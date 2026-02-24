@@ -330,23 +330,20 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8
 proc read_word_internal*(bus: Bus; address: uint32): uint32
 proc write_half_internal*(bus: Bus; address: uint32; value: uint16)
 proc write_word_internal*(bus: Bus; address: uint32; value: uint32)
-proc `[]`*(ppu: PPU; io_addr: uint32): uint8
-proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8)
-proc `[]`*(apu: APU; io_addr: uint32): uint8
-proc `[]=`*(apu: APU; io_addr: uint32; value: uint8)
-proc `[]`*(dma: DMA; io_addr: uint32): uint8
-proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8)
-proc `[]`*(timer: Timer; io_addr: uint32): uint8
-proc `[]=`*(timer: Timer; io_addr: uint32; value: uint8)
+proc `[]`*(mmio: MMIO; address: uint32): uint8
+proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc timer_overflow*(apu: APU; timer: int)
 proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
-proc `[]`*(mmio: MMIO; address: uint32): uint8
-proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
+proc draw*(ppu: PPU)
+proc scanline*(ppu: PPU)
+proc start_line*(ppu: PPU)
+proc start_hblank*(ppu: PPU)
+proc end_hblank*(ppu: PPU)
 proc write_half*(bus: Bus; address: uint32; value: uint16)
 proc write_word*(bus: Bus; address: uint32; value: uint32)
 proc fill_pipeline*(cpu: CPU)
@@ -457,10 +454,8 @@ include apu
 include timer
 include dma
 include bus
-include ppu
-include mmio
 
-# Sprite accessor procs (defined after types)
+# Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)
 proc color_mode_8bpp*(s: Sprite): bool = bit(s.attr0, 13)
 proc obj_mode*(s: Sprite): uint32 = bits_range(s.attr0, 10, 11)
@@ -474,6 +469,9 @@ proc x_coord*(s: Sprite): uint32 = bits_range(s.attr1, 0, 8)
 proc tile_idx*(s: Sprite): uint32 = bits_range(s.attr2, 0, 9)
 proc priority*(s: Sprite): uint32 = bits_range(s.attr2, 10, 11)
 proc palette_bank*(s: Sprite): uint32 = bits_range(s.attr2, 12, 15)
+
+include ppu
+include mmio
 
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
@@ -503,6 +501,8 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool): GBA =
   result.scheduler = new_scheduler()
   result.cartridge = new_cartridge(rom_path)
 
+proc handle_saves*(gba: GBA)
+
 proc post_init*(gba: GBA) =
   gba.storage    = new_storage(gba, gba.rom_path)
   gba.mmio       = new_mmio(gba)
@@ -522,7 +522,7 @@ proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, proc() {.closure.} = gba.handle_saves(), etSaves)
   gba.storage.write_save()
 
-proc run_until_frame*(gba: GBA) =
+method run_until_frame*(gba: GBA) =
   gba.cpu.count_cycles = 0
   while not gba.ppu.frame:
     gba.cpu.tick()
@@ -531,12 +531,5 @@ proc run_until_frame*(gba: GBA) =
 proc handle_input*(gba: GBA; input: Input; pressed: bool) =
   gba.keypad.handle_input(input, pressed)
 
-proc toggle_sync*(gba: GBA) =
-  gba.apu.toggle_sync()
-
-# Override the Emu base methods
-method run_until_frame*(gba: GBA) =
-  gba.run_until_frame()
-
 method toggle_sync*(gba: GBA) =
-  gba.toggle_sync()
+  gba.apu.toggle_sync()

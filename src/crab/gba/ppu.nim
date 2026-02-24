@@ -180,8 +180,9 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
     int_x += dx
     int_y += dy
     if bgcnt.affine_wrap:
-      px = ((px mod size_pixels) + size_pixels) mod size_pixels
-      py = ((py mod size_pixels) + size_pixels) mod size_pixels
+      let sp = int32(size_pixels)
+      px = ((px mod sp) + sp) mod sp
+      py = ((py mod sp) + sp) mod sp
     if not (px >= 0 and px < size_pixels and py >= 0 and py < size_pixels):
       continue
     let tile_id = ppu.vram[screen_base + uint32(py shr 3) * uint32(size_tiles) + uint32(px shr 3)]
@@ -275,11 +276,11 @@ proc render_sprites*(ppu: PPU) =
 proc get_enables*(ppu: PPU; col: int): tuple[enable_bits: uint16, effects_enabled: bool] =
   let vc = ppu.vcount
   if ppu.dispcnt.window_0_display and
-     col >= ppu.win0h.x1 and col < ppu.win0h.x2 and
+     uint16(col) >= ppu.win0h.x1 and uint16(col) < ppu.win0h.x2 and
      vc >= uint16(ppu.win0v.y1) and vc < uint16(ppu.win0v.y2):
     (uint16(ppu.winin.window_0_enable_bits), ppu.winin.window_0_color_special_effect)
   elif ppu.dispcnt.window_1_display and
-       col >= ppu.win1h.x1 and col < ppu.win1h.x2 and
+       uint16(col) >= ppu.win1h.x1 and uint16(col) < ppu.win1h.x2 and
        vc >= uint16(ppu.win1v.y1) and vc < uint16(ppu.win1v.y2):
     (uint16(ppu.winin.window_1_enable_bits), ppu.winin.window_1_color_special_effect)
   elif ppu.dispcnt.obj_window_display and ppu.sprite_pixels[col].window:
@@ -293,14 +294,14 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
   case blend_mode
   of 0: top_u16  # None
   of 1:          # Blend
-    let eva = float(min(16, ppu.bldalpha.eva_coefficient)) / 16.0
-    let evb = float(min(16, ppu.bldalpha.evb_coefficient)) / 16.0
+    let eva = float(min(16, int(ppu.bldalpha.eva_coefficient))) / 16.0
+    let evb = float(min(16, int(ppu.bldalpha.evb_coefficient))) / 16.0
     bgr16_add(bgr16_mul(top_u16, eva), bgr16_mul(bot_u16, evb))
   of 2:          # Brighten
-    let evy = float(min(16, ppu.bldy.evy_coefficient)) / 16.0
+    let evy = float(min(16, int(ppu.bldy.evy_coefficient))) / 16.0
     bgr16_add(top_u16, bgr16_mul(bgr16_sub(0xFFFF'u16, top_u16), evy))
   of 3:          # Darken
-    let evy = float(min(16, ppu.bldy.evy_coefficient)) / 16.0
+    let evy = float(min(16, int(ppu.bldy.evy_coefficient))) / 16.0
     bgr16_sub(top_u16, bgr16_mul(top_u16, evy))
   else: top_u16
 
@@ -315,7 +316,7 @@ proc blend_top_bot*(ppu: PPU; top: GbaColor; bot: GbaColor; effects_enabled: boo
     if top.special_handling and bot_selected:
       return ppu.blend_colors(top_u16, bot_u16, 1)  # Blend
     elif top_selected and (bot_selected or blend_mode != 1):
-      return ppu.blend_colors(top_u16, bot_u16, blend_mode)
+      return ppu.blend_colors(top_u16, bot_u16, int(blend_mode))
   top_u16
 
 proc select_top_colors*(ppu: PPU; enable_bits: uint16; col: int): tuple[top: GbaColor, bot: GbaColor] =
@@ -331,7 +332,7 @@ proc select_top_colors*(ppu: PPU; enable_bits: uint16; col: int): tuple[top: Gba
       else:
         return (top_color, color)
     for bg in 0..3:
-      if bit(enable_bits, bg) and ppu.bgcnt[bg].priority == priority:
+      if bit(enable_bits, bg) and int(ppu.bgcnt[bg].priority) == priority:
         let palette = int(ppu.layer_palettes[bg][col])
         if palette == 0: continue
         let color = GbaColor(palette: palette, layer: bg, special_handling: false)

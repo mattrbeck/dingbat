@@ -128,9 +128,9 @@ bitfield DISPCNT, uint16:
   bool obj_window_display
 
 bitfield DISPSTAT, uint16:
-  bool vblank, read_only = true
-  bool hblank, read_only = true
-  bool vcounter, read_only = true
+  bool vblank
+  bool hblank
+  bool vcounter
   bool vblank_irq_enable
   bool hblank_irq_enable
   bool vcounter_irq_enable
@@ -144,7 +144,7 @@ bitfield BGCNT, uint16:
   bool mosaic
   bool color_mode_8bpp
   num screen_base_block, 5
-  bool affine_wrap, write_only = true
+  bool affine_wrap
   num screen_size, 2
 
 bitfield BGOFS, uint16:
