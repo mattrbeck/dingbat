@@ -142,8 +142,15 @@ proc check_cond*(cpu: CPU; cond: uint32): bool =
 proc lsl*(cpu: CPU; word: uint32; bits: uint32; carry_out: ptr bool): uint32 =
   log("lsl - word:" & hex_str(word) & ", bits:" & $bits)
   if bits == 0: return word
-  carry_out[] = bit(word, int(32 - bits))
-  word shl bits
+  if bits < 32:
+    carry_out[] = bit(word, int(32 - bits))
+    word shl bits
+  elif bits == 32:
+    carry_out[] = bit(word, 0)
+    0'u32
+  else:
+    carry_out[] = false
+    0'u32
 
 proc lsr*(cpu: CPU; word: uint32; bits: uint32; immediate: bool; carry_out: ptr bool): uint32 =
   log("lsr - word:" & hex_str(word) & ", bits:" & $bits)
