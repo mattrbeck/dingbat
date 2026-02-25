@@ -26,6 +26,8 @@ const AUDIO_S16LSB = 0x8010'u16
 
 proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
   {.importc: "SDL_OpenAudio", cdecl.}
+proc sdl_close_audio()
+  {.importc: "SDL_CloseAudio", cdecl.}
 proc sdl_pause_audio(pause_on: cint)
   {.importc: "SDL_PauseAudio", cdecl.}
 proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
@@ -63,6 +65,7 @@ proc new_apu*(gba: GBA): APU =
     userdata: nil,
   )
   var obtained: SDL_AudioSpec
+  sdl_close_audio()  # close any previously open device (no-op if none)
   if sdl_open_audio(addr desired, addr obtained) == 0:
     result.audio_dev = 1  # SDL_OpenAudio always uses device ID 1
     sdl_pause_audio(0)    # unpause (start playback)

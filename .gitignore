@@ -1,1 +1,14 @@
 reference/
+
+# Build outputs
+src/*.out
+src/*.out.dSYM/
+*_debug
+*_debug.dSYM/
+nimcache/
+
+# ImGui runtime state
+imgui.ini
+
+# Nim compiler cache
+.cache/

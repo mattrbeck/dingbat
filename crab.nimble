@@ -10,5 +10,5 @@ bin    = @["crab"]
 # Dependencies
 requires "nim >= 2.0.0"
 requires "sdl2 >= 2.0.4"
-
-# Pass linker flags to find SDL2 on Homebrew (macOS arm64)
+requires "imguin"
+requires "yaml"

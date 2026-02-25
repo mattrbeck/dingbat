@@ -9,13 +9,13 @@ type
     etSaves, etInterrupts, etPPU
     etTimer0, etTimer1, etTimer2, etTimer3
 
-  Event = object
-    cycles: uint64
+  Event* = object
+    cycles*: uint64
     cb: proc() {.closure.}
-    kind: EventType
+    kind*: EventType
 
   Scheduler* = ref object
-    events: seq[Event]
+    events*: seq[Event]
     cycles*: uint64
     next_event: uint64
     current_speed: uint8

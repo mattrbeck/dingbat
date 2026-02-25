@@ -1,12 +1,56 @@
-import std/[os, parseopt]
-import sdl2
-import crab/common/input
+import std/[os, parseopt, strformat, tables, times]
+import sdl2 except init, quit, glBindTexture, glUnbindTexture
+import imguin/[cimgui, impl_opengl, impl_sdl2]
+import imguin/glad/gl
+import crab/common/config
 import crab/gba/gba
+import crab/frontend/file_explorer
+import crab/frontend/config_editor
+import crab/frontend/keybindings_widget
+import crab/frontend/gba_debug
 
 const VERSION = "0.1.0"
-const SCALE = 3
-const GBA_W = 240
-const GBA_H = 160
+const GBA_W   = 240
+const GBA_H   = 160
+
+# Mod key mask for keyboard shortcuts (raw int16 from modstate)
+when defined(macosx):
+  const MOD_KEY_MASK = int16(0x0C00)  # LGUI | RGUI
+  const MOD_KEY_STR  = "Cmd"
+else:
+  const MOD_KEY_MASK = int16(0x00C0)  # LCTRL | RCTRL
+  const MOD_KEY_STR  = "Ctrl"
+
+# ──────────────────────────── Shaders ────────────────────────────
+
+const VERT_SRC = """
+#version 330 core
+out vec2 tex_coord;
+const vec2 vertices[4] = vec2[](vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(-1.0,1.0),vec2(1.0,1.0));
+void main() {
+  gl_Position = vec4(vertices[gl_VertexID], 0.0, 1.0);
+  tex_coord = (vertices[gl_VertexID] + 1.0) / vec2(2.0, -2.0);
+}
+"""
+
+const FRAG_SRC = """
+#version 330 core
+in vec2 tex_coord;
+out vec4 frag_color;
+uniform sampler2D input_texture;
+void main() {
+  vec4 color = texture(input_texture, tex_coord);
+  float lcdGamma = 4.0, outGamma = 2.2;
+  color.rgb = pow(color.rgb, vec3(lcdGamma));
+  frag_color.rgb = pow(vec3(
+    0.0 * color.b +  50.0 * color.g + 255.0 * color.r,
+   30.0 * color.b + 230.0 * color.g +  10.0 * color.r,
+  220.0 * color.b +  10.0 * color.g +  50.0 * color.r) / 255.0,
+    vec3(1.0 / outGamma));
+}
+"""
+
+# ──────────────────────────── Helpers ────────────────────────────
 
 proc print_help() =
   echo "crab - A GBA emulator"
@@ -19,34 +63,306 @@ proc print_help() =
   echo "  --skip-bios      Skip the BIOS on startup (default)"
   echo "  --version        Print version"
 
-proc bgr555_to_argb(color: uint16): uint32 =
-  let r = uint32(color and 0x1F'u16) shl 3
-  let g = uint32((color shr 5) and 0x1F'u16) shl 3
-  let b = uint32((color shr 10) and 0x1F'u16) shl 3
-  (0xFF'u32 shl 24) or (r shl 16) or (g shl 8) or b
+proc compile_shader(src: string; shader_type: GLenum): GLuint =
+  result = glCreateShader(shader_type)
+  var src_ptr = cstring(src)
+  glShaderSource(result, 1, cast[cstringArray](addr src_ptr), nil)
+  glCompileShader(result)
+  var status: GLint = 0
+  glGetShaderiv(result, GL_COMPILE_STATUS, addr status)
+  if status == 0:
+    var log_len: GLint = 0
+    glGetShaderiv(result, GL_INFO_LOG_LENGTH, addr log_len)
+    var log_buf = newString(log_len + 1)
+    glGetShaderInfoLog(result, log_len, nil, cstring(log_buf))
+    echo "Shader compile error: ", log_buf
+    sdl2.quit(); system.quit(1)
 
-proc keycode_to_input(key: cint): Input =
-  if   key == K_x:       Input.A
-  elif key == K_z:       Input.B
-  elif key == K_a:       Input.L
-  elif key == K_s:       Input.R
-  elif key == K_RETURN:  Input.START
-  elif key == K_SPACE:   Input.SELECT
-  elif key == K_RIGHT:   Input.RIGHT
-  elif key == K_LEFT:    Input.LEFT
-  elif key == K_UP:      Input.UP
-  elif key == K_DOWN:    Input.DOWN
-  else: Input.A  # ignored below
+proc create_shader_program(): GLuint =
+  let vert = compile_shader(VERT_SRC, GL_VERTEX_SHADER)
+  let frag = compile_shader(FRAG_SRC, GL_FRAGMENT_SHADER)
+  result = glCreateProgram()
+  glAttachShader(result, vert)
+  glAttachShader(result, frag)
+  glLinkProgram(result)
+  var status: GLint = 0
+  glGetProgramiv(result, GL_LINK_STATUS, addr status)
+  if status == 0:
+    var log_len: GLint = 0
+    glGetProgramiv(result, GL_INFO_LOG_LENGTH, addr log_len)
+    var log_buf = newString(log_len + 1)
+    glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
+    echo "Shader link error: ", log_buf
+    sdl2.quit(); system.quit(1)
+  glDeleteShader(vert)
+  glDeleteShader(frag)
 
-proc is_gba_key(key: cint): bool =
-  key in [K_x, K_z, K_a, K_s, K_RETURN, K_SPACE,
-          K_RIGHT, K_LEFT, K_UP, K_DOWN]
+proc setup_game_texture(): GLuint =
+  glGenTextures(1, addr result)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D, result)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
+
+proc setup_vao() =
+  var vao: GLuint
+  glGenVertexArrays(1, addr vao)
+  glBindVertexArray(vao)
+
+# ──────────────────────────── App State ────────────────────────────
+
+type AppState = ref object
+  cfg:             Config
+  gba_emu:         GBA
+  window:          WindowPtr
+  gl_ctx:          GlContextPtr
+  io:              ptr ImGuiIO
+  game_texture:    GLuint
+  fe:              FileExplorer
+  ce:              ConfigEditor
+  dbg:             GbaDebug
+  scale:           int
+  running:         bool
+  paused:          bool
+  fullscreen:      bool
+  enable_overlay:  bool
+  last_mouse_tick: uint32
+
+var app: AppState
+
+# ──────────────────────────── ROM Loading ────────────────────────────
+
+proc load_rom(path: string) =
+  if not fileExists(path):
+    echo "ROM not found: ", path; return
+  let bios = app.cfg.bios_path
+  app.gba_emu = new_gba(bios, path, app.cfg.run_bios)
+  app.gba_emu.post_init()
+  # Update recents
+  var recs = app.cfg.recents
+  let idx = recs.find(path)
+  if idx >= 0: recs.delete(idx)
+  recs.insert(path, 0)
+  while recs.len > 8: recs.setLen(8)
+  app.cfg.recents = recs
+  save_config(app.cfg)
+  # Resize window
+  setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
+  setPosition(app.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)
+  app.dbg = new_gba_debug(app.gba_emu)
+  app.paused = false
+
+# ──────────────────────────── Rendering ────────────────────────────
+
+proc render_game() =
+  if app.gba_emu == nil: return
+  glBindTexture(GL_TEXTURE_2D, app.game_texture)
+  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GBA_W, GBA_H, 0,
+               GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+               addr app.gba_emu.ppu.framebuffer[0])
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+
+proc show_menu_bar(): bool =
+  let focused    = getMouseFocus() == app.window
+  let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u32
+  result = focused and not mouse_idle
+  discard showCursor(result)
+
+proc render_imgui() =
+  ImGui_Impl_OpenGL3_NewFrame()
+  ImGui_ImplSDL2_NewFrame()
+  igNewFrame()
+
+  var overlay_h: cfloat = 10.0
+  var open_rom = false
+
+  if show_menu_bar():
+    if igBeginMainMenuBar():
+      # File menu
+      if igBeginMenu("File", true):
+        if igMenuItem_Bool("Open ROM", nil, false, true):
+          open_rom = true
+        if igBeginMenu("Recent", app.cfg.recents.len > 0):
+          for recent in app.cfg.recents:
+            if igMenuItem_Bool(cstring(recent), nil, false, true):
+              load_rom(recent)
+          igSeparator()
+          if igMenuItem_Bool("Clear", nil, false, true):
+            app.cfg.recents.setLen(0)
+            save_config(app.cfg)
+          igEndMenu()
+        igSeparator()
+        if igMenuItem_Bool("Settings", nil, false, true):
+          app.ce.open = true
+        igSeparator()
+        if igMenuItem_Bool(cstring("Exit  " & MOD_KEY_STR & "+Q"), nil, false, true):
+          app.running = false
+        igEndMenu()
+
+      # Emulation menu
+      if igBeginMenu("Emulation", true):
+        var should_reset = false
+        discard igMenuItem_BoolPtr(cstring("Reset  " & MOD_KEY_STR & "+R"),
+                                   nil, addr should_reset, true)
+        discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
+                                   nil, addr app.paused, true)
+        if app.gba_emu != nil:
+          discard igMenuItem_BoolPtr("Audio Sync", "Tab",
+                                     addr app.gba_emu.apu.sync, true)
+        if should_reset and app.cfg.recents.len > 0:
+          load_rom(app.cfg.recents[0])
+        igEndMenu()
+
+      # Audio/Video menu
+      if igBeginMenu("Audio/Video", true):
+        if igBeginMenu("Frame size", true):
+          for s in 1 .. 8:
+            if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):
+              app.scale = s
+              if app.gba_emu != nil:
+                setSize(app.window, cint(GBA_W * s), cint(GBA_H * s))
+          igSeparator()
+          if igMenuItem_BoolPtr(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
+                                nil, addr app.fullscreen, true):
+            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
+            discard setFullscreen(app.window, flags)
+          igEndMenu()
+        igEndMenu()
+
+      # Debug menu
+      if igBeginMenu("Debug", true):
+        discard igMenuItem_BoolPtr("Overlay", nil, addr app.enable_overlay, true)
+        igSeparator()
+        if app.dbg != nil:
+          app.dbg.render_menu_items()
+        igEndMenu()
+
+      var win_size = ImVec2(x: 0, y: 0)
+      igGetWindowSize(addr win_size)
+      overlay_h += win_size.y
+      igEndMainMenuBar()
+
+  # File explorer
+  app.fe.render("ROM", open_rom, ["gba"], proc(path: string) =
+    load_rom(path))
+
+  # Config editor
+  app.ce.render()
+
+  # Overlay
+  if app.enable_overlay:
+    igSetNextWindowPos(ImVec2(x: 10, y: overlay_h), cint(ImGui_Cond_Always),
+                       ImVec2(x: 0, y: 0))
+    igSetNextWindowBgAlpha(0.5'f32)
+    let ov_flags = cint(ImGui_WindowFlags_NoDecoration) or
+                   cint(ImGui_WindowFlags_NoMove) or
+                   cint(ImGui_WindowFlags_NoSavedSettings)
+    if igBegin("##overlay", addr app.enable_overlay, ov_flags):
+      let fps = app.io[].Framerate
+      igText("FPS:        %.1f", fps)
+      igText("Frame time: %.3f ms", 1000.0'f32 / fps)
+      igSeparator()
+      igText("OpenGL")
+      let ver  = cast[cstring](glGetString(GL_VERSION))
+      let shad = cast[cstring](glGetString(GL_SHADING_LANGUAGE_VERSION))
+      igText("  Version: %s", ver)
+      igText("  Shading: %s", shad)
+    igEnd()
+
+  if app.dbg != nil:
+    app.dbg.render_windows()
+
+  igRender()
+  ImGui_Impl_OpenGL3_RenderDrawData(igGetDrawData())
+
+# ──────────────────────────── Input ────────────────────────────
+
+proc handle_input() =
+  var evt = defaultEvent
+  while pollEvent(evt):
+    discard ImGui_ImplSDL2_ProcessEvent(cast[ptr SDL_Event](addr evt))
+
+    case evt.kind
+    of KeyDown, KeyUp:
+      let pressed = evt.kind == KeyDown
+      let kev     = key(evt)
+      let sym     = kev.keysym.sym
+      let mods    = kev.keysym.modstate
+
+      if app.io != nil and app.io[].WantCaptureKeyboard: continue
+
+      if app.ce.keybindings.wants_input():
+        if not pressed: app.ce.keybindings.key_released(sym)
+      elif (mods and MOD_KEY_MASK) != 0:
+        if not pressed:
+          case sym
+          of K_r:
+            if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
+          of K_p:
+            app.paused = not app.paused
+          of K_f:
+            app.fullscreen = not app.fullscreen
+            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
+            discard setFullscreen(app.window, flags)
+          of K_q:
+            app.running = false
+          else: discard
+      elif app.gba_emu != nil:
+        if app.cfg.keybindings.hasKey(sym):
+          app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
+        elif sym == K_TAB and pressed:
+          app.gba_emu.apu.sync = not app.gba_emu.apu.sync
+
+    of WindowEvent:
+      let wev = window(evt)
+      if wev.event == WindowEvent_SizeChanged:
+        var w, h: cint
+        getSize(app.window, w, h)
+        glViewport(0, 0, w, h)
+
+    of MouseMotion:
+      app.last_mouse_tick = motion(evt).timestamp
+
+    of QuitEvent:
+      app.running = false
+
+    else: discard
+
+# ──────────────────────────── FPS Title ────────────────────────────
+
+var fps_frames    = 0
+var fps_us        = 0'i64
+var fps_last_time = getTime()
+var fps_second    = getTime().toUnix() mod 60
+
+proc update_fps_title() =
+  inc fps_frames
+  let now = getTime()
+  fps_us += (now - fps_last_time).inMicroseconds()
+  fps_last_time = now
+  let cur_sec = now.toUnix() mod 60
+  if cur_sec != fps_second:
+    let fps = if fps_us > 0: fps_frames.float * 1_000_000.0 / fps_us.float else: 0.0
+    let title = if app.gba_emu == nil: "crab"
+                elif app.paused: "crab - PAUSED"
+                else: fmt"crab - {fps:.1f} fps"
+    setTitle(app.window, cstring(title))
+    fps_frames = 0
+    fps_us     = 0
+    fps_second = cur_sec
+
+# ──────────────────────────── GL proc loader ────────────────────────────
+
+proc gl_loader(name: cstring): pointer = glGetProcAddress(name)
+
+# ──────────────────────────── Main ────────────────────────────
 
 proc main() =
-  var bios_path = ""
-  var rom_path  = ""
-  var run_bios  = false
-  var pos_args: seq[string] = @[]
+  var bios_path    = ""
+  var rom_path     = ""
+  var cli_run_bios = false
+  var has_bios_arg = false
+  var pos_args: seq[string]
 
   var p = initOptParser(commandLineParams())
   while true:
@@ -55,101 +371,109 @@ proc main() =
     of cmdEnd: break
     of cmdShortOption, cmdLongOption:
       case p.key
-      of "h", "help":
-        print_help(); quit(0)
-      of "version":
-        echo VERSION; quit(0)
-      of "run-bios":  run_bios = true
-      of "skip-bios": run_bios = false
-      else:
-        echo "Unknown option: --" & p.key; quit(1)
+      of "h", "help":  print_help(); system.quit(0)
+      of "version":    echo VERSION; system.quit(0)
+      of "run-bios":   cli_run_bios = true
+      of "skip-bios":  cli_run_bios = false
+      else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
       pos_args.add(p.key)
 
   case pos_args.len
-  of 0: echo "No ROM specified. Use --help for usage."; quit(1)
-  of 1: rom_path = pos_args[0]
-  of 2: bios_path = pos_args[0]; rom_path = pos_args[1]
-  else: echo "Too many arguments."; quit(1)
+  of 0: discard
+  of 1: rom_path  = pos_args[0]
+  of 2: bios_path = pos_args[0]; rom_path = pos_args[1]; has_bios_arg = true
+  else: echo "Too many arguments."; system.quit(1)
 
-  if not fileExists(rom_path):
-    echo "ROM file not found: " & rom_path; quit(1)
-  if bios_path != "" and not fileExists(bios_path):
-    echo "BIOS file not found: " & bios_path; quit(1)
+  let cfg = load_config()
+  if has_bios_arg: cfg.bios_path = bios_path
+  if cli_run_bios: cfg.run_bios = true
 
-  # Initialize SDL2 first (APU opens audio device during GBA init)
-  if sdl2.init(INIT_VIDEO or INIT_AUDIO) != SdlSuccess:
-    echo "SDL2 init failed: ", $sdl2.getError(); quit(1)
+  # SDL2 init
+  if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK) != SdlSuccess:
+    echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
   defer: sdl2.quit()
 
-  # Initialize GBA
-  let gba_emu = new_gba(bios_path, rom_path, run_bios)
-  gba_emu.post_init()
+  # Set GL attributes before window creation
+  when defined(macosx):
+    discard glSetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
+  discard glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
+  discard glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)
+  discard glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3)
+  discard glSetAttribute(SDL_GL_DOUBLEBUFFER, 1)
+  discard glSetAttribute(SDL_GL_DEPTH_SIZE, 24)
+  discard glSetAttribute(SDL_GL_STENCIL_SIZE, 8)
 
-  let title = cstring("crab - " & gba_emu.cartridge.title())
   let window = createWindow(
-    title,
+    "crab",
     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-    GBA_W * SCALE, GBA_H * SCALE,
-    SDL_WINDOW_SHOWN or SDL_WINDOW_RESIZABLE
+    cint(GBA_W * 3), cint(GBA_H * 3),
+    SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
   )
-  if window.isNil:
-    echo "Failed to create window: ", $sdl2.getError(); quit(1)
-  defer: window.destroy()
+  if window == nil:
+    echo "Failed to create window: ", $sdl2.getError(); system.quit(1)
+  defer: destroyWindow(window)
 
-  let renderer = createRenderer(window, -1, Renderer_Accelerated or Renderer_PresentVsync)
-  if renderer.isNil:
-    echo "Failed to create renderer: ", $sdl2.getError(); quit(1)
-  defer: renderer.destroy()
+  let gl_ctx = glCreateContext(window)
+  if gl_ctx == nil:
+    echo "Failed to create OpenGL context: ", $sdl2.getError(); system.quit(1)
+  defer: glDeleteContext(gl_ctx)
+  discard glSetSwapInterval(0)  # disable vsync
 
-  discard renderer.setLogicalSize(GBA_W, GBA_H)
+  # Load OpenGL function pointers
+  if not gladLoadGL(gl_loader):
+    echo "Failed to load OpenGL extensions"; system.quit(1)
 
-  let texture = renderer.createTexture(
-    SDL_PIXELFORMAT_ARGB8888,
-    SDL_TEXTUREACCESS_STREAMING,
-    GBA_W, GBA_H
+  # GL setup
+  glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
+  let game_tex = setup_game_texture()
+  setup_vao()
+  let shader_prog = create_shader_program()
+  glUseProgram(shader_prog)
+
+  # ImGui setup
+  discard igCreateContext(nil)
+  igStyleColorsDark(nil)
+  let io_ptr = igGetIO_Nil()
+  discard ImGui_ImplSDL2_InitForOpenGL(cast[ptr SDL_Window](window),
+                                        cast[pointer](gl_ctx))
+  discard ImGui_Impl_opengl3_Init("#version 330")
+
+  # Frontend objects
+  let fe = new_file_explorer(cfg)
+  let ce = new_config_editor(cfg, fe)
+
+  app = AppState(
+    cfg:             cfg,
+    gba_emu:         nil,
+    window:          window,
+    gl_ctx:          gl_ctx,
+    io:              io_ptr,
+    game_texture:    game_tex,
+    fe:              fe,
+    ce:              ce,
+    dbg:             nil,
+    scale:           3,
+    running:         true,
+    paused:          false,
+    fullscreen:      false,
+    enable_overlay:  false,
+    last_mouse_tick: getTicks(),
   )
-  if texture.isNil:
-    echo "Failed to create texture: ", $sdl2.getError(); quit(1)
-  defer: texture.destroy()
 
-  # Pixel conversion buffer
-  var pixels = newSeq[uint32](GBA_W * GBA_H)
+  if rom_path != "":
+    if not fileExists(rom_path):
+      echo "ROM file not found: ", rom_path; system.quit(1)
+    load_rom(rom_path)
 
-  var evt = sdl2.defaultEvent
-  var running = true
-
-  while running:
-    # Run one GBA frame
-    gba_emu.run_until_frame()
-
-    # Convert BGR555 framebuffer to ARGB8888
-    for i in 0 ..< GBA_W * GBA_H:
-      pixels[i] = bgr555_to_argb(gba_emu.ppu.framebuffer[i])
-
-    # Update texture
-    let pitch = cint(GBA_W * sizeof(uint32))
-    discard texture.updateTexture(nil, addr pixels[0], pitch)
-
-    # Render
-    discard renderer.clear()
-    discard renderer.copy(texture, nil, nil)
-    renderer.present()
-
-    # Handle events
-    while pollEvent(evt):
-      case evt.kind
-      of QuitEvent:
-        running = false
-      of KeyDown:
-        let key = evt.key.keysym.sym
-        if key == K_ESCAPE: running = false
-        elif is_gba_key(key):
-          gba_emu.handle_input(keycode_to_input(key), true)
-      of KeyUp:
-        let key = evt.key.keysym.sym
-        if is_gba_key(key):
-          gba_emu.handle_input(keycode_to_input(key), false)
-      else: discard
+  while app.running:
+    if app.gba_emu != nil and not app.paused:
+      app.gba_emu.run_until_frame()
+    handle_input()
+    glClear(GL_COLOR_BUFFER_BIT)
+    render_game()
+    render_imgui()
+    glSwapWindow(window)
+    update_fps_title()
 
 main()
