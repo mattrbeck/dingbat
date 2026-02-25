@@ -5,6 +5,44 @@ const ACCESS_TIMING_TABLE: array[2, array[16, int]] = [
   [1, 1, 6, 1, 1, 2, 2, 1, 4, 4, 4, 4, 4, 4, 4, 4],  # 32-bit
 ]
 
+# Minimal HLE BIOS stub loaded when no real BIOS is provided.
+# Provides working IRQ and SWI vectors so games can boot without a BIOS file.
+#
+# At 0x08 (SWI vector): MOVS PC, LR
+#   Returns from SWI immediately, restoring CPSR from SPSR.
+#   Critical SWI functions (Halt, VBlankIntrWait) are intercepted at the
+#   Nim level in software_interrupt.nim before this stub runs.
+#
+# At 0x18 (IRQ vector): dispatch to user handler at [0x03FFFFFC]
+#   0x18: E92D4001  STMFD SP!, {R0, LR}
+#   0x1C: E59F0010  LDR R0, [PC, #16]     ; load 0x03FFFFFC from 0x34
+#   0x20: E5900000  LDR R0, [R0]          ; R0 = user handler address
+#   0x24: E12FFF30  BLX R0                ; call handler, LR=0x28
+#   0x28: E8BD4001  LDMFD SP!, {R0, LR}
+#   0x2C: E25EF004  SUBS PC, LR, #4       ; return from IRQ
+#   0x30: 00000000  (padding)
+#   0x34: 03FFFFFC  (constant: address of user handler pointer)
+const HLE_BIOS_STUB: array[56, byte] = [
+  # 0x00..0x07: reset/undefined vectors (unused, fill with NOP equivalent)
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x00
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x04
+  # 0x08: SWI vector — MOVS PC, LR (0xE1B0F00E)
+  0x0E'u8, 0xF0'u8, 0xB0'u8, 0xE1'u8,  # 0x08: MOVS PC, LR
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x0C
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x10
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x14
+  # 0x18: IRQ vector
+  0x01'u8, 0x40'u8, 0x2D'u8, 0xE9'u8,  # 0x18: STMFD SP!, {R0, LR}
+  0x10'u8, 0x00'u8, 0x9F'u8, 0xE5'u8,  # 0x1C: LDR R0, [PC, #16]
+  0x00'u8, 0x00'u8, 0x90'u8, 0xE5'u8,  # 0x20: LDR R0, [R0]
+  0x30'u8, 0xFF'u8, 0x2F'u8, 0xE1'u8,  # 0x24: BLX R0
+  0x01'u8, 0x40'u8, 0xBD'u8, 0xE8'u8,  # 0x28: LDMFD SP!, {R0, LR}
+  0x04'u8, 0xF0'u8, 0x5E'u8, 0xE2'u8,  # 0x2C: SUBS PC, LR, #4
+  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,  # 0x30: padding
+  # 0x34: constant = 0x03FFFFFC (address of user IRQ handler pointer)
+  0xFC'u8, 0xFF'u8, 0xFF'u8, 0x03'u8,  # 0x34: 0x03FFFFFC (LE)
+]
+
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
   result.cycles = 0
@@ -15,6 +53,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     let f = open(bios_path, fmRead)
     discard f.readBytes(result.bios, 0, result.bios.len)
     f.close()
+  else:
+    # Load minimal HLE stub so IRQ/SWI vectors work without a real BIOS
+    for i, b in HLE_BIOS_STUB:
+      result.bios[i] = b
   result.gpio = new_gpio(gba)
 
 proc bus_page(address: uint32): int {.inline.} =
