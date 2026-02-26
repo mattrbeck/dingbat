@@ -172,26 +172,18 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
     if ppu.lx >= 0:
       let use_sprite = has_sprite and sprite_wins(ppu, gb, bg_px, sp_px)
-      let (px, arr_pram, pal_offset) =
-        if use_sprite:
-          let pal = if gb.cgb_enabled: int(sp_px.palette) * 4 * 2
-                    else:
-                      let p = if sp_px.palette == 0: ppu.obp0 else: ppu.obp1
-                      int(p[sp_px.color]) * 2
-          (sp_px, addr ppu.obj_pram[0], pal)
+      let (px, arr_pram) =
+        if use_sprite: (sp_px, addr ppu.obj_pram[0])
+        else:          (bg_px, addr ppu.pram[0])
+      let final_color =
+        if gb.cgb_enabled: int(px.color)
         else:
-          let pal = if gb.cgb_enabled: int(bg_px.palette) * 4 * 2
-                    else: int(ppu.bgp[bg_px.color]) * 2
-          (bg_px, addr ppu.pram[0], pal)
-      let color = if gb.cgb_enabled: px.color
-                  else:
-                    let p = if use_sprite:
-                              (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
-                            else: ppu.bgp
-                    p[px.color]
+          let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
+                  else: ppu.bgp
+          int(p[px.color])
+      let pal_offset = (int(px.palette) * 4 + final_color) * 2
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
-      discard color  # already encoded in pal_offset above
     inc ppu.lx
     if ppu.lx == GB_WIDTH:
       ppu.`mode_flag=`(0'u8, gb)
