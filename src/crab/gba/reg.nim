@@ -96,7 +96,7 @@ bitfield DMACNT, uint16:
   num source_control, 2
   bool repeat
   num xfer_type, 1          # renamed from "type" (Nim keyword)
-  bool game_pak
+  bool game_pak, write_only = true  # special dma3 case handled separately
   num start_timing, 2
   bool irq_enable
   bool enable
@@ -144,7 +144,7 @@ bitfield BGCNT, uint16:
   bool mosaic
   bool color_mode_8bpp
   num screen_base_block, 5
-  bool affine_wrap
+  bool affine_wrap, write_only = true
   num screen_size, 2
 
 bitfield BGOFS, uint16:

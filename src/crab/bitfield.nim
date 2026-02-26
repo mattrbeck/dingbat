@@ -30,6 +30,8 @@ proc makeIdent(name: string): NimNode =
 macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
   result = newStmtList()
   var bitOffset = 0
+  var readMask  = 0  # bits visible via read_byte  (all except write_only)
+  var writeMask = 0  # bits writable via write_byte (all except read_only)
 
   # Generate the type with a single `value` field.
   result.add(nnkTypeSection.newTree(
@@ -90,21 +92,23 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
     let offset  = newLit(bitOffset)
     let maskVal = (1 shl numBits) - 1
     let mask    = newLit(maskVal)
+    let fieldBits = maskVal shl bitOffset
+    if not readOnly:  writeMask = writeMask or fieldBits
+    if not writeOnly: readMask  = readMask  or fieldBits
     bitOffset  += numBits
 
-    # Getter
-    if not writeOnly:
-      let fn = makeIdent(fieldName.strVal)
-      if isBool:
-        result.add(quote do:
-          proc `fn`*(self: `typeName`): bool {.inline.} =
-            ((self.value shr `offset`) and 1) != 0
-        )
-      else:
-        result.add(quote do:
-          proc `fn`*(self: `typeName`): `baseType` {.inline.} =
-            `baseType`((self.value shr `offset`) and `baseType`(`mask`))
-        )
+    # Getter — always generate (write_only fields still need getters for internal use)
+    let fn = makeIdent(fieldName.strVal)
+    if isBool:
+      result.add(quote do:
+        proc `fn`*(self: `typeName`): bool {.inline.} =
+          ((self.value shr `offset`) and 1) != 0
+      )
+    else:
+      result.add(quote do:
+        proc `fn`*(self: `typeName`): `baseType` {.inline.} =
+          `baseType`((self.value shr `offset`) and `baseType`(`mask`))
+      )
 
     # Setter
     if not readOnly:
@@ -123,11 +127,16 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
         )
 
   # Every bitfield type gets read_byte / write_byte helpers.
+  # read_byte masks write_only bits (return 0); write_byte masks read_only bits (ignore writes).
+  let readMaskLit  = newLit(readMask)
+  let writeMaskLit = newLit(writeMask)
   result.add(quote do:
     proc read_byte*(self: `typeName`, byte_num: uint32): uint8 {.inline.} =
-      uint8(self.value shr (8'u32 * byte_num))
+      let shift = 8'u32 * byte_num
+      uint8(self.value shr shift) and uint8((`readMaskLit` shr shift) and 0xFF)
     proc write_byte*(self: var `typeName`, byte_num: uint32, v: uint8) {.inline.} =
       let shift = 8'u32 * byte_num
+      let byte_mask = uint8((`writeMaskLit` shr shift) and 0xFF)
       let m = not(`baseType`(0xFF'u32) shl shift)
-      self.value = (self.value and m) or (`baseType`(v) shl shift)
+      self.value = (self.value and m) or (`baseType`(v and byte_mask) shl shift)
   )

@@ -186,10 +186,10 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_write(io_addr, value)
   else:
     case io_addr
-    of 0x80: apu.soundcnt_l.value = (apu.soundcnt_l.value and 0xFF00'u16) or uint16(value)
+    of 0x80: apu.soundcnt_l.value = (apu.soundcnt_l.value and 0xFF00'u16) or (uint16(value) and 0x77'u16)  # bits 3,7 read_only
     of 0x81: apu.soundcnt_l.value = (apu.soundcnt_l.value and 0x00FF'u16) or (uint16(value) shl 8)
-    of 0x82: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0xFF00'u16) or uint16(value)
-    of 0x83: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0x00FF'u16) or (uint16(value) shl 8)
+    of 0x82: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0xFF00'u16) or (uint16(value) and 0x0F'u16)  # bits 4-7 read_only
+    of 0x83: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8)  # bits 11,15 read_only
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:
         for addr in 0x60'u32..0x81'u32:

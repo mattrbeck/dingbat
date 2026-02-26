@@ -158,8 +158,15 @@ proc lsr*(cpu: CPU; word: uint32; bits: uint32; immediate: bool; carry_out: ptr 
   if b == 0:
     if not immediate: return word
     b = 32
-  carry_out[] = bit(word, int(b - 1))
-  if b >= 32: 0'u32 else: word shr b
+  if b < 32:
+    carry_out[] = bit(word, int(b - 1))
+    word shr b
+  elif b == 32:
+    carry_out[] = bit(word, 31)
+    0'u32
+  else:
+    carry_out[] = false
+    0'u32
 
 proc asr*(cpu: CPU; word: uint32; bits: uint32; immediate: bool; carry_out: ptr bool): uint32 =
   log("asr - word:" & hex_str(word) & ", bits:" & $bits)
