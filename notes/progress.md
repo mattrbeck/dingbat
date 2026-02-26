@@ -94,6 +94,38 @@ transfer loop, then explicitly call `switch_mode(saved_mode)` after the loop (ou
 **Key lesson**: Never use `defer` inside an `if` block when the deferred work must outlive that
 block. Nim `defer` ≠ Go `defer` (which is proc-scoped).
 
+### Phase 4: GB/GBC Port
+
+#### GB/GBC emulator implemented
+Full Game Boy / Game Boy Color port translated from Crystal to Nim:
+- SM83 CPU with all 512 opcodes (unprefixed + CB-prefixed)
+- Memory bus with MBC1/2/3/5 and plain ROM support
+- Dual PPU renderers: scanline (simple) and FIFO (cycle-accurate, default)
+- APU with channels 1–4 (square×2, wave, noise), frame sequencer, SDL2 output
+- Timer, joypad, interrupts, OAM DMA, HDMA (CGB), CGB double-speed mode
+- Multi-core frontend: `.gb`/`.gbc` → GB, `.gba` → GBA (detected by extension)
+
+#### Fix: GB APU audio garbled
+**Problem**: `AUDIO_F32SYS` was hardcoded as `0x9120` (`AUDIO_F32MSB` — big-endian float32).
+On macOS (little-endian), SDL2 performs byte-swap conversion from the declared big-endian
+format to the system's little-endian format. But the actual sample data in the buffer is
+already little-endian, so SDL double-swaps every float, completely garbling the audio.
+
+**Fix** (`src/crab/gb/apu.nim`):
+- Changed constant to `AUDIO_F32LSB = 0x8120` (little-endian float32), matching the GBA
+  APU which correctly uses `AUDIO_S16LSB = 0x8010`.
+- Also changed initialization to call `tick_frame_sequencer` and `get_sample` directly
+  (matching Crystal/GBA behavior) instead of only scheduling them, so the frame sequencer
+  advances to stage 1 at startup and the buffer is pre-filled before any CPU cycles run.
+
+#### Fix: GB APU zombie mode double-increment
+**Problem**: `write_NRx2` in `abstract_channels.nim` had two separate `if` blocks for the
+zombie mode glitch, which could increment `current_volume` twice in cases where both
+conditions were true.
+
+**Fix**: Merged into a single `if (period == 0 and updating) or (not add_mode)` matching
+Crystal's single `||` condition exactly.
+
 ## Current Status
 
 | Subsystem     | Status        | Notes                                            |
@@ -101,7 +133,7 @@ block. Nim `defer` ≠ Go `defer` (which is proc-scoped).
 | CPU (ARM)     | Working       | All standard instructions; gba-tests/arm passes  |
 | CPU (Thumb)   | Working       | All standard instructions implemented            |
 | PPU           | Working       | Modes 0–5, sprites, windowing                    |
-| APU           | Working       | PSG channels 1–4 + DMA channels A/B; SDL2 output |
+| APU (GBA)     | Working       | PSG channels 1–4 + DMA channels A/B; SDL2 output |
 | DMA           | Working       | All 4 channels; video capture mode stubbed       |
 | Timers        | Working       | Cascade mode, overflow IRQ                       |
 | Interrupts    | Working       | IE/IF/IME; halt/unhalt cycle                     |
@@ -111,3 +143,9 @@ block. Nim `defer` ≠ Go `defer` (which is proc-scoped).
 | Serial I/O    | Stubbed       | Registers discarded silently                     |
 | HLE BIOS      | Partial       | Halt/IntrWait/VBlankIntrWait; other SWIs are no-ops |
 | Real BIOS     | Working       | Pass `[bios.bin] [rom.gba]` to use               |
+| GB/GBC CPU    | Working       | SM83, all 512 opcodes                            |
+| GB/GBC PPU    | Working       | Scanline + FIFO renderers; CGB palettes/HDMA     |
+| GB/GBC APU    | Working       | Channels 1–4; correct SDL2 float32 LE output     |
+| GB/GBC MBC    | Working       | ROM, MBC1/2/3/5; battery saves                  |
+| GB/GBC Timer  | Working       | DIV/TIMA/TMA/TAC; falling-edge detection         |
+| GB/GBC Misc   | Working       | Joypad, OAM DMA, CGB double-speed, WRAM banks    |
