@@ -1,5 +1,13 @@
 # Storage base class (included by gba.nim)
 
+proc `$`*(t: StorageType): string =
+  case t
+  of stEEPROM:   "EEPROM"
+  of stSRAM:     "SRAM"
+  of stFLASH:    "FLASH"
+  of stFLASH512: "FLASH512"
+  of stFLASH1M:  "FLASH1M"
+
 proc match_str(t: StorageType): string =
   case t
   of stEEPROM:  "EEPROM_V"
