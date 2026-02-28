@@ -12,8 +12,8 @@ proc mode_bank*(m: CpuMode): int =
 proc new_cpu*(gba: GBA): CPU =
   result = CPU(
     gba: gba,
-    cpsr: PSR(value: uint32(modeSYS)),
-    spsr: PSR(value: uint32(modeSYS)),
+    cpsr: cast[PSR](uint32(modeSYS)),
+    spsr: cast[PSR](uint32(modeSYS)),
     pipeline: Pipeline(),
     halted: false,
     count_cycles: 0,
@@ -50,10 +50,10 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
       cpu.r[8 + idx] = cpu.reg_banks[new_bank][idx]
   cpu.reg_banks[old_bank][5] = cpu.r[13]
   cpu.reg_banks[old_bank][6] = cpu.r[14]
-  cpu.spsr_banks[old_bank]   = cpu.spsr.value
+  cpu.spsr_banks[old_bank]   = uint32(cpu.spsr)
   cpu.r[13]         = cpu.reg_banks[new_bank][5]
   cpu.r[14]         = cpu.reg_banks[new_bank][6]
-  cpu.spsr.value    = cpu.cpsr.value
+  cpu.spsr          = cast[PSR](uint32(cpu.cpsr))
   cpu.cpsr.mode     = uint32(new_mode)
 
 proc irq*(cpu: CPU) =

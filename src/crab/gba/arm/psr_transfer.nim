@@ -19,18 +19,18 @@ proc arm_psr_transfer*(cpu: CPU; instr: uint32) =
     value = value and mask
     if spsr:
       if has_spsr:
-        cpu.spsr.value = (cpu.spsr.value and not mask) or value
+        cpu.spsr = cast[PSR]((uint32(cpu.spsr) and not mask) or value)
     else:
       let thumb = cpu.cpsr.thumb
       if (mask and 0xFF) > 0:
         cpu.switch_mode(CpuMode(value and 0x1F'u32))
-      cpu.cpsr.value = (cpu.cpsr.value and not mask) or value
+      cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
       cpu.cpsr.thumb = thumb
   else:  # MRS
     let rd = int(bits_range(instr, 12, 15))
     if spsr and has_spsr:
-      discard cpu.set_reg(rd, cpu.spsr.value)
+      discard cpu.set_reg(rd, uint32(cpu.spsr))
     else:
-      discard cpu.set_reg(rd, cpu.cpsr.value)
+      discard cpu.set_reg(rd, uint32(cpu.cpsr))
   if not (not bit(instr, 21) and bits_range(instr, 12, 15) == 15):
     cpu.step_arm()

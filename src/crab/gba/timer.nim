@@ -34,7 +34,7 @@ proc make_overflow_event(tim: Timer; num: int): proc() {.closure.} =
 proc new_timer*(gba: GBA): Timer =
   result = Timer(gba: gba)
   for i in 0..3:
-    result.tmcnt[i] = TMCNT(value: 0)
+    result.tmcnt[i] = TMCNT()
     result.tmd[i] = 0
     result.tm[i] = 0
     result.cycle_enabled[i] = 0
@@ -57,31 +57,19 @@ proc update_tm(tim: Timer; num: int) =
 
 proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
   let num = int((io_addr and 0xF) div 4)
-  var value: uint32 =
-    if bit(io_addr, 1):
-      uint32(tim.tmcnt[num].value)
-    else:
-      uint32(tim.get_current_tm(num))
-  if bit(io_addr, 0):
-    value = value shr 8
-  uint8(value)
+  if bit(io_addr, 1):
+    read(tim.tmcnt[num], io_addr and 1)
+  else:
+    read(tim.get_current_tm(num), io_addr and 1)
 
 proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
   let num = int((io_addr and 0xF) div 4)
-  let high = bit(io_addr, 0)
-  var mask: uint16 = 0xFF00'u16
-  var v16: uint16
-  if high:
-    mask = mask shr 8
-    v16 = uint16(value) shl 8
-  else:
-    v16 = uint16(value)
   if bit(io_addr, 1):
-    if not high:
+    if not bit(io_addr, 0):  # TMCNT low byte only triggers side-effects
       tim.update_tm(num)
       let was_enabled = tim.tmcnt[num].enable
       let was_cascade = tim.tmcnt[num].cascade
-      tim.tmcnt[num].value = (tim.tmcnt[num].value and mask) or v16
+      write(tim.tmcnt[num], value, 0)
       if tim.tmcnt[num].enable:
         if tim.tmcnt[num].cascade:
           tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
@@ -93,4 +81,4 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       elif was_enabled:
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
   else:
-    tim.tmd[num] = (tim.tmd[num] and mask) or v16
+    write(tim.tmd[num], value, io_addr and 1)

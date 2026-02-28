@@ -2,7 +2,7 @@
 
 proc new_mmio*(gba: GBA): MMIO =
   result = MMIO(gba: gba)
-  result.waitcnt = WAITCNT(value: 0)
+  result.waitcnt = WAITCNT()
 
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
@@ -16,7 +16,7 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
     else: 0'u8
   of 0x130..0x133: mmio.gba.keypad[io_addr]
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr]
-  of 0x204..0x205: mmio.waitcnt.read_byte(io_addr and 1)
+  of 0x204..0x205: read(mmio.waitcnt, io_addr and 1)
   of 0x206..0x207, 0x20A..0x20B, 0x302..0x303: 0'u8
   else: mmio.gba.bus.read_open_bus_value(io_addr)
 
@@ -30,7 +30,7 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x120..0x12B, 0x134..0x15B: discard  # serial, todo
   of 0x130..0x133: mmio.gba.keypad[io_addr] = value
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr] = value
-  of 0x204..0x205: mmio.waitcnt.write_byte(io_addr and 1, value)
+  of 0x204..0x205: write(mmio.waitcnt, value, io_addr and 1)
   of 0x301:
     if bit(value, 7):
       discard  # TODO: stop mode

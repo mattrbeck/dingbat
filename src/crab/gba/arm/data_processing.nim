@@ -88,9 +88,9 @@ proc arm_data_processing*(cpu: CPU; instr: uint32) =
   if pc_reads_12_ahead: cpu.r[15] -= 4
   if rd == 15 and set_conditions:
     if cpu.spsr.thumb: cpu.r[15] -= 4
-    let old_spsr  = cpu.spsr.value
+    let old_spsr  = uint32(cpu.spsr)
     let new_mode  = CpuMode(cpu.spsr.mode)
     cpu.switch_mode(new_mode)
-    cpu.cpsr.value = old_spsr
+    cpu.cpsr = cast[PSR](old_spsr)
     let bank = mode_bank(new_mode)
-    cpu.spsr.value = if bank == 0: cpu.cpsr.value else: cpu.spsr_banks[bank]
+    cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])

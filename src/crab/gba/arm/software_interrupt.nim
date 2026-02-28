@@ -10,10 +10,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let discard_flags = cpu.r[0]
     let intr_mask = uint16(cpu.r[1])
     if discard_flags != 0:
-      cpu.gba.interrupts.reg_if.value =
-        cpu.gba.interrupts.reg_if.value and not intr_mask
-    cpu.gba.interrupts.reg_ie.value =
-      cpu.gba.interrupts.reg_ie.value or intr_mask
+      cpu.gba.interrupts.reg_if =
+        cast[InterruptReg](uint16(cpu.gba.interrupts.reg_if) and not intr_mask)
+    cpu.gba.interrupts.reg_ie =
+      cast[InterruptReg](uint16(cpu.gba.interrupts.reg_ie) or intr_mask)
     cpu.halted = true
   of 0x05:  # VBlankIntrWait
     cpu.gba.interrupts.reg_if.vblank = false

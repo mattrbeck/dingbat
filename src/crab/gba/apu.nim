@@ -42,10 +42,10 @@ proc sdl_delay(ms: uint32)
 proc new_apu*(gba: GBA): APU =
   result = APU(
     gba: gba,
-    soundcnt_l: SOUNDCNT_L(value: 0),
-    soundcnt_h: SOUNDCNT_H(value: 0),
+    soundcnt_l: SOUNDCNT_L(),
+    soundcnt_h: SOUNDCNT_H(),
     sound_enabled: false,
-    soundbias: SOUNDBIAS(value: 0x200),
+    soundbias: cast[SOUNDBIAS](0x200'u16),
     buffer_pos: 0,
     frame_sequencer_stage: 0,
     first_half_of_length_period: false,
@@ -158,10 +158,8 @@ proc `[]`*(apu: APU; io_addr: uint32): uint8 =
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_read(io_addr)
   else:
     case io_addr
-    of 0x80: uint8(apu.soundcnt_l.value)
-    of 0x81: uint8(apu.soundcnt_l.value shr 8)
-    of 0x82: uint8(apu.soundcnt_h.value)
-    of 0x83: uint8(apu.soundcnt_h.value shr 8)
+    of 0x80..0x81: read(apu.soundcnt_l, io_addr and 1)
+    of 0x82..0x83: read(apu.soundcnt_h, io_addr and 1)
     of 0x84:
       (if apu.sound_enabled: 0x80'u8 else: 0'u8) or
       (if apu.channel4.enabled: 0b1000'u8 else: 0'u8) or
@@ -169,8 +167,7 @@ proc `[]`*(apu: APU; io_addr: uint32): uint8 =
       (if apu.channel2.enabled: 0b0010'u8 else: 0'u8) or
       (if apu.channel1.enabled: 0b0001'u8 else: 0'u8)
     of 0x85, 0x86, 0x87: 0'u8
-    of 0x88: uint8(apu.soundbias.value)
-    of 0x89: uint8(apu.soundbias.value shr 8)
+    of 0x88..0x89: read(apu.soundbias, io_addr and 1)
     of 0x8A, 0x8B: 0'u8
     else: apu.gba.bus.read_open_bus_value(io_addr)
 
@@ -186,10 +183,10 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_write(io_addr, value)
   else:
     case io_addr
-    of 0x80: apu.soundcnt_l.value = (apu.soundcnt_l.value and 0xFF00'u16) or (uint16(value) and 0x77'u16)  # bits 3,7 read_only
-    of 0x81: apu.soundcnt_l.value = (apu.soundcnt_l.value and 0x00FF'u16) or (uint16(value) shl 8)
-    of 0x82: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0xFF00'u16) or (uint16(value) and 0x0F'u16)  # bits 4-7 read_only
-    of 0x83: apu.soundcnt_h.value = (apu.soundcnt_h.value and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8)  # bits 11,15 read_only
+    of 0x80: apu.soundcnt_l = cast[SOUNDCNT_L]((uint16(apu.soundcnt_l) and 0xFF00'u16) or (uint16(value) and 0x77'u16))  # bits 3,7 unused
+    of 0x81: apu.soundcnt_l = cast[SOUNDCNT_L]((uint16(apu.soundcnt_l) and 0x00FF'u16) or (uint16(value) shl 8))
+    of 0x82: apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0xFF00'u16) or (uint16(value) and 0x0F'u16))  # bits 4-7 unused
+    of 0x83: apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))  # bits 11,15 unused
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:
         for addr in 0x60'u32..0x81'u32:
@@ -203,7 +200,6 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.channel3.length_counter = 0
         apu.channel4.length_counter = 0
     of 0x85: discard
-    of 0x88: apu.soundbias.value = (apu.soundbias.value and 0xFF00'u16) or uint16(value)
-    of 0x89: apu.soundbias.value = (apu.soundbias.value and 0x00FF'u16) or (uint16(value) shl 8)
+    of 0x88..0x89: write(apu.soundbias, value, io_addr and 1)
     of 0xA8..0xAF: discard
     else: discard

@@ -2,13 +2,13 @@
 
 proc new_keypad*(gba: GBA): Keypad =
   result = Keypad(gba: gba)
-  result.keyinput = KEYINPUT(value: 0xFFFF'u16)
-  result.keycnt   = KEYCNT(value: 0xFFFF'u16)
+  result.keyinput = cast[KEYINPUT](0xFFFF'u16)
+  result.keycnt   = cast[KEYCNT](0xFFFF'u16)
 
 proc `[]`*(kp: Keypad; io_addr: uint32): uint8 =
   case io_addr
-  of 0x130..0x131: kp.keyinput.read_byte(io_addr and 1)
-  of 0x132..0x133: kp.keycnt.read_byte(io_addr and 1)
+  of 0x130..0x131: read(kp.keyinput, io_addr and 1)
+  of 0x132..0x133: read(kp.keycnt, io_addr and 1)
   else: raise newException(Exception, "Unreachable keypad read " & hex_str(uint32(io_addr)))
 
 proc `[]=`*(kp: Keypad; io_addr: uint32; value: uint8) =

@@ -16,32 +16,32 @@ proc new_ppu*(gba: GBA): PPU =
   result.pram           = newSeq[byte](0x400)
   result.vram           = newSeq[byte](0x18000)
   result.oam            = newSeq[byte](0x400)
-  result.dispcnt        = DISPCNT(value: 0)
-  result.dispstat       = DISPSTAT(value: 0)
+  result.dispcnt        = DISPCNT()
+  result.dispstat       = DISPSTAT()
   result.vcount         = 0
   for i in 0..3:
-    result.bgcnt[i]  = BGCNT(value: 0)
-    result.bghofs[i] = BGOFS(value: 0)
-    result.bgvofs[i] = BGOFS(value: 0)
+    result.bgcnt[i]  = BGCNT()
+    result.bghofs[i] = BGOFS()
+    result.bgvofs[i] = BGOFS()
   for i in 0..1:
-    result.bgaff[i][0] = BGAFF(value: 0)
-    result.bgaff[i][1] = BGAFF(value: 0)
-    result.bgaff[i][2] = BGAFF(value: 0)
-    result.bgaff[i][3] = BGAFF(value: 0)
-    result.bgref[i][0] = BGREF(value: 0)
-    result.bgref[i][1] = BGREF(value: 0)
+    result.bgaff[i][0] = BGAFF()
+    result.bgaff[i][1] = BGAFF()
+    result.bgaff[i][2] = BGAFF()
+    result.bgaff[i][3] = BGAFF()
+    result.bgref[i][0] = BGREF()
+    result.bgref[i][1] = BGREF()
     result.bgref_int[i][0] = 0
     result.bgref_int[i][1] = 0
-  result.win0h   = WINH(value: 0)
-  result.win1h   = WINH(value: 0)
-  result.win0v   = WINV(value: 0)
-  result.win1v   = WINV(value: 0)
-  result.winin   = WININ(value: 0)
-  result.winout  = WINOUT(value: 0)
-  result.mosaic  = MOSAIC(value: 0)
-  result.bldcnt  = BLDCNT(value: 0)
-  result.bldalpha = BLDALPHA(value: 0)
-  result.bldy    = BLDY(value: 0)
+  result.win0h   = WINH()
+  result.win1h   = WINH()
+  result.win0v   = WINV()
+  result.win1v   = WINV()
+  result.winin   = WININ()
+  result.winout  = WINOUT()
+  result.mosaic  = MOSAIC()
+  result.bldcnt  = BLDCNT()
+  result.bldalpha = BLDALPHA()
+  result.bldy    = BLDY()
   for i in 0..3:
     result.layer_palettes[i] = newSeq[byte](240)
   for i in 0..239:
@@ -129,7 +129,7 @@ proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
 
 proc render_reg_bg*(ppu: PPU; bg: int) =
-  if not bit(ppu.dispcnt.value, 8 + bg): return
+  if not bit(uint16(ppu.dispcnt), 8 + bg): return
   let bgcnt  = ppu.bgcnt[bg]
   let bghofs = ppu.bghofs[bg]
   let bgvofs = ppu.bgvofs[bg]
@@ -163,7 +163,7 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
     ppu.layer_palettes[bg][col] = uint8(pal_idx)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
-  if not bit(ppu.dispcnt.value, 8 + bg): return
+  if not bit(uint16(ppu.dispcnt), 8 + bg): return
   let bgcnt = ppu.bgcnt[bg]
   let bg_idx = bg - 2
   let dx = ppu.bgaff[bg_idx][0].num
@@ -190,7 +190,7 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
     ppu.layer_palettes[bg][col] = pal_idx
 
 proc render_sprites*(ppu: PPU) =
-  if not bit(ppu.dispcnt.value, 12): return
+  if not bit(uint16(ppu.dispcnt), 12): return
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
   let num_sprites = 128  # OAM has 128 sprites
@@ -405,52 +405,52 @@ proc scanline*(ppu: PPU) =
 
 proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   case io_addr
-  of 0x000..0x001: ppu.dispcnt.read_byte(io_addr and 1)
+  of 0x000..0x001: read(ppu.dispcnt, io_addr and 1)
   of 0x002..0x003: 0'u8  # green swap
-  of 0x004..0x005: ppu.dispstat.read_byte(io_addr and 1)
-  of 0x006..0x007: uint8(ppu.vcount shr (8 * (io_addr and 1)))
+  of 0x004..0x005: read(ppu.dispstat, io_addr and 1)
+  of 0x006..0x007: read(ppu.vcount, io_addr and 1)
   of 0x008..0x00F:
     let bg_num = int((io_addr - 0x008) shr 1)
-    var val = ppu.bgcnt[bg_num].read_byte(io_addr and 1)
+    var val = read(ppu.bgcnt[bg_num], io_addr and 1)
     if (io_addr == 0xD or io_addr == 0xF) and ppu.bgcnt[bg_num].affine_wrap:
       val = val or 0x20'u8
     val
-  of 0x048..0x049: ppu.winin.read_byte(io_addr and 1)
-  of 0x04A..0x04B: ppu.winout.read_byte(io_addr and 1)
-  of 0x050..0x051: ppu.bldcnt.read_byte(io_addr and 1)
-  of 0x052..0x053: ppu.bldalpha.read_byte(io_addr and 1)
+  of 0x048..0x049: read(ppu.winin, io_addr and 1)
+  of 0x04A..0x04B: read(ppu.winout, io_addr and 1)
+  of 0x050..0x051: read(ppu.bldcnt, io_addr and 1)
+  of 0x052..0x053: read(ppu.bldalpha, io_addr and 1)
   else: ppu.gba.bus.read_open_bus_value(io_addr)
 
 proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   case io_addr
-  of 0x000..0x001: ppu.dispcnt.write_byte(io_addr and 1, value)
+  of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
   of 0x002..0x003: discard  # green swap
-  of 0x004..0x005: ppu.dispstat.write_byte(io_addr and 1, value)
+  of 0x004..0x005: write(ppu.dispstat, value, io_addr and 1)
   of 0x006..0x007: discard  # vcount
-  of 0x008..0x00F: ppu.bgcnt[int((io_addr - 0x008) shr 1)].write_byte(io_addr and 1, value)
+  of 0x008..0x00F: write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
   of 0x010..0x01F:
     let bg_num = int((io_addr - 0x010) shr 2)
     if bit(io_addr, 1):
-      ppu.bgvofs[bg_num].write_byte(io_addr and 1, value)
+      write(ppu.bgvofs[bg_num], value, io_addr and 1)
     else:
-      ppu.bghofs[bg_num].write_byte(io_addr and 1, value)
+      write(ppu.bghofs[bg_num], value, io_addr and 1)
   of 0x020..0x03F:
     let bg_num = int((io_addr and 0x10) shr 4)
     let offs   = int(io_addr and 0xF)
     if offs >= 8:
       let o = offs - 8
-      ppu.bgref[bg_num][o shr 2].write_byte(uint32(o and 3), value)
+      write(ppu.bgref[bg_num][o shr 2], value, o and 3)
       ppu.bgref_int[bg_num][o shr 2] = ppu.bgref[bg_num][o shr 2].num
     else:
-      ppu.bgaff[bg_num][offs shr 1].write_byte(uint32(offs and 1), value)
-  of 0x040..0x041: ppu.win0h.write_byte(io_addr and 1, value)
-  of 0x042..0x043: ppu.win1h.write_byte(io_addr and 1, value)
-  of 0x044..0x045: ppu.win0v.write_byte(io_addr and 1, value)
-  of 0x046..0x047: ppu.win1v.write_byte(io_addr and 1, value)
-  of 0x048..0x049: ppu.winin.write_byte(io_addr and 1, value)
-  of 0x04A..0x04B: ppu.winout.write_byte(io_addr and 1, value)
-  of 0x04C..0x04D: ppu.mosaic.write_byte(io_addr and 1, value)
-  of 0x050..0x051: ppu.bldcnt.write_byte(io_addr and 1, value)
-  of 0x052..0x053: ppu.bldalpha.write_byte(io_addr and 1, value)
-  of 0x054..0x055: ppu.bldy.write_byte(io_addr and 1, value)
+      write(ppu.bgaff[bg_num][offs shr 1], value, offs and 1)
+  of 0x040..0x041: write(ppu.win0h, value, io_addr and 1)
+  of 0x042..0x043: write(ppu.win1h, value, io_addr and 1)
+  of 0x044..0x045: write(ppu.win0v, value, io_addr and 1)
+  of 0x046..0x047: write(ppu.win1v, value, io_addr and 1)
+  of 0x048..0x049: write(ppu.winin, value, io_addr and 1)
+  of 0x04A..0x04B: write(ppu.winout, value, io_addr and 1)
+  of 0x04C..0x04D: write(ppu.mosaic, value, io_addr and 1)
+  of 0x050..0x051: write(ppu.bldcnt, value, io_addr and 1)
+  of 0x052..0x053: write(ppu.bldalpha, value, io_addr and 1)
+  of 0x054..0x055: write(ppu.bldy, value, io_addr and 1)
   else: discard

@@ -126,6 +126,35 @@ conditions were true.
 **Fix**: Merged into a single `if (period == 0 and updating) or (not add_mode)` matching
 Crystal's single `||` condition exactly.
 
+### Refactor: GBA bitfield registers — native packed objects
+
+Replaced the custom `bitfield` macro (`src/crab/bitfield.nim`) with Nim's native
+`{.packed.}` + `{.bitsize:N.}` struct pragmas, mirroring `reference/gba`'s approach.
+
+**Why**: The macro approach generated a wrapper type with a `.value: T` field and
+individual getter/setter procs. The native approach maps directly to hardware layout
+without any wrapper — fields are accessed directly as struct members.
+
+**Key changes**:
+- `src/crab/gba/reg.nim` — complete rewrite; all 24 GBA I/O registers now use
+  `{.packed.}` objects. Added `GbaReg16` type class and `converter toU16`/`toU32`
+  for implicit coercions. Added `read(reg, byteNum)` and `write(reg, value, byteNum)`
+  procs for both packed register types and plain `uint16 | uint32`.
+- `CpuMode` enum moved from `gba.nim` type block into `reg.nim` (must precede PSR).
+- `import ../bitfield` removed from `gba.nim`.
+- All `.value` accesses replaced: `psr.value` → `uint32(psr)`, raw assignment via
+  `cast[T](raw_value)`.
+- All `read_byte(n)` / `write_byte(n, v)` call sites updated to `read(reg, n)` /
+  `write(reg, v, n)` — note the parameter order swap (value before byteNum).
+- Case branches halved where possible using `of 0xNN..0xNN+1: read(reg, io_addr and 1)`.
+- Validated all register bit totals: PSR=32, BGREF=32, all others=16. ✓
+
+**Not adopted from reference**:
+- Reverse converter `toReg16*[T](num: uint16): T` — explicit `cast[T](...)` is clearer.
+- `put` helper proc — equivalent to our inline `write` approach.
+- `{.packed.}` Sprite type — our Sprite uses three `uint16` attrs + accessor procs
+  (potential future improvement).
+
 ## Current Status
 
 | Subsystem     | Status        | Notes                                            |

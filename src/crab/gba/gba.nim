@@ -2,7 +2,6 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[options, times, os, strutils]
-import ../bitfield
 import ../common/[util, input, scheduler, emu]
 
 # Include register definitions (provides PSR, DISPCNT, etc.)
@@ -145,10 +144,6 @@ type
     read_only*:  bool
     read_bits*:  uint16
     write_bits*: uint16
-
-  CpuMode* = enum
-    modeUSR = 0x10, modeFIQ = 0x11, modeIRQ = 0x12, modeSVC = 0x13,
-    modeABT = 0x17, modeUND = 0x1B, modeSYS = 0x1F
 
   CPU* = ref object
     gba*:         GBA

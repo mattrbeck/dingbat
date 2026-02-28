@@ -1,259 +1,297 @@
-# GBA I/O register definitions using the bitfield macro.
+# GBA I/O register definitions using packed objects with bitsize pragmas.
 # This file is `include`d by gba.nim; it shares gba.nim's scope.
+# Approach borrowed from reference/gba — uses Nim's native {.packed.} +
+# {.bitsize:N.} instead of a custom macro.
 
 ####################
-# CPU PSR (defined here for cpu.nim, but logically belongs with the CPU)
-bitfield PSR, uint32:
-  num mode, 5
-  bool thumb
-  bool fiq_disable
-  bool irq_disable
-  num reserved, 20, read_only = true
-  bool overflow
-  bool carry
-  bool zero
-  bool negative
+# CPU mode enum (must come before PSR since it lives in reg.nim now)
+
+type
+  CpuMode* = enum
+    modeUSR = 0x10, modeFIQ = 0x11, modeIRQ = 0x12, modeSVC = 0x13,
+    modeABT = 0x17, modeUND = 0x1B, modeSYS = 0x1F
 
 ####################
-# General
+# CPU PSR (Program Status Register) — 32-bit
 
-bitfield WAITCNT, uint16:
-  num sram_wait_control, 2
-  num wait_state_0_first_access, 2
-  num wait_state_0_second_access, 1
-  num wait_state_1_first_access, 2
-  num wait_state_1_second_access, 1
-  num wait_state_2_first_access, 2
-  num wait_state_2_second_access, 1
-  num phi_terminal_output, 2
-  bool not_used, read_only = true
-  bool gamepack_prefetch_buffer
-  bool gamepak_type, read_only = true
+type
+  PSR* {.packed.} = object
+    mode*        {.bitsize:  5.}: uint32
+    thumb*       {.bitsize:  1.}: bool
+    fiq_disable* {.bitsize:  1.}: bool
+    irq_disable* {.bitsize:  1.}: bool
+    reserved*    {.bitsize: 20.}: uint32
+    overflow*    {.bitsize:  1.}: bool
+    carry*       {.bitsize:  1.}: bool
+    zero*        {.bitsize:  1.}: bool
+    negative*    {.bitsize:  1.}: bool
 
-####################
-# Interrupts
-
-bitfield InterruptReg, uint16:
-  bool vblank
-  bool hblank
-  bool vcounter
-  bool timer0
-  bool timer1
-  bool timer2
-  bool timer3
-  bool serial
-  bool dma0
-  bool dma1
-  bool dma2
-  bool dma3
-  bool keypad
-  bool game_pak
-  num not_used, 2, read_only = true
+converter toU32*(psr: PSR): uint32 = cast[uint32](psr)
+converter toPSR*(v: uint32): PSR   = cast[PSR](v)
 
 ####################
-# APU
+# GBA 16-bit I/O registers
 
-bitfield SOUNDCNT_L, uint16:
-  num right_volume, 3
-  bool not_used_2, read_only = true
-  num left_volume, 3
-  bool not_used_1, read_only = true
-  num channel_1_right, 1
-  num channel_2_right, 1
-  num channel_3_right, 1
-  num channel_4_right, 1
-  num channel_1_left, 1
-  num channel_2_left, 1
-  num channel_3_left, 1
-  num channel_4_left, 1
+type
+  WAITCNT* {.packed.} = object
+    sram_wait_control*          {.bitsize: 2.}: uint16
+    wait_state_0_first_access*  {.bitsize: 2.}: uint16
+    wait_state_0_second_access* {.bitsize: 1.}: uint16
+    wait_state_1_first_access*  {.bitsize: 2.}: uint16
+    wait_state_1_second_access* {.bitsize: 1.}: uint16
+    wait_state_2_first_access*  {.bitsize: 2.}: uint16
+    wait_state_2_second_access* {.bitsize: 1.}: uint16
+    phi_terminal_output*        {.bitsize: 2.}: uint16
+    not_used*                   {.bitsize: 1.}: bool
+    gamepack_prefetch_buffer*   {.bitsize: 1.}: bool
+    gamepak_type*               {.bitsize: 1.}: bool
 
-bitfield SOUNDCNT_H, uint16:
-  num sound_volume, 2
-  num dma_sound_a_volume, 1
-  num dma_sound_b_volume, 1
-  num not_used, 4, read_only = true
-  num dma_sound_a_right, 1
-  num dma_sound_a_left, 1
-  num dma_sound_a_timer, 1
-  bool dma_sound_a_reset, read_only = true
-  num dma_sound_b_right, 1
-  num dma_sound_b_left, 1
-  num dma_sound_b_timer, 1
-  bool dma_sound_b_reset, read_only = true
+  InterruptReg* {.packed.} = object
+    vblank*   {.bitsize: 1.}: bool
+    hblank*   {.bitsize: 1.}: bool
+    vcounter* {.bitsize: 1.}: bool
+    timer0*   {.bitsize: 1.}: bool
+    timer1*   {.bitsize: 1.}: bool
+    timer2*   {.bitsize: 1.}: bool
+    timer3*   {.bitsize: 1.}: bool
+    serial*   {.bitsize: 1.}: bool
+    dma0*     {.bitsize: 1.}: bool
+    dma1*     {.bitsize: 1.}: bool
+    dma2*     {.bitsize: 1.}: bool
+    dma3*     {.bitsize: 1.}: bool
+    keypad*   {.bitsize: 1.}: bool
+    game_pak* {.bitsize: 1.}: bool
+    not_used* {.bitsize: 2.}: uint16
 
-bitfield SOUNDBIAS, uint16:
-  bool not_used_2
-  num bias_level, 9
-  num not_used_1, 4
-  num amplitude_resolution, 2
+  SOUNDCNT_L* {.packed.} = object
+    right_volume*    {.bitsize: 3.}: uint16
+    not_used_2*      {.bitsize: 1.}: bool
+    left_volume*     {.bitsize: 3.}: uint16
+    not_used_1*      {.bitsize: 1.}: bool
+    channel_1_right* {.bitsize: 1.}: uint16
+    channel_2_right* {.bitsize: 1.}: uint16
+    channel_3_right* {.bitsize: 1.}: uint16
+    channel_4_right* {.bitsize: 1.}: uint16
+    channel_1_left*  {.bitsize: 1.}: uint16
+    channel_2_left*  {.bitsize: 1.}: uint16
+    channel_3_left*  {.bitsize: 1.}: uint16
+    channel_4_left*  {.bitsize: 1.}: uint16
+
+  SOUNDCNT_H* {.packed.} = object
+    sound_volume*       {.bitsize: 2.}: uint16
+    dma_sound_a_volume* {.bitsize: 1.}: uint16
+    dma_sound_b_volume* {.bitsize: 1.}: uint16
+    not_used*           {.bitsize: 4.}: uint16
+    dma_sound_a_right*  {.bitsize: 1.}: uint16
+    dma_sound_a_left*   {.bitsize: 1.}: uint16
+    dma_sound_a_timer*  {.bitsize: 1.}: uint16
+    dma_sound_a_reset*  {.bitsize: 1.}: bool
+    dma_sound_b_right*  {.bitsize: 1.}: uint16
+    dma_sound_b_left*   {.bitsize: 1.}: uint16
+    dma_sound_b_timer*  {.bitsize: 1.}: uint16
+    dma_sound_b_reset*  {.bitsize: 1.}: bool
+
+  SOUNDBIAS* {.packed.} = object
+    not_used_2*          {.bitsize:  1.}: bool
+    bias_level*          {.bitsize:  9.}: uint16
+    not_used_1*          {.bitsize:  4.}: uint16
+    amplitude_resolution* {.bitsize: 2.}: uint16
+
+  DMACNT* {.packed.} = object
+    not_used*       {.bitsize: 5.}: uint16
+    dest_control*   {.bitsize: 2.}: uint16
+    source_control* {.bitsize: 2.}: uint16
+    repeat*         {.bitsize: 1.}: bool
+    xfer_type*      {.bitsize: 1.}: uint16
+    game_pak*       {.bitsize: 1.}: bool
+    start_timing*   {.bitsize: 2.}: uint16
+    irq_enable*     {.bitsize: 1.}: bool
+    enable*         {.bitsize: 1.}: bool
+
+  TMCNT* {.packed.} = object
+    frequency*  {.bitsize: 2.}: uint16
+    cascade*    {.bitsize: 1.}: bool
+    not_used_2* {.bitsize: 3.}: uint16
+    irq_enable* {.bitsize: 1.}: bool
+    enable*     {.bitsize: 1.}: bool
+    not_used_1* {.bitsize: 8.}: uint16
+
+  DISPCNT* {.packed.} = object
+    bg_mode*              {.bitsize: 3.}: uint16
+    reserved_for_bios*    {.bitsize: 1.}: bool
+    display_frame_select* {.bitsize: 1.}: bool
+    hblank_interval_free* {.bitsize: 1.}: bool
+    obj_mapping_1d*       {.bitsize: 1.}: bool
+    forced_blank*         {.bitsize: 1.}: bool
+    default_enable_bits*  {.bitsize: 5.}: uint16
+    window_0_display*     {.bitsize: 1.}: bool
+    window_1_display*     {.bitsize: 1.}: bool
+    obj_window_display*   {.bitsize: 1.}: bool
+
+  DISPSTAT* {.packed.} = object
+    vblank*              {.bitsize: 1.}: bool
+    hblank*              {.bitsize: 1.}: bool
+    vcounter*            {.bitsize: 1.}: bool
+    vblank_irq_enable*   {.bitsize: 1.}: bool
+    hblank_irq_enable*   {.bitsize: 1.}: bool
+    vcounter_irq_enable* {.bitsize: 1.}: bool
+    not_used*            {.bitsize: 2.}: uint16
+    vcount_setting*      {.bitsize: 8.}: uint16
+
+  BGCNT* {.packed.} = object
+    priority*             {.bitsize: 2.}: uint16
+    character_base_block* {.bitsize: 2.}: uint16
+    not_used*             {.bitsize: 2.}: uint16
+    mosaic*               {.bitsize: 1.}: bool
+    color_mode_8bpp*      {.bitsize: 1.}: bool
+    screen_base_block*    {.bitsize: 5.}: uint16
+    affine_wrap*          {.bitsize: 1.}: bool
+    screen_size*          {.bitsize: 2.}: uint16
+
+  BGOFS* {.packed.} = object
+    offset*   {.bitsize: 9.}: uint16
+    not_used* {.bitsize: 7.}: uint16
+
+  BGAFF* {.packed.} = object
+    fraction* {.bitsize: 8.}: uint16
+    integer*  {.bitsize: 7.}: uint16
+    sign*     {.bitsize: 1.}: bool
+
+  WINH* {.packed.} = object
+    x2* {.bitsize: 8.}: uint16
+    x1* {.bitsize: 8.}: uint16
+
+  WINV* {.packed.} = object
+    y2* {.bitsize: 8.}: uint16
+    y1* {.bitsize: 8.}: uint16
+
+  WININ* {.packed.} = object
+    window_0_enable_bits*          {.bitsize: 5.}: uint16
+    window_0_color_special_effect* {.bitsize: 1.}: bool
+    not_used_0*                    {.bitsize: 2.}: uint16
+    window_1_enable_bits*          {.bitsize: 5.}: uint16
+    window_1_color_special_effect* {.bitsize: 1.}: bool
+    not_used_1*                    {.bitsize: 2.}: uint16
+
+  WINOUT* {.packed.} = object
+    outside_enable_bits*             {.bitsize: 5.}: uint16
+    outside_color_special_effect*    {.bitsize: 1.}: bool
+    not_used_outside*                {.bitsize: 2.}: uint16
+    obj_window_enable_bits*          {.bitsize: 5.}: uint16
+    obj_window_color_special_effect* {.bitsize: 1.}: bool
+    not_used_obj*                    {.bitsize: 2.}: uint16
+
+  MOSAIC* {.packed.} = object
+    bg_mosiac_h_size*  {.bitsize: 4.}: uint16
+    bg_mosiac_v_size*  {.bitsize: 4.}: uint16
+    obj_mosiac_h_size* {.bitsize: 4.}: uint16
+    obj_mosiac_v_size* {.bitsize: 4.}: uint16
+
+  BLDCNT* {.packed.} = object
+    bg0_1st_target_pixel* {.bitsize: 1.}: bool
+    bg1_1st_target_pixel* {.bitsize: 1.}: bool
+    bg2_1st_target_pixel* {.bitsize: 1.}: bool
+    bg3_1st_target_pixel* {.bitsize: 1.}: bool
+    obj_1st_target_pixel* {.bitsize: 1.}: bool
+    bd_1st_target_pixel*  {.bitsize: 1.}: bool
+    blend_mode*           {.bitsize: 2.}: uint16
+    bg0_2nd_target_pixel* {.bitsize: 1.}: bool
+    bg1_2nd_target_pixel* {.bitsize: 1.}: bool
+    bg2_2nd_target_pixel* {.bitsize: 1.}: bool
+    bg3_2nd_target_pixel* {.bitsize: 1.}: bool
+    obj_2nd_target_pixel* {.bitsize: 1.}: bool
+    bd_2nd_target_pixel*  {.bitsize: 1.}: bool
+    not_used*             {.bitsize: 2.}: uint16
+
+  BLDALPHA* {.packed.} = object
+    eva_coefficient* {.bitsize: 5.}: uint16
+    not_used_5_7*    {.bitsize: 3.}: uint16
+    evb_coefficient* {.bitsize: 5.}: uint16
+    not_used_13_15*  {.bitsize: 3.}: uint16
+
+  BLDY* {.packed.} = object
+    evy_coefficient* {.bitsize:  5.}: uint16
+    not_used*        {.bitsize: 11.}: uint16
+
+  KEYINPUT* {.packed.} = object
+    a*        {.bitsize: 1.}: bool
+    b*        {.bitsize: 1.}: bool
+    select*   {.bitsize: 1.}: bool
+    start*    {.bitsize: 1.}: bool
+    right*    {.bitsize: 1.}: bool
+    left*     {.bitsize: 1.}: bool
+    up*       {.bitsize: 1.}: bool
+    down*     {.bitsize: 1.}: bool
+    r*        {.bitsize: 1.}: bool
+    l*        {.bitsize: 1.}: bool
+    not_used* {.bitsize: 6.}: uint16
+
+  KEYCNT* {.packed.} = object
+    a*             {.bitsize: 1.}: bool
+    b*             {.bitsize: 1.}: bool
+    select*        {.bitsize: 1.}: bool
+    start*         {.bitsize: 1.}: bool
+    right*         {.bitsize: 1.}: bool
+    left*          {.bitsize: 1.}: bool
+    up*            {.bitsize: 1.}: bool
+    down*          {.bitsize: 1.}: bool
+    r*             {.bitsize: 1.}: bool
+    l*             {.bitsize: 1.}: bool
+    not_used*      {.bitsize: 4.}: uint16
+    irq_enable*    {.bitsize: 1.}: bool
+    irq_condition* {.bitsize: 1.}: bool
+
+  # BGREF is 32-bit, handled separately from the GbaReg16 type class
+  BGREF* {.packed.} = object
+    fraction* {.bitsize:  8.}: uint32
+    integer*  {.bitsize: 19.}: uint32
+    sign*     {.bitsize:  1.}: bool
+    not_used* {.bitsize:  4.}: uint32
+
+  # Type class covering all 16-bit GBA I/O registers
+  GbaReg16* = WAITCNT | InterruptReg | SOUNDCNT_L | SOUNDCNT_H | SOUNDBIAS |
+              DMACNT | TMCNT | DISPCNT | DISPSTAT | BGCNT | BGOFS | BGAFF |
+              WINH | WINV | WININ | WINOUT | MOSAIC | BLDCNT | BLDALPHA | BLDY |
+              KEYINPUT | KEYCNT
 
 ####################
-# DMA
+# Converters and I/O helpers
 
-bitfield DMACNT, uint16:
-  num not_used, 5, read_only = true
-  num dest_control, 2
-  num source_control, 2
-  bool repeat
-  num xfer_type, 1          # renamed from "type" (Nim keyword)
-  bool game_pak, write_only = true  # special dma3 case handled separately
-  num start_timing, 2
-  bool irq_enable
-  bool enable
+converter toU16*(reg: GbaReg16): uint16 = cast[uint16](reg)
+converter toU32*(reg: BGREF): uint32     = cast[uint32](reg)
+
+proc read*(reg: GbaReg16; byte_num: SomeInteger): uint8 {.inline.} =
+  cast[uint8](toU16(reg) shr (8 * byte_num))
+
+proc write*[T: GbaReg16](reg: var T; value: uint8; byte_num: SomeInteger) {.inline.} =
+  let shift = 8 * byte_num
+  let mask  = not(0xFF'u16 shl shift)
+  reg = cast[T]((mask and toU16(reg)) or (value.uint16 shl shift))
+
+proc read*(reg: BGREF; byte_num: SomeInteger): uint8 {.inline.} =
+  cast[uint8](toU32(reg) shr (8 * byte_num))
+
+proc write*(reg: var BGREF; value: uint8; byte_num: SomeInteger) {.inline.} =
+  let shift = 8 * byte_num
+  let mask  = not(0xFF'u32 shl shift)
+  reg = cast[BGREF]((mask and toU32(reg)) or (value.uint32 shl shift))
+
+proc read*[T: uint16 | uint32](reg: T; byte_num: SomeInteger): uint8 {.inline.} =
+  cast[uint8](reg shr (8 * byte_num))
+
+proc write*[T: uint16 | uint32](reg: var T; value: uint8; byte_num: SomeInteger) {.inline.} =
+  let shift = 8 * byte_num
+  let mask  = not(0xFF.T shl shift)
+  reg = (mask and reg) or (value.T shl shift)
 
 ####################
-# Timer
-
-bitfield TMCNT, uint16:
-  num frequency, 2
-  bool cascade
-  num not_used_2, 3, read_only = true
-  bool irq_enable
-  bool enable
-  num not_used_1, 8, read_only = true
-
-####################
-# PPU
-
-bitfield DISPCNT, uint16:
-  num bg_mode, 3
-  bool reserved_for_bios, read_only = true
-  bool display_frame_select
-  bool hblank_interval_free
-  bool obj_mapping_1d
-  bool forced_blank
-  num default_enable_bits, 5
-  bool window_0_display
-  bool window_1_display
-  bool obj_window_display
-
-bitfield DISPSTAT, uint16:
-  bool vblank
-  bool hblank
-  bool vcounter
-  bool vblank_irq_enable
-  bool hblank_irq_enable
-  bool vcounter_irq_enable
-  num not_used, 2
-  num vcount_setting, 8
-
-bitfield BGCNT, uint16:
-  num priority, 2
-  num character_base_block, 2
-  num not_used, 2
-  bool mosaic
-  bool color_mode_8bpp
-  num screen_base_block, 5
-  bool affine_wrap, write_only = true
-  num screen_size, 2
-
-bitfield BGOFS, uint16:
-  num offset, 9
-  num not_used, 7, read_only = true
-
-bitfield BGAFF, uint16:
-  num fraction, 8
-  num integer, 7
-  bool sign
+# Custom procs
 
 proc num*(self: BGAFF): int16 {.inline.} =
-  cast[int16](self.value)
-
-bitfield BGREF, uint32:
-  num fraction, 8
-  num integer, 19
-  bool sign
-  num not_used, 4, read_only = true
+  cast[int16](toU16(self))
 
 proc num*(self: BGREF): int32 {.inline.} =
-  cast[int32](self.value shl 4) shr 4
-
-bitfield WINH, uint16:
-  num x2, 8
-  num x1, 8
-
-bitfield WINV, uint16:
-  num y2, 8
-  num y1, 8
-
-bitfield WININ, uint16:
-  num window_0_enable_bits, 5
-  bool window_0_color_special_effect
-  num not_used_0, 2, read_only = true
-  num window_1_enable_bits, 5
-  bool window_1_color_special_effect
-  num not_used_1, 2, read_only = true
-
-bitfield WINOUT, uint16:
-  num outside_enable_bits, 5
-  bool outside_color_special_effect
-  num not_used_outside, 2, read_only = true
-  num obj_window_enable_bits, 5
-  bool obj_window_color_special_effect
-  num not_used_obj, 2, read_only = true
-
-bitfield MOSAIC, uint16:
-  num bg_mosiac_h_size, 4
-  num bg_mosiac_v_size, 4
-  num obj_mosiac_h_size, 4
-  num obj_mosiac_v_size, 4
-
-bitfield BLDCNT, uint16:
-  bool bg0_1st_target_pixel
-  bool bg1_1st_target_pixel
-  bool bg2_1st_target_pixel
-  bool bg3_1st_target_pixel
-  bool obj_1st_target_pixel
-  bool bd_1st_target_pixel
-  num blend_mode, 2
-  bool bg0_2nd_target_pixel
-  bool bg1_2nd_target_pixel
-  bool bg2_2nd_target_pixel
-  bool bg3_2nd_target_pixel
-  bool obj_2nd_target_pixel
-  bool bd_2nd_target_pixel
-  num not_used, 2, read_only = true
+  cast[int32](toU32(self) shl 4) shr 4
 
 proc layer_target*(self: BLDCNT; layer, target: int): bool {.inline.} =
-  bit(self.value, layer + (target - 1) * 8)
-
-bitfield BLDALPHA, uint16:
-  num eva_coefficient, 5
-  num not_used_5_7, 3, read_only = true
-  num evb_coefficient, 5
-  num not_used_13_15, 3, read_only = true
-
-bitfield BLDY, uint16:
-  num evy_coefficient, 5
-  num not_used, 11, read_only = true
-
-####################
-# Keypad
-
-bitfield KEYINPUT, uint16:
-  bool a
-  bool b
-  bool select
-  bool start
-  bool right
-  bool left
-  bool up
-  bool down
-  bool r
-  bool l
-  num not_used, 6
-
-bitfield KEYCNT, uint16:
-  bool a
-  bool b
-  bool select
-  bool start
-  bool right
-  bool left
-  bool up
-  bool down
-  bool r
-  bool l
-  num not_used, 4
-  bool irq_enable
-  bool irq_condition
+  bit(toU16(self), layer + (target - 1) * 8)

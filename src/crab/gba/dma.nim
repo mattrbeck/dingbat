@@ -26,7 +26,7 @@ proc new_dma*(gba: GBA): DMA =
     result.dmasad[i]  = 0
     result.dmadad[i]  = 0
     result.dmacnt_l[i] = 0
-    result.dmacnt_h[i] = DMACNT(value: 0)
+    result.dmacnt_h[i] = DMACNT()
     result.src[i]     = 0
     result.dst[i]     = 0
     result.interrupt_flags[i] = make_dma_irq_flag(gba, i)
@@ -39,7 +39,7 @@ proc `[]`*(dma: DMA; io_addr: uint32): uint8 =
   case reg
   of 8, 9: 0'u8  # dmacnt_l is write-only
   of 10, 11:
-    var val = dma.dmacnt_h[channel].read_byte(io_addr and 1)
+    var val = read(dma.dmacnt_h[channel], io_addr and 1)
     if io_addr == 0xDF'u32 and dma.dmacnt_h[3].game_pak:
       val = val or 0b1000'u8
     val
@@ -65,7 +65,7 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     dma.dmacnt_l[channel] = ((dma.dmacnt_l[channel] and not mask) or v16) and DMA_LEN_MASK[channel]
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
-    dma.dmacnt_h[channel].write_byte(io_addr and 1, value)
+    write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
       dma.src[channel] = dma.dmasad[channel]
       dma.dst[channel] = dma.dmadad[channel]
