@@ -3,6 +3,7 @@
 
 import std/[options, times, os, strutils]
 import ../common/[util, input, scheduler, emu]
+import lut_macros
 
 # Include register definitions (provides PSR, DISPCNT, etc.)
 include reg
@@ -151,8 +152,6 @@ type
     cpsr*:        PSR
     spsr*:        PSR
     pipeline*:    Pipeline
-    lut*:         seq[proc(instr: uint32) {.closure.}]
-    thumb_lut*:   seq[proc(instr: uint32) {.closure.}]
     reg_banks*:   array[6, array[7, uint32]]
     spsr_banks*:  array[6, uint32]
     halted*:      bool
@@ -362,39 +361,6 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32
 proc clear_pipeline*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32
 proc mode_bank*(m: CpuMode): int
-# ARM instruction handlers
-proc arm_software_interrupt*(cpu: CPU; instr: uint32)
-proc arm_branch*(cpu: CPU; instr: uint32)
-proc arm_block_data_transfer*(cpu: CPU; instr: uint32)
-proc arm_single_data_transfer*(cpu: CPU; instr: uint32)
-proc arm_branch_exchange*(cpu: CPU; instr: uint32)
-proc arm_single_data_swap*(cpu: CPU; instr: uint32)
-proc arm_multiply_long*(cpu: CPU; instr: uint32)
-proc arm_multiply*(cpu: CPU; instr: uint32)
-proc arm_halfword_data_transfer_immediate*(cpu: CPU; instr: uint32)
-proc arm_halfword_data_transfer_register*(cpu: CPU; instr: uint32)
-proc arm_psr_transfer*(cpu: CPU; instr: uint32)
-proc arm_data_processing*(cpu: CPU; instr: uint32)
-# Thumb instruction handlers
-proc thumb_software_interrupt*(cpu: CPU; instr: uint32)
-proc thumb_unconditional_branch*(cpu: CPU; instr: uint32)
-proc thumb_long_branch_link*(cpu: CPU; instr: uint32)
-proc thumb_conditional_branch*(cpu: CPU; instr: uint32)
-proc thumb_multiple_load_store*(cpu: CPU; instr: uint32)
-proc thumb_push_pop_registers*(cpu: CPU; instr: uint32)
-proc thumb_add_offset_to_stack_pointer*(cpu: CPU; instr: uint32)
-proc thumb_load_address*(cpu: CPU; instr: uint32)
-proc thumb_sp_relative_load_store*(cpu: CPU; instr: uint32)
-proc thumb_load_store_halfword*(cpu: CPU; instr: uint32)
-proc thumb_load_store_immediate_offset*(cpu: CPU; instr: uint32)
-proc thumb_load_store_sign_extended*(cpu: CPU; instr: uint32)
-proc thumb_load_store_register_offset*(cpu: CPU; instr: uint32)
-proc thumb_pc_relative_load*(cpu: CPU; instr: uint32)
-proc thumb_high_reg_branch_exchange*(cpu: CPU; instr: uint32)
-proc thumb_alu_operations*(cpu: CPU; instr: uint32)
-proc thumb_move_compare_add_subtract*(cpu: CPU; instr: uint32)
-proc thumb_add_subtract*(cpu: CPU; instr: uint32)
-proc thumb_move_shifted_register*(cpu: CPU; instr: uint32)
 
 include pipeline
 include cartridge
@@ -420,7 +386,7 @@ include arm/single_data_swap
 include arm/branch
 include arm/branch_exchange
 include arm/software_interrupt
-include thumb/thumb
+include arm/lut
 include thumb/add_offset_to_stack_pointer
 include thumb/add_subtract
 include thumb/alu_operations
@@ -440,6 +406,7 @@ include thumb/push_pop_registers
 include thumb/sp_relative_load_store
 include thumb/software_interrupt
 include thumb/unconditional_branch
+include thumb/thumb
 include cpu
 include apu/abstract_channels
 include apu/channel1

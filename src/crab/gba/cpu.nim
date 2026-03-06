@@ -27,8 +27,6 @@ proc new_cpu*(gba: GBA): CPU =
     for reg in 0..6: result.reg_banks[bank][reg] = 0
     result.spsr_banks[bank] = uint32(modeSYS)
   result.waitloop_instr_lut = build_waitloop_lut()
-  result.lut = result.fill_lut()
-  result.thumb_lut = result.fill_thumb_lut()
   result.clear_pipeline()
 
 proc skip_bios*(cpu: CPU) =
