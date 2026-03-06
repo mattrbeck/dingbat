@@ -7,22 +7,21 @@ macro armLutBuilder(): untyped =
   for i in 0'u32 ..< 4096'u32:
     result.add:
       checkBits i:
-      of "000000..1001": call("arm_multiply")
-      of "00001...1001": call("arm_multiply_long")
-      of "00010.001001": call("arm_single_data_swap")
+      of "000000..1001": call("arm_multiply", i.bit(5), i.bit(4))
+      of "00001...1001": call("arm_multiply_long", i.bit(6), i.bit(5), i.bit(4))
+      of "00010.001001": call("arm_single_data_swap", i.bit(6))
       of "000100100001": call("arm_branch_exchange")
-      of "000..1..1..1": call("arm_halfword_data_transfer_immediate")
-      of "000..0..1..1": call("arm_halfword_data_transfer_register")
+      of "000.....1..1": call("arm_halfword_data_transfer", i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), bits_range(i, 1, 2))
       of "011........1": call("arm_unimplemented")  # undefined instruction
-      of "01..........": call("arm_single_data_transfer")
-      of "100.........": call("arm_block_data_transfer")
-      of "101.........": call("arm_branch")
+      of "01..........": call("arm_single_data_transfer", i.bit(9), i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), i.bit(0))
+      of "100.........": call("arm_block_data_transfer", i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4))
+      of "101.........": call("arm_branch", i.bit(8))
       of "110.........": call("arm_unimplemented")  # coprocessor data transfer
       of "1110.......0": call("arm_unimplemented")  # coprocessor data operation
       of "1110.......1": call("arm_unimplemented")  # coprocessor register transfer
       of "1111........": call("arm_software_interrupt")
-      of "00.10..0....": call("arm_psr_transfer")
-      of "00..........": call("arm_data_processing")
+      of "00.10..0....": call("arm_psr_transfer", i.bit(9), i.bit(6), i.bit(5))
+      of "00..........": call("arm_data_processing", i.bit(9), ArmAluOp(bits_range(i, 5, 8)), i.bit(4), i.bit(0))
       else:              call("arm_unused")
 
 {.push warning[UnreachableCode]: off.}

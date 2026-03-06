@@ -1,4 +1,26 @@
-# ARM helpers (included by gba.nim)
+# ARM instruction handlers (included by gba.nim)
+
+proc hle_swi*(cpu: CPU; swi_num: uint32) =
+  ## HLE BIOS dispatch for the most common GBA SWI calls.
+  ## Only used when no real BIOS file is provided.
+  case swi_num
+  of 0x02, 0x06:  # Halt / Halt2
+    cpu.halted = true
+  of 0x04:  # IntrWait(discard_flags, intr_flags)
+    let discard_flags = cpu.r[0]
+    let intr_mask = uint16(cpu.r[1])
+    if discard_flags != 0:
+      cpu.gba.interrupts.reg_if =
+        cast[InterruptReg](uint16(cpu.gba.interrupts.reg_if) and not intr_mask)
+    cpu.gba.interrupts.reg_ie =
+      cast[InterruptReg](uint16(cpu.gba.interrupts.reg_ie) or intr_mask)
+    cpu.halted = true
+  of 0x05:  # VBlankIntrWait
+    cpu.gba.interrupts.reg_if.vblank = false
+    cpu.gba.interrupts.reg_ie.vblank = true
+    cpu.halted = true
+  else:
+    discard  # unimplemented SWI: return immediately (no-op)
 
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
   cpu.und()
@@ -29,3 +51,306 @@ proc immediate_offset*(cpu: CPU; instr: uint32; carry_out: ptr bool): uint32 =
   let rotate = bits_range(instr, 8, 11)
   let imm    = bits_range(instr, 0, 7)
   cpu.ror(imm, rotate shl 1, false, carry_out)
+
+type ArmAluOp* = enum
+  AND, EOR, SUB, RSB,
+  ADD, ADC, SBC, RSC,
+  TST, TEQ, CMP, CMN,
+  ORR, MOV, BIC, MVN
+
+proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
+  let rd  = int(bits_range(instr, 16, 19))
+  let rn  = int(bits_range(instr, 12, 15))
+  let rs  = int(bits_range(instr, 8, 11))
+  let rm  = int(bits_range(instr, 0, 3))
+  let acc = when accumulate: cpu.r[rn] else: 0'u32
+  discard cpu.set_reg(rd, cpu.r[rm] * cpu.r[rs] + acc)
+  when set_cond: cpu.set_neg_and_zero_flags(cpu.r[rd])
+  if rd != 15: cpu.step_arm()
+
+proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
+  let rdhi = int(bits_range(instr, 16, 19))
+  let rdlo = int(bits_range(instr, 12, 15))
+  let rs   = int(bits_range(instr, 8, 11))
+  let rm   = int(bits_range(instr, 0, 3))
+  var res: uint64 =
+    when signed:
+      cast[uint64](int64(cast[int32](cpu.r[rm])) * int64(cast[int32](cpu.r[rs])))
+    else:
+      uint64(cpu.r[rm]) * uint64(cpu.r[rs])
+  when accumulate:
+    res += (uint64(cpu.r[rdhi]) shl 32) or uint64(cpu.r[rdlo])
+  discard cpu.set_reg(rdhi, uint32(res shr 32))
+  discard cpu.set_reg(rdlo, uint32(res))
+  when set_cond:
+    cpu.cpsr.negative = bit(cpu.r[rdhi], 31)
+    cpu.cpsr.zero     = (res == 0)
+  if rdhi != 15 and rdlo != 15: cpu.step_arm()
+
+proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) =
+  let rn = int(bits_range(instr, 16, 19))
+  let rd = int(bits_range(instr, 12, 15))
+  let rm = int(bits_range(instr, 0, 3))
+  when byte_quantity:
+    let tmp = cpu.gba.bus[cpu.r[rn]]
+    cpu.gba.bus[cpu.r[rn]] = uint8(cpu.r[rm])
+    discard cpu.set_reg(rd, uint32(tmp))
+  else:
+    let tmp = cpu.gba.bus.read_word_rotate(cpu.r[rn])
+    cpu.gba.bus.write_word(cpu.r[rn], cpu.r[rm])
+    discard cpu.set_reg(rd, tmp)
+  if rd != 15: cpu.step_arm()
+
+proc arm_branch_exchange*(cpu: CPU; instr: uint32) =
+  let address = cpu.r[int(bits_range(instr, 0, 3))]
+  cpu.cpsr.thumb = bit(address, 0)
+  discard cpu.set_reg(15, address)
+
+proc arm_halfword_data_transfer*[pre, add, immediate, write_back, load: static bool,
+                                  sh: static uint32](cpu: CPU; instr: uint32) =
+  let rn     = int(bits_range(instr, 16, 19))
+  let rd     = int(bits_range(instr, 12, 15))
+  let offset =
+    when immediate:
+      (bits_range(instr, 8, 11) shl 4) or bits_range(instr, 0, 3)
+    else:
+      cpu.r[int(bits_range(instr, 0, 3))]
+  var address = cpu.r[rn]
+  when pre:
+    when add: address += offset
+    else:     address -= offset
+  when sh == 0b00:
+    raise newException(Exception, "HalfwordDataTransfer sh=00: " & hex_str(instr))
+  elif sh == 0b01:  # ldrh/strh
+    when load:
+      discard cpu.set_reg(rd, cpu.gba.bus.read_half_rotate(address))
+    else:
+      cpu.gba.bus.write_half(address, uint16(cpu.r[rd] and 0xFFFF'u32))
+      if rd == 15:
+        cpu.gba.bus.write_half(address, uint16(cpu.gba.bus.read_half(address)) + 4)
+  elif sh == 0b10:  # ldrsb
+    discard cpu.set_reg(rd, uint32(cast[int32](cast[int8](cpu.gba.bus[address]))))
+  else:  # sh == 0b11, ldrsh
+    discard cpu.set_reg(rd, cpu.gba.bus.read_half_signed(address))
+  when not pre:
+    when add: address += offset
+    else:     address -= offset
+  when write_back or not pre:
+    if rd != rn or not load:
+      discard cpu.set_reg(rn, address)
+  if not (load and rd == 15): cpu.step_arm()
+
+proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quantity,
+                                 write_back, load, bit0: static bool](cpu: CPU; instr: uint32) =
+  var carry_out = false
+  let rn = int(bits_range(instr, 16, 19))
+  let rd = int(bits_range(instr, 12, 15))
+  let offset =
+    when imm_flag:
+      cpu.rotate_register(bits_range(instr, 0, 11), addr carry_out, allow_register_shifts = false)
+    else:
+      bits_range(instr, 0, 11)
+  var address = cpu.r[rn]
+  when pre_addressing:
+    when add_offset: address += offset
+    else:            address -= offset
+  when load:
+    when byte_quantity:
+      discard cpu.set_reg(rd, uint32(cpu.gba.bus[address]))
+    else:
+      discard cpu.set_reg(rd, cpu.gba.bus.read_word_rotate(address))
+  else:
+    when byte_quantity:
+      cpu.gba.bus[address] = uint8(cpu.r[rd])
+    else:
+      cpu.gba.bus.write_word(address, cpu.r[rd])
+    if rd == 15:
+      cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
+  when not pre_addressing:
+    when add_offset: address += offset
+    else:            address -= offset
+  when write_back or not pre_addressing:
+    if rd != rn or not load:
+      discard cpu.set_reg(rn, address)
+  if not (load and rd == 15): cpu.step_arm()
+
+proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static bool](cpu: CPU; instr: uint32) =
+  let rn = int(bits_range(instr, 16, 19))
+  var list = bits_range(instr, 0, 15)
+  var saved_mode: uint32 = 0
+  when s_bit:
+    if bit(list, 15):
+      raise newException(Exception, "todo: handle cases with r15 in list")
+    saved_mode = cpu.cpsr.mode
+    cpu.switch_mode(modeUSR)
+  var address  = cpu.r[rn]
+  var bits_set = count_set_bits(list)
+  if bits_set == 0:
+    bits_set = 16
+    list = 0x8000'u32
+  let step       = when add: 4 else: -4
+  let final_addr = uint32(int(address) + bits_set * step)
+  when add:
+    when pre_address: address += 4
+  else:
+    address = final_addr
+    when not pre_address: address += 4
+  var first_transfer = false
+  for idx in 0..15:
+    if bit(list, idx):
+      when load:
+        discard cpu.set_reg(idx, cpu.gba.bus.read_word(address))
+      else:
+        cpu.gba.bus.write_word(address, cpu.r[idx])
+        if idx == 15:
+          cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
+      address += 4
+      when write_back:
+        if not first_transfer and not (load and bit(list, rn)):
+          discard cpu.set_reg(rn, final_addr)
+      first_transfer = true
+  when s_bit:
+    cpu.switch_mode(CpuMode(saved_mode))
+  if not (load and bit(list, 15)): cpu.step_arm()
+
+proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
+  let offset = cast[int32](bits_range(instr, 0, 23) shl 8) shr 6
+  when link: discard cpu.set_reg(14, cpu.r[15] - 4)
+  discard cpu.set_reg(15, uint32(int(cpu.r[15]) + offset))
+
+proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
+  if cpu.gba.bios_path == "":
+    let swi_num = bits_range(instr, 16, 23)
+    cpu.hle_swi(swi_num)
+    cpu.step_arm()
+  else:
+    let lr = cpu.r[15] - 4
+    cpu.switch_mode(modeSVC)
+    discard cpu.set_reg(14, lr)
+    cpu.cpsr.irq_disable = true
+    discard cpu.set_reg(15, 0x08'u32)
+
+proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32) =
+  let mode     = CpuMode(cpu.cpsr.mode)
+  let has_spsr = mode != modeUSR and mode != modeSYS
+  when msr:
+    var mask: uint32 = 0
+    if bit(instr, 19): mask = mask or 0xFF000000'u32
+    if bit(instr, 18): mask = mask or 0x00FF0000'u32
+    if bit(instr, 17): mask = mask or 0x0000FF00'u32
+    if bit(instr, 16): mask = mask or 0x000000FF'u32
+    var carry_out = false
+    let value =
+      when imm_flag:
+        cpu.immediate_offset(bits_range(instr, 0, 11), addr carry_out) and mask
+      else:
+        cpu.r[int(bits_range(instr, 0, 3))] and mask
+    when spsr:
+      if has_spsr:
+        cpu.spsr = cast[PSR]((uint32(cpu.spsr) and not mask) or value)
+    else:
+      let thumb = cpu.cpsr.thumb
+      if (mask and 0xFF) > 0:
+        cpu.switch_mode(CpuMode(value and 0x1F'u32))
+      cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
+      cpu.cpsr.thumb = thumb
+  else:  # MRS
+    let rd = int(bits_range(instr, 12, 15))
+    if spsr and has_spsr:
+      discard cpu.set_reg(rd, uint32(cpu.spsr))
+    else:
+      discard cpu.set_reg(rd, uint32(cpu.cpsr))
+  when not msr:
+    if bits_range(instr, 12, 15) != 15: cpu.step_arm()
+  else:
+    cpu.step_arm()
+
+proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
+                            set_cond, bit4: static bool](cpu: CPU; instr: uint32) =
+  const pc_reads_12_ahead = not imm_flag and bit4
+  when pc_reads_12_ahead: cpu.r[15] += 4
+  var barrel_carry = cpu.cpsr.carry
+  let rn = int(bits_range(instr, 16, 19))
+  let rd = int(bits_range(instr, 12, 15))
+  let operand_2 =
+    when imm_flag:
+      cpu.immediate_offset(bits_range(instr, 0, 11), addr barrel_carry)
+    else:
+      cpu.rotate_register(bits_range(instr, 0, 11), addr barrel_carry, allow_register_shifts = true)
+  when opcode == AND:
+    discard cpu.set_reg(rd, cpu.r[rn] and operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  elif opcode == EOR:
+    discard cpu.set_reg(rd, cpu.r[rn] xor operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  elif opcode == SUB:
+    discard cpu.set_reg(rd, cpu.sub(cpu.r[rn], operand_2, set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == RSB:
+    discard cpu.set_reg(rd, cpu.sub(operand_2, cpu.r[rn], set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == ADD:
+    discard cpu.set_reg(rd, cpu.add(cpu.r[rn], operand_2, set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == ADC:
+    discard cpu.set_reg(rd, cpu.adc(cpu.r[rn], operand_2, set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == SBC:
+    discard cpu.set_reg(rd, cpu.sbc(cpu.r[rn], operand_2, set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == RSC:
+    discard cpu.set_reg(rd, cpu.sbc(operand_2, cpu.r[rn], set_cond))
+    if rd != 15: cpu.step_arm()
+  elif opcode == TST:
+    cpu.set_neg_and_zero_flags(cpu.r[rn] and operand_2)
+    cpu.cpsr.carry = barrel_carry
+    cpu.step_arm()
+  elif opcode == TEQ:
+    cpu.set_neg_and_zero_flags(cpu.r[rn] xor operand_2)
+    cpu.cpsr.carry = barrel_carry
+    cpu.step_arm()
+  elif opcode == CMP:
+    discard cpu.sub(cpu.r[rn], operand_2, set_cond)
+    cpu.step_arm()
+  elif opcode == CMN:
+    discard cpu.add(cpu.r[rn], operand_2, set_cond)
+    cpu.step_arm()
+  elif opcode == ORR:
+    discard cpu.set_reg(rd, cpu.r[rn] or operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  elif opcode == MOV:
+    discard cpu.set_reg(rd, operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  elif opcode == BIC:
+    discard cpu.set_reg(rd, cpu.r[rn] and not operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  else:  # MVN
+    discard cpu.set_reg(rd, not operand_2)
+    when set_cond:
+      cpu.set_neg_and_zero_flags(cpu.r[rd])
+      cpu.cpsr.carry = barrel_carry
+    if rd != 15: cpu.step_arm()
+  when pc_reads_12_ahead: cpu.r[15] -= 4
+  if rd == 15 and set_cond:
+    if cpu.spsr.thumb: cpu.r[15] -= 4
+    let old_spsr = uint32(cpu.spsr)
+    let new_mode = CpuMode(cpu.spsr.mode)
+    cpu.switch_mode(new_mode)
+    cpu.cpsr = cast[PSR](old_spsr)
+    let bank = mode_bank(new_mode)
+    cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
