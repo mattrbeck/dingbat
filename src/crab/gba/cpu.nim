@@ -38,7 +38,7 @@ proc skip_bios*(cpu: CPU) =
   cpu.clear_pipeline()
 
 proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
-  let old_mode  = CpuMode(cpu.cpsr.mode)
+  let old_mode  = cast[CpuMode](cpu.cpsr.mode)
   if new_mode == old_mode: return
   let new_bank  = mode_bank(new_mode)
   let old_bank  = mode_bank(old_mode)

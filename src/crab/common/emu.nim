@@ -1,5 +1,3 @@
-import ./scheduler
-
 type
   EmuObj* = object of RootObj
   Emu* = ref EmuObj

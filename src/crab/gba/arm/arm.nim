@@ -210,7 +210,7 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           discard cpu.set_reg(rn, final_addr)
       first_transfer = true
   when s_bit:
-    cpu.switch_mode(CpuMode(saved_mode))
+    cpu.switch_mode(cast[CpuMode](saved_mode))
   if not (load and bit(list, 15)): cpu.step_arm()
 
 proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
@@ -231,7 +231,7 @@ proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
     discard cpu.set_reg(15, 0x08'u32)
 
 proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32) =
-  let mode     = CpuMode(cpu.cpsr.mode)
+  let mode     = cast[CpuMode](cpu.cpsr.mode)
   let has_spsr = mode != modeUSR and mode != modeSYS
   when msr:
     var mask: uint32 = 0
@@ -251,7 +251,7 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     else:
       let thumb = cpu.cpsr.thumb
       if (mask and 0xFF) > 0:
-        cpu.switch_mode(CpuMode(value and 0x1F'u32))
+        cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
       cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
       cpu.cpsr.thumb = thumb
   else:  # MRS
@@ -349,7 +349,7 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
   if rd == 15 and set_cond:
     if cpu.spsr.thumb: cpu.r[15] -= 4
     let old_spsr = uint32(cpu.spsr)
-    let new_mode = CpuMode(cpu.spsr.mode)
+    let new_mode = cast[CpuMode](cpu.spsr.mode)
     cpu.switch_mode(new_mode)
     cpu.cpsr = cast[PSR](old_spsr)
     let bank = mode_bank(new_mode)

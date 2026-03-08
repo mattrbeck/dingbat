@@ -57,7 +57,7 @@ proc render*(w: KeybindingsWidget) =
     let btn_text =
       if keycode < 0: "---"
       elif (keycode and 0x40000000) != 0:
-        $getKeyName(getKeyFromScancode(ScanCode(keycode xor 0x40000000)))
+        $getKeyName(getKeyFromScancode(cast[ScanCode](keycode xor 0x40000000)))
       else: $getKeyName(keycode)
     if selected:
       igPushStyleColor_Vec4(cint(ImGui_Col_Button), w.hovered_col)
