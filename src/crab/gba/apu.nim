@@ -22,14 +22,24 @@ type
     callback:  pointer
     userdata:  pointer
 
-const AUDIO_S16LSB = 0x8010'u16
+const AUDIO_S16LSB  = 0x8010'u16
+const AUDIO_F32LSB  = 0x8120'u16
+const SDL_AUDIO_ALLOW_FREQUENCY_CHANGE = cint(1)
 
 proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
   {.importc: "SDL_OpenAudio", cdecl.}
+proc sdl_open_audio_device(device: pointer; iscapture: cint;
+    desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec;
+    allowed_changes: cint): SDL_AudioDeviceID
+  {.importc: "SDL_OpenAudioDevice", cdecl.}
 proc sdl_close_audio()
   {.importc: "SDL_CloseAudio", cdecl.}
+proc sdl_close_audio_device(dev: SDL_AudioDeviceID)
+  {.importc: "SDL_CloseAudioDevice", cdecl.}
 proc sdl_pause_audio(pause_on: cint)
   {.importc: "SDL_PauseAudio", cdecl.}
+proc sdl_pause_audio_device(dev: SDL_AudioDeviceID; pause_on: cint)
+  {.importc: "SDL_PauseAudioDevice", cdecl.}
 proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
   {.importc: "SDL_QueueAudio", cdecl.}
 proc sdl_get_queued_audio_size(dev: SDL_AudioDeviceID): uint32
@@ -38,6 +48,11 @@ proc sdl_clear_queued_audio(dev: SDL_AudioDeviceID)
   {.importc: "SDL_ClearQueuedAudio", cdecl.}
 proc sdl_delay(ms: uint32)
   {.importc: "SDL_Delay", cdecl.}
+
+when defined(emscripten):
+  # On emscripten, the APU pushes float32 samples to a global buffer
+  # (in crab_wasm.nim) that JS consumes via the Web Audio API.
+  proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
 proc new_apu*(gba: GBA): APU =
   result = APU(
@@ -57,23 +72,26 @@ proc new_apu*(gba: GBA): APU =
   result.channel3 = new_channel3(gba)
   result.channel4 = new_channel4(gba)
   result.dma_channels = new_dma_channels(gba)
-  # Open SDL2 audio device (SDL2 must already be initialized by the frontend)
-  var desired = SDL_AudioSpec(
-    freq:     APU_SAMPLE_RATE.cint,
-    format:   AUDIO_S16LSB,
-    channels: APU_CHANNELS.uint8,
-    samples:  uint16(APU_BUFFER_SIZE div APU_CHANNELS),
-    callback: nil,
-    userdata: nil,
-  )
-  var obtained: SDL_AudioSpec
-  sdl_close_audio()  # close any previously open device (no-op if none)
-  if sdl_open_audio(addr desired, addr obtained) == 0:
-    result.audio_dev = 1  # SDL_OpenAudio always uses device ID 1
-    sdl_pause_audio(0)    # unpause (start playback)
-  else:
-    echo "Warning: failed to open audio device"
+  when defined(emscripten):
+    # No SDL audio on emscripten — JS handles playback via Web Audio API
     result.audio_dev = 0
+  else:
+    var desired = SDL_AudioSpec(
+      freq:     APU_SAMPLE_RATE.cint,
+      format:   AUDIO_S16LSB,
+      channels: APU_CHANNELS.uint8,
+      samples:  uint16(APU_BUFFER_SIZE div APU_CHANNELS),
+      callback: nil,
+      userdata: nil,
+    )
+    var obtained: SDL_AudioSpec
+    sdl_close_audio()
+    if sdl_open_audio(addr desired, addr obtained) == 0:
+      result.audio_dev = 1
+      sdl_pause_audio(0)
+    else:
+      echo "Warning: failed to open audio device"
+      result.audio_dev = 0
   result.tick_frame_sequencer()
   result.get_sample()
 
@@ -132,24 +150,25 @@ proc get_sample*(apu: APU) =
   let bias = int32(apu.soundbias.bias_level)
   let total_left  = int16(max(0, min(0x3FF, psg_left  + dma_left  + bias)) - bias)
   let total_right = int16(max(0, min(0x3FF, psg_right + dma_right + bias)) - bias)
-  apu.buffer[apu.buffer_pos]     = total_left  * 32
-  apu.buffer[apu.buffer_pos + 1] = total_right * 32
-  apu.buffer_pos += 2
-  if apu.buffer_pos >= APU_BUFFER_SIZE:
-    if apu.audio_dev != 0:
-      if not apu.sync:
-        sdl_clear_queued_audio(apu.audio_dev)
-      # Block until the queue drains to < 2 buffers to stay in sync.
-      # On WASM, SDL_Delay blocks the main thread and the audio queue
-      # never drains synchronously, so skip the blocking loop entirely.
-      when not defined(emscripten):
+  when defined(emscripten):
+    appendAudioSample(float32(total_left * 32) / 32768.0'f32,
+                       float32(total_right * 32) / 32768.0'f32)
+  else:
+    apu.buffer[apu.buffer_pos]     = total_left  * 32
+    apu.buffer[apu.buffer_pos + 1] = total_right * 32
+    apu.buffer_pos += 2
+    if apu.buffer_pos >= APU_BUFFER_SIZE:
+      if apu.audio_dev != 0:
+        if not apu.sync:
+          sdl_clear_queued_audio(apu.audio_dev)
+        # Block until the queue drains to < 2 buffers to stay in sync
         let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
         while sdl_get_queued_audio_size(apu.audio_dev) > threshold:
           sdl_delay(1)
-      discard sdl_queue_audio(apu.audio_dev,
-                               cast[pointer](addr apu.buffer[0]),
-                               uint32(APU_BUFFER_SIZE * sizeof(int16)))
-    apu.buffer_pos = 0
+        discard sdl_queue_audio(apu.audio_dev,
+                                 cast[pointer](addr apu.buffer[0]),
+                                 uint32(APU_BUFFER_SIZE * sizeof(int16)))
+      apu.buffer_pos = 0
   let g = apu.gba
   g.scheduler.schedule(APU_SAMPLE_PERIOD, proc() {.closure.} = apu.get_sample(), etAPU)
 

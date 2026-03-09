@@ -37,6 +37,23 @@ var stateRenderer: RendererPtr = nil
 var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
 
+# Global audio sample buffer for JS to consume via Web Audio API.
+# The APU appends float32 stereo samples here; JS reads and clears after each frame.
+var audioBuffer: seq[float32] = @[]
+
+proc appendAudioSample(left, right: float32) {.exportc.} =
+  audioBuffer.add(left)
+  audioBuffer.add(right)
+
+proc getAudioBufferPtr(): pointer {.exportc.} =
+  if audioBuffer.len > 0: addr audioBuffer[0] else: nil
+
+proc getAudioBufferLen(): cint {.exportc.} =
+  cint(audioBuffer.len)
+
+proc clearAudioBuffer() {.exportc.} =
+  audioBuffer.setLen(0)
+
 proc checkInput() =
   var evt = defaultEvent
   while pollEvent(evt):

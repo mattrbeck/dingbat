@@ -65,16 +65,81 @@ var Module = {
   canvas: (() => document.getElementById("canvas"))(),
   onRuntimeInitialized: () => {
     let frameCount = 0;
-    const realTick = Module._loop_tick.bind(Module);
-    Module._loop_tick = () => { realTick(); frameCount++; };
+    const SAMPLE_RATE = 32768; // GBA/GB native sample rate
+    const TARGET_FPS = 59.7275;
+    const FRAME_TIME = 1000.0 / TARGET_FPS;
+    let lastFrameTime = 0;
+    let accumulator = 0;
+
+    // Web Audio API push-based playback (binjgb approach).
+    // Audio samples are produced by the emulator at SAMPLE_RATE and scheduled
+    // for playback at precise times. The browser handles resampling to the
+    // output device rate natively, so no custom resampler is needed.
+    let audioCtx = null;
+    let playTime = 0;
+
+    const initAudio = () => {
+      if (audioCtx) return;
+      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      playTime = 0;
+    };
+
+    // Resume audio context on first user interaction (browser autoplay policy)
+    const resumeAudio = () => {
+      initAudio();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    };
+    document.addEventListener("click", resumeAudio, { once: false });
+    document.addEventListener("keydown", resumeAudio, { once: false });
+
+    const pushAudio = () => {
+      if (!audioCtx || audioCtx.state !== "running") return;
+      const len = Module._getAudioBufferLen();
+      if (len === 0) return;
+      const ptr = Module._getAudioBufferPtr();
+      if (!ptr) return;
+      const stereoSamples = len; // total float32 values (L,R,L,R,...)
+      const frames = stereoSamples / 2;
+      const buffer = audioCtx.createBuffer(2, frames, SAMPLE_RATE);
+      const left = buffer.getChannelData(0);
+      const right = buffer.getChannelData(1);
+      // Read interleaved float32 samples directly from WASM memory
+      const heap = new Float32Array(Module.memory.buffer, ptr, stereoSamples);
+      for (let i = 0; i < frames; i++) {
+        left[i] = heap[i * 2];
+        right[i] = heap[i * 2 + 1];
+      }
+      Module._clearAudioBuffer();
+      // Schedule playback at the correct time
+      const now = audioCtx.currentTime;
+      if (playTime < now) playTime = now;
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+      source.start(playTime);
+      playTime += buffer.duration;
+    };
 
     setInterval(() => {
       document.getElementById("fps").textContent = frameCount + " fps";
       frameCount = 0;
     }, 1000);
 
-    const tick = () => {
-      Module._loop_tick();
+    const tick = (timestamp) => {
+      if (lastFrameTime === 0) lastFrameTime = timestamp;
+      accumulator += timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+      // Run as many frames as needed to catch up, capped to avoid spiral
+      let framesRun = 0;
+      while (accumulator >= FRAME_TIME && framesRun < 2) {
+        Module._loop_tick();
+        pushAudio();
+        frameCount++;
+        accumulator -= FRAME_TIME;
+        framesRun++;
+      }
+      // Prevent accumulator from growing unbounded if tab was backgrounded
+      if (accumulator > FRAME_TIME * 2) accumulator = 0;
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

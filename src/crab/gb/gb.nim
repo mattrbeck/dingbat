@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[os, strutils]
-import ../common/[input, scheduler, emu]
+import ../common/[input, scheduler, emu, resampler]
 
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
@@ -243,6 +243,10 @@ type
     channel2*:            GbChannel2
     channel3*:            GbChannel3
     channel4*:            GbChannel4
+    left_resampler*:      Resampler[float32]
+    right_resampler*:     Resampler[float32]
+    resample_freq*:       int
+    output_freq*:         int
 
   # ---- Memory ----
   GbMemory* = ref object

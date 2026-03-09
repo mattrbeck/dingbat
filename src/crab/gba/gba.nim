@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[options, times, os, strutils]
-import ../common/[util, input, scheduler, emu]
+import ../common/[util, input, scheduler, emu, resampler]
 import lut_macros
 
 # Include register definitions (provides PSR, DISPCNT, etc.)
@@ -287,6 +287,10 @@ type
     dma_channels*:      DMAChannels
     sync*:              bool
     audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
+    left_resampler*:    Resampler[float32]
+    right_resampler*:   Resampler[float32]
+    resample_freq*:     int
+    output_freq*:       int
 
   Cartridge* = ref object
     rom*: seq[byte]

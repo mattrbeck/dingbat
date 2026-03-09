@@ -1,5 +1,8 @@
 # GB APU master (included by gb.nim)
 
+when defined(emscripten):
+  proc appendAudioSample(left, right: float32) {.importc, cdecl.}
+
 # SDL2 audio bindings
 when not declared(SDL_AudioSpec):
   type
@@ -64,28 +67,32 @@ proc get_sample*(apu: GbApu; gb: GB) =
   let c2 = ch2_get_amplitude(apu.channel2)
   let c3 = ch3_get_amplitude(apu.channel3)
   let c4 = ch4_get_amplitude(apu.channel4)
-  apu.buffer[apu.buffer_pos] =
+  let sample_left =
     (float32(apu.left_volume) / 7.0'f32) *
     ((if (apu.nr51 and 0x80) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x40) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x20) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x10) != 0: c1 else: 0.0'f32)) / 4.0'f32
-  apu.buffer[apu.buffer_pos + 1] =
+  let sample_right =
     (float32(apu.right_volume) / 7.0'f32) *
     ((if (apu.nr51 and 0x08) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x04) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32)) / 4.0'f32
-  apu.buffer_pos += 2
-  if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
-    if apu.audio_dev != 0:
-      if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-      when not defined(emscripten):
+  when defined(emscripten):
+    appendAudioSample(sample_left, sample_right)
+  else:
+    apu.buffer[apu.buffer_pos]     = sample_left
+    apu.buffer[apu.buffer_pos + 1] = sample_right
+    apu.buffer_pos += 2
+    if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
+      if apu.audio_dev != 0:
+        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
         while sdl_get_queued_audio_size_gb(apu.audio_dev) >
               uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
-      discard sdl_queue_audio_gb(apu.audio_dev,
-        addr apu.buffer[0], uint32(GB_APU_BUFFER_SIZE * 4))
-    apu.buffer_pos = 0
+        discard sdl_queue_audio_gb(apu.audio_dev,
+          addr apu.buffer[0], uint32(GB_APU_BUFFER_SIZE * 4))
+      apu.buffer_pos = 0
   gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD,
     proc() = get_sample(apu, gb), etAPU)
 
@@ -100,19 +107,22 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   result.channel2 = new_channel2(gb)
   result.channel3 = new_channel3(gb)
   result.channel4 = new_channel4(gb)
-  var desired = SDL_AudioSpec(
-    freq:     cint(GB_SAMPLE_RATE), format: AUDIO_F32LSB,
-    channels: 2'u8, samples: uint16(GB_APU_BUFFER_SIZE div 2),
-    callback: nil, userdata: nil,
-  )
-  var obtained: SDL_AudioSpec
-  sdl_close_audio_gb()
-  if sdl_open_audio_gb(addr desired, addr obtained) == 0:
-    result.audio_dev = 1
-    if not headless: sdl_pause_audio_gb(0)
+  when defined(emscripten):
+    result.audio_dev = 0  # JS handles playback via Web Audio API
   else:
-    echo "Warning: GB failed to open audio device"
-    result.audio_dev = 0
+    var desired = SDL_AudioSpec(
+      freq:     cint(GB_SAMPLE_RATE), format: AUDIO_F32LSB,
+      channels: 2'u8, samples: uint16(GB_APU_BUFFER_SIZE div 2),
+      callback: nil, userdata: nil,
+    )
+    var obtained: SDL_AudioSpec
+    sdl_close_audio_gb()
+    if sdl_open_audio_gb(addr desired, addr obtained) == 0:
+      result.audio_dev = 1
+      if not headless: sdl_pause_audio_gb(0)
+    else:
+      echo "Warning: GB failed to open audio device"
+      result.audio_dev = 0
   let apu = result
   tick_frame_sequencer(apu, gb)
   get_sample(apu, gb)
