@@ -508,6 +508,7 @@ proc step_frame*(gb: GB) =
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
   gb.ppu.frame = false
+  gb.scheduler.rebase()
 
 method run_until_frame*(gb: GB) = gb.step_frame()
 

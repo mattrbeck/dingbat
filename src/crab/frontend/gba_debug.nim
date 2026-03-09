@@ -1,4 +1,5 @@
 import imguin/[cimgui, impl_opengl, impl_sdl2]
+import ../common/scheduler
 import ../gba/gba
 
 type
@@ -65,7 +66,7 @@ proc render_windows*(d: GbaDebug) =
       for ev in d.gba.scheduler.events:
         igTableNextRow(0, 0)
         discard igTableSetColumnIndex(0)
-        let delta = if ev.cycles >= cycles: ev.cycles - cycles else: 0'u64
+        let delta = if ev.cycles >= cycles: ev.cycles - cycles else: CycleCount(0)
         igText("%llu", delta)
         discard igTableSetColumnIndex(1)
         igTextUnformatted(cstring($ev.kind), nil)

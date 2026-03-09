@@ -79,7 +79,7 @@ type
     tmcnt*:        array[4, TMCNT]
     tmd*:          array[4, uint16]
     tm*:           array[4, uint16]
-    cycle_enabled*: array[4, uint64]
+    cycle_enabled*: array[4, CycleCount]
     events*:       array[4, proc() {.closure.}]
     interrupt_flags*: array[4, proc() {.closure.}]
 
@@ -460,6 +460,14 @@ proc step_frame*(gba: GBA) =
   while not gba.ppu.frame:
     gba.cpu.tick()
   gba.ppu.frame = false
+  # Rebase scheduler and timer cycle references to prevent uint32 overflow on WASM
+  let base = gba.scheduler.cycles
+  gba.scheduler.rebase()
+  for i in 0..3:
+    if gba.timer.cycle_enabled[i] >= base:
+      gba.timer.cycle_enabled[i] -= base
+    else:
+      gba.timer.cycle_enabled[i] = 0
 
 method run_until_frame*(gba: GBA) = gba.step_frame()
 

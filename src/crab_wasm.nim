@@ -87,7 +87,8 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
-    stateGba = new_gba("bios.bin", path, false)
+    let bios = if fileExists("bios.bin"): "bios.bin" else: ""
+    stateGba = new_gba(bios, path, false)
     stateGba.post_init()
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_BGR555, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)

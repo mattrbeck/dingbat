@@ -1,3 +1,8 @@
+when defined(emscripten):
+  type CycleCount* = uint32
+else:
+  type CycleCount* = uint64
+
 type
   EventType* = enum
     # Shared
@@ -10,23 +15,23 @@ type
     etTimer0, etTimer1, etTimer2, etTimer3
 
   Event* = object
-    cycles*: uint64
+    cycles*: CycleCount
     cb: proc() {.closure.}
     kind*: EventType
 
   Scheduler* = ref object
     events*: seq[Event]
-    cycles*: uint64
-    next_event: uint64
+    cycles*: CycleCount
+    next_event: CycleCount
     current_speed: uint8
 
 proc new_scheduler*(): Scheduler =
-  result = Scheduler(next_event: high(uint64))
+  result = Scheduler(next_event: high(CycleCount))
   result.events = @[]
 
 proc schedule*(s: Scheduler; cycles: int; cb: proc() {.closure.}; kind: EventType) =
   # Insert in sorted order by target cycle.
-  let target = s.cycles + uint64(cycles)
+  let target = s.cycles + CycleCount(cycles)
   let ev = Event(cycles: target, cb: cb, kind: kind)
   var idx = s.events.len
   for i in 0 ..< s.events.len:
@@ -50,12 +55,12 @@ proc clear*(s: Scheduler; kind: EventType) =
       s.events.delete(i)
     else:
       inc i
-  s.next_event = if s.events.len > 0: s.events[0].cycles else: high(uint64)
+  s.next_event = if s.events.len > 0: s.events[0].cycles else: high(CycleCount)
 
 proc call_current*(s: Scheduler) =
   while true:
     if s.events.len == 0:
-      s.next_event = high(uint64)
+      s.next_event = high(CycleCount)
       return
     let ev = s.events[0]
     if s.cycles >= ev.cycles:
@@ -66,8 +71,8 @@ proc call_current*(s: Scheduler) =
       return
 
 proc tick*(s: Scheduler; cycles: int) =
-  if s.cycles + uint64(cycles) < s.next_event:
-    s.cycles += uint64(cycles)
+  if s.cycles + CycleCount(cycles) < s.next_event:
+    s.cycles += CycleCount(cycles)
   else:
     for _ in 0 ..< cycles:
       s.cycles += 1
@@ -76,6 +81,15 @@ proc tick*(s: Scheduler; cycles: int) =
 proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event
   s.call_current()
+
+proc rebase*(s: Scheduler) =
+  ## Subtract current cycle count from all event targets and reset to zero.
+  ## Prevents overflow when using uint32 cycle counters.
+  let base = s.cycles
+  for i in 0 ..< s.events.len:
+    s.events[i].cycles -= base
+  s.next_event = if s.events.len > 0: s.events[0].cycles else: high(CycleCount)
+  s.cycles = 0
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
   let old = s.current_speed

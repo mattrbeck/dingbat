@@ -80,8 +80,9 @@ proc get_sample*(apu: GbApu; gb: GB) =
   if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
     if apu.audio_dev != 0:
       if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-      while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-            uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
+      when not defined(emscripten):
+        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
+              uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
       discard sdl_queue_audio_gb(apu.audio_dev,
         addr apu.buffer[0], uint32(GB_APU_BUFFER_SIZE * 4))
     apu.buffer_pos = 0

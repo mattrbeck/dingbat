@@ -139,10 +139,13 @@ proc get_sample*(apu: APU) =
     if apu.audio_dev != 0:
       if not apu.sync:
         sdl_clear_queued_audio(apu.audio_dev)
-      # Block until the queue drains to < 2 buffers to stay in sync
-      let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
-      while sdl_get_queued_audio_size(apu.audio_dev) > threshold:
-        sdl_delay(1)
+      # Block until the queue drains to < 2 buffers to stay in sync.
+      # On WASM, SDL_Delay blocks the main thread and the audio queue
+      # never drains synchronously, so skip the blocking loop entirely.
+      when not defined(emscripten):
+        let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
+        while sdl_get_queued_audio_size(apu.audio_dev) > threshold:
+          sdl_delay(1)
       discard sdl_queue_audio(apu.audio_dev,
                                cast[pointer](addr apu.buffer[0]),
                                uint32(APU_BUFFER_SIZE * sizeof(int16)))

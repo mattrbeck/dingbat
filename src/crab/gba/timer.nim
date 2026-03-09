@@ -47,7 +47,7 @@ proc new_timer*(gba: GBA): Timer =
 proc get_current_tm(tim: Timer; num: int): uint16 =
   if tim.tmcnt[num].enable and not tim.tmcnt[num].cascade:
     let elapsed = tim.gba.scheduler.cycles - tim.cycle_enabled[num]
-    tim.tm[num] + uint16(elapsed div uint64(TIMER_PERIODS[tim.tmcnt[num].frequency]))
+    tim.tm[num] + uint16(elapsed div CycleCount(TIMER_PERIODS[tim.tmcnt[num].frequency]))
   else:
     tim.tm[num]
 
