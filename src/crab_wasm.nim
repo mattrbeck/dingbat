@@ -54,6 +54,15 @@ proc getAudioBufferLen(): cint {.exportc.} =
 proc clearAudioBuffer() {.exportc.} =
   audioBuffer.setLen(0)
 
+proc setInput(inputId: cint; pressed: cint) {.exportc.} =
+  if inputId < 0 or inputId > ord(Input.high): return
+  let inp = Input(inputId)
+  let down = pressed != 0
+  case stateKind
+  of ekGBA: stateGba.handle_input(inp, down)
+  of ekGB:  stateGb.handle_input(inp, down)
+  of ekNone: discard
+
 proc checkInput() =
   var evt = defaultEvent
   while pollEvent(evt):
@@ -63,10 +72,7 @@ proc checkInput() =
       let sym = key(evt).keysym.sym
       for (code, inp) in KEYBINDINGS:
         if sym == code:
-          case stateKind
-          of ekGBA: stateGba.handle_input(inp, pressed)
-          of ekGB:  stateGb.handle_input(inp, pressed)
-          of ekNone: discard
+          setInput(cint(ord(inp)), cint(pressed))
           break
     else: discard
 

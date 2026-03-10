@@ -161,20 +161,11 @@ var Module = {
   },
 };
 
-const pressKey = (keycode, down = true) => {
-  let event = new Event(down ? "keydown" : "keyup", {
-    bubbles: true,
-    cancelable: "true",
-  });
-  event.keyCode = keycode;
-  event.which = keycode;
-  document.dispatchEvent(event);
-};
+const getInputs = (element) =>
+  element?.getAttribute("data-inputs")?.split(" ").map(Number) ?? [];
 
-const pressAllKeys = (keycodes, down) => {
-  for (let keycode of keycodes) {
-    pressKey(keycode, down);
-  }
+const setInputs = (inputs, down) => {
+  for (let id of inputs) Module._setInput(id, down ? 1 : 0);
 };
 
 var currentDpadTouchId = null;
@@ -188,41 +179,40 @@ const getTouch = (touchList, touchId) => {
   }
 };
 
-const getKeycodes = (element) =>
-  element?.getAttribute("keycodes")?.split(" ") ?? [];
-
 const dpadTouchStart = (event) => {
+  event.preventDefault();
   let element = event.target;
   if (currentDpadTouchId == null) {
     currentDpadTouchId = event.targetTouches[0].identifier;
-    if (element.hasAttribute("keycodes")) {
+    if (element.hasAttribute("data-inputs")) {
       currentDpadElement = element;
-      pressAllKeys(getKeycodes(element), true);
+      setInputs(getInputs(element), true);
     }
   }
 };
 
 const dpadTouchMove = (event) => {
+  event.preventDefault();
   if (currentDpadTouchId == null) return;
   let touch = getTouch(event.targetTouches, currentDpadTouchId);
   if (touch != null) {
     let element = document.elementFromPoint(touch.clientX, touch.clientY);
     if (element == currentDpadElement) return;
     if (element == null) return;
-    let oldKeycodes = getKeycodes(currentDpadElement);
-    if (element.hasAttribute("keycodes")) {
-      let newKeycodes = getKeycodes(element);
-      for (let oldKeycode of oldKeycodes) {
-        if (newKeycodes.includes(oldKeycode)) continue;
-        pressKey(oldKeycode, false);
+    let oldInputs = getInputs(currentDpadElement);
+    if (element.hasAttribute("data-inputs")) {
+      let newInputs = getInputs(element);
+      for (let id of oldInputs) {
+        if (newInputs.includes(id)) continue;
+        Module._setInput(id, 0);
       }
-      for (let newKeycode of newKeycodes) {
-        if (oldKeycodes.includes(newKeycode)) continue;
-        pressKey(newKeycode, true);
+      for (let id of newInputs) {
+        if (oldInputs.includes(id)) continue;
+        Module._setInput(id, 1);
       }
       currentDpadElement = element;
     } else {
-      pressAllKeys(oldKeycodes, false);
+      setInputs(oldInputs, false);
       currentDpadElement = null;
     }
   }
@@ -231,7 +221,7 @@ const dpadTouchMove = (event) => {
 const dpadTouchEnd = (event) => {
   let touch = getTouch(event.changedTouches, currentDpadTouchId);
   if (touch != null) {
-    pressAllKeys(getKeycodes(currentDpadElement), false);
+    setInputs(getInputs(currentDpadElement), false);
     currentDpadTouchId = null;
     currentDpadElement = null;
   }
@@ -242,14 +232,12 @@ document.getElementById("dpad").addEventListener("touchmove", dpadTouchMove);
 document.getElementById("dpad").addEventListener("touchend", dpadTouchEnd);
 document.getElementById("dpad").addEventListener("touchcancel", dpadTouchEnd);
 
-document.querySelectorAll("[keycode]").forEach((element) =>
+document.querySelectorAll("[data-inputs]").forEach((element) => {
   element.addEventListener("touchstart", (event) => {
-    pressKey(element.getAttribute("keycode"), true);
-  })
-);
-
-document.querySelectorAll("[keycode]").forEach((element) =>
+    event.preventDefault();
+    setInputs(getInputs(element), true);
+  });
   element.addEventListener("touchend", (event) => {
-    pressKey(element.getAttribute("keycode"), false);
-  })
-);
+    setInputs(getInputs(element), false);
+  });
+});
