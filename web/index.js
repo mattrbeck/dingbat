@@ -284,10 +284,11 @@ const renderRecentList = async () => {
     let nameSpan = document.createElement("span");
     nameSpan.className = "recent-entry-name";
     nameSpan.textContent = rom.name;
-    nameSpan.addEventListener("click", () => {
+    nameSpan.addEventListener("click", async () => {
       let ext = rom.name.substring(rom.name.lastIndexOf(".")).toLowerCase();
       let romFile = "rom" + ext;
       writeToFS(romFile, rom.data);
+      await addRecentRom(rom.name, rom.data);
       recentModal.classList.remove("open");
       loadRom(romFile, rom.name);
     });
