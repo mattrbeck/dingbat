@@ -16,9 +16,11 @@
     <div id="external">
       <button type="button" class="button" id="open-rom">Open ROM</button>
       <button type="button" class="button" id="open-bios">Custom BIOS</button>
-      <button type="button" class="button" id="pause" hidden>Pause</button>
-      <button type="button" class="button" id="reset" hidden>Reset</button>
-      <button type="button" class="button" id="fast-forward" hidden>Fast Forward</button>
+      <div id="playback-controls" class="segmented" hidden>
+        <button type="button" class="seg-btn" id="reset" title="Reset">&#x21bb;</button>
+        <button type="button" class="seg-btn" id="pause" title="Pause">&#x23f8;</button>
+        <button type="button" class="seg-btn" id="fast-forward" title="Fast Forward">&#x276D;&#x276D;</button>
+      </div>
       <button type="button" class="button" id="show-log">Show Log</button>
       <div id="fps"></div>
     </div>

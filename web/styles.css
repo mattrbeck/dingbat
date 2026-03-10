@@ -197,6 +197,40 @@ body {
   background-color: var(--accent-color);
 }
 
+.segmented {
+  display: inline-flex;
+}
+
+.seg-btn {
+  background-color: var(--alt-color);
+  color: var(--text-color);
+  border: 1px solid var(--accent-color);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.seg-btn:not(:first-child) {
+  border-left: none;
+}
+
+.seg-btn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.seg-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.seg-btn:hover {
+  background-color: var(--accent-color);
+}
+
+.seg-btn.active {
+  background-color: var(--accent-color);
+}
+
 #external {
   display: flex;
   align-items: center;

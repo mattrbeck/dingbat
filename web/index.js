@@ -59,16 +59,16 @@ var fastForward = false;
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
+const playbackControls = document.getElementById("playback-controls");
 
 const loadRom = (romName) => {
   currentRomName = romName;
   paused = false;
   fastForward = false;
-  pauseButton.textContent = "Pause";
-  fastForwardButton.textContent = "Fast Forward";
-  pauseButton.hidden = false;
-  resetButton.hidden = false;
-  fastForwardButton.hidden = false;
+  pauseButton.textContent = "\u23f8";
+  pauseButton.classList.remove("active");
+  fastForwardButton.classList.remove("active");
+  playbackControls.hidden = false;
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
 };
 
@@ -97,7 +97,8 @@ document.getElementById("open-rom").addEventListener("click", () => {
 
 pauseButton.addEventListener("click", () => {
   paused = !paused;
-  pauseButton.textContent = paused ? "Resume" : "Pause";
+  pauseButton.textContent = paused ? "\u25b6" : "\u23f8";
+  pauseButton.classList.toggle("active", paused);
 });
 
 resetButton.addEventListener("click", () => {
@@ -106,7 +107,7 @@ resetButton.addEventListener("click", () => {
 
 fastForwardButton.addEventListener("click", () => {
   fastForward = !fastForward;
-  fastForwardButton.textContent = fastForward ? "Normal Speed" : "Fast Forward";
+  fastForwardButton.classList.toggle("active", fastForward);
 });
 
 var Module = {
