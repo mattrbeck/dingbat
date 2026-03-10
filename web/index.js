@@ -52,6 +52,21 @@ document.getElementById("open-bios").addEventListener("click", () => {
   input.click();
 });
 
+var currentRomName = null;
+var paused = false;
+
+const pauseButton = document.getElementById("pause");
+const resetButton = document.getElementById("reset");
+
+const loadRom = (romName) => {
+  currentRomName = romName;
+  paused = false;
+  pauseButton.textContent = "Pause";
+  pauseButton.hidden = false;
+  resetButton.hidden = false;
+  Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+};
+
 document.getElementById("open-rom").addEventListener("click", () => {
   let input = document.createElement("input");
   input.type = "file";
@@ -67,12 +82,21 @@ document.getElementById("open-rom").addEventListener("click", () => {
         let stream = FS.open(romName, "w+");
         FS.write(stream, bytes, 0, bytes.length, 0);
         FS.close(stream);
-        Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+        loadRom(romName);
       });
       reader.readAsArrayBuffer(file);
     }
   });
   input.click();
+});
+
+pauseButton.addEventListener("click", () => {
+  paused = !paused;
+  pauseButton.textContent = paused ? "Resume" : "Pause";
+});
+
+resetButton.addEventListener("click", () => {
+  if (currentRomName) loadRom(currentRomName);
 });
 
 var Module = {
@@ -141,6 +165,12 @@ var Module = {
     }, 1000);
 
     const tick = (timestamp) => {
+      if (paused) {
+        lastFrameTime = 0;
+        accumulator = 0;
+        requestAnimationFrame(tick);
+        return;
+      }
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
