@@ -212,7 +212,7 @@ const renderRecentList = () => {
       let romFile = "rom" + ext;
       writeToFS(romFile, bytes);
       recentModal.classList.remove("open");
-      loadRom(romFile);
+      loadRom(romFile, rom.name);
     });
     let delBtn = document.createElement("button");
     delBtn.className = "recent-delete";
@@ -254,7 +254,46 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// --- Save state persistence ---
+
+const SAVES_KEY = "crab_saves";
+
+const getSaves = () => {
+  try { return JSON.parse(localStorage.getItem(SAVES_KEY)) || {}; }
+  catch { return {}; }
+};
+
+const saveSavesToStorage = (saves) => {
+  localStorage.setItem(SAVES_KEY, JSON.stringify(saves));
+};
+
+const persistSave = (romName, originalName) => {
+  let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
+  try {
+    let data = FS.readFile(savName);
+    if (data && data.length > 0) {
+      let binary = "";
+      for (let i = 0; i < data.length; i++) binary += String.fromCharCode(data[i]);
+      let saves = getSaves();
+      saves[originalName] = btoa(binary);
+      saveSavesToStorage(saves);
+    }
+  } catch {}
+};
+
+const restoreSave = (romName, originalName) => {
+  let saves = getSaves();
+  let encoded = saves[originalName];
+  if (!encoded) return;
+  let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
+  let binary = atob(encoded);
+  let bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  writeToFS(savName, bytes);
+};
+
 var currentRomName = null;
+var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
 
@@ -263,14 +302,21 @@ const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
 const playbackControls = document.getElementById("playback-controls");
 
-const loadRom = (romName) => {
+const loadRom = (romName, originalName) => {
+  // Persist save from previous ROM before switching
+  if (currentRomName && currentOriginalName) {
+    persistSave(currentRomName, currentOriginalName);
+  }
   currentRomName = romName;
+  currentOriginalName = originalName || romName;
   paused = false;
   fastForward = false;
   pauseButton.textContent = "\u23f8";
   pauseButton.classList.remove("active");
   fastForwardButton.classList.remove("active");
   playbackControls.hidden = false;
+  // Restore save for the new ROM
+  restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
 };
 
@@ -289,7 +335,7 @@ document.getElementById("open-rom").addEventListener("click", () => {
         let bytes = new Uint8Array(reader.result);
         writeToFS(romName, bytes);
         addRecentRom(file.name, bytes);
-        loadRom(romName);
+        loadRom(romName, file.name);
       });
       reader.readAsArrayBuffer(file);
     }
@@ -304,7 +350,7 @@ pauseButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", () => {
-  if (currentRomName) loadRom(currentRomName);
+  if (currentRomName) loadRom(currentRomName, currentOriginalName);
 });
 
 fastForwardButton.addEventListener("click", () => {
@@ -376,6 +422,20 @@ var Module = {
       document.getElementById("fps").textContent = frameCount + " fps";
       frameCount = 0;
     }, 1000);
+
+    // Persist save data to localStorage every 5 seconds
+    setInterval(() => {
+      if (currentRomName && currentOriginalName) {
+        persistSave(currentRomName, currentOriginalName);
+      }
+    }, 5000);
+
+    // Also persist on page unload
+    window.addEventListener("beforeunload", () => {
+      if (currentRomName && currentOriginalName) {
+        persistSave(currentRomName, currentOriginalName);
+      }
+    });
 
     const tick = (timestamp) => {
       if (paused) {
