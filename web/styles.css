@@ -325,3 +325,45 @@ body {
   justify-content: flex-end;
   margin-top: 16px;
 }
+
+.recent-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--accent-color);
+  cursor: pointer;
+}
+
+.recent-entry:hover {
+  background-color: var(--accent-color);
+}
+
+.recent-entry-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
+}
+
+.recent-delete {
+  background: none;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 16px;
+  padding: 2px 6px;
+}
+
+.recent-delete:hover {
+  opacity: 1;
+}
+
+#recent-list:empty::after {
+  content: "No recent ROMs";
+  display: block;
+  opacity: 0.5;
+  padding: 12px 0;
+}

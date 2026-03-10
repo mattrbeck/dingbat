@@ -168,8 +168,90 @@ biosModal.addEventListener("click", (e) => {
   if (e.target === biosModal) closeBiosModal();
 });
 
+// --- Recent ROMs ---
+
+const RECENT_KEY = "crab_recent_roms";
+const MAX_RECENT = 20;
+
+const getRecentRoms = () => {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+};
+
+const saveRecentRoms = (list) => {
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+};
+
+const addRecentRom = (name, bytes) => {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  let encoded = btoa(binary);
+  let list = getRecentRoms().filter(r => r.name !== name);
+  list.unshift({ name, data: encoded });
+  if (list.length > MAX_RECENT) list.length = MAX_RECENT;
+  saveRecentRoms(list);
+};
+
+const recentModal = document.getElementById("recent-modal");
+const recentList = document.getElementById("recent-list");
+
+const renderRecentList = () => {
+  recentList.innerHTML = "";
+  let roms = getRecentRoms();
+  for (let rom of roms) {
+    let entry = document.createElement("div");
+    entry.className = "recent-entry";
+    let nameSpan = document.createElement("span");
+    nameSpan.className = "recent-entry-name";
+    nameSpan.textContent = rom.name;
+    nameSpan.addEventListener("click", () => {
+      let binary = atob(rom.data);
+      let bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      let ext = rom.name.substring(rom.name.lastIndexOf(".")).toLowerCase();
+      let romFile = "rom" + ext;
+      writeToFS(romFile, bytes);
+      recentModal.classList.remove("open");
+      loadRom(romFile);
+    });
+    let delBtn = document.createElement("button");
+    delBtn.className = "recent-delete";
+    delBtn.innerHTML = "&#x1f5d1;";
+    delBtn.title = "Remove";
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      let list = getRecentRoms().filter(r => r.name !== rom.name);
+      saveRecentRoms(list);
+      renderRecentList();
+    });
+    entry.appendChild(nameSpan);
+    entry.appendChild(delBtn);
+    recentList.appendChild(entry);
+  }
+};
+
+document.getElementById("open-recent").addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  renderRecentList();
+  recentModal.classList.add("open");
+});
+
+const closeRecentModal = () => {
+  recentModal.classList.remove("open");
+};
+
+document.getElementById("recent-close").addEventListener("click", closeRecentModal);
+
+recentModal.addEventListener("click", (e) => {
+  if (e.target === recentModal) closeRecentModal();
+});
+
+// Close any open modal on Escape
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeBiosModal();
+  if (e.key === "Escape") {
+    closeBiosModal();
+    closeRecentModal();
+  }
 });
 
 var currentRomName = null;
@@ -205,9 +287,8 @@ document.getElementById("open-rom").addEventListener("click", () => {
       let reader = new FileReader();
       reader.addEventListener("load", () => {
         let bytes = new Uint8Array(reader.result);
-        let stream = FS.open(romName, "w+");
-        FS.write(stream, bytes, 0, bytes.length, 0);
-        FS.close(stream);
+        writeToFS(romName, bytes);
+        addRecentRom(file.name, bytes);
         loadRom(romName);
       });
       reader.readAsArrayBuffer(file);

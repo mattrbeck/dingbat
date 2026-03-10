@@ -18,6 +18,7 @@
         <button type="button" class="button" id="menu-btn" title="Menu">&#x2630;</button>
         <div id="menu-dropdown" hidden>
           <button type="button" class="menu-item" id="open-rom">Load ROM</button>
+          <button type="button" class="menu-item" id="open-recent">Recent</button>
           <button type="button" class="menu-item" id="open-bios">Select BIOS</button>
         </div>
       </div>
@@ -48,6 +49,16 @@
         <div class="modal-actions">
           <button type="button" class="button" id="bios-save">Save</button>
           <button type="button" class="button" id="bios-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="recent-modal" class="modal-overlay">
+      <div class="modal">
+        <h3>Recent ROMs</h3>
+        <div id="recent-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="button" id="recent-close">Close</button>
         </div>
       </div>
     </div>
