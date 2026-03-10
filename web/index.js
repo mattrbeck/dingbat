@@ -12,31 +12,45 @@ const log = (message) => {
   if (shouldScroll) logDiv.scroll({ top: logDiv.scrollHeight });
 };
 
-const readToEmscriptenFileSystem = (filename, filter = "") => {
-  return new Promise((resolve, reject) => {
-    let input = document.createElement("input");
-    input.type = "file";
-    input.accept = filter;
-    input.addEventListener("input", () => {
-      if (input.files?.length > 0) {
-        let reader = new FileReader();
-        reader.addEventListener("load", () => {
-          let bytes = new Uint8Array(reader.result);
-          let stream = FS.open(filename, "w+");
-          FS.write(stream, bytes, 0, bytes.length, 0);
-          FS.close(stream);
-          resolve(filename);
-        });
-        reader.readAsArrayBuffer(input.files[0]);
-      }
-    });
-    input.click();
-  });
+const writeBiosToFS = (bytes) => {
+  let stream = FS.open("bios.bin", "w+");
+  FS.write(stream, bytes, 0, bytes.length, 0);
+  FS.close(stream);
 };
 
-document
-  .getElementById("open-bios")
-  .addEventListener("click", () => readToEmscriptenFileSystem("bios.bin"));
+const saveBiosToStorage = (bytes) => {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  localStorage.setItem("crab_bios", btoa(binary));
+};
+
+const loadBiosFromStorage = () => {
+  let data = localStorage.getItem("crab_bios");
+  if (!data) return false;
+  let binary = atob(data);
+  let bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  writeBiosToFS(bytes);
+  return true;
+};
+
+document.getElementById("open-bios").addEventListener("click", () => {
+  let input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".bin";
+  input.addEventListener("input", () => {
+    if (input.files?.length > 0) {
+      let reader = new FileReader();
+      reader.addEventListener("load", () => {
+        let bytes = new Uint8Array(reader.result);
+        writeBiosToFS(bytes);
+        saveBiosToStorage(bytes);
+      });
+      reader.readAsArrayBuffer(input.files[0]);
+    }
+  });
+  input.click();
+});
 
 document.getElementById("open-rom").addEventListener("click", () => {
   let input = document.createElement("input");
@@ -64,6 +78,7 @@ document.getElementById("open-rom").addEventListener("click", () => {
 var Module = {
   canvas: (() => document.getElementById("canvas"))(),
   onRuntimeInitialized: () => {
+    loadBiosFromStorage();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;

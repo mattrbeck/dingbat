@@ -29,13 +29,13 @@ proc is_buf_valid(b: BiosSelection): bool =
 proc render*(b: BiosSelection) =
   igText("GBA BIOS:")
   igSameLine(0, -1)
-  help_marker("While a BIOS is included, using the official GBA BIOS will always be more accurate.")
+  help_marker("A BIOS is embedded and used by default. You can optionally provide your own.")
   igSameLine(0, -1)
   let valid = b.buf_valid
   if not valid:
     igPushStyleColor_Vec4(cint(ImGui_Col_Text), RED_TEXT_COL)
   discard igInputTextWithHint("##gba_bios",
-    "optional (leave empty for built-in HLE)",
+    "optional (leave empty for embedded BIOS)",
     cast[cstring](addr b.bios_buf[0]), BUF_SIZE.csize_t, 0, nil, nil)
   b.buf_valid = b.is_buf_valid()
   if not valid:
