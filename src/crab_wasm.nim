@@ -37,22 +37,6 @@ var stateRenderer: RendererPtr = nil
 var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
 
-# Conversion buffer: BGR555 (uint16) -> ABGR8888 (uint32) for WebGL compatibility.
-# iOS Safari's WebGL doesn't support GL_UNSIGNED_SHORT_1_5_5_5_REV which SDL2 uses
-# for BGR555 textures, so we convert to ABGR8888 which maps to standard GL_UNSIGNED_BYTE.
-var rgbaBuf: seq[uint32] = @[]
-
-proc bgr555toAbgr8888(src: ptr uint16, dst: ptr uint32, count: int) {.inline.} =
-  for i in 0 ..< count:
-    let c = cast[ptr UncheckedArray[uint16]](src)[i]
-    let r = (c and 0x1F'u16)
-    let g = (c shr 5) and 0x1F'u16
-    let b = (c shr 10) and 0x1F'u16
-    let r8 = uint32(r shl 3 or r shr 2)
-    let g8 = uint32(g shl 3 or g shr 2)
-    let b8 = uint32(b shl 3 or b shr 2)
-    cast[ptr UncheckedArray[uint32]](dst)[i] = r8 or (g8 shl 8) or (b8 shl 16) or 0xFF000000'u32
-
 # Global audio sample buffer for JS to consume via Web Audio API.
 # The APU appends float32 stereo samples here; JS reads and clears after each frame.
 var audioBuffer: seq[float32] = @[]
@@ -99,13 +83,11 @@ proc loop_tick() {.exportc.} =
   of ekGBA:
     if stateTexture == nil: return
     stateGba.step_frame()
-    bgr555toAbgr8888(unsafeAddr stateGba.ppu.framebuffer[0], addr rgbaBuf[0], GBA_W * GBA_H)
-    discard stateTexture.updateTexture(nil, addr rgbaBuf[0], GBA_W * 4)
+    discard stateTexture.updateTexture(nil, unsafeAddr stateGba.ppu.framebuffer[0], GBA_W * 2)
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
-    bgr555toAbgr8888(unsafeAddr stateGb.ppu.framebuffer[0], addr rgbaBuf[0], GB_W * GB_H)
-    discard stateTexture.updateTexture(nil, addr rgbaBuf[0], GB_W * 4)
+    discard stateTexture.updateTexture(nil, unsafeAddr stateGb.ppu.framebuffer[0], GB_W * 2)
   of ekNone:
     return
   checkInput()
@@ -124,18 +106,16 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
     stateGb = new_gb(bootrom, path, true, false, bootrom.len > 0)
     stateGb.post_init()
-    rgbaBuf = newSeq[uint32](GB_W * GB_H)
     stateTexture = stateRenderer.createTexture(
-      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
+      SDL_PIXELFORMAT_BGR555, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
     let bios = if fileExists("bios.bin"): "bios.bin" else: ""
     stateGba = new_gba(bios, path, false)
     stateGba.post_init()
-    rgbaBuf = newSeq[uint32](GBA_W * GBA_H)
     stateTexture = stateRenderer.createTexture(
-      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
+      SDL_PIXELFORMAT_BGR555, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
 
