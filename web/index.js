@@ -437,6 +437,26 @@ document.getElementById("export-save").addEventListener("click", async () => {
   URL.revokeObjectURL(a.href);
 });
 
+const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
+
+document.getElementById("load-save").addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName || !currentOriginalName) {
+    alert("No ROM is loaded.");
+    return;
+  }
+  if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
+  pickFile(".sav", async (bytes, fileName) => {
+    if (stripExt(fileName) !== stripExt(currentOriginalName)) {
+      if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
+    }
+    let savName = currentRomName.substring(0, currentRomName.lastIndexOf(".")) + ".sav";
+    writeToFS(savName, bytes);
+    await dbPut("save:" + currentOriginalName, new Uint8Array(bytes));
+    loadRom(currentRomName, currentOriginalName);
+  });
+});
+
 var currentRomName = null;
 var currentOriginalName = null;
 var paused = false;
