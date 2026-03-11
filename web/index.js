@@ -37,6 +37,21 @@ document.getElementById("check-update").addEventListener("click", async () => {
   }
 });
 
+document.getElementById("force-update").addEventListener("click", async () => {
+  document.getElementById("menu-dropdown").hidden = true;
+  if (!confirm("This will clear all cached assets and reload. Continue?")) return;
+  try {
+    // Delete all service worker caches
+    let keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+    // Unregister the service worker so it re-fetches everything
+    if (swRegistration) await swRegistration.unregister();
+    location.reload();
+  } catch (e) {
+    alert("Force update failed: " + e.message);
+  }
+});
+
 const showLogButton = document.getElementById("show-log");
 const logDiv = document.getElementById("log");
 logDiv.hidden = true;
