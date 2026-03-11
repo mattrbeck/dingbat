@@ -543,8 +543,13 @@ var Module = {
       playTime += buffer.duration;
     };
 
+    const fpsDiv = document.getElementById("fps");
     setInterval(() => {
-      document.getElementById("fps").textContent = frameCount + " fps";
+      if (frameCount >= 59 && frameCount <= 60) {
+        fpsDiv.textContent = "";
+      } else {
+        fpsDiv.textContent = frameCount + " fps";
+      }
       frameCount = 0;
     }, 1000);
 
