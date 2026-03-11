@@ -415,6 +415,28 @@ const restoreSave = async (romName, originalName) => {
   writeToFS(savName, data);
 };
 
+document.getElementById("export-save").addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName || !currentOriginalName) {
+    alert("No ROM is loaded.");
+    return;
+  }
+  // Persist latest save data first
+  await persistSave(currentRomName, currentOriginalName);
+  let data = await dbGet("save:" + currentOriginalName);
+  if (!data || data.length === 0) {
+    alert("No save data found for this ROM.");
+    return;
+  }
+  let savName = currentOriginalName.substring(0, currentOriginalName.lastIndexOf(".")) + ".sav";
+  let blob = new Blob([data], { type: "application/octet-stream" });
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = savName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
 var currentRomName = null;
 var currentOriginalName = null;
 var paused = false;
