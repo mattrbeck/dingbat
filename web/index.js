@@ -1,3 +1,42 @@
+// --- Service Worker ---
+
+let swRegistration = null;
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").then((reg) => {
+    swRegistration = reg;
+  });
+  // Reload when a new service worker takes over
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!refreshing) {
+      refreshing = true;
+      location.reload();
+    }
+  });
+}
+
+document.getElementById("check-update").addEventListener("click", async () => {
+  document.getElementById("menu-dropdown").hidden = true;
+  if (!swRegistration) {
+    alert("Service worker not available.");
+    return;
+  }
+  try {
+    await swRegistration.update();
+    let waiting = swRegistration.waiting;
+    if (waiting) {
+      // A new version is installed and waiting — activate it
+      waiting.postMessage({ type: "skipWaiting" });
+    } else if (!swRegistration.installing) {
+      alert("Already up to date.");
+    }
+    // If installing, the controllerchange listener will reload automatically
+  } catch (e) {
+    alert("Update check failed: " + e.message);
+  }
+});
+
 const showLogButton = document.getElementById("show-log");
 const logDiv = document.getElementById("log");
 logDiv.hidden = true;
