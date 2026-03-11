@@ -19,7 +19,12 @@ if ("serviceWorker" in navigator) {
 document.getElementById("check-update").addEventListener("click", async () => {
   document.getElementById("menu-dropdown").hidden = true;
   if (!swRegistration) {
-    alert("Service worker not available.");
+    // On iOS standalone mode, SW may not be available — just reload
+    if (!("serviceWorker" in navigator)) {
+      location.reload();
+      return;
+    }
+    alert("Service worker not available. Try again in a moment.");
     return;
   }
   try {
@@ -41,11 +46,16 @@ document.getElementById("force-update").addEventListener("click", async () => {
   document.getElementById("menu-dropdown").hidden = true;
   if (!confirm("This will clear all cached assets and reload. Continue?")) return;
   try {
-    // Delete all service worker caches
-    let keys = await caches.keys();
-    await Promise.all(keys.map((key) => caches.delete(key)));
-    // Unregister the service worker so it re-fetches everything
-    if (swRegistration) await swRegistration.unregister();
+    // Delete all service worker caches (Cache API may not be available on iOS standalone)
+    if (typeof caches !== "undefined") {
+      let keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+    // Unregister all service workers (handles case where swRegistration is null)
+    if (navigator.serviceWorker) {
+      let regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
     location.reload();
   } catch (e) {
     alert("Force update failed: " + e.message);
