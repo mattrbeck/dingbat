@@ -1,4 +1,4 @@
-<p align="center"><img width="200" src="README/dingbat.png" style="image-rendering: pixelated"></p>
+<p align="center"><img src="README/dingbat_large.png"></p>
 
 Dingbat is a Game Boy, Game Boy Color, and Game Boy Advance emulator written in Nim. Game Boy and Game Boy Color emulation are very accurate, while Game Boy Advance is considered playable in many games.
 
