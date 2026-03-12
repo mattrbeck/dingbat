@@ -231,6 +231,21 @@ body {
   background-color: var(--accent-color);
 }
 
+.seg-vol-input {
+  width: 40px;
+  text-align: center;
+  background-color: var(--alt-color);
+  color: var(--text-color);
+  border: 1px solid var(--accent-color);
+  border-left: none;
+  border-right: none;
+  padding: 4px 2px;
+  font-size: 14px;
+  line-height: 1;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 #external {
   display: flex;
   align-items: center;

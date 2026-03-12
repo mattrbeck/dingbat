@@ -467,6 +467,22 @@ document.getElementById("load-save").addEventListener("click", async () => {
   });
 });
 
+// --- Volume control ---
+
+var volume = 100;
+const volDisplay = document.getElementById("vol-display");
+const volDown = document.getElementById("vol-down");
+const volUp = document.getElementById("vol-up");
+
+const setVolume = (v) => {
+  volume = Math.max(0, Math.min(100, v));
+  volDisplay.value = volume + "%";
+  if (typeof updateGain === "function") updateGain();
+};
+
+volDown.addEventListener("click", () => setVolume(volume - 10));
+volUp.addEventListener("click", () => setVolume(volume + 10));
+
 var currentRomName = null;
 var currentOriginalName = null;
 var paused = false;
@@ -551,21 +567,51 @@ var Module = {
     // for playback at precise times. The browser handles resampling to the
     // output device rate natively, so no custom resampler is needed.
     let audioCtx = null;
+    let gainNode = null;
     let playTime = 0;
 
     const initAudio = () => {
       if (audioCtx) return;
+      // Request "playback" audio session so iOS ignores the silent switch.
+      // This is the official WebKit API (Safari 17+).
+      if (navigator.audioSession) {
+        navigator.audioSession.type = "playback";
+      }
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = volume / 100;
+      gainNode.connect(audioCtx.destination);
       playTime = 0;
     };
 
-    // Resume audio context on first user interaction (browser autoplay policy)
+    // Expose gain update for the volume control
+    window.updateGain = () => {
+      if (gainNode) gainNode.gain.value = volume / 100;
+    };
+
+    // Resume audio context on first user interaction (browser autoplay policy).
+    // On iOS Safari, we also play a brief silent buffer through the AudioContext
+    // and an <audio> element to ensure the audio session is fully activated.
+    let audioUnlocked = false;
     const resumeAudio = () => {
       initAudio();
       if (audioCtx.state === "suspended") audioCtx.resume();
+      if (!audioUnlocked) {
+        audioUnlocked = true;
+        // Play a silent buffer through the AudioContext to fully unlock it
+        let silentBuf = audioCtx.createBuffer(1, 1, SAMPLE_RATE);
+        let src = audioCtx.createBufferSource();
+        src.buffer = silentBuf;
+        src.connect(audioCtx.destination);
+        src.start(0);
+        // Also play through an <audio> element as a fallback for older iOS
+        let a = new Audio("data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==");
+        a.play().catch(() => {});
+      }
     };
     document.addEventListener("click", resumeAudio, { once: false });
     document.addEventListener("keydown", resumeAudio, { once: false });
+    document.addEventListener("touchstart", resumeAudio, { once: false });
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") return;
@@ -590,7 +636,7 @@ var Module = {
       if (playTime < now) playTime = now;
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(audioCtx.destination);
+      source.connect(gainNode);
       source.start(playTime);
       playTime += buffer.duration;
     };
