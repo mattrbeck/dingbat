@@ -398,11 +398,100 @@ recentModal.addEventListener("click", (e) => {
   if (e.target === recentModal) closeRecentModal();
 });
 
+// --- Button Size ---
+
+const DEFAULT_SCALES = { dpad: 100, ab: 100, lr: 100, ss: 100 };
+
+const getSettings = async () => {
+  return (await dbGet("settings")) || {};
+};
+
+const saveSettings = async (settings) => {
+  await dbPut("settings", settings);
+};
+
+const applyScales = (scales) => {
+  const s = { ...DEFAULT_SCALES, ...scales };
+  document.documentElement.style.setProperty("--scale-dpad", s.dpad / 100);
+  document.documentElement.style.setProperty("--scale-ab", s.ab / 100);
+  document.documentElement.style.setProperty("--scale-lr", s.lr / 100);
+  document.documentElement.style.setProperty("--scale-ss", s.ss / 100);
+};
+
+const sizeModal = document.getElementById("size-modal");
+const sizeInputs = {
+  dpad: document.getElementById("size-dpad"),
+  ab: document.getElementById("size-ab"),
+  lr: document.getElementById("size-lr"),
+  ss: document.getElementById("size-ss"),
+};
+const sizeLabels = {
+  dpad: document.getElementById("size-dpad-val"),
+  ab: document.getElementById("size-ab-val"),
+  lr: document.getElementById("size-lr-val"),
+  ss: document.getElementById("size-ss-val"),
+};
+
+const updateSizeLabels = () => {
+  for (let key of Object.keys(sizeInputs)) {
+    sizeLabels[key].textContent = sizeInputs[key].value + "%";
+  }
+};
+
+const getScalesFromInputs = () => {
+  let scales = {};
+  for (let key of Object.keys(sizeInputs)) {
+    scales[key] = parseInt(sizeInputs[key].value, 10);
+  }
+  return scales;
+};
+
+// Live preview: update CSS as slider moves
+for (let key of Object.keys(sizeInputs)) {
+  sizeInputs[key].addEventListener("input", () => {
+    updateSizeLabels();
+    applyScales(getScalesFromInputs());
+  });
+}
+
+document.getElementById("open-size").addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  let settings = await getSettings();
+  let scales = { ...DEFAULT_SCALES, ...(settings.scales || {}) };
+  for (let key of Object.keys(sizeInputs)) {
+    sizeInputs[key].value = scales[key];
+  }
+  updateSizeLabels();
+  sizeModal.classList.add("open");
+});
+
+const closeSizeModal = async () => {
+  let settings = await getSettings();
+  settings.scales = getScalesFromInputs();
+  await saveSettings(settings);
+  sizeModal.classList.remove("open");
+};
+
+document.getElementById("size-close").addEventListener("click", closeSizeModal);
+
+sizeModal.addEventListener("click", (e) => {
+  if (e.target === sizeModal) closeSizeModal();
+});
+
+document.getElementById("size-reset").addEventListener("click", () => {
+  for (let key of Object.keys(sizeInputs)) {
+    sizeInputs[key].value = DEFAULT_SCALES[key];
+  }
+  updateSizeLabels();
+  applyScales(DEFAULT_SCALES);
+});
+
 // Close any open modal on Escape
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeBiosModal();
     closeRecentModal();
+    closeSizeModal();
   }
 });
 
@@ -539,6 +628,8 @@ var Module = {
     await openDB();
     await migrateFromLocalStorage();
     await loadBiosFromStorage();
+    let settings = await getSettings();
+    applyScales(settings.scales || {});
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;

@@ -36,6 +36,8 @@
           <button type="button" class="menu-item" id="force-update">Force Update</button>
           <hr class="menu-sep" />
           <button type="button" class="menu-item" id="show-log">Toggle Log</button>
+          <hr class="menu-sep" />
+          <button type="button" class="menu-item" id="open-size">Button Size</button>
         </div>
       </div>
       <div id="playback-controls" class="segmented" hidden>
@@ -75,6 +77,36 @@
         <div class="modal-footer">
           <span id="storage-info"></span>
           <button type="button" class="button" id="recent-close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="size-modal" class="modal-overlay">
+      <div class="modal">
+        <h3>Button Size</h3>
+        <div class="size-row">
+          <label for="size-dpad">D-Pad</label>
+          <input type="range" id="size-dpad" min="50" max="200" value="100" step="10" />
+          <span class="size-value" id="size-dpad-val">100%</span>
+        </div>
+        <div class="size-row">
+          <label for="size-ab">A / B</label>
+          <input type="range" id="size-ab" min="50" max="200" value="100" step="10" />
+          <span class="size-value" id="size-ab-val">100%</span>
+        </div>
+        <div class="size-row">
+          <label for="size-lr">L / R</label>
+          <input type="range" id="size-lr" min="50" max="200" value="100" step="10" />
+          <span class="size-value" id="size-lr-val">100%</span>
+        </div>
+        <div class="size-row">
+          <label for="size-ss">Sel / Start</label>
+          <input type="range" id="size-ss" min="50" max="200" value="100" step="10" />
+          <span class="size-value" id="size-ss-val">100%</span>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="button" id="size-reset">Reset</button>
+          <button type="button" class="button" id="size-close">Close</button>
         </div>
       </div>
     </div>

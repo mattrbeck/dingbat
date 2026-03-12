@@ -10,6 +10,10 @@
   --fore-color: #182533;
   --accent-color: #2b5278;
   --text-color: #ffffff;
+  --scale-dpad: 1;
+  --scale-ab: 1;
+  --scale-lr: 1;
+  --scale-ss: 1;
 }
 
 .no-select {
@@ -59,13 +63,24 @@ body {
   align-content: space-between;
 }
 
-#lr,
+#lr {
+  width: 100%;
+  display: flex;
+  justify-content: space-evenly;
+  gap: 9px;
+  margin: 9px;
+  transform: scale(var(--scale-lr));
+  transform-origin: center;
+}
+
 #select-start {
   width: 100%;
   display: flex;
   justify-content: space-evenly;
   gap: 9px;
   margin: 9px;
+  transform: scale(var(--scale-ss));
+  transform-origin: center;
 }
 
 #lr > div,
@@ -102,6 +117,8 @@ body {
   display: grid;
   grid-template-columns: 50px 50px 50px;
   grid-template-rows: 50px 50px 50px;
+  transform: scale(var(--scale-dpad));
+  transform-origin: center;
 }
 
 #dpad > #up,
@@ -152,6 +169,8 @@ body {
   width: 120px;
   height: 150px;
   position: relative;
+  transform: scale(var(--scale-ab));
+  transform-origin: center;
 }
 
 #a,
@@ -384,4 +403,28 @@ body {
   display: block;
   opacity: 0.5;
   padding: 12px 0;
+}
+
+.size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.size-row label {
+  min-width: 80px;
+  font-size: 14px;
+}
+
+.size-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent-color);
+}
+
+.size-row .size-value {
+  min-width: 36px;
+  text-align: right;
+  font-size: 13px;
+  opacity: 0.7;
 }
