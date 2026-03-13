@@ -511,27 +511,58 @@ const loadRom = async (romName, originalName) => {
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
 };
 
+let handleRomFile = (file) => {
+  let ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+  if (ext !== ".gba" && ext !== ".gb" && ext !== ".gbc") return;
+  let romName = "rom" + ext;
+  let reader = new FileReader();
+  reader.addEventListener("load", async () => {
+    let bytes = new Uint8Array(reader.result);
+    writeToFS(romName, bytes);
+    await addRecentRom(file.name, bytes);
+    loadRom(romName, file.name);
+  });
+  reader.readAsArrayBuffer(file);
+};
+
 document.getElementById("open-rom").addEventListener("click", () => {
   menuDropdown.hidden = true;
   let input = document.createElement("input");
   input.type = "file";
   input.accept = ".gba,.gb,.gbc";
   input.addEventListener("input", () => {
-    if (input.files?.length > 0) {
-      let file = input.files[0];
-      let ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-      let romName = "rom" + ext;
-      let reader = new FileReader();
-      reader.addEventListener("load", async () => {
-        let bytes = new Uint8Array(reader.result);
-        writeToFS(romName, bytes);
-        await addRecentRom(file.name, bytes);
-        loadRom(romName, file.name);
-      });
-      reader.readAsArrayBuffer(file);
-    }
+    if (input.files?.length > 0) handleRomFile(input.files[0]);
   });
   input.click();
+});
+
+let dropOverlay = document.getElementById("drop-overlay");
+let dragCounter = 0;
+
+document.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  dragCounter++;
+  dropOverlay.classList.add("visible");
+});
+
+document.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dropOverlay.classList.remove("visible");
+  }
+});
+
+document.addEventListener("dragover", (e) => {
+  e.preventDefault();
+});
+
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  dropOverlay.classList.remove("visible");
+  if (e.dataTransfer.files?.length > 0) handleRomFile(e.dataTransfer.files[0]);
 });
 
 pauseButton.addEventListener("click", () => {
