@@ -1,0 +1,202 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* --- Canvas sizing: snap to integer multiples of 240x160 --- */
+
+#canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+}
+
+/* 1x: 240x160 (default / smallest) */
+#canvas {
+  width: 240px;
+  height: 160px;
+}
+
+/* 2x: 480x320 */
+@media (min-width: 480px) and (min-height: 320px) {
+  #canvas { width: 480px; height: 320px; }
+}
+
+/* 3x: 720x480 */
+@media (min-width: 720px) and (min-height: 480px) {
+  #canvas { width: 720px; height: 480px; }
+}
+
+/* 4x: 960x640 */
+@media (min-width: 960px) and (min-height: 640px) {
+  #canvas { width: 960px; height: 640px; }
+}
+
+/* 5x: 1200x800 */
+@media (min-width: 1200px) and (min-height: 800px) {
+  #canvas { width: 1200px; height: 800px; }
+}
+
+/* 6x: 1440x960 */
+@media (min-width: 1440px) and (min-height: 960px) {
+  #canvas { width: 1440px; height: 960px; }
+}
+
+/* --- Wrapper: positions overlay on top of canvas --- */
+
+#wrapper {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+/* --- Hover overlay (frosted glass) --- */
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+#wrapper:hover #overlay,
+#overlay.pinned {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* --- Playback controls --- */
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+#controls button {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease, color 0.15s ease;
+}
+
+#controls button:hover {
+  transform: scale(1.15);
+}
+
+#controls button:active {
+  transform: scale(0.95);
+}
+
+#fast-forward.active {
+  color: #7dd3fc;
+}
+
+/* --- Volume slider --- */
+
+#volume {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 200px;
+  max-width: 60%;
+}
+
+#vol-icon {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+#vol-track {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#vol-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0%;
+  background: white;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+#vol-knob {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+}
+
+/* --- Drop overlay --- */
+
+#drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: white;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#drop-overlay.visible {
+  opacity: 1;
+}
