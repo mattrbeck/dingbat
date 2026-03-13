@@ -54,8 +54,14 @@ body {
 
 #controls {
   height: 100%;
-  display: grid;
+  display: none;
   grid-template-rows: auto 1fr auto;
+}
+
+@media (pointer: coarse) {
+  #controls {
+    display: grid;
+  }
 }
 
 #lr,
