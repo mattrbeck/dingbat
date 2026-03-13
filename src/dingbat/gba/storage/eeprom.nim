@@ -75,7 +75,7 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
   return 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
-  if ep.state == {esRead} or esReadIgnore in ep.state:
+  if ep.state == {esRead} or ep.state == {esReadIgnore}:
     return
   let v = int(value and 1)
   ep.buffer.push(v)
