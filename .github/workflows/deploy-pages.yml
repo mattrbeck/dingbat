@@ -39,7 +39,9 @@ jobs:
         run: nim c -d:emscripten src/dingbat_wasm.nim
 
       - name: Stamp service worker version
-        run: sed -i "s/CACHE_VERSION = \"dev\"/CACHE_VERSION = \"${GITHUB_SHA::7}\"/" web/sw.js
+        run: |
+          sed -i "s/CACHE_VERSION = \"dev\"/CACHE_VERSION = \"${GITHUB_SHA::7}\"/" web/sw.js
+          echo -n "${GITHUB_SHA::7}" > web/version.txt
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

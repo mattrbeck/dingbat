@@ -16,30 +16,88 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-document.getElementById("check-update").addEventListener("click", async () => {
-  document.getElementById("menu-dropdown").hidden = true;
-  if (!swRegistration) {
-    // On iOS standalone mode, SW may not be available — just reload
-    if (!("serviceWorker" in navigator)) {
-      location.reload();
-      return;
-    }
-    alert("Service worker not available. Try again in a moment.");
-    return;
-  }
+// --- Update check ---
+
+const UPDATE_CHECK_KEY = "dingbat_last_update_check";
+const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+const updateBtn = document.getElementById("update-btn");
+const updateModal = document.getElementById("update-modal");
+let updateAvailable = false;
+
+const checkForUpdate = async () => {
   try {
-    await swRegistration.update();
-    let waiting = swRegistration.waiting;
-    if (waiting) {
-      // A new version is installed and waiting — activate it
-      waiting.postMessage({ type: "skipWaiting" });
-    } else if (!swRegistration.installing) {
-      alert("Already up to date.");
+    // Fetch cached version (what we're running) and network version (what's deployed)
+    let [cachedRes, networkRes] = await Promise.all([
+      fetch("version.txt"),
+      fetch("version.txt", { cache: "no-store" }),
+    ]);
+    if (!cachedRes.ok || !networkRes.ok) return;
+    let current = (await cachedRes.text()).trim();
+    let latest = (await networkRes.text()).trim();
+    if (current && latest && latest !== current) {
+      updateAvailable = true;
+      updateBtn.hidden = false;
     }
-    // If installing, the controllerchange listener will reload automatically
-  } catch (e) {
-    alert("Update check failed: " + e.message);
+    localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString());
+  } catch {}
+};
+
+const maybeCheckForUpdate = () => {
+  if (updateAvailable) return; // already showing
+  let last = parseInt(localStorage.getItem(UPDATE_CHECK_KEY) || "0", 10);
+  if (Date.now() - last >= UPDATE_CHECK_INTERVAL) {
+    checkForUpdate();
   }
+};
+
+// Check on page load
+maybeCheckForUpdate();
+
+// Check when user returns to the tab
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") maybeCheckForUpdate();
+});
+
+const applyUpdate = async () => {
+  closeUpdateModal();
+  // Use the same service worker update flow
+  if (swRegistration) {
+    try {
+      await swRegistration.update();
+      let waiting = swRegistration.waiting;
+      if (waiting) {
+        waiting.postMessage({ type: "skipWaiting" });
+        return;
+      }
+      if (swRegistration.installing) return; // controllerchange will reload
+    } catch {}
+  }
+  // Fallback: clear caches and reload
+  if (typeof caches !== "undefined") {
+    let keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+  location.reload();
+};
+
+const closeUpdateModal = () => {
+  updateModal.classList.remove("open");
+};
+
+updateBtn.addEventListener("click", () => {
+  if (currentRomName) {
+    updateModal.classList.add("open");
+  } else {
+    applyUpdate();
+  }
+});
+
+document.getElementById("update-confirm").addEventListener("click", applyUpdate);
+document.getElementById("update-not-now").addEventListener("click", closeUpdateModal);
+document.getElementById("update-modal-close").addEventListener("click", closeUpdateModal);
+
+updateModal.addEventListener("click", (e) => {
+  if (e.target === updateModal) closeUpdateModal();
 });
 
 document.getElementById("force-update").addEventListener("click", async () => {
@@ -403,6 +461,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeBiosModal();
     closeRecentModal();
+    closeUpdateModal();
   }
 });
 

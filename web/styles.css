@@ -320,6 +320,7 @@ body {
 }
 
 .modal {
+  position: relative;
   background-color: var(--fore-color);
   border: 1px solid var(--accent-color);
   padding: 16px 20px;
@@ -407,6 +408,56 @@ body {
   display: block;
   opacity: 0.5;
   padding: 12px 0;
+}
+
+#update-btn {
+  background: linear-gradient(135deg, #2980d9, #1a6bbf);
+  color: #fff;
+  border: 1px solid #3a9aef;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(41, 128, 217, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  animation: update-glow 2s ease-in-out infinite;
+}
+
+#update-btn:hover {
+  background: linear-gradient(135deg, #3a9aef, #2980d9);
+  box-shadow: 0 0 14px rgba(41, 128, 217, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+@keyframes update-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(41, 128, 217, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(41, 128, 217, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+}
+
+.modal-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  font-size: 20px;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  opacity: 1;
+}
+
+.button-primary {
+  background-color: #2980d9;
+  border-color: #3a9aef;
+}
+
+.button-primary:hover {
+  background-color: #3a9aef;
 }
 
 #drop-overlay {

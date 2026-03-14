@@ -11,6 +11,7 @@ const ASSETS = [
   "./em.wasm",
   "./manifest.json",
   "./apple-touch-icon-precomposed.png",
+  "./version.txt",
 ];
 
 self.addEventListener("install", (event) => {

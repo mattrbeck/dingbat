@@ -32,7 +32,6 @@
           <button type="button" class="menu-item" id="load-save">Load Save</button>
           <button type="button" class="menu-item" id="export-save">Export Save</button>
           <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="check-update">Check for Updates</button>
           <button type="button" class="menu-item" id="force-update">Force Update</button>
           <hr class="menu-sep" />
           <button type="button" class="menu-item" id="show-log">Toggle Log</button>
@@ -48,7 +47,20 @@
         <input type="text" id="vol-display" class="seg-vol-input" value="100%" readonly />
         <button type="button" class="seg-btn" id="vol-up" title="Volume Up">+</button>
       </div>
+      <button type="button" id="update-btn" hidden>Update Available</button>
       <div id="fps"></div>
+    </div>
+
+    <div id="update-modal" class="modal-overlay">
+      <div class="modal">
+        <button type="button" class="modal-close" id="update-modal-close">&times;</button>
+        <h3>Update Available</h3>
+        <p>Updating now will erase any unsaved data. Make sure you've saved your game before continuing.</p>
+        <div class="modal-actions">
+          <button type="button" class="button" id="update-not-now">Not Now</button>
+          <button type="button" class="button button-primary" id="update-confirm">Update</button>
+        </div>
+      </div>
     </div>
 
     <div id="bios-modal" class="modal-overlay">
