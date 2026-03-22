@@ -38,17 +38,6 @@ type
     tests: seq[MgbaTestDetail]
     timed_out: bool
 
-proc ensure_repo(url, dirname: string): string =
-  let dir = RomCacheDir / dirname
-  if dirExists(dir):
-    return dir
-  echo &"Cloning {url}..."
-  createDir(RomCacheDir)
-  let (output, code) = execCmdEx(&"git clone --depth 1 {url} {dir}")
-  if code != 0:
-    echo "Failed to clone: ", output
-    quit(1)
-  dir
 
 proc ensure_gameboy_test_roms(): string =
   let dir = RomCacheDir / "game-boy-test-roms"
@@ -71,20 +60,6 @@ proc ensure_gameboy_test_roms(): string =
   removeFile(zipfile)
   dir
 
-proc ensure_mealybug(repo_dir: string): string =
-  ## Extract pre-built ROMs from the zip in the mealybug repo.
-  let roms_dir = repo_dir / "build"
-  if dirExists(roms_dir) and walkDir(roms_dir).toSeq.len > 0:
-    return roms_dir
-  createDir(roms_dir)
-  let zipfile = repo_dir / "mealybug-tearoom-tests.zip"
-  if not fileExists(zipfile):
-    echo "  Warning: mealybug-tearoom-tests.zip not found"
-    return roms_dir
-  let (output, code) = execCmdEx(&"unzip -q -o {zipfile.quoteShell} -d {roms_dir.quoteShell}")
-  if code != 0:
-    echo "  Warning: failed to extract mealybug ROMs: ", output
-  roms_dir
 
 proc find_roms(dir: string; ext: string): seq[string] =
   var roms: seq[string]
@@ -258,18 +233,17 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
     ))
   tests
 
-proc build_mealybug_tests(repo_dir: string): seq[TestDef] =
+proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   var tests: seq[TestDef]
-  let roms_dir = ensure_mealybug(repo_dir)
-  let expected_dir = repo_dir / "expected" / "DMG-blob"
-  if not dirExists(expected_dir):
-    echo "  Warning: DMG-blob expected directory not found"
+  let ppu_dir = mealybug_dir / "ppu"
+  if not dirExists(ppu_dir):
+    echo "  Warning: mealybug ppu directory not found"
     return tests
-  for rom in find_roms(roms_dir, ".gb"):
+  for rom in find_roms(ppu_dir, ".gb"):
     let test_name = rom.splitFile().name
-    let expected_png = expected_dir / test_name & ".png"
+    let expected_png = ppu_dir / test_name & "_dmg_blob.png"
     if not fileExists(expected_png):
-      continue  # Skip ROMs without DMG expected images (e.g. CGB-only *2 variants)
+      continue  # Skip ROMs without DMG expected images
     tests.add(TestDef(
       name: "mealybug/" & test_name,
       rom_path: rom,
@@ -395,11 +369,15 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   var current_suite = ""
   var current_tests: seq[MgbaTestDetail]
   var pending_fail = false
+  var seen_suites: seq[string]
   for line in output.strip().splitLines():
     let stripped = line.strip()
     if stripped.len == 0: continue
     if stripped.startsWith("BEGIN: "):
-      current_suite = stripped[7 .. ^1]
+      let name = stripped[7 .. ^1]
+      if name in seen_suites:
+        break  # Suite is looping; stop after first complete pass
+      current_suite = name
       current_tests = @[]
       pending_fail = false
     elif stripped.startsWith("END: "):
@@ -423,6 +401,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
         let short_name = current_suite
         if previous.hasKey(short_name) and previous[short_name] and not passed:
           regressions.add("mgba-suite/" & current_suite)
+        seen_suites.add(current_suite)
       pending_fail = false
     elif stripped.startsWith("PASS: "):
       current_tests.add(MgbaTestDetail(name: stripped[6 .. ^1], passed: true))
@@ -433,7 +412,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
     elif pending_fail and stripped.endsWith(": FAIL"):
       # "DMA0 16: Got 0x00001DB2 vs 0x0000FACE: FAIL" -> actual/expected from "Got X vs Y"
       let colon_pos = stripped.find(": ")
-      if colon_pos >= 0 and current_tests.len > 0:
+      if colon_pos >= 0 and current_tests.len > 0 and stripped.len >= colon_pos + 2 + 7:
         let reason = stripped[colon_pos + 2 .. ^7].splitWhitespace().join(" ")  # strip ": FAIL", collapse ws
         if reason.startsWith("Got ") and reason.contains(" vs "):
           let inner = reason[4 .. ^1]  # strip "Got "
@@ -509,13 +488,14 @@ proc main() =
   var all_suites: seq[SuiteResults]
   var regressions: seq[string]
 
+  # All GB tests come from the game-boy-test-roms release
+  let gb_test_roms_dir = ensure_gameboy_test_roms()
+
   # Blargg tests
-  let blargg_dir = ensure_repo("https://github.com/retrio/gb-test-roms.git", "gb-test-roms")
-  let blargg_tests = build_blargg_tests(blargg_dir)
+  let blargg_tests = build_blargg_tests(gb_test_roms_dir / "blargg")
   all_suites.add(run_suite("Game Boy - Blargg", blargg_tests, harness, previous, regressions))
 
   # Mooneye tests
-  let gb_test_roms_dir = ensure_gameboy_test_roms()
   let mooneye_tests = build_mooneye_tests(gb_test_roms_dir)
   all_suites.add(run_suite("Game Boy - Mooneye", mooneye_tests, harness, previous, regressions))
 
@@ -529,8 +509,7 @@ proc main() =
   all_suites.add(run_suite("Game Boy - Acid2", acid2_tests, harness, previous, regressions))
 
   # Mealybug Tearoom tests (screenshot comparison)
-  let mealybug_dir = ensure_repo("https://github.com/mattcurrie/mealybug-tearoom-tests.git", "mealybug-tearoom-tests")
-  let mealybug_tests = build_mealybug_tests(mealybug_dir)
+  let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
 
   # Write results

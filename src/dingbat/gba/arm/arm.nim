@@ -250,10 +250,13 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         cpu.spsr = cast[PSR]((uint32(cpu.spsr) and not mask) or value)
     else:
       let thumb = cpu.cpsr.thumb
+      let was_irq_disabled = cpu.cpsr.irq_disable
       if (mask and 0xFF) > 0:
         cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
       cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
       cpu.cpsr.thumb = thumb
+      if was_irq_disabled and not cpu.cpsr.irq_disable:
+        cpu.gba.interrupts.schedule_interrupt_check()
   else:  # MRS
     let rd = int(bits_range(instr, 12, 15))
     if spsr and has_spsr:
@@ -349,8 +352,11 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
   if rd == 15 and set_cond:
     if cpu.spsr.thumb: cpu.r[15] -= 4
     let old_spsr = uint32(cpu.spsr)
+    let was_irq_disabled = cpu.cpsr.irq_disable
     let new_mode = cast[CpuMode](cpu.spsr.mode)
     cpu.switch_mode(new_mode)
     cpu.cpsr = cast[PSR](old_spsr)
     let bank = mode_bank(new_mode)
     cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
+    if was_irq_disabled and not cpu.cpsr.irq_disable:
+      cpu.gba.interrupts.schedule_interrupt_check()

@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-03-19 13:09:33*
+*Generated: 2026-03-22 08:11:51*
 
 ## Memory tests (1376/1552 passed)
 
@@ -2039,12 +2039,1036 @@ All tests passed.
 | Short DMA (32/ROM to ROM) Thumb/WRAM | 132 | 200 |
 | Short DMA (32/ROM to ROM) Thumb/IWRAM | 130 | 2 |
 
-## Timer count-up tests (timed out)
+## Timer count-up tests (336/936 passed)
+
+336/936 tests passed, 600 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| 0b, 0x0001 1xs 1d 1i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 2d 1i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 4d 1i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 1d 2i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 2d 2i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 4d 2i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 1d 4i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 2d 4i | 00000001 | 00000002 |
+| 0b, 0x0001 1xs 4d 4i | 00000001 | 00000002 |
+| 0b, 0x0005 1xs 1d 1i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 1d 1i | FFFB | FFFF |
+| 0b, 0x0005 16xv 1d 1i | FFFB | FFFD |
+| 0b, 0x0005 1xs 2d 1i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 2d 1i | FFFB | FFFF |
+| 0b, 0x0005 16xv 2d 1i | FFFB | FFFD |
+| 0b, 0x0005 1xs 4d 1i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 4d 1i | FFFB | FFFF |
+| 0b, 0x0005 16xv 4d 1i | FFFB | FFFD |
+| 0b, 0x0005 1xs 1d 2i | 00000002 | 00000003 |
+| 0b, 0x0005 16xv 1d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xs 2d 2i | 00000002 | 00000003 |
+| 0b, 0x0005 16xv 2d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xs 4d 2i | 00000002 | 00000003 |
+| 0b, 0x0005 16xv 4d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xs 1d 4i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 1d 4i | FFFB | FFFD |
+| 0b, 0x0005 1xs 2d 4i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 2d 4i | FFFB | FFFD |
+| 0b, 0x0005 1xs 4d 4i | 00000002 | 00000003 |
+| 0b, 0x0005 1xv 4d 4i | FFFB | FFFD |
+| 0b, 0x000C 16xs 1d 1i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 1d 1i | FFF9 | FFFC |
+| 0b, 0x000C 16xv 1d 1i | FFF9 | FFFE |
+| 0b, 0x000C 16xs 2d 1i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 2d 1i | FFF9 | FFFC |
+| 0b, 0x000C 16xv 2d 1i | FFF9 | FFFE |
+| 0b, 0x000C 16xs 4d 1i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 4d 1i | FFF9 | FFFC |
+| 0b, 0x000C 16xv 4d 1i | FFF9 | FFFE |
+| 0b, 0x000C 16xs 1d 2i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 1d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xs 2d 2i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 2d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xs 4d 2i | 00000010 | 00000020 |
+| 0b, 0x000C 1xv 4d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xs 1d 4i | 00000010 | 00000020 |
+| 0b, 0x000C 16xv 1d 4i | FFFF | FFF5 |
+| 0b, 0x000C 16xs 2d 4i | 00000010 | 00000020 |
+| 0b, 0x000C 16xv 2d 4i | FFFF | FFF5 |
+| 0b, 0x000C 16xs 4d 4i | 00000010 | 00000020 |
+| 0b, 0x000C 16xv 4d 4i | FFFF | FFF5 |
+| 0b, 0x000D 1xs 1d 1i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 1d 1i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 1d 1i | FFF3 | FFF6 |
+| 0b, 0x000D 16xv 1d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xs 2d 1i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 2d 1i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 2d 1i | FFF3 | FFF6 |
+| 0b, 0x000D 16xv 2d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xs 4d 1i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 4d 1i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 4d 1i | FFF3 | FFF6 |
+| 0b, 0x000D 16xv 4d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xs 1d 2i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 1d 2i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 1d 2i | FFFF | FFFA |
+| 0b, 0x000D 16xv 1d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xs 2d 2i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 2d 2i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 2d 2i | FFFF | FFFA |
+| 0b, 0x000D 16xv 2d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xs 4d 2i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 4d 2i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 4d 2i | FFFF | FFFA |
+| 0b, 0x000D 16xv 4d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xs 1d 4i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 1d 4i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 1d 4i | FFFD | FFF5 |
+| 0b, 0x000D 16xv 1d 4i | FFFD | FFF4 |
+| 0b, 0x000D 1xs 2d 4i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 2d 4i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 2d 4i | FFFD | FFF5 |
+| 0b, 0x000D 16xv 2d 4i | FFFD | FFF4 |
+| 0b, 0x000D 1xs 4d 4i | 00000003 | 00000004 |
+| 0b, 0x000D 16xs 4d 4i | 00000010 | 00000020 |
+| 0b, 0x000D 1xv 4d 4i | FFFD | FFF5 |
+| 0b, 0x000D 16xv 4d 4i | FFFD | FFF4 |
+| 0b, 0x0010 16xs 1d 1i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 1d 1i | FFF1 | FFFC |
+| 0b, 0x0010 16xv 1d 1i | FFF1 | FFFE |
+| 0b, 0x0010 16xs 2d 1i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 2d 1i | FFF1 | FFFC |
+| 0b, 0x0010 16xv 2d 1i | FFF1 | FFFE |
+| 0b, 0x0010 16xs 4d 1i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 4d 1i | FFF1 | FFFC |
+| 0b, 0x0010 16xv 4d 1i | FFF1 | FFFE |
+| 0b, 0x0010 16xs 1d 2i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 1d 2i | FFFB | FFF5 |
+| 0b, 0x0010 16xv 1d 2i | FFFB | FFF7 |
+| 0b, 0x0010 16xs 2d 2i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 2d 2i | FFFB | FFF5 |
+| 0b, 0x0010 16xv 2d 2i | FFFB | FFF7 |
+| 0b, 0x0010 16xs 4d 2i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 4d 2i | FFFB | FFF5 |
+| 0b, 0x0010 16xv 4d 2i | FFFB | FFF7 |
+| 0b, 0x0010 16xs 1d 4i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 1d 4i | FFFF | FFF7 |
+| 0b, 0x0010 16xv 1d 4i | FFFF | FFF9 |
+| 0b, 0x0010 16xs 2d 4i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 2d 4i | FFFF | FFF7 |
+| 0b, 0x0010 16xv 2d 4i | FFFF | FFF9 |
+| 0b, 0x0010 16xs 4d 4i | 00000010 | 00000020 |
+| 0b, 0x0010 1xv 4d 4i | FFFF | FFF7 |
+| 0b, 0x0010 16xv 4d 4i | FFFF | FFF9 |
+| 0b, 0x0014 1xs 1d 1i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 1d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 16xv 1d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xs 2d 1i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 2d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 16xv 2d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xs 4d 1i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 4d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 16xv 4d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xs 1d 2i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 1d 2i | FFFB | FFF9 |
+| 0b, 0x0014 16xv 1d 2i | FFFB | FFF9 |
+| 0b, 0x0014 1xs 2d 2i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 2d 2i | FFFB | FFF9 |
+| 0b, 0x0014 16xv 2d 2i | FFFB | FFF9 |
+| 0b, 0x0014 1xs 4d 2i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 4d 2i | FFFB | FFF9 |
+| 0b, 0x0014 16xv 4d 2i | FFFB | FFF9 |
+| 0b, 0x0014 1xs 1d 4i | 00000005 | 00000004 |
+| 0b, 0x0014 1xs 2d 4i | 00000005 | 00000004 |
+| 0b, 0x0014 1xs 4d 4i | 00000005 | 00000004 |
+| 0b, 0x0015 1xv 1d 1i | FFED | FFF5 |
+| 0b, 0x0015 16xv 1d 1i | FFED | FFF3 |
+| 0b, 0x0015 1xv 2d 1i | FFED | FFF5 |
+| 0b, 0x0015 16xv 2d 1i | FFED | FFF3 |
+| 0b, 0x0015 1xv 4d 1i | FFED | FFF5 |
+| 0b, 0x0015 16xv 4d 1i | FFED | FFF3 |
+| 0b, 0x0015 1xv 1d 2i | FFF3 | FFF0 |
+| 0b, 0x0015 16xv 1d 2i | FFF3 | FFEE |
+| 0b, 0x0015 1xv 2d 2i | FFF3 | FFF0 |
+| 0b, 0x0015 16xv 2d 2i | FFF3 | FFEE |
+| 0b, 0x0015 1xv 4d 2i | FFF3 | FFF0 |
+| 0b, 0x0015 16xv 4d 2i | FFF3 | FFEE |
+| 0b, 0x0015 1xv 1d 4i | FFFF | FFFB |
+| 0b, 0x0015 16xv 1d 4i | FFFF | FFF9 |
+| 0b, 0x0015 1xv 2d 4i | FFFF | FFFB |
+| 0b, 0x0015 16xv 2d 4i | FFFF | FFF9 |
+| 0b, 0x0015 1xv 4d 4i | FFFF | FFFB |
+| 0b, 0x0015 16xv 4d 4i | FFFF | FFF9 |
+| 0b, 0x0020 1xs 1d 1i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 1d 1i | FFE1 | FFFC |
+| 0b, 0x0020 16xv 1d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xs 2d 1i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 2d 1i | FFE1 | FFFC |
+| 0b, 0x0020 16xv 2d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xs 4d 1i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 4d 1i | FFE1 | FFFC |
+| 0b, 0x0020 16xv 4d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xs 1d 2i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 1d 2i | FFFB | FFF5 |
+| 0b, 0x0020 16xv 1d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xs 2d 2i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 2d 2i | FFFB | FFF5 |
+| 0b, 0x0020 16xv 2d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xs 4d 2i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 4d 2i | FFFB | FFF5 |
+| 0b, 0x0020 16xv 4d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xs 1d 4i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 1d 4i | FFEF | FFE7 |
+| 0b, 0x0020 16xv 1d 4i | FFEF | FFE7 |
+| 0b, 0x0020 1xs 2d 4i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 2d 4i | FFEF | FFE7 |
+| 0b, 0x0020 16xv 2d 4i | FFEF | FFE7 |
+| 0b, 0x0020 1xs 4d 4i | 00000007 | 00000006 |
+| 0b, 0x0020 1xv 4d 4i | FFEF | FFE7 |
+| 0b, 0x0020 16xv 4d 4i | FFEF | FFE7 |
+| 0b, 0x0024 1xs 1d 1i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 1d 1i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 1d 1i | FFF9 | FFF0 |
+| 0b, 0x0024 16xv 1d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xs 2d 1i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 2d 1i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 2d 1i | FFF9 | FFF0 |
+| 0b, 0x0024 16xv 2d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xs 4d 1i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 4d 1i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 4d 1i | FFF9 | FFF0 |
+| 0b, 0x0024 16xv 4d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xs 1d 2i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 1d 2i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 1d 2i | FFE7 | FFFD |
+| 0b, 0x0024 16xv 1d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xs 2d 2i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 2d 2i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 2d 2i | FFE7 | FFFD |
+| 0b, 0x0024 16xv 2d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xs 4d 2i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 4d 2i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 4d 2i | FFE7 | FFFD |
+| 0b, 0x0024 16xv 4d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xs 1d 4i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 1d 4i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 1d 4i | FFE7 | FFF3 |
+| 0b, 0x0024 16xv 1d 4i | FFE7 | FFF4 |
+| 0b, 0x0024 1xs 2d 4i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 2d 4i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 2d 4i | FFE7 | FFF3 |
+| 0b, 0x0024 16xv 2d 4i | FFE7 | FFF4 |
+| 0b, 0x0024 1xs 4d 4i | 00000008 | 00000006 |
+| 0b, 0x0024 16xs 4d 4i | 00000020 | 00000030 |
+| 0b, 0x0024 1xv 4d 4i | FFE7 | FFF3 |
+| 0b, 0x0024 16xv 4d 4i | FFE7 | FFF4 |
+| 0b, 0x0025 1xs 1d 1i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 1d 1i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 1d 1i | FFF7 | FFEF |
+| 0b, 0x0025 16xv 1d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xs 2d 1i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 2d 1i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 2d 1i | FFF7 | FFEF |
+| 0b, 0x0025 16xv 2d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xs 4d 1i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 4d 1i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 4d 1i | FFF7 | FFEF |
+| 0b, 0x0025 16xv 4d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xs 1d 2i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 1d 2i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 1d 2i | FFE2 | FFF9 |
+| 0b, 0x0025 16xv 1d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xs 2d 2i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 2d 2i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 2d 2i | FFE2 | FFF9 |
+| 0b, 0x0025 16xv 2d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xs 4d 2i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 4d 2i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 4d 2i | FFE2 | FFF9 |
+| 0b, 0x0025 16xv 4d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xs 1d 4i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 1d 4i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 1d 4i | FFDD | FFE8 |
+| 0b, 0x0025 16xv 1d 4i | FFDD | FFE6 |
+| 0b, 0x0025 1xs 2d 4i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 2d 4i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 2d 4i | FFDD | FFE8 |
+| 0b, 0x0025 16xv 2d 4i | FFDD | FFE6 |
+| 0b, 0x0025 1xs 4d 4i | 00000008 | 00000007 |
+| 0b, 0x0025 16xs 4d 4i | 00000020 | 00000030 |
+| 0b, 0x0025 1xv 4d 4i | FFDD | FFE8 |
+| 0b, 0x0025 16xv 4d 4i | FFDD | FFE6 |
+| 0b, 0x0040 1xs 1d 1i | 0000000E | 0000000A |
+| 0b, 0x0040 1xv 1d 1i | FFC2 | FFDC |
+| 0b, 0x0040 16xv 1d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xs 2d 1i | 0000000E | 0000000A |
+| 0b, 0x0040 1xv 2d 1i | FFC2 | FFDC |
+| 0b, 0x0040 16xv 2d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xs 4d 1i | 0000000E | 0000000A |
+| 0b, 0x0040 1xv 4d 1i | FFC2 | FFDC |
+| 0b, 0x0040 16xv 4d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xs 1d 2i | 0000000E | 0000000B |
+| 0b, 0x0040 16xv 1d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xs 2d 2i | 0000000E | 0000000B |
+| 0b, 0x0040 16xv 2d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xs 4d 2i | 0000000E | 0000000B |
+| 0b, 0x0040 16xv 4d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xs 1d 4i | 00000010 | 0000000D |
+| 0b, 0x0040 16xs 1d 4i | 00000040 | 00000050 |
+| 0b, 0x0040 1xv 1d 4i | FFDB | FFDE |
+| 0b, 0x0040 16xv 1d 4i | FFDB | FFDE |
+| 0b, 0x0040 1xs 2d 4i | 00000010 | 0000000D |
+| 0b, 0x0040 16xs 2d 4i | 00000040 | 00000050 |
+| 0b, 0x0040 1xv 2d 4i | FFDB | FFDE |
+| 0b, 0x0040 16xv 2d 4i | FFDB | FFDE |
+| 0b, 0x0040 1xs 4d 4i | 00000010 | 0000000D |
+| 0b, 0x0040 16xs 4d 4i | 00000040 | 00000050 |
+| 0b, 0x0040 1xv 4d 4i | FFDB | FFDE |
+| 0b, 0x0040 16xv 4d 4i | FFDB | FFDE |
+| 0b, 0x0080 1xs 1d 1i | 0000001A | 00000012 |
+| 0b, 0x0080 1xv 1d 1i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 1d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xs 2d 1i | 0000001A | 00000012 |
+| 0b, 0x0080 1xv 2d 1i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 2d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xs 4d 1i | 0000001A | 00000012 |
+| 0b, 0x0080 1xv 4d 1i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 4d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xs 1d 2i | 00000022 | 00000013 |
+| 0b, 0x0080 16xs 1d 2i | 00000090 | 00000070 |
+| 0b, 0x0080 1xv 1d 2i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 1d 2i | FFC1 | FFDC |
+| 0b, 0x0080 1xs 2d 2i | 00000022 | 00000013 |
+| 0b, 0x0080 16xs 2d 2i | 00000090 | 00000070 |
+| 0b, 0x0080 1xv 2d 2i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 2d 2i | FFC1 | FFDC |
+| 0b, 0x0080 1xs 4d 2i | 00000022 | 00000013 |
+| 0b, 0x0080 16xs 4d 2i | 00000090 | 00000070 |
+| 0b, 0x0080 1xv 4d 2i | FFC1 | FFDC |
+| 0b, 0x0080 16xv 4d 2i | FFC1 | FFDC |
+| 0b, 0x0080 1xs 1d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 16xs 1d 4i | 000000D0 | 00000070 |
+| 0b, 0x0080 1xv 1d 4i | FFC1 | FFDE |
+| 0b, 0x0080 16xv 1d 4i | FFC1 | FFDC |
+| 0b, 0x0080 1xs 2d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 16xs 2d 4i | 000000D0 | 00000070 |
+| 0b, 0x0080 1xv 2d 4i | FFC1 | FFDE |
+| 0b, 0x0080 16xv 2d 4i | FFC1 | FFDC |
+| 0b, 0x0080 1xs 4d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 16xs 4d 4i | 000000D0 | 00000070 |
+| 0b, 0x0080 1xv 4d 4i | FFC1 | FFDE |
+| 0b, 0x0080 16xv 4d 4i | FFC1 | FFDC |
+| 0b, 0x0800 1xs 1d 1i | 0000019A | 00000102 |
+| 0b, 0x0800 16xs 1d 1i | 00000670 | 000005A0 |
+| 0b, 0x0800 1xv 1d 1i | F841 | F85C |
+| 0b, 0x0800 16xv 1d 1i | F841 | F85C |
+| 0b, 0x0800 1xs 2d 1i | 0000019A | 00000102 |
+| 0b, 0x0800 16xs 2d 1i | 00000670 | 000005A0 |
+| 0b, 0x0800 1xv 2d 1i | F841 | F85C |
+| 0b, 0x0800 16xv 2d 1i | F841 | F85C |
+| 0b, 0x0800 1xs 4d 1i | 0000019A | 00000102 |
+| 0b, 0x0800 16xs 4d 1i | 00000670 | 000005A0 |
+| 0b, 0x0800 1xv 4d 1i | F841 | F85C |
+| 0b, 0x0800 16xv 4d 1i | F841 | F85C |
+| 0b, 0x0800 1xs 1d 2i | 00000322 | 000001F3 |
+| 0b, 0x0800 16xs 1d 2i | 00000C90 | 00000AE0 |
+| 0b, 0x0800 1xv 1d 2i | F841 | F85C |
+| 0b, 0x0800 16xv 1d 2i | F841 | F85C |
+| 0b, 0x0800 1xs 2d 2i | 00000322 | 000001F3 |
+| 0b, 0x0800 16xs 2d 2i | 00000C90 | 00000AE0 |
+| 0b, 0x0800 1xv 2d 2i | F841 | F85C |
+| 0b, 0x0800 16xv 2d 2i | F841 | F85C |
+| 0b, 0x0800 1xs 4d 2i | 00000322 | 000001F3 |
+| 0b, 0x0800 16xs 4d 2i | 00000C90 | 00000AE0 |
+| 0b, 0x0800 1xv 4d 2i | F841 | F85C |
+| 0b, 0x0800 16xv 4d 2i | F841 | F85C |
+| 0b, 0x0800 1xs 1d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 16xs 1d 4i | 000018D0 | 00001550 |
+| 0b, 0x0800 1xv 1d 4i | F841 | F85E |
+| 0b, 0x0800 16xv 1d 4i | F841 | F85C |
+| 0b, 0x0800 1xs 2d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 16xs 2d 4i | 000018D0 | 00001550 |
+| 0b, 0x0800 1xv 2d 4i | F841 | F85E |
+| 0b, 0x0800 16xv 2d 4i | F841 | F85C |
+| 0b, 0x0800 1xs 4d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 16xs 4d 4i | 000018D0 | 00001550 |
+| 0b, 0x0800 1xv 4d 4i | F841 | F85E |
+| 0b, 0x0800 16xv 4d 4i | F841 | F85C |
+| 0b, 0x8000 1xs 1d 1i | 0000199A | 00001002 |
+| 0b, 0x8000 16xs 1d 1i | 00006670 | 00005920 |
+| 0b, 0x8000 1xv 1d 1i | 8041 | 805C |
+| 0b, 0x8000 16xv 1d 1i | 8041 | 805E |
+| 0b, 0x8000 1xs 2d 1i | 0000199A | 00001002 |
+| 0b, 0x8000 16xs 2d 1i | 00006670 | 00005920 |
+| 0b, 0x8000 1xv 2d 1i | 8041 | 805C |
+| 0b, 0x8000 16xv 2d 1i | 8041 | 805E |
+| 0b, 0x8000 1xs 4d 1i | 0000199A | 00001002 |
+| 0b, 0x8000 16xs 4d 1i | 00006670 | 00005920 |
+| 0b, 0x8000 1xv 4d 1i | 8041 | 805C |
+| 0b, 0x8000 16xv 4d 1i | 8041 | 805E |
+| 0b, 0x8000 1xs 1d 2i | 00003322 | 00001FF3 |
+| 0b, 0x8000 16xs 1d 2i | 0000CC90 | 0000B1D0 |
+| 0b, 0x8000 1xv 1d 2i | 8041 | 805C |
+| 0b, 0x8000 16xv 1d 2i | 8041 | 805C |
+| 0b, 0x8000 1xs 2d 2i | 00003322 | 00001FF3 |
+| 0b, 0x8000 16xs 2d 2i | 0000CC90 | 0000B1D0 |
+| 0b, 0x8000 1xv 2d 2i | 8041 | 805C |
+| 0b, 0x8000 16xv 2d 2i | 8041 | 805C |
+| 0b, 0x8000 1xs 4d 2i | 00003322 | 00001FF3 |
+| 0b, 0x8000 16xs 4d 2i | 0000CC90 | 0000B1D0 |
+| 0b, 0x8000 1xv 4d 2i | 8041 | 805C |
+| 0b, 0x8000 16xv 4d 2i | 8041 | 805C |
+| 0b, 0x8000 1xs 1d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 16xs 1d 4i | 000198D0 | 00016340 |
+| 0b, 0x8000 1xv 1d 4i | 8041 | 805E |
+| 0b, 0x8000 16xv 1d 4i | 8041 | 805C |
+| 0b, 0x8000 1xs 2d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 16xs 2d 4i | 000198D0 | 00016340 |
+| 0b, 0x8000 1xv 2d 4i | 8041 | 805E |
+| 0b, 0x8000 16xv 2d 4i | 8041 | 805C |
+| 0b, 0x8000 1xs 4d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 16xs 4d 4i | 000198D0 | 00016340 |
+| 0b, 0x8000 1xv 4d 4i | 8041 | 805E |
+| 0b, 0x8000 16xv 4d 4i | 8041 | 805C |
+| 6b, 0x0010 1xs 1d 1i | 000000CE | 0000007B |
+| 6b, 0x0010 16xs 1d 1i | 00000340 | 000002B0 |
+| 6b, 0x0010 1xs 2d 1i | 000000CE | 0000007B |
+| 6b, 0x0010 16xs 2d 1i | 00000340 | 000002B0 |
+| 6b, 0x0010 1xs 4d 1i | 000000CE | 00000081 |
+| 6b, 0x0010 16xs 4d 1i | 00000340 | 000002D0 |
+| 6b, 0x0010 1xs 1d 2i | 00000188 | 000000EC |
+| 6b, 0x0010 16xs 1d 2i | 00000620 | 00000520 |
+| 6b, 0x0010 1xs 2d 2i | 00000188 | 000000EB |
+| 6b, 0x0010 16xs 2d 2i | 00000620 | 00000520 |
+| 6b, 0x0010 1xs 4d 2i | 00000188 | 000000F2 |
+| 6b, 0x0010 16xs 4d 2i | 00000620 | 00000550 |
+| 6b, 0x0010 1xs 1d 4i | 000002FE | 000001CE |
+| 6b, 0x0010 16xs 1d 4i | 00000C00 | 00000A10 |
+| 6b, 0x0010 1xs 2d 4i | 000002FE | 000001CD |
+| 6b, 0x0010 16xs 2d 4i | 00000C00 | 00000A10 |
+| 6b, 0x0010 1xs 4d 4i | 000002FE | 000001D4 |
+| 6b, 0x0010 16xs 4d 4i | 00000C00 | 00000A30 |
+| 6b, 0x0011 1xs 1d 1i | 000000DA | 00000083 |
+| 6b, 0x0011 16xs 1d 1i | 00000370 | 000002E0 |
+| 6b, 0x0011 1xs 2d 1i | 000000DA | 00000083 |
+| 6b, 0x0011 16xs 2d 1i | 00000370 | 000002E0 |
+| 6b, 0x0011 1xs 4d 1i | 000000DA | 00000089 |
+| 6b, 0x0011 16xs 4d 1i | 00000370 | 00000300 |
+| 6b, 0x0011 1xs 1d 2i | 000001A2 | 000000FC |
+| 6b, 0x0011 16xs 1d 2i | 00000690 | 00000580 |
+| 6b, 0x0011 1xs 2d 2i | 000001A2 | 000000FB |
+| 6b, 0x0011 16xs 2d 2i | 00000690 | 00000580 |
+| 6b, 0x0011 1xs 4d 2i | 000001A2 | 00000102 |
+| 6b, 0x0011 16xs 4d 2i | 00000690 | 000005A0 |
+| 6b, 0x0011 1xs 1d 4i | 00000331 | 000001EE |
+| 6b, 0x0011 16xs 1d 4i | 00000CD0 | 00000AC0 |
+| 6b, 0x0011 1xs 2d 4i | 00000331 | 000001ED |
+| 6b, 0x0011 16xs 2d 4i | 00000CD0 | 00000AC0 |
+| 6b, 0x0011 1xs 4d 4i | 00000331 | 000001F4 |
+| 6b, 0x0011 16xs 4d 4i | 00000CD0 | 00000AE0 |
+| 6b, 0x0012 1xs 1d 1i | 000000E7 | 0000008B |
+| 6b, 0x0012 16xs 1d 1i | 000003A0 | 00000310 |
+| 6b, 0x0012 1xs 2d 1i | 000000E7 | 0000008B |
+| 6b, 0x0012 16xs 2d 1i | 000003A0 | 00000310 |
+| 6b, 0x0012 1xs 4d 1i | 000000E7 | 00000091 |
+| 6b, 0x0012 16xs 4d 1i | 000003A0 | 00000330 |
+| 6b, 0x0012 1xs 1d 2i | 000001BC | 0000010C |
+| 6b, 0x0012 16xs 1d 2i | 000006F0 | 000005E0 |
+| 6b, 0x0012 1xs 2d 2i | 000001BC | 0000010B |
+| 6b, 0x0012 16xs 2d 2i | 000006F0 | 000005D0 |
+| 6b, 0x0012 1xs 4d 2i | 000001BC | 00000112 |
+| 6b, 0x0012 16xs 4d 2i | 000006F0 | 00000600 |
+| 6b, 0x0012 1xs 1d 4i | 00000364 | 0000020E |
+| 6b, 0x0012 16xs 1d 4i | 00000D90 | 00000B70 |
+| 6b, 0x0012 1xs 2d 4i | 00000364 | 0000020D |
+| 6b, 0x0012 16xs 2d 4i | 00000D90 | 00000B70 |
+| 6b, 0x0012 1xs 4d 4i | 00000364 | 00000214 |
+| 6b, 0x0012 16xs 4d 4i | 00000D90 | 00000B90 |
+| 6b, 0x0013 1xs 1d 1i | 000000F4 | 00000093 |
+| 6b, 0x0013 16xs 1d 1i | 000003D0 | 00000340 |
+| 6b, 0x0013 1xs 2d 1i | 000000F4 | 00000093 |
+| 6b, 0x0013 16xs 2d 1i | 000003D0 | 00000330 |
+| 6b, 0x0013 1xs 4d 1i | 000000F4 | 00000099 |
+| 6b, 0x0013 16xs 4d 1i | 000003D0 | 00000360 |
+| 6b, 0x0013 1xs 1d 2i | 000001D5 | 0000011C |
+| 6b, 0x0013 16xs 1d 2i | 00000760 | 00000630 |
+| 6b, 0x0013 1xs 2d 2i | 000001D5 | 0000011B |
+| 6b, 0x0013 16xs 2d 2i | 00000760 | 00000630 |
+| 6b, 0x0013 1xs 4d 2i | 000001D5 | 00000122 |
+| 6b, 0x0013 16xs 4d 2i | 00000760 | 00000650 |
+| 6b, 0x0013 1xs 1d 4i | 00000398 | 0000022E |
+| 6b, 0x0013 16xs 1d 4i | 00000E60 | 00000C20 |
+| 6b, 0x0013 1xs 2d 4i | 00000398 | 0000022D |
+| 6b, 0x0013 16xs 2d 4i | 00000E60 | 00000C20 |
+| 6b, 0x0013 1xs 4d 4i | 00000398 | 00000234 |
+| 6b, 0x0013 16xs 4d 4i | 00000E60 | 00000C40 |
+| 8b, 0x0010 1xs 1d 1i | 00000334 | 000001EB |
+| 8b, 0x0010 16xs 1d 1i | 00000CD0 | 00000AB0 |
+| 8b, 0x0010 1xs 2d 1i | 00000334 | 000001EB |
+| 8b, 0x0010 16xs 2d 1i | 00000CD0 | 00000AB0 |
+| 8b, 0x0010 1xs 4d 1i | 00000334 | 000001E9 |
+| 8b, 0x0010 16xs 4d 1i | 00000CD0 | 00000AB0 |
+| 8b, 0x0010 1xs 1d 2i | 00000655 | 000003DC |
+| 8b, 0x0010 16xs 1d 2i | 00001960 | 00001580 |
+| 8b, 0x0010 1xs 2d 2i | 00000655 | 000003DB |
+| 8b, 0x0010 16xs 2d 2i | 00001960 | 00001580 |
+| 8b, 0x0010 1xs 4d 2i | 00000655 | 000003DA |
+| 8b, 0x0010 16xs 4d 2i | 00001960 | 00001570 |
+| 8b, 0x0010 1xs 1d 4i | 00000C98 | 000007BE |
+| 8b, 0x0010 16xs 1d 4i | 00003260 | 00002B20 |
+| 8b, 0x0010 1xs 2d 4i | 00000C98 | 000007BD |
+| 8b, 0x0010 16xs 2d 4i | 00003260 | 00002B10 |
+| 8b, 0x0010 1xs 4d 4i | 00000C98 | 000007BC |
+| 8b, 0x0010 16xs 4d 4i | 00003260 | 00002B10 |
+| 8b, 0x0011 1xs 1d 1i | 00000367 | 0000020B |
+| 8b, 0x0011 16xs 1d 1i | 00000DA0 | 00000B60 |
+| 8b, 0x0011 1xs 2d 1i | 00000367 | 0000020B |
+| 8b, 0x0011 16xs 2d 1i | 00000DA0 | 00000B60 |
+| 8b, 0x0011 1xs 4d 1i | 00000367 | 00000209 |
+| 8b, 0x0011 16xs 4d 1i | 00000DA0 | 00000B60 |
+| 8b, 0x0011 1xs 1d 2i | 000006BC | 0000041C |
+| 8b, 0x0011 16xs 1d 2i | 00001AF0 | 000016E0 |
+| 8b, 0x0011 1xs 2d 2i | 000006BC | 0000041B |
+| 8b, 0x0011 16xs 2d 2i | 00001AF0 | 000016E0 |
+| 8b, 0x0011 1xs 4d 2i | 000006BC | 0000041A |
+| 8b, 0x0011 16xs 4d 2i | 00001AF0 | 000016E0 |
+| 8b, 0x0011 1xs 1d 4i | 00000D64 | 0000083E |
+| 8b, 0x0011 16xs 1d 4i | 00003590 | 00002DE0 |
+| 8b, 0x0011 1xs 2d 4i | 00000D64 | 0000083D |
+| 8b, 0x0011 16xs 2d 4i | 00003590 | 00002DE0 |
+| 8b, 0x0011 1xs 4d 4i | 00000D64 | 0000083C |
+| 8b, 0x0011 16xs 4d 4i | 00003590 | 00002DE0 |
+| 8b, 0x0012 1xs 1d 1i | 0000039A | 0000022B |
+| 8b, 0x0012 16xs 1d 1i | 00000E70 | 00000C10 |
+| 8b, 0x0012 1xs 2d 1i | 0000039A | 0000022B |
+| 8b, 0x0012 16xs 2d 1i | 00000E70 | 00000C10 |
+| 8b, 0x0012 1xs 4d 1i | 0000039A | 00000229 |
+| 8b, 0x0012 16xs 4d 1i | 00000E70 | 00000C10 |
+| 8b, 0x0012 1xs 1d 2i | 00000722 | 0000045C |
+| 8b, 0x0012 16xs 1d 2i | 00001C90 | 00001850 |
+| 8b, 0x0012 1xs 2d 2i | 00000722 | 0000045B |
+| 8b, 0x0012 16xs 2d 2i | 00001C90 | 00001840 |
+| 8b, 0x0012 1xs 4d 2i | 00000722 | 0000045A |
+| 8b, 0x0012 16xs 4d 2i | 00001C90 | 00001840 |
+| 8b, 0x0012 1xs 1d 4i | 00000E31 | 000008BE |
+| 8b, 0x0012 16xs 1d 4i | 000038D0 | 000030B0 |
+| 8b, 0x0012 1xs 2d 4i | 00000E31 | 000008BD |
+| 8b, 0x0012 16xs 2d 4i | 000038D0 | 000030A0 |
+| 8b, 0x0012 1xs 4d 4i | 00000E31 | 000008BC |
+| 8b, 0x0012 16xs 4d 4i | 000038D0 | 000030A0 |
+| 8b, 0x0013 1xs 1d 1i | 000003CE | 0000024B |
+| 8b, 0x0013 16xs 1d 1i | 00000F40 | 00000CD0 |
+| 8b, 0x0013 1xs 2d 1i | 000003CE | 0000024B |
+| 8b, 0x0013 16xs 2d 1i | 00000F40 | 00000CC0 |
+| 8b, 0x0013 1xs 4d 1i | 000003CE | 00000249 |
+| 8b, 0x0013 16xs 4d 1i | 00000F40 | 00000CC0 |
+| 8b, 0x0013 1xs 1d 2i | 00000788 | 0000049C |
+| 8b, 0x0013 16xs 1d 2i | 00001E20 | 000019B0 |
+| 8b, 0x0013 1xs 2d 2i | 00000788 | 0000049B |
+| 8b, 0x0013 16xs 2d 2i | 00001E20 | 000019B0 |
+| 8b, 0x0013 1xs 4d 2i | 00000788 | 0000049A |
+| 8b, 0x0013 16xs 4d 2i | 00001E20 | 000019A0 |
+| 8b, 0x0013 1xs 1d 4i | 00000EFE | 0000093E |
+| 8b, 0x0013 16xs 1d 4i | 00003C00 | 00003370 |
+| 8b, 0x0013 1xs 2d 4i | 00000EFE | 0000093D |
+| 8b, 0x0013 16xs 2d 4i | 00003C00 | 00003370 |
+| 8b, 0x0013 1xs 4d 4i | 00000EFE | 0000093C |
+| 8b, 0x0013 16xs 4d 4i | 00003C00 | 00003370 |
+| 10b, 0x0010 1xs 1d 1i | 00000CCE | 000007EB |
+| 10b, 0x0010 16xs 1d 1i | 00003340 | 00002C10 |
+| 10b, 0x0010 1xs 2d 1i | 00000CCE | 000007EB |
+| 10b, 0x0010 16xs 2d 1i | 00003340 | 00002C10 |
+| 10b, 0x0010 1xs 4d 1i | 00000CCE | 000007E9 |
+| 10b, 0x0010 16xs 4d 1i | 00003340 | 00002C10 |
+| 10b, 0x0010 1xs 1d 2i | 00001988 | 00000FDC |
+| 10b, 0x0010 16xs 1d 2i | 00006620 | 00005850 |
+| 10b, 0x0010 1xs 2d 2i | 00001988 | 00000FDB |
+| 10b, 0x0010 16xs 2d 2i | 00006620 | 00005840 |
+| 10b, 0x0010 1xs 4d 2i | 00001988 | 00000FDA |
+| 10b, 0x0010 16xs 4d 2i | 00006620 | 00005840 |
+| 10b, 0x0010 1xs 1d 4i | 000032FE | 00001FBE |
+| 10b, 0x0010 16xs 1d 4i | 0000CC00 | 0000B0B0 |
+| 10b, 0x0010 1xs 2d 4i | 000032FE | 00001FBD |
+| 10b, 0x0010 16xs 2d 4i | 0000CC00 | 0000B0A0 |
+| 10b, 0x0010 1xs 4d 4i | 000032FE | 00001FBC |
+| 10b, 0x0010 16xs 4d 4i | 0000CC00 | 0000B0A0 |
+| 10b, 0x0011 1xs 1d 1i | 00000D9A | 0000086B |
+| 10b, 0x0011 16xs 1d 1i | 00003670 | 00002EE0 |
+| 10b, 0x0011 1xs 2d 1i | 00000D9A | 0000086B |
+| 10b, 0x0011 16xs 2d 1i | 00003670 | 00002EE0 |
+| 10b, 0x0011 1xs 4d 1i | 00000D9A | 00000869 |
+| 10b, 0x0011 16xs 4d 1i | 00003670 | 00002ED0 |
+| 10b, 0x0011 1xs 1d 2i | 00001B22 | 000010DC |
+| 10b, 0x0011 16xs 1d 2i | 00006C90 | 00005DE0 |
+| 10b, 0x0011 1xs 2d 2i | 00001B22 | 000010DB |
+| 10b, 0x0011 16xs 2d 2i | 00006C90 | 00005DD0 |
+| 10b, 0x0011 1xs 4d 2i | 00001B22 | 000010DA |
+| 10b, 0x0011 16xs 4d 2i | 00006C90 | 00005DD0 |
+| 10b, 0x0011 1xs 1d 4i | 00003631 | 000021BE |
+| 10b, 0x0011 16xs 1d 4i | 0000D8D0 | 0000BBD0 |
+| 10b, 0x0011 1xs 2d 4i | 00003631 | 000021BD |
+| 10b, 0x0011 16xs 2d 4i | 0000D8D0 | 0000BBD0 |
+| 10b, 0x0011 1xs 4d 4i | 00003631 | 000021BC |
+| 10b, 0x0011 16xs 4d 4i | 0000D8D0 | 0000BBC0 |
+| 10b, 0x0012 1xs 1d 1i | 00000E67 | 000008EB |
+| 10b, 0x0012 16xs 1d 1i | 000039A0 | 000031A0 |
+| 10b, 0x0012 1xs 2d 1i | 00000E67 | 000008EB |
+| 10b, 0x0012 16xs 2d 1i | 000039A0 | 000031A0 |
+| 10b, 0x0012 1xs 4d 1i | 00000E67 | 000008E9 |
+| 10b, 0x0012 16xs 4d 1i | 000039A0 | 000031A0 |
+| 10b, 0x0012 1xs 1d 2i | 00001CBC | 000011DC |
+| 10b, 0x0012 16xs 1d 2i | 000072F0 | 00006370 |
+| 10b, 0x0012 1xs 2d 2i | 00001CBC | 000011DB |
+| 10b, 0x0012 16xs 2d 2i | 000072F0 | 00006360 |
+| 10b, 0x0012 1xs 4d 2i | 00001CBC | 000011DA |
+| 10b, 0x0012 16xs 4d 2i | 000072F0 | 00006360 |
+| 10b, 0x0012 1xs 1d 4i | 00003964 | 000023BE |
+| 10b, 0x0012 16xs 1d 4i | 0000E590 | 0000C6F0 |
+| 10b, 0x0012 1xs 2d 4i | 00003964 | 000023BD |
+| 10b, 0x0012 16xs 2d 4i | 0000E590 | 0000C6F0 |
+| 10b, 0x0012 1xs 4d 4i | 00003964 | 000023BC |
+| 10b, 0x0012 16xs 4d 4i | 0000E590 | 0000C6E0 |
+| 10b, 0x0013 1xs 1d 1i | 00000F34 | 0000096B |
+| 10b, 0x0013 16xs 1d 1i | 00003CD0 | 00003470 |
+| 10b, 0x0013 1xs 2d 1i | 00000F34 | 0000096B |
+| 10b, 0x0013 16xs 2d 1i | 00003CD0 | 00003470 |
+| 10b, 0x0013 1xs 4d 1i | 00000F34 | 00000969 |
+| 10b, 0x0013 16xs 4d 1i | 00003CD0 | 00003460 |
+| 10b, 0x0013 1xs 1d 2i | 00001E55 | 000012DC |
+| 10b, 0x0013 16xs 1d 2i | 00007960 | 00006900 |
+| 10b, 0x0013 1xs 2d 2i | 00001E55 | 000012DB |
+| 10b, 0x0013 16xs 2d 2i | 00007960 | 000068F0 |
+| 10b, 0x0013 1xs 4d 2i | 00001E55 | 000012DA |
+| 10b, 0x0013 16xs 4d 2i | 00007960 | 000068F0 |
+| 10b, 0x0013 1xs 1d 4i | 00003C98 | 000025BE |
+| 10b, 0x0013 16xs 1d 4i | 0000F260 | 0000D210 |
+| 10b, 0x0013 1xs 2d 4i | 00003C98 | 000025BD |
+| 10b, 0x0013 16xs 2d 4i | 0000F260 | 0000D210 |
+| 10b, 0x0013 1xs 4d 4i | 00003C98 | 000025BC |
+| 10b, 0x0013 16xs 4d 4i | 0000F260 | 0000D200 |
+
+## Timer IRQ tests (0/90 passed)
+
+0/90 tests passed, 90 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| FFFF 0 nops |  |  |
+| FFFF 1 nop |  |  |
+| FFFF 2 nops |  |  |
+| FFFF 3 nops |  |  |
+| FFFF 4 nops |  |  |
+| FFFF 5 nops |  |  |
+| FFFF 6 nops |  |  |
+| FFFF 7 nops |  |  |
+| FFFF 8 nops |  |  |
+| FFFF 9 nops |  |  |
+| FFFE 0 nops |  |  |
+| FFFE 1 nop |  |  |
+| FFFE 2 nops |  |  |
+| FFFE 3 nops |  |  |
+| FFFE 4 nops |  |  |
+| FFFE 5 nops |  |  |
+| FFFE 6 nops |  |  |
+| FFFE 7 nops |  |  |
+| FFFE 8 nops |  |  |
+| FFFE 9 nops |  |  |
+| FFFD 0 nops |  |  |
+| FFFD 1 nop |  |  |
+| FFFD 2 nops |  |  |
+| FFFD 3 nops |  |  |
+| FFFD 4 nops |  |  |
+| FFFD 5 nops |  |  |
+| FFFD 6 nops |  |  |
+| FFFD 7 nops |  |  |
+| FFFD 8 nops |  |  |
+| FFFD 9 nops |  |  |
+| FFFC 0 nops |  |  |
+| FFFC 1 nop |  |  |
+| FFFC 2 nops |  |  |
+| FFFC 3 nops |  |  |
+| FFFC 4 nops |  |  |
+| FFFC 5 nops |  |  |
+| FFFC 6 nops |  |  |
+| FFFC 7 nops |  |  |
+| FFFC 8 nops |  |  |
+| FFFC 9 nops |  |  |
+| FFFB 0 nops |  |  |
+| FFFB 1 nop |  |  |
+| FFFB 2 nops |  |  |
+| FFFB 3 nops |  |  |
+| FFFB 4 nops |  |  |
+| FFFB 5 nops |  |  |
+| FFFB 6 nops |  |  |
+| FFFB 7 nops |  |  |
+| FFFB 8 nops |  |  |
+| FFFB 9 nops |  |  |
+| FFFA 0 nops |  |  |
+| FFFA 1 nop |  |  |
+| FFFA 2 nops |  |  |
+| FFFA 3 nops |  |  |
+| FFFA 4 nops |  |  |
+| FFFA 5 nops |  |  |
+| FFFA 6 nops |  |  |
+| FFFA 7 nops |  |  |
+| FFFA 8 nops |  |  |
+| FFFA 9 nops |  |  |
+| FFF9 0 nops |  |  |
+| FFF9 1 nop |  |  |
+| FFF9 2 nops |  |  |
+| FFF9 3 nops |  |  |
+| FFF9 4 nops |  |  |
+| FFF9 5 nops |  |  |
+| FFF9 6 nops |  |  |
+| FFF9 7 nops |  |  |
+| FFF9 8 nops |  |  |
+| FFF9 9 nops |  |  |
+| FFF8 0 nops |  |  |
+| FFF8 1 nop |  |  |
+| FFF8 2 nops |  |  |
+| FFF8 3 nops |  |  |
+| FFF8 4 nops |  |  |
+| FFF8 5 nops |  |  |
+| FFF8 6 nops |  |  |
+| FFF8 7 nops |  |  |
+| FFF8 8 nops |  |  |
+| FFF8 9 nops |  |  |
+| FFF7 0 nops |  |  |
+| FFF7 1 nop |  |  |
+| FFF7 2 nops |  |  |
+| FFF7 3 nops |  |  |
+| FFF7 4 nops |  |  |
+| FFF7 5 nops |  |  |
+| FFF7 6 nops |  |  |
+| FFF7 7 nops |  |  |
+| FFF7 8 nops |  |  |
+| FFF7 9 nops |  |  |
+
+## Shifter tests
+
+All tests passed.
+
+## Carry tests
+
+All tests passed.
+
+## Multiply long tests (52/72 passed)
+
+52/72 tests passed, 20 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+|  -1 *  -1 umulls | FFFFFFFE:00000001 (CSPR 8) | FFFFFFFE:00000001 (CSPR A) |
+| $7F *  -1 umulls | 7FFFFFFE:80000001 (CSPR 0) | 7FFFFFFE:80000001 (CSPR 2) |
+|  -1 * $7F smulls | FFFFFFFF:80000001 (CSPR 8) | FFFFFFFF:80000001 (CSPR A) |
+|  -1 * $7F umulls | 7FFFFFFE:80000001 (CSPR 0) | 7FFFFFFE:80000001 (CSPR 2) |
+| $80 * $7F smulls | C0000000:80000000 (CSPR 8) | C0000000:80000000 (CSPR A) |
+| $80 * $7F umulls | 3FFFFFFF:80000000 (CSPR 0) | 3FFFFFFF:80000000 (CSPR 2) |
+| $81 * $7F smulls | C0000000:FFFFFFFF (CSPR 8) | C0000000:FFFFFFFF (CSPR A) |
+| $81 * $7F umulls | 3FFFFFFF:FFFFFFFF (CSPR 0) | 3FFFFFFF:FFFFFFFF (CSPR 2) |
+|   0 * $80 smulls | 00000000:00000000 (CSPR 4) | 00000000:00000000 (CSPR 6) |
+|   1 * $80 smulls | FFFFFFFF:80000000 (CSPR 8) | FFFFFFFF:80000000 (CSPR A) |
+|  -1 * $80 umulls | 7FFFFFFF:80000000 (CSPR 0) | 7FFFFFFF:80000000 (CSPR 2) |
+| $7F * $80 smulls | C0000000:80000000 (CSPR 8) | C0000000:80000000 (CSPR A) |
+| $80 * $80 umulls | 40000000:00000000 (CSPR 0) | 40000000:00000000 (CSPR 2) |
+| $81 * $80 umulls | 40000000:80000000 (CSPR 0) | 40000000:80000000 (CSPR 2) |
+|   0 * $81 smulls | 00000000:00000000 (CSPR 4) | 00000000:00000000 (CSPR 6) |
+|   1 * $81 smulls | FFFFFFFF:80000001 (CSPR 8) | FFFFFFFF:80000001 (CSPR A) |
+|  -1 * $81 umulls | 80000000:7FFFFFFF (CSPR 8) | 80000000:7FFFFFFF (CSPR A) |
+| $7F * $81 smulls | C0000000:FFFFFFFF (CSPR 8) | C0000000:FFFFFFFF (CSPR A) |
+| $80 * $81 umulls | 40000000:80000000 (CSPR 0) | 40000000:80000000 (CSPR 2) |
+| $81 * $81 umulls | 40000001:00000001 (CSPR 0) | 40000001:00000001 (CSPR 2) |
+
+## BIOS math tests (603/615 passed)
+
+603/615 tests passed, 12 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| ArcTan2 00000000,00000001 r1 | 00000000 | 00000001 |
+| ArcTan2 00000000,00004000 r1 | 00000000 | 00004000 |
+| ArcTan2 00000000,00008000 r1 | 00000000 | 00008000 |
+| ArcTan2 00000000,0000C000 r1 | 00000000 | 0000C000 |
+| ArcTan2 00000000,00010000 r1 | 00000000 | 00010000 |
+| ArcTan2 00000000,FFFF0000 r1 | 00000000 | FFFF0000 |
+| Div 00000000/00000000 r0 | 00000000 | 00000001 |
+| Div 00000000/00000000 r3 | 00000000 | 00000001 |
+| Div 00000001/00000000 r1 | 00000000 | 00000001 |
+| Div 00000001/00000000 r3 | 00000000 | 00000001 |
+| Div FFFFFFFF/00000000 r1 | 00000000 | FFFFFFFF |
+| Div FFFFFFFF/00000000 r3 | 00000000 | 00000001 |
+
+## DMA tests (1056/1256 passed)
+
+1056/1256 tests passed, 200 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| 0 Imm H =ROM/=IWRAM 3 | CB0E0C7C | CB0EBABE |
+| 1 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 2 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 3 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 0 Imm H =ROM/=EWRAM 3 | FEFD0C7C | FEFDBABE |
+| 1 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 2 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 3 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 0 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 1 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 2 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 3 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 0 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 1 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 2 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 3 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 0 Imm W =ROM/=IWRAM 3 | 0E050C7C | BABEBABE |
+| 1 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 2 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 3 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 0 Imm W =ROM/=EWRAM 3 | 0E050C7C | BABEBABE |
+| 1 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 2 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 3 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 0 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 1 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 2 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 3 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 0 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 1 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 2 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 3 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 0 Imm H +ROM/=IWRAM 3 | CB0E1111 | CB0ECAFE |
+| 0 Imm H +ROM/=EWRAM 3 | FEFD1111 | FEFDCAFE |
+| 0 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 1 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 2 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 3 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 0 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 1 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 2 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 3 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 0 Imm W +ROM/=IWRAM 3 | 1708158F | CAFECAFE |
+| 0 Imm W +ROM/=EWRAM 3 | 1708158F | CAFECAFE |
+| 0 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 1 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 2 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 3 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 0 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 1 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 2 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 3 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 0 Imm H -ROM/=IWRAM 3 | CB0E07D5 | CB0ECAFE |
+| 0 Imm H -ROM/=EWRAM 3 | FEFD07D5 | FEFDCAFE |
+| 0 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 1 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 2 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 3 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 0 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 1 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 2 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 3 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 0 Imm W -ROM/=IWRAM 3 | 04B50323 | CAFECAFE |
+| 1 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 2 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 3 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 0 Imm W -ROM/=EWRAM 3 | 04B50323 | CAFECAFE |
+| 1 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 2 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 3 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 0 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 1 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 2 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 3 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 0 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 1 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 2 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 3 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 0 Imm W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 Imm W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 HBl H =ROM/=IWRAM 3 | CB0E0C7C | CB0EBABE |
+| 1 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 2 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 3 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
+| 0 HBl H =ROM/=EWRAM 3 | FEFD0C7C | FEFDBABE |
+| 1 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 2 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 3 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
+| 0 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 1 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 2 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 3 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
+| 0 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 1 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 2 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 3 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
+| 0 HBl W =ROM/=IWRAM 3 | 0E050C7C | BABEBABE |
+| 1 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 2 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 3 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
+| 0 HBl W =ROM/=EWRAM 3 | 0E050C7C | BABEBABE |
+| 1 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 2 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 3 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
+| 0 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 1 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 2 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 3 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
+| 0 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 1 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 2 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 3 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
+| 0 HBl H +ROM/=IWRAM 3 | CB0E1111 | CB0ECAFE |
+| 0 HBl H +ROM/=EWRAM 3 | FEFD1111 | FEFDCAFE |
+| 0 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 1 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 2 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 3 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 0 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 1 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 2 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 3 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 0 HBl W +ROM/=IWRAM 3 | 1708158F | CAFECAFE |
+| 0 HBl W +ROM/=EWRAM 3 | 1708158F | CAFECAFE |
+| 0 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 1 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 2 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 3 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
+| 0 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 1 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 2 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 3 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
+| 0 HBl H -ROM/=IWRAM 3 | CB0E07D5 | CB0ECAFE |
+| 0 HBl H -ROM/=EWRAM 3 | FEFD07D5 | FEFDCAFE |
+| 0 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 1 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 2 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 3 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
+| 0 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 1 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 2 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 3 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
+| 0 HBl W -ROM/=IWRAM 3 | 04B50323 | CAFECAFE |
+| 1 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 2 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 3 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
+| 0 HBl W -ROM/=EWRAM 3 | 04B50323 | CAFECAFE |
+| 1 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 2 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 3 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
+| 0 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 1 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 2 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 3 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
+| 0 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 1 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 2 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 3 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 0 HBl W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 HBl W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 3 | EA000055 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 4 | E3A00301 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 5 | E5C00008 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 6 | E329F01F | 00000000 |
+| 1 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
+| 0 Imm W R+0x10/+EWRAM 3 | EA000055 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 4 | E3A00301 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 5 | E5C00008 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 6 | E329F01F | 00000000 |
+| 1 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
+| 0 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
+| 0 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
+| 1 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
+| 1 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
+| 2 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
+| 2 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
+| 3 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
+| 3 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
+
+## SIO register R/W tests (65/90 passed)
+
+65/90 tests passed, 25 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| M: SIOCNT | SIOCNT: Got 0x0000 vs 0x6F8F |  |
+| M: SIOMLT_SEND | SIOMLT_SEND: Got 0x0000 vs 0xFFFF |  |
+| M: RCNT | RCNT: Got 0x8000 vs 0x01FF |  |
+| M: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+| N8: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
+| N8: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
+| N8: RCNT | RCNT: Got 0x8000 vs 0x01F5 |  |
+| N8: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+| N32: SIODATA32_L | SIODATA32_L: Got 0x0000 vs 0xFFFF |  |
+| N32: SIODATA32_H | SIODATA32_H: Got 0x0000 vs 0xFFFF |  |
+| N32: SIOCNT | SIOCNT: Got 0x0000 vs 0x5F8F |  |
+| N32: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
+| N32: RCNT | RCNT: Got 0x8000 vs 0x01F5 |  |
+| N32: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+| U: SIOCNT | SIOCNT: Got 0x0000 vs 0x7FAF |  |
+| U: RCNT | RCNT: Got 0x8000 vs 0x01FF |  |
+| U: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+| G: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
+| G: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
+| G: RCNT | RCNT: Got 0x8000 vs 0x81FF |  |
+| G: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+| J: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
+| J: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
+| J: RCNT | RCNT: Got 0x8000 vs 0xC1FC |  |
+| J: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+
+## SIO timing tests (0/4 passed)
+
+0/4 tests passed, 4 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| Normal8/256k | Timed out |  |
+| Normal8/2M | Timed out |  |
+| Normal32/256k | Timed out |  |
+| Normal32/2M | Timed out |  |
+
+## Misc. edge case tests (1/10 passed)
+
+1/10 tests passed, 9 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| DMA Prefetch Break | 0x10002A64 | 0x10000004 |
+| DMA Prefetch Read | 0xDEAD0000 | 0xEA000006 |
+| H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
+| H-blank bit start Flip 1 | 0x00000085 | 0x000000E7 |
+| H-blank bit start Flip 2 | 0x000003EC | 0x000003C0 |
+| H-blank bit start Flip 3 | 0x000000E4 | 0x00000101 |
+| H-blank bit start Flip 4 | 0x000003EC | 0x000003C0 |
+| H-blank bit start Flip 5 | 0x000000E4 | 0x00000120 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x000003AD |
+
+## Video tests (timed out)
 
 Suite did not complete (emulator timed out).
 
 ## Summary
 
-- **Total:** 3702
-- **Pass:** 1683
-- **Fail:** 2019
+- **Total:** 7008
+- **Pass:** 4029
+- **Fail:** 2979
