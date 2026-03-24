@@ -4,8 +4,28 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
   case swi_num
-  of 0x02, 0x06:  # Halt / Halt2
+  of 0x02:  # Halt
     cpu.halted = true
+  of 0x06:  # Div
+    let numer = cast[int32](cpu.r[0])
+    let denom = cast[int32](cpu.r[1])
+    if denom == 0: discard
+    else:
+      let quot = numer div denom
+      let rem = numer mod denom
+      cpu.r[0] = cast[uint32](quot)
+      cpu.r[1] = cast[uint32](rem)
+      cpu.r[3] = cast[uint32](abs(quot))
+  of 0x07:  # DivArm (swapped inputs)
+    let numer = cast[int32](cpu.r[1])
+    let denom = cast[int32](cpu.r[0])
+    if denom == 0: discard
+    else:
+      let quot = numer div denom
+      let rem = numer mod denom
+      cpu.r[0] = cast[uint32](quot)
+      cpu.r[1] = cast[uint32](rem)
+      cpu.r[3] = cast[uint32](abs(quot))
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     let discard_flags = cpu.r[0]
     let intr_mask = uint16(cpu.r[1])
