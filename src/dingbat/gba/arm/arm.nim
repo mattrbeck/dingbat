@@ -1,19 +1,20 @@
 # ARM instruction handlers (included by gba.nim)
 
 proc bios_arctan(a: int32): int32 =
-  ## GBA BIOS ArcTan polynomial approximation.
+  ## GBA BIOS ArcTan polynomial approximation (standard HLE coefficients).
   ## Input: tan value in 1.14 fixed-point (signed).
   ## Output: theta where 0x4000 = pi/2.
-  let r1 = -((a * a) shr 14)
-  var r3 = ((int32(0xA9) * r1) shr 14)
-  r3 = ((r3 + int32(0x0390)) * r1) shr 14
-  r3 = ((r3 + int32(0x091C)) * r1) shr 14
-  r3 = ((r3 + int32(0x0FB6)) * r1) shr 14
-  r3 = ((r3 + int32(0x16AA)) * r1) shr 14
-  r3 = ((r3 + int32(0x2081)) * r1) shr 14
-  r3 = ((r3 + int32(0x3651)) * r1) shr 14
-  r3 = r3 + int32(0xA2F9)
-  result = (a * r3) shr 14
+  let a64 = int64(a)
+  let neg_a_sq = -((a64 * a64) shr 14)
+  var r3 = (int64(0xA9) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x0390) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x091C) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x0FB6) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x16AA) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x2081) * neg_a_sq) shr 14
+  r3 = ((r3 + 0x3651) * neg_a_sq) shr 14
+  r3 = r3 + 0xA2F9
+  result = cast[int32](uint32((a64 * r3) shr 14))
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
@@ -22,25 +23,25 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x02:  # Halt
     cpu.halted = true
   of 0x06:  # Div
-    let numer = cast[int32](cpu.r[0])
-    let denom = cast[int32](cpu.r[1])
+    let numer = int64(cast[int32](cpu.r[0]))
+    let denom = int64(cast[int32](cpu.r[1]))
     if denom == 0: discard
     else:
       let quot = numer div denom
       let rem = numer mod denom
-      cpu.r[0] = cast[uint32](quot)
-      cpu.r[1] = cast[uint32](rem)
-      cpu.r[3] = cast[uint32](abs(quot))
+      cpu.r[0] = cast[uint32](uint32(quot and 0xFFFFFFFF))
+      cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
+      cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
   of 0x07:  # DivArm (swapped inputs)
-    let numer = cast[int32](cpu.r[1])
-    let denom = cast[int32](cpu.r[0])
+    let numer = int64(cast[int32](cpu.r[1]))
+    let denom = int64(cast[int32](cpu.r[0]))
     if denom == 0: discard
     else:
       let quot = numer div denom
       let rem = numer mod denom
-      cpu.r[0] = cast[uint32](quot)
-      cpu.r[1] = cast[uint32](rem)
-      cpu.r[3] = cast[uint32](abs(quot))
+      cpu.r[0] = cast[uint32](uint32(quot and 0xFFFFFFFF))
+      cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
+      cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     let discard_flags = cpu.r[0]
     let intr_mask = uint16(cpu.r[1])

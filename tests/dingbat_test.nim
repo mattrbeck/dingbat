@@ -49,6 +49,7 @@ proc write_ppm(path: string; buf: seq[uint16]; w, h: int; color: bool) =
 
 proc main() =
   var rom_path = ""
+  var bios_path = ""
   var mode = tmSerial
   var timeout_frames = 1800
   var screenshot_path = ""
@@ -89,6 +90,10 @@ proc main() =
         screenshot_path = v
       of "color":
         color_mode = true
+      of "bios":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        bios_path = v
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot> [--timeout <frames>] [--screenshot <path.ppm>]"
@@ -99,9 +104,11 @@ proc main() =
   let test_out = new_test_output()
 
   if is_gba:
-    let emu = new_gba("", rom_path, run_bios = false)
+    let emu = new_gba(bios_path, rom_path, run_bios = false)
     emu.test_output = test_out
     emu.post_init()
+    if bios_path == "hle":
+      emu.bios_path = ""  # Force HLE SWI dispatch
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
       emu.step_frame()
