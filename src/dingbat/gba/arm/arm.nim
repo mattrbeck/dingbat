@@ -39,6 +39,39 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.interrupts.reg_if.vblank = false
     cpu.gba.interrupts.reg_ie.vblank = true
     cpu.halted = true
+  of 0x0B:  # CpuSet
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    let ctrl = cpu.r[2]
+    let count = bits_range(ctrl, 0, 20)
+    let fill = bit(ctrl, 24)
+    let word_mode = bit(ctrl, 26)
+    if word_mode:
+      let fill_val = cpu.gba.bus.read_word(src)
+      for i in 0'u32 ..< count:
+        let val = if fill: fill_val else: cpu.gba.bus.read_word(src)
+        cpu.gba.bus.write_word(dst, val)
+        if not fill: src += 4
+        dst += 4
+    else:
+      let fill_val = cpu.gba.bus.read_half(src)
+      for i in 0'u32 ..< count:
+        let val = if fill: fill_val else: cpu.gba.bus.read_half(src)
+        cpu.gba.bus.write_half(dst, val)
+        if not fill: src += 2
+        dst += 2
+  of 0x0C:  # CpuFastSet
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    let ctrl = cpu.r[2]
+    let count = (bits_range(ctrl, 0, 20) + 7) and not 7'u32  # round up to multiple of 8
+    let fill = bit(ctrl, 24)
+    let fill_val = cpu.gba.bus.read_word(src)
+    for i in 0'u32 ..< count:
+      let val = if fill: fill_val else: cpu.gba.bus.read_word(src)
+      cpu.gba.bus.write_word(dst, val)
+      if not fill: src += 4
+      dst += 4
   else:
     discard  # unimplemented SWI: return immediately (no-op)
 
