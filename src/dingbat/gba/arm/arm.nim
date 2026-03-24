@@ -25,7 +25,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x06:  # Div
     let numer = int64(cast[int32](cpu.r[0]))
     let denom = int64(cast[int32](cpu.r[1]))
-    if denom == 0: discard
+    if denom == 0:
+      cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
+      cpu.r[1] = uint32(numer and 0xFFFFFFFF)
+      cpu.r[3] = 1'u32
     else:
       let quot = numer div denom
       let rem = numer mod denom
@@ -35,7 +38,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x07:  # DivArm (swapped inputs)
     let numer = int64(cast[int32](cpu.r[1]))
     let denom = int64(cast[int32](cpu.r[0]))
-    if denom == 0: discard
+    if denom == 0:
+      cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
+      cpu.r[1] = uint32(numer and 0xFFFFFFFF)
+      cpu.r[3] = 1'u32
     else:
       let quot = numer div denom
       let rem = numer mod denom
