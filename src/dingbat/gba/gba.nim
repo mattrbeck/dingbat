@@ -83,6 +83,19 @@ type
     tm*:           array[4, uint16]
     cycle_enabled*: array[4, CycleCount]
 
+  Serial* = ref object
+    gba*:        GBA
+    siocnt*:     uint16    # 0x4000128 - SIO Control
+    rcnt*:       uint16    # 0x4000134 - Mode Select / General Purpose
+    siodata8*:   uint16    # 0x400012A - 8-bit data (shared with SIOMLT_SEND)
+    siodata32*:  uint32    # 0x4000120 - 32-bit data (shared with SIOMULTI0/1)
+    siomulti2*:  uint16    # 0x4000124
+    siomulti3*:  uint16    # 0x4000126
+    joycnt*:     uint16    # 0x4000140
+    joy_recv*:   uint32    # 0x4000150
+    joy_trans*:  uint32    # 0x4000154
+    joystat*:    uint16    # 0x4000158
+
   DmaStartTiming* = enum
     dmaImmediate = 0, dmaVBlank = 1, dmaHBlank = 2, dmaSpecial = 3
 
@@ -309,6 +322,7 @@ type
     ppu*:        PPU
     apu*:        APU
     dma*:        DMA
+    serial*:     Serial
     when defined(test_harness):
       test_output*: TestOutput
 
@@ -337,6 +351,7 @@ proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
+proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
 proc draw*(ppu: PPU)
@@ -389,6 +404,7 @@ include apu/channel4
 include apu/dma_channels
 include apu
 include timer
+include serial
 include dma
 include bus
 
@@ -458,6 +474,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer1:        gba.timer.timer_overflow_event(1)
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
+    of etSerial:        gba.serial.serial_transfer_complete()
     of etHandleInput, etIME: discard
 
 proc post_init*(gba: GBA) =
@@ -471,6 +488,7 @@ proc post_init*(gba: GBA) =
   gba.ppu        = new_ppu(gba)
   gba.apu        = new_apu(gba)
   gba.dma        = new_dma(gba)
+  gba.serial     = new_serial(gba)
   gba.scheduler.dispatch = gba_dispatch(gba)
   gba.handle_saves()
   if not gba.run_bios:

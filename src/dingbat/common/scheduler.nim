@@ -15,6 +15,7 @@ type
     etSaves, etInterrupts
     etPPUStartLine, etPPUStartHBlank, etPPUEndHBlank
     etTimer0, etTimer1, etTimer2, etTimer3
+    etSerial
 
   Event* = object
     cycles*: CycleCount
