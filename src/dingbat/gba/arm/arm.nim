@@ -207,6 +207,26 @@ proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; ins
   when set_cond:
     cpu.cpsr.negative = bit(cpu.r[rdhi], 31)
     cpu.cpsr.zero     = (res == 0)
+    # ARM7TDMI "meaningless" carry flag: determined by the Booth multiplier internals.
+    # For long multiply, the carry depends on the number of Booth iterations and
+    # the interaction of Rm/Rs bit patterns in the carry-save adder.
+    block:
+      let rs_val = cpu.r[rs]
+      let rm_val = cpu.r[rm]
+      when signed:
+        var rs33 = uint64(rs_val)
+        if bit(rs_val, 31): rs33 = rs33 or 0x1_00000000'u64
+        let four_iters = not ((rs33 shr 8) == 0 or (rs33 shr 8) == 0x1FFFFFF'u64 or
+                              (rs33 shr 16) == 0 or (rs33 shr 16) == 0x1FFFF'u64 or
+                              (rs33 shr 24) == 0 or (rs33 shr 24) == 0x1FF'u64)
+        cpu.cpsr.carry = four_iters and (bit(rm_val, 31) xor bit(rs_val, 31))
+      else:
+        let four_iters = rs_val > 0xFFFFFF'u32
+        if four_iters and ((rs_val shr 29) == 7):
+          # Rs bits [31:29] all set: Booth chunk 15 cancels, carry from chunk 16
+          cpu.cpsr.carry = bit(rm_val, 30)
+        else:
+          cpu.cpsr.carry = four_iters and bit(rm_val, 31)
   if rdhi != 15 and rdlo != 15: cpu.step_arm()
 
 proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) =
