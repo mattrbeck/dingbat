@@ -112,6 +112,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let fill = bit(ctrl, 24)
     let word_mode = bit(ctrl, 26)
     if word_mode:
+      src = src and not 3'u32
+      dst = dst and not 3'u32
       let fill_val = cpu.gba.bus.read_word(src)
       for i in 0'u32 ..< count:
         let val = if fill: fill_val else: cpu.gba.bus.read_word(src)
@@ -119,6 +121,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         if not fill: src += 4
         dst += 4
     else:
+      src = src and not 1'u32
+      dst = dst and not 1'u32
       let fill_val = cpu.gba.bus.read_half(src)
       for i in 0'u32 ..< count:
         let val = if fill: fill_val else: cpu.gba.bus.read_half(src)
