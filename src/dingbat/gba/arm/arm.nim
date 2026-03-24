@@ -1,5 +1,20 @@
 # ARM instruction handlers (included by gba.nim)
 
+proc bios_arctan(a: int32): int32 =
+  ## GBA BIOS ArcTan polynomial approximation.
+  ## Input: tan value in 1.14 fixed-point (signed).
+  ## Output: theta where 0x4000 = pi/2.
+  let r1 = -((a * a) shr 14)
+  var r3 = ((int32(0xA9) * r1) shr 14)
+  r3 = ((r3 + int32(0x0390)) * r1) shr 14
+  r3 = ((r3 + int32(0x091C)) * r1) shr 14
+  r3 = ((r3 + int32(0x0FB6)) * r1) shr 14
+  r3 = ((r3 + int32(0x16AA)) * r1) shr 14
+  r3 = ((r3 + int32(0x2081)) * r1) shr 14
+  r3 = ((r3 + int32(0x3651)) * r1) shr 14
+  r3 = r3 + int32(0xA2F9)
+  result = (a * r3) shr 14
+
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
@@ -57,6 +72,31 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           result_val = result_val shr 1
         bit_val = bit_val shr 2
       cpu.r[0] = result_val
+  of 0x09:  # ArcTan
+    cpu.r[0] = cast[uint32](bios_arctan(cast[int32](cpu.r[0])))
+  of 0x0A:  # ArcTan2
+    let x = cast[int16](cpu.r[0] and 0xFFFF)
+    let y = cast[int16](cpu.r[1] and 0xFFFF)
+    if x == 0 and y == 0:
+      cpu.r[0] = 0
+    elif y == 0:
+      cpu.r[0] = if x > 0: 0'u32 else: 0x8000'u32
+    elif x == 0:
+      cpu.r[0] = if y > 0: 0x4000'u32 else: 0xC000'u32
+    else:
+      if abs(int32(x)) > abs(int32(y)):
+        cpu.r[0] = cast[uint32](bios_arctan((int32(y) shl 14) div int32(x)))
+        if x < 0:
+          if y >= 0:
+            cpu.r[0] = cpu.r[0] + 0x8000'u32
+          else:
+            cpu.r[0] = cpu.r[0] - 0x8000'u32
+      else:
+        cpu.r[0] = cast[uint32](bios_arctan((int32(x) shl 14) div int32(y)))
+        if y > 0:
+          cpu.r[0] = 0x4000'u32 - cpu.r[0]
+        else:
+          cpu.r[0] = 0xC000'u32 - cpu.r[0]
   of 0x0B:  # CpuSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
