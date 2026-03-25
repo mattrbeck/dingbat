@@ -174,6 +174,30 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         dst += 2
     cpu.r[0] = src
     cpu.r[1] = dst
+  of 0x01:  # RegisterRamReset
+    let flags = cpu.r[0]
+    if bit(flags, 0):  # Clear 256K EWRAM
+      for i in 0 ..< 0x40000: cpu.gba.bus.wram_board[i] = 0
+    if bit(flags, 1):  # Clear 32K IWRAM (except last 0x200)
+      for i in 0 ..< 0x7E00: cpu.gba.bus.wram_chip[i] = 0
+    if bit(flags, 2):  # Clear palette
+      for i in 0 ..< 0x400: cpu.gba.ppu.pram[i] = 0
+    if bit(flags, 3):  # Clear VRAM
+      for i in 0 ..< 0x18000: cpu.gba.ppu.vram[i] = 0
+    if bit(flags, 4):  # Clear OAM
+      for i in 0 ..< 0x400: cpu.gba.ppu.oam[i] = 0
+    if bit(flags, 5):  # Reset SIO
+      cpu.gba.serial.siocnt = 0
+      cpu.gba.serial.rcnt = 0
+    if bit(flags, 6):  # Reset sound
+      cpu.gba.apu.soundcnt_l = SOUNDCNT_L()
+      cpu.gba.apu.soundcnt_h = SOUNDCNT_H()
+      cpu.gba.apu.sound_enabled = false
+    if bit(flags, 7):  # Reset other I/O
+      cpu.gba.ppu.dispcnt = DISPCNT()
+      cpu.gba.interrupts.reg_ie = cast[InterruptReg](0'u16)
+      cpu.gba.interrupts.reg_if = cast[InterruptReg](0'u16)
+      cpu.gba.interrupts.ime = false
   of 0x0C:  # CpuFastSet
     var src = cpu.r[0] and not 3'u32
     var dst = cpu.r[1] and not 3'u32
@@ -188,8 +212,91 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       dst += 4
     cpu.r[0] = src
     cpu.r[1] = dst
+  of 0x0F:  # ObjAffineSet
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    var count = cpu.r[2]
+    let dst_stride = cpu.r[3]
+    while count > 0:
+      let sx = cast[int32](int16(cpu.gba.bus.read_half(src)))
+      let sy = cast[int32](int16(cpu.gba.bus.read_half(src + 2)))
+      let angle = uint32(cpu.gba.bus.read_half(src + 4))
+      src += 8
+      # GBA angle: 0x0000..0xFFFF = 0..2*pi
+      let theta = float64(angle) / 32768.0 * 3.14159265358979323846
+      let cos_val = int16(float64(sx) * cos(theta) / 256.0)
+      let sin_val = int16(float64(sx) * sin(theta) / 256.0)
+      let cos_val_y = int16(float64(sy) * cos(theta) / 256.0)
+      let sin_val_y = int16(float64(sy) * sin(theta) / 256.0)
+      cpu.gba.bus.write_half(dst, uint16(cos_val));             dst += dst_stride  # pa
+      cpu.gba.bus.write_half(dst, uint16(cast[uint16](-sin_val))); dst += dst_stride  # pb
+      cpu.gba.bus.write_half(dst, uint16(sin_val_y));           dst += dst_stride  # pc
+      cpu.gba.bus.write_half(dst, uint16(cos_val_y));           dst += dst_stride  # pd
+      count -= 1
+  of 0x11:  # LZ77UnCompWram (8-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var remaining = decomp_len
+    while remaining > 0:
+      let flags = cpu.gba.bus[src]; src += 1
+      for i in 0 ..< 8:
+        if remaining == 0: break
+        if bit(flags, 7 - i):
+          # Compressed block
+          let b1 = uint32(cpu.gba.bus[src]); src += 1
+          let b2 = uint32(cpu.gba.bus[src]); src += 1
+          let length = (b1 shr 4) + 3
+          let offset = ((b1 and 0xF) shl 8) or b2
+          for j in 0'u32 ..< length:
+            if remaining == 0: break
+            cpu.gba.bus[dst] = cpu.gba.bus[dst - offset - 1]
+            dst += 1; remaining -= 1
+        else:
+          # Uncompressed byte
+          cpu.gba.bus[dst] = cpu.gba.bus[src]
+          src += 1; dst += 1; remaining -= 1
+  of 0x12:  # LZ77UnCompVram (16-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var remaining = decomp_len
+    var out_buf: uint16 = 0
+    var out_idx: uint32 = 0
+    while remaining > 0:
+      let flags = cpu.gba.bus[src]; src += 1
+      for i in 0 ..< 8:
+        if remaining == 0: break
+        if bit(flags, 7 - i):
+          # Compressed block
+          let b1 = uint32(cpu.gba.bus[src]); src += 1
+          let b2 = uint32(cpu.gba.bus[src]); src += 1
+          let length = (b1 shr 4) + 3
+          let offset = ((b1 and 0xF) shl 8) or b2
+          for j in 0'u32 ..< length:
+            if remaining == 0: break
+            let val = cpu.gba.bus[dst - offset - 1]
+            if (out_idx and 1) == 0:
+              out_buf = uint16(val)
+            else:
+              out_buf = out_buf or (uint16(val) shl 8)
+              cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
+            dst += 1; remaining -= 1; out_idx += 1
+        else:
+          # Uncompressed byte
+          let val = cpu.gba.bus[src]; src += 1
+          if (out_idx and 1) == 0:
+            out_buf = uint16(val)
+          else:
+            out_buf = out_buf or (uint16(val) shl 8)
+            cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
+          dst += 1; remaining -= 1; out_idx += 1
   else:
-    discard  # unimplemented SWI: return immediately (no-op)
+    echo "unimplemented SWI: 0x", toHex(swi_num, 2)
 
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
   cpu.und()

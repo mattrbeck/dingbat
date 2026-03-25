@@ -1,7 +1,7 @@
 # GBA emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[options, times, os, strutils]
+import std/[options, times, os, strutils, math]
 import ../common/[util, input, scheduler, emu, resampler]
 when defined(test_harness):
   import ../common/test_output
