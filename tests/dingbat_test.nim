@@ -104,11 +104,11 @@ proc main() =
   let test_out = new_test_output()
 
   if is_gba:
-    let emu = new_gba(bios_path, rom_path, run_bios = false)
+    let is_hle = bios_path == "hle"
+    let actual_bios = if is_hle: "" else: bios_path
+    let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
-    if bios_path == "hle":
-      emu.bios_path = ""  # Force HLE SWI dispatch
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
       emu.step_frame()

@@ -304,42 +304,42 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           cpu.gba.bus[dst] = cpu.gba.bus[src]
           src += 1; dst += 1; remaining -= 1
   of 0x12:  # LZ77UnCompVram (16-bit writes)
+    # Decompress into a local buffer first, then copy to VRAM via halfword
+    # writes.  Direct VRAM decompression breaks back-references because
+    # bytes are buffered into halfwords and not flushed until the second
+    # byte arrives — reads of the unflushed byte hit stale VRAM.
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
-    var dst = cpu.r[1]
-    var remaining = decomp_len
-    var out_buf: uint16 = 0
-    var out_idx: uint32 = 0
-    while remaining > 0:
+    var buf = newSeq[uint8](decomp_len)
+    var buf_pos: uint32 = 0
+    while buf_pos < decomp_len:
       let flags = cpu.gba.bus[src]; src += 1
       for i in 0 ..< 8:
-        if remaining == 0: break
+        if buf_pos >= decomp_len: break
         if bit(flags, 7 - i):
-          # Compressed block
           let b1 = uint32(cpu.gba.bus[src]); src += 1
           let b2 = uint32(cpu.gba.bus[src]); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
           for j in 0'u32 ..< length:
-            if remaining == 0: break
-            let val = cpu.gba.bus[dst - offset - 1]
-            if (out_idx and 1) == 0:
-              out_buf = uint16(val)
-            else:
-              out_buf = out_buf or (uint16(val) shl 8)
-              cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
-            dst += 1; remaining -= 1; out_idx += 1
+            if buf_pos >= decomp_len: break
+            buf[buf_pos] = buf[buf_pos - offset - 1]
+            buf_pos += 1
         else:
-          # Uncompressed byte
-          let val = cpu.gba.bus[src]; src += 1
-          if (out_idx and 1) == 0:
-            out_buf = uint16(val)
-          else:
-            out_buf = out_buf or (uint16(val) shl 8)
-            cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
-          dst += 1; remaining -= 1; out_idx += 1
+          buf[buf_pos] = cpu.gba.bus[src]
+          src += 1; buf_pos += 1
+    # Write to destination using halfword writes
+    var dst = cpu.r[1]
+    var idx: uint32 = 0
+    while idx < decomp_len:
+      if idx + 1 < decomp_len:
+        cpu.gba.bus.write_half(dst, uint16(buf[idx]) or (uint16(buf[idx + 1]) shl 8))
+        dst += 2; idx += 2
+      else:
+        cpu.gba.bus.write_half(dst, uint16(buf[idx]))
+        dst += 2; idx += 1
   of 0x10:  # BitUnPack
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -767,7 +767,7 @@ proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + offset))
 
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
-  if cpu.gba.bios_path == "":
+  if cpu.gba.use_hle:
     let swi_num = bits_range(instr, 16, 23)
     cpu.hle_swi(swi_num)
     cpu.step_arm()

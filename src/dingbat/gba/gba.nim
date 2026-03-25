@@ -310,6 +310,7 @@ type
     bios_path*:  string
     rom_path*:   string
     run_bios*:   bool
+    use_hle*:    bool
     scheduler*:  Scheduler
     cartridge*:  Cartridge
     storage*:    Storage
@@ -445,11 +446,12 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
 
 # ==================== GBA PROCS ====================
 
-proc new_gba*(bios_path, rom_path: string; run_bios: bool): GBA =
+proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false): GBA =
   result = GBA(
     bios_path: bios_path,
     rom_path:  rom_path,
     run_bios:  run_bios,
+    use_hle:   use_hle,
   )
   result.scheduler = new_scheduler()
   result.cartridge = new_cartridge(rom_path)

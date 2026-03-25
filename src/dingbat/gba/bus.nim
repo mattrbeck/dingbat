@@ -22,11 +22,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # Fall back to embedded BIOS
     for i in 0 ..< result.bios.len:
       result.bios[i] = byte(EMBEDDED_BIOS[i])
-    if gba.bios_path != "":
-      # No external file found — mark as embedded so SWI dispatch
-      # uses real BIOS code.  When bios_path is "" (HLE mode),
-      # leave it empty so SWI dispatch routes to hle_swi().
-      gba.bios_path = "embedded"
+    gba.bios_path = "embedded"
   result.gpio = new_gpio(gba)
 
 proc bus_page(address: uint32): int {.inline.} =

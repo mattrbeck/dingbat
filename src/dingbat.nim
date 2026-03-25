@@ -217,7 +217,7 @@ proc load_rom(path: string) =
     setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
   else:
     let bios = app.cfg.bios_path
-    app.gba_emu = new_gba(bios, path, app.cfg.run_bios)
+    app.gba_emu = new_gba(bios, path, app.cfg.run_bios, app.cfg.use_hle)
     app.gba_emu.post_init()
     app.gb_emu = nil
     app.emu_kind = ekGBA
@@ -501,8 +501,8 @@ proc main() =
   else: echo "Too many arguments."; system.quit(1)
 
   let cfg = load_config()
-  if use_hle: cfg.bios_path = ""
-  elif has_bios_arg: cfg.bios_path = bios_path
+  if use_hle: cfg.use_hle = true
+  if has_bios_arg: cfg.bios_path = bios_path
   if cli_run_bios: cfg.run_bios = true
 
   # SDL2 init
