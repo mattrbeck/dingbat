@@ -31,7 +31,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
   case swi_num
+  of 0x00:  # SoftReset
+    let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
+    for i in 0x7E00 ..< 0x8000:
+      cpu.gba.bus.wram_chip[i] = 0
+    for i in 0 .. 12:
+      cpu.r[i] = 0
+    cpu.reg_banks[mode_bank(modeUSR)][5] = 0x03007F00'u32
+    cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
+    cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
+    cpu.cpsr = cast[PSR](uint32(modeSYS))
+    let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
+    discard cpu.set_reg(15, reset_addr)
   of 0x02:  # Halt
+    cpu.halted = true
+  of 0x03:  # Stop
     cpu.halted = true
   of 0x06:  # Div
     let numer = int64(cast[int32](cpu.r[0]))
@@ -212,6 +226,37 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       dst += 4
     cpu.r[0] = src
     cpu.r[1] = dst
+  of 0x0D:  # GetBiosChecksum
+    cpu.r[0] = 0xBAAE187F'u32
+  of 0x0E:  # BgAffineSet
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    let count = cpu.r[2]
+    for i in 0'u32 ..< count:
+      let center_org_x = cast[int32](cpu.gba.bus.read_word(src))
+      let center_org_y = cast[int32](cpu.gba.bus.read_word(src + 4))
+      let display_cx = int32(cast[int16](cpu.gba.bus.read_half(src + 8)))
+      let display_cy = int32(cast[int16](cpu.gba.bus.read_half(src + 10)))
+      let scale_x = cast[int16](cpu.gba.bus.read_half(src + 12))
+      let scale_y = cast[int16](cpu.gba.bus.read_half(src + 14))
+      let angle = cpu.gba.bus.read_half(src + 16)
+      let theta = float64(angle) / 32768.0 * PI
+      let cos_t = cos(theta)
+      let sin_t = sin(theta)
+      let pa = int16(float64(scale_x) * cos_t)
+      let pb = int16(-float64(scale_x) * sin_t)
+      let pc = int16(float64(scale_y) * sin_t)
+      let pd = int16(float64(scale_y) * cos_t)
+      let start_x = int32(center_org_x) - (int32(pa) * display_cx + int32(pb) * display_cy)
+      let start_y = int32(center_org_y) - (int32(pc) * display_cx + int32(pd) * display_cy)
+      cpu.gba.bus.write_half(dst, cast[uint16](pa))
+      cpu.gba.bus.write_half(dst + 2, cast[uint16](pb))
+      cpu.gba.bus.write_half(dst + 4, cast[uint16](pc))
+      cpu.gba.bus.write_half(dst + 6, cast[uint16](pd))
+      cpu.gba.bus.write_word(dst + 8, cast[uint32](start_x))
+      cpu.gba.bus.write_word(dst + 12, cast[uint32](start_y))
+      src += 20
+      dst += 16
   of 0x0F:  # ObjAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -295,6 +340,213 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             out_buf = out_buf or (uint16(val) shl 8)
             cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
           dst += 1; remaining -= 1; out_idx += 1
+  of 0x10:  # BitUnPack
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    let info = cpu.r[2]
+    let src_len = uint32(cpu.gba.bus.read_half(info))
+    let src_width = uint32(cpu.gba.bus[info + 2])
+    let dest_width = uint32(cpu.gba.bus[info + 3])
+    let data_offset = cpu.gba.bus.read_word(info + 4)
+    let offset_val = data_offset and 0x7FFFFFFF'u32
+    let zero_flag = bit(data_offset, 31)
+    var out_word: uint32 = 0
+    var out_bits: uint32 = 0
+    let src_mask = (1'u32 shl src_width) - 1
+    for i in 0'u32 ..< src_len:
+      let byte_val = uint32(cpu.gba.bus[src]); src += 1
+      var bit_pos: uint32 = 0
+      while bit_pos < 8:
+        let val = (byte_val shr bit_pos) and src_mask
+        var expanded: uint32
+        if val != 0 or zero_flag:
+          expanded = val + offset_val
+        else:
+          expanded = 0
+        out_word = out_word or ((expanded and ((1'u32 shl dest_width) - 1)) shl out_bits)
+        out_bits += dest_width
+        if out_bits >= 32:
+          cpu.gba.bus.write_word(dst, out_word)
+          dst += 4
+          out_word = 0
+          out_bits = 0
+        bit_pos += src_width
+  of 0x13:  # HuffUnComp
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let data_size = header and 0xF  # 4 or 8 bits
+    let decomp_len = header shr 8
+    src += 4
+    let tree_size = uint32(cpu.gba.bus[src])
+    let tree_start = src + 1
+    let data_start = src + (tree_size * 2) + 2
+    # Align data start to 4-byte boundary
+    var data_pos = (data_start + 3) and not 3'u32
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var out_word: uint32 = 0
+    var out_bits: uint32 = 0
+    var cur_node = tree_start
+    var cur_word: uint32 = 0
+    var bits_left: int = 0
+    while written < decomp_len:
+      if bits_left == 0:
+        cur_word = cpu.gba.bus.read_word(data_pos)
+        data_pos += 4
+        bits_left = 32
+      let cur_bit = (cur_word shr 31) and 1
+      cur_word = cur_word shl 1
+      bits_left -= 1
+      let node_val = uint32(cpu.gba.bus[cur_node])
+      let child_offset = node_val and 0x3F
+      let right_is_leaf = bit(node_val, 6)
+      let left_is_leaf = bit(node_val, 7)
+      let next_addr = (cur_node and not 1'u32) + (child_offset + 1) * 2
+      let is_right = cur_bit == 1
+      let child_addr = next_addr + (if is_right: 1'u32 else: 0'u32)
+      let is_leaf = if is_right: right_is_leaf else: left_is_leaf
+      if is_leaf:
+        let leaf_val = uint32(cpu.gba.bus[child_addr])
+        if data_size == 4:
+          out_word = out_word or (leaf_val shl out_bits)
+          out_bits += 4
+        else:
+          out_word = out_word or (leaf_val shl out_bits)
+          out_bits += 8
+        if out_bits >= 32:
+          cpu.gba.bus.write_word(dst, out_word)
+          dst += 4
+          written += 4
+          out_word = 0
+          out_bits = 0
+        cur_node = tree_start
+      else:
+        cur_node = child_addr
+  of 0x14:  # RLUnCompWram (8-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    while written < decomp_len:
+      let flag = uint32(cpu.gba.bus[src]); src += 1
+      if bit(flag, 7):
+        # Compressed run
+        let length = (flag and 0x7F) + 3
+        let val = cpu.gba.bus[src]; src += 1
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          cpu.gba.bus[dst] = val
+          dst += 1; written += 1
+      else:
+        # Uncompressed run
+        let length = (flag and 0x7F) + 1
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          cpu.gba.bus[dst] = cpu.gba.bus[src]
+          src += 1; dst += 1; written += 1
+  of 0x15:  # RLUnCompVram (16-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var out_buf: uint16 = 0
+    var out_idx: uint32 = 0
+    while written < decomp_len:
+      let flag = uint32(cpu.gba.bus[src]); src += 1
+      if bit(flag, 7):
+        # Compressed run
+        let length = (flag and 0x7F) + 3
+        let val = cpu.gba.bus[src]; src += 1
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          if (out_idx and 1) == 0:
+            out_buf = uint16(val)
+          else:
+            out_buf = out_buf or (uint16(val) shl 8)
+            cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
+          dst += 1; written += 1; out_idx += 1
+      else:
+        # Uncompressed run
+        let length = (flag and 0x7F) + 1
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          let val = cpu.gba.bus[src]; src += 1
+          if (out_idx and 1) == 0:
+            out_buf = uint16(val)
+          else:
+            out_buf = out_buf or (uint16(val) shl 8)
+            cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
+          dst += 1; written += 1; out_idx += 1
+  of 0x16:  # Diff8bitUnFilterWram (8-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var prev = cpu.gba.bus[src]; src += 1
+    cpu.gba.bus[dst] = prev
+    dst += 1; written += 1
+    while written < decomp_len:
+      let diff = cpu.gba.bus[src]; src += 1
+      prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
+      cpu.gba.bus[dst] = prev
+      dst += 1; written += 1
+  of 0x17:  # Diff8bitUnFilterVram (16-bit writes)
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var out_buf: uint16 = 0
+    var out_idx: uint32 = 0
+    var prev = cpu.gba.bus[src]; src += 1
+    # Output first byte
+    out_buf = uint16(prev)
+    out_idx += 1
+    dst += 1; written += 1
+    while written < decomp_len:
+      let diff = cpu.gba.bus[src]; src += 1
+      prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
+      if (out_idx and 1) == 0:
+        out_buf = uint16(prev)
+      else:
+        out_buf = out_buf or (uint16(prev) shl 8)
+        cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
+      dst += 1; written += 1; out_idx += 1
+  of 0x18:  # Diff16bitUnFilter
+    var src = cpu.r[0]
+    let header = cpu.gba.bus.read_word(src)
+    let decomp_len = header shr 8
+    src += 4
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var prev = cpu.gba.bus.read_half(src); src += 2
+    cpu.gba.bus.write_half(dst, prev)
+    dst += 2; written += 2
+    while written < decomp_len:
+      let diff = cpu.gba.bus.read_half(src); src += 2
+      prev = uint16((uint32(prev) + uint32(diff)) and 0xFFFF)
+      cpu.gba.bus.write_half(dst, prev)
+      dst += 2; written += 2
+  of 0x19:  # SoundBias
+    cpu.gba.apu.soundbias.bias_level = uint16(cpu.r[0] and 0x3FF)
+  of 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
+    discard  # Sound driver / music player stubs (games use their own engine)
+  of 0x1F:  # MidiKey2Freq
+    let base_freq = cpu.gba.bus.read_word(cpu.r[0] + 4)
+    let key = cast[int32](cpu.r[1])
+    let pitch = cast[int32](cpu.r[2])
+    let exponent = (float64(key) - 60.0 + float64(pitch) / 256.0) / 12.0
+    let freq = float64(base_freq) * pow(2.0, exponent)
+    cpu.r[0] = uint32(freq)
+  of 0x25:  # MultiBoot
+    cpu.r[0] = 1'u32  # Return failure (link cable not emulated)
   else:
     echo "unimplemented SWI: 0x", toHex(swi_num, 2)
 
