@@ -285,10 +285,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let theta = float64(angle) / 32768.0 * PI
       let cos_t = cos(theta)
       let sin_t = sin(theta)
-      let pa = int16(float64(scale_x) * cos_t)
-      let pb = int16(-float64(scale_x) * sin_t)
-      let pc = int16(float64(scale_y) * sin_t)
-      let pd = int16(float64(scale_y) * cos_t)
+      let pa = cast[int16](int32(float64(scale_x) * cos_t))
+      let pb = cast[int16](int32(-float64(scale_x) * sin_t))
+      let pc = cast[int16](int32(float64(scale_y) * sin_t))
+      let pd = cast[int16](int32(float64(scale_y) * cos_t))
       let start_x = int32(center_org_x) - (int32(pa) * display_cx + int32(pb) * display_cy)
       let start_y = int32(center_org_y) - (int32(pc) * display_cx + int32(pd) * display_cy)
       cpu.gba.bus.write_half(dst, cast[uint16](pa))
@@ -311,10 +311,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       src += 8
       # GBA angle: 0x0000..0xFFFF = 0..2*pi
       let theta = float64(angle) / 32768.0 * 3.14159265358979323846
-      let cos_val = int16(float64(sx) * cos(theta))
-      let sin_val = int16(float64(sx) * sin(theta))
-      let cos_val_y = int16(float64(sy) * cos(theta))
-      let sin_val_y = int16(float64(sy) * sin(theta))
+      let cos_val = cast[int16](int32(float64(sx) * cos(theta)))
+      let sin_val = cast[int16](int32(float64(sx) * sin(theta)))
+      let cos_val_y = cast[int16](int32(float64(sy) * cos(theta)))
+      let sin_val_y = cast[int16](int32(float64(sy) * sin(theta)))
       cpu.gba.bus.write_half(dst, uint16(cos_val));             dst += dst_stride  # pa
       cpu.gba.bus.write_half(dst, uint16(cast[uint16](-sin_val))); dst += dst_stride  # pb
       cpu.gba.bus.write_half(dst, uint16(sin_val_y));           dst += dst_stride  # pc
@@ -811,7 +811,7 @@ proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
 # BISECT: SWI numbers that use HLE when --hle is active; all others route through real BIOS.
 # Start empty (all real BIOS) to confirm the fix, then add SWIs back to narrow down the culprit.
 # Suggested groups: {0x00'u8..0x03'u8} | {0x06'u8..0x0A'u8} | {0x0B'u8, 0x0C'u8} | {0x0D'u8..0x11'u8}
-const hle_swi_set: set[uint8] = {0x00'u8..0x0A'u8, 0x0B'u8..0x18'u8}
+const hle_swi_set: set[uint8] = {0x00'u8..0xFF'u8}
 
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
