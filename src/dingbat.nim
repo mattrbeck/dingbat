@@ -517,6 +517,9 @@ proc main() =
     cfg.run_bios = true
   if has_bios_arg: cfg.bios_path = bios_path
   if cli_run_bios: cfg.run_bios = true
+  # Default to HLE when no BIOS is configured
+  if cfg.bios_path == "" and not has_bios_arg and not cfg.use_hle and not cfg.hle_after_bios:
+    cfg.use_hle = true
 
   # SDL2 init
   if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK) != SdlSuccess:

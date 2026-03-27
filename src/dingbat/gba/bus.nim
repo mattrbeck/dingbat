@@ -5,8 +5,11 @@ const ACCESS_TIMING_TABLE: array[2, array[16, int]] = [
   [1, 1, 6, 1, 1, 2, 2, 1, 4, 4, 4, 4, 4, 4, 4, 4],  # 32-bit
 ]
 
-# Embedded GBA BIOS — compiled into the binary so a real BIOS is always available.
-const EMBEDDED_BIOS = staticRead("bios.bin")
+proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
+  bios[offset + 0] = byte(value)
+  bios[offset + 1] = byte(value shr 8)
+  bios[offset + 2] = byte(value shr 16)
+  bios[offset + 3] = byte(value shr 24)
 
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
@@ -19,10 +22,19 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     discard f.readBytes(result.bios, 0, result.bios.len)
     f.close()
   else:
-    # Fall back to embedded BIOS
-    for i in 0 ..< result.bios.len:
-      result.bios[i] = byte(EMBEDDED_BIOS[i])
-    gba.bios_path = "embedded"
+    # Minimal BIOS stub: IRQ handler at 0x18 dispatches to user handler at [0x03FFFFFC].
+    #   0x18: stmfd sp!, {r0-r3, r12, lr}   E92D500F
+    #   0x1C: mov   r0, #0x04000000          E3A00301
+    #   0x20: add   lr, pc, #0               E28FE000
+    #   0x24: ldr   pc, [r0, #-4]            E510F004
+    #   0x28: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
+    #   0x2C: subs  pc, lr, #4               E25EF004
+    write_stub_u32(result.bios, 0x18, 0xE92D500F'u32)
+    write_stub_u32(result.bios, 0x1C, 0xE3A00301'u32)
+    write_stub_u32(result.bios, 0x20, 0xE28FE000'u32)
+    write_stub_u32(result.bios, 0x24, 0xE510F004'u32)
+    write_stub_u32(result.bios, 0x28, 0xE8BD500F'u32)
+    write_stub_u32(result.bios, 0x2C, 0xE25EF004'u32)
   result.gpio = new_gpio(gba)
 
 proc bus_page(address: uint32): int {.inline.} =

@@ -112,7 +112,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   else:
     stateKind = ekGBA
     let bios = if fileExists("bios.bin"): "bios.bin" else: ""
-    stateGba = new_gba(bios, path, false)
+    stateGba = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
     stateGba.post_init()
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_BGR555, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)

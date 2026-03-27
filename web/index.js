@@ -271,7 +271,7 @@ let pendingGbcBootrom = null;
 
 const updateBiosStatusText = async () => {
   if (pendingGbaBios === "remove") {
-    gbaBiosStatus.textContent = "Default (pending)";
+    gbaBiosStatus.textContent = "Not set (pending)";
   } else if (pendingGbaBios) {
     gbaBiosStatus.textContent = pendingGbaBios.name + " (pending)";
   } else {
