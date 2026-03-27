@@ -62,12 +62,12 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       let was_cascade = tim.tmcnt[num].cascade
       write(tim.tmcnt[num], value, 0)
       if tim.tmcnt[num].enable:
+        if not was_enabled:
+          tim.tm[num] = tim.tmd[num]
         if tim.tmcnt[num].cascade:
           tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
         elif not was_enabled or was_cascade:
           tim.cycle_enabled[num] = tim.gba.scheduler.cycles
-          if not was_enabled:
-            tim.tm[num] = tim.tmd[num]
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
       elif was_enabled:
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
