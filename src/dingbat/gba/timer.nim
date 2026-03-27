@@ -68,6 +68,14 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           tim.cycle_enabled[num] = tim.gba.scheduler.cycles
           if not was_enabled:
             tim.tm[num] = tim.tmd[num]
+          if num <= 1:
+            echo "DBG Timer", num, " started: reload=", tim.tmd[num],
+                 " freq=", tim.tmcnt[num].frequency, " irq=", tim.tmcnt[num].irq_enable
+            if num == 0:
+              let d1_src = tim.gba.dma.src[1]
+              let d2_src = tim.gba.dma.src[2]
+              echo "  DMA1 src=0x", toHex(d1_src, 8), " word[0]=0x", toHex(tim.gba.bus.read_word(d1_src), 8)
+              echo "  DMA2 src=0x", toHex(d2_src, 8), " word[0]=0x", toHex(tim.gba.bus.read_word(d2_src), 8)
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
       elif was_enabled:
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])

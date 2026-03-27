@@ -19,8 +19,9 @@ proc thumb_unconditional_branch*(cpu: CPU; instr: uint32) =
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + off_signed))
 
 proc thumb_software_interrupt*(cpu: CPU; instr: uint32) =
-  if cpu.gba.use_hle:
-    let swi_num = bits_range(instr, 0, 7)
+  let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
+  let swi_num = bits_range(instr, 0, 7)
+  if use_hle and uint8(swi_num) in hle_swi_set:
     cpu.hle_swi(swi_num)
     cpu.step_thumb()
   else:

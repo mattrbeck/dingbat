@@ -178,6 +178,7 @@ type
     gb_bootrom_path*:   string   # GB/GBC boot ROM path
     gb_fifo*:           bool     # use FIFO PPU renderer (default true)
     use_hle*:           bool     # use HLE BIOS for SWI calls
+    hle_after_bios*:    bool     # run real BIOS for init, then use HLE for SWI calls
 
 proc new_config*(): Config =
   Config(

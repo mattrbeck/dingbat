@@ -1,5 +1,7 @@
 # APU implementation (included by gba.nim)
 
+var dbg_nonzero_sample_count = 0  # DBG: track first non-zero DMA samples
+
 const APU_CHANNELS*       = 2
 const APU_BUFFER_SIZE*    = 1024
 const APU_SAMPLE_RATE*    = 32768
@@ -145,6 +147,12 @@ proc get_sample*(apu: APU) =
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   let (dma_a, dma_b) = apu.dma_channels.dma_channels_get_amplitude()
+  if dbg_nonzero_sample_count < 5 and (dma_a != 0 or dma_b != 0):
+    echo "DBG first DMA sample #", dbg_nonzero_sample_count,
+         ": dma_a=", dma_a, " dma_b=", dma_b,
+         " fifo_a_size=", apu.dma_channels.sizes[0],
+         " fifo_b_size=", apu.dma_channels.sizes[1]
+    dbg_nonzero_sample_count += 1
   let dma_a_scaled = int32(dma_a) shl apu.soundcnt_h.dma_sound_a_volume
   let dma_b_scaled = int32(dma_b) shl apu.soundcnt_h.dma_sound_b_volume
   let dma_left  = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_left)  + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_left)
@@ -210,14 +218,30 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
     case io_addr
     of 0x80: apu.soundcnt_l = cast[SOUNDCNT_L]((uint16(apu.soundcnt_l) and 0xFF00'u16) or (uint16(value) and 0x77'u16))  # bits 3,7 unused
     of 0x81: apu.soundcnt_l = cast[SOUNDCNT_L]((uint16(apu.soundcnt_l) and 0x00FF'u16) or (uint16(value) shl 8))
-    of 0x82: apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0xFF00'u16) or (uint16(value) and 0x0F'u16))  # bits 4-7 unused
-    of 0x83: apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))  # bits 11,15 unused
+    of 0x82:
+      apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0xFF00'u16) or (uint16(value) and 0x0F'u16))  # bits 4-7 unused
+      echo "DBG SOUNDCNT_H[lo]=0x", toHex(value, 2), " → 0x", toHex(uint16(apu.soundcnt_h), 4)
+    of 0x83:
+      # Bits 3,7 (= register bits 11,15) are write-only FIFO reset triggers
+      if bit(value, 3):  # FIFO A reset
+        for i in 0..31: apu.dma_channels.fifos[0][i] = 0
+        apu.dma_channels.positions[0] = 0
+        apu.dma_channels.sizes[0] = 0
+        apu.dma_channels.latches[0] = 0
+      if bit(value, 7):  # FIFO B reset
+        for i in 0..31: apu.dma_channels.fifos[1][i] = 0
+        apu.dma_channels.positions[1] = 0
+        apu.dma_channels.sizes[1] = 0
+        apu.dma_channels.latches[1] = 0
+      apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))
+      echo "DBG SOUNDCNT_H[hi]=0x", toHex(value, 2), " → 0x", toHex(uint16(apu.soundcnt_h), 4)
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:
         for addr in 0x60'u32..0x81'u32:
           apu[addr] = 0x00'u8
         apu.sound_enabled = false
       elif (value and 0x80) > 0 and not apu.sound_enabled:
+        echo "DBG sound re-enabled (SOUNDCNT_X write 0x84)"
         apu.sound_enabled = true
         apu.frame_sequencer_stage = 0
         apu.channel1.length_counter = 0

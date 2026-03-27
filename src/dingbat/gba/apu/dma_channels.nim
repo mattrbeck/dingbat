@@ -1,5 +1,7 @@
 # DMA sound channels (included by gba.nim)
 
+var dbg_fifo_nonzero_write_count: array[2, int]  # DBG: track first non-zero FIFO writes
+
 const DMA_CHANNELS_RANGE_LOW*  = 0xA0'u32
 const DMA_CHANNELS_RANGE_HIGH* = 0xA7'u32
 
@@ -21,6 +23,11 @@ proc dma_channels_read*(dc: DMAChannels; address: uint32): uint8 =
 proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
   let channel = int(bit(address, 2))
   if dc.sizes[channel] < 32:
+    if value != 0 and dbg_fifo_nonzero_write_count[channel] < 5:
+      echo "DBG FIFO", channel, " write #", dbg_fifo_nonzero_write_count[channel],
+           ": val=0x", toHex(value, 2), " (", cast[int8](value), ") addr=0x",
+           toHex(address, 8), " size=", dc.sizes[channel], " pos=", dc.positions[channel]
+      dbg_fifo_nonzero_write_count[channel] += 1
     dc.fifos[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = cast[int8](value)
     dc.sizes[channel] += 1
   else:

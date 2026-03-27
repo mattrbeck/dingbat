@@ -59,6 +59,12 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     if dma.dmacnt_h[channel].enable and not enabled:
       dma.src[channel] = dma.dmasad[channel]
       dma.dst[channel] = dma.dmadad[channel]
+      if dma.dmacnt_h[channel].start_timing == 3 and (channel == 1 or channel == 2):
+        echo "DBG FIFO DMA", channel, " enabled: sad=0x", toHex(dma.dmasad[channel], 8),
+             " dad=0x", toHex(dma.dmadad[channel], 8),
+             " src_ctrl=", dma.dmacnt_h[channel].source_control,
+             " repeat=", dma.dmacnt_h[channel].repeat,
+             " xfer=", dma.dmacnt_h[channel].xfer_type
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
         dma.trigger(channel)
   else:
@@ -95,6 +101,13 @@ proc trigger*(dma: DMA; channel: int) =
       len = 4
       word_size = 4
       dest_ctrl = 2  # Fixed
+      let ch_idx = channel - 1  # channel is 1 or 2; map to index 0 or 1
+      if dma.fifo_trigger_count[ch_idx] < 3:
+        let first_word = dma.gba.bus.read_word(dma.src[channel])
+        echo "DBG FIFO DMA", channel, " trigger#", dma.fifo_trigger_count[ch_idx],
+             " src=0x", toHex(dma.src[channel], 8),
+             " first_word=0x", toHex(first_word, 8)
+        dma.fifo_trigger_count[ch_idx] += 1
     elif channel == 3:
       echo "todo: video capture dma"
     else:

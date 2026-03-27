@@ -190,6 +190,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[1] = dst
   of 0x01:  # RegisterRamReset
     let flags = cpu.r[0]
+    echo "HLE RegisterRamReset: flags=0x", toHex(flags, 2), " pc=0x", toHex(cpu.r[15] - 8, 8)
     if bit(flags, 0):  # Clear 256K EWRAM
       for i in 0 ..< 0x40000: cpu.gba.bus.wram_board[i] = 0
     if bit(flags, 1):  # Clear 32K IWRAM (except last 0x200)
@@ -203,15 +204,56 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     if bit(flags, 5):  # Reset SIO
       cpu.gba.serial.siocnt = 0
       cpu.gba.serial.rcnt = 0
-    if bit(flags, 6):  # Reset sound
-      cpu.gba.apu.soundcnt_l = SOUNDCNT_L()
+    if bit(flags, 6):  # Reset sound (0x4000060–0x4000084)
+      # The real BIOS sweeps 0x60–0x84: zeroes SOUNDCNT_L (0x80), SOUNDCNT_H (0x82),
+      # then writes 0 to SOUNDCNT_X (0x84) which internally clears 0x60–0x81 and
+      # disables sound. It does NOT touch SOUNDBIAS (0x88), wave RAM (0x90), or
+      # FIFO addresses (0xA0) — games rely on SOUNDBIAS keeping its power-on default.
+      cpu.gba.apu.sound_enabled = true
+      for offset in 0x60'u32..0x84'u32:
+        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      # 0xA0–0xA7 (FIFOs) are write-gated after sound is disabled; reset directly
+      for ch in 0..1:
+        for i in 0..31: cpu.gba.apu.dma_channels.fifos[ch][i] = 0
+        cpu.gba.apu.dma_channels.positions[ch] = 0
+        cpu.gba.apu.dma_channels.sizes[ch]     = 0
+        cpu.gba.apu.dma_channels.latches[ch]   = 0
+      # SOUNDCNT_H bits 11/15 (FIFO reset triggers) are masked in the bus write handler;
+      # no bus path can fully zero them — reset directly
       cpu.gba.apu.soundcnt_h = SOUNDCNT_H()
-      cpu.gba.apu.sound_enabled = false
-    if bit(flags, 7):  # Reset other I/O
-      cpu.gba.ppu.dispcnt = DISPCNT()
-      cpu.gba.interrupts.reg_ie = cast[InterruptReg](0'u16)
-      cpu.gba.interrupts.reg_if = cast[InterruptReg](0'u16)
-      cpu.gba.interrupts.ime = false
+    if bit(flags, 7):  # Reset other I/O: LCD (0x000–0x05F) and DMA/timer/etc. (0x0B0–0x1FF)
+      for offset in 0x000'u32..0x05F'u32:
+        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      for offset in 0x0B0'u32..0x1FF'u32:
+        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      # NOTE: 0x200–0x20B (IE, IF, IME) are NOT part of the real BIOS sweep — stop at 0x1FF
+    # Simulate the cycle cost of the real BIOS RegisterRamReset.
+    # The real BIOS uses CpuSet (STMIA loops) to clear memory:
+    #   EWRAM: 64K words × ~3 cyc/word (2 wait-state)  ≈ 192K
+    #   IWRAM: ~2K words × ~1 cyc/word                  ≈   2K
+    #   VRAM:  24K words × ~2 cyc/word                  ≈  48K
+    #   Palette+OAM+I/O+overhead                         ≈   8K
+    # Total ≈ 250K cycles for flags=0xFF.
+    # Without this, HLE is instantaneous and VBlank/timer scheduling diverges
+    # from the real BIOS path, causing audio buffer fill timing mismatches.
+    var hle_cycles = 0
+    if bit(flags, 0): hle_cycles += 192000  # EWRAM
+    if bit(flags, 1): hle_cycles += 2000    # IWRAM
+    if bit(flags, 2): hle_cycles += 500     # Palette
+    if bit(flags, 3): hle_cycles += 48000   # VRAM
+    if bit(flags, 4): hle_cycles += 500     # OAM
+    if bit(flags, 5) or bit(flags, 6) or bit(flags, 7): hle_cycles += 5000  # I/O sweeps + overhead
+    cpu.gba.bus.cycles += hle_cycles
+    echo "  post-reset: snd_en=", cpu.gba.apu.sound_enabled,
+         " sndcnt_h=0x", toHex(uint16(cpu.gba.apu.soundcnt_h), 4),
+         " soundbias=0x", toHex(uint16(cpu.gba.apu.soundbias), 4),
+         " bias_level=", cpu.gba.apu.soundbias.bias_level,
+         " dma1.en=", cpu.gba.dma.dmacnt_h[1].enable,
+         " dma1.sad=0x", toHex(cpu.gba.dma.dmasad[1], 8),
+         " tm0.en=", cpu.gba.timer.tmcnt[0].enable,
+         " tm0.tmd=", cpu.gba.timer.tmd[0],
+         " ie=0x", toHex(uint16(cpu.gba.interrupts.reg_ie), 4),
+         " ime=", cpu.gba.interrupts.ime
   of 0x0C:  # CpuFastSet
     var src = cpu.r[0] and not 3'u32
     var dst = cpu.r[1] and not 3'u32
@@ -766,9 +808,15 @@ proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
   when link: discard cpu.set_reg(14, cpu.r[15] - 4)
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + offset))
 
+# BISECT: SWI numbers that use HLE when --hle is active; all others route through real BIOS.
+# Start empty (all real BIOS) to confirm the fix, then add SWIs back to narrow down the culprit.
+# Suggested groups: {0x00'u8..0x03'u8} | {0x06'u8..0x0A'u8} | {0x0B'u8, 0x0C'u8} | {0x0D'u8..0x11'u8}
+const hle_swi_set: set[uint8] = {0x01'u8}
+
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
-  if cpu.gba.use_hle:
-    let swi_num = bits_range(instr, 16, 23)
+  let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
+  let swi_num = bits_range(instr, 16, 23)
+  if use_hle and uint8(swi_num) in hle_swi_set:
     cpu.hle_swi(swi_num)
     cpu.step_arm()
   else:

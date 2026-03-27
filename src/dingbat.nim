@@ -87,6 +87,7 @@ proc print_help() =
   echo "Options:"
   echo "  -h, --help       Show this help message"
   echo "  --hle            Use HLE BIOS (no external BIOS file needed)"
+  echo "  --hle-after-bios Run real BIOS for init, then use HLE for SWI calls"
   echo "  --run-bios       Run the BIOS on startup"
   echo "  --skip-bios      Skip the BIOS on startup (default)"
   echo "  --version        Print version"
@@ -217,7 +218,7 @@ proc load_rom(path: string) =
     setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
   else:
     let bios = app.cfg.bios_path
-    app.gba_emu = new_gba(bios, path, app.cfg.run_bios, app.cfg.use_hle)
+    app.gba_emu = new_gba(bios, path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
     app.gba_emu.post_init()
     app.gb_emu = nil
     app.emu_kind = ekGBA
@@ -475,7 +476,8 @@ proc main() =
   var rom_path     = ""
   var cli_run_bios = false
   var has_bios_arg = false
-  var use_hle      = false
+  var use_hle        = false
+  var hle_after_bios = false
   var pos_args: seq[string]
 
   var p = initOptParser(commandLineParams())
@@ -487,8 +489,9 @@ proc main() =
       case p.key
       of "h", "help":  print_help(); system.quit(0)
       of "version":    echo VERSION; system.quit(0)
-      of "hle":        use_hle = true
-      of "run-bios":   cli_run_bios = true
+      of "hle":            use_hle = true
+      of "hle-after-bios": hle_after_bios = true
+      of "run-bios":       cli_run_bios = true
       of "skip-bios":  cli_run_bios = false
       else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
@@ -504,6 +507,9 @@ proc main() =
   if use_hle:
     cfg.use_hle = true
     cfg.run_bios = false
+  if hle_after_bios:
+    cfg.hle_after_bios = true
+    cfg.run_bios = true
   if has_bios_arg: cfg.bios_path = bios_path
   if cli_run_bios: cfg.run_bios = true
 
