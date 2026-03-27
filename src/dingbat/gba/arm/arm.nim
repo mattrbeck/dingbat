@@ -305,8 +305,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var count = cpu.r[2]
     let dst_stride = cpu.r[3]
     while count > 0:
-      let sx = cast[int32](int16(cpu.gba.bus.read_half(src)))
-      let sy = cast[int32](int16(cpu.gba.bus.read_half(src + 2)))
+      let sx = cast[int32](cast[int16](cpu.gba.bus.read_half(src)))
+      let sy = cast[int32](cast[int16](cpu.gba.bus.read_half(src + 2)))
       let angle = uint32(cpu.gba.bus.read_half(src + 4))
       src += 8
       # GBA angle: 0x0000..0xFFFF = 0..2*pi
@@ -811,7 +811,7 @@ proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
 # BISECT: SWI numbers that use HLE when --hle is active; all others route through real BIOS.
 # Start empty (all real BIOS) to confirm the fix, then add SWIs back to narrow down the culprit.
 # Suggested groups: {0x00'u8..0x03'u8} | {0x06'u8..0x0A'u8} | {0x0B'u8, 0x0C'u8} | {0x0D'u8..0x11'u8}
-const hle_swi_set: set[uint8] = {0x01'u8}
+const hle_swi_set: set[uint8] = {0x00'u8..0x0A'u8, 0x0B'u8..0x18'u8}
 
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
