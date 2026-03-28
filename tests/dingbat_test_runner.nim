@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm]
+import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt]
 import png_reader
 
 const RomCacheDir = "/tmp/dingbat-test-roms"
@@ -368,12 +368,15 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
 
 proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     regressions: var seq[string];
-                    detail: var seq[MgbaSuiteDetail]): SuiteResults =
+                    detail: var seq[MgbaSuiteDetail];
+                    bios_path: string = ""): SuiteResults =
   echo &"\n=== GBA - mGBA Test Suite ==="
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/download/v1.0/suite.gba",
     "mgba-suite.gba")
-  let cmd = &"{harness} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
+  var cmd = &"{harness} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
+  if bios_path.len > 0:
+    cmd.add(&" --bios={bios_path.quoteShell}")
   let (output, code) = execCmdEx(cmd, options = {poUsePath})
   var results: seq[TestResult]
   var current_suite = ""
@@ -492,6 +495,21 @@ proc main() =
     echo "Error: dingbat_test not found. Run 'nimble test_build' first."
     quit(1)
 
+  var bios_path = ""
+  var p = initOptParser(commandLineParams())
+  while true:
+    p.next()
+    case p.kind
+    of cmdEnd: break
+    of cmdArgument: discard
+    of cmdLongOption, cmdShortOption:
+      case p.key
+      of "bios":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        bios_path = v
+      else: discard
+
   let results_path = getCurrentDir() / "tests" / "results.md"
   let previous = load_previous_results(results_path)
 
@@ -511,7 +529,7 @@ proc main() =
 
   # mGBA Test Suite (GBA)
   var mgba_detail: seq[MgbaSuiteDetail]
-  let mgba_results = run_mgba_suite(harness, previous, regressions, mgba_detail)
+  let mgba_results = run_mgba_suite(harness, previous, regressions, mgba_detail, bios_path)
   all_suites.add(mgba_results)
 
   # Acid2 tests (screenshot comparison)

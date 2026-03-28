@@ -1,19 +1,19 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-03-22 08:11:51*
+*Generated: 2026-03-28 09:55:49*
 
-## Memory tests (1376/1552 passed)
+## Memory tests (1398/1552 passed)
 
-1376/1552 tests passed, 176 failed:
+1398/1552 tests passed, 154 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| ROM load DMA0 16 | 0x00001DB2 | 0x0000FACE |
-| ROM load DMA0 16 (unaligned) | 0x00001DB2 | 0x0000FACE |
-| ROM load DMA0 32 | 0xE1C21DB2 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 1) | 0xE1C21DB2 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 2) | 0xE1C21DB2 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 3) | 0xE1C21DB2 | 0xFEEDFACE |
+| ROM load DMA0 16 | 0x00000000 | 0x0000FACE |
+| ROM load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| ROM load DMA0 32 | 0x00000000 | 0xFEEDFACE |
+| ROM load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| ROM load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| ROM load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
 | ROM out-of-bounds load DMA0 16 | 0x00000000 | 0x0000FACE |
 | ROM out-of-bounds load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
 | ROM out-of-bounds load DMA0 32 | 0x00000000 | 0xFEEDFACE |
@@ -24,7 +24,6 @@
 | SRAM load 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM load 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM load 32 (unaligned 3) | 0x47474747 | 0x65656565 |
-| SRAM load swi B 16 (unaligned) | 0x006D0047 | 0x00650061 |
 | SRAM load swi B 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM load swi B 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM load swi B 32 (unaligned 3) | 0x47474747 | 0x65656565 |
@@ -35,7 +34,6 @@
 | SRAM mirror load 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM mirror load 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM mirror load 32 (unaligned 3) | 0x47474747 | 0x65656565 |
-| SRAM mirror load swi B 16 (unaligned) | 0x006D0047 | 0x00650061 |
 | SRAM mirror load swi B 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM mirror load swi B 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM mirror load swi B 32 (unaligned 3) | 0x47474747 | 0x65656565 |
@@ -62,94 +60,74 @@
 | SRAM mirror store swi C 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi C 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi C 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
-| BIOS load U8 | 0x00000006 | 0x00000004 |
-| BIOS load S8 | 0x00000006 | 0x00000004 |
-| BIOS load U16 | 0x00000006 | 0x00002004 |
-| BIOS load U16 (unaligned) | 0x06000000 | 0x04000020 |
-| BIOS load S16 | 0x00000006 | 0x00002004 |
+| BIOS load U8 | 0x00000000 | 0x00000004 |
+| BIOS load S8 | 0x00000000 | 0x00000004 |
+| BIOS load U16 | 0x00000000 | 0x00002004 |
+| BIOS load U16 (unaligned) | 0x00000000 | 0x04000020 |
+| BIOS load S16 | 0x00000000 | 0x00002004 |
 | BIOS load S16 (unaligned) | 0x00000000 | 0x00000020 |
-| BIOS load 32 | 0xEA000006 | 0xE3A02004 |
-| BIOS load 32 (unaligned 1) | 0x06EA0000 | 0x04E3A020 |
-| BIOS load 32 (unaligned 2) | 0x0006EA00 | 0x2004E3A0 |
-| BIOS load 32 (unaligned 3) | 0x000006EA | 0xA02004E3 |
-| BIOS load DMA0 16 | 0x00000006 | 0x0000FACE |
-| BIOS load DMA0 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS load DMA0 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA1 16 | 0x00000006 | 0x0000FACE |
-| BIOS load DMA1 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS load DMA1 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA2 16 | 0x00000006 | 0x0000FACE |
-| BIOS load DMA2 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS load DMA2 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA3 16 | 0x00000006 | 0x0000FACE |
-| BIOS load DMA3 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS load DMA3 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS load swi B 16 | 0xEA000006 | 0x00000000 |
-| BIOS load swi B 16 (unaligned) | 0x00EA0000 | 0x00000000 |
-| BIOS load swi B 32 | 0xEA000006 | 0x00000000 |
-| BIOS load swi B 32 (unaligned 1) | 0xEA000006 | 0x00000000 |
-| BIOS load swi B 32 (unaligned 2) | 0xEA000006 | 0x00000000 |
-| BIOS load swi B 32 (unaligned 3) | 0xEA000006 | 0x00000000 |
-| BIOS load swi C 32 | 0xEA000006 | 0x00000000 |
-| BIOS load swi C 32 (unaligned 1) | 0xEA000006 | 0x00000000 |
-| BIOS load swi C 32 (unaligned 2) | 0xEA000006 | 0x00000000 |
-| BIOS load swi C 32 (unaligned 3) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load U8 | 0x00000006 | 0x00000001 |
-| BIOS out-of-bounds load S8 | 0x00000006 | 0x00000002 |
-| BIOS out-of-bounds load U16 | 0x00000006 | 0x00002003 |
-| BIOS out-of-bounds load U16 (unaligned) | 0x06000000 | 0x04000020 |
-| BIOS out-of-bounds load S16 | 0x00000006 | 0x00002005 |
+| BIOS load 32 | 0x00000000 | 0xE3A02004 |
+| BIOS load 32 (unaligned 1) | 0x00000000 | 0x04E3A020 |
+| BIOS load 32 (unaligned 2) | 0x00000000 | 0x2004E3A0 |
+| BIOS load 32 (unaligned 3) | 0x00000000 | 0xA02004E3 |
+| BIOS load DMA0 16 | 0x00000000 | 0x0000FACE |
+| BIOS load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS load DMA0 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA1 16 | 0x00000000 | 0x0000FACE |
+| BIOS load DMA1 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS load DMA1 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA1 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA1 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA1 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA2 16 | 0x00000000 | 0x0000FACE |
+| BIOS load DMA2 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS load DMA2 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA2 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA2 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA2 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA3 16 | 0x00000000 | 0x0000FACE |
+| BIOS load DMA3 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS load DMA3 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA3 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA3 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS load DMA3 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load U8 | 0x00000000 | 0x00000001 |
+| BIOS out-of-bounds load S8 | 0x00000000 | 0x00000002 |
+| BIOS out-of-bounds load U16 | 0x00000000 | 0x00002003 |
+| BIOS out-of-bounds load U16 (unaligned) | 0x00000000 | 0x04000020 |
+| BIOS out-of-bounds load S16 | 0x00000000 | 0x00002005 |
 | BIOS out-of-bounds load S16 (unaligned) | 0x00000000 | 0x00000020 |
-| BIOS out-of-bounds load 32 | 0xEA000006 | 0xE3A02007 |
-| BIOS out-of-bounds load 32 (unaligned 1) | 0x06EA0000 | 0x08E3A020 |
-| BIOS out-of-bounds load 32 (unaligned 2) | 0x0006EA00 | 0x2009E3A0 |
-| BIOS out-of-bounds load 32 (unaligned 3) | 0x000006EA | 0x9F000CE5 |
-| BIOS out-of-bounds load DMA0 16 | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA0 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA0 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 16 | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA1 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA1 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 16 | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA2 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA2 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 16 | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA3 16 (unaligned) | 0x00000006 | 0x0000FACE |
-| BIOS out-of-bounds load DMA3 32 | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 1) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 2) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 3) | 0xEA000006 | 0xFEEDFACE |
-| BIOS out-of-bounds load swi B 16 | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi B 16 (unaligned) | 0x00EA0000 | 0x00000000 |
-| BIOS out-of-bounds load swi B 32 | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi B 32 (unaligned 1) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi B 32 (unaligned 2) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi B 32 (unaligned 3) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi C 32 | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi C 32 (unaligned 1) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi C 32 (unaligned 2) | 0xEA000006 | 0x00000000 |
-| BIOS out-of-bounds load swi C 32 (unaligned 3) | 0xEA000006 | 0x00000000 |
+| BIOS out-of-bounds load 32 | 0x00000000 | 0xE3A02007 |
+| BIOS out-of-bounds load 32 (unaligned 1) | 0x00000000 | 0x08E3A020 |
+| BIOS out-of-bounds load 32 (unaligned 2) | 0x00000000 | 0x2009E3A0 |
+| BIOS out-of-bounds load 32 (unaligned 3) | 0x00000000 | 0x9F000CE5 |
+| BIOS out-of-bounds load DMA0 16 | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA0 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA1 16 | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA1 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA1 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA1 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA1 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA1 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA2 16 | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA2 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA2 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA2 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA2 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA2 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA3 16 | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA3 16 (unaligned) | 0x00000000 | 0x0000FACE |
+| BIOS out-of-bounds load DMA3 32 | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA3 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA3 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
+| BIOS out-of-bounds load DMA3 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
 | Out-of-bounds load U8 | 0x00000000 | 0x00000001 |
 | Out-of-bounds load S8 | 0x00000000 | 0x00000002 |
 | Out-of-bounds load U16 | 0x00000000 | 0x00002003 |
@@ -1578,146 +1556,146 @@ All tests passed.
 | C loop Thumb/ROM PNS | 159 | 143 |
 | C loop Thumb/WRAM | 170 | 319 |
 | C loop Thumb/IWRAM | 147 | 292 |
-| BIOS Division ARM/ROM ... | 295 | 398 |
-| BIOS Division ARM/ROM P.. | 295 | 398 |
-| BIOS Division ARM/ROM .N. | 295 | 394 |
-| BIOS Division ARM/ROM PN. | 295 | 394 |
-| BIOS Division ARM/ROM ..S | 295 | 381 |
-| BIOS Division ARM/ROM P.S | 295 | 381 |
-| BIOS Division ARM/ROM .NS | 295 | 377 |
-| BIOS Division ARM/ROM PNS | 295 | 377 |
-| BIOS Division ARM/WRAM | 312 | 390 |
-| BIOS Division ARM/IWRAM | 270 | 338 |
-| BIOS Division Thumb/ROM ... | 281 | 371 |
-| BIOS Division Thumb/ROM P.. | 281 | 371 |
-| BIOS Division Thumb/ROM .N. | 281 | 367 |
-| BIOS Division Thumb/ROM PN. | 281 | 367 |
-| BIOS Division Thumb/ROM ..S | 281 | 363 |
-| BIOS Division Thumb/ROM P.S | 281 | 363 |
-| BIOS Division Thumb/ROM .NS | 281 | 359 |
-| BIOS Division Thumb/ROM PNS | 281 | 359 |
-| BIOS Division Thumb/WRAM | 291 | 363 |
-| BIOS Division Thumb/IWRAM | 270 | 338 |
-| BIOS Division 2 ARM/ROM ... | 95 | 138 |
-| BIOS Division 2 ARM/ROM P.. | 95 | 138 |
-| BIOS Division 2 ARM/ROM .N. | 95 | 134 |
-| BIOS Division 2 ARM/ROM PN. | 95 | 134 |
-| BIOS Division 2 ARM/ROM ..S | 95 | 121 |
-| BIOS Division 2 ARM/ROM P.S | 95 | 121 |
-| BIOS Division 2 ARM/ROM .NS | 95 | 117 |
-| BIOS Division 2 ARM/ROM PNS | 95 | 117 |
-| BIOS Division 2 ARM/WRAM | 112 | 130 |
-| BIOS Division 2 ARM/IWRAM | 70 | 78 |
-| BIOS Division 2 Thumb/ROM ... | 81 | 111 |
-| BIOS Division 2 Thumb/ROM P.. | 81 | 111 |
-| BIOS Division 2 Thumb/ROM .N. | 81 | 107 |
-| BIOS Division 2 Thumb/ROM PN. | 81 | 107 |
-| BIOS Division 2 Thumb/ROM ..S | 81 | 103 |
-| BIOS Division 2 Thumb/ROM P.S | 81 | 103 |
-| BIOS Division 2 Thumb/ROM .NS | 81 | 99 |
-| BIOS Division 2 Thumb/ROM PNS | 81 | 99 |
-| BIOS Division 2 Thumb/WRAM | 91 | 103 |
-| BIOS Division 2 Thumb/IWRAM | 70 | 78 |
-| BIOS Sqrt ARM/ROM ... | 84 | 150 |
-| BIOS Sqrt ARM/ROM P.. | 84 | 150 |
-| BIOS Sqrt ARM/ROM .N. | 84 | 148 |
-| BIOS Sqrt ARM/ROM PN. | 84 | 148 |
-| BIOS Sqrt ARM/ROM ..S | 84 | 135 |
-| BIOS Sqrt ARM/ROM P.S | 84 | 135 |
-| BIOS Sqrt ARM/ROM .NS | 84 | 133 |
-| BIOS Sqrt ARM/ROM PNS | 84 | 133 |
-| BIOS Sqrt ARM/WRAM | 97 | 146 |
-| BIOS Sqrt ARM/IWRAM | 65 | 104 |
-| BIOS Sqrt Thumb/ROM ... | 72 | 126 |
-| BIOS Sqrt Thumb/ROM P.. | 72 | 126 |
-| BIOS Sqrt Thumb/ROM .N. | 72 | 124 |
-| BIOS Sqrt Thumb/ROM PN. | 72 | 124 |
-| BIOS Sqrt Thumb/ROM ..S | 72 | 119 |
-| BIOS Sqrt Thumb/ROM P.S | 72 | 119 |
-| BIOS Sqrt Thumb/ROM .NS | 72 | 117 |
-| BIOS Sqrt Thumb/ROM PNS | 72 | 117 |
-| BIOS Sqrt Thumb/WRAM | 79 | 122 |
-| BIOS Sqrt Thumb/IWRAM | 65 | 104 |
-| BIOS Sqrt 2 ARM/ROM ... | 108 | 265 |
-| BIOS Sqrt 2 ARM/ROM P.. | 108 | 265 |
-| BIOS Sqrt 2 ARM/ROM .N. | 108 | 263 |
-| BIOS Sqrt 2 ARM/ROM PN. | 108 | 263 |
-| BIOS Sqrt 2 ARM/ROM ..S | 108 | 250 |
-| BIOS Sqrt 2 ARM/ROM P.S | 108 | 250 |
-| BIOS Sqrt 2 ARM/ROM .NS | 108 | 248 |
-| BIOS Sqrt 2 ARM/ROM PNS | 108 | 248 |
-| BIOS Sqrt 2 ARM/WRAM | 121 | 261 |
-| BIOS Sqrt 2 ARM/IWRAM | 89 | 219 |
-| BIOS Sqrt 2 Thumb/ROM ... | 96 | 241 |
-| BIOS Sqrt 2 Thumb/ROM P.. | 96 | 241 |
-| BIOS Sqrt 2 Thumb/ROM .N. | 96 | 239 |
-| BIOS Sqrt 2 Thumb/ROM PN. | 96 | 239 |
-| BIOS Sqrt 2 Thumb/ROM ..S | 96 | 234 |
-| BIOS Sqrt 2 Thumb/ROM P.S | 96 | 234 |
-| BIOS Sqrt 2 Thumb/ROM .NS | 96 | 232 |
-| BIOS Sqrt 2 Thumb/ROM PNS | 96 | 232 |
-| BIOS Sqrt 2 Thumb/WRAM | 103 | 237 |
-| BIOS Sqrt 2 Thumb/IWRAM | 89 | 219 |
-| BIOS Sqrt 3 ARM/ROM ... | 222 | 1192 |
-| BIOS Sqrt 3 ARM/ROM P.. | 222 | 1192 |
-| BIOS Sqrt 3 ARM/ROM .N. | 222 | 1188 |
-| BIOS Sqrt 3 ARM/ROM PN. | 222 | 1188 |
-| BIOS Sqrt 3 ARM/ROM ..S | 222 | 1177 |
-| BIOS Sqrt 3 ARM/ROM P.S | 222 | 1177 |
-| BIOS Sqrt 3 ARM/ROM .NS | 222 | 1173 |
-| BIOS Sqrt 3 ARM/ROM PNS | 222 | 1173 |
-| BIOS Sqrt 3 ARM/WRAM | 237 | 1184 |
-| BIOS Sqrt 3 ARM/IWRAM | 200 | 1137 |
-| BIOS Sqrt 3 Thumb/ROM ... | 210 | 1168 |
-| BIOS Sqrt 3 Thumb/ROM P.. | 210 | 1168 |
-| BIOS Sqrt 3 Thumb/ROM .N. | 210 | 1164 |
-| BIOS Sqrt 3 Thumb/ROM PN. | 210 | 1164 |
-| BIOS Sqrt 3 Thumb/ROM ..S | 210 | 1161 |
-| BIOS Sqrt 3 Thumb/ROM P.S | 210 | 1161 |
-| BIOS Sqrt 3 Thumb/ROM .NS | 210 | 1157 |
-| BIOS Sqrt 3 Thumb/ROM PNS | 210 | 1157 |
-| BIOS Sqrt 3 Thumb/WRAM | 219 | 1160 |
-| BIOS Sqrt 3 Thumb/IWRAM | 200 | 1137 |
-| BIOS ArcTan ARM/ROM ... | 93 | 150 |
-| BIOS ArcTan ARM/ROM P.. | 93 | 150 |
-| BIOS ArcTan ARM/ROM .N. | 93 | 148 |
-| BIOS ArcTan ARM/ROM PN. | 93 | 148 |
-| BIOS ArcTan ARM/ROM ..S | 93 | 135 |
-| BIOS ArcTan ARM/ROM P.S | 93 | 135 |
-| BIOS ArcTan ARM/ROM .NS | 93 | 133 |
-| BIOS ArcTan ARM/ROM PNS | 93 | 133 |
-| BIOS ArcTan ARM/WRAM | 106 | 146 |
-| BIOS ArcTan ARM/IWRAM | 74 | 104 |
-| BIOS ArcTan Thumb/ROM ... | 81 | 126 |
-| BIOS ArcTan Thumb/ROM P.. | 81 | 126 |
-| BIOS ArcTan Thumb/ROM .N. | 81 | 124 |
-| BIOS ArcTan Thumb/ROM PN. | 81 | 124 |
-| BIOS ArcTan Thumb/ROM ..S | 81 | 119 |
-| BIOS ArcTan Thumb/ROM P.S | 81 | 119 |
-| BIOS ArcTan Thumb/ROM .NS | 81 | 117 |
-| BIOS ArcTan Thumb/ROM PNS | 81 | 117 |
-| BIOS ArcTan Thumb/WRAM | 88 | 122 |
-| BIOS ArcTan Thumb/IWRAM | 74 | 104 |
-| CpuSet ARM/ROM ... | 3293 | 3453 |
-| CpuSet ARM/ROM P.. | 3293 | 3453 |
-| CpuSet ARM/ROM .N. | 3293 | 3451 |
-| CpuSet ARM/ROM PN. | 3293 | 3451 |
-| CpuSet ARM/ROM ..S | 3293 | 3434 |
-| CpuSet ARM/ROM P.S | 3293 | 3434 |
-| CpuSet ARM/ROM .NS | 3293 | 3432 |
-| CpuSet ARM/ROM PNS | 3293 | 3432 |
-| CpuSet ARM/WRAM | 3310 | 3449 |
-| CpuSet ARM/IWRAM | 3268 | 3397 |
-| CpuSet Thumb/ROM ... | 3289 | 3456 |
-| CpuSet Thumb/ROM P.. | 3289 | 3456 |
-| CpuSet Thumb/ROM .N. | 3289 | 3448 |
-| CpuSet Thumb/ROM PN. | 3289 | 3448 |
-| CpuSet Thumb/ROM ..S | 3289 | 3447 |
-| CpuSet Thumb/ROM P.S | 3289 | 3447 |
-| CpuSet Thumb/ROM .NS | 3289 | 3439 |
-| CpuSet Thumb/ROM PNS | 3289 | 3439 |
-| CpuSet Thumb/WRAM | 3304 | 3440 |
-| CpuSet Thumb/IWRAM | 3271 | 3403 |
+| BIOS Division ARM/ROM ... | 32 | 398 |
+| BIOS Division ARM/ROM P.. | 32 | 398 |
+| BIOS Division ARM/ROM .N. | 32 | 394 |
+| BIOS Division ARM/ROM PN. | 32 | 394 |
+| BIOS Division ARM/ROM ..S | 32 | 381 |
+| BIOS Division ARM/ROM P.S | 32 | 381 |
+| BIOS Division ARM/ROM .NS | 32 | 377 |
+| BIOS Division ARM/ROM PNS | 32 | 377 |
+| BIOS Division ARM/WRAM | 48 | 390 |
+| BIOS Division ARM/IWRAM | 8 | 338 |
+| BIOS Division Thumb/ROM ... | 18 | 371 |
+| BIOS Division Thumb/ROM P.. | 18 | 371 |
+| BIOS Division Thumb/ROM .N. | 18 | 367 |
+| BIOS Division Thumb/ROM PN. | 18 | 367 |
+| BIOS Division Thumb/ROM ..S | 18 | 363 |
+| BIOS Division Thumb/ROM P.S | 18 | 363 |
+| BIOS Division Thumb/ROM .NS | 18 | 359 |
+| BIOS Division Thumb/ROM PNS | 18 | 359 |
+| BIOS Division Thumb/WRAM | 27 | 363 |
+| BIOS Division Thumb/IWRAM | 8 | 338 |
+| BIOS Division 2 ARM/ROM ... | 32 | 138 |
+| BIOS Division 2 ARM/ROM P.. | 32 | 138 |
+| BIOS Division 2 ARM/ROM .N. | 32 | 134 |
+| BIOS Division 2 ARM/ROM PN. | 32 | 134 |
+| BIOS Division 2 ARM/ROM ..S | 32 | 121 |
+| BIOS Division 2 ARM/ROM P.S | 32 | 121 |
+| BIOS Division 2 ARM/ROM .NS | 32 | 117 |
+| BIOS Division 2 ARM/ROM PNS | 32 | 117 |
+| BIOS Division 2 ARM/WRAM | 48 | 130 |
+| BIOS Division 2 ARM/IWRAM | 8 | 78 |
+| BIOS Division 2 Thumb/ROM ... | 18 | 111 |
+| BIOS Division 2 Thumb/ROM P.. | 18 | 111 |
+| BIOS Division 2 Thumb/ROM .N. | 18 | 107 |
+| BIOS Division 2 Thumb/ROM PN. | 18 | 107 |
+| BIOS Division 2 Thumb/ROM ..S | 18 | 103 |
+| BIOS Division 2 Thumb/ROM P.S | 18 | 103 |
+| BIOS Division 2 Thumb/ROM .NS | 18 | 99 |
+| BIOS Division 2 Thumb/ROM PNS | 18 | 99 |
+| BIOS Division 2 Thumb/WRAM | 27 | 103 |
+| BIOS Division 2 Thumb/IWRAM | 8 | 78 |
+| BIOS Sqrt ARM/ROM ... | 24 | 150 |
+| BIOS Sqrt ARM/ROM P.. | 24 | 150 |
+| BIOS Sqrt ARM/ROM .N. | 24 | 148 |
+| BIOS Sqrt ARM/ROM PN. | 24 | 148 |
+| BIOS Sqrt ARM/ROM ..S | 24 | 135 |
+| BIOS Sqrt ARM/ROM P.S | 24 | 135 |
+| BIOS Sqrt ARM/ROM .NS | 24 | 133 |
+| BIOS Sqrt ARM/ROM PNS | 24 | 133 |
+| BIOS Sqrt ARM/WRAM | 36 | 146 |
+| BIOS Sqrt ARM/IWRAM | 6 | 104 |
+| BIOS Sqrt Thumb/ROM ... | 12 | 126 |
+| BIOS Sqrt Thumb/ROM P.. | 12 | 126 |
+| BIOS Sqrt Thumb/ROM .N. | 12 | 124 |
+| BIOS Sqrt Thumb/ROM PN. | 12 | 124 |
+| BIOS Sqrt Thumb/ROM ..S | 12 | 119 |
+| BIOS Sqrt Thumb/ROM P.S | 12 | 119 |
+| BIOS Sqrt Thumb/ROM .NS | 12 | 117 |
+| BIOS Sqrt Thumb/ROM PNS | 12 | 117 |
+| BIOS Sqrt Thumb/WRAM | 18 | 122 |
+| BIOS Sqrt Thumb/IWRAM | 6 | 104 |
+| BIOS Sqrt 2 ARM/ROM ... | 24 | 265 |
+| BIOS Sqrt 2 ARM/ROM P.. | 24 | 265 |
+| BIOS Sqrt 2 ARM/ROM .N. | 24 | 263 |
+| BIOS Sqrt 2 ARM/ROM PN. | 24 | 263 |
+| BIOS Sqrt 2 ARM/ROM ..S | 24 | 250 |
+| BIOS Sqrt 2 ARM/ROM P.S | 24 | 250 |
+| BIOS Sqrt 2 ARM/ROM .NS | 24 | 248 |
+| BIOS Sqrt 2 ARM/ROM PNS | 24 | 248 |
+| BIOS Sqrt 2 ARM/WRAM | 36 | 261 |
+| BIOS Sqrt 2 ARM/IWRAM | 6 | 219 |
+| BIOS Sqrt 2 Thumb/ROM ... | 12 | 241 |
+| BIOS Sqrt 2 Thumb/ROM P.. | 12 | 241 |
+| BIOS Sqrt 2 Thumb/ROM .N. | 12 | 239 |
+| BIOS Sqrt 2 Thumb/ROM PN. | 12 | 239 |
+| BIOS Sqrt 2 Thumb/ROM ..S | 12 | 234 |
+| BIOS Sqrt 2 Thumb/ROM P.S | 12 | 234 |
+| BIOS Sqrt 2 Thumb/ROM .NS | 12 | 232 |
+| BIOS Sqrt 2 Thumb/ROM PNS | 12 | 232 |
+| BIOS Sqrt 2 Thumb/WRAM | 18 | 237 |
+| BIOS Sqrt 2 Thumb/IWRAM | 6 | 219 |
+| BIOS Sqrt 3 ARM/ROM ... | 28 | 1192 |
+| BIOS Sqrt 3 ARM/ROM P.. | 28 | 1192 |
+| BIOS Sqrt 3 ARM/ROM .N. | 28 | 1188 |
+| BIOS Sqrt 3 ARM/ROM PN. | 28 | 1188 |
+| BIOS Sqrt 3 ARM/ROM ..S | 28 | 1177 |
+| BIOS Sqrt 3 ARM/ROM P.S | 28 | 1177 |
+| BIOS Sqrt 3 ARM/ROM .NS | 28 | 1173 |
+| BIOS Sqrt 3 ARM/ROM PNS | 28 | 1173 |
+| BIOS Sqrt 3 ARM/WRAM | 42 | 1184 |
+| BIOS Sqrt 3 ARM/IWRAM | 7 | 1137 |
+| BIOS Sqrt 3 Thumb/ROM ... | 16 | 1168 |
+| BIOS Sqrt 3 Thumb/ROM P.. | 16 | 1168 |
+| BIOS Sqrt 3 Thumb/ROM .N. | 16 | 1164 |
+| BIOS Sqrt 3 Thumb/ROM PN. | 16 | 1164 |
+| BIOS Sqrt 3 Thumb/ROM ..S | 16 | 1161 |
+| BIOS Sqrt 3 Thumb/ROM P.S | 16 | 1161 |
+| BIOS Sqrt 3 Thumb/ROM .NS | 16 | 1157 |
+| BIOS Sqrt 3 Thumb/ROM PNS | 16 | 1157 |
+| BIOS Sqrt 3 Thumb/WRAM | 24 | 1160 |
+| BIOS Sqrt 3 Thumb/IWRAM | 7 | 1137 |
+| BIOS ArcTan ARM/ROM ... | 24 | 150 |
+| BIOS ArcTan ARM/ROM P.. | 24 | 150 |
+| BIOS ArcTan ARM/ROM .N. | 24 | 148 |
+| BIOS ArcTan ARM/ROM PN. | 24 | 148 |
+| BIOS ArcTan ARM/ROM ..S | 24 | 135 |
+| BIOS ArcTan ARM/ROM P.S | 24 | 135 |
+| BIOS ArcTan ARM/ROM .NS | 24 | 133 |
+| BIOS ArcTan ARM/ROM PNS | 24 | 133 |
+| BIOS ArcTan ARM/WRAM | 36 | 146 |
+| BIOS ArcTan ARM/IWRAM | 6 | 104 |
+| BIOS ArcTan Thumb/ROM ... | 12 | 126 |
+| BIOS ArcTan Thumb/ROM P.. | 12 | 126 |
+| BIOS ArcTan Thumb/ROM .N. | 12 | 124 |
+| BIOS ArcTan Thumb/ROM PN. | 12 | 124 |
+| BIOS ArcTan Thumb/ROM ..S | 12 | 119 |
+| BIOS ArcTan Thumb/ROM P.S | 12 | 119 |
+| BIOS ArcTan Thumb/ROM .NS | 12 | 117 |
+| BIOS ArcTan Thumb/ROM PNS | 12 | 117 |
+| BIOS ArcTan Thumb/WRAM | 18 | 122 |
+| BIOS ArcTan Thumb/IWRAM | 6 | 104 |
+| CpuSet ARM/ROM ... | 3110 | 3453 |
+| CpuSet ARM/ROM P.. | 3110 | 3453 |
+| CpuSet ARM/ROM .N. | 3110 | 3451 |
+| CpuSet ARM/ROM PN. | 3110 | 3451 |
+| CpuSet ARM/ROM ..S | 3110 | 3434 |
+| CpuSet ARM/ROM P.S | 3110 | 3434 |
+| CpuSet ARM/ROM .NS | 3110 | 3432 |
+| CpuSet ARM/ROM PNS | 3110 | 3432 |
+| CpuSet ARM/WRAM | 3126 | 3449 |
+| CpuSet ARM/IWRAM | 3086 | 3397 |
+| CpuSet Thumb/ROM ... | 3106 | 3456 |
+| CpuSet Thumb/ROM P.. | 3106 | 3456 |
+| CpuSet Thumb/ROM .N. | 3106 | 3448 |
+| CpuSet Thumb/ROM PN. | 3106 | 3448 |
+| CpuSet Thumb/ROM ..S | 3106 | 3447 |
+| CpuSet Thumb/ROM P.S | 3106 | 3447 |
+| CpuSet Thumb/ROM .NS | 3106 | 3439 |
+| CpuSet Thumb/ROM PNS | 3106 | 3439 |
+| CpuSet Thumb/WRAM | 3120 | 3440 |
+| CpuSet Thumb/IWRAM | 3089 | 3403 |
 | Trivial DMA (16) ARM/ROM ... | 7 | 13 |
 | Trivial DMA (16) ARM/ROM P.. | 7 | 10 |
 | Trivial DMA (16) ARM/ROM .N. | 7 | 12 |
@@ -2039,9 +2017,9 @@ All tests passed.
 | Short DMA (32/ROM to ROM) Thumb/WRAM | 132 | 200 |
 | Short DMA (32/ROM to ROM) Thumb/IWRAM | 130 | 2 |
 
-## Timer count-up tests (336/936 passed)
+## Timer count-up tests (333/936 passed)
 
-336/936 tests passed, 600 failed:
+333/936 tests passed, 603 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
@@ -2055,397 +2033,400 @@ All tests passed.
 | 0b, 0x0001 1xs 2d 4i | 00000001 | 00000002 |
 | 0b, 0x0001 1xs 4d 4i | 00000001 | 00000002 |
 | 0b, 0x0005 1xs 1d 1i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 1d 1i | FFFB | FFFF |
-| 0b, 0x0005 16xv 1d 1i | FFFB | FFFD |
+| 0b, 0x0005 16xv 1d 1i | FFFF | FFFD |
 | 0b, 0x0005 1xs 2d 1i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 2d 1i | FFFB | FFFF |
-| 0b, 0x0005 16xv 2d 1i | FFFB | FFFD |
+| 0b, 0x0005 16xv 2d 1i | FFFF | FFFD |
 | 0b, 0x0005 1xs 4d 1i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 4d 1i | FFFB | FFFF |
-| 0b, 0x0005 16xv 4d 1i | FFFB | FFFD |
+| 0b, 0x0005 16xv 4d 1i | FFFF | FFFD |
 | 0b, 0x0005 1xs 1d 2i | 00000002 | 00000003 |
-| 0b, 0x0005 16xv 1d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xv 1d 2i | FFFE | FFFB |
 | 0b, 0x0005 1xs 2d 2i | 00000002 | 00000003 |
-| 0b, 0x0005 16xv 2d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xv 2d 2i | FFFE | FFFB |
 | 0b, 0x0005 1xs 4d 2i | 00000002 | 00000003 |
-| 0b, 0x0005 16xv 4d 2i | FFFB | FFFE |
+| 0b, 0x0005 1xv 4d 2i | FFFE | FFFB |
 | 0b, 0x0005 1xs 1d 4i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 1d 4i | FFFB | FFFD |
+| 0b, 0x0005 1xv 1d 4i | FFFC | FFFD |
+| 0b, 0x0005 16xv 1d 4i | FFFC | FFFB |
 | 0b, 0x0005 1xs 2d 4i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 2d 4i | FFFB | FFFD |
+| 0b, 0x0005 1xv 2d 4i | FFFC | FFFD |
+| 0b, 0x0005 16xv 2d 4i | FFFC | FFFB |
 | 0b, 0x0005 1xs 4d 4i | 00000002 | 00000003 |
-| 0b, 0x0005 1xv 4d 4i | FFFB | FFFD |
+| 0b, 0x0005 1xv 4d 4i | FFFC | FFFD |
+| 0b, 0x0005 16xv 4d 4i | FFFC | FFFB |
 | 0b, 0x000C 16xs 1d 1i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 1d 1i | FFF9 | FFFC |
-| 0b, 0x000C 16xv 1d 1i | FFF9 | FFFE |
+| 0b, 0x000C 1xv 1d 1i | FFF8 | FFFC |
+| 0b, 0x000C 16xv 1d 1i | FFF8 | FFFE |
 | 0b, 0x000C 16xs 2d 1i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 2d 1i | FFF9 | FFFC |
-| 0b, 0x000C 16xv 2d 1i | FFF9 | FFFE |
+| 0b, 0x000C 1xv 2d 1i | FFF8 | FFFC |
+| 0b, 0x000C 16xv 2d 1i | FFF8 | FFFE |
 | 0b, 0x000C 16xs 4d 1i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 4d 1i | FFF9 | FFFC |
-| 0b, 0x000C 16xv 4d 1i | FFF9 | FFFE |
+| 0b, 0x000C 1xv 4d 1i | FFF8 | FFFC |
+| 0b, 0x000C 16xv 4d 1i | FFF8 | FFFE |
 | 0b, 0x000C 16xs 1d 2i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 1d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xv 1d 2i | FFFD | FFFF |
 | 0b, 0x000C 16xs 2d 2i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 2d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xv 2d 2i | FFFD | FFFF |
 | 0b, 0x000C 16xs 4d 2i | 00000010 | 00000020 |
-| 0b, 0x000C 1xv 4d 2i | FFFF | FFFD |
+| 0b, 0x000C 16xv 4d 2i | FFFD | FFFF |
 | 0b, 0x000C 16xs 1d 4i | 00000010 | 00000020 |
-| 0b, 0x000C 16xv 1d 4i | FFFF | FFF5 |
+| 0b, 0x000C 1xv 1d 4i | FFFB | FFFF |
+| 0b, 0x000C 16xv 1d 4i | FFFB | FFF5 |
 | 0b, 0x000C 16xs 2d 4i | 00000010 | 00000020 |
-| 0b, 0x000C 16xv 2d 4i | FFFF | FFF5 |
+| 0b, 0x000C 1xv 2d 4i | FFFB | FFFF |
+| 0b, 0x000C 16xv 2d 4i | FFFB | FFF5 |
 | 0b, 0x000C 16xs 4d 4i | 00000010 | 00000020 |
-| 0b, 0x000C 16xv 4d 4i | FFFF | FFF5 |
+| 0b, 0x000C 1xv 4d 4i | FFFB | FFFF |
+| 0b, 0x000C 16xv 4d 4i | FFFB | FFF5 |
 | 0b, 0x000D 1xs 1d 1i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 1d 1i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 1d 1i | FFF3 | FFF6 |
-| 0b, 0x000D 16xv 1d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xv 1d 1i | FFFF | FFF6 |
+| 0b, 0x000D 16xv 1d 1i | FFFF | FFF5 |
 | 0b, 0x000D 1xs 2d 1i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 2d 1i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 2d 1i | FFF3 | FFF6 |
-| 0b, 0x000D 16xv 2d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xv 2d 1i | FFFF | FFF6 |
+| 0b, 0x000D 16xv 2d 1i | FFFF | FFF5 |
 | 0b, 0x000D 1xs 4d 1i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 4d 1i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 4d 1i | FFF3 | FFF6 |
-| 0b, 0x000D 16xv 4d 1i | FFF3 | FFF5 |
+| 0b, 0x000D 1xv 4d 1i | FFFF | FFF6 |
+| 0b, 0x000D 16xv 4d 1i | FFFF | FFF5 |
 | 0b, 0x000D 1xs 1d 2i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 1d 2i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 1d 2i | FFFF | FFFA |
-| 0b, 0x000D 16xv 1d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xv 1d 2i | FFFD | FFFA |
+| 0b, 0x000D 16xv 1d 2i | FFFD | FFF9 |
 | 0b, 0x000D 1xs 2d 2i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 2d 2i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 2d 2i | FFFF | FFFA |
-| 0b, 0x000D 16xv 2d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xv 2d 2i | FFFD | FFFA |
+| 0b, 0x000D 16xv 2d 2i | FFFD | FFF9 |
 | 0b, 0x000D 1xs 4d 2i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 4d 2i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 4d 2i | FFFF | FFFA |
-| 0b, 0x000D 16xv 4d 2i | FFFF | FFF9 |
+| 0b, 0x000D 1xv 4d 2i | FFFD | FFFA |
+| 0b, 0x000D 16xv 4d 2i | FFFD | FFF9 |
 | 0b, 0x000D 1xs 1d 4i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 1d 4i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 1d 4i | FFFD | FFF5 |
-| 0b, 0x000D 16xv 1d 4i | FFFD | FFF4 |
+| 0b, 0x000D 1xv 1d 4i | FFF9 | FFF5 |
+| 0b, 0x000D 16xv 1d 4i | FFF9 | FFF4 |
 | 0b, 0x000D 1xs 2d 4i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 2d 4i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 2d 4i | FFFD | FFF5 |
-| 0b, 0x000D 16xv 2d 4i | FFFD | FFF4 |
+| 0b, 0x000D 1xv 2d 4i | FFF9 | FFF5 |
+| 0b, 0x000D 16xv 2d 4i | FFF9 | FFF4 |
 | 0b, 0x000D 1xs 4d 4i | 00000003 | 00000004 |
 | 0b, 0x000D 16xs 4d 4i | 00000010 | 00000020 |
-| 0b, 0x000D 1xv 4d 4i | FFFD | FFF5 |
-| 0b, 0x000D 16xv 4d 4i | FFFD | FFF4 |
+| 0b, 0x000D 1xv 4d 4i | FFF9 | FFF5 |
+| 0b, 0x000D 16xv 4d 4i | FFF9 | FFF4 |
 | 0b, 0x0010 16xs 1d 1i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 1d 1i | FFF1 | FFFC |
-| 0b, 0x0010 16xv 1d 1i | FFF1 | FFFE |
+| 0b, 0x0010 1xv 1d 1i | FFF0 | FFFC |
+| 0b, 0x0010 16xv 1d 1i | FFF0 | FFFE |
 | 0b, 0x0010 16xs 2d 1i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 2d 1i | FFF1 | FFFC |
-| 0b, 0x0010 16xv 2d 1i | FFF1 | FFFE |
+| 0b, 0x0010 1xv 2d 1i | FFF0 | FFFC |
+| 0b, 0x0010 16xv 2d 1i | FFF0 | FFFE |
 | 0b, 0x0010 16xs 4d 1i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 4d 1i | FFF1 | FFFC |
-| 0b, 0x0010 16xv 4d 1i | FFF1 | FFFE |
+| 0b, 0x0010 1xv 4d 1i | FFF0 | FFFC |
+| 0b, 0x0010 16xv 4d 1i | FFF0 | FFFE |
 | 0b, 0x0010 16xs 1d 2i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 1d 2i | FFFB | FFF5 |
-| 0b, 0x0010 16xv 1d 2i | FFFB | FFF7 |
+| 0b, 0x0010 1xv 1d 2i | FFF9 | FFF5 |
+| 0b, 0x0010 16xv 1d 2i | FFF9 | FFF7 |
 | 0b, 0x0010 16xs 2d 2i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 2d 2i | FFFB | FFF5 |
-| 0b, 0x0010 16xv 2d 2i | FFFB | FFF7 |
+| 0b, 0x0010 1xv 2d 2i | FFF9 | FFF5 |
+| 0b, 0x0010 16xv 2d 2i | FFF9 | FFF7 |
 | 0b, 0x0010 16xs 4d 2i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 4d 2i | FFFB | FFF5 |
-| 0b, 0x0010 16xv 4d 2i | FFFB | FFF7 |
+| 0b, 0x0010 1xv 4d 2i | FFF9 | FFF5 |
+| 0b, 0x0010 16xv 4d 2i | FFF9 | FFF7 |
 | 0b, 0x0010 16xs 1d 4i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 1d 4i | FFFF | FFF7 |
-| 0b, 0x0010 16xv 1d 4i | FFFF | FFF9 |
+| 0b, 0x0010 1xv 1d 4i | FFFB | FFF7 |
+| 0b, 0x0010 16xv 1d 4i | FFFB | FFF9 |
 | 0b, 0x0010 16xs 2d 4i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 2d 4i | FFFF | FFF7 |
-| 0b, 0x0010 16xv 2d 4i | FFFF | FFF9 |
+| 0b, 0x0010 1xv 2d 4i | FFFB | FFF7 |
+| 0b, 0x0010 16xv 2d 4i | FFFB | FFF9 |
 | 0b, 0x0010 16xs 4d 4i | 00000010 | 00000020 |
-| 0b, 0x0010 1xv 4d 4i | FFFF | FFF7 |
-| 0b, 0x0010 16xv 4d 4i | FFFF | FFF9 |
+| 0b, 0x0010 1xv 4d 4i | FFFB | FFF7 |
+| 0b, 0x0010 16xv 4d 4i | FFFB | FFF9 |
 | 0b, 0x0014 1xs 1d 1i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 1d 1i | FFF1 | FFF8 |
-| 0b, 0x0014 16xv 1d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xv 1d 1i | FFF0 | FFF8 |
+| 0b, 0x0014 16xv 1d 1i | FFF0 | FFF8 |
 | 0b, 0x0014 1xs 2d 1i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 2d 1i | FFF1 | FFF8 |
-| 0b, 0x0014 16xv 2d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xv 2d 1i | FFF0 | FFF8 |
+| 0b, 0x0014 16xv 2d 1i | FFF0 | FFF8 |
 | 0b, 0x0014 1xs 4d 1i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 4d 1i | FFF1 | FFF8 |
-| 0b, 0x0014 16xv 4d 1i | FFF1 | FFF8 |
+| 0b, 0x0014 1xv 4d 1i | FFF0 | FFF8 |
+| 0b, 0x0014 16xv 4d 1i | FFF0 | FFF8 |
 | 0b, 0x0014 1xs 1d 2i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 1d 2i | FFFB | FFF9 |
-| 0b, 0x0014 16xv 1d 2i | FFFB | FFF9 |
 | 0b, 0x0014 1xs 2d 2i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 2d 2i | FFFB | FFF9 |
-| 0b, 0x0014 16xv 2d 2i | FFFB | FFF9 |
 | 0b, 0x0014 1xs 4d 2i | 00000005 | 00000004 |
-| 0b, 0x0014 1xv 4d 2i | FFFB | FFF9 |
-| 0b, 0x0014 16xv 4d 2i | FFFB | FFF9 |
 | 0b, 0x0014 1xs 1d 4i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 1d 4i | FFF7 | FFFB |
+| 0b, 0x0014 16xv 1d 4i | FFF7 | FFFB |
 | 0b, 0x0014 1xs 2d 4i | 00000005 | 00000004 |
+| 0b, 0x0014 1xv 2d 4i | FFF7 | FFFB |
+| 0b, 0x0014 16xv 2d 4i | FFF7 | FFFB |
 | 0b, 0x0014 1xs 4d 4i | 00000005 | 00000004 |
-| 0b, 0x0015 1xv 1d 1i | FFED | FFF5 |
-| 0b, 0x0015 16xv 1d 1i | FFED | FFF3 |
-| 0b, 0x0015 1xv 2d 1i | FFED | FFF5 |
-| 0b, 0x0015 16xv 2d 1i | FFED | FFF3 |
-| 0b, 0x0015 1xv 4d 1i | FFED | FFF5 |
-| 0b, 0x0015 16xv 4d 1i | FFED | FFF3 |
-| 0b, 0x0015 1xv 1d 2i | FFF3 | FFF0 |
-| 0b, 0x0015 16xv 1d 2i | FFF3 | FFEE |
-| 0b, 0x0015 1xv 2d 2i | FFF3 | FFF0 |
-| 0b, 0x0015 16xv 2d 2i | FFF3 | FFEE |
-| 0b, 0x0015 1xv 4d 2i | FFF3 | FFF0 |
-| 0b, 0x0015 16xv 4d 2i | FFF3 | FFEE |
-| 0b, 0x0015 1xv 1d 4i | FFFF | FFFB |
-| 0b, 0x0015 16xv 1d 4i | FFFF | FFF9 |
-| 0b, 0x0015 1xv 2d 4i | FFFF | FFFB |
-| 0b, 0x0015 16xv 2d 4i | FFFF | FFF9 |
-| 0b, 0x0015 1xv 4d 4i | FFFF | FFFB |
-| 0b, 0x0015 16xv 4d 4i | FFFF | FFF9 |
+| 0b, 0x0014 1xv 4d 4i | FFF7 | FFFB |
+| 0b, 0x0014 16xv 4d 4i | FFF7 | FFFB |
+| 0b, 0x0015 1xv 1d 1i | FFEC | FFF5 |
+| 0b, 0x0015 16xv 1d 1i | FFEC | FFF3 |
+| 0b, 0x0015 1xv 2d 1i | FFEC | FFF5 |
+| 0b, 0x0015 16xv 2d 1i | FFEC | FFF3 |
+| 0b, 0x0015 1xv 4d 1i | FFEC | FFF5 |
+| 0b, 0x0015 16xv 4d 1i | FFEC | FFF3 |
+| 0b, 0x0015 1xv 1d 2i | FFF1 | FFF0 |
+| 0b, 0x0015 16xv 1d 2i | FFF1 | FFEE |
+| 0b, 0x0015 1xv 2d 2i | FFF1 | FFF0 |
+| 0b, 0x0015 16xv 2d 2i | FFF1 | FFEE |
+| 0b, 0x0015 1xv 4d 2i | FFF1 | FFF0 |
+| 0b, 0x0015 16xv 4d 2i | FFF1 | FFEE |
+| 0b, 0x0015 16xv 1d 4i | FFFB | FFF9 |
+| 0b, 0x0015 16xv 2d 4i | FFFB | FFF9 |
+| 0b, 0x0015 16xv 4d 4i | FFFB | FFF9 |
 | 0b, 0x0020 1xs 1d 1i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 1d 1i | FFE1 | FFFC |
-| 0b, 0x0020 16xv 1d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xv 1d 1i | FFE0 | FFFC |
+| 0b, 0x0020 16xv 1d 1i | FFE0 | FFFC |
 | 0b, 0x0020 1xs 2d 1i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 2d 1i | FFE1 | FFFC |
-| 0b, 0x0020 16xv 2d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xv 2d 1i | FFE0 | FFFC |
+| 0b, 0x0020 16xv 2d 1i | FFE0 | FFFC |
 | 0b, 0x0020 1xs 4d 1i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 4d 1i | FFE1 | FFFC |
-| 0b, 0x0020 16xv 4d 1i | FFE1 | FFFC |
+| 0b, 0x0020 1xv 4d 1i | FFE0 | FFFC |
+| 0b, 0x0020 16xv 4d 1i | FFE0 | FFFC |
 | 0b, 0x0020 1xs 1d 2i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 1d 2i | FFFB | FFF5 |
-| 0b, 0x0020 16xv 1d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xv 1d 2i | FFF9 | FFF5 |
+| 0b, 0x0020 16xv 1d 2i | FFF9 | FFF5 |
 | 0b, 0x0020 1xs 2d 2i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 2d 2i | FFFB | FFF5 |
-| 0b, 0x0020 16xv 2d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xv 2d 2i | FFF9 | FFF5 |
+| 0b, 0x0020 16xv 2d 2i | FFF9 | FFF5 |
 | 0b, 0x0020 1xs 4d 2i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 4d 2i | FFFB | FFF5 |
-| 0b, 0x0020 16xv 4d 2i | FFFB | FFF5 |
+| 0b, 0x0020 1xv 4d 2i | FFF9 | FFF5 |
+| 0b, 0x0020 16xv 4d 2i | FFF9 | FFF5 |
 | 0b, 0x0020 1xs 1d 4i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 1d 4i | FFEF | FFE7 |
-| 0b, 0x0020 16xv 1d 4i | FFEF | FFE7 |
+| 0b, 0x0020 1xv 1d 4i | FFEB | FFE7 |
+| 0b, 0x0020 16xv 1d 4i | FFEB | FFE7 |
 | 0b, 0x0020 1xs 2d 4i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 2d 4i | FFEF | FFE7 |
-| 0b, 0x0020 16xv 2d 4i | FFEF | FFE7 |
+| 0b, 0x0020 1xv 2d 4i | FFEB | FFE7 |
+| 0b, 0x0020 16xv 2d 4i | FFEB | FFE7 |
 | 0b, 0x0020 1xs 4d 4i | 00000007 | 00000006 |
-| 0b, 0x0020 1xv 4d 4i | FFEF | FFE7 |
-| 0b, 0x0020 16xv 4d 4i | FFEF | FFE7 |
+| 0b, 0x0020 1xv 4d 4i | FFEB | FFE7 |
+| 0b, 0x0020 16xv 4d 4i | FFEB | FFE7 |
 | 0b, 0x0024 1xs 1d 1i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 1d 1i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 1d 1i | FFF9 | FFF0 |
-| 0b, 0x0024 16xv 1d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xv 1d 1i | FFF8 | FFF0 |
+| 0b, 0x0024 16xv 1d 1i | FFF8 | FFF1 |
 | 0b, 0x0024 1xs 2d 1i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 2d 1i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 2d 1i | FFF9 | FFF0 |
-| 0b, 0x0024 16xv 2d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xv 2d 1i | FFF8 | FFF0 |
+| 0b, 0x0024 16xv 2d 1i | FFF8 | FFF1 |
 | 0b, 0x0024 1xs 4d 1i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 4d 1i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 4d 1i | FFF9 | FFF0 |
-| 0b, 0x0024 16xv 4d 1i | FFF9 | FFF1 |
+| 0b, 0x0024 1xv 4d 1i | FFF8 | FFF0 |
+| 0b, 0x0024 16xv 4d 1i | FFF8 | FFF1 |
 | 0b, 0x0024 1xs 1d 2i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 1d 2i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 1d 2i | FFE7 | FFFD |
-| 0b, 0x0024 16xv 1d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xv 1d 2i | FFE5 | FFFD |
+| 0b, 0x0024 16xv 1d 2i | FFE5 | FFFE |
 | 0b, 0x0024 1xs 2d 2i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 2d 2i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 2d 2i | FFE7 | FFFD |
-| 0b, 0x0024 16xv 2d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xv 2d 2i | FFE5 | FFFD |
+| 0b, 0x0024 16xv 2d 2i | FFE5 | FFFE |
 | 0b, 0x0024 1xs 4d 2i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 4d 2i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 4d 2i | FFE7 | FFFD |
-| 0b, 0x0024 16xv 4d 2i | FFE7 | FFFE |
+| 0b, 0x0024 1xv 4d 2i | FFE5 | FFFD |
+| 0b, 0x0024 16xv 4d 2i | FFE5 | FFFE |
 | 0b, 0x0024 1xs 1d 4i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 1d 4i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 1d 4i | FFE7 | FFF3 |
-| 0b, 0x0024 16xv 1d 4i | FFE7 | FFF4 |
+| 0b, 0x0024 1xv 1d 4i | FFE3 | FFF3 |
+| 0b, 0x0024 16xv 1d 4i | FFE3 | FFF4 |
 | 0b, 0x0024 1xs 2d 4i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 2d 4i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 2d 4i | FFE7 | FFF3 |
-| 0b, 0x0024 16xv 2d 4i | FFE7 | FFF4 |
+| 0b, 0x0024 1xv 2d 4i | FFE3 | FFF3 |
+| 0b, 0x0024 16xv 2d 4i | FFE3 | FFF4 |
 | 0b, 0x0024 1xs 4d 4i | 00000008 | 00000006 |
 | 0b, 0x0024 16xs 4d 4i | 00000020 | 00000030 |
-| 0b, 0x0024 1xv 4d 4i | FFE7 | FFF3 |
-| 0b, 0x0024 16xv 4d 4i | FFE7 | FFF4 |
+| 0b, 0x0024 1xv 4d 4i | FFE3 | FFF3 |
+| 0b, 0x0024 16xv 4d 4i | FFE3 | FFF4 |
 | 0b, 0x0025 1xs 1d 1i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 1d 1i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 1d 1i | FFF7 | FFEF |
-| 0b, 0x0025 16xv 1d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xv 1d 1i | FFF6 | FFEF |
+| 0b, 0x0025 16xv 1d 1i | FFF6 | FFED |
 | 0b, 0x0025 1xs 2d 1i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 2d 1i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 2d 1i | FFF7 | FFEF |
-| 0b, 0x0025 16xv 2d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xv 2d 1i | FFF6 | FFEF |
+| 0b, 0x0025 16xv 2d 1i | FFF6 | FFED |
 | 0b, 0x0025 1xs 4d 1i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 4d 1i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 4d 1i | FFF7 | FFEF |
-| 0b, 0x0025 16xv 4d 1i | FFF7 | FFED |
+| 0b, 0x0025 1xv 4d 1i | FFF6 | FFEF |
+| 0b, 0x0025 16xv 4d 1i | FFF6 | FFED |
 | 0b, 0x0025 1xs 1d 2i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 1d 2i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 1d 2i | FFE2 | FFF9 |
-| 0b, 0x0025 16xv 1d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xv 1d 2i | FFE0 | FFF9 |
+| 0b, 0x0025 16xv 1d 2i | FFE0 | FFF7 |
 | 0b, 0x0025 1xs 2d 2i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 2d 2i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 2d 2i | FFE2 | FFF9 |
-| 0b, 0x0025 16xv 2d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xv 2d 2i | FFE0 | FFF9 |
+| 0b, 0x0025 16xv 2d 2i | FFE0 | FFF7 |
 | 0b, 0x0025 1xs 4d 2i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 4d 2i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 4d 2i | FFE2 | FFF9 |
-| 0b, 0x0025 16xv 4d 2i | FFE2 | FFF7 |
+| 0b, 0x0025 1xv 4d 2i | FFE0 | FFF9 |
+| 0b, 0x0025 16xv 4d 2i | FFE0 | FFF7 |
 | 0b, 0x0025 1xs 1d 4i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 1d 4i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 1d 4i | FFDD | FFE8 |
-| 0b, 0x0025 16xv 1d 4i | FFDD | FFE6 |
+| 0b, 0x0025 1xv 1d 4i | FFFE | FFE8 |
+| 0b, 0x0025 16xv 1d 4i | FFFE | FFE6 |
 | 0b, 0x0025 1xs 2d 4i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 2d 4i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 2d 4i | FFDD | FFE8 |
-| 0b, 0x0025 16xv 2d 4i | FFDD | FFE6 |
+| 0b, 0x0025 1xv 2d 4i | FFFE | FFE8 |
+| 0b, 0x0025 16xv 2d 4i | FFFE | FFE6 |
 | 0b, 0x0025 1xs 4d 4i | 00000008 | 00000007 |
 | 0b, 0x0025 16xs 4d 4i | 00000020 | 00000030 |
-| 0b, 0x0025 1xv 4d 4i | FFDD | FFE8 |
-| 0b, 0x0025 16xv 4d 4i | FFDD | FFE6 |
+| 0b, 0x0025 1xv 4d 4i | FFFE | FFE8 |
+| 0b, 0x0025 16xv 4d 4i | FFFE | FFE6 |
 | 0b, 0x0040 1xs 1d 1i | 0000000E | 0000000A |
-| 0b, 0x0040 1xv 1d 1i | FFC2 | FFDC |
-| 0b, 0x0040 16xv 1d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xv 1d 1i | FFC1 | FFDC |
+| 0b, 0x0040 16xv 1d 1i | FFC0 | FFDC |
 | 0b, 0x0040 1xs 2d 1i | 0000000E | 0000000A |
-| 0b, 0x0040 1xv 2d 1i | FFC2 | FFDC |
-| 0b, 0x0040 16xv 2d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xv 2d 1i | FFC1 | FFDC |
+| 0b, 0x0040 16xv 2d 1i | FFC0 | FFDC |
 | 0b, 0x0040 1xs 4d 1i | 0000000E | 0000000A |
-| 0b, 0x0040 1xv 4d 1i | FFC2 | FFDC |
-| 0b, 0x0040 16xv 4d 1i | FFC1 | FFDC |
+| 0b, 0x0040 1xv 4d 1i | FFC1 | FFDC |
+| 0b, 0x0040 16xv 4d 1i | FFC0 | FFDC |
 | 0b, 0x0040 1xs 1d 2i | 0000000E | 0000000B |
-| 0b, 0x0040 16xv 1d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xv 1d 2i | FFDA | FFDC |
+| 0b, 0x0040 16xv 1d 2i | FFD9 | FFDC |
 | 0b, 0x0040 1xs 2d 2i | 0000000E | 0000000B |
-| 0b, 0x0040 16xv 2d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xv 2d 2i | FFDA | FFDC |
+| 0b, 0x0040 16xv 2d 2i | FFD9 | FFDC |
 | 0b, 0x0040 1xs 4d 2i | 0000000E | 0000000B |
-| 0b, 0x0040 16xv 4d 2i | FFDB | FFDC |
+| 0b, 0x0040 1xv 4d 2i | FFDA | FFDC |
+| 0b, 0x0040 16xv 4d 2i | FFD9 | FFDC |
 | 0b, 0x0040 1xs 1d 4i | 00000010 | 0000000D |
 | 0b, 0x0040 16xs 1d 4i | 00000040 | 00000050 |
-| 0b, 0x0040 1xv 1d 4i | FFDB | FFDE |
-| 0b, 0x0040 16xv 1d 4i | FFDB | FFDE |
+| 0b, 0x0040 1xv 1d 4i | FFD9 | FFDE |
+| 0b, 0x0040 16xv 1d 4i | FFD9 | FFDE |
 | 0b, 0x0040 1xs 2d 4i | 00000010 | 0000000D |
 | 0b, 0x0040 16xs 2d 4i | 00000040 | 00000050 |
-| 0b, 0x0040 1xv 2d 4i | FFDB | FFDE |
-| 0b, 0x0040 16xv 2d 4i | FFDB | FFDE |
+| 0b, 0x0040 1xv 2d 4i | FFD9 | FFDE |
+| 0b, 0x0040 16xv 2d 4i | FFD9 | FFDE |
 | 0b, 0x0040 1xs 4d 4i | 00000010 | 0000000D |
 | 0b, 0x0040 16xs 4d 4i | 00000040 | 00000050 |
-| 0b, 0x0040 1xv 4d 4i | FFDB | FFDE |
-| 0b, 0x0040 16xv 4d 4i | FFDB | FFDE |
+| 0b, 0x0040 1xv 4d 4i | FFD9 | FFDE |
+| 0b, 0x0040 16xv 4d 4i | FFD9 | FFDE |
 | 0b, 0x0080 1xs 1d 1i | 0000001A | 00000012 |
-| 0b, 0x0080 1xv 1d 1i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 1d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xv 1d 1i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 1d 1i | FFC0 | FFDD |
 | 0b, 0x0080 1xs 2d 1i | 0000001A | 00000012 |
-| 0b, 0x0080 1xv 2d 1i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 2d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xv 2d 1i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 2d 1i | FFC0 | FFDD |
 | 0b, 0x0080 1xs 4d 1i | 0000001A | 00000012 |
-| 0b, 0x0080 1xv 4d 1i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 4d 1i | FFC1 | FFDD |
+| 0b, 0x0080 1xv 4d 1i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 4d 1i | FFC0 | FFDD |
 | 0b, 0x0080 1xs 1d 2i | 00000022 | 00000013 |
 | 0b, 0x0080 16xs 1d 2i | 00000090 | 00000070 |
-| 0b, 0x0080 1xv 1d 2i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 1d 2i | FFC1 | FFDC |
+| 0b, 0x0080 1xv 1d 2i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 1d 2i | FFC0 | FFDC |
 | 0b, 0x0080 1xs 2d 2i | 00000022 | 00000013 |
 | 0b, 0x0080 16xs 2d 2i | 00000090 | 00000070 |
-| 0b, 0x0080 1xv 2d 2i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 2d 2i | FFC1 | FFDC |
+| 0b, 0x0080 1xv 2d 2i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 2d 2i | FFC0 | FFDC |
 | 0b, 0x0080 1xs 4d 2i | 00000022 | 00000013 |
 | 0b, 0x0080 16xs 4d 2i | 00000090 | 00000070 |
-| 0b, 0x0080 1xv 4d 2i | FFC1 | FFDC |
-| 0b, 0x0080 16xv 4d 2i | FFC1 | FFDC |
-| 0b, 0x0080 1xs 1d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 1xv 4d 2i | FFC0 | FFDC |
+| 0b, 0x0080 16xv 4d 2i | FFC0 | FFDC |
+| 0b, 0x0080 1xs 1d 4i | 00000032 | 00000015 |
 | 0b, 0x0080 16xs 1d 4i | 000000D0 | 00000070 |
-| 0b, 0x0080 1xv 1d 4i | FFC1 | FFDE |
-| 0b, 0x0080 16xv 1d 4i | FFC1 | FFDC |
-| 0b, 0x0080 1xs 2d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 1xv 1d 4i | FFC0 | FFDE |
+| 0b, 0x0080 16xv 1d 4i | FFC0 | FFDC |
+| 0b, 0x0080 1xs 2d 4i | 00000032 | 00000015 |
 | 0b, 0x0080 16xs 2d 4i | 000000D0 | 00000070 |
-| 0b, 0x0080 1xv 2d 4i | FFC1 | FFDE |
-| 0b, 0x0080 16xv 2d 4i | FFC1 | FFDC |
-| 0b, 0x0080 1xs 4d 4i | 00000031 | 00000015 |
+| 0b, 0x0080 1xv 2d 4i | FFC0 | FFDE |
+| 0b, 0x0080 16xv 2d 4i | FFC0 | FFDC |
+| 0b, 0x0080 1xs 4d 4i | 00000032 | 00000015 |
 | 0b, 0x0080 16xs 4d 4i | 000000D0 | 00000070 |
-| 0b, 0x0080 1xv 4d 4i | FFC1 | FFDE |
-| 0b, 0x0080 16xv 4d 4i | FFC1 | FFDC |
+| 0b, 0x0080 1xv 4d 4i | FFC0 | FFDE |
+| 0b, 0x0080 16xv 4d 4i | FFC0 | FFDC |
 | 0b, 0x0800 1xs 1d 1i | 0000019A | 00000102 |
 | 0b, 0x0800 16xs 1d 1i | 00000670 | 000005A0 |
-| 0b, 0x0800 1xv 1d 1i | F841 | F85C |
-| 0b, 0x0800 16xv 1d 1i | F841 | F85C |
+| 0b, 0x0800 1xv 1d 1i | F840 | F85C |
+| 0b, 0x0800 16xv 1d 1i | F840 | F85C |
 | 0b, 0x0800 1xs 2d 1i | 0000019A | 00000102 |
 | 0b, 0x0800 16xs 2d 1i | 00000670 | 000005A0 |
-| 0b, 0x0800 1xv 2d 1i | F841 | F85C |
-| 0b, 0x0800 16xv 2d 1i | F841 | F85C |
+| 0b, 0x0800 1xv 2d 1i | F840 | F85C |
+| 0b, 0x0800 16xv 2d 1i | F840 | F85C |
 | 0b, 0x0800 1xs 4d 1i | 0000019A | 00000102 |
 | 0b, 0x0800 16xs 4d 1i | 00000670 | 000005A0 |
-| 0b, 0x0800 1xv 4d 1i | F841 | F85C |
-| 0b, 0x0800 16xv 4d 1i | F841 | F85C |
+| 0b, 0x0800 1xv 4d 1i | F840 | F85C |
+| 0b, 0x0800 16xv 4d 1i | F840 | F85C |
 | 0b, 0x0800 1xs 1d 2i | 00000322 | 000001F3 |
 | 0b, 0x0800 16xs 1d 2i | 00000C90 | 00000AE0 |
-| 0b, 0x0800 1xv 1d 2i | F841 | F85C |
-| 0b, 0x0800 16xv 1d 2i | F841 | F85C |
+| 0b, 0x0800 1xv 1d 2i | F840 | F85C |
+| 0b, 0x0800 16xv 1d 2i | F840 | F85C |
 | 0b, 0x0800 1xs 2d 2i | 00000322 | 000001F3 |
 | 0b, 0x0800 16xs 2d 2i | 00000C90 | 00000AE0 |
-| 0b, 0x0800 1xv 2d 2i | F841 | F85C |
-| 0b, 0x0800 16xv 2d 2i | F841 | F85C |
+| 0b, 0x0800 1xv 2d 2i | F840 | F85C |
+| 0b, 0x0800 16xv 2d 2i | F840 | F85C |
 | 0b, 0x0800 1xs 4d 2i | 00000322 | 000001F3 |
 | 0b, 0x0800 16xs 4d 2i | 00000C90 | 00000AE0 |
-| 0b, 0x0800 1xv 4d 2i | F841 | F85C |
-| 0b, 0x0800 16xv 4d 2i | F841 | F85C |
-| 0b, 0x0800 1xs 1d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 1xv 4d 2i | F840 | F85C |
+| 0b, 0x0800 16xv 4d 2i | F840 | F85C |
+| 0b, 0x0800 1xs 1d 4i | 00000632 | 000003D5 |
 | 0b, 0x0800 16xs 1d 4i | 000018D0 | 00001550 |
-| 0b, 0x0800 1xv 1d 4i | F841 | F85E |
-| 0b, 0x0800 16xv 1d 4i | F841 | F85C |
-| 0b, 0x0800 1xs 2d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 1xv 1d 4i | F840 | F85E |
+| 0b, 0x0800 16xv 1d 4i | F840 | F85C |
+| 0b, 0x0800 1xs 2d 4i | 00000632 | 000003D5 |
 | 0b, 0x0800 16xs 2d 4i | 000018D0 | 00001550 |
-| 0b, 0x0800 1xv 2d 4i | F841 | F85E |
-| 0b, 0x0800 16xv 2d 4i | F841 | F85C |
-| 0b, 0x0800 1xs 4d 4i | 00000631 | 000003D5 |
+| 0b, 0x0800 1xv 2d 4i | F840 | F85E |
+| 0b, 0x0800 16xv 2d 4i | F840 | F85C |
+| 0b, 0x0800 1xs 4d 4i | 00000632 | 000003D5 |
 | 0b, 0x0800 16xs 4d 4i | 000018D0 | 00001550 |
-| 0b, 0x0800 1xv 4d 4i | F841 | F85E |
-| 0b, 0x0800 16xv 4d 4i | F841 | F85C |
+| 0b, 0x0800 1xv 4d 4i | F840 | F85E |
+| 0b, 0x0800 16xv 4d 4i | F840 | F85C |
 | 0b, 0x8000 1xs 1d 1i | 0000199A | 00001002 |
 | 0b, 0x8000 16xs 1d 1i | 00006670 | 00005920 |
-| 0b, 0x8000 1xv 1d 1i | 8041 | 805C |
-| 0b, 0x8000 16xv 1d 1i | 8041 | 805E |
+| 0b, 0x8000 1xv 1d 1i | 8040 | 805C |
+| 0b, 0x8000 16xv 1d 1i | 8040 | 805E |
 | 0b, 0x8000 1xs 2d 1i | 0000199A | 00001002 |
 | 0b, 0x8000 16xs 2d 1i | 00006670 | 00005920 |
-| 0b, 0x8000 1xv 2d 1i | 8041 | 805C |
-| 0b, 0x8000 16xv 2d 1i | 8041 | 805E |
+| 0b, 0x8000 1xv 2d 1i | 8040 | 805C |
+| 0b, 0x8000 16xv 2d 1i | 8040 | 805E |
 | 0b, 0x8000 1xs 4d 1i | 0000199A | 00001002 |
 | 0b, 0x8000 16xs 4d 1i | 00006670 | 00005920 |
-| 0b, 0x8000 1xv 4d 1i | 8041 | 805C |
-| 0b, 0x8000 16xv 4d 1i | 8041 | 805E |
+| 0b, 0x8000 1xv 4d 1i | 8040 | 805C |
+| 0b, 0x8000 16xv 4d 1i | 8040 | 805E |
 | 0b, 0x8000 1xs 1d 2i | 00003322 | 00001FF3 |
 | 0b, 0x8000 16xs 1d 2i | 0000CC90 | 0000B1D0 |
-| 0b, 0x8000 1xv 1d 2i | 8041 | 805C |
-| 0b, 0x8000 16xv 1d 2i | 8041 | 805C |
+| 0b, 0x8000 1xv 1d 2i | 8040 | 805C |
+| 0b, 0x8000 16xv 1d 2i | 8040 | 805C |
 | 0b, 0x8000 1xs 2d 2i | 00003322 | 00001FF3 |
 | 0b, 0x8000 16xs 2d 2i | 0000CC90 | 0000B1D0 |
-| 0b, 0x8000 1xv 2d 2i | 8041 | 805C |
-| 0b, 0x8000 16xv 2d 2i | 8041 | 805C |
+| 0b, 0x8000 1xv 2d 2i | 8040 | 805C |
+| 0b, 0x8000 16xv 2d 2i | 8040 | 805C |
 | 0b, 0x8000 1xs 4d 2i | 00003322 | 00001FF3 |
 | 0b, 0x8000 16xs 4d 2i | 0000CC90 | 0000B1D0 |
-| 0b, 0x8000 1xv 4d 2i | 8041 | 805C |
-| 0b, 0x8000 16xv 4d 2i | 8041 | 805C |
-| 0b, 0x8000 1xs 1d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 1xv 4d 2i | 8040 | 805C |
+| 0b, 0x8000 16xv 4d 2i | 8040 | 805C |
+| 0b, 0x8000 1xs 1d 4i | 00006632 | 00003FD5 |
 | 0b, 0x8000 16xs 1d 4i | 000198D0 | 00016340 |
-| 0b, 0x8000 1xv 1d 4i | 8041 | 805E |
-| 0b, 0x8000 16xv 1d 4i | 8041 | 805C |
-| 0b, 0x8000 1xs 2d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 1xv 1d 4i | 8040 | 805E |
+| 0b, 0x8000 16xv 1d 4i | 8040 | 805C |
+| 0b, 0x8000 1xs 2d 4i | 00006632 | 00003FD5 |
 | 0b, 0x8000 16xs 2d 4i | 000198D0 | 00016340 |
-| 0b, 0x8000 1xv 2d 4i | 8041 | 805E |
-| 0b, 0x8000 16xv 2d 4i | 8041 | 805C |
-| 0b, 0x8000 1xs 4d 4i | 00006631 | 00003FD5 |
+| 0b, 0x8000 1xv 2d 4i | 8040 | 805E |
+| 0b, 0x8000 16xv 2d 4i | 8040 | 805C |
+| 0b, 0x8000 1xs 4d 4i | 00006632 | 00003FD5 |
 | 0b, 0x8000 16xs 4d 4i | 000198D0 | 00016340 |
-| 0b, 0x8000 1xv 4d 4i | 8041 | 805E |
-| 0b, 0x8000 16xv 4d 4i | 8041 | 805C |
+| 0b, 0x8000 1xv 4d 4i | 8040 | 805E |
+| 0b, 0x8000 16xv 4d 4i | 8040 | 805C |
 | 6b, 0x0010 1xs 1d 1i | 000000CE | 0000007B |
 | 6b, 0x0010 16xs 1d 1i | 00000340 | 000002B0 |
 | 6b, 0x0010 1xs 2d 1i | 000000CE | 0000007B |
 | 6b, 0x0010 16xs 2d 1i | 00000340 | 000002B0 |
 | 6b, 0x0010 1xs 4d 1i | 000000CE | 00000081 |
 | 6b, 0x0010 16xs 4d 1i | 00000340 | 000002D0 |
-| 6b, 0x0010 1xs 1d 2i | 00000188 | 000000EC |
-| 6b, 0x0010 16xs 1d 2i | 00000620 | 00000520 |
-| 6b, 0x0010 1xs 2d 2i | 00000188 | 000000EB |
-| 6b, 0x0010 16xs 2d 2i | 00000620 | 00000520 |
-| 6b, 0x0010 1xs 4d 2i | 00000188 | 000000F2 |
-| 6b, 0x0010 16xs 4d 2i | 00000620 | 00000550 |
-| 6b, 0x0010 1xs 1d 4i | 000002FE | 000001CE |
+| 6b, 0x0010 1xs 1d 2i | 00000189 | 000000EC |
+| 6b, 0x0010 16xs 1d 2i | 00000630 | 00000520 |
+| 6b, 0x0010 1xs 2d 2i | 00000189 | 000000EB |
+| 6b, 0x0010 16xs 2d 2i | 00000630 | 00000520 |
+| 6b, 0x0010 1xs 4d 2i | 00000189 | 000000F2 |
+| 6b, 0x0010 16xs 4d 2i | 00000630 | 00000550 |
+| 6b, 0x0010 1xs 1d 4i | 000002FF | 000001CE |
 | 6b, 0x0010 16xs 1d 4i | 00000C00 | 00000A10 |
-| 6b, 0x0010 1xs 2d 4i | 000002FE | 000001CD |
+| 6b, 0x0010 1xs 2d 4i | 000002FF | 000001CD |
 | 6b, 0x0010 16xs 2d 4i | 00000C00 | 00000A10 |
-| 6b, 0x0010 1xs 4d 4i | 000002FE | 000001D4 |
+| 6b, 0x0010 1xs 4d 4i | 000002FF | 000001D4 |
 | 6b, 0x0010 16xs 4d 4i | 00000C00 | 00000A30 |
 | 6b, 0x0011 1xs 1d 1i | 000000DA | 00000083 |
 | 6b, 0x0011 16xs 1d 1i | 00000370 | 000002E0 |
@@ -2459,11 +2440,11 @@ All tests passed.
 | 6b, 0x0011 16xs 2d 2i | 00000690 | 00000580 |
 | 6b, 0x0011 1xs 4d 2i | 000001A2 | 00000102 |
 | 6b, 0x0011 16xs 4d 2i | 00000690 | 000005A0 |
-| 6b, 0x0011 1xs 1d 4i | 00000331 | 000001EE |
+| 6b, 0x0011 1xs 1d 4i | 00000332 | 000001EE |
 | 6b, 0x0011 16xs 1d 4i | 00000CD0 | 00000AC0 |
-| 6b, 0x0011 1xs 2d 4i | 00000331 | 000001ED |
+| 6b, 0x0011 1xs 2d 4i | 00000332 | 000001ED |
 | 6b, 0x0011 16xs 2d 4i | 00000CD0 | 00000AC0 |
-| 6b, 0x0011 1xs 4d 4i | 00000331 | 000001F4 |
+| 6b, 0x0011 1xs 4d 4i | 00000332 | 000001F4 |
 | 6b, 0x0011 16xs 4d 4i | 00000CD0 | 00000AE0 |
 | 6b, 0x0012 1xs 1d 1i | 000000E7 | 0000008B |
 | 6b, 0x0012 16xs 1d 1i | 000003A0 | 00000310 |
@@ -2477,12 +2458,12 @@ All tests passed.
 | 6b, 0x0012 16xs 2d 2i | 000006F0 | 000005D0 |
 | 6b, 0x0012 1xs 4d 2i | 000001BC | 00000112 |
 | 6b, 0x0012 16xs 4d 2i | 000006F0 | 00000600 |
-| 6b, 0x0012 1xs 1d 4i | 00000364 | 0000020E |
-| 6b, 0x0012 16xs 1d 4i | 00000D90 | 00000B70 |
-| 6b, 0x0012 1xs 2d 4i | 00000364 | 0000020D |
-| 6b, 0x0012 16xs 2d 4i | 00000D90 | 00000B70 |
-| 6b, 0x0012 1xs 4d 4i | 00000364 | 00000214 |
-| 6b, 0x0012 16xs 4d 4i | 00000D90 | 00000B90 |
+| 6b, 0x0012 1xs 1d 4i | 00000365 | 0000020E |
+| 6b, 0x0012 16xs 1d 4i | 00000DA0 | 00000B70 |
+| 6b, 0x0012 1xs 2d 4i | 00000365 | 0000020D |
+| 6b, 0x0012 16xs 2d 4i | 00000DA0 | 00000B70 |
+| 6b, 0x0012 1xs 4d 4i | 00000365 | 00000214 |
+| 6b, 0x0012 16xs 4d 4i | 00000DA0 | 00000B90 |
 | 6b, 0x0013 1xs 1d 1i | 000000F4 | 00000093 |
 | 6b, 0x0013 16xs 1d 1i | 000003D0 | 00000340 |
 | 6b, 0x0013 1xs 2d 1i | 000000F4 | 00000093 |
@@ -2531,12 +2512,12 @@ All tests passed.
 | 8b, 0x0011 16xs 2d 2i | 00001AF0 | 000016E0 |
 | 8b, 0x0011 1xs 4d 2i | 000006BC | 0000041A |
 | 8b, 0x0011 16xs 4d 2i | 00001AF0 | 000016E0 |
-| 8b, 0x0011 1xs 1d 4i | 00000D64 | 0000083E |
-| 8b, 0x0011 16xs 1d 4i | 00003590 | 00002DE0 |
-| 8b, 0x0011 1xs 2d 4i | 00000D64 | 0000083D |
-| 8b, 0x0011 16xs 2d 4i | 00003590 | 00002DE0 |
-| 8b, 0x0011 1xs 4d 4i | 00000D64 | 0000083C |
-| 8b, 0x0011 16xs 4d 4i | 00003590 | 00002DE0 |
+| 8b, 0x0011 1xs 1d 4i | 00000D65 | 0000083E |
+| 8b, 0x0011 16xs 1d 4i | 000035A0 | 00002DE0 |
+| 8b, 0x0011 1xs 2d 4i | 00000D65 | 0000083D |
+| 8b, 0x0011 16xs 2d 4i | 000035A0 | 00002DE0 |
+| 8b, 0x0011 1xs 4d 4i | 00000D65 | 0000083C |
+| 8b, 0x0011 16xs 4d 4i | 000035A0 | 00002DE0 |
 | 8b, 0x0012 1xs 1d 1i | 0000039A | 0000022B |
 | 8b, 0x0012 16xs 1d 1i | 00000E70 | 00000C10 |
 | 8b, 0x0012 1xs 2d 1i | 0000039A | 0000022B |
@@ -2549,11 +2530,11 @@ All tests passed.
 | 8b, 0x0012 16xs 2d 2i | 00001C90 | 00001840 |
 | 8b, 0x0012 1xs 4d 2i | 00000722 | 0000045A |
 | 8b, 0x0012 16xs 4d 2i | 00001C90 | 00001840 |
-| 8b, 0x0012 1xs 1d 4i | 00000E31 | 000008BE |
+| 8b, 0x0012 1xs 1d 4i | 00000E32 | 000008BE |
 | 8b, 0x0012 16xs 1d 4i | 000038D0 | 000030B0 |
-| 8b, 0x0012 1xs 2d 4i | 00000E31 | 000008BD |
+| 8b, 0x0012 1xs 2d 4i | 00000E32 | 000008BD |
 | 8b, 0x0012 16xs 2d 4i | 000038D0 | 000030A0 |
-| 8b, 0x0012 1xs 4d 4i | 00000E31 | 000008BC |
+| 8b, 0x0012 1xs 4d 4i | 00000E32 | 000008BC |
 | 8b, 0x0012 16xs 4d 4i | 000038D0 | 000030A0 |
 | 8b, 0x0013 1xs 1d 1i | 000003CE | 0000024B |
 | 8b, 0x0013 16xs 1d 1i | 00000F40 | 00000CD0 |
@@ -2561,17 +2542,17 @@ All tests passed.
 | 8b, 0x0013 16xs 2d 1i | 00000F40 | 00000CC0 |
 | 8b, 0x0013 1xs 4d 1i | 000003CE | 00000249 |
 | 8b, 0x0013 16xs 4d 1i | 00000F40 | 00000CC0 |
-| 8b, 0x0013 1xs 1d 2i | 00000788 | 0000049C |
-| 8b, 0x0013 16xs 1d 2i | 00001E20 | 000019B0 |
-| 8b, 0x0013 1xs 2d 2i | 00000788 | 0000049B |
-| 8b, 0x0013 16xs 2d 2i | 00001E20 | 000019B0 |
-| 8b, 0x0013 1xs 4d 2i | 00000788 | 0000049A |
-| 8b, 0x0013 16xs 4d 2i | 00001E20 | 000019A0 |
-| 8b, 0x0013 1xs 1d 4i | 00000EFE | 0000093E |
+| 8b, 0x0013 1xs 1d 2i | 00000789 | 0000049C |
+| 8b, 0x0013 16xs 1d 2i | 00001E30 | 000019B0 |
+| 8b, 0x0013 1xs 2d 2i | 00000789 | 0000049B |
+| 8b, 0x0013 16xs 2d 2i | 00001E30 | 000019B0 |
+| 8b, 0x0013 1xs 4d 2i | 00000789 | 0000049A |
+| 8b, 0x0013 16xs 4d 2i | 00001E30 | 000019A0 |
+| 8b, 0x0013 1xs 1d 4i | 00000EFF | 0000093E |
 | 8b, 0x0013 16xs 1d 4i | 00003C00 | 00003370 |
-| 8b, 0x0013 1xs 2d 4i | 00000EFE | 0000093D |
+| 8b, 0x0013 1xs 2d 4i | 00000EFF | 0000093D |
 | 8b, 0x0013 16xs 2d 4i | 00003C00 | 00003370 |
-| 8b, 0x0013 1xs 4d 4i | 00000EFE | 0000093C |
+| 8b, 0x0013 1xs 4d 4i | 00000EFF | 0000093C |
 | 8b, 0x0013 16xs 4d 4i | 00003C00 | 00003370 |
 | 10b, 0x0010 1xs 1d 1i | 00000CCE | 000007EB |
 | 10b, 0x0010 16xs 1d 1i | 00003340 | 00002C10 |
@@ -2579,17 +2560,17 @@ All tests passed.
 | 10b, 0x0010 16xs 2d 1i | 00003340 | 00002C10 |
 | 10b, 0x0010 1xs 4d 1i | 00000CCE | 000007E9 |
 | 10b, 0x0010 16xs 4d 1i | 00003340 | 00002C10 |
-| 10b, 0x0010 1xs 1d 2i | 00001988 | 00000FDC |
-| 10b, 0x0010 16xs 1d 2i | 00006620 | 00005850 |
-| 10b, 0x0010 1xs 2d 2i | 00001988 | 00000FDB |
-| 10b, 0x0010 16xs 2d 2i | 00006620 | 00005840 |
-| 10b, 0x0010 1xs 4d 2i | 00001988 | 00000FDA |
-| 10b, 0x0010 16xs 4d 2i | 00006620 | 00005840 |
-| 10b, 0x0010 1xs 1d 4i | 000032FE | 00001FBE |
+| 10b, 0x0010 1xs 1d 2i | 00001989 | 00000FDC |
+| 10b, 0x0010 16xs 1d 2i | 00006630 | 00005850 |
+| 10b, 0x0010 1xs 2d 2i | 00001989 | 00000FDB |
+| 10b, 0x0010 16xs 2d 2i | 00006630 | 00005840 |
+| 10b, 0x0010 1xs 4d 2i | 00001989 | 00000FDA |
+| 10b, 0x0010 16xs 4d 2i | 00006630 | 00005840 |
+| 10b, 0x0010 1xs 1d 4i | 000032FF | 00001FBE |
 | 10b, 0x0010 16xs 1d 4i | 0000CC00 | 0000B0B0 |
-| 10b, 0x0010 1xs 2d 4i | 000032FE | 00001FBD |
+| 10b, 0x0010 1xs 2d 4i | 000032FF | 00001FBD |
 | 10b, 0x0010 16xs 2d 4i | 0000CC00 | 0000B0A0 |
-| 10b, 0x0010 1xs 4d 4i | 000032FE | 00001FBC |
+| 10b, 0x0010 1xs 4d 4i | 000032FF | 00001FBC |
 | 10b, 0x0010 16xs 4d 4i | 0000CC00 | 0000B0A0 |
 | 10b, 0x0011 1xs 1d 1i | 00000D9A | 0000086B |
 | 10b, 0x0011 16xs 1d 1i | 00003670 | 00002EE0 |
@@ -2603,11 +2584,11 @@ All tests passed.
 | 10b, 0x0011 16xs 2d 2i | 00006C90 | 00005DD0 |
 | 10b, 0x0011 1xs 4d 2i | 00001B22 | 000010DA |
 | 10b, 0x0011 16xs 4d 2i | 00006C90 | 00005DD0 |
-| 10b, 0x0011 1xs 1d 4i | 00003631 | 000021BE |
+| 10b, 0x0011 1xs 1d 4i | 00003632 | 000021BE |
 | 10b, 0x0011 16xs 1d 4i | 0000D8D0 | 0000BBD0 |
-| 10b, 0x0011 1xs 2d 4i | 00003631 | 000021BD |
+| 10b, 0x0011 1xs 2d 4i | 00003632 | 000021BD |
 | 10b, 0x0011 16xs 2d 4i | 0000D8D0 | 0000BBD0 |
-| 10b, 0x0011 1xs 4d 4i | 00003631 | 000021BC |
+| 10b, 0x0011 1xs 4d 4i | 00003632 | 000021BC |
 | 10b, 0x0011 16xs 4d 4i | 0000D8D0 | 0000BBC0 |
 | 10b, 0x0012 1xs 1d 1i | 00000E67 | 000008EB |
 | 10b, 0x0012 16xs 1d 1i | 000039A0 | 000031A0 |
@@ -2621,12 +2602,12 @@ All tests passed.
 | 10b, 0x0012 16xs 2d 2i | 000072F0 | 00006360 |
 | 10b, 0x0012 1xs 4d 2i | 00001CBC | 000011DA |
 | 10b, 0x0012 16xs 4d 2i | 000072F0 | 00006360 |
-| 10b, 0x0012 1xs 1d 4i | 00003964 | 000023BE |
-| 10b, 0x0012 16xs 1d 4i | 0000E590 | 0000C6F0 |
-| 10b, 0x0012 1xs 2d 4i | 00003964 | 000023BD |
-| 10b, 0x0012 16xs 2d 4i | 0000E590 | 0000C6F0 |
-| 10b, 0x0012 1xs 4d 4i | 00003964 | 000023BC |
-| 10b, 0x0012 16xs 4d 4i | 0000E590 | 0000C6E0 |
+| 10b, 0x0012 1xs 1d 4i | 00003965 | 000023BE |
+| 10b, 0x0012 16xs 1d 4i | 0000E5A0 | 0000C6F0 |
+| 10b, 0x0012 1xs 2d 4i | 00003965 | 000023BD |
+| 10b, 0x0012 16xs 2d 4i | 0000E5A0 | 0000C6F0 |
+| 10b, 0x0012 1xs 4d 4i | 00003965 | 000023BC |
+| 10b, 0x0012 16xs 4d 4i | 0000E5A0 | 0000C6E0 |
 | 10b, 0x0013 1xs 1d 1i | 00000F34 | 0000096B |
 | 10b, 0x0013 16xs 1d 1i | 00003CD0 | 00003470 |
 | 10b, 0x0013 1xs 2d 1i | 00000F34 | 0000096B |
@@ -2751,290 +2732,236 @@ All tests passed.
 
 All tests passed.
 
-## Multiply long tests (52/72 passed)
+## Multiply long tests
 
-52/72 tests passed, 20 failed:
+All tests passed.
 
-| Test | Actual | Expected |
-|------|--------|----------|
-|  -1 *  -1 umulls | FFFFFFFE:00000001 (CSPR 8) | FFFFFFFE:00000001 (CSPR A) |
-| $7F *  -1 umulls | 7FFFFFFE:80000001 (CSPR 0) | 7FFFFFFE:80000001 (CSPR 2) |
-|  -1 * $7F smulls | FFFFFFFF:80000001 (CSPR 8) | FFFFFFFF:80000001 (CSPR A) |
-|  -1 * $7F umulls | 7FFFFFFE:80000001 (CSPR 0) | 7FFFFFFE:80000001 (CSPR 2) |
-| $80 * $7F smulls | C0000000:80000000 (CSPR 8) | C0000000:80000000 (CSPR A) |
-| $80 * $7F umulls | 3FFFFFFF:80000000 (CSPR 0) | 3FFFFFFF:80000000 (CSPR 2) |
-| $81 * $7F smulls | C0000000:FFFFFFFF (CSPR 8) | C0000000:FFFFFFFF (CSPR A) |
-| $81 * $7F umulls | 3FFFFFFF:FFFFFFFF (CSPR 0) | 3FFFFFFF:FFFFFFFF (CSPR 2) |
-|   0 * $80 smulls | 00000000:00000000 (CSPR 4) | 00000000:00000000 (CSPR 6) |
-|   1 * $80 smulls | FFFFFFFF:80000000 (CSPR 8) | FFFFFFFF:80000000 (CSPR A) |
-|  -1 * $80 umulls | 7FFFFFFF:80000000 (CSPR 0) | 7FFFFFFF:80000000 (CSPR 2) |
-| $7F * $80 smulls | C0000000:80000000 (CSPR 8) | C0000000:80000000 (CSPR A) |
-| $80 * $80 umulls | 40000000:00000000 (CSPR 0) | 40000000:00000000 (CSPR 2) |
-| $81 * $80 umulls | 40000000:80000000 (CSPR 0) | 40000000:80000000 (CSPR 2) |
-|   0 * $81 smulls | 00000000:00000000 (CSPR 4) | 00000000:00000000 (CSPR 6) |
-|   1 * $81 smulls | FFFFFFFF:80000001 (CSPR 8) | FFFFFFFF:80000001 (CSPR A) |
-|  -1 * $81 umulls | 80000000:7FFFFFFF (CSPR 8) | 80000000:7FFFFFFF (CSPR A) |
-| $7F * $81 smulls | C0000000:FFFFFFFF (CSPR 8) | C0000000:FFFFFFFF (CSPR A) |
-| $80 * $81 umulls | 40000000:80000000 (CSPR 0) | 40000000:80000000 (CSPR 2) |
-| $81 * $81 umulls | 40000001:00000001 (CSPR 0) | 40000001:00000001 (CSPR 2) |
+## BIOS math tests
 
-## BIOS math tests (603/615 passed)
+All tests passed.
 
-603/615 tests passed, 12 failed:
+## DMA tests (1044/1256 passed)
+
+1044/1256 tests passed, 212 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| ArcTan2 00000000,00000001 r1 | 00000000 | 00000001 |
-| ArcTan2 00000000,00004000 r1 | 00000000 | 00004000 |
-| ArcTan2 00000000,00008000 r1 | 00000000 | 00008000 |
-| ArcTan2 00000000,0000C000 r1 | 00000000 | 0000C000 |
-| ArcTan2 00000000,00010000 r1 | 00000000 | 00010000 |
-| ArcTan2 00000000,FFFF0000 r1 | 00000000 | FFFF0000 |
-| Div 00000000/00000000 r0 | 00000000 | 00000001 |
-| Div 00000000/00000000 r3 | 00000000 | 00000001 |
-| Div 00000001/00000000 r1 | 00000000 | 00000001 |
-| Div 00000001/00000000 r3 | 00000000 | 00000001 |
-| Div FFFFFFFF/00000000 r1 | 00000000 | FFFFFFFF |
-| Div FFFFFFFF/00000000 r3 | 00000000 | 00000001 |
-
-## DMA tests (1056/1256 passed)
-
-1056/1256 tests passed, 200 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| 0 Imm H =ROM/=IWRAM 3 | CB0E0C7C | CB0EBABE |
+| 0 Imm H =ROM/=IWRAM 3 | CB0E0000 | CB0EBABE |
 | 1 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 2 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 3 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
-| 0 Imm H =ROM/=EWRAM 3 | FEFD0C7C | FEFDBABE |
+| 0 Imm H =ROM/=EWRAM 3 | FEFD0000 | FEFDBABE |
 | 1 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 2 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 3 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
-| 0 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 1 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 2 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 3 Imm H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 0 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 1 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 2 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 3 Imm H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 0 Imm W =ROM/=IWRAM 3 | 0E050C7C | BABEBABE |
+| 0 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 1 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 2 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 3 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 0 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 1 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 2 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 3 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 0 Imm W =ROM/=IWRAM 3 | 00000000 | BABEBABE |
 | 1 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 Imm W =ROM/=EWRAM 3 | 0E050C7C | BABEBABE |
+| 0 Imm W =ROM/=EWRAM 3 | 00000000 | BABEBABE |
 | 1 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 1 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 2 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 3 Imm W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 0 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 1 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 2 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 3 Imm W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 0 Imm H +ROM/=IWRAM 3 | CB0E1111 | CB0ECAFE |
-| 0 Imm H +ROM/=EWRAM 3 | FEFD1111 | FEFDCAFE |
-| 0 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 1 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 2 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 3 Imm H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 0 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 1 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 2 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 3 Imm H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 0 Imm W +ROM/=IWRAM 3 | 1708158F | CAFECAFE |
-| 0 Imm W +ROM/=EWRAM 3 | 1708158F | CAFECAFE |
-| 0 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 1 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 2 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 3 Imm W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 0 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 1 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 2 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 3 Imm W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 0 Imm H -ROM/=IWRAM 3 | CB0E07D5 | CB0ECAFE |
-| 0 Imm H -ROM/=EWRAM 3 | FEFD07D5 | FEFDCAFE |
-| 0 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 1 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 2 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 3 Imm H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 0 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 1 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 2 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 3 Imm H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 0 Imm W -ROM/=IWRAM 3 | 04B50323 | CAFECAFE |
+| 0 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 1 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 2 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 3 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 0 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 1 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 2 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 3 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 0 Imm H +ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 Imm H +ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 1 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 2 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 3 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 1 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 2 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 3 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 Imm W +ROM/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W +ROM/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 1 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 2 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 3 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 0 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 1 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 2 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 3 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 0 Imm H -ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 Imm H -ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 1 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 2 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 3 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 1 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 2 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 3 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 Imm W -ROM/=IWRAM 3 | 00000000 | CAFECAFE |
 | 1 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 Imm W -ROM/=EWRAM 3 | 04B50323 | CAFECAFE |
+| 0 Imm W -ROM/=EWRAM 3 | 00000000 | CAFECAFE |
 | 1 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 1 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 2 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 3 Imm W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 0 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 1 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 2 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 3 Imm W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 0 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 1 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 2 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 3 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 1 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 2 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 3 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
 | 0 Imm W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
+| 1 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 2 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 3 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
 | 0 Imm W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 HBl H =ROM/=IWRAM 3 | CB0E0C7C | CB0EBABE |
+| 1 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 2 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 3 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 0 HBl H =ROM/=IWRAM 3 | CB0E0000 | CB0EBABE |
 | 1 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 2 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 3 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
-| 0 HBl H =ROM/=EWRAM 3 | FEFD0C7C | FEFDBABE |
+| 0 HBl H =ROM/=EWRAM 3 | FEFD0000 | FEFDBABE |
 | 1 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 2 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 3 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
-| 0 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 1 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 2 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 3 HBl H =BIOS/=IWRAM 3 | CB0E0059 | CB0EBABE |
-| 0 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 1 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 2 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 3 HBl H =BIOS/=EWRAM 3 | FEFD0059 | FEFDBABE |
-| 0 HBl W =ROM/=IWRAM 3 | 0E050C7C | BABEBABE |
+| 0 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 1 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 2 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 3 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
+| 0 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 1 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 2 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 3 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
+| 0 HBl W =ROM/=IWRAM 3 | 00000000 | BABEBABE |
 | 1 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 HBl W =ROM/=EWRAM 3 | 0E050C7C | BABEBABE |
+| 0 HBl W =ROM/=EWRAM 3 | 00000000 | BABEBABE |
 | 1 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 1 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 2 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 3 HBl W =BIOS/=IWRAM 3 | EA000059 | BABEBABE |
-| 0 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 1 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 2 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 3 HBl W =BIOS/=EWRAM 3 | EA000059 | BABEBABE |
-| 0 HBl H +ROM/=IWRAM 3 | CB0E1111 | CB0ECAFE |
-| 0 HBl H +ROM/=EWRAM 3 | FEFD1111 | FEFDCAFE |
-| 0 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 1 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 2 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 3 HBl H +BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 0 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 1 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 2 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 3 HBl H +BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 0 HBl W +ROM/=IWRAM 3 | 1708158F | CAFECAFE |
-| 0 HBl W +ROM/=EWRAM 3 | 1708158F | CAFECAFE |
-| 0 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 1 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 2 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 3 HBl W +BIOS/=IWRAM 3 | EA00003C | CAFECAFE |
-| 0 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 1 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 2 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 3 HBl W +BIOS/=EWRAM 3 | EA00003C | CAFECAFE |
-| 0 HBl H -ROM/=IWRAM 3 | CB0E07D5 | CB0ECAFE |
-| 0 HBl H -ROM/=EWRAM 3 | FEFD07D5 | FEFDCAFE |
-| 0 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 1 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 2 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 3 HBl H -BIOS/=IWRAM 3 | CB0EEA00 | CB0ECAFE |
-| 0 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 1 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 2 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 3 HBl H -BIOS/=EWRAM 3 | FEFDEA00 | FEFDCAFE |
-| 0 HBl W -ROM/=IWRAM 3 | 04B50323 | CAFECAFE |
+| 0 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 1 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 2 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 3 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
+| 0 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 1 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 2 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 3 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
+| 0 HBl H +ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 HBl H +ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 1 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 2 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 3 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 1 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 2 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 3 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 HBl W +ROM/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W +ROM/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 1 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 2 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 3 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
+| 0 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 1 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 2 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 3 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
+| 0 HBl H -ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 HBl H -ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 1 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 2 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 3 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
+| 0 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 1 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 2 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 3 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
+| 0 HBl W -ROM/=IWRAM 3 | 00000000 | CAFECAFE |
 | 1 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 HBl W -ROM/=EWRAM 3 | 04B50323 | CAFECAFE |
+| 0 HBl W -ROM/=EWRAM 3 | 00000000 | CAFECAFE |
 | 1 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 1 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 2 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 3 HBl W -BIOS/=IWRAM 3 | EA000006 | CAFECAFE |
-| 0 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 1 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 2 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
-| 3 HBl W -BIOS/=EWRAM 3 | EA000006 | CAFECAFE |
+| 0 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 1 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 2 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 3 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 1 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 2 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 3 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
 | 0 HBl W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
+| 1 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 2 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 3 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
 | 0 HBl W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 3 | EA000055 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 4 | E3A00301 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 5 | E5C00008 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 6 | E329F01F | 00000000 |
-| 1 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 3 | EA000055 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 4 | E3A00301 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 5 | E5C00008 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 6 | E329F01F | DEADDEAD |
-| 0 Imm W R+0x10/+EWRAM 3 | EA000055 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 4 | E3A00301 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 5 | E5C00008 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 6 | E329F01F | 00000000 |
-| 1 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 3 | EA000055 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 4 | E3A00301 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 5 | E5C00008 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 6 | E329F01F | DEADDEAD |
-| 0 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
-| 0 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
-| 1 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
-| 1 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
-| 2 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
-| 2 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
-| 3 Imm H V+BIOS/+VRAM 3 | EA000059 | CAFECAFE |
-| 3 Imm H V+BIOS/+VRAM 4 | EA000058 | CAFECAFE |
+| 1 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 2 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 3 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 0 Imm W R+0x10/+IWRAM 3 | E3A00301 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 4 | E28FE000 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 5 | E510F004 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 6 | E8BD500F | 00000000 |
+| 1 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
+| 0 Imm W R+0x10/+EWRAM 3 | E3A00301 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 4 | E28FE000 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 5 | E510F004 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 6 | E8BD500F | 00000000 |
+| 1 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
+| 0 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
+| 1 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
+| 1 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
+| 2 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
+| 2 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
+| 3 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
+| 3 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
 
-## SIO register R/W tests (65/90 passed)
+## SIO register R/W tests
 
-65/90 tests passed, 25 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| M: SIOCNT | SIOCNT: Got 0x0000 vs 0x6F8F |  |
-| M: SIOMLT_SEND | SIOMLT_SEND: Got 0x0000 vs 0xFFFF |  |
-| M: RCNT | RCNT: Got 0x8000 vs 0x01FF |  |
-| M: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
-| N8: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
-| N8: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
-| N8: RCNT | RCNT: Got 0x8000 vs 0x01F5 |  |
-| N8: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
-| N32: SIODATA32_L | SIODATA32_L: Got 0x0000 vs 0xFFFF |  |
-| N32: SIODATA32_H | SIODATA32_H: Got 0x0000 vs 0xFFFF |  |
-| N32: SIOCNT | SIOCNT: Got 0x0000 vs 0x5F8F |  |
-| N32: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
-| N32: RCNT | RCNT: Got 0x8000 vs 0x01F5 |  |
-| N32: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
-| U: SIOCNT | SIOCNT: Got 0x0000 vs 0x7FAF |  |
-| U: RCNT | RCNT: Got 0x8000 vs 0x01FF |  |
-| U: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
-| G: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
-| G: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
-| G: RCNT | RCNT: Got 0x8000 vs 0x81FF |  |
-| G: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
-| J: SIOCNT | SIOCNT: Got 0x0000 vs 0x4F8F |  |
-| J: SIODATA8 | SIODATA8: Got 0x0000 vs 0xFFFF |  |
-| J: RCNT | RCNT: Got 0x8000 vs 0xC1FC |  |
-| J: JOYCNT | JOYCNT: Got 0x0000 vs 0x0040 |  |
+All tests passed.
 
 ## SIO timing tests (0/4 passed)
 
@@ -3042,10 +2969,10 @@ All tests passed.
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| Normal8/256k | Timed out |  |
-| Normal8/2M | Timed out |  |
-| Normal32/256k | Timed out |  |
-| Normal32/2M | Timed out |  |
+| Normal8/256k | 00000241 | 00000279 |
+| Normal8/2M | 00000081 | 000000B9 |
+| Normal32/256k | 00000841 | 00000879 |
+| Normal32/2M | 00000141 | 00000179 |
 
 ## Misc. edge case tests (1/10 passed)
 
@@ -3054,14 +2981,14 @@ All tests passed.
 | Test | Actual | Expected |
 |------|--------|----------|
 | DMA Prefetch Break | 0x10002A64 | 0x10000004 |
-| DMA Prefetch Read | 0xDEAD0000 | 0xEA000006 |
+| DMA Prefetch Read | 0xDEAD0000 | 0x00000000 |
 | H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x000000E7 |
+| H-blank bit start Flip 1 | 0x00000085 | 0x0000011A |
 | H-blank bit start Flip 2 | 0x000003EC | 0x000003C0 |
-| H-blank bit start Flip 3 | 0x000000E4 | 0x00000101 |
+| H-blank bit start Flip 3 | 0x000000E4 | 0x000000E1 |
 | H-blank bit start Flip 4 | 0x000003EC | 0x000003C0 |
-| H-blank bit start Flip 5 | 0x000000E4 | 0x00000120 |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x000003AD |
+| H-blank bit start Flip 5 | 0x000000E4 | 0x00000140 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x0000038A |
 
 ## Video tests (timed out)
 
@@ -3070,5 +2997,5 @@ Suite did not complete (emulator timed out).
 ## Summary
 
 - **Total:** 7008
-- **Pass:** 4029
-- **Fail:** 2979
+- **Pass:** 4093
+- **Fail:** 2915
