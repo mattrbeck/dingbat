@@ -117,10 +117,11 @@ proc bgr16_sub*(a, b: uint16): uint16 =
             int(bgr16_green(a)) - int(bgr16_green(b)),
             int(bgr16_red(a))   - int(bgr16_red(b)))
 
-proc bgr16_mul*(a: uint16; f: float): uint16 =
-  new_bgr16(int(float(bgr16_blue(a))  * f),
-            int(float(bgr16_green(a)) * f),
-            int(float(bgr16_red(a))   * f))
+proc bgr16_mul*(a: uint16; coeff: int): uint16 =
+  ## Multiply each channel by coeff/16 using integer math. coeff is 0..16.
+  new_bgr16((int(bgr16_blue(a))  * coeff) shr 4,
+            (int(bgr16_green(a)) * coeff) shr 4,
+            (int(bgr16_red(a))   * coeff) shr 4)
 
 proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
@@ -140,23 +141,43 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
   let character_base  = 0x4000'u32 * uint32(bgcnt.character_base_block)
   let effective_row   = (uint32(ppu.vcount) + uint32(bgvofs.offset)) and uint32(bg_height)
   let tile_y          = effective_row shr 3
+  let is_8bpp         = bgcnt.color_mode_8bpp
+  # Precompute tile_y contribution to se_address
+  let ty_base         = int(tile_y) * 32
+  let ty_extra        = if int(tile_y) >= 32 and bgcnt.screen_size == 0b11: 0x0400 else: 0
+  let row_in_tile     = effective_row and 7
+  var prev_tile_x: uint32 = 0xFFFFFFFF'u32
+  var screen_entry: uint16
+  var tile_id: uint16
+  var flip_x_mask: int
+  var y: int
+  var tile_base_8bpp: uint32
+  var tile_base_4bpp: uint32
+  var palette_bank_shift: uint32
   for col in 0..239:
     let effective_col = (uint32(col) + uint32(bghofs.offset)) and uint32(bg_width)
     let tile_x        = effective_col shr 3
-    let se_idx        = ppu.se_address(int(tile_x), int(tile_y), int(bgcnt.screen_size))
-    let screen_entry  = uint16(ppu.vram[screen_base + uint32(se_idx) * 2 + 1]) shl 8 or
-                        uint16(ppu.vram[screen_base + uint32(se_idx) * 2])
-    let tile_id       = bits_range(screen_entry, 0, 9)
-    let y             = int(effective_row and 7) xor (7 * int(screen_entry shr 11 and 1))
-    let x             = int(effective_col and 7) xor (7 * int(screen_entry shr 10 and 1))
+    if tile_x != prev_tile_x:
+      prev_tile_x = tile_x
+      let se_idx = ty_base + int(tile_x) + (if int(tile_x) >= 32: 0x03E0 else: 0) + ty_extra
+      screen_entry = uint16(ppu.vram[screen_base + uint32(se_idx) * 2 + 1]) shl 8 or
+                     uint16(ppu.vram[screen_base + uint32(se_idx) * 2])
+      tile_id = bits_range(screen_entry, 0, 9)
+      flip_x_mask = 7 * int(screen_entry shr 10 and 1)
+      y = int(row_in_tile) xor (7 * int(screen_entry shr 11 and 1))
+      if is_8bpp:
+        tile_base_8bpp = character_base + uint32(tile_id) * 0x40 + uint32(y) * 8
+      else:
+        tile_base_4bpp = character_base + uint32(tile_id) * 0x20 + uint32(y) * 4
+        palette_bank_shift = uint32(bits_range(screen_entry, 12, 15)) shl 4
+    let x = int(effective_col and 7) xor flip_x_mask
     var pal_idx: uint32
-    if bgcnt.color_mode_8bpp:
-      pal_idx = uint32(ppu.vram[character_base + uint32(tile_id) * 0x40 + uint32(y) * 8 + uint32(x)])
+    if is_8bpp:
+      pal_idx = uint32(ppu.vram[tile_base_8bpp + uint32(x)])
     else:
-      let palette_bank = bits_range(screen_entry, 12, 15)
-      let palettes     = ppu.vram[character_base + uint32(tile_id) * 0x20 + uint32(y) * 4 + (uint32(x) shr 1)]
+      let palettes = ppu.vram[tile_base_4bpp + (uint32(x) shr 1)]
       pal_idx = uint32((palettes shr (uint32(x and 1) * 4)) and 0xF)
-      if pal_idx > 0: pal_idx += uint32(palette_bank) shl 4
+      if pal_idx > 0: pal_idx += palette_bank_shift
     ppu.layer_palettes[bg][col] = uint8(pal_idx)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
@@ -291,14 +312,14 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
   case blend_mode
   of 0: top_u16  # None
   of 1:          # Blend
-    let eva = float(min(16, int(ppu.bldalpha.eva_coefficient))) / 16.0
-    let evb = float(min(16, int(ppu.bldalpha.evb_coefficient))) / 16.0
+    let eva = min(16, int(ppu.bldalpha.eva_coefficient))
+    let evb = min(16, int(ppu.bldalpha.evb_coefficient))
     bgr16_add(bgr16_mul(top_u16, eva), bgr16_mul(bot_u16, evb))
   of 2:          # Brighten
-    let evy = float(min(16, int(ppu.bldy.evy_coefficient))) / 16.0
-    bgr16_add(top_u16, bgr16_mul(bgr16_sub(0xFFFF'u16, top_u16), evy))
+    let evy = min(16, int(ppu.bldy.evy_coefficient))
+    bgr16_add(top_u16, bgr16_mul(bgr16_sub(0x7FFF'u16, top_u16), evy))
   of 3:          # Darken
-    let evy = float(min(16, int(ppu.bldy.evy_coefficient))) / 16.0
+    let evy = min(16, int(ppu.bldy.evy_coefficient))
     bgr16_sub(top_u16, bgr16_mul(top_u16, evy))
   else: top_u16
 

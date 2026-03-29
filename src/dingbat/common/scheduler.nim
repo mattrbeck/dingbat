@@ -33,16 +33,16 @@ proc new_scheduler*(): Scheduler =
   result.events = @[]
 
 proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
-  # Insert in sorted order by target cycle.
+  # Insert in descending order (largest first) so pop from end is O(1).
   let target = s.cycles + CycleCount(cycles)
   let ev = Event(cycles: target, kind: kind)
-  var idx = s.events.len
-  for i in 0 ..< s.events.len:
-    if s.events[i].cycles > target:
-      idx = i
+  var idx = 0
+  for i in countdown(s.events.len - 1, 0):
+    if s.events[i].cycles >= target:
+      idx = i + 1
       break
   s.events.insert(ev, idx)
-  s.next_event = s.events[0].cycles
+  s.next_event = s.events[^1].cycles
 
 proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
   var c = cycles
@@ -51,27 +51,24 @@ proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
   s.schedule(c, kind)
 
 proc clear*(s: Scheduler; kind: EventType) =
-  # Remove all events of a given type.
-  var i = 0
-  while i < s.events.len:
-    if s.events[i].kind == kind:
-      s.events.delete(i)
-    else:
-      inc i
-  s.next_event = if s.events.len > 0: s.events[0].cycles else: high(CycleCount)
+  # Remove all events of a given type (single-pass compaction).
+  var j = 0
+  for i in 0 ..< s.events.len:
+    if s.events[i].kind != kind:
+      if j != i: s.events[j] = s.events[i]
+      inc j
+  s.events.setLen(j)
+  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
 
 proc call_current*(s: Scheduler) =
-  while true:
-    if s.events.len == 0:
-      s.next_event = high(CycleCount)
-      return
-    let ev = s.events[0]
-    if s.cycles >= ev.cycles:
-      s.events.delete(0)
-      s.dispatch(ev.kind)
-    else:
+  while s.events.len > 0:
+    let ev = s.events[^1]
+    if s.cycles < ev.cycles:
       s.next_event = ev.cycles
       return
+    s.events.setLen(s.events.len - 1)
+    s.dispatch(ev.kind)
+  s.next_event = high(CycleCount)
 
 proc tick*(s: Scheduler; cycles: int) =
   if s.cycles + CycleCount(cycles) < s.next_event:
@@ -91,7 +88,7 @@ proc rebase*(s: Scheduler) =
   let base = s.cycles
   for i in 0 ..< s.events.len:
     s.events[i].cycles -= base
-  s.next_event = if s.events.len > 0: s.events[0].cycles else: high(CycleCount)
+  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
   s.cycles = 0
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
@@ -102,3 +99,4 @@ proc `speed_mode=`*(s: Scheduler; speed: uint8) =
       let remaining = s.events[i].cycles - s.cycles
       let offset = remaining shr (old - speed)
       s.events[i].cycles = s.cycles + offset
+  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
