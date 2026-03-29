@@ -42,19 +42,31 @@ proc rtc_prepare_read(rtc: RTC) =
   of 2:  # DATE_TIME
     let now = local(now())
     var hour = now.hour
-    if not rtc.m24: hour = hour mod 12
+    if not rtc.m24:
+      let pm = hour >= 12
+      hour = hour mod 12
+      if pm: hour = hour or 0x80
     rtc.buffer.push_byte(bcd(now.year mod 100))
     rtc.buffer.push_byte(bcd(now.month.int))
     rtc.buffer.push_byte(bcd(now.monthday))
-    rtc.buffer.push_byte(bcd(now.weekday.int mod 7))
-    rtc.buffer.push_byte(bcd(hour))
+    rtc.buffer.push_byte(bcd((now.weekday.int + 1) mod 7))
+    if not rtc.m24 and (hour and 0x80) != 0:
+      rtc.buffer.push_byte(bcd(hour and 0x7F) or 0x80'u8)
+    else:
+      rtc.buffer.push_byte(bcd(hour))
     rtc.buffer.push_byte(bcd(now.minute))
     rtc.buffer.push_byte(bcd(now.second))
   of 3:  # TIME
     let now = local(now())
     var hour = now.hour
-    if not rtc.m24: hour = hour mod 12
-    rtc.buffer.push_byte(bcd(hour))
+    if not rtc.m24:
+      let pm = hour >= 12
+      hour = hour mod 12
+      if pm: hour = hour or 0x80
+    if not rtc.m24 and (hour and 0x80) != 0:
+      rtc.buffer.push_byte(bcd(hour and 0x7F) or 0x80'u8)
+    else:
+      rtc.buffer.push_byte(bcd(hour))
     rtc.buffer.push_byte(bcd(now.minute))
     rtc.buffer.push_byte(bcd(now.second))
   else: discard

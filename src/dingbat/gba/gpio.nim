@@ -28,8 +28,9 @@ proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
 proc `[]=`*(gpio: GPIO; io_addr: uint32; value: uint8) =
   case io_addr and 0xFF'u32
   of 0xC4:  # IO Port Data
-    gpio.data = gpio.data and (value and 0xF'u8)
-    rtc_write(gpio.rtc, value and 0xF'u8)
+    let masked = (value and gpio.direction and 0xF'u8) or (gpio.data and (not gpio.direction) and 0xF'u8)
+    gpio.data = masked
+    rtc_write(gpio.rtc, masked)
   of 0xC6:  # IO Port Direction
     gpio.direction = value and 0x0F'u8
   of 0xC8:  # IO Port Control
