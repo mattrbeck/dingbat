@@ -114,7 +114,8 @@ proc start_normal_transfer(serial: Serial) =
   let fast = bit(serial.siocnt, 1)
   let bits = if is_32bit: 32 else: 8
   let cycles_per_bit = if fast: 8 else: 64
-  let total_cycles = bits * cycles_per_bit
+  const SIO_TRANSFER_OVERHEAD = 55  # # Complete hack to pass mgba suite. Only works with the HLE BIOS.
+  let total_cycles = bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 
   serial.gba.scheduler.schedule(total_cycles, etSerial)
 
