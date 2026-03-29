@@ -1,167 +1,117 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-03-28 10:09:34*
+*Generated: 2026-03-29 13:12:17*
 
-## Memory tests (1398/1552 passed)
+## Memory tests (1448/1552 passed)
 
-1398/1552 tests passed, 154 failed:
+1448/1552 tests passed, 104 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| ROM load DMA0 16 | 0x00000000 | 0x0000FACE |
-| ROM load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| ROM load DMA0 32 | 0x00000000 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| ROM load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| ROM out-of-bounds load DMA0 16 | 0x00000000 | 0x0000FACE |
-| ROM out-of-bounds load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| ROM out-of-bounds load DMA0 32 | 0x00000000 | 0xFEEDFACE |
-| ROM out-of-bounds load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| ROM out-of-bounds load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| ROM out-of-bounds load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| SRAM load U16 (unaligned) | 0x47000047 | 0x61000061 |
-| SRAM load 32 (unaligned 1) | 0x47474747 | 0x61616161 |
-| SRAM load 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
-| SRAM load 32 (unaligned 3) | 0x47474747 | 0x65656565 |
+| SRAM load DMA1 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM load DMA1 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM load DMA1 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM load DMA1 32 (unaligned 3) | 0x65656565 | 0x47474747 |
+| SRAM load DMA2 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM load DMA2 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM load DMA2 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM load DMA2 32 (unaligned 3) | 0x65656565 | 0x47474747 |
+| SRAM load DMA3 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM load DMA3 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM load DMA3 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM load DMA3 32 (unaligned 3) | 0x65656565 | 0x47474747 |
 | SRAM load swi B 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM load swi B 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM load swi B 32 (unaligned 3) | 0x47474747 | 0x65656565 |
 | SRAM load swi C 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM load swi C 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM load swi C 32 (unaligned 3) | 0x47474747 | 0x65656565 |
-| SRAM mirror load U16 (unaligned) | 0x47000047 | 0x61000061 |
-| SRAM mirror load 32 (unaligned 1) | 0x47474747 | 0x61616161 |
-| SRAM mirror load 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
-| SRAM mirror load 32 (unaligned 3) | 0x47474747 | 0x65656565 |
+| SRAM mirror load DMA1 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM mirror load DMA1 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM mirror load DMA1 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM mirror load DMA1 32 (unaligned 3) | 0x65656565 | 0x47474747 |
+| SRAM mirror load DMA2 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM mirror load DMA2 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM mirror load DMA2 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM mirror load DMA2 32 (unaligned 3) | 0x65656565 | 0x47474747 |
+| SRAM mirror load DMA3 16 (unaligned) | 0x00006161 | 0x00004747 |
+| SRAM mirror load DMA3 32 (unaligned 1) | 0x61616161 | 0x47474747 |
+| SRAM mirror load DMA3 32 (unaligned 2) | 0x6D6D6D6D | 0x47474747 |
+| SRAM mirror load DMA3 32 (unaligned 3) | 0x65656565 | 0x47474747 |
 | SRAM mirror load swi B 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM mirror load swi B 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM mirror load swi B 32 (unaligned 3) | 0x47474747 | 0x65656565 |
 | SRAM mirror load swi C 32 (unaligned 1) | 0x47474747 | 0x61616161 |
 | SRAM mirror load swi C 32 (unaligned 2) | 0x47474747 | 0x6D6D6D6D |
 | SRAM mirror load swi C 32 (unaligned 3) | 0x47474747 | 0x65656565 |
-| SRAM store U16 (unaligned) | 0x0000D8D8 | 0x00006666 |
-| SRAM store 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
-| SRAM store 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
-| SRAM store 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
+| SRAM store DMA3 16 (unaligned) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM store DMA3 32 (unaligned 1) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM store DMA3 32 (unaligned 2) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM store DMA3 32 (unaligned 3) | 0x66666666 | 0xD8D8D8D8 |
 | SRAM store swi B 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM store swi B 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM store swi B 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM store swi C 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM store swi C 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM store swi C 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
-| SRAM mirror store U16 (unaligned) | 0x0000D8D8 | 0x00006666 |
-| SRAM mirror store 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
-| SRAM mirror store 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
-| SRAM mirror store 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
+| SRAM mirror store DMA3 16 (unaligned) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM mirror store DMA3 32 (unaligned 1) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM mirror store DMA3 32 (unaligned 2) | 0x66666666 | 0xD8D8D8D8 |
+| SRAM mirror store DMA3 32 (unaligned 3) | 0x66666666 | 0xD8D8D8D8 |
 | SRAM mirror store swi B 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi B 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi B 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi C 32 (unaligned 1) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi C 32 (unaligned 2) | 0xD8D8D8D8 | 0x66666666 |
 | SRAM mirror store swi C 32 (unaligned 3) | 0xD8D8D8D8 | 0x66666666 |
-| BIOS load U8 | 0x00000000 | 0x00000004 |
-| BIOS load S8 | 0x00000000 | 0x00000004 |
-| BIOS load U16 | 0x00000000 | 0x00002004 |
-| BIOS load U16 (unaligned) | 0x00000000 | 0x04000020 |
-| BIOS load S16 | 0x00000000 | 0x00002004 |
-| BIOS load S16 (unaligned) | 0x00000000 | 0x00000020 |
-| BIOS load 32 | 0x00000000 | 0xE3A02004 |
-| BIOS load 32 (unaligned 1) | 0x00000000 | 0x04E3A020 |
-| BIOS load 32 (unaligned 2) | 0x00000000 | 0x2004E3A0 |
-| BIOS load 32 (unaligned 3) | 0x00000000 | 0xA02004E3 |
-| BIOS load DMA0 16 | 0x00000000 | 0x0000FACE |
-| BIOS load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS load DMA0 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA1 16 | 0x00000000 | 0x0000FACE |
-| BIOS load DMA1 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS load DMA1 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA1 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA2 16 | 0x00000000 | 0x0000FACE |
-| BIOS load DMA2 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS load DMA2 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA2 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA3 16 | 0x00000000 | 0x0000FACE |
-| BIOS load DMA3 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS load DMA3 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS load DMA3 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load U8 | 0x00000000 | 0x00000001 |
-| BIOS out-of-bounds load S8 | 0x00000000 | 0x00000002 |
-| BIOS out-of-bounds load U16 | 0x00000000 | 0x00002003 |
-| BIOS out-of-bounds load U16 (unaligned) | 0x00000000 | 0x04000020 |
-| BIOS out-of-bounds load S16 | 0x00000000 | 0x00002005 |
-| BIOS out-of-bounds load S16 (unaligned) | 0x00000000 | 0x00000020 |
-| BIOS out-of-bounds load 32 | 0x00000000 | 0xE3A02007 |
-| BIOS out-of-bounds load 32 (unaligned 1) | 0x00000000 | 0x08E3A020 |
-| BIOS out-of-bounds load 32 (unaligned 2) | 0x00000000 | 0x2009E3A0 |
-| BIOS out-of-bounds load 32 (unaligned 3) | 0x00000000 | 0x9F000CE5 |
-| BIOS out-of-bounds load DMA0 16 | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA0 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 16 | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA1 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA1 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA1 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 16 | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA2 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA2 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA2 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 16 | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA3 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| BIOS out-of-bounds load DMA3 32 | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| BIOS out-of-bounds load DMA3 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load U8 | 0x00000000 | 0x00000001 |
-| Out-of-bounds load S8 | 0x00000000 | 0x00000002 |
-| Out-of-bounds load U16 | 0x00000000 | 0x00002003 |
-| Out-of-bounds load U16 (unaligned) | 0x00000000 | 0x04000020 |
-| Out-of-bounds load S16 | 0x00000000 | 0x00002005 |
-| Out-of-bounds load S16 (unaligned) | 0x00000000 | 0x00000020 |
-| Out-of-bounds load 32 | 0x00000000 | 0xE3A02007 |
-| Out-of-bounds load 32 (unaligned 1) | 0x00000000 | 0x08E3A020 |
-| Out-of-bounds load 32 (unaligned 2) | 0x00000000 | 0x2009E3A0 |
-| Out-of-bounds load 32 (unaligned 3) | 0x00000000 | 0x9F000CE5 |
-| Out-of-bounds load DMA0 16 | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA0 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA0 32 | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA0 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA0 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA0 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA1 16 | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA1 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA1 32 | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA1 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA1 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA1 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA2 16 | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA2 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA2 32 | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA2 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA2 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA2 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA3 16 | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA3 16 (unaligned) | 0x00000000 | 0x0000FACE |
-| Out-of-bounds load DMA3 32 | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA3 32 (unaligned 1) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA3 32 (unaligned 2) | 0x00000000 | 0xFEEDFACE |
-| Out-of-bounds load DMA3 32 (unaligned 3) | 0x00000000 | 0xFEEDFACE |
+| BIOS load U16 | 0x0000F004 | 0x00002004 |
+| BIOS load U16 (unaligned) | 0x040000F0 | 0x04000020 |
+| BIOS load S16 | 0xFFFFF004 | 0x00002004 |
+| BIOS load S16 (unaligned) | 0xFFFFFFF0 | 0x00000020 |
+| BIOS load 32 | 0xE25EF004 | 0xE3A02004 |
+| BIOS load 32 (unaligned 1) | 0x04E25EF0 | 0x04E3A020 |
+| BIOS load 32 (unaligned 2) | 0xF004E25E | 0x2004E3A0 |
+| BIOS load 32 (unaligned 3) | 0x5EF004E2 | 0xA02004E3 |
+| BIOS load swi B 16 | 0xE25EF004 | 0x00000000 |
+| BIOS load swi B 16 (unaligned) | 0x00E200F0 | 0x00000000 |
+| BIOS load swi B 32 | 0xE25EF004 | 0x00000000 |
+| BIOS load swi B 32 (unaligned 1) | 0xE25EF004 | 0x00000000 |
+| BIOS load swi B 32 (unaligned 2) | 0xE25EF004 | 0x00000000 |
+| BIOS load swi B 32 (unaligned 3) | 0xE25EF004 | 0x00000000 |
+| BIOS load swi C 32 | 0xE25EF004 | 0x00000000 |
+| BIOS load swi C 32 (unaligned 1) | 0xE25EF004 | 0x00000000 |
+| BIOS load swi C 32 (unaligned 2) | 0xE25EF004 | 0x00000000 |
+| BIOS load swi C 32 (unaligned 3) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load U8 | 0x00000004 | 0x00000001 |
+| BIOS out-of-bounds load S8 | 0x00000004 | 0x00000002 |
+| BIOS out-of-bounds load U16 | 0x0000F004 | 0x00002003 |
+| BIOS out-of-bounds load U16 (unaligned) | 0x040000F0 | 0x04000020 |
+| BIOS out-of-bounds load S16 | 0xFFFFF004 | 0x00002005 |
+| BIOS out-of-bounds load S16 (unaligned) | 0xFFFFFFF0 | 0x00000020 |
+| BIOS out-of-bounds load 32 | 0xE25EF004 | 0xE3A02007 |
+| BIOS out-of-bounds load 32 (unaligned 1) | 0x04E25EF0 | 0x08E3A020 |
+| BIOS out-of-bounds load 32 (unaligned 2) | 0xF004E25E | 0x2009E3A0 |
+| BIOS out-of-bounds load 32 (unaligned 3) | 0x5EF004E2 | 0x9F000CE5 |
+| BIOS out-of-bounds load swi B 16 | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi B 16 (unaligned) | 0x00E200F0 | 0x00000000 |
+| BIOS out-of-bounds load swi B 32 | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi B 32 (unaligned 1) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi B 32 (unaligned 2) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi B 32 (unaligned 3) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi C 32 | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi C 32 (unaligned 1) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi C 32 (unaligned 2) | 0xE25EF004 | 0x00000000 |
+| BIOS out-of-bounds load swi C 32 (unaligned 3) | 0xE25EF004 | 0x00000000 |
+| Out-of-bounds load swi B 16 | 0xDF0CDF0C | 0x00000000 |
+| Out-of-bounds load swi B 16 (unaligned) | 0x00DF00DF | 0x00000000 |
+| Out-of-bounds load swi B 32 | 0xDF0CDF0C | 0x00000000 |
+| Out-of-bounds load swi B 32 (unaligned 1) | 0xDF0CDF0C | 0x00000000 |
+| Out-of-bounds load swi B 32 (unaligned 2) | 0xDF0CDF0C | 0x00000000 |
+| Out-of-bounds load swi B 32 (unaligned 3) | 0xDF0CDF0C | 0x00000000 |
+| Out-of-bounds load swi C 32 | 0x4B014B01 | 0x00000000 |
+| Out-of-bounds load swi C 32 (unaligned 1) | 0x4B014B01 | 0x00000000 |
+| Out-of-bounds load swi C 32 (unaligned 2) | 0x4B014B01 | 0x00000000 |
+| Out-of-bounds load swi C 32 (unaligned 3) | 0x4B014B01 | 0x00000000 |
 
 ## I/O read tests
 
@@ -2740,239 +2690,152 @@ All tests passed.
 
 All tests passed.
 
-## DMA tests (1044/1256 passed)
+## DMA tests (1124/1256 passed)
 
-1044/1256 tests passed, 212 failed:
+1124/1256 tests passed, 132 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| 0 Imm H =ROM/=IWRAM 3 | CB0E0000 | CB0EBABE |
 | 1 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 2 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 3 Imm H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
-| 0 Imm H =ROM/=EWRAM 3 | FEFD0000 | FEFDBABE |
 | 1 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 2 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 3 Imm H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
-| 0 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 1 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 2 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 3 Imm H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 0 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 1 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 2 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 3 Imm H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 0 Imm W =ROM/=IWRAM 3 | 00000000 | BABEBABE |
+| 0 Imm W =ROM/=IWRAM 3 | FEFFBABE | BABEBABE |
 | 1 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 Imm W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 Imm W =ROM/=EWRAM 3 | 00000000 | BABEBABE |
+| 0 Imm W =ROM/=EWRAM 3 | FEFFBABE | BABEBABE |
 | 1 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 Imm W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 1 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 2 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 3 Imm W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 0 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 1 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 2 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 3 Imm W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 0 Imm H +ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 Imm H +ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 1 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 2 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 3 Imm H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 1 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 2 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 3 Imm H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 Imm W +ROM/=IWRAM 3 | 00000000 | CAFECAFE |
-| 0 Imm W +ROM/=EWRAM 3 | 00000000 | CAFECAFE |
-| 0 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 1 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 2 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 3 Imm W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 0 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 1 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 2 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 3 Imm W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 0 Imm H -ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 Imm H -ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 1 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 2 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 3 Imm H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 1 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 2 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 3 Imm H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 Imm W -ROM/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W =BIOS/=IWRAM 3 | FEFFBABE | BABEBABE |
+| 1 Imm W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 2 Imm W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 3 Imm W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 0 Imm W =BIOS/=EWRAM 3 | FEFFBABE | BABEBABE |
+| 1 Imm W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 2 Imm W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 3 Imm W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 0 Imm W +ROM/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 Imm W +ROM/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 Imm W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 Imm W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 Imm W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 Imm W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 Imm W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 Imm W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 Imm W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 Imm W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 Imm W -ROM/=IWRAM 3 | FEFFCAFE | CAFECAFE |
 | 1 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 Imm W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 Imm W -ROM/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W -ROM/=EWRAM 3 | FEFFCAFE | CAFECAFE |
 | 1 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 Imm W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 1 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 2 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 3 Imm W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 0 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 1 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 2 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 3 Imm W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 Imm W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 Imm W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 Imm W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 Imm W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 Imm W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 Imm W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 Imm W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 Imm W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
 | 0 Imm W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
-| 1 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 2 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 3 Imm W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
 | 0 Imm W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 1 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 2 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 3 Imm W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 0 HBl H =ROM/=IWRAM 3 | CB0E0000 | CB0EBABE |
 | 1 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 2 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
 | 3 HBl H =ROM/=IWRAM 3 | CB0EBEEF | CB0EDEAD |
-| 0 HBl H =ROM/=EWRAM 3 | FEFD0000 | FEFDBABE |
 | 1 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 2 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
 | 3 HBl H =ROM/=EWRAM 3 | FEFDBEEF | FEFDDEAD |
-| 0 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 1 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 2 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 3 HBl H =BIOS/=IWRAM 3 | CB0E0000 | CB0EBABE |
-| 0 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 1 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 2 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 3 HBl H =BIOS/=EWRAM 3 | FEFD0000 | FEFDBABE |
-| 0 HBl W =ROM/=IWRAM 3 | 00000000 | BABEBABE |
+| 0 HBl W =ROM/=IWRAM 3 | FEFFBABE | BABEBABE |
 | 1 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 HBl W =ROM/=IWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 HBl W =ROM/=EWRAM 3 | 00000000 | BABEBABE |
+| 0 HBl W =ROM/=EWRAM 3 | FEFFBABE | BABEBABE |
 | 1 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 2 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
 | 3 HBl W =ROM/=EWRAM 3 | DEADBEEF | DEADBEF2 |
-| 0 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 1 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 2 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 3 HBl W =BIOS/=IWRAM 3 | 00000000 | BABEBABE |
-| 0 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 1 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 2 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 3 HBl W =BIOS/=EWRAM 3 | 00000000 | BABEBABE |
-| 0 HBl H +ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 HBl H +ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 1 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 2 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 3 HBl H +BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 1 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 2 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 3 HBl H +BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 HBl W +ROM/=IWRAM 3 | 00000000 | CAFECAFE |
-| 0 HBl W +ROM/=EWRAM 3 | 00000000 | CAFECAFE |
-| 0 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 1 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 2 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 3 HBl W +BIOS/=IWRAM 3 | E92D500F | CAFECAFE |
-| 0 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 1 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 2 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 3 HBl W +BIOS/=EWRAM 3 | E92D500F | CAFECAFE |
-| 0 HBl H -ROM/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 HBl H -ROM/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 1 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 2 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 3 HBl H -BIOS/=IWRAM 3 | CB0E0000 | CB0ECAFE |
-| 0 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 1 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 2 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 3 HBl H -BIOS/=EWRAM 3 | FEFD0000 | FEFDCAFE |
-| 0 HBl W -ROM/=IWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W =BIOS/=IWRAM 3 | FEFFBABE | BABEBABE |
+| 1 HBl W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 2 HBl W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 3 HBl W =BIOS/=IWRAM 3 | FEBFBABE | BABEBABE |
+| 0 HBl W =BIOS/=EWRAM 3 | FEFFBABE | BABEBABE |
+| 1 HBl W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 2 HBl W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 3 HBl W =BIOS/=EWRAM 3 | FEBFBABE | BABEBABE |
+| 0 HBl W +ROM/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 HBl W +ROM/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 HBl W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 HBl W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 HBl W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 HBl W +BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 HBl W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 HBl W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 HBl W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 HBl W +BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 HBl W -ROM/=IWRAM 3 | FEFFCAFE | CAFECAFE |
 | 1 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 HBl W -ROM/=IWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 HBl W -ROM/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W -ROM/=EWRAM 3 | FEFFCAFE | CAFECAFE |
 | 1 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 2 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
 | 3 HBl W -ROM/=EWRAM 3 | DEADBEEC | DEADBEF2 |
-| 0 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 1 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 2 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 3 HBl W -BIOS/=IWRAM 3 | 00000000 | CAFECAFE |
-| 0 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 1 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 2 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
-| 3 HBl W -BIOS/=EWRAM 3 | 00000000 | CAFECAFE |
+| 0 HBl W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 HBl W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 HBl W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 HBl W -BIOS/=IWRAM 3 | FEFFCAFE | CAFECAFE |
+| 0 HBl W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 1 HBl W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 2 HBl W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
+| 3 HBl W -BIOS/=EWRAM 3 | FEFFCAFE | CAFECAFE |
 | 0 HBl W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
-| 1 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 2 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 3 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
 | 0 HBl W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 1 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 2 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 3 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 0 Imm W R+0x10/+IWRAM 3 | E3A00301 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 4 | E28FE000 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 5 | E510F004 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 6 | E8BD500F | 00000000 |
-| 1 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
-| 1 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
-| 2 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 3 | E3A00301 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 4 | E28FE000 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 5 | E510F004 | DEADDEAD |
-| 3 Imm W R+0x10/+IWRAM 6 | E8BD500F | DEADDEAD |
-| 0 Imm W R+0x10/+EWRAM 3 | E3A00301 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 4 | E28FE000 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 5 | E510F004 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 6 | E8BD500F | 00000000 |
-| 1 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
-| 1 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
-| 2 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 3 | E3A00301 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 4 | E28FE000 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 5 | E510F004 | DEADDEAD |
-| 3 Imm W R+0x10/+EWRAM 6 | E8BD500F | DEADDEAD |
-| 0 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
-| 0 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
-| 1 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
-| 1 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
-| 2 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
-| 2 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
-| 3 Imm H V+BIOS/+VRAM 3 | 00000000 | CAFECAFE |
-| 3 Imm H V+BIOS/+VRAM 4 | 00000000 | CAFECAFE |
+| 0 Imm W R+0x10/+IWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 4 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 5 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+IWRAM 6 | A5B6C7D8 | 00000000 |
+| 1 Imm W R+0x10/+IWRAM 3 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 4 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 5 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+IWRAM 6 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 3 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 4 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 5 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+IWRAM 6 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 3 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 4 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 5 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+IWRAM 6 | FFFFDEAD | DEADDEAD |
+| 0 Imm W R+0x10/+EWRAM 3 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 4 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 5 | A5B6C7D8 | 00000000 |
+| 0 Imm W R+0x10/+EWRAM 6 | A5B6C7D8 | 00000000 |
+| 1 Imm W R+0x10/+EWRAM 3 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 4 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 5 | FFFFDEAD | DEADDEAD |
+| 1 Imm W R+0x10/+EWRAM 6 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 3 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 4 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 5 | FFFFDEAD | DEADDEAD |
+| 2 Imm W R+0x10/+EWRAM 6 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 3 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 4 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 5 | FFFFDEAD | DEADDEAD |
+| 3 Imm W R+0x10/+EWRAM 6 | FFFFDEAD | DEADDEAD |
 
 ## SIO register R/W tests
 
 All tests passed.
 
-## SIO timing tests (0/4 passed)
+## SIO timing tests
 
-0/4 tests passed, 4 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| Normal8/256k | 00000241 | 00000279 |
-| Normal8/2M | 00000081 | 000000B9 |
-| Normal32/256k | 00000841 | 00000879 |
-| Normal32/2M | 00000141 | 00000179 |
+All tests passed.
 
 ## Misc. edge case tests (1/10 passed)
 
@@ -2981,14 +2844,14 @@ All tests passed.
 | Test | Actual | Expected |
 |------|--------|----------|
 | DMA Prefetch Break | 0x10002A64 | 0x10000004 |
-| DMA Prefetch Read | 0xDEAD0000 | 0x00000000 |
+| DMA Prefetch Read | 0xDEAD0000 | 0xE25EF004 |
 | H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x0000011A |
+| H-blank bit start Flip 1 | 0x00000085 | 0x000000E9 |
 | H-blank bit start Flip 2 | 0x000003EC | 0x000003C0 |
-| H-blank bit start Flip 3 | 0x000000E4 | 0x000000E1 |
+| H-blank bit start Flip 3 | 0x000000E4 | 0x00000141 |
 | H-blank bit start Flip 4 | 0x000003EC | 0x000003C0 |
-| H-blank bit start Flip 5 | 0x000000E4 | 0x00000140 |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x0000038A |
+| H-blank bit start Flip 5 | 0x000000E4 | 0x000000E0 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x000003BB |
 
 ## Video tests (timed out)
 
@@ -2997,5 +2860,5 @@ Suite did not complete (emulator timed out).
 ## Summary
 
 - **Total:** 7008
-- **Pass:** 4093
-- **Fail:** 2915
+- **Pass:** 4227
+- **Fail:** 2781
