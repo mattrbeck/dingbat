@@ -105,10 +105,20 @@ proc trigger*(dma: DMA; channel: int) =
   let delta_dest   = dma_addr_delta(dest_ctrl,  word_size)
 
   for _ in 0 ..< len:
+    # TODO: This accessibility check is a deny-list and may miss unmapped gaps
+    # (e.g. 0x00004000-0x01FFFFFF). Should be replaced with an allow-list of
+    # known-valid regions (0x2-0x7, 0x8-0xD, 0xE-0xF).
+    let src_region = bits_range(dma.src[channel], 24, 27)
+    let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
     if word_size == 4:
-      dma.gba.bus.write_word(dma.dst[channel], dma.gba.bus.read_word(dma.src[channel]))
+      if src_accessible:
+        dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
+      dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
     else:
-      dma.gba.bus.write_half(dma.dst[channel], dma.gba.bus.read_half(dma.src[channel]))
+      if src_accessible:
+        dma.latch[channel] = (dma.latch[channel] and 0xFFFF0000'u32) or uint32(dma.gba.bus.read_half(dma.src[channel]))
+        dma.latch[channel] = dma.latch[channel] or (dma.latch[channel] shl 16)
+      dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 

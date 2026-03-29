@@ -110,6 +110,8 @@ type
     dst*:       array[4, uint32]
     dmacnt_l*:  array[4, uint16]
     dmacnt_h*:  array[4, DMACNT]
+    # Latch per channel: https://github.com/mgba-emu/mgba/issues/2105
+    latch*:     array[4, uint32]
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting
 
