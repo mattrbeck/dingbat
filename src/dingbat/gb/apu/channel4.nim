@@ -36,7 +36,7 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
     ch.length_load    = val and 0x3F
     ch.length_counter = 0x40 - int(ch.length_load)
   of 0xFF21:
-    write_NRx2(ch, val, gb)
+    write_NRx2(ch, val)
   of 0xFF22:
     ch.clock_shift   = val shr 4
     ch.width_mode    = (val and 0x08) shr 3

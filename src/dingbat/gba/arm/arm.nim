@@ -14,18 +14,29 @@ proc bios_arctan(cpu: CPU) =
   var r1 = mul32(a, a)
   r1 = ashr(r1, 14)
   r1 = -r1  # neg_a_sq
-  var r3 = mul32(0xA9'i32, r1)
+  const ARCTAN_COEFFS = [0xA9'i32, 0x0390, 0x091C, 0x0FB6, 0x16AA, 0x2081, 0x3651, 0xA2F9]
+  var r3 = mul32(ARCTAN_COEFFS[0], r1)
   r3 = ashr(r3, 14)
-  r3 = r3 + 0x0390'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0x091C'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0x0FB6'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0x16AA'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0x2081'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0x3651'i32; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
-  r3 = r3 + 0xA2F9'i32
+  for i in 1 ..< ARCTAN_COEFFS.len - 1:
+    r3 = r3 + ARCTAN_COEFFS[i]; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
+  r3 = r3 + ARCTAN_COEFFS[^1]
   cpu.r[0] = cast[uint32](ashr(mul32(r3, a), 16))
   cpu.r[1] = cast[uint32](r1)
   cpu.r[3] = cast[uint32](r3)
+
+proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
+  let numer = int64(cast[int32](cpu.r[numer_reg]))
+  let denom = int64(cast[int32](cpu.r[denom_reg]))
+  if denom == 0:
+    cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
+    cpu.r[1] = uint32(numer and 0xFFFFFFFF)
+    cpu.r[3] = 1'u32
+  else:
+    let quot = numer div denom
+    let rem = numer mod denom
+    cpu.r[0] = cast[uint32](uint32(quot and 0xFFFFFFFF))
+    cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
+    cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
@@ -47,32 +58,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.halted = true
   of 0x03:  # Stop
     cpu.halted = true
-  of 0x06:  # Div
-    let numer = int64(cast[int32](cpu.r[0]))
-    let denom = int64(cast[int32](cpu.r[1]))
-    if denom == 0:
-      cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
-      cpu.r[1] = uint32(numer and 0xFFFFFFFF)
-      cpu.r[3] = 1'u32
-    else:
-      let quot = numer div denom
-      let rem = numer mod denom
-      cpu.r[0] = cast[uint32](uint32(quot and 0xFFFFFFFF))
-      cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
-      cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
-  of 0x07:  # DivArm (swapped inputs)
-    let numer = int64(cast[int32](cpu.r[1]))
-    let denom = int64(cast[int32](cpu.r[0]))
-    if denom == 0:
-      cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
-      cpu.r[1] = uint32(numer and 0xFFFFFFFF)
-      cpu.r[3] = 1'u32
-    else:
-      let quot = numer div denom
-      let rem = numer mod denom
-      cpu.r[0] = cast[uint32](uint32(quot and 0xFFFFFFFF))
-      cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
-      cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
+  of 0x06: hle_div(cpu, 0, 1)  # Div
+  of 0x07: hle_div(cpu, 1, 0)  # DivArm (swapped inputs)
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     let discard_flags = cpu.r[0]
     let intr_mask = uint16(cpu.r[1])

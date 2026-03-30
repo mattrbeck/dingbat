@@ -27,7 +27,7 @@ proc init_volume_envelope*(ch: GbVolumeEnvChannel) =
 proc read_NRx2*(ch: GbVolumeEnvChannel): uint8 =
   (ch.starting_volume shl 4) or (if ch.envelope_add_mode: 0x08'u8 else: 0'u8) or ch.period
 
-proc write_NRx2*(ch: GbVolumeEnvChannel; value: uint8; gb: GB) =
+proc write_NRx2*(ch: GbVolumeEnvChannel; value: uint8) =
   let new_add_mode = (value and 0x08) != 0
   if ch.enabled:
     if (ch.period == 0 and ch.vol_env_is_updating) or (not ch.envelope_add_mode):

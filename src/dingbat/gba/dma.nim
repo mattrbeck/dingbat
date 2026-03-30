@@ -35,24 +35,26 @@ proc `[]`*(dma: DMA; io_addr: uint32): uint8 =
     read(dma.dmacnt_h[channel], 1) and mask
   else: dma.gba.bus.read_open_bus_value(io_addr)
 
+proc write_reg_byte(reg: var uint32; byte_idx: int; value: uint8; mask: uint32) {.inline.} =
+  let shift = 8 * byte_idx
+  let m = 0xFF'u32 shl shift
+  reg = ((reg and not m) or (uint32(value) shl shift)) and mask
+
+proc write_reg_byte16(reg: var uint16; byte_idx: int; value: uint8; mask: uint16) {.inline.} =
+  let shift = 8 * byte_idx
+  let m = 0xFF'u16 shl shift
+  reg = ((reg and not m) or (uint16(value) shl shift)) and mask
+
 proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
   let channel = int((io_addr - 0xB0'u32) div 12)
   let reg     = int((io_addr - 0xB0'u32) mod 12)
   case reg
   of 0, 1, 2, 3:  # dmasad
-    let mask = 0xFF'u32 shl (8 * reg)
-    let v32  = uint32(value) shl (8 * reg)
-    dma.dmasad[channel] = ((dma.dmasad[channel] and not mask) or v32) and DMA_SRC_MASK[channel]
+    write_reg_byte(dma.dmasad[channel], reg, value, DMA_SRC_MASK[channel])
   of 4, 5, 6, 7:  # dmadad
-    let r2   = reg - 4
-    let mask = 0xFF'u32 shl (8 * r2)
-    let v32  = uint32(value) shl (8 * r2)
-    dma.dmadad[channel] = ((dma.dmadad[channel] and not mask) or v32) and DMA_DST_MASK[channel]
+    write_reg_byte(dma.dmadad[channel], reg - 4, value, DMA_DST_MASK[channel])
   of 8, 9:  # dmacnt_l
-    let r2   = reg - 8
-    let mask = 0xFF'u16 shl (8 * r2)
-    let v16  = uint16(value) shl (8 * r2)
-    dma.dmacnt_l[channel] = ((dma.dmacnt_l[channel] and not mask) or v16) and DMA_LEN_MASK[channel]
+    write_reg_byte16(dma.dmacnt_l[channel], reg - 8, value, DMA_LEN_MASK[channel])
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
     write(dma.dmacnt_h[channel], value, io_addr and 1)
@@ -95,7 +97,6 @@ proc trigger*(dma: DMA; channel: int) =
       len = 4
       word_size = 4
       dest_ctrl = 2  # Fixed
-      let ch_idx = channel - 1  # channel is 1 or 2; map to index 0 or 1
     elif channel == 3:
       echo "todo: video capture dma"
     else:
@@ -129,10 +130,5 @@ proc trigger*(dma: DMA; channel: int) =
     dma.dmacnt_h[channel].enable = false
 
   if dma.dmacnt_h[channel].irq_enable:
-    case channel
-    of 0: dma.gba.interrupts.reg_if.dma0 = true
-    of 1: dma.gba.interrupts.reg_if.dma1 = true
-    of 2: dma.gba.interrupts.reg_if.dma2 = true
-    of 3: dma.gba.interrupts.reg_if.dma3 = true
-    else: discard
+    dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)
     dma.gba.interrupts.schedule_interrupt_check()

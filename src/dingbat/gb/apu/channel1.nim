@@ -63,7 +63,7 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
     ch.length_load  = val and 0x3F
     ch.length_counter = 0x40 - int(ch.length_load)
   of 0xFF12:
-    write_NRx2(ch, val, gb)
+    write_NRx2(ch, val)
   of 0xFF13:
     ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
   of 0xFF14:

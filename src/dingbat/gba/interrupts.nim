@@ -6,6 +6,13 @@ proc new_interrupts*(gba: GBA): Interrupts =
   result.reg_if = InterruptReg()
   result.ime = false
 
+const
+  IRQ_TIMER_BIT_BASE* = 3
+  IRQ_DMA_BIT_BASE*   = 8
+
+proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
+  intr.reg_if = cast[InterruptReg](uint16(intr.reg_if) or (1'u16 shl bit))
+
 proc schedule_interrupt_check*(intr: Interrupts) =
   intr.gba.scheduler.schedule(0, etInterrupts)
 

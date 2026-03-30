@@ -17,12 +17,7 @@ proc timer_overflow_event*(tim: Timer; num: int) =
   if num <= 1:
     tim.gba.apu.timer_overflow(num)
   if tim.tmcnt[num].irq_enable:
-    case num
-    of 0: tim.gba.interrupts.reg_if.timer0 = true
-    of 1: tim.gba.interrupts.reg_if.timer1 = true
-    of 2: tim.gba.interrupts.reg_if.timer2 = true
-    of 3: tim.gba.interrupts.reg_if.timer3 = true
-    else: discard
+    tim.gba.interrupts.set_interrupt_flag(IRQ_TIMER_BIT_BASE + num)
     tim.gba.interrupts.schedule_interrupt_check()
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
