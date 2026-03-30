@@ -14,25 +14,15 @@ After cloning the repository, run `nimble build -d:release` to build the emulato
 
 ### WASM / Browser Build
 
-To build for the browser using Emscripten:
+To build for the browser using Emscripten, run `nimble wasm`. This configures various flags that are required for the web build.
 
-```
-nim c -d:emscripten src/dingbat_wasm.nim
-```
-
-Then serve the `web/` directory with `python3 web/serve.py` (required for SharedArrayBuffer support).
+Serve the `web/` directory with `python3 web/serve.py` (required for SharedArrayBuffer support).
 
 ## Usage
 
 Running the emulator is as simple as running the `dingbat` executable. If you'd rather launch a specific ROM directly, you can pass it as a command-line argument: `./dingbat /path/to/rom`.
 
 A GBA BIOS is required for GBA emulation. You can select it through the UI or place it at `~/.config/dingbat/bios.bin`.
-
-### Controls
-
-Keybindings are completely configurable through the UI. Controllers are also supported.
-
-![](README/keyboard.png)
 
 ### Pixel-Accurate GB / GBC Rendering
 
