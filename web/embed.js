@@ -276,12 +276,21 @@ var Module = {
     document.addEventListener("click", resumeAudio, { once: false });
     document.addEventListener("keydown", resumeAudio, { once: false });
 
+    const MAX_AUDIO_LEAD = 0.04; // max seconds audio can be scheduled ahead
+
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") return;
       const len = Module._getAudioBufferLen();
       if (len === 0) return;
       const ptr = Module._getAudioBufferPtr();
       if (!ptr) return;
+      const now = audioCtx.currentTime;
+      if (playTime < now) playTime = now;
+      // Drop audio if we've scheduled too far ahead (e.g. RAF throttled in iframe)
+      if (playTime - now > MAX_AUDIO_LEAD) {
+        Module._clearAudioBuffer();
+        return;
+      }
       const stereoSamples = len;
       const frames = stereoSamples / 2;
       const buffer = audioCtx.createBuffer(2, frames, SAMPLE_RATE);
@@ -293,8 +302,6 @@ var Module = {
         right[i] = heap[i * 2 + 1];
       }
       Module._clearAudioBuffer();
-      const now = audioCtx.currentTime;
-      if (playTime < now) playTime = now;
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
