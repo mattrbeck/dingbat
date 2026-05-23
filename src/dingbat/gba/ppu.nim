@@ -444,7 +444,10 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   case io_addr
   of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
   of 0x002..0x003: discard  # green swap
-  of 0x004..0x005: write(ppu.dispstat, value, io_addr and 1)
+  of 0x004:
+    let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
+    write(ppu.dispstat, (value and 0xF8'u8) or preserved, 0)
+  of 0x005: write(ppu.dispstat, value, 1)
   of 0x006..0x007: discard  # vcount
   of 0x008..0x00F: write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
   of 0x010..0x01F:
