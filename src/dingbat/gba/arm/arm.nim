@@ -622,6 +622,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   else:
     echo "unimplemented SWI: 0x", toHex(swi_num, 2)
 
+proc exception_return_restore*(cpu: CPU) =
+  ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
+  ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
+  ## ran, so the pipeline offset is corrected when returning to thumb.
+  if cpu.spsr.thumb: cpu.r[15] -= 4
+  let old_spsr = uint32(cpu.spsr)
+  let was_irq_disabled = cpu.cpsr.irq_disable
+  let new_mode = cast[CpuMode](cpu.spsr.mode)
+  cpu.switch_mode(new_mode)
+  cpu.cpsr = cast[PSR](old_spsr)
+  let bank = mode_bank(new_mode)
+  cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
+  if was_irq_disabled and not cpu.cpsr.irq_disable:
+    cpu.gba.interrupts.schedule_interrupt_check()
+
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
   cpu.und()
   cpu.step_arm()
@@ -798,11 +813,15 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
   let rn = int(bits_range(instr, 16, 19))
   var list = bits_range(instr, 0, 15)
   var saved_mode: uint32 = 0
+  var user_bank = false
   when s_bit:
-    if bit(list, 15):
-      raise newException(Exception, "todo: handle cases with r15 in list")
-    saved_mode = cpu.cpsr.mode
-    cpu.switch_mode(modeUSR)
+    # LDM with the S bit and r15 in the list is an exception return: the
+    # registers load into the current mode's banks and CPSR is restored from
+    # SPSR after pc loads. Every other S-bit form transfers the user bank.
+    if not (load and bit(list, 15)):
+      user_bank = true
+      saved_mode = cpu.cpsr.mode
+      cpu.switch_mode(modeUSR)
   var address  = cpu.r[rn]
   var bits_set = count_set_bits(list)
   if bits_set == 0:
@@ -830,7 +849,10 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           discard cpu.set_reg(rn, final_addr)
       first_transfer = true
   when s_bit:
-    cpu.switch_mode(cast[CpuMode](saved_mode))
+    if user_bank:
+      cpu.switch_mode(cast[CpuMode](saved_mode))
+    else:
+      cpu.exception_return_restore()
   if not (load and bit(list, 15)): cpu.step_arm()
 
 proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
@@ -973,13 +995,4 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
     if rd != 15: cpu.step_arm()
   when pc_reads_12_ahead: cpu.r[15] -= 4
   if rd == 15 and set_cond:
-    if cpu.spsr.thumb: cpu.r[15] -= 4
-    let old_spsr = uint32(cpu.spsr)
-    let was_irq_disabled = cpu.cpsr.irq_disable
-    let new_mode = cast[CpuMode](cpu.spsr.mode)
-    cpu.switch_mode(new_mode)
-    cpu.cpsr = cast[PSR](old_spsr)
-    let bank = mode_bank(new_mode)
-    cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
-    if was_irq_disabled and not cpu.cpsr.irq_disable:
-      cpu.gba.interrupts.schedule_interrupt_check()
+    cpu.exception_return_restore()
