@@ -290,9 +290,10 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   log("Reading open bus at " & hex_str(address))
   let shift = (address and 3) * 8
   let pc = bus.gba.cpu.r[15]
-  # Guard: if PC is in MMIO or otherwise unreadable, avoid infinite recursion
+  # Guard: if PC is in MMIO, unmapped memory, or otherwise unreadable, avoid
+  # infinite recursion (region 0x1 reads recurse back into this proc)
   let pc_region = bits_range(pc, 24, 27)
-  if pc_region == 0x4 or pc_region > 0xD:
+  if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD:
     return 0'u8
   let word: uint32 =
     if bus.gba.cpu.cpsr.thumb:
