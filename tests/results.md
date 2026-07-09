@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-08 18:37:37*
+*Generated: 2026-07-09 13:53:11*
 
 ## Game Boy - Blargg
 
@@ -159,7 +159,6 @@
 | SIO register R/W tests | 👌 |
 | SIO timing tests | 👌 |
 | Misc. edge case tests | 👀 1/10 passed |
-| Video tests | 👀 timed out |
 
 See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
@@ -201,6 +200,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 ## Summary
 
-- **Total:** 170
+- **Total:** 169
 - **Pass:** 101
-- **Fail:** 69
+- **Fail:** 68
