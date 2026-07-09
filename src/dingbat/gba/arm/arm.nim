@@ -88,12 +88,20 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
     for i in 0x7E00 ..< 0x8000:
       cpu.gba.bus.wram_chip[i] = 0
+    # Enter system mode through switch_mode so the live r13/r14 rebank; a
+    # direct CPSR write would leave the previous mode's registers active
+    cpu.switch_mode(modeSYS)
+    cpu.cpsr = cast[PSR](uint32(modeSYS))
     for i in 0 .. 12:
       cpu.r[i] = 0
+    cpu.r[13] = 0x03007F00'u32
+    cpu.r[14] = 0
     cpu.reg_banks[mode_bank(modeUSR)][5] = 0x03007F00'u32
     cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
+    cpu.reg_banks[mode_bank(modeIRQ)][6] = 0
     cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
-    cpu.cpsr = cast[PSR](uint32(modeSYS))
+    cpu.reg_banks[mode_bank(modeSVC)][6] = 0
+    cpu.intr_wait_active = false
     let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
     discard cpu.set_reg(15, reset_addr)
   of 0x02:  # Halt
