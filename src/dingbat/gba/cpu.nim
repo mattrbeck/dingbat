@@ -252,6 +252,12 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
   res
 
 proc tick*(cpu: CPU) =
+  if cpu.intr_wait_active and not cpu.halted:
+    # Execution is back at the instruction after an IntrWait SWI, meaning the
+    # user IRQ handler (if any) has returned. Re-halt unless satisfied.
+    let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+    if cur == cpu.intr_wait_resume_addr:
+      cpu.check_intr_wait()
   if not cpu.halted:
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:

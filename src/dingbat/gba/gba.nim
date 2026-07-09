@@ -170,6 +170,12 @@ type
     spsr_banks*:  array[6, uint32]
     halted*:      bool
     count_cycles*: int
+    # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
+    # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
+    # flags mirror at 0x03007FF8
+    intr_wait_active*:      bool
+    intr_wait_mask*:        uint16
+    intr_wait_resume_addr*: uint32
     # Waitloop fields
     attempt_waitloop_detection*: bool
     cache_waitloop_results*:     bool
@@ -316,10 +322,6 @@ type
     run_bios*:   bool
     use_hle*:        bool
     hle_after_bios*: bool
-    # HACK: VBlankIntrWait timing test - route to real BIOS for cycle accuracy, restore regs after
-    hle_vblank_pending*:    bool
-    hle_vblank_return_pc*:  uint32
-    hle_vblank_saved_regs*: array[4, uint32]
     scheduler*:      Scheduler
     cartridge*:  Cartridge
     storage*:    Storage

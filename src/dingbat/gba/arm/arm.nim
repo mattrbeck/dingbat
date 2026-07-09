@@ -38,6 +38,48 @@ proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
     cpu.r[1] = cast[uint32](uint32(rem and 0xFFFFFFFF))
     cpu.r[3] = uint32(abs(quot) and 0xFFFFFFFF)
 
+# BIOS interrupt flags mirror at 0x03007FF8. User IRQ handlers OR the
+# interrupts they service into this halfword; IntrWait consumes it.
+proc read_intr_mirror(cpu: CPU): uint16 {.inline.} =
+  uint16(cpu.gba.bus.wram_chip[0x7FF8]) or (uint16(cpu.gba.bus.wram_chip[0x7FF9]) shl 8)
+
+proc write_intr_mirror(cpu: CPU; value: uint16) {.inline.} =
+  cpu.gba.bus.wram_chip[0x7FF8] = uint8(value)
+  cpu.gba.bus.wram_chip[0x7FF9] = uint8(value shr 8)
+
+proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
+  ## IntrWait per GBATEK: forcefully sets IME=1, then halts until the user
+  ## IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8.
+  ## With discard_old=false, returns immediately if a masked flag is already
+  ## set. Matched mirror flags are acknowledged (cleared) on return.
+  cpu.gba.interrupts.ime = true
+  let mirror = cpu.read_intr_mirror()
+  if discard_old:
+    cpu.write_intr_mirror(mirror and not mask)
+  else:
+    let hit = mirror and mask
+    if hit != 0:
+      cpu.write_intr_mirror(mirror and not hit)
+      return
+  cpu.intr_wait_active = true
+  cpu.intr_wait_mask = mask
+  # Address of the instruction following the SWI (r15 is pipeline-ahead)
+  cpu.intr_wait_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
+  cpu.halted = true
+  # Wake immediately if an enabled interrupt is already pending
+  cpu.gba.interrupts.schedule_interrupt_check()
+
+proc check_intr_wait*(cpu: CPU) =
+  ## Called when execution reaches the instruction after an IntrWait SWI
+  ## (i.e. the user IRQ handler has returned). Re-halts unless a requested
+  ## flag has appeared in the BIOS interrupt flags mirror.
+  let hit = cpu.read_intr_mirror() and cpu.intr_wait_mask
+  if hit != 0:
+    cpu.write_intr_mirror(cpu.read_intr_mirror() and not hit)
+    cpu.intr_wait_active = false
+  else:
+    cpu.halted = true
+
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
@@ -61,18 +103,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x06: hle_div(cpu, 0, 1)  # Div
   of 0x07: hle_div(cpu, 1, 0)  # DivArm (swapped inputs)
   of 0x04:  # IntrWait(discard_flags, intr_flags)
-    let discard_flags = cpu.r[0]
-    let intr_mask = uint16(cpu.r[1])
-    if discard_flags != 0:
-      cpu.gba.interrupts.reg_if =
-        cast[InterruptReg](uint16(cpu.gba.interrupts.reg_if) and not intr_mask)
-    cpu.gba.interrupts.reg_ie =
-      cast[InterruptReg](uint16(cpu.gba.interrupts.reg_ie) or intr_mask)
-    cpu.halted = true
-  of 0x05:  # VBlankIntrWait
-    cpu.gba.interrupts.reg_if.vblank = false
-    cpu.gba.interrupts.reg_ie.vblank = true
-    cpu.halted = true
+    cpu.hle_intr_wait(cpu.r[0] != 0, uint16(cpu.r[1]))
+  of 0x05:  # VBlankIntrWait = IntrWait(1, 1)
+    cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
     let val = cpu.r[0]
     if val == 0:
