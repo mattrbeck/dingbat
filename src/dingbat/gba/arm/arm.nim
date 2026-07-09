@@ -582,8 +582,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       prev = uint16((uint32(prev) + uint32(diff)) and 0xFFFF)
       cpu.gba.bus.write_half(dst, prev)
       dst += 2; written += 2
-  of 0x19:  # SoundBias
-    cpu.gba.apu.soundbias.bias_level = uint16(cpu.r[0] and 0x3FF)
+  of 0x19:  # SoundBias(r0): 0 = bias level 0x000, any other value = 0x200
+    cpu.gba.apu.soundbias.bias_level = if cpu.r[0] == 0: 0x000'u16 else: 0x200'u16
   of 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
     discard  # Sound driver / music player stubs (games use their own engine)
   of 0x1F:  # MidiKey2Freq
