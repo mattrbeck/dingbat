@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-04-02 15:07:27*
+*Generated: 2026-07-08 18:37:37*
 
 ## Game Boy - Blargg
 
@@ -148,8 +148,8 @@
 |------|--------|
 | Memory tests | 👀 1448/1552 passed |
 | I/O read tests | 👌 |
-| Timing tests | 👀 177/2020 passed |
-| Timer count-up tests | 👀 333/936 passed |
+| Timing tests | 👀 183/2020 passed |
+| Timer count-up tests | 👀 339/936 passed |
 | Timer IRQ tests | 👀 0/90 passed |
 | Shifter tests | 👌 |
 | Carry tests | 👌 |
@@ -175,25 +175,25 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | Test | Result |
 |------|--------|
 | m2_win_en_toggle | 👀 21.6% correct (4980/23040 pixels match) |
-| m3_bgp_change | 👀 65.4% correct (15076/23040 pixels match) |
-| m3_bgp_change_sprites | 👀 55.9% correct (12878/23040 pixels match) |
+| m3_bgp_change | 👀 62.3% correct (14356/23040 pixels match) |
+| m3_bgp_change_sprites | 👀 59.4% correct (13684/23040 pixels match) |
 | m3_lcdc_bg_en_change | 👀 87.1% correct (20060/23040 pixels match) |
 | m3_lcdc_bg_map_change | 👀 89.6% correct (20654/23040 pixels match) |
 | m3_lcdc_obj_en_change | 👀 99.4% correct (22894/23040 pixels match) |
 | m3_lcdc_obj_en_change_variant | 👀 94.2% correct (21706/23040 pixels match) |
-| m3_lcdc_obj_size_change | 👀 98.8% correct (22755/23040 pixels match) |
+| m3_lcdc_obj_size_change | 👀 99.3% correct (22870/23040 pixels match) |
 | m3_lcdc_obj_size_change_scx | 👀 99.1% correct (22830/23040 pixels match) |
-| m3_lcdc_tile_sel_change | 👀 88.8% correct (20466/23040 pixels match) |
-| m3_lcdc_tile_sel_win_change | 👀 87.5% correct (20150/23040 pixels match) |
+| m3_lcdc_tile_sel_change | 👀 86.1% correct (19834/23040 pixels match) |
+| m3_lcdc_tile_sel_win_change | 👀 83.0% correct (19134/23040 pixels match) |
 | m3_lcdc_win_en_change_multiple | 👀 63.9% correct (14724/23040 pixels match) |
-| m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16963/23040 pixels match) |
+| m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16962/23040 pixels match) |
 | m3_lcdc_win_map_change | 👀 90.0% correct (20732/23040 pixels match) |
 | m3_obp0_change | 👀 98.1% correct (22608/23040 pixels match) |
 | m3_scx_high_5_bits | 👀 98.5% correct (22698/23040 pixels match) |
 | m3_scx_low_3_bits | 👀 97.7% correct (22500/23040 pixels match) |
-| m3_scy_change | 👀 57.5% correct (13258/23040 pixels match) |
-| m3_window_timing | 👀 88.7% correct (20436/23040 pixels match) |
-| m3_window_timing_wx_0 | 👀 90.4% correct (20831/23040 pixels match) |
+| m3_scy_change | 👀 43.9% correct (10109/23040 pixels match) |
+| m3_window_timing | 👀 87.5% correct (20164/23040 pixels match) |
+| m3_window_timing_wx_0 | 👀 88.1% correct (20294/23040 pixels match) |
 | m3_wx_4_change | 👀 99.0% correct (22811/23040 pixels match) |
 | m3_wx_4_change_sprites | 👀 100.0% correct (23030/23040 pixels match) |
 | m3_wx_5_change | 👀 97.2% correct (22402/23040 pixels match) |
