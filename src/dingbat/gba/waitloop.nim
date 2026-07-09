@@ -118,6 +118,11 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       return
     let p = parsed.get
     never_write = never_write or (p.read_bits and not written_bits)
+    # Fold in this instruction's writes before checking: an instruction that
+    # reads and writes the same register (e.g. subs r2, #1) is a loop-carried
+    # dependency — the loop terminates by itself and must not be treated as a
+    # waitloop, or countdown delay loops get fast-forwarded
+    written_bits = written_bits or p.write_bits
     if (written_bits and never_write) > 0:
       if cpu.cache_waitloop_results:
         cpu.identified_non_waitloops.add(start_addr)
@@ -126,7 +131,6 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       if cpu.cache_waitloop_results:
         cpu.identified_non_waitloops.add(start_addr)
       return
-    written_bits = written_bits or p.write_bits
     cur_addr += 2
   if cpu.cache_waitloop_results:
     cpu.identified_waitloops.add(start_addr)
