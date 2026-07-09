@@ -257,11 +257,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cpu.gba.apu.dma_channels.sizes[ch]     = 0
         cpu.gba.apu.dma_channels.latches[ch]   = 0
       cpu.gba.apu.soundcnt_h = SOUNDCNT_H()
-    if bit(flags, 7):  # Reset other I/O
+    if bit(flags, 7):  # Reset all other I/O (except SIO and sound)
       for offset in 0x000'u32..0x05F'u32:
         cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for offset in 0x0B0'u32..0x1FF'u32:
+      for offset in 0x0B0'u32..0x11F'u32:
         cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      for offset in 0x130'u32..0x133'u32:
+        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      for offset in 0x15C'u32..0x1FF'u32:
+        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      # The real BIOS leaves the display in forced blank, not zeroed
+      cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
     # Simulate cycle cost with APU events suppressed
     var hle_cycles = 0
     if bit(flags, 0): hle_cycles += 192000
