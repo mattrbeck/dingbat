@@ -110,10 +110,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # interrupts that were already pending on entry
     cpu.gba.interrupts.schedule_interrupt_check()
   of 0x03:  # Stop
-    # Approximated as Halt: real Stop wakes only on keypad/cartridge/SIO
-    # interrupts, but the keypad IRQ is unimplemented so faithful Stop
-    # semantics would sleep forever
+    # Peripherals keep running (hardware stops sound/video/timers), but the
+    # wake sources are faithful: only keypad/cartridge/SIO interrupts
     cpu.halted = true
+    cpu.stopped = true
     cpu.gba.interrupts.schedule_interrupt_check()
   of 0x06: hle_div(cpu, 0, 1)  # Div
   of 0x07: hle_div(cpu, 1, 0)  # DivArm (swapped inputs)

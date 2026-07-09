@@ -35,12 +35,10 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr] = value
   of 0x204..0x205: write(mmio.waitcnt, value, io_addr and 1)
   of 0x301:
-    if bit(value, 7):
-      discard  # TODO: stop mode
-    else:
-      mmio.gba.cpu.halted = true
-      # Wake immediately if an enabled interrupt is already pending
-      mmio.gba.interrupts.schedule_interrupt_check()
+    mmio.gba.cpu.halted = true
+    mmio.gba.cpu.stopped = bit(value, 7)  # Stop wakes only on keypad/cartridge/SIO
+    # Wake immediately if an enabled interrupt is already pending
+    mmio.gba.interrupts.schedule_interrupt_check()
   else:
     when defined(test_harness):
       if mmio.gba.test_output != nil:

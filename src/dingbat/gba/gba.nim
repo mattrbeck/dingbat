@@ -170,6 +170,7 @@ type
     reg_banks*:   array[6, array[7, uint32]]
     spsr_banks*:  array[6, uint32]
     halted*:      bool
+    stopped*:     bool  # Stop mode: halted, and only keypad/cartridge/SIO IRQs wake
     count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
