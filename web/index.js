@@ -931,6 +931,10 @@ var Module = {
 
     const fpsDiv = document.getElementById("fps");
     setInterval(() => {
+      if (sleepVisible) {
+        frameCount = 0;
+        return;  // fps display is showing SLEEPING
+      }
       if (frameCount >= 59 && frameCount <= 60) {
         fpsDiv.textContent = "";
       } else {
@@ -952,6 +956,17 @@ var Module = {
         persistSave(currentRomName, currentOriginalName);
       }
     });
+
+    // "SLEEPING" indicator while the GBA is in Stop mode, shown in place of
+    // the FPS counter (which isn't meaningful while sleeping)
+    let sleepVisible = false;
+    const updateSleepOverlay = () => {
+      const sleeping = !!(Module._isStopped && Module._isStopped());
+      if (sleeping !== sleepVisible) {
+        sleepVisible = sleeping;
+        fpsDiv.textContent = sleeping ? "SLEEPING" : "";
+      }
+    };
 
     const tick = (timestamp) => {
       if (paused) {
@@ -989,6 +1004,7 @@ var Module = {
         // Prevent accumulator from growing unbounded if tab was backgrounded
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
       }
+      updateSleepOverlay();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

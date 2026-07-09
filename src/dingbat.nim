@@ -464,6 +464,8 @@ proc update_fps_title() =
     let fps = if fps_us > 0: fps_frames.float * 1_000_000.0 / fps_us.float else: 0.0
     let title = if app.emu_kind == ekNone: "dingbat"
                 elif app.paused: "dingbat - PAUSED"
+                elif app.emu_kind == ekGBA and app.gba_emu != nil and
+                     app.gba_emu.cpu.stopped: "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
     setTitle(app.window, cstring(title))
     fps_frames = 0

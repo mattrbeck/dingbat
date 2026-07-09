@@ -58,6 +58,10 @@ proc getAudioBufferLen(): cint {.exportc.} =
 proc clearAudioBuffer() {.exportc.} =
   audioBuffer.setLen(0)
 
+proc isStopped(): cint {.exportc.} =
+  ## 1 while the GBA is in Stop mode (sleeping), used by the JS frontends
+  if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
+
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   let inp = Input(inputId)
