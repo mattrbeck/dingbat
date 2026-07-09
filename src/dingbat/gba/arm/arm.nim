@@ -422,6 +422,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var out_word: uint32 = 0
     var out_bits: uint32 = 0
     let src_mask = (1'u32 shl src_width) - 1
+    # dest_width may be 32, where a plain shift would be undefined
+    let dest_mask = if dest_width >= 32: 0xFFFFFFFF'u32
+                    else: (1'u32 shl dest_width) - 1
     for i in 0'u32 ..< src_len:
       let byte_val = uint32(cpu.gba.bus[src]); src += 1
       var bit_pos: uint32 = 0
@@ -432,7 +435,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           expanded = val + offset_val
         else:
           expanded = 0
-        out_word = out_word or ((expanded and ((1'u32 shl dest_width) - 1)) shl out_bits)
+        out_word = out_word or ((expanded and dest_mask) shl out_bits)
         out_bits += dest_width
         if out_bits >= 32:
           cpu.gba.bus.write_word(dst, out_word)
