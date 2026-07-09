@@ -87,6 +87,8 @@ proc trigger*(dma: DMA; channel: int) =
   let dest_control   = int(dma.dmacnt_h[channel].dest_control)
   var word_size      = 2 shl int(dma.dmacnt_h[channel].xfer_type)  # 2 or 4
   var len            = int(dma.dmacnt_l[channel])
+  if len == 0:
+    len = int(DMA_LEN_MASK[channel]) + 1
   var dest_ctrl      = dest_control
 
   if source_control == 3:  # IncrementReload - prohibited
