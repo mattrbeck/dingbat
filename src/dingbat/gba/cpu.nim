@@ -51,13 +51,19 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   cpu.spsr_banks[old_bank]   = uint32(cpu.spsr)
   cpu.r[13]         = cpu.reg_banks[new_bank][5]
   cpu.r[14]         = cpu.reg_banks[new_bank][6]
-  cpu.spsr          = cast[PSR](uint32(cpu.cpsr))
+  # Restore the destination mode's banked SPSR. Exception entry (IRQ/UND/SWI)
+  # overwrites it with the interrupted CPSR afterwards; an msr-initiated mode
+  # switch must NOT touch it, or a nested-interrupt handler switching back to
+  # IRQ mode destroys SPSR_irq and the exception return restores garbage
+  cpu.spsr          = cast[PSR](cpu.spsr_banks[new_bank])
   cpu.cpsr.mode     = uint32(new_mode)
 
 proc irq*(cpu: CPU) =
   if not cpu.cpsr.irq_disable:
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
+    let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)
+    cpu.spsr = old_cpsr
     cpu.cpsr.thumb = false
     cpu.cpsr.irq_disable = true
     discard cpu.set_reg(14, lr)
@@ -65,7 +71,9 @@ proc irq*(cpu: CPU) =
 
 proc und*(cpu: CPU) =
   let lr = cpu.r[15] - 4'u32
+  let old_cpsr = cpu.cpsr
   cpu.switch_mode(modeUND)
+  cpu.spsr = old_cpsr
   cpu.cpsr.thumb = false
   cpu.cpsr.irq_disable = true
   discard cpu.set_reg(14, lr)

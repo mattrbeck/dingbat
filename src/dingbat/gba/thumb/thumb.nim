@@ -26,7 +26,9 @@ proc thumb_software_interrupt*(cpu: CPU; instr: uint32) =
     cpu.step_thumb()
   else:
     let lr = cpu.r[15] - 2
+    let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeSVC)
+    cpu.spsr = old_cpsr
     discard cpu.set_reg(14, lr)
     cpu.cpsr.irq_disable = true
     cpu.cpsr.thumb = false

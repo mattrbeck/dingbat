@@ -846,7 +846,9 @@ proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
     cpu.step_arm()
   else:
     let lr = cpu.r[15] - 4
+    let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeSVC)
+    cpu.spsr = old_cpsr
     discard cpu.set_reg(14, lr)
     cpu.cpsr.irq_disable = true
     discard cpu.set_reg(15, 0x08'u32)
