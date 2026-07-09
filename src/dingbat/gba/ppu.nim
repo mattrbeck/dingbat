@@ -56,7 +56,7 @@ proc start_line*(ppu: PPU) =
 
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
-  ppu.dispstat.hblank = true
+  ppu.gba.scheduler.schedule(46, etPPUSetHBlankFlag)
   if ppu.dispstat.hblank_irq_enable:
     ppu.gba.interrupts.reg_if.hblank = true
     ppu.gba.interrupts.schedule_interrupt_check()
@@ -66,6 +66,9 @@ proc start_hblank*(ppu: PPU) =
       ppu.bgref_int[bg_num][0] += ppu.bgaff[bg_num][1].num  # bgx += dmx
       ppu.bgref_int[bg_num][1] += ppu.bgaff[bg_num][3].num  # bgy += dmy
     ppu.gba.dma.trigger_hdma()
+
+proc set_hblank_flag*(ppu: PPU) =
+  ppu.dispstat.hblank = true
 
 proc end_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(0, etPPUStartLine)

@@ -13,7 +13,7 @@ type
     etIME
     # GBA
     etSaves, etInterrupts
-    etPPUStartLine, etPPUStartHBlank, etPPUEndHBlank
+    etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag, etPPUEndHBlank
     etTimer0, etTimer1, etTimer2, etTimer3
     etSerial
 
