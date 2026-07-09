@@ -135,18 +135,21 @@ proc tick_frame_sequencer*(apu: APU) =
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: APU) =
-  if apu.soundcnt_h.sound_volume >= 3:
-    raise newException(Exception, "Prohibited sound 1-4 volume " & $apu.soundcnt_h.sound_volume)
   let ch1 = if apu.channel_mask[0]: apu.channel1.ch1_get_amplitude() else: 0'i16
   let ch2 = if apu.channel_mask[1]: apu.channel2.ch2_get_amplitude() else: 0'i16
   let ch3 = if apu.channel_mask[2]: apu.channel3.ch3_get_amplitude() else: 0'i16
   let ch4 = if apu.channel_mask[3]: apu.channel4.ch4_get_amplitude() else: 0'i16
+  # PSG volume: 0=25%, 1=50%, 2=100%; the prohibited value 3 silences the
+  # PSG channels (NanoBoyAdvance and SkyEmu agree; mGBA extrapolates to 200%)
+  let psg_muted = apu.soundcnt_h.sound_volume == 3
   let psg_sound =
-    ch1 * int16(apu.soundcnt_l.channel_1_left) +
-    ch2 * int16(apu.soundcnt_l.channel_2_left) +
-    ch3 * int16(apu.soundcnt_l.channel_3_left) +
-    ch4 * int16(apu.soundcnt_l.channel_4_left)
-  let shift = 5 - int(apu.soundcnt_h.sound_volume)
+    if psg_muted: 0'i16
+    else:
+      ch1 * int16(apu.soundcnt_l.channel_1_left) +
+      ch2 * int16(apu.soundcnt_l.channel_2_left) +
+      ch3 * int16(apu.soundcnt_l.channel_3_left) +
+      ch4 * int16(apu.soundcnt_l.channel_4_left)
+  let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   let (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
