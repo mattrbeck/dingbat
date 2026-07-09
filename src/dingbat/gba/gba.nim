@@ -71,6 +71,7 @@ type
     gba*:      GBA
     keyinput*: KEYINPUT
     keycnt*:   KEYCNT
+    prev_irq_condition*: bool  # for edge-triggering the keypad IRQ
 
   MMIO* = ref object
     gba*:     GBA
