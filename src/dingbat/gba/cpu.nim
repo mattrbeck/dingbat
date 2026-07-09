@@ -103,6 +103,7 @@ proc clear_pipeline*(cpu: CPU) =
     cpu.r[15] += 4
   else:
     cpu.r[15] += 8
+  cpu.gba.bus.cycles += 2
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   if cpu.pipeline.size == 0:
@@ -257,7 +258,7 @@ proc tick*(cpu: CPU) =
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
-    let cycles = cpu.gba.bus.cycles
+    let cycles = max(1, cpu.gba.bus.cycles)
     cpu.gba.bus.cycles = 0
     cpu.count_cycles += cycles
     if cpu.entered_waitloop:
