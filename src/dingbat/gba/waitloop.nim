@@ -27,6 +27,10 @@ proc build_waitloop_lut*(): seq[WLInstrKind] =
 
 proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
   case kind
+  of wlPcRelativeLoad:
+    # ldr rd, [pc, #imm] loads a literal-pool constant, which is loop-invariant
+    let rd = bits_range(instr, 8, 10)
+    some(WLParsed(read_only: true, read_bits: 0, write_bits: 1'u16 shl rd))
   of wlConditionalBranch:
     some(WLParsed(read_only: true,
                   read_bits:  1'u16 shl 15,
@@ -97,7 +101,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   if start_addr != cpu.branch_dest: return
   if not (start_addr < end_addr and
           (end_addr - start_addr) >= 2 and
-          (end_addr - start_addr) <= 8):
+          (end_addr - start_addr) <= 12):
     return
   if cpu.cache_waitloop_results:
     if start_addr in cpu.identified_waitloops:
