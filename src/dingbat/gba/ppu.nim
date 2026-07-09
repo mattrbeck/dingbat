@@ -176,11 +176,20 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
     let x = int(effective_col and 7) xor flip_x_mask
     var pal_idx: uint32
     if is_8bpp:
-      pal_idx = uint32(ppu.vram[tile_base_8bpp + uint32(x)])
+      # The BG unit can't fetch character data from OBJ VRAM; such tiles
+      # render transparent (row bases are 4-byte aligned, so checking the
+      # row start suffices)
+      if tile_base_8bpp >= 0x10000'u32:
+        pal_idx = 0
+      else:
+        pal_idx = uint32(ppu.vram[tile_base_8bpp + uint32(x)])
     else:
-      let palettes = ppu.vram[tile_base_4bpp + (uint32(x) shr 1)]
-      pal_idx = uint32((palettes shr (uint32(x and 1) * 4)) and 0xF)
-      if pal_idx > 0: pal_idx += palette_bank_shift
+      if tile_base_4bpp >= 0x10000'u32:
+        pal_idx = 0
+      else:
+        let palettes = ppu.vram[tile_base_4bpp + (uint32(x) shr 1)]
+        pal_idx = uint32((palettes shr (uint32(x and 1) * 4)) and 0xF)
+        if pal_idx > 0: pal_idx += palette_bank_shift
     ppu.layer_palettes[bg][col] = uint8(pal_idx)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
@@ -273,13 +282,15 @@ proc render_sprites*(ppu: PPU) =
           offset *= 0x20
       offset += tex_x shr 3
       var pal_idx: uint32
+      # OBJ character fetches wrap within the 32K of OBJ VRAM (matches
+      # mGBA's offset mask and NanoBoyAdvance's tile index mask)
       if bit(sprite.attr0, 13):  # 8bpp
         tile_id = tile_id shr 1
         tile_id += offset
-        pal_idx = uint32(ppu.vram[base + uint32(tile_id) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)])
+        pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
       else:
         tile_id += offset
-        let palettes = ppu.vram[base + uint32(tile_id) * 0x20 + uint32(tile_y) * 4 + (uint32(tile_x) shr 1)]
+        let palettes = ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(tile_y) * 4 + (uint32(tile_x) shr 1)) and 0x7FFF)]
         pal_idx = uint32((palettes shr (uint32(tile_x and 1) * 4)) and 0xF)
         if pal_idx > 0:
           pal_idx += uint32(bits_range(sprite.attr2, 12, 15)) shl 4
