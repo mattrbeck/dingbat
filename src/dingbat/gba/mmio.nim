@@ -39,6 +39,8 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
       discard  # TODO: stop mode
     else:
       mmio.gba.cpu.halted = true
+      # Wake immediately if an enabled interrupt is already pending
+      mmio.gba.interrupts.schedule_interrupt_check()
   else:
     when defined(test_harness):
       if mmio.gba.test_output != nil:
