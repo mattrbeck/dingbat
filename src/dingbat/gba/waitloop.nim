@@ -118,7 +118,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     let parsed = parse_wl_instr(kind, instr)
     if parsed.isNone or not parsed.get.read_only:
       if cpu.cache_waitloop_results:
-        cpu.identified_non_waitloops.add(start_addr)
+        cpu.identified_non_waitloops.incl(start_addr)
       return
     let p = parsed.get
     never_write = never_write or (p.read_bits and not written_bits)
@@ -129,13 +129,13 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     written_bits = written_bits or p.write_bits
     if (written_bits and never_write) > 0:
       if cpu.cache_waitloop_results:
-        cpu.identified_non_waitloops.add(start_addr)
+        cpu.identified_non_waitloops.incl(start_addr)
       return
     if (p.write_bits and (1'u16 shl 15)) > 0:
       if cpu.cache_waitloop_results:
-        cpu.identified_non_waitloops.add(start_addr)
+        cpu.identified_non_waitloops.incl(start_addr)
       return
     cur_addr += 2
   if cpu.cache_waitloop_results:
-    cpu.identified_waitloops.add(start_addr)
+    cpu.identified_waitloops.incl(start_addr)
   cpu.entered_waitloop = true

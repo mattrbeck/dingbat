@@ -1,7 +1,7 @@
 # GBA emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[options, times, os, strutils, math]
+import std/[options, times, os, strutils, math, sets]
 import ../common/[util, input, scheduler, emu, resampler]
 when defined(test_harness):
   import ../common/test_output
@@ -182,8 +182,8 @@ type
     attempt_waitloop_detection*: bool
     cache_waitloop_results*:     bool
     branch_dest*:                uint32
-    identified_waitloops*:       seq[uint32]
-    identified_non_waitloops*:   seq[uint32]
+    identified_waitloops*:       HashSet[uint32]
+    identified_non_waitloops*:   HashSet[uint32]
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
 
