@@ -103,7 +103,12 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
           (end_addr - start_addr) >= 2 and
           (end_addr - start_addr) <= 12):
     return
-  if cpu.cache_waitloop_results:
+  # Only cache classifications for ROM addresses: RAM-resident code can be
+  # overwritten (overlays, copied drivers), so re-analyze it every time and a
+  # stale verdict is impossible. The analysis is only a few halfword reads.
+  let cacheable = cpu.cache_waitloop_results and
+                  bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
+  if cacheable:
     if start_addr in cpu.identified_waitloops:
       cpu.entered_waitloop = true
       return
@@ -117,7 +122,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     let kind  = cpu.waitloop_instr_lut[instr shr 8]
     let parsed = parse_wl_instr(kind, instr)
     if parsed.isNone or not parsed.get.read_only:
-      if cpu.cache_waitloop_results:
+      if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
       return
     let p = parsed.get
@@ -128,14 +133,14 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     # waitloop, or countdown delay loops get fast-forwarded
     written_bits = written_bits or p.write_bits
     if (written_bits and never_write) > 0:
-      if cpu.cache_waitloop_results:
+      if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
       return
     if (p.write_bits and (1'u16 shl 15)) > 0:
-      if cpu.cache_waitloop_results:
+      if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
       return
     cur_addr += 2
-  if cpu.cache_waitloop_results:
+  if cacheable:
     cpu.identified_waitloops.incl(start_addr)
   cpu.entered_waitloop = true
