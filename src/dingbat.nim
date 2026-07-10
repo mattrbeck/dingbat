@@ -1,15 +1,19 @@
 import std/[os, hashes, parseopt, strformat, strutils, tables, times]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
+import sdl2/joystick
+import sdl2/gamecontroller
 import zippy/ziparchives
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import imguin/glad/gl
 import stb_image/read as stbi
 import dingbat/common/config
+import dingbat/common/input
 import dingbat/gba/gba
 import dingbat/gb/gb
 import dingbat/frontend/file_explorer
 import dingbat/frontend/config_editor
 import dingbat/frontend/keybindings_widget
+import dingbat/frontend/controller_widget
 import dingbat/frontend/gba_debug
 import dingbat/frontend/gb_debug
 
@@ -615,6 +619,55 @@ proc render_imgui() =
   igRender()
   ImGui_Impl_OpenGL3_RenderDrawData(igGetDrawData())
 
+# ──────────────────────────── Controllers ────────────────────────────
+
+# Open game controllers, keyed by joystick instance id. SDL2 emits
+# ControllerDeviceAdded for controllers already attached at init, so hotplug
+# handling below covers startup too. Every opened controller feeds player 1.
+var controllers: Table[int32, GameControllerPtr]
+
+# Left-stick-as-dpad and right-trigger fast-forward state (hardcoded, not
+# part of the rebindable button table)
+const STICK_DEADZONE     = 8000'i16
+const TRIGGER_THRESHOLD  = 8000'i16
+var stick_dirs: array[Input.UP..Input.RIGHT, bool]
+var pad_ff_held = false
+
+proc emu_pad_input(inp: Input; pressed: bool) =
+  case app.emu_kind
+  of ekGBA:
+    if app.gba_emu != nil: app.gba_emu.handle_input(inp, pressed)
+  of ekGB:
+    if app.gb_emu != nil: app.gb_emu.handle_input(inp, pressed)
+  of ekNone: discard
+
+proc bound_button_held(inp: Input): bool =
+  # Is any controller button that maps to `inp` currently held?
+  for btn, v in app.cfg.controller_bindings.pairs:
+    if v == inp:
+      for pad in controllers.values:
+        if pad.getButton(GameControllerButton(btn)) != 0: return true
+  false
+
+proc set_stick_dir(inp: Input; active: bool) =
+  if stick_dirs[inp] == active: return
+  stick_dirs[inp] = active
+  # Don't release a direction the d-pad (or any button bound to it) still holds
+  if not active and bound_button_held(inp): return
+  emu_pad_input(inp, active)
+
+proc set_fast_forward(held: bool) =
+  # Audio sync is a toggle elsewhere in the UI, so track the trigger's held
+  # state and assign sync directly instead of toggling per event
+  if held == pad_ff_held: return
+  pad_ff_held = held
+  case app.emu_kind
+  of ekGBA:
+    if app.gba_emu != nil: app.gba_emu.apu.sync = not held
+  of ekGB:
+    if app.gb_emu != nil: app.gb_emu.apu.sync = not held
+  of ekNone: discard
+
 # ──────────────────────────── Input ────────────────────────────
 
 proc handle_input() =
@@ -667,6 +720,48 @@ proc handle_input() =
           app.gb_emu.handle_input(app.cfg.keybindings[sym], pressed)
         elif sym == K_TAB and pressed:
           app.gb_emu.apu.toggle_sync()
+
+    of ControllerDeviceAdded:
+      # `which` is a device index for the Added event
+      let idx = cdevice(evt).which
+      if isGameController(cint(idx)):
+        let pad = gameControllerOpen(cint(idx))
+        if pad != nil:
+          controllers[pad.getJoystick().instanceID()] = pad
+
+    of ControllerDeviceRemoved:
+      # `which` is a joystick instance id for the Removed event
+      let id = cdevice(evt).which
+      if controllers.hasKey(id):
+        controllers[id].close()
+        controllers.del(id)
+      if controllers.len == 0:
+        # Unplugged mid-press: release anything the pad was holding
+        for inp in Input.UP .. Input.RIGHT: stick_dirs[inp] = false
+        for inp in Input: emu_pad_input(inp, false)
+        set_fast_forward(false)
+
+    of ControllerButtonDown, ControllerButtonUp:
+      let pressed = evt.kind == ControllerButtonDown
+      let button  = cint(cbutton(evt).button)
+      if app.ce.controller.wants_input():
+        if not pressed: app.ce.controller.button_released(button)
+      elif app.cfg.controller_bindings.hasKey(button):
+        let inp = app.cfg.controller_bindings[button]
+        # Don't release a direction the left stick still holds
+        if pressed or not (inp in stick_dirs.low .. stick_dirs.high and stick_dirs[inp]):
+          emu_pad_input(inp, pressed)
+
+    of ControllerAxisMotion:
+      let ax = caxis(evt)
+      if ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTX):
+        set_stick_dir(Input.LEFT,  ax.value < -STICK_DEADZONE)
+        set_stick_dir(Input.RIGHT, ax.value > STICK_DEADZONE)
+      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTY):
+        set_stick_dir(Input.UP,   ax.value < -STICK_DEADZONE)
+        set_stick_dir(Input.DOWN, ax.value > STICK_DEADZONE)
+      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_TRIGGERRIGHT):
+        set_fast_forward(ax.value > TRIGGER_THRESHOLD)
 
     of WindowEvent:
       let wev = window(evt)
@@ -776,7 +871,7 @@ proc main() =
     # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
     # instead of letting DWM bitmap-stretch the window on scaled displays
     discard setHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
-  if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK) != SdlSuccess:
+  if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK or INIT_GAMECONTROLLER) != SdlSuccess:
     echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
   defer: sdl2.quit()
 
