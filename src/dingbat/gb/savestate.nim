@@ -465,6 +465,40 @@ proc gb_apply_state(gb: GB; payload: string) =
 proc gb_rom_checksum(gb: GB): uint32 =
   fnv1a(gb.cartridge.rom)
 
+proc state_payload*(gb: GB): string =
+  ## Raw serialized state, no header/validation. For trusted in-process uses
+  ## (the rewind ring buffer). Frame boundaries only.
+  gb.gb_state_payload()
+
+proc apply_state_payload*(gb: GB; payload: string) =
+  ## Apply a raw payload produced by state_payload. Raises StateError on
+  ## corrupt input; no rollback — trusted callers only.
+  gb.gb_apply_state(payload)
+
+proc state_bytes*(gb: GB): string =
+  ## Full validated state image (header + payload) for in-memory transports
+  ## (web IndexedDB / downloads). Same format as .state files.
+  make_state_bytes(ckGB, gb.gb_rom_checksum(),
+                   uint32(gb.cartridge.rom.len), gb.gb_state_payload())
+
+proc load_state_bytes*(gb: GB; data: string): bool =
+  ## Validate and apply a full state image. Mirrors load_state's rollback.
+  var payload: string
+  try:
+    payload = parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
+                                  uint32(gb.cartridge.rom.len))
+  except CatchableError:
+    echo "Load state failed: ", getCurrentExceptionMsg()
+    return false
+  let backup = gb.gb_state_payload()
+  try:
+    gb.gb_apply_state(payload)
+    true
+  except CatchableError:
+    echo "Load state failed: ", getCurrentExceptionMsg()
+    gb.gb_apply_state(backup)
+    false
+
 proc save_state*(gb: GB; path: string): bool =
   ## Serialize the full emulator state to path. Must only be called at a
   ## frame boundary (right after step_frame returns). Returns false and

@@ -552,6 +552,40 @@ proc gba_rom_checksum(gba: GBA): uint32 =
   let n = min(gba.cartridge.rom.len, 0x100000)
   fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1))
 
+proc state_payload*(gba: GBA): string =
+  ## Raw serialized state, no header/validation. For trusted in-process uses
+  ## (the rewind ring buffer). Frame boundaries only.
+  gba.gba_state_payload()
+
+proc apply_state_payload*(gba: GBA; payload: string) =
+  ## Apply a raw payload produced by state_payload. Raises StateError on
+  ## corrupt input; no rollback — trusted callers only.
+  gba.gba_apply_state(payload)
+
+proc state_bytes*(gba: GBA): string =
+  ## Full validated state image (header + payload) for in-memory transports
+  ## (web IndexedDB / downloads). Same format as .state files.
+  make_state_bytes(ckGBA, gba.gba_rom_checksum(),
+                   uint32(gba.cartridge.rom.len), gba.gba_state_payload())
+
+proc load_state_bytes*(gba: GBA; data: string): bool =
+  ## Validate and apply a full state image. Mirrors load_state's rollback.
+  var payload: string
+  try:
+    payload = parse_state_payload(data, ckGBA, gba.gba_rom_checksum(),
+                                  uint32(gba.cartridge.rom.len))
+  except CatchableError:
+    echo "Load state failed: ", getCurrentExceptionMsg()
+    return false
+  let backup = gba.gba_state_payload()
+  try:
+    gba.gba_apply_state(payload)
+    true
+  except CatchableError:
+    echo "Load state failed: ", getCurrentExceptionMsg()
+    gba.gba_apply_state(backup)
+    false
+
 proc save_state*(gba: GBA; path: string): bool =
   ## Serialize the full emulator state to path. Must only be called at a
   ## frame boundary (right after step_frame returns). Returns false and

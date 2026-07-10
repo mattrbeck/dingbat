@@ -138,8 +138,10 @@ proc fnv1a*(data: string): uint32 =
 
 # ==================== State file header ====================
 
-proc write_state_file*(path: string; core: CoreKind;
-                       rom_checksum, rom_size: uint32; payload: string) =
+proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
+                       payload: string): string =
+  ## Full state-file image (header + payload) as bytes, for file storage or
+  ## in-memory transports (web IndexedDB, downloads)
   var w = Writer()
   w.buf.add(STATE_MAGIC)
   w.write_u32(STATE_VERSION)
@@ -151,20 +153,22 @@ proc write_state_file*(path: string; core: CoreKind;
   w.write_u32(uint32(payload.len))
   w.write_u32(fnv1a(payload))
   w.buf.add(payload)
+  w.buf
+
+proc write_state_file*(path: string; core: CoreKind;
+                       rom_checksum, rom_size: uint32; payload: string) =
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
-  writeFile(path, w.buf)
+  writeFile(path, make_state_bytes(core, rom_checksum, rom_size, payload))
 
-proc read_state_payload*(path: string; core: CoreKind;
-                         rom_checksum, rom_size: uint32): string =
-  ## Validates the header and returns the payload; raises StateError with a
-  ## human-readable message on any mismatch.
-  if not fileExists(path):
-    raise state_error("no save state found at " & path)
-  let data = readFile(path)
+proc parse_state_payload*(data: string; core: CoreKind;
+                          rom_checksum, rom_size: uint32;
+                          origin = "state data"): string =
+  ## Validates the header of a full state image and returns the payload;
+  ## raises StateError with a human-readable message on any mismatch.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
-    raise state_error("not a dingbat save state: " & path)
+    raise state_error("not a dingbat save state: " & origin)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
   let version = r.read_u32()
   if version != STATE_VERSION:
@@ -186,3 +190,9 @@ proc read_state_payload*(path: string; core: CoreKind;
   result = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
   if fnv1a(result) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
+
+proc read_state_payload*(path: string; core: CoreKind;
+                         rom_checksum, rom_size: uint32): string =
+  if not fileExists(path):
+    raise state_error("no save state found at " & path)
+  parse_state_payload(readFile(path), core, rom_checksum, rom_size, path)
