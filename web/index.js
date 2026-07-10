@@ -643,6 +643,112 @@ document.getElementById("load-save").addEventListener("click", async () => {
   });
 });
 
+// --- Save states ---
+// State images come from the core's wasm_state_size/wasm_state_data/
+// wasm_load_state exports and are stored in IndexedDB keyed by the same
+// per-ROM identity the library uses ("state:" + original file name, next to
+// "save:" battery saves). The bytes are byte-compatible with the desktop
+// emulator's ~/.config/dingbat/states/*.state files, so exported states can
+// move between web and desktop. All calls happen from event handlers, which
+// run between requestAnimationFrame ticks — i.e. at a frame boundary.
+
+let toastTimer = null;
+const showToast = (msg) => {
+  let t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+};
+
+const stateKey = (name) => "state:" + name;
+
+// Serialize the running core's state; returns a Uint8Array copy or null.
+const captureStateBytes = () => {
+  if (typeof Module === "undefined" || !Module._wasm_state_size) return null;
+  let len = Module._wasm_state_size();
+  if (len <= 0) return null;
+  let ptr = Module._wasm_state_data();
+  if (!ptr) return null;
+  // Copy out of WASM memory immediately: the buffer is only retained until
+  // the next wasm_state_size call (and the heap can move when memory grows).
+  return new Uint8Array(Module.memory.buffer, ptr, len).slice();
+};
+
+// Validate + apply a state image; returns true when the core accepted it.
+const applyStateBytes = (bytes) => {
+  if (typeof Module === "undefined" || !Module._wasm_load_state) return false;
+  let ptr = Module._malloc(bytes.length);
+  if (!ptr) return false;
+  // Build the heap view after _malloc: growth can detach the old buffer
+  new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
+  let ok = Module._wasm_load_state(ptr, bytes.length) === 1;
+  Module._free(ptr);
+  return ok;
+};
+
+document.getElementById("save-state").addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  if (!currentOriginalName) return;
+  let bytes = captureStateBytes();
+  if (!bytes) {
+    showToast("Couldn't capture the emulator state");
+    return;
+  }
+  try {
+    await dbPut(stateKey(currentOriginalName), bytes);
+    showToast("State saved");
+  } catch (e) {
+    showToast("Save state failed: " + e.message);
+  }
+});
+
+document.getElementById("load-state").addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  if (!currentOriginalName) return;
+  let bytes = null;
+  try {
+    bytes = await dbGet(stateKey(currentOriginalName));
+  } catch (e) {
+    showToast("Load state failed: " + e.message);
+    return;
+  }
+  if (!bytes) {
+    showToast("No saved state for this game");
+    return;
+  }
+  // The core validates the image (version, core kind, ROM checksum, payload
+  // hash) and leaves itself untouched when it doesn't match — e.g. a state
+  // saved for a different ROM.
+  showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
+});
+
+document.getElementById("export-state").addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (!currentOriginalName) return;
+  let bytes = captureStateBytes();
+  if (!bytes) {
+    showToast("Couldn't capture the emulator state");
+    return;
+  }
+  // Same format as the desktop emulator's .state files
+  let blob = new Blob([bytes], { type: "application/octet-stream" });
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = stripExt(currentOriginalName) + ".state";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+document.getElementById("import-state").addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (!currentOriginalName) return;
+  pickFile(".state", (bytes) => {
+    // Applied directly, not persisted — use Save State to keep it around
+    showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
+  });
+});
+
 // --- Volume control ---
 
 var volume = 100;

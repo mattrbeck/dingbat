@@ -274,6 +274,11 @@ body.running #main-menu-sep {
 }
 
 /* Save actions + screenshot only make sense once a game is loaded */
+#save-state,
+#load-state,
+#export-state,
+#import-state,
+#state-sep,
 #load-save,
 #export-save,
 #screenshot,
@@ -281,12 +286,17 @@ body.running #main-menu-sep {
   display: none;
 }
 
+body.has-game #save-state,
+body.has-game #load-state,
+body.has-game #export-state,
+body.has-game #import-state,
 body.has-game #load-save,
 body.has-game #export-save,
 body.has-game #screenshot {
   display: flex;
 }
 
+body.has-game #state-sep,
 body.has-game #save-sep {
   display: block;
 }
@@ -994,6 +1004,35 @@ body.has-game #home-resume {
 
 #log p {
   margin: 0 0 2px;
+}
+
+/* --- Toast (brief feedback for save-state actions) --- */
+
+#toast {
+  position: absolute;
+  z-index: 350;
+  left: 50%;
+  bottom: 20px;
+  transform: translate(-50%, 8px);
+  max-width: min(80%, 420px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  border: 1px solid var(--border-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 1px 0 var(--inset-hi) inset;
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 /*
