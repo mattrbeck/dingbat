@@ -8,6 +8,7 @@ import imguin/glad/gl
 import stb_image/read as stbi
 import dingbat/common/config
 import dingbat/common/input
+import dingbat/common/rewind
 import dingbat/gba/gba
 import dingbat/gb/gb
 import dingbat/frontend/file_explorer
@@ -217,6 +218,9 @@ type AppState = ref object
   pending_save:    bool
   pending_load:    bool
   pending_step:    bool  # frame advance: run exactly one frame while paused
+  rewind:          Rewind
+  rewinding:       bool    # true while the rewind key is held
+  last_rewind_pop: uint32
   fullscreen:      bool
   enable_overlay:  bool
   last_mouse_tick: uint32
@@ -305,6 +309,8 @@ proc load_rom(path: string) =
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   apply_master_volume()
+  app.rewind.clear()
+  app.rewinding = false
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
   glBindTexture(GL_TEXTURE_2D, app.game_texture)
@@ -415,7 +421,7 @@ proc render_imgui() =
   # loaded) always renders ImGui — it shows the drag-and-drop hint and has
   # no emulation to slow down.
   let menu_visible = show_menu_bar()
-  if app.emu_kind != ekNone and not app.paused and
+  if app.emu_kind != ekNone and not app.paused and not app.rewinding and
      not menu_visible and not app.enable_overlay and
      not app.fe.open and not app.ce.open and
      (app.dbg == nil or
@@ -471,6 +477,10 @@ proc render_imgui() =
         if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
                            nil, false, app.paused and app.emu_kind != ekNone):
           app.pending_step = true
+        if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind, true):
+          if not app.cfg.rewind:
+            app.rewind.clear()  # free the history when disabled
+          save_config(app.cfg)
         # Fast Forward is inverted audio sync: unsynced emulation runs
         # uncapped, so checked == not sync
         if app.emu_kind == ekGBA and app.gba_emu != nil:
@@ -572,6 +582,9 @@ proc render_imgui() =
          app.gba_emu.apu != nil:
         # GB's APU has no queued-bytes getter, so this is GBA-only
         igText("Audio queue: %u bytes", cuint(app.gba_emu.apu.audio_queued_bytes()))
+      if app.cfg.rewind and app.emu_kind != ekNone:
+        igText("Rewind: %d snapshots, %.1f MB", cint(app.rewind.len),
+               cdouble(app.rewind.mem_used()) / (1024.0 * 1024.0))
       igSeparator()
       igText("OpenGL")
       let ver  = cast[cstring](glGetString(GL_VERSION))
@@ -604,9 +617,9 @@ proc render_imgui() =
         igTextDisabled("Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
       igEnd()
 
-  # Paused badge: without it a paused game with the menu bar hidden looks
-  # like a frozen emulator
-  if app.paused and app.emu_kind != ekNone:
+  # Paused/rewinding badge: without it a paused game with the menu bar
+  # hidden looks like a frozen emulator
+  if (app.paused or app.rewinding) and app.emu_kind != ekNone:
     let vp = igGetMainViewport()
     if vp != nil:
       let (vpos, vsize) = (vp[].Pos, vp[].Size)
@@ -619,7 +632,7 @@ proc render_imgui() =
                         cint(ImGui_WindowFlags_NoInputs) or
                         cint(ImGui_WindowFlags_NoSavedSettings)
       if igBegin("##paused_badge", nil, badge_flags):
-        igText("Paused")
+        igText(if app.rewinding: "<< Rewinding" else: "Paused")
       igEnd()
 
   igRender()
@@ -712,6 +725,9 @@ proc handle_input() =
           of K_q:
             app.running = false
           else: discard
+      elif sym == K_BACKQUOTE:
+        # Hold-to-rewind, core-agnostic
+        app.rewinding = pressed and app.cfg.rewind and app.emu_kind != ekNone
       elif app.emu_kind == ekGBA and app.gba_emu != nil:
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
@@ -954,6 +970,7 @@ proc main() =
     fullscreen:      false,
     enable_overlay:  false,
     last_mouse_tick: getTicks(),
+    rewind:          new_rewind(),
   )
   # GLSL uniforms default to 0/false, so push the configured value now
   apply_color_correction()
@@ -995,7 +1012,25 @@ proc main() =
     # frame regardless of queue depth
     let stepping = app.paused and app.pending_step
     app.pending_step = false
-    if not app.paused or stepping:
+    if app.rewinding and app.emu_kind != ekNone:
+      # Step history backward at a fixed cadence (~30 pops/s of 10-frame
+      # snapshots ≈ 5x realtime). Applying a snapshot restores the serialized
+      # framebuffer, so presenting it shows the rewound frame directly.
+      let now_r = getTicks()
+      if now_r - app.last_rewind_pop >= 33:
+        app.last_rewind_pop = now_r
+        let snap = app.rewind.pop()
+        if snap.len > 0:
+          try:
+            case app.emu_kind
+            of ekGBA: app.gba_emu.apply_state_payload(snap)
+            of ekGB:  app.gb_emu.apply_state_payload(snap)
+            of ekNone: discard
+            emulated = true
+          except CatchableError:
+            echo "Rewind failed: ", getCurrentExceptionMsg()
+            app.rewinding = false
+    elif not app.paused or stepping:
       case app.emu_kind
       of ekGBA:
         if app.gba_emu != nil and (stepping or not app.gba_emu.apu.audio_ahead()):
@@ -1006,6 +1041,13 @@ proc main() =
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
+      if emulated and app.cfg.rewind:
+        case app.emu_kind
+        of ekGBA:
+          discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())
+        of ekGB:
+          discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload())
+        of ekNone: discard
     # Pending save/load states run here, at a guaranteed frame boundary
     if (app.pending_save or app.pending_load) and app.emu_kind != ekNone:
       process_pending_state()

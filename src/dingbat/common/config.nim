@@ -257,6 +257,7 @@ type
     volume*:            int      # master volume 0..100
     mute*:              bool     # mute audio output
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
+    rewind*:            bool     # keep rewind history (hold ` to rewind)
 
 proc new_config*(): Config =
   Config(
@@ -273,6 +274,7 @@ proc new_config*(): Config =
     volume:          100,
     mute:            false,
     color_correction: true,
+    rewind:          true,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -290,6 +292,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.mute = j["mute"].getBool(false)
   if j.hasKey("color_correction"):
     cfg.color_correction = j["color_correction"].getBool(true)
+  if j.hasKey("rewind"):
+    cfg.rewind = j["rewind"].getBool(true)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -382,6 +386,7 @@ proc save_config*(cfg: Config) =
   lines.add("volume: " & $cfg.volume)
   lines.add("mute: " & $cfg.mute)
   lines.add("color_correction: " & $cfg.color_correction)
+  lines.add("rewind: " & $cfg.rewind)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))

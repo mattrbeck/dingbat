@@ -2,11 +2,12 @@ import std/[os, strutils, parseopt]
 import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/common/test_output
+import dingbat/common/rewind
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
-    tmStateRoundtrip
+    tmStateRoundtrip, tmRewindTest
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -116,6 +117,62 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
   echo "ROUNDTRIP full state:  ", (if state_ok: "MATCH" else: "MISMATCH")
   if fb_ok and state_ok: 0 else: 1
 
+# Rewind verification: run forward taking snapshots exactly like the
+# frontend does, then pop backward and require byte-exact payload
+# reconstruction through the XOR-delta chain — both a few steps back and all
+# the way to the oldest snapshot — and that the emulator resumes from the
+# rewound state. Exits 0 iff everything matches.
+proc rewind_test(rom_path, bios_path: string): int =
+  const TOTAL_FRAMES = 300
+  let ext = rom_path.splitFile().ext.toLowerAscii()
+  let rw = new_rewind()
+  var ref_first = ""   # payload of the very first snapshot
+  var ref_mid = ""     # payload of snapshot 20
+  var snapshots = 0
+
+  template drive(emu: untyped) =
+    for f in 1 .. TOTAL_FRAMES:
+      emu.step_frame()
+      if rw.maybe_push(proc(): string = emu.state_payload()):
+        inc snapshots
+        if snapshots == 1:  ref_first = emu.state_payload()
+        if snapshots == 20: ref_mid = emu.state_payload()
+    echo "REWIND history:    ", rw.len, " snapshots in ", rw.mem_used(),
+         " bytes (", ref_mid.len, " bytes/full snapshot)"
+    # Pop back to snapshot 20 (pops return newest first)
+    var popped = ""
+    for _ in 1 .. (snapshots - 19):
+      popped = rw.pop()
+    let mid_ok = popped == ref_mid
+    echo "REWIND mid-chain:  ", (if mid_ok: "MATCH" else: "MISMATCH")
+    # Apply and make sure the emulator resumes from there
+    emu.apply_state_payload(popped)
+    let apply_ok = emu.state_payload() == ref_mid
+    for _ in 1 .. 10: emu.step_frame()
+    echo "REWIND apply:      ", (if apply_ok: "MATCH" else: "MISMATCH")
+    # Walk the rest of the chain to the oldest snapshot
+    var last = ""
+    while true:
+      let s = rw.pop()
+      if s.len == 0: break
+      last = s
+    let full_ok = last == ref_first
+    echo "REWIND full chain: ", (if full_ok: "MATCH" else: "MISMATCH")
+    if mid_ok and apply_ok and full_ok: return 0 else: return 1
+
+  if ext in [".gba", ".bin"]:
+    let is_hle = bios_path == "hle" or bios_path == ""
+    let actual_bios = if is_hle: "" else: bios_path
+    let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
+    emu.test_output = new_test_output()
+    emu.post_init()
+    drive(emu)
+  else:
+    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+    emu.test_output = new_test_output()
+    emu.post_init()
+    drive(emu)
+
 proc main() =
   var rom_path = ""
   var bios_path = ""
@@ -148,6 +205,7 @@ proc main() =
         of "mgba-suite": mode = tmMgbaSuite
         of "screenshot": mode = tmScreenshot
         of "stateroundtrip": mode = tmStateRoundtrip
+        of "rewindtest": mode = tmRewindTest
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -176,6 +234,8 @@ proc main() =
 
   if mode == tmStateRoundtrip:
     quit(state_roundtrip(rom_path, bios_path, warmup_frames))
+  if mode == tmRewindTest:
+    quit(rewind_test(rom_path, bios_path))
 
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
@@ -253,7 +313,7 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
-  of tmStateRoundtrip:
+  of tmStateRoundtrip, tmRewindTest:
     discard  # handled (and exited) above
 
   if output.len > 0:
