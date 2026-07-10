@@ -470,6 +470,9 @@ proc scanline*(ppu: PPU) =
   for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0
   if ppu.gba.cpu.stopped:
     return  # Stop mode powers down the LCD; present black
+  if ppu.dispcnt.forced_blank:
+    for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0x7FFF'u16
+    return
   for bg in 0..3:
     for c in 0..239: ppu.layer_palettes[bg][c] = 0
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
