@@ -38,30 +38,34 @@ proc pram_color(pram: array[64, uint8]; idx: int): uint16 =
   # Palette RAM is little-endian BGR555 pairs (red in the low 5 bits)
   uint16(pram[idx * 2]) or (uint16(pram[idx * 2 + 1]) shl 8)
 
-proc swatch(c: uint16) =
+proc swatch(c: uint16; id: cint) =
   let col = ImVec4(x: cfloat(c and 0x1F'u16) / 31.0'f32,
                    y: cfloat((c shr 5) and 0x1F'u16) / 31.0'f32,
                    z: cfloat((c shr 10) and 0x1F'u16) / 31.0'f32,
                    w: 1.0'f32)
-  discard igColorButton("", col, SWATCH_FLAGS, ImVec2(x: 18, y: 18))
+  # An empty desc_id hashes to the window's own ID, which trips an ImGui
+  # assert; push a unique per-swatch ID instead
+  igPushID_Int(id)
+  discard igColorButton("##swatch", col, SWATCH_FLAGS, ImVec2(x: 18, y: 18))
+  igPopID()
 
 proc dmg_palette_row(label: cstring; reg: array[4, uint8];
-                     pram: array[64, uint8]) =
+                     pram: array[64, uint8]; id_base: cint) =
   igTextUnformatted(label, nil)
   igSameLine(56, -1)
   for i in 0 .. 3:
-    swatch(pram_color(pram, int(reg[i])))
+    swatch(pram_color(pram, int(reg[i])), id_base + cint(i))
     igSameLine(0, 2)
   igText("= %02X", cuint(ppu_palette_from_array(reg)))
 
-proc cgb_palette_grid(title: cstring; pram: array[64, uint8]) =
+proc cgb_palette_grid(title: cstring; pram: array[64, uint8]; id_base: cint) =
   igBeginGroup()
   igTextUnformatted(title, nil)
   for p in 0 .. 7:
     igText("%d", cint(p))
     igSameLine(24, -1)
     for c in 0 .. 3:
-      swatch(pram_color(pram, p * 4 + c))
+      swatch(pram_color(pram, p * 4 + c), id_base + cint(p * 4 + c))
       if c < 3: igSameLine(0, 2)
   igEndGroup()
 
@@ -71,13 +75,13 @@ proc render_palette_window(d: GbDebug) =
   if igBegin("Palettes", addr d.palette_window, 0):
     let ppu = d.gb.ppu
     if d.gb.cgb_enabled:
-      cgb_palette_grid("Background", ppu.pram)
+      cgb_palette_grid("Background", ppu.pram, 0)
       igSameLine(0, 24)
-      cgb_palette_grid("Objects", ppu.obj_pram)
+      cgb_palette_grid("Objects", ppu.obj_pram, 32)
     else:
-      dmg_palette_row("BGP", ppu.bgp, ppu.pram)
-      dmg_palette_row("OBP0", ppu.obp0, ppu.obj_pram)
-      dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram)
+      dmg_palette_row("BGP", ppu.bgp, ppu.pram, 0)
+      dmg_palette_row("OBP0", ppu.obp0, ppu.obj_pram, 4)
+      dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram, 8)
   igEnd()
 
 # ──────────────────────────── Texture helpers ────────────────────────────
