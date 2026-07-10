@@ -207,6 +207,10 @@ type AppState = ref object
 
 var app: AppState
 
+# Emulated-frames FPS, updated once a second by update_fps_title and shown in
+# the debug overlay alongside the ImGui (UI) framerate
+var emu_fps = 0.0
+
 # ──────────────────────────── ROM Loading ────────────────────────────
 
 proc flush_gb_save() =
@@ -472,8 +476,13 @@ proc render_imgui() =
                    cint(ImGui_WindowFlags_NoSavedSettings)
     if igBegin("##overlay", addr app.enable_overlay, ov_flags):
       let fps = app.io[].Framerate
-      igText("FPS:        %.1f", fps)
+      igText("UI FPS:     %.1f", fps)
       igText("Frame time: %.3f ms", 1000.0'f32 / fps)
+      igText("Emulation:  %.1f fps", cfloat(emu_fps))
+      if app.emu_kind == ekGBA and app.gba_emu != nil and
+         app.gba_emu.apu != nil:
+        # GB's APU has no queued-bytes getter, so this is GBA-only
+        igText("Audio queue: %u bytes", cuint(app.gba_emu.apu.audio_queued_bytes()))
       igSeparator()
       igText("OpenGL")
       let ver  = cast[cstring](glGetString(GL_VERSION))
@@ -594,6 +603,7 @@ proc update_fps_title(emulated: bool) =
   let cur_sec = now.toUnix() mod 60
   if cur_sec != fps_second:
     let fps = if fps_us > 0: fps_frames.float * 1_000_000.0 / fps_us.float else: 0.0
+    emu_fps = fps
     let title = if app.emu_kind == ekNone: "dingbat"
                 elif app.paused: "dingbat - PAUSED"
                 elif app.emu_kind == ekGBA and app.gba_emu != nil and
