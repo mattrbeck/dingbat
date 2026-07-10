@@ -148,8 +148,10 @@ proc input_from_name(name: string): Input =
   of "r":      Input.R
   else:        raise newException(ValueError, "Unknown input: " & name)
 
-const CONFIG_DIR  = "~/.config/dingbat"
-const CONFIG_FILE = CONFIG_DIR & "/dingbat.yml"
+# Windows: %APPDATA%\dingbat (the native location); elsewhere: ~/.config/dingbat
+let CONFIG_DIR  = when defined(windows): getConfigDir() / "dingbat"
+                  else: "~/.config/dingbat"
+let CONFIG_FILE = CONFIG_DIR / "dingbat.yml"
 
 # Default keybindings: SDL keycode → Input (mgba-style)
 # Arrow keys=D-pad, Z=A, X=B, Backspace=SELECT, Return=START, A=L, S=R

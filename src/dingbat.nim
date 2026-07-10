@@ -555,6 +555,10 @@ proc main() =
     cfg.use_hle = true
 
   # SDL2 init
+  when defined(windows):
+    # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
+    # instead of letting DWM bitmap-stretch the window on scaled displays
+    discard setHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
   if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK) != SdlSuccess:
     echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
   defer: sdl2.quit()
