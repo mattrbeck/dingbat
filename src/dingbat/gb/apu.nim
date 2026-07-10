@@ -128,9 +128,11 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       channels: 2'u8, samples: uint16(GB_APU_BUFFER_SIZE div 2),
       callback: nil, userdata: nil,
     )
-    var obtained: SDL_AudioSpec
     sdl_close_audio_gb()
-    if sdl_open_audio_gb(addr desired, addr obtained) == 0:
+    # obtained must be nil so SDL converts to exactly this spec; see the
+    # matching comment in gba/apu.nim (Windows WASAPI otherwise changes the
+    # spec and audio-sync paces emulation at ~2x real time)
+    if sdl_open_audio_gb(addr desired, nil) == 0:
       result.audio_dev = 1
       if not headless: sdl_pause_audio_gb(0)
     else:

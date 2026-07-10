@@ -88,9 +88,14 @@ proc new_apu*(gba: GBA): APU =
       callback: nil,
       userdata: nil,
     )
-    var obtained: SDL_AudioSpec
     sdl_close_audio()
-    if sdl_open_audio(addr desired, addr obtained) == 0:
+    # obtained must be nil: passing a non-nil obtained means
+    # SDL_AUDIO_ALLOW_ANY_CHANGE, and on Windows WASAPI hands back the
+    # mixer's native spec (float32, 44.1/48 kHz) with no conversion. The
+    # device then drains bytes ~2x faster than the APU queues them and
+    # audio-sync paces emulation at ~2x real time. nil makes SDL convert
+    # to exactly the requested spec on every platform.
+    if sdl_open_audio(addr desired, nil) == 0:
       result.audio_dev = 1
       sdl_pause_audio(0)
     else:
