@@ -262,6 +262,10 @@ type
     render_dirty*: bool
     skip_render*:  bool
     frame_static*: bool
+    # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown).
+    # ANDed into the per-scanline enable computation only, so the per-pixel
+    # compositing hot path is untouched.
+    debug_layer_mask*: uint16
 
   SoundChannel* = ref object of RootObj
     gba*:            GBA

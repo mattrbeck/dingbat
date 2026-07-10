@@ -47,11 +47,25 @@ proc render_palettes(d: GbaDebug) =
     igPopStyleVar(1)
     igEndTabItem()
 
+proc render_layers(d: GbaDebug) =
+  if igBeginTabItem("Layers", nil, 0):
+    igTextUnformatted("Debug visibility (display only; emulation unaffected)", nil)
+    const names: array[5, cstring] = ["BG0", "BG1", "BG2", "BG3", "OBJ"]
+    let ppu = d.gba.ppu
+    for i in 0 .. 4:
+      var shown = ((ppu.debug_layer_mask shr i) and 1) != 0
+      if igCheckbox(names[i], addr shown):
+        ppu.debug_layer_mask = ppu.debug_layer_mask xor (1'u16 shl i)
+        # Wake the render-skip path so a static screen repaints immediately
+        ppu.render_dirty = true
+    igEndTabItem()
+
 proc render_windows*(d: GbaDebug) =
   if d.video_window:
     discard igBegin("Video", addr d.video_window, 0)
     if igBeginTabBar("VideoTabBar", 0):
       d.render_palettes()
+      d.render_layers()
       igEndTabBar()
     igEnd()
 
