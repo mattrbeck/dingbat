@@ -110,11 +110,13 @@ const applyUpdate = async () => {
 
 const closeUpdateModal = () => {
   updateModal.classList.remove("open");
+  releaseFocus(updateModal);
 };
 
 updateBtn.addEventListener("click", () => {
   if (currentRomName) {
     updateModal.classList.add("open");
+    trapFocus(updateModal);
   } else {
     applyUpdate();
   }
@@ -169,6 +171,48 @@ window.onerror = (msg, src, line, col, err) => {
 window.addEventListener("unhandledrejection", (e) => {
   log("REJECT: " + e.reason);
 });
+
+// --- Modal focus management (open: focus first control + trap Tab; close:
+// restore focus to the element that opened it) ---
+
+let modalReturnFocus = null;
+let modalTrapHandler = null;
+
+const modalFocusables = (overlay) =>
+  Array.from(
+    overlay.querySelectorAll("button, input, select, textarea, [tabindex]")
+  ).filter(
+    (n) => !n.disabled && n.offsetParent !== null && n.getAttribute("tabindex") !== "-1"
+  );
+
+const trapFocus = (overlay) => {
+  modalReturnFocus = document.activeElement;
+  let f = modalFocusables(overlay);
+  if (f.length) f[0].focus();
+  modalTrapHandler = (e) => {
+    if (e.key !== "Tab") return;
+    let items = modalFocusables(overlay);
+    if (!items.length) return;
+    let idx = items.indexOf(document.activeElement);
+    if (e.shiftKey && idx <= 0) {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (!e.shiftKey && idx === items.length - 1) {
+      e.preventDefault();
+      items[0].focus();
+    }
+  };
+  overlay.addEventListener("keydown", modalTrapHandler);
+};
+
+const releaseFocus = (overlay) => {
+  if (modalTrapHandler) overlay.removeEventListener("keydown", modalTrapHandler);
+  modalTrapHandler = null;
+  try {
+    if (modalReturnFocus && modalReturnFocus.focus) modalReturnFocus.focus();
+  } catch {}
+  modalReturnFocus = null;
+};
 
 // --- IndexedDB storage ---
 
@@ -338,6 +382,7 @@ document.getElementById("open-bios").addEventListener("click", () => {
   pendingGbcBootrom = null;
   updateBiosStatusText();
   biosModal.classList.add("open");
+  trapFocus(biosModal);
 });
 
 document.getElementById("pick-gba-bios").addEventListener("click", () => {
@@ -368,7 +413,10 @@ const closeBiosModal = () => {
   pendingGbaBios = null;
   pendingGbcBootrom = null;
   biosModal.classList.remove("open");
+  releaseFocus(biosModal);
 };
+
+document.getElementById("bios-close").addEventListener("click", closeBiosModal);
 
 document.getElementById("bios-save").addEventListener("click", async () => {
   if (pendingGbaBios === "remove") {
@@ -406,15 +454,29 @@ const saveRecentRoms = async (list) => {
   await dbPut("recent", list);
 };
 
-const addRecentRom = async (name, bytes) => {
+const addRecentRom = async (name, bytes, art) => {
   let list = (await getRecentRoms()).filter(r => r.name !== name);
-  list.unshift({ name, data: new Uint8Array(bytes) });
+  let entry = { name, data: new Uint8Array(bytes) };
+  if (art) entry.art = art; // Blob (box art from a zip), optional
+  list.unshift(entry);
   if (list.length > MAX_RECENT) list.length = MAX_RECENT;
   await saveRecentRoms(list);
+  refreshHomeRecent();
 };
 
-const recentModal = document.getElementById("recent-modal");
-const recentList = document.getElementById("recent-list");
+// Launch a ROM from a stored recent entry ({ name, data, art? })
+const launchRom = async (rom) => {
+  let ext = rom.name.substring(rom.name.lastIndexOf(".")).toLowerCase();
+  let romFile = "rom" + ext;
+  writeToFS(romFile, rom.data);
+  await addRecentRom(rom.name, rom.data, rom.art);
+  loadRom(romFile, rom.name);
+};
+
+// Home-screen recent grid — this is the app's game library (it replaces the
+// old Recent modal: launch, remove, and storage usage all live here).
+const homeRecentWrap = document.getElementById("home-recent-wrap");
+const homeRecent = document.getElementById("home-recent");
 const storageInfo = document.getElementById("storage-info");
 
 const formatBytes = (bytes) => {
@@ -430,59 +492,83 @@ const updateStorageInfo = async () => {
     return;
   }
   let est = await navigator.storage.estimate();
-  storageInfo.textContent = `Storage: ${formatBytes(est.usage)} / ${formatBytes(est.quota)}`;
+  storageInfo.textContent = `${formatBytes(est.usage)} used`;
 };
 
-const renderRecentList = async () => {
-  recentList.innerHTML = "";
+const deleteRecent = async (name) => {
+  let list = (await getRecentRoms()).filter((r) => r.name !== name);
+  await saveRecentRoms(list);
+  refreshHomeRecent();
+};
+
+// Object URLs for box-art thumbnails, revoked and rebuilt each render
+let homeArtUrls = [];
+
+const refreshHomeRecent = async () => {
+  if (!db) return;
   let roms = await getRecentRoms();
+  homeArtUrls.forEach(URL.revokeObjectURL);
+  homeArtUrls = [];
+  homeRecent.innerHTML = "";
+  if (roms.length === 0) {
+    homeRecentWrap.hidden = true;
+    return;
+  }
+  homeRecentWrap.hidden = false;
+  updateStorageInfo();
   for (let rom of roms) {
-    let entry = document.createElement("div");
-    entry.className = "recent-entry";
-    let nameSpan = document.createElement("span");
-    nameSpan.className = "recent-entry-name";
-    nameSpan.textContent = rom.name;
-    nameSpan.addEventListener("click", async () => {
-      let ext = rom.name.substring(rom.name.lastIndexOf(".")).toLowerCase();
-      let romFile = "rom" + ext;
-      writeToFS(romFile, rom.data);
-      await addRecentRom(rom.name, rom.data);
-      recentModal.classList.remove("open");
-      loadRom(romFile, rom.name);
-    });
-    let delBtn = document.createElement("button");
-    delBtn.className = "recent-delete";
-    delBtn.innerHTML = "&#x1f5d1;";
-    delBtn.title = "Remove";
-    delBtn.addEventListener("click", async (e) => {
+    let system = systemOf(rom.name);
+    let tile = document.createElement("div");
+    tile.className = "home-tile";
+
+    let launch = document.createElement("button");
+    launch.type = "button";
+    launch.className = "home-tile-launch";
+    launch.title = rom.name; // full name on hover when truncated
+
+    let icon;
+    if (rom.art) {
+      // Box art from a zip, shown in place of the cartridge icon
+      let url = URL.createObjectURL(rom.art);
+      homeArtUrls.push(url);
+      icon = document.createElement("img");
+      icon.className = "home-tile-art";
+      icon.src = url;
+      icon.alt = "";
+    } else {
+      icon = document.createElement("span");
+      icon.className = "cart cart-" + system.toLowerCase();
+    }
+
+    let name = document.createElement("span");
+    name.className = "home-tile-name";
+    name.textContent = rom.name;
+
+    let badge = document.createElement("span");
+    badge.className = "home-tile-badge badge-" + system.toLowerCase();
+    badge.textContent = system;
+
+    launch.appendChild(icon);
+    launch.appendChild(name);
+    launch.appendChild(badge);
+    launch.addEventListener("click", () => launchRom(rom));
+
+    let del = document.createElement("button");
+    del.type = "button";
+    del.className = "home-tile-delete";
+    del.title = "Remove from recent";
+    del.setAttribute("aria-label", "Remove " + rom.name);
+    del.innerHTML = "&times;";
+    del.addEventListener("click", (e) => {
       e.stopPropagation();
-      let list = (await getRecentRoms()).filter(r => r.name !== rom.name);
-      await saveRecentRoms(list);
-      await renderRecentList();
-      updateStorageInfo();
+      deleteRecent(rom.name);
     });
-    entry.appendChild(nameSpan);
-    entry.appendChild(delBtn);
-    recentList.appendChild(entry);
+
+    tile.appendChild(launch);
+    tile.appendChild(del);
+    homeRecent.appendChild(tile);
   }
 };
-
-document.getElementById("open-recent").addEventListener("click", () => {
-  menuDropdown.hidden = true;
-  renderRecentList();
-  updateStorageInfo();
-  recentModal.classList.add("open");
-});
-
-const closeRecentModal = () => {
-  recentModal.classList.remove("open");
-};
-
-document.getElementById("recent-close").addEventListener("click", closeRecentModal);
-
-recentModal.addEventListener("click", (e) => {
-  if (e.target === recentModal) closeRecentModal();
-});
 
 // Close any open modal on Escape
 document.addEventListener("keydown", (e) => {
@@ -492,7 +578,6 @@ document.addEventListener("keydown", (e) => {
       closeKeyboardModal();
     }
     closeBiosModal();
-    closeRecentModal();
     closeUpdateModal();
   }
 });
@@ -561,18 +646,69 @@ document.getElementById("load-save").addEventListener("click", async () => {
 // --- Volume control ---
 
 var volume = 100;
-const volDisplay = document.getElementById("vol-display");
-const volDown = document.getElementById("vol-down");
-const volUp = document.getElementById("vol-up");
+var muted = false;
+// Both the top-bar slider (hidden on phones) and the in-menu slider
+const volSliders = Array.from(document.querySelectorAll(".vol-range"));
+const muteBtn = document.getElementById("mute-btn");
+const menuVolume = document.getElementById("menu-volume");
 
-const setVolume = (v) => {
-  volume = Math.max(0, Math.min(100, v));
-  volDisplay.value = volume + "%";
-  if (typeof updateGain === "function") updateGain();
+// Effective gain applied to the audio graph (0..1), respecting mute.
+const effectiveGain = () => (muted ? 0 : volume / 100);
+
+const syncVolumeUI = () => {
+  let off = muted || volume === 0;
+  for (let s of volSliders) {
+    s.value = volume;
+    s.style.setProperty("--vol", volume + "%");
+    s.classList.toggle("muted", off);
+  }
+  muteBtn.classList.toggle("muted", off);
+  muteBtn.title = muted ? "Unmute" : "Mute";
 };
 
-volDown.addEventListener("click", () => setVolume(volume - 10));
-volUp.addEventListener("click", () => setVolume(volume + 10));
+// Persist volume/mute to IndexedDB, debounced so slider drags don't hammer it
+let audioSaveTimer = null;
+const saveAudioSettings = () => {
+  if (!db) return;
+  clearTimeout(audioSaveTimer);
+  audioSaveTimer = setTimeout(() => dbPut("audio", { volume, muted }), 250);
+};
+
+const setVolume = (v) => {
+  volume = Math.max(0, Math.min(100, Math.round(v)));
+  if (volume > 0) muted = false;
+  syncVolumeUI();
+  if (typeof updateGain === "function") updateGain();
+  saveAudioSettings();
+};
+
+const toggleMute = () => {
+  muted = !muted;
+  if (!muted && volume === 0) volume = 50;
+  syncVolumeUI();
+  if (typeof updateGain === "function") updateGain();
+  saveAudioSettings();
+};
+
+const loadAudioSettings = async () => {
+  let s = await dbGet("audio");
+  if (s && typeof s.volume === "number") {
+    volume = Math.max(0, Math.min(100, s.volume));
+    muted = !!s.muted;
+    syncVolumeUI();
+    if (typeof updateGain === "function") updateGain();
+  }
+};
+
+for (let s of volSliders) {
+  s.addEventListener("input", () => setVolume(Number(s.value)));
+}
+muteBtn.addEventListener("click", toggleMute);
+// Keep the menu open while interacting with its volume slider
+["click", "pointerdown"].forEach((ev) =>
+  menuVolume.addEventListener(ev, (e) => e.stopPropagation())
+);
+syncVolumeUI();
 
 // --- Keyboard settings ---
 
@@ -726,13 +862,17 @@ const openKeyboardModal = () => {
   renderKbBindings();
   keyboardModal.classList.add("open");
   document.addEventListener("keydown", kbKeyHandler, true);
+  trapFocus(keyboardModal);
 };
 
 const closeKeyboardModal = () => {
   kbSelection = -1;
   keyboardModal.classList.remove("open");
   document.removeEventListener("keydown", kbKeyHandler, true);
+  releaseFocus(keyboardModal);
 };
+
+document.getElementById("kb-close").addEventListener("click", closeKeyboardModal);
 
 const applyKeybindings = (bindings) => {
   activeBindings = [...bindings];
@@ -750,6 +890,23 @@ const loadKeybindingsFromStorage = async () => {
   if (stored && stored.length === INPUT_NAMES.length) {
     applyKeybindings(stored);
   }
+};
+
+// --- Large on-screen controls (bigger d-pad for touch) ---
+const largeControlsToggle = document.getElementById("large-controls-toggle");
+
+const applyLargeControls = (on) => {
+  document.body.classList.toggle("large-controls", on);
+  largeControlsToggle.checked = on;
+};
+
+largeControlsToggle.addEventListener("change", async () => {
+  applyLargeControls(largeControlsToggle.checked);
+  await dbPut("large-controls", largeControlsToggle.checked);
+});
+
+const loadLargeControlsFromStorage = async () => {
+  applyLargeControls(!!(await dbGet("large-controls")));
 };
 
 document.getElementById("open-keyboard").addEventListener("click", openKeyboardModal);
@@ -775,7 +932,6 @@ var fastForward = false;
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
-const playbackControls = document.getElementById("playback-controls");
 
 const loadRom = async (romName, originalName) => {
   // Persist save from previous ROM before switching
@@ -786,18 +942,136 @@ const loadRom = async (romName, originalName) => {
   currentOriginalName = originalName || romName;
   paused = false;
   fastForward = false;
-  pauseButton.textContent = "\u23f8";
-  pauseButton.classList.remove("active");
+  pauseButton.classList.remove("paused", "active");
+  pauseButton.title = "Pause";
   fastForwardButton.classList.remove("active");
-  playbackControls.hidden = false;
+  document.body.classList.add("has-game", "running");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
 };
 
+// --- File type helpers ---
+
+const ROM_EXTS = [".gba", ".gb", ".gbc"];
+const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+
+const extOf = (n) => {
+  let i = n.lastIndexOf(".");
+  return i < 0 ? "" : n.slice(i).toLowerCase();
+};
+const baseName = (n) => n.slice(n.lastIndexOf("/") + 1);
+const systemOf = (name) => {
+  let e = extOf(name);
+  return e === ".gba" ? "GBA" : e === ".gbc" ? "GBC" : "GB";
+};
+const mimeForImg = (e) =>
+  ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+     ".webp": "image/webp", ".gif": "image/gif" }[e] || "image/png");
+
+// --- Minimal in-browser ZIP reader ---
+// Reads the central directory and inflates entries with the platform's
+// DecompressionStream (deflate-raw) — no external library, works under COEP.
+
+const unzip = async (arrayBuffer) => {
+  const view = new DataView(arrayBuffer);
+  const bytes = new Uint8Array(arrayBuffer);
+  const len = arrayBuffer.byteLength;
+
+  // Find End Of Central Directory (scan the tail; comment is at most 64 KB)
+  let eocd = -1;
+  const scanStart = Math.max(0, len - 65557);
+  for (let i = len - 22; i >= scanStart; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("not a valid zip file");
+
+  const count = view.getUint16(eocd + 10, true);
+  let p = view.getUint32(eocd + 16, true); // central directory offset
+  const entries = [];
+  for (let n = 0; n < count && p + 46 <= len; n++) {
+    if (view.getUint32(p, true) !== 0x02014b50) break;
+    const method = view.getUint16(p + 10, true);
+    const compSize = view.getUint32(p + 20, true);
+    const uncompSize = view.getUint32(p + 24, true);
+    const nameLen = view.getUint16(p + 28, true);
+    const extraLen = view.getUint16(p + 30, true);
+    const commentLen = view.getUint16(p + 32, true);
+    const localOffset = view.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    entries.push({ name, method, compSize, uncompSize, localOffset });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+
+  const extract = async (entry) => {
+    const lo = entry.localOffset;
+    if (view.getUint32(lo, true) !== 0x04034b50) throw new Error("bad local header");
+    const nameLen = view.getUint16(lo + 26, true);
+    const extraLen = view.getUint16(lo + 28, true);
+    const start = lo + 30 + nameLen + extraLen;
+    const comp = bytes.subarray(start, start + entry.compSize);
+    if (entry.method === 0) return comp.slice(); // stored
+    if (entry.method === 8) {
+      if (typeof DecompressionStream === "undefined")
+        throw new Error("this browser can't decompress zip files");
+      const stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    throw new Error("unsupported zip compression (method " + entry.method + ")");
+  };
+
+  return { entries, extract };
+};
+
+const usable = (e) => !e.name.startsWith("__MACOSX/") && !e.name.endsWith("/");
+
+const handleZipFile = async (file) => {
+  let zip;
+  try {
+    zip = await unzip(await file.arrayBuffer());
+  } catch (e) {
+    alert("Couldn't read that zip: " + e.message);
+    return;
+  }
+  let romEntry = zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
+  if (!romEntry) {
+    alert("No .gba, .gb or .gbc ROM was found inside that zip.");
+    return;
+  }
+  // Largest embedded image is almost always the box art
+  let imgEntry = zip.entries
+    .filter((e) => usable(e) && IMG_EXTS.includes(extOf(e.name)))
+    .sort((a, b) => b.uncompSize - a.uncompSize)[0];
+
+  let romBytes;
+  try {
+    romBytes = await zip.extract(romEntry);
+  } catch (e) {
+    alert("Couldn't extract the ROM: " + e.message);
+    return;
+  }
+  let art = null;
+  if (imgEntry) {
+    try {
+      let imgBytes = await zip.extract(imgEntry);
+      art = new Blob([imgBytes], { type: mimeForImg(extOf(imgEntry.name)) });
+    } catch { /* art is optional */ }
+  }
+
+  let innerName = baseName(romEntry.name);
+  let romFile = "rom" + extOf(innerName);
+  writeToFS(romFile, romBytes);
+  await addRecentRom(innerName, romBytes, art);
+  loadRom(romFile, innerName);
+};
+
 let handleRomFile = (file) => {
-  let ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-  if (ext !== ".gba" && ext !== ".gb" && ext !== ".gbc") return;
+  let ext = extOf(file.name);
+  if (ext === ".zip") return handleZipFile(file);
+  if (!ROM_EXTS.includes(ext)) {
+    alert("Unsupported file. Load a .gba, .gb, or .gbc ROM (or a .zip containing one).");
+    return;
+  }
   let romName = "rom" + ext;
   let reader = new FileReader();
   reader.addEventListener("load", async () => {
@@ -809,16 +1083,21 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
-document.getElementById("open-rom").addEventListener("click", () => {
+const openRomPicker = () => {
   menuDropdown.hidden = true;
   let input = document.createElement("input");
   input.type = "file";
-  input.accept = ".gba,.gb,.gbc";
+  // No `accept` filter: some platforms (notably iOS Safari) grey out files
+  // whose extension they don't recognize — .gba/.gb/.gbc — as soon as a known
+  // type like .zip is listed. Showing all files keeps every ROM selectable;
+  // handleRomFile validates the extension itself.
   input.addEventListener("input", () => {
     if (input.files?.length > 0) handleRomFile(input.files[0]);
   });
   input.click();
-});
+};
+
+document.getElementById("dropzone").addEventListener("click", openRomPicker);
 
 let dropOverlay = document.getElementById("drop-overlay");
 let dragCounter = 0;
@@ -851,8 +1130,9 @@ document.addEventListener("drop", (e) => {
 
 pauseButton.addEventListener("click", () => {
   paused = !paused;
-  pauseButton.textContent = paused ? "\u25b6" : "\u23f8";
+  pauseButton.classList.toggle("paused", paused);
   pauseButton.classList.toggle("active", paused);
+  pauseButton.title = paused ? "Resume" : "Pause";
 });
 
 resetButton.addEventListener("click", () => {
@@ -864,6 +1144,128 @@ fastForwardButton.addEventListener("click", () => {
   fastForwardButton.classList.toggle("active", fastForward);
 });
 
+// --- Main Menu (return to the home screen without terminating the game) ---
+
+// Show the home screen over the paused-but-still-loaded game. The emulator
+// keeps its state; Resume (or loading another ROM) picks up where it left off.
+const showMainMenu = () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName) return;
+  paused = true;
+  document.body.classList.remove("running");
+  refreshHomeRecent();
+};
+
+const resumeGame = () => {
+  if (!currentRomName) return;
+  paused = false;
+  pauseButton.classList.remove("paused", "active");
+  pauseButton.title = "Pause";
+  document.body.classList.add("running");
+};
+
+document.getElementById("main-menu").addEventListener("click", showMainMenu);
+document.getElementById("home-resume").addEventListener("click", resumeGame);
+
+// --- Screenshot ---
+// The GBA canvas is a WebGL context without preserveDrawingBuffer, so its
+// pixels are only valid within the render task. captureCanvas() is therefore
+// called from the main loop right after a fresh frame is drawn.
+let pendingShot = false;
+
+const captureCanvas = () => {
+  pendingShot = false;
+  document.getElementById("canvas").toBlob((blob) => {
+    if (!blob) return;
+    let a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (currentOriginalName || "dingbat").replace(/\.[^.]*$/, "") + ".png";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+};
+
+const takeScreenshot = () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName || typeof Module === "undefined" || !Module._loop_tick) return;
+  if (paused) {
+    // Paused loop isn't rendering; draw one frame, then grab it in the same task
+    Module._loop_tick();
+    captureCanvas();
+  } else {
+    pendingShot = true; // grabbed by the running loop after the next render
+  }
+};
+
+document.getElementById("screenshot").addEventListener("click", takeScreenshot);
+
+// --- Fullscreen ---
+
+const fullscreenBtn = document.getElementById("fullscreen-btn");
+const fsRoot = document.documentElement;
+const requestFs = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
+if (!requestFs) {
+  // iOS Safari can't fullscreen arbitrary elements
+  fullscreenBtn.hidden = true;
+} else {
+  fullscreenBtn.addEventListener("click", () => {
+    let active = document.fullscreenElement || document.webkitFullscreenElement;
+    if (active) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      requestFs.call(fsRoot);
+    }
+  });
+  const onFsChange = () => {
+    let active = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    document.body.classList.toggle("fs", active);
+    fullscreenBtn.title = active ? "Exit Fullscreen" : "Fullscreen";
+  };
+  document.addEventListener("fullscreenchange", onFsChange);
+  document.addEventListener("webkitfullscreenchange", onFsChange);
+}
+
+// --- Gamepad support (polled each frame from the main loop) ---
+
+// Input IDs: 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R
+const gpPrev = new Array(10).fill(false);
+const GP_DEADZONE = 0.4;
+
+const pollGamepads = () => {
+  if (typeof Module === "undefined" || !Module._setInput) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const want = new Array(10).fill(false);
+  let anyConnected = false;
+  for (const pad of pads) {
+    if (!pad) continue;
+    anyConnected = true;
+    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
+    if (b(0) || b(3)) want[4] = true; // A / Y -> A
+    if (b(1) || b(2)) want[5] = true; // B / X -> B
+    if (b(8)) want[6] = true; // Back -> Select
+    if (b(9)) want[7] = true; // Start
+    if (b(4) || b(6)) want[8] = true; // LB / LT -> L
+    if (b(5) || b(7)) want[9] = true; // RB / RT -> R
+    if (b(12)) want[0] = true; // Dpad
+    if (b(13)) want[1] = true;
+    if (b(14)) want[2] = true;
+    if (b(15)) want[3] = true;
+    const ax = pad.axes[0] || 0;
+    const ay = pad.axes[1] || 0; // Left stick
+    if (ay < -GP_DEADZONE) want[0] = true;
+    if (ay > GP_DEADZONE) want[1] = true;
+    if (ax < -GP_DEADZONE) want[2] = true;
+    if (ax > GP_DEADZONE) want[3] = true;
+  }
+  if (!anyConnected) return;
+  for (let i = 0; i < 10; i++) {
+    if (want[i] !== gpPrev[i]) {
+      Module._setInput(i, want[i] ? 1 : 0);
+      gpPrev[i] = want[i];
+    }
+  }
+};
+
 var Module = {
   canvas: (() => document.getElementById("canvas"))(),
   onRuntimeInitialized: async () => {
@@ -871,6 +1273,9 @@ var Module = {
     await migrateFromLocalStorage();
     await loadBiosFromStorage();
     await loadKeybindingsFromStorage();
+    await loadLargeControlsFromStorage();
+    await loadAudioSettings();
+    refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;
@@ -895,14 +1300,14 @@ var Module = {
       }
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       gainNode = audioCtx.createGain();
-      gainNode.gain.value = volume / 100;
+      gainNode.gain.value = effectiveGain();
       gainNode.connect(audioCtx.destination);
       playTime = 0;
     };
 
     // Expose gain update for the volume control
     window.updateGain = () => {
-      if (gainNode) gainNode.gain.value = volume / 100;
+      if (gainNode) gainNode.gain.value = effectiveGain();
     };
 
     // Resume audio context on first user interaction (browser autoplay policy).
@@ -993,10 +1398,12 @@ var Module = {
       if (sleeping !== sleepVisible) {
         sleepVisible = sleeping;
         fpsDiv.textContent = sleeping ? "SLEEPING" : "";
+        document.body.classList.toggle("sleeping", sleeping);
       }
     };
 
     const tick = (timestamp) => {
+      pollGamepads();
       if (paused) {
         lastFrameTime = 0;
         accumulator = 0;
@@ -1032,6 +1439,11 @@ var Module = {
         // Prevent accumulator from growing unbounded if tab was backgrounded
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
       }
+      // Draw one guaranteed-fresh frame, then capture it in this same task
+      if (pendingShot) {
+        Module._loop_tick();
+        captureCanvas();
+      }
       updateSleepOverlay();
       requestAnimationFrame(tick);
     };
@@ -1044,6 +1456,11 @@ const getInputs = (element) =>
 
 const setInputs = (inputs, down) => {
   for (let id of inputs) Module._setInput(id, down ? 1 : 0);
+};
+
+// Short haptic tick for touch controls (no-op where unsupported)
+const haptic = () => {
+  try { navigator.vibrate?.(8); } catch {}
 };
 
 var currentDpadTouchId = null;
@@ -1064,7 +1481,9 @@ const dpadTouchStart = (event) => {
     currentDpadTouchId = event.targetTouches[0].identifier;
     if (element.hasAttribute("data-inputs")) {
       currentDpadElement = element;
+      element.classList.add("pressed");
       setInputs(getInputs(element), true);
+      haptic();
     }
   }
 };
@@ -1088,9 +1507,13 @@ const dpadTouchMove = (event) => {
         if (oldInputs.includes(id)) continue;
         Module._setInput(id, 1);
       }
+      currentDpadElement?.classList.remove("pressed");
+      element.classList.add("pressed");
       currentDpadElement = element;
+      haptic();
     } else {
       setInputs(oldInputs, false);
+      currentDpadElement?.classList.remove("pressed");
       currentDpadElement = null;
     }
   }
@@ -1100,6 +1523,7 @@ const dpadTouchEnd = (event) => {
   let touch = getTouch(event.changedTouches, currentDpadTouchId);
   if (touch != null) {
     setInputs(getInputs(currentDpadElement), false);
+    currentDpadElement?.classList.remove("pressed");
     currentDpadTouchId = null;
     currentDpadElement = null;
   }
@@ -1110,12 +1534,21 @@ document.getElementById("dpad").addEventListener("touchmove", dpadTouchMove);
 document.getElementById("dpad").addEventListener("touchend", dpadTouchEnd);
 document.getElementById("dpad").addEventListener("touchcancel", dpadTouchEnd);
 
-document.querySelectorAll("[data-inputs]").forEach((element) => {
-  element.addEventListener("touchstart", (event) => {
-    event.preventDefault();
-    setInputs(getInputs(element), true);
+// Standalone buttons (A/B/L/R/Select/Start). D-pad children are handled by the
+// dedicated d-pad handlers above, so they're excluded here.
+document
+  .querySelectorAll("#l, #r, #a, #b, #select, #start")
+  .forEach((element) => {
+    element.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+      element.classList.add("pressed");
+      setInputs(getInputs(element), true);
+      haptic();
+    });
+    const release = () => {
+      element.classList.remove("pressed");
+      setInputs(getInputs(element), false);
+    };
+    element.addEventListener("touchend", release);
+    element.addEventListener("touchcancel", release);
   });
-  element.addEventListener("touchend", (event) => {
-    setInputs(getInputs(element), false);
-  });
-});

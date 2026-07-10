@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
       name="viewport"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,41 +21,141 @@
   </head>
 
   <body class="no-select">
-    <div id="external">
+    <!-- ============================ Top bar ============================ -->
+    <header id="topbar">
       <div id="menu-container">
-        <button type="button" class="button" id="menu-btn" title="Menu">&#x2630;</button>
-        <div id="menu-dropdown" hidden>
-          <button type="button" class="menu-item" id="open-rom">Load ROM</button>
-          <button type="button" class="menu-item" id="open-recent">Recent</button>
-          <button type="button" class="menu-item" id="open-bios">Select BIOS</button>
+        <button type="button" class="icon-btn" id="menu-btn" title="Menu" aria-label="Menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div id="menu-dropdown" hidden role="menu">
+          <button type="button" class="menu-item" id="main-menu" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5M6 10v9h5v-6h2v6h5v-9"/></svg>
+            <span>Main Menu</span>
+          </button>
+          <hr class="menu-sep" id="main-menu-sep" />
+          <button type="button" class="menu-item" id="load-save" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v9m0 0 3.5-3.5M12 13 8.5 9.5M5 16v3h14v-3"/></svg>
+            <span>Load Save</span>
+          </button>
+          <button type="button" class="menu-item" id="export-save" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20v-9m0 0 3.5 3.5M12 11 8.5 14.5M5 8V5h14v3"/></svg>
+            <span>Export Save</span>
+          </button>
+          <button type="button" class="menu-item" id="screenshot" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
+            <span>Screenshot</span>
+          </button>
+          <hr class="menu-sep" id="save-sep" />
+          <button type="button" class="menu-item" id="open-bios" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="1"/><path d="M8 11h.01M12 11h.01M16 11h4"/></svg>
+            <span>BIOS / Bootrom</span>
+          </button>
+          <button type="button" class="menu-item" id="open-keyboard" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>
+            <span>Controls</span>
+          </button>
+          <hr class="menu-sep" id="menu-volume-sep" />
+          <div class="menu-volume" id="menu-volume">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
+            <input type="range" id="menu-vol-slider" class="vol-range" min="0" max="100" step="5" value="100" aria-label="Volume" />
+          </div>
           <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="load-save">Load Save</button>
-          <button type="button" class="menu-item" id="export-save">Export Save</button>
-          <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="open-keyboard">Keyboard</button>
-          <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="force-update">Force Update</button>
-          <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="show-log">Toggle Log</button>
+          <div class="menu-heading">Advanced</div>
+          <button type="button" class="menu-item menu-item-muted" id="force-update" role="menuitem">
+            <span>Force Update</span>
+          </button>
+          <button type="button" class="menu-item menu-item-muted" id="show-log" role="menuitem">
+            <span>Toggle Log</span>
+          </button>
         </div>
       </div>
-      <div id="playback-controls" class="segmented" hidden>
-        <button type="button" class="seg-btn" id="reset" title="Reset">&#x21bb;</button>
-        <button type="button" class="seg-btn" id="pause" title="Pause">&#x23f8;</button>
-        <button type="button" class="seg-btn" id="fast-forward" title="Fast Forward">&#x276D;&#x276D;</button>
-      </div>
-      <div id="volume-control" class="segmented">
-        <button type="button" class="seg-btn" id="vol-down" title="Volume Down">&minus;</button>
-        <input type="text" id="vol-display" class="seg-vol-input" value="100%" readonly />
-        <button type="button" class="seg-btn" id="vol-up" title="Volume Up">+</button>
-      </div>
-      <button type="button" id="update-btn" hidden>Update Available</button>
-      <div id="fps"></div>
-    </div>
 
+      <div id="playback-controls">
+        <button type="button" class="icon-btn" id="reset" title="Reset" aria-label="Reset">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="pause" title="Pause" aria-label="Pause / Resume">
+          <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+          <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward" aria-label="Fast Forward">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12l8-6zM13 6v12l8-6z" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+
+      <div id="topbar-spacer"></div>
+
+      <div id="status" aria-live="polite">
+        <span class="led" aria-hidden="true"></span>
+        <span id="fps"></span>
+      </div>
+
+      <button type="button" id="update-btn" hidden title="A new version is available">
+        <span class="update-dot" aria-hidden="true"></span>Update
+      </button>
+
+      <div id="volume-control">
+        <button type="button" class="icon-btn" id="mute-btn" title="Mute" aria-label="Mute">
+          <svg class="ico-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
+          <svg class="ico-mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM17 10l4 4M21 10l-4 4"/></svg>
+        </button>
+        <input type="range" id="vol-slider" class="vol-range" min="0" max="100" step="5" value="100" title="Volume" aria-label="Volume" />
+      </div>
+
+      <button type="button" class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Fullscreen">
+        <svg class="ico-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        <svg class="ico-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+      </button>
+    </header>
+
+    <!-- ============================= Stage ============================= -->
+    <main id="stage">
+      <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+      <!-- Home / empty state (shown until a ROM is loaded) -->
+      <section id="home">
+        <div id="home-inner">
+          <button type="button" id="home-resume">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
+            <span>Resume game</span>
+          </button>
+          <div id="home-brand">
+            <img src="favicon.svg" alt="" id="home-logo" />
+            <h1>dingbat</h1>
+            <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
+          </div>
+
+          <button type="button" id="dropzone">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0 4 4m-4-4-4 4M5 15v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+            <span class="dropzone-title">Load a game</span>
+            <span class="dropzone-sub">Drop a ROM or .zip here, or click to browse</span>
+            <span class="dropzone-formats">.gba &nbsp;&middot;&nbsp; .gb &nbsp;&middot;&nbsp; .gbc &nbsp;&middot;&nbsp; .zip</span>
+          </button>
+
+          <div id="home-recent-wrap" hidden>
+            <div class="home-recent-head">
+              <span class="home-recent-label">Recent</span>
+              <span id="storage-info"></span>
+            </div>
+            <div id="home-recent"></div>
+          </div>
+        </div>
+      </section>
+
+      <div id="drop-overlay">
+        <div id="drop-overlay-inner">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0 4 4m-4-4-4 4M5 15v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+          <span>Drop ROM to load</span>
+        </div>
+      </div>
+
+      <div id="log"></div>
+    </main>
+
+    <!-- =========================== Modals =========================== -->
     <div id="update-modal" class="modal-overlay">
       <div class="modal">
-        <button type="button" class="modal-close" id="update-modal-close">&times;</button>
+        <button type="button" class="modal-close" id="update-modal-close" aria-label="Close">&times;</button>
         <h3>Update Available</h3>
         <p>Updating now will erase any unsaved data. Make sure you've saved your game before continuing.</p>
         <div class="modal-actions">
@@ -67,89 +167,90 @@
 
     <div id="bios-modal" class="modal-overlay">
       <div class="modal">
+        <button type="button" class="modal-close" id="bios-close" aria-label="Close">&times;</button>
         <h3>BIOS / Bootrom</h3>
         <div class="modal-row">
-          <span>GBA BIOS:</span>
-          <span id="gba-bios-status">Not set</span>
-          <button type="button" class="button" id="pick-gba-bios">Choose</button>
-          <button type="button" class="button" id="remove-gba-bios">Remove</button>
+          <span class="modal-row-label">GBA BIOS</span>
+          <span id="gba-bios-status" class="modal-row-status">Not set</span>
+          <button type="button" class="button button-sm" id="pick-gba-bios">Choose</button>
+          <button type="button" class="button button-sm button-ghost" id="remove-gba-bios">Remove</button>
         </div>
         <div class="modal-row">
-          <span>GBC Bootrom:</span>
-          <span id="gbc-bootrom-status">Not set</span>
-          <button type="button" class="button" id="pick-gbc-bootrom">Choose</button>
-          <button type="button" class="button" id="remove-gbc-bootrom">Remove</button>
+          <span class="modal-row-label">GBC Bootrom</span>
+          <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
+          <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
+          <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
         </div>
         <div class="modal-actions">
-          <button type="button" class="button" id="bios-save">Save</button>
           <button type="button" class="button" id="bios-cancel">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="recent-modal" class="modal-overlay">
-      <div class="modal">
-        <h3>Recent ROMs</h3>
-        <div id="recent-list"></div>
-        <div class="modal-footer">
-          <span id="storage-info"></span>
-          <button type="button" class="button" id="recent-close">Close</button>
+          <button type="button" class="button button-primary" id="bios-save">Save</button>
         </div>
       </div>
     </div>
 
     <div id="keyboard-modal" class="modal-overlay">
       <div class="modal">
-        <h3>Keyboard</h3>
-        <div class="modal-row">
-          <span>Preset:</span>
-          <select id="kb-preset" class="kb-select">
-            <option value="default">Default</option>
-            <option value="homerow">Home-row</option>
-            <option value="custom">Custom</option>
-          </select>
+        <button type="button" class="modal-close" id="kb-close" aria-label="Close">&times;</button>
+        <h3>Controls</h3>
+        <div class="modal-toggle-row">
+          <div>
+            <span class="modal-row-label">Large on-screen controls</span>
+            <span class="modal-toggle-sub">A bigger d-pad for touch — best for large fingers</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="large-controls-toggle" />
+            <span class="switch-track"></span>
+          </label>
         </div>
-        <div id="kb-bindings"></div>
-        <div class="modal-actions">
-          <button type="button" class="button" id="kb-cancel">Cancel</button>
-          <button type="button" class="button button-primary" id="kb-save">Save</button>
+        <div id="kb-section">
+          <div class="modal-subhead">Keyboard</div>
+          <div class="modal-row">
+            <span class="modal-row-label">Preset</span>
+            <select id="kb-preset" class="kb-select">
+              <option value="default">Default</option>
+              <option value="homerow">Home-row</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <p class="modal-hint">Click a key, then press a new one to rebind.</p>
+          <div id="kb-bindings"></div>
+          <div class="modal-actions">
+            <button type="button" class="button" id="kb-cancel">Cancel</button>
+            <button type="button" class="button button-primary" id="kb-save">Save</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-
-    <div id="drop-overlay">Drop ROM file here</div>
-
-    <div id="log"></div>
-
+    <!-- ====================== On-screen gamepad ====================== -->
     <div id="controls">
       <div id="lr">
-        <div id="l" data-inputs="8">L</div>
-        <div id="r" data-inputs="9">R</div>
+        <div id="l" class="pad-btn pad-shoulder" data-inputs="8">L</div>
+        <div id="r" class="pad-btn pad-shoulder" data-inputs="9">R</div>
       </div>
 
       <div id="main-controls">
         <div id="dpad">
           <div id="upleft" data-inputs="0 2"></div>
-          <div id="up" data-inputs="0"></div>
+          <div id="up" class="pad-btn" data-inputs="0"></div>
           <div id="upright" data-inputs="0 3"></div>
-          <div id="left" data-inputs="2"></div>
-          <div id="right" data-inputs="3"></div>
+          <div id="left" class="pad-btn" data-inputs="2"></div>
+          <div id="dpad-center"></div>
+          <div id="right" class="pad-btn" data-inputs="3"></div>
           <div id="downleft" data-inputs="1 2"></div>
-          <div id="down" data-inputs="1"></div>
+          <div id="down" class="pad-btn" data-inputs="1"></div>
           <div id="downright" data-inputs="1 3"></div>
         </div>
 
         <div id="ab">
-          <div id="a" data-inputs="4">A</div>
-          <div id="b" data-inputs="5">B</div>
+          <div id="a" class="pad-btn pad-face" data-inputs="4">A</div>
+          <div id="b" class="pad-btn pad-face" data-inputs="5">B</div>
         </div>
       </div>
 
       <div id="select-start">
-        <div id="select" data-inputs="6">select</div>
-        <div id="start" data-inputs="7">start</div>
+        <div id="select" class="pad-btn pad-pill" data-inputs="6">Select</div>
+        <div id="start" class="pad-btn pad-pill" data-inputs="7">Start</div>
       </div>
     </div>
 
