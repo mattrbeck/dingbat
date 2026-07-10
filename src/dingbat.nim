@@ -49,15 +49,20 @@ const FRAG_SRC = """
 in vec2 tex_coord;
 out vec4 frag_color;
 uniform sampler2D input_texture;
+uniform bool color_correct;
 void main() {
   vec4 color = texture(input_texture, tex_coord);
-  float lcdGamma = 4.0, outGamma = 2.2;
-  color.rgb = pow(color.rgb, vec3(lcdGamma));
-  frag_color.rgb = pow(vec3(
-    0.0 * color.b +  50.0 * color.g + 255.0 * color.r,
-   30.0 * color.b + 230.0 * color.g +  10.0 * color.r,
-  220.0 * color.b +  10.0 * color.g +  50.0 * color.r) / 255.0,
-    vec3(1.0 / outGamma));
+  if (color_correct) {
+    float lcdGamma = 4.0, outGamma = 2.2;
+    color.rgb = pow(color.rgb, vec3(lcdGamma));
+    frag_color.rgb = pow(vec3(
+      0.0 * color.b +  50.0 * color.g + 255.0 * color.r,
+     30.0 * color.b + 230.0 * color.g +  10.0 * color.r,
+    220.0 * color.b +  10.0 * color.g +  50.0 * color.r) / 255.0,
+      vec3(1.0 / outGamma));
+  } else {
+    frag_color.rgb = color.rgb;
+  }
 }
 """
 
@@ -254,6 +259,12 @@ proc extract_zip_rom(zip_path: string): string =
   except ZippyError, IOError, OSError:
     echo "Failed to read zip: ", getCurrentExceptionMsg()
     ""
+
+proc apply_color_correction() =
+  ## Push the config's color-correction flag into the game shader uniform
+  glUseProgram(app.game_shader)
+  let loc = glGetUniformLocation(app.game_shader, "color_correct")
+  glUniform1i(loc, GLint(if app.cfg.color_correction: 1 else: 0))
 
 proc apply_master_volume() =
   if app.gba_emu != nil:
@@ -478,6 +489,11 @@ proc render_imgui() =
           save_config(app.cfg)
         if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
           apply_master_volume()
+          save_config(app.cfg)
+        igSeparator()
+        if igMenuItem_BoolPtr("LCD Color Correction", nil,
+                              addr app.cfg.color_correction, true):
+          apply_color_correction()
           save_config(app.cfg)
         if igBeginMenu("Channels", app.emu_kind == ekGBA and app.gba_emu != nil):
           const ch_names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
@@ -837,6 +853,8 @@ proc main() =
     enable_overlay:  false,
     last_mouse_tick: getTicks(),
   )
+  # GLSL uniforms default to 0/false, so push the configured value now
+  apply_color_correction()
 
   if rom_path != "":
     if not fileExists(rom_path):

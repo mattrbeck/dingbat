@@ -199,6 +199,7 @@ type
     hle_after_bios*:    bool     # run real BIOS for init, then use HLE for SWI calls
     volume*:            int      # master volume 0..100
     mute*:              bool     # mute audio output
+    color_correction*:  bool     # GBA LCD color-correction shader (default on)
 
 proc new_config*(): Config =
   Config(
@@ -212,6 +213,7 @@ proc new_config*(): Config =
     gb_fifo:         true,
     volume:          100,
     mute:            false,
+    color_correction: true,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -227,6 +229,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.volume = clamp(j["volume"].getInt(100), 0, 100)
   if j.hasKey("mute"):
     cfg.mute = j["mute"].getBool(false)
+  if j.hasKey("color_correction"):
+    cfg.color_correction = j["color_correction"].getBool(true)
   # bios path is nested under "gba" key to match Crystal's config structure
   if j.hasKey("gba") and j["gba"].kind == JObject:
     let gba = j["gba"]
@@ -294,6 +298,7 @@ proc save_config*(cfg: Config) =
   lines.add("run_bios: " & $cfg.run_bios)
   lines.add("volume: " & $cfg.volume)
   lines.add("mute: " & $cfg.mute)
+  lines.add("color_correction: " & $cfg.color_correction)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))
