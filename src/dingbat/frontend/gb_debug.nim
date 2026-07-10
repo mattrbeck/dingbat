@@ -200,9 +200,14 @@ proc outline_scroll_viewport(d: GbDebug; img_pos: ImVec2) =
     for wy in 0 .. 1:
       let x0 = img_pos.x + (cfloat(ppu.scx) - cfloat(wx * MAP_PX)) * MAP_SCALE
       let y0 = img_pos.y + (cfloat(ppu.scy) - cfloat(wy * MAP_PX)) * MAP_SCALE
-      ImDrawList_AddRect(dl, ImVec2(x: x0, y: y0),
-                         ImVec2(x: x0 + 160 * MAP_SCALE, y: y0 + 144 * MAP_SCALE),
-                         col, 0, 0, 2.0)
+      let p0 = ImVec2(x: x0, y: y0)
+      let p1 = ImVec2(x: x0 + 160 * MAP_SCALE, y: y0 + 144 * MAP_SCALE)
+      # imguin <= 1.92.4 orders AddRect params (rounding, flags, thickness);
+      # later versions swapped to (rounding, thickness, flags)
+      when compiles(ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)):
+        ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)
+      else:
+        ImDrawList_AddRect(dl, p0, p1, col, 0, 2.0, 0)
   ImDrawList_PopClipRect(dl)
 
 proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
