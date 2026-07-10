@@ -1,3 +1,5 @@
+import serialize
+
 when defined(emscripten):
   type CycleCount* = uint32
 else:
@@ -105,6 +107,37 @@ proc rebase*(s: Scheduler) =
     s.evbuf[i].cycles -= base
   s.next_event = if s.nevents > 0: s.evbuf[s.nevents - 1].cycles else: high(CycleCount)
   s.cycles = 0
+
+proc save_to*(s: Scheduler; w: var Writer) =
+  ## Serialize all scheduler state. Event kinds are written by ordinal; the
+  ## dispatch closure is not serialized — it stays registered on the owning
+  ## emulator and maps each kind back to its handler.
+  w.write_u64(uint64(s.cycles))
+  w.write_u8(s.current_speed)
+  w.write_u8(uint8(s.nevents))
+  for i in 0 ..< s.nevents:
+    w.write_u8(uint8(ord(s.evbuf[i].kind)))
+    w.write_u64(uint64(s.evbuf[i].cycles))
+
+proc load_from*(s: Scheduler; r: var Reader) =
+  ## Restore scheduler state saved by save_to. Events are stored in the
+  ## internal order (sorted descending by target cycle, soonest last), so
+  ## they are restored verbatim.
+  let cycles = r.read_u64()
+  let speed = r.read_u8()
+  let n = int(r.read_u8())
+  if n > MAX_EVENTS:
+    raise newException(StateError, "too many scheduler events in state")
+  s.cycles = CycleCount(cycles)
+  s.current_speed = speed
+  s.nevents = n
+  for i in 0 ..< n:
+    let kind = r.read_u8()
+    if int(kind) > int(high(EventType)):
+      raise newException(StateError, "unknown scheduler event kind in state")
+    let target = r.read_u64()
+    s.evbuf[i] = Event(cycles: CycleCount(target), kind: EventType(kind))
+  s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
   let old = s.current_speed
