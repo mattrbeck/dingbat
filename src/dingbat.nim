@@ -330,9 +330,12 @@ proc show_menu_bar(): bool =
 proc render_imgui() =
   # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
   # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
-  # NewFrame/Render pair costs real throughput
+  # NewFrame/Render pair costs real throughput. The home screen (no ROM
+  # loaded) always renders ImGui — it shows the drag-and-drop hint and has
+  # no emulation to slow down.
   let menu_visible = show_menu_bar()
-  if not menu_visible and not app.enable_overlay and
+  if app.emu_kind != ekNone and
+     not menu_visible and not app.enable_overlay and
      not app.fe.open and not app.ce.open and
      (app.dbg == nil or
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)):
@@ -447,6 +450,25 @@ proc render_imgui() =
 
   if app.dbg != nil:
     app.dbg.render_windows()
+
+  # Home screen: point out that ROMs can be dragged onto the window (SDL2
+  # has no drag-hover event, so a live "release to load" prompt isn't
+  # possible until SDL3)
+  if app.emu_kind == ekNone:
+    let vp = igGetMainViewport()
+    if vp != nil:
+      let (vpos, vsize) = (vp[].Pos, vp[].Size)
+      igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x * 0.5'f32,
+                                y: vpos.y + vsize.y - 16),
+                         cint(ImGui_Cond_Always), ImVec2(x: 0.5, y: 1.0))
+      igSetNextWindowBgAlpha(0.0'f32)
+      let hint_flags = cint(ImGui_WindowFlags_NoDecoration) or
+                       cint(ImGui_WindowFlags_NoMove) or
+                       cint(ImGui_WindowFlags_NoInputs) or
+                       cint(ImGui_WindowFlags_NoSavedSettings)
+      if igBegin("##drop_hint", nil, hint_flags):
+        igTextDisabled("Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
+      igEnd()
 
   igRender()
   ImGui_Impl_OpenGL3_RenderDrawData(igGetDrawData())
