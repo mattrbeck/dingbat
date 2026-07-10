@@ -1,0 +1,68 @@
+# xcodegen spec for the dingbat iOS app (SwiftUI shell around libdingbat.a).
+#
+# Build steps:
+#   ios/build-core.sh                # produce ios/lib/*/libdingbat.a first
+#   cd ios && xcodegen generate      # emits Dingbat.xcodeproj (gitignored)
+#   xcodebuild -project Dingbat.xcodeproj -scheme Dingbat \
+#     -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+#
+# The bundled goodboy-demo-en.gba resource is the homebrew demo already
+# checked in for the web build (no new ROM binary enters the repo).
+name: Dingbat
+options:
+  bundleIdPrefix: com.mattrb
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  Dingbat:
+    type: application
+    platform: iOS
+    sources:
+      - path: Dingbat/Sources
+      - path: ../web/goodboy-demo-en.gba
+        buildPhase: resources
+    info:
+      path: Dingbat/Info.plist
+      properties:
+        CFBundleDisplayName: dingbat
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.mattrb.dingbat.gba
+            UTTypeDescription: Game Boy Advance ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [gba]
+          - UTTypeIdentifier: com.mattrb.dingbat.gb
+            UTTypeDescription: Game Boy ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [gb]
+          - UTTypeIdentifier: com.mattrb.dingbat.gbc
+            UTTypeDescription: Game Boy Color ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [gbc]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Game ROM
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.mattrb.dingbat.gba
+              - com.mattrb.dingbat.gb
+              - com.mattrb.dingbat.gbc
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat
+        SWIFT_VERSION: "5.9"
+        SWIFT_OBJC_BRIDGING_HEADER: Dingbat/Sources/Bridging.h
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include"
+        LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/lib/$(PLATFORM_NAME)"
+        OTHER_LDFLAGS: "-ldingbat"
+        TARGETED_DEVICE_FAMILY: "1,2"
