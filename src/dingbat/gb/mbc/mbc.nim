@@ -45,7 +45,8 @@ proc load_cartridge*(rom_path: string): Mbc =
   of 0x0F, 0x10, 0x11, 0x12, 0x13:
     let c = Mbc3(rom: rom, ram: newSeq[uint8](ram_sz),
                  sav_path: sav_path, has_battery: has_battery,
-                 rom_bank_num: 1)
+                 rom_bank_num: 1,
+                 has_rtc: cart_type in [0x0F'u8, 0x10])
     cart = c
   of 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E:
     let c = Mbc5(rom: rom, ram: newSeq[uint8](ram_sz),

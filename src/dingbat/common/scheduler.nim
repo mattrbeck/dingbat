@@ -10,7 +10,7 @@ type
     etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4
     etHandleInput
     # GB
-    etIME
+    etIME, etRtcSecond
     # GBA
     etSaves, etInterrupts
     etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag, etPPUEndHBlank

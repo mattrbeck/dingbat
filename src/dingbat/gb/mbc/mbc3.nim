@@ -1,5 +1,31 @@
 # MBC3 cartridge (included by gb.nim)
 
+proc rtc_write(cart: Mbc3; reg: int; val: uint8) =
+  cart.ram_dirty = true
+  case reg
+  of 0:
+    cart.rtc_live[0] = val and 0x3F
+    # Writing the seconds register resets the sub-second divider
+    if cart.rtc_halted():
+      cart.rtc_halt_remaining = RTC_SECOND_CYCLES
+    else:
+      cart.rtc_schedule_full()
+  of 1: cart.rtc_live[1] = val and 0x3F
+  of 2: cart.rtc_live[2] = val and 0x1F
+  of 3: cart.rtc_live[3] = val
+  of 4:
+    # Halting freezes the sub-second remainder; resuming continues from it
+    let was_halted = cart.rtc_halted()
+    let now_halted = (val and 0x40) != 0
+    if not was_halted and now_halted:
+      cart.rtc_halt_remaining = cart.rtc_remaining()
+      cart.gb_ref.scheduler.clear(etRtcSecond)
+    elif was_halted and not now_halted:
+      cart.gb_ref.scheduler.clear(etRtcSecond)
+      cart.gb_ref.scheduler.schedule(cart.rtc_halt_remaining, etRtcSecond)
+    cart.rtc_live[4] = val and 0xC1
+  else: discard
+
 method mbc_read*(cart: Mbc3; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]
@@ -10,8 +36,12 @@ method mbc_read*(cart: Mbc3; idx: int): uint8 =
       if cart.ram_enabled and cart.ram.len > 0:
         cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)]
       else: 0xFF'u8
-    elif cart.ram_bank_num <= 0x0C:
-      0xFF'u8  # RTC registers (stub)
+    elif cart.ram_bank_num >= 0x08 and cart.ram_bank_num <= 0x0C:
+      if cart.has_rtc and cart.ram_enabled:
+        const masks = [0x3F'u8, 0x3F, 0x1F, 0xFF, 0xC1]
+        let reg = int(cart.ram_bank_num) - 8
+        cart.rtc_latched[reg] and masks[reg]
+      else: 0xFF'u8
     else: 0xFF'u8
   else: 0xFF'u8
 
@@ -27,12 +57,17 @@ method mbc_write*(cart: Mbc3; idx: int; val: uint8) =
   of 0x4000..0x5FFF:
     cart.ram_bank_num = val
   of 0x6000..0x7FFF:
-    discard  # latch clock (stub)
+    # Writing 0x00 then 0x01 latches the live clock into the readable registers
+    if cart.has_rtc:
+      if cart.rtc_latch_prev == 0 and val == 1:
+        cart.rtc_latched = cart.rtc_live
+      cart.rtc_latch_prev = val
   of 0xA000..0xBFFF:
     if cart.ram_bank_num <= 0x03:
       if cart.ram_enabled and cart.ram.len > 0:
         cart.ram_dirty = true
         cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
-    elif cart.ram_bank_num <= 0x0C:
-      discard  # RTC write (stub)
+    elif cart.ram_bank_num >= 0x08 and cart.ram_bank_num <= 0x0C:
+      if cart.has_rtc and cart.ram_enabled:
+        cart.rtc_write(int(cart.ram_bank_num) - 8, val)
   else: discard

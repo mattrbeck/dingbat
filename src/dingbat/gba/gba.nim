@@ -500,7 +500,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
     of etSerial:        gba.serial.serial_transfer_complete()
-    of etHandleInput, etIME: discard
+    of etHandleInput, etIME, etRtcSecond: discard
 
 proc post_init*(gba: GBA) =
   gba.storage    = new_storage(gba, gba.rom_path)

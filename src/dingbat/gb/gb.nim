@@ -1,7 +1,7 @@
 # GB/GBC emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[os, strutils]
+import std/[os, strutils, times]
 import ../common/[input, scheduler, emu, resampler]
 when defined(test_harness):
   import ../common/test_output
@@ -15,6 +15,7 @@ type
     cgbNone, cgbSupport, cgbExclusive
 
   Mbc* = ref object of RootObj
+    gb_ref*:       GB
     rom*:          seq[uint8]
     ram*:          seq[uint8]
     sav_path*:     string
@@ -38,6 +39,12 @@ type
     ram_enabled*:    bool
     rom_bank_num*:   uint8
     ram_bank_num*:   uint8
+    # MBC3 real-time clock
+    has_rtc*:            bool
+    rtc_live*:           array[5, uint8]  # S, M, H, DL, DH
+    rtc_latched*:        array[5, uint8]
+    rtc_latch_prev*:     uint8
+    rtc_halt_remaining*: int  # scheduler cycles left on the pending tick while halted
 
   Mbc5* = ref object of Mbc
     ram_enabled*:    bool
@@ -421,10 +428,98 @@ proc mbc_ram_bank_offset*(cart: Mbc; bank_num: int): int =
 
 proc mbc_ram_offset*(idx: int): int = idx - 0xA000
 
+const RTC_SECOND_CYCLES* = 4194304  # one RTC tick per emulated second
+
+proc rtc_halted*(cart: Mbc3): bool =
+  (cart.rtc_live[4] and 0x40) != 0
+
+proc rtc_schedule_full*(cart: Mbc3) =
+  cart.gb_ref.scheduler.clear(etRtcSecond)
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+
+proc rtc_remaining*(cart: Mbc3): int =
+  ## Scheduler cycles until the pending RTC tick
+  let s = cart.gb_ref.scheduler
+  for ev in s.events:
+    if ev.kind == etRtcSecond:
+      return int(ev.cycles - s.cycles)
+  RTC_SECOND_CYCLES
+
+proc rtc_increment(cart: Mbc3) =
+  # Hardware counters roll over at their natural boundaries with carry, but
+  # out-of-range values (writable because registers are wider than needed)
+  # count up to the register limit and wrap without carrying
+  let s = cart.rtc_live[0] and 0x3F
+  if s != 59:
+    cart.rtc_live[0] = if s == 63: 0'u8 else: s + 1
+    return
+  cart.rtc_live[0] = 0
+  let m = cart.rtc_live[1] and 0x3F
+  if m != 59:
+    cart.rtc_live[1] = if m == 63: 0'u8 else: m + 1
+    return
+  cart.rtc_live[1] = 0
+  let h = cart.rtc_live[2] and 0x1F
+  if h != 23:
+    cart.rtc_live[2] = if h == 31: 0'u8 else: h + 1
+    return
+  cart.rtc_live[2] = 0
+  let day = (uint16(cart.rtc_live[4] and 1) shl 8) or uint16(cart.rtc_live[3])
+  let new_day = (day + 1) and 0x1FF
+  cart.rtc_live[3] = uint8(new_day and 0xFF)
+  cart.rtc_live[4] = (cart.rtc_live[4] and 0xC0) or uint8(new_day shr 8)
+  if day == 511:  # day counter overflow: sticky carry flag
+    cart.rtc_live[4] = cart.rtc_live[4] or 0x80
+
+proc rtc_tick*(cart: Mbc3) =
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+  cart.rtc_increment()
+
+proc rtc_catch_up(cart: Mbc3; elapsed: int64) =
+  ## Advance the clock by wall time that passed while the emulator was off
+  if cart.rtc_halted() or elapsed <= 0: return
+  let secs  = int64(cart.rtc_live[0] and 0x3F) + elapsed
+  cart.rtc_live[0] = uint8(secs mod 60)
+  let mins  = int64(cart.rtc_live[1] and 0x3F) + secs div 60
+  cart.rtc_live[1] = uint8(mins mod 60)
+  let hours = int64(cart.rtc_live[2] and 0x1F) + mins div 60
+  cart.rtc_live[2] = uint8(hours mod 24)
+  let days  = (int64(cart.rtc_live[4] and 1) shl 8) + int64(cart.rtc_live[3]) + hours div 24
+  cart.rtc_live[3] = uint8(days and 0xFF)
+  cart.rtc_live[4] = (cart.rtc_live[4] and 0xC0) or uint8((days shr 8) and 1)
+  if days > 511:
+    cart.rtc_live[4] = cart.rtc_live[4] or 0x80
+
+proc rtc_footer(cart: Mbc3): string =
+  ## BGB/VBA-compatible .sav footer: live regs, latched regs, unix timestamp
+  proc add_u32(s: var string; v: uint32) =
+    for i in 0 .. 3: s.add(char((v shr (8 * i)) and 0xFF))
+  result = ""
+  for i in 0 .. 4: result.add_u32(uint32(cart.rtc_live[i]))
+  for i in 0 .. 4: result.add_u32(uint32(cart.rtc_latched[i]))
+  let ts = uint64(getTime().toUnix())
+  for i in 0 .. 7: result.add(char((ts shr (8 * i)) and 0xFF))
+
+proc rtc_load_footer(cart: Mbc3; data: string) =
+  proc get_u32(data: string; off: int): uint32 =
+    for i in 0 .. 3: result = result or (uint32(data[off + i]) shl (8 * i))
+  let base = cart.ram.len
+  let extra = data.len - base
+  if extra < 44: return  # no footer
+  for i in 0 .. 4: cart.rtc_live[i]    = uint8(get_u32(data, base + i * 4) and 0xFF)
+  for i in 0 .. 4: cart.rtc_latched[i] = uint8(get_u32(data, base + 20 + i * 4) and 0xFF)
+  var ts: int64 = int64(get_u32(data, base + 40))
+  if extra >= 48:
+    ts = ts or (int64(get_u32(data, base + 44)) shl 32)
+  cart.rtc_catch_up(getTime().toUnix() - ts)
+
 proc mbc_save*(cart: Mbc) =
   if cart.ram_dirty and cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:
     try:
-      writeFile(cart.sav_path, cast[string](cart.ram))
+      var data = cast[string](cart.ram)
+      if cart of Mbc3 and Mbc3(cart).has_rtc:
+        data.add(rtc_footer(Mbc3(cart)))
+      writeFile(cart.sav_path, data)
       cart.ram_dirty = false
     except IOError, OSError:
       if not cart.save_error_reported:
@@ -436,6 +531,8 @@ proc mbc_load*(cart: Mbc) =
     let data = readFile(cart.sav_path)
     for i in 0 ..< min(data.len, cart.ram.len):
       cart.ram[i] = uint8(data[i])
+    if cart of Mbc3 and Mbc3(cart).has_rtc:
+      rtc_load_footer(Mbc3(cart), data)
 
 # ==================== INCLUDES ====================
 include mbc/mbc
@@ -525,6 +622,8 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     of etAPUChannel4:  ch4_step(gb.apu.channel4, gb)
     of etIME:          gb.cpu.ime = true
     of etSaves:        gb.handle_saves()
+    of etRtcSecond:
+      if gb.cartridge of Mbc3: Mbc3(gb.cartridge).rtc_tick()
     else: discard
 
 proc post_init*(gb: GB) =
@@ -540,6 +639,11 @@ proc post_init*(gb: GB) =
   gb.memory = new_gb_memory(gb)
   gb.cpu    = new_gb_cpu()
   gb.scheduler.dispatch = gb_dispatch(gb)
+  gb.cartridge.gb_ref = gb
+  if gb.cartridge of Mbc3:
+    let c = Mbc3(gb.cartridge)
+    if c.has_rtc and not c.rtc_halted():
+      c.rtc_schedule_full()
   gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
