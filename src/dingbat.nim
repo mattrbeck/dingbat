@@ -11,6 +11,7 @@ import dingbat/frontend/file_explorer
 import dingbat/frontend/config_editor
 import dingbat/frontend/keybindings_widget
 import dingbat/frontend/gba_debug
+import dingbat/frontend/gb_debug
 
 const VERSION = "0.1.0"
 const GBA_W   = 240
@@ -198,6 +199,7 @@ type AppState = ref object
   fe:              FileExplorer
   ce:              ConfigEditor
   dbg:             GbaDebug
+  gb_dbg:          GbDebug
   scale:           int
   running:         bool
   paused:          bool
@@ -271,6 +273,8 @@ proc load_rom(path: string) =
     app.gba_emu = nil
     app.emu_kind = ekGB
     setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
+    app.dbg = nil
+    app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
     let bios = app.cfg.bios_path
     app.gba_emu = new_gba(bios, rom_path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
@@ -279,6 +283,7 @@ proc load_rom(path: string) =
     app.emu_kind = ekGBA
     setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
+    app.gb_dbg = nil
   apply_master_volume()
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
@@ -349,7 +354,8 @@ proc render_imgui() =
      not menu_visible and not app.enable_overlay and
      not app.fe.open and not app.ce.open and
      (app.dbg == nil or
-      not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)):
+      not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
+     (app.gb_dbg == nil or not app.gb_dbg.any_window_open):
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -447,6 +453,8 @@ proc render_imgui() =
         igSeparator()
         if app.dbg != nil:
           app.dbg.render_menu_items()
+        if app.gb_dbg != nil:
+          app.gb_dbg.render_menu_items()
         igEndMenu()
 
       var win_size = ImVec2(x: 0, y: 0)
@@ -493,6 +501,8 @@ proc render_imgui() =
 
   if app.dbg != nil:
     app.dbg.render_windows()
+  if app.gb_dbg != nil:
+    app.gb_dbg.render_windows()
 
   # Home screen: point out that ROMs can be dragged onto the window (SDL2
   # has no drag-hover event, so a live "release to load" prompt isn't
