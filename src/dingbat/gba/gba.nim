@@ -197,6 +197,8 @@ type
     palette*:          int
     layer*:            int
     special_handling*: bool
+    direct*:           bool    # bitmap modes 3/5: color is a raw BGR555 value
+    direct_color*:     uint16
 
   Sprite* = object
     attr0*:     uint16
@@ -210,6 +212,10 @@ type
     frame*:        bool
     layer_palettes*: array[4, seq[byte]]
     sprite_pixels*: array[240, SpritePixel]
+    # BG2 line buffers for the direct-color bitmap modes (3 and 5)
+    bitmap_direct*: bool
+    bg2_direct*:        array[240, uint16]
+    bg2_direct_opaque*: array[240, bool]
     pram*:         seq[byte]
     vram*:         seq[byte]
     oam*:          seq[byte]

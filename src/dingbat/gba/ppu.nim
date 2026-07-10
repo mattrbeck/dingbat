@@ -241,15 +241,59 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
       for col in 0..239:
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
+proc render_bitmap*(ppu: PPU) =
+  ## Fill the BG2 line buffers for the bitmap modes (3/4/5), honoring the
+  ## BG2 enable bit and mosaic. Modes 3/5 produce direct BGR555 colors;
+  ## mode 4 is paletted and uses the regular layer pipeline.
+  let mode = int(ppu.dispcnt.bg_mode)
+  ppu.bitmap_direct = mode != 4
+  for col in 0..239: ppu.bg2_direct_opaque[col] = false
+  if not bit(uint16(ppu.dispcnt), 10): return  # BG2 disabled
+  var row = uint32(ppu.vcount)
+  if ppu.bgcnt[2].mosaic:
+    row -= row mod (uint32(ppu.mosaic.bg_mosiac_v_size) + 1)
+  case mode
+  of 3:
+    let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[0])
+    for col in 0..239:
+      ppu.bg2_direct[col] = vram_u16[row * 240 + uint32(col)]
+      ppu.bg2_direct_opaque[col] = true
+  of 4:
+    let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
+    for col in 0..239:
+      ppu.layer_palettes[2][col] = ppu.vram[base + row * 240 + uint32(col)]
+  of 5:
+    if row < 128:
+      let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
+      let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[base])
+      for col in 0..159:
+        ppu.bg2_direct[col] = vram_u16[row * 160 + uint32(col)]
+        ppu.bg2_direct_opaque[col] = true
+  else: discard
+  if ppu.bgcnt[2].mosaic:
+    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        let src = col - col mod h
+        if mode == 4:
+          ppu.layer_palettes[2][col] = ppu.layer_palettes[2][src]
+        else:
+          ppu.bg2_direct[col] = ppu.bg2_direct[src]
+          ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
+
 proc render_sprites*(ppu: PPU) =
   if not bit(uint16(ppu.dispcnt), 12): return
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
   let num_sprites = 128  # OAM has 128 sprites
+  let bitmap_mode = ppu.dispcnt.bg_mode >= 3
   for s_idx in 0 ..< num_sprites:
     let sprite = sprites[s_idx]
     if sprite.obj_shape == 3: continue
     if sprite.affine_mode == 0b10: continue
+    # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
+    # below 512 don't render
+    if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: continue
     var x_coord = cast[int16](bits_range(sprite.attr1, 0, 8))
     var y_coord = cast[int16](bits_range(sprite.attr0, 0, 7))
     if x_coord > 239: x_coord -= 512
@@ -366,9 +410,9 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
 
 proc blend_top_bot*(ppu: PPU; top: GbaColor; bot: GbaColor; effects_enabled: bool): uint16 =
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
-  let top_u16 = pram_u16[top.palette]
+  let top_u16 = if top.direct: top.direct_color else: pram_u16[top.palette]
   if effects_enabled:
-    let bot_u16 = pram_u16[bot.palette]
+    let bot_u16 = if bot.direct: bot.direct_color else: pram_u16[bot.palette]
     let top_selected = ppu.bldcnt.layer_target(top.layer, 1)
     let bot_selected = ppu.bldcnt.layer_target(bot.layer, 2)
     let blend_mode   = ppu.bldcnt.blend_mode
@@ -392,9 +436,15 @@ proc select_top_colors*(ppu: PPU; enable_bits: uint16; col: int): tuple[top: Gba
         return (top_color, color)
     for bg in 0..3:
       if bit(enable_bits, bg) and int(ppu.bgcnt[bg].priority) == priority:
-        let palette = int(ppu.layer_palettes[bg][col])
-        if palette == 0: continue
-        let color = GbaColor(palette: palette, layer: bg, special_handling: false)
+        var color: GbaColor
+        if ppu.bitmap_direct and bg == 2:
+          if not ppu.bg2_direct_opaque[col]: continue
+          color = GbaColor(direct: true, direct_color: ppu.bg2_direct[col],
+                           layer: 2, special_handling: false)
+        else:
+          let palette = int(ppu.layer_palettes[bg][col])
+          if palette == 0: continue
+          color = GbaColor(palette: palette, layer: bg, special_handling: false)
         if not found_top:
           top_color = color; found_top = true
         else:
@@ -423,6 +473,7 @@ proc scanline*(ppu: PPU) =
   for bg in 0..3:
     for c in 0..239: ppu.layer_palettes[bg][c] = 0
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
+  ppu.bitmap_direct = false
   case ppu.dispcnt.bg_mode
   of 0:
     ppu.render_reg_bg(0); ppu.render_reg_bg(1)
@@ -438,31 +489,13 @@ proc scanline*(ppu: PPU) =
     ppu.render_aff_bg(2); ppu.render_aff_bg(3)
     ppu.render_sprites()
     ppu.composite(row_base)
-  of 3:
-    let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[0])
-    for col in 0..239:
-      ppu.framebuffer[row_base + uint32(col)] = vram_u16[row_base + uint32(col)]
-  of 4:
-    let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
-    let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
-    for col in 0..239:
-      let pal_idx = ppu.vram[base + row_base + uint32(col)]
-      ppu.framebuffer[row_base + uint32(col)] = pram_u16[pal_idx]
-  of 5:
-    let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
-    let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
-    let background_color = pram_u16[0]
-    if ppu.vcount < 128:
-      for col in 0..159:
-        let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[base])
-        ppu.framebuffer[row_base + uint32(col)] = vram_u16[row * 160 + uint32(col)]
-      for col in 160..239:
-        ppu.framebuffer[row_base + uint32(col)] = background_color
-    else:
-      for col in 0..239:
-        ppu.framebuffer[row_base + uint32(col)] = background_color
+  of 3, 4, 5:
+    ppu.render_bitmap()
+    ppu.render_sprites()
+    ppu.composite(row_base)
   else:
-    raise newException(Exception, "Invalid background mode: " & $ppu.dispcnt.bg_mode)
+    # Prohibited modes 6/7: no background layers; show the backdrop
+    ppu.composite(row_base)
 
 proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   case io_addr
