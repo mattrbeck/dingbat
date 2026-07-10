@@ -153,6 +153,10 @@ let CONFIG_DIR  = when defined(windows): getConfigDir() / "dingbat"
                   else: "~/.config/dingbat"
 let CONFIG_FILE = CONFIG_DIR / "dingbat.yml"
 
+proc config_dir*(): string =
+  ## The per-user config/data directory (tilde expanded)
+  expandTilde(CONFIG_DIR)
+
 # Default keybindings: SDL keycode → Input (mgba-style)
 # Arrow keys=D-pad, Z=A, X=B, Backspace=SELECT, Return=START, A=L, S=R
 proc default_keybindings*(): Table[cint, Input] =

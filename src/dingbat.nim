@@ -1,5 +1,6 @@
-import std/[os, parseopt, strformat, strutils, tables, times]
+import std/[os, hashes, parseopt, strformat, strutils, tables, times]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
+import zippy/ziparchives
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import imguin/glad/gl
 import stb_image/read as stbi
@@ -214,13 +215,47 @@ proc flush_gb_save() =
   if app.gb_emu != nil:
     app.gb_emu.cartridge.mbc_save()
 
+const ROM_EXTS = [".gba", ".gb", ".gbc"]
+
+proc extract_zip_rom(zip_path: string): string =
+  ## Extract the first GBA/GB/GBC ROM in a zip and return its path ("" if
+  ## none / unreadable). The destination is a stable per-zip cache dir keyed
+  ## by the zip's full path, so re-opening the same zip reuses the same
+  ## extracted ROM — which keeps the emulator's .sav (written next to the
+  ## ROM) persistent across sessions.
+  try:
+    let reader = openZipArchive(zip_path)
+    defer: reader.close()
+    var entry = ""
+    for name in reader.walkFiles:
+      if name.splitFile().ext.toLowerAscii() in ROM_EXTS:
+        entry = name
+        break
+    if entry == "":
+      echo "No ROM found in zip: ", zip_path
+      return ""
+    let dest_dir = config_dir() / "zip-cache" /
+                   &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
+    createDir(dest_dir)
+    let dest = dest_dir / entry.extractFilename()
+    writeFile(dest, reader.extractFile(entry))
+    dest
+  except ZippyError, IOError, OSError:
+    echo "Failed to read zip: ", getCurrentExceptionMsg()
+    ""
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
+  # Zips: load the first ROM inside; recents keep the zip path itself
+  var rom_path = path
+  if path.splitFile().ext.toLowerAscii() == ".zip":
+    rom_path = extract_zip_rom(path)
+    if rom_path == "": return
   flush_gb_save()
-  let ext = path.splitFile().ext.toLowerAscii()
+  let ext = rom_path.splitFile().ext.toLowerAscii()
   if ext in [".gb", ".gbc"]:
-    app.gb_emu = new_gb(app.cfg.gb_bootrom_path, path, app.cfg.gb_fifo,
+    app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path, app.cfg.gb_fifo,
                         app.cfg.headless, app.cfg.run_bios)
     app.gb_emu.post_init()
     app.gba_emu = nil
@@ -228,7 +263,7 @@ proc load_rom(path: string) =
     setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
   else:
     let bios = app.cfg.bios_path
-    app.gba_emu = new_gba(bios, path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
+    app.gba_emu = new_gba(bios, rom_path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
     app.gba_emu.post_init()
     app.gb_emu = nil
     app.emu_kind = ekGBA
@@ -384,7 +419,7 @@ proc render_imgui() =
       igEndMainMenuBar()
 
   # File explorer
-  app.fe.render("ROM", open_rom, ["gba", "gb", "gbc"], proc(path: string) =
+  app.fe.render("ROM", open_rom, ["gba", "gb", "gbc", "zip"], proc(path: string) =
     load_rom(path))
 
   # Config editor
@@ -478,7 +513,8 @@ proc handle_input() =
       let dropped = drop(evt)
       let path = $dropped.file
       sdl_free(dropped.file)
-      if path.splitFile().ext.toLowerAscii() in [".gba", ".gb", ".gbc"]:
+      let ext = path.splitFile().ext.toLowerAscii()
+      if ext in ROM_EXTS or ext == ".zip":
         load_rom(path)
 
     of QuitEvent:
