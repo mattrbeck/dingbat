@@ -205,9 +205,16 @@ var app: AppState
 
 # ──────────────────────────── ROM Loading ────────────────────────────
 
+proc flush_gb_save() =
+  # Battery saves are also flushed once per frame while running; this covers
+  # switching ROMs and quitting mid-frame
+  if app.gb_emu != nil:
+    app.gb_emu.cartridge.mbc_save()
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
+  flush_gb_save()
   let ext = path.splitFile().ext.toLowerAscii()
   if ext in [".gb", ".gbc"]:
     app.gb_emu = new_gb(app.cfg.gb_bootrom_path, path, app.cfg.gb_fifo,
@@ -622,5 +629,6 @@ proc main() =
     render_imgui()
     glSwapWindow(window)
     update_fps_title()
+  flush_gb_save()
 
 main()

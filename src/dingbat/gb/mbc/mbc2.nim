@@ -23,5 +23,6 @@ method mbc_write*(cart: Mbc2; idx: int; val: uint8) =
       if cart.rom_bank == 0: cart.rom_bank = 1
   of 0xA000..0xBFFF:
     if cart.ram_enabled:
+      cart.ram_dirty = true
       cart.ram[mbc_ram_offset(idx) mod 0x0200] = val and 0x0F
   else: discard

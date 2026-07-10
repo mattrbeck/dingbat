@@ -19,6 +19,8 @@ type
     ram*:          seq[uint8]
     sav_path*:     string
     has_battery*:  bool
+    ram_dirty*:    bool
+    save_error_reported*: bool
 
   MbcRom* = ref object of Mbc
 
@@ -420,8 +422,14 @@ proc mbc_ram_bank_offset*(cart: Mbc; bank_num: int): int =
 proc mbc_ram_offset*(idx: int): int = idx - 0xA000
 
 proc mbc_save*(cart: Mbc) =
-  if cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:
-    writeFile(cart.sav_path, cast[string](cart.ram))
+  if cart.ram_dirty and cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:
+    try:
+      writeFile(cart.sav_path, cast[string](cart.ram))
+      cart.ram_dirty = false
+    except IOError, OSError:
+      if not cart.save_error_reported:
+        cart.save_error_reported = true
+        echo "Failed to write save file: ", cart.sav_path
 
 proc mbc_load*(cart: Mbc) =
   if cart.has_battery and cart.sav_path.len > 0 and fileExists(cart.sav_path):
@@ -500,6 +508,12 @@ proc gb_skip_boot(gb: GB) =
   gb.ppu.skip_boot()
   gb.timer.skip_boot()
 
+proc handle_saves*(gb: GB) =
+  ## Flush battery-backed cart RAM once per frame (when dirty) so progress
+  ## isn't lost if the emulator exits without the game disabling cart RAM
+  gb.scheduler.schedule_gb(70224, etSaves)
+  gb.cartridge.mbc_save()
+
 proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
   result = proc(kind: EventType) =
     case kind
@@ -510,6 +524,7 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     of etAPUChannel3:  ch3_step(gb.apu.channel3, gb)
     of etAPUChannel4:  ch4_step(gb.apu.channel4, gb)
     of etIME:          gb.cpu.ime = true
+    of etSaves:        gb.handle_saves()
     else: discard
 
 proc post_init*(gb: GB) =
@@ -525,6 +540,7 @@ proc post_init*(gb: GB) =
   gb.memory = new_gb_memory(gb)
   gb.cpu    = new_gb_cpu()
   gb.scheduler.dispatch = gb_dispatch(gb)
+  gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
 

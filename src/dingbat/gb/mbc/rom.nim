@@ -13,5 +13,7 @@ method mbc_write*(cart: MbcRom; idx: int; val: uint8) =
   case idx
   of 0xA000..0xBFFF:
     let off = idx - 0xA000
-    if off < cart.ram.len: cart.ram[off] = val
+    if off < cart.ram.len:
+      cart.ram_dirty = true
+      cart.ram[off] = val
   else: discard

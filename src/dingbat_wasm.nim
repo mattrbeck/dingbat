@@ -141,6 +141,9 @@ proc loop_tick() {.exportc.} =
   stateRenderer.present()
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
+  # Flush the outgoing GB cart's battery save before replacing it
+  if stateGb != nil:
+    stateGb.cartridge.mbc_save()
   let path = $rom_path
   let ext = path.splitFile().ext.toLowerAscii()
   if stateTexture != nil:

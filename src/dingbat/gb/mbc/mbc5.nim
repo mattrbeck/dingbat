@@ -27,5 +27,6 @@ method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
     discard
   of 0xA000..0xBFFF:
     if cart.ram_enabled and cart.ram.len > 0:
+      cart.ram_dirty = true
       cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
   else: discard
