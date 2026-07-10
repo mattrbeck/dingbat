@@ -11,7 +11,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
       - name: Install dependencies
-        run: nimble install -d -y
+        # nimble on the Windows runner intermittently dies with "Access is
+        # denied" (file locks) partway through, sometimes without a nonzero
+        # exit — retry, then prove the deps actually import
+        shell: bash
+        run: |
+          echo 'import zippy/ziparchives, yaml/tojson, stb_image/read' > depcheck.nim
+          for i in 1 2 3; do
+            nimble install -d -y || true
+            if nim check --hints:off depcheck.nim; then rm depcheck.nim; exit 0; fi
+            echo "dependencies incomplete after attempt $i, retrying"
+            sleep 10
+          done
+          exit 1
       - name: Build test harness
         run: nim c -d:test_harness -d:release --path:src -o:dingbat_test tests/dingbat_test.nim
       - name: Build test runner

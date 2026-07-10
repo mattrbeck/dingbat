@@ -4,6 +4,10 @@
 # C++ runtime are statically linked).
 set -eu
 
+# In CI the checkout is owned by a different uid than the container's root;
+# git refuses to operate on it (and nimble shells out to git) without this
+git config --global --add safe.directory /src 2>/dev/null || true
+
 nimble install --depsOnly -y
 
 mkdir -p dist/windows
