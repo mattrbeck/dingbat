@@ -151,8 +151,94 @@ proc render_tiles_window(d: GbDebug) =
   debug_image(d.tiles_tex, float32(w) * TILES_SCALE, float32(h) * TILES_SCALE)
   igEnd()
 
+# ──────────────────────────── BG maps ────────────────────────────
+
+const MAP_PX = 256
+const MAP_SCALE = 2.0'f32
+
+proc build_bg_map(d: GbDebug; map_base: int) =
+  let ppu = d.gb.ppu
+  let cgb = d.gb.cgb_enabled
+  if d.bgmap_buf.len != MAP_PX * MAP_PX: d.bgmap_buf.setLen(MAP_PX * MAP_PX)
+  let signed_mode = bg_window_tile_data(ppu) == 0
+  for ty in 0 ..< 32:
+    for tx in 0 ..< 32:
+      let tn_addr = map_base + ty * 32 + tx
+      let raw = ppu.vram[0][tn_addr]
+      let tile_ptr = if signed_mode: 0x1000 + int(cast[int8](raw)) * 16
+                     else: int(raw) * 16
+      let attrs = if cgb: ppu.vram[1][tn_addr] else: 0'u8
+      let bank = int((attrs shr 3) and 1)
+      for row in 0 ..< 8:
+        let y_row = if (attrs and 0x40) != 0: 7 - row else: row
+        let b1 = ppu.vram[bank][tile_ptr + y_row * 2]
+        let b2 = ppu.vram[bank][tile_ptr + y_row * 2 + 1]
+        for col in 0 ..< 8:
+          let shift = if (attrs and 0x20) != 0: col else: 7 - col
+          let color = uint8((((b2 shr shift) and 1) shl 1) or
+                            ((b1 shr shift) and 1))
+          d.bgmap_buf[(ty * 8 + row) * MAP_PX + tx * 8 + col] =
+            if cgb:
+              bgr555_to_rgba8(pram_color(ppu.pram,
+                                         int(attrs and 0b111) * 4 + int(color)))
+            else:
+              DMG_GREYS[ppu.bgp[color]]
+
+proc outline_scroll_viewport(d: GbDebug; img_pos: ImVec2) =
+  # SCX/SCY viewport, drawn wrapped: clip to the image and stamp the rect at
+  # the four wrap offsets so the parts that cross the map edge reappear
+  let ppu = d.gb.ppu
+  let side = cfloat(MAP_PX) * MAP_SCALE
+  let img_max = ImVec2(x: img_pos.x + side, y: img_pos.y + side)
+  let dl = igGetWindowDrawList()
+  let col = igGetColorU32_Vec4(ImVec4(x: 1.0, y: 0.2, z: 0.2, w: 1.0))
+  ImDrawList_PushClipRect(dl, img_pos, img_max, true)
+  for wx in 0 .. 1:
+    for wy in 0 .. 1:
+      let x0 = img_pos.x + (cfloat(ppu.scx) - cfloat(wx * MAP_PX)) * MAP_SCALE
+      let y0 = img_pos.y + (cfloat(ppu.scy) - cfloat(wy * MAP_PX)) * MAP_SCALE
+      ImDrawList_AddRect(dl, ImVec2(x: x0, y: y0),
+                         ImVec2(x: x0 + 160 * MAP_SCALE, y: y0 + 144 * MAP_SCALE),
+                         col, 0, 0, 2.0)
+  ImDrawList_PopClipRect(dl)
+
+proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
+                       is_bg_map: bool) =
+  if igBeginTabItem(label, nil, 0):
+    d.build_bg_map(map_base)
+    upload_texture(d.bgmap_tex, addr d.bgmap_buf[0], MAP_PX, MAP_PX)
+    var img_pos = ImVec2(x: 0, y: 0)
+    # imguin <= 1.92.4 uses a pOut out-param; later versions return by value
+    when compiles(igGetCursorScreenPos(addr img_pos)):
+      igGetCursorScreenPos(addr img_pos)
+    else:
+      let p = igGetCursorScreenPos()
+      img_pos = ImVec2(x: p.x, y: p.y)
+    debug_image(d.bgmap_tex, cfloat(MAP_PX) * MAP_SCALE, cfloat(MAP_PX) * MAP_SCALE)
+    if is_bg_map:
+      d.outline_scroll_viewport(img_pos)
+    igEndTabItem()
+
+proc render_bgmap_window(d: GbDebug) =
+  discard igBegin("BG Maps", addr d.bgmap_window, 0)
+  let ppu = d.gb.ppu
+  let bg_map_hi = bg_tile_map(ppu) != 0
+  igText("LCDC: BG map %s   window map %s   tile data %s",
+         (if bg_map_hi: cstring"0x9C00" else: cstring"0x9800"),
+         (if window_tile_map(ppu) != 0: cstring"0x9C00" else: cstring"0x9800"),
+         (if bg_window_tile_data(ppu) != 0: cstring"0x8000 (unsigned)"
+          else: cstring"0x8800 (signed)"))
+  igText("SCX: %3d  SCY: %3d", cint(ppu.scx), cint(ppu.scy))
+  if igBeginTabBar("BgMapTabBar", 0):
+    d.render_bg_map_tab("0x9800", 0x1800, not bg_map_hi)
+    d.render_bg_map_tab("0x9C00", 0x1C00, bg_map_hi)
+    igEndTabBar()
+  igEnd()
+
 proc render_windows*(d: GbDebug) =
   if d.palette_window:
     d.render_palette_window()
   if d.tiles_window:
     d.render_tiles_window()
+  if d.bgmap_window:
+    d.render_bgmap_window()
