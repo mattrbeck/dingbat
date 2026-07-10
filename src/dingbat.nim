@@ -244,6 +244,12 @@ proc extract_zip_rom(zip_path: string): string =
     echo "Failed to read zip: ", getCurrentExceptionMsg()
     ""
 
+proc apply_master_volume() =
+  if app.gba_emu != nil:
+    app.gba_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+  if app.gb_emu != nil:
+    app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
@@ -269,6 +275,7 @@ proc load_rom(path: string) =
     app.emu_kind = ekGBA
     setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
+  apply_master_volume()
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
   glBindTexture(GL_TEXTURE_2D, app.game_texture)
@@ -387,6 +394,18 @@ proc render_imgui() =
 
       # Audio/Video menu
       if igBeginMenu("Audio/Video", true):
+        var vol = cint(app.cfg.volume)
+        igSetNextItemWidth(120.0)
+        if igSliderInt("Volume", addr vol, 0, 100, "%d%%", 0):
+          app.cfg.volume = int(vol)
+          apply_master_volume()
+        # Persist only when the slider edit completes, not every frame
+        if igIsItemDeactivatedAfterEdit():
+          save_config(app.cfg)
+        if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
+          apply_master_volume()
+          save_config(app.cfg)
+        igSeparator()
         if igBeginMenu("Frame size", true):
           for s in 1 .. 8:
             if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):

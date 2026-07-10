@@ -339,6 +339,10 @@ type
     dma_channels*:      DMAChannels
     sync*:              bool
     channel_mask*:      array[6, bool]  # PSG 1-4 + DMA A/B; true = enabled
+    # Master volume as an 8.8 fixed-point factor (256 = unity), precomputed
+    # so queue-time scaling stays one integer multiply+shift per sample
+    master_volume_factor*: int32
+    master_muted*:      bool
     audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
     left_resampler*:    Resampler[float32]
     right_resampler*:   Resampler[float32]

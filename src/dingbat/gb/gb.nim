@@ -252,6 +252,10 @@ type
     right_volume*:        uint8
     nr51*:                uint8
     sync*:                bool
+    # Master volume as a precomputed factor (1.0 = unity), applied per
+    # buffer at the queue point
+    master_volume_factor*: float32
+    master_muted*:        bool
     audio_dev*:           uint32
     channel1*:            GbChannel1
     channel2*:            GbChannel2

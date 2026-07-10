@@ -67,6 +67,7 @@ proc new_apu*(gba: GBA): APU =
     first_half_of_length_period: false,
     sync: true,
     channel_mask: [true, true, true, true, true, true],
+    master_volume_factor: 256,
   )
   result.buffer = newSeq[int16](APU_BUFFER_SIZE)
   result.channel1 = new_channel1(gba)
@@ -106,6 +107,12 @@ proc new_apu*(gba: GBA): APU =
 
 proc toggle_sync*(apu: APU) =
   apu.sync = not apu.sync
+
+proc set_master_volume*(apu: APU; volume: int; mute: bool) =
+  ## volume is 0..100; 100 maps to exactly 256 so the unity-passthrough
+  ## branch in get_sample keeps samples bit-identical
+  apu.master_volume_factor = int32(clamp(volume, 0, 100) * 256 div 100)
+  apu.master_muted = mute
 
 proc audio_ahead*(apu: APU): bool =
   ## True when synced audio is buffered comfortably ahead of playback. The
@@ -209,6 +216,17 @@ proc get_sample*(apu: APU) =
     apu.buffer[apu.buffer_pos + 1] = total_right * 32
     apu.buffer_pos += 2
     if apu.buffer_pos >= APU_BUFFER_SIZE:
+      # Master volume, applied per buffer at the queue point. Muting still
+      # queues (zeroed) samples: emulation pacing is driven by the SDL queue
+      # depth, so skipping the queue would break frame pacing. At volume 100
+      # unmuted this branch is skipped entirely — bit-identical passthrough.
+      if apu.master_muted:
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = 0'i16
+      elif apu.master_volume_factor != 256:
+        let vf = apu.master_volume_factor
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
       let dump = audio_dump_dest()
       if dump != nil:
         discard dump.writeBuffer(addr apu.buffer[0],

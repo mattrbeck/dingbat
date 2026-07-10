@@ -38,6 +38,12 @@ when not defined(test_harness):
 proc toggle_sync*(apu: GbApu) =
   apu.sync = not apu.sync
 
+proc set_master_volume*(apu: GbApu; volume: int; mute: bool) =
+  ## volume is 0..100; 100 maps to exactly 1.0 so the unity-passthrough
+  ## branch in get_sample keeps samples bit-identical
+  apu.master_volume_factor = float32(clamp(volume, 0, 100)) / 100.0'f32
+  apu.master_muted = mute
+
 proc audio_ahead*(apu: GbApu): bool =
   ## See the GBA APU's audio_ahead: lets the frontend pace synced emulation
   ## without blocking inside the sample callback
@@ -98,6 +104,16 @@ proc get_sample*(apu: GbApu; gb: GB) =
     apu.buffer[apu.buffer_pos + 1] = sample_right
     apu.buffer_pos += 2
     if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
+      # Master volume at the queue point; mute still queues (zeroed)
+      # samples because SDL queue depth paces emulation. Volume 100 unmuted
+      # skips this entirely — bit-identical passthrough.
+      if apu.master_muted:
+        for i in 0 ..< GB_APU_BUFFER_SIZE:
+          apu.buffer[i] = 0.0'f32
+      elif apu.master_volume_factor != 1.0'f32:
+        let vf = apu.master_volume_factor
+        for i in 0 ..< GB_APU_BUFFER_SIZE:
+          apu.buffer[i] = apu.buffer[i] * vf
       if apu.audio_dev != 0:
         if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
         while sdl_get_queued_audio_size_gb(apu.audio_dev) >
@@ -112,6 +128,7 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
     sound_enabled: false, buffer_pos: 0,
     frame_sequencer_stage: 0, first_half_of_length_period: false,
     sync: not headless,
+    master_volume_factor: 1.0'f32,
   )
   result.buffer   = newSeq[float32](GB_APU_BUFFER_SIZE)
   result.channel1 = new_channel1(gb)

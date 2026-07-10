@@ -197,6 +197,8 @@ type
     gb_fifo*:           bool     # use FIFO PPU renderer (default true)
     use_hle*:           bool     # use HLE BIOS for SWI calls
     hle_after_bios*:    bool     # run real BIOS for init, then use HLE for SWI calls
+    volume*:            int      # master volume 0..100
+    mute*:              bool     # mute audio output
 
 proc new_config*(): Config =
   Config(
@@ -208,6 +210,8 @@ proc new_config*(): Config =
     headless:        false,
     gb_bootrom_path: "",
     gb_fifo:         true,
+    volume:          100,
+    mute:            false,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -219,6 +223,10 @@ proc parse_config(j: JsonNode): Config =
       if r.kind == JString: cfg.recents.add(r.getStr())
   if j.hasKey("run_bios"):
     cfg.run_bios = j["run_bios"].getBool(false)
+  if j.hasKey("volume") and j["volume"].kind == JInt:
+    cfg.volume = clamp(j["volume"].getInt(100), 0, 100)
+  if j.hasKey("mute"):
+    cfg.mute = j["mute"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
   if j.hasKey("gba") and j["gba"].kind == JObject:
     let gba = j["gba"]
@@ -284,6 +292,8 @@ proc save_config*(cfg: Config) =
   for r in cfg.recents:
     lines.add("- " & yaml_str(r))
   lines.add("run_bios: " & $cfg.run_bios)
+  lines.add("volume: " & $cfg.volume)
+  lines.add("mute: " & $cfg.mute)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))
