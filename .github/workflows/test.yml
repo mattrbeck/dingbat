@@ -20,7 +20,9 @@ jobs:
         run: |
           echo 'import zippy/ziparchives' > depcheck.nim
           for i in 1 2 3; do
-            nimble install -y zippy || true
+            # cd out of the checkout: inside it, nimble resolves the whole
+            # project graph (imguin and friends) even for a single install
+            (cd "$RUNNER_TEMP" && nimble install -y zippy) || true
             if nim check --hints:off depcheck.nim; then rm depcheck.nim; exit 0; fi
             echo "dependencies incomplete after attempt $i, retrying"
             sleep 10
