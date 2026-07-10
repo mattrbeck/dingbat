@@ -24,6 +24,8 @@ const GBA_H   = 160
 const GB_W    = 160
 const GB_H    = 144
 
+const KMOD_SHIFT_MASK = int16(0x0003)  # LSHIFT | RSHIFT
+
 # Mod key mask for keyboard shortcuts (raw int16 from modstate)
 when defined(macosx):
   const MOD_KEY_MASK = int16(0x0C00)  # LGUI | RGUI
@@ -481,14 +483,19 @@ proc render_imgui() =
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
           save_config(app.cfg)
-        # Fast Forward is inverted audio sync: unsynced emulation runs
-        # uncapped, so checked == not sync
+        # 2x Speed stays audio-paced (at double rate); Fast Forward is
+        # inverted audio sync — unsynced emulation runs uncapped, so
+        # checked == not sync
         if app.emu_kind == ekGBA and app.gba_emu != nil:
+          discard igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
+                                     addr app.gba_emu.apu.turbo, true)
           var fast_forward = not app.gba_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
                                 addr fast_forward, true):
             app.gba_emu.apu.sync = not fast_forward
         elif app.emu_kind == ekGB and app.gb_emu != nil:
+          discard igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
+                                     addr app.gb_emu.apu.turbo, true)
           var fast_forward = not app.gb_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
                                 addr fast_forward, true):
@@ -732,7 +739,11 @@ proc handle_input() =
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
         elif sym == K_TAB and pressed:
-          app.gba_emu.apu.sync = not app.gba_emu.apu.sync
+          # Shift+Tab = 2x speed, Tab = unbounded fast forward
+          if (mods and KMOD_SHIFT_MASK) != 0:
+            app.gba_emu.apu.turbo = not app.gba_emu.apu.turbo
+          else:
+            app.gba_emu.apu.sync = not app.gba_emu.apu.sync
         elif pressed and sym >= K_1 and sym <= K_6:
           # Feedback is visible in the Audio/Video > Channels submenu
           let ch = int(sym) - int(K_1)
@@ -741,7 +752,10 @@ proc handle_input() =
         if app.cfg.keybindings.hasKey(sym):
           app.gb_emu.handle_input(app.cfg.keybindings[sym], pressed)
         elif sym == K_TAB and pressed:
-          app.gb_emu.apu.toggle_sync()
+          if (mods and KMOD_SHIFT_MASK) != 0:
+            app.gb_emu.apu.turbo = not app.gb_emu.apu.turbo
+          else:
+            app.gb_emu.apu.toggle_sync()
 
     of ControllerDeviceAdded:
       # `which` is a device index for the Added event

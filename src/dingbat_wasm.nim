@@ -112,6 +112,15 @@ proc wasm_state_data(): pointer {.exportc.} =
   ## JS must copy it out before calling wasm_state_size() again.
   if stateImage.len > 0: addr stateImage[0] else: nil
 
+proc wasm_set_turbo(on: cint) {.exportc.} =
+  ## 2x speed: the APU drops every other sample at the queue point, so JS
+  ## receives realtime-rate (pitched-up) audio while running double the
+  ## frames per wall-clock second (the JS tick loop halves its frame step)
+  case stateKind
+  of ekGBA: stateGba.apu.turbo = on != 0
+  of ekGB:  stateGb.apu.turbo = on != 0
+  of ekNone: discard
+
 proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or

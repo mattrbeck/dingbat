@@ -347,6 +347,10 @@ type
     # so queue-time scaling stays one integer multiply+shift per sample
     master_volume_factor*: int32
     master_muted*:      bool
+    # 2x speed: drop every other stereo frame at the queue point so
+    # audio-driven pacing runs emulation twice as fast
+    turbo*:             bool
+    turbo_parity:       bool  # emscripten per-sample decimation state
     audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
     left_resampler*:    Resampler[float32]
     right_resampler*:   Resampler[float32]

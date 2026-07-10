@@ -1034,10 +1034,12 @@ var currentRomName = null;
 var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
+var speed2x = false;
 
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
+const speed2xItem = document.getElementById("speed-2x");
 
 const loadRom = async (romName, originalName) => {
   // Persist save from previous ROM before switching
@@ -1048,9 +1050,11 @@ const loadRom = async (romName, originalName) => {
   currentOriginalName = originalName || romName;
   paused = false;
   fastForward = false;
+  speed2x = false;  // a fresh core starts with turbo off
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   fastForwardButton.classList.remove("active");
+  speed2xItem.classList.remove("active");
   document.body.classList.add("has-game", "running");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
@@ -1248,6 +1252,17 @@ resetButton.addEventListener("click", () => {
 fastForwardButton.addEventListener("click", () => {
   fastForward = !fastForward;
   fastForwardButton.classList.toggle("active", fastForward);
+});
+
+// 2x speed: the core drops every other audio sample (pitched-up realtime
+// audio) while the tick loop below halves its per-frame time step
+speed2xItem.addEventListener("click", () => {
+  speed2x = !speed2x;
+  speed2xItem.classList.toggle("active", speed2x);
+  if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
+    Module._wasm_set_turbo(speed2x ? 1 : 0);
+  }
+  showToast(speed2x ? "2x speed on" : "2x speed off");
 });
 
 // --- Main Menu (return to the home screen without terminating the game) ---
@@ -1542,17 +1557,21 @@ var Module = {
         }
         accumulator = 0;
       } else {
-        // Run as many frames as needed to catch up, capped to avoid spiral
+        // Run as many frames as needed to catch up, capped to avoid spiral.
+        // At 2x speed each frame consumes half the wall-clock step (the core
+        // decimates audio to match).
+        const step = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
+        const maxFrames = speed2x ? 4 : 2;
         let framesRun = 0;
-        while (accumulator >= FRAME_TIME && framesRun < 2) {
+        while (accumulator >= step && framesRun < maxFrames) {
           Module._loop_tick();
           pushAudio();
           frameCount++;
-          accumulator -= FRAME_TIME;
+          accumulator -= step;
           framesRun++;
         }
         // Prevent accumulator from growing unbounded if tab was backgrounded
-        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        if (accumulator > step * 2) accumulator = 0;
       }
       // Draw one guaranteed-fresh frame, then capture it in this same task
       if (pendingShot) {

@@ -256,6 +256,10 @@ type
     # buffer at the queue point
     master_volume_factor*: float32
     master_muted*:        bool
+    # 2x speed: drop every other stereo frame at the queue point so
+    # audio-driven pacing runs emulation twice as fast
+    turbo*:               bool
+    turbo_parity:         bool  # emscripten per-sample decimation state
     audio_dev*:           uint32
     channel1*:            GbChannel1
     channel2*:            GbChannel2

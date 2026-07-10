@@ -282,6 +282,7 @@ body.running #main-menu-sep {
 #load-save,
 #export-save,
 #screenshot,
+#speed-2x,
 #save-sep {
   display: none;
 }
@@ -292,8 +293,13 @@ body.has-game #export-state,
 body.has-game #import-state,
 body.has-game #load-save,
 body.has-game #export-save,
-body.has-game #screenshot {
+body.has-game #screenshot,
+body.has-game #speed-2x {
   display: flex;
+}
+
+.menu-item.active {
+  color: var(--accent);
 }
 
 body.has-game #state-sep,

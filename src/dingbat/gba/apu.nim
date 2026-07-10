@@ -209,8 +209,12 @@ proc get_sample*(apu: APU) =
   when defined(test_harness):
     discard
   elif defined(emscripten):
-    appendAudioSample(float32(total_left * 32) / 32768.0'f32,
-                       float32(total_right * 32) / 32768.0'f32)
+    # 2x speed drops every other sample: JS receives realtime-rate audio
+    # (pitched up an octave) while emulation runs double speed
+    apu.turbo_parity = not apu.turbo_parity
+    if not apu.turbo or apu.turbo_parity:
+      appendAudioSample(float32(total_left * 32) / 32768.0'f32,
+                         float32(total_right * 32) / 32768.0'f32)
   else:
     apu.buffer[apu.buffer_pos]     = total_left  * 32
     apu.buffer[apu.buffer_pos + 1] = total_right * 32
@@ -227,10 +231,24 @@ proc get_sample*(apu: APU) =
         let vf = apu.master_volume_factor
         for i in 0 ..< APU_BUFFER_SIZE:
           apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
+      # 2x speed: keep every other stereo frame, so the queue fills at half
+      # rate and audio-driven pacing runs emulation twice as fast (audio
+      # pitches up an octave — the classic turbo sound). At normal speed
+      # this is skipped entirely.
+      var queue_len = APU_BUFFER_SIZE
+      if apu.turbo:
+        var o = 0
+        var i = 0
+        while i < APU_BUFFER_SIZE:
+          apu.buffer[o]     = apu.buffer[i]
+          apu.buffer[o + 1] = apu.buffer[i + 1]
+          o += 2
+          i += 4
+        queue_len = o
       let dump = audio_dump_dest()
       if dump != nil:
         discard dump.writeBuffer(addr apu.buffer[0],
-                                 APU_BUFFER_SIZE * sizeof(int16))
+                                 queue_len * sizeof(int16))
         dump.flushFile()
       if apu.audio_dev != 0:
         if not apu.sync:
@@ -241,7 +259,7 @@ proc get_sample*(apu: APU) =
           sdl_delay(1)
         discard sdl_queue_audio(apu.audio_dev,
                                  cast[pointer](addr apu.buffer[0]),
-                                 uint32(APU_BUFFER_SIZE * sizeof(int16)))
+                                 uint32(queue_len * sizeof(int16)))
       apu.buffer_pos = 0
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 

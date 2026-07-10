@@ -98,7 +98,11 @@ proc get_sample*(apu: GbApu; gb: GB) =
   when defined(test_harness):
     discard
   elif defined(emscripten):
-    appendAudioSample(sample_left, sample_right)
+    # 2x speed drops every other sample: JS receives realtime-rate audio
+    # (pitched up an octave) while emulation runs double speed
+    apu.turbo_parity = not apu.turbo_parity
+    if not apu.turbo or apu.turbo_parity:
+      appendAudioSample(sample_left, sample_right)
   else:
     apu.buffer[apu.buffer_pos]     = sample_left
     apu.buffer[apu.buffer_pos + 1] = sample_right
@@ -114,12 +118,23 @@ proc get_sample*(apu: GbApu; gb: GB) =
         let vf = apu.master_volume_factor
         for i in 0 ..< GB_APU_BUFFER_SIZE:
           apu.buffer[i] = apu.buffer[i] * vf
+      # 2x speed: keep every other stereo frame (see the GBA APU comment)
+      var queue_len = GB_APU_BUFFER_SIZE
+      if apu.turbo:
+        var o = 0
+        var i = 0
+        while i < GB_APU_BUFFER_SIZE:
+          apu.buffer[o]     = apu.buffer[i]
+          apu.buffer[o + 1] = apu.buffer[i + 1]
+          o += 2
+          i += 4
+        queue_len = o
       if apu.audio_dev != 0:
         if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
         while sdl_get_queued_audio_size_gb(apu.audio_dev) >
               uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
         discard sdl_queue_audio_gb(apu.audio_dev,
-          addr apu.buffer[0], uint32(GB_APU_BUFFER_SIZE * 4))
+          addr apu.buffer[0], uint32(queue_len * 4))
       apu.buffer_pos = 0
   gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
 
