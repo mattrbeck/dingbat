@@ -66,16 +66,18 @@ proc cgb_palette_grid(title: cstring; pram: array[64, uint8]) =
   igEndGroup()
 
 proc render_palette_window(d: GbDebug) =
-  discard igBegin("Palettes", addr d.palette_window, 0)
-  let ppu = d.gb.ppu
-  if d.gb.cgb_enabled:
-    cgb_palette_grid("Background", ppu.pram)
-    igSameLine(0, 24)
-    cgb_palette_grid("Objects", ppu.obj_pram)
-  else:
-    dmg_palette_row("BGP", ppu.bgp, ppu.pram)
-    dmg_palette_row("OBP0", ppu.obp0, ppu.obj_pram)
-    dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram)
+  # igBegin returns false while collapsed: skip the content (igEnd is
+  # still required)
+  if igBegin("Palettes", addr d.palette_window, 0):
+    let ppu = d.gb.ppu
+    if d.gb.cgb_enabled:
+      cgb_palette_grid("Background", ppu.pram)
+      igSameLine(0, 24)
+      cgb_palette_grid("Objects", ppu.obj_pram)
+    else:
+      dmg_palette_row("BGP", ppu.bgp, ppu.pram)
+      dmg_palette_row("OBP0", ppu.obp0, ppu.obj_pram)
+      dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram)
   igEnd()
 
 # ──────────────────────────── Texture helpers ────────────────────────────
@@ -141,14 +143,15 @@ proc build_tiles(d: GbDebug): (int, int) =
   (w, h)
 
 proc render_tiles_window(d: GbDebug) =
-  discard igBegin("Tiles", addr d.tiles_window, 0)
-  let (w, h) = d.build_tiles()
-  upload_texture(d.tiles_tex, addr d.tiles_buf[0], w, h)
-  if d.gb.cgb_enabled:
-    igTextUnformatted("Bank 0", nil)
-    igSameLine(cfloat(TILE_COLS * 8) * TILES_SCALE + 8, -1)
-    igTextUnformatted("Bank 1", nil)
-  debug_image(d.tiles_tex, float32(w) * TILES_SCALE, float32(h) * TILES_SCALE)
+  # Skip the decode + texture upload while collapsed
+  if igBegin("Tiles", addr d.tiles_window, 0):
+    let (w, h) = d.build_tiles()
+    upload_texture(d.tiles_tex, addr d.tiles_buf[0], w, h)
+    if d.gb.cgb_enabled:
+      igTextUnformatted("Bank 0", nil)
+      igSameLine(cfloat(TILE_COLS * 8) * TILES_SCALE + 8, -1)
+      igTextUnformatted("Bank 1", nil)
+    debug_image(d.tiles_tex, float32(w) * TILES_SCALE, float32(h) * TILES_SCALE)
   igEnd()
 
 # ──────────────────────────── BG maps ────────────────────────────
@@ -220,19 +223,20 @@ proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
     igEndTabItem()
 
 proc render_bgmap_window(d: GbDebug) =
-  discard igBegin("BG Maps", addr d.bgmap_window, 0)
-  let ppu = d.gb.ppu
-  let bg_map_hi = bg_tile_map(ppu) != 0
-  igText("LCDC: BG map %s   window map %s   tile data %s",
-         (if bg_map_hi: cstring"0x9C00" else: cstring"0x9800"),
-         (if window_tile_map(ppu) != 0: cstring"0x9C00" else: cstring"0x9800"),
-         (if bg_window_tile_data(ppu) != 0: cstring"0x8000 (unsigned)"
-          else: cstring"0x8800 (signed)"))
-  igText("SCX: %3d  SCY: %3d", cint(ppu.scx), cint(ppu.scy))
-  if igBeginTabBar("BgMapTabBar", 0):
-    d.render_bg_map_tab("0x9800", 0x1800, not bg_map_hi)
-    d.render_bg_map_tab("0x9C00", 0x1C00, bg_map_hi)
-    igEndTabBar()
+  # Skip the decode + texture upload while collapsed
+  if igBegin("BG Maps", addr d.bgmap_window, 0):
+    let ppu = d.gb.ppu
+    let bg_map_hi = bg_tile_map(ppu) != 0
+    igText("LCDC: BG map %s   window map %s   tile data %s",
+           (if bg_map_hi: cstring"0x9C00" else: cstring"0x9800"),
+           (if window_tile_map(ppu) != 0: cstring"0x9C00" else: cstring"0x9800"),
+           (if bg_window_tile_data(ppu) != 0: cstring"0x8000 (unsigned)"
+            else: cstring"0x8800 (signed)"))
+    igText("SCX: %3d  SCY: %3d", cint(ppu.scx), cint(ppu.scy))
+    if igBeginTabBar("BgMapTabBar", 0):
+      d.render_bg_map_tab("0x9800", 0x1800, not bg_map_hi)
+      d.render_bg_map_tab("0x9C00", 0x1C00, bg_map_hi)
+      igEndTabBar()
   igEnd()
 
 proc render_windows*(d: GbDebug) =
