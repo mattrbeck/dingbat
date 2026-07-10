@@ -764,11 +764,12 @@ proc main() =
   if hle_after_bios:
     cfg.hle_after_bios = true
     cfg.run_bios = true
-  if has_bios_arg: cfg.bios_path = bios_path
+  if has_bios_arg:
+    cfg.bios_path = bios_path
+    # An explicit CLI BIOS implies real-BIOS mode unless --hle* was passed
+    if not use_hle and not hle_after_bios:
+      cfg.use_hle = false
   if cli_run_bios: cfg.run_bios = true
-  # Default to HLE when no BIOS is configured
-  if cfg.bios_path == "" and not has_bios_arg and not cfg.use_hle and not cfg.hle_after_bios:
-    cfg.use_hle = true
 
   # SDL2 init
   when defined(windows):

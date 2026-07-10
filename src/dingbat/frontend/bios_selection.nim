@@ -14,6 +14,7 @@ type
     bios_buf*:  array[BUF_SIZE, char]
     buf_valid*: bool
     run_bios*:  bool
+    bios_mode*: cint   # 0 = HLE, 1 = real BIOS, 2 = real BIOS init + HLE SWIs
     visible*:   bool
 
 proc new_bios_selection*(cfg: Config; fe: FileExplorer): BiosSelection =
@@ -45,6 +46,14 @@ proc render*(b: BiosSelection) =
 
   igIndent(106)
   discard igCheckbox("Run BIOS intro", addr b.run_bios)
+
+  igText("SWI handling:")
+  igSameLine(0, -1)
+  help_marker("How GBA BIOS calls are serviced. HLE needs no BIOS file; " &
+              "the mode takes effect on the next ROM load.")
+  discard igRadioButton_IntPtr("HLE (no BIOS file needed)", addr b.bios_mode, 0)
+  discard igRadioButton_IntPtr("Real BIOS", addr b.bios_mode, 1)
+  discard igRadioButton_IntPtr("Real BIOS init, HLE SWI calls", addr b.bios_mode, 2)
   igUnindent(106)
 
   b.fe.render("GBA BIOS", browse, [], proc(path: string) =
@@ -62,7 +71,12 @@ proc reset*(b: BiosSelection) =
     copyMem(addr b.bios_buf[0], cstring(s), copy_len)
   b.buf_valid = b.is_buf_valid()
   b.run_bios  = b.cfg.run_bios
+  b.bios_mode = if b.cfg.hle_after_bios: 2'i32
+                elif b.cfg.use_hle: 0'i32
+                else: 1'i32
 
 proc apply*(b: BiosSelection) =
-  b.cfg.bios_path = b.bios_buf_str()
-  b.cfg.run_bios  = b.run_bios
+  b.cfg.bios_path      = b.bios_buf_str()
+  b.cfg.run_bios       = b.run_bios
+  b.cfg.use_hle        = b.bios_mode == 0
+  b.cfg.hle_after_bios = b.bios_mode == 2

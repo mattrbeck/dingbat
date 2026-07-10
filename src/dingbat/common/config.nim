@@ -207,6 +207,7 @@ proc new_config*(): Config =
     keybindings:     default_keybindings(),
     recents:         @[],
     run_bios:        false,
+    use_hle:         true,   # fresh configs have no BIOS file → HLE
     bios_path:       "",
     headless:        false,
     gb_bootrom_path: "",
@@ -232,10 +233,20 @@ proc parse_config(j: JsonNode): Config =
   if j.hasKey("color_correction"):
     cfg.color_correction = j["color_correction"].getBool(true)
   # bios path is nested under "gba" key to match Crystal's config structure
+  var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
     let gba = j["gba"]
     if gba.hasKey("bios") and gba["bios"].kind == JString:
       cfg.bios_path = gba["bios"].getStr("")
+    if gba.hasKey("hle"):
+      hle_key_present = true
+      cfg.use_hle = gba["hle"].getBool(false)
+    if gba.hasKey("hle_after_bios"):
+      cfg.hle_after_bios = gba["hle_after_bios"].getBool(false)
+  if not hle_key_present:
+    # Legacy configs predate the persisted SWI mode: keep the old behavior
+    # of defaulting to HLE exactly when no BIOS file is configured
+    cfg.use_hle = cfg.bios_path.len == 0
   if j.hasKey("gb") and j["gb"].kind == JObject:
     let gb = j["gb"]
     if gb.hasKey("bootrom") and gb["bootrom"].kind == JString:
@@ -304,6 +315,8 @@ proc save_config*(cfg: Config) =
     lines.add("  bios: " & yaml_str(cfg.bios_path))
   else:
     lines.add("  bios:")
+  lines.add("  hle: " & $cfg.use_hle)
+  lines.add("  hle_after_bios: " & $cfg.hle_after_bios)
   lines.add("gb:")
   if cfg.gb_bootrom_path.len > 0:
     lines.add("  bootrom: " & yaml_str(cfg.gb_bootrom_path))
