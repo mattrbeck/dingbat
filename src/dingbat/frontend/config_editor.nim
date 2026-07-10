@@ -3,6 +3,7 @@ import ../common/config
 import file_explorer
 import bios_selection
 import keybindings_widget
+import controller_widget
 
 type
   ConfigEditor* = ref object
@@ -10,6 +11,7 @@ type
     fe*:          FileExplorer
     bios*:        BiosSelection
     keybindings*: KeybindingsWidget
+    controller*:  ControllerWidget
     open*:        bool
     prev_open:    bool
 
@@ -19,6 +21,7 @@ proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
     fe:          fe,
     bios:        new_bios_selection(cfg, fe),
     keybindings: new_keybindings_widget(cfg),
+    controller:  new_controller_widget(cfg),
     open:        false,
     prev_open:   false,
   )
@@ -26,10 +29,12 @@ proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
 proc do_reset(ed: ConfigEditor) =
   ed.bios.reset()
   ed.keybindings.reset()
+  ed.controller.reset()
 
 proc do_apply(ed: ConfigEditor) =
   ed.bios.apply()
   ed.keybindings.apply()
+  ed.controller.apply()
   save_config(ed.cfg)
 
 proc render*(ed: ConfigEditor) =
@@ -64,6 +69,13 @@ proc render*(ed: ConfigEditor) =
     if ed.keybindings.visible:
       igBeginGroup()
       ed.keybindings.render()
+      igEndGroup()
+      igEndTabItem()
+
+    ed.controller.visible = igBeginTabItem("Controller", nil, 0)
+    if ed.controller.visible:
+      igBeginGroup()
+      ed.controller.render()
       igEndGroup()
       igEndTabItem()
 
