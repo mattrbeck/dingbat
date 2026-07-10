@@ -367,6 +367,9 @@ proc process_pending_state() =
 # ──────────────────────────── Rendering ────────────────────────────
 
 proc render_logo() =
+  # Bind explicitly: other code (uniform updates, debug texture uploads) may
+  # have switched the active program/texture between frames
+  glUseProgram(app.logo_shader)
   glBindTexture(GL_TEXTURE_2D, app.logo_texture)
   var w, h: cint
   getSize(app.window, w, h)
@@ -378,6 +381,9 @@ proc render_logo() =
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
 proc render_game() =
+  if app.emu_kind != ekNone:
+    glUseProgram(app.game_shader)
+    glBindTexture(GL_TEXTURE_2D, app.game_texture)
   case app.emu_kind
   of ekGBA:
     if app.gba_emu == nil: return
