@@ -649,6 +649,17 @@ proc main() =
      display_mode.refresh_rate > 0:
     present_interval = uint32(1000 div display_mode.refresh_rate)
   var last_present = getTicks()
+  # Pacing diagnostics (env-gated): DINGBAT_PACING_LOG=1 prints one line per
+  # second with emulated-frame counts and SDL audio queue depth bounds, for
+  # verifying that audio-sync pacing holds the hardware frame rate (59.7275)
+  # without draining the queue (qmin=0 would mean an underrun)
+  let pacing_log = getEnv("DINGBAT_PACING_LOG").len > 0
+  var pace_frames = 0
+  var pace_total  = 0
+  var pace_min_q  = uint32.high
+  var pace_max_q  = 0'u32
+  var pace_start  = 0'u32
+  var pace_last   = 0'u32
   while app.running:
     var emulated = false
     if not app.paused:
@@ -662,6 +673,28 @@ proc main() =
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
+    if pacing_log and app.emu_kind == ekGBA and app.gba_emu != nil and
+       not app.paused:
+      let q = app.gba_emu.apu.audio_queued_bytes()
+      pace_min_q = min(pace_min_q, q)
+      pace_max_q = max(pace_max_q, q)
+      if emulated:
+        if pace_start == 0:
+          pace_start = getTicks()
+          pace_last  = pace_start
+        inc pace_frames
+        inc pace_total
+      if pace_start != 0:
+        let t = getTicks()
+        if t - pace_last >= 1000:
+          let elapsed = float(t - pace_start) / 1000.0
+          echo &"pacing t={elapsed:.2f}s frames_1s={pace_frames} " &
+               &"total={pace_total} avg_fps={float(pace_total - 1)/elapsed:.4f} " &
+               &"qmin={pace_min_q} qmax={pace_max_q}"
+          pace_last = t
+          pace_frames = 0
+          pace_min_q = uint32.high
+          pace_max_q = 0
     handle_input()
     let now = getTicks()
     var presented = false

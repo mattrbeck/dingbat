@@ -115,6 +115,25 @@ proc audio_ahead*(apu: APU): bool =
       sdl_get_queued_audio_size(apu.audio_dev) >
         uint32(APU_BUFFER_SIZE * sizeof(int16))
 
+when not defined(test_harness) and not defined(emscripten):
+  # Debug instrumentation, env-gated and zero-cost when unset:
+  #   DINGBAT_AUDIO_DUMP=<path>  writes every mixed sample as raw s16le stereo
+  #   (exactly the bytes queued to SDL) for offline waveform comparison
+  var audio_dump_file: File = nil
+  var audio_dump_checked = false
+
+  proc audio_dump_dest(): File =
+    if not audio_dump_checked:
+      audio_dump_checked = true
+      let path = getEnv("DINGBAT_AUDIO_DUMP")
+      if path.len > 0:
+        audio_dump_file = open(path, fmWrite)
+    audio_dump_file
+
+  proc audio_queued_bytes*(apu: APU): uint32 =
+    ## Bytes currently queued to the SDL audio device (pacing diagnostics)
+    if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
+
 proc timer_overflow*(apu: APU; timer: int) =
   apu.dma_channels.timer_overflow(timer)
 
@@ -185,6 +204,11 @@ proc get_sample*(apu: APU) =
     apu.buffer[apu.buffer_pos + 1] = total_right * 32
     apu.buffer_pos += 2
     if apu.buffer_pos >= APU_BUFFER_SIZE:
+      let dump = audio_dump_dest()
+      if dump != nil:
+        discard dump.writeBuffer(addr apu.buffer[0],
+                                 APU_BUFFER_SIZE * sizeof(int16))
+        dump.flushFile()
       if apu.audio_dev != 0:
         if not apu.sync:
           sdl_clear_queued_audio(apu.audio_dev)
