@@ -405,6 +405,12 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
           apply_master_volume()
           save_config(app.cfg)
+        if igBeginMenu("Channels", app.emu_kind == ekGBA and app.gba_emu != nil):
+          const ch_names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
+          for ch in 0 .. 5:
+            discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
+                                       addr app.gba_emu.apu.channel_mask[ch], true)
+          igEndMenu()
         igSeparator()
         if igBeginMenu("Frame size", true):
           for s in 1 .. 8:
@@ -530,10 +536,9 @@ proc handle_input() =
         elif sym == K_TAB and pressed:
           app.gba_emu.apu.sync = not app.gba_emu.apu.sync
         elif pressed and sym >= K_1 and sym <= K_6:
+          # Feedback is visible in the Audio/Video > Channels submenu
           let ch = int(sym) - int(K_1)
           app.gba_emu.apu.channel_mask[ch] = not app.gba_emu.apu.channel_mask[ch]
-          const names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
-          echo names[ch], if app.gba_emu.apu.channel_mask[ch]: " ON" else: " OFF"
       elif app.emu_kind == ekGB and app.gb_emu != nil:
         if app.cfg.keybindings.hasKey(sym):
           app.gb_emu.handle_input(app.cfg.keybindings[sym], pressed)
