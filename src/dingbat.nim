@@ -203,6 +203,10 @@ type AppState = ref object
   scale:           int
   running:         bool
   paused:          bool
+  # Save states execute only at frame boundaries: the menu/hotkey sets a
+  # pending flag and the main loop services it right after run_until_frame
+  pending_save:    bool
+  pending_load:    bool
   fullscreen:      bool
   enable_overlay:  bool
   last_mouse_tick: uint32
@@ -304,6 +308,45 @@ proc load_rom(path: string) =
   save_config(app.cfg)
   setPosition(app.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)
   app.paused = false
+  app.pending_save = false
+  app.pending_load = false
+
+# ──────────────────────────── Save States ────────────────────────────
+
+proc current_rom_path(): string =
+  case app.emu_kind
+  of ekGBA: (if app.gba_emu != nil: app.gba_emu.rom_path else: "")
+  of ekGB:  (if app.gb_emu != nil: app.gb_emu.rom_path else: "")
+  of ekNone: ""
+
+proc state_file_path(): string =
+  ## One slot per ROM for now; the state header reserves a slot byte so more
+  ## slots can be added later
+  let rom = current_rom_path()
+  if rom.len == 0: return ""
+  config_dir() / "states" / rom.extractFilename() & ".state"
+
+proc process_pending_state() =
+  ## Runs between frames only (right after run_until_frame returns, or while
+  ## paused), so the core is always at a frame boundary here. Success/failure
+  ## is echoed for now; the bool results are ready for a future toast/OSD.
+  let path = state_file_path()
+  if app.pending_save:
+    app.pending_save = false
+    if path.len > 0:
+      let ok = case app.emu_kind
+        of ekGBA: app.gba_emu.save_state(path)
+        of ekGB:  app.gb_emu.save_state(path)
+        of ekNone: false
+      if ok: echo "State saved: ", path
+  if app.pending_load:
+    app.pending_load = false
+    if path.len > 0:
+      let ok = case app.emu_kind
+        of ekGBA: app.gba_emu.load_state(path)
+        of ekGB:  app.gb_emu.load_state(path)
+        of ekNone: false
+      if ok: echo "State loaded: ", path
 
 # ──────────────────────────── Rendering ────────────────────────────
 
@@ -380,6 +423,14 @@ proc render_imgui() =
             app.cfg.recents.setLen(0)
             save_config(app.cfg)
           igEndMenu()
+        igSeparator()
+        let game_loaded = app.emu_kind != ekNone
+        if igMenuItem_Bool(cstring("Save State  " & MOD_KEY_STR & "+S"),
+                           nil, false, game_loaded):
+          app.pending_save = true
+        if igMenuItem_Bool(cstring("Load State  " & MOD_KEY_STR & "+L"),
+                           nil, false, game_loaded):
+          app.pending_load = true
         igSeparator()
         if igMenuItem_Bool("Settings", nil, false, true):
           app.ce.open = true
@@ -551,6 +602,10 @@ proc handle_input() =
             if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
           of K_p:
             app.paused = not app.paused
+          of K_s:
+            if app.emu_kind != ekNone: app.pending_save = true
+          of K_l:
+            if app.emu_kind != ekNone: app.pending_load = true
           of K_f:
             app.fullscreen = not app.fullscreen
             let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
@@ -803,6 +858,9 @@ proc main() =
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
+    # Pending save/load states run here, at a guaranteed frame boundary
+    if (app.pending_save or app.pending_load) and app.emu_kind != ekNone:
+      process_pending_state()
     if pacing_log and app.emu_kind == ekGBA and app.gba_emu != nil and
        not app.paused:
       let q = app.gba_emu.apu.audio_queued_bytes()
