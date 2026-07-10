@@ -29,3 +29,6 @@ web/rom.gbc
 
 # Claude Code local state
 .claude/
+
+# Windows cross-build output
+dist/

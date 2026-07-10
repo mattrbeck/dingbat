@@ -18,6 +18,19 @@ To build for the browser using Emscripten, run `nimble wasm`. This configures va
 
 Serve the `web/` directory with `python3 web/serve.py` (required for SharedArrayBuffer support).
 
+### Windows Build (cross-compiled)
+
+Windows binaries are cross-compiled with mingw-w64 inside a Docker container — no Windows machine needed:
+
+```sh
+docker build --platform linux/amd64 -t dingbat-win-cross docker/windows-cross
+docker run --rm --platform linux/amd64 \
+  -v "$PWD":/src -v dingbat-nimble:/root/.nimble -w /src \
+  dingbat-win-cross ./docker/windows-cross/build.sh
+```
+
+This produces a self-contained `dist/windows/dingbat.exe` — SDL2 (zlib-licensed) and the mingw C++ runtime are linked statically, so the single exe is the entire distribution. If an end user ever needs a different SDL2 build (e.g. for a controller fix), SDL's dynamic API override still works: set `SDL_DYNAMIC_API=C:\path\to\SDL2.dll`.
+
 ## Usage
 
 Running the emulator is as simple as running the `dingbat` executable. If you'd rather launch a specific ROM directly, you can pass it as a command-line argument: `./dingbat /path/to/rom`.
