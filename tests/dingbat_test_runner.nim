@@ -1,7 +1,10 @@
 import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt]
+import zippy/ziparchives
 import png_reader
 
-const RomCacheDir = "/tmp/dingbat-test-roms"
+let RomCacheDir =
+  when defined(windows): getTempDir() / "dingbat-test-roms"
+  else: "/tmp/dingbat-test-roms"
 
 type
   TestMode = enum
@@ -54,18 +57,20 @@ proc ensure_gameboy_test_roms(): string =
     echo "Cached game-boy-test-roms directory has no ROMs, re-downloading..."
     removeDir(dir)
   echo "Downloading game-boy-test-roms release..."
-  createDir(dir)
+  createDir(RomCacheDir)
   let url = "https://github.com/c-sp/game-boy-test-roms/releases/download/v7.0/game-boy-test-roms-v7.0.zip"
-  let zipfile = dir / "roms.zip"
-  let (dl_output, dl_code) = execCmdEx(&"curl -L -o {zipfile} {url}")
+  let zipfile = RomCacheDir / "gb-roms.zip"
+  let (dl_output, dl_code) = execCmdEx(&"curl -L -o {zipfile.quoteShell} {url}")
   if dl_code != 0:
     echo "Failed to download: ", dl_output
-    removeDir(dir)
     quit(1)
-  let (extract_output, extract_code) = execCmdEx(&"unzip -q {zipfile} -d {dir}")
-  if extract_code != 0:
-    echo "Failed to extract: ", extract_output
-    removeDir(dir)
+  try:
+    # extractAll requires that dir not exist yet; it creates it
+    extractAll(zipfile, dir)
+  except ZippyError, IOError, OSError:
+    echo "Failed to extract: ", getCurrentExceptionMsg()
+    if dirExists(dir): removeDir(dir)
+    removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
   dir
@@ -149,7 +154,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmScreenshot: "screenshot"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
-    var cmd = &"{harness_path} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
+    var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
     if test.color:
       cmd.add(" --color")
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
@@ -185,7 +190,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       output: &"{pct:.1f}% correct ({total_pixels - diff_count}/{total_pixels} pixels match)",
     )
   else:
-    let cmd = &"{harness_path} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
+    let cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
     return TestResult(
       name: test.name,
@@ -374,7 +379,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/download/v1.0/suite.gba",
     "mgba-suite.gba")
-  var cmd = &"{harness} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
+  var cmd = &"{harness.quoteShell} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
   if bios_path.len > 0:
     cmd.add(&" --bios={bios_path.quoteShell}")
   let (output, code) = execCmdEx(cmd, options = {poUsePath})
@@ -490,7 +495,8 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
   lines.join("\n")
 
 proc main() =
-  let harness = getCurrentDir() / "dingbat_test"
+  let harness_name = when defined(windows): "dingbat_test.exe" else: "dingbat_test"
+  let harness = getCurrentDir() / harness_name
   if not fileExists(harness):
     echo "Error: dingbat_test not found. Run 'nimble test_build' first."
     quit(1)
