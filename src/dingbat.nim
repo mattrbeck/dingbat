@@ -207,6 +207,7 @@ type AppState = ref object
   # pending flag and the main loop services it right after run_until_frame
   pending_save:    bool
   pending_load:    bool
+  pending_step:    bool  # frame advance: run exactly one frame while paused
   fullscreen:      bool
   enable_overlay:  bool
   last_mouse_tick: uint32
@@ -393,7 +394,7 @@ proc render_imgui() =
   # loaded) always renders ImGui — it shows the drag-and-drop hint and has
   # no emulation to slow down.
   let menu_visible = show_menu_bar()
-  if app.emu_kind != ekNone and
+  if app.emu_kind != ekNone and not app.paused and
      not menu_visible and not app.enable_overlay and
      not app.fe.open and not app.ce.open and
      (app.dbg == nil or
@@ -446,6 +447,9 @@ proc render_imgui() =
                                    nil, addr should_reset, true)
         discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
                                    nil, addr app.paused, true)
+        if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
+                           nil, false, app.paused and app.emu_kind != ekNone):
+          app.pending_step = true
         # Fast Forward is inverted audio sync: unsynced emulation runs
         # uncapped, so checked == not sync
         if app.emu_kind == ekGBA and app.gba_emu != nil:
@@ -574,6 +578,24 @@ proc render_imgui() =
         igTextDisabled("Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
       igEnd()
 
+  # Paused badge: without it a paused game with the menu bar hidden looks
+  # like a frozen emulator
+  if app.paused and app.emu_kind != ekNone:
+    let vp = igGetMainViewport()
+    if vp != nil:
+      let (vpos, vsize) = (vp[].Pos, vp[].Size)
+      igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x - 10,
+                                y: vpos.y + overlay_h + 4),
+                         cint(ImGui_Cond_Always), ImVec2(x: 1.0, y: 0.0))
+      igSetNextWindowBgAlpha(0.5'f32)
+      let badge_flags = cint(ImGui_WindowFlags_NoDecoration) or
+                        cint(ImGui_WindowFlags_NoMove) or
+                        cint(ImGui_WindowFlags_NoInputs) or
+                        cint(ImGui_WindowFlags_NoSavedSettings)
+      if igBegin("##paused_badge", nil, badge_flags):
+        igText("Paused")
+      igEnd()
+
   igRender()
   ImGui_Impl_OpenGL3_RenderDrawData(igGetDrawData())
 
@@ -602,6 +624,8 @@ proc handle_input() =
             if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
           of K_p:
             app.paused = not app.paused
+          of K_n:
+            if app.paused and app.emu_kind != ekNone: app.pending_step = true
           of K_s:
             if app.emu_kind != ekNone: app.pending_save = true
           of K_l:
@@ -847,14 +871,18 @@ proc main() =
   var pace_last   = 0'u32
   while app.running:
     var emulated = false
-    if not app.paused:
+    # Frame advance bypasses the audio pacing gate: it must run exactly one
+    # frame regardless of queue depth
+    let stepping = app.paused and app.pending_step
+    app.pending_step = false
+    if not app.paused or stepping:
       case app.emu_kind
       of ekGBA:
-        if app.gba_emu != nil and not app.gba_emu.apu.audio_ahead():
+        if app.gba_emu != nil and (stepping or not app.gba_emu.apu.audio_ahead()):
           app.gba_emu.run_until_frame()
           emulated = true
       of ekGB:
-        if app.gb_emu != nil and not app.gb_emu.apu.audio_ahead():
+        if app.gb_emu != nil and (stepping or not app.gb_emu.apu.audio_ahead()):
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
