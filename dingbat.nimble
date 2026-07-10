@@ -21,3 +21,6 @@ task wasm, "Build the WASM/Emscripten target":
 task test_build, "Build the test harness":
   exec "nim c -d:test_harness -d:release --path:src -o:dingbat_test tests/dingbat_test.nim"
   exec "nim c -d:test_harness -d:release --path:src --path:tests -o:dingbat_test_runner tests/dingbat_test_runner.nim"
+
+task bench_build, "Build the headless benchmark harness":
+  exec "nim c -d:test_harness -d:release --path:src -o:dingbat_bench tests/dingbat_bench.nim"

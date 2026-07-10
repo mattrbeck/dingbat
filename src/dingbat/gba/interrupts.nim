@@ -23,6 +23,9 @@ proc check_interrupts*(intr: Interrupts) =
   if pending != 0:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0:
       return  # Stop mode ignores other interrupt sources
+    if intr.gba.cpu.stopped:
+      # Waking from Stop turns the LCD back on without any memory write
+      intr.gba.ppu.render_dirty = true
     intr.gba.cpu.stopped = false
     intr.gba.cpu.halted = false
     if intr.ime:

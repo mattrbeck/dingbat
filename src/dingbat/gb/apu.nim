@@ -38,6 +38,16 @@ when not defined(test_harness):
 proc toggle_sync*(apu: GbApu) =
   apu.sync = not apu.sync
 
+proc audio_ahead*(apu: GbApu): bool =
+  ## See the GBA APU's audio_ahead: lets the frontend pace synced emulation
+  ## without blocking inside the sample callback
+  when defined(test_harness):
+    false
+  else:
+    apu.sync and apu.audio_dev != 0 and
+      sdl_get_queued_audio_size_gb(apu.audio_dev) >
+        uint32(GB_APU_BUFFER_SIZE * 4)
+
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage

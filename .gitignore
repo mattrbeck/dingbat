@@ -25,6 +25,7 @@ web/rom.gbc
 /dingbat
 /dingbat_test
 /dingbat_test_runner
+/dingbat_bench
 
 # Claude Code local state
 .claude/

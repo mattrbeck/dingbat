@@ -234,6 +234,12 @@ proc load_rom(path: string) =
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
   glBindTexture(GL_TEXTURE_2D, app.game_texture)
+  # Allocate the texture storage once here; per-frame uploads use
+  # glTexSubImage2D, which avoids a driver-side reallocation every frame
+  # (glTexImage2D each frame cost ~0.4 ms on macOS's GL-on-Metal stack)
+  let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
+  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
+               GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
   # Update recents
   var recs = app.cfg.recents
   let idx = recs.find(path)
@@ -262,15 +268,16 @@ proc render_game() =
   case app.emu_kind
   of ekGBA:
     if app.gba_emu == nil: return
-    glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GBA_W, GBA_H, 0,
-                 GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                 addr app.gba_emu.ppu.framebuffer[0])
+    if not app.gba_emu.ppu.frame_static:
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GBA_W, GBA_H,
+                      GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+                      addr app.gba_emu.ppu.framebuffer[0])
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekGB:
     if app.gb_emu == nil: return
-    glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GB_W, GB_H, 0,
-                 GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                 addr app.gb_emu.ppu.framebuffer[0])
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GB_W, GB_H,
+                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+                    addr app.gb_emu.ppu.framebuffer[0])
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekNone:
     render_logo()
@@ -283,6 +290,16 @@ proc show_menu_bar(): bool =
   discard showCursor(result)
 
 proc render_imgui() =
+  # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
+  # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
+  # NewFrame/Render pair costs real throughput
+  let menu_visible = show_menu_bar()
+  if not menu_visible and not app.enable_overlay and
+     not app.fe.open and not app.ce.open and
+     (app.dbg == nil or
+      not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)):
+    return
+
   ImGui_Impl_OpenGL3_NewFrame()
   ImGui_ImplSDL2_NewFrame()
   igNewFrame()
@@ -290,7 +307,7 @@ proc render_imgui() =
   var overlay_h: cfloat = 10.0
   var open_rom = false
 
-  if show_menu_bar():
+  if menu_visible:
     if igBeginMainMenuBar():
       # File menu
       if igBeginMenu("File", true):
@@ -461,8 +478,10 @@ var fps_us        = 0'i64
 var fps_last_time = getTime()
 var fps_second    = getTime().toUnix() mod 60
 
-proc update_fps_title() =
-  inc fps_frames
+proc update_fps_title(emulated: bool) =
+  # Count emulated frames only: the main loop now iterates at the display's
+  # refresh rate even when emulation is paced slower by audio sync
+  if emulated: inc fps_frames
   let now = getTime()
   fps_us += (now - fps_last_time).inMicroseconds()
   fps_last_time = now
@@ -615,20 +634,48 @@ proc main() =
       echo "ROM file not found: ", rom_path; system.quit(1)
     load_rom(rom_path)
 
+  # The UI (ImGui + present) runs at the display's refresh rate, decoupled
+  # from emulation speed in both directions:
+  #  - Emulation faster than the display (audio sync off / fast forward):
+  #    presents are skipped down to the display rate instead of wasting
+  #    ~1 ms per emulated frame on texture upload + swap.
+  #  - Emulation paced below the display rate (audio sync at ~60 fps on a
+  #    120 Hz display): audio pacing happens here — skip emulation while the
+  #    audio queue is ahead — so the loop keeps servicing the UI instead of
+  #    blocking inside the APU's queue-drain wait.
+  var display_mode: DisplayMode
+  var present_interval = 8'u32
+  if getDesktopDisplayMode(0, display_mode) == SdlSuccess and
+     display_mode.refresh_rate > 0:
+    present_interval = uint32(1000 div display_mode.refresh_rate)
+  var last_present = getTicks()
   while app.running:
+    var emulated = false
     if not app.paused:
       case app.emu_kind
       of ekGBA:
-        if app.gba_emu != nil: app.gba_emu.run_until_frame()
+        if app.gba_emu != nil and not app.gba_emu.apu.audio_ahead():
+          app.gba_emu.run_until_frame()
+          emulated = true
       of ekGB:
-        if app.gb_emu != nil: app.gb_emu.run_until_frame()
+        if app.gb_emu != nil and not app.gb_emu.apu.audio_ahead():
+          app.gb_emu.run_until_frame()
+          emulated = true
       of ekNone: discard
     handle_input()
-    glClear(GL_COLOR_BUFFER_BIT)
-    render_game()
-    render_imgui()
-    glSwapWindow(window)
-    update_fps_title()
+    let now = getTicks()
+    var presented = false
+    if now - last_present >= present_interval:
+      last_present = now
+      glClear(GL_COLOR_BUFFER_BIT)
+      render_game()
+      render_imgui()
+      glSwapWindow(window)
+      presented = true
+    update_fps_title(emulated)
+    if not emulated and not presented:
+      # Idle until audio drains or the next present slot; don't busy-spin
+      delay(1)
   flush_gb_save()
 
 main()

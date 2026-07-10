@@ -85,6 +85,16 @@ proc getAudioBufferLen(): cint {.exportc.} =
 proc clearAudioBuffer() {.exportc.} =
   audioBuffer.setLen(0)
 
+proc benchFrames(n: cint) {.exportc.} =
+  ## Run emulation frames without presenting; lets the JS side measure how
+  ## much of a frame is emulation vs the LUT convert + texture upload path.
+  case stateKind
+  of ekGBA:
+    for _ in 0 ..< n: stateGba.step_frame()
+  of ekGB:
+    for _ in 0 ..< n: stateGb.step_frame()
+  of ekNone: discard
+
 proc isStopped(): cint {.exportc.} =
   ## 1 while the GBA is in Stop mode (sleeping), used by the JS frontends
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
@@ -126,8 +136,9 @@ proc loop_tick() {.exportc.} =
   of ekGBA:
     if stateTexture == nil: return
     stateGba.step_frame()
-    present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
-                      GBA_W * GBA_H, GBA_W * 4)
+    if not stateGba.ppu.frame_static:
+      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                        GBA_W * GBA_H, GBA_W * 4)
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()

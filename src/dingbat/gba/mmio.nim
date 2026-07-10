@@ -37,6 +37,9 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x301:
     mmio.gba.cpu.halted = true
     mmio.gba.cpu.stopped = bit(value, 7)  # Stop wakes only on keypad/cartridge/SIO
+    # Stop mode blanks the LCD without any memory write; force a re-render
+    if mmio.gba.cpu.stopped:
+      mmio.gba.ppu.render_dirty = true
     # Wake immediately if an enabled interrupt is already pending
     mmio.gba.interrupts.schedule_interrupt_check()
   else:

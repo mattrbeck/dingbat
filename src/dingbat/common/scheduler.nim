@@ -3,6 +3,8 @@ when defined(emscripten):
 else:
   type CycleCount* = uint64
 
+const MAX_EVENTS = 64  # far above the ~15 events ever pending at once
+
 type
   EventType* = enum
     # Shared
@@ -22,7 +24,10 @@ type
     kind*: EventType
 
   Scheduler* = ref object
-    events*: seq[Event]
+    # Sorted descending by target cycle (soonest last) in a fixed array so
+    # scheduling never touches seq grow/shrink machinery; pop is O(1)
+    evbuf: array[MAX_EVENTS, Event]
+    nevents: int
     cycles*: CycleCount
     next_event: CycleCount
     current_speed: uint8
@@ -30,19 +35,24 @@ type
 
 proc new_scheduler*(): Scheduler =
   result = Scheduler(next_event: high(CycleCount))
-  result.events = @[]
+
+iterator events*(s: Scheduler): Event =
+  ## Pending events, soonest last (kept for debug UIs and RTC queries)
+  for i in 0 ..< s.nevents:
+    yield s.evbuf[i]
 
 proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
-  # Insert in descending order (largest first) so pop from end is O(1).
+  assert s.nevents < MAX_EVENTS
   let target = s.cycles + CycleCount(cycles)
-  let ev = Event(cycles: target, kind: kind)
-  var idx = 0
-  for i in countdown(s.events.len - 1, 0):
-    if s.events[i].cycles >= target:
-      idx = i + 1
-      break
-  s.events.insert(ev, idx)
-  s.next_event = s.events[^1].cycles
+  # Shift sooner events right; ties keep the newest event at the higher
+  # index so it pops first (matches the historical insertion order)
+  var i = s.nevents
+  while i > 0 and s.evbuf[i - 1].cycles < target:
+    s.evbuf[i] = s.evbuf[i - 1]
+    dec i
+  s.evbuf[i] = Event(cycles: target, kind: kind)
+  inc s.nevents
+  s.next_event = s.evbuf[s.nevents - 1].cycles
 
 proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
   var c = cycles
@@ -53,30 +63,35 @@ proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
 proc clear*(s: Scheduler; kind: EventType) =
   # Remove all events of a given type (single-pass compaction).
   var j = 0
-  for i in 0 ..< s.events.len:
-    if s.events[i].kind != kind:
-      if j != i: s.events[j] = s.events[i]
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind != kind:
+      if j != i: s.evbuf[j] = s.evbuf[i]
       inc j
-  s.events.setLen(j)
-  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
+  s.nevents = j
+  s.next_event = if j > 0: s.evbuf[j - 1].cycles else: high(CycleCount)
 
 proc call_current*(s: Scheduler) =
-  while s.events.len > 0:
-    let ev = s.events[^1]
+  while s.nevents > 0:
+    let ev = s.evbuf[s.nevents - 1]
     if s.cycles < ev.cycles:
       s.next_event = ev.cycles
       return
-    s.events.setLen(s.events.len - 1)
+    dec s.nevents
     s.dispatch(ev.kind)
   s.next_event = high(CycleCount)
 
-proc tick*(s: Scheduler; cycles: int) =
-  if s.cycles + CycleCount(cycles) < s.next_event:
-    s.cycles += CycleCount(cycles)
+proc tick*(s: Scheduler; cycles: int) {.inline.} =
+  let target = s.cycles + CycleCount(cycles)
+  if target < s.next_event:
+    s.cycles = target
   else:
-    for _ in 0 ..< cycles:
-      s.cycles += 1
+    # Jump directly to each due event's timestamp so handlers observe the
+    # exact cycle they were scheduled for (same semantics as stepping one
+    # cycle at a time, without the per-cycle loop).
+    while target >= s.next_event:
+      s.cycles = s.next_event
       s.call_current()
+    s.cycles = target
 
 proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event
@@ -86,24 +101,24 @@ proc rebase*(s: Scheduler) =
   ## Subtract current cycle count from all event targets and reset to zero.
   ## Prevents overflow when using uint32 cycle counters.
   let base = s.cycles
-  for i in 0 ..< s.events.len:
-    s.events[i].cycles -= base
-  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
+  for i in 0 ..< s.nevents:
+    s.evbuf[i].cycles -= base
+  s.next_event = if s.nevents > 0: s.evbuf[s.nevents - 1].cycles else: high(CycleCount)
   s.cycles = 0
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
   let old = s.current_speed
   if speed == old: return
   s.current_speed = speed
-  for i in 0 ..< s.events.len:
-    if s.events[i].kind != etIME:
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind != etIME:
       # Real-time events (APU) are stored in CPU cycles, which run twice as
       # fast in double speed: entering double speed doubles the remaining
       # delay, leaving it halves it. The old code shifted right with an
       # underflowing uint8 exponent when entering, collapsing every pending
       # event to fire immediately.
-      let remaining = s.events[i].cycles - s.cycles
+      let remaining = s.evbuf[i].cycles - s.cycles
       let rescaled = if speed > old: remaining shl (speed - old)
                      else: remaining shr (old - speed)
-      s.events[i].cycles = s.cycles + rescaled
-  s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
+      s.evbuf[i].cycles = s.cycles + rescaled
+  s.next_event = if s.nevents > 0: s.evbuf[s.nevents - 1].cycles else: high(CycleCount)

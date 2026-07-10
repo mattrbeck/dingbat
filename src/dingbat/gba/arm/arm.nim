@@ -114,6 +114,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # wake sources are faithful: only keypad/cartridge/SIO interrupts
     cpu.halted = true
     cpu.stopped = true
+    # Stop blanks the LCD without any memory write; force a re-render
+    cpu.gba.ppu.render_dirty = true
     cpu.gba.interrupts.schedule_interrupt_check()
   of 0x06: hle_div(cpu, 0, 1)  # Div
   of 0x07: hle_div(cpu, 1, 0)  # DivArm (swapped inputs)

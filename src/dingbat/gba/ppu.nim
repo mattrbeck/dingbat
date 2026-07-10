@@ -46,6 +46,7 @@ proc new_ppu*(gba: GBA): PPU =
     result.layer_palettes[i] = newSeq[byte](240)
   for i in 0..239:
     result.sprite_pixels[i] = SPRITE_PIXEL_DEFAULT
+  result.render_dirty = true
   result.start_line()
 
 proc bitmap*(ppu: PPU): bool =
@@ -92,6 +93,10 @@ proc end_hblank*(ppu: PPU) =
 
 proc draw*(ppu: PPU) =
   ppu.frame = true
+  # True only when every scanline of this frame was skipped: the framebuffer
+  # is bit-identical to the previous frame, so frontends can skip the
+  # texture upload as well
+  ppu.frame_static = ppu.skip_render
 
 proc se_address*(ppu: PPU; tx, ty, screen_size: int): int {.inline.} =
   var n = tx + ty * 32
@@ -375,6 +380,7 @@ proc render_sprites*(ppu: PPU) =
         if pal_idx > 0:
           ppu.sprite_pixels[col].palette = uint16(pal_idx)
           ppu.sprite_pixels[col].blends  = obj_mode == 0b01
+          if obj_mode == 0b01: ppu.line_sprite_blend = true
 
 proc window_contains(v, lo, hi: uint16): bool {.inline.} =
   # Hardware windows are comparators: when the start is past the end the
@@ -382,100 +388,219 @@ proc window_contains(v, lo, hi: uint16): bool {.inline.} =
   if lo <= hi: v >= lo and v < hi
   else: v >= lo or v < hi
 
-proc get_enables*(ppu: PPU; col: int): tuple[enable_bits: uint16, effects_enabled: bool] =
-  let vc = ppu.vcount
-  if ppu.dispcnt.window_0_display and
-     window_contains(uint16(col), ppu.win0h.x1, ppu.win0h.x2) and
-     window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2)):
-    (uint16(ppu.winin.window_0_enable_bits), ppu.winin.window_0_color_special_effect)
-  elif ppu.dispcnt.window_1_display and
-       window_contains(uint16(col), ppu.win1h.x1, ppu.win1h.x2) and
-       window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2)):
-    (uint16(ppu.winin.window_1_enable_bits), ppu.winin.window_1_color_special_effect)
-  elif ppu.dispcnt.obj_window_display and ppu.sprite_pixels[col].window:
-    (uint16(ppu.winout.obj_window_enable_bits), ppu.winout.obj_window_color_special_effect)
-  elif ppu.dispcnt.window_0_display or ppu.dispcnt.window_1_display or ppu.dispcnt.obj_window_display:
-    (uint16(ppu.winout.outside_enable_bits), ppu.winout.outside_color_special_effect)
+proc fill_window_cols(ppu: PPU; winh: WINH; bits: uint16; effect: bool) =
+  # Fill columns [x1, x2); when x1 > x2 the window wraps around the screen edge
+  let x1 = int(winh.x1)
+  let x2 = int(winh.x2)
+  if x1 <= x2:
+    for col in x1 ..< min(x2, 240):
+      ppu.line_enables[col] = bits
+      ppu.line_effects[col] = effect
   else:
-    (uint16(ppu.dispcnt.default_enable_bits), true)
+    for col in 0 ..< min(x2, 240):
+      ppu.line_enables[col] = bits
+      ppu.line_effects[col] = effect
+    for col in min(x1, 240) ..< 240:
+      ppu.line_enables[col] = bits
+      ppu.line_effects[col] = effect
+
+proc compute_line_enables*(ppu: PPU) =
+  # Same per-pixel result as checking win0 -> win1 -> obj window -> outside,
+  # but computed once per scanline: paint the lowest-priority source first,
+  # then overlay win1, then win0.
+  let vc = ppu.vcount
+  let obj_active = ppu.dispcnt.obj_window_display
+  let out_bits = uint16(ppu.winout.outside_enable_bits)
+  let out_eff  = ppu.winout.outside_color_special_effect
+  let obj_bits = uint16(ppu.winout.obj_window_enable_bits)
+  let obj_eff  = ppu.winout.obj_window_color_special_effect
+  for col in 0 .. 239:
+    if obj_active and ppu.sprite_pixels[col].window:
+      ppu.line_enables[col] = obj_bits
+      ppu.line_effects[col] = obj_eff
+    else:
+      ppu.line_enables[col] = out_bits
+      ppu.line_effects[col] = out_eff
+  if ppu.dispcnt.window_1_display and
+     window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2)):
+    ppu.fill_window_cols(ppu.win1h, uint16(ppu.winin.window_1_enable_bits),
+                         ppu.winin.window_1_color_special_effect)
+  if ppu.dispcnt.window_0_display and
+     window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2)):
+    ppu.fill_window_cols(ppu.win0h, uint16(ppu.winin.window_0_enable_bits),
+                         ppu.winin.window_0_color_special_effect)
+
+proc compute_prio_bgs*(ppu: PPU) =
+  # BGs that can contribute this scanline, grouped by priority, in BG-index
+  # order (hardware picks the lower BG number at equal priority). BGs disabled
+  # in DISPCNT never render (their layer_palettes stay 0), so skip them here.
+  for p in 0 .. 3: ppu.prio_count[p] = 0
+  for bg in 0 .. 3:
+    if bit(uint16(ppu.dispcnt), 8 + bg):
+      let p = int(ppu.bgcnt[bg].priority)
+      ppu.prio_bgs[p][ppu.prio_count[p]] = int8(bg)
+      inc ppu.prio_count[p]
+
+# SWAR helpers: spread the three 5-bit BGR555 channels into separate 16-bit
+# lanes of a uint64 so all three can be scaled/added/saturated at once
+proc bgr16_spread(c: uint16): uint64 {.inline.} =
+  uint64(c and 0x1F) or (uint64(c and 0x3E0) shl 11) or (uint64(c and 0x7C00) shl 22)
+
+const BGR_LANE_MASK = 0xFF'u64 or (0xFF'u64 shl 16) or (0xFF'u64 shl 32)
+
+proc bgr16_pack_sat(v: uint64): uint16 {.inline.} =
+  # Saturate each lane at 0x1F, then pack back to BGR555
+  var r = v and 0xFFFF'u64
+  var g = (v shr 16) and 0xFFFF'u64
+  var b = (v shr 32) and 0xFFFF'u64
+  if r > 0x1F: r = 0x1F
+  if g > 0x1F: g = 0x1F
+  if b > 0x1F: b = 0x1F
+  uint16(r or (g shl 5) or (b shl 10))
 
 proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 =
   case blend_mode
   of 0: top_u16  # None
   of 1:          # Blend
-    let eva = min(16, int(ppu.bldalpha.eva_coefficient))
-    let evb = min(16, int(ppu.bldalpha.evb_coefficient))
-    bgr16_add(bgr16_mul(top_u16, eva), bgr16_mul(bot_u16, evb))
+    let eva = uint64(min(16, int(ppu.bldalpha.eva_coefficient)))
+    let evb = uint64(min(16, int(ppu.bldalpha.evb_coefficient)))
+    let t = ((bgr16_spread(top_u16) * eva) shr 4) and BGR_LANE_MASK
+    let b = ((bgr16_spread(bot_u16) * evb) shr 4) and BGR_LANE_MASK
+    bgr16_pack_sat(t + b)
   of 2:          # Brighten
-    let evy = min(16, int(ppu.bldy.evy_coefficient))
-    bgr16_add(top_u16, bgr16_mul(bgr16_sub(0x7FFF'u16, top_u16), evy))
+    let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
+    let s = bgr16_spread(top_u16)
+    let d = (((bgr16_spread(0x7FFF'u16) - s) * evy) shr 4) and BGR_LANE_MASK
+    bgr16_pack_sat(s + d)
   of 3:          # Darken
-    let evy = min(16, int(ppu.bldy.evy_coefficient))
-    bgr16_sub(top_u16, bgr16_mul(top_u16, evy))
+    let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
+    let s = bgr16_spread(top_u16)
+    bgr16_pack_sat(s - (((s * evy) shr 4) and BGR_LANE_MASK))
   else: top_u16
 
-proc blend_top_bot*(ppu: PPU; top: GbaColor; bot: GbaColor; effects_enabled: bool): uint16 =
-  let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
-  let top_u16 = if top.direct: top.direct_color else: pram_u16[top.palette]
-  if effects_enabled:
-    let bot_u16 = if bot.direct: bot.direct_color else: pram_u16[bot.palette]
-    let top_selected = ppu.bldcnt.layer_target(top.layer, 1)
-    let bot_selected = ppu.bldcnt.layer_target(bot.layer, 2)
-    let blend_mode   = ppu.bldcnt.blend_mode
-    if top.special_handling and bot_selected:
-      return ppu.blend_colors(top_u16, bot_u16, 1)  # Blend
-    elif top_selected and (bot_selected or blend_mode != 1):
-      return ppu.blend_colors(top_u16, bot_u16, int(blend_mode))
-  top_u16
-
-proc select_top_colors*(ppu: PPU; enable_bits: uint16; col: int): tuple[top: GbaColor, bot: GbaColor] =
-  let sprite = ppu.sprite_pixels[col]
-  let backdrop = GbaColor(palette: 0, layer: 5, special_handling: false)
-  var top_color: GbaColor = GbaColor(palette: -1, layer: 0, special_handling: false)
-  var found_top = false
-  for priority in 0..3:
-    if bit(enable_bits, 4) and int(sprite.priority) == priority and sprite.palette != 0:
-      let color = GbaColor(palette: int(sprite.palette) + 0x100, layer: 4, special_handling: sprite.blends)
-      if not found_top:
-        top_color = color; found_top = true
-      else:
-        return (top_color, color)
-    for bg in 0..3:
-      if bit(enable_bits, bg) and int(ppu.bgcnt[bg].priority) == priority:
-        var color: GbaColor
+proc next_layer(ppu: PPU; pram_u16: ptr UncheckedArray[uint16];
+                enable_bits: uint16; col: int;
+                pos: var int): tuple[layer: int, color: uint16, blends: bool] =
+  ## Walk the layers in priority order starting at `pos` and return the next
+  ## opaque pixel; layer 5 is the backdrop. `pos` encodes (priority, slot)
+  ## as priority*8 + slot, where slot 0 is the sprite layer and slots 1..n
+  ## are the BGs of that priority, so a caller can resume the walk to find
+  ## the second layer for blending.
+  let sprite_pal  = int(ppu.sprite_pixels[col].palette)
+  let sprite_prio = int(ppu.sprite_pixels[col].priority)
+  let sprite_on   = bit(enable_bits, 4) and sprite_pal != 0
+  while pos < 32:
+    let priority = pos shr 3
+    let slot     = pos and 7
+    inc pos
+    if slot == 0:
+      if sprite_on and sprite_prio == priority:
+        return (4, pram_u16[0x100 + sprite_pal], ppu.sprite_pixels[col].blends)
+    elif slot - 1 < ppu.prio_count[priority]:
+      let bg = int(ppu.prio_bgs[priority][slot - 1])
+      if bit(enable_bits, bg):
         if ppu.bitmap_direct and bg == 2:
-          if not ppu.bg2_direct_opaque[col]: continue
-          color = GbaColor(direct: true, direct_color: ppu.bg2_direct[col],
-                           layer: 2, special_handling: false)
+          if ppu.bg2_direct_opaque[col]:
+            return (2, ppu.bg2_direct[col], false)
         else:
           let palette = int(ppu.layer_palettes[bg][col])
-          if palette == 0: continue
-          color = GbaColor(palette: palette, layer: bg, special_handling: false)
-        if not found_top:
-          top_color = color; found_top = true
-        else:
-          return (top_color, color)
-  if found_top:
-    (top_color, backdrop)
-  else:
-    (backdrop, backdrop)
-
-proc calculate_color*(ppu: PPU; col: int): uint16 =
-  let (enable_bits, effects_enabled) = ppu.get_enables(col)
-  let (top, bot) = ppu.select_top_colors(enable_bits, col)
-  ppu.blend_top_bot(top, bot, effects_enabled)
+          if palette != 0:
+            return (bg, pram_u16[palette], false)
+    else:
+      pos = (priority + 1) shl 3  # no more BGs at this priority
+  (5, pram_u16[0], false)
 
 proc composite*(ppu: PPU; row_base: uint32) =
-  for col in 0..239:
-    ppu.framebuffer[row_base + uint32(col)] = ppu.calculate_color(col)
+  ppu.compute_prio_bgs()
+  let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
+  let windows_active = ppu.dispcnt.window_0_display or
+                       ppu.dispcnt.window_1_display or
+                       ppu.dispcnt.obj_window_display
+  let blending_possible = ppu.bldcnt.blend_mode != 0 or ppu.line_sprite_blend
+  if not windows_active and not blending_possible:
+    # Fast path (most scanlines): every layer is enabled screen-wide and no
+    # color math can apply, so the first opaque pixel in priority order wins
+    let obj_enable = bit(uint16(ppu.dispcnt.default_enable_bits), 4)
+    for col in 0 .. 239:
+      let sprite_pal = int(ppu.sprite_pixels[col].palette)
+      let sprite_prio = int(ppu.sprite_pixels[col].priority)
+      let sprite_vis = obj_enable and sprite_pal != 0
+      var color = pram_u16[0]
+      block found:
+        for priority in 0 .. 3:
+          if sprite_vis and sprite_prio == priority:
+            color = pram_u16[0x100 + sprite_pal]
+            break found
+          for i in 0 ..< ppu.prio_count[priority]:
+            let bg = int(ppu.prio_bgs[priority][i])
+            if ppu.bitmap_direct and bg == 2:
+              if ppu.bg2_direct_opaque[col]:
+                color = ppu.bg2_direct[col]
+                break found
+            else:
+              let palette = int(ppu.layer_palettes[bg][col])
+              if palette != 0:
+                color = pram_u16[palette]
+                break found
+      ppu.framebuffer[row_base + uint32(col)] = color
+  else:
+    if windows_active:
+      ppu.compute_line_enables()
+    else:
+      for col in 0 .. 239:
+        ppu.line_enables[col] = uint16(ppu.dispcnt.default_enable_bits)
+        ppu.line_effects[col] = true
+    let bld = uint16(ppu.bldcnt)
+    let blend_mode = int(ppu.bldcnt.blend_mode)
+    for col in 0 .. 239:
+      let enable_bits = ppu.line_enables[col]
+      var pos = 0
+      let (top_layer, top_color, top_blends) =
+        ppu.next_layer(pram_u16, enable_bits, col, pos)
+      var color = top_color
+      if ppu.line_effects[col]:
+        # 1st-target = bldcnt bit `layer`, 2nd-target = bit `layer + 8`.
+        # The second layer is only searched when the result can depend on it:
+        # a semi-transparent sprite on top, or alpha blending with a selected
+        # top layer.
+        let top_selected = bit(bld, top_layer)
+        if top_blends:
+          let (bot_layer, bot_color, _) =
+            ppu.next_layer(pram_u16, enable_bits, col, pos)
+          if bit(bld, bot_layer + 8):
+            color = ppu.blend_colors(top_color, bot_color, 1)
+          elif top_selected and blend_mode != 1:
+            color = ppu.blend_colors(top_color, 0, blend_mode)
+        elif top_selected:
+          if blend_mode == 1:
+            let (bot_layer, bot_color, _) =
+              ppu.next_layer(pram_u16, enable_bits, col, pos)
+            if bit(bld, bot_layer + 8):
+              color = ppu.blend_colors(top_color, bot_color, 1)
+          elif blend_mode != 0:
+            color = ppu.blend_colors(top_color, 0, blend_mode)
+      ppu.framebuffer[row_base + uint32(col)] = color
 
 proc scanline*(ppu: PPU) =
+  # Render skipping: when a full frame passes without any change to VRAM,
+  # PRAM, OAM, or PPU registers, the framebuffer already contains exactly
+  # what each scanline would produce, so skip rendering until something
+  # changes. A mid-frame change only affects lines from that point down;
+  # the untouched lines above still hold correct (identical) pixels.
+  if ppu.vcount == 0:
+    ppu.skip_render = not ppu.render_dirty
+    ppu.render_dirty = false
+  if ppu.skip_render:
+    if ppu.render_dirty:
+      ppu.skip_render = false
+    else:
+      return
   let row      = uint32(ppu.vcount)
   let row_base = 240'u32 * row
-  # clear scanline
-  for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0
   if ppu.gba.cpu.stopped:
-    return  # Stop mode powers down the LCD; present black
+    # Stop mode powers down the LCD; present black
+    for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0
+    return
   if ppu.dispcnt.forced_blank:
     for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0x7FFF'u16
     return
@@ -483,6 +608,7 @@ proc scanline*(ppu: PPU) =
     for c in 0..239: ppu.layer_palettes[bg][c] = 0
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
   ppu.bitmap_direct = false
+  ppu.line_sprite_blend = false
   case ppu.dispcnt.bg_mode
   of 0:
     ppu.render_reg_bg(0); ppu.render_reg_bg(1)
@@ -526,6 +652,7 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   else: ppu.gba.bus.read_open_bus_value(io_addr)
 
 proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
+  ppu.render_dirty = true
   case io_addr
   of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
   of 0x002..0x003: discard  # green swap

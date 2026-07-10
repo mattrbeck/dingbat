@@ -102,6 +102,19 @@ proc new_apu*(gba: GBA): APU =
 proc toggle_sync*(apu: APU) =
   apu.sync = not apu.sync
 
+proc audio_ahead*(apu: APU): bool =
+  ## True when synced audio is buffered comfortably ahead of playback. The
+  ## frontend main loop uses this to pace emulation instead of blocking in
+  ## get_sample, so the UI keeps running at the display's refresh rate while
+  ## emulation waits for audio to drain. Half of get_sample's block
+  ## threshold, so the blocking wait stays a rarely-hit backstop.
+  when defined(test_harness):
+    false
+  else:
+    apu.sync and apu.audio_dev != 0 and
+      sdl_get_queued_audio_size(apu.audio_dev) >
+        uint32(APU_BUFFER_SIZE * sizeof(int16))
+
 proc timer_overflow*(apu: APU; timer: int) =
   apu.dma_channels.timer_overflow(timer)
 

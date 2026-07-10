@@ -109,10 +109,13 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   let cacheable = cpu.cache_waitloop_results and
                   bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
   if cacheable:
+    if start_addr == cpu.last_non_waitloop:
+      return
     if start_addr in cpu.identified_waitloops:
       cpu.entered_waitloop = true
       return
     if start_addr in cpu.identified_non_waitloops:
+      cpu.last_non_waitloop = start_addr
       return
   var written_bits: uint16 = 0
   var never_write: uint16  = 0
@@ -124,6 +127,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     if parsed.isNone or not parsed.get.read_only:
       if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
+        cpu.last_non_waitloop = start_addr
       return
     let p = parsed.get
     never_write = never_write or (p.read_bits and not written_bits)
@@ -135,10 +139,12 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     if (written_bits and never_write) > 0:
       if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
+        cpu.last_non_waitloop = start_addr
       return
     if (p.write_bits and (1'u16 shl 15)) > 0:
       if cacheable:
         cpu.identified_non_waitloops.incl(start_addr)
+        cpu.last_non_waitloop = start_addr
       return
     cur_addr += 2
   if cacheable:

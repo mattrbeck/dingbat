@@ -14,6 +14,7 @@ proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
   result.cycles = 0
+  result.fetch_page = 0xFFFFFFFF'u32  # no fetch page cached yet
   result.bios       = newSeq[byte](0x4000)
   result.wram_board = newSeq[byte](0x40000)
   result.wram_chip  = newSeq[byte](0x08000)
@@ -47,6 +48,12 @@ proc read_u16_ptr(buf: seq[byte]; offset: uint32): uint16 {.inline.} =
 
 proc read_u32_ptr(buf: seq[byte]; offset: uint32): uint32 {.inline.} =
   cast[ptr uint32](unsafeAddr buf[offset])[]
+
+proc read_u16_ptr_raw(p: ptr UncheckedArray[byte]; offset: uint32): uint16 {.inline.} =
+  cast[ptr uint16](addr p[offset])[]
+
+proc read_u32_ptr_raw(p: ptr UncheckedArray[byte]; offset: uint32): uint32 {.inline.} =
+  cast[ptr uint32](addr p[offset])[]
 
 proc write_u16_ptr(buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
   cast[ptr uint16](addr buf[offset])[] = val
@@ -168,12 +175,14 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   of 0x3: bus.wram_chip[address and 0x7FFF'u32] = value
   of 0x4: bus.gba.mmio[address] = value
   of 0x5:
+    bus.gba.ppu.render_dirty = true
     write_u16_ptr(bus.gba.ppu.pram, address and 0x3FE'u32, 0x0101'u16 * uint16(value))
   of 0x6:
     let limit: uint32 = if bus.gba.ppu.bitmap(): 0x13FFF'u32 else: 0x0FFFF'u32
     var a = 0x1FFFE'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
     if a <= limit:
+      bus.gba.ppu.render_dirty = true
       write_u16_ptr(bus.gba.ppu.vram, a, 0x0101'u16 * uint16(value))
   of 0x7: discard  # can't write bytes to oam
   of 0x8, 0xD:
@@ -196,12 +205,17 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
   of 0x4:
     bus.write_byte_internal(address, uint8(value))
     bus.write_byte_internal(address + 1, uint8(value shr 8))
-  of 0x5: write_u16_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+  of 0x5:
+    bus.gba.ppu.render_dirty = true
+    write_u16_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
+    bus.gba.ppu.render_dirty = true
     write_u16_ptr(bus.gba.ppu.vram, a, value)
-  of 0x7: write_u16_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+  of 0x7:
+    bus.gba.ppu.render_dirty = true
+    write_u16_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)
@@ -225,12 +239,17 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     bus.write_byte_internal(address + 1, uint8(value shr 8))
     bus.write_byte_internal(address + 2, uint8(value shr 16))
     bus.write_byte_internal(address + 3, uint8(value shr 24))
-  of 0x5: write_u32_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+  of 0x5:
+    bus.gba.ppu.render_dirty = true
+    write_u32_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
+    bus.gba.ppu.render_dirty = true
     write_u32_ptr(bus.gba.ppu.vram, a, value)
-  of 0x7: write_u32_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+  of 0x7:
+    bus.gba.ppu.render_dirty = true
+    write_u32_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)
@@ -239,6 +258,45 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
   of 0xE, 0xF:
     bus.gba.storage[orig] = uint8(value)
   else: log("Unmapped write word: " & hex_str(address))
+
+# ---- Instruction-fetch fast path ----
+
+proc install_fetch_cache(bus: Bus; page: uint32): bool =
+  # Only pages whose fetches are plain masked memory reads are cacheable.
+  # BIOS (latch + PC checks), MMIO, open bus, and 0xD (possible EEPROM
+  # mapping) always take the generic path.
+  case page
+  of 0x2:
+    bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_board[0])
+    bus.fetch_mask = 0x3FFFF'u32
+  of 0x3:
+    bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_chip[0])
+    bus.fetch_mask = 0x7FFF'u32
+  of 0x8, 0x9, 0xA, 0xB, 0xC:
+    bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.gba.cartridge.rom[0])
+    bus.fetch_mask = 0x01FFFFFF'u32
+  else:
+    return false
+  bus.fetch_page = page
+  bus.fetch_c16 = ACCESS_TIMING_TABLE[0][int(page)]
+  bus.fetch_c32 = ACCESS_TIMING_TABLE[1][int(page)]
+  true
+
+proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
+  let page = bits_range(address, 24, 27)
+  if page == bus.fetch_page or bus.install_fetch_cache(page):
+    bus.cycles += bus.fetch_c16
+    read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
+  else:
+    bus.read_half(address)
+
+proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
+  let page = bits_range(address, 24, 27)
+  if page == bus.fetch_page or bus.install_fetch_cache(page):
+    bus.cycles += bus.fetch_c32
+    read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
+  else:
+    bus.read_word(address)
 
 # ---- Public read/write with cycle accounting ----
 

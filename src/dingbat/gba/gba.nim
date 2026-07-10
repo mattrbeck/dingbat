@@ -146,6 +146,16 @@ type
     wram_chip*:  seq[byte]
     gpio*:       GPIO
     bios_latch*: uint32
+    # Instruction-fetch fast path: direct pointer + mask + waitstates for the
+    # page PC currently executes from (EWRAM/IWRAM/ROM). The buffers never
+    # move and ROM is padded to the full 32 MB mirror, so a cached pointer
+    # stays valid; writes to RAM-resident code are visible because fetches
+    # read through the pointer into the live buffer.
+    fetch_page*: uint32
+    fetch_mask*: uint32
+    fetch_c16*:  int
+    fetch_c32*:  int
+    fetch_ptr*:  ptr UncheckedArray[byte]
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,
@@ -184,6 +194,10 @@ type
     branch_dest*:                uint32
     identified_waitloops*:       HashSet[uint32]
     identified_non_waitloops*:   HashSet[uint32]
+    # One-entry cache in front of identified_non_waitloops: a hot game loop
+    # re-analyzes the same backward branch every iteration (1 = no entry;
+    # thumb addresses are always even)
+    last_non_waitloop*:          uint32
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
 
@@ -192,13 +206,6 @@ type
     palette*:  uint16
     blends*:   bool
     window*:   bool
-
-  GbaColor* = object
-    palette*:          int
-    layer*:            int
-    special_handling*: bool
-    direct*:           bool    # bitmap modes 3/5: color is a raw BGR555 value
-    direct_color*:     uint16
 
   Sprite* = object
     attr0*:     uint16
@@ -239,6 +246,22 @@ type
     bldcnt*:       BLDCNT
     bldalpha*:     BLDALPHA
     bldy*:         BLDY
+    # Compositing scratch, recomputed each scanline: BGs that can contribute,
+    # grouped by priority, and per-column window enable bits
+    prio_bgs*:     array[4, array[4, int8]]
+    prio_count*:   array[4, int]
+    line_enables*: array[240, uint16]
+    line_effects*: array[240, bool]
+    line_sprite_blend*: bool  # any semi-transparent sprite pixel on this line
+    # Render skipping: render_dirty is set by anything that can change the
+    # picture (VRAM/PRAM/OAM writes, PPU register writes, Stop transitions).
+    # When a full frame passes with no such change, the framebuffer already
+    # holds exactly what every scanline would render, so rendering is skipped
+    # until the next change. frame_static tells frontends the framebuffer is
+    # unchanged so they can skip the texture upload too.
+    render_dirty*: bool
+    skip_render*:  bool
+    frame_static*: bool
 
   SoundChannel* = ref object of RootObj
     gba*:            GBA
@@ -358,6 +381,8 @@ proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)
 proc read_half*(bus: Bus; address: uint32): uint16
 proc read_word*(bus: Bus; address: uint32): uint32
+proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.}
+proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.}
 proc read_word_rotate*(bus: Bus; address: uint32): uint32
 proc read_half_rotate*(bus: Bus; address: uint32): uint32
 proc read_half_signed*(bus: Bus; address: uint32): uint32
