@@ -5,7 +5,8 @@ import dingbat/common/test_output
 
 type
   TestMode = enum
-    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot
+    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
+    tmStateRoundtrip
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -47,11 +48,80 @@ proc write_ppm(path: string; buf: seq[uint16]; w, h: int; color: bool) =
       f.write(char(grey))
   f.close()
 
+proc fb_hash(fb: seq[uint16]): uint32 =
+  ## FNV-1a over the framebuffer bytes
+  result = 0x811C9DC5'u32
+  for v in fb:
+    result = (result xor uint32(v and 0xFF)) * 0x01000193'u32
+    result = (result xor uint32(v shr 8)) * 0x01000193'u32
+
+# Save/load-state roundtrip: run `warmup` frames, save a state, run 60 more
+# frames and record a framebuffer hash; then reconstruct a fresh emulator,
+# load the state, run 60 frames and compare. Also re-saves both emulators'
+# states and compares the files byte-for-byte, which covers all serialized
+# internal state, not just the visible pixels. Exits 0 iff everything matches.
+proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
+  const POST_FRAMES = 60
+  let state_path  = rom_path & ".roundtrip.state"
+  let state_path1 = rom_path & ".roundtrip1.state"
+  let state_path2 = rom_path & ".roundtrip2.state"
+  defer:
+    for p in [state_path, state_path1, state_path2]: removeFile(p)
+  let ext = rom_path.splitFile().ext.toLowerAscii()
+  var fb1, fb2: seq[uint16]
+  if ext in [".gba", ".bin"]:
+    let is_hle = bios_path == "hle" or bios_path == ""
+    let actual_bios = if is_hle: "" else: bios_path
+    proc make_gba(): GBA =
+      result = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
+      result.test_output = new_test_output()
+      result.post_init()
+    let emu1 = make_gba()
+    for _ in 0 ..< warmup: emu1.step_frame()
+    if not emu1.save_state(state_path):
+      echo "ROUNDTRIP: save failed"; return 1
+    let emu2 = make_gba()
+    if not emu2.load_state(state_path):
+      echo "ROUNDTRIP: load failed"; return 1
+    for _ in 0 ..< POST_FRAMES: emu1.step_frame()
+    for _ in 0 ..< POST_FRAMES: emu2.step_frame()
+    fb1 = emu1.ppu.framebuffer
+    fb2 = emu2.ppu.framebuffer
+    if not emu1.save_state(state_path1) or not emu2.save_state(state_path2):
+      echo "ROUNDTRIP: re-save failed"; return 1
+  else:
+    proc make_gb(): GB =
+      result = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+      result.test_output = new_test_output()
+      result.post_init()
+    let emu1 = make_gb()
+    for _ in 0 ..< warmup: emu1.step_frame()
+    if not emu1.save_state(state_path):
+      echo "ROUNDTRIP: save failed"; return 1
+    let emu2 = make_gb()
+    if not emu2.load_state(state_path):
+      echo "ROUNDTRIP: load failed"; return 1
+    for _ in 0 ..< POST_FRAMES: emu1.step_frame()
+    for _ in 0 ..< POST_FRAMES: emu2.step_frame()
+    fb1 = emu1.ppu.framebuffer
+    fb2 = emu2.ppu.framebuffer
+    if not emu1.save_state(state_path1) or not emu2.save_state(state_path2):
+      echo "ROUNDTRIP: re-save failed"; return 1
+  let h1 = fb_hash(fb1)
+  let h2 = fb_hash(fb2)
+  let fb_ok = fb1 == fb2
+  let state_ok = readFile(state_path1) == readFile(state_path2)
+  echo "ROUNDTRIP framebuffer: ", toHex(h1, 8), " vs ", toHex(h2, 8),
+       (if fb_ok: " MATCH" else: " MISMATCH")
+  echo "ROUNDTRIP full state:  ", (if state_ok: "MATCH" else: "MISMATCH")
+  if fb_ok and state_ok: 0 else: 1
+
 proc main() =
   var rom_path = ""
   var bios_path = ""
   var mode = tmSerial
   var timeout_frames = 1800
+  var warmup_frames = 600
   var screenshot_path = ""
   var color_mode = false
 
@@ -77,6 +147,7 @@ proc main() =
         of "mgba": mode = tmMgba
         of "mgba-suite": mode = tmMgbaSuite
         of "screenshot": mode = tmScreenshot
+        of "stateroundtrip": mode = tmStateRoundtrip
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -84,6 +155,10 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         timeout_frames = parseInt(v)
+      of "frames":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        warmup_frames = parseInt(v)
       of "screenshot":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -96,8 +171,11 @@ proc main() =
         bios_path = v
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot> [--timeout <frames>] [--screenshot <path.ppm>]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
     quit(1)
+
+  if mode == tmStateRoundtrip:
+    quit(state_roundtrip(rom_path, bios_path, warmup_frames))
 
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
@@ -175,6 +253,8 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
+  of tmStateRoundtrip:
+    discard  # handled (and exited) above
 
   if output.len > 0:
     echo output
