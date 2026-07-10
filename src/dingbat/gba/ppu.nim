@@ -142,7 +142,10 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
     else: raise newException(Exception, "Impossible bgcnt screen size: " & $bgcnt.screen_size)
   let screen_base     = 0x800'u32 * uint32(bgcnt.screen_base_block)
   let character_base  = 0x4000'u32 * uint32(bgcnt.character_base_block)
-  let effective_row   = (uint32(ppu.vcount) + uint32(bgvofs.offset)) and uint32(bg_height)
+  var vc = uint32(ppu.vcount)
+  if bgcnt.mosaic:
+    vc -= vc mod (uint32(ppu.mosaic.bg_mosiac_v_size) + 1)
+  let effective_row   = (vc + uint32(bgvofs.offset)) and uint32(bg_height)
   let tile_y          = effective_row shr 3
   let is_8bpp         = bgcnt.color_mode_8bpp
   # Precompute tile_y contribution to se_address
@@ -191,6 +194,11 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
         pal_idx = uint32((palettes shr (uint32(x and 1) * 4)) and 0xF)
         if pal_idx > 0: pal_idx += palette_bank_shift
     ppu.layer_palettes[bg][col] = uint8(pal_idx)
+  if bgcnt.mosaic:
+    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
   if not bit(uint16(ppu.dispcnt), 8 + bg): return
@@ -200,6 +208,15 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
   let dy = ppu.bgaff[bg_idx][2].num
   var int_x = ppu.bgref_int[bg_idx][0]
   var int_y = ppu.bgref_int[bg_idx][1]
+  if bgcnt.mosaic:
+    # Vertical mosaic: reuse the internal coordinates latched on the first
+    # line of the mosaic block
+    let v = uint16(ppu.mosaic.bg_mosiac_v_size) + 1
+    if ppu.vcount mod v == 0:
+      ppu.mosaic_bgref_int[bg_idx] = [int_x, int_y]
+    else:
+      int_x = ppu.mosaic_bgref_int[bg_idx][0]
+      int_y = ppu.mosaic_bgref_int[bg_idx][1]
   let size_tiles  = 16 shl bgcnt.screen_size
   let size_pixels = size_tiles shl 3
   let screen_base    = 0x800'u32 * uint32(bgcnt.screen_base_block)
@@ -218,6 +235,11 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
     let tile_id = ppu.vram[screen_base + uint32(py shr 3) * uint32(size_tiles) + uint32(px shr 3)]
     let pal_idx = ppu.vram[character_base + 0x40'u32 * uint32(tile_id) + uint32(8 * (py and 7)) + uint32(px and 7)]
     ppu.layer_palettes[bg][col] = pal_idx
+  if bgcnt.mosaic:
+    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_sprites*(ppu: PPU) =
   if not bit(uint16(ppu.dispcnt), 12): return
@@ -254,7 +276,11 @@ proc render_sprites*(ppu: PPU) =
       pa = 0x100; pb = 0; pc = 0; pd = 0x100
     let vc = int(ppu.vcount)
     if not (int(y_coord) <= vc and vc < int(y_coord) + height): continue
-    let iy     = vc - center_y
+    # Mosaic sprites sample from the first pixel of each screen-space block
+    let obj_mosaic = bit(sprite.attr0, 12)
+    let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
+    let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosiac_v_size) + 1) else: vc
+    let iy     = vc_m - center_y
     let flip_x = bit(sprite.attr1, 12) and not bit(sprite.attr0, 8)
     let flip_y = bit(sprite.attr1, 13) and not bit(sprite.attr0, 8)
     let min_x  = max(0, int(x_coord))
@@ -262,8 +288,9 @@ proc render_sprites*(ppu: PPU) =
     for ix in (-(width div 2)) ..< (width div 2):
       let col = center_x + ix
       if col < min_x or col >= max_x: continue
-      var tex_x = (pa * ix + pb * iy) shr 8
-      var tex_y = (pc * ix + pd * iy) shr 8
+      let ix_m = if mosaic_h > 1: (col - col mod mosaic_h) - center_x else: ix
+      var tex_x = (pa * ix_m + pb * iy) shr 8
+      var tex_y = (pc * ix_m + pd * iy) shr 8
       tex_x += orig_width div 2
       tex_y += orig_height div 2
       if tex_x < 0 or tex_x >= orig_width or tex_y < 0 or tex_y >= orig_height: continue

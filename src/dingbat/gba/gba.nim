@@ -222,6 +222,7 @@ type
     bgaff*:        array[2, array[4, BGAFF]]
     bgref*:        array[2, array[2, BGREF]]
     bgref_int*:    array[2, array[2, int32]]
+    mosaic_bgref_int*: array[2, array[2, int32]]  # affine coords latched per mosaic block
     win0h*:        WINH
     win1h*:        WINH
     win0v*:        WINV
