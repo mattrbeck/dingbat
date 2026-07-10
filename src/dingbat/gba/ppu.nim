@@ -376,15 +376,21 @@ proc render_sprites*(ppu: PPU) =
           ppu.sprite_pixels[col].palette = uint16(pal_idx)
           ppu.sprite_pixels[col].blends  = obj_mode == 0b01
 
+proc window_contains(v, lo, hi: uint16): bool {.inline.} =
+  # Hardware windows are comparators: when the start is past the end the
+  # window wraps around the screen edge (flashlight/tunnel effects)
+  if lo <= hi: v >= lo and v < hi
+  else: v >= lo or v < hi
+
 proc get_enables*(ppu: PPU; col: int): tuple[enable_bits: uint16, effects_enabled: bool] =
   let vc = ppu.vcount
   if ppu.dispcnt.window_0_display and
-     uint16(col) >= ppu.win0h.x1 and uint16(col) < ppu.win0h.x2 and
-     vc >= uint16(ppu.win0v.y1) and vc < uint16(ppu.win0v.y2):
+     window_contains(uint16(col), ppu.win0h.x1, ppu.win0h.x2) and
+     window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2)):
     (uint16(ppu.winin.window_0_enable_bits), ppu.winin.window_0_color_special_effect)
   elif ppu.dispcnt.window_1_display and
-       uint16(col) >= ppu.win1h.x1 and uint16(col) < ppu.win1h.x2 and
-       vc >= uint16(ppu.win1v.y1) and vc < uint16(ppu.win1v.y2):
+       window_contains(uint16(col), ppu.win1h.x1, ppu.win1h.x2) and
+       window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2)):
     (uint16(ppu.winin.window_1_enable_bits), ppu.winin.window_1_color_special_effect)
   elif ppu.dispcnt.obj_window_display and ppu.sprite_pixels[col].window:
     (uint16(ppu.winout.obj_window_enable_bits), ppu.winout.obj_window_color_special_effect)
