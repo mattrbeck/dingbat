@@ -5,6 +5,20 @@ let swRegistration = null;
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then((reg) => {
     swRegistration = reg;
+    // A new version already installed on a previous visit and is waiting
+    if (reg.waiting) showUpdateButton();
+    // A new version is discovered while this page is open (the browser
+    // checks sw.js on navigation, so this fires on the first load after
+    // a deploy)
+    reg.addEventListener("updatefound", () => {
+      let sw = reg.installing;
+      sw.addEventListener("statechange", () => {
+        // Ignore the very first install, when nothing controls the page yet
+        if (sw.state === "installed" && navigator.serviceWorker.controller) {
+          showUpdateButton();
+        }
+      });
+    });
   });
   // Reload when a new service worker takes over
   let refreshing = false;
@@ -24,6 +38,11 @@ const updateBtn = document.getElementById("update-btn");
 const updateModal = document.getElementById("update-modal");
 let updateAvailable = false;
 
+const showUpdateButton = () => {
+  updateAvailable = true;
+  updateBtn.hidden = false;
+};
+
 const checkForUpdate = async () => {
   try {
     // Fetch cached version (what we're running) and network version (what's deployed)
@@ -35,8 +54,7 @@ const checkForUpdate = async () => {
     let current = (await cachedRes.text()).trim();
     let latest = (await networkRes.text()).trim();
     if (current && latest && latest !== current) {
-      updateAvailable = true;
-      updateBtn.hidden = false;
+      showUpdateButton();
     }
     localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString());
   } catch {}
@@ -69,7 +87,17 @@ const applyUpdate = async () => {
         waiting.postMessage({ type: "skipWaiting" });
         return;
       }
-      if (swRegistration.installing) return; // controllerchange will reload
+      let installing = swRegistration.installing;
+      if (installing) {
+        // Activate it as soon as it finishes installing; controllerchange
+        // then reloads the page
+        installing.addEventListener("statechange", () => {
+          if (installing.state === "installed") {
+            installing.postMessage({ type: "skipWaiting" });
+          }
+        });
+        return;
+      }
     } catch {}
   }
   // Fallback: clear caches and reload

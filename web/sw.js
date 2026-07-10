@@ -18,8 +18,8 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
-  // Activate immediately instead of waiting for existing tabs to close
-  self.skipWaiting();
+  // Stay in "waiting" until the page confirms via the skipWaiting message,
+  // so an update never force-reloads a tab mid-game.
 });
 
 self.addEventListener("activate", (event) => {
@@ -42,6 +42,8 @@ self.addEventListener("message", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // Explicit network probes (the version.txt update check) must bypass the cache
+  if (event.request.cache === "no-store") return;
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
