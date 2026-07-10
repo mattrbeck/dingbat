@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[options, times, os, strutils, math, sets]
-import ../common/[util, input, scheduler, emu, resampler]
+import ../common/[util, input, scheduler, emu, resampler, serialize]
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -577,3 +577,5 @@ proc handle_input*(gba: GBA; input: Input; pressed: bool) =
 
 method toggle_sync*(gba: GBA) =
   gba.apu.toggle_sync()
+
+include savestate
