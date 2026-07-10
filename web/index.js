@@ -1335,7 +1335,16 @@ var Module = {
     document.addEventListener("touchstart", resumeAudio, { once: false });
 
     const pushAudio = () => {
-      if (!audioCtx || audioCtx.state !== "running") return;
+      if (!audioCtx || audioCtx.state !== "running") {
+        // Audio is locked (no user gesture yet) or suspended: discard the
+        // samples from this tick. Letting them accumulate grows WASM-side
+        // memory without bound, and the first unlock would schedule the
+        // whole stale backlog, leaving audio permanently behind the video.
+        if (typeof Module !== "undefined" && Module._clearAudioBuffer) {
+          Module._clearAudioBuffer();
+        }
+        return;
+      }
       const len = Module._getAudioBufferLen();
       if (len === 0) return;
       const ptr = Module._getAudioBufferPtr();
