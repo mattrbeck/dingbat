@@ -93,10 +93,17 @@ proc rebase*(s: Scheduler) =
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
   let old = s.current_speed
+  if speed == old: return
   s.current_speed = speed
   for i in 0 ..< s.events.len:
     if s.events[i].kind != etIME:
+      # Real-time events (APU) are stored in CPU cycles, which run twice as
+      # fast in double speed: entering double speed doubles the remaining
+      # delay, leaving it halves it. The old code shifted right with an
+      # underflowing uint8 exponent when entering, collapsing every pending
+      # event to fire immediately.
       let remaining = s.events[i].cycles - s.cycles
-      let offset = remaining shr (old - speed)
-      s.events[i].cycles = s.cycles + offset
+      let rescaled = if speed > old: remaining shl (speed - old)
+                     else: remaining shr (old - speed)
+      s.events[i].cycles = s.cycles + rescaled
   s.next_event = if s.events.len > 0: s.events[^1].cycles else: high(CycleCount)
