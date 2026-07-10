@@ -27,6 +27,9 @@ else:
 
 const LOGO_PNG_DATA = staticRead("../README/dingbat.png")
 
+# The sdl2 wrapper doesn't expose SDL_free (needed for drop-event filenames)
+proc sdl_free(mem: pointer) {.importc: "SDL_free", cdecl.}
+
 # ──────────────────────────── Shaders ────────────────────────────
 
 const VERT_SRC = """
@@ -470,6 +473,13 @@ proc handle_input() =
 
     of MouseMotion:
       app.last_mouse_tick = motion(evt).timestamp
+
+    of DropFile:
+      let dropped = drop(evt)
+      let path = $dropped.file
+      sdl_free(dropped.file)
+      if path.splitFile().ext.toLowerAscii() in [".gba", ".gb", ".gbc"]:
+        load_rom(path)
 
     of QuitEvent:
       app.running = false

@@ -33,7 +33,7 @@ This produces a self-contained `dist/windows/dingbat.exe` — SDL2 (zlib-license
 
 ## Usage
 
-Running the emulator is as simple as running the `dingbat` executable. If you'd rather launch a specific ROM directly, you can pass it as a command-line argument: `./dingbat /path/to/rom`.
+Running the emulator is as simple as running the `dingbat` executable. If you'd rather launch a specific ROM directly, you can pass it as a command-line argument (`./dingbat /path/to/rom`) or drag a ROM file onto the window.
 
 A GBA BIOS is required for GBA emulation. You can select it through the UI or place it at `~/.config/dingbat/bios.bin` (`%APPDATA%\dingbat\bios.bin` on Windows).
 
