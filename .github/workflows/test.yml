@@ -11,14 +11,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
       - name: Install dependencies
-        # nimble on the Windows runner intermittently dies with "Access is
-        # denied" (file locks) partway through, sometimes without a nonzero
-        # exit — retry, then prove the deps actually import
+        # The tests need only zippy. Installing the full dep tree pulls the
+        # GUI-only packages, and imguin's install persistently dies with
+        # "Access is denied" on the Windows runner (then poisons nimble's
+        # solver for retries) — so install the minimum, retry transient
+        # failures, and prove the import actually works before proceeding
         shell: bash
         run: |
-          echo 'import zippy/ziparchives, yaml/tojson, stb_image/read' > depcheck.nim
+          echo 'import zippy/ziparchives' > depcheck.nim
           for i in 1 2 3; do
-            nimble install -d -y || true
+            nimble install -y zippy || true
             if nim check --hints:off depcheck.nim; then rm depcheck.nim; exit 0; fi
             echo "dependencies incomplete after attempt $i, retrying"
             sleep 10
