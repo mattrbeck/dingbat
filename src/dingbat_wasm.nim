@@ -85,6 +85,46 @@ proc getAudioBufferLen(): cint {.exportc.} =
 proc clearAudioBuffer() {.exportc.} =
   audioBuffer.setLen(0)
 
+# --- Save states ---
+# The build is single-threaded (--threads:off, no pthread link flags) and JS
+# drives emulation: requestAnimationFrame calls loop_tick(), one frame per
+# call. These exports are only invoked from JS event handlers, which the
+# browser never interleaves with the RAF callback, so they always run between
+# ticks — i.e. at a frame boundary, the only place state_bytes /
+# load_state_bytes are valid.
+
+# Retained so the pointer returned by wasm_state_data stays valid after
+# wasm_state_size returns (freed/replaced on the next wasm_state_size call).
+var stateImage: string = ""
+
+proc wasm_state_size(): cint {.exportc.} =
+  ## Serialize the running core's full state (header + payload, identical to
+  ## desktop .state files) into a retained buffer and return its length.
+  ## Returns 0 when no core is running. Read the bytes via wasm_state_data().
+  case stateKind
+  of ekGBA: stateImage = stateGba.state_bytes()
+  of ekGB:  stateImage = stateGb.state_bytes()
+  of ekNone: stateImage = ""
+  cint(stateImage.len)
+
+proc wasm_state_data(): pointer {.exportc.} =
+  ## Pointer to the buffer produced by the last wasm_state_size() call.
+  ## JS must copy it out before calling wasm_state_size() again.
+  if stateImage.len > 0: addr stateImage[0] else: nil
+
+proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
+  ## Validate and apply a state image (same bytes as desktop .state files).
+  ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
+  ## corruption — the reason is echoed to the log) with the core untouched.
+  if data == nil or len <= 0: return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  let ok = case stateKind
+    of ekGBA: stateGba.load_state_bytes(image)
+    of ekGB:  stateGb.load_state_bytes(image)
+    of ekNone: false
+  if ok: 1 else: 0
+
 proc benchFrames(n: cint) {.exportc.} =
   ## Run emulation frames without presenting; lets the JS side measure how
   ## much of a frame is emulation vs the LUT convert + texture upload path.
