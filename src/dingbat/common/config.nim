@@ -148,6 +148,62 @@ proc input_from_name(name: string): Input =
   of "r":      Input.R
   else:        raise newException(ValueError, "Unknown input: " & name)
 
+# Controller button names, indexed by SDL_GameControllerButton ordinal.
+# These match SDL_GameControllerGetStringForButton / FromString exactly, but
+# are kept as a table so config.nim stays SDL-free (the wasm build must not
+# link SDL's controller API).
+const CONTROLLER_BUTTON_NAMES = [
+  "a", "b", "x", "y", "back", "guide", "start", "leftstick", "rightstick",
+  "leftshoulder", "rightshoulder", "dpup", "dpdown", "dpleft", "dpright",
+]
+
+proc controller_button_name*(button: cint): string =
+  if button >= 0 and button < cint(CONTROLLER_BUTTON_NAMES.len):
+    CONTROLLER_BUTTON_NAMES[button]
+  else:
+    ""
+
+proc controller_button_from_name*(name: string): cint =
+  let lowered = toLowerAscii(name)
+  for i, n in CONTROLLER_BUTTON_NAMES:
+    if n == lowered: return cint(i)
+  cint(-1)
+
+# Default controller bindings, by SDL_GameControllerButton ordinal.
+# X/Y intentionally duplicate A/B (GBA-style face buttons on a 4-button pad).
+const DEFAULT_CONTROLLER_MAPPING = [
+  (cint(0),  Input.A),       # a
+  (cint(1),  Input.B),       # b
+  (cint(2),  Input.A),       # x
+  (cint(3),  Input.B),       # y
+  (cint(4),  Input.SELECT),  # back
+  (cint(6),  Input.START),   # start
+  (cint(9),  Input.L),       # leftshoulder
+  (cint(10), Input.R),       # rightshoulder
+  (cint(11), Input.UP),      # dpup
+  (cint(12), Input.DOWN),    # dpdown
+  (cint(13), Input.LEFT),    # dpleft
+  (cint(14), Input.RIGHT),   # dpright
+]
+
+static:
+  # Every emulated input must be reachable and no button may be bound twice
+  var covered: set[Input]
+  for (btn, inp) in DEFAULT_CONTROLLER_MAPPING:
+    covered.incl(inp)
+    assert CONTROLLER_BUTTON_NAMES[btn] != "", "unnamed controller button"
+  for inp in Input:
+    assert inp in covered, "default controller mapping misses an Input"
+  for i in 0 ..< DEFAULT_CONTROLLER_MAPPING.len:
+    for j in (i + 1) ..< DEFAULT_CONTROLLER_MAPPING.len:
+      assert DEFAULT_CONTROLLER_MAPPING[i][0] != DEFAULT_CONTROLLER_MAPPING[j][0],
+             "controller button bound twice in default mapping"
+
+proc default_controller_bindings*(): Table[cint, Input] =
+  result = initTable[cint, Input]()
+  for (btn, inp) in DEFAULT_CONTROLLER_MAPPING:
+    result[btn] = inp
+
 # Windows: %APPDATA%\dingbat (the native location); elsewhere: ~/.config/dingbat
 let CONFIG_DIR  = when defined(windows): getConfigDir() / "dingbat"
                   else: "~/.config/dingbat"
@@ -189,6 +245,7 @@ type
   Config* = ref object
     explorer_dir*:      string
     keybindings*:       Table[cint, Input]
+    controller_bindings*: Table[cint, Input]  # SDL_GameControllerButton ordinal → Input
     recents*:           seq[string]
     run_bios*:          bool
     bios_path*:         string   # GBA BIOS path
@@ -205,6 +262,7 @@ proc new_config*(): Config =
   Config(
     explorer_dir:    getCurrentDir(),
     keybindings:     default_keybindings(),
+    controller_bindings: default_controller_bindings(),
     recents:         @[],
     run_bios:        false,
     use_hle:         true,   # fresh configs have no BIOS file → HLE
@@ -262,6 +320,15 @@ proc parse_config(j: JsonNode): Config =
         if keycode >= 0:
           cfg.keybindings[keycode] = input_val
       except: discard
+  if j.hasKey("controller_bindings") and j["controller_bindings"].kind == JObject:
+    cfg.controller_bindings = initTable[cint, Input]()
+    for k, v in j["controller_bindings"].pairs:
+      try:
+        let button    = controller_button_from_name(k)
+        let input_val = input_from_name(v.getStr())
+        if button >= 0:
+          cfg.controller_bindings[button] = input_val
+      except: discard
   result = cfg
 
 proc load_config*(): Config =
@@ -303,6 +370,11 @@ proc save_config*(cfg: Config) =
   lines.add("keybindings:")
   for k, v in cfg.keybindings.pairs:
     lines.add("  " & key_code_to_name(k) & ": " & toLowerAscii($v))
+  lines.add("controller_bindings:")
+  for k, v in cfg.controller_bindings.pairs:
+    let name = controller_button_name(k)
+    if name.len > 0:
+      lines.add("  " & name & ": " & toLowerAscii($v))
   lines.add("recents:")
   for r in cfg.recents:
     lines.add("- " & yaml_str(r))
