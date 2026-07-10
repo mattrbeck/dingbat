@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[os, strutils, times]
-import ../common/[input, scheduler, emu, resampler]
+import ../common/[input, scheduler, emu, resampler, serialize]
 when defined(test_harness):
   import ../common/test_output
 
@@ -286,6 +286,7 @@ type
   # ---- Main GB type ----
   GB* = ref object of EmuObj
     bootrom_path*:   string
+    rom_path*:       string
     cgb_enabled*:    bool
     fifo*:           bool
     headless*:       bool
@@ -577,6 +578,7 @@ include cpu
 proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool): GB =
   result = GB(
     bootrom_path: bootrom_path,
+    rom_path:     rom_path,
     fifo:         fifo,
     headless:     headless,
     run_bios:     run_bios,
@@ -665,3 +667,5 @@ method handle_input*(gb: GB; inp: Input; pressed: bool) {.base.} =
 
 method toggle_sync*(gb: GB) =
   gb.apu.toggle_sync()
+
+include savestate
