@@ -371,7 +371,12 @@ proc render_imgui() =
         igEndMenu()
 
       var win_size = ImVec2(x: 0, y: 0)
-      igGetWindowSize(addr win_size)
+      # imguin <= 1.92.4 uses a pOut out-param; later versions return by value
+      when compiles(igGetWindowSize(addr win_size)):
+        igGetWindowSize(addr win_size)
+      else:
+        let ws = igGetWindowSize()
+        win_size = ImVec2(x: ws.x, y: ws.y)
       overlay_h += win_size.y
       igEndMainMenuBar()
 

@@ -53,7 +53,12 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
   var center = ImVec2(x: 0, y: 0)
   let vp = igGetMainViewport()
   if vp != nil:
-    ImGuiViewport_GetCenter(addr center, vp)
+    # imguin <= 1.92.4 uses a pOut out-param; later versions return by value
+    when compiles(ImGuiViewport_GetCenter(addr center, vp)):
+      ImGuiViewport_GetCenter(addr center, vp)
+    else:
+      let c = ImGuiViewport_GetCenter(vp)
+      center = ImVec2(x: c.x, y: c.y)
   igSetNextWindowPos(center, cint(ImGui_Cond_Appearing),
                      ImVec2(x: 0.5'f32, y: 0.5'f32))
 
