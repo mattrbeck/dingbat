@@ -62,10 +62,6 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
             <span>Screenshot</span>
           </button>
-          <button type="button" class="menu-item" id="speed-2x" role="menuitem">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12l7-6zM13 6v12l7-6z"/></svg>
-            <span>2x Speed</span>
-          </button>
           <hr class="menu-sep" id="save-sep" />
           <button type="button" class="menu-item" id="open-bios" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="1"/><path d="M8 11h.01M12 11h.01M16 11h4"/></svg>
@@ -95,12 +91,18 @@
         <button type="button" class="icon-btn" id="reset" title="Reset" aria-label="Reset">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5"/></svg>
         </button>
+        <button type="button" class="icon-btn" id="rewind" title="Rewind (hold)" aria-label="Rewind (hold)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v12l-8-6zM11 6v12l-8-6z" fill="currentColor" stroke="none"/></svg>
+        </button>
         <button type="button" class="icon-btn" id="pause" title="Pause" aria-label="Pause / Resume">
           <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
           <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward" aria-label="Fast Forward">
+        <button type="button" class="icon-btn" id="speed-2x-btn" title="2x Speed" aria-label="2x Speed">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12l8-6zM13 6v12l8-6z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward (unbounded)" aria-label="Fast Forward (unbounded)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6v12l6.5-6zM9 6v12l6.5-6zM16 6v12l6.5-6z" fill="currentColor" stroke="none"/></svg>
         </button>
       </div>
 

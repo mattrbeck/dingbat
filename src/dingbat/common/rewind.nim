@@ -62,7 +62,7 @@ proc decode_delta(cur, packed: string): string =
   result = uncompress(packed, dfZlib)
   xor_bytes(result, cur, min(result.len, cur.len))
 
-proc push*(rw: Rewind; payload: sink string) =
+proc push*(rw: Rewind; payload: string) =
   ## Record a new snapshot (frame-boundary payloads only)
   if rw.latest.len > 0:
     let packed = encode_delta(rw.latest, payload)

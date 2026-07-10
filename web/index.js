@@ -1035,11 +1035,14 @@ var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
 var speed2x = false;
+var rewindHeld = false;
+var lastRewindPop = 0;
 
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
-const speed2xItem = document.getElementById("speed-2x");
+const speed2xButton = document.getElementById("speed-2x-btn");
+const rewindButton = document.getElementById("rewind");
 
 const loadRom = async (romName, originalName) => {
   // Persist save from previous ROM before switching
@@ -1051,10 +1054,12 @@ const loadRom = async (romName, originalName) => {
   paused = false;
   fastForward = false;
   speed2x = false;  // a fresh core starts with turbo off
+  rewindHeld = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   fastForwardButton.classList.remove("active");
-  speed2xItem.classList.remove("active");
+  speed2xButton.classList.remove("active");
+  rewindButton.classList.remove("active");
   document.body.classList.add("has-game", "running");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
@@ -1256,14 +1261,27 @@ fastForwardButton.addEventListener("click", () => {
 
 // 2x speed: the core drops every other audio sample (pitched-up realtime
 // audio) while the tick loop below halves its per-frame time step
-speed2xItem.addEventListener("click", () => {
+speed2xButton.addEventListener("click", () => {
   speed2x = !speed2x;
-  speed2xItem.classList.toggle("active", speed2x);
+  speed2xButton.classList.toggle("active", speed2x);
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(speed2x ? 1 : 0);
   }
-  showToast(speed2x ? "2x speed on" : "2x speed off");
 });
+
+// Rewind: hold to step history backward (the tick loop pops snapshots at a
+// fixed cadence while held)
+const setRewindHeld = (on) => {
+  rewindHeld = on;
+  rewindButton.classList.toggle("active", on);
+};
+rewindButton.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  setRewindHeld(true);
+});
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+  rewindButton.addEventListener(ev, () => setRewindHeld(false));
+}
 
 // --- Main Menu (return to the home screen without terminating the game) ---
 
@@ -1543,7 +1561,16 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (fastForward) {
+      if (rewindHeld) {
+        // Pop ~30 snapshots/s (10 frames each ≈ 5x realtime backward); the
+        // pop presents the restored frame itself, and no audio is queued so
+        // the scheduled lead just drains
+        if (timestamp - lastRewindPop >= 33) {
+          lastRewindPop = timestamp;
+          if (Module._wasm_rewind_pop) Module._wasm_rewind_pop();
+        }
+        accumulator = 0;
+      } else if (fastForward) {
         // Run as many frames as possible within ~16ms budget
         // Reset playTime so audio plays immediately (sped up) instead of
         // queuing behind previously scheduled buffers

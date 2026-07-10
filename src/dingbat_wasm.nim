@@ -1,6 +1,7 @@
 import std/[os, strutils, math]
 import sdl2 except init, quit
 import dingbat/common/input
+import dingbat/common/rewind
 import dingbat/gba/gba
 import dingbat/gb/gb
 
@@ -178,6 +179,15 @@ proc checkInput() =
           break
     else: discard
 
+# Rewind history (see common/rewind.nim): pushed every REWIND_INTERVAL
+# frames from loop_tick, popped by JS at its own cadence while the rewind
+# button is held. Cleared when a new core is created.
+# Deliberately nil at module scope: this build's main() returns after init
+# (JS drives frames via rAF), and Nim's exit teardown destroys module-init
+# heap globals — a ring created here would dangle by the time JS calls in.
+# initFromEmscripten (invoked from JS, post-main) creates it instead.
+var rewindHistory: Rewind = nil
+
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
   inc frameCount
@@ -185,12 +195,16 @@ proc loop_tick() {.exportc.} =
   of ekGBA:
     if stateTexture == nil: return
     stateGba.step_frame()
+    if rewindHistory != nil:
+      discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
     if not stateGba.ppu.frame_static:
       present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                         GBA_W * GBA_H, GBA_W * 4)
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
+    if rewindHistory != nil:
+      discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
     present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                       GB_W * GB_H, GB_W * 4)
   of ekNone:
@@ -199,6 +213,33 @@ proc loop_tick() {.exportc.} =
   stateRenderer.clear()
   discard stateRenderer.copy(stateTexture, nil, nil)
   stateRenderer.present()
+
+proc wasm_rewind_pop(): cint {.exportc.} =
+  ## Step rewind history back one snapshot (REWIND_INTERVAL frames) and
+  ## present the restored framebuffer. Called between loop_tick invocations
+  ## only (frame boundary). Returns 1 when applied, 0 when exhausted.
+  if stateRenderer == nil or stateTexture == nil or rewindHistory == nil:
+    return 0
+  let snap = rewindHistory.pop()
+  if snap.len == 0: return 0
+  try:
+    case stateKind
+    of ekGBA:
+      stateGba.apply_state_payload(snap)
+      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                        GBA_W * GBA_H, GBA_W * 4)
+    of ekGB:
+      stateGb.apply_state_payload(snap)
+      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                        GB_W * GB_H, GB_W * 4)
+    of ekNone:
+      return 0
+  except CatchableError:
+    return 0
+  stateRenderer.clear()
+  discard stateRenderer.copy(stateTexture, nil, nil)
+  stateRenderer.present()
+  1
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Flush the outgoing GB cart's battery save before replacing it
@@ -228,6 +269,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     rgbaBuffer.setLen(GBA_W * GBA_H)
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
+  rewindHistory = new_rewind()
 
 when defined(emscripten):
   # Register a dummy main loop so SDL2's emscripten backend can call
