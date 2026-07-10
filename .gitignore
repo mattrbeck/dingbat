@@ -32,3 +32,9 @@ web/rom.gbc
 
 # Windows cross-build output
 dist/
+
+# iOS build artifacts (built by ios/build-core.sh / xcodegen)
+ios/lib/
+ios/Dingbat.xcodeproj/
+ios/build/
+ios/DerivedData/
