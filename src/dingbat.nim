@@ -385,9 +385,18 @@ proc render_imgui() =
                                    nil, addr should_reset, true)
         discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
                                    nil, addr app.paused, true)
+        # Fast Forward is inverted audio sync: unsynced emulation runs
+        # uncapped, so checked == not sync
         if app.emu_kind == ekGBA and app.gba_emu != nil:
-          discard igMenuItem_BoolPtr("Audio Sync", "Tab",
-                                     addr app.gba_emu.apu.sync, true)
+          var fast_forward = not app.gba_emu.apu.sync
+          if igMenuItem_BoolPtr("Fast Forward", "Tab",
+                                addr fast_forward, true):
+            app.gba_emu.apu.sync = not fast_forward
+        elif app.emu_kind == ekGB and app.gb_emu != nil:
+          var fast_forward = not app.gb_emu.apu.sync
+          if igMenuItem_BoolPtr("Fast Forward", "Tab",
+                                addr fast_forward, true):
+            app.gb_emu.apu.sync = not fast_forward
         if should_reset and app.cfg.recents.len > 0:
           load_rom(app.cfg.recents[0])
         igEndMenu()
