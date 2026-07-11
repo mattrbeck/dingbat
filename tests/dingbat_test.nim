@@ -1,13 +1,14 @@
 import std/[os, strutils, parseopt]
 import dingbat/gb/gb
 import dingbat/gba/gba
+import dingbat/gba/link
 import dingbat/common/test_output
 import dingbat/common/rewind
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
-    tmStateRoundtrip, tmRewindTest
+    tmStateRoundtrip, tmRewindTest, tmLinkTest
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -117,6 +118,73 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
   echo "ROUNDTRIP full state:  ", (if state_ok: "MATCH" else: "MISMATCH")
   if fb_ok and state_ok: 0 else: 1
 
+# Two-core lockstep link acceptance (tests/roms/linktest.s): the multi-mode
+# parent sends 0xA000|round, the child answers 0xB000|round, and each unit
+# logs its four receive latches, SIOCNT role bits, and serial-IRQ count to
+# fixed EWRAM addresses. Runs both cores under the lockstep coordinator and
+# asserts both units observed identical, correct rounds. Exits 0 iff all
+# checks pass.
+proc link_test(rom1, rom2, bios_path: string; timeout: int): int =
+  const ROUNDS = 16
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc make_gba(rom: string): GBA =
+    result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+    result.test_output = new_test_output()
+    result.post_init()
+  let cores = @[make_gba(rom1), make_gba(rom2)]
+  let lnk = new_link(cores)
+
+  proc ew16(g: GBA; offset: int): uint16 =
+    uint16(g.bus.wram_board[offset]) or (uint16(g.bus.wram_board[offset + 1]) shl 8)
+  proc done(g: GBA): bool = g.ew16(0x800) == 0xCAFE'u16
+
+  var frames = 0
+  while frames < timeout and not (cores[0].done() and cores[1].done()):
+    lnk.step_frame()
+    inc frames
+
+  var failures = 0
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo "LINKTEST FAIL: ", msg
+      inc failures
+
+  for i, g in cores:
+    let who = (if i == 0: "parent" else: "child")
+    check g.done(), who & " never finished (done flag missing after " &
+      $frames & " frames)"
+  if failures == 0:
+    for i, g in cores:
+      let who = (if i == 0: "parent" else: "child")
+      # Role bits (SIOCNT snapshot, busy bit masked): SI=0/SD=1/ID=0 on the
+      # parent; SI=1/SD=1/ID=1 on the child.
+      let role = g.ew16(0x804) and 0x7C'u16
+      let expected_role = (if i == 0: 0x08'u16 else: 0x1C'u16)
+      check role == expected_role,
+        who & " SIOCNT role bits: got 0x" & toHex(role, 2) &
+        ", expected 0x" & toHex(expected_role, 2)
+      # Both units must have seen every round's SIOMULTI0/1 slots.
+      for k in 0 ..< ROUNDS:
+        let slot0 = g.ew16(k * 2)
+        let slot1 = g.ew16(0x400 + k * 2)
+        check slot0 == (0xA000'u16 or uint16(k)),
+          who & " round " & $k & " SIOMULTI0: got 0x" & toHex(slot0, 4)
+        check slot1 == (0xB000'u16 or uint16(k)),
+          who & " round " & $k & " SIOMULTI1: got 0x" & toHex(slot1, 4)
+      let irqs = g.ew16(0x808)
+      check irqs == uint16(ROUNDS),
+        who & " serial IRQ count: got " & $irqs & ", expected " & $ROUNDS
+  echo "LINKTEST parent rounds: ", (if cores[0].done(): "complete" else: "incomplete"),
+       ", child rounds: ", (if cores[1].done(): "complete" else: "incomplete"),
+       " (", frames, " frames)"
+  if failures == 0:
+    echo "LINKTEST: PASS (", ROUNDS, " multi-mode rounds, both directions, IDs and IRQs verified)"
+    0
+  else:
+    echo "LINKTEST: FAIL (", failures, " failed checks)"
+    1
+
 # Rewind verification: run forward taking snapshots exactly like the
 # frontend does, then pop backward and require byte-exact payload
 # reconstruction through the XOR-delta chain — both a few steps back and all
@@ -175,6 +243,7 @@ proc rewind_test(rom_path, bios_path: string): int =
 
 proc main() =
   var rom_path = ""
+  var rom_path2 = ""
   var bios_path = ""
   var mode = tmSerial
   var timeout_frames = 1800
@@ -193,6 +262,9 @@ proc main() =
       if positional == 0:
         rom_path = p.key
         inc positional
+      elif positional == 1:
+        rom_path2 = p.key
+        inc positional
     of cmdLongOption, cmdShortOption:
       case p.key
       of "mode":
@@ -207,6 +279,7 @@ proc main() =
         of "screenshot": mode = tmScreenshot
         of "stateroundtrip": mode = tmStateRoundtrip
         of "rewindtest": mode = tmRewindTest
+        of "linktest": mode = tmLinkTest
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -246,6 +319,11 @@ proc main() =
     quit(state_roundtrip(rom_path, bios_path, warmup_frames))
   if mode == tmRewindTest:
     quit(rewind_test(rom_path, bios_path))
+  if mode == tmLinkTest:
+    # Second positional arg is core 2's ROM; defaults to running the same
+    # ROM on both cores.
+    let rom2 = if rom_path2.len > 0: rom_path2 else: rom_path
+    quit(link_test(rom_path, rom2, bios_path, timeout_frames))
 
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
@@ -330,7 +408,7 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
-  of tmStateRoundtrip, tmRewindTest:
+  of tmStateRoundtrip, tmRewindTest, tmLinkTest:
     discard  # handled (and exited) above
 
   if output.len > 0:

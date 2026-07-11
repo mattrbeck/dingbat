@@ -651,14 +651,14 @@ proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, etSaves)
   gba.storage.write_save()
 
-proc step_frame*(gba: GBA) =
-  gba.cpu.count_cycles = 0
-  while not gba.ppu.frame:
-    gba.cpu.tick()
+proc end_frame*(gba: GBA): CycleCount {.discardable.} =
+  ## Frame-boundary bookkeeping: clear the frame flag and rebase the
+  ## scheduler and timer cycle references to prevent uint32 overflow on
+  ## WASM. The low 10 bits stay so free-running timer prescaler phase (up to
+  ## 1024 cycles) is preserved across the rebase. Returns the subtracted
+  ## base so a link coordinator (link.nim) can keep cross-core cycle
+  ## comparisons valid across rebases.
   gba.ppu.frame = false
-  # Rebase scheduler and timer cycle references to prevent uint32 overflow on
-  # WASM. The low 10 bits stay so free-running timer prescaler phase (up to
-  # 1024 cycles) is preserved across the rebase.
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
@@ -685,6 +685,13 @@ proc step_frame*(gba: GBA) =
     gba.bus.rom_free_since -= base
   else:
     gba.bus.rom_free_since = 0
+  base
+
+proc step_frame*(gba: GBA) =
+  gba.cpu.count_cycles = 0
+  while not gba.ppu.frame:
+    gba.cpu.tick()
+  gba.end_frame()
 
 method run_until_frame*(gba: GBA) = gba.step_frame()
 

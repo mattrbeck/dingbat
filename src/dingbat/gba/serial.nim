@@ -17,7 +17,7 @@ type
   SioMode* = enum
     smNormal8, smNormal32, smMulti, smUart, smGeneralPurpose, smJoyBus
 
-proc sio_mode(serial: Serial): SioMode =
+proc sio_mode*(serial: Serial): SioMode =
   if bit(serial.rcnt, 15):
     if bit(serial.rcnt, 14): smJoyBus
     else: smGeneralPurpose

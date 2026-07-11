@@ -114,22 +114,62 @@ of a single-unit bus, own word in SIOMULTI0, 0xFFFF elsewhere) and remains
 the cheap deterministic driver-interface test; the AGS COM PASS is a
 phase-2 target.
 
-### 2. In-process local multiplayer (2–4 cores, one process)
+### 2. In-process local multiplayer (2–4 cores, one process) — DONE (phase 2, 2026-07)
 
-The mGBA model, adapted: N `GBA` instances, one designated clock master.
+Implemented in `src/dingbat/gba/link.nim`: a lockstep coordinator (`Link`)
+plus a `LockstepSioDriver` bound per core. Design:
 
-- Scheduling: run each core in bounded slices so no core gets ahead of a
-  possible transfer start. mGBA bounds the skew to a small cycle window
-  (SIO transfers at 9.6 kbps take ~1750 cycles/byte, so slices of ~1024
-  cycles are safe and cheap). On a transfer start, the master stalls until
-  every slave has reached the transfer's start cycle, then all cores resolve
-  the exchange at the same emulated time.
+- **Bounded interleaved slicing**: `new_link(cores)` takes N post-init GBA
+  instances (core 0 = multi-mode parent / cable head); `link.step_frame()`
+  advances all cores one video frame by repeatedly advancing the core with
+  the smallest clock in 512-cycle slices, so skew never exceeds the slice
+  plus bounded overshoot (one instruction, one DMA burst, or one halted
+  fast-forward to the next event — PPU events cap that at ~1232 cycles).
+  The shortest multi round (115.2 kbps, 16 bits) is 2336 cycles, so a child
+  is never a full round behind. The coordinator never uses `cpu.tick`'s
+  halted branch (it drains to wake/frame-end, unbounded); it calls
+  `scheduler.fast_forward()` per event instead.
+- **Cross-core clocks**: schedulers stay strictly per-core. The coordinator
+  compares int64 global times = per-core offset + `scheduler.cycles`; the
+  per-frame `rebase` was extracted into `gba.end_frame()`, which returns the
+  subtracted base to feed the offsets, keeping comparisons valid on wasm's
+  uint32 `CycleCount`.
+- **Deferred completion**: the initiating core (multi parent / normal-mode
+  internal-clock master) schedules its completion through the normal
+  etSerial path, so its timing and IRQ are exactly single-core behavior.
+  Multi mode samples every unit's SIOMLT_SEND at the round's *start* time
+  (children are first driven forward to it, then marked busy); when the
+  parent's completion fires, every peer is driven forward to the completion
+  cycle before the four SIOMULTI slots latch and busy/IRQ resolve on all
+  units at the same emulated time. `Link.run_to` is the single
+  network-transport boundary for phase 3: for a remote peer, "advance peer
+  to cycle X" becomes "block until the peer reports it has reached X".
+- **Status bits per GBATEK**: multi SI=0 parent / 1 child, SD=1 when every
+  unit is in multi mode, ID = cable position; normal-mode SI mirrors the
+  peer's SO. Normal 8/32 exchanges full-duplex at the master's completion
+  cycle; per GBATEK the exchange happens whether or not the slave set its
+  start bit — the slave only gets busy-clear/IRQ if it had started.
+- **Acceptance test**: `tests/roms/linktest.s` (headerless ARM ROM, both
+  units run the same image and derive their role from SI) — the parent
+  sends 0xA000|round, the child answers 0xB000|round, 16 rounds; both log
+  receive latches, role bits, and serial-IRQ counts to fixed EWRAM.
+  `./dingbat_test tests/roms/linktest.gba tests/roms/linktest.gba
+  --mode=linktest --timeout=60` runs both cores under the coordinator and
+  asserts both units saw identical, correct rounds → PASS.
+
+Still open from the original sketch (front-end work, not core):
+
 - Frontend: N framebuffers/keypads. The web UI is likely the best first
   home (two canvases side by side, second player on a gamepad); native SDL
-  needs a window/viewport story.
+  needs a window/viewport story. Keypads already exist per core
+  (`gba.handle_input`).
 - Audio: only the focused player mixes; others muted (mGBA does the same).
-- Determinism makes this testable headlessly: two cores, scripted inputs,
-  assert on RAM/framebuffer (e.g. Pokémon link trade completes).
+  Linked cores currently just leave APU sync off.
+- Save states / rewind of linked sessions are out of scope (single-core
+  state format untouched); a link session should disable rewind or snapshot
+  all cores atomically.
+- AGS COM PASS (second core as BIOS multiboot slave) remains a stretch
+  target; the deterministic assembly ROM above is the acceptance test.
 
 ### 3. Cross-emulator transports (pick per goal)
 
@@ -168,9 +208,11 @@ The mGBA model, adapted: N `GBA` instances, one designated clock master.
 
 ## Suggested order
 
-1. SIO driver abstraction + loopback driver (small; AGS COM as the test).
-2. In-process 2-player lockstep + web UI (the actual "local multiplayer").
-3. BGB protocol for GB (first true cross-emulator interop).
+1. SIO driver abstraction + loopback driver — DONE (phase 1, 2026-07).
+2. In-process 2-player lockstep — core DONE (phase 2, 2026-07; link.nim +
+   linktest); web UI wiring pending.
+3. BGB protocol for GB (first true cross-emulator interop), and/or a
+   dingbat↔dingbat GBA network transport behind `Link.run_to` (phase 3).
 4. JoyBus/TCP (Dolphin) and/or VBA-M protocol for GBA, per demand.
 
 Sources: [mGBA multiplayer architecture](https://deepwiki.com/mgba-emu/mgba/9.3-multiplayer-support),
