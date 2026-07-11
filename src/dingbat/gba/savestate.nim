@@ -187,6 +187,10 @@ proc load_dma_state(dma: DMA; r: var Reader) =
     dma.dmacnt_l[i] = r.read_u16()
     dma.dmacnt_h[i] = cast[DMACNT](r.read_u16())
     dma.latch[i] = r.read_u32()
+  # Arbitration state is always idle at frame boundaries (where states are
+  # taken), so it is not serialized — just reset it
+  dma.pending = 0
+  dma.current_priority = 4
 
 # ---- GPIO + RTC ----
 

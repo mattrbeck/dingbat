@@ -39,6 +39,11 @@ type
     # (e.g. a DMA triggered by an event touching MMIO mid-dispatch)
     dispatching*: bool
     dispatch*: proc(kind: EventType) {.closure.}
+    # Deferred-work pump, run after each event dispatch with dispatching
+    # already false. Handlers stay pure (they only mark work — e.g. GBA DMA
+    # requests); the pump executes it outside dispatch so it can advance the
+    # clock and dispatch nested events (DMA priority preemption). Nil for GB.
+    pump*: proc() {.closure.}
 
 proc new_scheduler*(): Scheduler =
   result = Scheduler(next_event: high(CycleCount))
@@ -87,25 +92,35 @@ proc call_current*(s: Scheduler) =
     s.dispatching = true
     s.dispatch(ev.kind)
     s.dispatching = false
+    if s.pump != nil: s.pump()
   s.next_event = high(CycleCount)
 
-proc tick_slow(s: Scheduler; target: CycleCount) =
+proc tick_slow(s: Scheduler; cycles: CycleCount) =
   # Jump directly to each due event's timestamp so handlers observe the
   # exact cycle they were scheduled for (same semantics as stepping one
   # cycle at a time, without the per-cycle loop).
-  while target >= s.next_event:
+  #
+  # The advance is quota-based (remaining cycles applied on top of the live
+  # clock) rather than toward a precomputed absolute target: a dispatch can
+  # re-entrantly advance the clock (a GBA DMA burst pumped from an event
+  # handler drains its stall cycles between transfers), and the rest of this
+  # tick's quota must then apply AFTER that stall — an absolute target would
+  # overlap the two, silently dropping the drained cycles.
+  var remaining = cycles
+  while s.cycles + remaining >= s.next_event:
+    remaining -= s.next_event - s.cycles
     s.cycles = s.next_event
     s.call_current()
-  s.cycles = target
+  s.cycles += remaining
 
 proc tick*(s: Scheduler; cycles: int) {.inline.} =
   # Kept tiny so it inlines into the CPU instruction loop; the event
   # dispatch loop lives out of line.
-  let target = s.cycles + CycleCount(cycles)
-  if target < s.next_event:
-    s.cycles = target
+  let n = CycleCount(cycles)
+  if s.cycles + n < s.next_event:
+    s.cycles += n
   else:
-    s.tick_slow(target)
+    s.tick_slow(n)
 
 proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event
