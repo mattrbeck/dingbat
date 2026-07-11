@@ -107,6 +107,14 @@ TCHK30 v9.0 behaves identically):
   multiboot wait (phase 2 below), or a small HLE "multiboot slave" SIO
   driver that answers 0x720x/0x610x. Even then the stock aging screen
   stays "-" unless the enable word is patched, because of the first bullet.
+- **Two force-enabled checkers do NOT handshake** (verified 2026-07 with
+  the phase-2 lockstep link: both cores force-enabled + auto-START). The
+  parent broadcasts 0x6200 but the child answers 0x0000, never 0x720x —
+  the checker's multi-play library has no slave-responder path (its send
+  path requires being bus parent, and nothing arms SIOMLT_SEND on a
+  child), so both units show COM: X FAIL. A PASS therefore requires a
+  core sitting in the actual BIOS multiboot wait, which needs
+  cartridge-less LLE boot support — deferred past phase 2.
 
 The loopback driver keeps its physically-sound semantics (normal mode:
 SO→SI, a unit receives its own bits, SI reads back SO; multi mode: parent
@@ -168,8 +176,10 @@ Still open from the original sketch (front-end work, not core):
 - Save states / rewind of linked sessions are out of scope (single-core
   state format untouched); a link session should disable rewind or snapshot
   all cores atomically.
-- AGS COM PASS (second core as BIOS multiboot slave) remains a stretch
-  target; the deterministic assembly ROM above is the acceptance test.
+- AGS COM PASS requires a second core in the BIOS multiboot wait, i.e.
+  cartridge-less LLE boot support (two force-enabled checkers do not
+  handshake — see the COM findings above); the deterministic assembly ROM
+  above is the acceptance test.
 
 ### 3. Cross-emulator transports (pick per goal)
 
