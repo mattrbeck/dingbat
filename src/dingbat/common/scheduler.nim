@@ -39,11 +39,14 @@ type
     # (e.g. a DMA triggered by an event touching MMIO mid-dispatch)
     dispatching*: bool
     dispatch*: proc(kind: EventType) {.closure.}
-    # Deferred-work pump, run after each event dispatch with dispatching
+    # Deferred-work pump, run after an event dispatch with dispatching
     # already false. Handlers stay pure (they only mark work — e.g. GBA DMA
     # requests); the pump executes it outside dispatch so it can advance the
     # clock and dispatch nested events (DMA priority preemption). Nil for GB.
+    # Only invoked when a handler set pump_requested — a closure call per
+    # event (~1000/frame) measurably costs host instructions.
     pump*: proc() {.closure.}
+    pump_requested*: bool
 
 proc new_scheduler*(): Scheduler =
   result = Scheduler(next_event: high(CycleCount))
@@ -92,7 +95,9 @@ proc call_current*(s: Scheduler) =
     s.dispatching = true
     s.dispatch(ev.kind)
     s.dispatching = false
-    if s.pump != nil: s.pump()
+    if s.pump_requested:
+      s.pump_requested = false
+      s.pump()
   s.next_event = high(CycleCount)
 
 proc tick_slow(s: Scheduler; cycles: CycleCount) =

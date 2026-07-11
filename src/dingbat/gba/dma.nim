@@ -29,6 +29,7 @@ proc request(dma: DMA; channel: int) {.inline.} =
   ## Latch a transfer request; run_pending (the scheduler's post-dispatch
   ## pump) grants it in priority order.
   dma.pending = dma.pending or uint8(1 shl channel)
+  dma.gba.scheduler.pump_requested = true
 
 proc `[]`*(dma: DMA; io_addr: uint32): uint8 =
   let channel = int((io_addr - 0xB0'u32) div 12)
