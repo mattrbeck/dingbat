@@ -126,7 +126,7 @@ const closeUpdateModal = () => {
 };
 
 updateBtn.addEventListener("click", () => {
-  if (currentRomName) {
+  if (currentRomName || linkMode) {
     updateModal.classList.add("open");
     trapFocus(updateModal);
   } else {
@@ -627,6 +627,22 @@ const refreshHomeRecent = async () => {
     });
 
     tile.appendChild(launch);
+    // GBA games get a 2P entry point: two linked cores side by side,
+    // keyboard vs. gamepad, each with its own save file
+    if (extOf(rom.name) === ".gba") {
+      tile.classList.add("has-2p");
+      let link2p = document.createElement("button");
+      link2p.type = "button";
+      link2p.className = "home-tile-2p";
+      link2p.title = "Play 2P over an emulated link cable";
+      link2p.setAttribute("aria-label", "Play " + rom.name + " in 2P link mode");
+      link2p.textContent = "2P";
+      link2p.addEventListener("click", (e) => {
+        e.stopPropagation();
+        launchLinkRom(rom);
+      });
+      tile.appendChild(link2p);
+    }
     tile.appendChild(del);
     homeRecent.appendChild(tile);
   }
@@ -951,6 +967,16 @@ const rebuildLookup = () => {
 };
 rebuildLookup();
 
+// Route player-1 input (keyboard, touch controls) to the right core: the
+// single running core normally, core 0 in 2P link mode.
+const routeP1Input = (inputId, down) => {
+  if (linkMode) {
+    if (Module._link_input) Module._link_input(0, inputId, down ? 1 : 0);
+  } else {
+    Module._setInput(inputId, down ? 1 : 0);
+  }
+};
+
 // JS-side keyboard handler: intercepts bound keys before Emscripten's SDL layer
 // and calls _setInput directly. This is authoritative for keyboard input.
 const gameKeyHandler = (e, down) => {
@@ -959,7 +985,7 @@ const gameKeyHandler = (e, down) => {
   if (inputId !== undefined && typeof Module !== "undefined" && Module._setInput) {
     e.preventDefault();
     e.stopImmediatePropagation();
-    Module._setInput(inputId, down ? 1 : 0);
+    routeP1Input(inputId, down);
   }
 };
 document.addEventListener("keydown", (e) => gameKeyHandler(e, true), true);
@@ -1107,6 +1133,8 @@ const speed2xButton = document.getElementById("speed-2x-btn");
 const rewindButton = document.getElementById("rewind");
 
 const loadRom = async (romName, originalName) => {
+  // Leaving 2P link mode: flush and persist both players' saves first
+  if (linkMode) await exitLinkMode();
   // Persist save from previous ROM before switching
   if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
@@ -1313,7 +1341,8 @@ pauseButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", () => {
-  if (currentRomName) loadRom(currentRomName, currentOriginalName);
+  if (linkMode && linkRomEntry) launchLinkRom(linkRomEntry);
+  else if (currentRomName) loadRom(currentRomName, currentOriginalName);
 });
 
 // 2x speed and unbounded fast forward are radio-style: fast forward would
@@ -1357,20 +1386,126 @@ for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
   rewindButton.addEventListener(ev, () => setRewindHeld(false));
 }
 
+// --- 2P local link mode ---
+// Two GBA cores running the same ROM over the emulated link cable (lockstep,
+// in-process), rendered side by side on their own 2D canvases. Keyboard and
+// touch controls drive P1, a connected gamepad drives P2. Each player has an
+// independent battery save: the same ROM bytes are written to two FS paths,
+// so core 2's .sav lands in its own file, persisted under "save:<name>-p2".
+// Rewind / 2x / fast-forward / save states are disabled in this mode — any
+// of them would desync the pair (their controls are hidden by CSS).
+
+var linkMode = false;
+var linkRomEntry = null; // { name, data, art? } kept for reset + persistence
+
+const LINK_FS_ROMS = ["linkrom1.gba", "linkrom2.gba"];
+const LINK_FS_SAVS = ["linkrom1.sav", "linkrom2.sav"];
+const linkSaveKey = (name, player) =>
+  "save:" + (player === 0 ? name : name + "-p2");
+
+let linkCtx = [null, null];
+let linkImg = [null, null];
+
+const initLinkCanvases = () => {
+  for (let p = 0; p < 2; p++) {
+    let c = document.getElementById("link-canvas-" + p);
+    linkCtx[p] = c.getContext("2d");
+    linkImg[p] = linkCtx[p].createImageData(240, 160);
+  }
+};
+
+const blitLinkCanvases = () => {
+  for (let p = 0; p < 2; p++) {
+    if (!linkCtx[p] || !Module._link_fb_ptr) continue;
+    let ptr = Module._link_fb_ptr(p);
+    if (!ptr) continue;
+    // Build the heap view fresh each blit: memory growth detaches buffers
+    linkImg[p].data.set(new Uint8Array(Module.memory.buffer, ptr, 240 * 160 * 4));
+    linkCtx[p].putImageData(linkImg[p], 0, 0);
+  }
+};
+
+// Persist both players' battery saves (the core flushes dirty saves to the
+// FS .sav files once per frame, same as single-player)
+const persistLinkSaves = async () => {
+  if (!linkRomEntry) return;
+  for (let p = 0; p < 2; p++) {
+    try {
+      let data = FS.readFile(LINK_FS_SAVS[p]);
+      if (data && data.length > 0) {
+        await dbPut(linkSaveKey(linkRomEntry.name, p), new Uint8Array(data));
+      }
+    } catch {}
+  }
+};
+
+const exitLinkMode = async () => {
+  if (!linkMode) return;
+  if (Module._link_exit) Module._link_exit(); // final battery flush into FS
+  await persistLinkSaves();
+  linkMode = false;
+  gpPrev.fill(false);
+  document.body.classList.remove("link-mode");
+};
+
+const launchLinkRom = async (rom) => {
+  // Flush whatever was running before
+  if (linkMode) {
+    await exitLinkMode();
+  } else if (currentRomName && currentOriginalName) {
+    await persistSave(currentRomName, currentOriginalName);
+  }
+  // Same ROM bytes at two FS paths: each core derives its own .sav file
+  writeToFS(LINK_FS_ROMS[0], rom.data);
+  writeToFS(LINK_FS_ROMS[1], rom.data);
+  // Restore both players' saves (never leave a previous game's .sav behind).
+  // P2 starts from a copy of P1's save the first time, so both sides hold a
+  // viable game — trading needs two playable saves.
+  for (let sav of LINK_FS_SAVS) {
+    try { FS.unlink(sav); } catch {}
+  }
+  let s1 = await dbGet(linkSaveKey(rom.name, 0));
+  let s2 = await dbGet(linkSaveKey(rom.name, 1));
+  if (!s2 && s1) s2 = s1;
+  if (s1) writeToFS(LINK_FS_SAVS[0], s1);
+  if (s2) writeToFS(LINK_FS_SAVS[1], s2);
+  // None of the speed/rewind toggles exist in link mode
+  setFastForward(false);
+  setSpeed2x(false);
+  setRewindHeld(false);
+  currentRomName = null;
+  currentOriginalName = null;
+  linkRomEntry = { name: rom.name, data: rom.data, art: rom.art };
+  let ok = Module.ccall("link_init", "number", ["string", "string"], LINK_FS_ROMS);
+  if (ok !== 1) {
+    linkRomEntry = null;
+    showToast("Couldn't start 2P link mode");
+    return;
+  }
+  linkMode = true;
+  paused = false;
+  pauseButton.classList.remove("paused", "active");
+  pauseButton.title = "Pause";
+  gpPrev.fill(false);
+  initLinkCanvases();
+  document.body.classList.add("has-game", "running", "link-mode");
+  await addRecentRom(rom.name, rom.data, rom.art);
+};
+
 // --- Main Menu (return to the home screen without terminating the game) ---
 
 // Show the home screen over the paused-but-still-loaded game. The emulator
 // keeps its state; Resume (or loading another ROM) picks up where it left off.
 const showMainMenu = () => {
   menuDropdown.hidden = true;
-  if (!currentRomName) return;
+  if (!currentRomName && !linkMode) return;
   paused = true;
   document.body.classList.remove("running");
   refreshHomeRecent();
 };
 
 const resumeGame = () => {
-  if (!currentRomName) return;
+  if (!currentRomName && !linkMode) return;
   paused = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
@@ -1473,7 +1608,12 @@ const pollGamepads = () => {
   if (!anyConnected) return;
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
-      Module._setInput(i, want[i] ? 1 : 0);
+      // In 2P link mode the gamepad is player 2's controller
+      if (linkMode) {
+        if (Module._link_input) Module._link_input(1, i, want[i] ? 1 : 0);
+      } else {
+        Module._setInput(i, want[i] ? 1 : 0);
+      }
       gpPrev[i] = want[i];
     }
   }
@@ -1600,14 +1740,18 @@ var Module = {
 
     // Persist save data to IndexedDB every 5 seconds
     setInterval(() => {
-      if (currentRomName && currentOriginalName) {
+      if (linkMode) {
+        persistLinkSaves();
+      } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
       }
     }, 5000);
 
     // Also persist on page unload
     window.addEventListener("beforeunload", () => {
-      if (currentRomName && currentOriginalName) {
+      if (linkMode) {
+        persistLinkSaves();
+      } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
       }
     });
@@ -1635,7 +1779,20 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (rewindHeld) {
+      if (linkMode) {
+        // 2P link: fixed-rate frames only — rewind/turbo would desync the
+        // pair, so their branches (and controls) don't exist here
+        let framesRun = 0;
+        while (accumulator >= FRAME_TIME && framesRun < 2) {
+          Module._link_tick();
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        blitLinkCanvases();
+      } else if (rewindHeld) {
         // Pop ~30 snapshots/s (10 frames each ≈ 5x realtime backward); the
         // pop presents the restored frame itself, and no audio is queued so
         // the scheduled lead just drains
@@ -1690,7 +1847,7 @@ const getInputs = (element) =>
   element?.getAttribute("data-inputs")?.split(" ").map(Number) ?? [];
 
 const setInputs = (inputs, down) => {
-  for (let id of inputs) Module._setInput(id, down ? 1 : 0);
+  for (let id of inputs) routeP1Input(id, down);
 };
 
 // Short haptic tick for touch controls (no-op where unsupported)
@@ -1736,11 +1893,11 @@ const dpadTouchMove = (event) => {
       let newInputs = getInputs(element);
       for (let id of oldInputs) {
         if (newInputs.includes(id)) continue;
-        Module._setInput(id, 0);
+        routeP1Input(id, false);
       }
       for (let id of newInputs) {
         if (oldInputs.includes(id)) continue;
-        Module._setInput(id, 1);
+        routeP1Input(id, true);
       }
       currentDpadElement?.classList.remove("pressed");
       element.classList.add("pressed");

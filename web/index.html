@@ -135,6 +135,18 @@
     <main id="stage">
       <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
+      <!-- 2P link mode: two linked cores, one canvas per player -->
+      <div id="link-stage">
+        <div class="link-pane">
+          <canvas id="link-canvas-0" width="240" height="160" oncontextmenu="event.preventDefault()"></canvas>
+          <span class="link-label">P1 &middot; Keyboard</span>
+        </div>
+        <div class="link-pane">
+          <canvas id="link-canvas-1" width="240" height="160" oncontextmenu="event.preventDefault()"></canvas>
+          <span class="link-label">P2 &middot; Gamepad</span>
+        </div>
+      </div>
+
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
         <div id="home-inner">

@@ -2,7 +2,9 @@ import std/[os, strutils, math]
 import sdl2 except init, quit
 import dingbat/common/input
 import dingbat/common/rewind
+import dingbat/common/scheduler
 import dingbat/gba/gba
+import dingbat/gba/link
 import dingbat/gb/gb
 
 const GBA_W = 240
@@ -73,7 +75,14 @@ proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint)
 # The APU appends float32 stereo samples here; JS reads and clears after each frame.
 var audioBuffer: seq[float32] = @[]
 
+# True while a muted core's etAPUSample event is being dispatched (2P link
+# mode plays player 1's APU only — see link_init). The sample is computed
+# and the event rescheduled exactly as usual; only the append is dropped, so
+# emulation stays bit-identical between the two linked cores.
+var audioSuppressed = false
+
 proc appendAudioSample(left, right: float32) {.exportc.} =
+  if audioSuppressed: return
   audioBuffer.add(left)
   audioBuffer.add(right)
 
@@ -241,7 +250,101 @@ proc wasm_rewind_pop(): cint {.exportc.} =
   stateRenderer.present()
   1
 
+# --- 2P local link mode (multiplayer phase 3, web side) ---
+# Two GBA cores running the same ROM, wired by the in-process lockstep link
+# (gba/link.nim). The SDL renderer/canvas only serves the single-core path,
+# so in link mode JS drives frames via link_tick and blits each core's
+# framebuffer itself from the per-core RGBA buffers below (converted through
+# the same color LUT as the single-core present path). Globals are nil/empty
+# at module scope and only ever allocated from JS-invoked procs — this
+# build's main() returns after init and Nim's exit teardown would leave
+# module-init heap globals dangling (see rewindHistory above).
+var stateLink: Link = nil
+var linkRgba: array[2, seq[uint32]]
+
+proc link_exit() {.exportc.} =
+  ## Leave link mode: force a final battery-save flush for both cores into
+  ## their FS .sav files (JS persists those to IndexedDB right after) and
+  ## drop the link.
+  if stateLink != nil:
+    for core in stateLink.cores:
+      core.storage.write_save()
+    stateLink = nil
+  audioSuppressed = false
+
+proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
+  ## Start 2P link mode. The two paths hold identical ROM bytes under
+  ## distinct names, so each core derives its own .sav path — two
+  ## independent battery saves for the same game (trading needs both).
+  ## Returns 1 on success.
+  link_exit()
+  # Tear down any running single-core session (mirrors initFromEmscripten)
+  if stateGb != nil:
+    stateGb.cartridge.mbc_save()
+  stateKind = ekNone
+  stateGba = nil
+  stateGb = nil
+  rewindHistory = nil  # rewinding one core would desync the pair
+  if stateTexture != nil:
+    destroyTexture(stateTexture)
+    stateTexture = nil
+  let bios = if fileExists("bios.bin"): "bios.bin" else: ""
+  var cores: seq[GBA] = @[]
+  for path in [$rom1_path, $rom2_path]:
+    if not fileExists(path): return 0
+    let core = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    core.post_init()
+    cores.add(core)
+  # Player 1's APU is the only audible one: wrap core 2's event dispatch so
+  # its sample events run normally (identical emulation, event stream and
+  # rescheduling untouched) while appendAudioSample drops the samples
+  # instead of interleaving them into the shared audio buffer.
+  let orig_dispatch = cores[1].scheduler.dispatch
+  cores[1].scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample:
+      audioSuppressed = true
+      orig_dispatch(kind)
+      audioSuppressed = false
+    else:
+      orig_dispatch(kind)
+  stateLink = new_link(cores)
+  for p in 0 .. 1:
+    linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
+  frameCount = 0
+  1
+
+proc link_tick() {.exportc.} =
+  ## Advance both cores one lockstep-linked frame and convert each changed
+  ## framebuffer to RGBA. JS blits the buffers into two 2D canvases.
+  if stateLink == nil: return
+  inc frameCount
+  stateLink.step_frame()
+  for p in 0 .. 1:
+    let core = stateLink.cores[p]
+    if core.ppu.frame_static: continue  # unchanged since the previous frame
+    let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
+    for i in 0 ..< GBA_W * GBA_H:
+      linkRgba[p][i] = colorLut[fb[i] and 0x7FFF]
+  # Drain the SDL event queue: JS handles all link-mode input directly via
+  # link_input, but emscripten's SDL layer still queues events for keys the
+  # JS capture handler doesn't intercept.
+  var evt = defaultEvent
+  while pollEvent(evt): discard
+
+proc link_fb_ptr(player: cint): pointer {.exportc.} =
+  ## Pointer to `player`'s (0 or 1) 240x160 RGBA8888 framebuffer.
+  if stateLink == nil or player < 0 or player > 1: return nil
+  if linkRgba[player].len == 0: return nil
+  addr linkRgba[player][0]
+
+proc link_input(player, inputId, pressed: cint) {.exportc.} =
+  if stateLink == nil or player < 0 or player >= cint(stateLink.cores.len): return
+  if inputId < 0 or inputId > ord(Input.high): return
+  stateLink.cores[player].handle_input(Input(inputId), pressed != 0)
+
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
+  # Leaving 2P link mode for a single-core session
+  link_exit()
   # Flush the outgoing GB cart's battery save before replacing it
   if stateGb != nil:
     stateGb.cartridge.mbc_save()

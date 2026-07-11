@@ -1693,3 +1693,129 @@ body.large-controls .pad-pill {
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * ==========================================================
+ * 2P link mode
+ * ==========================================================
+ */
+
+/* "2P" launch button on GBA library tiles, next to the delete button */
+.home-tile.has-2p .home-tile-launch {
+  padding-right: 64px;
+}
+
+.home-tile-2p {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  transform: translateY(-50%);
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.home-tile:hover .home-tile-2p {
+  opacity: 1;
+}
+
+.home-tile-2p:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Two side-by-side screens (stacked in portrait), one per player */
+#link-stage {
+  display: none;
+}
+
+body.running.link-mode #canvas {
+  display: none;
+}
+
+body.running.link-mode #link-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+}
+
+.link-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.link-pane canvas {
+  width: min(100%, calc((100dvh - var(--bar-h) - 72px) * 1.5));
+  max-width: 100%;
+  aspect-ratio: 3 / 2;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 50px rgba(0, 0, 0, 0.6),
+    0 0 60px -20px var(--accent-glow);
+}
+
+.link-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* Portrait / narrow: stack the two screens */
+@media (max-aspect-ratio: 5/4) {
+  body.running.link-mode #link-stage {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .link-pane canvas {
+    width: min(100%, calc((50dvh - var(--bar-h)) * 1.5));
+  }
+}
+
+/* Anything that would desync the linked pair is hidden in link mode:
+   rewind and the speed toggles change one clock, save states and .sav
+   import/export target a single core, and the screenshot path captures
+   the (hidden) single-core canvas. Pause/reset stay: they act on both. */
+body.link-mode #rewind,
+body.link-mode #speed-2x-btn,
+body.link-mode #fast-forward,
+body.link-mode #save-state,
+body.link-mode #load-state,
+body.link-mode #export-state,
+body.link-mode #import-state,
+body.link-mode #state-sep,
+body.link-mode #load-save,
+body.link-mode #export-save,
+body.link-mode #screenshot,
+body.link-mode #save-sep {
+  display: none !important;
+}
