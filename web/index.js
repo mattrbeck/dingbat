@@ -627,8 +627,9 @@ const refreshHomeRecent = async () => {
     });
 
     tile.appendChild(launch);
-    // GBA games get a 2P entry point: two linked cores side by side,
-    // keyboard vs. gamepad, each with its own save file
+    // GBA games get link-cable entry points: 2P (two local cores, keyboard
+    // vs. gamepad) and online host/join (one core linked to a remote peer
+    // over WebRTC with a room code)
     if (extOf(rom.name) === ".gba") {
       tile.classList.add("has-2p");
       let link2p = document.createElement("button");
@@ -642,6 +643,28 @@ const refreshHomeRecent = async () => {
         launchLinkRom(rom);
       });
       tile.appendChild(link2p);
+      let host = document.createElement("button");
+      host.type = "button";
+      host.className = "home-tile-net home-tile-host";
+      host.title = "Host an online link game (get a room code)";
+      host.setAttribute("aria-label", "Host " + rom.name + " online");
+      host.textContent = "HOST";
+      host.addEventListener("click", (e) => {
+        e.stopPropagation();
+        netHost(rom);
+      });
+      tile.appendChild(host);
+      let join = document.createElement("button");
+      join.type = "button";
+      join.className = "home-tile-net home-tile-join";
+      join.title = "Join an online link game with a room code";
+      join.setAttribute("aria-label", "Join an online game of " + rom.name);
+      join.textContent = "JOIN";
+      join.addEventListener("click", (e) => {
+        e.stopPropagation();
+        netJoin(rom);
+      });
+      tile.appendChild(join);
     }
     tile.appendChild(del);
     homeRecent.appendChild(tile);
@@ -1135,6 +1158,8 @@ const rewindButton = document.getElementById("rewind");
 const loadRom = async (romName, originalName) => {
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
+  // Leaving online link mode: say BYE to the peer and drop the channel
+  if (typeof netShutdown === "function" && netMode) await netShutdown();
   // Persist save from previous ROM before switching
   if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
@@ -1774,6 +1799,10 @@ var Module = {
 
     // Also persist on page unload
     window.addEventListener("beforeunload", () => {
+      // Closing the tab mid-online-game: get the BYE out so the peer sees a
+      // clean exit instead of a dead channel (the sync parts run before the
+      // page dies; the await inside is best-effort)
+      if (netMode && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
@@ -1804,7 +1833,25 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (linkMode) {
+      if (netMode) {
+        // Online link: fixed-rate frames, no rewind/turbo (they'd desync
+        // the peers). A tick can also report "stalled": the emulated clock
+        // is parked waiting for the remote side — drop the accumulated debt
+        // (wall time spent stalled must not be replayed as a frame burst)
+        // and keep the RAF loop running so the badge and channel stay live.
+        let st = 1;
+        let framesRun = 0;
+        while (accumulator >= FRAME_TIME && framesRun < 2) {
+          st = netStep();
+          if (st !== 1) break;
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        if (st !== 1 || accumulator > FRAME_TIME * 2) accumulator = 0;
+        netAfterTick(st);
+      } else if (linkMode) {
         // 2P link: fixed-rate frames only — rewind/turbo would desync the
         // pair, so their branches (and controls) don't exist here
         let framesRun = 0;

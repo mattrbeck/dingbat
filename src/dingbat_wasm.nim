@@ -5,6 +5,7 @@ import dingbat/common/rewind
 import dingbat/common/scheduler
 import dingbat/gba/gba
 import dingbat/gba/link
+import dingbat/gba/netcore
 import dingbat/gb/gb
 
 const GBA_W = 240
@@ -43,6 +44,16 @@ var stateWindow:   WindowPtr   = nil
 var stateRenderer: RendererPtr = nil
 var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
+
+# --- Online link mode (multiplayer phase 3b) state ---
+# A single local GBA core linked to a remote peer: JS shuttles linkproto
+# wire bytes between netlink_feed/netlink_drain and a WebRTC DataChannel.
+# Globals follow the module-scope rule below (rewindHistory): nil/empty
+# here, only ever allocated from JS-invoked procs. Full implementation
+# after initFromEmscripten.
+var stateNet: NetCore = nil
+var netOut: string = ""       # drained frames awaiting pickup by JS
+var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
 
 # LCD color correction matching the desktop game shader exactly: linearize
 # with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2. SDL's renderer
@@ -136,6 +147,7 @@ proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
   ## corruption — the reason is echoed to the log) with the core untouched.
   if data == nil or len <= 0: return 0
+  if stateNet != nil: return 0  # loading a state mid-link would desync the pair
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   let ok = case stateKind
@@ -147,6 +159,7 @@ proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
 proc benchFrames(n: cint) {.exportc.} =
   ## Run emulation frames without presenting; lets the JS side measure how
   ## much of a frame is emulation vs the LUT convert + texture upload path.
+  if stateNet != nil: return  # free-running past the peer would desync
   case stateKind
   of ekGBA:
     for _ in 0 ..< n: stateGba.step_frame()
@@ -199,6 +212,7 @@ var rewindHistory: Rewind = nil
 
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
+  if stateNet != nil: return  # online link mode: netlink_tick drives frames
   inc frameCount
   case stateKind
   of ekGBA:
@@ -278,6 +292,9 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   ## independent battery saves for the same game (trading needs both).
   ## Returns 1 on success.
   link_exit()
+  stateNet = nil  # entering 2P mode tears down any online link session
+  netOut.setLen(0)
+  netErrorMsg.setLen(0)
   # Tear down any running single-core session (mirrors initFromEmscripten)
   if stateGb != nil:
     stateGb.cartridge.mbc_save()
@@ -345,6 +362,10 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session
   link_exit()
+  # Leaving online link mode: drop the protocol core (JS closes the channel)
+  stateNet = nil
+  netOut.setLen(0)
+  netErrorMsg.setLen(0)
   # Flush the outgoing GB cart's battery save before replacing it
   if stateGb != nil:
     stateGb.cartridge.mbc_save()
@@ -373,6 +394,153 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
   rewindHistory = new_rewind()
+
+# --- Online link mode (multiplayer phase 3b, web side) ---
+# One local GBA core linked to a remote peer over whatever byte transport
+# JS provides (a WebRTC DataChannel in the web UI). The protocol state
+# machine is gba/netcore.nim — the same implementation the native TCP
+# transport wraps. JS shuttles wire bytes with netlink_feed/netlink_drain
+# and drives frames with netlink_tick instead of loop_tick; rendering,
+# audio, and input all reuse the single-core paths (each side renders only
+# its own core).
+
+proc net_collect() =
+  # Move frames the protocol core queued into the JS-visible drain buffer.
+  if stateNet == nil: return
+  for f in stateNet.take_outgoing():
+    netOut.add f
+
+proc netlink_init(rom_path: cstring; is_host: cint;
+                  allow_crc_mismatch: cint): cint {.exportc.} =
+  ## Start online link mode on a GBA ROM already written to the FS. Sets up
+  ## the usual single-core session, then binds the network protocol core to
+  ## it (host = unit 0, the multi-mode parent). Our HELLO is queued
+  ## immediately — drain and send it once the channel opens. With
+  ## allow_crc_mismatch, differing ROM CRCs are accepted and reported via
+  ## netlink_crc_mismatch (cross-version trades, e.g. Ruby<->Sapphire);
+  ## the UI should warn + confirm before ticking. Returns 1 on success.
+  initFromEmscripten(rom_path)  # also tears down any previous session
+  if stateKind != ekGBA: return 0
+  rewindHistory = nil  # rewinding one side would desync the pair
+  let rom = readFile($rom_path)
+  stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
+                          rom_crc = crc32(rom),
+                          strict_crc = allow_crc_mismatch == 0,
+                          lead = NETLINK_LEAD_RAF)
+  net_collect()
+  frameCount = 0
+  1
+
+proc netlink_exit() {.exportc.} =
+  ## Leave online mode: queue BYE for the peer, flush the battery save, and
+  ## keep the local game running unlinked (it sees a yanked cable). JS must
+  ## drain once more after this to actually deliver the BYE, then close the
+  ## channel and switch the RAF driver back to loop_tick.
+  if stateNet == nil: return
+  stateNet.send_bye(LINK_BYE_SHUTDOWN)
+  net_collect()
+  stateNet = nil
+  if stateGba != nil:
+    stateGba.set_sio_driver(NullSioDriver())
+    stateGba.storage.write_save()
+  rewindHistory = new_rewind()
+
+proc netlink_feed(data: pointer; len: cint): cint {.exportc.} =
+  ## Ingest wire bytes from the transport (any chunking). A REPLY landing
+  ## here can unpark a stalled transfer completion. Returns 0 on a corrupt
+  ## stream (sticky error; see netlink_error_msg).
+  if stateNet == nil or data == nil or len <= 0: return 0
+  try:
+    stateNet.feed(cast[ptr UncheckedArray[char]](data)
+                  .toOpenArray(0, int(len) - 1))
+    net_collect()
+    1
+  except LinkProtoError as e:
+    netErrorMsg = e.msg
+    0
+
+proc netlink_drain(buf: pointer; cap: cint): cint {.exportc.} =
+  ## Copy up to cap pending outbound wire bytes into buf; returns the count
+  ## (0 = nothing pending). Call after every tick/feed and send on the
+  ## DataChannel.
+  net_collect()
+  if netOut.len == 0 or buf == nil or cap <= 0: return 0
+  let n = min(netOut.len, int(cap))
+  copyMem(buf, addr netOut[0], n)
+  if n == netOut.len:
+    netOut.setLen(0)
+  else:
+    netOut = netOut[n .. ^1]
+  cint(n)
+
+proc netlink_tick(): cint {.exportc.} =
+  ## Drive one RAF tick of online link mode. Returns:
+  ##   0 = handshake pending (feed more, don't render)
+  ##   1 = a frame completed and was presented
+  ##   2 = stalled waiting for the peer (emulated clock parked mid-frame;
+  ##       keep the RAF loop running, show the indicator, feed on arrival)
+  ##   3 = failed (handshake rejection or corrupt stream; netlink_error_msg)
+  ##   4 = not in online link mode
+  if stateNet == nil: return 4
+  if netErrorMsg.len > 0: return 3
+  if stateNet.hello == hsFailed:
+    netErrorMsg = stateNet.hello_error
+    return 3
+  var r = stateNet.try_advance()
+  while r == naProgress:
+    r = stateNet.try_advance()
+  net_collect()
+  case r
+  of naHello:
+    0
+  of naStalled:
+    2
+  of naFrame:
+    inc frameCount
+    if not stateGba.ppu.frame_static:
+      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                        GBA_W * GBA_H, GBA_W * 4)
+    checkInput()
+    stateRenderer.clear()
+    discard stateRenderer.copy(stateTexture, nil, nil)
+    stateRenderer.present()
+    1
+  of naProgress:
+    1  # unreachable: the loop above only exits on the other results
+
+proc netlink_stalled(): cint {.exportc.} =
+  ## 1 while the emulated clock is parked waiting for the peer (frontends
+  ## surface "waiting for peer").
+  if stateNet != nil and stateNet.stalled: 1 else: 0
+
+proc netlink_peer_done(): cint {.exportc.} =
+  ## 1 once the peer sent BYE (it left the session; we keep running).
+  if stateNet != nil and stateNet.peer_done: 1 else: 0
+
+proc netlink_crc_mismatch(): cint {.exportc.} =
+  ## 1 when the handshake accepted a differing ROM CRC (relaxed mode); the
+  ## UI warns + confirms before play starts.
+  if stateNet != nil and stateNet.crc_mismatch: 1 else: 0
+
+proc netlink_error_msg(): cstring {.exportc.} =
+  ## Sticky failure reason after netlink_tick/netlink_feed reported one.
+  cstring(netErrorMsg)
+
+var netDebugStr: string = ""
+
+proc netlink_debug(): cstring {.exportc.} =
+  ## Diagnostic snapshot of the protocol core (shown in the web log).
+  netDebugStr = if stateNet != nil: stateNet.debug_state() else: "no session"
+  cstring(netDebugStr)
+
+proc wasm_ew16(offset: cint): cint {.exportc.} =
+  ## Debug/test hook: read a halfword from board WRAM (EWRAM). The linktest
+  ## ROM acceptance contract lives at fixed EWRAM offsets (0x800 = 0xCAFE
+  ## when finished); browser acceptance tests poll this.
+  if stateGba == nil or offset < 0 or int(offset) + 1 >= stateGba.bus.wram_board.len:
+    return 0
+  cint(uint16(stateGba.bus.wram_board[offset]) or
+       (uint16(stateGba.bus.wram_board[offset + 1]) shl 8))
 
 when defined(emscripten):
   # Register a dummy main loop so SDL2's emscripten backend can call

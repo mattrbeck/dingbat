@@ -1984,3 +1984,148 @@ body.link-mode #save-sep {
     gap: 12px;
   }
 }
+
+/*
+ * ==========================================================
+ * Online link mode (phase 3b)
+ * ==========================================================
+ */
+
+/* HOST / JOIN launch buttons on GBA library tiles, next to 2P */
+.home-tile.has-2p .home-tile-launch {
+  padding-right: 148px;
+}
+
+.home-tile-net {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.home-tile-join {
+  right: 58px;
+}
+
+.home-tile-host {
+  right: 100px;
+}
+
+.home-tile:hover .home-tile-net {
+  opacity: 1;
+}
+
+.home-tile-net:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Room-code modal */
+#net-code {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: center;
+  color: var(--accent);
+  padding: 14px 0 6px;
+  min-height: 58px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.net-join-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#net-code-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+#net-code-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.net-status {
+  min-height: 1.2em;
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.net-status.net-error {
+  color: var(--danger);
+}
+
+/* "waiting for peer" badge: subtle chip over the top-right of the stage,
+   shown only during sustained stalls of the emulated clock */
+#net-stall {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  background: rgba(20, 16, 8, 0.72);
+  border: 1px solid rgba(255, 176, 77, 0.35);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+#net-stall[hidden] {
+  display: none;
+}
+
+/* Anything that would desync (or reset) one side of the pair is hidden
+   while linked online. Unlike local 2P, reset also hides (it can't reach
+   the remote core), while screenshot and save-file export are fine (this
+   side's canvas and .sav are the only ones here). */
+body.net-mode #rewind,
+body.net-mode #speed-2x-btn,
+body.net-mode #fast-forward,
+body.net-mode #reset,
+body.net-mode #save-state,
+body.net-mode #load-state,
+body.net-mode #export-state,
+body.net-mode #import-state,
+body.net-mode #state-sep,
+body.net-mode #load-save {
+  display: none !important;
+}

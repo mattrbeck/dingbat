@@ -198,6 +198,11 @@
         <div id="log-entries"></div>
       </div>
 
+      <!-- Online link: shown while the emulated clock waits on the peer -->
+      <div id="net-stall" hidden aria-live="polite">
+        <span aria-hidden="true">&#8987;</span> waiting for peer
+      </div>
+
       <div id="toast" role="status" aria-live="polite"></div>
     </main>
 
@@ -271,6 +276,27 @@
       </div>
     </div>
 
+    <div id="net-modal" class="modal-overlay">
+      <div class="modal">
+        <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
+        <h3 id="net-title">Play online</h3>
+        <div id="net-host-view" hidden>
+          <p>Share this room code with your friend (they pick the same game and choose <strong>Join</strong>):</p>
+          <div id="net-code" aria-live="polite"></div>
+        </div>
+        <div id="net-join-view" hidden>
+          <p>Enter the room code from the host:</p>
+          <div class="net-join-row">
+            <input id="net-code-input" type="text" inputmode="latin" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false" maxlength="8"
+                   placeholder="KJ4-Q7N" aria-label="Room code" />
+            <button type="button" class="button button-primary" id="net-join-go">Join</button>
+          </div>
+        </div>
+        <p id="net-status" class="net-status" aria-live="polite"></p>
+      </div>
+    </div>
+
     <!-- ====================== On-screen gamepad ====================== -->
     <div id="controls">
       <div id="lr">
@@ -304,6 +330,7 @@
     </div>
 
     <script src="index.js"></script>
+    <script src="netplay.js"></script>
     <script src="em.js"></script>
   </body>
 </html>
