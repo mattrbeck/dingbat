@@ -455,6 +455,7 @@ proc get_sample*(apu: APU)
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
 proc run_pending_immediate*(dma: DMA)
+proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool

@@ -90,6 +90,16 @@ proc trigger_vdma*(dma: DMA) =
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 1:  # VBlank
       dma.trigger(channel)
 
+proc trigger_video_capture*(dma: DMA; vcount: uint16) =
+  ## DMA3 special timing = video capture: one transfer per scanline for
+  ## VCOUNT 2..161, then the channel disables itself at line 162. The AGS
+  ## aging cartridge verifies this by capturing VCOUNT itself each line.
+  if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
+    if vcount >= 2 and vcount < 162:
+      dma.trigger(3)
+    elif vcount == 162:
+      dma.dmacnt_h[3].enable = false
+
 proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1
   if dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 3:  # Special
@@ -114,7 +124,7 @@ proc trigger*(dma: DMA; channel: int) =
       word_size = 4
       dest_ctrl = 2  # Fixed
     elif channel == 3:
-      echo "todo: video capture dma"
+      discard  # video capture: programmed length/size, one burst per line
     else:
       echo "Prohibited special dma"
 

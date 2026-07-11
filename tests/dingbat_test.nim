@@ -261,6 +261,11 @@ proc main() =
           test_out.finished = true
       if mode == tmMgbaSuite and test_out.mgba_debug_output.contains("ALL DONE"):
         test_out.finished = true
+    # Screenshot mode: write the 240x160 GBA framebuffer as PPM after running
+    if mode == tmScreenshot and screenshot_path.len > 0:
+      write_ppm(screenshot_path, emu.ppu.framebuffer, 240, 160, color_mode)
+      echo screenshot_path
+      quit(0)
   else:
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
     emu.test_output = test_out

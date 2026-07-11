@@ -78,6 +78,7 @@ proc end_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(0, etPPUStartLine)
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
+  ppu.gba.dma.trigger_video_capture(ppu.vcount)
   ppu.dispstat.vcounter = (ppu.vcount == uint16(ppu.dispstat.vcount_setting))
   if ppu.dispstat.vcounter_irq_enable and ppu.dispstat.vcounter:
     ppu.gba.interrupts.reg_if.vcounter = true

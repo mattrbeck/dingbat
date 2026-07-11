@@ -53,7 +53,12 @@ proc new_timer*(gba: GBA): Timer =
 
 proc get_current_tm(tim: Timer; num: int): uint16 =
   if tim.tmcnt[num].enable and not tim.tmcnt[num].cascade:
-    let now = tim.gba.scheduler.cycles
+    # Include un-ticked bus cycles: normally catch_up has just drained them
+    # (so this adds zero), but a DMA reading the timer runs inside event
+    # dispatch where catch_up is suppressed — each transfer must still see
+    # the live count (the AGS aging cartridge DMA-captures consecutive timer
+    # values to verify bus timing).
+    let now = tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
     # cycle_enabled can sit up to TIMER_START_DELAY in the future right after
     # an enable write; the counter hasn't started yet
     if now <= tim.cycle_enabled[num]: return tim.tm[num]
