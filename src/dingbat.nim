@@ -485,21 +485,26 @@ proc render_imgui() =
           save_config(app.cfg)
         # 2x Speed stays audio-paced (at double rate); Fast Forward is
         # inverted audio sync — unsynced emulation runs uncapped, so
-        # checked == not sync
+        # checked == not sync. Radio-style: fast forward would silently
+        # dominate 2x, so enabling either clears the other.
         if app.emu_kind == ekGBA and app.gba_emu != nil:
-          discard igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                     addr app.gba_emu.apu.turbo, true)
+          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
+                                addr app.gba_emu.apu.turbo, true):
+            if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
           var fast_forward = not app.gba_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
                                 addr fast_forward, true):
             app.gba_emu.apu.sync = not fast_forward
+            if fast_forward: app.gba_emu.apu.turbo = false
         elif app.emu_kind == ekGB and app.gb_emu != nil:
-          discard igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                     addr app.gb_emu.apu.turbo, true)
+          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
+                                addr app.gb_emu.apu.turbo, true):
+            if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
           var fast_forward = not app.gb_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
                                 addr fast_forward, true):
             app.gb_emu.apu.sync = not fast_forward
+            if fast_forward: app.gb_emu.apu.turbo = false
         if should_reset and app.cfg.recents.len > 0:
           load_rom(app.cfg.recents[0])
         igEndMenu()
@@ -739,11 +744,14 @@ proc handle_input() =
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
         elif sym == K_TAB and pressed:
-          # Shift+Tab = 2x speed, Tab = unbounded fast forward
+          # Shift+Tab = 2x speed, Tab = unbounded fast forward; the two are
+          # mutually exclusive (fast forward would silently dominate 2x)
           if (mods and KMOD_SHIFT_MASK) != 0:
             app.gba_emu.apu.turbo = not app.gba_emu.apu.turbo
+            if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
           else:
             app.gba_emu.apu.sync = not app.gba_emu.apu.sync
+            if not app.gba_emu.apu.sync: app.gba_emu.apu.turbo = false
         elif pressed and sym >= K_1 and sym <= K_6:
           # Feedback is visible in the Audio/Video > Channels submenu
           let ch = int(sym) - int(K_1)
@@ -754,8 +762,10 @@ proc handle_input() =
         elif sym == K_TAB and pressed:
           if (mods and KMOD_SHIFT_MASK) != 0:
             app.gb_emu.apu.turbo = not app.gb_emu.apu.turbo
+            if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
           else:
             app.gb_emu.apu.toggle_sync()
+            if not app.gb_emu.apu.sync: app.gb_emu.apu.turbo = false
 
     of ControllerDeviceAdded:
       # `which` is a device index for the Added event

@@ -1254,19 +1254,31 @@ resetButton.addEventListener("click", () => {
   if (currentRomName) loadRom(currentRomName, currentOriginalName);
 });
 
+// 2x speed and unbounded fast forward are radio-style: fast forward would
+// silently dominate 2x (it ignores pacing entirely), so enabling either
+// clears the other.
+const setSpeed2x = (on) => {
+  speed2x = on;
+  speed2xButton.classList.toggle("active", on);
+  if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
+    Module._wasm_set_turbo(on ? 1 : 0);
+  }
+};
+const setFastForward = (on) => {
+  fastForward = on;
+  fastForwardButton.classList.toggle("active", on);
+};
+
 fastForwardButton.addEventListener("click", () => {
-  fastForward = !fastForward;
-  fastForwardButton.classList.toggle("active", fastForward);
+  setFastForward(!fastForward);
+  if (fastForward) setSpeed2x(false);
 });
 
 // 2x speed: the core drops every other audio sample (pitched-up realtime
-// audio) while the tick loop below halves its per-frame time step
+// audio) while the tick loop halves its per-frame time step
 speed2xButton.addEventListener("click", () => {
-  speed2x = !speed2x;
-  speed2xButton.classList.toggle("active", speed2x);
-  if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
-    Module._wasm_set_turbo(speed2x ? 1 : 0);
-  }
+  setSpeed2x(!speed2x);
+  if (speed2x) setFastForward(false);
 });
 
 // Rewind: hold to step history backward (the tick loop pops snapshots at a
