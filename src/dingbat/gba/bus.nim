@@ -166,6 +166,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x134, 0xE510F004'u32)
     write_stub_u32(result.bios, 0x138, 0xE8BD500F'u32)
     write_stub_u32(result.bios, 0x13C, 0xE25EF004'u32)
+    # Never executed: the two words after the IRQ return, so the two-ahead
+    # pipeline latch reads the same values as the real BIOS leaves
+    write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
+    write_stub_u32(result.bios, 0x144, 0xE55EC002'u32)
   result.gpio = new_gpio(gba)
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
 

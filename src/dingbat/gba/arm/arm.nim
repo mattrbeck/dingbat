@@ -696,7 +696,14 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
-  if cpu.spsr.thumb: cpu.r[15] -= 4
+  if cpu.spsr.thumb:
+    cpu.r[15] -= 4
+    # set_reg(15) already refilled the pipeline at ARM width; a return to
+    # thumb refills with two halfword fetches instead. Charge the
+    # difference (zero in IWRAM/BIOS, -6 in EWRAM/default ROM).
+    let page = int(bits_range(cpu.r[15], 24, 27))
+    cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
+                                int(cpu.gba.bus.wait32_s[page])))
   let old_spsr = uint32(cpu.spsr)
   let was_irq_disabled = cpu.cpsr.irq_disable
   let new_mode = cast[CpuMode](cpu.spsr.mode)

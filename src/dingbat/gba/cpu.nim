@@ -116,6 +116,14 @@ proc clear_pipeline*(cpu: CPU) =
   # Pipeline refill: two sequential fetches at the branch destination
   # (1 cycle each in IWRAM/BIOS, waitstate-dependent in EWRAM/ROM)
   let page = int(bits_range(cpu.r[15], 24, 27))
+  if page < 0x8 or page > 0xD:
+    # Execution left the gamepak: the prefetcher only runs while the CPU
+    # executes from ROM, so the buffered stream is abandoned. Without this
+    # a SWI into the BIOS banks the whole handler's runtime as prefetch
+    # credit and the return fetches come out too cheap (mGBA suite BIOS
+    # timing tests, prefetch columns, under the official BIOS).
+    cpu.gba.bus.rom_next_addr = 1
+    cpu.gba.bus.rom_hot = false
   if cpu.cpsr.thumb:
     cpu.r[15] += 4
     cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
@@ -130,14 +138,18 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       let fetch_addr = cpu.r[15] - 4
       let v = uint32(cpu.gba.bus.fetch_half(fetch_addr))
       if bits_range(fetch_addr, 24, 27) == 0:
-        cpu.gba.bus.bios_latch = v or (v shl 16)
+        # The latch holds the newest pipeline fetch, which runs two
+        # instructions ahead of execution (hardware-verified: after a SWI
+        # the latch is the opcode 8 bytes past the BIOS's `movs pc, lr`)
+        let ahead = uint32(cpu.gba.bus.read_half_internal((fetch_addr + 4) and 0x3FFF'u32))
+        cpu.gba.bus.bios_latch = ahead or (ahead shl 16)
       v
     else:
       cpu.r[15] = cpu.r[15] and not 3'u32
       let fetch_addr = cpu.r[15] - 8
       let v = cpu.gba.bus.fetch_word(fetch_addr)
       if bits_range(fetch_addr, 24, 27) == 0:
-        cpu.gba.bus.bios_latch = v
+        cpu.gba.bus.bios_latch = cpu.gba.bus.read_word_internal((fetch_addr + 8) and 0x3FFF'u32)
       v
   else:
     cpu.pipeline.shift()
