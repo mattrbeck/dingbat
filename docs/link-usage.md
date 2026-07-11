@@ -111,17 +111,37 @@ The test harness exposes the network link headlessly:
   a real game over TCP needs a windowed frontend wired to `netlink.nim`
   (native GUI wiring is a small follow-up; the web path goes through 3b).
 
-### Acceptance tests (CI-able)
+### Acceptance tests (run in CI — see `.github/workflows/test.yml`)
+
+Two acceptance ROMs, each run both in-process (lockstep, `link.nim`) and
+over TCP (`netlink.nim` + the transport-independent `netcore.nim` the
+browser bridge also uses):
+
+| ROM | Covers | Contract |
+|---|---|---|
+| `tests/roms/linktest.gba` (`linktest.s`) | Multi-player mode: parent/child SI-SD-ID roles, 4-slot SIOMULTI latches, serial IRQs | 16 rounds, parent sends `0xA000\|r`, child `0xB000\|r` |
+| `tests/roms/normlinktest.gba` (`normlinktest.s`) | Normal 8-bit mode: internal/external clock master/slave, full-duplex register swap, serial IRQs | 16 rounds, master sends `0xC0\|r`, slave `0xD0\|r` |
 
 ```
-# in-process lockstep:
-./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
-# networked, two processes on localhost:
-./dingbat_test tests/roms/linktest.gba --mode=netlink --listen 7788 --timeout 1200 &
-./dingbat_test tests/roms/linktest.gba --mode=netlink --connect 127.0.0.1:7788 --timeout 1200
+# in-process lockstep (deterministic, no sockets):
+./dingbat_test tests/roms/linktest.gba     --mode=linktest     --timeout=600
+./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
+
+# networked, two processes on localhost (--link-contract picks the EWRAM
+# contract; default is multi):
+./dingbat_test tests/roms/normlinktest.gba --mode=netlink --link-contract=normal --listen 7789 --timeout 1200 &
+./dingbat_test tests/roms/normlinktest.gba --mode=netlink --link-contract=normal --connect 127.0.0.1:7789 --timeout 1200
 ```
 
-Both print `... PASS (16 multi-mode rounds ...)` on success.
+Each prints `... PASS (16 ... rounds ...)` on success. Build the ROMs from
+their `.s` sources with devkitARM (`arm-none-eabi-as -mcpu=arm7tdmi` +
+`arm-none-eabi-objcopy -O binary`); the committed `.gba` binaries are what
+CI runs, so the toolchain is only needed to regenerate them.
+
+Both ROMs are headless (no window/input) — their PASS/FAIL is tied to the
+EWRAM contract above. Playing a real game over TCP needs a windowed
+frontend wired to `netlink.nim` (native GUI wiring is a small follow-up;
+the web path goes through 3b's browser bridge).
 
 ## Behavior to expect during real link play
 

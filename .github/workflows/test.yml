@@ -34,6 +34,34 @@ jobs:
         run: nim c -d:test_harness -d:release --path:src --path:tests -o:dingbat_test_runner tests/dingbat_test_runner.nim
       - name: Run tests
         run: ./dingbat_test_runner
+      - name: Link acceptance (in-process lockstep)
+        shell: bash
+        run: |
+          set -e
+          ./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
+          ./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
+      - name: Link acceptance (networked, localhost)
+        # Exercises the transport-independent protocol core (netcore.nim, the
+        # same implementation the browser bridge uses) over a real socket.
+        # Linux only: localhost sockets + backgrounding are reliable there.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -e
+          run_net() {
+            local rom=$1 contract=$2 port=$3
+            ./dingbat_test "$rom" --mode=netlink --link-contract="$contract" \
+              --listen "$port" --timeout 1200 > listener.log 2>&1 &
+            local pid=$!
+            sleep 1
+            ./dingbat_test "$rom" --mode=netlink --link-contract="$contract" \
+              --connect 127.0.0.1:"$port" --timeout 1200
+            wait "$pid"          # listener's exit code (fails the step if != 0)
+            cat listener.log
+            grep -q "NETLINK LINKTEST: PASS" listener.log
+          }
+          run_net tests/roms/linktest.gba multi 7788
+          run_net tests/roms/normlinktest.gba normal 7789
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
