@@ -293,7 +293,7 @@ type
     gba*:          GBA
     framebuffer*:  seq[uint16]
     frame*:        bool
-    layer_palettes*: array[4, seq[byte]]
+    layer_palettes*: array[4, array[240, uint8]]
     sprite_pixels*: array[240, SpritePixel]
     # BG2 line buffers for the direct-color bitmap modes (3 and 5)
     bitmap_direct*: bool
@@ -323,9 +323,11 @@ type
     bldalpha*:     BLDALPHA
     bldy*:         BLDY
     # Compositing scratch, recomputed each scanline: BGs that can contribute,
-    # grouped by priority, and per-column window enable bits
-    prio_bgs*:     array[4, array[4, int8]]
-    prio_count*:   array[4, int]
+    # flattened into a single (priority, BG index)-ordered walk list, and
+    # per-column window enable bits
+    walk_bgs*:     array[4, int8]  # BG number of each walk entry
+    walk_prios*:   array[4, int8]  # priority of each walk entry
+    walk_n*:       int
     line_enables*: array[240, uint16]
     line_effects*: array[240, bool]
     line_sprite_blend*: bool  # any semi-transparent sprite pixel on this line
