@@ -152,6 +152,9 @@ plus a `LockstepSioDriver` bound per core. Design:
   units at the same emulated time. `Link.run_to` is the single
   network-transport boundary for phase 3: for a remote peer, "advance peer
   to cycle X" becomes "block until the peer reports it has reached X".
+  (Phase 3a realized exactly that shape in netlink.nim: the initiator's
+  run_to-the-completion-cycle became "stall until the peer's REPLY for
+  cycle X arrives"; see section 3a.)
 - **Status bits per GBATEK**: multi SI=0 parent / 1 child, SD=1 when every
   unit is in multi mode, ID = cable position; normal-mode SI mirrors the
   peer's SO. Normal 8/32 exchanges full-duplex at the master's completion
@@ -180,6 +183,80 @@ Still open from the original sketch (front-end work, not core):
   cartridge-less LLE boot support (two force-enabled checkers do not
   handshake — see the COM findings above); the deterministic assembly ROM
   above is the acceptance test.
+
+### 3a. dingbat↔dingbat network link over TCP — DONE (2026-07)
+
+Two dingbat processes run `tests/roms/linktest.gba` linked over a socket and
+produce the same results as the in-process pair. Pieces:
+
+- `src/dingbat/common/linkproto.nim` — transport-agnostic wire protocol
+  (pure byte encode/decode, wasm-safe; see the message table below). A
+  future browser bridge (phase 3b) speaks the same frames byte-for-byte
+  over a WebRTC DataChannel.
+- `src/dingbat/gba/netlink.nim` — native-only (`std/net` TCP, gated out of
+  emscripten builds): `NetLink` + `RemoteSioDriver`. The local core runs
+  normally on its own scheduler; the remote peer appears through the
+  driver. Sockets are TCP_NODELAY and nonblocking after the handshake —
+  sends buffer in userspace and drain opportunistically (a blocking send
+  while the peer also sends is a deadlock), and teardown is half-close +
+  drain-to-EOF (closing with unread beacons RSTs the connection, and an
+  RST discards the peer's receive queue — it could lose our BYE).
+- `tests/dingbat_test.nim --mode=netlink` with `--listen PORT` (unit 0,
+  multi-mode parent candidate) or `--connect HOST:PORT` (unit 1), plus
+  `--netlink-delay-ms N` to add artificial latency to every send. Each
+  process asserts its own unit's EWRAM log from the linktest ROM and
+  prints its own PASS/FAIL; run both and require PASS from both.
+
+**Sync model (BGB-style timestamped bounded lead).** Neither side ever
+drives the remote core. Each side free-runs its own scheduler but never
+more than LEAD (= 16384) cycles ahead of the newest peer-clock report;
+CLOCK beacons flow at least once per 4096 emulated cycles and immediately
+when a side blocks. When a side would exceed the lead, it stalls its
+*emulated* clock (blocking socket wait, emulator frozen) until a newer
+peer clock arrives. Transfers anchor to explicit emulated cycles: the
+initiator sends TRANSFER(clock=S, duration=D, data) and schedules its own
+completion at S+D through the normal etSerial path (initiator timing/IRQ
+are exactly single-core behavior); if the peer's REPLY hasn't arrived when
+that fires, the initiator stalls at S+D — it never free-runs past a
+pending exchange. The responder samples/answers at exactly cycle S when it
+is behind S, or immediately when it is (boundedly, ≤ LEAD) past S, running
+the busy window D cycles from its own clock — every ROM on either side
+observes a hardware-plausible transfer, and latency can only slow
+emulation, never desync it. All stalls funnel through `stall_wait`
+(`NetLink.stalled` is the "waiting for peer" flag for frontends).
+
+**Wire format.** TCP byte stream of frames: `u32le payload_length`, then
+that many payload bytes; first payload byte is the message type. All
+integers little-endian. Clocks are emulated cycles since link start
+(u64le; ~16.78 MHz — a 32-bit clock would wrap in ~4 minutes).
+
+| # | Message  | Payload layout (after the type byte) |
+|---|----------|--------------------------------------|
+| 1 | HELLO    | `u8 version` (=1), `u8 system` (0=GBA, 1=GB), `u8 unit` (0=listener, 1=connector), `u8 reserved`, `u32 rom_crc` (CRC-32/IEEE of the ROM file). First message both directions; validate version/system/ROM, units must differ. Reject politely with BYE(reason=2). |
+| 2 | CLOCK    | `u64 clock`, `u8 sio_mode` (0=normal8, 1=normal32, 2=multi, 3=uart, 4=gpio, 5=joybus), `u8 flags` (bit0 = SO output level, bit1 = sender is blocked on us). Beacon; also carries the state the peer's status bits need (SD=1 in multi requires the peer in multi mode; normal-mode SI mirrors the peer's SO). |
+| 3 | TRANSFER | `u64 clock` (start cycle S = sender's clock), `u32 duration` (cycles), `u8 mode` (same encoding as CLOCK, only 0/1/2 legal), `u8 reserved`, `u32 data` (initiator's outgoing word). Multi: parent's SIOMLT_SEND; the exchange completes at S+duration. Normal 8/32: master's SIODATA; the full-duplex swap happens at S+duration. |
+| 4 | REPLY    | `u64 clock` (responder's clock when it answered), `u64 cycle` (echo of the TRANSFER's S — matches replies to rounds), `u8 mode`, `u8 flags` (bit0 = responder was in a compatible SIO mode; if 0 the initiator reads all-1s/absent), `u32 data` (responder's word). |
+| 5 | BYE      | `u8 reason` (0 = finished, 1 = shutdown, 2 = HELLO mismatch). A finished peer's clock is treated as infinite (never stall on it again). |
+
+Roles: the listener is unit 0 — the multi-mode parent *candidate* and the
+head of the cable (ID bits/SI status derive from it) — but actual
+initiator-ship is per-transfer: mode+role ride in SIOCNT (a normal-mode
+master is whichever unit set internal clock), which is why TRANSFER
+carries `mode` rather than assuming.
+
+Measured with the linktest ROM (localhost, 2026-07): both units PASS in
+~34 frames / ~50 ms wall, and 20/20 repeated runs pass. With
+`--netlink-delay-ms 50` on both sides (≈100 ms RTT simulation) both units
+still PASS — ~27 s wall for the same 34 frames (~405 stalls/side), i.e.
+slower but never desynced.
+
+Phase 3b (browser bridge) needs: a WebRTC DataChannel (or WebSocket
+relay) producing/consuming the same frames — linkproto compiles under
+emscripten already; a wasm-side NetLink equivalent whose socket pump is
+event-driven (no blocking waits in the browser: the stall points must
+become "pause emulation until message X arrives" callbacks); and a
+signaling story for peer discovery. The GB core can join the same wire
+format later (HELLO `system=1`) or speak the real BGB protocol instead.
 
 ### 3. Cross-emulator transports (pick per goal)
 
@@ -221,8 +298,10 @@ Still open from the original sketch (front-end work, not core):
 1. SIO driver abstraction + loopback driver — DONE (phase 1, 2026-07).
 2. In-process 2-player lockstep — core DONE (phase 2, 2026-07; link.nim +
    linktest); web UI wiring pending.
-3. BGB protocol for GB (first true cross-emulator interop), and/or a
-   dingbat↔dingbat GBA network transport behind `Link.run_to` (phase 3).
+3. dingbat↔dingbat GBA network transport — native TCP DONE (phase 3a,
+   2026-07; linkproto.nim + netlink.nim + --mode=netlink). Next: browser
+   bridge over the same wire format (phase 3b), BGB protocol for GB
+   (first true cross-emulator interop).
 4. JoyBus/TCP (Dolphin) and/or VBA-M protocol for GBA, per demand.
 
 Sources: [mGBA multiplayer architecture](https://deepwiki.com/mgba-emu/mgba/9.3-multiplayer-support),

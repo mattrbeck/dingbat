@@ -1,14 +1,15 @@
-import std/[os, strutils, parseopt]
+import std/[os, strutils, parseopt, net, nativesockets, monotimes, times]
 import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/gba/link
+import dingbat/gba/netlink
 import dingbat/common/test_output
 import dingbat/common/rewind
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
-    tmStateRoundtrip, tmRewindTest, tmLinkTest
+    tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNetLink
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -118,6 +119,44 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
   echo "ROUNDTRIP full state:  ", (if state_ok: "MATCH" else: "MISMATCH")
   if fb_ok and state_ok: 0 else: 1
 
+# --- linktest ROM helpers (tests/roms/linktest.s EWRAM contract) ---
+
+proc ew16(g: GBA; offset: int): uint16 =
+  uint16(g.bus.wram_board[offset]) or (uint16(g.bus.wram_board[offset + 1]) shl 8)
+proc linktest_finished(g: GBA): bool = g.ew16(0x800) == 0xCAFE'u16
+
+const LINKTEST_ROUNDS = 16
+
+# Assert one unit's EWRAM log from the linktest ROM: role bits, both
+# receive-latch slots for every round, and the serial IRQ count. Returns the
+# number of failed checks (also echoed with the given prefix).
+proc check_linktest_unit(g: GBA; unit: int; prefix: string): int =
+  var failures = 0
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo prefix, " FAIL: ", msg
+      inc failures
+  let who = (if unit == 0: "parent" else: "child")
+  # Role bits (SIOCNT snapshot, busy bit masked): SI=0/SD=1/ID=0 on the
+  # parent; SI=1/SD=1/ID=1 on the child.
+  let role = g.ew16(0x804) and 0x7C'u16
+  let expected_role = (if unit == 0: 0x08'u16 else: 0x1C'u16)
+  check role == expected_role,
+    who & " SIOCNT role bits: got 0x" & toHex(role, 2) &
+    ", expected 0x" & toHex(expected_role, 2)
+  # The unit must have seen every round's SIOMULTI0/1 slots.
+  for k in 0 ..< LINKTEST_ROUNDS:
+    let slot0 = g.ew16(k * 2)
+    let slot1 = g.ew16(0x400 + k * 2)
+    check slot0 == (0xA000'u16 or uint16(k)),
+      who & " round " & $k & " SIOMULTI0: got 0x" & toHex(slot0, 4)
+    check slot1 == (0xB000'u16 or uint16(k)),
+      who & " round " & $k & " SIOMULTI1: got 0x" & toHex(slot1, 4)
+  let irqs = g.ew16(0x808)
+  check irqs == uint16(LINKTEST_ROUNDS),
+    who & " serial IRQ count: got " & $irqs & ", expected " & $LINKTEST_ROUNDS
+  failures
+
 # Two-core lockstep link acceptance (tests/roms/linktest.s): the multi-mode
 # parent sends 0xA000|round, the child answers 0xB000|round, and each unit
 # logs its four receive latches, SIOCNT role bits, and serial-IRQ count to
@@ -125,7 +164,6 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
 # asserts both units observed identical, correct rounds. Exits 0 iff all
 # checks pass.
 proc link_test(rom1, rom2, bios_path: string; timeout: int): int =
-  const ROUNDS = 16
   let is_hle = bios_path == "hle" or bios_path == ""
   let actual_bios = if is_hle: "" else: bios_path
   proc make_gba(rom: string): GBA =
@@ -135,55 +173,120 @@ proc link_test(rom1, rom2, bios_path: string; timeout: int): int =
   let cores = @[make_gba(rom1), make_gba(rom2)]
   let lnk = new_link(cores)
 
-  proc ew16(g: GBA; offset: int): uint16 =
-    uint16(g.bus.wram_board[offset]) or (uint16(g.bus.wram_board[offset + 1]) shl 8)
-  proc done(g: GBA): bool = g.ew16(0x800) == 0xCAFE'u16
-
   var frames = 0
-  while frames < timeout and not (cores[0].done() and cores[1].done()):
+  while frames < timeout and
+        not (cores[0].linktest_finished() and cores[1].linktest_finished()):
     lnk.step_frame()
     inc frames
 
   var failures = 0
-  template check(cond: bool; msg: string) =
-    if not cond:
-      echo "LINKTEST FAIL: ", msg
-      inc failures
-
   for i, g in cores:
     let who = (if i == 0: "parent" else: "child")
-    check g.done(), who & " never finished (done flag missing after " &
-      $frames & " frames)"
+    if not g.linktest_finished():
+      echo "LINKTEST FAIL: ", who, " never finished (done flag missing after ",
+        frames, " frames)"
+      inc failures
   if failures == 0:
     for i, g in cores:
-      let who = (if i == 0: "parent" else: "child")
-      # Role bits (SIOCNT snapshot, busy bit masked): SI=0/SD=1/ID=0 on the
-      # parent; SI=1/SD=1/ID=1 on the child.
-      let role = g.ew16(0x804) and 0x7C'u16
-      let expected_role = (if i == 0: 0x08'u16 else: 0x1C'u16)
-      check role == expected_role,
-        who & " SIOCNT role bits: got 0x" & toHex(role, 2) &
-        ", expected 0x" & toHex(expected_role, 2)
-      # Both units must have seen every round's SIOMULTI0/1 slots.
-      for k in 0 ..< ROUNDS:
-        let slot0 = g.ew16(k * 2)
-        let slot1 = g.ew16(0x400 + k * 2)
-        check slot0 == (0xA000'u16 or uint16(k)),
-          who & " round " & $k & " SIOMULTI0: got 0x" & toHex(slot0, 4)
-        check slot1 == (0xB000'u16 or uint16(k)),
-          who & " round " & $k & " SIOMULTI1: got 0x" & toHex(slot1, 4)
-      let irqs = g.ew16(0x808)
-      check irqs == uint16(ROUNDS),
-        who & " serial IRQ count: got " & $irqs & ", expected " & $ROUNDS
-  echo "LINKTEST parent rounds: ", (if cores[0].done(): "complete" else: "incomplete"),
-       ", child rounds: ", (if cores[1].done(): "complete" else: "incomplete"),
+      failures += check_linktest_unit(g, i, "LINKTEST")
+  echo "LINKTEST parent rounds: ",
+       (if cores[0].linktest_finished(): "complete" else: "incomplete"),
+       ", child rounds: ",
+       (if cores[1].linktest_finished(): "complete" else: "incomplete"),
        " (", frames, " frames)"
   if failures == 0:
-    echo "LINKTEST: PASS (", ROUNDS, " multi-mode rounds, both directions, IDs and IRQs verified)"
+    echo "LINKTEST: PASS (", LINKTEST_ROUNDS, " multi-mode rounds, both directions, IDs and IRQs verified)"
     0
   else:
     echo "LINKTEST: FAIL (", failures, " failed checks)"
     1
+
+# Networked link acceptance (phase 3a of docs/multiplayer.md): two dingbat
+# processes run the linktest ROM over TCP, one with --listen PORT (unit 0,
+# multi-mode parent candidate) and one with --connect HOST:PORT (unit 1).
+# Each process asserts its own unit's EWRAM log — run both and require PASS
+# from both. --netlink-delay-ms N adds an artificial delay to every message
+# send (internet-latency simulation); the test must still pass, just slower.
+proc netlink_test(rom, bios_path: string; listen_port: int; connect_to: string;
+                  timeout, delay_ms: int): int =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  let emu = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+  emu.test_output = new_test_output()
+  emu.post_init()
+
+  var sock: Socket
+  var id = 0
+  if listen_port > 0:
+    let server = newSocket(buffered = false)
+    server.setSockOpt(OptReuseAddr, true)
+    server.bindAddr(Port(listen_port))
+    server.listen()
+    echo "NETLINK: listening on port ", listen_port
+    var fds = @[server.getFd()]
+    if selectRead(fds, 30_000) <= 0:
+      echo "NETLINK: FAIL — no peer connected within 30 s"
+      return 1
+    server.accept(sock)
+    server.close()
+    id = 0
+  else:
+    let colon = connect_to.rfind(':')
+    if colon < 0:
+      echo "NETLINK: FAIL — --connect wants HOST:PORT, got ", connect_to
+      return 1
+    let host = connect_to[0 ..< colon]
+    let port = Port(parseInt(connect_to[colon + 1 .. ^1]))
+    var connected = false
+    for attempt in 0 ..< 40:  # the listener may still be starting up
+      sock = newSocket(buffered = false)
+      try:
+        sock.connect(host, port)
+        connected = true
+        break
+      except OSError:
+        sock.close()
+        sleep(250)
+    if not connected:
+      echo "NETLINK: FAIL — could not connect to ", connect_to
+      return 1
+    id = 1
+  let who = (if id == 0: "parent" else: "child")
+
+  var frames = 0
+  var verdict = 1
+  try:
+    let nl = new_net_link(emu, sock, id, crc32(readFile(rom)), delay_ms)
+    echo "NETLINK: linked as unit ", id, " (", who, ")",
+         (if delay_ms > 0: ", +" & $delay_ms & " ms send delay" else: "")
+    let t0 = getMonoTime()
+    var sent_done = false
+    while frames < timeout:
+      nl.step_frame()
+      inc frames
+      if emu.linktest_finished() and not sent_done:
+        nl.send_bye()  # tell the peer we are done; keep beaconing until it is
+        sent_done = true
+      if sent_done and nl.peer_done:
+        break
+    let elapsed_ms = (getMonoTime() - t0).inMilliseconds
+    if not emu.linktest_finished():
+      echo "NETLINK LINKTEST FAIL: ", who, " never finished (done flag ",
+           "missing after ", frames, " frames)"
+    else:
+      let failures = check_linktest_unit(emu, id, "NETLINK LINKTEST")
+      echo "NETLINK ", who, " rounds complete: ", frames, " frames, ",
+           elapsed_ms, " ms, ", nl.stall_count, " stalls"
+      if failures == 0:
+        echo "NETLINK LINKTEST: PASS (unit ", id, ", ", LINKTEST_ROUNDS,
+             " multi-mode rounds over TCP, role and IRQs verified)"
+        verdict = 0
+      else:
+        echo "NETLINK LINKTEST: FAIL (", failures, " failed checks)"
+    nl.close()
+  except NetLinkError as e:
+    echo "NETLINK LINKTEST: FAIL — ", e.msg
+  verdict
 
 # Rewind verification: run forward taking snapshots exactly like the
 # frontend does, then pop backward and require byte-exact payload
@@ -251,6 +354,9 @@ proc main() =
   var screenshot_path = ""
   var color_mode = false
   var sio_driver = "null"
+  var listen_port = 0
+  var connect_to = ""
+  var netlink_delay = 0
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -280,6 +386,7 @@ proc main() =
         of "stateroundtrip": mode = tmStateRoundtrip
         of "rewindtest": mode = tmRewindTest
         of "linktest": mode = tmLinkTest
+        of "netlink": mode = tmNetLink
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -310,6 +417,18 @@ proc main() =
         else:
           echo "Unknown sio driver: ", v
           quit(1)
+      of "listen":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        listen_port = parseInt(v)
+      of "connect":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        connect_to = v
+      of "netlink-delay-ms":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        netlink_delay = parseInt(v)
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
@@ -324,6 +443,12 @@ proc main() =
     # ROM on both cores.
     let rom2 = if rom_path2.len > 0: rom_path2 else: rom_path
     quit(link_test(rom_path, rom2, bios_path, timeout_frames))
+  if mode == tmNetLink:
+    if (listen_port > 0) == (connect_to.len > 0):
+      echo "netlink mode needs exactly one of --listen PORT or --connect HOST:PORT"
+      quit(1)
+    quit(netlink_test(rom_path, bios_path, listen_port, connect_to,
+                      timeout_frames, netlink_delay))
 
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
@@ -408,7 +533,7 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
-  of tmStateRoundtrip, tmRewindTest, tmLinkTest:
+  of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNetLink:
     discard  # handled (and exited) above
 
   if output.len > 0:
