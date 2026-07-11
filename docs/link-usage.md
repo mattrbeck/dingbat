@@ -1,0 +1,94 @@
+# Link cable: how it works and how to use it (2026-07)
+
+Companion to `multiplayer.md` (roadmap + investigation) — this is the
+practical guide. The full wire-format spec lives in `multiplayer.md` §3a;
+this file summarizes the model and documents every user-facing entry point
+that exists today.
+
+## The model in one page
+
+A GBA link session is **lockstep over emulated time**, not real time:
+
+- Every core runs on its own deterministic scheduler. Cores are allowed to
+  free-run only within a bounded window of each other (in-process: 512-cycle
+  slices; network: LEAD = 16384 cycles past the peer's newest CLOCK beacon).
+- When a game starts an SIO transfer, the exchange is resolved at an exact
+  emulated cycle on every participant. If a peer hasn't reached that cycle
+  yet, the initiator **stalls its emulated clock** and waits. Latency
+  therefore slows emulation during link activity but can never desync it —
+  the same discipline BGB uses for GB link over the internet.
+- The transfer data/roles are hardware-faithful (multi-mode parent/child SI/
+  SD/ID bits per GBATEK, normal-mode full-duplex exchange), so games behave
+  as if a real AGB-005 cable were attached.
+
+Layers (all shipped):
+
+| Layer | File | What it does |
+|---|---|---|
+| SIO driver interface | `src/dingbat/gba/serial.nim` | `SioDriver` methods (`sio_start/complete/pin_state/siocnt_status`); null driver = no cable, loopback driver = plug wired to itself |
+| In-process lockstep | `src/dingbat/gba/link.nim` | `new_link(@[gba1, gba2])`, `link.step_frame()`; drives 2 cores in one process |
+| Wire protocol | `src/dingbat/common/linkproto.nim` | Length-prefixed LE frames: HELLO/CLOCK/TRANSFER/REPLY/BYE; compiles under emscripten |
+| TCP transport | `src/dingbat/gba/netlink.nim` | `RemoteSioDriver` + bounded-lead sync + stall logic over a socket (native only; gated out of wasm) |
+
+## Using it today
+
+### Web UI: local 2-player (one machine)
+
+The GBA tiles in the home library have a **"2P"** button. It launches two
+linked cores side by side (stacked in portrait):
+
+- **Player 1** = keyboard + touch controls; **Player 2** = connected gamepad.
+- Both cores run the same ROM with **independent save slots**: P2's save is
+  stored under `save:<rom>-p2` in IndexedDB, seeded from P1's save the first
+  time. Both flush on the usual 5-second interval and on exit.
+- Audio comes from P1 only. Rewind, 2x, fast-forward, save states, and
+  sav import/export are hidden in link mode (they would desync the pair);
+  pause and reset act on both cores.
+
+### Native CLI: two processes over TCP (LAN/internet)
+
+The test harness exposes the network link headlessly:
+
+```
+# machine/terminal A (unit 0, listener):
+./dingbat_test <rom> --mode=netlink --listen 7788 --timeout 1200
+
+# machine/terminal B (unit 1):
+./dingbat_test <rom> --mode=netlink --connect <hostA>:7788 --timeout 1200
+```
+
+- The HELLO handshake verifies both sides run the same ROM (CRC-32) and
+  refuses politely on mismatch.
+- `--netlink-delay-ms N` adds artificial per-message latency (internet
+  simulation; the linktest passes with 50 ms — slow, but correct).
+- Over the internet: the listener's port must be reachable (port forward);
+  this is the raw VBA-M/BGB-style workflow. The room-code experience is
+  phase 3b (`phase3b-plan.md`).
+- Note this harness is **headless** (no window or input) — its PASS/FAIL
+  assertions are tied to `tests/roms/linktest.gba`'s EWRAM contract. Playing
+  a real game over TCP needs a windowed frontend wired to `netlink.nim`
+  (native GUI wiring is a small follow-up; the web path goes through 3b).
+
+### Acceptance tests (CI-able)
+
+```
+# in-process lockstep:
+./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
+# networked, two processes on localhost:
+./dingbat_test tests/roms/linktest.gba --mode=netlink --listen 7788 --timeout 1200 &
+./dingbat_test tests/roms/linktest.gba --mode=netlink --connect 127.0.0.1:7788 --timeout 1200
+```
+
+Both print `... PASS (16 multi-mode rounds ...)` on success.
+
+## Behavior to expect during real link play
+
+- **Stalls are normal.** During link screens the two emulators ping-pong
+  transfers; each round-trip stalls the initiator until the peer catches up.
+  On localhost this is invisible; at 50 ms RTT, transfer-heavy screens run
+  visibly slow (a full linktest took ~26 s instead of ~0.6 s). Menus and
+  trades are tolerant; real-time link battles will feel it.
+- `NetLink.stalled` is exposed for frontends to show "waiting for peer".
+- Pausing one side stalls the other within the lead window (by design).
+- Disconnects: BYE on clean shutdown; the survivor's game sees the transfer
+  time out exactly as a yanked cable would.
