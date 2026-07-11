@@ -14,7 +14,7 @@ proc dma_addr_delta(ctrl: int; word_size: int): int =
   else:    0            # Fixed
 
 proc new_dma*(gba: GBA): DMA =
-  result = DMA(gba: gba)
+  result = DMA(gba: gba, current_priority: 4)
   for i in 0..3:
     result.dmasad[i]  = 0
     result.dmadad[i]  = 0
@@ -23,7 +23,12 @@ proc new_dma*(gba: GBA): DMA =
     result.src[i]     = 0
     result.dst[i]     = 0
 
-proc trigger*(dma: DMA; channel: int)
+proc run_pending*(dma: DMA)
+
+proc request(dma: DMA; channel: int) {.inline.} =
+  ## Latch a transfer request; run_pending (the scheduler's post-dispatch
+  ## pump) grants it in priority order.
+  dma.pending = dma.pending or uint8(1 shl channel)
 
 proc `[]`*(dma: DMA; io_addr: uint32): uint8 =
   let channel = int((io_addr - 0xB0'u32) div 12)
@@ -74,21 +79,21 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
 
-proc run_pending_immediate*(dma: DMA) =
+proc request_immediate*(dma: DMA) =
   dma.gba.bus.dma_pending = false
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0:
-      dma.trigger(channel)
+      dma.request(channel)
 
 proc trigger_hdma*(dma: DMA) =
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 2:  # HBlank
-      dma.trigger(channel)
+      dma.request(channel)
 
 proc trigger_vdma*(dma: DMA) =
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 1:  # VBlank
-      dma.trigger(channel)
+      dma.request(channel)
 
 proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## DMA3 special timing = video capture: one transfer per scanline for
@@ -96,16 +101,16 @@ proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## aging cartridge verifies this by capturing VCOUNT itself each line.
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
     if vcount >= 2 and vcount < 162:
-      dma.trigger(3)
+      dma.request(3)
     elif vcount == 162:
       dma.dmacnt_h[3].enable = false
 
 proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1
   if dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 3:  # Special
-    dma.trigger(ch)
+    dma.request(ch)
 
-proc trigger*(dma: DMA; channel: int) =
+proc run_channel(dma: DMA; channel: int; nested: bool) =
   let start_timing   = int(dma.dmacnt_h[channel].start_timing)
   let source_control = int(dma.dmacnt_h[channel].source_control)
   let dest_control   = int(dma.dmacnt_h[channel].dest_control)
@@ -136,15 +141,47 @@ proc trigger*(dma: DMA; channel: int) =
                      else: dma_addr_delta(source_control, word_size)
   let delta_dest   = dma_addr_delta(dest_ctrl,  word_size)
 
-  # DMA internal cycles (calibrated against the mGBA suite DMA timing tests;
-  # ROM-to-ROM needs no extra I cycles once its write is sequential-timed)
-  dma.gba.bus.add_cycles(2)
+  # DMA internal cycles for the CPU->DMA bus handoff (calibrated against the
+  # mGBA suite DMA timing tests; ROM-to-ROM needs no extra I cycles once its
+  # write is sequential-timed). A channel that preempts another mid-burst
+  # pays nothing: the bus never returns to the CPU, and the AGS aging
+  # cartridge's DMA priority test verifies the switch is seamless (its
+  # timer-capture cadence must continue exactly across both channel
+  # boundaries).
+  if not nested:
+    dma.gba.bus.add_cycles(2)
 
   dma.gba.bus.dma_active = true
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
   dma.gba.bus.rom_next_addr2 = 1
 
+  # Preemption is only possible while a higher-priority channel is armed on
+  # a hardware trigger (hblank/vblank/special). Only then is the burst run
+  # with mid-burst event drains; otherwise events keep dispatching after the
+  # burst as a whole (identical to the pre-preemption behavior, which the
+  # mGBA suite timing baselines are calibrated against).
+  var preemptible = false
+  for ch2 in 0 ..< channel:
+    if dma.dmacnt_h[ch2].enable and dma.dmacnt_h[ch2].start_timing != 0:
+      preemptible = true
+      break
+
   for _ in 0 ..< len:
+    # Preemption point, checked between transfers (a transfer is atomic on
+    # hardware: its read/write pair completes before the bus changes hands).
+    # Drain the accumulated stall cycles so any scheduler event that came due
+    # during the burst dispatches (we run outside `dispatching`, so the drain
+    # is safe). Handlers only latch DMA requests — the pump defers while
+    # dma_active — so a higher-priority request is granted HERE, at the
+    # fully-drained transfer boundary, not at the event's own (earlier)
+    # cycle. Recursion via run_pending implements pause/resume: this loop's
+    # locals hold our progress while the higher-priority burst runs.
+    if preemptible:
+      let bus = dma.gba.bus
+      if bus.sched.cycles + CycleCount(bus.cycles) >= bus.sched.next_event:
+        bus.catch_up()
+      if dma.pending != 0:
+        dma.run_pending()
     # TODO: This accessibility check is a deny-list and may miss unmapped gaps
     # (e.g. 0x00004000-0x01FFFFFF). Should be replaced with an allow-list of
     # known-valid regions (0x2-0x7, 0x8-0xD, 0xE-0xF).
@@ -162,9 +199,6 @@ proc trigger*(dma: DMA; channel: int) =
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 
-  dma.gba.bus.dma_active = false
-  dma.gba.bus.rom_next_addr = 1  # CPU refetches nonsequentially after a DMA
-
   if dest_ctrl == 3:  # IncrementReload
     dma.dst[channel] = dma.dmadad[channel]
 
@@ -174,3 +208,34 @@ proc trigger*(dma: DMA; channel: int) =
   if dma.dmacnt_h[channel].irq_enable:
     dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)
     dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+
+proc run_pending*(dma: DMA) =
+  ## DMA arbitration pump: grants latched requests strictly in priority order
+  ## (channel 0 highest). Invoked from two places, always with `dispatching`
+  ## false so bursts can advance the clock and dispatch further events:
+  ## - the scheduler, after each event dispatch, when no burst is running
+  ##   (bus.dma_active gates this so mid-burst grants happen below instead);
+  ## - a running burst's transfer loop, right after its drain, so a
+  ##   higher-priority request is granted at the fully-drained transfer
+  ##   boundary and runs nested to completion (preemption; the outer loop's
+  ##   locals hold its progress).
+  ## A request for a channel numbered >= the burst in progress stays latched
+  ## until the run_pending level that granted that burst loops back around.
+  while dma.pending != 0:
+    let ch = countTrailingZeroBits(dma.pending)
+    if ch >= dma.current_priority:
+      break  # waits for the equal/higher-priority burst in progress
+    dma.pending = dma.pending and not uint8(1 shl ch)
+    # Re-check enable: a burst that ran between request and grant may have
+    # written this channel's control register
+    if not dma.dmacnt_h[ch].enable: continue
+    let saved = dma.current_priority
+    dma.current_priority = ch
+    dma.run_channel(ch, nested = saved < 4)
+    dma.current_priority = saved
+    let bus = dma.gba.bus
+    # The bus changed masters: the CPU (or a paused outer DMA burst)
+    # continues with a nonsequential access
+    bus.dma_active = saved < 4
+    bus.rom_next_addr = 1
+    bus.rom_next_addr2 = 1

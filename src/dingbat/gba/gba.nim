@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[options, times, os, strutils, math, sets]
-from std/bitops import countLeadingZeroBits
+from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize]
 when defined(test_harness):
   import ../common/test_output
@@ -118,6 +118,14 @@ type
     dmacnt_h*:  array[4, DMACNT]
     # Latch per channel: https://github.com/mgba-emu/mgba/issues/2105
     latch*:     array[4, uint32]
+    # Priority arbitration: bitmask of channels with a latched transfer
+    # request (set by the trigger_* entry points, consumed by run_pending),
+    # and the channel number of the innermost burst in progress (4 = none).
+    # A pending channel only runs while its number is below current_priority;
+    # a higher-priority request arriving mid-burst preempts via a nested
+    # run_pending call. Always 0/4 between instructions, so not serialized.
+    pending*:          uint8
+    current_priority*: int
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting
 
@@ -454,8 +462,9 @@ proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
-proc run_pending_immediate*(dma: DMA)
+proc request_immediate*(dma: DMA)
 proc trigger_video_capture*(dma: DMA; vcount: uint16)
+proc catch_up(bus: Bus) {.inline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
@@ -586,7 +595,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
     of etSerial:        gba.serial.serial_transfer_complete()
-    of etDMA:           gba.dma.run_pending_immediate()
+    of etDMA:           gba.dma.request_immediate()
     of etHandleInput, etIME, etRtcSecond: discard
 
 proc post_init*(gba: GBA) =
@@ -602,6 +611,13 @@ proc post_init*(gba: GBA) =
   gba.dma        = new_dma(gba)
   gba.serial     = new_serial(gba)
   gba.scheduler.dispatch = gba_dispatch(gba)
+  gba.scheduler.pump = proc() =
+    # While a DMA burst is running, its own drain dispatched this event with
+    # the clock rewound to the event's cycle; the request must instead be
+    # granted at the burst's current transfer boundary, so leave it latched —
+    # the burst loop runs run_pending itself after its drain completes.
+    if gba.dma.pending != 0 and not gba.bus.dma_active:
+      gba.dma.run_pending()
   gba.handle_saves()
   if not gba.run_bios:
     gba.cpu.skip_bios()

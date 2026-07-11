@@ -470,9 +470,14 @@ proc catch_up_slow(bus: Bus) =
 proc catch_up(bus: Bus) {.inline.} =
   # Advance the scheduler to the current mid-instruction cycle so MMIO
   # accesses observe/affect timers, IF flags, etc. at the exact cycle they
-  # happen. Skipped while an event handler runs (re-entrant tick would let
-  # time go backwards when the outer loop restores its target). The common
-  # no-event-due case stays inline; event dispatch takes the slow path.
+  # happen. Skipped while an event handler runs (handlers must stay pure so
+  # the DMA pump, which runs after dispatch, arbitrates all deferred work).
+  # The accessors below additionally skip it while a DMA burst runs
+  # (dma_active): a transfer must not be preempted between its read and
+  # write — the DMA loop drains due events at transfer boundaries instead
+  # (timer reads stay exact regardless: get_current_tm includes bus.cycles).
+  # The common no-event-due case stays inline; event dispatch takes the
+  # slow path.
   let s = bus.sched
   if s.dispatching: return
   let target = s.cycles + CycleCount(bus.cycles)
@@ -486,37 +491,37 @@ proc catch_up(bus: Bus) {.inline.} =
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.read_word_internal(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.write_byte_internal(address, value)
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
-  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
+  if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript

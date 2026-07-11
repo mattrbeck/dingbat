@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-07-10 22:42:51*
+*Generated: 2026-07-11 05:45:30*
 
 ## Memory tests (1544/1552 passed)
 
@@ -336,12 +336,12 @@ All tests passed.
 | DMA Prefetch Break | 0x10002A64 | 0x10000004 |
 | DMA Prefetch Read | 0xDEAD0000 | 0xE3A02004 |
 | H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x000000CE |
+| H-blank bit start Flip 1 | 0x00000085 | 0x000000C8 |
 | H-blank bit start Flip 2 | 0x000003EC | 0x00000400 |
 | H-blank bit start Flip 3 | 0x000000E4 | 0x000000E1 |
 | H-blank bit start Flip 4 | 0x000003EC | 0x000003E0 |
 | H-blank bit start Flip 5 | 0x000000E4 | 0x000000E0 |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x00000400 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x00000420 |
 
 ## Summary
 
