@@ -1819,3 +1819,162 @@ body.link-mode #screenshot,
 body.link-mode #save-sep {
   display: none !important;
 }
+
+/*
+ * ==========================================================
+ * Narrow phones: segmented playback bar
+ * ==========================================================
+ * The five playback buttons fuse into one segmented control
+ * ([reset|rewind|pause|2x|ffw]) so the fps readout and the mute button
+ * always fit beside them (375pt-wide phones cramp with separate buttons).
+ */
+@media (max-width: 480px) {
+  /* Tighten the bar itself so all controls + the fps readout fit at 375pt */
+  #topbar {
+    gap: 6px;
+    padding-left: calc(8px + var(--safe-l));
+    padding-right: calc(8px + var(--safe-r));
+  }
+  body.running #playback-controls {
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(180deg, var(--surface-2), #171d2c);
+    box-shadow: inset 0 1px 0 var(--inset-hi), 0 1px 2px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+  #playback-controls .icon-btn {
+    width: 30px;
+    height: 34px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  /* Small separator between segments */
+  #playback-controls .icon-btn + .icon-btn {
+    border-left: 1px solid var(--border);
+  }
+  #playback-controls .icon-btn svg {
+    width: 17px;
+    height: 17px;
+  }
+  #playback-controls .icon-btn.active {
+    background: linear-gradient(180deg, #2a2410, #211c0c);
+  }
+  #playback-controls .icon-btn:active {
+    transform: none;
+    box-shadow: inset 0 2px 5px var(--inset-lo);
+  }
+}
+
+/*
+ * ==========================================================
+ * Mobile landscape: maximise the screen
+ * ==========================================================
+ * The top bar slides off-screen (a handle at the top edge pulls it back),
+ * the stage takes the full height, and the overlaid touch controls hug the
+ * screen edges, semi-transparent so they don't hide the game.
+ */
+
+/* Handle base style (only displayed by the landscape block below) */
+#topbar-handle {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 41;
+  width: 46px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-dim);
+  background: rgba(20, 24, 38, 0.55);
+  border: 1px solid var(--border-2);
+  border-top: none;
+  border-radius: 0 0 9px 9px;
+  cursor: pointer;
+  transition: top 0.2s ease;
+}
+
+#topbar-handle svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.2s ease;
+}
+
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  /* Top bar off-screen by default; the handle slides it in/out */
+  body.running #topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    transform: translateY(-100%);
+    transition: transform 0.2s ease;
+  }
+  body.running.topbar-open #topbar {
+    transform: translateY(0);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  }
+  body.running #topbar-handle {
+    display: flex;
+  }
+  body.running.topbar-open #topbar-handle {
+    top: var(--bar-h);
+  }
+  body.running.topbar-open #topbar-handle svg {
+    transform: rotate(180deg);
+  }
+  /* With the bar gone the stage owns the full height */
+  body.running #canvas {
+    width: min(100%, calc(100dvh * 1.5));
+  }
+  body.running #controls {
+    top: 0;
+  }
+  /* Hug the screen edges */
+  body.running #controls {
+    padding: 6px calc(6px + var(--safe-r)) calc(6px + var(--safe-b))
+      calc(6px + var(--safe-l));
+  }
+  /* Fully transparent controls, just a faint outline and glyph: they
+     overlap the display area, so they must not obscure it */
+  .pad-btn,
+  #dpad > #dpad-center {
+    background: none;
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: none;
+    color: rgba(234, 238, 246, 0.5);
+  }
+  #dpad > #dpad-center::after {
+    background: none;
+    box-shadow: none;
+  }
+  .pad-btn.pressed {
+    color: var(--accent);
+    background: none;
+    border-color: rgba(255, 176, 77, 0.7);
+    box-shadow: 0 0 14px -4px var(--accent-glow);
+  }
+  /* Select / Start shrink to small, label-less circles (the text isn't
+     needed at this size; position tells them apart) */
+  .pad-pill {
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    font-size: 0;
+  }
+  #select-start {
+    gap: 12px;
+  }
+}

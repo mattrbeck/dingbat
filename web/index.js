@@ -1573,6 +1573,13 @@ if (!requestFs) {
   document.addEventListener("webkitfullscreenchange", onFsChange);
 }
 
+// --- Mobile-landscape top bar handle ---
+// In landscape on phones the top bar sits off-screen (CSS); this small
+// handle at the top edge slides it in and out.
+document.getElementById("topbar-handle").addEventListener("click", () => {
+  document.body.classList.toggle("topbar-open");
+});
+
 // --- Gamepad support (polled each frame from the main loop) ---
 
 // Input IDs: 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R
@@ -1725,16 +1732,30 @@ var Module = {
     };
 
     const fpsDiv = document.getElementById("fps");
+    // The counter is a diagnostic: it only appears when the frame rate is
+    // UNUSUAL for the current mode. Expected rates — 0 while paused or
+    // rewinding (rewind pops don't count as frames), ~120 at 2x, ~60
+    // otherwise — hide it; fast-forward is unbounded, so whatever rate it
+    // reaches is the interesting number and always shows.
+    let lastFpsMode = "";
     setInterval(() => {
       if (sleepVisible) {
         frameCount = 0;
         return;  // fps display is showing SLEEPING
       }
-      if (frameCount >= 59 && frameCount <= 60) {
+      const mode = paused ? "paused" : rewindHeld ? "rewind"
+        : fastForward ? "ffw" : speed2x ? "2x" : "normal";
+      const expected = mode === "paused" || mode === "rewind" ? 0
+        : mode === "2x" ? 119.5 : mode === "normal" ? 59.7 : null;
+      const usual = expected !== null &&
+        Math.abs(frameCount - expected) <= Math.max(3, expected * 0.05);
+      // A mode switch mid-window yields a blended count; don't flash it
+      if (usual || mode !== lastFpsMode) {
         fpsDiv.textContent = "";
       } else {
         fpsDiv.textContent = frameCount + " fps";
       }
+      lastFpsMode = mode;
       frameCount = 0;
     }, 1000);
 
