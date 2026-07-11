@@ -28,7 +28,9 @@ Layers (all shipped):
 | SIO driver interface | `src/dingbat/gba/serial.nim` | `SioDriver` methods (`sio_start/complete/pin_state/siocnt_status`); null driver = no cable, loopback driver = plug wired to itself |
 | In-process lockstep | `src/dingbat/gba/link.nim` | `new_link(@[gba1, gba2])`, `link.step_frame()`; drives 2 cores in one process |
 | Wire protocol | `src/dingbat/common/linkproto.nim` | Length-prefixed LE frames: HELLO/CLOCK/TRANSFER/REPLY/BYE; compiles under emscripten |
-| TCP transport | `src/dingbat/gba/netlink.nim` | `RemoteSioDriver` + bounded-lead sync + stall logic over a socket (native only; gated out of wasm) |
+| Protocol core | `src/dingbat/gba/netcore.nim` | `RemoteSioDriver` + bounded-lead sync + non-blocking `feed`/`take_outgoing`/`try_advance` state machine; transport-agnostic (emscripten-clean) |
+| TCP transport | `src/dingbat/gba/netlink.nim` | Native socket pump over `netcore` (blocking waits + timeout, latency sim, half-close teardown); gated out of wasm |
+| Browser transport | `web/netplay.js` + `web/signaling/server.js` | WebRTC DataChannel over `netcore`'s wasm exports; room-code signaling |
 
 ## Using it today
 
@@ -44,6 +46,46 @@ linked cores side by side (stacked in portrait):
 - Audio comes from P1 only. Rewind, 2x, fast-forward, save states, and
   sav import/export are hidden in link mode (they would desync the pair);
   pause and reset act on both cores.
+
+### Web UI: online play with a room code (two browsers, anywhere)
+
+GBA tiles also carry **HOST** and **JOIN** buttons:
+
+- **Host** picks the game and gets a short room code (e.g. `KJ4-Q7N`) to
+  share out of band. **Join** picks the same game and enters the code.
+  Once the WebRTC DataChannel is up, both play in their own browser with
+  their own save; trades/link features work.
+- Each side runs only its own core (single canvas). A subtle
+  **⏳ waiting for peer** badge appears whenever the emulated clock is
+  stalled on the remote side (routine during transfer-heavy link screens;
+  more visible on a slow connection). Rewind, speed toggles, save states,
+  load-save, and reset are hidden (they would desync or can't reach the
+  remote core); pause acts locally.
+- If your friend leaves (or the connection drops), you get a
+  "your game keeps running" toast and keep playing solo — the game sees a
+  yanked cable.
+- **Cross-version trades** (e.g. Ruby↔Sapphire): different ROMs have
+  different checksums but link fine, so a mismatch is a warn-and-confirm,
+  not a hard block. Truly incompatible games fail their own in-game link
+  handshake.
+
+Running it locally (development/CI, no cloud account):
+
+```
+# 1. signaling rendezvous (zero dependencies):
+node web/signaling/server.js        # ws://localhost:8790 by default
+
+# 2. serve web/ with COOP/COEP (SharedArrayBuffer):
+python3 web/serve.py                 # http://localhost:8765
+```
+
+Open two tabs, Host in one, Join in the other with the code. Dev knobs:
+`?linkdelay=50` adds 50 ms of send latency per side (internet simulation,
+mirrors `--netlink-delay-ms`); `?signal=ws://host:port` points at a
+different signaling server. v1 is **STUN-only** — most home NATs connect;
+a strict-NAT/CGNAT pair gets a clear "could not connect peer-to-peer"
+error (a TURN relay is a future add). The production signaling URL defaults
+to `wss://<page-host>/signal`; set it up or override with `?signal=`.
 
 ### Native CLI: two processes over TCP (LAN/internet)
 

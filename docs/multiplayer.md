@@ -258,6 +258,79 @@ become "pause emulation until message X arrives" callbacks); and a
 signaling story for peer discovery. The GB core can join the same wire
 format later (HELLO `system=1`) or speak the real BGB protocol instead.
 
+### 3b. Internet play in the browser with room codes — DONE (2026-07-11)
+
+Two browsers link the same GBA game over a WebRTC DataChannel that carries
+the exact linkproto frames byte-for-byte; a room code is all a player
+shares. Pieces:
+
+- `src/dingbat/gba/netcore.nim` — the transport-independent protocol state
+  machine extracted from netlink.nim (emscripten-clean). Non-blocking by
+  construction: `feed(bytes)` ingests inbound frames and can unpark a
+  stalled transfer, `take_outgoing()` hands queued frames to the transport,
+  and `try_advance()` advances up to one slice of emulated time and returns
+  `naProgress` (call again), `naFrame` (a video frame completed),
+  `naStalled` (emulated clock parked on the peer — render the indicator,
+  come back after `feed`), or `naHello` (handshake not yet validated). The
+  HELLO handshake is part of the same flow (`hello: hsWait|hsDone|hsFailed`).
+  The native TCP path (`netlink.nim`) is now a thin socket pump over this
+  core, so there is ONE protocol implementation and the 3a acceptance gates
+  still pass unchanged.
+- Bounded lead is per-side and constructor-set: `NETLINK_LEAD` (16384
+  cycles) suits a transport pumped every slice (the socket); the browser
+  uses `NETLINK_LEAD_RAF` (3 frames ≈ 50 ms emulated) because JS only
+  delivers DataChannel messages between requestAnimationFrame ticks, never
+  mid-tick — a 1 ms lead there throttles each side to advancing ~1 ms of
+  emulated time per real frame (~6% speed). The extra lead only widens the
+  responder's sampling skew (still bounded, still hardware-plausible); it
+  cannot desync, because transfers stay anchored to exact cycles.
+- `src/dingbat_wasm.nim` — `netlink_init(rom, is_host, allow_crc_mismatch)`,
+  `netlink_feed/drain/tick/stalled/peer_done/crc_mismatch/error_msg/exit`,
+  plus a `wasm_ew16` EWRAM probe for the linktest acceptance hook. Online
+  mode runs one core through the standard single-core render/audio/input
+  paths (each side renders only itself); `netlink_tick` returns a status
+  the RAF loop uses to drop wall-clock debt while stalled instead of
+  replaying it as a frame burst.
+- `web/netplay.js` — the JS bridge: `RTCPeerConnection` + a reliable,
+  ordered DataChannel (`ordered: true`, default reliable) shuttling frames
+  to/from the wasm exports each RAF. STUN-only for v1 (a strict-NAT pair
+  gets a clear "could not connect peer-to-peer" error; TURN is a later
+  add). `?linkdelay=NN` injects N ms of send latency (mirrors the native
+  `--netlink-delay-ms`); `?signal=URL` overrides the signaling endpoint.
+- `web/signaling/server.js` — a zero-dependency Node WebSocket rendezvous
+  (`node server.js [port]`, default 8790). `create → code`, `join(code)`,
+  then it relays the SDP offer/answer + ICE between exactly two sockets and
+  closes; game traffic never touches it. Codes are 6 chars from an
+  unambiguous alphabet (no 0/O/1/I/L), single-use, ~10-minute TTL.
+- UI: GBA library tiles gain **HOST** / **JOIN** next to **2P**. Host shows
+  the room code + "waiting for your friend"; join has a code field
+  (accepts `KJ4-Q7N`, `kj4q7n`, spaces — all normalized). In session,
+  `body.net-mode` hides the desync/reset-hazard controls (rewind, speed,
+  save states, load-save, reset — reset can't reach the remote core), a
+  subtle `⏳ waiting for peer` badge surfaces sustained stalls, and a peer
+  departure (BYE, closed channel, ICE failure) toasts "your game keeps
+  running" while the local core plays on — the game itself just sees a
+  yanked cable.
+
+**Same-ROM policy.** The linktest harness keeps the strict CRC check
+(`strict_crc = true`); the web relaxes it to a warn-and-confirm
+(`allow_crc_mismatch`), because cross-version pairs (Ruby↔Sapphire↔Emerald)
+have different CRCs but are fully link-compatible, and blocking them would
+defeat half the point of Pokémon trading. Compatible games negotiate their
+own link handshake; incompatible ones fail that handshake themselves.
+
+**Verified (2026-07-11, two browser contexts + the local signaling
+server):** the linktest ROM reaches its `EWRAM[0x800]==0xCAFE` completion
+with all 16 multi-mode rounds correct on both units, plain and under
+`?linkdelay=50` (slower, never desynced). Pokémon Emerald (same version)
+runs both sides into the overworld at full frame rate, each on its own
+battery save. The cross-version relaxed-CRC confirm fires on both ends.
+
+Not yet done: a deployed signaling URL (an ops choice — the web UI's
+default guesses `wss://<host>/signal`), a TURN relay for strict-NAT pairs,
+native clients joining the room system, and GB/GBC online (the GB core has
+no SIO driver abstraction yet — GBA-only for 3b).
+
 ### 3. Cross-emulator transports (pick per goal)
 
 - **BGB protocol for the GB core** — best interop-per-effort in the whole
@@ -299,8 +372,9 @@ format later (HELLO `system=1`) or speak the real BGB protocol instead.
 2. In-process 2-player lockstep — core DONE (phase 2, 2026-07; link.nim +
    linktest); web UI wiring pending.
 3. dingbat↔dingbat GBA network transport — native TCP DONE (phase 3a,
-   2026-07; linkproto.nim + netlink.nim + --mode=netlink). Next: browser
-   bridge over the same wire format (phase 3b), BGB protocol for GB
+   2026-07; linkproto.nim + netlink.nim + --mode=netlink); browser WebRTC
+   bridge with room codes DONE (phase 3b, 2026-07-11; netcore.nim +
+   netplay.js + signaling server — see §3b). Next: BGB protocol for GB
    (first true cross-emulator interop).
 4. JoyBus/TCP (Dolphin) and/or VBA-M protocol for GBA, per demand.
 
