@@ -54,6 +54,7 @@ var frameCount {.exportc.}: cint = 0
 var stateNet: NetCore = nil
 var netOut: string = ""       # drained frames awaiting pickup by JS
 var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
+var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
 
 # LCD color correction matching the desktop game shader exactly: linearize
 # with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2. SDL's renderer
@@ -385,6 +386,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
+    curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
     let bios = if fileExists("bios.bin"): "bios.bin" else: ""
     stateGba = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
     stateGba.post_init()
@@ -429,6 +431,39 @@ proc netlink_init(rom_path: cstring; is_host: cint;
                           lead = NETLINK_LEAD_RAF)
   net_collect()
   frameCount = 0
+  1
+
+proc gba_awaiting_link(): cint {.exportc.} =
+  ## 1 when a running, un-linked GBA game is sitting in multi-player serial
+  ## mode — i.e. it walked up to a Cable Club / Union Room and is polling a
+  ## link port with no cable attached. GBA games only enter this SIO mode to
+  ## link, so it is a reliable "wants a partner" signal for the mid-game
+  ## "link cable detected" badge. Returns 0 once online mode is active.
+  if stateNet != nil or stateKind != ekGBA or stateGba == nil: return 0
+  if stateGba.serial.sio_mode() == smMulti: 1 else: 0
+
+proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
+  ## Bind the network protocol core to the ALREADY-RUNNING GBA core, without
+  ## the reboot netlink_init does — the game keeps its exact state, and its
+  ## next link-cable poll finds a partner. The link clock is rebaselined to
+  ## the core's current cycle so both sides start near zero; the bounded-lead
+  ## sync absorbs whatever skew remains. Returns 1 on success.
+  if stateKind != ekGBA or stateGba == nil or stateNet != nil: return 0
+  if curRomPath.len == 0 or not fileExists(curRomPath): return 0
+  rewindHistory = nil  # rewinding one side would desync the pair
+  let rom = readFile(curRomPath)
+  stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
+                          rom_crc = crc32(rom),
+                          strict_crc = allow_crc_mismatch == 0,
+                          lead = NETLINK_LEAD_RAF)
+  stateNet.rebaseline()
+  # A multi-mode transfer left mid-flight by the no-cable driver is stuck
+  # busy with no completion scheduled; clear it so the game's link retry
+  # re-initiates cleanly through the remote driver (it is polling for
+  # exactly that). No data is latched — the real exchange happens on retry.
+  if (stateGba.serial.siocnt and 0x0080'u16) != 0:
+    stateGba.serial.siocnt = stateGba.serial.siocnt and not 0x0080'u16
+  net_collect()
   1
 
 proc netlink_exit() {.exportc.} =

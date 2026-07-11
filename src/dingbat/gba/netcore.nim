@@ -569,6 +569,13 @@ proc try_advance*(nc: NetCore): NetAdvance =
 
 # ---------------- construction ----------------
 
+proc rebaseline*(nc: NetCore) =
+  ## Reset the link-clock origin to the core's current cycle. Used when
+  ## attaching to an already-running core mid-game so now() starts near zero
+  ## on both sides; the bounded-lead sync then absorbs the residual skew.
+  ## Only valid before the first CLOCK is sent (i.e. right after construction).
+  nc.offset = -int64(nc.gba.scheduler.cycles)
+
 proc debug_state*(nc: NetCore): string =
   ## One-line state dump for frontends' diagnostics.
   "hello=" & $nc.hello & " phase=" & $nc.phase & " now=" & $nc.now() &

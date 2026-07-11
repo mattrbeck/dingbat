@@ -2129,3 +2129,59 @@ body.net-mode #state-sep,
 body.net-mode #load-save {
   display: none !important;
 }
+
+/* In-game "link cable detected" badge: a tap target, unlike the passive
+   waiting-for-peer chip. Sits top-center over the stage. */
+#net-detect {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #141008;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3);
+  animation: net-detect-pulse 1.6s ease-in-out infinite;
+}
+
+#net-detect[hidden] {
+  display: none;
+}
+
+#net-detect:hover {
+  filter: brightness(1.08);
+}
+
+@keyframes net-detect-pulse {
+  0%, 100% { box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
+  50% { box-shadow: 0 4px 26px 0 var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #net-detect { animation: none; }
+}
+
+/* Host/Join chooser in the room-code modal (opened from the badge) */
+.net-choose-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.net-choose-row .button {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+}

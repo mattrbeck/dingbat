@@ -30,6 +30,7 @@ let net = null;      // active session (from modal open to shutdown)
 
 const netModal = document.getElementById("net-modal");
 const netTitle = document.getElementById("net-title");
+const netChooseView = document.getElementById("net-choose-view");
 const netHostView = document.getElementById("net-host-view");
 const netJoinView = document.getElementById("net-join-view");
 const netCodeDiv = document.getElementById("net-code");
@@ -37,6 +38,9 @@ const netStatusDiv = document.getElementById("net-status");
 const netCodeInput = document.getElementById("net-code-input");
 const netJoinGo = document.getElementById("net-join-go");
 const netStallBadge = document.getElementById("net-stall");
+const netDetectBadge = document.getElementById("net-detect");
+
+const netModalOpen = () => netModal.classList.contains("open");
 
 const netSetStatus = (msg, isError) => {
   netStatusDiv.textContent = msg;
@@ -48,6 +52,7 @@ const netFormatCode = (code) => code.slice(0, 3) + "-" + code.slice(3);
 
 const openNetModal = (isHost) => {
   netTitle.textContent = isHost ? "Host online game" : "Join online game";
+  netChooseView.hidden = true;
   netHostView.hidden = !isHost;
   netJoinView.hidden = isHost;
   netCodeDiv.textContent = "";
@@ -58,10 +63,56 @@ const openNetModal = (isHost) => {
   trapFocus(netModal);
 };
 
+// The in-game badge opens the modal on a Host/Join chooser (we don't yet
+// know which side this player should be).
+const openNetChooser = () => {
+  netTitle.textContent = "Link cable detected";
+  netChooseView.hidden = false;
+  netHostView.hidden = true;
+  netJoinView.hidden = true;
+  netCodeDiv.textContent = "";
+  netSetStatus("");
+  netModal.classList.add("open");
+  trapFocus(netModal);
+};
+
 const closeNetModal = () => {
   netModal.classList.remove("open");
   releaseFocus(netModal);
 };
+
+// --- In-game "link cable detected" badge ---
+// The game entered multi-player SIO mode while un-linked (walked up to a
+// Cable Club / Union Room). Offer a tap-to-connect badge; once dismissed,
+// stay quiet until the game leaves and re-enters that mode.
+let netDetectDismissed = false;
+
+const netShowBadge = () => { netDetectBadge.hidden = false; };
+const netHideBadge = () => { netDetectBadge.hidden = true; };
+
+const netCheckAwaitingLink = () => {
+  if (!Module._gba_awaiting_link) return;
+  const awaiting = Module._gba_awaiting_link() === 1;
+  if (!awaiting) {
+    netDetectDismissed = false; // left the link screen; re-arm for next time
+    netHideBadge();
+    return;
+  }
+  if (netMode || netDetectDismissed || netModalOpen()) {
+    netHideBadge();
+    return;
+  }
+  netShowBadge();
+};
+
+netDetectBadge.addEventListener("click", () => {
+  netHideBadge();
+  openNetChooser();
+});
+// Arrow wrappers: netChooseHost/Join are defined later in the file, so
+// reference them at click time to avoid a top-level TDZ error.
+document.getElementById("net-choose-host").addEventListener("click", () => netChooseHost());
+document.getElementById("net-choose-join").addEventListener("click", () => netChooseJoin());
 
 // ---------------- signaling ----------------
 
@@ -228,7 +279,11 @@ const netFeedNow = (bytes) => {
     netPeerGone("Link error: " + Module.UTF8ToString(Module._netlink_error_msg()));
     return;
   }
-  // A REPLY the peer is stalled on should go out now, not next frame
+  // This message may carry the REPLY a stalled transfer is parked on.
+  // Advance the core right now (driveNet resolves the stall at network
+  // speed) and push whatever we produced back out immediately — without
+  // this, every link round-trip would cost a whole 16 ms RAF interval.
+  if (typeof window.driveNet === "function") window.driveNet();
   netFlush();
 };
 
@@ -254,29 +309,40 @@ const netFlush = () => {
 
 // ---------------- session lifecycle ----------------
 
-const netHost = async (rom) => {
-  await startNet(rom, true);
+// From the library tiles: launch the ROM fresh into a linked session.
+const netHost = (rom) => netStartHost(rom, false);
+const netJoin = (rom) => netStartJoin(rom, false);
+
+// From the in-game "link cable detected" badge: attach to the running core
+// with no reboot (rom is null — the game is already running its own save).
+const netChooseHost = () => netStartHost(null, true);
+const netChooseJoin = () => netStartJoin(null, true);
+
+const netStartHost = async (rom, attach) => {
+  await startNet(rom, true, attach);
   if (!net) return;
   netSetStatus("Contacting server…");
   if (await sigConnect()) sigSend({ t: "create" });
 };
 
-const netJoin = async (rom) => {
-  await startNet(rom, false);
+const netStartJoin = async (rom, attach) => {
+  await startNet(rom, false, attach);
   // Wait for the user to type the code; netJoinGo's handler continues.
 };
 
-const startNet = async (rom, isHost) => {
+const startNet = async (rom, isHost, attach) => {
   if (netMode || net) await netShutdown();
   if (linkMode) await exitLinkMode();
+  netHideBadge();
   net = {
     rom,
     isHost,
+    attach,               // true = bind to the running core (no reboot)
     ws: null,
     pc: null,
     dc: null,
     ptr: 0,
-    started: false,       // wasm core initialized, game ticking
+    started: false,       // wasm core linked, game ticking
     rtcConnected: false,  // DataChannel open
     helloDone: false,     // wire handshake validated (first successful tick)
     rxQueue: [],
@@ -302,19 +368,12 @@ netCodeInput.addEventListener("keydown", (e) => {
   e.stopPropagation(); // keep bound game keys usable in the field
 });
 
-// Start the local core against the open DataChannel. Mirrors loadRom's
-// bookkeeping: the ROM runs from the standard single-core FS path with the
-// player's OWN battery save — trading from your real save is the point.
+// The DataChannel is open: bring the local core online. Two paths —
+// attach binds the network cable to the already-running game with no
+// reboot (from the in-game badge); the fresh path boots the ROM into a
+// linked session from the player's OWN battery save (from the tiles).
+// Trading from your real save is the point either way.
 const launchNetRom = async () => {
-  const rom = net.rom;
-  if (currentRomName && currentOriginalName) {
-    await persistSave(currentRomName, currentOriginalName);
-  }
-  const romFile = "rom" + extOf(rom.name);
-  writeToFS(romFile, rom.data);
-  currentRomName = romFile;
-  currentOriginalName = rom.name;
-  await restoreSave(romFile, rom.name);
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);
@@ -322,16 +381,39 @@ const launchNetRom = async () => {
   document.body.classList.remove("paused");
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
-  const ok = Module.ccall(
-    "netlink_init",
-    "number",
-    ["string", "number", "number"],
-    [romFile, net.isHost ? 1 : 0, 1] // relaxed CRC: games negotiate compatibility
-  );
-  if (ok !== 1) throw new Error("core init failed");
+
+  if (net.attach) {
+    // The game is already running its own save; just plug the cable in.
+    const ok = Module.ccall(
+      "netlink_attach",
+      "number",
+      ["number", "number"],
+      [net.isHost ? 1 : 0, 1] // relaxed CRC: games negotiate compatibility
+    );
+    if (ok !== 1) throw new Error("attach failed");
+  } else {
+    const rom = net.rom;
+    if (currentRomName && currentOriginalName) {
+      await persistSave(currentRomName, currentOriginalName);
+    }
+    const romFile = "rom" + extOf(rom.name);
+    writeToFS(romFile, rom.data);
+    currentRomName = romFile;
+    currentOriginalName = rom.name;
+    await restoreSave(romFile, rom.name);
+    const ok = Module.ccall(
+      "netlink_init",
+      "number",
+      ["string", "number", "number"],
+      [romFile, net.isHost ? 1 : 0, 1]
+    );
+    if (ok !== 1) throw new Error("core init failed");
+  }
+
   net.ptr = Module._malloc(NET_BUF_CAP);
   net.started = true;
   netMode = true;
+  netHideBadge();
   document.body.classList.add("has-game", "running", "net-mode");
   netFlush(); // our HELLO
   for (const bytes of net.rxQueue) netFeedNow(bytes);
@@ -454,19 +536,18 @@ const netShutdown = async (opts) => {
 
 // Modal dismissal = abandoning the pending session (or nothing once the
 // game is already running — then the modal is long closed anyway).
-document.getElementById("net-close").addEventListener("click", () => {
+// Dismissing also silences the in-game badge until the game leaves and
+// re-enters the link screen, so it doesn't immediately pop back up.
+const netDismissModal = () => {
+  netDetectDismissed = true;
   if (net && !net.started) netShutdown();
   else closeNetModal();
-});
+};
+
+document.getElementById("net-close").addEventListener("click", netDismissModal);
 netModal.addEventListener("click", (e) => {
-  if (e.target === netModal) {
-    if (net && !net.started) netShutdown();
-    else closeNetModal();
-  }
+  if (e.target === netModal) netDismissModal();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && netModal.classList.contains("open")) {
-    if (net && !net.started) netShutdown();
-    else closeNetModal();
-  }
+  if (e.key === "Escape" && netModalOpen()) netDismissModal();
 });

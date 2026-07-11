@@ -1822,8 +1822,43 @@ var Module = {
       }
     };
 
+    // Advance the online-link core by whatever the shared `accumulator`
+    // affords, capped so a long stall can't later burst. Called from the RAF
+    // loop (after accumulator is topped up with real elapsed time) AND from
+    // netplay.js on every inbound DataChannel message — the latter drains
+    // any debt a stall left behind the moment the peer's data arrives, which
+    // is what keeps link-heavy screens near full speed. Re-entrancy guarded.
+    let netPumping = false;
+    const driveNet = () => {
+      if (!netMode || netPumping) return;
+      netPumping = true;
+      try {
+        if (accumulator > FRAME_TIME * 4) accumulator = FRAME_TIME * 4;
+        let st = 4;
+        let framesRun = 0;
+        while (accumulator >= FRAME_TIME && framesRun < 4) {
+          st = netStep();
+          if (st !== 1) break; // stalled / handshake / failed — keep the debt
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        netAfterTick(framesRun > 0 && st !== 3 ? (st === 1 ? 1 : st) : st);
+      } finally {
+        netPumping = false;
+      }
+    };
+    window.driveNet = driveNet;
+
     const tick = (timestamp) => {
       pollGamepads();
+      // Mid-game link detection: when a running game walks up to a Cable
+      // Club / Union Room (enters multi-player SIO mode) and we're not
+      // already linked, offer the "link cable detected" badge.
+      if (!netMode && typeof netCheckAwaitingLink === "function") {
+        netCheckAwaitingLink();
+      }
       if (paused) {
         lastFrameTime = 0;
         accumulator = 0;
@@ -1834,23 +1869,12 @@ var Module = {
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       if (netMode) {
-        // Online link: fixed-rate frames, no rewind/turbo (they'd desync
-        // the peers). A tick can also report "stalled": the emulated clock
-        // is parked waiting for the remote side — drop the accumulated debt
-        // (wall time spent stalled must not be replayed as a frame burst)
-        // and keep the RAF loop running so the badge and channel stay live.
-        let st = 1;
-        let framesRun = 0;
-        while (accumulator >= FRAME_TIME && framesRun < 2) {
-          st = netStep();
-          if (st !== 1) break;
-          pushAudio();
-          frameCount++;
-          accumulator -= FRAME_TIME;
-          framesRun++;
-        }
-        if (st !== 1 || accumulator > FRAME_TIME * 2) accumulator = 0;
-        netAfterTick(st);
+        // Online link: driveNet consumes the shared accumulator. It is ALSO
+        // called from netplay.js the instant a DataChannel message arrives,
+        // so a frame stalled on the peer's reply resumes at network speed
+        // instead of waiting a whole 16 ms RAF interval — without that, the
+        // trade handshake (hundreds of round-trips) crawls at a few fps.
+        driveNet();
       } else if (linkMode) {
         // 2P link: fixed-rate frames only — rewind/turbo would desync the
         // pair, so their branches (and controls) don't exist here
