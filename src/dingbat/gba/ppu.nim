@@ -58,10 +58,12 @@ proc start_line*(ppu: PPU) =
 
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
-  ppu.gba.scheduler.schedule(46, etPPUSetHBlankFlag)
+  # DISPSTAT hblank flag sets 44 cycles into the h-blank gap (flag high for
+  # 228 of the 1232-cycle scanline; mGBA suite "H-blank bit start")
+  ppu.gba.scheduler.schedule(44, etPPUSetHBlankFlag)
   if ppu.dispstat.hblank_irq_enable:
     ppu.gba.interrupts.reg_if.hblank = true
-    ppu.gba.interrupts.schedule_interrupt_check()
+    ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
   if ppu.vcount < 160:
     ppu.scanline()
     for bg_num in 0..1:
@@ -90,7 +92,7 @@ proc end_hblank*(ppu: PPU) =
       for ref_num in 0..1:
         ppu.bgref_int[bg_num][ref_num] = ppu.bgref[bg_num][ref_num].num
     ppu.draw()
-  ppu.gba.interrupts.schedule_interrupt_check()
+  ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc draw*(ppu: PPU) =
   ppu.frame = true

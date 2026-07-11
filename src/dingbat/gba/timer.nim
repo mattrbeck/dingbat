@@ -3,12 +3,33 @@
 const
   TIMER_PERIODS   = [1, 64, 256, 1024]
   TIMER_EVENT_TYPES* = [etTimer0, etTimer1, etTimer2, etTimer3]
+  # Hardware starts counting 2 cycles after the enable write
+  TIMER_START_DELAY = 2
+
+# The prescaler is free-running: a timer with period P ticks at absolute
+# cycles divisible by P, regardless of when it was enabled. Ticks are counted
+# over the half-open interval (anchor, now], so a tick landing exactly on the
+# anchor cycle (enable+delay or the overflow itself) is excluded.
+proc ticks_between(anchor, now: CycleCount; period: int): uint32 {.inline.} =
+  uint32(now div CycleCount(period) - anchor div CycleCount(period))
 
 proc cycles_until_overflow(tim: Timer; num: int): int =
-  TIMER_PERIODS[tim.tmcnt[num].frequency] * (0x10000 - int(tim.tm[num]))
+  # From the anchor cycle: overflow fires on the (0x10000 - tm)-th tick
+  let period = TIMER_PERIODS[tim.tmcnt[num].frequency]
+  let anchor = tim.cycle_enabled[num]
+  let target = CycleCount(period) * (anchor div CycleCount(period) + CycleCount(0x10000 - int(tim.tm[num])))
+  int(target - tim.gba.scheduler.cycles)
+
+proc effective_reload(tim: Timer; num: int): uint16 {.inline.} =
+  # A reload write on the cycle immediately before (or the same cycle as)
+  # this overflow isn't visible to the reload yet
+  if tim.gba.scheduler.cycles <= tim.tmd_write_cycle[num] + 1:
+    tim.tmd_prev[num]
+  else:
+    tim.tmd[num]
 
 proc timer_overflow_event*(tim: Timer; num: int) =
-  tim.tm[num] = tim.tmd[num]
+  tim.tm[num] = tim.effective_reload(num)
   tim.cycle_enabled[num] = tim.gba.scheduler.cycles
   if num < 3 and tim.tmcnt[num + 1].cascade and tim.tmcnt[num + 1].enable:
     tim.tm[num + 1] += 1
@@ -18,7 +39,7 @@ proc timer_overflow_event*(tim: Timer; num: int) =
     tim.gba.apu.timer_overflow(num)
   if tim.tmcnt[num].irq_enable:
     tim.gba.interrupts.set_interrupt_flag(IRQ_TIMER_BIT_BASE + num)
-    tim.gba.interrupts.schedule_interrupt_check()
+    tim.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
 
@@ -32,8 +53,12 @@ proc new_timer*(gba: GBA): Timer =
 
 proc get_current_tm(tim: Timer; num: int): uint16 =
   if tim.tmcnt[num].enable and not tim.tmcnt[num].cascade:
-    let elapsed = tim.gba.scheduler.cycles - tim.cycle_enabled[num]
-    tim.tm[num] + uint16(elapsed div CycleCount(TIMER_PERIODS[tim.tmcnt[num].frequency]))
+    let now = tim.gba.scheduler.cycles
+    # cycle_enabled can sit up to TIMER_START_DELAY in the future right after
+    # an enable write; the counter hasn't started yet
+    if now <= tim.cycle_enabled[num]: return tim.tm[num]
+    tim.tm[num] + uint16(ticks_between(tim.cycle_enabled[num], now,
+                                       TIMER_PERIODS[tim.tmcnt[num].frequency]))
   else:
     tim.tm[num]
 
@@ -64,9 +89,14 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
         if tim.tmcnt[num].cascade:
           tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
         elif not was_enabled or was_cascade:
-          tim.cycle_enabled[num] = tim.gba.scheduler.cycles
+          let delay = if was_enabled: 0 else: TIMER_START_DELAY
+          tim.cycle_enabled[num] = tim.gba.scheduler.cycles + CycleCount(delay)
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
       elif was_enabled:
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
   else:
+    let now = tim.gba.scheduler.cycles
+    if tim.tmd_write_cycle[num] != now:
+      tim.tmd_prev[num] = tim.tmd[num]
+      tim.tmd_write_cycle[num] = now
     write(tim.tmd[num], value, io_addr and 1)

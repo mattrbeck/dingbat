@@ -33,7 +33,9 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x120..0x12B, 0x134..0x15B: mmio.gba.serial[io_addr] = value
   of 0x130..0x133: mmio.gba.keypad[io_addr] = value
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr] = value
-  of 0x204..0x205: write(mmio.waitcnt, value, io_addr and 1)
+  of 0x204..0x205:
+    write(mmio.waitcnt, value, io_addr and 1)
+    mmio.gba.bus.update_waitcnt(mmio.waitcnt)
   of 0x301:
     mmio.gba.cpu.halted = true
     mmio.gba.cpu.stopped = bit(value, 7)  # Stop wakes only on keypad/cartridge/SIO

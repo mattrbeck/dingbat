@@ -27,6 +27,14 @@ proc bios_arctan(cpu: CPU) =
 proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
   let numer = int64(cast[int32](cpu.r[numer_reg]))
   let denom = int64(cast[int32](cpu.r[denom_reg]))
+  # The real BIOS divide loops once per quotient bit; calibrated against the
+  # mGBA suite's "BIOS Division" timing tests
+  block:
+    let n = uint32(abs(numer) and 0xFFFFFFFF)
+    let d = uint32(abs(denom) and 0xFFFFFFFF)
+    if d != 0:
+      let quot_bits = max(0, countLeadingZeroBits(d) - countLeadingZeroBits(max(n, 1'u32)) - 1)
+      cpu.idle(19 + quot_bits * 13)
   if denom == 0:
     cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
     cpu.r[1] = uint32(numer and 0xFFFFFFFF)
@@ -77,12 +85,45 @@ proc check_intr_wait*(cpu: CPU) =
   if hit != 0:
     cpu.write_intr_mirror(cpu.read_intr_mirror() and not hit)
     cpu.intr_wait_active = false
+    # The IRQ handler ran through the (stub) BIOS and rewrote the open-bus
+    # latch; the real BIOS's IntrWait exit path leaves 0xE3A02004
+    cpu.gba.bus.bios_latch = 0xE3A02004'u32
+    # Cost of the real BIOS's wake path (mirror check, register restore,
+    # return to caller). Keeps code after IntrWait phase-aligned with the
+    # free-running timer prescaler (mGBA suite Timer count-up tests).
+    cpu.gba.bus.cycles += 42  # INTRWAIT_TUNE
   else:
     cpu.halted = true
+
+# Cycle cost of the real BIOS's SWI entry/dispatch/return path (exception
+# entry, register saves, jump-table dispatch, return), excluding the
+# caller-side pipeline refill which is charged region-dependently below.
+# Calibrated against the mGBA suite's BIOS timing tests (IWRAM column).
+const SWI_HLE_BASE = 48
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
+  cpu.idle(SWI_HLE_BASE)
+  # BIOS open-bus latch: the last opcode the real BIOS fetches before
+  # returning (GBATEK "Reading from BIOS memory"; the mGBA suite verifies
+  # 0xE3A02004 after VBlankIntrWait on hardware)
+  cpu.gba.bus.bios_latch = 0xE3A02004'u32
+  # The return refills the caller's pipeline: one nonsequential + one
+  # sequential fetch in the caller's region
+  block:
+    let bus = cpu.gba.bus
+    let page = int(bits_range(cpu.r[15], 24, 27))
+    if cpu.cpsr.thumb:
+      bus.cycles += int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+    else:
+      bus.cycles += int(bus.wait32_n[page]) + int(bus.wait32_s[page])
+    # Plus one more sequential halfword slot; the residual every non-IWRAM
+    # column showed against hardware (exactly S16 - 1)
+    bus.cycles += int(bus.wait16_s[page]) - 1
+    # The swi flushed the ROM fetch stream; forget burst/prefetch state
+    bus.rom_next_addr = 1  # never matches (halfword-aligned addresses)
+    bus.rom_free_since = bus.gba.scheduler.cycles + CycleCount(bus.cycles)
   case swi_num
   of 0x00:  # SoftReset
     let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
@@ -124,6 +165,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x05:  # VBlankIntrWait = IntrWait(1, 1)
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
+    # Input-dependent cost of the real BIOS routine. The hardware algorithm
+    # is unknown (the bundled replacement BIOS uses a different one), so this
+    # is a monotone piecewise-linear fit through the mGBA suite's three
+    # "BIOS Sqrt" timing datapoints (inputs 0, 0xFF, 0x12345678).
+    block:
+      let b = 32 - countLeadingZeroBits(max(cpu.r[0], 1'u32))
+      let extra = if cpu.r[0] == 0: 48
+                  elif b <= 8: 48 + (115 * b + 4) div 8
+                  else: 163 + (916 * (b - 8) + 10) div 21
+      cpu.idle(extra)
     let val = cpu.r[0]
     if val == 0:
       cpu.r[0] = 0
@@ -142,6 +193,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         bit_val = bit_val shr 2
       cpu.r[0] = result_val
   of 0x09:  # ArcTan
+    cpu.idle(48)  # fixed-iteration polynomial in the real BIOS
     bios_arctan(cpu)
   of 0x0A:  # ArcTan2
     ## Matches real BIOS: full 32-bit signed inputs, same branching logic.
@@ -203,23 +255,31 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let count = bits_range(ctrl, 0, 20)
     let fill = bit(ctrl, 24)
     let word_mode = bit(ctrl, 26)
+    # Loop overhead of the real BIOS copy loop beyond the bus accesses
+    cpu.idle(int(count))
+    # Addresses are NOT aligned: normal memory aligns on the bus anyway, and
+    # SRAM (8-bit bus) genuinely sees the unaligned byte address. Reads from
+    # the protected BIOS/unused region return 0 (hardware-verified by the
+    # mGBA suite memory tests).
+    let src_protected = bits_range(src, 24, 27) <= 0x1
     if word_mode:
-      src = src and not 3'u32
-      dst = dst and not 3'u32
-      let fill_val = cpu.gba.bus.read_word(src)
+      let fill_val = if src_protected: 0'u32 else: cpu.gba.bus.read_word(src)
       for i in 0'u32 ..< count:
-        let val = if fill: fill_val else: cpu.gba.bus.read_word(src)
+        let val = if fill: fill_val
+                  elif src_protected: 0'u32
+                  else: cpu.gba.bus.read_word(src)
         cpu.gba.bus.write_word(dst, val)
         if not fill: src += 4
         dst += 4
     else:
-      dst = dst and not 1'u32
-      let fill_val = if bit(src, 0): uint16(cpu.gba.bus[src])
-                     else: cpu.gba.bus.read_half(src)
+      # The real BIOS uses ldrh: an odd source address reads rotated, so the
+      # stored halfword is the addressed byte (ldrh+strh; hardware-verified)
+      let fill_val = if src_protected: 0'u16
+                     else: uint16(cpu.gba.bus.read_half_rotate(src))
       for i in 0'u32 ..< count:
         let val = if fill: fill_val
-                  elif bit(src, 0): uint16(cpu.gba.bus[src])
-                  else: cpu.gba.bus.read_half(src)
+                  elif src_protected: 0'u16
+                  else: uint16(cpu.gba.bus.read_half_rotate(src))
         cpu.gba.bus.write_half(dst, val)
         if not fill: src += 2
         dst += 2
@@ -284,14 +344,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.apu.tick_frame_sequencer()
       cpu.gba.apu.get_sample()
   of 0x0C:  # CpuFastSet
-    var src = cpu.r[0] and not 3'u32
-    var dst = cpu.r[1] and not 3'u32
+    var src = cpu.r[0]
+    var dst = cpu.r[1]
+    let src_protected = bits_range(src, 24, 27) <= 0x1
     let ctrl = cpu.r[2]
     let count = (bits_range(ctrl, 0, 20) + 7) and not 7'u32  # round up to multiple of 8
+    # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
+    # (calibrated against the mGBA suite "CpuSet" timing test, which uses
+    # swi 0xC despite its name)
+    cpu.idle(int(count) + 5)
     let fill = bit(ctrl, 24)
-    let fill_val = cpu.gba.bus.read_word(src)
+    let fill_val = if src_protected: 0'u32 else: cpu.gba.bus.read_word(src)
     for i in 0'u32 ..< count:
-      let val = if fill: fill_val else: cpu.gba.bus.read_word(src)
+      let val = if fill: fill_val
+                elif src_protected: 0'u32
+                else: cpu.gba.bus.read_word(src)
       cpu.gba.bus.write_word(dst, val)
       if not fill: src += 4
       dst += 4
@@ -681,6 +748,7 @@ proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let rs  = int(bits_range(instr, 8, 11))
   let rm  = int(bits_range(instr, 0, 3))
   let acc = when accumulate: cpu.r[rn] else: 0'u32
+  cpu.idle(mul_i_cycles(cpu.r[rs], true) + (when accumulate: 1 else: 0))
   discard cpu.set_reg(rd, cpu.r[rm] * cpu.r[rs] + acc)
   when set_cond: cpu.set_neg_and_zero_flags(cpu.r[rd])
   if rd != 15: cpu.step_arm()
@@ -695,6 +763,7 @@ proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; ins
       cast[uint64](int64(cast[int32](cpu.r[rm])) * int64(cast[int32](cpu.r[rs])))
     else:
       uint64(cpu.r[rm]) * uint64(cpu.r[rs])
+  cpu.idle(mul_i_cycles(cpu.r[rs], signed) + (when accumulate: 2 else: 1))
   when accumulate:
     res += (uint64(cpu.r[rdhi]) shl 32) or uint64(cpu.r[rdlo])
   discard cpu.set_reg(rdhi, uint32(res shr 32))
@@ -736,6 +805,7 @@ proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) 
     let tmp = cpu.gba.bus.read_word_rotate(cpu.r[rn])
     cpu.gba.bus.write_word(cpu.r[rn], cpu.r[rm])
     discard cpu.set_reg(rd, tmp)
+  cpu.idle(1)
   if rd != 15: cpu.step_arm()
 
 proc arm_branch_exchange*(cpu: CPU; instr: uint32) =
@@ -760,15 +830,21 @@ proc arm_halfword_data_transfer*[pre, add, immediate, write_back, load: static b
     raise newException(Exception, "HalfwordDataTransfer sh=00: " & hex_str(instr))
   elif sh == 0b01:  # ldrh/strh
     when load:
-      discard cpu.set_reg(rd, cpu.gba.bus.read_half_rotate(address))
+      let value = cpu.gba.bus.read_half_rotate(address)
+      cpu.idle(1)
+      discard cpu.set_reg(rd, value)
     else:
       cpu.gba.bus.write_half(address, uint16(cpu.r[rd] and 0xFFFF'u32))
       if rd == 15:
         cpu.gba.bus.write_half(address, uint16(cpu.gba.bus.read_half(address)) + 4)
   elif sh == 0b10:  # ldrsb
-    discard cpu.set_reg(rd, uint32(cast[int32](cast[int8](cpu.gba.bus[address]))))
+    let value = uint32(cast[int32](cast[int8](cpu.gba.bus[address])))
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:  # sh == 0b11, ldrsh
-    discard cpu.set_reg(rd, cpu.gba.bus.read_half_signed(address))
+    let value = cpu.gba.bus.read_half_signed(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   when not pre:
     when add: address += offset
     else:     address -= offset
@@ -792,10 +868,13 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
     when add_offset: address += offset
     else:            address -= offset
   when load:
-    when byte_quantity:
-      discard cpu.set_reg(rd, uint32(cpu.gba.bus[address]))
-    else:
-      discard cpu.set_reg(rd, cpu.gba.bus.read_word_rotate(address))
+    let value =
+      when byte_quantity:
+        uint32(cpu.gba.bus[address])
+      else:
+        cpu.gba.bus.read_word_rotate(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:
     when byte_quantity:
       cpu.gba.bus[address] = uint8(cpu.r[rd])
@@ -840,7 +919,9 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
   for idx in 0..15:
     if bit(list, idx):
       when load:
-        discard cpu.set_reg(idx, cpu.gba.bus.read_word(address))
+        let value = cpu.gba.bus.read_word(address)
+        if idx == 15: cpu.idle(1)  # the I cycle precedes the pipeline refill
+        discard cpu.set_reg(idx, value)
       else:
         cpu.gba.bus.write_word(address, cpu.r[idx])
         if idx == 15:
@@ -850,6 +931,8 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
         if not first_transfer and not (load and bit(list, rn)):
           discard cpu.set_reg(rn, final_addr)
       first_transfer = true
+  when load:
+    if not bit(list, 15): cpu.idle(1)  # I cycle after the last transfer
   when s_bit:
     if user_bank:
       cpu.switch_mode(cast[CpuMode](saved_mode))
@@ -918,7 +1001,9 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
 proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
                             set_cond, bit4: static bool](cpu: CPU; instr: uint32) =
   const pc_reads_12_ahead = not imm_flag and bit4
-  when pc_reads_12_ahead: cpu.r[15] += 4
+  when pc_reads_12_ahead:
+    cpu.r[15] += 4
+    cpu.idle(1)  # register-specified shift costs one internal cycle
   var barrel_carry = cpu.cpsr.carry
   let rn = int(bits_range(instr, 16, 19))
   let rd = int(bits_range(instr, 12, 15))

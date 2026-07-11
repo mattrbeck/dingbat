@@ -114,7 +114,7 @@ proc start_normal_transfer(serial: Serial) =
   let fast = bit(serial.siocnt, 1)
   let bits = if is_32bit: 32 else: 8
   let cycles_per_bit = if fast: 8 else: 64
-  const SIO_TRANSFER_OVERHEAD = 44  # # Complete hack to pass mgba suite. Only works with the HLE BIOS.
+  const SIO_TRANSFER_OVERHEAD = 27  # Complete hack to pass mgba suite; retune when CPU cycle accounting changes.
   let total_cycles = bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 
   serial.gba.scheduler.schedule(total_cycles, etSerial)
@@ -136,7 +136,7 @@ proc serial_transfer_complete*(serial: Serial) =
   # Fire serial interrupt if enabled
   if bit(serial.siocnt, 14):
     serial.gba.interrupts.reg_if.serial = true
-    serial.gba.interrupts.schedule_interrupt_check()
+    serial.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc write_siocnt(serial: Serial; old_val: uint16) =
   let mode = serial.sio_mode()

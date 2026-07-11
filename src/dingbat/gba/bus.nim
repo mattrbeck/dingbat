@@ -5,6 +5,110 @@ const ACCESS_TIMING_TABLE: array[2, array[16, int]] = [
   [1, 1, 6, 1, 1, 2, 2, 1, 4, 4, 4, 4, 4, 4, 4, 4],  # 32-bit
 ]
 
+# WAITCNT first-access (nonsequential) wait states and second-access
+# (sequential) wait states, per GBATEK. Access cost = waits + 1.
+const ROM_N_WAITS = [4, 3, 2, 8]
+const ROM_S_WAITS = [[2, 1], [4, 1], [8, 1]]  # per wait-state region
+const SRAM_WAITS  = [4, 3, 2, 8]
+
+proc update_waitcnt*(bus: Bus; w: WAITCNT) =
+  # Constant non-ROM timings
+  for page in 0 .. 7:
+    bus.wait16_n[page] = int8(ACCESS_TIMING_TABLE[0][page])
+    bus.wait16_s[page] = int8(ACCESS_TIMING_TABLE[0][page])
+    bus.wait32_n[page] = int8(ACCESS_TIMING_TABLE[1][page])
+    bus.wait32_s[page] = int8(ACCESS_TIMING_TABLE[1][page])
+  let n_first = [int(w.wait_state_0_first_access),
+                 int(w.wait_state_1_first_access),
+                 int(w.wait_state_2_first_access)]
+  let n_second = [int(w.wait_state_0_second_access),
+                  int(w.wait_state_1_second_access),
+                  int(w.wait_state_2_second_access)]
+  for ws in 0 .. 2:
+    let n = ROM_N_WAITS[n_first[ws]] + 1
+    let s = ROM_S_WAITS[ws][n_second[ws]] + 1
+    for page in [8 + ws * 2, 9 + ws * 2]:
+      bus.wait16_n[page] = int8(n)
+      bus.wait16_s[page] = int8(s)
+      bus.wait32_n[page] = int8(n + s)  # nonseq first half + seq second half
+      bus.wait32_s[page] = int8(s + s)
+  let sram = int8(SRAM_WAITS[int(w.sram_wait_control)] + 1)
+  for page in [0xE, 0xF]:
+    bus.wait16_n[page] = sram
+    bus.wait16_s[page] = sram
+    bus.wait32_n[page] = sram
+    bus.wait32_s[page] = sram
+  bus.prefetch_on = w.gamepack_prefetch_buffer
+
+proc bus_now(bus: Bus): CycleCount {.inline.} =
+  bus.gba.scheduler.cycles + CycleCount(bus.cycles)
+
+proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int =
+  ## Cycle cost of a ROM-region (pages 8-D) access, tracking burst
+  ## sequentiality and the prefetch buffer. Sequential = the address
+  ## continues the previous ROM access; with the prefetch buffer off the
+  ## burst additionally breaks whenever the CPU spent cycles off the ROM bus.
+  let page = int(bits_range(address, 24, 27))
+  let now = bus.bus_now()
+  let contiguous = now == bus.rom_free_since
+  var seq: bool
+  if bus.dma_active:
+    # DMA: src and dst streams each keep their own burst; no back-to-back
+    # requirement. LRU pair of trackers handles the interleaving. An access
+    # immediately following another ROM access (e.g. the write of a
+    # ROM-to-ROM transfer right after its read) is also sequential-timed:
+    # the ROM bus is still hot.
+    if address == bus.rom_next_addr:
+      seq = true
+    elif address == bus.rom_next_addr2:
+      seq = true
+      bus.rom_next_addr2 = bus.rom_next_addr
+      bus.rom_next_addr = address  # promoted; advanced below
+    elif contiguous:
+      seq = true
+      bus.rom_next_addr2 = bus.rom_next_addr
+      bus.rom_next_addr = address
+    else:
+      seq = false
+      bus.rom_next_addr2 = bus.rom_next_addr
+      bus.rom_next_addr = address
+  else:
+    seq = address == bus.rom_next_addr and (bus.prefetch_on or contiguous)
+  var cost: int
+  var new_free_since: CycleCount
+  if seq:
+    if fetch and bus.prefetch_on and not contiguous:
+      # Prefetch hit: the buffer worked ahead while the ROM bus was free,
+      # one halfword per S-access time (buffer holds up to 8 halfwords).
+      # Leftover credit carries over to the next fetch, so back-to-back
+      # buffer hits stay cheap until the buffer drains.
+      let s = int(bus.wait16_s[page])
+      let credit = min(int(now - bus.rom_free_since), 8 * s)
+      let need = if is32: 2 * s else: s
+      cost = max(1, need - credit)  # a full buffer serves even a 32-bit fetch in one cycle
+      let done = now + CycleCount(cost)
+      let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
+      new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+    else:
+      cost = int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
+      new_free_since = now + CycleCount(cost)
+  else:
+    cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    new_free_since = now + CycleCount(cost)
+  bus.rom_next_addr = address + (if is32: 4'u32 else: 2'u32)
+  bus.rom_free_since = new_free_since
+  cost
+
+proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
+  let page = int(bits_range(address, 24, 27))
+  if page >= 0x8:
+    if page <= 0xD:
+      bus.rom_access_cycles(address, is32, fetch)
+    else:
+      int(bus.wait16_n[page])  # SRAM: 8-bit bus, same cost either way
+  else:
+    ACCESS_TIMING_TABLE[int(is32)][page]
+
 proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
   bios[offset + 0] = byte(value)
   bios[offset + 1] = byte(value shr 8)
@@ -23,20 +127,25 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     discard f.readBytes(result.bios, 0, result.bios.len)
     f.close()
   else:
-    # Minimal BIOS stub: IRQ handler at 0x18 dispatches to user handler at [0x03FFFFFC].
-    #   0x18: stmfd sp!, {r0-r3, r12, lr}   E92D500F
-    #   0x1C: mov   r0, #0x04000000          E3A00301
-    #   0x20: add   lr, pc, #0               E28FE000
-    #   0x24: ldr   pc, [r0, #-4]            E510F004
-    #   0x28: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
-    #   0x2C: subs  pc, lr, #4               E25EF004
-    write_stub_u32(result.bios, 0x18, 0xE92D500F'u32)
-    write_stub_u32(result.bios, 0x1C, 0xE3A00301'u32)
-    write_stub_u32(result.bios, 0x20, 0xE28FE000'u32)
-    write_stub_u32(result.bios, 0x24, 0xE510F004'u32)
-    write_stub_u32(result.bios, 0x28, 0xE8BD500F'u32)
-    write_stub_u32(result.bios, 0x2C, 0xE25EF004'u32)
+    # Minimal BIOS stub: IRQ vector at 0x18 branches to the handler at 0x128
+    # (matching the real BIOS layout, so IRQ dispatch costs the same 3-cycle
+    # branch) which dispatches to the user handler at [0x03FFFFFC].
+    #   0x018: b 0x128                        EA000042
+    #   0x128: stmfd sp!, {r0-r3, r12, lr}   E92D500F
+    #   0x12C: mov   r0, #0x04000000          E3A00301
+    #   0x130: add   lr, pc, #0               E28FE000
+    #   0x134: ldr   pc, [r0, #-4]            E510F004
+    #   0x138: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
+    #   0x13C: subs  pc, lr, #4               E25EF004
+    write_stub_u32(result.bios, 0x018, 0xEA000042'u32)
+    write_stub_u32(result.bios, 0x128, 0xE92D500F'u32)
+    write_stub_u32(result.bios, 0x12C, 0xE3A00301'u32)
+    write_stub_u32(result.bios, 0x130, 0xE28FE000'u32)
+    write_stub_u32(result.bios, 0x134, 0xE510F004'u32)
+    write_stub_u32(result.bios, 0x138, 0xE8BD500F'u32)
+    write_stub_u32(result.bios, 0x13C, 0xE25EF004'u32)
   result.gpio = new_gpio(gba)
+  result.update_waitcnt(WAITCNT())  # reset-state waitstates
 
 proc bus_page(address: uint32): int {.inline.} =
   int(bits_range(address, 24, 27))
@@ -285,7 +394,10 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
 proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_page or bus.install_fetch_cache(page):
-    bus.cycles += bus.fetch_c16
+    if page >= 0x8:
+      bus.cycles += bus.rom_access_cycles(address, is32 = false, fetch = true)
+    else:
+      bus.cycles += bus.fetch_c16
     read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
   else:
     bus.read_half(address)
@@ -293,35 +405,58 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
 proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_page or bus.install_fetch_cache(page):
-    bus.cycles += bus.fetch_c32
+    if page >= 0x8:
+      bus.cycles += bus.rom_access_cycles(address, is32 = true, fetch = true)
+    else:
+      bus.cycles += bus.fetch_c32
     read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
   else:
     bus.read_word(address)
 
 # ---- Public read/write with cycle accounting ----
 
+proc catch_up(bus: Bus) {.inline.} =
+  # Advance the scheduler to the current mid-instruction cycle so MMIO
+  # accesses observe/affect timers, IF flags, etc. at the exact cycle they
+  # happen. Skipped while an event handler runs (re-entrant tick would let
+  # time go backwards when the outer loop restores its target). Loops because
+  # a fired event can itself consume bus time (a DMA stalling the CPU) that
+  # must also be ticked before the access observes the clock.
+  if bus.gba.scheduler.dispatching: return
+  while bus.cycles > 0:
+    let pending = bus.cycles
+    bus.cycles = 0
+    bus.synced += pending
+    bus.gba.scheduler.tick(pending)
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
-  bus.cycles += ACCESS_TIMING_TABLE[0][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
-  bus.cycles += ACCESS_TIMING_TABLE[0][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
-  bus.cycles += ACCESS_TIMING_TABLE[1][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_word_internal(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
-  bus.cycles += ACCESS_TIMING_TABLE[0][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_byte_internal(address, value)
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
-  bus.cycles += ACCESS_TIMING_TABLE[0][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
-  bus.cycles += ACCESS_TIMING_TABLE[1][bus_page(address)]
+  bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
+  if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript

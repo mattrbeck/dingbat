@@ -2,6 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[options, times, os, strutils, math, sets]
+from std/bitops import countLeadingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize]
 when defined(test_harness):
   import ../common/test_output
@@ -83,6 +84,10 @@ type
     tmd*:          array[4, uint16]
     tm*:           array[4, uint16]
     cycle_enabled*: array[4, CycleCount]
+    # Reload writes latch one cycle late relative to an overflow: an overflow
+    # on the cycle right after the write still reloads the old value
+    tmd_prev*:        array[4, uint16]
+    tmd_write_cycle*: array[4, CycleCount]
 
   Serial* = ref object
     gba*:        GBA
@@ -141,6 +146,10 @@ type
   Bus* = ref object
     gba*:        GBA
     cycles*:     int
+    # Cycles already handed to the scheduler mid-instruction by catch_up so
+    # MMIO accesses observe the exact cycle they occur on; cpu.tick folds this
+    # into the instruction total and resets it
+    synced*:     int
     bios*:       seq[byte]
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
@@ -156,6 +165,29 @@ type
     fetch_c16*:  int
     fetch_c32*:  int
     fetch_ptr*:  ptr UncheckedArray[byte]
+    # WAITCNT-derived cycle costs per page (nonseq/seq × 16/32-bit); pages
+    # 0-7 are constant, 8-D come from the ROM waitstate fields, E-F from the
+    # SRAM field. Recomputed on WAITCNT writes.
+    wait16_n*: array[16, int8]
+    wait16_s*: array[16, int8]
+    wait32_n*: array[16, int8]
+    wait32_s*: array[16, int8]
+    prefetch_on*: bool
+    # ROM bus bookkeeping for sequential-access detection and the prefetch
+    # buffer: the address that would continue the current burst, and the
+    # absolute cycle at which the ROM bus went idle (prefetch credit accrues
+    # from that point while the CPU runs off other memory)
+    rom_next_addr*:  uint32
+    rom_free_since*: CycleCount
+    # Second burst tracker + flag for DMA: a DMA's src and dst streams
+    # interleave on the ROM bus yet each stays sequential on hardware, and
+    # DMA sequentiality doesn't require back-to-back bus cycles
+    rom_next_addr2*: uint32
+    dma_active*:     bool
+    # True while a delayed immediate DMA is scheduled: data accesses catch
+    # the scheduler up so the DMA preempts the CPU at its exact start cycle
+    # (a read one instruction after the enable must see the DMA'd data)
+    dma_pending*: bool
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,
@@ -181,6 +213,10 @@ type
     spsr_banks*:  array[6, uint32]
     halted*:      bool
     stopped*:     bool  # Stop mode: halted, and only keypad/cartridge/SIO IRQs wake
+    # Level-triggered IRQ signal (IE & IF != 0 and IME), maintained by
+    # check_interrupts; sampled at instruction boundaries so events fired
+    # mid-instruction can't redirect PC while an instruction executes
+    irq_line*:    bool
     count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
@@ -387,7 +423,7 @@ type
 # Forward declarations to handle circular include dependencies
 proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
-proc schedule_interrupt_check*(intr: Interrupts)
+proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
 proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)
@@ -409,6 +445,7 @@ proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
+proc run_pending_immediate*(dma: DMA)
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
@@ -426,6 +463,8 @@ proc check_cond*(cpu: CPU; cond: uint32): bool {.inline.}
 proc step_arm*(cpu: CPU) {.inline.}
 proc step_thumb*(cpu: CPU) {.inline.}
 proc set_reg*(cpu: CPU; reg: int; value: uint32): uint32 {.discardable, inline.}
+proc idle*(cpu: CPU; n: int) {.inline.}
+proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.}
 proc set_neg_and_zero_flags*(cpu: CPU; value: uint32) {.inline.}
 proc switch_mode*(cpu: CPU; new_mode: CpuMode)
 proc lsl*(cpu: CPU; word: uint32; bits: uint32; carry_out: ptr bool): uint32 {.inline.}
@@ -537,6 +576,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
     of etSerial:        gba.serial.serial_transfer_complete()
+    of etDMA:           gba.dma.run_pending_immediate()
     of etHandleInput, etIME, etRtcSecond: discard
 
 proc post_init*(gba: GBA) =
@@ -565,14 +605,35 @@ proc step_frame*(gba: GBA) =
   while not gba.ppu.frame:
     gba.cpu.tick()
   gba.ppu.frame = false
-  # Rebase scheduler and timer cycle references to prevent uint32 overflow on WASM
-  let base = gba.scheduler.cycles
-  gba.scheduler.rebase()
+  # Rebase scheduler and timer cycle references to prevent uint32 overflow on
+  # WASM. The low 10 bits stay so free-running timer prescaler phase (up to
+  # 1024 cycles) is preserved across the rebase.
+  let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base
+    elif gba.timer.tmcnt[i].enable and not gba.timer.tmcnt[i].cascade:
+      # Anchor predates the rebase base: advance it by whole periods (which
+      # keeps prescaler phase) and compensate the counter value. No overflow
+      # can hide in the skipped window - the overflow event would have fired
+      # and re-anchored.
+      let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].frequency])
+      let deficit = base - gba.timer.cycle_enabled[i]
+      let k = (deficit + period - 1) div period
+      gba.timer.cycle_enabled[i] = gba.timer.cycle_enabled[i] + k * period - base
+      gba.timer.tm[i] += uint16(k)
     else:
+      # Cascade/disabled: the anchor is unused while in this mode; keep it in
+      # range without touching the counter
       gba.timer.cycle_enabled[i] = 0
+    if gba.timer.tmd_write_cycle[i] >= base:
+      gba.timer.tmd_write_cycle[i] -= base
+    else:
+      gba.timer.tmd_write_cycle[i] = 0
+  if gba.bus.rom_free_since >= base:
+    gba.bus.rom_free_since -= base
+  else:
+    gba.bus.rom_free_since = 0
 
 method run_until_frame*(gba: GBA) = gba.step_frame()
 

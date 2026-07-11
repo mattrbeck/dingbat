@@ -15,11 +15,17 @@ const
 proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
   intr.reg_if = cast[InterruptReg](uint16(intr.reg_if) or (1'u16 shl bit))
 
-proc schedule_interrupt_check*(intr: Interrupts) =
-  intr.gba.scheduler.schedule(0, etInterrupts)
+# Cycles between a peripheral raising IF and the CPU recognizing the IRQ
+# (hardware synchronization latency; calibrated against the mGBA suite's
+# Timer IRQ tests). Register writes (IE/IF/IME) re-evaluate with no delay.
+const IRQ_SYNC_DELAY* = 3
+
+proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
+  intr.gba.scheduler.schedule(delay, etInterrupts)
 
 proc check_interrupts*(intr: Interrupts) =
   let pending = uint16(intr.reg_ie) and uint16(intr.reg_if)
+  intr.gba.cpu.irq_line = false
   if pending != 0:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0:
       return  # Stop mode ignores other interrupt sources
@@ -29,7 +35,7 @@ proc check_interrupts*(intr: Interrupts) =
     intr.gba.cpu.stopped = false
     intr.gba.cpu.halted = false
     if intr.ime:
-      intr.gba.cpu.irq()
+      intr.gba.cpu.irq_line = true
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
   case io_addr

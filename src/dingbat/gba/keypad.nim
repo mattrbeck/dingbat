@@ -15,7 +15,7 @@ proc check_keypad_irq(kp: Keypad) =
               else: (pressed and mask) != 0)                          # OR: any selected
   if cond and not kp.prev_irq_condition:
     kp.gba.interrupts.reg_if.keypad = true
-    kp.gba.interrupts.schedule_interrupt_check()
+    kp.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
   kp.prev_irq_condition = cond
 
 proc `[]`*(kp: Keypad; io_addr: uint32): uint8 =

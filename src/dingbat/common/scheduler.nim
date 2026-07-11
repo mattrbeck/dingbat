@@ -19,7 +19,7 @@ type
     etSaves, etInterrupts
     etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag, etPPUEndHBlank
     etTimer0, etTimer1, etTimer2, etTimer3
-    etSerial
+    etSerial, etDMA
 
   Event* = object
     cycles*: CycleCount
@@ -33,6 +33,9 @@ type
     cycles*: CycleCount
     next_event: CycleCount
     current_speed: uint8
+    # True while an event handler runs; guards against re-entrant tick()
+    # (e.g. a DMA triggered by an event touching MMIO mid-dispatch)
+    dispatching*: bool
     dispatch*: proc(kind: EventType) {.closure.}
 
 proc new_scheduler*(): Scheduler =
@@ -79,7 +82,9 @@ proc call_current*(s: Scheduler) =
       s.next_event = ev.cycles
       return
     dec s.nevents
+    s.dispatching = true
     s.dispatch(ev.kind)
+    s.dispatching = false
   s.next_event = high(CycleCount)
 
 proc tick*(s: Scheduler; cycles: int) {.inline.} =
@@ -99,14 +104,17 @@ proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event
   s.call_current()
 
-proc rebase*(s: Scheduler) =
-  ## Subtract current cycle count from all event targets and reset to zero.
-  ## Prevents overflow when using uint32 cycle counters.
-  let base = s.cycles
+proc rebase*(s: Scheduler; keep_phase_mask: CycleCount = 0): CycleCount {.discardable.} =
+  ## Subtract the current cycle count (rounded down to keep the low
+  ## keep_phase_mask bits — GBA timers derive prescaler phase from the
+  ## absolute cycle count) from all event targets. Returns the subtracted
+  ## base. Prevents overflow when using uint32 cycle counters.
+  let base = s.cycles and not keep_phase_mask
   for i in 0 ..< s.nevents:
     s.evbuf[i].cycles -= base
   s.next_event = if s.nevents > 0: s.evbuf[s.nevents - 1].cycles else: high(CycleCount)
-  s.cycles = 0
+  s.cycles -= base
+  base
 
 proc save_to*(s: Scheduler; w: var Writer) =
   ## Serialize all scheduler state. Event kinds are written by ordinal; the

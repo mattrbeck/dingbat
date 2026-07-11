@@ -55,6 +55,7 @@ proc thumb_multiple_load_store*[load: static bool](cpu: CPU; instr: uint32) =
         if bit(list, idx):
           discard cpu.set_reg(idx, cpu.gba.bus.read_word(address))
           address += 4
+      cpu.idle(1)  # I cycle after the last transfer
     else:  # stmia
       var first_transfer = false
       for idx in 0..7:
@@ -66,7 +67,9 @@ proc thumb_multiple_load_store*[load: static bool](cpu: CPU; instr: uint32) =
           first_transfer = true
   else:  # empty list edge case
     when load:
-      discard cpu.set_reg(15, cpu.gba.bus.read_word(address))
+      let value = cpu.gba.bus.read_word(address)
+      cpu.idle(1)
+      discard cpu.set_reg(15, value)
     else:
       cpu.gba.bus.write_word(address, cpu.r[15] + 2)
     discard cpu.set_reg(rb, address + 0x40'u32)
@@ -81,8 +84,12 @@ proc thumb_push_pop_registers*[pop, pclr: static bool](cpu: CPU; instr: uint32) 
         discard cpu.set_reg(idx, cpu.gba.bus.read_word(address))
         address += 4
     when pclr:
-      discard cpu.set_reg(15, cpu.gba.bus.read_word(address))
+      let value = cpu.gba.bus.read_word(address)
       address += 4
+      cpu.idle(1)  # I cycle after the last transfer, before pipeline refill
+      discard cpu.set_reg(15, value)
+    else:
+      cpu.idle(1)  # I cycle after the last transfer
   else:
     when pclr:
       address -= 4
@@ -114,7 +121,9 @@ proc thumb_sp_relative_load_store*[load: static bool](cpu: CPU; instr: uint32) =
   let rd      = int(bits_range(instr, 8, 10))
   let address = cpu.r[13] + (bits_range(instr, 0, 7) shl 2)
   when load:
-    discard cpu.set_reg(rd, cpu.gba.bus.read_word_rotate(address))
+    let value = cpu.gba.bus.read_word_rotate(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:
     cpu.gba.bus.write_word(address, cpu.r[rd])
   cpu.step_thumb()
@@ -124,7 +133,9 @@ proc thumb_load_store_halfword*[load: static bool](cpu: CPU; instr: uint32) =
   let rd      = int(bits_range(instr, 0, 2))
   let address = cpu.r[rb] + (bits_range(instr, 6, 10) shl 1)
   when load:
-    discard cpu.set_reg(rd, cpu.gba.bus.read_half_rotate(address))
+    let value = cpu.gba.bus.read_half_rotate(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:
     cpu.gba.bus.write_half(address, uint16(cpu.r[rd]))
   cpu.step_thumb()
@@ -137,11 +148,15 @@ proc thumb_load_store_immediate_offset*[bq_and_load: static uint32](cpu: CPU; in
   when bq_and_load == 0b00:  # str
     cpu.gba.bus.write_word(base_addr + (offset shl 2), cpu.r[rd])
   elif bq_and_load == 0b01:  # ldr
-    discard cpu.set_reg(rd, cpu.gba.bus.read_word_rotate(base_addr + (offset shl 2)))
+    let value = cpu.gba.bus.read_word_rotate(base_addr + (offset shl 2))
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   elif bq_and_load == 0b10:  # strb
     cpu.gba.bus[base_addr + offset] = uint8(cpu.r[rd])
   else:  # ldrb
-    discard cpu.set_reg(rd, uint32(cpu.gba.bus[base_addr + offset]))
+    let value = uint32(cpu.gba.bus[base_addr + offset])
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   cpu.step_thumb()
 
 proc thumb_load_store_sign_extended*[hs: static uint32](cpu: CPU; instr: uint32) =
@@ -152,11 +167,17 @@ proc thumb_load_store_sign_extended*[hs: static uint32](cpu: CPU; instr: uint32)
   when hs == 0b00:  # strh
     cpu.gba.bus.write_half(address, uint16(cpu.r[rd]))
   elif hs == 0b01:  # ldsb
-    discard cpu.set_reg(rd, uint32(cast[int32](cast[int8](cpu.gba.bus[address]))))
+    let value = uint32(cast[int32](cast[int8](cpu.gba.bus[address])))
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   elif hs == 0b10:  # ldrh
-    discard cpu.set_reg(rd, cpu.gba.bus.read_half_rotate(address))
+    let value = cpu.gba.bus.read_half_rotate(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:  # ldsh
-    discard cpu.set_reg(rd, cpu.gba.bus.read_half_signed(address))
+    let value = cpu.gba.bus.read_half_signed(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   cpu.step_thumb()
 
 proc thumb_load_store_register_offset*[lb_and_bq: static uint32](cpu: CPU; instr: uint32) =
@@ -169,15 +190,21 @@ proc thumb_load_store_register_offset*[lb_and_bq: static uint32](cpu: CPU; instr
   elif lb_and_bq == 0b01:  # strb
     cpu.gba.bus[address] = uint8(cpu.r[rd])
   elif lb_and_bq == 0b10:  # ldr
-    discard cpu.set_reg(rd, cpu.gba.bus.read_word_rotate(address))
+    let value = cpu.gba.bus.read_word_rotate(address)
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   else:  # ldrb
-    discard cpu.set_reg(rd, uint32(cpu.gba.bus[address]))
+    let value = uint32(cpu.gba.bus[address])
+    cpu.idle(1)
+    discard cpu.set_reg(rd, value)
   cpu.step_thumb()
 
 proc thumb_pc_relative_load*(cpu: CPU; instr: uint32) =
   let imm = bits_range(instr, 0, 7)
   let rd  = int(bits_range(instr, 8, 10))
-  discard cpu.set_reg(rd, cpu.gba.bus.read_word((cpu.r[15] and not 2'u32) + (imm shl 2)))
+  let value = cpu.gba.bus.read_word((cpu.r[15] and not 2'u32) + (imm shl 2))
+  cpu.idle(1)
+  discard cpu.set_reg(rd, value)
   cpu.step_thumb()
 
 proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu: CPU; instr: uint32) =
@@ -207,17 +234,21 @@ proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   when op == 0b0000: res = cpu.set_reg(rd, cpu.r[rd] and cpu.r[rs])
   elif op == 0b0001: res = cpu.set_reg(rd, cpu.r[rd] xor cpu.r[rs])
   elif op == 0b0010:
+    cpu.idle(1)  # register-specified shift
     res = cpu.set_reg(rd, cpu.lsl(cpu.r[rd], cpu.r[rs], addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0011:
+    cpu.idle(1)  # register-specified shift
     res = cpu.set_reg(rd, cpu.lsr(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0100:
+    cpu.idle(1)  # register-specified shift
     res = cpu.set_reg(rd, cpu.asr(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0101: res = cpu.set_reg(rd, cpu.adc(cpu.r[rd], cpu.r[rs], set_conditions = true))
   elif op == 0b0110: res = cpu.set_reg(rd, cpu.sbc(cpu.r[rd], cpu.r[rs], set_conditions = true))
   elif op == 0b0111:
+    cpu.idle(1)  # register-specified shift
     res = cpu.set_reg(rd, cpu.ror(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b1000: res = cpu.r[rd] and cpu.r[rs]
@@ -225,7 +256,9 @@ proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   elif op == 0b1010: res = cpu.sub(cpu.r[rd], cpu.r[rs], set_conditions = true)
   elif op == 0b1011: res = cpu.add(cpu.r[rd], cpu.r[rs], set_conditions = true)
   elif op == 0b1100: res = cpu.set_reg(rd, cpu.r[rd] or cpu.r[rs])
-  elif op == 0b1101: res = cpu.set_reg(rd, cpu.r[rs] * cpu.r[rd])
+  elif op == 0b1101:
+    cpu.idle(mul_i_cycles(cpu.r[rd], true))  # thumb mul: Rd is the multiplier
+    res = cpu.set_reg(rd, cpu.r[rs] * cpu.r[rd])
   elif op == 0b1110: res = cpu.set_reg(rd, cpu.r[rd] and not cpu.r[rs])
   else:              res = cpu.set_reg(rd, not cpu.r[rs])
   cpu.set_neg_and_zero_flags(res)

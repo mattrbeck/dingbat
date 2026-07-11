@@ -545,6 +545,11 @@ proc gba_apply_state(gba: GBA; payload: string) =
   load_apu_state(gba.apu, r)
   load_storage_state(gba.storage, r)
   r.expect_tag(GBA_SEC_END)
+  # irq_line is derived from IE/IF/IME and not serialized; recompute it so a
+  # pending-but-untaken IRQ at the save point isn't lost. Same for the
+  # WAITCNT-derived bus timing tables.
+  gba.interrupts.check_interrupts()
+  gba.bus.update_waitcnt(gba.mmio.waitcnt)
 
 proc gba_rom_checksum(gba: GBA): uint32 =
   # The ROM buffer is padded to the full 32 MB mirror with a deterministic

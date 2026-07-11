@@ -1,6 +1,7 @@
 # DMA implementation (included by gba.nim)
 
 const
+  DMA_START_DELAY = 3
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   DMA_DST_MASK = [0x07FFFFFF'u32, 0x07FFFFFF'u32, 0x07FFFFFF'u32, 0x0FFFFFFF'u32]
   DMA_LEN_MASK = [0x3FFF'u16,     0x3FFF'u16,     0x3FFF'u16,     0xFFFF'u16    ]
@@ -59,12 +60,25 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     let enabled = dma.dmacnt_h[channel].enable
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
-      dma.src[channel] = dma.dmasad[channel]
-      dma.dst[channel] = dma.dmadad[channel]
+      # Hardware force-aligns DMA addresses to the transfer size
+      let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
+      dma.src[channel] = dma.dmasad[channel] and align
+      dma.dst[channel] = dma.dmadad[channel] and align
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
-        dma.trigger(channel)
+        # Hardware starts an immediate DMA ~3 cycles after the enable write;
+        # the CPU keeps executing until then (mGBA suite "Trivial DMA").
+        # The event handler re-checks enable, so no pending state is needed:
+        # an immediate DMA always clears its enable bit when it runs.
+        dma.gba.bus.dma_pending = true
+        dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
+
+proc run_pending_immediate*(dma: DMA) =
+  dma.gba.bus.dma_pending = false
+  for channel in 0..3:
+    if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0:
+      dma.trigger(channel)
 
 proc trigger_hdma*(dma: DMA) =
   for channel in 0..3:
@@ -104,8 +118,21 @@ proc trigger*(dma: DMA; channel: int) =
     else:
       echo "Prohibited special dma"
 
-  let delta_source = dma_addr_delta(source_control, word_size)
+  # Gamepak ROM sources always increment regardless of the source control
+  # bits (SRAM is not affected)
+  let src_page = bits_range(dma.src[channel], 24, 27)
+  let src_in_rom = src_page >= 0x8 and src_page <= 0xD
+  let delta_source = if src_in_rom: word_size
+                     else: dma_addr_delta(source_control, word_size)
   let delta_dest   = dma_addr_delta(dest_ctrl,  word_size)
+
+  # DMA internal cycles (calibrated against the mGBA suite DMA timing tests;
+  # ROM-to-ROM needs no extra I cycles once its write is sequential-timed)
+  dma.gba.bus.cycles += 2
+
+  dma.gba.bus.dma_active = true
+  dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
+  dma.gba.bus.rom_next_addr2 = 1
 
   for _ in 0 ..< len:
     # TODO: This accessibility check is a deny-list and may miss unmapped gaps
@@ -119,11 +146,14 @@ proc trigger*(dma: DMA; channel: int) =
       dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
     else:
       if src_accessible:
-        dma.latch[channel] = (dma.latch[channel] and 0xFFFF0000'u32) or uint32(dma.gba.bus.read_half(dma.src[channel]))
-        dma.latch[channel] = dma.latch[channel] or (dma.latch[channel] shl 16)
+        let half = uint32(dma.gba.bus.read_half(dma.src[channel]))
+        dma.latch[channel] = half or (half shl 16)
       dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
+
+  dma.gba.bus.dma_active = false
+  dma.gba.bus.rom_next_addr = 1  # CPU refetches nonsequentially after a DMA
 
   if dest_ctrl == 3:  # IncrementReload
     dma.dst[channel] = dma.dmadad[channel]
@@ -133,4 +163,4 @@ proc trigger*(dma: DMA; channel: int) =
 
   if dma.dmacnt_h[channel].irq_enable:
     dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)
-    dma.gba.interrupts.schedule_interrupt_check()
+    dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)

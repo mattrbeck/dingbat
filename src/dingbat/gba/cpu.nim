@@ -35,6 +35,9 @@ proc skip_bios*(cpu: CPU) =
   cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
   cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
   cpu.r[15] = 0x08000000'u32
+  # BIOS open-bus latch after boot (GBATEK: 0xE129F000, the msr at the end
+  # of the boot sequence)
+  cpu.gba.bus.bios_latch = 0xE129F000'u32
   cpu.clear_pipeline()
 
 proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
@@ -68,6 +71,9 @@ proc irq*(cpu: CPU) =
     cpu.cpsr.irq_disable = true
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
+    # Exception-entry overhead beyond the pipeline refill (calibrated against
+    # the mGBA suite Timer IRQ tests)
+    cpu.gba.bus.cycles += 2
 
 proc und*(cpu: CPU) =
   let lr = cpu.r[15] - 4'u32
@@ -107,11 +113,15 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
 
 proc clear_pipeline*(cpu: CPU) =
   cpu.pipeline.clear()
+  # Pipeline refill: two sequential fetches at the branch destination
+  # (1 cycle each in IWRAM/BIOS, waitstate-dependent in EWRAM/ROM)
+  let page = int(bits_range(cpu.r[15], 24, 27))
   if cpu.cpsr.thumb:
     cpu.r[15] += 4
+    cpu.gba.bus.cycles += 2 * int(cpu.gba.bus.wait16_s[page])
   else:
     cpu.r[15] += 8
-  cpu.gba.bus.cycles += 2
+    cpu.gba.bus.cycles += 2 * int(cpu.gba.bus.wait32_s[page])
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   if cpu.pipeline.size == 0:
@@ -131,6 +141,19 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       v
   else:
     cpu.pipeline.shift()
+
+proc idle*(cpu: CPU; n: int) {.inline.} =
+  ## Internal (I) cycles: CPU busy, no bus access
+  cpu.gba.bus.cycles += n
+
+proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.} =
+  ## Booth's algorithm early termination: 1-4 internal cycles depending on
+  ## the magnitude of the multiplier. Signed multiplies also terminate early
+  ## on all-ones (negative) prefixes.
+  if rs < 0x100'u32 or (signed_early_term and rs >= 0xFFFFFF00'u32): 1
+  elif rs < 0x10000'u32 or (signed_early_term and rs >= 0xFFFF0000'u32): 2
+  elif rs < 0x1000000'u32 or (signed_early_term and rs >= 0xFF000000'u32): 3
+  else: 4
 
 proc set_reg*(cpu: CPU; reg: int; value: uint32): uint32 {.discardable, inline.} =
   cpu.r[reg] = value
@@ -260,6 +283,10 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
   res
 
 proc tick*(cpu: CPU) =
+  # Take a pending IRQ before the IntrWait re-halt check: the handler must
+  # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
+  if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable:
+    cpu.irq()
   if cpu.intr_wait_active and not cpu.halted:
     # Execution is back at the instruction after an IntrWait SWI, meaning the
     # user IRQ handler (if any) has returned. Re-halt unless satisfied.
@@ -272,13 +299,16 @@ proc tick*(cpu: CPU) =
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
-    let cycles = max(1, cpu.gba.bus.cycles)
+    var remaining = cpu.gba.bus.cycles
+    let total = remaining + cpu.gba.bus.synced
+    if total == 0: remaining = 1  # forward-progress guarantee
     cpu.gba.bus.cycles = 0
-    cpu.count_cycles += cycles
+    cpu.gba.bus.synced = 0
+    cpu.count_cycles += max(1, total)
     if cpu.entered_waitloop:
       cpu.gba.scheduler.fast_forward()
       cpu.entered_waitloop = false
     else:
-      cpu.gba.scheduler.tick(cycles)
+      cpu.gba.scheduler.tick(remaining)
   else:
     cpu.gba.scheduler.fast_forward()
