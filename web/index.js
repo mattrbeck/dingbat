@@ -76,6 +76,22 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") maybeCheckForUpdate();
 });
 
+// Full reset: drop every cache AND unregister the workers, then reload.
+// Deleting caches alone is worse than useless — the old worker stays in
+// control with an empty cache it will never repopulate (install only runs
+// once), so the next load mixes browser-HTTP-cached assets instead.
+const fullResetReload = async () => {
+  if (typeof caches !== "undefined") {
+    let keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+  if (navigator.serviceWorker) {
+    let regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  }
+  location.reload();
+};
+
 const applyUpdate = async () => {
   closeUpdateModal();
   // Use the same service worker update flow
@@ -100,12 +116,8 @@ const applyUpdate = async () => {
       }
     } catch {}
   }
-  // Fallback: clear caches and reload
-  if (typeof caches !== "undefined") {
-    let keys = await caches.keys();
-    await Promise.all(keys.map((key) => caches.delete(key)));
-  }
-  location.reload();
+  // No new worker found (e.g. deploy propagation lag): full clean slate
+  await fullResetReload();
 };
 
 const closeUpdateModal = () => {
@@ -134,17 +146,7 @@ document.getElementById("force-update").addEventListener("click", async () => {
   document.getElementById("menu-dropdown").hidden = true;
   if (!confirm("This will clear all cached assets and reload. Continue?")) return;
   try {
-    // Delete all service worker caches (Cache API may not be available on iOS standalone)
-    if (typeof caches !== "undefined") {
-      let keys = await caches.keys();
-      await Promise.all(keys.map((key) => caches.delete(key)));
-    }
-    // Unregister all service workers (handles case where swRegistration is null)
-    if (navigator.serviceWorker) {
-      let regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-    location.reload();
+    await fullResetReload();
   } catch (e) {
     alert("Force update failed: " + e.message);
   }
@@ -152,24 +154,84 @@ document.getElementById("force-update").addEventListener("click", async () => {
 
 const showLogButton = document.getElementById("show-log");
 const logDiv = document.getElementById("log");
+const logEntries = document.getElementById("log-entries");
 logDiv.hidden = true;
-showLogButton.addEventListener("click", () => {
-  menuDropdown.hidden = true;
-  logDiv.hidden = !logDiv.hidden;
-  logDiv.scroll({ top: logDiv.scrollHeight });
-});
-const log = (message) => {
+
+const LOG_MAX_ENTRIES = 500;
+const logTime = () => new Date().toTimeString().slice(0, 8);
+
+const log = (message, level = "info") => {
   let shouldScroll =
-    logDiv.scrollTop === logDiv.scrollHeight - logDiv.offsetHeight;
-  logDiv.innerHTML += `<p>${message}</p>`;
+    logDiv.scrollTop >= logDiv.scrollHeight - logDiv.offsetHeight - 4;
+  let p = document.createElement("p");
+  p.className = "log-" + level;
+  p.textContent = `[${logTime()}] ${message}`;
+  logEntries.appendChild(p);
+  while (logEntries.childElementCount > LOG_MAX_ENTRIES)
+    logEntries.firstElementChild.remove();
   if (shouldScroll) logDiv.scroll({ top: logDiv.scrollHeight });
 };
 
+// Mirror the console into the log view: the emulator core's own messages
+// (save-state rejections, backup-type detection, ...) arrive via
+// emscripten's default print -> console.log, which is invisible on phones
+for (const level of ["log", "warn", "error"]) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    try {
+      const text = args
+        .map((a) => (a instanceof Error ? a.stack || a.message
+                     : typeof a === "object" ? JSON.stringify(a) : String(a)))
+        .join(" ");
+      log(text, level === "log" ? "info" : level);
+    } catch {}
+  };
+}
+
 window.onerror = (msg, src, line, col, err) => {
-  log(`ERROR: ${msg} (${src}:${line}:${col})`);
+  log(`ERROR: ${msg} (${src}:${line}:${col})`, "error");
 };
 window.addEventListener("unhandledrejection", (e) => {
-  log("REJECT: " + e.reason);
+  log("REJECT: " + ((e.reason && e.reason.stack) || e.reason), "error");
+});
+
+// One line of environment context, refreshed each time the log opens —
+// exactly the details needed to make sense of remote bug reports
+const logContext = async () => {
+  let version = "unknown";
+  try {
+    version = (await (await fetch("version.txt")).text()).trim().slice(0, 12);
+  } catch {}
+  const sw = navigator.serviceWorker && navigator.serviceWorker.controller
+    ? "sw:controlled" : "sw:none";
+  return `dingbat ${version} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${navigator.userAgent}`;
+};
+
+showLogButton.addEventListener("click", async () => {
+  menuDropdown.hidden = true;
+  logDiv.hidden = !logDiv.hidden;
+  if (!logDiv.hidden) {
+    document.getElementById("log-context").textContent = await logContext();
+    logDiv.scroll({ top: logDiv.scrollHeight });
+  }
+});
+
+document.getElementById("log-clear").addEventListener("click", () => {
+  logEntries.textContent = "";
+});
+
+document.getElementById("log-copy").addEventListener("click", async () => {
+  const text = [
+    document.getElementById("log-context").textContent,
+    ...Array.from(logEntries.children, (p) => p.textContent),
+  ].join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Log copied");
+  } catch {
+    showToast("Couldn't access the clipboard");
+  }
 });
 
 // --- Modal focus management (open: focus first control + trap Tab; close:

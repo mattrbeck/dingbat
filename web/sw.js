@@ -15,8 +15,14 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  // cache: "no-cache" revalidates every asset with the server. Without it,
+  // addAll fills the new version's cache from the browser HTTP cache (Pages
+  // serves max-age=600), so an update within 10 minutes of a deploy could
+  // mix old and new assets — the classic black-screen-after-update.
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(ASSETS.map((u) => new Request(u, { cache: "no-cache" })))
+    )
   );
   // Stay in "waiting" until the page confirms via the skipWaiting message,
   // so an update never force-reloads a tab mid-game.
@@ -44,7 +50,13 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   // Explicit network probes (the version.txt update check) must bypass the cache
   if (event.request.cache === "no-store") return;
+  // Match only THIS version's cache: caches.match() searches every cache,
+  // so while a new version sits installed-but-waiting the old worker could
+  // serve the new version's assets (or vice versa) — version skew.
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.match(event.request))
+      .then((cached) => cached || fetch(event.request))
   );
 });
