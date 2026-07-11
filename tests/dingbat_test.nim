@@ -9,7 +9,8 @@ import dingbat/common/rewind
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
-    tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest, tmNetLink
+    tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
+    tmNorm32LinkTest, tmAttachTest, tmNetLink
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -189,25 +190,55 @@ proc check_normlink_unit(g: GBA; unit: int; prefix: string): int =
     who & " serial IRQ count: got " & $irqs & ", expected " & $NORMLINK_ROUNDS
   failures
 
+# Normal 32-bit variant: unit 0 master sends 0xA5A50000|round, unit 1 slave
+# answers 0x5A5A0000|round; the full-duplex swap of the 32-bit SIODATA32
+# register lands each unit's word in the other's, logged at 0x000+4*round.
+proc check_norm32link_unit(g: GBA; unit: int; prefix: string): int =
+  var failures = 0
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo prefix, " FAIL: ", msg
+      inc failures
+  proc ew32(g: GBA; off: int): uint32 =
+    uint32(g.ew16(off)) or (uint32(g.ew16(off + 2)) shl 16)
+  let who = (if unit == 0: "master" else: "slave")
+  let ictl = g.ew16(0x804) and 0x0001'u16
+  let expected_ictl = (if unit == 0: 0x0001'u16 else: 0x0000'u16)
+  check ictl == expected_ictl,
+    who & " internal-clock bit: got " & $ictl & ", expected " & $expected_ictl
+  for k in 0 ..< NORMLINK_ROUNDS:
+    let got = g.ew32(k * 4)
+    let expected = (if unit == 0: 0x5A5A0000'u32 else: 0xA5A50000'u32) or uint32(k)
+    check got == expected,
+      who & " round " & $k & " received word: got 0x" & toHex(got, 8) &
+      ", expected 0x" & toHex(expected, 8)
+  let irqs = g.ew16(0x808)
+  check irqs == uint16(NORMLINK_ROUNDS),
+    who & " serial IRQ count: got " & $irqs & ", expected " & $NORMLINK_ROUNDS
+  failures
+
 type LinkContract = enum
-  lcMulti   ## linktest.gba: multi-player rounds
-  lcNormal  ## normlinktest.gba: normal 8-bit full-duplex rounds
+  lcMulti    ## linktest.gba: multi-player rounds
+  lcNormal   ## normlinktest.gba: normal 8-bit full-duplex rounds
+  lcNormal32 ## norm32linktest.gba: normal 32-bit full-duplex rounds
 
 proc check_link_unit(g: GBA; unit: int; prefix: string;
                      contract: LinkContract): int =
   case contract
   of lcMulti: check_linktest_unit(g, unit, prefix)
   of lcNormal: check_normlink_unit(g, unit, prefix)
+  of lcNormal32: check_norm32link_unit(g, unit, prefix)
 
 proc link_rounds(contract: LinkContract): int =
   case contract
   of lcMulti: LINKTEST_ROUNDS
-  of lcNormal: NORMLINK_ROUNDS
+  of lcNormal, lcNormal32: NORMLINK_ROUNDS
 
 proc link_desc(contract: LinkContract): string =
   case contract
   of lcMulti: "multi-mode rounds, both directions, IDs and IRQs verified"
   of lcNormal: "normal 8-bit full-duplex rounds, master/slave swap and IRQs verified"
+  of lcNormal32: "normal 32-bit full-duplex rounds, master/slave swap and IRQs verified"
 
 # Two-core lockstep link acceptance (tests/roms/linktest.s): the multi-mode
 # parent sends 0xA000|round, the child answers 0xB000|round, and each unit
@@ -252,6 +283,56 @@ proc link_test(rom1, rom2, bios_path: string; timeout: int;
     0
   else:
     echo "LINKTEST: FAIL (", failures, " failed checks)"
+    1
+
+# Mid-game attach acceptance (tests/roms/attachtest.s): boot two cores with
+# NO link, let them spin in the role-negotiate loop, then plug the lockstep
+# link in mid-run — the deterministic analogue of the browser's "link cable
+# detected -> attach" flow (netlink_attach in the wasm bridge). Because the
+# ROM re-reads SI every pass, it picks up the freshly attached cable and
+# completes the multi-mode rounds; the linktest ROM cannot do this (it
+# latches its role at boot). Asserts with the multi-mode contract.
+proc attach_test(rom, bios_path: string; timeout, attach_after: int): int =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc make_gba(): GBA =
+    result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+    result.test_output = new_test_output()
+    result.post_init()
+  let cores = @[make_gba(), make_gba()]
+  # Phase 1: run cable-less (each core keeps its default no-cable driver) —
+  # the ROM sits in its negotiate loop, both units reading SI=1 and waiting.
+  for _ in 0 ..< attach_after:
+    for g in cores:
+      g.step_frame()
+  # Phase 2: plug the cable in mid-run. new_link rebinds each core's SIO
+  # driver to the lockstep coordinator without touching CPU/memory state.
+  let lnk = new_link(cores)
+  # Phase 3: run linked until both finish.
+  var frames = 0
+  while frames < timeout and
+        not (cores[0].linktest_finished() and cores[1].linktest_finished()):
+    lnk.step_frame()
+    inc frames
+
+  var failures = 0
+  for i, g in cores:
+    let who = (if i == 0: "unit 0" else: "unit 1")
+    if not g.linktest_finished():
+      echo "ATTACHTEST FAIL: ", who, " never finished (done flag missing ",
+        attach_after, " cable-less + ", frames, " linked frames)"
+      inc failures
+  if failures == 0:
+    for i, g in cores:
+      failures += check_link_unit(g, i, "ATTACHTEST", lcMulti)
+  echo "ATTACHTEST: attached after ", attach_after, " cable-less frames, ",
+       "finished in ", frames, " linked frames"
+  if failures == 0:
+    echo "ATTACHTEST: PASS (mid-run attach, ", LINKTEST_ROUNDS,
+         " multi-mode rounds after the cable was plugged in)"
+    0
+  else:
+    echo "ATTACHTEST: FAIL (", failures, " failed checks)"
     1
 
 # Networked link acceptance (phase 3a of docs/multiplayer.md): two dingbat
@@ -411,6 +492,7 @@ proc main() =
   var connect_to = ""
   var netlink_delay = 0
   var link_contract = lcMulti
+  var attach_after = 10
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -441,6 +523,8 @@ proc main() =
         of "rewindtest": mode = tmRewindTest
         of "linktest": mode = tmLinkTest
         of "normlinktest": mode = tmNormLinkTest
+        of "norm32linktest": mode = tmNorm32LinkTest
+        of "attachtest": mode = tmAttachTest
         of "netlink": mode = tmNetLink
         else:
           echo "Unknown mode: ", v
@@ -490,9 +574,14 @@ proc main() =
         case v.toLowerAscii()
         of "multi": link_contract = lcMulti
         of "normal": link_contract = lcNormal
+        of "normal32": link_contract = lcNormal32
         else:
-          echo "Unknown link contract: ", v, " (use multi or normal)"
+          echo "Unknown link contract: ", v, " (use multi, normal, or normal32)"
           quit(1)
+      of "attach-after":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        attach_after = parseInt(v)
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
@@ -502,13 +591,18 @@ proc main() =
     quit(state_roundtrip(rom_path, bios_path, warmup_frames))
   if mode == tmRewindTest:
     quit(rewind_test(rom_path, bios_path))
-  if mode == tmLinkTest or mode == tmNormLinkTest:
+  if mode in {tmLinkTest, tmNormLinkTest, tmNorm32LinkTest}:
     # Second positional arg is core 2's ROM; defaults to running the same
-    # ROM on both cores. normlinktest runs the same coordinator with the
-    # normal-mode ROM's EWRAM contract.
+    # ROM on both cores. The normal-mode variants run the same coordinator
+    # with their own EWRAM contract.
     let rom2 = if rom_path2.len > 0: rom_path2 else: rom_path
-    let contract = if mode == tmNormLinkTest: lcNormal else: lcMulti
+    let contract = case mode
+      of tmNormLinkTest: lcNormal
+      of tmNorm32LinkTest: lcNormal32
+      else: lcMulti
     quit(link_test(rom_path, rom2, bios_path, timeout_frames, contract))
+  if mode == tmAttachTest:
+    quit(attach_test(rom_path, bios_path, timeout_frames, attach_after))
   if mode == tmNetLink:
     if (listen_port > 0) == (connect_to.len > 0):
       echo "netlink mode needs exactly one of --listen PORT or --connect HOST:PORT"
@@ -599,7 +693,8 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
-  of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest, tmNetLink:
+  of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
+     tmNorm32LinkTest, tmAttachTest, tmNetLink:
     discard  # handled (and exited) above
 
   if output.len > 0:

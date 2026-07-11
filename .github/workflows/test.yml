@@ -40,6 +40,9 @@ jobs:
           set -e
           ./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
           ./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
+          ./dingbat_test tests/roms/norm32linktest.gba --mode=norm32linktest --timeout=600
+          # Mid-game attach: boot cable-less, plug the link in mid-run, negotiate.
+          ./dingbat_test tests/roms/attachtest.gba --mode=attachtest --timeout=1200
       - name: Link acceptance (networked, localhost)
         # Exercises the transport-independent protocol core (netcore.nim, the
         # same implementation the browser bridge uses) over a real socket.
@@ -62,6 +65,7 @@ jobs:
           }
           run_net tests/roms/linktest.gba multi 7788
           run_net tests/roms/normlinktest.gba normal 7789
+          run_net tests/roms/norm32linktest.gba normal32 7790
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

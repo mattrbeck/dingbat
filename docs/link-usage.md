@@ -113,30 +113,36 @@ The test harness exposes the network link headlessly:
 
 ### Acceptance tests (run in CI — see `.github/workflows/test.yml`)
 
-Two acceptance ROMs, each run both in-process (lockstep, `link.nim`) and
-over TCP (`netlink.nim` + the transport-independent `netcore.nim` the
-browser bridge also uses):
+Four acceptance ROMs; the three transfer ROMs run both in-process
+(lockstep, `link.nim`) and over TCP (`netlink.nim` + the
+transport-independent `netcore.nim` the browser bridge also uses):
 
 | ROM | Covers | Contract |
 |---|---|---|
-| `tests/roms/linktest.gba` (`linktest.s`) | Multi-player mode: parent/child SI-SD-ID roles, 4-slot SIOMULTI latches, serial IRQs | 16 rounds, parent sends `0xA000\|r`, child `0xB000\|r` |
-| `tests/roms/normlinktest.gba` (`normlinktest.s`) | Normal 8-bit mode: internal/external clock master/slave, full-duplex register swap, serial IRQs | 16 rounds, master sends `0xC0\|r`, slave `0xD0\|r` |
+| `linktest.gba` (`linktest.s`) | Multi-player mode: parent/child SI-SD-ID roles, 4-slot SIOMULTI latches, serial IRQs | 16 rounds, parent `0xA000\|r`, child `0xB000\|r` |
+| `normlinktest.gba` (`normlinktest.s`) | Normal 8-bit mode: internal/external clock master/slave, full-duplex register swap, serial IRQs | 16 rounds, master `0xC0\|r`, slave `0xD0\|r` |
+| `norm32linktest.gba` (`norm32linktest.s`) | Normal 32-bit mode: the SIODATA32 full-duplex swap (distinct path from 8-bit) | 16 rounds, master `0xA5A50000\|r`, slave `0x5A5A0000\|r` |
+| `attachtest.gba` (`attachtest.s`) | Mid-game attach: role re-negotiation when the cable is plugged in AFTER boot (the browser's `netlink_attach` flow, which boot-latched linktest can't exercise) | in-process only; boots cable-less, attaches mid-run, then linktest's multi contract |
 
 ```
 # in-process lockstep (deterministic, no sockets):
-./dingbat_test tests/roms/linktest.gba     --mode=linktest     --timeout=600
-./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
+./dingbat_test tests/roms/linktest.gba       --mode=linktest       --timeout=600
+./dingbat_test tests/roms/normlinktest.gba   --mode=normlinktest   --timeout=600
+./dingbat_test tests/roms/norm32linktest.gba --mode=norm32linktest --timeout=600
+./dingbat_test tests/roms/attachtest.gba     --mode=attachtest     --timeout=1200
 
 # networked, two processes on localhost (--link-contract picks the EWRAM
-# contract; default is multi):
-./dingbat_test tests/roms/normlinktest.gba --mode=netlink --link-contract=normal --listen 7789 --timeout 1200 &
-./dingbat_test tests/roms/normlinktest.gba --mode=netlink --link-contract=normal --connect 127.0.0.1:7789 --timeout 1200
+# contract: multi | normal | normal32; default multi):
+./dingbat_test tests/roms/norm32linktest.gba --mode=netlink --link-contract=normal32 --listen 7790 --timeout 1200 &
+./dingbat_test tests/roms/norm32linktest.gba --mode=netlink --link-contract=normal32 --connect 127.0.0.1:7790 --timeout 1200
 ```
 
-Each prints `... PASS (16 ... rounds ...)` on success. Build the ROMs from
-their `.s` sources with devkitARM (`arm-none-eabi-as -mcpu=arm7tdmi` +
-`arm-none-eabi-objcopy -O binary`); the committed `.gba` binaries are what
-CI runs, so the toolchain is only needed to regenerate them.
+Each prints `... PASS (16 ... rounds ...)` on success. `--mode=attachtest`
+takes `--attach-after N` (default 10) to vary how many cable-less frames run
+before the link is plugged in. Build the ROMs from their `.s` sources with
+devkitARM (`arm-none-eabi-as -mcpu=arm7tdmi` + `arm-none-eabi-objcopy -O
+binary`); the committed `.gba` binaries are what CI runs, so the toolchain is
+only needed to regenerate them.
 
 Both ROMs are headless (no window/input) — their PASS/FAIL is tied to the
 EWRAM contract above. Playing a real game over TCP needs a windowed
