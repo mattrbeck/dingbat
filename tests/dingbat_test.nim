@@ -181,6 +181,7 @@ proc main() =
   var warmup_frames = 600
   var screenshot_path = ""
   var color_mode = false
+  var sio_driver = "null"
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -227,6 +228,15 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         bios_path = v
+      of "sio":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        case v.toLowerAscii()
+        of "null": sio_driver = "null"
+        of "loopback": sio_driver = "loopback"
+        else:
+          echo "Unknown sio driver: ", v
+          quit(1)
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
@@ -247,6 +257,8 @@ proc main() =
     let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
+    if sio_driver == "loopback":
+      emu.set_sio_driver(LoopbackSioDriver())
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
       try:

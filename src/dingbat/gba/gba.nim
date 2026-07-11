@@ -89,8 +89,22 @@ type
     tmd_prev*:        array[4, uint16]
     tmd_write_cycle*: array[4, CycleCount]
 
+  # Link-cable driver interface. The base methods (in serial.nim) implement
+  # the exact no-cable behavior, so the base type doubles as the null driver.
+  # Drivers are frontend configuration, not emulated state: they are never
+  # serialized, and after a save-state load the frontend's configured driver
+  # simply remains bound.
+  SioDriver* = ref object of RootObj
+
   Serial* = ref object
     gba*:        GBA
+    driver*:     SioDriver # bound link-cable driver (never nil, not serialized)
+    # Multi-mode receive latches (SIOMULTI0-3). Filled only by drivers on
+    # transfer completion; CPU writes never land here, so with the null
+    # driver they stay 0 (matching no-cable hardware reads). Not serialized:
+    # data received mid-link is session state that the next transfer after a
+    # load refreshes.
+    multi_recv*: array[4, uint16]
     siocnt*:     uint16    # 0x4000128 - SIO Control
     rcnt*:       uint16    # 0x4000134 - Mode Select / General Purpose
     siodata8*:   uint16    # 0x400012A - 8-bit data (shared with SIOMLT_SEND)

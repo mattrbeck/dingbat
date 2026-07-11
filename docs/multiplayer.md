@@ -67,6 +67,53 @@ Cheap first client: a **loopback driver** (SO→SI, master-only) — this is
 what the AGS aging cartridge's COM test expects from the factory loopback
 plug, so it gives us an immediate hardware-verified test case.
 
+#### COM test findings (2026-07, from AGB_CHECKER TCHK10 disassembly)
+
+The loopback-plug theory above turned out to be wrong. What the checker
+actually does (all addresses TCHK10, `AGB/AGS TEST PROGRAM Version 7.0`;
+TCHK30 v9.0 behaves identically):
+
+- **The aging program never runs the COM test.** The aging-mode entry point
+  (0x8000478) unconditionally disables the interactive KEY INPUT test
+  (0x80004BC: clear enable word of section 5 test 0) and the entire COM
+  section (0x80004C4: `movs r0, #4; bl 0x8000C04` clears every enable word
+  in section 4) before the first pass. There is no cable probe — the "-"
+  next to COM on the aging screen is unconditional, on real hardware too.
+  The per-test state lives in IWRAM (COM: 5 words at 0x3000234 =
+  {enabled/attempts, passes, errors, handler=0x800AE31, name=0x801864C});
+  the status renderer (0x8000E14) prints "-" when word 0 is 0.
+- **The COM test itself ("MULTI PLAY SIO", handler 0x800AE30) is a
+  two-unit multiboot test, not a loopback test.** It first shows
+  "PREPARE CABLE(AGB-005) AND ANOTHER AGB … TURN ON ANOTHER AGB.
+  PUSH START TO CONTINUE" (strings at 0x807A900..) and waits for START.
+  It then DMAs a 1372-byte multiboot image from ROM 0x807AA6C (a valid
+  cartridge header: ARM branch + Nintendo logo) into EWRAM and drives the
+  SDK multi-play/multiboot library (init 0x8011534: RCNT=0, SIOCNT=0x2003 —
+  multi mode, 115200 baud). The send path (0x8011CF4) requires
+  `(SIOCNT & 0xFC) == 8` — SD=1, SI=0, ID=0, no error, i.e. "I am the
+  parent of a ready bus" — then broadcasts 0x6200 once per frame, up to a
+  120-frame timeout, expecting a BIOS multiboot slave to answer (0x720x in
+  SIOMULTI1-3).
+- **Loopback therefore cannot pass it.** The loopback driver's multi-mode
+  status (parent, SD=1, ID=0) satisfies the library's bus-ready check and
+  the transfers run and complete, but the parent only ever sees its own
+  0x6200 echoed in SIOMULTI0 and 0xFFFF (absent) in slots 1-3, so the
+  handshake times out. Verified empirically by force-enabling the test in
+  the emulator (poke [0x3000234]=1, auto-press START): with the loopback
+  driver it runs the full flow — 120 multi transfers of 0x6200 — and shows
+  COM: X FAIL.
+- **What a PASS needs**: a second unit speaking the BIOS multiboot slave
+  protocol — either a second in-process GBA core sitting in the BIOS's
+  multiboot wait (phase 2 below), or a small HLE "multiboot slave" SIO
+  driver that answers 0x720x/0x610x. Even then the stock aging screen
+  stays "-" unless the enable word is patched, because of the first bullet.
+
+The loopback driver keeps its physically-sound semantics (normal mode:
+SO→SI, a unit receives its own bits, SI reads back SO; multi mode: parent
+of a single-unit bus, own word in SIOMULTI0, 0xFFFF elsewhere) and remains
+the cheap deterministic driver-interface test; the AGS COM PASS is a
+phase-2 target.
+
 ### 2. In-process local multiplayer (2–4 cores, one process)
 
 The mGBA model, adapted: N `GBA` instances, one designated clock master.
