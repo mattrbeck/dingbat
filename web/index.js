@@ -1142,6 +1142,7 @@ const loadRom = async (romName, originalName) => {
   currentRomName = romName;
   currentOriginalName = originalName || romName;
   paused = false;
+  document.body.classList.remove("paused");
   fastForward = false;
   speed2x = false;  // a fresh core starts with turbo off
   rewindHeld = false;
@@ -1338,6 +1339,7 @@ pauseButton.addEventListener("click", () => {
   pauseButton.classList.toggle("paused", paused);
   pauseButton.classList.toggle("active", paused);
   pauseButton.title = paused ? "Resume" : "Pause";
+  document.body.classList.toggle("paused", paused);
 });
 
 resetButton.addEventListener("click", () => {
@@ -1500,6 +1502,7 @@ const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
   paused = true;
+  document.body.classList.add("paused");
   document.body.classList.remove("running");
   refreshHomeRecent();
 };
@@ -1509,6 +1512,7 @@ const resumeGame = () => {
   paused = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
+  document.body.classList.remove("paused");
   document.body.classList.add("running");
 };
 

@@ -341,6 +341,12 @@ body.running.sleeping #status .led {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
+/* Paused wins over running/sleeping: back to the dim idle dot */
+body.running.paused #status .led {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+
 #fps:empty {
   display: none;
 }
