@@ -224,6 +224,11 @@ type
     # check_interrupts; sampled at instruction boundaries so events fired
     # mid-instruction can't redirect PC while an instruction executes
     irq_line*:    bool
+    # Set when an interrupt wakes the CPU out of halt; the next IRQ taken
+    # skips the exception-entry overhead (hardware vectors 2 cycles faster
+    # out of halt than out of running execution). Consumed/cleared at the
+    # first instruction boundary after the wake.
+    halt_wake*:   bool
     count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
@@ -231,6 +236,12 @@ type
     intr_wait_active*:      bool
     intr_wait_mask*:        uint16
     intr_wait_resume_addr*: uint32
+    # HLE Halt/Stop state: the real BIOS executes its SWI-dispatcher return
+    # path (bx lr + register restore + movs pc, lr) AFTER the wake IRQ has
+    # been serviced, so that cost must land after the wake, not at call time.
+    # Charged once when execution reaches the instruction after the SWI.
+    halt_resume_charge*:    int32
+    halt_resume_addr*:      uint32
     # Waitloop fields
     attempt_waitloop_detection*: bool
     cache_waitloop_results*:     bool

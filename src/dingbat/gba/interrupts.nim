@@ -32,6 +32,8 @@ proc check_interrupts*(intr: Interrupts) =
     if intr.gba.cpu.stopped:
       # Waking from Stop turns the LCD back on without any memory write
       intr.gba.ppu.render_dirty = true
+    if intr.gba.cpu.halted:
+      intr.gba.cpu.halt_wake = true
     intr.gba.cpu.stopped = false
     intr.gba.cpu.halted = false
     if intr.ime:

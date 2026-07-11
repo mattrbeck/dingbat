@@ -91,7 +91,11 @@ proc check_intr_wait*(cpu: CPU) =
     # Cost of the real BIOS's wake path (mirror check, register restore,
     # return to caller). Keeps code after IntrWait phase-aligned with the
     # free-running timer prescaler (mGBA suite Timer count-up tests).
-    cpu.gba.bus.add_cycles(42)  # INTRWAIT_TUNE
+    # 44 = exactly what the real BIOS executes from the IRQ handler's return
+    # to the caller's first instruction: bl 0x358 (3) + flag check/ack
+    # subroutine (15) + beq not taken (1) + pop {r4,lr} (4) + bx lr (3) +
+    # dispatcher restore 0x170-0x184 (12) + movs pc, lr (3+refill 2, IWRAM)
+    cpu.gba.bus.add_cycles(44)  # INTRWAIT_TUNE
   else:
     cpu.halted = true
 
@@ -100,6 +104,13 @@ proc check_intr_wait*(cpu: CPU) =
 # caller-side pipeline refill which is charged region-dependently below.
 # Calibrated against the mGBA suite's BIOS timing tests (IWRAM column).
 const SWI_HLE_BASE = 48
+
+# The part of a Halt/Stop SWI the real BIOS executes AFTER the wake IRQ has
+# been serviced: bx lr (3) + pop {r2, lr} (4) + mov (1) + msr (1) +
+# ldm {fp} (3) + msr SPSR (1) + pop {fp, ip, lr} (5) + movs pc, lr with an
+# IWRAM/BIOS-width refill (3). Deferring it keeps post-wake measurements
+# (mGBA suite SIO timing tests) aligned with the real-BIOS execution order.
+const HALT_RETURN_COST = 21
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
@@ -147,6 +158,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
     discard cpu.set_reg(15, reset_addr)
   of 0x02:  # Halt
+    # Move the BIOS's post-wake return cost out of the upfront charge and
+    # onto the resume boundary (see HALT_RETURN_COST)
+    cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
+    cpu.halt_resume_charge = HALT_RETURN_COST
+    cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
     cpu.halted = true
     # Halt exits when IE & IF is nonzero (IME is don't care), including
     # interrupts that were already pending on entry
@@ -154,6 +170,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x03:  # Stop
     # Peripherals keep running (hardware stops sound/video/timers), but the
     # wake sources are faithful: only keypad/cartridge/SIO interrupts
+    cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
+    cpu.halt_resume_charge = HALT_RETURN_COST
+    cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
     cpu.halted = true
     cpu.stopped = true
     # Stop blanks the LCD without any memory write; force a re-render

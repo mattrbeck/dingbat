@@ -43,6 +43,10 @@ proc save_cpu_state(cpu: CPU; w: var Writer) =
   w.write_bool(cpu.intr_wait_active)
   w.write_u16(cpu.intr_wait_mask)
   w.write_u32(cpu.intr_wait_resume_addr)
+  # Halt-wake IRQ entry discount + deferred HLE Halt/Stop return charge
+  w.write_bool(cpu.halt_wake)
+  w.write_u32(cast[uint32](cpu.halt_resume_charge))
+  w.write_u32(cpu.halt_resume_addr)
 
 proc load_cpu_state(cpu: CPU; r: var Reader) =
   r.expect_tag(GBA_SEC_CPU)
@@ -61,6 +65,9 @@ proc load_cpu_state(cpu: CPU; r: var Reader) =
   cpu.intr_wait_active      = r.read_bool()
   cpu.intr_wait_mask        = r.read_u16()
   cpu.intr_wait_resume_addr = r.read_u32()
+  cpu.halt_wake             = r.read_bool()
+  cpu.halt_resume_charge    = cast[int32](r.read_u32())
+  cpu.halt_resume_addr      = r.read_u32()
   cpu.count_cycles = 0
   cpu.entered_waitloop = false
 

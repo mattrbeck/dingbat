@@ -20,7 +20,7 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
-  STATE_VERSION* = 1'u32
+  STATE_VERSION* = 2'u32  # v2: GBA CPU halt-wake / deferred halt-return fields
   # magic(8) version(4) core(1) slot(1) reserved(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)
   STATE_HEADER_SIZE* = 32

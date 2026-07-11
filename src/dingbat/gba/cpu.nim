@@ -72,8 +72,13 @@ proc irq*(cpu: CPU) =
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
     # Exception-entry overhead beyond the pipeline refill (calibrated against
-    # the mGBA suite Timer IRQ tests)
-    cpu.gba.bus.add_cycles(2)
+    # the mGBA suite Timer IRQ tests). An IRQ that wakes the CPU out of halt
+    # vectors 2 cycles faster: there is no in-flight instruction to complete
+    # (calibrated against the mGBA suite Timer count-up tests under the
+    # official BIOS, where the IntrWait resume phase must be exact modulo
+    # the free-running timer prescaler)
+    if not cpu.halt_wake:
+      cpu.gba.bus.add_cycles(2)
 
 proc und*(cpu: CPU) =
   let lr = cpu.r[15] - 4'u32
@@ -299,12 +304,23 @@ proc tick*(cpu: CPU) =
   # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable:
     cpu.irq()
+  # The halt-wake entry discount only applies to an IRQ taken at the first
+  # boundary after the wake (a wake with the I flag set resumes execution;
+  # any later IRQ is a normal running-state entry)
+  cpu.halt_wake = false
   if cpu.intr_wait_active and not cpu.halted:
     # Execution is back at the instruction after an IntrWait SWI, meaning the
     # user IRQ handler (if any) has returned. Re-halt unless satisfied.
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.intr_wait_resume_addr:
       cpu.check_intr_wait()
+  if cpu.halt_resume_charge != 0 and not cpu.halted:
+    # Execution is back at the instruction after an HLE Halt/Stop SWI; charge
+    # the BIOS return path that the real BIOS executes after the wake
+    let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+    if cur == cpu.halt_resume_addr:
+      cpu.gba.bus.add_cycles(int(cpu.halt_resume_charge))
+      cpu.halt_resume_charge = 0
   if not cpu.halted:
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:
