@@ -128,7 +128,7 @@ proc trigger*(dma: DMA; channel: int) =
 
   # DMA internal cycles (calibrated against the mGBA suite DMA timing tests;
   # ROM-to-ROM needs no extra I cycles once its write is sequential-timed)
-  dma.gba.bus.cycles += 2
+  dma.gba.bus.add_cycles(2)
 
   dma.gba.bus.dma_active = true
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold

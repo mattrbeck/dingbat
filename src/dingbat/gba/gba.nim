@@ -145,6 +145,9 @@ type
 
   Bus* = ref object
     gba*:        GBA
+    # Cached to avoid a double pointer-chase on the per-fetch/per-MMIO hot
+    # paths (bus_now, catch_up)
+    sched*:      Scheduler
     cycles*:     int
     # Cycles already handed to the scheduler mid-instruction by catch_up so
     # MMIO accesses observe the exact cycle they occur on; cpu.tick folds this
@@ -184,6 +187,10 @@ type
     # DMA sequentiality doesn't require back-to-back bus cycles
     rom_next_addr2*: uint32
     dma_active*:     bool
+    # True while the CPU fetch stream is unbroken: sequential ROM fetches
+    # skip the absolute-time bookkeeping entirely. Any other cycle consumer
+    # must "cool" the stream (recording rom_free_since) first.
+    rom_hot*:        bool
     # True while a delayed immediate DMA is scheduled: data accesses catch
     # the scheduler up so the DMA preempts the CPU at its exact start cycle
     # (a read one instruction after the enable must see the DMA'd data)
@@ -425,6 +432,8 @@ proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
+proc rom_cool*(bus: Bus) {.inline.}
+proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)
 proc read_half*(bus: Bus; address: uint32): uint16

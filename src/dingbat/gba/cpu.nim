@@ -73,7 +73,7 @@ proc irq*(cpu: CPU) =
     discard cpu.set_reg(15, 0x18'u32)
     # Exception-entry overhead beyond the pipeline refill (calibrated against
     # the mGBA suite Timer IRQ tests)
-    cpu.gba.bus.cycles += 2
+    cpu.gba.bus.add_cycles(2)
 
 proc und*(cpu: CPU) =
   let lr = cpu.r[15] - 4'u32
@@ -118,10 +118,10 @@ proc clear_pipeline*(cpu: CPU) =
   let page = int(bits_range(cpu.r[15], 24, 27))
   if cpu.cpsr.thumb:
     cpu.r[15] += 4
-    cpu.gba.bus.cycles += 2 * int(cpu.gba.bus.wait16_s[page])
+    cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
   else:
     cpu.r[15] += 8
-    cpu.gba.bus.cycles += 2 * int(cpu.gba.bus.wait32_s[page])
+    cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait32_s[page]))
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   if cpu.pipeline.size == 0:
@@ -144,7 +144,7 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
 
 proc idle*(cpu: CPU; n: int) {.inline.} =
   ## Internal (I) cycles: CPU busy, no bus access
-  cpu.gba.bus.cycles += n
+  cpu.gba.bus.add_cycles(n)
 
 proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.} =
   ## Booth's algorithm early termination: 1-4 internal cycles depending on

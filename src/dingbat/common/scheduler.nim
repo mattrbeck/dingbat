@@ -31,7 +31,9 @@ type
     evbuf: array[MAX_EVENTS, Event]
     nevents: int
     cycles*: CycleCount
-    next_event: CycleCount
+    # Exposed so the GBA bus catch-up can test "no event due" inline without
+    # a cross-module call on every MMIO access
+    next_event*: CycleCount
     current_speed: uint8
     # True while an event handler runs; guards against re-entrant tick()
     # (e.g. a DMA triggered by an event touching MMIO mid-dispatch)
@@ -87,18 +89,23 @@ proc call_current*(s: Scheduler) =
     s.dispatching = false
   s.next_event = high(CycleCount)
 
+proc tick_slow(s: Scheduler; target: CycleCount) =
+  # Jump directly to each due event's timestamp so handlers observe the
+  # exact cycle they were scheduled for (same semantics as stepping one
+  # cycle at a time, without the per-cycle loop).
+  while target >= s.next_event:
+    s.cycles = s.next_event
+    s.call_current()
+  s.cycles = target
+
 proc tick*(s: Scheduler; cycles: int) {.inline.} =
+  # Kept tiny so it inlines into the CPU instruction loop; the event
+  # dispatch loop lives out of line.
   let target = s.cycles + CycleCount(cycles)
   if target < s.next_event:
     s.cycles = target
   else:
-    # Jump directly to each due event's timestamp so handlers observe the
-    # exact cycle they were scheduled for (same semantics as stepping one
-    # cycle at a time, without the per-cycle loop).
-    while target >= s.next_event:
-      s.cycles = s.next_event
-      s.call_current()
-    s.cycles = target
+    s.tick_slow(target)
 
 proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event

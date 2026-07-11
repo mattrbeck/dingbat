@@ -41,9 +41,24 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
   bus.prefetch_on = w.gamepack_prefetch_buffer
 
 proc bus_now(bus: Bus): CycleCount {.inline.} =
-  bus.gba.scheduler.cycles + CycleCount(bus.cycles)
+  bus.sched.cycles + CycleCount(bus.cycles)
 
-proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int =
+proc rom_cool*(bus: Bus) {.inline.} =
+  # End an unbroken fetch stream: while hot, no cycles can have been added
+  # by anything except the stream itself, so "now" is exactly when the ROM
+  # bus went idle.
+  if bus.rom_hot:
+    bus.rom_hot = false
+    bus.rom_free_since = bus.bus_now()
+
+proc add_cycles*(bus: Bus; n: int) {.inline.} =
+  ## All cycle consumers outside the bus (I-cycles, pipeline refills, HLE
+  ## costs) must go through this so the ROM fetch-stream bookkeeping stays
+  ## consistent.
+  bus.rom_cool()
+  bus.cycles += n
+
+proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   ## Cycle cost of a ROM-region (pages 8-D) access, tracking burst
   ## sequentiality and the prefetch buffer. Sequential = the address
   ## continues the previous ROM access; with the prefetch buffer off the
@@ -82,8 +97,14 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       # one halfword per S-access time (buffer holds up to 8 halfwords).
       # Leftover credit carries over to the next fetch, so back-to-back
       # buffer hits stay cheap until the buffer drains.
+      # rom_free_since can sit ahead of `now`: the waitloop fast-forward
+      # discards a partial instruction's cycles after bookkeeping already
+      # anticipated them. Unsigned subtraction would wrap (and crashed
+      # Pokémon FireRed with a RangeDefect); treat it as zero credit.
       let s = int(bus.wait16_s[page])
-      let credit = min(int(now - bus.rom_free_since), 8 * s)
+      let credit = if now > bus.rom_free_since:
+                     min(int(now - bus.rom_free_since), 8 * s)
+                   else: 0
       let need = if is32: 2 * s else: s
       cost = max(1, need - credit)  # a full buffer serves even a 32-bit fetch in one cycle
       let done = now + CycleCount(cost)
@@ -117,6 +138,7 @@ proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
 
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
+  result.sched = gba.scheduler
   result.cycles = 0
   result.fetch_page = 0xFFFFFFFF'u32  # no fetch page cached yet
   result.bios       = newSeq[byte](0x4000)
@@ -395,7 +417,18 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_page or bus.install_fetch_cache(page):
     if page >= 0x8:
-      bus.cycles += bus.rom_access_cycles(address, is32 = false, fetch = true)
+      # Straight-line execution fast path: while the fetch stream is hot
+      # (unbroken), a sequential fetch is a plain S access and needs no
+      # absolute-time bookkeeping at all
+      if bus.rom_hot and address == bus.rom_next_addr:
+        bus.cycles += int(bus.wait16_s[page])
+        bus.rom_next_addr = address + 2
+      else:
+        bus.rom_cool()
+        bus.cycles += bus.rom_access_cycles(address, is32 = false, fetch = true)
+        # Go hot only when no prefetch credit is left over; leftover credit
+        # must keep flowing through the slow path to be consumed
+        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
     else:
       bus.cycles += bus.fetch_c16
     read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
@@ -406,7 +439,13 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_page or bus.install_fetch_cache(page):
     if page >= 0x8:
-      bus.cycles += bus.rom_access_cycles(address, is32 = true, fetch = true)
+      if bus.rom_hot and address == bus.rom_next_addr:
+        bus.cycles += int(bus.wait32_s[page])
+        bus.rom_next_addr = address + 4
+      else:
+        bus.rom_cool()
+        bus.cycles += bus.rom_access_cycles(address, is32 = true, fetch = true)
+        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
     else:
       bus.cycles += bus.fetch_c32
     read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
@@ -415,46 +454,63 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
 
 # ---- Public read/write with cycle accounting ----
 
-proc catch_up(bus: Bus) {.inline.} =
-  # Advance the scheduler to the current mid-instruction cycle so MMIO
-  # accesses observe/affect timers, IF flags, etc. at the exact cycle they
-  # happen. Skipped while an event handler runs (re-entrant tick would let
-  # time go backwards when the outer loop restores its target). Loops because
-  # a fired event can itself consume bus time (a DMA stalling the CPU) that
-  # must also be ticked before the access observes the clock.
-  if bus.gba.scheduler.dispatching: return
+proc catch_up_slow(bus: Bus) =
+  # Loops because a fired event can itself consume bus time (a DMA stalling
+  # the CPU) that must also be ticked before the access observes the clock.
   while bus.cycles > 0:
     let pending = bus.cycles
     bus.cycles = 0
     bus.synced += pending
     bus.gba.scheduler.tick(pending)
 
+proc catch_up(bus: Bus) {.inline.} =
+  # Advance the scheduler to the current mid-instruction cycle so MMIO
+  # accesses observe/affect timers, IF flags, etc. at the exact cycle they
+  # happen. Skipped while an event handler runs (re-entrant tick would let
+  # time go backwards when the outer loop restores its target). The common
+  # no-event-due case stays inline; event dispatch takes the slow path.
+  let s = bus.sched
+  if s.dispatching: return
+  let target = s.cycles + CycleCount(bus.cycles)
+  if target < s.next_event:
+    s.cycles = target
+    bus.synced += bus.cycles
+    bus.cycles = 0
+  else:
+    bus.catch_up_slow()
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.read_word_internal(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_byte_internal(address, value)
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
+  bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
   if bus_page(address) == 0x4 or bus.dma_pending: bus.catch_up()
   bus.write_word_internal(address, value)

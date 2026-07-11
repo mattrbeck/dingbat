@@ -91,7 +91,7 @@ proc check_intr_wait*(cpu: CPU) =
     # Cost of the real BIOS's wake path (mirror check, register restore,
     # return to caller). Keeps code after IntrWait phase-aligned with the
     # free-running timer prescaler (mGBA suite Timer count-up tests).
-    cpu.gba.bus.cycles += 42  # INTRWAIT_TUNE
+    cpu.gba.bus.add_cycles(42)  # INTRWAIT_TUNE
   else:
     cpu.halted = true
 
@@ -115,13 +115,14 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let bus = cpu.gba.bus
     let page = int(bits_range(cpu.r[15], 24, 27))
     if cpu.cpsr.thumb:
-      bus.cycles += int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+      bus.add_cycles(int(bus.wait16_n[page]) + int(bus.wait16_s[page]))
     else:
-      bus.cycles += int(bus.wait32_n[page]) + int(bus.wait32_s[page])
+      bus.add_cycles(int(bus.wait32_n[page]) + int(bus.wait32_s[page]))
     # Plus one more sequential halfword slot; the residual every non-IWRAM
     # column showed against hardware (exactly S16 - 1)
-    bus.cycles += int(bus.wait16_s[page]) - 1
+    bus.add_cycles(int(bus.wait16_s[page]) - 1)
     # The swi flushed the ROM fetch stream; forget burst/prefetch state
+    bus.rom_hot = false
     bus.rom_next_addr = 1  # never matches (halfword-aligned addresses)
     bus.rom_free_since = bus.gba.scheduler.cycles + CycleCount(bus.cycles)
   case swi_num
@@ -338,7 +339,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     if bit(flags, 3): hle_cycles += 48000
     if bit(flags, 4): hle_cycles += 500
     if bit(flags, 5) or bit(flags, 6) or bit(flags, 7): hle_cycles += 5000
-    cpu.gba.bus.cycles += hle_cycles
+    cpu.gba.bus.add_cycles(hle_cycles)
     # Re-schedule APU events after cycle advance
     if bit(flags, 6):
       cpu.gba.apu.tick_frame_sequencer()
