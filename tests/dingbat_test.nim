@@ -10,7 +10,7 @@ type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
-    tmNorm32LinkTest, tmAttachTest, tmNetLink
+    tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -478,6 +478,155 @@ proc rewind_test(rom_path, bios_path: string): int =
     emu.post_init()
     drive(emu)
 
+# Speculative-rollback acceptance (docs/multiplayer.md phase 3c): drives two
+# NetCores in-process through a deterministic coordinator that shuttles wire
+# frames between them with a fixed per-message latency (measured in coordinator
+# iterations, not wall-clock, so runs are reproducible and OFF/ON are directly
+# comparable). The committed linktest.gba self-drives 16 multi-mode rounds.
+#
+# The correctness bar is the EWRAM round log (round data + role bits + serial
+# IRQ count) — timing-tolerant by construction, so it isolates *what the games
+# exchanged* from the exact cycle skew the wider speculative lead introduces.
+# Speculation must reproduce it bit-for-bit vs the blocking path, even when the
+# predictor is forced to mispredict (rollback must recover).
+
+proc ewram_log_hash(g: GBA): uint32 =
+  ## FNV-1a over the EWRAM region the link ROMs log to (0x000..0x810: both
+  ## receive-latch tables, role snapshot, IRQ count, done flag).
+  result = 0x811C9DC5'u32
+  for off in 0 ..< 0x810:
+    result = (result xor uint32(g.bus.wram_board[off])) * 0x01000193'u32
+
+type SpecRun = object
+  hash0, hash1: uint32
+  fail0, fail1: int
+  done0, done1: bool
+  stalls0, stalls1, steps: int
+  hits, misses, rollbacks: int
+  dbg0: string
+
+# Deterministic two-core coordinator. `delay` is the per-message latency in
+# coordinator iterations (post-handshake only, like netlink's --netlink-delay).
+# `mispredict` forces the master to guess wrong for the first N rounds.
+proc run_spec_link(rom, bios_path: string; contract: LinkContract;
+                   speculative: bool; delay, mispredict, timeout_frames: int): SpecRun =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc make_gba(): GBA =
+    result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+    result.test_output = new_test_output()
+    result.post_init()
+  let g0 = make_gba()
+  let g1 = make_gba()
+  let crc = crc32(readFile(rom))
+  # Speculation is a master-side feature: only the initiator (unit 0, the
+  # multi-mode parent / normal-mode internal-clock master) predicts. The
+  # responder runs the ordinary blocking path either way, so it stays bit-
+  # identical without the responder-side checkpoint cost — this mirrors how a
+  # real frontend would enable it.
+  let nc0 = new_net_core(g0, 0, crc, strict_crc = true, speculative = speculative)
+  let nc1 = new_net_core(g1, 1, crc, strict_crc = true, speculative = false)
+  if mispredict > 0: nc0.force_mispredict(mispredict)
+
+  # In-flight message queues: (deliver_at_step, frame_bytes).
+  var q01, q10: seq[(int, string)]  # 0->1 and 1->0
+  var step = 0
+  proc collect(src: NetCore; dst: var seq[(int, string)]) =
+    let due = step + (if src.hello == hsDone and delay > 0: delay else: 0)
+    for f in src.take_outgoing(): dst.add((due, f))
+  proc deliver(q: var seq[(int, string)]; dst: NetCore) =
+    var keep: seq[(int, string)]
+    for (due, data) in q:
+      if due <= step: dst.feed(data) else: keep.add((due, data))
+    q = keep
+
+  let cap = timeout_frames * 400  # generous iteration bound
+  while step < cap:
+    inc step
+    deliver(q01, nc1)
+    deliver(q10, nc0)
+    let r0 = nc0.try_advance()
+    collect(nc0, q01)
+    let r1 = nc1.try_advance()
+    collect(nc1, q10)
+    if r0 == naStalled: inc result.stalls0
+    if r1 == naStalled: inc result.stalls1
+    # Terminate once both ROMs are done AND (for speculation) every latched
+    # round has been confirmed by a real REPLY — i.e. the visible state has
+    # settled to the blocking path. Beacons keep flowing forever while the
+    # ROMs spin, so we must NOT wait for the queues to empty; but a reply that
+    # is still in flight keeps all_confirmed false, so we drain those first.
+    let settled = (not speculative) or nc0.all_confirmed
+    if g0.linktest_finished() and g1.linktest_finished() and settled:
+      break
+  result.steps = step
+  result.done0 = g0.linktest_finished()
+  result.done1 = g1.linktest_finished()
+  result.hash0 = ewram_log_hash(g0)
+  result.hash1 = ewram_log_hash(g1)
+  result.fail0 = check_link_unit(g0, 0, "SPECLINK", contract)
+  result.fail1 = check_link_unit(g1, 1, "SPECLINK", contract)
+  (result.hits, result.misses, result.rollbacks) = nc0.pred_stats()
+  result.dbg0 = nc0.debug_state()
+
+proc spec_link_test(rom, bios_path: string; contract: LinkContract;
+                    delay, timeout_frames: int): int =
+  ## Self-contained: run the blocking path (reference), then speculation ON at
+  ## a couple of latencies, then ON with forced mispredictions — all must
+  ## reproduce the reference EWRAM log and pass the ROM contract.
+  var verdict = 0
+  template require(cond: bool; msg: string) =
+    if not cond:
+      echo "SPECLINK FAIL: ", msg
+      verdict = 1
+
+  let base = run_spec_link(rom, bios_path, contract, false, delay, 0, timeout_frames)
+  require(base.done0 and base.done1, "reference (spec OFF) never finished")
+  require(base.fail0 == 0 and base.fail1 == 0, "reference contract checks failed")
+  echo "SPECLINK reference (OFF, delay ", delay, "): unit0 hash ",
+       toHex(base.hash0, 8), ", unit1 hash ", toHex(base.hash1, 8),
+       ", ", base.steps, " steps, ", base.stalls0, "+", base.stalls1, " stalls"
+
+  for d in @[0, delay]:
+    let on = run_spec_link(rom, bios_path, contract, true, d, 0, timeout_frames)
+    require(on.done0 and on.done1, "spec ON (delay " & $d & ") never finished/settled")
+    require(on.fail0 == 0 and on.fail1 == 0,
+      "spec ON (delay " & $d & ") contract checks failed")
+    require(on.hash0 == base.hash0 and on.hash1 == base.hash1,
+      "spec ON (delay " & $d & ") EWRAM log differs from blocking path (unit0 " &
+      toHex(on.hash0, 8) & " vs " & toHex(base.hash0, 8) & ", unit1 " &
+      toHex(on.hash1, 8) & " vs " & toHex(base.hash1, 8) & ")")
+    echo "SPECLINK ON  (delay ", d, "): MATCH, ", on.steps, " steps, ",
+         on.stalls0, "+", on.stalls1, " stalls, hits=", on.hits,
+         " misses=", on.misses, " rollbacks=", on.rollbacks
+
+  # Forced-misprediction recovery: predictor returns wrong words for the first
+  # 20 rounds; rollback must still land on the reference log.
+  let bad = run_spec_link(rom, bios_path, contract, true, delay, 20, timeout_frames)
+  require(bad.done0 and bad.done1, "forced-mispredict run never finished/settled")
+  require(bad.fail0 == 0 and bad.fail1 == 0, "forced-mispredict contract checks failed")
+  require(bad.hash0 == base.hash0 and bad.hash1 == base.hash1,
+    "forced-mispredict EWRAM log differs from blocking path (rollback did not recover)")
+  require(bad.rollbacks > 0, "forced mispredict produced no rollbacks (hook inert?)")
+  echo "SPECLINK ON  (delay ", delay, ", forced mispredict): MATCH, ",
+       bad.steps, " steps, hits=", bad.hits, " misses=", bad.misses,
+       " rollbacks=", bad.rollbacks
+
+  # Speed proxy: reply_wait/lead stalls should collapse under latency.
+  let on_hi = run_spec_link(rom, bios_path, contract, true, delay, 0, timeout_frames)
+  echo "SPECLINK speed (delay ", delay, "): OFF ", base.stalls0 + base.stalls1,
+       " stalls / ", base.steps, " steps  vs  ON ",
+       on_hi.stalls0 + on_hi.stalls1, " stalls / ", on_hi.steps, " steps"
+  require(on_hi.stalls0 <= base.stalls0,
+    "speculation did not reduce master stalls under latency")
+
+  if verdict == 0:
+    echo "SPECLINK: PASS (blocking-path-identical under speculation + rollback recovery, ",
+         link_desc(contract), ")"
+  else:
+    echo "SPECLINK: FAIL"
+  verdict
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -526,6 +675,7 @@ proc main() =
         of "norm32linktest": mode = tmNorm32LinkTest
         of "attachtest": mode = tmAttachTest
         of "netlink": mode = tmNetLink
+        of "speclink": mode = tmSpecLink
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -603,6 +753,9 @@ proc main() =
     quit(link_test(rom_path, rom2, bios_path, timeout_frames, contract))
   if mode == tmAttachTest:
     quit(attach_test(rom_path, bios_path, timeout_frames, attach_after))
+  if mode == tmSpecLink:
+    let delay = if netlink_delay > 0: netlink_delay else: 20
+    quit(spec_link_test(rom_path, bios_path, link_contract, delay, timeout_frames))
   if mode == tmNetLink:
     if (listen_port > 0) == (connect_to.len > 0):
       echo "netlink mode needs exactly one of --listen PORT or --connect HOST:PORT"
@@ -694,7 +847,7 @@ proc main() =
     echo "Screenshot mode requires --screenshot path"
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
-     tmNorm32LinkTest, tmAttachTest, tmNetLink:
+     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink:
     discard  # handled (and exited) above
 
   if output.len > 0:
