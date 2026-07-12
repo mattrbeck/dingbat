@@ -38,7 +38,6 @@ const netStatusDiv = document.getElementById("net-status");
 const netCodeInput = document.getElementById("net-code-input");
 const netJoinGo = document.getElementById("net-join-go");
 const netStallBadge = document.getElementById("net-stall");
-const netDetectBadge = document.getElementById("net-detect");
 
 const netModalOpen = () => netModal.classList.contains("open");
 
@@ -61,12 +60,15 @@ const openNetModal = (isHost) => {
   netSetStatus("");
   netModal.classList.add("open");
   trapFocus(netModal);
+  // Put the cursor straight in the code field so the host's code can be typed
+  // (or pasted) without an extra tap.
+  if (!isHost) setTimeout(() => netCodeInput.focus(), 0);
 };
 
-// The in-game badge opens the modal on a Host/Join chooser (we don't yet
-// know which side this player should be).
+// The "Link Cable" menu button opens the modal on a Host/Join chooser (we
+// don't yet know which side this player should be).
 const openNetChooser = () => {
-  netTitle.textContent = "Link cable detected";
+  netTitle.textContent = "Connect link cable";
   netChooseView.hidden = false;
   netHostView.hidden = true;
   netJoinView.hidden = true;
@@ -81,32 +83,15 @@ const closeNetModal = () => {
   releaseFocus(netModal);
 };
 
-// --- In-game "link cable detected" badge ---
-// The game entered multi-player SIO mode while un-linked (walked up to a
-// Cable Club / Union Room). Offer a tap-to-connect badge; once dismissed,
-// stay quiet until the game leaves and re-enters that mode.
-let netDetectDismissed = false;
-
-const netShowBadge = () => { netDetectBadge.hidden = false; };
-const netHideBadge = () => { netDetectBadge.hidden = true; };
-
-const netCheckAwaitingLink = () => {
-  if (!Module._gba_awaiting_link) return;
-  const awaiting = Module._gba_awaiting_link() === 1;
-  if (!awaiting) {
-    netDetectDismissed = false; // left the link screen; re-arm for next time
-    netHideBadge();
+// --- "Link Cable" menu button ---
+// Opens the Host/Join chooser and binds the cable to the already-running
+// game (attach mode). Online link is GBA-only, so guard other cores.
+document.getElementById("net-connect").addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (extOf(currentOriginalName || "") !== ".gba") {
+    showToast("Link cable is GBA-only");
     return;
   }
-  if (netMode || netDetectDismissed || netModalOpen()) {
-    netHideBadge();
-    return;
-  }
-  netShowBadge();
-};
-
-netDetectBadge.addEventListener("click", () => {
-  netHideBadge();
   openNetChooser();
 });
 // Arrow wrappers: netChooseHost/Join are defined later in the file, so
@@ -333,7 +318,6 @@ const netStartJoin = async (rom, attach) => {
 const startNet = async (rom, isHost, attach) => {
   if (netMode || net) await netShutdown();
   if (linkMode) await exitLinkMode();
-  netHideBadge();
   net = {
     rom,
     isHost,
@@ -413,7 +397,6 @@ const launchNetRom = async () => {
   net.ptr = Module._malloc(NET_BUF_CAP);
   net.started = true;
   netMode = true;
-  netHideBadge();
   document.body.classList.add("has-game", "running", "net-mode");
   netFlush(); // our HELLO
   for (const bytes of net.rxQueue) netFeedNow(bytes);
@@ -536,10 +519,7 @@ const netShutdown = async (opts) => {
 
 // Modal dismissal = abandoning the pending session (or nothing once the
 // game is already running — then the modal is long closed anyway).
-// Dismissing also silences the in-game badge until the game leaves and
-// re-enters the link screen, so it doesn't immediately pop back up.
 const netDismissModal = () => {
-  netDetectDismissed = true;
   if (net && !net.started) netShutdown();
   else closeNetModal();
 };

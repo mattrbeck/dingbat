@@ -627,9 +627,9 @@ const refreshHomeRecent = async () => {
     });
 
     tile.appendChild(launch);
-    // GBA games get link-cable entry points: 2P (two local cores, keyboard
-    // vs. gamepad) and online host/join (one core linked to a remote peer
-    // over WebRTC with a room code)
+    // GBA games get a 2P button for local two-player link (two cores on one
+    // device, keyboard vs. gamepad). Online play is started from the in-game
+    // "Link Cable" menu button once a game is running.
     if (extOf(rom.name) === ".gba") {
       tile.classList.add("has-2p");
       let link2p = document.createElement("button");
@@ -643,28 +643,6 @@ const refreshHomeRecent = async () => {
         launchLinkRom(rom);
       });
       tile.appendChild(link2p);
-      let host = document.createElement("button");
-      host.type = "button";
-      host.className = "home-tile-net home-tile-host";
-      host.title = "Host an online link game (get a room code)";
-      host.setAttribute("aria-label", "Host " + rom.name + " online");
-      host.textContent = "HOST";
-      host.addEventListener("click", (e) => {
-        e.stopPropagation();
-        netHost(rom);
-      });
-      tile.appendChild(host);
-      let join = document.createElement("button");
-      join.type = "button";
-      join.className = "home-tile-net home-tile-join";
-      join.title = "Join an online link game with a room code";
-      join.setAttribute("aria-label", "Join an online game of " + rom.name);
-      join.textContent = "JOIN";
-      join.addEventListener("click", (e) => {
-        e.stopPropagation();
-        netJoin(rom);
-      });
-      tile.appendChild(join);
     }
     tile.appendChild(del);
     homeRecent.appendChild(tile);
@@ -1004,6 +982,11 @@ const routeP1Input = (inputId, down) => {
 // and calls _setInput directly. This is authoritative for keyboard input.
 const gameKeyHandler = (e, down) => {
   if (keyboardModal.classList.contains("open")) return;
+  // Don't hijack keystrokes while the user is typing in a text field (e.g. the
+  // room-code input): letters like A/S/Z/X are default game-input keys, and
+  // preventDefault here would swallow them before they reach the field.
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   let inputId = codeLookup[e.code];
   if (inputId !== undefined && typeof Module !== "undefined" && Module._setInput) {
     e.preventDefault();
@@ -1853,12 +1836,6 @@ var Module = {
 
     const tick = (timestamp) => {
       pollGamepads();
-      // Mid-game link detection: when a running game walks up to a Cable
-      // Club / Union Room (enters multi-player SIO mode) and we're not
-      // already linked, offer the "link cable detected" badge.
-      if (!netMode && typeof netCheckAwaitingLink === "function") {
-        netCheckAwaitingLink();
-      }
       if (paused) {
         lastFrameTime = 0;
         accumulator = 0;

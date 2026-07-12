@@ -71,6 +71,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>
             <span>Controls</span>
           </button>
+          <button type="button" class="menu-item" id="net-connect" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
+            <span>Link Cable</span>
+          </button>
           <hr class="menu-sep" id="menu-volume-sep" />
           <div class="menu-volume" id="menu-volume">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
@@ -203,12 +207,6 @@
         <span aria-hidden="true">&#8987;</span> waiting for peer
       </div>
 
-      <!-- Online link: tap-to-connect badge, shown when a running game walks
-           up to a link cable (Cable Club / Union Room) and isn't linked -->
-      <button type="button" id="net-detect" hidden>
-        <span aria-hidden="true">&#128279;</span> Link cable detected &mdash; connect
-      </button>
-
       <div id="toast" role="status" aria-live="polite"></div>
     </main>
 
@@ -287,7 +285,7 @@
         <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
         <h3 id="net-title">Play online</h3>
         <div id="net-choose-view" hidden>
-          <p>A game is looking for a link partner. Who are you?</p>
+          <p>Connect to a friend over a link cable. Host to get a room code, or join with one they share.</p>
           <div class="net-choose-row">
             <button type="button" class="button button-primary" id="net-choose-host">Host (get a code)</button>
             <button type="button" class="button" id="net-choose-join">Join (enter a code)</button>
