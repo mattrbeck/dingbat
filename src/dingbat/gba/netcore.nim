@@ -101,7 +101,14 @@ type
     gba*: GBA
     id*: int              # 0 = host/listener (multi-mode unit 0), 1 = joiner
     rom_crc: uint32
-    lead: int64           # bounded-lead window (see NETLINK_LEAD*)
+    lead: int64           # bounded-lead window while the link is idle
+    lead_active: int64    # tighter bound while a serial link mode is active:
+                          # multi-mode games (e.g. Pokémon Cable Club trades)
+                          # sample each other's SIOMULTI data at explicit
+                          # cycles and only tolerate a small skew, so the wide
+                          # idle lead (a browser needs it for full-speed solo
+                          # play) must tighten the moment either side enters a
+                          # link SIO mode or the handshake never converges.
     strict_crc: bool      # reject a ROM CRC mismatch (linktest harness);
                           # relaxed mode accepts and sets crc_mismatch
                           # (cross-version Pokémon trades have different
@@ -167,6 +174,17 @@ const
 proc peer_in_multi(nc: NetCore): bool = nc.peer_mode == WIRE_MULTI
 proc peer_in_normal(nc: NetCore): bool =
   nc.peer_mode == WIRE_NORMAL8 or nc.peer_mode == WIRE_NORMAL32
+
+proc effective_lead(nc: NetCore): int64 =
+  ## Tighten the bounded-lead window whenever either side is in a serial link
+  ## mode, so an actively-linking game (which samples the peer's data at exact
+  ## cycles) never drifts past its skew tolerance; fall back to the wide idle
+  ## lead otherwise for full-speed solo play while nominally connected.
+  if nc.gba.serial.sio_mode() in {smMulti, smNormal8, smNormal32} or
+     nc.peer_in_multi or nc.peer_in_normal:
+    min(nc.lead, nc.lead_active)
+  else:
+    nc.lead
 
 proc send_msg(nc: NetCore; data: string) =
   nc.outbox.add data
@@ -541,7 +559,8 @@ proc try_advance*(nc: NetCore): NetAdvance =
     gba.cpu.count_cycles = 0
     nc.in_frame = true
   # Bounded lead: we may not run further ahead of the peer's newest clock.
-  if not nc.peer_done and nc.now() > nc.peer_clock + nc.lead:
+  # The window tightens automatically while a link SIO mode is active.
+  if not nc.peer_done and nc.now() > nc.peer_clock + nc.effective_lead:
     if not nc.lead_wait:
       nc.lead_wait = true
       nc.enter_stall()
@@ -586,16 +605,19 @@ proc debug_state*(nc: NetCore): string =
     " peer_done=" & $nc.peer_done
 
 proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
-                   strict_crc = true; lead: int64 = NETLINK_LEAD): NetCore =
+                   strict_crc = true; lead: int64 = NETLINK_LEAD;
+                   lead_active: int64 = NETLINK_LEAD): NetCore =
   ## Wire a post-init core to the protocol state machine and queue our
   ## HELLO. The transport must then shuttle bytes with feed/take_outgoing;
   ## try_advance reports naHello until the peer's HELLO validates.
-  ## id 0 = host/listener = multi-mode unit 0. `lead` is this side's
+  ## id 0 = host/listener = multi-mode unit 0. `lead` is this side's idle
   ## bounded-lead window — pick it to exceed the transport's byte-exchange
   ## cadence (NETLINK_LEAD for a pumped socket, NETLINK_LEAD_RAF for a
-  ## browser RAF loop); the two sides need not agree.
+  ## browser RAF loop); the two sides need not agree. `lead_active` is the
+  ## tighter window used while a link SIO mode is active (defaults to the
+  ## native lead, which real link games tolerate); it caps `lead`.
   doAssert id in {0, 1}, "the network link is 2-player: unit id must be 0 or 1"
   result = NetCore(gba: gba, id: id, rom_crc: rom_crc, strict_crc: strict_crc,
-                   lead: lead, peer_mode: 0xFF)
+                   lead: lead, lead_active: lead_active, peer_mode: 0xFF)
   result.send_msg(encode_hello(LINK_SYSTEM_GBA, uint8(id), rom_crc))
   gba.set_sio_driver(RemoteSioDriver(core: result))
