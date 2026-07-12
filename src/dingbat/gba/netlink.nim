@@ -161,13 +161,16 @@ proc step_frame*(nl: NetLink) =
 # ---------------- construction & handshake ----------------
 
 proc new_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
-                   delay_ms = 0): NetLink =
+                   delay_ms = 0; allow_crc_mismatch = false): NetLink =
   ## Wire a post-init core to a connected TCP socket and perform the HELLO
   ## handshake (blocking, not subject to the artificial delay — it is setup,
-  ## not gameplay traffic). id 0 = listener = multi-mode unit 0.
+  ## not gameplay traffic). id 0 = listener = multi-mode unit 0. With
+  ## allow_crc_mismatch, differing ROM CRCs are accepted (cross-version link
+  ## games such as Ruby<->Sapphire trades have distinct CRCs but link fine).
   sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
   result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms)
-  result.core = new_net_core(gba, id, rom_crc)
+  result.core = new_net_core(gba, id, rom_crc,
+                             strict_crc = not allow_crc_mismatch)
   result.flush_outgoing()  # our HELLO (blocking socket: sends immediately)
   let deadline = getMonoTime() + initDuration(milliseconds = HELLO_TIMEOUT_MS)
   while result.core.hello == hsWait:
