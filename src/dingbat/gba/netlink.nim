@@ -198,12 +198,16 @@ proc send_bye*(nl: NetLink; reason = LINK_BYE_FINISHED) =
 proc poll_socket(nl: NetLink; timeout_ms: int): bool =
   ## Pull whatever bytes are available into the decoder, waiting up to
   ## timeout_ms for the first byte. Returns true if anything arrived.
-  var fds = @[nl.sock.getFd()]
-  if selectRead(fds, timeout_ms) <= 0: return false
+  ## The per-slice pumps pass timeout_ms == 0 on the (post-handshake)
+  ## nonblocking socket, so they skip the select() + fds allocation and let
+  ## recv report emptiness via EWOULDBLOCK.
+  if timeout_ms > 0:
+    var fds = @[nl.sock.getFd()]
+    if selectRead(fds, timeout_ms) <= 0: return false
   var buf: array[4096, char]
   let n = nl.sock.recv(addr buf[0], buf.len)
   if n < 0:
-    if osLastError().is_transient(): return false  # select/recv race
+    if osLastError().is_transient(): return false  # nothing ready / select race
     raise newException(NetLinkError,
       "peer connection lost: " & osErrorMsg(osLastError()))
   if n == 0:

@@ -28,8 +28,9 @@
 # plain-C dingbat_audio_* functions in dingbat_ios_audio.c which are safe from
 # the CoreAudio render thread.
 
-import std/[os, strutils, math]
+import std/[os, strutils]
 import dingbat/common/input
+import dingbat/common/lcd_color
 import dingbat/gba/gba
 import dingbat/gb/gb
 
@@ -50,25 +51,9 @@ var biosPath:  string  = ""
 
 proc NimMain() {.importc.}
 
-# LCD color correction, identical to dingbat_wasm.nim's build_color_lut:
-# linearize with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2.
-var colorLut: array[0x8000, uint32]
+# LCD color-correction (BGR555 -> RGBA8888) is shared with the wasm shell —
+# see dingbat/common/lcd_color.
 var rgbaBuffer: seq[uint32] = @[]
-
-proc build_color_lut() =
-  for i in 0 ..< 0x8000:
-    let r = pow(float64(i and 0x1F) / 31.0, 4.0)
-    let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
-    let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
-    let mixed = [
-      (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
-      ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
-      (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
-    ]
-    var rgb: array[3, uint32]
-    for c in 0 .. 2:
-      rgb[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
-    colorLut[i] = 0xFF000000'u32 or (rgb[2] shl 16) or (rgb[1] shl 8) or rgb[0]
 
 proc dingbat_init() {.exportc, cdecl.} =
   ## Must be called once before any other API; runs Nim module init.
@@ -153,10 +138,9 @@ proc dingbat_framebuffer_rgba(): ptr uint32 {.exportc, cdecl.} =
   ## converted on call. Valid until the next ROM load. nil when no core runs.
   let fb = dingbat_framebuffer()
   if fb == nil: return nil
-  let n = rgbaBuffer.len
-  let src = cast[ptr UncheckedArray[uint16]](fb)
-  for i in 0 ..< n:
-    rgbaBuffer[i] = colorLut[src[i] and 0x7FFF]
+  convert_bgr555_rgba(cast[ptr UncheckedArray[uint16]](fb),
+                      cast[ptr UncheckedArray[uint32]](addr rgbaBuffer[0]),
+                      rgbaBuffer.len)
   addr rgbaBuffer[0]
 
 proc dingbat_fb_width(): cint {.exportc, cdecl.} =
@@ -248,4 +232,4 @@ proc dingbat_load_state(data: pointer; len: cint): cint {.exportc, cdecl.} =
     of ekNone: false
   if ok: 1 else: 0
 
-build_color_lut()
+init_lcd_color()

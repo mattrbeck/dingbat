@@ -65,7 +65,16 @@ proc write_seq_u8*(w: var Writer; data: openArray[byte]) =
 
 proc write_seq_u16*(w: var Writer; data: openArray[uint16]) =
   w.write_u32(uint32(data.len))
-  for v in data: w.write_u16(v)
+  when cpuEndian == littleEndian:
+    # uint16 little-endian layout already matches the wire format, so bulk-copy
+    # the whole buffer instead of writing 76,800+ elements one at a time (the
+    # GBA framebuffer alone is 38,400 u16, serialized 6x/sec while rewinding).
+    if data.len > 0:
+      let start = w.buf.len
+      w.buf.setLen(start + data.len * 2)
+      copyMem(addr w.buf[start], unsafeAddr data[0], data.len * 2)
+  else:
+    for v in data: w.write_u16(v)
 
 proc write_tag*(w: var Writer; tag: uint8) {.inline.} =
   ## Section marker, validated on read to catch format desyncs early
@@ -119,7 +128,13 @@ proc read_seq_u16_into*(r: var Reader; dest: var openArray[uint16]) =
   let n = int(r.read_u32())
   if n != dest.len:
     raise state_error("state buffer size mismatch")
-  for i in 0 ..< n: dest[i] = r.read_u16()
+  when cpuEndian == littleEndian:
+    if n > 0:
+      r.need(n * 2)
+      copyMem(addr dest[0], unsafeAddr r.buf[r.pos], n * 2)
+      r.pos += n * 2
+  else:
+    for i in 0 ..< n: dest[i] = r.read_u16()
 
 proc expect_tag*(r: var Reader; tag: uint8) =
   let got = r.read_u8()
@@ -196,3 +211,79 @@ proc read_state_payload*(path: string; core: CoreKind;
   if not fileExists(path):
     raise state_error("no save state found at " & path)
   parse_state_payload(readFile(path), core, rom_checksum, rom_size, path)
+
+# ==================== Per-core state API ====================
+
+template define_state_api*(EmuT: typedesc; core: CoreKind;
+                           state_payload_impl, apply_state_impl,
+                           rom_checksum_impl: untyped) =
+  ## Generates the standard save-state surface (raw payload, full validated
+  ## image, file I/O, and the load rollback protocol) for a core, given its
+  ## three per-core primitives. GBA and GB instantiate this identically; the
+  ## body used to be copy-pasted into both modules.
+
+  proc state_payload*(emu: EmuT): string =
+    ## Raw serialized state, no header/validation. For trusted in-process uses
+    ## (the rewind ring buffer). Frame boundaries only.
+    state_payload_impl(emu)
+
+  proc apply_state_payload*(emu: EmuT; payload: string) =
+    ## Apply a raw payload produced by state_payload. Raises StateError on
+    ## corrupt input; no rollback — trusted callers only.
+    apply_state_impl(emu, payload)
+
+  proc state_bytes*(emu: EmuT): string =
+    ## Full validated state image (header + payload) for in-memory transports
+    ## (web IndexedDB / downloads). Same format as .state files.
+    make_state_bytes(core, rom_checksum_impl(emu),
+                     uint32(emu.cartridge.rom.len), state_payload_impl(emu))
+
+  proc load_state_bytes*(emu: EmuT; data: string): bool =
+    ## Validate and apply a full state image. Mirrors load_state's rollback.
+    var payload: string
+    try:
+      payload = parse_state_payload(data, core, rom_checksum_impl(emu),
+                                    uint32(emu.cartridge.rom.len))
+    except CatchableError:
+      echo "Load state failed: ", getCurrentExceptionMsg()
+      return false
+    let backup = state_payload_impl(emu)
+    try:
+      apply_state_impl(emu, payload)
+      true
+    except CatchableError:
+      echo "Load state failed: ", getCurrentExceptionMsg()
+      apply_state_impl(emu, backup)
+      false
+
+  proc save_state*(emu: EmuT; path: string): bool =
+    ## Serialize the full emulator state to path. Must only be called at a
+    ## frame boundary (right after step_frame returns). Returns false and
+    ## echoes a message on failure.
+    try:
+      write_state_file(path, core, rom_checksum_impl(emu),
+                       uint32(emu.cartridge.rom.len), state_payload_impl(emu))
+      true
+    except CatchableError:
+      echo "Save state failed: ", getCurrentExceptionMsg()
+      false
+
+  proc load_state*(emu: EmuT; path: string): bool =
+    ## Restore emulator state from path. Must only be called at a frame
+    ## boundary. On any validation error the emulator is left untouched; if
+    ## applying fails midway the pre-load state is restored.
+    var payload: string
+    try:
+      payload = read_state_payload(path, core, rom_checksum_impl(emu),
+                                   uint32(emu.cartridge.rom.len))
+    except CatchableError:
+      echo "Load state failed: ", getCurrentExceptionMsg()
+      return false
+    let backup = state_payload_impl(emu)
+    try:
+      apply_state_impl(emu, payload)
+      true
+    except CatchableError:
+      echo "Load state failed: ", getCurrentExceptionMsg()
+      apply_state_impl(emu, backup)
+      false

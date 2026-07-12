@@ -178,8 +178,10 @@ type
     pos: int  # consumed prefix; compacted lazily
 
 proc feed*(d: var LinkDecoder; data: openArray[char]) =
-  for c in data:
-    d.buf.add c
+  if data.len > 0:
+    let start = d.buf.len
+    d.buf.setLen(start + data.len)
+    copyMem(addr d.buf[start], unsafeAddr data[0], data.len)
 
 proc feed*(d: var LinkDecoder; data: string) =
   d.buf.add data

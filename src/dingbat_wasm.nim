@@ -1,6 +1,7 @@
-import std/[os, strutils, math]
+import std/[os, strutils]
 import sdl2 except init, quit
 import dingbat/common/input
+import dingbat/common/lcd_color
 import dingbat/common/rewind
 import dingbat/common/scheduler
 import dingbat/gba/gba
@@ -44,31 +45,12 @@ var stateRenderer: RendererPtr = nil
 var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
 
-# LCD color correction matching the desktop game shader exactly: linearize
-# with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2. SDL's renderer
-# API has no shader hook, but the 15-bit BGR555 domain is small enough to
-# precompute exhaustively as a BGR555 -> RGBA8888 table.
-var colorLut: array[0x8000, uint32]
+# LCD color-correction (BGR555 -> RGBA8888) is shared with the iOS shell and
+# kept in sync with the desktop shader — see dingbat/common/lcd_color.
 var rgbaBuffer: seq[uint32] = @[]
 
-proc build_color_lut() =
-  for i in 0 ..< 0x8000:
-    let r = pow(float64(i and 0x1F) / 31.0, 4.0)
-    let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
-    let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
-    let mixed = [
-      (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
-      ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
-      (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
-    ]
-    var rgb: array[3, uint32]
-    for c in 0 .. 2:
-      rgb[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
-    colorLut[i] = 0xFF000000'u32 or (rgb[2] shl 16) or (rgb[1] shl 8) or rgb[0]
-
 proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint) =
-  for i in 0 ..< pixels:
-    rgbaBuffer[i] = colorLut[fb[i] and 0x7FFF]
+  convert_bgr555_rgba(fb, cast[ptr UncheckedArray[uint32]](addr rgbaBuffer[0]), pixels)
   discard stateTexture.updateTexture(nil, addr rgbaBuffer[0], pitch)
 
 # Global audio sample buffer for JS to consume via Web Audio API.
@@ -323,8 +305,8 @@ proc link_tick() {.exportc.} =
     let core = stateLink.cores[p]
     if core.ppu.frame_static: continue  # unchanged since the previous frame
     let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
-    for i in 0 ..< GBA_W * GBA_H:
-      linkRgba[p][i] = colorLut[fb[i] and 0x7FFF]
+    convert_bgr555_rgba(fb, cast[ptr UncheckedArray[uint32]](addr linkRgba[p][0]),
+                        GBA_W * GBA_H)
   # Drain the SDL event queue: JS handles all link-mode input directly via
   # link_input, but emscripten's SDL layer still queues events for keys the
   # JS capture handler doesn't intercept.
@@ -383,7 +365,7 @@ when defined(emscripten):
   proc dummyLoop() {.cdecl.} = discard
   emscripten_set_main_loop(dummyLoop, 0, 0)
 
-build_color_lut()
+init_lcd_color()
 discard sdl2.init(INIT_VIDEO or INIT_AUDIO)
 stateWindow = createWindow("dingbat", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             GBA_W * 4, GBA_H * 4, SDL_WINDOW_SHOWN)

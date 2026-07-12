@@ -50,12 +50,13 @@ proc xor_bytes(dst: var string; src: string; k: int) =
   for i in (words * 8) ..< k:
     dst[i] = char(uint8(dst[i]) xor uint8(src[i]))
 
-proc encode_delta(prev, cur: string): string =
+proc encode_delta(prev: sink string; cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
   ## prefix, raw tail where prev extends past cur (payload lengths vary
-  ## slightly — e.g. the scheduler's event count)
+  ## slightly — e.g. the scheduler's event count). `prev` is consumed in
+  ## place (the caller's copy is dead), so no ~600 KB duplication per snapshot.
   var body = prev
-  xor_bytes(body, cur, min(prev.len, cur.len))
+  xor_bytes(body, cur, min(body.len, cur.len))
   compress(body, BestSpeed, dfZlib)
 
 proc decode_delta(cur, packed: string): string =
@@ -65,7 +66,7 @@ proc decode_delta(cur, packed: string): string =
 proc push*(rw: Rewind; payload: string) =
   ## Record a new snapshot (frame-boundary payloads only)
   if rw.latest.len > 0:
-    let packed = encode_delta(rw.latest, payload)
+    let packed = encode_delta(move(rw.latest), payload)
     rw.deltas.addLast(packed)
     rw.total += packed.len
     while rw.total > rw.cap and rw.deltas.len > 0:

@@ -693,15 +693,18 @@ document.getElementById("export-save").addEventListener("click", async () => {
     return;
   }
   let savName = currentOriginalName.substring(0, currentOriginalName.lastIndexOf(".")) + ".sav";
-  let blob = new Blob([data], { type: "application/octet-stream" });
-  let a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = savName;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob(new Blob([data], { type: "application/octet-stream" }), savName);
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
+
+const downloadBlob = (blob, filename) => {
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
 
 document.getElementById("load-save").addEventListener("click", async () => {
   menuDropdown.hidden = true;
@@ -811,11 +814,7 @@ document.getElementById("export-state").addEventListener("click", () => {
   }
   // Same format as the desktop emulator's .state files
   let blob = new Blob([bytes], { type: "application/octet-stream" });
-  let a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = stripExt(currentOriginalName) + ".state";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob(blob, stripExt(currentOriginalName) + ".state");
 });
 
 document.getElementById("import-state").addEventListener("click", () => {
@@ -1529,11 +1528,8 @@ const captureCanvas = () => {
   pendingShot = false;
   document.getElementById("canvas").toBlob((blob) => {
     if (!blob) return;
-    let a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = (currentOriginalName || "dingbat").replace(/\.[^.]*$/, "") + ".png";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    let name = (currentOriginalName || "dingbat").replace(/\.[^.]*$/, "") + ".png";
+    downloadBlob(blob, name);
   });
 };
 
