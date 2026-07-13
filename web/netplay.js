@@ -20,6 +20,10 @@ const NET_SIGNAL_URL =
     ? "wss://" + location.host + "/signal"
     : "ws://" + location.hostname + ":8790");
 const NET_LINK_DELAY = parseInt(NET_PARAMS.get("linkdelay") || "0", 10) || 0;
+// Opt-in speculative rollback (?speculative=1). Off by default: the blocking
+// path with the adaptive lead is the proven default; speculation removes the
+// per-round RTT stall but the interactive trade is still being verified.
+const NET_SPECULATIVE = NET_PARAMS.get("speculative") === "1";
 // STUN-only for v1: most home NATs connect; symmetric NAT/strict CGNAT
 // pairs fail with a clear error (a TURN relay is a future option).
 const NET_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -365,6 +369,10 @@ const launchNetRom = async () => {
   document.body.classList.remove("paused");
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
+
+  if (Module._netlink_set_speculative) {
+    Module._netlink_set_speculative(NET_SPECULATIVE ? 1 : 0);
+  }
 
   if (net.attach) {
     // The game is already running its own save; just plug the cable in.

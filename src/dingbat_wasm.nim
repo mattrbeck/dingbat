@@ -52,6 +52,13 @@ var frameCount {.exportc.}: cint = 0
 # here, only ever allocated from JS-invoked procs. Full implementation
 # after initFromEmscripten.
 var stateNet: NetCore = nil
+# Speculative rollback is opt-in for now (proven bit-identical to the blocking
+# path in the native tests, but the interactive Emerald trade is unverified):
+# JS enables it from a ?speculative=1 URL param before netlink_init/attach.
+var specEnabled = false
+
+proc netlink_set_speculative(on: cint) {.exportc.} =
+  specEnabled = on != 0
 var netOut: string = ""       # drained frames awaiting pickup by JS
 var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
 var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
@@ -176,6 +183,12 @@ proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   let inp = Input(inputId)
   let down = pressed != 0
+  # While an online link is live, route input through the netcore so a
+  # speculative rollback replays the exact press timing (note_input just
+  # applies the press when speculation is off, so this is always safe).
+  if stateNet != nil:
+    stateNet.note_input(inp, down)
+    return
   case stateKind
   of ekGBA: stateGba.handle_input(inp, down)
   of ekGB:  stateGb.handle_input(inp, down)
@@ -428,7 +441,8 @@ proc netlink_init(rom_path: cstring; is_host: cint;
   stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
                           rom_crc = crc32(rom),
                           strict_crc = allow_crc_mismatch == 0,
-                          lead = NETLINK_LEAD_RAF)
+                          lead = NETLINK_LEAD_RAF,
+                          speculative = specEnabled)
   net_collect()
   frameCount = 0
   1
@@ -455,7 +469,8 @@ proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
   stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
                           rom_crc = crc32(rom),
                           strict_crc = allow_crc_mismatch == 0,
-                          lead = NETLINK_LEAD_RAF)
+                          lead = NETLINK_LEAD_RAF,
+                          speculative = specEnabled)
   stateNet.rebaseline()
   # A multi-mode transfer left mid-flight by the no-cable driver is stuck
   # busy with no completion scheduled; clear it so the game's link retry
