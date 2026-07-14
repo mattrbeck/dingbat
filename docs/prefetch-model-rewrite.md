@@ -66,10 +66,22 @@ do not maintain. (3 scoped patches were empirically falsified: whole-halfword fl
    changed row as REGRESSED / FIXED / VALUE / STRUCTURAL and exits nonzero on any change —
    this is how every subsequent change is judged, never by the aggregate. See
    `tests/golden/README.md` for the workflow and the 4 known HLE↔LLE artifact rows.
-2. **Reconstruct authoritative `GBAMemoryStall`.** Pull the real mgba source
-   (`src/gba/memory.c` `GBAMemoryStall` + `lastPrefetchedPc`/`prefetchCursor` wiring +
-   how WAITCNT feeds `activeSeqCycles16`/`activeNonseqCycles16`). Write it out as
-   pseudocode with the exact integer/floor/cap semantics. Do not code from memory.
+2. **Reconstruct authoritative `GBAMemoryStall`.** ✅ DONE — `docs/research_gba_memory_stall.md`
+   (mgba `master` @ `5157ce2`, verbatim body + line-by-line pseudocode + WAITCNT tables +
+   the −1 mechanically, all independently re-verified against a fresh checkout). **Three
+   findings that revise the framing above and matter for Phase 1:** (a) there is no
+   `prefetchCursor` — `lastPrefetchedPc` (a byte addr on a 2-byte grid, reset to 0 on
+   *every* pipeline refill in `GBASetActiveRegion`) is the entire prefetch state, cap
+   `maxLoads=8` halfwords; (b) `GBAMemoryStall` runs **only** on a ROM-executing *data
+   access to non-ROM* (`if address < GBA_BASE_ROM0`) and on *multiplies* — **never on
+   opcode fetches** (those are flat `1+s`), and **DMA never touches prefetch state at
+   all**; the stall computes how many opcode halfwords the prefetcher jams into that
+   access's `wait` window and returns a (possibly negative) cycle credit. So mgba applies
+   the prefetch discount at the *preceding data access*, whereas dingbat applies it at the
+   *fetch* — Phase 1 must reconcile this, not just floor the credit. (c) mgba's `s =
+   activeSeqCycles16` is the raw waitstate (base `+1` re-added as `stall=s+1`); dingbat's
+   `wait16_s` already includes the `+1` — do not double-count. The lever for the −1 is
+   unchanged: floor available fill to whole `s`-cycle halfwords before it offsets cost.
 
 ### Phase 1 — Occupancy representation
 - Decide the state that replaces/augments `rom_free_since`. Candidate: keep an absolute
