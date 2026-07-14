@@ -68,6 +68,7 @@ when defined(linkTrace):
   # multi-mode round with the latched outgoing words and each unit's
   # participation. Compiled out entirely in normal builds.
   var onMultiRound*: proc(data: array[4, uint16]; multi: array[4, bool]) = nil
+  var onCoalesce*: proc(core: int) = nil
 
 # ---------------- clock plumbing ----------------
 
@@ -175,13 +176,35 @@ proc complete_multi(link: Link; parent: int) =
   for i in 0 ..< link.cores.len:
     if i < 4 and link.cores[i].serial.sio_mode() == smMulti:
       link.multi_data[i] = link.cores[i].serial.siodata8
-  for core in link.cores:
+  for idx, core in link.cores:
     if core.serial.sio_mode() == smMulti:
       for slot in 0 ..< 4:
         core.serial.multi_recv[slot] = link.multi_data[slot]
+      when defined(linkTrace):
+        if onCoalesce != nil and core.interrupts.reg_if.serial and
+           bit(core.serial.siocnt, 14):
+          onCoalesce(idx)
       # Clears busy and raises the serial IRQ per-core if that core
       # enabled it — all at the same emulated time.
       core.serial.finish_sio_transfer()
+  # A non-initiator that ran slightly ahead of this completion (bounded
+  # overshoot from a halt/waitloop fast-forward) hasn't serviced the serial IRQ
+  # yet. If the next transfer completes first it overwrites SIOMLT_RECV and re-
+  # sets the (level-triggered) IF bit, so the CPU takes ONE IRQ for several
+  # transfers and the game's SIO handler advances its command index once instead
+  # of per transfer — silently desyncing multi-mode command framing (the cross-
+  # game trade "communication error"). Drain each IRQ-driven peer now so it
+  # reads THIS transfer's word and stages its next before the latch moves on.
+  # Bounded to ~one transfer window (and the frame) so a non-servicing peer
+  # never runs away.
+  for i in 0 ..< link.cores.len:
+    if i != parent and link.cores[i].serial.sio_mode() == smMulti and
+       link.cores[i].interrupts.reg_ie.serial:
+      let g = link.cores[i]
+      let deadline = g.scheduler.cycles + CycleCount(2336)
+      while g.interrupts.reg_if.serial and g.scheduler.cycles < deadline and
+            not g.ppu.frame:
+        advance_once(g)
   when defined(linkTrace):
     if onMultiRound != nil:
       var multi: array[4, bool]
