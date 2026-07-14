@@ -31,6 +31,10 @@ web/rom.gbc
 # Generated SRAM backing for test ROMs (created at runtime, not a fixture)
 tests/roms/*.sav
 
+# Copyrighted GBA BIOS — LLE test fixture, never commit
+gba_bios.bin
+*bios*.bin
+
 # Claude Code local state
 .claude/
 

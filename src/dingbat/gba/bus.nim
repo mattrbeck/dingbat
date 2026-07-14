@@ -79,7 +79,13 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       seq = true
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address  # promoted; advanced below
-    elif contiguous:
+    elif contiguous and bus.rom_next_addr != 1:
+      # ROM bus still hot from the previous DMA access (e.g. a ROM-to-ROM
+      # transfer's write right after its read) → sequential. But NOT on the
+      # DMA's very first ROM access: rom_next_addr == 1 is the cold sentinel
+      # seeded at DMA start, and a DMA is a fresh bus master whose first
+      # access to each stream is always non-sequential regardless of how hot
+      # the CPU left the bus.
       seq = true
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address
