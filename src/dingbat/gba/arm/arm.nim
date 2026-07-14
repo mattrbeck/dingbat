@@ -715,6 +715,7 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
+  cpu.instr_exc_return = true
   if cpu.spsr.thumb:
     cpu.r[15] -= 4
     # set_reg(15) already refilled the pipeline at ARM width; a return to

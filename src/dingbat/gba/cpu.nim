@@ -78,7 +78,12 @@ proc irq*(cpu: CPU) =
     # official BIOS, where the IntrWait resume phase must be exact modulo
     # the free-running timer prescaler)
     if not cpu.halt_wake:
-      cpu.gba.bus.add_cycles(2)
+      # If the preceding instruction was an exception return, its pipeline
+      # refill overlaps the IRQ vector fetch on hardware: one of the two refill
+      # fetches is shared, so a back-to-back re-entry is 1 cycle cheaper. This
+      # is what makes the count-up test's overflow->IRQ->return->IRQ chain
+      # accumulate the correct frozen timer value.
+      cpu.gba.bus.add_cycles(if cpu.last_instr_exc_return: 1 else: 2)
 
 proc und*(cpu: CPU) =
   let lr = cpu.r[15] - 4'u32
@@ -322,11 +327,13 @@ proc tick*(cpu: CPU) =
       cpu.gba.bus.add_cycles(int(cpu.halt_resume_charge))
       cpu.halt_resume_charge = 0
   if not cpu.halted:
+    cpu.instr_exc_return = false
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
+    cpu.last_instr_exc_return = cpu.instr_exc_return
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
     if total == 0: remaining = 1  # forward-progress guarantee
