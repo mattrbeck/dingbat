@@ -1706,43 +1706,6 @@ body.large-controls .pad-pill {
  * ==========================================================
  */
 
-/* "2P" launch button on GBA library tiles, next to the delete button */
-.home-tile.has-2p .home-tile-launch {
-  padding-right: 64px;
-}
-
-.home-tile-2p {
-  position: absolute;
-  top: 50%;
-  right: 30px;
-  transform: translateY(-50%);
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.home-tile:hover .home-tile-2p {
-  opacity: 1;
-}
-
-.home-tile-2p:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* Two side-by-side screens (stacked in portrait), one per player */
 #link-stage {
   display: none;
@@ -1763,6 +1726,64 @@ body.running.link-mode #link-stage {
   width: 100%;
   height: 100%;
   padding: 12px;
+}
+
+/* Online rollback: one game (this player's), reusing link-canvas-0. */
+body.running.rollback-mode #canvas { display: none; }
+body.running.rollback-mode #link-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+}
+body.rollback-mode #link-stage .link-pane:nth-child(2),
+body.rollback-mode #link-stage .link-label { display: none; }
+body.running.rollback-mode .link-pane canvas {
+  width: min(100%, calc((100dvh - var(--bar-h) - 24px) * 1.5));
+}
+
+/* "Disconnect Link Cable" button — squared to match the other top-bar
+   .icon-btn controls, occupying the space the hidden speed/state controls left
+   so it's clear why they're gone. Shown only in rollback mode. */
+#rb-disconnect {
+  display: none;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#rb-disconnect svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#rb-disconnect:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+body.running.rollback-mode #rb-disconnect { display: inline-flex; }
+/* Narrow screens: drop the icon and " Link Cable" — just "Disconnect", which is
+   clear and compact. */
+@media (max-width: 480px) {
+  #rb-disconnect svg,
+  #rb-disconnect .rb-dc-suffix { display: none; }
+  #rb-disconnect { padding: 0 12px; gap: 0; }
 }
 
 .link-pane {
@@ -1822,7 +1843,19 @@ body.link-mode #state-sep,
 body.link-mode #load-save,
 body.link-mode #export-save,
 body.link-mode #screenshot,
-body.link-mode #save-sep {
+body.link-mode #save-sep,
+body.rollback-mode #rewind,
+body.rollback-mode #speed-2x-btn,
+body.rollback-mode #fast-forward,
+body.rollback-mode #save-state,
+body.rollback-mode #load-state,
+body.rollback-mode #export-state,
+body.rollback-mode #import-state,
+body.rollback-mode #state-sep,
+body.rollback-mode #load-save,
+body.rollback-mode #export-save,
+body.rollback-mode #screenshot,
+body.rollback-mode #save-sep {
   display: none !important;
 }
 
@@ -1983,4 +2016,253 @@ body.link-mode #save-sep {
   #select-start {
     gap: 12px;
   }
+}
+
+/*
+ * ==========================================================
+ * Online link mode (phase 3b)
+ * ==========================================================
+ */
+
+/* HOST / JOIN launch buttons on GBA library tiles */
+.home-tile-net {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.home-tile-join {
+  right: 58px;
+}
+
+.home-tile-host {
+  right: 100px;
+}
+
+.home-tile:hover .home-tile-net {
+  opacity: 1;
+}
+
+.home-tile-net:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Room-code modal */
+#net-code {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: center;
+  color: var(--accent);
+  padding: 14px 0 6px;
+  min-height: 58px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.net-join-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* The code field fills the row; the spinner overlays its right edge while
+   connecting, so no separate waiting line is needed. */
+.net-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+#net-code-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+#net-code-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Connecting: the field is locked (read-only) and dimmed, with the spinner at
+   its right — the read-only cursor + spinner + "Cancel" button convey waiting. */
+#net-code-input:read-only {
+  color: var(--text-dim);
+  border-color: var(--accent);
+  padding-right: 32px;
+  cursor: default;
+}
+
+/* Only errors land here now (the wait is shown in-field), so it takes no space
+   until it has something to say — no empty gap under the button. */
+.net-status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.net-status:not(:empty) {
+  margin-top: 12px;
+}
+
+.net-status.net-error {
+  color: var(--danger);
+}
+
+/* Small amber spinner pinned inside the right of the code field while connecting. */
+.net-spinner {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 176, 77, 0.25);
+  border-top-color: var(--accent);
+  animation: net-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+
+.net-spinner[hidden] {
+  display: none;
+}
+
+@keyframes net-spin {
+  from { transform: translateY(-50%) rotate(0); }
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .net-spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* "waiting for peer" badge: subtle chip over the top-right of the stage,
+   shown only during sustained stalls of the emulated clock */
+#net-stall {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  background: rgba(20, 16, 8, 0.72);
+  border: 1px solid rgba(255, 176, 77, 0.35);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+#net-stall[hidden] {
+  display: none;
+}
+
+/* Anything that would desync (or reset) one side of the pair is hidden
+   while linked online. Unlike local 2P, reset also hides (it can't reach
+   the remote core), while screenshot and save-file export are fine (this
+   side's canvas and .sav are the only ones here). */
+body.net-mode #rewind,
+body.net-mode #speed-2x-btn,
+body.net-mode #fast-forward,
+body.net-mode #reset,
+body.net-mode #save-state,
+body.net-mode #load-state,
+body.net-mode #export-state,
+body.net-mode #import-state,
+body.net-mode #state-sep,
+body.net-mode #load-save {
+  display: none !important;
+}
+
+/* In-game "link cable detected" badge: a tap target, unlike the passive
+   waiting-for-peer chip. Sits top-center over the stage. */
+#net-detect {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #141008;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3);
+  animation: net-detect-pulse 1.6s ease-in-out infinite;
+}
+
+#net-detect[hidden] {
+  display: none;
+}
+
+#net-detect:hover {
+  filter: brightness(1.08);
+}
+
+@keyframes net-detect-pulse {
+  0%, 100% { box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
+  50% { box-shadow: 0 4px 26px 0 var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #net-detect { animation: none; }
+}
+
+/* Host/Join chooser in the room-code modal (opened from the badge) */
+.net-choose-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.net-choose-row .button {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
 }

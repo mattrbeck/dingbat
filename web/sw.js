@@ -1,11 +1,12 @@
 // Replaced automatically with the git commit hash during CI build.
-const CACHE_VERSION = "dev";
+const CACHE_VERSION = "dev-linklatch";
 const CACHE_NAME = "dingbat-" + CACHE_VERSION;
 
 const ASSETS = [
   "./",
   "./index.html",
   "./index.js",
+  "./netplay.js",
   "./styles.css",
   "./em.js",
   "./em.wasm",

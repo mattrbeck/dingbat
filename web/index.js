@@ -627,22 +627,6 @@ const refreshHomeRecent = async () => {
     });
 
     tile.appendChild(launch);
-    // GBA games get a 2P entry point: two linked cores side by side,
-    // keyboard vs. gamepad, each with its own save file
-    if (extOf(rom.name) === ".gba") {
-      tile.classList.add("has-2p");
-      let link2p = document.createElement("button");
-      link2p.type = "button";
-      link2p.className = "home-tile-2p";
-      link2p.title = "Play 2P over an emulated link cable";
-      link2p.setAttribute("aria-label", "Play " + rom.name + " in 2P link mode");
-      link2p.textContent = "2P";
-      link2p.addEventListener("click", (e) => {
-        e.stopPropagation();
-        launchLinkRom(rom);
-      });
-      tile.appendChild(link2p);
-    }
     tile.appendChild(del);
     homeRecent.appendChild(tile);
   }
@@ -967,10 +951,31 @@ const rebuildLookup = () => {
 };
 rebuildLookup();
 
+// Online input-rollback mode: this player's currently-held buttons as a
+// bitmask (bit i = input id i). Captured from every input source so the RAF
+// loop can hand it to rollback_tick and ship it to the peer each frame.
+var rollbackMode = false;
+var localButtons = 0;
+var rbWasLinked = false;  // the games have actually communicated over the link
+var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
+var rbLastActivity = 0;   // timestamp of the last transfer-count change
+// Auto-end this long after the games STOP transferring over the cable (they
+// closed the link — left the Cable Club). A linked game transfers every frame,
+// so any gap this long means the link is genuinely done. Erring long: a late
+// auto-disconnect is harmless (or use the button), an early one interrupts play.
+const RB_IDLE_DISCONNECT_MS = 12000;
+const noteLocalButton = (inputId, down) => {
+  if (down) localButtons |= 1 << inputId;
+  else localButtons &= ~(1 << inputId);
+};
+
 // Route player-1 input (keyboard, touch controls) to the right core: the
-// single running core normally, core 0 in 2P link mode.
+// single running core normally, core 0 in 2P link mode, or — in online
+// rollback mode — captured into localButtons (the RAF loop feeds the core).
 const routeP1Input = (inputId, down) => {
-  if (linkMode) {
+  if (rollbackMode) {
+    noteLocalButton(inputId, down);
+  } else if (linkMode) {
     if (Module._link_input) Module._link_input(0, inputId, down ? 1 : 0);
   } else {
     Module._setInput(inputId, down ? 1 : 0);
@@ -981,6 +986,11 @@ const routeP1Input = (inputId, down) => {
 // and calls _setInput directly. This is authoritative for keyboard input.
 const gameKeyHandler = (e, down) => {
   if (keyboardModal.classList.contains("open")) return;
+  // Don't hijack keystrokes while the user is typing in a text field (e.g. the
+  // room-code input): letters like A/S/Z/X are default game-input keys, and
+  // preventDefault here would swallow them before they reach the field.
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   let inputId = codeLookup[e.code];
   if (inputId !== undefined && typeof Module !== "undefined" && Module._setInput) {
     e.preventDefault();
@@ -1135,6 +1145,8 @@ const rewindButton = document.getElementById("rewind");
 const loadRom = async (romName, originalName) => {
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
+  // Leaving online link mode: say BYE to the peer and drop the channel
+  if (typeof netShutdown === "function" && netMode) await netShutdown();
   // Persist save from previous ROM before switching
   if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
@@ -1427,6 +1439,42 @@ const blitLinkCanvases = () => {
   }
 };
 
+// Online rollback shows only THIS player's core, on link-canvas-0.
+const blitRollbackCanvas = () => {
+  if (!linkCtx[0] || !Module._rollback_fb_ptr) return;
+  let ptr = Module._rollback_fb_ptr();
+  if (!ptr) return;
+  linkImg[0].data.set(new Uint8Array(Module.memory.buffer, ptr, 240 * 160 * 4));
+  linkCtx[0].putImageData(linkImg[0], 0, 0);
+};
+
+// Enter/leave online input-rollback mode. netplay.js calls these once the
+// RollbackSession is initialized (enter) and on teardown (leave). The core is
+// driven by the RAF loop's rollbackMode branch.
+window.enterRollbackMode = () => {
+  if (linkCtx[0] === null) initLinkCanvases();
+  localButtons = 0;
+  gpPrev.fill(false);
+  rollbackMode = true;
+  rbWasLinked = false;
+  rbLastTransfers = 0;
+  rbLastActivity = performance.now();
+  paused = false;
+  document.body.classList.remove("paused");
+  document.body.classList.add("has-game", "running", "rollback-mode");
+  if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
+};
+// Clear the JS-side rollback flags. The wasm side (promote-to-single vs exit)
+// is handled by the caller (netplay's rbTeardown) so the local game can keep
+// playing solo after a disconnect.
+window.leaveRollbackMode = () => {
+  if (!rollbackMode) return;
+  rollbackMode = false;
+  localButtons = 0;
+  document.body.classList.remove("rollback-mode");
+  if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(false);
+};
+
 // Persist both players' battery saves (the core flushes dirty saves to the
 // FS .sav files once per frame, same as single-player)
 const persistLinkSaves = async () => {
@@ -1619,8 +1667,11 @@ const pollGamepads = () => {
   if (!anyConnected) return;
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
-      // In 2P link mode the gamepad is player 2's controller
-      if (linkMode) {
+      // In 2P link mode the gamepad is player 2's controller; in online
+      // rollback it is this player's controller (captured into localButtons).
+      if (rollbackMode) {
+        noteLocalButton(i, want[i]);
+      } else if (linkMode) {
         if (Module._link_input) Module._link_input(1, i, want[i] ? 1 : 0);
       } else {
         Module._setInput(i, want[i] ? 1 : 0);
@@ -1774,6 +1825,10 @@ var Module = {
 
     // Also persist on page unload
     window.addEventListener("beforeunload", () => {
+      // Closing the tab mid-online-game: get the BYE out so the peer sees a
+      // clean exit instead of a dead channel (the sync parts run before the
+      // page dies; the await inside is best-effort)
+      if (netMode && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
@@ -1793,6 +1848,35 @@ var Module = {
       }
     };
 
+    // Advance the online-link core by whatever the shared `accumulator`
+    // affords, capped so a long stall can't later burst. Called from the RAF
+    // loop (after accumulator is topped up with real elapsed time) AND from
+    // netplay.js on every inbound DataChannel message — the latter drains
+    // any debt a stall left behind the moment the peer's data arrives, which
+    // is what keeps link-heavy screens near full speed. Re-entrancy guarded.
+    let netPumping = false;
+    const driveNet = () => {
+      if (!netMode || netPumping) return;
+      netPumping = true;
+      try {
+        if (accumulator > FRAME_TIME * 4) accumulator = FRAME_TIME * 4;
+        let st = 4;
+        let framesRun = 0;
+        while (accumulator >= FRAME_TIME && framesRun < 4) {
+          st = netStep();
+          if (st !== 1) break; // stalled / handshake / failed — keep the debt
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        netAfterTick(framesRun > 0 && st !== 3 ? (st === 1 ? 1 : st) : st);
+      } finally {
+        netPumping = false;
+      }
+    };
+    window.driveNet = driveNet;
+
     const tick = (timestamp) => {
       pollGamepads();
       if (paused) {
@@ -1804,7 +1888,48 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (linkMode) {
+      if (rollbackMode) {
+        // Online input-rollback: both cores run locally at full speed; only
+        // this player's per-frame buttons cross the network. Fixed-rate frames
+        // (rewind/turbo would desync). rollback_tick returns the frame just
+        // simulated (ship it) or -1 when stalled at the prediction window.
+        let framesRun = 0;
+        while (accumulator >= FRAME_TIME && framesRun < 2) {
+          const frame = Module._rollback_tick(localButtons);
+          if (frame < 0) { accumulator = 0; break; } // stalled: wait for peer input
+          if (typeof window.rbSendInput === "function") window.rbSendInput(frame, localButtons);
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        blitRollbackCanvas();
+        // Auto-end via link ACTIVITY: a linked game drives SIO transfers every
+        // frame; once it has linked and then stops transferring for a while, the
+        // players closed the link (left the Cable Club) — disconnect (each side
+        // then continues solo). Uses transfer count, not the SIO mode register,
+        // which games leave latched in multi mode after they're done.
+        if (Module._rollback_transfers) {
+          const t = Module._rollback_transfers();
+          if (t !== rbLastTransfers) {
+            rbLastTransfers = t;
+            rbLastActivity = timestamp;
+            if (t > 0) rbWasLinked = true;
+          } else if (rbWasLinked && timestamp - rbLastActivity > RB_IDLE_DISCONNECT_MS) {
+            rbWasLinked = false;
+            if (typeof netShutdown === "function") netShutdown();
+            showToast("Trade complete — link disconnected");
+          }
+        }
+      } else if (netMode) {
+        // Online link: driveNet consumes the shared accumulator. It is ALSO
+        // called from netplay.js the instant a DataChannel message arrives,
+        // so a frame stalled on the peer's reply resumes at network speed
+        // instead of waiting a whole 16 ms RAF interval — without that, the
+        // trade handshake (hundreds of round-trips) crawls at a few fps.
+        driveNet();
+      } else if (linkMode) {
         // 2P link: fixed-rate frames only — rewind/turbo would desync the
         // pair, so their branches (and controls) don't exist here
         let framesRun = 0;

@@ -1,4 +1,5 @@
 import std/[os, hashes, parseopt, strformat, strutils, tables, times]
+import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
 import sdl2/gamecontroller
@@ -10,6 +11,7 @@ import dingbat/common/config
 import dingbat/common/input
 import dingbat/common/rewind
 import dingbat/gba/gba
+import dingbat/gba/netlink
 import dingbat/gb/gb
 import dingbat/frontend/file_explorer
 import dingbat/frontend/config_editor
@@ -108,6 +110,11 @@ proc print_help() =
   echo "  --run-bios       Run the BIOS on startup"
   echo "  --skip-bios      Skip the BIOS on startup (default)"
   echo "  --version        Print version"
+  echo ""
+  echo "Network link (2-player, GBA only — run the same ROM on both sides):"
+  echo "  --listen PORT       Host the link on PORT (this side is unit 0)"
+  echo "  --connect HOST:PORT Join a host's link (this side is unit 1)"
+  echo "  --netlink-delay-ms N  Add N ms of send latency (network simulation)"
 
 proc compile_shader(src: string; shader_type: GLenum): GLuint =
   result = glCreateShader(shader_type)
@@ -195,6 +202,11 @@ proc setup_vao() =
 
 type EmuKind = enum ekNone, ekGBA, ekGB
 
+type LinkSetup = enum
+  lsNone        # no link setup in progress
+  lsListening   # hosting: non-blocking accept polled each frame
+  lsConnecting  # joining: non-blocking connect polled each frame
+
 type AppState = ref object
   cfg:             Config
   gba_emu:         GBA
@@ -223,6 +235,22 @@ type AppState = ref object
   rewind:          Rewind
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
+  # Active 2-player network link (nil = single-player). While non-nil the
+  # local GBA core is driven by netlink.step_frame instead of run_until_frame
+  # so the socket stays pumped and the two sides stay in sync; rewind, frame
+  # advance, turbo and save-state load are suppressed (they would desync).
+  netlink:         NetLink
+  # UI-driven link setup (ImGui "Link Cable" window). No CLI port needed:
+  # the user picks Host or Join at runtime; establishment is non-blocking so
+  # the UI keeps rendering while waiting for a peer.
+  link_window:     bool
+  link_setup:      LinkSetup
+  link_server:     Socket
+  link_client:     Socket
+  link_port:       cint    # ImGui port input (defaults to LINK_DEFAULT_PORT)
+  link_host_buf:   array[64, char]  # ImGui host-address input for joining
+  link_status:     string  # last error / status line shown in the window
+  link_attempts:   int     # join: connect retries spread across frames
   fullscreen:      bool
   enable_overlay:  bool
   last_mouse_tick: uint32
@@ -416,6 +444,8 @@ proc show_menu_bar(): bool =
   result = focused and not mouse_idle
   discard showCursor(result)
 
+proc render_link_window()  # defined below, near the network-link procs
+
 proc render_imgui() =
   # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
   # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
@@ -428,7 +458,8 @@ proc render_imgui() =
      not app.fe.open and not app.ce.open and
      (app.dbg == nil or
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
-     (app.gb_dbg == nil or not app.gb_dbg.any_window_open):
+     (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
+     not app.link_window:
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -507,6 +538,12 @@ proc render_imgui() =
             if fast_forward: app.gb_emu.apu.turbo = false
         if should_reset and app.cfg.recents.len > 0:
           load_rom(app.cfg.recents[0])
+        igSeparator()
+        # Network link: opens the Host/Join window (GBA only). No CLI port
+        # needed — the user picks a role and address at runtime.
+        if igMenuItem_Bool("Link Cable...", nil, app.link_window,
+                           app.emu_kind == ekGBA):
+          app.link_window = not app.link_window
         igEndMenu()
 
       # Audio/Video menu
@@ -609,6 +646,8 @@ proc render_imgui() =
     app.dbg.render_windows()
   if app.gb_dbg != nil:
     app.gb_dbg.render_windows()
+
+  render_link_window()
 
   # Home screen: point out that ROMs can be dragged onto the window (SDL2
   # has no drag-hover event, so a live "release to load" prompt isn't
@@ -725,11 +764,15 @@ proc handle_input() =
           of K_p:
             app.paused = not app.paused
           of K_n:
-            if app.paused and app.emu_kind != ekNone: app.pending_step = true
+            # Frame advance would desync a live link; suppress it there.
+            if app.paused and app.emu_kind != ekNone and app.netlink == nil:
+              app.pending_step = true
           of K_s:
             if app.emu_kind != ekNone: app.pending_save = true
           of K_l:
-            if app.emu_kind != ekNone: app.pending_load = true
+            # Loading a save state mid-link would desync the pair.
+            if app.emu_kind != ekNone and app.netlink == nil:
+              app.pending_load = true
           of K_f:
             app.fullscreen = not app.fullscreen
             let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
@@ -738,13 +781,16 @@ proc handle_input() =
             app.running = false
           else: discard
       elif sym == K_BACKQUOTE:
-        # Hold-to-rewind, core-agnostic
-        app.rewinding = pressed and app.cfg.rewind and app.emu_kind != ekNone
+        # Hold-to-rewind, core-agnostic (disabled while linked — it desyncs)
+        app.rewinding = pressed and app.cfg.rewind and
+                        app.emu_kind != ekNone and app.netlink == nil
       elif app.emu_kind == ekGBA and app.gba_emu != nil:
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
-        elif sym == K_TAB and pressed:
-          # Shift+Tab = 2x speed, Tab = unbounded fast forward; the two are
+        elif sym == K_TAB and pressed and app.netlink == nil:
+          # Turbo/fast-forward are suppressed while linked (they would run
+          # ahead of the peer). Shift+Tab = 2x speed, Tab = unbounded fast
+          # forward; the two are
           # mutually exclusive (fast forward would silently dominate 2x)
           if (mods and KMOD_SHIFT_MASK) != 0:
             app.gba_emu.apu.turbo = not app.gba_emu.apu.turbo
@@ -864,6 +910,228 @@ proc update_fps_title(emulated: bool) =
 
 proc gl_loader(name: cstring): pointer = glGetProcAddress(name)
 
+# ──────────────────────────── Network link ────────────────────────────
+
+proc teardown_netlink() =
+  ## Drop the network link and return the local GBA to single-player: send the
+  ## peer a BYE, drain/close the socket, and swap the RemoteSioDriver back for
+  ## the default no-cable driver so the game sees the cable unplug cleanly.
+  if app.netlink == nil: return
+  try:
+    app.netlink.send_bye()
+    app.netlink.close()
+  except CatchableError:
+    discard  # peer already gone; nothing to flush
+  app.netlink = nil
+  if app.gba_emu != nil:
+    app.gba_emu.set_sio_driver(NullSioDriver())
+
+const LINK_DEFAULT_PORT = 47810
+
+proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
+  ## Run the HELLO handshake over an already-connected socket; on success bind
+  ## the link to the local core (and drop rewind history, which would desync).
+  ## Shared by the CLI flags and the ImGui "Link Cable" window. Returns false
+  ## (closing the socket) on a rejected handshake.
+  try:
+    app.netlink = new_net_link(app.gba_emu, sock, id,
+                               crc32(readFile(current_rom_path())),
+                               delay_ms, allow_crc_mismatch = true)
+    echo "NETLINK: linked as unit ", id, (if id == 0: " (host)" else: " (guest)"),
+         (if delay_ms > 0: ", +" & $delay_ms & " ms send delay" else: "")
+    app.rewind.clear()
+    app.rewinding = false
+    app.link_status = "Linked as " & (if id == 0: "host (unit 0)" else: "guest (unit 1)")
+    app.link_window = false
+    true
+  except NetLinkError as e:
+    echo "NETLINK: handshake failed: ", e.msg
+    app.link_status = "Handshake failed: " & e.msg
+    try: sock.close()
+    except CatchableError: discard
+    false
+
+proc establish_netlink(rom_path: string; listen_port: int; connect_to: string;
+                       delay_ms: int): NetLink =
+  ## Open a TCP link for the desktop app and run the HELLO handshake, mirroring
+  ## the test harness. `--listen` becomes unit 0 (host); `--connect HOST:PORT`
+  ## unit 1 (guest). Returns nil (printing the reason) on any failure so the
+  ## caller falls back to normal single-player. GBA-only; ROM already loaded.
+  if app.emu_kind != ekGBA or app.gba_emu == nil:
+    echo "NETLINK: link mode needs a GBA ROM; continuing single-player"
+    return nil
+  var sock: Socket
+  var id = 0
+  try:
+    if listen_port > 0:
+      let server = newSocket(buffered = false)
+      server.setSockOpt(OptReuseAddr, true)
+      server.bindAddr(Port(listen_port))
+      server.listen()
+      echo "NETLINK: listening on port ", listen_port, " — waiting for peer..."
+      var fds = @[server.getFd()]
+      if selectRead(fds, 120_000) <= 0:
+        echo "NETLINK: no peer connected within 120 s; continuing single-player"
+        server.close()
+        return nil
+      server.accept(sock)
+      server.close()
+      id = 0
+    else:
+      let colon = connect_to.rfind(':')
+      if colon < 0:
+        echo "NETLINK: --connect wants HOST:PORT, got ", connect_to
+        return nil
+      let host = connect_to[0 ..< colon]
+      let port = Port(parseInt(connect_to[colon + 1 .. ^1]))
+      echo "NETLINK: connecting to ", connect_to, " ..."
+      var connected = false
+      for attempt in 0 ..< 40:  # the host may still be starting up
+        sock = newSocket(buffered = false)
+        try:
+          sock.connect(host, port)
+          connected = true
+          break
+        except OSError:
+          sock.close()
+          sleep(250)
+      if not connected:
+        echo "NETLINK: could not connect to ", connect_to,
+             "; continuing single-player"
+        return nil
+      id = 1
+  except OSError as e:
+    echo "NETLINK: socket setup failed: ", e.msg, "; continuing single-player"
+    return nil
+  # Relaxed CRC: same-ROM sessions still match exactly, and cross-version link
+  # games (e.g. Ruby<->Sapphire trades) with differing CRCs link fine.
+  if finish_link(sock, id, delay_ms):
+    result = app.netlink
+  else:
+    echo "NETLINK: continuing single-player"
+    result = nil
+
+proc link_ready(): bool =
+  ## The link menu/window is only usable with a running GBA core.
+  app.emu_kind == ekGBA and app.gba_emu != nil
+
+proc link_cancel_setup() =
+  case app.link_setup
+  of lsListening:
+    try: app.link_server.close()
+    except CatchableError: discard
+  of lsConnecting:
+    if app.link_client != nil:
+      try: app.link_client.close()
+      except CatchableError: discard
+  of lsNone: discard
+  app.link_setup = lsNone
+
+proc link_start_host() =
+  ## Bind + listen (non-blocking); service_link_setup accepts the peer later.
+  if not link_ready():
+    app.link_status = "Load a GBA ROM first"; return
+  try:
+    let server = newSocket(buffered = false)
+    server.setSockOpt(OptReuseAddr, true)
+    server.bindAddr(Port(app.link_port))
+    server.listen()
+    server.getFd().setBlocking(false)
+    app.link_server = server
+    app.link_setup = lsListening
+    app.link_status = ""
+    echo "NETLINK: hosting on port ", app.link_port, " — waiting for a peer"
+  except OSError as e:
+    app.link_status = "Couldn't host on port " & $app.link_port & ": " & e.msg
+
+proc link_start_join() =
+  ## Begin joining; service_link_setup runs the (non-freezing) connect retries.
+  if not link_ready():
+    app.link_status = "Load a GBA ROM first"; return
+  app.link_attempts = 0
+  app.link_setup = lsConnecting
+  app.link_status = ""
+
+proc service_link_setup() =
+  ## Per-frame: poll the pending accept/connect so the UI never blocks while
+  ## waiting for a peer; hand a connected socket to finish_link.
+  case app.link_setup
+  of lsListening:
+    var fds = @[app.link_server.getFd()]
+    if selectRead(fds, 0) > 0:
+      var sock: Socket
+      try:
+        app.link_server.accept(sock)
+        app.link_server.close()
+      except OSError as e:
+        app.link_status = "Accept failed: " & e.msg
+        app.link_setup = lsNone
+        return
+      app.link_setup = lsNone
+      discard finish_link(sock, 0)
+  of lsConnecting:
+    # One blocking connect attempt throttled to ~6/sec. On localhost/LAN a
+    # connect is instant (success or refused), so this does not stall the UI.
+    inc app.link_attempts
+    if app.link_attempts mod 10 != 1: return
+    let host = $cast[cstring](addr app.link_host_buf[0])
+    var sock = newSocket(buffered = false)
+    try:
+      sock.connect(host, Port(app.link_port))
+      app.link_setup = lsNone
+      discard finish_link(sock, 1)
+    except OSError:
+      try: sock.close()
+      except CatchableError: discard
+      if app.link_attempts > 300:  # ~5 s of retries
+        app.link_status = "Couldn't reach " & host & ":" & $app.link_port
+        app.link_setup = lsNone
+  of lsNone: discard
+
+proc render_link_window() =
+  ## The "Link Cable" window: pick Host or Join at runtime — no CLI port.
+  if not app.link_window: return
+  igSetNextWindowSize(ImVec2(x: 340, y: 0), cint(ImGui_Cond_FirstUseEver))
+  if igBegin("Link Cable", addr app.link_window,
+             cint(ImGui_WindowFlags_NoCollapse)):
+    if app.netlink != nil:
+      igText("Connected — %s", cstring(app.link_status))
+      igText("Rewind, turbo and save-state load are paused while linked.")
+      if igButton("Disconnect", ImVec2(x: 0, y: 0)):
+        teardown_netlink()
+        app.link_status = ""
+    elif not link_ready():
+      igText("Load a GBA ROM, then reopen this window to link.")
+    elif app.link_setup == lsListening:
+      igText("Hosting on port %d", cint(app.link_port))
+      igText("Waiting for a friend to join...")
+      igText("They pick Join and enter  your-ip : %d", cint(app.link_port))
+      if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+    elif app.link_setup == lsConnecting:
+      igText("Connecting to %s:%d ...",
+             cstring(cast[cstring](addr app.link_host_buf[0])), cint(app.link_port))
+      if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+    else:
+      igText("Two players, one emulated link cable, over the network.")
+      igSeparator()
+      igSetNextItemWidth(120)
+      discard igInputInt("Port", addr app.link_port, 1, 100, 0)
+      igSeparator()
+      igText("Host — share your address + port with a friend:")
+      if igButton("Host game", ImVec2(x: 0, y: 0)): link_start_host()
+      igSeparator()
+      igText("Join — enter the host's address:")
+      igSetNextItemWidth(200)
+      discard igInputTextWithHint("##link_host", "127.0.0.1",
+        cast[cstring](addr app.link_host_buf[0]), csize_t(app.link_host_buf.len),
+        0, nil, nil)
+      igSameLine(0, -1)
+      if igButton("Join game", ImVec2(x: 0, y: 0)): link_start_join()
+    if app.link_status.len > 0 and app.netlink == nil:
+      igSeparator()
+      igText("%s", cstring(app.link_status))
+  igEnd()
+
 # ──────────────────────────── Main ────────────────────────────
 
 proc main() =
@@ -873,6 +1141,9 @@ proc main() =
   var has_bios_arg = false
   var use_hle        = false
   var hle_after_bios = false
+  var listen_port    = 0
+  var connect_to     = ""
+  var netlink_delay  = 0
   var pos_args: seq[string]
 
   var p = initOptParser(commandLineParams())
@@ -888,6 +1159,20 @@ proc main() =
       of "hle-after-bios": hle_after_bios = true
       of "run-bios":       cli_run_bios = true
       of "skip-bios":  cli_run_bios = false
+      of "listen":
+        # Values may be attached (--listen:PORT) or space-separated (--listen
+        # PORT); pull the next token in the latter case, like the harness.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        listen_port = parseInt(v)
+      of "connect":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        connect_to = v
+      of "netlink-delay-ms":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        netlink_delay = parseInt(v)
       else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
       pos_args.add(p.key)
@@ -995,14 +1280,27 @@ proc main() =
     enable_overlay:  false,
     last_mouse_tick: getTicks(),
     rewind:          new_rewind(),
+    link_port:       LINK_DEFAULT_PORT,
   )
+  # Default the Join address to localhost (2 instances on one machine).
+  let default_host = "127.0.0.1"
+  for i, c in default_host: app.link_host_buf[i] = c
   # GLSL uniforms default to 0/false, so push the configured value now
   apply_color_correction()
+
+  if listen_port > 0 and connect_to.len > 0:
+    echo "Use either --listen or --connect, not both."; system.quit(1)
 
   if rom_path != "":
     if not fileExists(rom_path):
       echo "ROM file not found: ", rom_path; system.quit(1)
     load_rom(rom_path)
+    # Bring up the 2-player network link once the core exists (GBA only).
+    if listen_port > 0 or connect_to.len > 0:
+      app.netlink = establish_netlink(rom_path, listen_port, connect_to,
+                                      netlink_delay)
+  elif listen_port > 0 or connect_to.len > 0:
+    echo "NETLINK: --listen/--connect need a ROM path; ignoring"
 
   # The UI (ImGui + present) runs at the display's refresh rate, decoupled
   # from emulation speed in both directions:
@@ -1036,7 +1334,7 @@ proc main() =
     # frame regardless of queue depth
     let stepping = app.paused and app.pending_step
     app.pending_step = false
-    if app.rewinding and app.emu_kind != ekNone:
+    if app.rewinding and app.emu_kind != ekNone and app.netlink == nil:
       # Step history backward at a fixed cadence (~30 pops/s of 10-frame
       # snapshots ≈ 5x realtime). Applying a snapshot restores the serialized
       # framebuffer, so presenting it shows the rewound frame directly.
@@ -1058,14 +1356,28 @@ proc main() =
       case app.emu_kind
       of ekGBA:
         if app.gba_emu != nil and (stepping or not app.gba_emu.apu.audio_ahead()):
-          app.gba_emu.run_until_frame()
-          emulated = true
+          if app.netlink != nil:
+            # Linked: advance through the netlink so the socket is pumped and
+            # the two sides stay in lockstep. On the peer leaving or a link
+            # error, tear the link down and keep running single-player.
+            try:
+              app.netlink.step_frame()
+              emulated = true
+            except NetLinkError as e:
+              echo "NETLINK: link lost: ", e.msg, " — continuing single-player"
+              teardown_netlink()
+            if app.netlink != nil and app.netlink.peer_done:
+              echo "NETLINK: peer disconnected — continuing single-player"
+              teardown_netlink()
+          else:
+            app.gba_emu.run_until_frame()
+            emulated = true
       of ekGB:
         if app.gb_emu != nil and (stepping or not app.gb_emu.apu.audio_ahead()):
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
-      if emulated and app.cfg.rewind:
+      if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
         of ekGBA:
           discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())
@@ -1098,6 +1410,7 @@ proc main() =
           pace_min_q = uint32.high
           pace_max_q = 0
     handle_input()
+    service_link_setup()  # non-blocking accept/connect for the Link window
     let now = getTicks()
     var presented = false
     if now - last_present >= present_interval:

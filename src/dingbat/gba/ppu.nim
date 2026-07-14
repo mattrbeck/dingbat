@@ -42,8 +42,6 @@ proc new_ppu*(gba: GBA): PPU =
   result.bldcnt  = BLDCNT()
   result.bldalpha = BLDALPHA()
   result.bldy    = BLDY()
-  for i in 0..3:
-    result.layer_palettes[i] = newSeq[byte](240)
   for i in 0..239:
     result.sprite_pixels[i] = SPRITE_PIXEL_DEFAULT
   result.render_dirty = true
@@ -437,16 +435,21 @@ proc compute_line_enables*(ppu: PPU) =
                          uint16(ppu.winin.window_0_enable_bits) and dbg_mask,
                          ppu.winin.window_0_color_special_effect)
 
-proc compute_prio_bgs*(ppu: PPU) =
-  # BGs that can contribute this scanline, grouped by priority, in BG-index
-  # order (hardware picks the lower BG number at equal priority). BGs disabled
-  # in DISPCNT never render (their layer_palettes stay 0), so skip them here.
-  for p in 0 .. 3: ppu.prio_count[p] = 0
-  for bg in 0 .. 3:
-    if bit(uint16(ppu.dispcnt), 8 + bg) and bit(ppu.debug_layer_mask, bg):
-      let p = int(ppu.bgcnt[bg].priority)
-      ppu.prio_bgs[p][ppu.prio_count[p]] = int8(bg)
-      inc ppu.prio_count[p]
+proc compute_layer_walk*(ppu: PPU) =
+  # BGs that can contribute this scanline, flattened into a single list in
+  # compositing order: priority first, then BG index (hardware picks the
+  # lower BG number at equal priority). BGs disabled in DISPCNT never render
+  # (their layer_palettes stay 0), so skip them here. Sprites are merged into
+  # the walk by comparing their per-pixel priority against each entry's.
+  var n = 0
+  for p in 0 .. 3:
+    for bg in 0 .. 3:
+      if int(ppu.bgcnt[bg].priority) == p and
+         bit(uint16(ppu.dispcnt), 8 + bg) and bit(ppu.debug_layer_mask, bg):
+        ppu.walk_bgs[n]   = int8(bg)
+        ppu.walk_prios[n] = int8(p)
+        inc n
+  ppu.walk_n = n
 
 # SWAR helpers: spread the three 5-bit BGR555 channels into separate 16-bit
 # lanes of a uint64 so all three can be scaled/added/saturated at once
@@ -488,37 +491,41 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
 proc next_layer(ppu: PPU; pram_u16: ptr UncheckedArray[uint16];
                 enable_bits: uint16; col: int;
                 pos: var int): tuple[layer: int, color: uint16, blends: bool] =
-  ## Walk the layers in priority order starting at `pos` and return the next
-  ## opaque pixel; layer 5 is the backdrop. `pos` encodes (priority, slot)
-  ## as priority*8 + slot, where slot 0 is the sprite layer and slots 1..n
-  ## are the BGs of that priority, so a caller can resume the walk to find
-  ## the second layer for blending.
-  let sprite_pal  = int(ppu.sprite_pixels[col].palette)
-  let sprite_prio = int(ppu.sprite_pixels[col].priority)
-  let sprite_on   = bit(enable_bits, 4) and sprite_pal != 0
-  while pos < 32:
-    let priority = pos shr 3
-    let slot     = pos and 7
-    inc pos
-    if slot == 0:
-      if sprite_on and sprite_prio == priority:
-        return (4, pram_u16[0x100 + sprite_pal], ppu.sprite_pixels[col].blends)
-    elif slot - 1 < ppu.prio_count[priority]:
-      let bg = int(ppu.prio_bgs[priority][slot - 1])
-      if bit(enable_bits, bg):
-        if ppu.bitmap_direct and bg == 2:
-          if ppu.bg2_direct_opaque[col]:
-            return (2, ppu.bg2_direct[col], false)
-        else:
-          let palette = int(ppu.layer_palettes[bg][col])
-          if palette != 0:
-            return (bg, pram_u16[palette], false)
-    else:
-      pos = (priority + 1) shl 3  # no more BGs at this priority
+  ## Scan the flattened layer walk starting at `pos` and return the next
+  ## opaque pixel; layer 5 is the backdrop. `pos` encodes the walk index in
+  ## its upper bits and "sprite already taken" in bit 0, so a caller can
+  ## resume the walk to find the second layer for blending. The sprite layer
+  ## sits in front of the first walk entry whose priority is >= the sprite's
+  ## (slot 0 of each priority on hardware).
+  let sp = ppu.sprite_pixels[col]
+  var sprio = 4
+  if (pos and 1) == 0 and bit(enable_bits, 4) and sp.palette != 0:
+    sprio = int(sp.priority)
+  let taken = pos and 1
+  var idx = pos shr 1
+  while idx < ppu.walk_n:
+    if sprio <= int(ppu.walk_prios[idx]):
+      pos = (idx shl 1) or 1
+      return (4, pram_u16[0x100 + int(sp.palette)], sp.blends)
+    let bg = int(ppu.walk_bgs[idx])
+    inc idx
+    if bit(enable_bits, bg):
+      if ppu.bitmap_direct and bg == 2:
+        if ppu.bg2_direct_opaque[col]:
+          pos = (idx shl 1) or taken
+          return (2, ppu.bg2_direct[col], false)
+      else:
+        let palette = int(ppu.layer_palettes[bg][col])
+        if palette != 0:
+          pos = (idx shl 1) or taken
+          return (bg, pram_u16[palette], false)
+  pos = (idx shl 1) or 1
+  if sprio < 4:
+    return (4, pram_u16[0x100 + int(sp.palette)], sp.blends)
   (5, pram_u16[0], false)
 
 proc composite*(ppu: PPU; row_base: uint32) =
-  ppu.compute_prio_bgs()
+  ppu.compute_layer_walk()
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let windows_active = ppu.dispcnt.window_0_display or
                        ppu.dispcnt.window_1_display or
@@ -529,27 +536,29 @@ proc composite*(ppu: PPU; row_base: uint32) =
     # color math can apply, so the first opaque pixel in priority order wins
     let obj_enable = bit(uint16(ppu.dispcnt.default_enable_bits), 4) and
                      bit(ppu.debug_layer_mask, 4)
+    let walk_n = ppu.walk_n
     for col in 0 .. 239:
-      let sprite_pal = int(ppu.sprite_pixels[col].palette)
-      let sprite_prio = int(ppu.sprite_pixels[col].priority)
-      let sprite_vis = obj_enable and sprite_pal != 0
+      let sp = ppu.sprite_pixels[col]
+      var sprio = 4
+      if obj_enable and sp.palette != 0: sprio = int(sp.priority)
       var color = pram_u16[0]
       block found:
-        for priority in 0 .. 3:
-          if sprite_vis and sprite_prio == priority:
-            color = pram_u16[0x100 + sprite_pal]
+        for i in 0 ..< walk_n:
+          if sprio <= int(ppu.walk_prios[i]):
+            color = pram_u16[0x100 + int(sp.palette)]
             break found
-          for i in 0 ..< ppu.prio_count[priority]:
-            let bg = int(ppu.prio_bgs[priority][i])
-            if ppu.bitmap_direct and bg == 2:
-              if ppu.bg2_direct_opaque[col]:
-                color = ppu.bg2_direct[col]
-                break found
-            else:
-              let palette = int(ppu.layer_palettes[bg][col])
-              if palette != 0:
-                color = pram_u16[palette]
-                break found
+          let bg = int(ppu.walk_bgs[i])
+          if ppu.bitmap_direct and bg == 2:
+            if ppu.bg2_direct_opaque[col]:
+              color = ppu.bg2_direct[col]
+              break found
+          else:
+            let palette = int(ppu.layer_palettes[bg][col])
+            if palette != 0:
+              color = pram_u16[palette]
+              break found
+        if sprio < 4:
+          color = pram_u16[0x100 + int(sp.palette)]
       ppu.framebuffer[row_base + uint32(col)] = color
   else:
     if windows_active:

@@ -5,6 +5,8 @@ import dingbat/common/rewind
 import dingbat/common/scheduler
 import dingbat/gba/gba
 import dingbat/gba/link
+import dingbat/gba/rollback
+import dingbat/gba/netcore
 import dingbat/gb/gb
 
 const GBA_W = 240
@@ -43,6 +45,24 @@ var stateWindow:   WindowPtr   = nil
 var stateRenderer: RendererPtr = nil
 var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
+
+# --- Online link mode (multiplayer phase 3b) state ---
+# A single local GBA core linked to a remote peer: JS shuttles linkproto
+# wire bytes between netlink_feed/netlink_drain and a WebRTC DataChannel.
+# Globals follow the module-scope rule below (rewindHistory): nil/empty
+# here, only ever allocated from JS-invoked procs. Full implementation
+# after initFromEmscripten.
+var stateNet: NetCore = nil
+# Speculative rollback is opt-in for now (proven bit-identical to the blocking
+# path in the native tests, but the interactive Emerald trade is unverified):
+# JS enables it from a ?speculative=1 URL param before netlink_init/attach.
+var specEnabled = false
+
+proc netlink_set_speculative(on: cint) {.exportc.} =
+  specEnabled = on != 0
+var netOut: string = ""       # drained frames awaiting pickup by JS
+var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
+var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
 
 # LCD color correction matching the desktop game shader exactly: linearize
 # with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2. SDL's renderer
@@ -136,6 +156,7 @@ proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
   ## corruption — the reason is echoed to the log) with the core untouched.
   if data == nil or len <= 0: return 0
+  if stateNet != nil: return 0  # loading a state mid-link would desync the pair
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   let ok = case stateKind
@@ -147,6 +168,7 @@ proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
 proc benchFrames(n: cint) {.exportc.} =
   ## Run emulation frames without presenting; lets the JS side measure how
   ## much of a frame is emulation vs the LUT convert + texture upload path.
+  if stateNet != nil: return  # free-running past the peer would desync
   case stateKind
   of ekGBA:
     for _ in 0 ..< n: stateGba.step_frame()
@@ -162,6 +184,12 @@ proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   let inp = Input(inputId)
   let down = pressed != 0
+  # While an online link is live, route input through the netcore so a
+  # speculative rollback replays the exact press timing (note_input just
+  # applies the press when speculation is off, so this is always safe).
+  if stateNet != nil:
+    stateNet.note_input(inp, down)
+    return
   case stateKind
   of ekGBA: stateGba.handle_input(inp, down)
   of ekGB:  stateGb.handle_input(inp, down)
@@ -199,6 +227,7 @@ var rewindHistory: Rewind = nil
 
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
+  if stateNet != nil: return  # online link mode: netlink_tick drives frames
   inc frameCount
   case stateKind
   of ekGBA:
@@ -278,6 +307,9 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   ## independent battery saves for the same game (trading needs both).
   ## Returns 1 on success.
   link_exit()
+  stateNet = nil  # entering 2P mode tears down any online link session
+  netOut.setLen(0)
+  netErrorMsg.setLen(0)
   # Tear down any running single-core session (mirrors initFromEmscripten)
   if stateGb != nil:
     stateGb.cartridge.mbc_save()
@@ -342,9 +374,167 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   stateLink.cores[player].handle_input(Input(inputId), pressed != 0)
 
+# --- Input-rollback online play (multiplayer phase 3c) ---
+# Both cores run locally (like 2P link); only the two players' per-frame input
+# bitmasks cross the network. JS drives one frame per RAF via rollback_tick,
+# ships the returned frame's input to the peer, and feeds arriving peer inputs
+# via rollback_feed. The RollbackSession predicts + rolls back internally
+# (gba/rollback.nim). Determinism: identical build/ROM/save + deterministic RTC.
+var stateRollback: RollbackSession = nil
+var rbLocal = 0
+var rbEpoch: int64 = 0
+
+proc wrap_rollback_audio(core: GBA; alwaysMute: bool) =
+  ## Mute a core's APU samples: `alwaysMute` (the remote player's core) is always
+  ## silent; otherwise (the local core) it is silent only while re-simulating
+  ## rolled-back frames, whose audio already played on the forward pass. A proc
+  ## (not an inline loop) so each wrapper captures its OWN `orig` — an inline
+  ## for-loop closure would alias the last iteration's binding.
+  let orig = core.scheduler.dispatch
+  core.scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample and
+       (alwaysMute or (stateRollback != nil and stateRollback.replaying)):
+      audioSuppressed = true
+      orig(kind)
+      audioSuppressed = false
+    else:
+      orig(kind)
+
+proc rollback_render() =
+  ## Convert the LOCAL player's framebuffer to RGBA for blitting (the peer sees
+  ## their own game). Skipped mid-replay — only the settled frame is shown.
+  if stateRollback == nil: return
+  let core = stateRollback.link.cores[rbLocal]
+  let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
+  for i in 0 ..< GBA_W * GBA_H:
+    linkRgba[rbLocal][i] = colorLut[fb[i] and 0x7FFF]
+
+proc rollback_exit() {.exportc.} =
+  if stateRollback != nil:
+    for core in stateRollback.link.cores:
+      core.storage.write_save()
+    stateRollback = nil
+  audioSuppressed = false
+
+proc rollback_exit_to_single(): cint {.exportc.} =
+  ## Leave the session but KEEP PLAYING: promote this peer's core (with all its
+  ## post-trade progress) to the single-player core, so disconnecting continues
+  ## seamlessly instead of dropping to a blank screen. Unplugs its cable (null
+  ## driver), drops the peer's core + the link. Returns 1 on success; JS then
+  ## clears rollback mode and the normal single-core RAF branch takes over.
+  if stateRollback == nil: return 0
+  let core = stateRollback.link.cores[rbLocal]
+  core.storage.write_save()
+  core.set_sio_driver(NullSioDriver())  # cable unplugged — back to solo play
+  stateRollback = nil
+  audioSuppressed = false
+  stateGba = core
+  stateKind = ekGBA
+  # Recreate the SDL texture rollback_init destroyed — loop_tick bails without it,
+  # so the solo game would freeze on a stale frame after disconnect.
+  if stateTexture != nil: destroyTexture(stateTexture)
+  stateTexture = stateRenderer.createTexture(
+    SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
+  rgbaBuffer.setLen(GBA_W * GBA_H)
+  discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
+  1
+
+proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
+                   epoch: cdouble): cint {.exportc.} =
+  ## Start an online input-rollback session. rom1/rom2 hold each player's ROM
+  ## bytes under distinct names (own .sav each); `localPlayer` (0/1) is which
+  ## core this peer's buttons drive; `epoch` is the shared UTC unix-seconds RTC
+  ## seed both peers must pass identically. Returns 1 on success.
+  rollback_exit()
+  link_exit()
+  stateNet = nil
+  netOut.setLen(0); netErrorMsg.setLen(0)
+  if stateGb != nil: stateGb.cartridge.mbc_save()
+  stateKind = ekNone
+  stateGba = nil; stateGb = nil
+  rewindHistory = nil
+  if stateTexture != nil:
+    destroyTexture(stateTexture); stateTexture = nil
+  if localPlayer < 0 or localPlayer > 1: return 0
+  rbLocal = int(localPlayer)
+  rbEpoch = int64(epoch)
+  let bios = if fileExists("bios.bin"): "bios.bin" else: ""
+  var cores: seq[GBA] = @[]
+  for path in [$rom1_path, $rom2_path]:
+    if not fileExists(path): return 0
+    let core = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    core.post_init()
+    core.enable_deterministic_rtc(int64(epoch))
+    cores.add(core)
+  # Audio: play only the LOCAL core, and nothing while re-simulating rolled-back
+  # frames (they were already heard on the forward pass).
+  wrap_rollback_audio(cores[rbLocal], alwaysMute = false)
+  wrap_rollback_audio(cores[1 - rbLocal], alwaysMute = true)
+  stateRollback = new_rollback_session(new_link(cores), rbLocal, 12)
+  for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
+  frameCount = 0
+  1
+
+proc rollback_tick(localBits: cint): cint {.exportc.} =
+  ## Advance one presentation frame with the local input + prediction. Returns
+  ## the frame index just simulated (ship it to the peer with `localBits`), or
+  ## -1 if stalled at the prediction window. Renders the local core.
+  if stateRollback == nil: return -1
+  let st = stateRollback.tick(uint16(localBits))
+  if st == rbStalled: return -1
+  inc frameCount
+  rollback_render()
+  var evt = defaultEvent
+  while pollEvent(evt): discard
+  cint(stateRollback.head - 1)
+
+proc rollback_feed(frame, bits: cint) {.exportc.} =
+  ## Ingest a peer input (may trigger a rollback + re-simulation internally).
+  if stateRollback == nil or frame < 0: return
+  stateRollback.feed_remote(int(frame), uint16(bits))
+
+proc rollback_fb_ptr(): pointer {.exportc.} =
+  ## The local player's RGBA framebuffer (call rollback_render first / after tick).
+  if stateRollback == nil: return nil
+  addr linkRgba[rbLocal][0]
+
+proc rollback_head(): cint {.exportc.} =
+  if stateRollback == nil: -1 else: cint(stateRollback.head)
+
+proc rollback_confirmed(): cint {.exportc.} =
+  if stateRollback == nil: -1 else: cint(stateRollback.confirmed)
+
+proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc.} =
+  ## Seed core `player` from a full save-state (same bytes as a .state file) so
+  ## the session CONTINUES from where each player was, instead of rebooting. Must
+  ## be called BEFORE the first tick (before any checkpoint is captured). The
+  ## deterministic RTC is re-applied afterward — the loaded state carries the
+  ## single-player wall-clock RTC, which would desync. Returns 1 on success.
+  if stateRollback == nil or player < 0 or player > 1 or data == nil or len <= 0:
+    return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  let core = stateRollback.link.cores[int(player)]
+  if not core.load_state_bytes(image): return 0
+  core.enable_deterministic_rtc(rbEpoch)  # both peers agree on this clock
+  1
+
+proc rollback_transfers(): cint {.exportc.} =
+  ## Monotonic count of SIO transfers driven on the emulated cable. A linked game
+  ## fires these continuously (timer-paced) to stay synced and STOPS when it
+  ## closes the link, so JS watches this for "no activity for a while ⇒ done" —
+  ## reliable across games, unlike the SIO mode register which stays latched in
+  ## multi mode after a game is finished (why the mode-based check never fired).
+  if stateRollback == nil: return 0
+  cint(stateRollback.link.transfers and 0x7fffffff)
+
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session
   link_exit()
+  # Leaving online link mode: drop the protocol core (JS closes the channel)
+  stateNet = nil
+  netOut.setLen(0)
+  netErrorMsg.setLen(0)
   # Flush the outgoing GB cart's battery save before replacing it
   if stateGb != nil:
     stateGb.cartridge.mbc_save()
@@ -364,6 +554,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
+    curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
     let bios = if fileExists("bios.bin"): "bios.bin" else: ""
     stateGba = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
     stateGba.post_init()
@@ -373,6 +564,188 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
   rewindHistory = new_rewind()
+
+# --- Online link mode (multiplayer phase 3b, web side) ---
+# One local GBA core linked to a remote peer over whatever byte transport
+# JS provides (a WebRTC DataChannel in the web UI). The protocol state
+# machine is gba/netcore.nim — the same implementation the native TCP
+# transport wraps. JS shuttles wire bytes with netlink_feed/netlink_drain
+# and drives frames with netlink_tick instead of loop_tick; rendering,
+# audio, and input all reuse the single-core paths (each side renders only
+# its own core).
+
+proc net_collect() =
+  # Move frames the protocol core queued into the JS-visible drain buffer.
+  if stateNet == nil: return
+  for f in stateNet.take_outgoing():
+    netOut.add f
+
+proc netlink_init(rom_path: cstring; is_host: cint;
+                  allow_crc_mismatch: cint): cint {.exportc.} =
+  ## Start online link mode on a GBA ROM already written to the FS. Sets up
+  ## the usual single-core session, then binds the network protocol core to
+  ## it (host = unit 0, the multi-mode parent). Our HELLO is queued
+  ## immediately — drain and send it once the channel opens. With
+  ## allow_crc_mismatch, differing ROM CRCs are accepted and reported via
+  ## netlink_crc_mismatch (cross-version trades, e.g. Ruby<->Sapphire);
+  ## the UI should warn + confirm before ticking. Returns 1 on success.
+  initFromEmscripten(rom_path)  # also tears down any previous session
+  if stateKind != ekGBA: return 0
+  rewindHistory = nil  # rewinding one side would desync the pair
+  let rom = readFile($rom_path)
+  stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
+                          rom_crc = crc32(rom),
+                          strict_crc = allow_crc_mismatch == 0,
+                          lead = NETLINK_LEAD_RAF,
+                          speculative = specEnabled)
+  net_collect()
+  frameCount = 0
+  1
+
+proc gba_awaiting_link(): cint {.exportc.} =
+  ## 1 when a running, un-linked GBA game is sitting in multi-player serial
+  ## mode — i.e. it walked up to a Cable Club / Union Room and is polling a
+  ## link port with no cable attached. GBA games only enter this SIO mode to
+  ## link, so it is a reliable "wants a partner" signal for the mid-game
+  ## "link cable detected" badge. Returns 0 once online mode is active.
+  if stateNet != nil or stateKind != ekGBA or stateGba == nil: return 0
+  if stateGba.serial.sio_mode() == smMulti: 1 else: 0
+
+proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
+  ## Bind the network protocol core to the ALREADY-RUNNING GBA core, without
+  ## the reboot netlink_init does — the game keeps its exact state, and its
+  ## next link-cable poll finds a partner. The link clock is rebaselined to
+  ## the core's current cycle so both sides start near zero; the bounded-lead
+  ## sync absorbs whatever skew remains. Returns 1 on success.
+  if stateKind != ekGBA or stateGba == nil or stateNet != nil: return 0
+  if curRomPath.len == 0 or not fileExists(curRomPath): return 0
+  rewindHistory = nil  # rewinding one side would desync the pair
+  let rom = readFile(curRomPath)
+  stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
+                          rom_crc = crc32(rom),
+                          strict_crc = allow_crc_mismatch == 0,
+                          lead = NETLINK_LEAD_RAF,
+                          speculative = specEnabled)
+  stateNet.rebaseline()
+  # A multi-mode transfer left mid-flight by the no-cable driver is stuck
+  # busy with no completion scheduled; clear it so the game's link retry
+  # re-initiates cleanly through the remote driver (it is polling for
+  # exactly that). No data is latched — the real exchange happens on retry.
+  if (stateGba.serial.siocnt and 0x0080'u16) != 0:
+    stateGba.serial.siocnt = stateGba.serial.siocnt and not 0x0080'u16
+  net_collect()
+  1
+
+proc netlink_exit() {.exportc.} =
+  ## Leave online mode: queue BYE for the peer, flush the battery save, and
+  ## keep the local game running unlinked (it sees a yanked cable). JS must
+  ## drain once more after this to actually deliver the BYE, then close the
+  ## channel and switch the RAF driver back to loop_tick.
+  if stateNet == nil: return
+  stateNet.send_bye(LINK_BYE_SHUTDOWN)
+  net_collect()
+  stateNet = nil
+  if stateGba != nil:
+    stateGba.set_sio_driver(NullSioDriver())
+    stateGba.storage.write_save()
+  rewindHistory = new_rewind()
+
+proc netlink_feed(data: pointer; len: cint): cint {.exportc.} =
+  ## Ingest wire bytes from the transport (any chunking). A REPLY landing
+  ## here can unpark a stalled transfer completion. Returns 0 on a corrupt
+  ## stream (sticky error; see netlink_error_msg).
+  if stateNet == nil or data == nil or len <= 0: return 0
+  try:
+    stateNet.feed(cast[ptr UncheckedArray[char]](data)
+                  .toOpenArray(0, int(len) - 1))
+    net_collect()
+    1
+  except LinkProtoError as e:
+    netErrorMsg = e.msg
+    0
+
+proc netlink_drain(buf: pointer; cap: cint): cint {.exportc.} =
+  ## Copy up to cap pending outbound wire bytes into buf; returns the count
+  ## (0 = nothing pending). Call after every tick/feed and send on the
+  ## DataChannel.
+  net_collect()
+  if netOut.len == 0 or buf == nil or cap <= 0: return 0
+  let n = min(netOut.len, int(cap))
+  copyMem(buf, addr netOut[0], n)
+  if n == netOut.len:
+    netOut.setLen(0)
+  else:
+    netOut = netOut[n .. ^1]
+  cint(n)
+
+proc netlink_tick(): cint {.exportc.} =
+  ## Drive one RAF tick of online link mode. Returns:
+  ##   0 = handshake pending (feed more, don't render)
+  ##   1 = a frame completed and was presented
+  ##   2 = stalled waiting for the peer (emulated clock parked mid-frame;
+  ##       keep the RAF loop running, show the indicator, feed on arrival)
+  ##   3 = failed (handshake rejection or corrupt stream; netlink_error_msg)
+  ##   4 = not in online link mode
+  if stateNet == nil: return 4
+  if netErrorMsg.len > 0: return 3
+  if stateNet.hello == hsFailed:
+    netErrorMsg = stateNet.hello_error
+    return 3
+  var r = stateNet.try_advance()
+  while r == naProgress:
+    r = stateNet.try_advance()
+  net_collect()
+  case r
+  of naHello:
+    0
+  of naStalled:
+    2
+  of naFrame:
+    inc frameCount
+    if not stateGba.ppu.frame_static:
+      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                        GBA_W * GBA_H, GBA_W * 4)
+    checkInput()
+    stateRenderer.clear()
+    discard stateRenderer.copy(stateTexture, nil, nil)
+    stateRenderer.present()
+    1
+  of naProgress:
+    1  # unreachable: the loop above only exits on the other results
+
+proc netlink_stalled(): cint {.exportc.} =
+  ## 1 while the emulated clock is parked waiting for the peer (frontends
+  ## surface "waiting for peer").
+  if stateNet != nil and stateNet.stalled: 1 else: 0
+
+proc netlink_peer_done(): cint {.exportc.} =
+  ## 1 once the peer sent BYE (it left the session; we keep running).
+  if stateNet != nil and stateNet.peer_done: 1 else: 0
+
+proc netlink_crc_mismatch(): cint {.exportc.} =
+  ## 1 when the handshake accepted a differing ROM CRC (relaxed mode); the
+  ## UI warns + confirms before play starts.
+  if stateNet != nil and stateNet.crc_mismatch: 1 else: 0
+
+proc netlink_error_msg(): cstring {.exportc.} =
+  ## Sticky failure reason after netlink_tick/netlink_feed reported one.
+  cstring(netErrorMsg)
+
+var netDebugStr: string = ""
+
+proc netlink_debug(): cstring {.exportc.} =
+  ## Diagnostic snapshot of the protocol core (shown in the web log).
+  netDebugStr = if stateNet != nil: stateNet.debug_state() else: "no session"
+  cstring(netDebugStr)
+
+proc wasm_ew16(offset: cint): cint {.exportc.} =
+  ## Debug/test hook: read a halfword from board WRAM (EWRAM). The linktest
+  ## ROM acceptance contract lives at fixed EWRAM offsets (0x800 = 0xCAFE
+  ## when finished); browser acceptance tests poll this.
+  if stateGba == nil or offset < 0 or int(offset) + 1 >= stateGba.bus.wram_board.len:
+    return 0
+  cint(uint16(stateGba.bus.wram_board[offset]) or
+       (uint16(stateGba.bus.wram_board[offset + 1]) shl 8))
 
 when defined(emscripten):
   # Register a dummy main loop so SDL2's emscripten backend can call

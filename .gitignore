@@ -26,6 +26,10 @@ web/rom.gbc
 /dingbat_test
 /dingbat_test_runner
 /dingbat_bench
+/trade_repro
+
+# Generated SRAM backing for test ROMs (created at runtime, not a fixture)
+tests/roms/*.sav
 
 # Claude Code local state
 .claude/

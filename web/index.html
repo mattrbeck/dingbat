@@ -71,6 +71,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>
             <span>Controls</span>
           </button>
+          <button type="button" class="menu-item" id="net-connect" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
+            <span>Link Cable</span>
+          </button>
           <hr class="menu-sep" id="menu-volume-sep" />
           <div class="menu-volume" id="menu-volume">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
@@ -103,6 +107,12 @@
         </button>
         <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward (unbounded)" aria-label="Fast Forward (unbounded)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6v12l6.5-6zM9 6v12l6.5-6zM16 6v12l6.5-6z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <!-- Online link: shown only in rollback mode, where the speed/state
+             controls are hidden (they'd desync the pair). -->
+        <button type="button" id="rb-disconnect" aria-label="Disconnect link cable">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
+          <span>Disconnect<span class="rb-dc-suffix"> Link Cable</span></span>
         </button>
       </div>
 
@@ -198,6 +208,11 @@
         <div id="log-entries"></div>
       </div>
 
+      <!-- Online link: shown while the emulated clock waits on the peer -->
+      <div id="net-stall" hidden aria-live="polite">
+        <span aria-hidden="true">&#8987;</span> waiting for peer
+      </div>
+
       <div id="toast" role="status" aria-live="polite"></div>
     </main>
 
@@ -271,6 +286,27 @@
       </div>
     </div>
 
+    <div id="net-modal" class="modal-overlay">
+      <div class="modal">
+        <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
+        <h3 id="net-title">Connect link cable</h3>
+        <div id="net-connect-view">
+          <p>Agree on a code with your friend and both type it in.</p>
+          <div class="net-join-row">
+            <div class="net-input-wrap">
+              <input id="net-code-input" type="text" name="linkcode" inputmode="latin"
+                     autocomplete="off" autocorrect="off" autocapitalize="characters"
+                     spellcheck="false" maxlength="12" placeholder="e.g. ABC123"
+                     aria-label="Link code" />
+              <span id="net-spinner" class="net-spinner" hidden aria-hidden="true"></span>
+            </div>
+            <button type="button" class="button button-primary" id="net-join-go">Connect</button>
+          </div>
+          <p id="net-status" class="net-status" aria-live="polite"></p>
+        </div>
+      </div>
+    </div>
+
     <!-- ====================== On-screen gamepad ====================== -->
     <div id="controls">
       <div id="lr">
@@ -304,6 +340,7 @@
     </div>
 
     <script src="index.js"></script>
+    <script src="netplay.js"></script>
     <script src="em.js"></script>
   </body>
 </html>

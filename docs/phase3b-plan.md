@@ -1,5 +1,47 @@
 # Phase 3b: internet play in the browser with room codes — implementation plan
 
+> **STATUS: implemented (2026-07-11).** All five work items landed. What
+> shipped and where:
+> - **Event-driven core** — `src/dingbat/gba/netcore.nim`: the whole
+>   transport-independent protocol state machine (`feed`/`take_outgoing`/
+>   `try_advance` returning `naProgress`/`naFrame`/`naStalled`/`naHello`).
+>   `netlink.nim` is now a thin native-TCP wrapper over it; both native
+>   acceptance gates still PASS. Per-side bounded lead is a constructor
+>   parameter: `NETLINK_LEAD` (16384) for the pumped socket,
+>   `NETLINK_LEAD_RAF` (3 frames) for the browser — a 1 ms lead throttles a
+>   once-per-RAF transport to ~6% speed (see that constant's comment).
+> - **Wasm exports** — `dingbat_wasm.nim`: `netlink_init(rom, is_host,
+>   allow_crc_mismatch)`, `netlink_feed/drain/tick/stalled/peer_done/
+>   crc_mismatch/error_msg/exit`, plus `wasm_ew16` (linktest EWRAM probe)
+>   and `netlink_debug`.
+> - **JS transport bridge** — `web/netplay.js`: `RTCPeerConnection` +
+>   reliable/ordered DataChannel carrying raw linkproto frames; STUN-only;
+>   `?linkdelay=NN` latency knob; `?signal=URL` override.
+> - **Signaling** — `web/signaling/server.js`: zero-dependency Node
+>   WebSocket rendezvous (`node server.js [port]`, default 8790), 6-char
+>   single-use codes, 10-min TTL.
+> - **UI** — HOST / JOIN tiles next to 2P; room-code modal; `body.net-mode`
+>   hides desync/reset-hazard controls; `#net-stall` "waiting for peer"
+>   badge; peer-disconnect keeps the local game running; relaxed-CRC warn +
+>   confirm for cross-version trades.
+>
+> **Decisions taken** (see the "Decisions for the owner" section below for
+> the menu): local signaling server is the reference; the deployed URL is
+> a deferred ops choice (default guesses `wss://<host>/signal`). **STUN
+> only** for v1 (clear "could not connect peer-to-peer" error). **WebRTC-
+> first** as planned. Native room-join **out of scope**. **GBA-only.** CRC
+> check **relaxed to warn+confirm** for the web (games negotiate their own
+> compatibility), **strict** for the linktest harness (`strict_crc`).
+>
+> **Acceptance evidence:** native `--mode=linktest` and two-process
+> `--mode=netlink` (localhost + `--netlink-delay-ms 50`) PASS; mGBA suite
+> 6734/7218 both BIOS configs; state roundtrip MATCH; `nimble wasm` builds.
+> Browser (two contexts + local signaling): linktest ROM reaches
+> `EWRAM[0x800]==0xCAFE` with all 16 rounds correct, plain and with
+> `?linkdelay=50`; Pokémon Emerald same-version link runs at full frame
+> rate into the overworld with each side on its own save; the cross-version
+> (Ruby↔Emerald) relaxed-CRC confirm fires on both sides.
+
 Handoff document for the implementing agent. Prerequisites are all on main:
 the wire protocol (`src/dingbat/common/linkproto.nim`, spec in
 `multiplayer.md` §3a), the native TCP reference implementation
