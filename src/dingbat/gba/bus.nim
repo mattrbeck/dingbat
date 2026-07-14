@@ -209,6 +209,11 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       bus.bios[address and 0x3FFF'u32]
+    elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
+      # Page-0 out-of-bounds (00004000-00FFFFFF) is unused memory, not BIOS:
+      # a CPU read returns the open-bus value (the prefetched opcode), not the
+      # protected-BIOS latch (GBATEK "Reading from Unused Memory").
+      bus.read_open_bus_value(address)
     else:
       # BIOS reads are latched to last successful read
       # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
@@ -241,6 +246,9 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u16_ptr(bus.bios, address and 0x3FFF'u32)
+    elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
+      # Page-0 out-of-bounds is unused memory (open bus), not protected BIOS.
+      uint16(bus.read_open_bus_value(address)) or (uint16(bus.read_open_bus_value(address or 1)) shl 8)
     else:
       # BIOS reads are latched to last successful read
       # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
@@ -275,6 +283,12 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u32_ptr(bus.bios, address and 0x3FFF'u32)
+    elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
+      # Page-0 out-of-bounds is unused memory (open bus), not protected BIOS.
+      let v = bus.read_open_bus_value(address)
+      uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
+      (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
+      (uint32(bus.read_open_bus_value(address or 3)) shl 24)
     else:
       # BIOS reads are latched to last successful read
       # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
