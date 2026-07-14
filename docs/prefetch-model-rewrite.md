@@ -58,12 +58,14 @@ do not maintain. (3 scoped patches were empirically falsified: whole-halfword fl
 ## Plan
 
 ### Phase 0 — Safety net FIRST (do not skip)
-1. **Per-row diff harness.** Extend the runner (or a throwaway script) to emit a
-   machine-readable table `(suite, test, ours, expected, delta)` for **every** Timing
-   and DMA row, not just the aggregate. Capture the a6ec55e baseline for HLE and LLE
-   as golden. Every subsequent change is judged by `diff` against this — the only way
-   to see a silent regression among 3200 rows. This harness is the deliverable that
-   makes the rest safe.
+1. **Per-row diff harness.** ✅ DONE (`tests/mgba_rowdiff.py` + `tests/golden/`). Emits a
+   machine-readable TSV `(suite, ord, name, status, ours, expected, delta)` for **every**
+   row (all suites, passing and failing), keyed by stable `(suite, ord)`. Golden captured
+   at a6ec55e for both configs: **HLE 6898 / LLE 6897** of 7008 emitted rows
+   (`mgba_rows_hle.tsv` / `mgba_rows_lle.tsv`). `mgba_rowdiff.py diff` classifies every
+   changed row as REGRESSED / FIXED / VALUE / STRUCTURAL and exits nonzero on any change —
+   this is how every subsequent change is judged, never by the aggregate. See
+   `tests/golden/README.md` for the workflow and the 4 known HLE↔LLE artifact rows.
 2. **Reconstruct authoritative `GBAMemoryStall`.** Pull the real mgba source
    (`src/gba/memory.c` `GBAMemoryStall` + `lastPrefetchedPc`/`prefetchCursor` wiring +
    how WAITCNT feeds `activeSeqCycles16`/`activeNonseqCycles16`). Write it out as
