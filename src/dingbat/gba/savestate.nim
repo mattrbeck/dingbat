@@ -79,6 +79,17 @@ proc save_bus_state(bus: Bus; w: var Writer) =
   w.write_u32(bus.bios_latch)
   w.write_bytes(bus.wram_board)
   w.write_bytes(bus.wram_chip)
+  # ROM burst / prefetch timing trackers. These PERSIST across frame boundaries
+  # (the CPU keeps fetching from ROM), so unlike the rebuilt fast-path caches
+  # they must be serialized: the first ROM access after a load reads them to
+  # judge sequential-vs-nonsequential and prefetch credit. Omitting them
+  # mistimes that access by a few cycles — invisible in a one-shot load, but it
+  # breaks bit-exact rollback replay (the frame ends a few cycles off).
+  w.write_u32(bus.rom_next_addr)
+  w.write_u32(bus.rom_next_addr2)
+  w.write_u64(uint64(bus.rom_free_since))
+  w.write_bool(bus.rom_hot)
+  w.write_bool(bus.dma_active)
 
 proc load_bus_state(bus: Bus; r: var Reader) =
   r.expect_tag(GBA_SEC_BUS)
@@ -86,6 +97,11 @@ proc load_bus_state(bus: Bus; r: var Reader) =
   bus.bios_latch = r.read_u32()
   r.read_bytes(bus.wram_board)
   r.read_bytes(bus.wram_chip)
+  bus.rom_next_addr = r.read_u32()
+  bus.rom_next_addr2 = r.read_u32()
+  bus.rom_free_since = CycleCount(r.read_u64())
+  bus.rom_hot = r.read_bool()
+  bus.dma_active = r.read_bool()
   bus.fetch_page = 0xFFFFFFFF'u32  # invalidate the fetch fast path
 
 # ---- Interrupts / MMIO / Keypad ----
@@ -209,6 +225,8 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_u64(rtc.buffer.value)
   w.write_bool(rtc.irq)
   w.write_bool(rtc.m24)
+  w.write_bool(rtc.deterministic)
+  w.write_u64(uint64(rtc.epoch))
 
 proc load_gpio_state(gpio: GPIO; r: var Reader) =
   r.expect_tag(GBA_SEC_GPIO)
@@ -228,6 +246,8 @@ proc load_gpio_state(gpio: GPIO; r: var Reader) =
   rtc.buffer.value = r.read_u64()
   rtc.irq = r.read_bool()
   rtc.m24 = r.read_bool()
+  rtc.deterministic = r.read_bool()
+  rtc.epoch = int64(r.read_u64())
 
 # ---- PPU ----
 

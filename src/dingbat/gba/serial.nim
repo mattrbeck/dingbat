@@ -17,6 +17,12 @@ type
   SioMode* = enum
     smNormal8, smNormal32, smMulti, smUart, smGeneralPurpose, smJoyBus
 
+when defined(linkTrace):
+  # Debug hook (trade-repro harness, -d:linkTrace): fires on a full SIOCNT write
+  # with old/new value; the harness reads the writing core's PC to see who
+  # reconfigures the link during the trade transition. Compiled out normally.
+  var onSiocntWrite*: proc(gba: GBA; oldv, newv: uint16) = nil
+
 proc sio_mode*(serial: Serial): SioMode =
   if bit(serial.rcnt, 15):
     if bit(serial.rcnt, 14): smJoyBus
@@ -394,7 +400,11 @@ proc `[]=`*(serial: Serial; io_addr: uint32; value: uint8) =
     write(serial.siocnt, value, io_addr and 1)
     serial.notify_mode_change(old_mode)
     write_siocnt(serial, old_val)
-  of 0x12A..0x12B: write(serial.siodata8, value, io_addr and 1)
+    when defined(linkTrace):
+      if onSiocntWrite != nil and (io_addr and 1) == 1:  # log full-value (high byte) writes
+        onSiocntWrite(serial.gba, old_val, serial.siocnt)
+  of 0x12A..0x12B:
+    write(serial.siodata8, value, io_addr and 1)
   of 0x134..0x135:
     let old_mode = serial.sio_mode()
     write(serial.rcnt, value, io_addr and 1)

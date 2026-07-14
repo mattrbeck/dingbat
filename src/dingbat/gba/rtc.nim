@@ -1,6 +1,19 @@
 # RTC implementation (included by gba.nim)
 import std/times
 
+proc rtc_now(rtc: RTC): DateTime =
+  ## The clock the RTC reports. Deterministic mode returns a fixed UTC epoch
+  ## (identical on both peers, stable across rollback); otherwise the host's
+  ## real local time (single-player real-time events).
+  if rtc.deterministic: utc(fromUnix(rtc.epoch))
+  else: local(now())
+
+proc enable_deterministic_rtc*(gba: GBA; epoch: int64) =
+  ## Freeze the RTC to a shared UTC epoch (unix seconds) for a linked session.
+  ## Both peers must pass the SAME epoch (exchange one peer's value at connect).
+  gba.bus.gpio.rtc.deterministic = true
+  gba.bus.gpio.rtc.epoch = epoch
+
 proc rtc_register_bytes(reg: int): int =
   case reg
   of 1: 1  # CONTROL
@@ -40,7 +53,7 @@ proc rtc_prepare_read(rtc: RTC) =
     let control = 0b10'u8 or (if rtc.irq: 0x08'u8 else: 0) or (if rtc.m24: 0x40'u8 else: 0)
     rtc.buffer.push_byte(control)
   of 2:  # DATE_TIME
-    let now = local(now())
+    let now = rtc_now(rtc)
     var hour = now.hour
     if not rtc.m24:
       let pm = hour >= 12
@@ -57,7 +70,7 @@ proc rtc_prepare_read(rtc: RTC) =
     rtc.buffer.push_byte(bcd(now.minute))
     rtc.buffer.push_byte(bcd(now.second))
   of 3:  # TIME
-    let now = local(now())
+    let now = rtc_now(rtc)
     var hour = now.hour
     if not rtc.m24:
       let pm = hour >= 12

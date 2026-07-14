@@ -157,6 +157,15 @@ type
     buffer*: RtcBuffer
     irq*:    bool
     m24*:    bool
+    # Deterministic clock for netplay/rollback. Normally the RTC reads the host
+    # wall-clock (real-time events in single-player). That is non-deterministic
+    # across peers (different clocks AND time zones) and across a rollback
+    # (re-reads a moving clock), so it desyncs a linked session. When
+    # `deterministic` is on, the clock is a fixed UTC epoch both peers agree on
+    # (seeded at connect), frozen for the session — a trade lasts minutes, so a
+    # still clock is harmless, and it is bit-identical everywhere.
+    deterministic*: bool
+    epoch*:         int64   # unix seconds; the frozen clock when deterministic
 
   GPIO* = ref object
     gba*:         GBA

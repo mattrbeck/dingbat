@@ -86,6 +86,11 @@ const
     ## back to today's reply_wait stall). ~8 frames ≈ 130 ms absorbs a
     ## round-trip while capping unconfirmed rollback work + checkpoint memory
     ## (one ~600 KB state_payload per frame).
+  ECHO_MAX = 4
+    ## Saturating cap on the per-mode "responder mirrors us" confidence counter.
+  ECHO_CONFIRM = 2
+    ## Predict our own outgoing word (not the peer's last) once the responder
+    ## has echoed us this many recent rounds — the symmetric Cable Club sync.
 
 type
   NetPhase = enum
@@ -205,9 +210,13 @@ type
     round_log: seq[RoundEntry]      # rounds latched since confirmed_cycle
     input_log: seq[InputEvent]      # host keypresses since confirmed_cycle
     last_reply: array[6, tuple[word: uint32, listening: bool]]  # predictor state
+    echo_predict: bool    # use the echo-aware predictor (default on; a bench hook flips it)
+    peer_echo: array[6, int]  # per-mode saturating "the responder mirrors us" confidence
     window_wait: bool     # parked because the speculation window is full
     force_wrong: int      # test hook: mispredict the next N rounds on purpose
     pred_hits*, pred_misses*, rollbacks*: int  # telemetry
+    replay_cycles*: int64 # honest cost: total cycles re-emulated by rollbacks
+    replay_overrun*: int  # times replay ran past the log (lossy idle-latch fallback)
 
   RemoteSioDriver* = ref object of SioDriver
     core*: NetCore
@@ -284,20 +293,35 @@ proc send_bye*(nc: NetCore; reason = LINK_BYE_FINISHED) =
 # ---------------- speculation: prediction & round log ----------------
 
 proc predict(nc: NetCore; mode: uint8): tuple[word: uint32, listening: bool] =
-  ## Guess the responder's next REPLY for `mode`. Default: the same word it
-  ## last actually sent (handshakes send runs of identical/slowly-changing
-  ## words, so this hits often; a change costs one rollback). Swappable — the
-  ## whole predictor is this one proc. `force_wrong` is a test hook that
-  ## deliberately mispredicts, to exercise the rollback path.
+  ## Guess the responder's next REPLY for `mode`. Two signals, cheapest first:
+  ##   * echo-aware: a Pokémon Cable Club "all players ready" sync is symmetric
+  ##     — same-team/same-version peers send the SAME handshake word each round,
+  ##     so once we've watched the responder mirror our output for a few rounds
+  ##     (`peer_echo >= ECHO_CONFIRM`) our OWN outgoing word (`round_out`)
+  ##     predicts its reply far better than its last word does. This is the case
+  ##     that gates the trade room, and where "same as last" mispredicts on every
+  ##     word change in the cycling handshake.
+  ##   * fallback: the same word it last sent (handshakes also hold runs of
+  ##     identical words, and asymmetric bursts have no better cheap guess).
+  ## `force_wrong` is a test hook that deliberately mispredicts.
   let idx = int(mode) and 7
   if nc.force_wrong > 0:
     dec nc.force_wrong
     return (0xDEAD0000'u32 or uint32(nc.pred_hits + nc.pred_misses), true)
+  if nc.echo_predict and nc.peer_echo[idx] >= ECHO_CONFIRM:
+    return (nc.round_out, nc.last_reply[idx].listening)
   nc.last_reply[idx]
 
-proc note_reply(nc: NetCore; mode: uint8; word: uint32; listening: bool) =
-  ## Record the peer's real word so future predictions echo it.
-  nc.last_reply[int(mode) and 7] = (word, listening)
+proc note_reply(nc: NetCore; mode: uint8; word: uint32; listening: bool;
+                our_word: uint32) =
+  ## Record the peer's real word so future predictions echo it, and track
+  ## whether the responder is mirroring our output (drives the echo predictor).
+  let idx = int(mode) and 7
+  nc.last_reply[idx] = (word, listening)
+  if word == our_word:
+    nc.peer_echo[idx] = min(nc.peer_echo[idx] + 1, ECHO_MAX)
+  else:
+    nc.peer_echo[idx] = max(nc.peer_echo[idx] - 1, 0)
 
 proc log_round(nc: NetCore) =
   ## Append the just-completed master round (called from master_finish on the
@@ -518,6 +542,7 @@ proc replay_master_complete(nc: NetCore) =
     # More rounds re-fired than were logged — only possible if corrected peer
     # data changed local control flow (a genuine divergence). Latch an idle
     # line so it is at least deterministic; the acceptance test would catch it.
+    inc nc.replay_overrun
     nc.round_in = 0xFFFFFFFF'u32
     nc.round_listening = false
     nc.round_predicted = true
@@ -589,6 +614,15 @@ proc take_checkpoint(nc: NetCore) =
   nc.checkpoints.addLast Checkpoint(cycle: nc.now(),
     payload: nc.gba.state_payload(), snap: nc.capture_snapshot())
 
+proc replay_start(cp: Checkpoint): int64 =
+  ## The earliest round-START a rollback to this checkpoint can re-fire: a round
+  ## in flight AS OF the checkpoint (started before the boundary, completes
+  ## after) is the first to re-complete, so its start — not the boundary — is
+  ## the low-water mark. Used both to seed the replay cursor and to decide how
+  ## far back the round log must be retained; the two MUST agree or replay
+  ## re-fires a round with no log entry (a spurious divergence).
+  if cp.snap.phase == npMasterWait: cp.snap.round_cycle else: cp.cycle
+
 proc advance_confirmed(nc: NetCore) =
   ## The peer has validated some rounds: recompute confirmed_cycle (the start
   ## cycle of the oldest still-unconfirmed round, or now() if all confirmed),
@@ -597,6 +631,14 @@ proc advance_confirmed(nc: NetCore) =
   for e in nc.round_log:
     if not e.confirmed and e.cycle < first_unconfirmed:
       first_unconfirmed = e.cycle
+  # A round in flight (started at round_cycle, not yet completed → not yet in the
+  # log) can still mispredict and demand a rollback to before its START, which
+  # may sit BEFORE the frame boundary we just checkpointed. It must bound
+  # confirmed_cycle too, or its rollback checkpoint gets pruned as "confirmed"
+  # and the later REPLY asserts (no checkpoint at/before its cycle). This only
+  # bites a round straddling a frame boundary — invisible in short exchanges.
+  if nc.phase == npMasterWait and nc.round_cycle < first_unconfirmed:
+    first_unconfirmed = nc.round_cycle
   nc.confirmed_cycle =
     if first_unconfirmed == high(int64): nc.now() else: first_unconfirmed
   # Keep the newest checkpoint at/before confirmed_cycle as the rollback
@@ -606,7 +648,10 @@ proc advance_confirmed(nc: NetCore) =
   # Drop log entries (rounds + host input) baked into the baseline: they are
   # already in the checkpoint and can never be replayed again.
   if nc.checkpoints.len > 0:
-    let baseline = nc.checkpoints[0].cycle
+    # Retain the log back to the OLDEST checkpoint's replay-start (not its
+    # cycle): a round straddling that checkpoint re-fires on a rollback there and
+    # must still have its entry, or replay_master_complete consumes the wrong one.
+    let baseline = replay_start(nc.checkpoints[0])
     var kept: seq[RoundEntry] = @[]
     for e in nc.round_log:
       if e.cycle >= baseline: kept.add e
@@ -629,16 +674,19 @@ proc rollback_and_replay(nc: NetCore; from_cycle: int64) =
       ci = i; break
   doAssert ci >= 0, "rollback: no checkpoint at/before cycle " & $from_cycle
   let cp = nc.checkpoints[ci]
+  # Honest cost: this rollback re-emulates every cycle from the checkpoint up to
+  # now(). Summed over a run, replay_cycles is the CPU the predictor wasted — the
+  # metric the step/stall speed proxy is blind to (re-emulation is invisible to it).
+  nc.replay_cycles += target - cp.cycle
   while nc.checkpoints.len > ci + 1: discard nc.checkpoints.popLast()
   nc.gba.apply_state_payload(cp.payload)
   nc.offset = cp.cycle - int64(nc.gba.scheduler.cycles)
   nc.restore_snapshot(cp.snap)
-  # Point the replay cursor at the first round that re-fires: a round in flight
-  # across the checkpoint (started before it) is the earliest to complete;
-  # otherwise it is the first round that starts at/after the checkpoint. These
-  # keys are stored (drift-free), unlike a cycle computed during replay.
-  let start_cycle = if cp.snap.phase == npMasterWait: cp.snap.round_cycle
-                    else: cp.cycle
+  # Point the replay cursor at the first round that re-fires (a round straddling
+  # the checkpoint, else the first starting at/after it). This key is stored
+  # (drift-free), unlike a cycle computed during replay, and matches the
+  # low-water mark advance_confirmed retains the log to.
+  let start_cycle = replay_start(cp)
   nc.replay_cursor = 0
   while nc.replay_cursor < nc.round_log.len and
         nc.round_log[nc.replay_cursor].cycle < start_cycle:
@@ -711,8 +759,11 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
     if m.clock > nc.peer_clock: nc.peer_clock = m.clock
     let listening = (m.flags and LINK_REPLY_LISTENING) != 0
     if nc.speculative:
-      nc.note_reply(m.mode, m.data, listening)
       let idx = nc.replay_round(m.cycle)
+      # Our outgoing word for the round this REPLY answers: from the log if we
+      # latched it, else the in-flight round's (the reply beat our S+D).
+      let our_word = if idx >= 0: nc.round_log[idx].out_word else: nc.round_out
+      nc.note_reply(m.mode, m.data, listening, our_word)
       if idx >= 0 and not nc.round_log[idx].confirmed:
         # A round we already latched (speculatively or live) is being confirmed.
         if not nc.round_log[idx].predicted:
@@ -908,7 +959,7 @@ proc debug_state*(nc: NetCore): string =
     result.add " spec[hits=" & $nc.pred_hits & " misses=" & $nc.pred_misses &
       " rollbacks=" & $nc.rollbacks & " ckpts=" & $nc.checkpoints.len &
       " log=" & $nc.round_log.len & " window_wait=" & $nc.window_wait &
-      " confirmed=" & $nc.confirmed_cycle & "]"
+      " confirmed=" & $nc.confirmed_cycle & " replay_cyc=" & $nc.replay_cycles & "]"
 
 # ---- speculation test/telemetry hooks ----
 
@@ -922,6 +973,20 @@ proc all_confirmed*(nc: NetCore): bool =
 
 proc pred_stats*(nc: NetCore): tuple[hits, misses, rollbacks: int] =
   (nc.pred_hits, nc.pred_misses, nc.rollbacks)
+
+proc replay_cost*(nc: NetCore): int64 = nc.replay_cycles
+proc replay_overruns*(nc: NetCore): int = nc.replay_overrun
+  ## Times a rollback re-emulated more rounds than were logged and fell back to
+  ## the lossy idle latch — a nonzero count means speculation could NOT stay
+  ## bit-identical (genuine divergence from control flow the corrected data
+  ## changed). Should be 0 on a healthy predictor.
+  ## Total cycles re-emulated by rollbacks over this run — the honest CPU cost
+  ## the step/stall speed proxy cannot see.
+
+proc set_echo_predict*(nc: NetCore; on: bool) =
+  ## Bench hook: turn the echo-aware predictor off to A/B it against the plain
+  ## "same as last" guess. Production leaves it on.
+  nc.echo_predict = on
 
 proc force_mispredict*(nc: NetCore; n: int) =
   ## Test hook: make the predictor deliberately return a wrong word for the
@@ -963,7 +1028,7 @@ proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
   doAssert id in {0, 1}, "the network link is 2-player: unit id must be 0 or 1"
   result = NetCore(gba: gba, id: id, rom_crc: rom_crc, strict_crc: strict_crc,
                    lead: lead, lead_active: lead_active, peer_mode: 0xFF,
-                   speculative: speculative,
+                   speculative: speculative, echo_predict: true,
                    window_cycles: int64(SPEC_WINDOW_FRAMES) * FRAME_CYCLES,
                    checkpoints: initDeque[Checkpoint]())
   result.send_msg(encode_hello(LINK_SYSTEM_GBA, uint8(id), rom_crc))
