@@ -2,15 +2,18 @@ import std/[os, strutils, parseopt, net, nativesockets, monotimes, times]
 import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/gba/link
+import dingbat/gba/rollback
 import dingbat/gba/netlink
 import dingbat/common/test_output
 import dingbat/common/rewind
+import dingbat/common/input
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
-    tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink
+    tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
+    tmRollback, tmRollbackNet
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -124,6 +127,8 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
 
 proc ew16(g: GBA; offset: int): uint16 =
   uint16(g.bus.wram_board[offset]) or (uint16(g.bus.wram_board[offset + 1]) shl 8)
+proc ew32(g: GBA; offset: int): uint32 =
+  uint32(g.ew16(offset)) or (uint32(g.ew16(offset + 2)) shl 16)
 proc linktest_finished(g: GBA): bool = g.ew16(0x800) == 0xCAFE'u16
 
 const LINKTEST_ROUNDS = 16
@@ -503,13 +508,18 @@ type SpecRun = object
   done0, done1: bool
   stalls0, stalls1, steps: int
   hits, misses, rollbacks: int
+  replay_cycles: int64  # honest CPU cost: cycles re-emulated by rollbacks
+  replay_overrun: int   # rollbacks that outran the log (lossy → diverges)
+  cpu_ms: float         # wall/CPU time of the whole run
   dbg0: string
 
 # Deterministic two-core coordinator. `delay` is the per-message latency in
 # coordinator iterations (post-handshake only, like netlink's --netlink-delay).
 # `mispredict` forces the master to guess wrong for the first N rounds.
+# `echo_predict` picks the predictor (true = echo-aware, false = plain last-word).
 proc run_spec_link(rom, bios_path: string; contract: LinkContract;
-                   speculative: bool; delay, mispredict, timeout_frames: int): SpecRun =
+                   speculative: bool; delay, mispredict, timeout_frames: int;
+                   echo_predict = true; check_contract = true): SpecRun =
   let is_hle = bios_path == "hle" or bios_path == ""
   let actual_bios = if is_hle: "" else: bios_path
   proc make_gba(): GBA =
@@ -526,6 +536,7 @@ proc run_spec_link(rom, bios_path: string; contract: LinkContract;
   # real frontend would enable it.
   let nc0 = new_net_core(g0, 0, crc, strict_crc = true, speculative = speculative)
   let nc1 = new_net_core(g1, 1, crc, strict_crc = true, speculative = false)
+  nc0.set_echo_predict(echo_predict)
   if mispredict > 0: nc0.force_mispredict(mispredict)
 
   # In-flight message queues: (deliver_at_step, frame_bytes).
@@ -541,6 +552,7 @@ proc run_spec_link(rom, bios_path: string; contract: LinkContract;
     q = keep
 
   let cap = timeout_frames * 400  # generous iteration bound
+  let t0 = cpuTime()
   while step < cap:
     inc step
     deliver(q01, nc1)
@@ -559,14 +571,18 @@ proc run_spec_link(rom, bios_path: string; contract: LinkContract;
     let settled = (not speculative) or nc0.all_confirmed
     if g0.linktest_finished() and g1.linktest_finished() and settled:
       break
+  result.cpu_ms = (cpuTime() - t0) * 1000.0
   result.steps = step
   result.done0 = g0.linktest_finished()
   result.done1 = g1.linktest_finished()
   result.hash0 = ewram_log_hash(g0)
   result.hash1 = ewram_log_hash(g1)
-  result.fail0 = check_link_unit(g0, 0, "SPECLINK", contract)
-  result.fail1 = check_link_unit(g1, 1, "SPECLINK", contract)
+  if check_contract:
+    result.fail0 = check_link_unit(g0, 0, "SPECLINK", contract)
+    result.fail1 = check_link_unit(g1, 1, "SPECLINK", contract)
   (result.hits, result.misses, result.rollbacks) = nc0.pred_stats()
+  result.replay_cycles = nc0.replay_cost()
+  result.replay_overrun = nc0.replay_overruns()
   result.dbg0 = nc0.debug_state()
 
 proc spec_link_test(rom, bios_path: string; contract: LinkContract;
@@ -627,6 +643,343 @@ proc spec_link_test(rom, bios_path: string; contract: LinkContract;
     echo "SPECLINK: FAIL"
   verdict
 
+proc spec_link_bench(rom, bios_path: string; contract: LinkContract;
+                     delay, timeout_frames: int): int =
+  ## Honest speculation benchmark. Runs a long, symmetric handshake (the
+  ## speclinkbench ROM) OFF, then ON with the OLD "same as last" predictor and
+  ## ON with the NEW echo-aware predictor, at 0 ms and `delay` latency. Reports
+  ## the metric the SPECLINK speed proxy is blind to: `replay_cyc` (cycles the
+  ## master RE-EMULATED on rollbacks), `overrun` (rollbacks that outran the log
+  ## → lossy divergence), and CPU ms. Hard-asserts the SHIPPED echo predictor
+  ## stays bit-identical to the blocking path AND slashes the re-emulation the
+  ## old "same as last" predictor wastes on the symmetric handshake. The old
+  ## predictor is REPORTED (it is the thing being replaced) — under heavy thrash
+  ## it drives so many deep rollbacks it even loses bit-identity (overrun>0),
+  ## which is itself the argument for a predictor that keeps rollbacks rare.
+  var verdict = 0
+  template require(cond: bool; msg: string) =
+    if not cond:
+      echo "SPECBENCH FAIL: ", msg
+      verdict = 1
+
+  proc report(tag: string; r, base: SpecRun) =
+    echo "SPECBENCH ", tag,
+      ": steps=", r.steps, " hits=", r.hits, " misses=", r.misses,
+      " rollbacks=", r.rollbacks, " replay_cyc=", r.replay_cycles,
+      " overrun=", r.replay_overrun,
+      " match=", (r.hash0 == base.hash0 and r.hash1 == base.hash1),
+      " cpu=", formatFloat(r.cpu_ms, ffDecimal, 1), "ms"
+
+  let base = run_spec_link(rom, bios_path, contract, false, delay, 0,
+                           timeout_frames, check_contract = false)
+  require(base.done0 and base.done1, "reference (OFF) never finished")
+  report("OFF        (delay " & $delay & ")", base, base)
+
+  for d in @[0, delay]:
+    let new_p = run_spec_link(rom, bios_path, contract, true, d, 0,
+                              timeout_frames, echo_predict = true,
+                              check_contract = false)
+    report("ON new-pred (delay " & $d & ")", new_p, base)
+    let old_p = run_spec_link(rom, bios_path, contract, true, d, 0,
+                              timeout_frames, echo_predict = false,
+                              check_contract = false)
+    report("ON old-pred (delay " & $d & ")", old_p, base)
+    # Shipped predictor: MUST be exactly the blocking path, with no lossy overrun.
+    require(new_p.hash0 == base.hash0 and new_p.hash1 == base.hash1,
+      "NEW predictor (delay " & $d & ") diverged from blocking path")
+    require(new_p.replay_overrun == 0,
+      "NEW predictor (delay " & $d & ") hit the lossy replay-overrun path")
+    # The whole point: at real latency the echo predictor eliminates the rollback
+    # re-emulation the old one wastes on the symmetric handshake.
+    if d > 0:
+      require(new_p.misses < old_p.misses,
+        "NEW predictor did not cut mispredictions vs OLD (delay " & $d & ")")
+      require(new_p.replay_cycles * 4 < old_p.replay_cycles,
+        "NEW predictor did not slash re-emulation vs OLD (delay " & $d &
+        "): new " & $new_p.replay_cycles & " vs old " & $old_p.replay_cycles)
+      if old_p.hash0 != base.hash0 or old_p.hash1 != base.hash1:
+        echo "SPECBENCH note: OLD predictor diverged under thrash (overrun=",
+          old_p.replay_overrun, ") — extreme rollback outran the log; the echo ",
+          "predictor avoids the regime entirely."
+
+  if verdict == 0:
+    echo "SPECBENCH: PASS (echo predictor bit-identical AND cuts rollback re-emulation, ",
+         link_desc(contract), ")"
+  else:
+    echo "SPECBENCH: FAIL"
+  verdict
+
+proc rollback_test(rom, bios_path: string): int =
+  ## Harness for the INPUT-ROLLBACK netplay model (the correct architecture for a
+  ## deterministic 2-player link): run BOTH cores locally, network only the two
+  ## players' inputs, predict the remote input and roll back when a late input
+  ## mispredicts. The SIO cable is resolved locally, so there is no RTT problem
+  ## and no unrecallable speculative bytes (the flaw that desyncs the SIO-word
+  ## scheme, see speclinkdep). Uses inputrec.gba, whose accumulator depends on
+  ## the exact input TIMELINE, so a wrong-then-corrected input must replay
+  ## faithfully or the result differs. Also checks the machinery primitives
+  ## (determinism, capture/restore round-trip, chained restore, frame(-1)
+  ## capture, and restore-older-onto-newer-then-replay — the pattern a rollback
+  ## actually performs). All pass once the bus ROM burst/prefetch timing
+  ## trackers are serialized (savestate v3); before that, a restore mistimed the
+  ## first ROM access by a few cycles and the frame ended off-by-a-few-cycles.
+  const
+    FRAMES = 90
+    DELAY = 3        # remote input lands this many frames late (predict meanwhile)
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc make_link(): Link =
+    proc mk(): GBA =
+      result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+      result.test_output = new_test_output()
+      result.post_init()
+    new_link(@[mk(), mk()])
+
+  # Deterministic per-frame held-buttons for each player. Player 1 changes often
+  # so the "repeat last" predictor misses a lot → the rollback path is exercised.
+  var script: array[FRAMES, array[2, set[Input]]]
+  for f in 0 ..< FRAMES:
+    var s0, s1: set[Input]
+    if f mod 2 == 0: s0.incl A
+    if f mod 5 == 0: s0.incl RIGHT
+    if f mod 3 == 0: s0.incl START
+    if f mod 3 == 0: s1.incl B
+    if f mod 4 == 0: s1.incl LEFT
+    if f mod 7 == 0: s1.incl UP
+    if f mod 11 == 0: s1.incl A
+    script[f] = [s0, s1]
+
+  proc apply(link: Link; s0, s1: set[Input]) =
+    for inp in Input:
+      link.cores[0].handle_input(inp, inp in s0)
+      link.cores[1].handle_input(inp, inp in s1)
+
+  # Ground truth: every input known upfront.
+  let truth = make_link()
+  for f in 0 ..< FRAMES:
+    truth.apply(script[f][0], script[f][1])
+    truth.step_frame()
+  let want_sum = truth.state_checksum()
+
+  # Foundation checks — the rollback machinery primitives (all pass today).
+  var foundation = true
+  proc note(name: string; ok: bool) =
+    echo "ROLLBACK ", (if ok: "ok  " else: "FAIL"), " ", name
+    if not ok: foundation = false
+  block: # (1) determinism: a second identical run must match.
+    let t2 = make_link()
+    for f in 0 ..< FRAMES: t2.apply(script[f][0], script[f][1]); t2.step_frame()
+    note("determinism", t2.state_checksum() == want_sum)
+  block: # (2) capture/restore round-trip (older snapshot onto newer state).
+    let l = make_link()
+    for f in 0 ..< 20: l.apply(script[f][0], script[f][1]); l.step_frame()
+    let snap = l.capture_state()
+    for f in 20 ..< 40: l.apply(script[f][0], script[f][1]); l.step_frame()
+    let sumA = l.state_checksum()
+    l.restore_state(snap)
+    for f in 20 ..< 40: l.apply(script[f][0], script[f][1]); l.step_frame()
+    note("restore round-trip", l.state_checksum() == sumA)
+  block: # (3) chained restore: continuous vs snapshot-restore-snapshot-restore.
+    let cont = make_link()
+    for f in 0 ..< 20: cont.apply(script[f][0], script[f][1]); cont.step_frame()
+    let sumCont = cont.state_checksum()
+    let l = make_link()
+    for f in 0 ..< 10: l.apply(script[f][0], script[f][1]); l.step_frame()
+    l.restore_state(l.capture_state())
+    for f in 10 ..< 15: l.apply(script[f][0], script[f][1]); l.step_frame()
+    l.restore_state(l.capture_state())
+    for f in 15 ..< 20: l.apply(script[f][0], script[f][1]); l.step_frame()
+    note("chained restore", l.state_checksum() == sumCont)
+  block: # (4) capture on a never-stepped core (frame -1), restore, replay.
+    let a = make_link()
+    for f in 0 ..< 5: a.apply(script[f][0], script[f][1]); a.step_frame()
+    let b = make_link()
+    b.restore_state(b.capture_state())
+    for f in 0 ..< 5: b.apply(script[f][0], script[f][1]); b.step_frame()
+    note("frame(-1) capture", a.state_checksum() == b.state_checksum())
+  block: # (5) THE failing pattern: restore an OLDER snapshot onto a link that was
+    #      advanced with DIFFERENT (predicted) inputs, then replay with real input.
+    let l = make_link()
+    for f in 0 ..< 10: l.apply(script[f][0], script[f][1]); l.step_frame()
+    let snap10 = l.capture_state()
+    for f in 10 ..< 14: l.apply(script[f][0], {}); l.step_frame()  # predict empty p1
+    l.restore_state(snap10)                                        # older onto newer
+    l.apply(script[10][0], script[10][1]); l.step_frame()          # replay frame 10 real
+    let sumR = l.state_checksum()
+    let c = make_link()
+    for f in 0 ..< 10: c.apply(script[f][0], script[f][1]); c.step_frame()
+    c.apply(script[10][0], script[10][1]); c.step_frame()
+    note("restore-older-onto-newer + replay", sumR == c.state_checksum())
+  block: # (6) SIOMULTI0-3 receive latches survive capture/restore. They back the
+    #      game's link reads (serial.nim read path) but are NOT in state_payload
+    #      (savestate refreshes them next transfer), so a rollback that didn't
+    #      snapshot them would replay stale link words — an in-game "communication
+    #      error" mid-trade under real latency (frequent rollbacks). inputrec.gba
+    #      never drives SIO, so set the latches directly to exercise the path.
+    let l = make_link()
+    l.cores[0].serial.multi_recv = [0x1111'u16, 0x2222, 0x3333, 0x4444]
+    l.cores[1].serial.multi_recv = [0xAAAA'u16, 0xBBBB, 0xCCCC, 0xDDDD]
+    let snap = l.capture_state()
+    l.cores[0].serial.multi_recv = [0'u16, 0, 0, 0]                 # a live round clobbers
+    l.cores[1].serial.multi_recv = [0xFFFF'u16, 0xFFFF, 0xFFFF, 0xFFFF]
+    l.restore_state(snap)
+    note("multi_recv restored",
+      l.cores[0].serial.multi_recv == [0x1111'u16, 0x2222, 0x3333, 0x4444] and
+      l.cores[1].serial.multi_recv == [0xAAAA'u16, 0xBBBB, 0xCCCC, 0xDDDD])
+
+  # Rollback run: player 0 local (always known); player 1 remote, arriving DELAY
+  # frames late, predicted as "repeat last confirmed" until it does.
+  #
+  # The invariant that makes this correct and simple: `confCkpt` is the state at
+  # the confirmed frontier and contains ONLY real inputs, because it is produced
+  # exclusively by replaying real inputs from the previous confCkpt. Predictions
+  # only ever live AHEAD of the frontier; a rollback restores confCkpt (never a
+  # prediction-tainted checkpoint) and replays. This is the crux GGPO gets right
+  # and the naive "roll back to the mispredicted frame" gets wrong.
+  let link = make_link()
+  var used1: array[FRAMES, set[Input]]     # p1 input actually applied per frame
+  var confirmed = -1                        # highest frame with REAL p1 applied
+  var confCkpt = link.capture_state()       # state AT `confirmed` (pure real)
+  var present = -1                          # highest frame simulated
+  var rollbacks = 0
+
+  proc predictP1(k: int): set[Input] =
+    if k <= confirmed: script[k][1]                 # real
+    elif confirmed >= 0: script[confirmed][1]       # predict: repeat last real
+    else: {}
+
+  proc stepFrame(k: int) =
+    used1[k] = predictP1(k)
+    link.apply(script[k][0], used1[k])
+    link.step_frame()
+
+  for f in 0 ..< FRAMES:
+    stepFrame(f)                    # advance presentation with prediction
+    present = f
+    let g = f - DELAY               # remote input for frame g is now known
+    if g >= 0 and g > confirmed:
+      var wrong = false
+      for k in (confirmed + 1) .. g:
+        if used1[k] != script[k][1]: wrong = true; break
+      if wrong: inc rollbacks
+      # Advance the confirmed frontier: restore the pure confCkpt, replay the
+      # now-real frames confirmed+1..g, re-snapshot the (still pure) frontier at
+      # g, then replay g+1..present with prediction to restore the presentation.
+      link.restore_state(confCkpt)
+      for k in (confirmed + 1) .. g:
+        link.apply(script[k][0], script[k][1])
+        link.step_frame()
+        used1[k] = script[k][1]
+      confirmed = g
+      confCkpt = link.capture_state()
+      for k in (g + 1) .. present: stepFrame(k)
+
+  # Drain: every remote input is known; replay the tail from the frontier.
+  if confirmed < FRAMES - 1:
+    link.restore_state(confCkpt)
+    for k in (confirmed + 1) ..< FRAMES:
+      link.apply(script[k][0], script[k][1])
+      link.step_frame()
+    confirmed = FRAMES - 1
+  let got_sum = link.state_checksum()
+  let loopMatches = rollbacks > 0 and got_sum == want_sum and
+    truth.cores[0].ew32(0) == link.cores[0].ew32(0) and
+    truth.cores[1].ew32(0) == link.cores[1].ew32(0)
+  echo "ROLLBACK ", (if loopMatches: "ok  " else: "FAIL"),
+    " full input-rollback loop (", FRAMES, " frames, delay ", DELAY, ", ",
+    rollbacks, " rollbacks; prediction+rollback bit-identical to inputs-known-upfront)"
+  if foundation and loopMatches:
+    echo "ROLLBACK: PASS"
+    return 0
+  echo "ROLLBACK: FAIL"
+  1
+
+proc rollback_net_test(rom, bios_path: string): int =
+  ## Two-sided end-to-end test of the RollbackSession (the transport-agnostic
+  ## netplay engine). Two independent sessions — peer A drives player 0, peer B
+  ## drives player 1 — each run their OWN 2-core link, exchange only per-frame
+  ## inputs over a DELAY, predict the peer and roll back on mispredictions. Both
+  ## must converge to the same state as a ground-truth run where every input was
+  ## known upfront, and must agree with each other (the peer desync check).
+  const
+    FRAMES = 120
+    DELAY = 3          # inputs arrive this many coordinator steps late
+    MAXAHEAD = 12
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc make_link(): Link =
+    proc mk(): GBA =
+      result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+      result.test_output = new_test_output()
+      result.post_init()
+    new_link(@[mk(), mk()])
+
+  # Per-frame held-buttons per player, as a bitmask (bit i = Input(i)). Both
+  # players change often so both peers exercise the rollback path.
+  proc mask(s: set[Input]): uint16 =
+    for i in s: result = result or (1'u16 shl int(i))
+  var p0, p1: array[FRAMES, uint16]
+  for f in 0 ..< FRAMES:
+    var s0, s1: set[Input]
+    if f mod 2 == 0: s0.incl A
+    if f mod 5 == 0: s0.incl RIGHT
+    if f mod 7 == 0: s0.incl START
+    if f mod 3 == 0: s1.incl B
+    if f mod 4 == 0: s1.incl LEFT
+    if f mod 9 == 0: s1.incl UP
+    p0[f] = mask(s0); p1[f] = mask(s1)
+
+  # Ground truth: one link, both inputs applied every frame.
+  proc applyMask(link: Link; f: int) =
+    for i in 0 ..< 10:
+      link.cores[0].handle_input(Input(i), ((p0[f] shr i) and 1) != 0)
+      link.cores[1].handle_input(Input(i), ((p1[f] shr i) and 1) != 0)
+  let truth = make_link()
+  for f in 0 ..< FRAMES: truth.applyMask(f); truth.step_frame()
+  let want = truth.state_checksum()
+
+  # Two peers. A = player 0 local, B = player 1 local.
+  let a = new_rollback_session(make_link(), 0, MAXAHEAD)
+  let b = new_rollback_session(make_link(), 1, MAXAHEAD)
+  var q_ab, q_ba: seq[(int, int, uint16)]  # (deliver_at, frame, bits)
+  var step = 0
+  let cap = FRAMES * 20
+  while (a.head < FRAMES or b.head < FRAMES or
+         a.confirmed < FRAMES - 1 or b.confirmed < FRAMES - 1) and step < cap:
+    inc step
+    var keepAB: seq[(int, int, uint16)]
+    for m in q_ab:
+      if m[0] <= step: b.feed_remote(m[1], m[2]) else: keepAB.add m
+    q_ab = keepAB
+    var keepBA: seq[(int, int, uint16)]
+    for m in q_ba:
+      if m[0] <= step: a.feed_remote(m[1], m[2]) else: keepBA.add m
+    q_ba = keepBA
+    if a.head < FRAMES and a.tick(p0[a.head]) == rbAdvanced:
+      q_ab.add((step + DELAY, a.head - 1, p0[a.head - 1]))  # A ships player-0 input
+    if b.head < FRAMES and b.tick(p1[b.head]) == rbAdvanced:
+      q_ba.add((step + DELAY, b.head - 1, p1[b.head - 1]))  # B ships player-1 input
+
+  var ok = true
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo "ROLLBACKNET FAIL: ", msg
+      ok = false
+  check(a.head == FRAMES and b.head == FRAMES, "peers did not both reach the end")
+  check(a.confirmed == FRAMES - 1 and b.confirmed == FRAMES - 1, "peers did not fully confirm")
+  check(a.rollbacks > 0 and b.rollbacks > 0, "no rollbacks — test would be vacuous")
+  check(a.checksum() == want, "peer A diverged from ground truth")
+  check(b.checksum() == want, "peer B diverged from ground truth")
+  check(a.checksum() == b.checksum(), "the two peers disagree (desync)")
+  if ok:
+    echo "ROLLBACKNET: PASS (", FRAMES, " frames, delay ", DELAY,
+      "; A rollbacks=", a.rollbacks, " stalls=", a.stalls,
+      ", B rollbacks=", b.rollbacks, " stalls=", b.stalls,
+      "; both peers bit-identical to ground truth)"
+    return 0
+  echo "ROLLBACKNET: FAIL"
+  1
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -676,6 +1029,9 @@ proc main() =
         of "attachtest": mode = tmAttachTest
         of "netlink": mode = tmNetLink
         of "speclink": mode = tmSpecLink
+        of "speclinkbench": mode = tmSpecLinkBench
+        of "rollback": mode = tmRollback
+        of "rollbacknet": mode = tmRollbackNet
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -756,6 +1112,13 @@ proc main() =
   if mode == tmSpecLink:
     let delay = if netlink_delay > 0: netlink_delay else: 20
     quit(spec_link_test(rom_path, bios_path, link_contract, delay, timeout_frames))
+  if mode == tmSpecLinkBench:
+    let delay = if netlink_delay > 0: netlink_delay else: 50
+    quit(spec_link_bench(rom_path, bios_path, link_contract, delay, timeout_frames))
+  if mode == tmRollback:
+    quit(rollback_test(rom_path, bios_path))
+  if mode == tmRollbackNet:
+    quit(rollback_net_test(rom_path, bios_path))
   if mode == tmNetLink:
     if (listen_port > 0) == (connect_to.len > 0):
       echo "netlink mode needs exactly one of --listen PORT or --connect HOST:PORT"
@@ -847,7 +1210,8 @@ proc main() =
     echo "Screenshot mode requires --screenshot path"
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
-     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink:
+     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
+     tmRollback, tmRollbackNet:
     discard  # handled (and exited) above
 
   if output.len > 0:

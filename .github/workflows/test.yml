@@ -39,10 +39,24 @@ jobs:
         run: |
           set -e
           ./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
+          # Cross-version link timing: the child stages its multi-mode word LATE
+          # (as a different game at a different cycle offset would), so a
+          # start-of-round latch samples a stale word and blows the partner's
+          # link block — the real "communication error" cross-game trades hit.
+          # Passes only with the completion-time latch (link.nim complete_multi).
+          ./dingbat_test tests/roms/linkskew.gba --mode=linktest --timeout=600
           ./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
           ./dingbat_test tests/roms/norm32linktest.gba --mode=norm32linktest --timeout=600
           # Mid-game attach: boot cable-less, plug the link in mid-run, negotiate.
           ./dingbat_test tests/roms/attachtest.gba --mode=attachtest --timeout=1200
+          # Input-rollback (GGPO) foundation for the netplay pivot: both cores
+          # local, predict+rollback the remote input, bit-identical to
+          # inputs-known-upfront. Also guards savestate completeness (the ROM
+          # burst/prefetch timing trackers) against regressions.
+          ./dingbat_test tests/roms/inputrec.gba --mode=rollback
+          # Two-sided end-to-end: two independent RollbackSessions exchange only
+          # inputs over a delay and must both stay bit-identical to ground truth.
+          ./dingbat_test tests/roms/inputrec.gba --mode=rollbacknet
       - name: Speculative rollback acceptance (bit-identical to the blocking path)
         # GGPO-style master-side prediction + frame-checkpoint rollback: proves
         # the speculative link reproduces the blocking path's EWRAM log exactly
@@ -56,6 +70,11 @@ jobs:
             --link-contract=normal --netlink-delay-ms 30 --timeout=800
           ./dingbat_test tests/roms/norm32linktest.gba --mode=speclink \
             --link-contract=normal32 --netlink-delay-ms 30 --timeout=800
+          # Honest speculation benchmark: a long symmetric handshake where the
+          # echo predictor must stay bit-identical (overrun=0) AND cut the
+          # rollback re-emulation the plain predictor wastes under latency.
+          ./dingbat_test tests/roms/speclinkbench.gba --mode=speclinkbench \
+            --netlink-delay-ms 50 --timeout=20000
       - name: Link acceptance (networked, localhost)
         # Exercises the transport-independent protocol core (netcore.nim, the
         # same implementation the browser bridge uses) over a real socket.
