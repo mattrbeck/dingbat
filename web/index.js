@@ -423,18 +423,32 @@ const updateBiosStatusText = async () => {
   }
 };
 
+// iOS/iPadOS (iPad reports as "MacIntel" with touch points since iPadOS 13).
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 const pickFile = (accept, callback) => {
   let input = document.createElement("input");
   input.type = "file";
-  input.accept = accept;
-  input.addEventListener("input", () => {
+  // iOS Safari greys out (makes unselectable) any file whose extension it can't
+  // map to a known type — ".sav"/".state"/".bin" have no UTI, so the save file
+  // can't be picked at all. Skip the filter on iOS; the extension isn't needed
+  // functionally (the target save name is derived from the loaded ROM).
+  if (accept && !IS_IOS) input.accept = accept;
+  // iOS Safari needs the input attached to the DOM for the file picker to open.
+  input.style.display = "none";
+  document.body.appendChild(input);
+  const done = () => input.remove();
+  input.addEventListener("change", () => {
     if (input.files?.length > 0) {
       let file = input.files[0];
       let reader = new FileReader();
-      reader.addEventListener("load", () => callback(new Uint8Array(reader.result), file.name));
+      reader.addEventListener("load", () => { callback(new Uint8Array(reader.result), file.name); done(); });
+      reader.addEventListener("error", done);
       reader.readAsArrayBuffer(file);
-    }
+    } else done();
   });
+  input.addEventListener("cancel", done);  // dismissed without picking
   input.click();
 };
 

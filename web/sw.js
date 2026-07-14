@@ -1,5 +1,5 @@
 // Replaced automatically with the git commit hash during CI build.
-const CACHE_VERSION = "dev-linklatch";
+const CACHE_VERSION = "dev-iosupload";
 const CACHE_NAME = "dingbat-" + CACHE_VERSION;
 
 const ASSETS = [
