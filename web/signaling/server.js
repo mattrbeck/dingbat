@@ -13,11 +13,13 @@
 //   node server.js [port]        # default 8790
 //
 // Wire protocol (JSON text messages):
-//   client -> server: {"t":"create"}                 host asks for a room
-//                     {"t":"join","code":"KJ4Q7N"}   guest redeems a code
-//   server -> client: {"t":"room","code":"KJ4Q7N"}   room created, share it
-//                     {"t":"paired"}                 both present (host gets
-//                                                    role:"host", guest
+//   client -> server: {"t":"rendezvous","code":"PIKA"} both peers send the same
+//                                                    code they agreed on
+//   server -> client: {"t":"waiting"}                first arrival with a code;
+//                                                    hold for the peer
+//                     {"t":"paired"}                 both present (whoever
+//                                                    arrived first gets
+//                                                    role:"host", the other
 //                                                    role:"guest"); start
 //                                                    WebRTC now
 //                     {"t":"peer-closed"}            the other side is gone
@@ -25,9 +27,11 @@
 //   after "paired", every other message is relayed verbatim to the peer
 //   (the web UI sends {"t":"sdp",...} and {"t":"ice",...}).
 //
-// Codes are 6 chars from an unambiguous alphabet (no 0/O/1/I/L), single
-// use (consumed by the first successful join), and expire after 10 minutes
-// unclaimed.
+// Like a physical link cable, players don't designate a host: both type the
+// same code and the FIRST to reach the server hosts (becomes the WebRTC
+// offerer / SIO multi-mode parent). A code is a rendezvous point for exactly
+// two peers; a third using the same code is rejected. Codes are normalized to
+// uppercase alphanumerics and an unclaimed room expires after 10 minutes.
 
 'use strict';
 
@@ -37,8 +41,11 @@ const crypto = require('crypto');
 const PORT = parseInt(process.argv[2], 10) || parseInt(process.env.PORT, 10) || 8790;
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const MAX_MSG_BYTES = 64 * 1024; // SDP + ICE are a few KB; anything bigger is abuse
-const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // no 0/O/1/I/L
-const CODE_LEN = 6;
+const MIN_CODE_LEN = 3; // user-chosen; short enough to say aloud, long enough to not collide by accident
+
+// Fold a user-typed code to the canonical form both peers must match on.
+const normalizeCode = (raw) =>
+  String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 // ---------------- minimal WebSocket implementation ----------------
 
@@ -168,16 +175,6 @@ class WebSock {
 
 const rooms = new Map(); // code -> { host: WebSock, guest: WebSock|null, timer }
 
-function newCode() {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    let code = '';
-    for (let i = 0; i < CODE_LEN; i++)
-      code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
-    if (!rooms.has(code)) return code;
-  }
-  return null; // effectively unreachable below millions of live rooms
-}
-
 function send(ws, obj) {
   ws.sendText(JSON.stringify(obj));
 }
@@ -196,7 +193,7 @@ function closeRoom(code) {
 
 function attach(ws) {
   // Each socket is in exactly one of three states: fresh (no message yet),
-  // hosting (created a room, waiting), or paired (relaying to `peer`).
+  // waiting (first with a code, holding a room), or paired (relaying to `peer`).
   let code = null;      // room this socket belongs to (as host or guest)
   let peer = null;      // set once paired
 
@@ -212,36 +209,34 @@ function attach(ws) {
       peer.sendText(text);
       return;
     }
-    if (msg.t === 'create') {
+    if (msg.t === 'rendezvous') {
       if (code) return fail(ws, 'already in a room');
-      const c = newCode();
-      if (!c) return fail(ws, 'room codes exhausted, try later');
-      code = c;
-      rooms.set(c, {
-        host: ws,
-        guest: null,
-        timer: setTimeout(() => {
-          const room = rooms.get(c);
-          closeRoom(c);
-          if (room) fail(room.host, 'room expired');
-        }, ROOM_TTL_MS),
-      });
-      send(ws, { t: 'room', code: c });
-    } else if (msg.t === 'join') {
-      if (code) return fail(ws, 'already in a room');
-      const c = String(msg.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const c = normalizeCode(msg.code);
+      if (c.length < MIN_CODE_LEN) return fail(ws, 'code too short');
       const room = rooms.get(c);
-      if (!room || room.guest) return fail(ws, 'no such room');
-      // Single use: pair and stop accepting joins for this code.
-      room.guest = ws;
-      clearTimeout(room.timer);
-      room.timer = null;
-      code = c;
-      peer = room.host;
-      // Tell the host who its peer is; both sides start WebRTC now. The
-      // host is the offerer (and unit 0 / multi-mode parent in the game).
-      const host = room.host;
-      const rewire = () => {
+      if (!room) {
+        // First to arrive with this code: host it and wait for the peer.
+        code = c;
+        rooms.set(c, {
+          host: ws,
+          guest: null,
+          timer: setTimeout(() => {
+            const r = rooms.get(c);
+            closeRoom(c);
+            if (r) fail(r.host, 'nobody joined — try again');
+          }, ROOM_TTL_MS),
+        });
+        send(ws, { t: 'waiting' });
+      } else if (!room.guest) {
+        // Second arrival: pair as guest. Two peers per code, no more.
+        room.guest = ws;
+        clearTimeout(room.timer);
+        room.timer = null;
+        code = c;
+        peer = room.host;
+        // Both sides start WebRTC now. The host (first arrival) is the offerer
+        // and unit 0 / multi-mode parent in the game.
+        const host = room.host;
         // Host side: swap from "waiting" to "relaying"
         host.onmessage = (t) => ws.sendText(t);
         host.onclose = () => {
@@ -249,12 +244,13 @@ function attach(ws) {
           send(ws, { t: 'peer-closed' });
           ws.close();
         };
-      };
-      rewire();
-      send(host, { t: 'paired', role: 'host' });
-      send(ws, { t: 'paired', role: 'guest' });
+        send(host, { t: 'paired', role: 'host' });
+        send(ws, { t: 'paired', role: 'guest' });
+      } else {
+        return fail(ws, 'that code is already in use — pick another');
+      }
     } else {
-      fail(ws, 'expected create or join');
+      fail(ws, 'expected rendezvous');
     }
   };
 

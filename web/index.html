@@ -108,6 +108,12 @@
         <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward (unbounded)" aria-label="Fast Forward (unbounded)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6v12l6.5-6zM9 6v12l6.5-6zM16 6v12l6.5-6z" fill="currentColor" stroke="none"/></svg>
         </button>
+        <!-- Online link: shown only in rollback mode, where the speed/state
+             controls are hidden (they'd desync the pair). -->
+        <button type="button" id="rb-disconnect" aria-label="Disconnect link cable">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
+          <span>Disconnect<span class="rb-dc-suffix"> Link Cable</span></span>
+        </button>
       </div>
 
       <div id="topbar-spacer"></div>
@@ -283,28 +289,21 @@
     <div id="net-modal" class="modal-overlay">
       <div class="modal">
         <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
-        <h3 id="net-title">Play online</h3>
-        <div id="net-choose-view" hidden>
-          <p>Connect to a friend over a link cable. Host to get a room code, or join with one they share.</p>
-          <div class="net-choose-row">
-            <button type="button" class="button button-primary" id="net-choose-host">Host (get a code)</button>
-            <button type="button" class="button" id="net-choose-join">Join (enter a code)</button>
-          </div>
-        </div>
-        <div id="net-host-view" hidden>
-          <p>Share this room code with your friend (they pick the same game and choose <strong>Join</strong>):</p>
-          <div id="net-code" aria-live="polite"></div>
-        </div>
-        <div id="net-join-view" hidden>
-          <p>Enter the room code from the host:</p>
+        <h3 id="net-title">Connect link cable</h3>
+        <div id="net-connect-view">
+          <p>Agree on a code with your friend and both type it in.</p>
           <div class="net-join-row">
-            <input id="net-code-input" type="text" inputmode="latin" autocomplete="off"
-                   autocapitalize="characters" spellcheck="false" maxlength="8"
-                   placeholder="KJ4-Q7N" aria-label="Room code" />
-            <button type="button" class="button button-primary" id="net-join-go">Join</button>
+            <div class="net-input-wrap">
+              <input id="net-code-input" type="text" name="linkcode" inputmode="latin"
+                     autocomplete="off" autocorrect="off" autocapitalize="characters"
+                     spellcheck="false" maxlength="12" placeholder="e.g. ABC123"
+                     aria-label="Link code" />
+              <span id="net-spinner" class="net-spinner" hidden aria-hidden="true"></span>
+            </div>
+            <button type="button" class="button button-primary" id="net-join-go">Connect</button>
           </div>
+          <p id="net-status" class="net-status" aria-live="polite"></p>
         </div>
-        <p id="net-status" class="net-status" aria-live="polite"></p>
       </div>
     </div>
 

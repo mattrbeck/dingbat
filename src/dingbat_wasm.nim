@@ -5,6 +5,7 @@ import dingbat/common/rewind
 import dingbat/common/scheduler
 import dingbat/gba/gba
 import dingbat/gba/link
+import dingbat/gba/rollback
 import dingbat/gba/netcore
 import dingbat/gb/gb
 
@@ -372,6 +373,160 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
   if stateLink == nil or player < 0 or player >= cint(stateLink.cores.len): return
   if inputId < 0 or inputId > ord(Input.high): return
   stateLink.cores[player].handle_input(Input(inputId), pressed != 0)
+
+# --- Input-rollback online play (multiplayer phase 3c) ---
+# Both cores run locally (like 2P link); only the two players' per-frame input
+# bitmasks cross the network. JS drives one frame per RAF via rollback_tick,
+# ships the returned frame's input to the peer, and feeds arriving peer inputs
+# via rollback_feed. The RollbackSession predicts + rolls back internally
+# (gba/rollback.nim). Determinism: identical build/ROM/save + deterministic RTC.
+var stateRollback: RollbackSession = nil
+var rbLocal = 0
+var rbEpoch: int64 = 0
+
+proc wrap_rollback_audio(core: GBA; alwaysMute: bool) =
+  ## Mute a core's APU samples: `alwaysMute` (the remote player's core) is always
+  ## silent; otherwise (the local core) it is silent only while re-simulating
+  ## rolled-back frames, whose audio already played on the forward pass. A proc
+  ## (not an inline loop) so each wrapper captures its OWN `orig` — an inline
+  ## for-loop closure would alias the last iteration's binding.
+  let orig = core.scheduler.dispatch
+  core.scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample and
+       (alwaysMute or (stateRollback != nil and stateRollback.replaying)):
+      audioSuppressed = true
+      orig(kind)
+      audioSuppressed = false
+    else:
+      orig(kind)
+
+proc rollback_render() =
+  ## Convert the LOCAL player's framebuffer to RGBA for blitting (the peer sees
+  ## their own game). Skipped mid-replay — only the settled frame is shown.
+  if stateRollback == nil: return
+  let core = stateRollback.link.cores[rbLocal]
+  let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
+  for i in 0 ..< GBA_W * GBA_H:
+    linkRgba[rbLocal][i] = colorLut[fb[i] and 0x7FFF]
+
+proc rollback_exit() {.exportc.} =
+  if stateRollback != nil:
+    for core in stateRollback.link.cores:
+      core.storage.write_save()
+    stateRollback = nil
+  audioSuppressed = false
+
+proc rollback_exit_to_single(): cint {.exportc.} =
+  ## Leave the session but KEEP PLAYING: promote this peer's core (with all its
+  ## post-trade progress) to the single-player core, so disconnecting continues
+  ## seamlessly instead of dropping to a blank screen. Unplugs its cable (null
+  ## driver), drops the peer's core + the link. Returns 1 on success; JS then
+  ## clears rollback mode and the normal single-core RAF branch takes over.
+  if stateRollback == nil: return 0
+  let core = stateRollback.link.cores[rbLocal]
+  core.storage.write_save()
+  core.set_sio_driver(NullSioDriver())  # cable unplugged — back to solo play
+  stateRollback = nil
+  audioSuppressed = false
+  stateGba = core
+  stateKind = ekGBA
+  # Recreate the SDL texture rollback_init destroyed — loop_tick bails without it,
+  # so the solo game would freeze on a stale frame after disconnect.
+  if stateTexture != nil: destroyTexture(stateTexture)
+  stateTexture = stateRenderer.createTexture(
+    SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
+  rgbaBuffer.setLen(GBA_W * GBA_H)
+  discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
+  1
+
+proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
+                   epoch: cdouble): cint {.exportc.} =
+  ## Start an online input-rollback session. rom1/rom2 hold each player's ROM
+  ## bytes under distinct names (own .sav each); `localPlayer` (0/1) is which
+  ## core this peer's buttons drive; `epoch` is the shared UTC unix-seconds RTC
+  ## seed both peers must pass identically. Returns 1 on success.
+  rollback_exit()
+  link_exit()
+  stateNet = nil
+  netOut.setLen(0); netErrorMsg.setLen(0)
+  if stateGb != nil: stateGb.cartridge.mbc_save()
+  stateKind = ekNone
+  stateGba = nil; stateGb = nil
+  rewindHistory = nil
+  if stateTexture != nil:
+    destroyTexture(stateTexture); stateTexture = nil
+  if localPlayer < 0 or localPlayer > 1: return 0
+  rbLocal = int(localPlayer)
+  rbEpoch = int64(epoch)
+  let bios = if fileExists("bios.bin"): "bios.bin" else: ""
+  var cores: seq[GBA] = @[]
+  for path in [$rom1_path, $rom2_path]:
+    if not fileExists(path): return 0
+    let core = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    core.post_init()
+    core.enable_deterministic_rtc(int64(epoch))
+    cores.add(core)
+  # Audio: play only the LOCAL core, and nothing while re-simulating rolled-back
+  # frames (they were already heard on the forward pass).
+  wrap_rollback_audio(cores[rbLocal], alwaysMute = false)
+  wrap_rollback_audio(cores[1 - rbLocal], alwaysMute = true)
+  stateRollback = new_rollback_session(new_link(cores), rbLocal, 12)
+  for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
+  frameCount = 0
+  1
+
+proc rollback_tick(localBits: cint): cint {.exportc.} =
+  ## Advance one presentation frame with the local input + prediction. Returns
+  ## the frame index just simulated (ship it to the peer with `localBits`), or
+  ## -1 if stalled at the prediction window. Renders the local core.
+  if stateRollback == nil: return -1
+  let st = stateRollback.tick(uint16(localBits))
+  if st == rbStalled: return -1
+  inc frameCount
+  rollback_render()
+  var evt = defaultEvent
+  while pollEvent(evt): discard
+  cint(stateRollback.head - 1)
+
+proc rollback_feed(frame, bits: cint) {.exportc.} =
+  ## Ingest a peer input (may trigger a rollback + re-simulation internally).
+  if stateRollback == nil or frame < 0: return
+  stateRollback.feed_remote(int(frame), uint16(bits))
+
+proc rollback_fb_ptr(): pointer {.exportc.} =
+  ## The local player's RGBA framebuffer (call rollback_render first / after tick).
+  if stateRollback == nil: return nil
+  addr linkRgba[rbLocal][0]
+
+proc rollback_head(): cint {.exportc.} =
+  if stateRollback == nil: -1 else: cint(stateRollback.head)
+
+proc rollback_confirmed(): cint {.exportc.} =
+  if stateRollback == nil: -1 else: cint(stateRollback.confirmed)
+
+proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc.} =
+  ## Seed core `player` from a full save-state (same bytes as a .state file) so
+  ## the session CONTINUES from where each player was, instead of rebooting. Must
+  ## be called BEFORE the first tick (before any checkpoint is captured). The
+  ## deterministic RTC is re-applied afterward — the loaded state carries the
+  ## single-player wall-clock RTC, which would desync. Returns 1 on success.
+  if stateRollback == nil or player < 0 or player > 1 or data == nil or len <= 0:
+    return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  let core = stateRollback.link.cores[int(player)]
+  if not core.load_state_bytes(image): return 0
+  core.enable_deterministic_rtc(rbEpoch)  # both peers agree on this clock
+  1
+
+proc rollback_transfers(): cint {.exportc.} =
+  ## Monotonic count of SIO transfers driven on the emulated cable. A linked game
+  ## fires these continuously (timer-paced) to stay synced and STOPS when it
+  ## closes the link, so JS watches this for "no activity for a while ⇒ done" —
+  ## reliable across games, unlike the SIO mode register which stays latched in
+  ## multi mode after a game is finished (why the mode-based check never fired).
+  if stateRollback == nil: return 0
+  cint(stateRollback.link.transfers and 0x7fffffff)
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session

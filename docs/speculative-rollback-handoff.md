@@ -4,6 +4,44 @@ Status as of the end of the multiplayer-phase3b speculation work. Read this
 before continuing; it captures what works, the open problem, how the engine is
 built, and where to look next.
 
+## UPDATE 2026-07-13 — root cause found + fixed (predictor + two rollback bugs)
+
+The open problem below is largely resolved. Summary of what changed
+(`src/dingbat/gba/netcore.nim`, `tests/`, wasm rebuilt):
+
+1. **Root cause of the crawl = rollback thrash from a weak predictor.** The old
+   `predict` ("same word the peer last sent") mispredicts on every change in
+   Emerald's cyclic handshake; each miss re-emulates up to *latency-worth of
+   frames* of CPU (frame-granular checkpoints), so the master runs far under
+   realtime and the responder — bounded-lead-pinned to the master's delayed
+   CLOCK — crawls with it. The `--mode=speclink` test hid this because its speed
+   proxy counts **steps/stalls**, which do NOT include rollback re-emulation.
+2. **Echo predictor (the fix).** In a symmetric Cable Club "all players ready"
+   sync the responder mirrors us, so once it has echoed us a couple of rounds
+   `predict` returns our own `round_out`. On the new benchmark: **hits 198/200,
+   2 rollbacks** @delay50 vs the old **99/200, 101 rollbacks** — ~60× less
+   re-emulation, still bit-identical. Default ON.
+3. **Honest benchmark:** `tests/roms/speclinkbench.gba` + `--mode=speclinkbench`
+   (in CI) — a 200-round symmetric handshake reporting `replay_cyc` (cycles
+   re-emulated), `overrun`, and cpu-ms. This is the metric the old proxy missed.
+4. **Two rollback CRASH bugs it exposed** (both from a round *straddling a frame
+   boundary*, which 16 rounds never aligned — these would abort the wasm, i.e.
+   *actually* prevent entering the trade room, not merely slow it):
+   - checkpoint for an in-flight straddling round got pruned → `advance_confirmed`
+     now clamps `confirmed_cycle` to the in-flight round's start;
+   - log entry for a round straddling the oldest checkpoint got pruned but still
+     re-fired → retain the log back to `replay_start(checkpoints[0])`.
+5. **Known residual (old predictor only):** extreme thrash (101 rollbacks) trips
+   `replay_overrun>0` (lossy idle-latch → divergence). The echo predictor keeps
+   overrun=0 at delays 0/50; `replay_overruns()` telemetry now detects it. A
+   deeper rollback fix (rollback-during-replay / checkpoint-regen) is the next
+   step if a real asymmetric trade pushes the echo predictor into many rollbacks.
+
+The rest of this document is the original pre-fix handoff, kept for context.
+
+---
+
+
 ## TL;DR
 
 The GBA network link works and is correct. Under real latency the *blocking*

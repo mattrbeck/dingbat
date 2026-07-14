@@ -1706,43 +1706,6 @@ body.large-controls .pad-pill {
  * ==========================================================
  */
 
-/* "2P" launch button on GBA library tiles, next to the delete button */
-.home-tile.has-2p .home-tile-launch {
-  padding-right: 64px;
-}
-
-.home-tile-2p {
-  position: absolute;
-  top: 50%;
-  right: 30px;
-  transform: translateY(-50%);
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.home-tile:hover .home-tile-2p {
-  opacity: 1;
-}
-
-.home-tile-2p:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* Two side-by-side screens (stacked in portrait), one per player */
 #link-stage {
   display: none;
@@ -1763,6 +1726,64 @@ body.running.link-mode #link-stage {
   width: 100%;
   height: 100%;
   padding: 12px;
+}
+
+/* Online rollback: one game (this player's), reusing link-canvas-0. */
+body.running.rollback-mode #canvas { display: none; }
+body.running.rollback-mode #link-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+}
+body.rollback-mode #link-stage .link-pane:nth-child(2),
+body.rollback-mode #link-stage .link-label { display: none; }
+body.running.rollback-mode .link-pane canvas {
+  width: min(100%, calc((100dvh - var(--bar-h) - 24px) * 1.5));
+}
+
+/* "Disconnect Link Cable" button — squared to match the other top-bar
+   .icon-btn controls, occupying the space the hidden speed/state controls left
+   so it's clear why they're gone. Shown only in rollback mode. */
+#rb-disconnect {
+  display: none;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#rb-disconnect svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#rb-disconnect:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+body.running.rollback-mode #rb-disconnect { display: inline-flex; }
+/* Narrow screens: drop the icon and " Link Cable" — just "Disconnect", which is
+   clear and compact. */
+@media (max-width: 480px) {
+  #rb-disconnect svg,
+  #rb-disconnect .rb-dc-suffix { display: none; }
+  #rb-disconnect { padding: 0 12px; gap: 0; }
 }
 
 .link-pane {
@@ -1822,7 +1843,19 @@ body.link-mode #state-sep,
 body.link-mode #load-save,
 body.link-mode #export-save,
 body.link-mode #screenshot,
-body.link-mode #save-sep {
+body.link-mode #save-sep,
+body.rollback-mode #rewind,
+body.rollback-mode #speed-2x-btn,
+body.rollback-mode #fast-forward,
+body.rollback-mode #save-state,
+body.rollback-mode #load-state,
+body.rollback-mode #export-state,
+body.rollback-mode #import-state,
+body.rollback-mode #state-sep,
+body.rollback-mode #load-save,
+body.rollback-mode #export-save,
+body.rollback-mode #screenshot,
+body.rollback-mode #save-sep {
   display: none !important;
 }
 
@@ -1991,11 +2024,7 @@ body.link-mode #save-sep {
  * ==========================================================
  */
 
-/* HOST / JOIN launch buttons on GBA library tiles, next to 2P */
-.home-tile.has-2p .home-tile-launch {
-  padding-right: 148px;
-}
-
+/* HOST / JOIN launch buttons on GBA library tiles */
 .home-tile-net {
   position: absolute;
   top: 50%;
@@ -2055,6 +2084,15 @@ body.link-mode #save-sep {
   margin-top: 10px;
 }
 
+/* The code field fills the row; the spinner overlays its right edge while
+   connecting, so no separate waiting line is needed. */
+.net-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
 #net-code-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -2076,16 +2114,59 @@ body.link-mode #save-sep {
   border-color: var(--accent);
 }
 
+/* Connecting: the field is locked (read-only) and dimmed, with the spinner at
+   its right — the read-only cursor + spinner + "Cancel" button convey waiting. */
+#net-code-input:read-only {
+  color: var(--text-dim);
+  border-color: var(--accent);
+  padding-right: 32px;
+  cursor: default;
+}
+
+/* Only errors land here now (the wait is shown in-field), so it takes no space
+   until it has something to say — no empty gap under the button. */
 .net-status {
-  min-height: 1.2em;
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--text-dim);
   text-align: center;
 }
 
+.net-status:not(:empty) {
+  margin-top: 12px;
+}
+
 .net-status.net-error {
   color: var(--danger);
+}
+
+/* Small amber spinner pinned inside the right of the code field while connecting. */
+.net-spinner {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 176, 77, 0.25);
+  border-top-color: var(--accent);
+  animation: net-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+
+.net-spinner[hidden] {
+  display: none;
+}
+
+@keyframes net-spin {
+  from { transform: translateY(-50%) rotate(0); }
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .net-spinner {
+    animation-duration: 2s;
+  }
 }
 
 /* "waiting for peer" badge: subtle chip over the top-right of the stage,
