@@ -1,12 +1,42 @@
 # Prefetch-model rewrite: occupancy model to close the 46 Timing fails
 
-Status: **scoped, not started** (2026-07-14). Owner: next dedicated GBA-timing session.
+Status: **Phase 0 done; premise revised; Phase 1 blocked on a scope decision** (2026-07-14).
 Prereq baseline: `main` @ a6ec55e — mGBA suite 6898/7218 HLE, 6897 LLE.
+
+> ## ⚠️ PREMISE CORRECTION (2026-07-14) — read before touching this
+> Phase 0 empirically **inverted this doc's original premise.** An agent built and
+> instrumented real mGBA (5157ce2) and ran the suite: **mGBA FAILS these rows too**, giving
+> values *below* dingbat (`ldr…P.S`: mGBA 15 / dingbat 16 / hardware 17). The `expected`
+> column is **hardware-derived**, not mGBA output — and corroborating this, memory records
+> "mGBA itself: 1552/2020 Timing" vs dingbat's 1974. So **dingbat = hardware − 1**, and the
+> target is the **hardware `expected` table, NOT mGBA**. Porting `GBAMemoryStall` verbatim
+> would *regress* dingbat to 15/12/11. Details: `docs/research_failing_rows_breakdown.md`.
+>
+> **The needed change is +1** on the first ROM fetch resuming after a non-fetch ROM-bus
+> event, by discarding the fractional-halfword credit. **Empirically probed via the Phase-0
+> harness (all under HLE):**
+> - blanket whole-halfword floor `credit=(raw div s)*s` → Timing **1758 (−216)**: fixes
+>   exactly **16 rows** (all *DMA-to-ROM* `P..`/`PN.`, s=3) but regresses **232** ordinary
+>   prefetch hits (`mla`, `smull`, `Calibration`, `nop/ldrh`). Confirms the memory's −216.
+> - floor **only when `dma_active`** set the buffer dirty → **inert** (post-DMA resume fetch
+>   already has credit 0; the −1 for DMA-to-ROM lives in a *later* prefetch hit whose
+>   fractional credit traces to the DMA-to-ROM *write* timing, not flagged at that access).
+> - floor on **any** non-fetch ROM access → **1518 (−456)**: PC-relative literal-pool loads
+>   (`ldr [pc,#imm]`, ubiquitous, read ROM) set the flag everywhere and the `rom_hot` fast
+>   path never clears it, so it leaks across thousands of fetches.
+>
+> **Conclusion:** the −1 is **not localizable** to a simple per-access condition; the 16
+> DMA-to-ROM rows are the *only* cleanly-identifiable subset, and even they resist a
+> targeted floor (the disturbing access and the mis-credited fetch are separated). Matching
+> the hardware table needs a genuine integer occupancy carried across accesses in whole
+> halfwords — a real model, derived from **hardware**, not transcribed from mGBA. See the
+> revised Decision gate at the bottom.
 
 ## Objective
 
 Replace the continuous **time-credit** prefetch model in `bus.nim rom_access_cycles`
-with an integer **halfword-occupancy** model equivalent to mGBA's `GBAMemoryStall`,
+with an integer **halfword-occupancy** model matching the **hardware** `expected` table
+(NOT mGBA's `GBAMemoryStall`, which under-counts these rows — see the premise correction),
 closing the 46 remaining Timing failures **without** regressing:
 
 - the ~1974 currently-passing Timing rows,
