@@ -893,15 +893,33 @@ proc try_advance*(nc: NetCore): NetAdvance =
   if not nc.in_frame:
     gba.cpu.count_cycles = 0
     nc.in_frame = true
+  # A responder mid-exchange has a serial completion already scheduled whose
+  # dispatch emits the REPLY the initiator is parked (reply_wait) on. If the
+  # bounded-lead / speculation-window stall blocked us from reaching that
+  # completion, and the initiator has frozen its clock waiting for us, NEITHER
+  # side can advance — a deadlock. It bites cross-game multi trades, where the
+  # two ROMs' differing instruction cadence lets the responder fall a whole
+  # round behind in *processing* while its clock races a lead ahead: the
+  # initiator then parks at round N's S+D while we still owe the REPLY for an
+  # earlier round whose completion sits >lead past the initiator's frozen clock.
+  # So while an exchange is in flight locally, DRAIN it (run only to the pending
+  # completion) rather than stalling — sampling already happened at the anchor,
+  # so this changes nothing but *when* the completion/IRQ fire, and it is bounded
+  # by the round duration (and the frame). Once the exchange closes we stop, and
+  # the ordinary lead/window stall applies again with phase idle.
+  let inflight = nc.phase in {npSlaveSample, npSlaveFinish}
+  var draining = false
   # Bounded lead: we may not run further ahead of the peer's newest clock.
   # The window tightens automatically while a link SIO mode is active.
   if not nc.peer_done and nc.now() > nc.peer_clock + nc.effective_lead:
-    if not nc.lead_wait:
-      nc.lead_wait = true
-      nc.enter_stall()
-      nc.send_clock(blocked = true)
-    return naStalled
-  if nc.lead_wait:
+    if not inflight:
+      if not nc.lead_wait:
+        nc.lead_wait = true
+        nc.enter_stall()
+        nc.send_clock(blocked = true)
+      return naStalled
+    draining = true  # bypass the stall to close the in-flight exchange
+  elif nc.lead_wait:
     nc.lead_wait = false
     nc.exit_stall()
   # Speculation back-pressure: bound how far past the newest peer-confirmed
@@ -910,12 +928,14 @@ proc try_advance*(nc: NetCore): NetAdvance =
   # degrades to today's stall behaviour, never worse.
   if nc.speculative and not nc.peer_done and
      nc.now() - nc.confirmed_cycle > nc.window_cycles:
-    if not nc.window_wait:
-      nc.window_wait = true
-      nc.enter_stall()
-      nc.send_clock(blocked = true)
-    return naStalled
-  if nc.window_wait:
+    if not inflight:
+      if not nc.window_wait:
+        nc.window_wait = true
+        nc.enter_stall()
+        nc.send_clock(blocked = true)
+      return naStalled
+    draining = true
+  elif nc.window_wait:
     nc.window_wait = false
     nc.exit_stall()
   if nc.now() - nc.last_clock_sent >= CLOCK_INTERVAL:
@@ -928,6 +948,11 @@ proc try_advance*(nc: NetCore): NetAdvance =
       gba.cpu.tick()
     if nc.reply_wait:
       return naStalled  # etSerial parked the clock mid-slice
+    if draining and nc.phase == npIdle:
+      # Finished draining the in-flight responder exchange(s) we bypassed the
+      # stall for. Do NOT free-run emulation past the bounded lead — hand
+      # control back so the next call re-evaluates the stall with phase idle.
+      return naProgress
   if gba.ppu.frame:
     nc.send_clock()
     nc.offset += int64(gba.end_frame())
