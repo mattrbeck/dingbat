@@ -1383,13 +1383,20 @@ resetButton.addEventListener("click", () => {
 // 2x speed and unbounded fast forward are radio-style: fast forward would
 // silently dominate 2x (it ignores pacing entirely), so enabling either
 // clears the other.
-const setSpeed2x = (on) => {
+const setSpeed2x = (on, fromRemote) => {
   speed2x = on;
   speed2xButton.classList.toggle("active", on);
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(on ? 1 : 0);
   }
+  // While linked online, 2x must drive BOTH cores or the pair desyncs — relay
+  // our toggle to the peer (unless this change *came* from the peer).
+  if (!fromRemote && rollbackMode && typeof window.rbSendSpeed === "function") {
+    window.rbSendSpeed(on);
+  }
 };
+// The peer toggled 2x; apply it here without echoing back (fromRemote = true).
+window.applyRemoteSpeed2x = (on) => setSpeed2x(on, true);
 const setFastForward = (on) => {
   fastForward = on;
   fastForwardButton.classList.toggle("active", on);
@@ -1911,17 +1918,21 @@ var Module = {
       lastFrameTime = timestamp;
       if (rollbackMode) {
         // Online input-rollback: both cores run locally at full speed; only
-        // this player's per-frame buttons cross the network. Fixed-rate frames
-        // (rewind/turbo would desync). rollback_tick returns the frame just
-        // simulated (ship it) or -1 when stalled at the prediction window.
+        // this player's per-frame buttons cross the network. rollback_tick
+        // returns the frame just simulated (ship it) or -1 when stalled at the
+        // prediction window. 2x is allowed because it's synchronized — both
+        // peers halve the step together (see setSpeed2x/RB_SPEED), so the frame
+        // numbering stays aligned; rewind/unbounded fast-forward still can't.
+        const rbStep = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
+        const rbCap = speed2x ? 4 : 2;
         let framesRun = 0;
-        while (accumulator >= FRAME_TIME && framesRun < 2) {
+        while (accumulator >= rbStep && framesRun < rbCap) {
           const frame = Module._rollback_tick(localButtons);
           if (frame < 0) { accumulator = 0; break; } // stalled: wait for peer input
           if (typeof window.rbSendInput === "function") window.rbSendInput(frame, localButtons);
           pushAudio();
           frameCount++;
-          accumulator -= FRAME_TIME;
+          accumulator -= rbStep;
           framesRun++;
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
