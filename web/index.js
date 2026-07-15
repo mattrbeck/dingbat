@@ -435,8 +435,11 @@ const pickFile = (accept, callback) => {
   // can't be picked at all. Skip the filter on iOS; the extension isn't needed
   // functionally (the target save name is derived from the loaded ROM).
   if (accept && !IS_IOS) input.accept = accept;
-  // iOS Safari needs the input attached to the DOM for the file picker to open.
-  input.style.display = "none";
+  // iOS Safari needs the input attached to the DOM and NOT display:none for the
+  // picker to open — hide it off-screen instead.
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  input.style.opacity = "0";
   document.body.appendChild(input);
   const done = () => input.remove();
   input.addEventListener("change", () => {
@@ -701,14 +704,18 @@ document.getElementById("export-save").addEventListener("click", async () => {
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 
-document.getElementById("load-save").addEventListener("click", async () => {
+document.getElementById("load-save").addEventListener("click", () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !currentOriginalName) {
     alert("No ROM is loaded.");
     return;
   }
-  if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
+  // pickFile() must run synchronously in this tap handler: on iOS Safari a
+  // preceding confirm()/alert() consumes the transient user activation, so
+  // input.click() no longer opens the file picker. Do the overwrite prompts
+  // AFTER a file is chosen (inside the callback), not before opening the picker.
   pickFile(".sav", async (bytes, fileName) => {
+    if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
     if (stripExt(fileName) !== stripExt(currentOriginalName)) {
       if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
     }
