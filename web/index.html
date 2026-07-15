@@ -108,13 +108,16 @@
         <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward (unbounded)" aria-label="Fast Forward (unbounded)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6v12l6.5-6zM9 6v12l6.5-6zM16 6v12l6.5-6z" fill="currentColor" stroke="none"/></svg>
         </button>
-        <!-- Online link: shown only in rollback mode, where the speed/state
-             controls are hidden (they'd desync the pair). -->
-        <button type="button" id="rb-disconnect" aria-label="Disconnect link cable">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
-          <span>Disconnect<span class="rb-dc-suffix"> Link Cable</span></span>
-        </button>
       </div>
+
+      <!-- Online link disconnect: a SEPARATE top-bar action (NOT a transport
+           control), so it stays disjoint from the segmented playback bar on
+           mobile. Shown only in rollback mode, where the speed/state controls
+           are hidden (they'd desync the pair). -->
+      <button type="button" id="rb-disconnect" aria-label="Disconnect link cable">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
+        <span>Disconnect<span class="rb-dc-suffix"> Link Cable</span></span>
+      </button>
 
       <div id="topbar-spacer"></div>
 
