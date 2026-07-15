@@ -74,6 +74,9 @@ const makeSession = (attach) => ({
   isHost: null,         // decided by the "paired" role (arrival order)
   ws: null,
   pc: null,
+  bc: null,             // same-browser BroadcastChannel (no server, no WebRTC)
+  localChan: null,      // LocalChannel wrapping bc, once the local path pairs
+  abortLocal: null,     // tears down the local path if WebRTC wins the race
   dc: null,
   ptr: 0,
   started: false,       // wasm core linked, game ticking
@@ -167,15 +170,30 @@ const sigConnect = () =>
       return resolve(false);
     }
     net.ws = ws;
+    // A dead/closing server is only fatal when nothing else can carry the
+    // session: no same-browser peer listening (bc), not already linked locally
+    // (dc), and not already running (rtcConnected/started). The same-browser
+    // path runs in parallel for every connect, so a down server must never tear
+    // a session down while that path is still live or has already won.
+    const hasAltPath = () => !!(net && (net.bc || net.dc || net.rtcConnected || net.started));
     ws.onopen = () => resolve(true);
     ws.onerror = () => {
+      if (hasAltPath()) {
+        // Only note it while we're still waiting on the local peer; once linked
+        // (dc set) the server is simply irrelevant.
+        if (net.bc && !net.dc) {
+          netSetStatus("Server unavailable — a second tab of this browser can still link");
+        }
+        resolve(false);
+        return;
+      }
       netFail("Couldn't reach the signaling server at " + NET_SIGNAL_URL);
       resolve(false);
     };
     ws.onclose = () => {
       // Normal after WebRTC connects (we close it); anything earlier is a
-      // failure unless one was already reported.
-      if (net && !net.rtcConnected && !net.started) {
+      // failure unless the local path is still live or already carried us.
+      if (net && !hasAltPath()) {
         netFail("Lost the signaling connection");
       }
     };
@@ -263,7 +281,17 @@ const startRtc = async (isOfferer) => {
 };
 
 const wireChannel = (dc) => {
+  // Two connect paths race (local BroadcastChannel vs. server+WebRTC); the first
+  // to hand us a channel wins and the loser is torn down here.
+  if (net.dc) {
+    try {
+      dc.close?.(true); // silent: discarding the losing channel, don't signal "bye"
+    } catch {}
+    return;
+  }
   net.dc = dc;
+  if (net.abortLocal && dc !== net.localChan) net.abortLocal(); // WebRTC won → drop BC
+  net.abortLocal = null;
   dc.binaryType = "arraybuffer";
   dc.onopen = () => {
     net.rtcConnected = true;
@@ -288,6 +316,151 @@ const wireChannel = (dc) => {
     // leave this peer frozen behind the modal — surface it and re-arm.
     else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
   };
+};
+
+// ---------------- same-browser fast path (no signaling, no WebRTC) ----------------
+// Two tabs/windows of the SAME browser can link with zero infrastructure: no
+// signaling server and no WebRTC at all. They rendezvous on a BroadcastChannel
+// keyed by the shared code and then carry the exact same wire traffic a
+// DataChannel would. LocalChannel below mimics just the RTCDataChannel surface
+// wireChannel()/rbSend*()/rbDrain() touch, so everything downstream is unchanged.
+//
+// Scope: BroadcastChannel only reaches same-origin contexts in the SAME browser
+// profile. Different browsers (Chrome↔Safari) or different devices are sandboxed
+// from each other and still take the signaling + WebRTC path.
+
+const LOCAL_PREFIX = "dingbat-link-"; // BroadcastChannel name = prefix + code
+
+const netRandId = () => {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0] || 1; // 0 is reserved as "unset"; re-roll to any nonzero
+};
+
+// A BroadcastChannel-backed stand-in for an RTCDataChannel. Exposes only what
+// the transport actually uses: send(), onmessage (e.data = ArrayBuffer, matching
+// binaryType="arraybuffer"), readyState, close/onclose, and a faked bufferedAmount
+// so rbSendRom's backpressure loop yields between bursts instead of blocking the
+// main thread on a multi-MB synchronous flood (BroadcastChannel has no send buffer).
+class LocalChannel {
+  constructor(bc) {
+    this.bc = bc;
+    this.readyState = "open";
+    this.binaryType = "arraybuffer";
+    this.bufferedAmount = 0;
+    this.bufferedAmountLowThreshold = 0;
+    this.onopen = null;
+    this.onmessage = null;
+    this.onclose = null;
+    this._low = new Set();
+    this._flushing = false;
+    this._onBc = (e) => {
+      const m = e.data;
+      if (!m || m.ch !== "link") return;
+      if (m.t === "data") this.onmessage?.({ data: m.buf });
+      else if (m.t === "bye") this.close(true);
+    };
+    bc.addEventListener("message", this._onBc);
+  }
+  addEventListener(type, fn) {
+    if (type === "bufferedamountlow") this._low.add(fn);
+  }
+  removeEventListener(type, fn) {
+    if (type === "bufferedamountlow") this._low.delete(fn);
+  }
+  send(buf) {
+    if (this.readyState !== "open") return;
+    // The caller reuses/frees its buffer, so hand postMessage a standalone copy.
+    const ab =
+      buf instanceof ArrayBuffer
+        ? buf.slice(0)
+        : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    this.bc.postMessage({ ch: "link", t: "data", buf: ab });
+    // Fake enough backpressure that rbSendRom's loop awaits rbDrain and yields.
+    this.bufferedAmount += ab.byteLength;
+    if (!this._flushing) {
+      this._flushing = true;
+      setTimeout(() => {
+        this.bufferedAmount = 0;
+        this._flushing = false;
+        this._low.forEach((fn) => fn());
+      }, 0);
+    }
+  }
+  close(fromPeer) {
+    if (this.readyState === "closed") return;
+    this.readyState = "closed";
+    try {
+      if (!fromPeer) this.bc.postMessage({ ch: "link", t: "bye" });
+    } catch {}
+    try {
+      this.bc.removeEventListener("message", this._onBc);
+    } catch {}
+    try {
+      this.bc.close();
+    } catch {}
+    this.onclose?.();
+  }
+}
+
+// Start listening for another tab of this browser on `code`. Runs CONCURRENTLY
+// with the signaling + WebRTC path (see the connect handler): whichever pairs
+// first wins and wireChannel() tears the other down. Unlike a one-shot probe,
+// this keeps listening until a peer appears, WebRTC wins, or the user cancels —
+// so the two players don't have to hit Connect at the same instant. When no
+// server is reachable at all, this is the only path, and same-browser still links.
+const startLocalLink = (code) => {
+  const session = net;
+  let bc;
+  try {
+    bc = new BroadcastChannel(LOCAL_PREFIX + code);
+  } catch {
+    return; // no BroadcastChannel support → WebRTC path carries on alone
+  }
+  session.bc = bc; // reachable for Cancel/shutdown
+  const myId = netRandId();
+
+  const onMsg = (e) => {
+    if (net !== session || net.dc) return; // torn down, or the other path won
+    const m = e.data;
+    if (!m || m.ch !== "hello") return;
+    if (m.t === "hi") {
+      // A peer announced. Answer so it learns us — it may have opened after our
+      // own announce, which it never saw (BroadcastChannel keeps no history).
+      try {
+        bc.postMessage({ ch: "hello", t: "yo", id: myId, to: m.id });
+      } catch {}
+      pair(m.id);
+    } else if (m.t === "yo" && m.to === myId) {
+      pair(m.id);
+    }
+  };
+
+  // Higher nonce = host (unit 0 / the multi-mode parent, the WebRTC offerer).
+  // Both tabs compute the same winner, so roles never collide.
+  const pair = (peerId) => {
+    if (net !== session || net.dc || peerId === myId) return; // won elsewhere, or a tie
+    bc.removeEventListener("message", onMsg); // hello handshake done
+    session.isHost = myId > peerId;
+    const chan = new LocalChannel(bc);
+    session.localChan = chan; // marks the local path as the winner in wireChannel
+    wireChannel(chan);
+    // No async "channel open": the cable is live the instant both tabs agree.
+    chan.onopen?.();
+  };
+
+  session.abortLocal = () => {
+    try {
+      bc.removeEventListener("message", onMsg);
+      bc.close();
+    } catch {}
+    if (net === session) session.bc = null;
+  };
+
+  bc.addEventListener("message", onMsg);
+  try {
+    bc.postMessage({ ch: "hello", t: "hi", id: myId });
+  } catch {}
 };
 
 // ---------------- input-rollback online play ----------------
@@ -700,19 +873,30 @@ const netFlush = () => {
 // peers send the same code; the server pairs them and hands back a role.
 netJoinGo.addEventListener("click", async () => {
   // Once connecting, the same button reads "Cancel" and tears the attempt down.
-  if (net?.ws) {
+  if (net?.ws || net?.bc) {
     netDismissModal();
     return;
   }
   if (!net) net = makeSession(netAttach); // re-arm if a prior attempt tore down
+  const session = net;
   const code = netCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length < 3) {
     netSetStatus("Pick a code of at least 3 letters/numbers", true);
     return;
   }
-  netSetStatus("Contacting server…");
   netSetConnecting(true);
-  if (await sigConnect()) sigSend({ t: "rendezvous", code });
+  netSetStatus("Connecting…");
+  // Two paths race. Same-browser tabs pair instantly over a BroadcastChannel with
+  // no server and no WebRTC; everyone else goes through the signaling server. The
+  // first to connect wins (wireChannel tears the loser down). Running both means a
+  // second browser tab links even with the server down, while a phone across the
+  // network still connects — no Host/Join choice, just a shared code either way.
+  startLocalLink(code);
+  if (await sigConnect()) {
+    // Paired locally (net.dc set) or cancelled (net swapped) while dialing?
+    if (net !== session || net.dc) return;
+    sigSend({ t: "rendezvous", code });
+  }
 });
 
 // Keep the emulator from swallowing what's typed here. Emscripten's SDL layer
@@ -894,6 +1078,9 @@ const netShutdown = async (opts) => {
     } catch {}
     try {
       s.ws?.close();
+    } catch {}
+    try {
+      s.bc?.close(); // discovery-phase channel (before it became s.dc)
     } catch {}
     if (s.ptr) Module._free(s.ptr);
   }
