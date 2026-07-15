@@ -1831,7 +1831,10 @@ body.running.rollback-mode #rb-disconnect { display: inline-flex; }
 /* Anything that would desync the linked pair is hidden in link mode:
    rewind and the speed toggles change one clock, save states and .sav
    import/export target a single core, and the screenshot path captures
-   the (hidden) single-core canvas. Pause/reset stay: they act on both. */
+   the (hidden) single-core canvas. Pause/reset stay: they act on both.
+   Exception: in online rollback mode #speed-2x-btn stays visible — its 2x is
+   relayed to the peer (RB_SPEED) so both cores fast-forward in lockstep.
+   Unbounded #fast-forward has no such sync, so it stays hidden everywhere. */
 body.link-mode #rewind,
 body.link-mode #speed-2x-btn,
 body.link-mode #fast-forward,
@@ -1845,7 +1848,6 @@ body.link-mode #export-save,
 body.link-mode #screenshot,
 body.link-mode #save-sep,
 body.rollback-mode #rewind,
-body.rollback-mode #speed-2x-btn,
 body.rollback-mode #fast-forward,
 body.rollback-mode #save-state,
 body.rollback-mode #load-state,

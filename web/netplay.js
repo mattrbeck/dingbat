@@ -299,6 +299,7 @@ const wireChannel = (dc) => {
 //   4 rom-begin    : [4][len u32]                  (this peer's ROM, chunked)
 //   5 rom-chunk    : [5][bytes…]
 //   6 ready        : [6]                           (cores built + states loaded)
+//   7 speed        : [7][on u8]                     (2x fast-forward toggle — both cores)
 // Both peers run BOTH cores; core 0 = host's game, core 1 = guest's. To CONTINUE
 // from exactly where each player was (no reboot), we exchange each running
 // core's full SAVE-STATE and load it into the matching core, then network only
@@ -313,7 +314,7 @@ const wireChannel = (dc) => {
 // either peer from ticking (and shipping inputs) until BOTH have booted.
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
-const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6;
+const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Keep at most this much queued in the DataChannel send buffer while streaming a
 // ROM; pause until it drains below. Well under Chrome's ~16 MB hard cap (a send()
@@ -345,6 +346,18 @@ const rbSendInput = (frame, bits) => {
   // ?linkdelay=NN simulates internet latency on the input stream, for testing.
   if (NET_LINK_DELAY > 0) setTimeout(() => rbSend(buf), NET_LINK_DELAY);
   else rbSend(buf);
+};
+
+// Tell the peer to match our 2x fast-forward. Both cores must run at the same
+// rate: a one-sided 2x would race its frame head past the rollback prediction
+// window and just stall waiting for the (still-1x) peer's inputs. So the toggle
+// drives BOTH — whoever taps 2x fast-forwards the pair together.
+const rbSendSpeed = (on) => {
+  const buf = new ArrayBuffer(2);
+  const v = new DataView(buf);
+  v.setUint8(0, RB_SPEED);
+  v.setUint8(1, on ? 1 : 0);
+  rbSend(buf);
 };
 
 // Snapshot the running single core (same bytes as a .state file).
@@ -496,6 +509,12 @@ const rbMessage = (data) => {
     rbStartIfReady();
     return;
   }
+  if (kind === RB_SPEED) {
+    // Peer toggled 2x — match it (without echoing back) so both cores run at
+    // the same rate and stay in rollback sync.
+    window.applyRemoteSpeed2x?.(v.getUint8(1) === 1);
+    return;
+  }
   if (kind === RB_HELLO) {
     rb.remoteRomHash = v.getUint32(5);
     if (!net.isHost) rb.epoch = v.getUint32(1); // guest adopts the host's clock
@@ -608,6 +627,7 @@ const rbStartIfReady = () => {
   netMode = false; // rollback drives its own RAF branch, not the SIO netStep path
   closeNetModal();
   window.rbSendInput = rbSendInput;
+  window.rbSendSpeed = rbSendSpeed;
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
   // The ROMs + states now live in wasm/MEMFS; drop the JS-side copies (up to
@@ -626,6 +646,7 @@ const rbStartIfReady = () => {
 const rbTeardown = async () => {
   if (!net?.rb?.inited) return;
   window.rbSendInput = null;
+  window.rbSendSpeed = null;
   const kept =
     Module._rollback_exit_to_single && Module._rollback_exit_to_single() === 1;
   if (kept) {
