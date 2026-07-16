@@ -301,7 +301,27 @@ shares. Pieces:
   (`node server.js [port]`, default 8790). `create → code`, `join(code)`,
   then it relays the SDP offer/answer + ICE between exactly two sockets and
   closes; game traffic never touches it. Codes are 6 chars from an
-  unambiguous alphabet (no 0/O/1/I/L), single-use, ~10-minute TTL.
+  unambiguous alphabet (no 0/O/1/I/L), single-use, ~10-minute TTL. Hardened
+  against abuse: room/connection caps, a handshake timeout, and a keepalive
+  ping + idle reaper that frees rooms whose peers vanished without a TCP FIN.
+- `web/signaling/server.nim` — a byte-for-byte protocol twin for deployment,
+  where Node's ~50 MB baseline RSS dominates the cost on a small VPS. Same
+  stdlib-only, dependency-free approach (RFC 6455 handshake + framing inline).
+  Runs in ~7 MB RSS (vs ~48 MB) with identical relay throughput. Native
+  build (any host, for local runs/tests):
+  `nim c -d:release -d:test_harness --opt:size -o:signalsrv
+  web/signaling/server.nim`. Static, scp-able Linux binary, built on a Linux
+  host with musl installed (`apk add musl-dev` / `apt install musl-tools`):
+  add `--gcc.exe:musl-gcc --gcc.linkerexe:musl-gcc --passL:-static`
+  (cross-compiling from macOS additionally needs `--os:linux --cpu:amd64` and
+  the `x86_64-linux-musl-gcc` toolchain). `-d:test_harness` is required — it
+  skips the repo `nim.cfg`'s SDL/OpenGL link flags, which the server doesn't
+  use. TLS is
+  terminated by the reverse proxy in front (`wss://<host>/signal` → plain
+  `ws://` here); the server ignores the request path. Both implementations
+  pass `web/signaling/server.test.mjs` (`SIGNAL_CMD=./signalsrv node
+  server.test.mjs` targets the binary); `bench.mjs` measures RSS + relay
+  throughput under room-churn load.
 - UI: GBA library tiles gain **HOST** / **JOIN** next to **2P**. Host shows
   the room code + "waiting for your friend"; join has a code field
   (accepts `KJ4-Q7N`, `kj4q7n`, spaces — all normalized). In session,

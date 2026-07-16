@@ -7,6 +7,10 @@ src/*.out.dSYM/
 *_debug.dSYM/
 nimcache/
 
+# Compiled signaling server binary (build from web/signaling/server.nim)
+web/signaling/signalsrv
+web/signaling/signalsrv_*
+
 # ImGui runtime state
 imgui.ini
 
