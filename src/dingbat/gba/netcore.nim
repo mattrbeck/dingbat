@@ -216,9 +216,13 @@ type
     checkpoints: Deque[Checkpoint]  # one frame-boundary snapshot per frame
     round_log: seq[RoundEntry]      # rounds latched since confirmed_cycle
     input_log: seq[InputEvent]      # host keypresses since confirmed_cycle
-    last_reply: array[6, tuple[word: uint32, listening: bool]]  # predictor state
+    # Indexed by `int(mode) and 7` (see predict/note_reply): sized to the full
+    # 0..7 mask so a corrupt/foreign wire mode field can never index out of
+    # bounds (unchecked under -d:danger). Only slots 0..5 (the defined
+    # LINK_MODE_* values) are ever meaningful.
+    last_reply: array[8, tuple[word: uint32, listening: bool]]  # predictor state
     echo_predict: bool    # use the echo-aware predictor (default on; a bench hook flips it)
-    peer_echo: array[6, int]  # per-mode saturating "the responder mirrors us" confidence
+    peer_echo: array[8, int]  # per-mode saturating "the responder mirrors us" confidence
     window_wait: bool     # parked because the speculation window is full
     force_wrong: int      # test hook: mispredict the next N rounds on purpose
     pred_hits*, pred_misses*, rollbacks*: int  # telemetry
