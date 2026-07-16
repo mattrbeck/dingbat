@@ -137,6 +137,13 @@ type
     got_reply: bool
     reply_wait: bool
     pending_transfers: seq[LinkMsg]
+    multi_recv: array[4, uint16]  # SIOMULTI0-3 receive latches: NOT carried by
+                                  # state_payload (session state refreshed by the
+                                  # next transfer), but a rollback re-sim can read
+                                  # them before the frame's round re-latches, so
+                                  # they MUST be restored or the replay diverges
+                                  # (an in-game "communication error"). Mirrors
+                                  # link.nim's LinkSnapshot.multi_recv fix.
 
   Checkpoint = object
     cycle: int64          # now() at this frame boundary
@@ -593,7 +600,8 @@ proc capture_snapshot(nc: NetCore): NetSnapshot =
     round_out: nc.round_out, round_in: nc.round_in,
     round_listening: nc.round_listening, round_predicted: nc.round_predicted,
     got_reply: nc.got_reply, reply_wait: nc.reply_wait,
-    pending_transfers: nc.pending_transfers)
+    pending_transfers: nc.pending_transfers,
+    multi_recv: nc.gba.serial.multi_recv)
 
 proc restore_snapshot(nc: NetCore; s: NetSnapshot) =
   nc.phase = s.phase
@@ -607,6 +615,7 @@ proc restore_snapshot(nc: NetCore; s: NetSnapshot) =
   nc.got_reply = s.got_reply
   nc.reply_wait = s.reply_wait
   nc.pending_transfers = s.pending_transfers
+  nc.gba.serial.multi_recv = s.multi_recv
 
 proc take_checkpoint(nc: NetCore) =
   ## Snapshot the core (state_payload — frame boundaries only) plus our round
