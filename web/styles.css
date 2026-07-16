@@ -610,6 +610,23 @@ body.running #canvas {
   background-repeat: repeat;
 }
 
+/* MBC5 rumble: a small transform-only jitter on the game screen while the
+   cart's motor runs (body.rumbling, set by the RAF loop). Width/height are
+   deliberately untouched — integer scaling pins those — and the scanline
+   overlay shakes in lockstep so it stays glued to the canvas. */
+body.rumbling #canvas,
+body.rumbling #scanline-overlay {
+  animation: rumble-shake 60ms linear infinite;
+}
+
+@keyframes rumble-shake {
+  0%   { transform: translate(1.2px, -0.8px); }
+  25%  { transform: translate(-1.2px, 0.8px); }
+  50%  { transform: translate(0.8px, 1.2px); }
+  75%  { transform: translate(-0.8px, -1.2px); }
+  100% { transform: translate(1.2px, -0.8px); }
+}
+
 /*
  * ==========================================================
  * Home / empty state
@@ -1533,6 +1550,34 @@ body.has-game #home-resume {
   border-color: var(--accent);
   background: rgba(255, 176, 77, 0.08);
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Shortcuts reference list (desktop-only: lives inside #kb-section) */
+#kb-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  margin-bottom: 14px;
+}
+
+.kb-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.kb-shortcut kbd {
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
 }
 
 /*

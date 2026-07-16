@@ -60,7 +60,9 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Pause and frame advance
   - Screenshots
   - Volume and per-channel audio controls
-  - LCD color correction
+  - LCD color correction (per-panel: AGB and GBC models)
+  - Scanlines and interframe blending (LCD ghosting)
+  - MBC5 rumble (controller rumble + screen shake)
   - Link cable window for network play
   - Debug windows for the PPU, IO registers, and scheduler
 - Web frontend
@@ -72,6 +74,9 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE
     modes, color correction, integer scaling, scanlines, motion blur
     (interframe blending), and an ambient glow backdrop
+  - Desktop keyboard shortcuts (pause, fast forward, rewind, save states,
+    screenshot, fullscreen, mute)
+  - MBC5 rumble: gamepad vibration where supported, screen shake everywhere
   - Per-panel color correction: mGBA's AGB model for GBA, the
     hardware-measured "GBC-Color" model for GB/GBC
 - GB / GBC
@@ -87,7 +92,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - MBC1 cartridges are supported (except for multicarts)
   - MBC2 cartridges are fully supported
   - MBC3 cartridges are fully supported, including the real-time clock
-  - MBC5 cartridges are supported
+  - MBC5 cartridges are supported, including the rumble motor
   - Game Boy Color support, including HDMA, double-speed mode, and palettes
 - GBA
   - Accurate sound emulation (both Direct Sound and PSGs)

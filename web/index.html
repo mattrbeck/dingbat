@@ -293,6 +293,19 @@
             </div>
             <p class="modal-hint">Click a key, then press a new one to rebind. Changes save automatically.</p>
             <div id="kb-bindings"></div>
+            <div class="modal-subhead">Shortcuts</div>
+            <div id="kb-shortcuts">
+              <div class="kb-shortcut"><span>Pause / Resume</span><kbd>Space</kbd></div>
+              <div class="kb-shortcut"><span>Fast forward (hold)</span><kbd>Tab</kbd></div>
+              <div class="kb-shortcut"><span>2&times; speed</span><kbd>Shift+Tab</kbd></div>
+              <div class="kb-shortcut"><span>Rewind (hold)</span><kbd>`</kbd></div>
+              <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
+              <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
+              <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
+              <div class="kb-shortcut"><span>Load state</span><kbd>F8</kbd></div>
+              <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
+            </div>
+            <p class="modal-hint">Game key bindings take precedence over shortcuts.</p>
           </div>
         </div>
 
@@ -316,7 +329,18 @@
             <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
           </div>
           <p class="modal-hint">When a bootrom is set, the boot animation plays on Game Boy games.</p>
-          <p class="settings-note">Changes apply the next time a game is loaded.</p>
+          <div class="modal-subhead">Feedback</div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Rumble</span>
+              <span class="modal-toggle-sub">Vibration and screen shake when a rumble cartridge's motor runs</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="gb-rumble-toggle" checked />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <p class="settings-note">Renderer and boot ROM changes apply the next time a game is loaded.</p>
         </div>
 
         <div class="settings-pane" id="settings-pane-gba" role="tabpanel" hidden>

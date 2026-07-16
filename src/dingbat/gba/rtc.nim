@@ -1,12 +1,41 @@
 # RTC implementation (included by gba.nim)
 import std/times
 
+# Per-minute IRQ poll interval: one emulated second (16.78 MHz CPU clock).
+# The S-3511A asserts /INT at second 00 of every minute, but this RTC reads a
+# live clock instead of counting cycles, so a once-per-emulated-second poll
+# detects the boundary; comparing whole minutes (not `second == 0`) stays
+# correct when emulated time drifts from the wall clock (turbo / slowdown).
+const RTC_IRQ_POLL_CYCLES = 1 shl 24
+
 proc rtc_now(rtc: RTC): DateTime =
   ## The clock the RTC reports. Deterministic mode returns a fixed UTC epoch
   ## (identical on both peers, stable across rollback); otherwise the host's
   ## real local time (single-player real-time events).
   if rtc.deterministic: utc(fromUnix(rtc.epoch))
   else: local(now())
+
+proc rtc_minutes(rtc: RTC): int64 =
+  ## Whole minutes since the unix epoch on the RTC's clock. Minute boundaries
+  ## coincide in UTC and local time (zone offsets are whole minutes), so this
+  ## is the timezone-independent "did a minute tick" value.
+  if rtc.deterministic: rtc.epoch div 60
+  else: getTime().toUnix div 60
+
+proc rtc_irq_poll*(gba: GBA) =
+  ## etRtcSecond handler (GBA): scheduled only while the control register's
+  ## per-minute IRQ bit is set. Raises the Game Pak interrupt once per RTC
+  ## minute boundary. In deterministic mode the clock is frozen, so the
+  ## minute never changes and no IRQ can fire — bit-identical on both
+  ## rollback peers (the pending event itself is serialized by savestate).
+  let rtc = gba.bus.gpio.rtc
+  if not rtc.irq: return  # disabled since scheduling; drop the poll chain
+  let m = rtc_minutes(rtc)
+  if m != rtc.irq_minute:
+    rtc.irq_minute = m
+    gba.interrupts.reg_if.game_pak = true
+    gba.interrupts.schedule_interrupt_check()
+  gba.scheduler.schedule(RTC_IRQ_POLL_CYCLES, etRtcSecond)
 
 proc enable_deterministic_rtc*(gba: GBA; epoch: int64) =
   ## Freeze the RTC to a shared UTC epoch (unix seconds) for a linked session.
@@ -105,10 +134,18 @@ proc rtc_execute_write(rtc: RTC) =
   case rtc.reg
   of 1:  # CONTROL
     let b = rtc.buffer.shift_byte()
+    let was_irq = rtc.irq
     rtc.irq = bit(b, 3)
     rtc.m24 = bit(b, 6)
-    if rtc.irq: echo "TODO: implement rtc irq"
+    if rtc.irq != was_irq:
+      rtc.gba.scheduler.clear(etRtcSecond)
+      if rtc.irq:
+        # Enabled mid-minute: the chip fires at second 00, so latch the
+        # current minute — the first IRQ comes at the NEXT boundary
+        rtc.irq_minute = rtc_minutes(rtc)
+        rtc.gba.scheduler.schedule(RTC_IRQ_POLL_CYCLES, etRtcSecond)
   of 0:  # RESET
+    if rtc.irq: rtc.gba.scheduler.clear(etRtcSecond)
     rtc.irq = false
     rtc.m24 = false
   of 6:  # IRQ

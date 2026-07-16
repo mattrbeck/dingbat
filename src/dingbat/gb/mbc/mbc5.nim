@@ -22,7 +22,13 @@ method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
   of 0x3000..0x3FFF:
     cart.rom_bank_num = (cart.rom_bank_num and 0x00FF'u16) or ((uint16(val) and 1'u16) shl 8)
   of 0x4000..0x5FFF:
-    cart.ram_bank_num = val and 0b0000_1111
+    if cart of Mbc5Rumble:
+      # Rumble carts repurpose bit 3 for the motor; only 3 bank bits remain.
+      let c = Mbc5Rumble(cart)
+      c.rumble = (val and 0b0000_1000) != 0
+      c.ram_bank_num = val and 0b0000_0111
+    else:
+      cart.ram_bank_num = val and 0b0000_1111
   of 0x6000..0x7FFF:
     discard
   of 0xA000..0xBFFF:
@@ -30,3 +36,5 @@ method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
       cart.ram_dirty = true
       cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
   else: discard
+
+method mbc_rumble*(cart: Mbc5Rumble): bool = cart.rumble

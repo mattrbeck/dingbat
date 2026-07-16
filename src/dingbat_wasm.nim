@@ -285,6 +285,14 @@ proc isStopped(): cint {.exportc.} =
   ## 1 while the GBA is in Stop mode (sleeping), used by the JS frontends
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
 
+proc wasm_rumble(): cint {.exportc.} =
+  ## 1 while the running single-core GB cart's rumble motor is on (MBC5
+  ## rumble carts, types 0x1C-0x1E). GBA, link modes and no-core return 0 —
+  ## stateKind is only ekGB in single-core GB sessions, so no mode check is
+  ## needed. JS polls this each RAF tick to drive haptics + screen shake.
+  if stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
+  else: 0
+
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   let inp = Input(inputId)

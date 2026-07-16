@@ -41,6 +41,12 @@ const LOGO_PNG_DATA = staticRead("../README/dingbat.png")
 
 # The sdl2 wrapper doesn't expose SDL_free (needed for drop-event filenames)
 proc sdl_free(mem: pointer) {.importc: "SDL_free", cdecl.}
+# ...nor SDL_GameControllerRumble (SDL >= 2.0.9; the linked SDL2 is newer).
+# Magnitudes are 0..0xFFFF; the effect auto-stops after duration_ms.
+proc game_controller_rumble(pad: GameControllerPtr;
+                            low_freq, high_freq: uint16;
+                            duration_ms: uint32): cint
+  {.importc: "SDL_GameControllerRumble", cdecl.}
 
 # ──────────────────────────── Shaders ────────────────────────────
 
@@ -54,25 +60,49 @@ void main() {
 }
 """
 
+# Color correction has one model per panel (selected by panel_gbc):
+#  - GBA: mGBA-style AGB model (linearize with lcdGamma 4.0, mix, re-gamma)
+#  - GB/GBC: Pokefan531's hardware-measured "GBC-Color" model — the CGB
+#    panel is far less washed out than the AGB's, so the GBA curve would
+#    crush its colors. Both match the wasm build's LUTs and the screenshot
+#    path (bgr555_to_rgb) exactly.
 const FRAG_SRC = """
 #version 330 core
 in vec2 tex_coord;
 out vec4 frag_color;
 uniform sampler2D input_texture;
 uniform bool color_correct;
+uniform bool panel_gbc;
+uniform bool scanlines;
+uniform float tex_height;
 void main() {
   vec4 color = texture(input_texture, tex_coord);
+  float outGamma = 2.2;
+  vec3 rgb;
   if (color_correct) {
-    float lcdGamma = 4.0, outGamma = 2.2;
-    color.rgb = pow(color.rgb, vec3(lcdGamma));
-    frag_color.rgb = pow(vec3(
-      0.0 * color.b +  50.0 * color.g + 255.0 * color.r,
-     30.0 * color.b + 230.0 * color.g +  10.0 * color.r,
-    220.0 * color.b +  10.0 * color.g +  50.0 * color.r) / 255.0,
-      vec3(1.0 / outGamma));
+    if (panel_gbc) {
+      vec3 lin = pow(color.rgb, vec3(2.2)) * 0.94;
+      rgb = pow(clamp(vec3(
+        0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
+        0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
+       -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
+        vec3(1.0 / outGamma));
+    } else {
+      float lcdGamma = 4.0;
+      vec3 lin = pow(color.rgb, vec3(lcdGamma));
+      rgb = pow(vec3(
+        0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
+       30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
+      220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
+        vec3(1.0 / outGamma));
+    }
   } else {
-    frag_color.rgb = color.rgb;
+    rgb = color.rgb;
   }
+  if (scanlines && fract(tex_coord.y * tex_height) < 0.3) {
+    rgb *= 0.72;
+  }
+  frag_color = vec4(rgb, 1.0);
 }
 """
 
@@ -262,6 +292,21 @@ var app: AppState
 # the debug overlay alongside the ImGui (UI) framerate
 var emu_fps = 0.0
 
+# Interframe blending (LCD ghosting) history: the previously uploaded BGR555
+# frame and a scratch buffer for the averaged upload. Presentation-only —
+# emulation state is untouched, so the toggle is safe to flip live. History
+# is dropped on ROM load and when the toggle turns off, so a stale ghost
+# can't smear across cores (the GBA/GB size change would also re-seed it).
+var blend_prev: seq[uint16]
+var blend_mix:  seq[uint16]
+
+# MBC5 rumble (GB cart types 0x1C-0x1E): update_rumble polls the cart's motor
+# once per main-loop iteration into rumble_on, which render_game reads for
+# the viewport shake; rumble_flip alternates the jitter direction per present.
+var rumble_on         = false
+var rumble_flip       = false
+var rumble_last_pulse = 0'u32
+
 # ──────────────────────────── ROM Loading ────────────────────────────
 
 proc flush_gb_save() =
@@ -305,6 +350,17 @@ proc apply_color_correction() =
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
   glUniform1i(loc, GLint(if app.cfg.color_correction: 1 else: 0))
 
+proc apply_panel_uniforms() =
+  ## Select the panel's color-correction model and pixel-row height for the
+  ## scanline effect. Depends only on the core kind, so this runs when a core
+  ## is (re)loaded rather than per frame.
+  glUseProgram(app.game_shader)
+  let gbc = app.emu_kind == ekGB
+  glUniform1i(glGetUniformLocation(app.game_shader, "panel_gbc"),
+              GLint(if gbc: 1 else: 0))
+  glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"),
+              if gbc: GLfloat(GB_H) else: GLfloat(GBA_H))
+
 proc apply_master_volume() =
   if app.gba_emu != nil:
     app.gba_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
@@ -340,6 +396,8 @@ proc load_rom(path: string) =
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   apply_master_volume()
+  apply_panel_uniforms()
+  blend_prev.setLen(0)  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
   app.rewinding = false
   glDisable(GL_BLEND)
@@ -403,14 +461,25 @@ proc process_pending_state() =
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
-proc bgr555_to_rgb(px: uint16; correct: bool): array[3, byte] =
+proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
   ## Expand one BGR555 framebuffer pixel to 8-bit RGB. When `correct` is set
-  ## this mirrors the display shader's LCD color correction (linearize with
-  ## gamma 4.0, mix channels, re-gamma with 2.2) so the PNG matches on-screen.
+  ## this mirrors the display shader's LCD color correction — the AGB model
+  ## (linearize with gamma 4.0, mix channels, re-gamma with 2.2) or, with
+  ## `gbc`, the CGB model — so the PNG matches on-screen.
   let r5 = float64(px and 0x1F) / 31.0
   let g5 = float64((px shr 5) and 0x1F) / 31.0
   let b5 = float64((px shr 10) and 0x1F) / 31.0
-  if correct:
+  if correct and gbc:
+    const lum = 0.94
+    let r = pow(r5, 2.2) * lum
+    let g = pow(g5, 2.2) * lum
+    let b = pow(b5, 2.2) * lum
+    let mixed = [0.82 * r + 0.125 * g + 0.195 * b,
+                 0.24 * r + 0.665 * g + 0.075 * b,
+                -0.06 * r + 0.210 * g + 0.730 * b]
+    for i in 0 .. 2:
+      result[i] = byte(min(255.0, round(pow(max(0.0, min(1.0, mixed[i])), 1.0 / 2.2) * 255.0)))
+  elif correct:
     let r = pow(r5, 4.0)
     let g = pow(g5, 4.0)
     let b = pow(b5, 4.0)
@@ -431,10 +500,11 @@ proc save_screenshot() =
   if app.emu_kind == ekNone: return
   let (w, h) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
   let correct = app.cfg.color_correction
+  let gbc = app.emu_kind == ekGB
   var rgb = newSeq[byte](w * h * 3)
   template convert(fb: untyped) =
     for i in 0 ..< w * h:
-      let c = bgr555_to_rgb(fb[i], correct)
+      let c = bgr555_to_rgb(fb[i], correct, gbc)
       rgb[i * 3 + 0] = c[0]
       rgb[i * 3 + 1] = c[1]
       rgb[i * 3 + 2] = c[2]
@@ -471,24 +541,65 @@ proc render_logo() =
   glUniform1f(scale_loc, 0.5'f32)
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
+proc upload_frame(fb: ptr uint16; w, h: int) =
+  ## Upload the frame texture, averaging with the previously uploaded frame
+  ## when interframe blending is on. Per-channel BGR555 (a+b)/2 without
+  ## unpacking: halve both with each channel's low bit masked off (0x7BDE),
+  ## then add back the carry the two low bits would produce (0x0421).
+  let src = cast[ptr UncheckedArray[uint16]](fb)
+  var upload = cast[pointer](fb)
+  if app.cfg.frame_blend:
+    let pixels = w * h
+    if blend_prev.len != pixels:  # first blended frame: seed history, no ghost
+      blend_prev.setLen(pixels)
+      blend_mix.setLen(pixels)
+      for i in 0 ..< pixels: blend_prev[i] = src[i]
+    for i in 0 ..< pixels:
+      let cur  = src[i]
+      let prev = blend_prev[i]
+      blend_mix[i] = ((cur and 0x7BDE) shr 1) + ((prev and 0x7BDE) shr 1) +
+                     (cur and prev and 0x0421)
+      blend_prev[i] = cur
+    upload = addr blend_mix[0]
+  elif blend_prev.len > 0:
+    blend_prev.setLen(0)  # toggled off: re-enabling must not ghost stale data
+    blend_mix.setLen(0)
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
+                  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
+
 proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
+    # Pushed every present (like the logo uniforms): the Settings window's
+    # Apply has no callback into this module, so a cached value could go stale
+    glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
+                GLint(if app.cfg.scanlines: 1 else: 0))
   case app.emu_kind
   of ekGBA:
     if app.gba_emu == nil: return
-    if not app.gba_emu.ppu.frame_static:
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GBA_W, GBA_H,
-                      GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                      addr app.gba_emu.ppu.framebuffer[0])
+    # Blending must upload static frames too, so the lingering ghost of the
+    # previous frame decays instead of freezing on screen
+    if app.cfg.frame_blend or not app.gba_emu.ppu.frame_static:
+      upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekGB:
     if app.gb_emu == nil: return
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GB_W, GB_H,
-                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                    addr app.gb_emu.ppu.framebuffer[0])
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
+    if rumble_on:
+      # ±1 px viewport jitter, alternating per present, while the cart's
+      # rumble motor runs. Only the viewport origin moves (the quad and
+      # texture are untouched), and it's restored right after the draw so
+      # ImGui renders unshaken.
+      var w, h: cint
+      getSize(app.window, w, h)
+      rumble_flip = not rumble_flip
+      let off: GLint = if rumble_flip: 1 else: -1
+      glViewport(off, -off, GLsizei(w), GLsizei(h))
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+      glViewport(0, 0, GLsizei(w), GLsizei(h))
+    else:
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekNone:
     render_logo()
 
@@ -794,6 +905,28 @@ proc set_fast_forward(held: bool) =
   of ekGB:
     if app.gb_emu != nil: app.gb_emu.apu.sync = not held
   of ekNone: discard
+
+proc update_rumble() =
+  ## Poll the GB cart's rumble motor (MBC5 rumble carts only; the base
+  ## mbc_rumble returns false everywhere else) and drive controller
+  ## vibration: 80 ms effects re-triggered every 50 ms chain into a
+  ## continuous buzz while the motor stays on. render_game reads rumble_on
+  ## for the viewport shake. Effects die out on their own, but stopping
+  ## explicitly on the off edge keeps short pulses crisp.
+  let was_on = rumble_on
+  rumble_on = app.cfg.gb_rumble and app.emu_kind == ekGB and
+              app.gb_emu != nil and not app.paused and
+              app.gb_emu.cartridge.mbc_rumble()
+  if rumble_on:
+    let now = getTicks()
+    if now - rumble_last_pulse >= 50:
+      rumble_last_pulse = now
+      for pad in controllers.values:
+        # 0.6 strong (low-freq) / 0.4 weak (high-freq), matching the web UI
+        discard pad.game_controller_rumble(0x9999'u16, 0x6666'u16, 80)
+  elif was_on:
+    for pad in controllers.values:
+      discard pad.game_controller_rumble(0, 0, 0)
 
 # ──────────────────────────── Input ────────────────────────────
 
@@ -1346,7 +1479,9 @@ proc main() =
   let default_host = "127.0.0.1"
   for i, c in default_host: app.link_host_buf[i] = c
   # GLSL uniforms default to 0/false, so push the configured value now
+  # (tex_height too: 0 would make the scanline fract() darken everything)
   apply_color_correction()
+  apply_panel_uniforms()
 
   if listen_port > 0 and connect_to.len > 0:
     echo "Use either --listen or --connect, not both."; system.quit(1)
@@ -1470,6 +1605,7 @@ proc main() =
           pace_min_q = uint32.high
           pace_max_q = 0
     handle_input()
+    update_rumble()
     service_link_setup()  # non-blocking accept/connect for the Link window
     let now = getTicks()
     var presented = false

@@ -166,6 +166,12 @@ type
     # still clock is harmless, and it is bit-identical everywhere.
     deterministic*: bool
     epoch*:         int64   # unix seconds; the frozen clock when deterministic
+    # Last minute (unix minutes) seen by the per-minute IRQ poll; the IRQ
+    # fires when it changes. Deliberately NOT serialized (session state, like
+    # the SIOMULTI receive latches): worst case is one spurious or missed
+    # minute tick right after a state load, and rollback only runs with a
+    # deterministic (frozen) clock where this value never changes.
+    irq_minute*:    int64
 
   GPIO* = ref object
     gba*:         GBA
@@ -642,7 +648,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer3:        gba.timer.timer_overflow_event(3)
     of etSerial:        gba.serial.serial_transfer_complete()
     of etDMA:           gba.dma.request_immediate()
-    of etHandleInput, etIME, etRtcSecond: discard
+    of etRtcSecond:     gba.rtc_irq_poll()
+    of etHandleInput, etIME: discard
 
 proc post_init*(gba: GBA) =
   gba.storage    = new_storage(gba, gba.rom_path)

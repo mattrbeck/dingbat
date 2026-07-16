@@ -538,8 +538,12 @@ savesModal.addEventListener("click", (e) => {
 var gbFifo = true;
 var gbaBiosMode = 0; // 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE calls
 var gbaRunBios = true;
+// Presentation-side only (the RAF loop polls _wasm_rumble and reacts here),
+// so unlike its siblings it has no wasm setter in applySystemSettings.
+var gbRumble = true;
 
 const gbaRunBiosToggle = document.getElementById("gba-run-bios-toggle");
+const gbRumbleToggle = document.getElementById("gb-rumble-toggle");
 
 const applySystemSettings = () => {
   if (typeof Module === "undefined") return;
@@ -556,11 +560,12 @@ const syncSystemSettingsUI = () => {
     r.checked = Number(r.value) === gbaBiosMode;
   }
   gbaRunBiosToggle.checked = gbaRunBios;
+  gbRumbleToggle.checked = gbRumble;
 };
 
 const saveSystemSettings = () => {
   applySystemSettings();
-  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios });
+  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios, gbRumble });
 };
 
 for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
@@ -586,12 +591,18 @@ gbaRunBiosToggle.addEventListener("change", () => {
   saveSystemSettings();
 });
 
+gbRumbleToggle.addEventListener("change", () => {
+  gbRumble = gbRumbleToggle.checked;
+  saveSystemSettings();
+});
+
 const loadSystemSettings = async () => {
   let s = await dbGet("system");
   if (s) {
     if (typeof s.gbFifo === "boolean") gbFifo = s.gbFifo;
     if ([0, 1, 2].includes(s.gbaBiosMode)) gbaBiosMode = s.gbaBiosMode;
     if (typeof s.gbaRunBios === "boolean") gbaRunBios = s.gbaRunBios;
+    if (typeof s.gbRumble === "boolean") gbRumble = s.gbRumble;
   }
   syncSystemSettingsUI();
   applySystemSettings();
@@ -1663,6 +1674,139 @@ for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
   rewindButton.addEventListener(ev, () => setRewindHeld(false));
 }
 
+// --- Desktop keyboard shortcuts ---
+// Mirrors the native app's conventions (src/dingbat.nim): Tab holds unbounded
+// fast-forward, Shift+Tab toggles 2x, backquote holds rewind. Registered
+// after gameKeyHandler (same capture phase, later registration), which
+// consumes bound game keys with stopImmediatePropagation — and the codeLookup
+// check below also covers the window before the wasm module is ready.
+
+const saveStateItem = document.getElementById("save-state");
+const loadStateItem = document.getElementById("load-state");
+
+const anyModalOpen = () => !!document.querySelector(".modal-overlay.open");
+// netplay.js loads after index.js, so its netMode global may not exist yet
+const netActive = () => typeof netMode !== "undefined" && !!netMode;
+// The speed/rewind/state controls are hidden in the linked modes because
+// they desync the pair; the shortcuts follow the same gating. 2x is the one
+// exception: it stays available in rollback mode (it's relayed to the peer).
+const speedControlsOk = () => !linkMode && !rollbackMode && !netActive();
+
+// Which holds the KEYBOARD owns, so losing the keyup (window blur, a modal
+// opening mid-hold) releases them without touching a button-initiated hold.
+var kbFastForward = false;
+var kbRewindHeld = false;
+const releaseKbHolds = () => {
+  if (kbFastForward) {
+    kbFastForward = false;
+    setFastForward(false);
+  }
+  if (kbRewindHeld) {
+    kbRewindHeld = false;
+    setRewindHeld(false);
+  }
+};
+window.addEventListener("blur", releaseKbHolds);
+
+const shortcutKeyHandler = (e, down) => {
+  if (codeLookup[e.code] !== undefined) return; // game bindings always win
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // browser/OS chords
+
+  // Releases skip the modal/typing guards: a hold must not stay stuck on
+  // when a modal opens (or focus lands in a field) before the keyup.
+  if (!down) {
+    if ((e.code === "Tab" && kbFastForward) ||
+        (e.code === "Backquote" && kbRewindHeld)) {
+      if (e.code === "Tab") {
+        kbFastForward = false;
+        setFastForward(false);
+      } else {
+        kbRewindHeld = false;
+        setRewindHeld(false);
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    return;
+  }
+
+  if (anyModalOpen()) return;
+  // Same guard as gameKeyHandler: don't hijack typing in text fields
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+
+  const gameLoaded = !!currentRomName || linkMode || rollbackMode || netActive();
+  let handled = false;
+  switch (e.code) {
+    case "Space":
+      if (!gameLoaded) break;
+      if (!e.repeat) pauseButton.click();
+      handled = true; // swallow repeats too (Space would scroll / click)
+      break;
+    case "Tab":
+      if (!gameLoaded) break; // leave Tab to focus navigation otherwise
+      if (e.shiftKey) {
+        // Toggle 2x — radio with fast-forward, same as the buttons
+        if (linkMode || netActive()) break;
+        if (!e.repeat) {
+          setSpeed2x(!speed2x);
+          if (speed2x) setFastForward(false);
+        }
+        handled = true;
+      } else {
+        // Hold for unbounded fast-forward
+        if (!speedControlsOk()) break;
+        if (!kbFastForward) {
+          kbFastForward = true;
+          setFastForward(true);
+          setSpeed2x(false);
+        }
+        handled = true;
+      }
+      break;
+    case "Backquote":
+      if (!gameLoaded || !speedControlsOk()) break;
+      if (!kbRewindHeld) {
+        kbRewindHeld = true;
+        setRewindHeld(true);
+      }
+      handled = true;
+      break;
+    case "KeyF":
+      if (e.shiftKey || fullscreenBtn.hidden) break; // hidden = no fullscreen API (iOS)
+      if (!e.repeat) fullscreenBtn.click();
+      handled = true;
+      break;
+    case "KeyM":
+      if (e.shiftKey) break;
+      if (!e.repeat) toggleMute();
+      handled = true;
+      break;
+    case "F5": // save state (F5 default is reload — must be swallowed)
+      if (e.shiftKey || !gameLoaded || !speedControlsOk()) break;
+      if (!e.repeat) saveStateItem.click();
+      handled = true;
+      break;
+    case "F8": // load state
+      if (e.shiftKey || !gameLoaded || !speedControlsOk()) break;
+      if (!e.repeat) loadStateItem.click();
+      handled = true;
+      break;
+    case "F9": // screenshot (F12 opens devtools). OK in net mode: this
+      // side's canvas is the only one here — matches the hidden-button CSS.
+      if (e.shiftKey || !currentRomName || linkMode || rollbackMode) break;
+      if (!e.repeat) takeScreenshot();
+      handled = true;
+      break;
+  }
+  if (handled) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+};
+document.addEventListener("keydown", (e) => shortcutKeyHandler(e, true), true);
+document.addEventListener("keyup", (e) => shortcutKeyHandler(e, false), true);
+
 // --- 2P local link mode ---
 // Two GBA cores running the same ROM over the emulated link cable (lockstep,
 // in-process), rendered side by side on their own 2D canvases. Keyboard and
@@ -1951,6 +2095,44 @@ const pollGamepads = () => {
   }
 };
 
+// --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
+// The RAF loop polls _wasm_rumble each tick while a single-core GB game runs
+// (link/net/rollback modes are GBA-only, and _wasm_rumble itself returns 0
+// for anything but a single GB core). Motor-on drives three presentation-side
+// effects, all gated by the gbRumble setting:
+//  - gamepad vibration, re-triggered every ~50 ms with 60 ms effects so they
+//    chain into a continuous buzz instead of spamming one per frame
+//  - navigator.vibrate on touch devices, same throttle
+//  - a body.rumbling class animating a small transform-only canvas shake
+const RUMBLE_RETRIGGER_MS = 50;
+const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+let rumbling = false;
+let lastRumblePulse = 0;
+
+const updateRumble = (timestamp) => {
+  const on = !!(gbRumble && currentRomName && !paused &&
+    typeof Module !== "undefined" && Module._wasm_rumble && Module._wasm_rumble());
+  if (on !== rumbling) {
+    rumbling = on;
+    document.body.classList.toggle("rumbling", on);
+  }
+  if (!on) return; // running effects are <=60 ms, they die out on their own
+  if (timestamp - lastRumblePulse < RUMBLE_RETRIGGER_MS) return;
+  lastRumblePulse = timestamp;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const pad of pads) {
+    if (!pad?.vibrationActuator?.playEffect) continue;
+    try {
+      pad.vibrationActuator.playEffect("dual-rumble", {
+        duration: 60, strongMagnitude: 0.6, weakMagnitude: 0.4,
+      }).catch(() => {});
+    } catch {}
+  }
+  if (touchDevice) {
+    try { navigator.vibrate?.(30); } catch {}
+  }
+};
+
 var Module = {
   canvas: (() => document.getElementById("canvas"))(),
   onRuntimeInitialized: async () => {
@@ -2153,6 +2335,7 @@ var Module = {
     const tick = (timestamp) => {
       pollGamepads();
       if (paused) {
+        updateRumble(timestamp); // drops body.rumbling promptly on pause
         lastFrameTime = 0;
         accumulator = 0;
         requestAnimationFrame(tick);
@@ -2265,6 +2448,7 @@ var Module = {
       }
       updateSleepOverlay();
       updateGlow();
+      updateRumble(timestamp);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

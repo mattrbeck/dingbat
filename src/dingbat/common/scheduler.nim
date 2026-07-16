@@ -13,7 +13,8 @@ type
     etAPUFrameSeq, etAPUSample
     etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4
     etHandleInput
-    # GB
+    # GB (etRtcSecond also drives the GBA RTC per-minute IRQ poll; enum order
+    # is savestate format — do not reorder)
     etIME, etRtcSecond
     # GBA
     etSaves, etInterrupts

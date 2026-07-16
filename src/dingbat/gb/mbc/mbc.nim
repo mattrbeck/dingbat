@@ -1,7 +1,15 @@
 # MBC base + factory (included by gb.nim)
 
+type
+  # MBC5+RUMBLE (cart types 0x1C-0x1E): bit 3 of the RAM-bank register drives
+  # the motor, leaving only bits 0-2 for bank selection.
+  Mbc5Rumble* = ref object of Mbc5
+    rumble*: bool  # transient motor state; deliberately not serialized
+
 method mbc_read*(cart: Mbc; idx: int): uint8 {.base.} = 0xFF'u8
 method mbc_write*(cart: Mbc; idx: int; val: uint8) {.base.} = discard
+# Frontends poll this each frame to drive controller/haptic rumble.
+method mbc_rumble*(cart: Mbc): bool {.base.} = false
 
 proc load_cartridge*(rom_path: string): Mbc =
   let raw = readFile(rom_path)
@@ -48,10 +56,15 @@ proc load_cartridge*(rom_path: string): Mbc =
                  rom_bank_num: 1,
                  has_rtc: cart_type in [0x0F'u8, 0x10])
     cart = c
-  of 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E:
+  of 0x19, 0x1A, 0x1B:
     let c = Mbc5(rom: rom, ram: newSeq[uint8](ram_sz),
                  sav_path: sav_path, has_battery: has_battery,
                  rom_bank_num: 1)
+    cart = c
+  of 0x1C, 0x1D, 0x1E:
+    let c = Mbc5Rumble(rom: rom, ram: newSeq[uint8](ram_sz),
+                       sav_path: sav_path, has_battery: has_battery,
+                       rom_bank_num: 1)
     cart = c
   else:
     echo "Warning: unimplemented cartridge type 0x", toHex(cart_type, 2), ", treating as ROM"
