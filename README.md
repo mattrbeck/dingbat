@@ -70,7 +70,10 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Save states, rewind, and fast forward
   - Online link play with room codes
   - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE
-    modes, color correction, integer scaling, and scanlines
+    modes, color correction, integer scaling, scanlines, motion blur
+    (interframe blending), and an ambient glow backdrop
+  - Per-panel color correction: mGBA's AGB model for GBA, the
+    hardware-measured "GBC-Color" model for GB/GBC
 - GB / GBC
   - Accurate sound emulation
   - Passing [blargg's CPU tests](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs)

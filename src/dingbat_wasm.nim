@@ -64,44 +64,66 @@ var netOut: string = ""       # drained frames awaiting pickup by JS
 var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
 var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
 
-# LCD color correction matching the desktop game shader exactly: linearize
-# with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2. SDL's renderer
-# API has no shader hook, but the 15-bit BGR555 domain is small enough to
-# precompute exhaustively as a BGR555 -> RGBA8888 table.
-var colorLut: array[0x8000, uint32]
+# LCD color correction. SDL's renderer API has no shader hook, but the 15-bit
+# BGR555 domain is small enough to precompute exhaustively as BGR555 ->
+# RGBA8888 tables — one per panel:
+#  - GBA: the desktop game shader's model (mGBA-style: linearize with
+#    lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2)
+#  - GB/GBC: Pokefan531's hardware-measured "GBC-Color" model (libretro):
+#    linearize with gamma 2.2, luminance 0.94, channel-mix matrix, re-gamma.
+#    The GBC panel is far less washed out than the AGB's, so reusing the GBA
+#    curve there crushed its colors.
+var colorLutGba: array[0x8000, uint32]
+var colorLutGbc: array[0x8000, uint32]
 var rgbaBuffer: seq[uint32] = @[]
 var colorCorrect = true  # matches the desktop default (cfg.color_correction)
 
-proc build_color_lut(correct: bool) =
-  ## Fill the BGR555 -> RGBA8888 lookup table. When `correct` is set this
-  ## applies the desktop shader's LCD color correction; otherwise it does a
-  ## plain 5-bit -> 8-bit expansion (raw hardware colors). Every present path
-  ## (single-core, link, rollback) reads colorLut, so rebuilding it here is
-  ## enough to toggle correction everywhere.
+proc build_color_luts(correct: bool) =
+  ## Fill both BGR555 -> RGBA8888 lookup tables. When `correct` is unset both
+  ## do a plain 5-bit -> 8-bit expansion (raw hardware colors). Every present
+  ## path (single-core, link, rollback) reads these, so rebuilding them here
+  ## is enough to toggle correction everywhere.
   for i in 0 ..< 0x8000:
-    var rgb: array[3, uint32]
+    let r5 = float64(i and 0x1F) / 31.0
+    let g5 = float64((i shr 5) and 0x1F) / 31.0
+    let b5 = float64((i shr 10) and 0x1F) / 31.0
+    var gba, gbc: array[3, uint32]
     if correct:
-      let r = pow(float64(i and 0x1F) / 31.0, 4.0)
-      let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
-      let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
-      let mixed = [
-        (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
-        ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
-        (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
-      ]
-      for c in 0 .. 2:
-        rgb[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
+      block:  # GBA (AGB panel)
+        let r = pow(r5, 4.0)
+        let g = pow(g5, 4.0)
+        let b = pow(b5, 4.0)
+        let mixed = [
+          (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
+          ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
+          (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
+        ]
+        for c in 0 .. 2:
+          gba[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
+      block:  # GB/GBC (CGB panel)
+        const lum = 0.94
+        let r = pow(r5, 2.2) * lum
+        let g = pow(g5, 2.2) * lum
+        let b = pow(b5, 2.2) * lum
+        let mixed = [
+          0.82 * r + 0.125 * g + 0.195 * b,
+          0.24 * r + 0.665 * g + 0.075 * b,
+         -0.06 * r + 0.210 * g + 0.730 * b,
+        ]
+        for c in 0 .. 2:
+          gbc[c] = uint32(min(255.0, round(pow(max(0.0, min(1.0, mixed[c])), 1.0 / 2.2) * 255.0)))
     else:
-      rgb[0] = uint32(round(float64(i and 0x1F) / 31.0 * 255.0))
-      rgb[1] = uint32(round(float64((i shr 5) and 0x1F) / 31.0 * 255.0))
-      rgb[2] = uint32(round(float64((i shr 10) and 0x1F) / 31.0 * 255.0))
-    colorLut[i] = 0xFF000000'u32 or (rgb[2] shl 16) or (rgb[1] shl 8) or rgb[0]
+      for (dst, v) in [(0, r5), (1, g5), (2, b5)]:
+        gba[dst] = uint32(round(v * 255.0))
+        gbc[dst] = gba[dst]
+    colorLutGba[i] = 0xFF000000'u32 or (gba[2] shl 16) or (gba[1] shl 8) or gba[0]
+    colorLutGbc[i] = 0xFF000000'u32 or (gbc[2] shl 16) or (gbc[1] shl 8) or gbc[0]
 
 proc wasm_set_color_correction(on: cint) {.exportc.} =
   ## Toggle LCD color correction from JS (parity with the desktop menu item).
-  ## Rebuilds the shared color LUT; the next presented frame uses it.
+  ## Rebuilds the shared color LUTs; the next presented frame uses them.
   colorCorrect = on != 0
-  build_color_lut(colorCorrect)
+  build_color_luts(colorCorrect)
 
 # --- Core-construction settings (web Settings panel) ---
 # Mirrors the desktop config: these take effect at the NEXT core construction
@@ -133,10 +155,46 @@ proc make_gba(rom_path: string): GBA =
           use_hle = mode == 0,
           hle_after_bios = mode == 2)
 
+# Interframe blending (LCD ghosting): presents the average of the last two
+# frames, like mGBA's "interframe blending" — the real panels' slow pixel
+# response ghosted the previous frame into the current one, and some games
+# exploit it (fast flicker for transparency). Presentation-only: emulation is
+# untouched, so it can be toggled live. prevFrame follows the module-scope
+# rule (empty here, allocated from JS-invoked procs only).
+var frameBlend = false
+var prevFrame: seq[uint32] = @[]
+
+proc wasm_set_frame_blend(on: cint) {.exportc.} =
+  frameBlend = on != 0
+  prevFrame.setLen(0)  # drop stale history (also on core/resolution switch)
+
+proc blend_avg(a, b: uint32): uint32 {.inline.} =
+  # Per-channel (a+b)/2 without unpacking: halve both with the low bits
+  # masked off, then add back the carry each pair of low bits would produce.
+  ((a and 0xFEFEFEFE'u32) shr 1) + ((b and 0xFEFEFEFE'u32) shr 1) +
+    (a and b and 0x01010101'u32)
+
 proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint) =
-  for i in 0 ..< pixels:
-    rgbaBuffer[i] = colorLut[fb[i] and 0x7FFF]
+  let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
+  if frameBlend:
+    if prevFrame.len != pixels:  # first blended frame: seed history, no ghost
+      prevFrame.setLen(pixels)
+      for i in 0 ..< pixels:
+        prevFrame[i] = lut[fb[i] and 0x7FFF]
+    for i in 0 ..< pixels:
+      let cur = lut[fb[i] and 0x7FFF]
+      rgbaBuffer[i] = blend_avg(cur, prevFrame[i])
+      prevFrame[i] = cur
+  else:
+    for i in 0 ..< pixels:
+      rgbaBuffer[i] = lut[fb[i] and 0x7FFF]
   discard stateTexture.updateTexture(nil, addr rgbaBuffer[0], pitch)
+
+proc wasm_fb_ptr(): pointer {.exportc.} =
+  ## Pointer to the last-presented single-core RGBA framebuffer (after color
+  ## correction and blending). JS samples a coarse grid from it to drive the
+  ## ambient-glow backdrop; stale-while-static is fine for that.
+  if rgbaBuffer.len > 0: addr rgbaBuffer[0] else: nil
 
 # Global audio sample buffer for JS to consume via Web Audio API.
 # The APU appends float32 stereo samples here; JS reads and clears after each frame.
@@ -282,7 +340,9 @@ proc loop_tick() {.exportc.} =
     stateGba.step_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
-    if not stateGba.ppu.frame_static:
+    # Blending must present static frames too, so the lingering ghost of the
+    # last change decays instead of freezing into the picture
+    if frameBlend or not stateGba.ppu.frame_static:
       present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                         GBA_W * GBA_H, GBA_W * 4)
   of ekGB:
@@ -402,7 +462,7 @@ proc link_tick() {.exportc.} =
     if core.ppu.frame_static: continue  # unchanged since the previous frame
     let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
     for i in 0 ..< GBA_W * GBA_H:
-      linkRgba[p][i] = colorLut[fb[i] and 0x7FFF]
+      linkRgba[p][i] = colorLutGba[fb[i] and 0x7FFF]
   # Drain the SDL event queue: JS handles all link-mode input directly via
   # link_input, but emscripten's SDL layer still queues events for keys the
   # JS capture handler doesn't intercept.
@@ -453,7 +513,7 @@ proc rollback_render() =
   let core = stateRollback.link.cores[rbLocal]
   let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
   for i in 0 ..< GBA_W * GBA_H:
-    linkRgba[rbLocal][i] = colorLut[fb[i] and 0x7FFF]
+    linkRgba[rbLocal][i] = colorLutGba[fb[i] and 0x7FFF]
 
 proc rollback_exit() {.exportc.} =
   if stateRollback != nil:
@@ -482,7 +542,9 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   stateTexture = stateRenderer.createTexture(
     SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
   rgbaBuffer.setLen(GBA_W * GBA_H)
+  stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
   discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
+  prevFrame.setLen(0)
   1
 
 proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
@@ -596,6 +658,10 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     rgbaBuffer.setLen(GB_W * GB_H)
+    # Match the canvas backing store to the panel's aspect ratio: leaving it
+    # at the GBA's 3:2 letterboxes GB content at a fractional scale, which
+    # defeats pixel-perfect (integer) display scaling.
+    stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
@@ -605,8 +671,10 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
     rgbaBuffer.setLen(GBA_W * GBA_H)
+    stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
+  prevFrame.setLen(0)  # blend history is per-core (and per-resolution)
   rewindHistory = new_rewind()
 
 # --- Online link mode (multiplayer phase 3b, web side) ---
@@ -746,7 +814,7 @@ proc netlink_tick(): cint {.exportc.} =
     2
   of naFrame:
     inc frameCount
-    if not stateGba.ppu.frame_static:
+    if frameBlend or not stateGba.ppu.frame_static:
       present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                         GBA_W * GBA_H, GBA_W * 4)
     checkInput()
@@ -800,7 +868,7 @@ when defined(emscripten):
   proc dummyLoop() {.cdecl.} = discard
   emscripten_set_main_loop(dummyLoop, 0, 0)
 
-build_color_lut(colorCorrect)
+build_color_luts(colorCorrect)
 discard sdl2.init(INIT_VIDEO or INIT_AUDIO)
 stateWindow = createWindow("dingbat", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             GBA_W * 4, GBA_H * 4, SDL_WINDOW_SHOWN)

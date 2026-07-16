@@ -509,6 +509,28 @@ document.getElementById("remove-gbc-bootrom").addEventListener("click", async ()
   updateBiosStatusText();
 });
 
+// --- Manage Saves modal (state + battery-save import/export) ---
+
+const savesModal = document.getElementById("saves-modal");
+
+const openSavesModal = () => {
+  menuDropdown.hidden = true;
+  savesModal.classList.add("open");
+  trapFocus(savesModal);
+};
+
+const closeSavesModal = () => {
+  savesModal.classList.remove("open");
+  releaseFocus(savesModal);
+};
+
+document.getElementById("manage-saves").addEventListener("click", openSavesModal);
+document.getElementById("saves-close").addEventListener("click", closeSavesModal);
+
+savesModal.addEventListener("click", (e) => {
+  if (e.target === savesModal) closeSavesModal();
+});
+
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
 // JS mirrors of the wasm-side option vars; they take effect the next time a
 // core is constructed (ROM load / reset), matching the desktop config.
@@ -710,6 +732,7 @@ document.addEventListener("keydown", (e) => {
     if (!settingsModal.classList.contains("open") || kbSelection < 0) {
       closeSettingsModal();
     }
+    closeSavesModal();
     closeUpdateModal();
   }
 });
@@ -758,7 +781,7 @@ document.getElementById("export-save").addEventListener("click", async () => {
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 
 document.getElementById("load-save").addEventListener("click", () => {
-  menuDropdown.hidden = true;
+  closeSavesModal(); // success reloads the game — don't leave the modal over it
   if (!currentRomName || !currentOriginalName) {
     alert("No ROM is loaded.");
     return;
@@ -985,12 +1008,18 @@ const loadColorCorrect = async () => {
 
 var integerScale = false;
 var scanlines = false;
+var motionBlur = false;
+var ambientGlow = false;
 
 const canvasEl = document.getElementById("canvas");
 const stageEl = document.getElementById("stage");
 const scanlineOverlay = document.getElementById("scanline-overlay");
+const glowCanvas = document.getElementById("glow-canvas");
+const glowCtx = glowCanvas.getContext("2d");
 const integerScaleToggle = document.getElementById("integer-scale-toggle");
 const scanlinesToggle = document.getElementById("scanlines-toggle");
+const motionBlurToggle = document.getElementById("motion-blur-toggle");
+const ambientGlowToggle = document.getElementById("ambient-glow-toggle");
 
 // Native resolution of the running system (GBA 240x160, GB/GBC 160x144)
 const nativeRes = () =>
@@ -1011,23 +1040,79 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
   }
-  if (scanlines && running && !linkMode && !rollbackMode) {
+  const singleCore = running && !linkMode && !rollbackMode;
+  if ((scanlines || ambientGlow) && singleCore) {
     const c = canvasEl.getBoundingClientRect();
     const s = stageEl.getBoundingClientRect();
-    scanlineOverlay.style.left = c.left - s.left + "px";
-    scanlineOverlay.style.top = c.top - s.top + "px";
-    scanlineOverlay.style.width = c.width + "px";
-    scanlineOverlay.style.height = c.height + "px";
-    scanlineOverlay.style.backgroundSize =
-      "100% " + c.height / nativeRes()[1] + "px";
-    scanlineOverlay.hidden = false;
-  } else {
-    scanlineOverlay.hidden = true;
+    if (scanlines) {
+      scanlineOverlay.style.left = c.left - s.left + "px";
+      scanlineOverlay.style.top = c.top - s.top + "px";
+      scanlineOverlay.style.width = c.width + "px";
+      scanlineOverlay.style.height = c.height + "px";
+      scanlineOverlay.style.backgroundSize =
+        "100% " + c.height / nativeRes()[1] + "px";
+    }
+    if (ambientGlow) {
+      glowCanvas.style.left = c.left - s.left + "px";
+      glowCanvas.style.top = c.top - s.top + "px";
+      glowCanvas.style.width = c.width + "px";
+      glowCanvas.style.height = c.height + "px";
+    }
   }
+  scanlineOverlay.hidden = !(scanlines && singleCore);
+  glowCanvas.hidden = !(ambientGlow && singleCore);
+};
+
+// Sample a coarse grid from the wasm-side presented framebuffer into the glow
+// canvas. Called from the RAF loop but throttled to ~10 Hz; each sample is
+// blended over the previous one so the glow eases between scenes instead of
+// flickering. The buffer is stale-while-paused/static, which reads correctly.
+const glowBuf = document.createElement("canvas");
+glowBuf.width = glowCanvas.width;
+glowBuf.height = glowCanvas.height;
+const glowBufCtx = glowBuf.getContext("2d");
+let glowImage = null;
+let glowTick = 0;
+let glowFresh = true; // first sample after enabling paints at full alpha
+
+const updateGlow = () => {
+  if (glowCanvas.hidden || !currentRomName) return;
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
+  if (glowTick++ % 6 !== 0) return;
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return;
+  const [w, h] = nativeRes();
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  const gw = glowCanvas.width;
+  const gh = glowCanvas.height;
+  if (!glowImage) glowImage = glowBufCtx.createImageData(gw, gh);
+  const d = glowImage.data;
+  for (let y = 0; y < gh; y++) {
+    const sy = Math.floor(((y + 0.5) * h) / gh);
+    for (let x = 0; x < gw; x++) {
+      const sx = Math.floor(((x + 0.5) * w) / gw);
+      const si = (sy * w + sx) * 4;
+      const di = (y * gw + x) * 4;
+      d[di] = heap[si];
+      d[di + 1] = heap[si + 1];
+      d[di + 2] = heap[si + 2];
+      d[di + 3] = 255;
+    }
+  }
+  glowBufCtx.putImageData(glowImage, 0, 0);
+  glowCtx.globalAlpha = glowFresh ? 1 : 0.3;
+  glowCtx.drawImage(glowBuf, 0, 0);
+  glowFresh = false;
 };
 
 const saveVideoSettings = () => {
-  if (db) dbPut("video", { integerScale, scanlines });
+  if (db) dbPut("video", { integerScale, scanlines, motionBlur, ambientGlow });
+};
+
+const applyMotionBlur = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_frame_blend) {
+    Module._wasm_set_frame_blend(motionBlur ? 1 : 0);
+  }
 };
 
 integerScaleToggle.addEventListener("change", () => {
@@ -1042,14 +1127,32 @@ scanlinesToggle.addEventListener("change", () => {
   saveVideoSettings();
 });
 
+motionBlurToggle.addEventListener("change", () => {
+  motionBlur = motionBlurToggle.checked;
+  applyMotionBlur();
+  saveVideoSettings();
+});
+
+ambientGlowToggle.addEventListener("change", () => {
+  ambientGlow = ambientGlowToggle.checked;
+  glowFresh = true; // repaint at full strength rather than fading in
+  updateCanvasScaling();
+  saveVideoSettings();
+});
+
 const loadVideoSettings = async () => {
   let v = await dbGet("video");
   if (v) {
     integerScale = !!v.integerScale;
     scanlines = !!v.scanlines;
+    motionBlur = !!v.motionBlur;
+    ambientGlow = !!v.ambientGlow;
   }
   integerScaleToggle.checked = integerScale;
   scanlinesToggle.checked = scanlines;
+  motionBlurToggle.checked = motionBlur;
+  ambientGlowToggle.checked = ambientGlow;
+  applyMotionBlur();
   updateCanvasScaling();
 };
 
@@ -1314,6 +1417,7 @@ const loadRom = async (romName, originalName) => {
   speed2xButton.classList.remove("active");
   rewindButton.classList.remove("active");
   document.body.classList.add("has-game", "running");
+  document.body.classList.toggle("sys-gb", extOf(romName) !== ".gba");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
@@ -1701,6 +1805,7 @@ const launchLinkRom = async (rom) => {
   gpPrev.fill(false);
   initLinkCanvases();
   document.body.classList.add("has-game", "running", "link-mode");
+  document.body.classList.remove("sys-gb"); // link mode is GBA-only
   updateCanvasScaling();
   await addRecentRom(rom.name, rom.data, rom.art);
 };
@@ -2159,6 +2264,7 @@ var Module = {
         captureCanvas();
       }
       updateSleepOverlay();
+      updateGlow();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

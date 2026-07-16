@@ -281,11 +281,7 @@ body.running #main-menu-sep {
 /* Save actions + screenshot only make sense once a game is loaded */
 #save-state,
 #load-state,
-#export-state,
-#import-state,
-#state-sep,
-#load-save,
-#export-save,
+#manage-saves,
 #screenshot,
 #save-sep {
   display: none;
@@ -293,15 +289,11 @@ body.running #main-menu-sep {
 
 body.has-game #save-state,
 body.has-game #load-state,
-body.has-game #export-state,
-body.has-game #import-state,
-body.has-game #load-save,
-body.has-game #export-save,
+body.has-game #manage-saves,
 body.has-game #screenshot {
   display: flex;
 }
 
-body.has-game #state-sep,
 body.has-game #save-sep {
   display: block;
 }
@@ -574,11 +566,32 @@ body.fs #fullscreen-btn .ico-collapse {
   display: none;
 }
 
+/* GB/GBC panels are 10:9, not the GBA's 3:2. The wasm resizes the canvas
+   backing store to match on ROM load; body.sys-gb keeps the CSS box in the
+   same shape so nothing letterboxes or stretches. */
+body.sys-gb #canvas {
+  aspect-ratio: 10 / 9;
+  width: min(100%, calc((100dvh - var(--bar-h)) * 1.1112));
+}
+
 body.running #canvas {
   display: block;
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 50px rgba(0, 0, 0, 0.6),
     0 0 60px -20px var(--accent-glow);
+}
+
+/* Ambient glow backdrop: a coarse sample of the frame, inflated past the
+   canvas edges and heavily blurred. JS pins it to the canvas rect and feeds
+   it ~10 samples/second with temporal smoothing. */
+#glow-canvas {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  transform: scale(1.3);
+  filter: blur(50px) saturate(1.5);
+  opacity: 0.8;
+  border-radius: 28px;
 }
 
 /* Scanlines video effect: one faint line per emulated pixel row. JS sizes and
@@ -1359,7 +1372,8 @@ body.has-game #home-resume {
 }
 
 /* The first section label in a pane needs no separator — the tab bar is one */
-.settings-pane .modal-subhead:first-child {
+.settings-pane .modal-subhead:first-child,
+.modal-subhead.no-rule {
   border-top: none;
   padding-top: 0;
 }
@@ -1960,22 +1974,14 @@ body.link-mode #speed-2x-btn,
 body.link-mode #fast-forward,
 body.link-mode #save-state,
 body.link-mode #load-state,
-body.link-mode #export-state,
-body.link-mode #import-state,
-body.link-mode #state-sep,
-body.link-mode #load-save,
-body.link-mode #export-save,
+body.link-mode #manage-saves,
 body.link-mode #screenshot,
 body.link-mode #save-sep,
 body.rollback-mode #rewind,
 body.rollback-mode #fast-forward,
 body.rollback-mode #save-state,
 body.rollback-mode #load-state,
-body.rollback-mode #export-state,
-body.rollback-mode #import-state,
-body.rollback-mode #state-sep,
-body.rollback-mode #load-save,
-body.rollback-mode #export-save,
+body.rollback-mode #manage-saves,
 body.rollback-mode #screenshot,
 body.rollback-mode #save-sep {
   display: none !important;
@@ -2098,6 +2104,9 @@ body.rollback-mode #save-sep {
   /* With the bar gone the stage owns the full height */
   body.running #canvas {
     width: min(100%, calc(100dvh * 1.5));
+  }
+  body.sys-gb.running #canvas {
+    width: min(100%, calc(100dvh * 1.1112));
   }
   body.running #controls {
     top: 0;
@@ -2326,10 +2335,12 @@ body.net-mode #fast-forward,
 body.net-mode #reset,
 body.net-mode #save-state,
 body.net-mode #load-state,
-body.net-mode #export-state,
-body.net-mode #import-state,
-body.net-mode #state-sep,
-body.net-mode #load-save {
+/* Inside Manage Saves, only save-file EXPORT stays: states and save import
+   would desync (or reset) this side of the pair */
+body.net-mode #saves-modal .modal-toggle-row:has(#export-state),
+body.net-mode #saves-modal .modal-toggle-row:has(#import-state),
+body.net-mode #saves-modal .modal-toggle-row:has(#load-save),
+body.net-mode #saves-modal .modal-subhead.no-rule {
   display: none !important;
 }
 
