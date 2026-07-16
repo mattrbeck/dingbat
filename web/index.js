@@ -393,34 +393,17 @@ document.addEventListener("click", () => {
   menuDropdown.hidden = true;
 });
 
-// --- BIOS Modal ---
+// --- Settings modal (tabbed: Controls / Game Boy / GBA / Video) ---
 
-const biosModal = document.getElementById("bios-modal");
+const settingsModal = document.getElementById("settings-modal");
 const gbaBiosStatus = document.getElementById("gba-bios-status");
 const gbcBootromStatus = document.getElementById("gbc-bootrom-status");
 
-// Pending state: { bytes, name } for a new pick, "remove" for removal, or null for no change
-let pendingGbaBios = null;
-let pendingGbcBootrom = null;
-
 const updateBiosStatusText = async () => {
-  if (pendingGbaBios === "remove") {
-    gbaBiosStatus.textContent = "Not set (pending)";
-  } else if (pendingGbaBios) {
-    gbaBiosStatus.textContent = pendingGbaBios.name + " (pending)";
-  } else {
-    let stored = await dbGet("bios:gba");
-    gbaBiosStatus.textContent = stored?.name || (stored ? "Set" : "Not set");
-  }
-
-  if (pendingGbcBootrom === "remove") {
-    gbcBootromStatus.textContent = "None (pending)";
-  } else if (pendingGbcBootrom) {
-    gbcBootromStatus.textContent = pendingGbcBootrom.name + " (pending)";
-  } else {
-    let stored = await dbGet("bios:gbc");
-    gbcBootromStatus.textContent = stored?.name || (stored ? "Set" : "Not set");
-  }
+  let gba = await dbGet("bios:gba");
+  gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
+  let gbc = await dbGet("bios:gbc");
+  gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
 };
 
 // iOS/iPadOS (iPad reports as "MacIntel" with touch points since iPadOS 13).
@@ -455,71 +438,142 @@ const pickFile = (accept, callback) => {
   input.click();
 };
 
-document.getElementById("open-bios").addEventListener("click", () => {
+// Tab bar: one pane visible at a time
+const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+
+const selectSettingsTab = (name) => {
+  for (let t of settingsTabs) {
+    let on = t.dataset.tab === name;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    document.getElementById("settings-pane-" + t.dataset.tab).hidden = !on;
+  }
+};
+
+settingsTabs.forEach((t) =>
+  t.addEventListener("click", () => selectSettingsTab(t.dataset.tab))
+);
+
+const openSettingsModal = () => {
   menuDropdown.hidden = true;
-  pendingGbaBios = null;
-  pendingGbcBootrom = null;
   updateBiosStatusText();
-  biosModal.classList.add("open");
-  trapFocus(biosModal);
+  kbSelection = -1;
+  kbPreset.value = detectPreset(activeBindings);
+  renderKbBindings();
+  settingsModal.classList.add("open");
+  document.addEventListener("keydown", kbKeyHandler, true);
+  trapFocus(settingsModal);
+};
+
+const closeSettingsModal = () => {
+  kbSelection = -1;
+  settingsModal.classList.remove("open");
+  document.removeEventListener("keydown", kbKeyHandler, true);
+  releaseFocus(settingsModal);
+};
+
+document.getElementById("open-settings").addEventListener("click", openSettingsModal);
+document.getElementById("settings-close").addEventListener("click", closeSettingsModal);
+
+settingsModal.addEventListener("click", (e) => {
+  if (e.target === settingsModal) closeSettingsModal();
 });
 
+// BIOS / bootrom files apply immediately: the FS copy and the IndexedDB copy
+// are updated on pick, and the next core construction reads the FS file.
 document.getElementById("pick-gba-bios").addEventListener("click", () => {
-  pickFile(".bin", (bytes, name) => {
-    pendingGbaBios = { bytes, name };
+  pickFile(".bin", async (bytes, name) => {
+    writeToFS("bios.bin", bytes);
+    await dbPut("bios:gba", { name, data: bytes });
     updateBiosStatusText();
   });
+});
+
+document.getElementById("remove-gba-bios").addEventListener("click", async () => {
+  await dbDelete("bios:gba");
+  try { FS.unlink("bios.bin"); } catch {}
+  updateBiosStatusText();
 });
 
 document.getElementById("pick-gbc-bootrom").addEventListener("click", () => {
-  pickFile(".bin", (bytes, name) => {
-    pendingGbcBootrom = { bytes, name };
+  pickFile(".bin", async (bytes, name) => {
+    writeToFS("bootrom.bin", bytes);
+    await dbPut("bios:gbc", { name, data: bytes });
     updateBiosStatusText();
   });
 });
 
-document.getElementById("remove-gba-bios").addEventListener("click", () => {
-  pendingGbaBios = "remove";
+document.getElementById("remove-gbc-bootrom").addEventListener("click", async () => {
+  await dbDelete("bios:gbc");
+  try { FS.unlink("bootrom.bin"); } catch {}
   updateBiosStatusText();
 });
 
-document.getElementById("remove-gbc-bootrom").addEventListener("click", () => {
-  pendingGbcBootrom = "remove";
-  updateBiosStatusText();
-});
+// --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
+// JS mirrors of the wasm-side option vars; they take effect the next time a
+// core is constructed (ROM load / reset), matching the desktop config.
 
-const closeBiosModal = () => {
-  pendingGbaBios = null;
-  pendingGbcBootrom = null;
-  biosModal.classList.remove("open");
-  releaseFocus(biosModal);
+var gbFifo = true;
+var gbaBiosMode = 0; // 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE calls
+var gbaRunBios = true;
+
+const gbaRunBiosToggle = document.getElementById("gba-run-bios-toggle");
+
+const applySystemSettings = () => {
+  if (typeof Module === "undefined") return;
+  if (Module._wasm_set_gb_renderer) Module._wasm_set_gb_renderer(gbFifo ? 1 : 0);
+  if (Module._wasm_set_gba_bios_mode) Module._wasm_set_gba_bios_mode(gbaBiosMode);
+  if (Module._wasm_set_gba_run_bios) Module._wasm_set_gba_run_bios(gbaRunBios ? 1 : 0);
 };
 
-document.getElementById("bios-close").addEventListener("click", closeBiosModal);
+const syncSystemSettingsUI = () => {
+  for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
+    r.checked = r.value === (gbFifo ? "fifo" : "scanline");
+  }
+  for (let r of document.querySelectorAll('input[name="gba-bios-mode"]')) {
+    r.checked = Number(r.value) === gbaBiosMode;
+  }
+  gbaRunBiosToggle.checked = gbaRunBios;
+};
 
-document.getElementById("bios-save").addEventListener("click", async () => {
-  if (pendingGbaBios === "remove") {
-    await dbDelete("bios:gba");
-    try { FS.unlink("bios.bin"); } catch {}
-  } else if (pendingGbaBios) {
-    writeToFS("bios.bin", pendingGbaBios.bytes);
-    await dbPut("bios:gba", { name: pendingGbaBios.name, data: pendingGbaBios.bytes });
-  }
-  if (pendingGbcBootrom === "remove") {
-    await dbDelete("bios:gbc");
-    try { FS.unlink("bootrom.bin"); } catch {}
-  } else if (pendingGbcBootrom) {
-    writeToFS("bootrom.bin", pendingGbcBootrom.bytes);
-    await dbPut("bios:gbc", { name: pendingGbcBootrom.name, data: pendingGbcBootrom.bytes });
-  }
-  closeBiosModal();
+const saveSystemSettings = () => {
+  applySystemSettings();
+  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios });
+};
+
+for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
+  r.addEventListener("change", () => {
+    if (r.checked) {
+      gbFifo = r.value === "fifo";
+      saveSystemSettings();
+    }
+  });
+}
+
+for (let r of document.querySelectorAll('input[name="gba-bios-mode"]')) {
+  r.addEventListener("change", () => {
+    if (r.checked) {
+      gbaBiosMode = Number(r.value);
+      saveSystemSettings();
+    }
+  });
+}
+
+gbaRunBiosToggle.addEventListener("change", () => {
+  gbaRunBios = gbaRunBiosToggle.checked;
+  saveSystemSettings();
 });
 
-document.getElementById("bios-cancel").addEventListener("click", closeBiosModal);
-
-biosModal.addEventListener("click", (e) => {
-  if (e.target === biosModal) closeBiosModal();
-});
+const loadSystemSettings = async () => {
+  let s = await dbGet("system");
+  if (s) {
+    if (typeof s.gbFifo === "boolean") gbFifo = s.gbFifo;
+    if ([0, 1, 2].includes(s.gbaBiosMode)) gbaBiosMode = s.gbaBiosMode;
+    if (typeof s.gbaRunBios === "boolean") gbaRunBios = s.gbaRunBios;
+  }
+  syncSystemSettingsUI();
+  applySystemSettings();
+};
 
 // --- Recent ROMs ---
 
@@ -652,11 +706,10 @@ const refreshHomeRecent = async () => {
 // Close any open modal on Escape
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    // Don't close keyboard modal if we're rebinding — the capture handler will eat it
-    if (!keyboardModal.classList.contains("open") || kbSelection < 0) {
-      closeKeyboardModal();
+    // Don't close settings if we're rebinding a key — the capture handler eats it
+    if (!settingsModal.classList.contains("open") || kbSelection < 0) {
+      closeSettingsModal();
     }
-    closeBiosModal();
     closeUpdateModal();
   }
 });
@@ -903,8 +956,7 @@ syncVolumeUI();
 // The wasm core keeps a single BGR555->RGBA lookup table used by every present
 // path; _wasm_set_color_correction rebuilds it. Default on, matching desktop.
 var colorCorrect = true;
-const ccButton = document.getElementById("color-correct");
-const ccLabel = document.getElementById("color-correct-label");
+const ccToggle = document.getElementById("color-correct-toggle");
 
 const applyColorCorrect = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_color_correction) {
@@ -912,16 +964,8 @@ const applyColorCorrect = () => {
   }
 };
 
-const syncColorCorrectUI = () => {
-  ccLabel.textContent = "Color Correction: " + (colorCorrect ? "On" : "Off");
-  ccButton.setAttribute("aria-checked", colorCorrect ? "true" : "false");
-  ccButton.classList.toggle("active", colorCorrect);
-};
-
-ccButton.addEventListener("click", (e) => {
-  e.stopPropagation(); // keep the menu open so the change is visible
-  colorCorrect = !colorCorrect;
-  syncColorCorrectUI();
+ccToggle.addEventListener("change", () => {
+  colorCorrect = ccToggle.checked;
   applyColorCorrect();
   if (db) dbPut("colorCorrect", colorCorrect);
 });
@@ -929,9 +973,88 @@ ccButton.addEventListener("click", (e) => {
 const loadColorCorrect = async () => {
   let v = await dbGet("colorCorrect");
   if (typeof v === "boolean") colorCorrect = v;
-  syncColorCorrectUI();
+  ccToggle.checked = colorCorrect;
   applyColorCorrect();
 };
+
+// --- Video effects (integer scaling, scanline overlay) ---
+// Integer scaling pins the canvas's CSS size to a whole multiple of the
+// emulated resolution. The scanline overlay is a separate element JS keeps
+// aligned over the canvas (a WebGL canvas can't carry pseudo-elements), with
+// background-size set so one line lands on each emulated pixel row.
+
+var integerScale = false;
+var scanlines = false;
+
+const canvasEl = document.getElementById("canvas");
+const stageEl = document.getElementById("stage");
+const scanlineOverlay = document.getElementById("scanline-overlay");
+const integerScaleToggle = document.getElementById("integer-scale-toggle");
+const scanlinesToggle = document.getElementById("scanlines-toggle");
+
+// Native resolution of the running system (GBA 240x160, GB/GBC 160x144)
+const nativeRes = () =>
+  currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
+
+const updateCanvasScaling = () => {
+  const running =
+    document.body.classList.contains("running") && !!currentRomName;
+  if (integerScale && running) {
+    const [w, h] = nativeRes();
+    const k = Math.max(
+      1,
+      Math.floor(Math.min(stageEl.clientWidth / w, stageEl.clientHeight / h))
+    );
+    canvasEl.style.width = k * w + "px";
+    canvasEl.style.height = k * h + "px";
+  } else {
+    canvasEl.style.width = "";
+    canvasEl.style.height = "";
+  }
+  if (scanlines && running && !linkMode && !rollbackMode) {
+    const c = canvasEl.getBoundingClientRect();
+    const s = stageEl.getBoundingClientRect();
+    scanlineOverlay.style.left = c.left - s.left + "px";
+    scanlineOverlay.style.top = c.top - s.top + "px";
+    scanlineOverlay.style.width = c.width + "px";
+    scanlineOverlay.style.height = c.height + "px";
+    scanlineOverlay.style.backgroundSize =
+      "100% " + c.height / nativeRes()[1] + "px";
+    scanlineOverlay.hidden = false;
+  } else {
+    scanlineOverlay.hidden = true;
+  }
+};
+
+const saveVideoSettings = () => {
+  if (db) dbPut("video", { integerScale, scanlines });
+};
+
+integerScaleToggle.addEventListener("change", () => {
+  integerScale = integerScaleToggle.checked;
+  updateCanvasScaling();
+  saveVideoSettings();
+});
+
+scanlinesToggle.addEventListener("change", () => {
+  scanlines = scanlinesToggle.checked;
+  updateCanvasScaling();
+  saveVideoSettings();
+});
+
+const loadVideoSettings = async () => {
+  let v = await dbGet("video");
+  if (v) {
+    integerScale = !!v.integerScale;
+    scanlines = !!v.scanlines;
+  }
+  integerScaleToggle.checked = integerScale;
+  scanlinesToggle.checked = scanlines;
+  updateCanvasScaling();
+};
+
+window.addEventListener("resize", updateCanvasScaling);
+new ResizeObserver(updateCanvasScaling).observe(stageEl);
 
 // --- Keyboard settings ---
 
@@ -1040,7 +1163,7 @@ const routeP1Input = (inputId, down) => {
 // JS-side keyboard handler: intercepts bound keys before Emscripten's SDL layer
 // and calls _setInput directly. This is authoritative for keyboard input.
 const gameKeyHandler = (e, down) => {
-  if (keyboardModal.classList.contains("open")) return;
+  if (settingsModal.classList.contains("open")) return;
   // Don't hijack keystrokes while the user is typing in a text field (e.g. the
   // room-code input): letters like A/S/Z/X are default game-input keys, and
   // preventDefault here would swallow them before they reach the field.
@@ -1056,11 +1179,9 @@ const gameKeyHandler = (e, down) => {
 document.addEventListener("keydown", (e) => gameKeyHandler(e, true), true);
 document.addEventListener("keyup", (e) => gameKeyHandler(e, false), true);
 
-const keyboardModal = document.getElementById("keyboard-modal");
 const kbBindingsDiv = document.getElementById("kb-bindings");
 const kbPreset = document.getElementById("kb-preset");
 
-var kbEditing = [...PRESET_DEFAULT]; // temp editing state
 var kbSelection = -1; // which input is selected for rebinding (-1 = none)
 
 const sdlName = (code) => SDL_TO_NAME[code] || "???";
@@ -1079,7 +1200,7 @@ const renderKbBindings = () => {
     let btn = document.createElement("button");
     btn.type = "button";
     btn.className = "kb-btn" + (kbSelection === i ? " active" : "");
-    btn.textContent = sdlName(kbEditing[i]);
+    btn.textContent = sdlName(activeBindings[i]);
     btn.addEventListener("click", () => {
       kbSelection = i;
       renderKbBindings();
@@ -1092,56 +1213,38 @@ const renderKbBindings = () => {
   }
 };
 
+const applyKeybindings = (bindings) => {
+  activeBindings = [...bindings];
+  rebuildLookup();
+};
+
+// Rebinds commit immediately: apply to the live bindings and persist
+const commitBindings = (bindings) => {
+  applyKeybindings(bindings);
+  if (db) dbPut("keybindings", activeBindings);
+  kbPreset.value = detectPreset(activeBindings);
+  renderKbBindings();
+};
+
 const kbKeyHandler = (e) => {
   if (kbSelection < 0) return;
   let sdl = JS_TO_SDL[e.code];
   if (sdl === undefined) return;
   e.preventDefault();
   e.stopImmediatePropagation();
+  let bindings = [...activeBindings];
   // Remove any existing binding for this key
-  for (let i = 0; i < kbEditing.length; i++) {
-    if (kbEditing[i] === sdl) kbEditing[i] = -1;
+  for (let i = 0; i < bindings.length; i++) {
+    if (bindings[i] === sdl) bindings[i] = -1;
   }
-  kbEditing[kbSelection] = sdl;
+  bindings[kbSelection] = sdl;
   // Auto-advance to next input
   if (kbSelection < INPUT_NAMES.length - 1) {
     kbSelection++;
   } else {
     kbSelection = -1;
   }
-  kbPreset.value = detectPreset(kbEditing);
-  renderKbBindings();
-};
-
-const openKeyboardModal = () => {
-  menuDropdown.hidden = true;
-  kbEditing = [...activeBindings];
-  kbSelection = -1;
-  kbPreset.value = detectPreset(kbEditing);
-  renderKbBindings();
-  keyboardModal.classList.add("open");
-  document.addEventListener("keydown", kbKeyHandler, true);
-  trapFocus(keyboardModal);
-};
-
-const closeKeyboardModal = () => {
-  kbSelection = -1;
-  keyboardModal.classList.remove("open");
-  document.removeEventListener("keydown", kbKeyHandler, true);
-  releaseFocus(keyboardModal);
-};
-
-document.getElementById("kb-close").addEventListener("click", closeKeyboardModal);
-
-const applyKeybindings = (bindings) => {
-  activeBindings = [...bindings];
-  rebuildLookup();
-};
-
-const saveKeybindings = async () => {
-  applyKeybindings(kbEditing);
-  await dbPut("keybindings", activeBindings);
-  closeKeyboardModal();
+  commitBindings(bindings);
 };
 
 const loadKeybindingsFromStorage = async () => {
@@ -1168,19 +1271,11 @@ const loadLargeControlsFromStorage = async () => {
   applyLargeControls(!!(await dbGet("large-controls")));
 };
 
-document.getElementById("open-keyboard").addEventListener("click", openKeyboardModal);
-document.getElementById("kb-save").addEventListener("click", saveKeybindings);
-document.getElementById("kb-cancel").addEventListener("click", closeKeyboardModal);
-
-keyboardModal.addEventListener("click", (e) => {
-  if (e.target === keyboardModal) closeKeyboardModal();
-});
-
 kbPreset.addEventListener("change", () => {
-  if (kbPreset.value === "default") kbEditing = [...PRESET_DEFAULT];
-  else if (kbPreset.value === "homerow") kbEditing = [...PRESET_HOMEROW];
   kbSelection = -1;
-  renderKbBindings();
+  if (kbPreset.value === "default") commitBindings(PRESET_DEFAULT);
+  else if (kbPreset.value === "homerow") commitBindings(PRESET_HOMEROW);
+  else renderKbBindings();
 });
 
 var currentRomName = null;
@@ -1222,6 +1317,7 @@ const loadRom = async (romName, originalName) => {
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  updateCanvasScaling();
 };
 
 // --- File type helpers ---
@@ -1526,6 +1622,7 @@ window.enterRollbackMode = () => {
   document.body.classList.remove("paused");
   document.body.classList.add("has-game", "running", "rollback-mode");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
+  updateCanvasScaling();
 };
 // Clear the JS-side rollback flags. The wasm side (promote-to-single vs exit)
 // is handled by the caller (netplay's rbTeardown) so the local game can keep
@@ -1536,6 +1633,7 @@ window.leaveRollbackMode = () => {
   localButtons = 0;
   document.body.classList.remove("rollback-mode");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(false);
+  updateCanvasScaling();
 };
 
 // Persist both players' battery saves (the core flushes dirty saves to the
@@ -1559,6 +1657,7 @@ const exitLinkMode = async () => {
   linkMode = false;
   gpPrev.fill(false);
   document.body.classList.remove("link-mode");
+  updateCanvasScaling();
 };
 
 const launchLinkRom = async (rom) => {
@@ -1602,6 +1701,7 @@ const launchLinkRom = async (rom) => {
   gpPrev.fill(false);
   initLinkCanvases();
   document.body.classList.add("has-game", "running", "link-mode");
+  updateCanvasScaling();
   await addRecentRom(rom.name, rom.data, rom.art);
 };
 
@@ -1616,6 +1716,7 @@ const showMainMenu = () => {
   document.body.classList.add("paused");
   document.body.classList.remove("running");
   refreshHomeRecent();
+  updateCanvasScaling();
 };
 
 const resumeGame = () => {
@@ -1625,6 +1726,7 @@ const resumeGame = () => {
   pauseButton.title = "Pause";
   document.body.classList.remove("paused");
   document.body.classList.add("running");
+  updateCanvasScaling();
 };
 
 document.getElementById("main-menu").addEventListener("click", showMainMenu);
@@ -1754,6 +1856,8 @@ var Module = {
     await loadLargeControlsFromStorage();
     await loadAudioSettings();
     await loadColorCorrect();
+    await loadSystemSettings();
+    await loadVideoSettings();
     refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate

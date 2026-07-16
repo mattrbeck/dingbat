@@ -179,6 +179,11 @@ button {
   z-index: 100;
   min-width: 210px;
   padding: 6px;
+  /* Scroll when the item list is taller than the space below the top bar
+     (short windows, phone landscape) — otherwise the tail is unreachable */
+  max-height: calc(100dvh - var(--bar-h) - var(--safe-t) - 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius);
@@ -574,6 +579,22 @@ body.running #canvas {
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 50px rgba(0, 0, 0, 0.6),
     0 0 60px -20px var(--accent-glow);
+}
+
+/* Scanlines video effect: one faint line per emulated pixel row. JS sizes and
+   positions the overlay to the canvas rect and sets background-size so the
+   line pitch tracks the current scale factor. */
+#scanline-overlay {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 4px;
+  background-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.28) 30%,
+    transparent 30%
+  );
+  background-repeat: repeat;
 }
 
 /*
@@ -1291,6 +1312,105 @@ body.has-game #home-resume {
   #kb-section {
     display: none;
   }
+}
+
+/* --- Settings modal (tabbed) --- */
+.modal-settings {
+  max-width: 460px;
+}
+
+#settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.settings-tab {
+  flex: 1 1 0;
+  padding: 7px 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.13s, color 0.13s;
+}
+
+.settings-tab:hover {
+  color: var(--text);
+}
+
+.settings-tab.active {
+  color: var(--accent);
+  background: var(--surface-1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--inset-hi);
+}
+
+/* A stable height keeps the dialog from jumping between tabs */
+.settings-pane {
+  min-height: 264px;
+}
+
+/* The first section label in a pane needs no separator — the tab bar is one */
+.settings-pane .modal-subhead:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-note {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Radio option rows (renderer / BIOS mode) */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13.5px;
+}
+
+.radio-row:hover {
+  background: var(--surface-2);
+}
+
+.radio-row:has(input:checked) {
+  border-color: rgba(255, 176, 77, 0.35);
+  background: rgba(255, 176, 77, 0.05);
+}
+
+.radio-row input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.radio-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-faint);
 }
 
 .modal-row {

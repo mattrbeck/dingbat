@@ -63,17 +63,9 @@
             <span>Screenshot</span>
           </button>
           <hr class="menu-sep" id="save-sep" />
-          <button type="button" class="menu-item" id="open-bios" role="menuitem">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="1"/><path d="M8 11h.01M12 11h.01M16 11h4"/></svg>
-            <span>BIOS / Bootrom</span>
-          </button>
-          <button type="button" class="menu-item" id="open-keyboard" role="menuitem">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>
-            <span>Controls</span>
-          </button>
-          <button type="button" class="menu-item" id="color-correct" role="menuitemcheckbox" aria-checked="true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z"/></svg>
-            <span id="color-correct-label">Color Correction: On</span>
+          <button type="button" class="menu-item" id="open-settings" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
+            <span>Settings</span>
           </button>
           <button type="button" class="menu-item" id="net-connect" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
@@ -157,6 +149,9 @@
     <main id="stage">
       <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
+      <!-- Scanlines video effect: JS keeps it aligned over the canvas -->
+      <div id="scanline-overlay" hidden aria-hidden="true"></div>
+
       <!-- 2P link mode: two linked cores, one canvas per player -->
       <div id="link-stage">
         <div class="link-pane">
@@ -236,58 +231,133 @@
       </div>
     </div>
 
-    <div id="bios-modal" class="modal-overlay">
-      <div class="modal">
-        <button type="button" class="modal-close" id="bios-close" aria-label="Close">&times;</button>
-        <h3>BIOS / Bootrom</h3>
-        <div class="modal-row">
-          <span class="modal-row-label">GBA BIOS</span>
-          <span id="gba-bios-status" class="modal-row-status">Not set</span>
-          <button type="button" class="button button-sm" id="pick-gba-bios">Choose</button>
-          <button type="button" class="button button-sm button-ghost" id="remove-gba-bios">Remove</button>
+    <div id="settings-modal" class="modal-overlay">
+      <div class="modal modal-settings">
+        <button type="button" class="modal-close" id="settings-close" aria-label="Close">&times;</button>
+        <h3>Settings</h3>
+        <div id="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button type="button" class="settings-tab active" data-tab="controls" role="tab" aria-selected="true">Controls</button>
+          <button type="button" class="settings-tab" data-tab="gb" role="tab" aria-selected="false">Game Boy</button>
+          <button type="button" class="settings-tab" data-tab="gba" role="tab" aria-selected="false">GBA</button>
+          <button type="button" class="settings-tab" data-tab="video" role="tab" aria-selected="false">Video</button>
         </div>
-        <div class="modal-row">
-          <span class="modal-row-label">GBC Bootrom</span>
-          <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
-          <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
-          <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="button" id="bios-cancel">Cancel</button>
-          <button type="button" class="button button-primary" id="bios-save">Save</button>
-        </div>
-      </div>
-    </div>
 
-    <div id="keyboard-modal" class="modal-overlay">
-      <div class="modal">
-        <button type="button" class="modal-close" id="kb-close" aria-label="Close">&times;</button>
-        <h3>Controls</h3>
-        <div class="modal-toggle-row">
-          <div>
-            <span class="modal-row-label">Large on-screen controls</span>
-            <span class="modal-toggle-sub">A bigger d-pad for touch — best for large fingers</span>
+        <div class="settings-pane" id="settings-pane-controls" role="tabpanel">
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Large on-screen controls</span>
+              <span class="modal-toggle-sub">A bigger d-pad for touch — best for large fingers</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="large-controls-toggle" />
+              <span class="switch-track"></span>
+            </label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="large-controls-toggle" />
-            <span class="switch-track"></span>
-          </label>
+          <div id="kb-section">
+            <div class="modal-subhead">Keyboard</div>
+            <div class="modal-row">
+              <span class="modal-row-label">Preset</span>
+              <select id="kb-preset" class="kb-select">
+                <option value="default">Default</option>
+                <option value="homerow">Home-row</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <p class="modal-hint">Click a key, then press a new one to rebind. Changes save automatically.</p>
+            <div id="kb-bindings"></div>
+          </div>
         </div>
-        <div id="kb-section">
-          <div class="modal-subhead">Keyboard</div>
-          <div class="modal-row">
-            <span class="modal-row-label">Preset</span>
-            <select id="kb-preset" class="kb-select">
-              <option value="default">Default</option>
-              <option value="homerow">Home-row</option>
-              <option value="custom">Custom</option>
-            </select>
+
+        <div class="settings-pane" id="settings-pane-gb" role="tabpanel" hidden>
+          <div class="modal-subhead">Renderer</div>
+          <div class="radio-group" role="radiogroup" aria-label="Game Boy renderer">
+            <label class="radio-row">
+              <input type="radio" name="gb-renderer" value="fifo" checked />
+              <span>Pixel FIFO<span class="radio-sub">Cycle-accurate, handles mid-scanline effects</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="gb-renderer" value="scanline" />
+              <span>Scanline<span class="radio-sub">Faster, renders each line in one pass</span></span>
+            </label>
           </div>
-          <p class="modal-hint">Click a key, then press a new one to rebind.</p>
-          <div id="kb-bindings"></div>
-          <div class="modal-actions">
-            <button type="button" class="button" id="kb-cancel">Cancel</button>
-            <button type="button" class="button button-primary" id="kb-save">Save</button>
+          <div class="modal-subhead">Boot ROM</div>
+          <div class="modal-row">
+            <span class="modal-row-label">GBC Bootrom</span>
+            <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
+            <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
+            <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
+          </div>
+          <p class="modal-hint">When a bootrom is set, the boot animation plays on Game Boy games.</p>
+          <p class="settings-note">Changes apply the next time a game is loaded.</p>
+        </div>
+
+        <div class="settings-pane" id="settings-pane-gba" role="tabpanel" hidden>
+          <div class="modal-subhead">BIOS</div>
+          <div class="modal-row">
+            <span class="modal-row-label">GBA BIOS</span>
+            <span id="gba-bios-status" class="modal-row-status">Not set</span>
+            <button type="button" class="button button-sm" id="pick-gba-bios">Choose</button>
+            <button type="button" class="button button-sm button-ghost" id="remove-gba-bios">Remove</button>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Play BIOS intro</span>
+              <span class="modal-toggle-sub">Boot through the GBA startup animation (needs a BIOS file)</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="gba-run-bios-toggle" checked />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-subhead">BIOS calls (SWI)</div>
+          <div class="radio-group" role="radiogroup" aria-label="GBA BIOS call handling">
+            <label class="radio-row">
+              <input type="radio" name="gba-bios-mode" value="0" checked />
+              <span>HLE<span class="radio-sub">Emulate BIOS calls in software — no BIOS file needed</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="gba-bios-mode" value="1" />
+              <span>Real BIOS<span class="radio-sub">Execute the BIOS file for every call</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="gba-bios-mode" value="2" />
+              <span>Real BIOS boot, HLE calls<span class="radio-sub">Boot from the BIOS file, then handle game calls in software</span></span>
+            </label>
+          </div>
+          <p class="modal-hint">The real-BIOS modes fall back to HLE while no BIOS file is set.</p>
+          <p class="settings-note">Changes apply the next time a game is loaded.</p>
+        </div>
+
+        <div class="settings-pane" id="settings-pane-video" role="tabpanel" hidden>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Color correction</span>
+              <span class="modal-toggle-sub">Match the original LCD panel's gamma and color mixing</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="color-correct-toggle" checked />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Integer scaling</span>
+              <span class="modal-toggle-sub">Scale only by whole multiples for perfectly even pixels</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="integer-scale-toggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Scanlines</span>
+              <span class="modal-toggle-sub">Overlay a faint line across each row of pixels</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="scanlines-toggle" />
+              <span class="switch-track"></span>
+            </label>
           </div>
         </div>
       </div>

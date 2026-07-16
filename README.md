@@ -69,6 +69,8 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Installable as an offline-capable PWA
   - Save states, rewind, and fast forward
   - Online link play with room codes
+  - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE
+    modes, color correction, integer scaling, and scanlines
 - GB / GBC
   - Accurate sound emulation
   - Passing [blargg's CPU tests](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs)

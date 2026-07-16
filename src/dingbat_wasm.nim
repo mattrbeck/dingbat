@@ -103,6 +103,36 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
   colorCorrect = on != 0
   build_color_lut(colorCorrect)
 
+# --- Core-construction settings (web Settings panel) ---
+# Mirrors the desktop config: these take effect at the NEXT core construction
+# (ROM load / reset), not on the running core. Defaults match the previous
+# hardcoded behavior: GB FIFO renderer; GBA full HLE with the real-BIOS intro
+# played whenever a bios.bin has been provided.
+var optGbFifo = true
+var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
+var optGbaRunBios = true
+
+proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
+  optGbFifo = fifo != 0
+
+proc wasm_set_gba_bios_mode(mode: cint) {.exportc.} =
+  optGbaBiosMode = clamp(mode, 0, 2)
+
+proc wasm_set_gba_run_bios(on: cint) {.exportc.} =
+  optGbaRunBios = on != 0
+
+proc make_gba(rom_path: string): GBA =
+  ## Construct a GBA core honoring the settings above. The real-BIOS modes
+  ## (and the boot intro) silently fall back to HLE when no bios.bin exists —
+  ## there is nothing to execute without one.
+  let have_bios = fileExists("bios.bin")
+  let bios = if have_bios: "bios.bin" else: ""
+  let mode = if have_bios: optGbaBiosMode else: 0
+  new_gba(bios, rom_path,
+          run_bios = have_bios and optGbaRunBios,
+          use_hle = mode == 0,
+          hle_after_bios = mode == 2)
+
 proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint) =
   for i in 0 ..< pixels:
     rgbaBuffer[i] = colorLut[fb[i] and 0x7FFF]
@@ -337,11 +367,10 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   if stateTexture != nil:
     destroyTexture(stateTexture)
     stateTexture = nil
-  let bios = if fileExists("bios.bin"): "bios.bin" else: ""
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
     if not fileExists(path): return 0
-    let core = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    let core = make_gba(path)
     core.post_init()
     cores.add(core)
   # Player 1's APU is the only audible one: wrap core 2's event dispatch so
@@ -475,11 +504,10 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   if localPlayer < 0 or localPlayer > 1: return 0
   rbLocal = int(localPlayer)
   rbEpoch = int64(epoch)
-  let bios = if fileExists("bios.bin"): "bios.bin" else: ""
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
     if not fileExists(path): return 0
-    let core = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    let core = make_gba(path)
     core.post_init()
     core.enable_deterministic_rtc(int64(epoch))
     cores.add(core)
@@ -563,7 +591,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   if ext in [".gb", ".gbc"]:
     stateKind = ekGB
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
-    stateGb = new_gb(bootrom, path, true, false, bootrom.len > 0)
+    stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
     stateGb.post_init()
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
@@ -572,8 +600,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   else:
     stateKind = ekGBA
     curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
-    let bios = if fileExists("bios.bin"): "bios.bin" else: ""
-    stateGba = new_gba(bios, path, run_bios = fileExists("bios.bin"), use_hle = true)
+    stateGba = make_gba(path)
     stateGba.post_init()
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
