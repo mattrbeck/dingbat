@@ -43,6 +43,20 @@ const ROOM_TTL_MS = 10 * 60 * 1000;
 const MAX_MSG_BYTES = 64 * 1024; // SDP + ICE are a few KB; anything bigger is abuse
 const MIN_CODE_LEN = 3; // user-chosen; short enough to say aloud, long enough to not collide by accident
 
+// Abuse / resource caps. On a tiny VPS an unbounded server is a liability:
+// a peer that opens sockets and never speaks, or spams unique codes, could
+// pin unbounded RAM. Legitimate use is a handful of concurrent pairs, so these
+// ceilings are far above real demand yet bound the worst case hard.
+const MAX_CONNS = 2000;              // total live sockets; reject the upgrade past this
+const MAX_ROOMS = 1000;              // total live rooms; reject new-room rendezvous past this
+const HANDSHAKE_TIMEOUT_MS = 30 * 1000; // a socket that never sends `rendezvous` is dropped
+// Keepalive: WebRTC normally makes both peers close their signaling socket, so
+// paired rooms are short-lived. But a peer that vanishes without a TCP FIN
+// (laptop asleep, NAT drop) would otherwise pin its socket + room forever —
+// paired rooms carry no TTL. A periodic ping + silence deadline reaps them.
+const PING_INTERVAL_MS = 30 * 1000;
+const IDLE_TIMEOUT_MS = 90 * 1000;   // no frame (incl. pong) for this long -> dead, close
+
 // Fold a user-typed code to the canonical form both peers must match on.
 const normalizeCode = (raw) =>
   String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -51,6 +65,9 @@ const normalizeCode = (raw) =>
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
+// Every live socket, so the reaper can sweep for dead/half-open ones.
+const conns = new Set();
+
 /** Wrap an upgraded socket with frame encode/decode + callbacks. */
 class WebSock {
   constructor(socket) {
@@ -58,8 +75,10 @@ class WebSock {
     this.buf = Buffer.alloc(0);
     this.fragments = null; // in-progress fragmented message
     this.closed = false;
+    this.lastRecv = Date.now(); // any inbound frame (incl. pong) proves liveness
     this.onmessage = null; // (string) => void
     this.onclose = null;   // () => void
+    conns.add(this);
     socket.on('data', (d) => this._ingest(d));
     const bye = () => this._dead();
     socket.on('close', bye);
@@ -70,11 +89,13 @@ class WebSock {
   _dead() {
     if (this.closed) return;
     this.closed = true;
+    conns.delete(this);
     this.socket.destroy();
     if (this.onclose) this.onclose();
   }
 
   _ingest(data) {
+    this.lastRecv = Date.now();
     this.buf = Buffer.concat([this.buf, data]);
     while (true) {
       const frame = this._parseFrame();
@@ -164,6 +185,10 @@ class WebSock {
     this._send(0x1, Buffer.from(s, 'utf8'));
   }
 
+  ping() {
+    this._send(0x9, Buffer.alloc(0)); // browsers auto-pong; a pong bumps lastRecv
+  }
+
   close() {
     if (this.closed) return;
     this._send(0x8, Buffer.alloc(0));
@@ -197,6 +222,11 @@ function attach(ws) {
   let code = null;      // room this socket belongs to (as host or guest)
   let peer = null;      // set once paired
 
+  // A socket that connects and never rendezvouses is either a stalled client or
+  // a resource-holding probe; drop it so it can't accumulate.
+  let hsTimer = setTimeout(() => fail(ws, 'no rendezvous'), HANDSHAKE_TIMEOUT_MS);
+  const clearHandshakeTimer = () => { if (hsTimer) { clearTimeout(hsTimer); hsTimer = null; } };
+
   ws.onmessage = (text) => {
     let msg;
     try {
@@ -215,7 +245,9 @@ function attach(ws) {
       if (c.length < MIN_CODE_LEN) return fail(ws, 'code too short');
       const room = rooms.get(c);
       if (!room) {
+        if (rooms.size >= MAX_ROOMS) return fail(ws, 'server busy — try again shortly');
         // First to arrive with this code: host it and wait for the peer.
+        clearHandshakeTimer();
         code = c;
         rooms.set(c, {
           host: ws,
@@ -229,6 +261,7 @@ function attach(ws) {
         send(ws, { t: 'waiting' });
       } else if (!room.guest) {
         // Second arrival: pair as guest. Two peers per code, no more.
+        clearHandshakeTimer();
         room.guest = ws;
         clearTimeout(room.timer);
         room.timer = null;
@@ -237,8 +270,10 @@ function attach(ws) {
         // Both sides start WebRTC now. The host (first arrival) is the offerer
         // and unit 0 / multi-mode parent in the game.
         const host = room.host;
-        // Host side: swap from "waiting" to "relaying"
+        // Both sides swap to a tight verbatim relay: neither peer's SDP/ICE is
+        // ever inspected, so skip the JSON round-trip the setup path needed.
         host.onmessage = (t) => ws.sendText(t);
+        ws.onmessage = (t) => host.sendText(t);
         host.onclose = () => {
           closeRoom(c);
           send(ws, { t: 'peer-closed' });
@@ -255,6 +290,7 @@ function attach(ws) {
   };
 
   ws.onclose = () => {
+    clearHandshakeTimer();
     if (!code) return;
     const room = rooms.get(code);
     if (!room) return;
@@ -284,6 +320,11 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
+  if (conns.size >= MAX_CONNS) {
+    // Shed load rather than let socket count grow without bound.
+    socket.destroy();
+    return;
+  }
   const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
   socket.write(
     'HTTP/1.1 101 Switching Protocols\r\n' +
@@ -296,6 +337,20 @@ server.on('upgrade', (req, socket, head) => {
   if (head && head.length) ws._ingest(head);
   attach(ws);
 });
+
+// ---------------- liveness reaper ----------------
+// Reap sockets that have gone silent (a half-open TCP the OS hasn't noticed),
+// and nudge quiet-but-live ones with a ping so their pong resets the clock.
+// This is what stops a vanished paired peer from pinning its room forever.
+const reaper = setInterval(() => {
+  const now = Date.now();
+  for (const ws of conns) {
+    const idle = now - ws.lastRecv;
+    if (idle > IDLE_TIMEOUT_MS) ws.close();
+    else if (idle > PING_INTERVAL_MS) ws.ping();
+  }
+}, PING_INTERVAL_MS);
+reaper.unref(); // never keep the process alive just for the sweep
 
 server.listen(PORT, () => {
   console.log(`dingbat signaling server listening on ws://localhost:${PORT}`);

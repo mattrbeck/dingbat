@@ -163,7 +163,13 @@ function assert(cond, msg) {
 // ---------------- scenarios ----------------
 
 async function run() {
-  const server = spawn(process.execPath, [SERVER, String(PORT)], { stdio: 'ignore' });
+  // Default target is the Node server; SIGNAL_CMD lets the same suite exercise
+  // an alternative implementation (e.g. the compiled Nim binary):
+  //   SIGNAL_CMD=./signalsrv node server.test.mjs
+  const [bin, ...preArgs] = process.env.SIGNAL_CMD
+    ? process.env.SIGNAL_CMD.split(' ')
+    : [process.execPath, SERVER];
+  const server = spawn(bin, [...preArgs, String(PORT)], { stdio: 'ignore' });
   server.on('error', (e) => { console.error('server spawn error', e); process.exit(1); });
 
   // Wait for the listener.
