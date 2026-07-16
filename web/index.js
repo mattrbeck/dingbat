@@ -899,6 +899,40 @@ muteBtn.addEventListener("click", toggleMute);
 );
 syncVolumeUI();
 
+// --- Color correction (LCD gamma) toggle ---
+// The wasm core keeps a single BGR555->RGBA lookup table used by every present
+// path; _wasm_set_color_correction rebuilds it. Default on, matching desktop.
+var colorCorrect = true;
+const ccButton = document.getElementById("color-correct");
+const ccLabel = document.getElementById("color-correct-label");
+
+const applyColorCorrect = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_color_correction) {
+    Module._wasm_set_color_correction(colorCorrect ? 1 : 0);
+  }
+};
+
+const syncColorCorrectUI = () => {
+  ccLabel.textContent = "Color Correction: " + (colorCorrect ? "On" : "Off");
+  ccButton.setAttribute("aria-checked", colorCorrect ? "true" : "false");
+  ccButton.classList.toggle("active", colorCorrect);
+};
+
+ccButton.addEventListener("click", (e) => {
+  e.stopPropagation(); // keep the menu open so the change is visible
+  colorCorrect = !colorCorrect;
+  syncColorCorrectUI();
+  applyColorCorrect();
+  if (db) dbPut("colorCorrect", colorCorrect);
+});
+
+const loadColorCorrect = async () => {
+  let v = await dbGet("colorCorrect");
+  if (typeof v === "boolean") colorCorrect = v;
+  syncColorCorrectUI();
+  applyColorCorrect();
+};
+
 // --- Keyboard settings ---
 
 const INPUT_NAMES = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R"];
@@ -1718,6 +1752,7 @@ var Module = {
     await loadKeybindingsFromStorage();
     await loadLargeControlsFromStorage();
     await loadAudioSettings();
+    await loadColorCorrect();
     refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate

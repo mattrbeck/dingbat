@@ -70,21 +70,38 @@ var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_atta
 # precompute exhaustively as a BGR555 -> RGBA8888 table.
 var colorLut: array[0x8000, uint32]
 var rgbaBuffer: seq[uint32] = @[]
+var colorCorrect = true  # matches the desktop default (cfg.color_correction)
 
-proc build_color_lut() =
+proc build_color_lut(correct: bool) =
+  ## Fill the BGR555 -> RGBA8888 lookup table. When `correct` is set this
+  ## applies the desktop shader's LCD color correction; otherwise it does a
+  ## plain 5-bit -> 8-bit expansion (raw hardware colors). Every present path
+  ## (single-core, link, rollback) reads colorLut, so rebuilding it here is
+  ## enough to toggle correction everywhere.
   for i in 0 ..< 0x8000:
-    let r = pow(float64(i and 0x1F) / 31.0, 4.0)
-    let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
-    let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
-    let mixed = [
-      (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
-      ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
-      (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
-    ]
     var rgb: array[3, uint32]
-    for c in 0 .. 2:
-      rgb[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
+    if correct:
+      let r = pow(float64(i and 0x1F) / 31.0, 4.0)
+      let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
+      let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
+      let mixed = [
+        (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
+        ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
+        (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
+      ]
+      for c in 0 .. 2:
+        rgb[c] = uint32(min(255.0, round(pow(mixed[c], 1.0 / 2.2) * 255.0)))
+    else:
+      rgb[0] = uint32(round(float64(i and 0x1F) / 31.0 * 255.0))
+      rgb[1] = uint32(round(float64((i shr 5) and 0x1F) / 31.0 * 255.0))
+      rgb[2] = uint32(round(float64((i shr 10) and 0x1F) / 31.0 * 255.0))
     colorLut[i] = 0xFF000000'u32 or (rgb[2] shl 16) or (rgb[1] shl 8) or rgb[0]
+
+proc wasm_set_color_correction(on: cint) {.exportc.} =
+  ## Toggle LCD color correction from JS (parity with the desktop menu item).
+  ## Rebuilds the shared color LUT; the next presented frame uses it.
+  colorCorrect = on != 0
+  build_color_lut(colorCorrect)
 
 proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint) =
   for i in 0 ..< pixels:
@@ -756,7 +773,7 @@ when defined(emscripten):
   proc dummyLoop() {.cdecl.} = discard
   emscripten_set_main_loop(dummyLoop, 0, 0)
 
-build_color_lut()
+build_color_lut(colorCorrect)
 discard sdl2.init(INIT_VIDEO or INIT_AUDIO)
 stateWindow = createWindow("dingbat", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             GBA_W * 4, GBA_H * 4, SDL_WINDOW_SHOWN)
