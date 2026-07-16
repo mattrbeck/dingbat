@@ -1360,10 +1360,11 @@ const openRomPicker = () => {
   menuDropdown.hidden = true;
   let input = document.createElement("input");
   input.type = "file";
-  // No `accept` filter: some platforms (notably iOS Safari) grey out files
-  // whose extension they don't recognize — .gba/.gb/.gbc — as soon as a known
-  // type like .zip is listed. Showing all files keeps every ROM selectable;
-  // handleRomFile validates the extension itself.
+  // iOS Safari greys out (makes unselectable) files whose extension it can't
+  // map to a known type — .gba/.gb/.gbc — as soon as a known type like .zip
+  // is listed, so the filter is desktop-only. handleRomFile validates the
+  // extension itself either way.
+  if (!IS_IOS) input.accept = ROM_EXTS.join(",") + ",.zip";
   input.addEventListener("input", () => {
     if (input.files?.length > 0) handleRomFile(input.files[0]);
   });
