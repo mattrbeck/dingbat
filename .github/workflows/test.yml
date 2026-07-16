@@ -98,6 +98,13 @@ jobs:
           run_net tests/roms/linktest.gba multi 7788
           run_net tests/roms/normlinktest.gba normal 7789
           run_net tests/roms/norm32linktest.gba normal32 7790
+      - name: Signaling server room lifecycle (Node)
+        # The room-code rendezvous server: a code must be FREED the instant its
+        # clients disconnect (e.g. two same-browser tabs that paired locally over
+        # a BroadcastChannel and dropped their signaling sockets), so it never
+        # dangles until the TTL. Zero-dep, spawns its own server on a test port.
+        if: runner.os == 'Linux'
+        run: node web/signaling/server.test.mjs
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

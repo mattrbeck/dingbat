@@ -295,7 +295,11 @@ const wireChannel = (dc) => {
   dc.binaryType = "arraybuffer";
   dc.onopen = () => {
     net.rtcConnected = true;
-    // Peer-to-peer is up: the signaling server's job is done.
+    // Linked (WebRTC peer, or a same-browser BroadcastChannel): the signaling
+    // server's job is done. Closing the socket also RELEASES our room on the
+    // server at once — so when two same-browser tabs pair locally, whichever had
+    // registered a code frees it immediately instead of holding it for the TTL.
+    // (web/signaling/server.test.mjs pins this room-freeing contract.)
     try {
       net.ws?.close();
     } catch {}
