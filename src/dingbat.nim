@@ -1,4 +1,4 @@
-import std/[os, hashes, parseopt, strformat, strutils, tables, times]
+import std/[os, hashes, math, parseopt, strformat, strutils, tables, times]
 import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
@@ -7,6 +7,7 @@ import zippy/ziparchives
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import imguin/glad/gl
 import stb_image/read as stbi
+import stb_image/write as stbiw
 import dingbat/common/config
 import dingbat/common/input
 import dingbat/common/rewind
@@ -400,6 +401,60 @@ proc process_pending_state() =
         of ekNone: false
       if ok: echo "State loaded: ", path
 
+# ──────────────────────────── Screenshots ────────────────────────────
+
+proc bgr555_to_rgb(px: uint16; correct: bool): array[3, byte] =
+  ## Expand one BGR555 framebuffer pixel to 8-bit RGB. When `correct` is set
+  ## this mirrors the display shader's LCD color correction (linearize with
+  ## gamma 4.0, mix channels, re-gamma with 2.2) so the PNG matches on-screen.
+  let r5 = float64(px and 0x1F) / 31.0
+  let g5 = float64((px shr 5) and 0x1F) / 31.0
+  let b5 = float64((px shr 10) and 0x1F) / 31.0
+  if correct:
+    let r = pow(r5, 4.0)
+    let g = pow(g5, 4.0)
+    let b = pow(b5, 4.0)
+    let mixed = [(  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
+                 ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
+                 (220.0 * b +  10.0 * g +  50.0 * r) / 255.0]
+    for i in 0 .. 2:
+      result[i] = byte(min(255.0, round(pow(mixed[i], 1.0 / 2.2) * 255.0)))
+  else:
+    result[0] = byte(round(r5 * 255.0))
+    result[1] = byte(round(g5 * 255.0))
+    result[2] = byte(round(b5 * 255.0))
+
+proc save_screenshot() =
+  ## Write the current frame to config_dir/screenshots/<rom>-<timestamp>.png.
+  ## Applies LCD color correction to match the on-screen image when the
+  ## setting is enabled — parity with the web front-end's screenshot button.
+  if app.emu_kind == ekNone: return
+  let (w, h) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
+  let correct = app.cfg.color_correction
+  var rgb = newSeq[byte](w * h * 3)
+  template convert(fb: untyped) =
+    for i in 0 ..< w * h:
+      let c = bgr555_to_rgb(fb[i], correct)
+      rgb[i * 3 + 0] = c[0]
+      rgb[i * 3 + 1] = c[1]
+      rgb[i * 3 + 2] = c[2]
+  case app.emu_kind
+  of ekGBA: convert(app.gba_emu.ppu.framebuffer)
+  of ekGB:  convert(app.gb_emu.ppu.framebuffer)
+  of ekNone: return
+  let dir = config_dir() / "screenshots"
+  try:
+    createDir(dir)
+  except OSError as e:
+    echo "Screenshot failed (mkdir): ", e.msg; return
+  let rom  = current_rom_path().extractFilename()
+  let base = if rom.len > 0: rom.changeFileExt("") else: "screenshot"
+  let path = dir / (base & "-" & now().format("yyyyMMdd-HHmmss") & ".png")
+  if stbiw.writePNG(path, w, h, 3, rgb):
+    echo "Screenshot saved: ", path
+  else:
+    echo "Screenshot failed: ", path
+
 # ──────────────────────────── Rendering ────────────────────────────
 
 proc render_logo() =
@@ -492,6 +547,8 @@ proc render_imgui() =
         if igMenuItem_Bool(cstring("Load State  " & MOD_KEY_STR & "+L"),
                            nil, false, game_loaded):
           app.pending_load = true
+        if igMenuItem_Bool("Screenshot  F12", nil, false, game_loaded):
+          save_screenshot()
         igSeparator()
         if igMenuItem_Bool("Settings", nil, false, true):
           app.ce.open = true
@@ -780,6 +837,9 @@ proc handle_input() =
           of K_q:
             app.running = false
           else: discard
+      elif sym == K_F12:
+        # Screenshot to config_dir/screenshots (fires on press, not release)
+        if pressed: save_screenshot()
       elif sym == K_BACKQUOTE:
         # Hold-to-rewind, core-agnostic (disabled while linked — it desyncs)
         app.rewinding = pressed and app.cfg.rewind and
