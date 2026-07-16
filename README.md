@@ -43,7 +43,7 @@ The link cable is emulated at three levels: two cores in one process, two dingba
 
 ### Pixel-Accurate GB / GBC Rendering
 
-The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the default) and a faster scanline renderer. The FIFO implementation handles games like Prehistorik Man accurately since that game relies on a cycle-accurate PPU implementation. The renderer can be selected with the `fifo` option in the config file.
+The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the default) and a faster scanline renderer. The FIFO implementation handles games like Prehistorik Man accurately since that game relies on a cycle-accurate PPU implementation. The renderer can be selected in the settings window, and takes effect on the next ROM load or reset.
 
 ## Features and Remaining Work
 

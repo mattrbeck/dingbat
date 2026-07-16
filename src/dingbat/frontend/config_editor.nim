@@ -2,6 +2,7 @@ import imguin/[cimgui, impl_opengl, impl_sdl2]
 import ../common/config
 import file_explorer
 import bios_selection
+import video_widget
 import keybindings_widget
 import controller_widget
 
@@ -10,6 +11,7 @@ type
     cfg*:         Config
     fe*:          FileExplorer
     bios*:        BiosSelection
+    video*:       VideoWidget
     keybindings*: KeybindingsWidget
     controller*:  ControllerWidget
     open*:        bool
@@ -20,6 +22,7 @@ proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
     cfg:         cfg,
     fe:          fe,
     bios:        new_bios_selection(cfg, fe),
+    video:       new_video_widget(cfg),
     keybindings: new_keybindings_widget(cfg),
     controller:  new_controller_widget(cfg),
     open:        false,
@@ -28,11 +31,13 @@ proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
 
 proc do_reset(ed: ConfigEditor) =
   ed.bios.reset()
+  ed.video.reset()
   ed.keybindings.reset()
   ed.controller.reset()
 
 proc do_apply(ed: ConfigEditor) =
   ed.bios.apply()
+  ed.video.apply()
   ed.keybindings.apply()
   ed.controller.apply()
   save_config(ed.cfg)
@@ -62,6 +67,13 @@ proc render*(ed: ConfigEditor) =
     if ed.bios.visible:
       igBeginGroup()
       ed.bios.render()
+      igEndGroup()
+      igEndTabItem()
+
+    ed.video.visible = igBeginTabItem("Video", nil, 0)
+    if ed.video.visible:
+      igBeginGroup()
+      ed.video.render()
       igEndGroup()
       igEndTabItem()
 
