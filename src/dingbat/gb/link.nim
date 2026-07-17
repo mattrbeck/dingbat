@@ -92,6 +92,15 @@ proc step_frame*(link: GbLink) =
     link.cores[i].ppu.frame = false
     link.offsets[i] += int64(link.cores[i].scheduler.rebase())
 
+when defined(gbLinkTrace):
+  # Debug hook (-d:gbLinkTrace): one call per completed transfer with the
+  # master id, the bytes exchanged, and whether the slave was ready. The
+  # harness prints these to reconstruct the link protocol. Compiled out
+  # of normal builds.
+  var onGbTransfer*: proc(master: int; master_out, slave_out: uint8;
+                          slave_sc: uint8; slave_got_irq: bool) = nil
+  var bothInternalCount*: int = 0  # transfers where the peer was also internal-clock
+
 # ---------------- transfer resolution ----------------
 
 proc peer_of(link: GbLink; m: int): int =
@@ -114,21 +123,32 @@ proc complete_transfer(link: GbLink; m: int) =
   link.run_to(p, link.now(m))
   inc link.transfers
   let slave = link.cores[p]
-  if (slave.serial.sc and 0x01) == 0:
-    # Peer's shift register is on the external clock (started or not):
-    # its SB — staged after its previous serial IRQ, which run_to gave it
-    # every chance to retire — lands in the master's SB and vice versa.
+  let master_out = master.serial.out_latch
+  var slave_out = 0xFF'u8
+  var slave_got_irq = false
+  # A transfer exchanges bytes only when the peer is a LISTENING external-
+  # clock slave (SC bit0=0 external, bit7=1 transfer enabled). An unarmed
+  # peer — not started, or clocking its own transfer — isn't driving its
+  # SO line, so the master clocks in idle-high 1s (0xFF), exactly as on
+  # hardware. Feeding the master the peer's latched SB while it wasn't
+  # listening was the desync bug: it let a game latch a role/handshake byte
+  # from a peer that never actually sent it that cycle.
+  let slave_listening = (slave.serial.sc and 0x81) == 0x80
+  if slave_listening:
+    slave_out = slave.serial.sb
     master.serial.sb = slave.serial.sb
     slave.serial.sb = master.serial.out_latch
-    let slave_started = (slave.serial.sc and 0x80) != 0
     master.serial.serial_finish_transfer(master)
-    if slave_started:
-      slave.serial.serial_finish_transfer(slave)
+    slave.serial.serial_finish_transfer(slave)
+    slave_got_irq = true
   else:
-    # Peer is clocking its own transfer (line contention, no hardware
-    # analog worth modeling): the master reads an idle-high line — the
-    # bit engine already shifted in 1s.
+    master.serial.sb = 0xFF'u8
     master.serial.serial_finish_transfer(master)
+    when defined(gbLinkTrace):
+      if (slave.serial.sc and 0x01) != 0: inc bothInternalCount
+  when defined(gbLinkTrace):
+    if onGbTransfer != nil:
+      onGbTransfer(m, master_out, slave_out, slave.serial.sc, slave_got_irq)
 
 # ---------------- driver ----------------
 
