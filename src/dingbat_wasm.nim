@@ -9,6 +9,7 @@ import dingbat/gba/rollback
 import dingbat/gba/netcore
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
+import dingbat/gb/rollback as gbrb
 
 const GBA_W = 240
 const GBA_H = 160
@@ -544,6 +545,7 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
 # via rollback_feed. The RollbackSession predicts + rolls back internally
 # (gba/rollback.nim). Determinism: identical build/ROM/save + deterministic RTC.
 var stateRollback: RollbackSession = nil
+var stateGbRollback: gbrb.GbRollbackSession = nil  # GB/GBC online (mutually exclusive)
 var rbLocal = 0
 var rbEpoch: int64 = 0
 
@@ -572,11 +574,55 @@ proc rollback_render() =
   for i in 0 ..< GBA_W * GBA_H:
     linkRgba[rbLocal][i] = colorLutGba[fb[i] and 0x7FFF]
 
+# ---- GB/GBC online rollback (parallel to the GBA path above) ----
+
+proc wrap_gb_rollback_audio(core: GB; alwaysMute: bool) =
+  ## GB analog of wrap_rollback_audio: play only the local core, and nothing
+  ## while re-simulating rolled-back frames (already heard on the forward pass).
+  let orig = core.scheduler.dispatch
+  core.scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample and
+       (alwaysMute or (stateGbRollback != nil and stateGbRollback.replaying)):
+      audioSuppressed = true
+      orig(kind)
+      audioSuppressed = false
+    else:
+      orig(kind)
+
+proc gb_rollback_render() =
+  if stateGbRollback == nil: return
+  let core = stateGbRollback.link.cores[rbLocal]
+  let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
+  for i in 0 ..< GB_W * GB_H:
+    linkRgba[rbLocal][i] = colorLutGbc[fb[i] and 0x7FFF]
+
+proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
+  ## GB variant of rollback_init: two GB cores over the lockstep GB link, both
+  ## with the RTC frozen to the shared epoch (deterministic across peers).
+  var cores: seq[GB] = @[]
+  let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
+  enable_deterministic_gb_rtc(epoch)  # applies to cartridge/state loads below
+  for path in [rom1_path, rom2_path]:
+    if not fileExists(path): return 0
+    let core = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    core.post_init()
+    cores.add(core)
+  wrap_gb_rollback_audio(cores[rbLocal], alwaysMute = false)
+  wrap_gb_rollback_audio(cores[1 - rbLocal], alwaysMute = true)
+  stateGbRollback = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
+  for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GB_W * GB_H)
+  frameCount = 0
+  1
+
 proc rollback_exit() {.exportc.} =
   if stateRollback != nil:
     for core in stateRollback.link.cores:
       core.storage.write_save()
     stateRollback = nil
+  if stateGbRollback != nil:
+    for core in stateGbRollback.link.cores:
+      core.cartridge.mbc_save()
+    stateGbRollback = nil
   audioSuppressed = false
 
 proc rollback_exit_to_single(): cint {.exportc.} =
@@ -585,6 +631,22 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   ## seamlessly instead of dropping to a blank screen. Unplugs its cable (null
   ## driver), drops the peer's core + the link. Returns 1 on success; JS then
   ## clears rollback mode and the normal single-core RAF branch takes over.
+  if stateGbRollback != nil:
+    let gcore = stateGbRollback.link.cores[rbLocal]
+    gcore.cartridge.mbc_save()
+    gcore.set_serial_driver(GbSerialDriver())  # cable unplugged — solo play
+    stateGbRollback = nil
+    audioSuppressed = false
+    stateGb = gcore
+    stateKind = ekGB
+    if stateTexture != nil: destroyTexture(stateTexture)
+    stateTexture = stateRenderer.createTexture(
+      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
+    rgbaBuffer.setLen(GB_W * GB_H)
+    stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
+    discard stateRenderer.setLogicalSize(GB_W, GB_H)
+    prevFrame.setLen(0)
+    return 1
   if stateRollback == nil: return 0
   let core = stateRollback.link.cores[rbLocal]
   core.storage.write_save()
@@ -623,6 +685,9 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   if localPlayer < 0 or localPlayer > 1: return 0
   rbLocal = int(localPlayer)
   rbEpoch = int64(epoch)
+  # GB/GBC ROMs take the GB rollback path (gb/rollback.nim).
+  if ($rom1_path).splitFile().ext.toLowerAscii() in [".gb", ".gbc"]:
+    return gb_rollback_init($rom1_path, $rom2_path, int64(epoch))
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
     if not fileExists(path): return 0
@@ -643,6 +708,13 @@ proc rollback_tick(localBits: cint): cint {.exportc.} =
   ## Advance one presentation frame with the local input + prediction. Returns
   ## the frame index just simulated (ship it to the peer with `localBits`), or
   ## -1 if stalled at the prediction window. Renders the local core.
+  if stateGbRollback != nil:
+    if gbrb.tick(stateGbRollback, uint16(localBits)) == gbrb.grbStalled: return -1
+    inc frameCount
+    gb_rollback_render()
+    var gevt = defaultEvent
+    while pollEvent(gevt): discard
+    return cint(stateGbRollback.head - 1)
   if stateRollback == nil: return -1
   let st = stateRollback.tick(uint16(localBits))
   if st == rbStalled: return -1
@@ -654,19 +726,25 @@ proc rollback_tick(localBits: cint): cint {.exportc.} =
 
 proc rollback_feed(frame, bits: cint) {.exportc.} =
   ## Ingest a peer input (may trigger a rollback + re-simulation internally).
-  if stateRollback == nil or frame < 0: return
+  if frame < 0: return
+  if stateGbRollback != nil:
+    gbrb.feed_remote(stateGbRollback, int(frame), uint16(bits))
+    return
+  if stateRollback == nil: return
   stateRollback.feed_remote(int(frame), uint16(bits))
 
 proc rollback_fb_ptr(): pointer {.exportc.} =
   ## The local player's RGBA framebuffer (call rollback_render first / after tick).
-  if stateRollback == nil: return nil
+  if stateRollback == nil and stateGbRollback == nil: return nil
   addr linkRgba[rbLocal][0]
 
 proc rollback_head(): cint {.exportc.} =
-  if stateRollback == nil: -1 else: cint(stateRollback.head)
+  if stateGbRollback != nil: cint(stateGbRollback.head)
+  elif stateRollback == nil: -1 else: cint(stateRollback.head)
 
 proc rollback_confirmed(): cint {.exportc.} =
-  if stateRollback == nil: -1 else: cint(stateRollback.confirmed)
+  if stateGbRollback != nil: cint(stateGbRollback.confirmed)
+  elif stateRollback == nil: -1 else: cint(stateRollback.confirmed)
 
 proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc.} =
   ## Seed core `player` from a full save-state (same bytes as a .state file) so
@@ -674,10 +752,13 @@ proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc
   ## be called BEFORE the first tick (before any checkpoint is captured). The
   ## deterministic RTC is re-applied afterward — the loaded state carries the
   ## single-player wall-clock RTC, which would desync. Returns 1 on success.
-  if stateRollback == nil or player < 0 or player > 1 or data == nil or len <= 0:
-    return 0
+  if player < 0 or player > 1 or data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
+  if stateGbRollback != nil:
+    enable_deterministic_gb_rtc(rbEpoch)  # frozen shared clock before the load
+    return (if stateGbRollback.link.cores[int(player)].load_state_bytes(image): 1 else: 0)
+  if stateRollback == nil: return 0
   let core = stateRollback.link.cores[int(player)]
   if not core.load_state_bytes(image): return 0
   core.enable_deterministic_rtc(rbEpoch)  # both peers agree on this clock
@@ -689,6 +770,7 @@ proc rollback_transfers(): cint {.exportc.} =
   ## closes the link, so JS watches this for "no activity for a while ⇒ done" —
   ## reliable across games, unlike the SIO mode register which stays latched in
   ## multi mode after a game is finished (why the mode-based check never fired).
+  if stateGbRollback != nil: return cint(stateGbRollback.link.transfers and 0x7fffffff)
   if stateRollback == nil: return 0
   cint(stateRollback.link.transfers and 0x7fffffff)
 

@@ -130,23 +130,11 @@ document.getElementById("net-connect").addEventListener("click", () => {
     return;
   }
   const oext = extOf(currentOriginalName || "");
-  if (oext !== ".gba") {
-    // Online (two-browser) link is GBA-only. GB/GBC has no network transport
-    // yet, but it does have the local 2-player link — split the running game
-    // into two linked cores in this browser so trades can be tested locally.
-    if ((oext === ".gb" || oext === ".gbc") && currentRomName) {
-      try {
-        const data = FS.readFile(currentRomName); // running ROM bytes
-        launchLinkRom({ name: currentOriginalName, data });
-        showToast("2-player link — P1 keyboard, P2 gamepad");
-        return;
-      } catch (e) {
-        log("2P link launch failed: " + e, "warn");
-      }
-    }
-    showToast("Online link cable is GBA-only (GB uses the 2P button)");
+  if (oext !== ".gba" && oext !== ".gb" && oext !== ".gbc") {
+    showToast("Link cable needs a GB, GBC, or GBA game");
     return;
   }
+  // GBA and GB/GBC both use the online (two-browser) input-rollback link now.
   openNetConnect(true);
 });
 
@@ -512,6 +500,9 @@ const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // over which throws → a dropped chunk → a corrupt ROM), so we never hit it.
 const RB_SEND_HIGH_WATER = 4 * 1024 * 1024;
 const RB_ROM_MAX = 48 * 1024 * 1024; // sanity cap on an announced ROM length
+// FS extension for the session's ROMs (.gba / .gb / .gbc); set at rbConnect and
+// used for the FS names so the wasm's rollback_init dispatches to the right core.
+let rbExt = ".gba";
 
 const rbHash = (bytes) => {
   // FNV-1a over the first 1 MB — enough to tell ROM versions apart cheaply.
@@ -641,8 +632,13 @@ const rbSendOurRom = () => {
 
 // Capture the running game's state + ROM, freeze it, and start the handshake.
 const rbConnect = async () => {
-  if (extOf(currentOriginalName || "") !== ".gba")
-    throw new Error("rollback is GBA-only");
+  const oext = extOf(currentOriginalName || "");
+  if (oext !== ".gba" && oext !== ".gb" && oext !== ".gbc")
+    throw new Error("link cable needs a GB/GBC/GBA game");
+  // Both peers must be the same system; the FS ROM extension drives the wasm's
+  // GB-vs-GBA dispatch in rollback_init. Also flags the GB canvas dimensions.
+  rbExt = oext === ".gba" ? ".gba" : oext;
+  linkIsGb = rbExt !== ".gba";
   const localState = rbCaptureState();
   // Freeze the local game AT the snapshot so it doesn't run past it during the
   // exchange (no overlay — the modal shows the sync status). enterRollbackMode
@@ -782,13 +778,14 @@ const rbTryInit = () => {
   const remoteRom = rb.needRom ? rb.remoteRom : rb.romBytes;
   const hostRom = net.isHost ? localRom : remoteRom;
   const guestRom = net.isHost ? remoteRom : localRom;
-  writeToFS("rbrom0.gba", hostRom);
-  writeToFS("rbrom1.gba", guestRom);
+  const rom0 = "rbrom0" + rbExt, rom1 = "rbrom1" + rbExt;
+  writeToFS(rom0, hostRom);
+  writeToFS(rom1, guestRom);
   const ok = Module.ccall(
     "rollback_init",
     "number",
     ["string", "string", "number", "number"],
-    ["rbrom0.gba", "rbrom1.gba", rb.localPlayer, rb.epoch]
+    [rom0, rom1, rb.localPlayer, rb.epoch]
   );
   if (ok !== 1) {
     netFail("Couldn't start the rollback session");
@@ -841,9 +838,9 @@ const rbTeardown = async () => {
   const kept =
     Module._rollback_exit_to_single && Module._rollback_exit_to_single() === 1;
   if (kept) {
-    // The running solo core now lives at rbrom<player>.gba / .sav; keep the
+    // The running solo core now lives at rbrom<player><ext> / .sav; keep the
     // original display name so its save persists under the real game's slot.
-    currentRomName = "rbrom" + net.rb.localPlayer + ".gba";
+    currentRomName = "rbrom" + net.rb.localPlayer + rbExt;
   } else if (Module._rollback_exit) {
     Module._rollback_exit();
   }

@@ -1955,6 +1955,10 @@ body.rollback-mode #link-stage .link-label { display: none; }
 body.running.rollback-mode .link-pane canvas {
   width: min(100%, calc((100dvh - var(--bar-h) - 24px) * 1.5));
 }
+/* GB/GBC online rollback: single 160x144 (10:9) screen. */
+body.running.rollback-mode.link-gb .link-pane canvas {
+  width: min(100%, calc((100dvh - var(--bar-h) - 24px) * 1.111));
+}
 
 /* "Disconnect Link Cable" button — squared to match the other top-bar
    .icon-btn controls, occupying the space the hidden speed/state controls left

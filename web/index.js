@@ -1932,7 +1932,8 @@ const blitRollbackCanvas = () => {
   if (!linkCtx[0] || !Module._rollback_fb_ptr) return;
   let ptr = Module._rollback_fb_ptr();
   if (!ptr) return;
-  linkImg[0].data.set(new Uint8Array(Module.memory.buffer, ptr, 240 * 160 * 4));
+  const [w, h] = linkDims();
+  linkImg[0].data.set(new Uint8Array(Module.memory.buffer, ptr, w * h * 4));
   linkCtx[0].putImageData(linkImg[0], 0, 0);
 };
 
@@ -1940,7 +1941,9 @@ const blitRollbackCanvas = () => {
 // RollbackSession is initialized (enter) and on teardown (leave). The core is
 // driven by the RAF loop's rollbackMode branch.
 window.enterRollbackMode = () => {
-  if (linkCtx[0] === null) initLinkCanvases();
+  // Always (re)init: sizes the canvas backing store to the session's system
+  // (linkIsGb is set by rbConnect), which may differ from a prior session.
+  initLinkCanvases();
   localButtons = 0;
   gpPrev.fill(false);
   rollbackMode = true;
@@ -1949,6 +1952,7 @@ window.enterRollbackMode = () => {
   rbLastActivity = performance.now();
   paused = false;
   document.body.classList.remove("paused");
+  document.body.classList.toggle("link-gb", linkIsGb);
   document.body.classList.add("has-game", "running", "rollback-mode");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
   updateCanvasScaling();
@@ -1960,7 +1964,7 @@ window.leaveRollbackMode = () => {
   if (!rollbackMode) return;
   rollbackMode = false;
   localButtons = 0;
-  document.body.classList.remove("rollback-mode");
+  document.body.classList.remove("rollback-mode", "link-gb");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(false);
   updateCanvasScaling();
 };

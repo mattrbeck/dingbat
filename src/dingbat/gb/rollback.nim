@@ -20,9 +20,9 @@ import gb
 const INPUT_COUNT = 10  # Input enum cardinality (UP..R)
 
 type
-  RollbackStatus* = enum
-    rbAdvanced   ## simulated one new frame
-    rbStalled    ## at the prediction-window limit; wait for remote input
+  GbRbStatus* = enum
+    grbAdvanced   ## simulated one new frame
+    grbStalled    ## at the prediction-window limit; wait for remote input
 
   GbRollbackSession* = ref object
     link*: GbLink
@@ -125,18 +125,18 @@ proc feed_remote*(sess: GbRollbackSession; frame: int; bits: uint16) =
   sess.remoteKnown[frame] = true
   sess.reconcile()
 
-proc tick*(sess: GbRollbackSession; localBits: uint16): RollbackStatus =
+proc tick*(sess: GbRollbackSession; localBits: uint16): GbRbStatus =
   ## Simulate one presentation frame with the local input and prediction. STALL
-  ## if we are already `maxAhead` past the confirmed remote input. On rbAdvanced
+  ## if we are already `maxAhead` past the confirmed remote input. On grbAdvanced
   ## the caller ships (`head-1`, localBits) to the peer.
   if sess.head - sess.confirmed > sess.maxAhead:
     inc sess.stalls
-    return rbStalled
+    return grbStalled
   sess.grow(sess.head)
   sess.localIn[sess.head] = localBits
   sess.sim(sess.head)
   inc sess.head
-  rbAdvanced
+  grbAdvanced
 
 proc checksum*(sess: GbRollbackSession): uint64 =
   ## State fingerprint for periodic desync detection between peers. Compare only
