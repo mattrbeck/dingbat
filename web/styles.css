@@ -553,25 +553,23 @@ body.fs #fullscreen-btn .ico-collapse {
   z-index: 0;
 }
 
+/* The CSS box must always be the same shape as the canvas backing store or
+   the picture distorts (GB is 10:9, GBA is 3:2, and the wasm resizes the
+   backing per system on ROM load). JS pins --game-ar to the LIVE backing
+   ratio (updateCanvasScaling), so the two can never disagree — even if a
+   cached frontend meets a newer wasm build, the worst case is letterboxing
+   inside the canvas, never a stretch. */
 #canvas {
   position: relative;
   z-index: 1;
-  width: min(100%, calc((100dvh - var(--bar-h)) * 1.5));
+  width: min(100%, calc((100dvh - var(--bar-h)) * var(--game-ar, 1.5)));
   max-width: 100%;
   max-height: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: var(--game-ar, 1.5);
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   background: #000;
   display: none;
-}
-
-/* GB/GBC panels are 10:9, not the GBA's 3:2. The wasm resizes the canvas
-   backing store to match on ROM load; body.sys-gb keeps the CSS box in the
-   same shape so nothing letterboxes or stretches. */
-body.sys-gb #canvas {
-  aspect-ratio: 10 / 9;
-  width: min(100%, calc((100dvh - var(--bar-h)) * 1.1112));
 }
 
 body.running #canvas {
@@ -2148,10 +2146,7 @@ body.rollback-mode #save-sep {
   }
   /* With the bar gone the stage owns the full height */
   body.running #canvas {
-    width: min(100%, calc(100dvh * 1.5));
-  }
-  body.sys-gb.running #canvas {
-    width: min(100%, calc(100dvh * 1.1112));
+    width: min(100%, calc(100dvh * var(--game-ar, 1.5)));
   }
   body.running #controls {
     top: 0;

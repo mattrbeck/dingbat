@@ -1037,6 +1037,13 @@ const nativeRes = () =>
   currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
 
 const updateCanvasScaling = () => {
+  // Keep the CSS box the exact shape of the canvas backing store (the wasm
+  // resizes it per system: GBA 3:2, GB 10:9). Deriving the ratio from the
+  // live element rather than duplicating it in CSS means a frontend/wasm
+  // version skew can only letterbox, never stretch.
+  if (canvasEl.width > 0 && canvasEl.height > 0) {
+    canvasEl.style.setProperty("--game-ar", canvasEl.width / canvasEl.height);
+  }
   const running =
     document.body.classList.contains("running") && !!currentRomName;
   if (integerScale && running) {
@@ -1428,7 +1435,6 @@ const loadRom = async (romName, originalName) => {
   speed2xButton.classList.remove("active");
   rewindButton.classList.remove("active");
   document.body.classList.add("has-game", "running");
-  document.body.classList.toggle("sys-gb", extOf(romName) !== ".gba");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
@@ -1949,7 +1955,6 @@ const launchLinkRom = async (rom) => {
   gpPrev.fill(false);
   initLinkCanvases();
   document.body.classList.add("has-game", "running", "link-mode");
-  document.body.classList.remove("sys-gb"); // link mode is GBA-only
   updateCanvasScaling();
   await addRecentRom(rom.name, rom.data, rom.art);
 };
