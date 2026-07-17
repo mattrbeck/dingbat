@@ -4,16 +4,25 @@ proc new_gb_cpu*(): GbCpu =
   GbCpu(pc: 0, sp: 0, ime: false, halted: false, halt_bug: false, cached_hl: -1)
 
 proc skip_boot*(cpu: GbCpu; gb: GB) =
+  # Registers at PC=0x100 (mooneye boot_regs-dmgABC / boot_regs-cgb /
+  # misc/boot_regs-cgb): the CGB boot ROM leaves different values depending
+  # on whether the cart runs in native CGB or DMG-compatibility mode.
   cpu.pc = 0x0100
   cpu.sp = 0xFFFE
-  cpu.af = 0x1180
-  cpu.bc = 0x0000
   if gb.cgb_enabled:
-    cpu.de = 0xFF56
-    cpu.hl = 0x000D
+    cpu.af = 0x1180
+    cpu.bc = 0x0000
+    if gb.cgb_flag != cgbNone:
+      cpu.de = 0xFF56  # native CGB mode
+      cpu.hl = 0x000D
+    else:
+      cpu.de = 0x0008  # DMG cart on CGB hardware
+      cpu.hl = 0x007C
   else:
-    cpu.de = 0x0008
-    cpu.hl = 0x007C
+    cpu.af = 0x01B0    # DMG-ABC
+    cpu.bc = 0x0013
+    cpu.de = 0x00D8
+    cpu.hl = 0x014D
 
 proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8 =
   if cpu.cached_hl < 0:

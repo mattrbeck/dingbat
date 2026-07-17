@@ -20,7 +20,7 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
-  STATE_VERSION* = 3'u32  # v3: GBA bus ROM burst/prefetch trackers + deterministic RTC
+  STATE_VERSION* = 4'u32  # v4: GB serial port state (link cable support)
   # magic(8) version(4) core(1) slot(1) reserved(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)
   STATE_HEADER_SIZE* = 32

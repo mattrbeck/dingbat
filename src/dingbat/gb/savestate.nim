@@ -19,6 +19,7 @@ const
   GB_SEC_PPU   = 0xB7'u8
   GB_SEC_APU   = 0xB8'u8
   GB_SEC_MBC   = 0xB9'u8
+  GB_SEC_SER   = 0xBA'u8
   GB_SEC_END   = 0xBF'u8
 
 # ---- CPU ----
@@ -81,6 +82,25 @@ proc load_timer_state(t: GbTimer; r: var Reader) =
   t.bit_for_tima = int(r.read_i32())
   t.previous_bit = r.read_bool()
   t.countdown = int(r.read_i32())
+
+proc save_serial_state(s: GbSerial; w: var Writer) =
+  # The driver (link cable binding) is not serialized; see set_serial_driver
+  w.write_tag(GB_SEC_SER)
+  w.write_u8(s.sb)
+  w.write_u8(s.sc)
+  w.write_u8(s.out_latch)
+  w.write_u8(uint8(s.bits_remaining))
+  w.write_bool(s.previous_bit)
+  w.write_bool(s.shifting)
+
+proc load_serial_state(s: GbSerial; r: var Reader) =
+  r.expect_tag(GB_SEC_SER)
+  s.sb = r.read_u8()
+  s.sc = r.read_u8()
+  s.out_latch = r.read_u8()
+  s.bits_remaining = int(r.read_u8())
+  s.previous_bit = r.read_bool()
+  s.shifting = r.read_bool()
 
 proc save_joypad_state(j: GbJoypad; w: var Writer) =
   # Only the select lines (written by the game); pressed-key state stays
@@ -436,6 +456,7 @@ proc gb_state_payload(gb: GB): string =
   save_cpu_state(gb.cpu, w)
   save_irq_state(gb.interrupts, w)
   save_timer_state(gb.timer, w)
+  save_serial_state(gb.serial, w)
   save_joypad_state(gb.joypad, w)
   save_mem_state(gb.memory, w)
   w.write_bool(gb.cgb_enabled)
@@ -452,6 +473,7 @@ proc gb_apply_state(gb: GB; payload: string) =
   load_cpu_state(gb.cpu, r)
   load_irq_state(gb.interrupts, r)
   load_timer_state(gb.timer, r)
+  load_serial_state(gb.serial, r)
   load_joypad_state(gb.joypad, r)
   load_mem_state(gb.memory, r)
   gb.cgb_enabled = r.read_bool()

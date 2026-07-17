@@ -78,6 +78,20 @@ type
     joypad_enabled*:     bool
     top_3_ie_bits*:      uint8
 
+  # ---- Serial ----
+  GbSerialDriver* = ref object of RootObj
+    ## Whatever is plugged into the link port (see serial.nim). The base
+    ## instance is the no-cable default; a link coordinator subclasses it.
+
+  GbSerial* = ref object
+    sb*:             uint8   # 0xFF01 shift register
+    sc*:             uint8   # 0xFF02 control (bits 7, 1 [CGB], 0)
+    out_latch*:      uint8   # outgoing byte latched at transfer start
+    bits_remaining*: int     # 8..1 while a started transfer has bits left
+    previous_bit*:   bool    # last sampled level of the selected DIV bit
+    shifting*:       bool    # cached: internal-clock transfer in progress
+    driver*:         GbSerialDriver
+
   # ---- Timer ----
   GbTimer* = ref object
     tdiv*:         uint16
@@ -306,6 +320,7 @@ type
     joypad*:         GbJoypad
     ppu*:            GbPpu
     timer*:          GbTimer
+    serial*:         GbSerial
     memory*:         GbMemory
     apu*:            GbApu
     when defined(test_harness):
@@ -556,7 +571,10 @@ include apu/channel2
 include apu/channel3
 include apu/channel4
 include apu
+# Forward declaration needed by serial.nim/ppu.nim (defined in memory.nim)
+proc cgb_native*(gb: GB): bool
 include interrupts
+include serial
 include timer
 include joypad
 # Forward declarations needed by ppu.nim (defined in memory.nim included later)
@@ -579,7 +597,9 @@ include cpu
 
 # ==================== NEW_GB + POST_INIT ====================
 
-proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool): GB =
+proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false): GB =
+  ## force_cgb runs a DMG-flagged cart in CGB mode (a DMG cart inserted in a
+  ## Game Boy Color) — mooneye's misc/ tests assert that hardware's behavior.
   result = GB(
     bootrom_path: bootrom_path,
     rom_path:     rom_path,
@@ -593,7 +613,8 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     of 0x80'u8: cgbSupport
     of 0xC0'u8: cgbExclusive
     else:       cgbNone
-  result.cgb_enabled = (bootrom_path.len > 0 and run_bios) or result.cgb_flag != cgbNone
+  result.cgb_enabled = (bootrom_path.len > 0 and run_bios) or
+                       result.cgb_flag != cgbNone or force_cgb
   result.rom_title = block:
     var s = ""
     for i in 0x0134 ..< 0x013F:
@@ -613,7 +634,7 @@ proc gb_skip_boot(gb: GB) =
   gb.cpu.skip_boot(gb)
   gb.memory.skip_boot(gb)
   gb.ppu.skip_boot()
-  gb.timer.skip_boot()
+  gb.timer.skip_boot(gb.cgb_enabled)
 
 proc handle_saves*(gb: GB) =
   ## Flush battery-backed cart RAM once per frame (when dirty) so progress
@@ -646,6 +667,7 @@ proc post_init*(gb: GB) =
   else:
     gb.ppu = new_gb_scanline_ppu(gb)
   gb.timer  = new_gb_timer()
+  gb.serial = new_gb_serial()
   gb.memory = new_gb_memory(gb)
   gb.cpu    = new_gb_cpu()
   gb.scheduler.dispatch = gb_dispatch(gb)

@@ -1,5 +1,12 @@
 # GB Memory bus (included by gb.nim)
 
+proc cgb_native*(gb: GB): bool =
+  ## True when the CGB-only half of the IO map is exposed. A DMG cart on CGB
+  ## hardware runs in DMG-compatibility mode where KEY1/HDMA/SVBK/BCPD/OCPD/
+  ## FF74 read as unmapped (mooneye misc/bits/unused_hwio-C); the boot ROM
+  ## itself always runs native (it switches modes at handoff via KEY0).
+  gb.cgb_enabled and (gb.cgb_flag != cgbNone or gb.memory.bootrom.len > 0)
+
 proc new_gb_memory*(gb: GB): GbMemory =
   result = GbMemory(wram_bank: 1, dma_position: 0xA1)
   for i in 0 ..< 8:
@@ -72,23 +79,24 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFE00..0xFE9F: ppu_read(gb.ppu, gb, idx)
   of 0xFEA0..0xFEFF: 0x00'u8
   of 0xFF00:         joypad_read(gb.joypad)
+  of 0xFF01..0xFF02: serial_read(gb.serial, gb, idx)
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
   of 0xFF0F:         irq_read(gb.interrupts, idx)
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx)
   of 0xFF40..0xFF4B: ppu_read(gb.ppu, gb, idx)
   of 0xFF4D:
-    if gb.cgb_enabled:
+    if gb.cgb_native:
       0x7E'u8 or (uint8(mem.current_speed) shl 7) or (if mem.requested_speed_switch: 1'u8 else: 0'u8)
     else: 0xFF'u8
   of 0xFF4F:         ppu_read(gb.ppu, gb, idx)
   of 0xFF51..0xFF55: ppu_read(gb.ppu, gb, idx)
   of 0xFF68..0xFF6B: ppu_read(gb.ppu, gb, idx)
   of 0xFF70:
-    if gb.cgb_enabled: 0xF8'u8 or mem.wram_bank else: 0xFF'u8
+    if gb.cgb_native: 0xF8'u8 or mem.wram_bank else: 0xFF'u8
   of 0xFF72: mem.ff72
   of 0xFF73: mem.ff73
   of 0xFF74:
-    if gb.cgb_enabled: mem.ff74 else: 0xFF'u8
+    if gb.cgb_native: mem.ff74 else: 0xFF'u8
   of 0xFF75: mem.ff75
   of 0xFF76: 0x00'u8
   of 0xFF77: 0x00'u8
@@ -122,29 +130,25 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFE00..0xFE9F: ppu_write(gb.ppu, gb, idx, val)
   of 0xFEA0..0xFEFF: discard
   of 0xFF00:         joypad_write(gb.joypad, val)
-  of 0xFF01:
-    when defined(test_harness):
-      if gb.test_output != nil:
-        gb.test_output.serial_buffer.add(char(val))
-    else: discard  # Serial data (stub)
+  of 0xFF01..0xFF02: serial_write(gb.serial, gb, idx, val)
   of 0xFF04..0xFF07: timer_write(gb.timer, gb, idx, val)
   of 0xFF0F:         irq_write(gb.interrupts, idx, val)
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
   of 0xFF46:         mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF4D:
-    if gb.cgb_enabled: mem.requested_speed_switch = (val and 0x1) != 0
+    if gb.cgb_native: mem.requested_speed_switch = (val and 0x1) != 0
   of 0xFF4F:         ppu_write(gb.ppu, gb, idx, val)
   of 0xFF51..0xFF55: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF68..0xFF6B: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF70:
-    if gb.cgb_enabled:
+    if gb.cgb_native:
       mem.wram_bank = val and 0x7
       if mem.wram_bank == 0: mem.wram_bank = 1
   of 0xFF72: mem.ff72 = val
   of 0xFF73: mem.ff73 = val
   of 0xFF74:
-    if gb.cgb_enabled: mem.ff74 = val
+    if gb.cgb_native: mem.ff74 = val
   of 0xFF75: mem.ff75 = val or 0x8F
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80] = val
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)

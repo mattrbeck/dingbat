@@ -17,6 +17,7 @@ type
     timeout: int
     expected_png: string  # for screenshot mode
     color: bool           # true = RGB comparison, false = greyscale
+    cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
 
   TestResult = object
     name: string
@@ -190,7 +191,9 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       output: &"{pct:.1f}% correct ({total_pixels - diff_count}/{total_pixels} pixels match)",
     )
   else:
-    let cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
+    var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
+    if test.cgb:
+      cmd.add(" --cgb")
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
     return TestResult(
       name: test.name,
@@ -245,6 +248,9 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
       rom_path: rom,
       mode: tmMooneye,
       timeout: 1800,
+      # misc/ holds the CGB/AGB-hardware tests (DMG-flagged carts that
+      # assert CGB boot state); run them as a DMG cart on CGB hardware
+      cgb: rel.startsWith("misc"),
     ))
   tests
 

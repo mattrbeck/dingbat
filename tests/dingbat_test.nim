@@ -995,6 +995,7 @@ proc main() =
   var netlink_delay = 0
   var link_contract = lcMulti
   var attach_after = 10
+  var force_cgb = false
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1049,6 +1050,8 @@ proc main() =
         screenshot_path = v
       of "color":
         color_mode = true
+      of "cgb":
+        force_cgb = true
       of "bios":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1158,7 +1161,8 @@ proc main() =
       echo screenshot_path
       quit(0)
   else:
-    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
+                     force_cgb = force_cgb)
     emu.test_output = test_out
     emu.post_init()
     for frame in 0 ..< timeout_frames:

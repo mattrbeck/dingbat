@@ -162,21 +162,21 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFF4A: ppu.wy
   of 0xFF4B: ppu.wx
   of 0xFF4F: (if gb.cgb_enabled: 0xFE'u8 or ppu.vram_bank else: 0xFF'u8)
-  of 0xFF51: (if gb.cgb_enabled: ppu.hdma1 else: 0xFF'u8)
-  of 0xFF52: (if gb.cgb_enabled: ppu.hdma2 else: 0xFF'u8)
-  of 0xFF53: (if gb.cgb_enabled: ppu.hdma3 else: 0xFF'u8)
-  of 0xFF54: (if gb.cgb_enabled: ppu.hdma4 else: 0xFF'u8)
-  of 0xFF55: (if gb.cgb_enabled: ppu.hdma5 else: 0xFF'u8)
+  of 0xFF51: (if gb.cgb_native: ppu.hdma1 else: 0xFF'u8)
+  of 0xFF52: (if gb.cgb_native: ppu.hdma2 else: 0xFF'u8)
+  of 0xFF53: (if gb.cgb_native: ppu.hdma3 else: 0xFF'u8)
+  of 0xFF54: (if gb.cgb_native: ppu.hdma4 else: 0xFF'u8)
+  of 0xFF55: (if gb.cgb_native: ppu.hdma5 else: 0xFF'u8)
   of 0xFF68:
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.auto_increment: 0x80'u8 else: 0'u8) or ppu.palette_index
     else: 0xFF'u8
-  of 0xFF69: (if gb.cgb_enabled: ppu.pram[ppu.palette_index] else: 0xFF'u8)
+  of 0xFF69: (if gb.cgb_native: ppu.pram[ppu.palette_index] else: 0xFF'u8)
   of 0xFF6A:
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.obj_auto_increment: 0x80'u8 else: 0'u8) or ppu.obj_palette_index
     else: 0xFF'u8
-  of 0xFF6B: (if gb.cgb_enabled: ppu.obj_pram[ppu.obj_palette_index] else: 0xFF'u8)
+  of 0xFF6B: (if gb.cgb_native: ppu.obj_pram[ppu.obj_palette_index] else: 0xFF'u8)
   else: 0xFF'u8
 
 proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -208,21 +208,21 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   of 0xFF4F:
     if gb.cgb_enabled: ppu.vram_bank = val and 0x1
   of 0xFF51:
-    if gb.cgb_enabled: ppu.hdma1 = val
+    if gb.cgb_native: ppu.hdma1 = val
   of 0xFF52:
-    if gb.cgb_enabled: ppu.hdma2 = val
+    if gb.cgb_native: ppu.hdma2 = val
   of 0xFF53:
-    if gb.cgb_enabled: ppu.hdma3 = val
+    if gb.cgb_native: ppu.hdma3 = val
   of 0xFF54:
-    if gb.cgb_enabled: ppu.hdma4 = val
+    if gb.cgb_native: ppu.hdma4 = val
   of 0xFF55:
-    if gb.cgb_enabled: ppu_start_hdma(ppu, gb, val)
+    if gb.cgb_native: ppu_start_hdma(ppu, gb, val)
   of 0xFF68:
     if gb.cgb_enabled:
       ppu.palette_index  = val and 0x3F
       ppu.auto_increment = (val and 0x80) != 0
   of 0xFF69:
-    if gb.cgb_enabled:
+    if gb.cgb_native:
       ppu.pram[ppu.palette_index] = val
       if ppu.auto_increment:
         ppu.palette_index = (ppu.palette_index + 1) and 0x3F
@@ -231,7 +231,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.obj_palette_index  = val and 0x3F
       ppu.obj_auto_increment = (val and 0x80) != 0
   of 0xFF6B:
-    if gb.cgb_enabled:
+    if gb.cgb_native:
       ppu.obj_pram[ppu.obj_palette_index] = val
       if ppu.obj_auto_increment:
         ppu.obj_palette_index = (ppu.obj_palette_index + 1) and 0x3F

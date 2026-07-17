@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-14 09:44:06*
+*Generated: 2026-07-16 20:12:40*
 
 ## Game Boy - Blargg
 
@@ -38,7 +38,7 @@
 | acceptance/boot_hwio-dmg0 | 👀 |
 | acceptance/boot_hwio-dmgABCmgb | 👀 |
 | acceptance/boot_regs-dmg0 | 👀 |
-| acceptance/boot_regs-dmgABC | 👀 |
+| acceptance/boot_regs-dmgABC | 👌 |
 | acceptance/boot_regs-mgb | 👀 |
 | acceptance/boot_regs-sgb | 👀 |
 | acceptance/boot_regs-sgb2 | 👀 |
@@ -87,7 +87,7 @@
 | acceptance/reti_intr_timing | 👌 |
 | acceptance/reti_timing | 👌 |
 | acceptance/rst_timing | 👌 |
-| acceptance/serial/boot_sclk_align-dmgABCmgb | 👀 |
+| acceptance/serial/boot_sclk_align-dmgABCmgb | 👌 |
 | acceptance/timer/div_write | 👌 |
 | acceptance/timer/rapid_toggle | 👌 |
 | acceptance/timer/tim00 | 👌 |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 103
-- **Fail:** 66
+- **Pass:** 105
+- **Fail:** 64
