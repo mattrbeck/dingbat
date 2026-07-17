@@ -348,16 +348,78 @@ battery save. The cross-version relaxed-CRC confirm fires on both ends.
 
 Not yet done: a deployed signaling URL (an ops choice — the web UI's
 default guesses `wss://<host>/signal`), a TURN relay for strict-NAT pairs,
-native clients joining the room system, and GB/GBC online (the GB core has
-no SIO driver abstraction yet — GBA-only for 3b).
+native clients joining the room system, and GB/GBC *online* (local
+in-process GB linking is DONE — see §2b — but the network transports still
+need the GB serial driver hooked to linkproto/netcore).
+
+### 2b. In-process GB/GBC link — DONE (2026-07-16)
+
+The GB core got the serial port it never had (`src/dingbat/gb/serial.nim`):
+SB/SC registers, a shift clock derived from the free-running divider (bit 8
+= 8192 Hz; the CGB-only fast clock bit 3 = 262144 Hz), and the
+serial-complete interrupt that was previously unreachable from hardware.
+Timing is pinned by mooneye `boot_sclk_align-dmgABCmgb` (passing) and the
+gambatte serial suite; the same calibration work fixed the DMG/CGB
+post-boot DIV/register/LCD state, taking the GB suite from 103 → 106
+passing with no regressions.
+
+`GbSerialDriver` mirrors the GBA `SioDriver` contract: consulted only on
+transfer start/completion, with completion an explicit `serial_finish_transfer`
+step. `src/dingbat/gb/link.nim` is the two-core lockstep coordinator — the
+GB analog of `gba/link.nim`, sharing its deferred-completion discipline and
+its `run_to` network-transport boundary. It resolves a transfer byte-duplex
+at the master's 8th shift edge: run the peer to that emulated cycle, swap
+the master's start-latched byte with the slave's staged SB, and hand each
+unit completion semantics (SC.7 clear + IRQ) per whether it had started.
+
+Verified: `tests/roms/gblinktest.gb` (hand-assembled by
+`tests/roms/gblinktest.py`, `dingbat_test --mode=gblinktest`) exchanges 16
+full-duplex rounds in both directions with correct IRQ counts. Two real
+Pokémon Crystal cores run bit-identically in lockstep for 5000 frames
+(`tests/gb_trade_repro.nim --mode=stability`) — the coordinator interleaves
+real ROM code, including Crystal's CGB double-speed switch, without desync.
+An in-game trade needs Cable-Club battery saves (real ROM, manually
+positioned), driven by the same file's `--mode=trade`; like the GBA
+`tests/trade_repro.nim` it mirrors, that path is a MANUAL tool.
+
+### 2c. GB↔GBA heterogeneous link — design note (not yet built)
+
+The user goal behind this work: eventually a GBC core and a GBA core on one
+cable (e.g. a GBA running a GB game in GBC-compat mode, linked to a real
+GBC). A historical caveat worth recording — Pokémon Gen 2 (Crystal) and Gen
+3 (Emerald) never actually traded on hardware even with Crystal booted in a
+GBA; that path needed the DS's Pal Park. But the *emulator* architecture for
+heterogeneous cores is still the right target, and both link layers were
+built byte-duplex specifically to allow it:
+
+- Both `GbSerialDriver.serial_complete` and the GBA normal-8
+  `SioDriver.sio_complete` resolve a transfer as "one whole byte each way."
+  A bridge driver pairs the two: when the clock-master core (either side)
+  completes its byte, latch it into the slave's shift register and vice
+  versa — exactly what `gb/link.nim complete_transfer` and
+  `gba/link.nim complete_normal` already do within one core type.
+- The one genuinely new piece is **clock-rate conversion**. The GB runs at
+  4.194304 MHz and the GBA at 16.777216 MHz (4×). The lockstep coordinator
+  already compares cores on an int64 global clock (`offsets[i] +
+  scheduler.cycles`); a heterogeneous link multiplies each core's cycles by
+  its per-cycle wall-time weight (GB ×4, GBA ×1, GB-double-speed ×2) so
+  `run_to` advances the right amount of real time on each. A GBA in a GB
+  serial mode clocks at the GB rate regardless of its faster CPU, so the
+  *transfer duration* is defined by whichever side drives the clock.
+- Above the byte layer, the two games must speak a compatible link protocol
+  for a trade to mean anything — which is the Pal Park caveat above. The
+  emulator's job stops at delivering each side's bytes at the right emulated
+  time; that layer is ready.
 
 ### 3. Cross-emulator transports (pick per goal)
 
 - **BGB protocol for the GB core** — best interop-per-effort in the whole
   space: documented, stable, two independent implementations to test
-  against, and our GB core already passes the serial tests it needs. The
-  timestamp discipline (2 MHz units, stall when peer is behind) maps
-  directly onto our scheduler.
+  against, and our GB core now passes the serial tests it needs *and* has a
+  serial driver abstraction + in-process lockstep link (§2b). The timestamp
+  discipline (2 MHz units, stall when peer is behind) maps directly onto our
+  scheduler; a BgbSerialDriver would subclass `GbSerialDriver` the way
+  `netcore` subclasses the GBA `SioDriver`.
 - **JoyBus/TCP for Dolphin** — well-defined, testable against Dolphin, and
   the JoyBus register plumbing (JOYCNT/JOY_RECV/JOY_TRANS/JOYSTAT) already
   exists in serial.nim. Scope: implement the jbus wire commands (RESET,
@@ -394,8 +456,11 @@ no SIO driver abstraction yet — GBA-only for 3b).
 3. dingbat↔dingbat GBA network transport — native TCP DONE (phase 3a,
    2026-07; linkproto.nim + netlink.nim + --mode=netlink); browser WebRTC
    bridge with room codes DONE (phase 3b, 2026-07-11; netcore.nim +
-   netplay.js + signaling server — see §3b). Next: BGB protocol for GB
-   (first true cross-emulator interop).
+   netplay.js + signaling server — see §3b).
+3b. GB/GBC serial port + in-process lockstep link — DONE (2026-07-16;
+   gb/serial.nim + gb/link.nim + gblinktest — see §2b). Next: BGB protocol
+   for GB (first true cross-emulator interop) and/or the GB↔GBA
+   heterogeneous bridge (§2c).
 4. JoyBus/TCP (Dolphin) and/or VBA-M protocol for GBA, per demand.
 
 Sources: [mGBA multiplayer architecture](https://deepwiki.com/mgba-emu/mgba/9.3-multiplayer-support),
