@@ -75,11 +75,14 @@ proc main() =
   var lastStatus = [0'u8, 0]
   var lastTransfers = 0
   var stalledFrames = 0
+  let skew = getEnv("GB_INPUT_SKEW").len > 0
   for f in 0 ..< frames:
     # Mash A on both cores: talk to the attendant, confirm the link prompts.
-    let a_down = (f mod 24) < 8
+    # With GB_INPUT_SKEW, core 1's mash is phase-shifted so the two cores
+    # don't press identically (models two humans / breaks perfect symmetry).
     for c in 0 .. 1:
-      link.cores[c].handle_input(A, a_down)
+      let ph = if c == 1 and skew: (f + 11) else: f
+      link.cores[c].handle_input(A, (ph mod 24) < 8)
     link.step_frame()
     for c in 0 .. 1:
       let st = hram(c, 0xFFCB)

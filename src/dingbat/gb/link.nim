@@ -168,3 +168,12 @@ proc new_gb_link*(cores: seq[GB]): GbLink =
   )
   for i, core in cores:
     core.set_serial_driver(LockstepGbSerialDriver(link: result, id: i))
+  # NOTE on perfect symmetry: two cores fed BYTE-IDENTICAL state AND input
+  # both choose the internal-clock master role on the same cycle and deadlock
+  # (every transfer "both-internal", neither establishes) — real hardware
+  # avoids this only because two units' independent oscillators drift. This
+  # never happens in practice: distinct saves diverge immediately, and the
+  # frontend drives the two players' input separately (browser click-to-focus
+  # gives one core input at a time), which is enough asymmetry. Handled at the
+  # input layer, deliberately not with an artificial in-core clock skew that
+  # would perturb single-core-accurate timing.
