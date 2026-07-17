@@ -1,5 +1,6 @@
 import std/[os, strutils, parseopt, net, nativesockets, monotimes, times]
 import dingbat/gb/gb
+import dingbat/gb/link as gblink
 import dingbat/gba/gba
 import dingbat/gba/link
 import dingbat/gba/rollback
@@ -13,7 +14,7 @@ type
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet
+    tmRollback, tmRollbackNet, tmGbLinkTest
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -288,6 +289,57 @@ proc link_test(rom1, rom2, bios_path: string; timeout: int;
     0
   else:
     echo "LINKTEST: FAIL (", failures, " failed checks)"
+    1
+
+# GB two-core lockstep link acceptance (tests/roms/gblinktest.py): the
+# harness pokes each unit's role into WRAM 0xC7FF (0 = master, 1 = slave),
+# then the units exchange 16 full-duplex bytes — master sends 0xC0|round,
+# slave answers 0xD0|round — logging the peer's byte at 0xC000+round, the
+# serial-IF count at 0xC808, and 0xCAFE at 0xC800 when done.
+proc gb_link_test(rom1, rom2: string; timeout: int): int =
+  proc make_gb(rom: string; role: uint8): GB =
+    result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+    result.test_output = new_test_output()
+    result.post_init()
+    result.memory.wram[0][0x7FF] = role
+  let cores = @[make_gb(rom1, 0), make_gb(rom2, 1)]
+  let lnk = new_gb_link(cores)
+
+  proc done(g: GB): bool =
+    g.memory.wram[0][0x800] == 0xFE'u8 and g.memory.wram[0][0x801] == 0xCA'u8
+
+  var frames = 0
+  while frames < timeout and not (cores[0].done() and cores[1].done()):
+    lnk.step_frame()
+    inc frames
+
+  var failures = 0
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo "GBLINKTEST FAIL: ", msg
+      inc failures
+  for i, g in cores:
+    let who = (if i == 0: "master" else: "slave")
+    check g.done(), who & " never finished (" & $frames & " frames)"
+  if failures == 0:
+    for i, g in cores:
+      let who = (if i == 0: "master" else: "slave")
+      for r in 0 ..< 16:
+        let got = g.memory.wram[0][r]
+        let expected = (if i == 0: 0xD0'u8 else: 0xC0'u8) or uint8(r)
+        check got == expected,
+          who & " round " & $r & " received byte: got 0x" & toHex(got) &
+          ", expected 0x" & toHex(expected)
+      let irqs = g.memory.wram[0][0x808]
+      check irqs == 16, who & " serial-IF count: got " & $irqs & ", expected 16"
+  echo "GBLINKTEST: master ", (if cores[0].done(): "complete" else: "incomplete"),
+       ", slave ", (if cores[1].done(): "complete" else: "incomplete"),
+       " (", frames, " frames, ", lnk.transfers, " transfers)"
+  if failures == 0:
+    echo "GBLINKTEST: PASS (16 full-duplex rounds, both directions and IF counts verified)"
+    0
+  else:
+    echo "GBLINKTEST: FAIL (", failures, " failed checks)"
     1
 
 # Mid-game attach acceptance (tests/roms/attachtest.s): boot two cores with
@@ -1033,6 +1085,7 @@ proc main() =
         of "speclinkbench": mode = tmSpecLinkBench
         of "rollback": mode = tmRollback
         of "rollbacknet": mode = tmRollbackNet
+        of "gblinktest": mode = tmGbLinkTest
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1110,6 +1163,9 @@ proc main() =
       of tmNorm32LinkTest: lcNormal32
       else: lcMulti
     quit(link_test(rom_path, rom2, bios_path, timeout_frames, contract))
+  if mode == tmGbLinkTest:
+    let rom2 = if rom_path2.len > 0: rom_path2 else: rom_path
+    quit(gb_link_test(rom_path, rom2, timeout_frames))
   if mode == tmAttachTest:
     quit(attach_test(rom_path, bios_path, timeout_frames, attach_after))
   if mode == tmSpecLink:
@@ -1215,7 +1271,7 @@ proc main() =
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet:
+     tmRollback, tmRollbackNet, tmGbLinkTest:
     discard  # handled (and exited) above
 
   if output.len > 0:
