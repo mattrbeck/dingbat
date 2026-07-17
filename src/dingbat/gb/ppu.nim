@@ -31,6 +31,18 @@ proc new_ppu_base(cgb: bool): GbPpu =
   result.hdma4 = 0xFF; result.hdma5 = 0xFF
   result.ran_bios = cgb
 
+method reset_render_scratch*(ppu: GbPpu) {.base.} =
+  ## Reset the renderer's per-line scratch to a clean pre-line state. The
+  ## savestate is renderer-agnostic and does NOT serialize this scratch
+  ## (it is fully rebuilt on every mode 2->3 transition and never read at
+  ## vblank, where states are captured). Loading a state onto a FRESH core
+  ## is therefore fine, but a rollback restore onto a RUNNING core would
+  ## otherwise leave stale scratch (e.g. a FIFO lx past 160 that never hits
+  ## its `== 160` line-end and runs off the framebuffer). Called after every
+  ## state load; the base (scanline) renderer rebuilds its scratch per line,
+  ## so it is a no-op here.
+  discard
+
 method skip_boot*(ppu: GbPpu; cgb: bool) {.base.} =
   for i in 0 ..< POST_BOOT_VRAM.len:
     ppu.vram[0][i] = POST_BOOT_VRAM[i]

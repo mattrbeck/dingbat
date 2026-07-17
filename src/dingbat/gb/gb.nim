@@ -456,10 +456,31 @@ proc mbc_ram_offset*(idx: int): int = idx - 0xA000
 
 const RTC_SECOND_CYCLES* = 4194304  # one RTC tick per emulated second
 
+# Deterministic-RTC override for lockstep/rollback netplay. With two peers the
+# MBC3 clock must NOT read the local wall clock (it would differ between peers)
+# and must NOT free-run (the tick count differs between a straight run and its
+# rollback re-simulation — a determinism gap that diverges Crystal's DIV/RTC-
+# seeded RNG). When set >= 0 it is the shared "now" (unix seconds) both peers
+# pass at connect: the load-time catch-up uses it, and the clock is then FROZEN
+# (no ticks). Mirrors the GBA core's enable_deterministic_rtc. -1 = real clock,
+# free-running (single-player default).
+var gbRtcNowOverride*: int64 = -1
+
+proc enable_deterministic_gb_rtc*(epoch: int64) =
+  ## Freeze the MBC3 RTC to a shared epoch. Both peers must pass the SAME
+  ## value. Call before loading the cartridge/state.
+  gbRtcNowOverride = epoch
+
+proc gb_rtc_now(): int64 {.inline.} =
+  if gbRtcNowOverride >= 0: gbRtcNowOverride else: getTime().toUnix()
+
+proc gb_rtc_frozen(): bool {.inline.} = gbRtcNowOverride >= 0
+
 proc rtc_halted*(cart: Mbc3): bool =
   (cart.rtc_live[4] and 0x40) != 0
 
 proc rtc_schedule_full*(cart: Mbc3) =
+  if gb_rtc_frozen(): return  # deterministic mode: clock frozen, never ticks
   cart.gb_ref.scheduler.clear(etRtcSecond)
   cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
 
@@ -498,6 +519,7 @@ proc rtc_increment(cart: Mbc3) =
     cart.rtc_live[4] = cart.rtc_live[4] or 0x80
 
 proc rtc_tick*(cart: Mbc3) =
+  if gb_rtc_frozen(): return  # deterministic mode: clock frozen
   cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
   cart.rtc_increment()
 
@@ -523,7 +545,7 @@ proc rtc_footer(cart: Mbc3): string =
   result = ""
   for i in 0 .. 4: result.add_u32(uint32(cart.rtc_live[i]))
   for i in 0 .. 4: result.add_u32(uint32(cart.rtc_latched[i]))
-  let ts = uint64(getTime().toUnix())
+  let ts = uint64(gb_rtc_now())
   for i in 0 .. 7: result.add(char((ts shr (8 * i)) and 0xFF))
 
 proc rtc_load_footer(cart: Mbc3; data: string) =
@@ -537,7 +559,7 @@ proc rtc_load_footer(cart: Mbc3; data: string) =
   var ts: int64 = int64(get_u32(data, base + 40))
   if extra >= 48:
     ts = ts or (int64(get_u32(data, base + 44)) shl 32)
-  cart.rtc_catch_up(getTime().toUnix() - ts)
+  cart.rtc_catch_up(gb_rtc_now() - ts)
 
 proc mbc_save*(cart: Mbc) =
   if cart.ram_dirty and cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:

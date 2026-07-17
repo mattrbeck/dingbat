@@ -177,3 +177,48 @@ proc new_gb_link*(cores: seq[GB]): GbLink =
   # gives one core input at a time), which is enough asymmetry. Handled at the
   # input layer, deliberately not with an artificial in-core clock skew that
   # would perturb single-core-accurate timing.
+
+# ---------------- rollback support (GGPO-style input rollback) ----------------
+#
+# The whole link runs locally on both peers; only the two players' INPUTS cross
+# the network. Snapshots are valid at FRAME BOUNDARIES only (where state_payload
+# is defined and where step_frame lands both cores). Simpler than the GBA link:
+# GB serial has no multi-mode receive latches, and its entire in-flight transfer
+# state (SB/SC/bits/clock_history) is already inside each core's state_payload
+# (savestate GB_SEC_SER), so a snapshot is just the two payloads + the cross-core
+# clock offsets.
+
+type
+  GbLinkSnapshot* = object
+    payloads: seq[string]   # each core's state_payload
+    offsets: seq[int64]     # per-core global-clock rebase
+    transfers: int          # cable activity counter (kept so idle detection
+                            # doesn't jump backwards across a rollback)
+
+proc capture_state*(link: GbLink): GbLinkSnapshot =
+  ## Snapshot both cores plus the cross-core clock state. Frame-boundary only.
+  ## `active`/`frame_done` are transient within step_frame, so omitted.
+  result.payloads = newSeq[string](link.cores.len)
+  for i, c in link.cores:
+    result.payloads[i] = c.state_payload()
+  result.offsets = link.offsets
+  result.transfers = link.transfers
+
+proc restore_state*(link: GbLink; s: GbLinkSnapshot) =
+  ## Restore a snapshot from capture_state. Trusted in-process use only.
+  doAssert s.payloads.len == link.cores.len, "snapshot core count mismatch"
+  for i, c in link.cores:
+    c.apply_state_payload(s.payloads[i])
+  link.offsets = s.offsets
+  link.transfers = s.transfers
+
+proc state_checksum*(link: GbLink): uint64 =
+  ## Cheap FNV-1a over both cores' serialized state — the value peers exchange
+  ## periodically to DETECT a desync before it corrupts a trade. Covers only the
+  ## cores: `offsets` are a LOCAL clock-rebase bias (they can differ between peers
+  ## without changing what either core emulates), so folding them in would flag
+  ## false desyncs.
+  result = 0xCBF29CE484222325'u64
+  for c in link.cores:
+    for ch in c.state_payload():
+      result = (result xor uint64(byte(ch))) * 0x100000001B3'u64

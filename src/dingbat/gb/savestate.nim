@@ -237,6 +237,9 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader) =
   ppu.ran_bios = r.read_bool()
   r.read_seq_u16_into(ppu.framebuffer)
   ppu.frame = false
+  # Renderer scratch isn't serialized; clear it so a load onto a running
+  # core (rollback) can't inherit stale per-line fetch state.
+  ppu.reset_render_scratch()
 
 # ---- APU ----
 

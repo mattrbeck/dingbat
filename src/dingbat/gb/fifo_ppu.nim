@@ -23,6 +23,31 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     sprites: @[],
   )
 
+method reset_render_scratch*(ppu: GbFifoPpu) =
+  ## Clear the FIFO/fetcher scratch to its clean pre-line state so a state
+  ## load onto a running core can't leave a runaway lx or stale FIFO
+  ## contents. Bit-identical to normal operation: none of this is read at
+  ## vblank (where states are captured), and it is fully reset again on the
+  ## next mode 2->3 transition.
+  fifo_clear(ppu.fifo)
+  fifo_clear(ppu.fifo_sprite)
+  ppu.fetch_counter = 0
+  ppu.fetch_counter_sprite = 0
+  ppu.fetcher_x = 0
+  ppu.lx = 0
+  ppu.smooth_scroll_sampled = false
+  ppu.dropped_first_fetch = false
+  ppu.fetching_window = false
+  ppu.fetching_sprite = false
+  ppu.sprite_fetch_phase = 0
+  ppu.bg_pixels_pushed = false
+  ppu.scx_penalty_remaining = 0
+  ppu.tile_num = 0
+  ppu.tile_attrs = 0
+  ppu.tile_data_low = 0
+  ppu.tile_data_high = 0
+  ppu.sprites = @[]
+
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
   result = @[]
   var sprite_addr = 0
