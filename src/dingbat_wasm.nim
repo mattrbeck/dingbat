@@ -764,6 +764,25 @@ proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc
   core.enable_deterministic_rtc(rbEpoch)  # both peers agree on this clock
   1
 
+var rbDumpImage: string = ""
+proc rollback_dump_size(player: cint): cint {.exportc.} =
+  ## Debug: serialize online-link core `player`'s (0/1) full save-state into an
+  ## internal buffer and return its length (0 if no session / bad index). Pair
+  ## with rollback_dump_data to read the bytes — used to capture a live link
+  ## desync (e.g. a stuck trade) for offline reproduction. Works for GB and GBA.
+  if player < 0 or player > 1: return 0
+  if stateGbRollback != nil:
+    rbDumpImage = stateGbRollback.link.cores[player].state_bytes()
+    return cint(rbDumpImage.len)
+  if stateRollback != nil:
+    rbDumpImage = stateRollback.link.cores[player].state_bytes()
+    return cint(rbDumpImage.len)
+  0
+
+proc rollback_dump_data(): pointer {.exportc.} =
+  ## Pointer to the buffer filled by the last rollback_dump_size call.
+  if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
+
 proc rollback_transfers(): cint {.exportc.} =
   ## Monotonic count of SIO transfers driven on the emulated cable. A linked game
   ## fires these continuously (timer-paced) to stay synced and STOPS when it

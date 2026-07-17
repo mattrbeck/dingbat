@@ -1937,6 +1937,24 @@ const blitRollbackCanvas = () => {
   linkCtx[0].putImageData(linkImg[0], 0, 0);
 };
 
+// Debug: from the browser console during an online link session, run
+// `dumpLinkStates()` to download both linked cores' save states (core0.state /
+// core1.state). Used to capture a stuck-trade repro for offline debugging.
+window.dumpLinkStates = () => {
+  if (!Module._rollback_dump_size) return "no dump export in this build";
+  for (let p = 0; p < 2; p++) {
+    const n = Module._rollback_dump_size(p);
+    if (n <= 0) return "no active online link session";
+    const ptr = Module._rollback_dump_data();
+    const bytes = new Uint8Array(Module.memory.buffer, ptr, n).slice();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([bytes]));
+    a.download = "core" + p + ".state";
+    a.click();
+  }
+  return "downloaded core0.state + core1.state";
+};
+
 // Enter/leave online input-rollback mode. netplay.js calls these once the
 // RollbackSession is initialized (enter) and on teardown (leave). The core is
 // driven by the RAF loop's rollbackMode branch.
