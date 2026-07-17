@@ -129,8 +129,22 @@ document.getElementById("net-connect").addEventListener("click", () => {
     showToast("Disconnected");
     return;
   }
-  if (extOf(currentOriginalName || "") !== ".gba") {
-    showToast("Link cable is GBA-only");
+  const oext = extOf(currentOriginalName || "");
+  if (oext !== ".gba") {
+    // Online (two-browser) link is GBA-only. GB/GBC has no network transport
+    // yet, but it does have the local 2-player link — split the running game
+    // into two linked cores in this browser so trades can be tested locally.
+    if ((oext === ".gb" || oext === ".gbc") && currentRomName) {
+      try {
+        const data = FS.readFile(currentRomName); // running ROM bytes
+        launchLinkRom({ name: currentOriginalName, data });
+        showToast("2-player link — P1 keyboard, P2 gamepad");
+        return;
+      } catch (e) {
+        log("2P link launch failed: " + e, "warn");
+      }
+    }
+    showToast("Online link cable is GBA-only (GB uses the 2P button)");
     return;
   }
   openNetConnect(true);
