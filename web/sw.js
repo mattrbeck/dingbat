@@ -51,6 +51,36 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   // Explicit network probes (the version.txt update check) must bypass the cache
   if (event.request.cache === "no-store") return;
+  // Dev builds: CACHE_VERSION never changes, so cache-first would pin the
+  // first-ever assets forever (rebuilt em.wasm meets a stale frontend and
+  // renders wrong). Serve network-first instead, refreshing the cache as we
+  // go; the cache remains only an offline fallback. CI stamps a real version,
+  // so production keeps the cache-first behavior below.
+  if (CACHE_VERSION === "dev") {
+    event.respondWith(
+      // no-cache: revalidate with the dev server even when the browser's
+      // HTTP cache still considers its copy fresh (heuristic freshness has
+      // no revalidation, which is how stale-frontend/fresh-wasm skew happens)
+      fetch(event.request, { cache: "no-cache" })
+        .then((res) => {
+          if (res.ok && event.request.method === "GET") {
+            const copy = res.clone();
+            caches
+              .open(CACHE_NAME)
+              .then((cache) => cache.put(event.request, copy))
+              .catch(() => {});
+          }
+          return res;
+        })
+        .catch(() =>
+          caches
+            .open(CACHE_NAME)
+            .then((cache) => cache.match(event.request))
+            .then((cached) => cached || Response.error())
+        )
+    );
+    return;
+  }
   // Match only THIS version's cache: caches.match() searches every cache,
   // so while a new version sits installed-but-waiting the old worker could
   // serve the new version's assets (or vice versa) — version skew.
