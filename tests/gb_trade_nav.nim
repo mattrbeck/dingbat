@@ -39,19 +39,39 @@ proc main() =
 
   proc hold(inp: Input; on: bool) =
     for c in 0..1: link.cores[c].handle_input(inp, on)
+  # Per-core D-pad route from the Trade Center spawn (4,7, facing up) to the
+  # console, ending facing it (pokecrystal maps/TradeCenter.asm bg_events):
+  #   master (internal clock) → west seat (3,4): Left,Up,Up,Up, face Right
+  #   guest  (external clock) → east seat (6,4): Right,Right,Up,Up,Up, face Left
+  # Which core is which is discovered at run time (connStatus 0x02 = internal),
+  # but here we just try: core 1 was the internal-clock master in earlier traces.
+  const MOVE = 18  # frames to hold a direction for one tile step
+  proc route(inp: seq[Input]; f, base: int): Input =
+    let i = (f - base) div MOVE
+    if i < inp.len: inp[i] else: SELECT  # SELECT = unused sentinel = no move
+  let westRoute  = @[LEFT, UP, UP, UP, RIGHT]         # core 1 (master)
+  let eastRoute  = @[RIGHT, RIGHT, UP, UP, UP, LEFT]  # core 0 (guest)
+  let navEnd = enterF + max(westRoute.len, eastRoute.len) * MOVE
+
   var lastTransfers = 0
   var stall = 0
   var maxStallAfterTrade = 0
   var tradeStartFrame = -1
   for f in 0 ..< frames:
-    # phase 1: enter room (A-mash; identical timing works for two DIFFERENT
-    # games — they're already asymmetric — and keeps the dialog prompts synced)
+    for c in 0..1:
+      for i in Input: link.cores[c].handle_input(i, false)
     if f < enterF:
+      # phase 1: enter room (A-mash; keeps the dialog prompts synced)
       hold(A, (f mod 24) < 8)
-    elif f < enterF + upF:
-      hold(A, false); hold(UP, (f mod 8) < 5)   # walk up to the table
+    elif f < navEnd:
+      # phase 2: walk each core to its console, ending facing it
+      let d0 = route(eastRoute, f, enterF)
+      let d1 = route(westRoute, f, enterF)
+      if d0 != SELECT: link.cores[0].handle_input(d0, true)
+      if d1 != SELECT: link.cores[1].handle_input(d1, true)
     else:
-      hold(UP, false); hold(A, (f mod 24) < 8)  # initiate trade at the table
+      # phase 3: press A at the console → initiate the party-data trade
+      hold(A, (f mod 24) < 8)
     link.step_frame()
     if link.transfers != lastTransfers:
       if tradeStartFrame < 0 and link.transfers > 40: tradeStartFrame = f
