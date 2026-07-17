@@ -4,11 +4,16 @@ proc new_gb_timer*(): GbTimer =
   GbTimer(tdiv: 0, tima: 0, tma: 0, enabled: false, clock_select: 0,
           bit_for_tima: 9, previous_bit: false, countdown: -1)
 
-proc skip_boot*(t: GbTimer; cgb: bool) =
-  # Internal divider at PC=0x100. DMG-ABC: 0xABCC (mooneye boot_div-dmgABCmgb
-  # reads DIV=0xAB; boot_sclk_align pins the sub-DIV phase of the serial
-  # clock). CGB: 0x2674 (mooneye misc/boot_div-cgbABCDE).
-  t.tdiv = if cgb: 0x2674'u16 else: 0xABCC'u16
+proc skip_boot*(t: GbTimer; cgb, native: bool) =
+  # Internal divider at PC=0x100, per model. DMG-ABC: 0xABC8 (mooneye
+  # boot_div-dmgABCmgb pins the phase of DIV reads; boot_sclk_align then
+  # pins the serial shift clock tap — see serial.nim). CGB booting a CGB
+  # cart: ~0x1Exx (gambatte div/start_inc). CGB booting a DMG cart: 0x2674
+  # (mooneye misc/boot_div-cgbABCDE) — the boot ROM's compatibility-palette
+  # work makes the DMG-cart handoff ~2000 cycles later.
+  t.tdiv = if not cgb: 0xABC8'u16
+           elif native: 0x1E9C'u16
+           else: 0x2674'u16
 
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   gb.interrupts.timer_interrupt = true
@@ -47,8 +52,9 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   of 0xFF04:
     t.tdiv = 0
     timer_check_edge(t, gb, on_write = true)
-    # Resetting DIV can also be a falling edge of the serial shift clock
-    if gb.serial.shifting: serial_check_edge(gb.serial, gb)
+    # The serial clock tap sees the reset too; a high->low transition of
+    # the tapped bit shifts (gambatte start_late_div_write serial tests)
+    if gb.serial.shifting: serial_tick(gb.serial, gb)
   of 0xFF05:
     if t.countdown != 0:
       t.tima     = val

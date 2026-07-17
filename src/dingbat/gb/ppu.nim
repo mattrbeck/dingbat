@@ -31,9 +31,18 @@ proc new_ppu_base(cgb: bool): GbPpu =
   result.hdma4 = 0xFF; result.hdma5 = 0xFF
   result.ran_bios = cgb
 
-method skip_boot*(ppu: GbPpu) {.base.} =
+method skip_boot*(ppu: GbPpu; cgb: bool) {.base.} =
   for i in 0 ..< POST_BOOT_VRAM.len:
     ppu.vram[0][i] = POST_BOOT_VRAM[i]
+  if cgb:
+    # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
+    # reads LY=0x90); the sub-frame phase is calibrated against gambatte
+    # display_startstate/stat_*, div/ and serial/ tests.
+    const phase = 160  # gambatte display_startstate/stat_1+stat_2 (159..162)
+    ppu.ly = uint8(144 + phase div 456)
+    ppu.cycle_counter = int32(phase mod 456)
+    ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    ppu.first_line = false
 
 # ---- LCDC helpers ----
 proc lcd_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x80) != 0

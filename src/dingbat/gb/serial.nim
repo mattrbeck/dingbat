@@ -77,23 +77,36 @@ proc set_serial_driver*(gb: GB; drv: GbSerialDriver) =
   gb.serial.driver = drv
 
 # ==================== Bit engine ====================
+#
+# The shift clock is the selected bit of (divider + tap offset): the serial
+# unit's tap sits a few cycles ahead of the value DIV reads return. The
+# offset is pinned empirically by mooneye boot_div-dmgABCmgb (which fixes
+# the post-boot divider seed via DIV reads) together with
+# boot_sclk_align-dmgABCmgb and the gambatte serial tests (which fix the
+# shift phase relative to that seed).
 
-proc serial_check_edge*(serial: GbSerial; gb: GB) {.inline.} =
-  ## Called whenever DIV changed while a master transfer is shifting. The
-  ## completion IF lands on the 8th shift edge itself: mooneye
-  ## boot_sclk_align passes at the hardware post-boot divider (0xABCC) with
-  ## exactly this phase.
-  let current = (gb.timer.tdiv and serial.serial_clock_mask(gb)) != 0
-  if serial.previous_bit and not current and serial.bits_remaining > 0:
+proc serial_tap(gb: GB): uint16 {.inline.} =
+  ## DMG: 4 (mooneye boot_div + boot_sclk_align jointly). CGB: 2 (the
+  ## gambatte serial suite's plateau) — different SoC, different tap.
+  if gb.cgb_enabled: 2'u16 else: 4'u16
+
+proc serial_clock_level(serial: GbSerial; gb: GB): bool {.inline.} =
+  ((gb.timer.tdiv + serial_tap(gb)) and serial.serial_clock_mask(gb)) != 0
+
+proc serial_prime_history*(serial: GbSerial; gb: GB) =
+  serial.clock_history = if serial.serial_clock_level(gb): 1'u8 else: 0'u8
+
+proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
+  ## Per-cycle hook from the timer loop (after tdiv increments), gated on
+  ## serial.shifting.
+  let current = serial.serial_clock_level(gb)
+  let previous = (serial.clock_history and 1) != 0
+  serial.clock_history = if current: 1'u8 else: 0'u8
+  if previous and not current and serial.bits_remaining > 0:  # falling edge
     serial.sb = (serial.sb shl 1) or 1'u8  # a lone/disconnected line reads 1
     dec serial.bits_remaining
     if serial.bits_remaining == 0:
       serial.driver.serial_complete(gb)
-  serial.previous_bit = current
-
-proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
-  ## Per-cycle hook from the timer loop, gated on serial.shifting.
-  serial_check_edge(serial, gb)
 
 # ==================== Register access ====================
 
@@ -122,11 +135,11 @@ proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       serial.out_latch = serial.sb
       serial.bits_remaining = 8
       # Watch the free-running serial clock for its next falling edge
-      serial.previous_bit = (gb.timer.tdiv and serial.serial_clock_mask(gb)) != 0
+      serial.serial_prime_history(gb)
       serial.driver.serial_start(gb)
     else:
       # Rewrite while enabled (e.g. clock-select change mid-transfer):
-      # resample the level so the edge detector tracks the new bit
-      serial.previous_bit = (gb.timer.tdiv and serial.serial_clock_mask(gb)) != 0
+      # resample so the edge detector tracks the newly selected bit
+      serial.serial_prime_history(gb)
     serial.serial_update_shifting()
   else: discard

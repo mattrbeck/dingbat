@@ -90,7 +90,7 @@ proc save_serial_state(s: GbSerial; w: var Writer) =
   w.write_u8(s.sc)
   w.write_u8(s.out_latch)
   w.write_u8(uint8(s.bits_remaining))
-  w.write_bool(s.previous_bit)
+  w.write_u8(s.clock_history)
   w.write_bool(s.shifting)
 
 proc load_serial_state(s: GbSerial; r: var Reader) =
@@ -99,7 +99,7 @@ proc load_serial_state(s: GbSerial; r: var Reader) =
   s.sc = r.read_u8()
   s.out_latch = r.read_u8()
   s.bits_remaining = int(r.read_u8())
-  s.previous_bit = r.read_bool()
+  s.clock_history = r.read_u8()
   s.shifting = r.read_bool()
 
 proc save_joypad_state(j: GbJoypad; w: var Writer) =

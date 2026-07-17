@@ -88,7 +88,9 @@ type
     sc*:             uint8   # 0xFF02 control (bits 7, 1 [CGB], 0)
     out_latch*:      uint8   # outgoing byte latched at transfer start
     bits_remaining*: int     # 8..1 while a started transfer has bits left
-    previous_bit*:   bool    # last sampled level of the selected DIV bit
+    clock_history*:  uint8   # per-cycle samples of the DIV clock bit; bit 0
+                             # = newest (see serial.nim: the shift clock is
+                             # the divider tap delayed by 4 cycles)
     shifting*:       bool    # cached: internal-clock transfer in progress
     driver*:         GbSerialDriver
 
@@ -631,10 +633,13 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     else:    0
 
 proc gb_skip_boot(gb: GB) =
+  # IF reads 0xE1 at PC=0x100 on DMG and CGB (gambatte
+  # display_startstate/irq): the boot ROM leaves a VBlank interrupt pending
+  gb.interrupts.vblank_interrupt = true
   gb.cpu.skip_boot(gb)
   gb.memory.skip_boot(gb)
-  gb.ppu.skip_boot()
-  gb.timer.skip_boot(gb.cgb_enabled)
+  gb.ppu.skip_boot(gb.cgb_enabled)
+  gb.timer.skip_boot(gb.cgb_enabled, gb.cgb_flag != cgbNone)
 
 proc handle_saves*(gb: GB) =
   ## Flush battery-backed cart RAM once per frame (when dirty) so progress
