@@ -1037,13 +1037,20 @@ const nativeRes = () =>
   currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
 
 const updateCanvasScaling = () => {
-  // Keep the CSS box the exact shape of the canvas backing store (the wasm
-  // resizes it per system: GBA 3:2, GB 10:9). Deriving the ratio from the
-  // live element rather than duplicating it in CSS means a frontend/wasm
-  // version skew can only letterbox, never stretch.
+  // Size the canvas box in JS from two live measurements: the stage's actual
+  // box and the canvas backing store's actual shape (the wasm resizes it per
+  // system: GBA 3:2, GB 10:9). CSS alone cannot do this safely — with
+  // aspect-ratio, a max-height clamp squashes the picture instead of
+  // shrinking it, which stretched GB games on phone portrait where the
+  // in-flow touch controls leave the stage short. The --game-ar variable is
+  // still published for the stylesheet's pre-JS fallback rules.
   if (canvasEl.width > 0 && canvasEl.height > 0) {
     canvasEl.style.setProperty("--game-ar", canvasEl.width / canvasEl.height);
   }
+  const ar =
+    canvasEl.width > 0 && canvasEl.height > 0
+      ? canvasEl.width / canvasEl.height
+      : 1.5;
   const running =
     document.body.classList.contains("running") && !!currentRomName;
   if (integerScale && running) {
@@ -1054,6 +1061,11 @@ const updateCanvasScaling = () => {
     );
     canvasEl.style.width = k * w + "px";
     canvasEl.style.height = k * h + "px";
+  } else if (running) {
+    // Contain-fit: as large as the stage allows without changing shape
+    const w = Math.min(stageEl.clientWidth, stageEl.clientHeight * ar);
+    canvasEl.style.width = w + "px";
+    canvasEl.style.height = w / ar + "px";
   } else {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
@@ -1176,6 +1188,20 @@ const loadVideoSettings = async () => {
 
 window.addEventListener("resize", updateCanvasScaling);
 new ResizeObserver(updateCanvasScaling).observe(stageEl);
+
+// WebKit applies the SDL window resize to the canvas attributes a beat AFTER
+// initFromEmscripten returns (Chromium is synchronous), so the sizing pass in
+// loadRom can run against the previous system's backing shape. Watch for the
+// late change from the RAF loop and re-fit when it lands.
+let seenCanvasW = 0;
+let seenCanvasH = 0;
+const watchCanvasBacking = () => {
+  if (canvasEl.width !== seenCanvasW || canvasEl.height !== seenCanvasH) {
+    seenCanvasW = canvasEl.width;
+    seenCanvasH = canvasEl.height;
+    updateCanvasScaling();
+  }
+};
 
 // --- Keyboard settings ---
 
@@ -2341,6 +2367,7 @@ var Module = {
       pollGamepads();
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
+        watchCanvasBacking();
         lastFrameTime = 0;
         accumulator = 0;
         requestAnimationFrame(tick);
@@ -2454,6 +2481,7 @@ var Module = {
       updateSleepOverlay();
       updateGlow();
       updateRumble(timestamp);
+      watchCanvasBacking();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
