@@ -1315,7 +1315,9 @@ const routeP1Input = (inputId, down) => {
   if (rollbackMode) {
     noteLocalButton(inputId, down);
   } else if (linkMode) {
-    if (Module._link_input) Module._link_input(0, inputId, down ? 1 : 0);
+    // Keyboard drives whichever linked screen has focus (click to switch);
+    // a gamepad, if present, always drives P2.
+    if (Module._link_input) Module._link_input(linkFocus, inputId, down ? 1 : 0);
   } else {
     Module._setInput(inputId, down ? 1 : 0);
   }
@@ -1865,6 +1867,26 @@ document.addEventListener("keyup", (e) => shortcutKeyHandler(e, false), true);
 var linkMode = false;
 var linkRomEntry = null; // { name, data, art? } kept for reset + persistence
 var linkIsGb = false;    // true while the linked pair is GB/GBC (160x144)
+var linkFocus = 0;       // which core the keyboard drives (click a screen to switch)
+
+// Point the keyboard at player `p`'s core. Clears held buttons on both cores
+// first so a key held during the switch doesn't stick on the other player.
+const setLinkFocus = (p) => {
+  if (!linkMode) return;
+  if (Module._link_input) {
+    for (let c = 0; c < 2; c++)
+      for (let i = 0; i < 10; i++) Module._link_input(c, i, 0);
+  }
+  linkFocus = p;
+  for (let c = 0; c < 2; c++) {
+    let pane = document.getElementById("link-canvas-" + c)?.closest(".link-pane");
+    if (pane) pane.classList.toggle("focused", c === p);
+    let label = pane?.querySelector(".link-label");
+    if (label)
+      label.textContent = c === p ? "▶ P" + (c + 1) + " · Keyboard"
+                                   : "P" + (c + 1) + " · Click to control";
+  }
+};
 
 // ROM lives at two FS paths so each core derives its own .sav; the extension
 // follows the launched ROM's system so the wasm side picks GB vs GBA.
@@ -1887,7 +1909,10 @@ const initLinkCanvases = () => {
     c.height = h;
     linkCtx[p] = c.getContext("2d");
     linkImg[p] = linkCtx[p].createImageData(w, h);
+    c.style.cursor = "pointer";
+    c.onclick = () => setLinkFocus(p);
   }
+  setLinkFocus(0); // keyboard starts on P1
 };
 
 const blitLinkCanvases = () => {

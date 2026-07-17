@@ -2025,6 +2025,19 @@ body.link-gb .link-pane canvas {
   width: min(100%, calc((100dvh - var(--bar-h) - 72px) * 1.111));
 }
 
+/* The screen the keyboard currently drives (click either to switch). The
+   unfocused screen dims slightly so it's obvious which one has input. */
+.link-pane:not(.focused) canvas {
+  opacity: 0.72;
+}
+.link-pane.focused canvas {
+  box-shadow: 0 0 0 2px var(--accent), 0 18px 50px rgba(0, 0, 0, 0.6),
+    0 0 60px -16px var(--accent-glow);
+}
+.link-pane.focused .link-label {
+  color: var(--accent);
+}
+
 .link-label {
   font-family: var(--font-mono);
   font-size: 11px;
