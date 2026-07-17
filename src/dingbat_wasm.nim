@@ -8,6 +8,7 @@ import dingbat/gba/link
 import dingbat/gba/rollback
 import dingbat/gba/netcore
 import dingbat/gb/gb
+import dingbat/gb/link as gblink
 
 const GBA_W = 240
 const GBA_H = 160
@@ -404,6 +405,7 @@ proc wasm_rewind_pop(): cint {.exportc.} =
 # build's main() returns after init and Nim's exit teardown would leave
 # module-init heap globals dangling (see rewindHistory above).
 var stateLink: Link = nil
+var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
 var linkRgba: array[2, seq[uint32]]
 
 proc link_exit() {.exportc.} =
@@ -414,7 +416,35 @@ proc link_exit() {.exportc.} =
     for core in stateLink.cores:
       core.storage.write_save()
     stateLink = nil
+  if stateGbLink != nil:
+    for core in stateGbLink.cores:
+      core.cartridge.mbc_save()
+    stateGbLink = nil
   audioSuppressed = false
+
+proc gb_link_init(rom1_path, rom2_path: string): cint =
+  ## GB/GBC variant of link_init: two GB cores over gb/link.nim's lockstep
+  ## coordinator. Player 2's APU is muted exactly as in the GBA path.
+  var cores: seq[GB] = @[]
+  let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
+  for path in [rom1_path, rom2_path]:
+    if not fileExists(path): return 0
+    let core = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    core.post_init()
+    cores.add(core)
+  let orig_dispatch = cores[1].scheduler.dispatch
+  cores[1].scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample:
+      audioSuppressed = true
+      orig_dispatch(kind)
+      audioSuppressed = false
+    else:
+      orig_dispatch(kind)
+  stateGbLink = new_gb_link(cores)
+  for p in 0 .. 1:
+    linkRgba[p] = newSeq[uint32](GB_W * GB_H)
+  frameCount = 0
+  1
 
 proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   ## Start 2P link mode. The two paths hold identical ROM bytes under
@@ -435,6 +465,9 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   if stateTexture != nil:
     destroyTexture(stateTexture)
     stateTexture = nil
+  # GB/GBC ROMs take the GB lockstep path (gb/link.nim); everything else GBA.
+  if ($rom1_path).splitFile().ext.toLowerAscii() in [".gb", ".gbc"]:
+    return gb_link_init($rom1_path, $rom2_path)
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
     if not fileExists(path): return 0
@@ -462,6 +495,17 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
 proc link_tick() {.exportc.} =
   ## Advance both cores one lockstep-linked frame and convert each changed
   ## framebuffer to RGBA. JS blits the buffers into two 2D canvases.
+  if stateGbLink != nil:
+    inc frameCount
+    stateGbLink.step_frame()
+    for p in 0 .. 1:
+      let fb = cast[ptr UncheckedArray[uint16]](
+        addr stateGbLink.cores[p].ppu.framebuffer[0])
+      for i in 0 ..< GB_W * GB_H:
+        linkRgba[p][i] = colorLutGbc[fb[i] and 0x7FFF]
+    var gevt = defaultEvent
+    while pollEvent(gevt): discard
+    return
   if stateLink == nil: return
   inc frameCount
   stateLink.step_frame()
@@ -478,14 +522,19 @@ proc link_tick() {.exportc.} =
   while pollEvent(evt): discard
 
 proc link_fb_ptr(player: cint): pointer {.exportc.} =
-  ## Pointer to `player`'s (0 or 1) 240x160 RGBA8888 framebuffer.
-  if stateLink == nil or player < 0 or player > 1: return nil
-  if linkRgba[player].len == 0: return nil
+  ## Pointer to `player`'s (0 or 1) RGBA8888 framebuffer (240x160 GBA or
+  ## 160x144 GB — JS picks the copy length from link_is_gb).
+  if player < 0 or player > 1 or linkRgba[player].len == 0: return nil
+  if stateLink == nil and stateGbLink == nil: return nil
   addr linkRgba[player][0]
 
 proc link_input(player, inputId, pressed: cint) {.exportc.} =
-  if stateLink == nil or player < 0 or player >= cint(stateLink.cores.len): return
   if inputId < 0 or inputId > ord(Input.high): return
+  if stateGbLink != nil:
+    if player < 0 or player >= cint(stateGbLink.cores.len): return
+    stateGbLink.cores[player].handle_input(Input(inputId), pressed != 0)
+    return
+  if stateLink == nil or player < 0 or player >= cint(stateLink.cores.len): return
   stateLink.cores[player].handle_input(Input(inputId), pressed != 0)
 
 # --- Input-rollback online play (multiplayer phase 3c) ---

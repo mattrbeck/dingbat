@@ -719,6 +719,19 @@ const refreshHomeRecent = async () => {
     launch.appendChild(badge);
     launch.addEventListener("click", () => launchRom(rom));
 
+    // 2-player local link cable: two linked cores of this ROM, one per
+    // player. Trading needs both — this is how you test a link trade here.
+    let link2p = document.createElement("button");
+    link2p.type = "button";
+    link2p.className = "home-tile-link";
+    link2p.title = "2-player link cable (" + rom.name + ")";
+    link2p.setAttribute("aria-label", "Start 2-player link: " + rom.name);
+    link2p.textContent = "2P";
+    link2p.addEventListener("click", (e) => {
+      e.stopPropagation();
+      launchLinkRom(rom);
+    });
+
     let del = document.createElement("button");
     del.type = "button";
     del.className = "home-tile-delete";
@@ -731,6 +744,7 @@ const refreshHomeRecent = async () => {
     });
 
     tile.appendChild(launch);
+    tile.appendChild(link2p);
     tile.appendChild(del);
     homeRecent.appendChild(tile);
   }
@@ -1850,30 +1864,40 @@ document.addEventListener("keyup", (e) => shortcutKeyHandler(e, false), true);
 
 var linkMode = false;
 var linkRomEntry = null; // { name, data, art? } kept for reset + persistence
+var linkIsGb = false;    // true while the linked pair is GB/GBC (160x144)
 
-const LINK_FS_ROMS = ["linkrom1.gba", "linkrom2.gba"];
+// ROM lives at two FS paths so each core derives its own .sav; the extension
+// follows the launched ROM's system so the wasm side picks GB vs GBA.
+let LINK_FS_ROMS = ["linkrom1.gba", "linkrom2.gba"];
 const LINK_FS_SAVS = ["linkrom1.sav", "linkrom2.sav"];
 const linkSaveKey = (name, player) =>
   "save:" + (player === 0 ? name : name + "-p2");
+
+// Backing-store dimensions of each player's canvas, set per launch.
+const linkDims = () => (linkIsGb ? [160, 144] : [240, 160]);
 
 let linkCtx = [null, null];
 let linkImg = [null, null];
 
 const initLinkCanvases = () => {
+  const [w, h] = linkDims();
   for (let p = 0; p < 2; p++) {
     let c = document.getElementById("link-canvas-" + p);
+    c.width = w;
+    c.height = h;
     linkCtx[p] = c.getContext("2d");
-    linkImg[p] = linkCtx[p].createImageData(240, 160);
+    linkImg[p] = linkCtx[p].createImageData(w, h);
   }
 };
 
 const blitLinkCanvases = () => {
+  const [w, h] = linkDims();
   for (let p = 0; p < 2; p++) {
     if (!linkCtx[p] || !Module._link_fb_ptr) continue;
     let ptr = Module._link_fb_ptr(p);
     if (!ptr) continue;
     // Build the heap view fresh each blit: memory growth detaches buffers
-    linkImg[p].data.set(new Uint8Array(Module.memory.buffer, ptr, 240 * 160 * 4));
+    linkImg[p].data.set(new Uint8Array(Module.memory.buffer, ptr, w * h * 4));
     linkCtx[p].putImageData(linkImg[p], 0, 0);
   }
 };
@@ -1936,7 +1960,7 @@ const exitLinkMode = async () => {
   await persistLinkSaves();
   linkMode = false;
   gpPrev.fill(false);
-  document.body.classList.remove("link-mode");
+  document.body.classList.remove("link-mode", "link-gb");
   updateCanvasScaling();
 };
 
@@ -1947,6 +1971,12 @@ const launchLinkRom = async (rom) => {
   } else if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
   }
+  // FS ROM extension follows the ROM's system so the wasm link_init picks the
+  // GB lockstep path for .gb/.gbc and the GBA path otherwise.
+  const ext = extOf(rom.name) === ".gba" ? ".gba" : extOf(rom.name) || ".gb";
+  linkIsGb = ext !== ".gba";
+  LINK_FS_ROMS = ["linkrom1" + ext, "linkrom2" + ext];
+  document.body.classList.toggle("link-gb", linkIsGb);
   // Same ROM bytes at two FS paths: each core derives its own .sav file
   writeToFS(LINK_FS_ROMS[0], rom.data);
   writeToFS(LINK_FS_ROMS[1], rom.data);

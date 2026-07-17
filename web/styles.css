@@ -990,6 +990,39 @@ body.has-game #home-resume {
   background: rgba(255, 107, 107, 0.12);
 }
 
+/* "2P" secondary launch on each recent tile — starts the linked pair. Sits
+   just left of the delete button; same reveal-on-hover treatment. */
+.home-tile-link {
+  position: absolute;
+  top: 50%;
+  right: 32px;
+  transform: translateY(-50%);
+  height: 22px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s, background 0.12s, border-color 0.12s;
+}
+.home-tile:hover .home-tile-link {
+  opacity: 1;
+}
+.home-tile-link:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
 /*
  * ==========================================================
  * Drop overlay
@@ -1986,6 +2019,12 @@ body.running.rollback-mode #rb-disconnect { display: inline-flex; }
     0 0 60px -20px var(--accent-glow);
 }
 
+/* GB/GBC linked pair: 160x144 panels are 10:9, not the GBA's 3:2. */
+body.link-gb .link-pane canvas {
+  aspect-ratio: 10 / 9;
+  width: min(100%, calc((100dvh - var(--bar-h) - 72px) * 1.111));
+}
+
 .link-label {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2002,6 +2041,9 @@ body.running.rollback-mode #rb-disconnect { display: inline-flex; }
   }
   .link-pane canvas {
     width: min(100%, calc((50dvh - var(--bar-h)) * 1.5));
+  }
+  body.link-gb .link-pane canvas {
+    width: min(100%, calc((50dvh - var(--bar-h)) * 1.111));
   }
 }
 
