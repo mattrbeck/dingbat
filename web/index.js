@@ -1302,7 +1302,7 @@ var rbLastActivity = 0;   // timestamp of the last transfer-count change
 // closed the link — left the Cable Club). A linked game transfers every frame,
 // so any gap this long means the link is genuinely done. Erring long: a late
 // auto-disconnect is harmless (or use the button), an early one interrupts play.
-const RB_IDLE_DISCONNECT_MS = 12000;
+const RB_IDLE_DISCONNECT_MS = 90000; // GB idles mid-trade (room/menus); be lenient
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -2474,21 +2474,30 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitRollbackCanvas();
-        // Auto-end via link ACTIVITY: a linked game drives SIO transfers every
-        // frame; once it has linked and then stops transferring for a while, the
-        // players closed the link (left the Cable Club) — disconnect (each side
-        // then continues solo). Uses transfer count, not the SIO mode register,
-        // which games leave latched in multi mode after they're done.
+        // Auto-end via link INACTIVITY: once the games have linked and then stop
+        // transferring for a long while, assume the players left the Cable Club
+        // and disconnect (each side continues solo). Two guards, both learned the
+        // hard way with GB Gen 2 trades:
+        //  - Skip while the tab is HIDDEN. A backgrounded tab's rAF is throttled
+        //    so the emulator barely advances and transfers naturally pause — that
+        //    is NOT "trade done", and counting it dropped the guest's link mid-
+        //    trade. Reset the activity clock so the timer restarts on return.
+        //  - The window is generous (RB_IDLE_DISCONNECT_MS). GBA games transfer
+        //    every frame across the whole link session, but GB Gen 2 goes idle
+        //    between entering the trade room, walking to the console, and browsing
+        //    the trade menu — a short window would fire in the middle of a trade.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
           if (t !== rbLastTransfers) {
             rbLastTransfers = t;
             rbLastActivity = timestamp;
             if (t > 0) rbWasLinked = true;
+          } else if (document.hidden) {
+            rbLastActivity = timestamp; // don't accrue idle time while throttled
           } else if (rbWasLinked && timestamp - rbLastActivity > RB_IDLE_DISCONNECT_MS) {
             rbWasLinked = false;
             if (typeof netShutdown === "function") netShutdown();
-            showToast("Trade complete — link disconnected");
+            showToast("Link idle — disconnected");
           }
         }
       } else if (netMode) {
