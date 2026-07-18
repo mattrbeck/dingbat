@@ -15,16 +15,28 @@ const ASSETS = [
   "./version.txt",
 ];
 
+// Fetch one asset and store it under its BARE url (so fetch-time cache
+// matching keeps working). The fetch itself uses a version-busted URL with
+// cache: "reload": the query string gives each deploy fresh CDN cache keys
+// (Pages' CDN propagates per-object, so bare URLs can serve the previous
+// build for a while after a deploy), and "reload" skips the browser HTTP
+// cache (Pages serves multi-hour max-age on assets). A failed fetch rejects
+// so install fails whole rather than caching a partial build.
+const fetchAndCache = (cache, url, bust) =>
+  fetch(url + (url.includes("?") ? "&" : "?") + "v=" + bust, {
+    cache: "reload",
+  }).then((res) => {
+    if (!res.ok) throw new Error("asset fetch failed: " + url + " " + res.status);
+    return cache.put(new Request(url), res);
+  });
+
+const installAssets = (bust) =>
+  caches
+    .open(CACHE_NAME)
+    .then((cache) => Promise.all(ASSETS.map((u) => fetchAndCache(cache, u, bust))));
+
 self.addEventListener("install", (event) => {
-  // cache: "no-cache" revalidates every asset with the server. Without it,
-  // addAll fills the new version's cache from the browser HTTP cache (Pages
-  // serves max-age=600), so an update within 10 minutes of a deploy could
-  // mix old and new assets — the classic black-screen-after-update.
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) =>
-      cache.addAll(ASSETS.map((u) => new Request(u, { cache: "no-cache" })))
-    )
-  );
+  event.waitUntil(installAssets(CACHE_VERSION));
   // Stay in "waiting" until the page confirms via the skipWaiting message,
   // so an update never force-reloads a tab mid-game.
 });
@@ -46,6 +58,20 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "skipWaiting") self.skipWaiting();
+  // Force update: re-download every asset straight from origin (the nonce
+  // gives cache keys no CDN edge or HTTP cache has seen) into the LIVE
+  // cache, then ack so the page can reload into the fresh copy. Used when
+  // the deployed sw.js is unreachable (stale edge) so a normal SW update
+  // can't run.
+  if (event.data?.type === "reinstall") {
+    const reply = (ok) => event.source?.postMessage({ type: "reinstalled", ok });
+    event.waitUntil(
+      installAssets(event.data.nonce || Date.now()).then(
+        () => reply(true),
+        () => reply(false)
+      )
+    );
+  }
 });
 
 self.addEventListener("fetch", (event) => {

@@ -52,16 +52,31 @@ const showUpdateButton = () => {
 
 const checkForUpdate = async () => {
   try {
-    // Fetch cached version (what we're running) and network version (what's deployed)
-    let [cachedRes, networkRes] = await Promise.all([
+    // current: the version.txt in the running build's cache. latest: a fresh
+    // version.txt. deployed: the CACHE_VERSION stamped in a fresh sw.js.
+    // version.txt alone can't gate the button — Pages' CDN propagates
+    // per-object after a deploy, so version.txt can be new while sw.js and
+    // the assets still serve the previous build; clicking Update then finds
+    // nothing to install and the button "does nothing". Only show the button
+    // once sw.js and version.txt agree on the same new version, i.e. the
+    // update is actually fetchable.
+    let [cachedRes, networkRes, swRes] = await Promise.all([
       fetch("version.txt"),
       fetch("version.txt", { cache: "no-store" }),
+      fetch("sw.js", { cache: "no-store" }),
     ]);
-    if (!cachedRes.ok || !networkRes.ok) return;
+    if (!cachedRes.ok || !networkRes.ok || !swRes.ok) return;
     let current = (await cachedRes.text()).trim();
     let latest = (await networkRes.text()).trim();
+    let deployed = (await swRes.text()).match(/CACHE_VERSION = "([^"]+)"/)?.[1];
     if (current && latest && latest !== current) {
-      showUpdateButton();
+      if (deployed === latest) {
+        showUpdateButton();
+      } else {
+        // Deploy still propagating through the CDN: skip stamping the check
+        // time so the next tab-visibility change retries soon
+        return;
+      }
     }
     localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString());
   } catch {}
@@ -149,11 +164,42 @@ updateModal.addEventListener("click", (e) => {
   if (e.target === updateModal) closeUpdateModal();
 });
 
+// Force update: ask the live worker to re-download every asset straight from
+// origin (nonce-busted URLs skip stale CDN edges AND the browser HTTP cache
+// — Pages serves assets with multi-hour max-age) and reload into the result.
+// This works even while the CDN still serves the previous build's sw.js,
+// which is exactly when the normal update flow can't find anything to
+// install. Falls back to the old nuke-everything reset when no worker is in
+// control or the reinstall doesn't ack.
+const forceUpdate = async () => {
+  const ctrl = navigator.serviceWorker?.controller;
+  if (ctrl) {
+    const ok = await new Promise((resolve) => {
+      const timer = setTimeout(() => done(false), 20000);
+      const done = (v) => {
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener("message", onMsg);
+        resolve(v);
+      };
+      const onMsg = (e) => {
+        if (e.data?.type === "reinstalled") done(e.data.ok);
+      };
+      navigator.serviceWorker.addEventListener("message", onMsg);
+      ctrl.postMessage({ type: "reinstall", nonce: Date.now() });
+    });
+    if (ok) {
+      location.reload();
+      return;
+    }
+  }
+  await fullResetReload();
+};
+
 document.getElementById("force-update").addEventListener("click", async () => {
   document.getElementById("menu-dropdown").hidden = true;
-  if (!confirm("This will clear all cached assets and reload. Continue?")) return;
+  if (!confirm("This will re-download the app and reload. Continue?")) return;
   try {
-    await fullResetReload();
+    await forceUpdate();
   } catch (e) {
     alert("Force update failed: " + e.message);
   }
