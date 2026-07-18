@@ -1298,21 +1298,29 @@ var localButtons = 0;
 var rbWasLinked = false;  // the games have actually communicated over the link
 var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
 var rbLastActivity = 0;   // timestamp of the last transfer-count change
-var rbTradedHeavy = false; // a real payload (not just a handshake) has crossed
-// Auto-end this long after the games STOP transferring over the cable (they
-// closed the link — left the Cable Club). Two windows, because the two systems
-// chatter very differently:
-//  - Before any real data has crossed we stay lenient. GB Gen 2 sits idle on the
-//    cable while you walk across the Trade Center to the console, so a short
-//    window would fire before trading even starts.
-//  - Once a full trade's worth of bytes has crossed (rbTradedHeavy) we switch to
-//    a responsive window. Both GBA (transfers every frame) and GB (loops back to
-//    the still-linked trade menu, exchanging periodic sync) keep the timer alive
-//    until the players actually leave — so this only fires once the link is truly
-//    done, and then promptly. Erring late is harmless (or use the button).
-const RB_IDLE_DISCONNECT_MS = 90000;        // pre-trade: lenient (GB room/menus)
-const RB_IDLE_DISCONNECT_TRADED_MS = 20000; // post-trade: disconnect soon after leaving
-const RB_HEAVY_TRANSFER_COUNT = 300;        // byte-transfers that mean "real data moved"
+// The ONLY signal used to auto-end an online link is hardware activity on the
+// emulated serial cable (_rollback_transfers = completed SIO byte-transfers).
+// No game-specific knowledge — no memory addresses, ROM/title detection, or
+// protocol sniffing — so this behaves the same for any linked GB/GBC/GBA title.
+//
+// Knowing when a link is "done" is a judgement call because games pace the
+// cable very differently, so we adapt to observed activity with two windows:
+//  - QUIET: before the cable has seen sustained use, stay lenient. A game can
+//    hold a link open yet idle for a long time before real traffic flows (e.g.
+//    a player walking to an in-game link terminal), so a short window here would
+//    cut the link before it is ever used.
+//  - ACTIVE: once a meaningful amount of traffic has crossed (rbLinkWasActive),
+//    tighten up. A game that is genuinely linking keeps the cable busy — every
+//    frame, or in periodic bursts — so any transfer keeps resetting the timer;
+//    the window only elapses once the cable truly falls silent (the players
+//    ended the link / walked away), and then it disconnects promptly.
+// Both windows reset on every transfer, so neither fires mid-activity. Erring
+// long is harmless: a late auto-disconnect just leaves an already-idle link up
+// a little longer, and the manual disconnect button is always available.
+var rbLinkWasActive = false; // the cable has seen a sustained burst of traffic
+const RB_IDLE_QUIET_MS  = 90000; // silence tolerated before the link is used
+const RB_IDLE_ACTIVE_MS = 20000; // silence tolerated after real traffic flowed
+const RB_ACTIVE_LINK_TRANSFERS = 300; // SIO transfers that mean "link in real use"
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -1976,7 +1984,7 @@ window.enterRollbackMode = () => {
   gpPrev.fill(false);
   rollbackMode = true;
   rbWasLinked = false;
-  rbTradedHeavy = false;
+  rbLinkWasActive = false;
   rbLastTransfers = 0;
   rbLastActivity = performance.now();
   paused = false;
@@ -2283,6 +2291,11 @@ var Module = {
     let audioCtx = null;
     let gainNode = null;
     let playTime = 0;
+    // Audio can only play at realtime rate. When unbounded fast-forward runs the
+    // core many frames per rAF, we play the frames that fit within this much
+    // queued lead and drop the rest (see the fastForward branch), keeping FF
+    // audio realtime-rate instead of piling into overlapping buffers.
+    const FF_MAX_AUDIO_LEAD = 0.15; // seconds of audio allowed queued ahead
 
     const initAudio = () => {
       if (audioCtx) return;
@@ -2489,28 +2502,22 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitRollbackCanvas();
-        // Auto-end via link INACTIVITY: once the games have linked and then stop
-        // transferring for a long while, assume the players left the Cable Club
-        // and disconnect (each side continues solo). Two guards, both learned the
-        // hard way with GB Gen 2 trades:
+        // Auto-end via serial-cable INACTIVITY (see the RB_IDLE_* block above for
+        // the QUIET vs ACTIVE window rationale). Once the games have linked and
+        // then stop transferring for long enough, assume the link is done and
+        // disconnect (each side continues solo). One extra guard:
         //  - Skip while the tab is HIDDEN. A backgrounded tab's rAF is throttled
         //    so the emulator barely advances and transfers naturally pause — that
-        //    is NOT "trade done", and counting it dropped the guest's link mid-
-        //    trade. Reset the activity clock so the timer restarts on return.
-        //  - The window is generous (RB_IDLE_DISCONNECT_MS). GBA games transfer
-        //    every frame across the whole link session, but GB Gen 2 goes idle
-        //    between entering the trade room, walking to the console, and browsing
-        //    the trade menu — a short window would fire in the middle of a trade.
+        //    is NOT "link done", and counting it once dropped a peer's link mid-
+        //    session. Reset the activity clock so the timer restarts on return.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
-          const idleLimit = rbTradedHeavy
-            ? RB_IDLE_DISCONNECT_TRADED_MS
-            : RB_IDLE_DISCONNECT_MS;
+          const idleLimit = rbLinkWasActive ? RB_IDLE_ACTIVE_MS : RB_IDLE_QUIET_MS;
           if (t !== rbLastTransfers) {
             rbLastTransfers = t;
             rbLastActivity = timestamp;
             if (t > 0) rbWasLinked = true;
-            if (t >= RB_HEAVY_TRANSFER_COUNT) rbTradedHeavy = true;
+            if (t >= RB_ACTIVE_LINK_TRANSFERS) rbLinkWasActive = true;
           } else if (document.hidden) {
             rbLastActivity = timestamp; // don't accrue idle time while throttled
           } else if (rbWasLinked && timestamp - rbLastActivity > idleLimit) {
@@ -2549,15 +2556,24 @@ var Module = {
         }
         accumulator = 0;
       } else if (fastForward) {
-        // Run as many frames as possible within ~16ms budget
-        // Reset playTime so audio plays immediately (sped up) instead of
-        // queuing behind previously scheduled buffers
-        if (audioCtx) playTime = audioCtx.currentTime;
+        // Run as many frames as fit in a ~16ms wall-clock budget. Audio can't
+        // play faster than realtime, so instead of the old approach (reset
+        // playTime to now every rAF, then schedule ~8 full frames of audio —
+        // which re-piled 8x too much into 10-30 OVERLAPPING buffers, garbling
+        // and clipping the sound), we keep playTime continuous and only play
+        // frames whose audio fits within FF_MAX_AUDIO_LEAD of realtime; the rest
+        // are dropped. Result: clean realtime-rate audio that skips ahead with
+        // the video (to mute FF entirely, drop the pushAudio call).
         const budget = 16;
         const start = performance.now();
         while (performance.now() - start < budget) {
           Module._loop_tick();
-          pushAudio();
+          if (audioCtx && audioCtx.state === "running" &&
+              playTime - audioCtx.currentTime < FF_MAX_AUDIO_LEAD) {
+            pushAudio();
+          } else if (Module._clearAudioBuffer) {
+            Module._clearAudioBuffer(); // discard this frame's audio; keep the WASM buffer bounded
+          }
           frameCount++;
         }
         accumulator = 0;
