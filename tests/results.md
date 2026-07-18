@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-16 20:38:19*
+*Generated: 2026-07-18 11:52:10*
 
 ## Game Boy - Blargg
 
@@ -8,7 +8,7 @@
 |------|--------|
 | cpu_instrs/01-special | 👌 |
 | cpu_instrs/02-interrupts | 👌 |
-| cpu_instrs/03-op sp,hl | 👀 |
+| cpu_instrs/03-op sp,hl | 👌 |
 | cpu_instrs/04-op r,imm | 👌 |
 | cpu_instrs/05-op rp | 👌 |
 | cpu_instrs/06-ld r,r | 👀 |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 106
-- **Fail:** 63
+- **Pass:** 107
+- **Fail:** 62

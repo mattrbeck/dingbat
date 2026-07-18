@@ -1330,9 +1330,9 @@ var UNPREFIXED* = [
     let raw = mem_read(gb.memory, gb, int(cpu.pc)); cpu_inc_pc(cpu)
     let offset = cast[int8](raw)
     let r = uint16(int(cpu.sp) + int(offset))
-    let xorv = cpu.sp xor uint16(raw) xor r
-    cpu.fh = (xorv and 0x0010'u16) != 0
-    cpu.fc = (xorv and 0x0100'u16) != 0
+    # H/C use the UNSIGNED immediate byte (even though the sum is sign-extended).
+    cpu.fh = ((cpu.sp and 0x000F'u16) + (uint16(raw) and 0x000F'u16)) > 0x000F'u16
+    cpu.fc = ((cpu.sp and 0x00FF'u16) + (uint16(raw) and 0x00FF'u16)) > 0x00FF'u16
     cpu.sp = r
     cpu.fz = false; cpu.fn = false
     16,
@@ -1431,9 +1431,9 @@ var UNPREFIXED* = [
     let raw = mem_read(gb.memory, gb, int(cpu.pc)); cpu_inc_pc(cpu)
     let offset = cast[int8](raw)
     let r = uint16(int(cpu.sp) + int(offset))
-    let xorv = cpu.sp xor uint16(raw) xor r
-    cpu.fh = (xorv and 0x0010'u16) != 0
-    cpu.fc = (xorv and 0x0100'u16) != 0
+    # H/C use the UNSIGNED immediate byte (even though the sum is sign-extended).
+    cpu.fh = ((cpu.sp and 0x000F'u16) + (uint16(raw) and 0x000F'u16)) > 0x000F'u16
+    cpu.fc = ((cpu.sp and 0x00FF'u16) + (uint16(raw) and 0x00FF'u16)) > 0x00FF'u16
     cpu.hl = r
     cpu.fz = false; cpu.fn = false
     12,
