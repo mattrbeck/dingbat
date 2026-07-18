@@ -2579,6 +2579,49 @@ var speed2x = false;
 var rewindHeld = false;
 var lastRewindPop = 0;
 
+// --- Screen Wake Lock ---
+// Keep the device awake while emulation is actively stepping (any mode: single,
+// 2P link, online rollback — including fast-forward/2x/rewind, since they all
+// run through the RAF loop). Released the instant we pause or return to the
+// menu. No UI: release-on-pause is the user's control. The browser auto-drops
+// the lock when the tab is hidden, so syncWakeLock() (driven every frame from
+// the main loop, and on visibilitychange) re-acquires when we're visible again.
+let wakeSentinel = null;
+let wakeRequesting = false;
+const emulationActive = () =>
+  (!!currentRomName || linkMode || rollbackMode || netActive()) && !paused;
+const syncWakeLock = () => {
+  if (!navigator.wakeLock) return; // unsupported: silent no-op
+  const want = emulationActive() && document.visibilityState === "visible";
+  if (want && !wakeSentinel && !wakeRequesting) {
+    wakeRequesting = true;
+    navigator.wakeLock
+      .request("screen")
+      .then((s) => {
+        wakeRequesting = false;
+        // A pause/hide may have raced in while the request was pending; if we no
+        // longer want it, drop it immediately.
+        if (!emulationActive() || document.visibilityState !== "visible") {
+          s.release().catch(() => {});
+          return;
+        }
+        wakeSentinel = s;
+        s.addEventListener("release", () => {
+          if (wakeSentinel === s) wakeSentinel = null; // e.g. auto-release on hide
+        });
+      })
+      .catch(() => {
+        // request() rejects on e.g. low battery or a hidden document — ignore.
+        wakeRequesting = false;
+      });
+  } else if (!want && wakeSentinel) {
+    const s = wakeSentinel;
+    wakeSentinel = null;
+    s.release().catch(() => {});
+  }
+};
+document.addEventListener("visibilitychange", syncWakeLock);
+
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
@@ -3782,6 +3825,7 @@ var Module = {
 
     const tick = (timestamp) => {
       pollGamepads();
+      syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
         watchCanvasBacking();
