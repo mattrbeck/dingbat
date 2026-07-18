@@ -1124,7 +1124,9 @@ body.debug-2p .home-tile-link {
 
 #log {
   position: absolute;
-  z-index: 400;
+  /* Below the topbar (50) so the menu dropdown and toasts (300+) stay usable
+     while the log is open; above stage internals and net indicators (<=41) */
+  z-index: 45;
   height: 250px;
   width: 100%;
   top: 0;

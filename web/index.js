@@ -234,7 +234,21 @@ document.getElementById("log-copy").addEventListener("click", async () => {
     ...Array.from(logEntries.children, (p) => p.textContent),
   ].join("\n");
   try {
-    await navigator.clipboard.writeText(text);
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // navigator.clipboard only exists on secure origins; dev serves over
+      // LAN http land here. The deprecated execCommand path still works.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (!ok) throw new Error("execCommand copy failed");
+    }
     showToast("Log copied");
   } catch {
     showToast("Couldn't access the clipboard");
