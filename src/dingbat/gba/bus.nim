@@ -127,6 +127,11 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   cost
 
 proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
+  if bits_range(address, 28, 31) > 0:
+    # Unmapped (open bus): nothing on the external bus responds, so the
+    # access completes in one internal cycle and must not disturb the ROM
+    # burst trackers.
+    return 1
   let page = int(bits_range(address, 24, 27))
   if page >= 0x8:
     if page <= 0xD:
@@ -205,6 +210,13 @@ proc write_u32_ptr(buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
 # ---- internal read implementations ----
 
 proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
+  if bits_range(address, 28, 31) > 0:
+    # 10000000-FFFFFFFF is not decoded by the cartridge/bus at all: reads
+    # return open bus, never a mirror of the low regions. Minish Cap relies
+    # on this (it walks an animation script through a NULL sprite entry into
+    # the BIOS open-bus latch 0xE55EC002 and only escapes the walk because
+    # the bytes it reads there are the non-zero prefetched opcode).
+    return bus.read_open_bus_value(address)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
@@ -242,6 +254,9 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
 proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
   let orig = address
   let address = address and not 1'u32
+  if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
+    return uint16(bus.read_open_bus_value(address)) or
+           (uint16(bus.read_open_bus_value(address or 1)) shl 8)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
@@ -279,6 +294,11 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
 proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
   let orig = address
   let address = address and not 3'u32
+  if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
+    let v = bus.read_open_bus_value(address)
+    return uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
+           (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
+           (uint32(bus.read_open_bus_value(address or 3)) shl 24)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
@@ -589,7 +609,8 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   # Guard: if PC is in MMIO, unmapped memory, or otherwise unreadable, avoid
   # infinite recursion (region 0x1 reads recurse back into this proc)
   let pc_region = bits_range(pc, 24, 27)
-  if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD:
+  if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD or
+     bits_range(pc, 28, 31) > 0:  # PC itself in unmapped space would recurse
     return 0'u8
   let word: uint32 =
     if bus.gba.cpu.cpsr.thumb:
