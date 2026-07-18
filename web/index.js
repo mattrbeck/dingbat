@@ -2487,6 +2487,74 @@ const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
 };
 
+// --- Reset all settings ---
+// Wipes ONLY the settings keys from IndexedDB — NOT ROMs, saves, states, BIOS,
+// box art, recents, or link saves — then restores every in-memory setting to its
+// default and re-runs each subsystem's sync/apply so the UI and the running core
+// reflect defaults immediately, no reload. Defaults are taken from the same
+// initial values each loader falls back to, kept in one place at the var decls.
+const SETTINGS_KEYS = [
+  "system", "audio", "colorCorrect", "video",
+  "keybindings", "large-controls", "opaque-controls",
+];
+
+const resetAllSettings = async () => {
+  for (const k of SETTINGS_KEYS) await dbDelete(k);
+  try { localStorage.removeItem(UPDATE_CHECK_KEY); } catch (e) {}
+
+  // System (GB renderer / GBA BIOS mode + intro / rumble)
+  gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
+  syncSystemSettingsUI();
+  applySystemSettings();
+
+  // Audio (volume / mute)
+  volume = 100; muted = false;
+  syncVolumeUI();
+  if (typeof updateGain === "function") updateGain();
+
+  // Color correction
+  colorCorrect = true;
+  ccToggle.checked = colorCorrect;
+  applyColorCorrect();
+
+  // Video effects
+  integerScale = false; scanlines = false; motionBlur = false; ambientGlow = false;
+  integerScaleToggle.checked = false;
+  scanlinesToggle.checked = false;
+  motionBlurToggle.checked = false;
+  ambientGlowToggle.checked = false;
+  glowFresh = true;
+  applyMotionBlur();
+  updateCanvasScaling();
+
+  // Keybindings -> default preset (the same path the "Default" preset uses)
+  kbSelection = -1;
+  applyKeybindings(PRESET_DEFAULT);
+  kbPreset.value = "default";
+  renderKbBindings();
+
+  // Touch controls
+  applyLargeControls(false);
+  applyOpaqueControls(false);
+};
+
+const resetSettingsSlot = document.getElementById("reset-settings-slot");
+if (resetSettingsSlot) {
+  const resetBtn = makeConfirmButton({
+    label: "Reset all settings",
+    confirmLabel: "Confirm reset?",
+    className: "button button-sm reset-settings-btn",
+    onConfirm: async () => {
+      await resetAllSettings();
+      // Persistent button (unlike the delete lists it isn't re-rendered away),
+      // so re-enable and disarm it for reuse.
+      resetBtn.disabled = false;
+      resetBtn.disarm();
+    },
+  });
+  resetSettingsSlot.appendChild(resetBtn);
+}
+
 kbPreset.addEventListener("change", () => {
   kbSelection = -1;
   if (kbPreset.value === "default") commitBindings(PRESET_DEFAULT);

@@ -1509,6 +1509,36 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
+/* "Reset all settings" footer row in the settings modal */
+.settings-reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-reset-row .modal-toggle-sub {
+  display: block;
+  margin-top: 2px;
+}
+
+.reset-settings-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Second tap arms the button before it wipes settings (matches the delete
+   lists' two-step confirm styling). */
+.reset-settings-btn.armed {
+  color: var(--accent-ink);
+  background: linear-gradient(180deg, #ff9b9b, var(--danger));
+  border-color: rgba(255, 107, 107, 0.6);
+  font-weight: 600;
+}
+
 /* Build identity at the bottom of the settings modal ("dingbat <commit>") */
 .settings-version {
   margin: 14px 0 0;
