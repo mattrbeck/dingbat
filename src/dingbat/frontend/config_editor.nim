@@ -16,6 +16,9 @@ type
     controller*:  ControllerWidget
     open*:        bool
     prev_open:    bool
+    # Pushes settings that no widget owns (color-correction GL uniform, master
+    # volume) into the live core after cfg changes. Set by the app; may be nil.
+    live_sync*:   proc() {.closure.}
 
 proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
   ConfigEditor(
@@ -42,6 +45,30 @@ proc do_apply(ed: ConfigEditor) =
   ed.controller.apply()
   save_config(ed.cfg)
 
+# Factory reset: restore every *setting* to its default while keeping the user's
+# data — file paths (bios_path, gb_bootrom_path), the recents list, the explorer
+# directory, and the runtime headless flag are all left untouched. Settings are
+# copied from a fresh new_config() so defaults live in exactly one place.
+proc do_factory_reset(ed: ConfigEditor) =
+  let d = new_config()
+  ed.cfg.keybindings         = d.keybindings
+  ed.cfg.controller_bindings = d.controller_bindings
+  ed.cfg.run_bios            = d.run_bios
+  ed.cfg.use_hle             = d.use_hle
+  ed.cfg.hle_after_bios      = d.hle_after_bios
+  ed.cfg.gb_fifo             = d.gb_fifo
+  ed.cfg.gb_rumble           = d.gb_rumble
+  ed.cfg.volume              = d.volume
+  ed.cfg.mute                = d.mute
+  ed.cfg.color_correction    = d.color_correction
+  ed.cfg.scanlines           = d.scanlines
+  ed.cfg.frame_blend         = d.frame_blend
+  ed.cfg.rewind              = d.rewind
+  ed.do_reset()          # reload every widget's UI state from the reset cfg
+  ed.do_apply()          # push widget-owned settings live + persist to disk
+  if ed.live_sync != nil:
+    ed.live_sync()       # color-correction uniform + master volume (no widget)
+
 proc render*(ed: ConfigEditor) =
   # Reset sub-widgets when window first opens
   if ed.open and not ed.prev_open:
@@ -59,6 +86,22 @@ proc render*(ed: ConfigEditor) =
   if igButton("OK", ImVec2(x: 0, y: 0)):
     ed.do_apply()
     ed.open = false
+  igSameLine(0, -1)
+  if igButton("Reset to Defaults", ImVec2(x: 0, y: 0)):
+    igOpenPopup_Str("Reset settings?", 0)
+
+  if igBeginPopupModal("Reset settings?", nil,
+                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
+    igText("Restore all settings to their defaults?")
+    igText("Your ROMs, saves, recents and BIOS paths are kept.")
+    igSeparator()
+    if igButton("Reset", ImVec2(x: 120, y: 0)):
+      ed.do_factory_reset()
+      igCloseCurrentPopup()
+    igSameLine(0, -1)
+    if igButton("Cancel", ImVec2(x: 120, y: 0)):
+      igCloseCurrentPopup()
+    igEndPopup()
 
   igSeparator()
 

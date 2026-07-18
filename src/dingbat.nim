@@ -1562,6 +1562,11 @@ proc main() =
   # Frontend objects
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
+  # "Reset to Defaults" changes color-correction and volume, which no widget
+  # owns — push them into the live GL uniform and APU here.
+  ce.live_sync = proc() =
+    apply_color_correction()
+    apply_master_volume()
 
   app = AppState(
     cfg:             cfg,
