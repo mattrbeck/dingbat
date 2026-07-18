@@ -18,6 +18,7 @@ type
     expected_png: string  # for screenshot mode
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
+    model: string         # mooneye per-model boot table (--model=...); "" = default
 
   TestResult = object
     name: string
@@ -194,6 +195,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
     if test.cgb:
       cmd.add(" --cgb")
+    if test.model.len > 0:
+      cmd.add(" --model=" & test.model)
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
     return TestResult(
       name: test.name,
@@ -243,6 +246,25 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(mooneye_dir, ".gb"):
     let rel = rom.relativePath(mooneye_dir)
     let name = "mooneye/" & rel.changeFileExt("")
+    # The boot_regs-*/boot_div-*/boot_hwio-* ROMs each target one specific
+    # hardware revision, encoded as the filename suffix after the last '-'
+    # (e.g. boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to
+    # the harness --model flag so the right boot table is applied. Only boot_*
+    # ROMs are model-scoped; everything else uses the default boot state. The
+    # default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
+    # unmapped so their long-standing passing behavior is untouched.
+    var model = ""
+    let base = rom.splitFile().name
+    if base.startsWith("boot_") and '-' in base:
+      case base.rsplit('-', maxsplit = 1)[1]
+      of "dmg0": model = "dmg0"
+      of "mgb":  model = "mgb"
+      of "sgb":  model = "sgb"
+      of "sgb2": model = "sgb2"
+      of "S":    model = "sgb"    # boot_div-S / boot_div2-S / boot_hwio-S
+      of "A":    model = "agb"    # misc/boot_regs-A / boot_div-A
+      of "cgb0": model = "cgb0"
+      else: discard
     tests.add(TestDef(
       name: name,
       rom_path: rom,
@@ -251,6 +273,7 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
       # misc/ holds the CGB/AGB-hardware tests (DMG-flagged carts that
       # assert CGB boot state); run them as a DMG cart on CGB hardware
       cgb: rel.startsWith("misc"),
+      model: model,
     ))
   tests
 

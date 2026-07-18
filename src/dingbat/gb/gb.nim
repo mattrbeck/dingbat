@@ -14,6 +14,24 @@ type
   CgbFlag* = enum
     cgbNone, cgbSupport, cgbExclusive
 
+  # Boot-state model. Selects the per-hardware-revision CPU register / DIV
+  # seed table applied at the boot-ROM handoff (skip_boot). Real users only
+  # ever get bmDmgABC (any DMG/SGB cart) or bmCgbABCDE (any CGB cart) — those
+  # reproduce the values dingbat has always used. The other variants exist so
+  # the mooneye boot_regs-*/boot_div-* acceptance ROMs (which each target one
+  # specific hardware revision) can be driven by the test harness via --model.
+  # Sources: mooneye-test-suite acceptance/misc boot_regs-*.s / boot_div-*.s
+  # asserts, and Pan Docs "Power-Up Sequence".
+  GbBootModel* = enum
+    bmDmg0       # original DMG (no serial number)
+    bmDmgABC     # DMG rev A/B/C  (dingbat default DMG)
+    bmMgb        # Game Boy Pocket / Light
+    bmSgb        # Super Game Boy
+    bmSgb2       # Super Game Boy 2
+    bmCgb0       # original CGB
+    bmCgbABCDE   # CGB rev A..E   (dingbat default CGB)
+    bmAgb        # Game Boy Advance / SP running a GB(C) cart
+
   Mbc* = ref object of RootObj
     gb_ref*:       GB
     rom*:          seq[uint8]
@@ -316,6 +334,7 @@ type
     rom_size*:       uint32
     ram_size*:       int
     cgb_flag*:       CgbFlag
+    boot_model*:     GbBootModel
     rom_title*:      string
     scheduler*:      Scheduler
     cpu*:            GbCpu
@@ -640,6 +659,10 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     else:       cgbNone
   result.cgb_enabled = (bootrom_path.len > 0 and run_bios) or
                        result.cgb_flag != cgbNone or force_cgb
+  # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
+  # The test harness may override this (via --model) before post_init to drive
+  # the model-specific mooneye boot_regs/boot_div acceptance ROMs.
+  result.boot_model = if result.cgb_enabled: bmCgbABCDE else: bmDmgABC
   result.rom_title = block:
     var s = ""
     for i in 0x0134 ..< 0x013F:
@@ -662,7 +685,7 @@ proc gb_skip_boot(gb: GB) =
   gb.cpu.skip_boot(gb)
   gb.memory.skip_boot(gb)
   gb.ppu.skip_boot(gb.cgb_enabled)
-  gb.timer.skip_boot(gb.cgb_enabled, gb.cgb_flag != cgbNone)
+  gb.timer.skip_boot(gb)
 
 proc handle_saves*(gb: GB) =
   ## Flush battery-backed cart RAM once per frame (when dirty) so progress

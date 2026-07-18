@@ -4,16 +4,25 @@ proc new_gb_timer*(): GbTimer =
   GbTimer(tdiv: 0, tima: 0, tma: 0, enabled: false, clock_select: 0,
           bit_for_tima: 9, previous_bit: false, countdown: -1)
 
-proc skip_boot*(t: GbTimer; cgb, native: bool) =
-  # Internal divider at PC=0x100, per model. DMG-ABC: 0xABC8 (mooneye
-  # boot_div-dmgABCmgb pins the phase of DIV reads; boot_sclk_align then
-  # pins the serial shift clock tap — see serial.nim). CGB booting a CGB
-  # cart: ~0x1Exx (gambatte div/start_inc). CGB booting a DMG cart: 0x2674
-  # (mooneye misc/boot_div-cgbABCDE) — the boot ROM's compatibility-palette
-  # work makes the DMG-cart handoff ~2000 cycles later.
-  t.tdiv = if not cgb: 0xABC8'u16
-           elif native: 0x1E9C'u16
-           else: 0x2674'u16
+proc skip_boot*(t: GbTimer; gb: GB) =
+  # Internal 16-bit divider at PC=0x100, per hardware model. The mooneye
+  # boot_div-* ROMs read DIV six times at fixed cycle offsets and assert the
+  # six high-byte values, which pins both the base (high byte) and the phase
+  # (low byte) of the 16-bit counter at handoff. The value differs per model
+  # because each boot ROM runs a different number of cycles. Each seed below
+  # was found by sweeping for the (narrow, ~4-wide) window that satisfies that
+  # model's boot_div ROM; DMG-ABC 0xABC8 additionally pins boot_sclk_align
+  # (serial tap, serial.nim); native CGB 0x1E9C is gambatte div/start_inc (the
+  # real CGB gameplay path).
+  let native = gb.cgb_flag != cgbNone
+  t.tdiv = case gb.boot_model
+    of bmDmg0:          0x182C'u16   # boot_div-dmg0
+    of bmDmgABC, bmMgb: 0xABC8'u16   # boot_div-dmgABCmgb
+    of bmSgb, bmSgb2:   0xD85C'u16   # boot_div-S / boot_div2-S
+    of bmCgb0:          0x2880'u16   # misc/boot_div-cgb0
+    of bmAgb:           0x2678'u16   # misc/boot_div-A
+    of bmCgbABCDE:
+      if native: 0x1E9C'u16 else: 0x2674'u16  # misc/boot_div-cgbABCDE
 
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   gb.interrupts.timer_interrupt = true

@@ -1048,6 +1048,7 @@ proc main() =
   var link_contract = lcMulti
   var attach_after = 10
   var force_cgb = false
+  var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1105,6 +1106,10 @@ proc main() =
         color_mode = true
       of "cgb":
         force_cgb = true
+      of "model":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        model_override = v.toLowerAscii()
       of "bios":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1219,6 +1224,19 @@ proc main() =
   else:
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
                      force_cgb = force_cgb)
+    if model_override.len > 0:
+      emu.boot_model = case model_override
+        of "dmg0": bmDmg0
+        of "dmg", "dmgabc", "dmgabcmgb": bmDmgABC
+        of "mgb": bmMgb
+        of "sgb", "s": bmSgb
+        of "sgb2": bmSgb2
+        of "cgb0": bmCgb0
+        of "cgb", "cgbabcde", "c": bmCgbABCDE
+        of "agb", "ags", "a": bmAgb
+        else:
+          echo "Unknown model: ", model_override
+          quit(1)
     emu.test_output = test_out
     emu.post_init()
     for frame in 0 ..< timeout_frames:

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-18 13:12:22*
+*Generated: 2026-07-18 16:09:37*
 
 ## Game Boy - Blargg
 
@@ -30,18 +30,18 @@
 | acceptance/bits/mem_oam | 👌 |
 | acceptance/bits/reg_f | 👌 |
 | acceptance/bits/unused_hwio-GS | 👀 |
-| acceptance/boot_div-S | 👀 |
-| acceptance/boot_div-dmg0 | 👀 |
+| acceptance/boot_div-S | 👌 |
+| acceptance/boot_div-dmg0 | 👌 |
 | acceptance/boot_div-dmgABCmgb | 👌 |
 | acceptance/boot_div2-S | 👀 |
 | acceptance/boot_hwio-S | 👀 |
 | acceptance/boot_hwio-dmg0 | 👀 |
 | acceptance/boot_hwio-dmgABCmgb | 👀 |
-| acceptance/boot_regs-dmg0 | 👀 |
+| acceptance/boot_regs-dmg0 | 👌 |
 | acceptance/boot_regs-dmgABC | 👌 |
-| acceptance/boot_regs-mgb | 👀 |
-| acceptance/boot_regs-sgb | 👀 |
-| acceptance/boot_regs-sgb2 | 👀 |
+| acceptance/boot_regs-mgb | 👌 |
+| acceptance/boot_regs-sgb | 👌 |
+| acceptance/boot_regs-sgb2 | 👌 |
 | acceptance/call_cc_timing | 👌 |
 | acceptance/call_cc_timing2 | 👌 |
 | acceptance/call_timing | 👌 |
@@ -132,11 +132,11 @@
 | madness/mgb_oam_dma_halt_sprites | 👀 |
 | manual-only/sprite_priority | 👀 |
 | misc/bits/unused_hwio-C | 👌 |
-| misc/boot_div-A | 👀 |
-| misc/boot_div-cgb0 | 👀 |
+| misc/boot_div-A | 👌 |
+| misc/boot_div-cgb0 | 👌 |
 | misc/boot_div-cgbABCDE | 👌 |
 | misc/boot_hwio-C | 👀 |
-| misc/boot_regs-A | 👀 |
+| misc/boot_regs-A | 👌 |
 | misc/boot_regs-cgb | 👌 |
 | misc/ppu/vblank_stat_intr-C | 👀 |
 | utils/bootrom_dumper | 👀 |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 109
-- **Fail:** 60
+- **Pass:** 118
+- **Fail:** 51
