@@ -991,8 +991,13 @@ body.has-game #home-resume {
 }
 
 /* "2P" secondary launch on each recent tile — starts the linked pair. Sits
-   just left of the delete button; same reveal-on-hover treatment. */
+   just left of the delete button; same reveal-on-hover treatment. This is a
+   debugging affordance, hidden unless the page is loaded with `?2p` (which
+   sets the `debug-2p` body class). */
 .home-tile-link {
+  display: none;
+}
+body.debug-2p .home-tile-link {
   position: absolute;
   top: 50%;
   right: 32px;

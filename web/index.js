@@ -30,6 +30,13 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+// The per-tile "2P" local link-cable launcher is a debugging aid (test a link
+// trade with two cores of the same ROM). It's hidden by default; add `?2p` to
+// the URL to reveal it — a `debug-2p` body class the CSS keys off of.
+if (new URLSearchParams(location.search).has("2p")) {
+  document.body.classList.add("debug-2p");
+}
+
 // --- Update check ---
 
 const UPDATE_CHECK_KEY = "dingbat_last_update_check";
