@@ -146,6 +146,8 @@ proc print_help() =
   echo "  --listen PORT       Host the link on PORT (this side is unit 0)"
   echo "  --connect HOST:PORT Join a host's link (this side is unit 1)"
   echo "  --netlink-delay-ms N  Add N ms of send latency (network simulation)"
+  echo "  --link-auto         Zero-config auto-pair on localhost (same as opening"
+  echo "                      the Link Cable window; for testing two local copies)"
 
 proc compile_shader(src: string; shader_type: GLenum): GLuint =
   result = glCreateShader(shader_type)
@@ -275,7 +277,13 @@ type AppState = ref object
   # the user picks Host or Join at runtime; establishment is non-blocking so
   # the UI keeps rendering while waiting for a peer.
   link_window:     bool
+  link_window_prev: bool   # previous frame's link_window, to detect open/close
   link_setup:      LinkSetup
+  # Zero-config auto-pairing: opening the Link Cable window immediately probes
+  # 127.0.0.1 and, failing that, hosts — alternating until a peer appears. The
+  # underlying socket phase is still tracked by link_setup; this flag just marks
+  # that the connect/listen alternation is being driven automatically.
+  link_auto:       bool
   link_server:     Socket
   link_client:     Socket
   link_port:       cint    # ImGui port input (defaults to LINK_DEFAULT_PORT)
@@ -1133,6 +1141,10 @@ proc teardown_netlink() =
 
 const LINK_DEFAULT_PORT = 47810
 
+# Auto-pair: connect probes to make before falling back to hosting. Probes are
+# throttled to ~6/sec in service_link_setup, so 3 tries is a snappy ~0.5 s.
+const LINK_AUTO_CONNECT_TRIES = 3
+
 proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
   ## Run the HELLO handshake over an already-connected socket; on success bind
   ## the link to the local core (and drop rewind history, which would desync).
@@ -1147,7 +1159,9 @@ proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
     app.rewind.clear()
     app.rewinding = false
     app.link_status = "Linked as " & (if id == 0: "host (unit 0)" else: "guest (unit 1)")
-    app.link_window = false
+    app.link_auto = false  # auto-pair, if it was running, is done
+    # Leave app.link_window as-is: keep the window open so it shows the paired
+    # status and Disconnect control (the user closes it when they're done).
     true
   except NetLinkError as e:
     echo "NETLINK: handshake failed: ", e.msg
@@ -1232,6 +1246,27 @@ proc link_cancel_setup() =
   of lsNone: discard
   app.link_setup = lsNone
 
+proc link_auto_start() =
+  ## Begin zero-config auto-pairing on localhost. Start by probing for an
+  ## existing host on 127.0.0.1:LINK_DEFAULT_PORT (reusing the non-blocking
+  ## connect machinery); service_link_setup flips to hosting if nobody answers.
+  if not link_ready() or app.netlink != nil or app.link_auto or
+     app.link_setup != lsNone:
+    return
+  app.link_auto = true
+  app.link_port = LINK_DEFAULT_PORT
+  app.link_attempts = 0
+  app.link_setup = lsConnecting
+  app.link_status = ""
+  echo "NETLINK: auto-pair — probing 127.0.0.1:", LINK_DEFAULT_PORT
+
+proc link_auto_stop() =
+  ## Cancel auto-pairing and tear down any listening/connecting socket exactly
+  ## as the manual Cancel path does. No-op once a link is established.
+  if not app.link_auto: return
+  link_cancel_setup()
+  app.link_auto = false
+
 proc link_start_host() =
   ## Bind + listen (non-blocking); service_link_setup accepts the peer later.
   if not link_ready():
@@ -1257,6 +1292,25 @@ proc link_start_join() =
   app.link_setup = lsConnecting
   app.link_status = ""
 
+proc link_auto_listen(): bool =
+  ## Auto-pair host leg: bind + listen on the default port, deliberately WITHOUT
+  ## SO_REUSEADDR. On macOS SO_REUSEADDR lets a second bind to the same port
+  ## silently succeed, which would leave both racing instances listening and
+  ## nobody connecting. Omitting it makes the second bind fail (EADDRINUSE) —
+  ## that failure is exactly what breaks the two-instance symmetry: the loser
+  ## falls back to connecting and reaches the winner. Listener = unit 0.
+  try:
+    let server = newSocket(buffered = false)
+    server.bindAddr(Port(LINK_DEFAULT_PORT))
+    server.listen()
+    server.getFd().setBlocking(false)
+    app.link_server = server
+    app.link_setup = lsListening
+    echo "NETLINK: auto-pair — hosting on port ", LINK_DEFAULT_PORT
+    true
+  except OSError:
+    false  # port already taken (peer is hosting); caller keeps probing it
+
 proc service_link_setup() =
   ## Per-frame: poll the pending accept/connect so the UI never blocks while
   ## waiting for a peer; hand a connected socket to finish_link.
@@ -1269,8 +1323,13 @@ proc service_link_setup() =
         app.link_server.accept(sock)
         app.link_server.close()
       except OSError as e:
-        app.link_status = "Accept failed: " & e.msg
-        app.link_setup = lsNone
+        if app.link_auto:
+          # Fall back to probing for a peer instead of surfacing an error.
+          app.link_attempts = 0
+          app.link_setup = lsConnecting
+        else:
+          app.link_status = "Accept failed: " & e.msg
+          app.link_setup = lsNone
         return
       app.link_setup = lsNone
       discard finish_link(sock, 0)
@@ -1288,54 +1347,89 @@ proc service_link_setup() =
     except OSError:
       try: sock.close()
       except CatchableError: discard
-      if app.link_attempts > 300:  # ~5 s of retries
+      if app.link_auto:
+        # After a few quick probes with no host answering, become the host.
+        # If the bind is refused (a peer grabbed the port first, or a
+        # simultaneous-start race), keep probing so we reach that peer.
+        if app.link_attempts >= LINK_AUTO_CONNECT_TRIES * 10:
+          if not link_auto_listen():
+            app.link_attempts = 0
+      elif app.link_attempts > 300:  # ~5 s of retries
         app.link_status = "Couldn't reach " & host & ":" & $app.link_port
         app.link_setup = lsNone
   of lsNone: discard
 
+proc render_link_advanced() =
+  ## The manual Host/Join controls, unchanged in behavior, tucked behind a
+  ## collapsed "Advanced" header. Either button first cancels auto-pairing so a
+  ## manual action behaves exactly as it did before zero-config existed.
+  if igCollapsingHeader_TreeNodeFlags("Advanced", 0):
+    igSetNextItemWidth(120)
+    discard igInputInt("Port", addr app.link_port, 1, 100, 0)
+    igSeparator()
+    igText("Host — share your address + port with a friend:")
+    if igButton("Host game", ImVec2(x: 0, y: 0)):
+      link_auto_stop(); link_cancel_setup(); link_start_host()
+    igSeparator()
+    igText("Join — enter the host's address:")
+    igSetNextItemWidth(200)
+    discard igInputTextWithHint("##link_host", "127.0.0.1",
+      cast[cstring](addr app.link_host_buf[0]), csize_t(app.link_host_buf.len),
+      0, nil, nil)
+    igSameLine(0, -1)
+    if igButton("Join game", ImVec2(x: 0, y: 0)):
+      link_auto_stop(); link_cancel_setup(); link_start_join()
+
 proc render_link_window() =
-  ## The "Link Cable" window: pick Host or Join at runtime — no CLI port.
+  ## The "Link Cable" window. Zero-config by default: opening it auto-pairs on
+  ## localhost and shows only a status line. Manual Host/Join live under
+  ## "Advanced" for cross-machine / custom-port play.
   if not app.link_window: return
   igSetNextWindowSize(ImVec2(x: 340, y: 0), cint(ImGui_Cond_FirstUseEver))
   if igBegin("Link Cable", addr app.link_window,
              cint(ImGui_WindowFlags_NoCollapse)):
     if app.netlink != nil:
-      igText("Connected — %s", cstring(app.link_status))
+      igText("Paired successfully")
+      igText("%s", cstring(app.link_status))
       igText("Rewind, turbo and save-state load are paused while linked.")
       if igButton("Disconnect", ImVec2(x: 0, y: 0)):
         teardown_netlink()
         app.link_status = ""
     elif not link_ready():
       igText("Load a GBA ROM, then reopen this window to link.")
-    elif app.link_setup == lsListening:
-      igText("Hosting on port %d", cint(app.link_port))
-      igText("Waiting for a friend to join...")
-      igText("They pick Join and enter  your-ip : %d", cint(app.link_port))
-      if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
-    elif app.link_setup == lsConnecting:
-      igText("Connecting to %s:%d ...",
-             cstring(cast[cstring](addr app.link_host_buf[0])), cint(app.link_port))
-      if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
     else:
-      igText("Two players, one emulated link cable, over the network.")
+      if app.link_auto:
+        # An animated ellipsis so it's visibly working; auto stops on close.
+        let dots = 1 + (int(getTicks() div 400) mod 3)
+        igText("Waiting to pair%s", cstring(repeat('.', dots)))
+      elif app.link_setup == lsListening:
+        igText("Hosting on port %d", cint(app.link_port))
+        igText("Waiting for a friend to join...")
+        igText("They pick Join and enter  your-ip : %d", cint(app.link_port))
+        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+      elif app.link_setup == lsConnecting:
+        igText("Connecting to %s:%d ...",
+               cstring(cast[cstring](addr app.link_host_buf[0])), cint(app.link_port))
+        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+      else:
+        igText("Two players, one emulated link cable, over the network.")
       igSeparator()
-      igSetNextItemWidth(120)
-      discard igInputInt("Port", addr app.link_port, 1, 100, 0)
-      igSeparator()
-      igText("Host — share your address + port with a friend:")
-      if igButton("Host game", ImVec2(x: 0, y: 0)): link_start_host()
-      igSeparator()
-      igText("Join — enter the host's address:")
-      igSetNextItemWidth(200)
-      discard igInputTextWithHint("##link_host", "127.0.0.1",
-        cast[cstring](addr app.link_host_buf[0]), csize_t(app.link_host_buf.len),
-        0, nil, nil)
-      igSameLine(0, -1)
-      if igButton("Join game", ImVec2(x: 0, y: 0)): link_start_join()
+      render_link_advanced()
     if app.link_status.len > 0 and app.netlink == nil:
       igSeparator()
       igText("%s", cstring(app.link_status))
   igEnd()
+
+proc update_link_auto() =
+  ## Drive zero-config auto-pairing off the Link Cable window's open/close edge:
+  ## start probing when it opens (nothing else in progress), tear the auto
+  ## socket down when it closes without having paired.
+  if app.link_window and not app.link_window_prev:
+    if link_ready() and app.netlink == nil and app.link_setup == lsNone:
+      link_auto_start()
+  elif not app.link_window and app.link_window_prev:
+    link_auto_stop()
+  app.link_window_prev = app.link_window
 
 # ──────────────────────────── Main ────────────────────────────
 
@@ -1349,6 +1443,7 @@ proc main() =
   var listen_port    = 0
   var connect_to     = ""
   var netlink_delay  = 0
+  var link_auto      = false
   var pos_args: seq[string]
 
   var p = initOptParser(commandLineParams())
@@ -1378,6 +1473,10 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         netlink_delay = parseInt(v)
+      of "link-auto":
+        # Debug/verification: kick off the same zero-config auto-pair the Link
+        # Cable window does, without touching the GUI. Mirrors opening it.
+        link_auto = true
       else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
       pos_args.add(p.key)
@@ -1506,8 +1605,17 @@ proc main() =
     if listen_port > 0 or connect_to.len > 0:
       app.netlink = establish_netlink(rom_path, listen_port, connect_to,
                                       netlink_delay)
+    elif link_auto:
+      # Mirror opening the Link Cable window: open it so update_link_auto's
+      # open-edge detection kicks off zero-config auto-pairing.
+      if link_ready():
+        app.link_window = true
+      else:
+        echo "NETLINK: --link-auto needs a GBA ROM; ignoring"
   elif listen_port > 0 or connect_to.len > 0:
     echo "NETLINK: --listen/--connect need a ROM path; ignoring"
+  elif link_auto:
+    echo "NETLINK: --link-auto needs a ROM path; ignoring"
 
   # The UI (ImGui + present) runs at the display's refresh rate, decoupled
   # from emulation speed in both directions:
@@ -1618,6 +1726,7 @@ proc main() =
           pace_max_q = 0
     handle_input()
     update_rumble()
+    update_link_auto()    # start/stop zero-config auto-pair on window open/close
     service_link_setup()  # non-blocking accept/connect for the Link window
     let now = getTicks()
     var presented = false
