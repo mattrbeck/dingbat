@@ -2470,6 +2470,23 @@ const loadLargeControlsFromStorage = async () => {
   applyLargeControls(!!(await dbGet("large-controls")));
 };
 
+// --- Opaque controls in landscape (solid instead of see-through buttons) ---
+const opaqueControlsToggle = document.getElementById("opaque-controls-toggle");
+
+const applyOpaqueControls = (on) => {
+  document.body.classList.toggle("opaque-controls", on);
+  opaqueControlsToggle.checked = on;
+};
+
+opaqueControlsToggle.addEventListener("change", async () => {
+  applyOpaqueControls(opaqueControlsToggle.checked);
+  await dbPut("opaque-controls", opaqueControlsToggle.checked);
+});
+
+const loadOpaqueControlsFromStorage = async () => {
+  applyOpaqueControls(!!(await dbGet("opaque-controls")));
+};
+
 kbPreset.addEventListener("change", () => {
   kbSelection = -1;
   if (kbPreset.value === "default") commitBindings(PRESET_DEFAULT);
@@ -3364,6 +3381,7 @@ var Module = {
     await loadBiosFromStorage();
     await loadKeybindingsFromStorage();
     await loadLargeControlsFromStorage();
+    await loadOpaqueControlsFromStorage();
     await loadAudioSettings();
     await loadColorCorrect();
     await loadSystemSettings();

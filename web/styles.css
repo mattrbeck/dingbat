@@ -2447,6 +2447,32 @@ body.rollback-mode #save-sep {
     border-color: rgba(255, 176, 77, 0.7);
     box-shadow: 0 0 14px -4px var(--accent-glow);
   }
+  /* Opaque-controls opt-out: restore the solid portrait look for the buttons
+     that the transparency rules above dimmed. Higher specificity than the
+     bare-selector rules above, and later in source order, so it wins. */
+  body.opaque-controls .pad-btn {
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
+    border-color: var(--border-2);
+    box-shadow: inset 0 1px 0 var(--inset-hi), 0 2px 5px rgba(0, 0, 0, 0.4);
+    color: var(--text-dim);
+  }
+  body.opaque-controls #dpad > #dpad-center {
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
+    border-color: var(--border-2);
+    box-shadow: none;
+    color: var(--text-dim);
+  }
+  body.opaque-controls #dpad > #dpad-center::after {
+    background: rgba(0, 0, 0, 0.25);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+  body.opaque-controls .pad-btn.pressed,
+  body.opaque-controls .pad-btn.arm-active {
+    color: var(--accent);
+    background: linear-gradient(180deg, #2a2410, #1d1809);
+    border-color: rgba(255, 176, 77, 0.55);
+    box-shadow: inset 0 2px 7px var(--inset-lo), 0 0 16px -3px var(--accent-glow);
+  }
   /* Select / Start shrink to small, label-less circles (the text isn't
      needed at this size; position tells them apart) */
   .pad-pill {
