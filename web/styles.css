@@ -68,9 +68,16 @@
 
 body {
   margin: 0;
-  height: 100vh;
-  height: 100dvh;
-  width: 100vw;
+  /* The app column must fill the real viewport. Sizing a fixed body with
+     viewport units (100vh/100dvh) breaks on iOS: in installed-to-home-screen
+     standalone mode (black-translucent status bar, viewport-fit=cover) WebKit
+     can resolve vh/dvh against a viewport that excludes the status-bar region
+     even though the webview itself covers the full screen — the column came up
+     ~50pt short on an iPhone 13 mini, shrinking the game frame and leaving a
+     dead gap under the touch controls. Anchoring the fixed body to all four
+     edges spans the true fixed-positioning containing block with no viewport
+     units involved. */
+  inset: 0;
   overflow: hidden;
   position: fixed;
   touch-action: none;
