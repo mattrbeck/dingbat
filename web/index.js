@@ -354,13 +354,21 @@ const migrateFromLocalStorage = async () => {
     localStorage.removeItem("dingbat_gbc_bootrom_name");
   }
 
-  // Migrate recent ROMs
+  // Migrate recent ROMs (straight into the per-ROM layout: rom:<name>
+  // records first, then the metadata-only "recent" index)
   let recentRaw = localStorage.getItem("dingbat_recent_roms");
   if (recentRaw) {
     try {
       let list = JSON.parse(recentRaw);
-      let migrated = list.map(r => ({ name: r.name, data: decodeBase64(r.data) }));
-      await dbPut("recent", migrated);
+      let now = Date.now();
+      let meta = [];
+      for (let i = 0; i < list.length; i++) {
+        let r = list[i];
+        if (!r?.name) continue;
+        await dbPut(romKey(r.name), { name: r.name, data: decodeBase64(r.data) });
+        meta.push({ name: r.name, ts: now - i }); // order encodes recency
+      }
+      await dbPut("recent", meta);
     } catch {}
     localStorage.removeItem("dingbat_recent_roms");
   }
@@ -376,6 +384,27 @@ const migrateFromLocalStorage = async () => {
     } catch {}
     localStorage.removeItem("dingbat_saves");
   }
+};
+
+// Migrate the old single-record recents format (one "recent" record holding
+// every ROM's bytes inline: [{ name, data, art? }]) to the per-ROM layout.
+// ROM/art records are written before the index is rewritten, so an interrupted
+// run leaves the old record intact and a re-run just overwrites the same
+// per-ROM records — idempotent either way. Entries without .data (already the
+// new metadata format) mean there is nothing to do.
+const migrateRecentFormat = async () => {
+  let list = await dbGet("recent");
+  if (!Array.isArray(list) || !list.some((r) => r && r.data)) return;
+  let now = Date.now();
+  let meta = [];
+  for (let i = 0; i < list.length; i++) {
+    let r = list[i];
+    if (!r?.name) continue;
+    if (r.data) await dbPut(romKey(r.name), { name: r.name, data: r.data });
+    if (r.art) await dbPut(artKey(r.name), r.art);
+    meta.push({ name: r.name, ts: r.ts ?? now - i }); // keep most-recent-first
+  }
+  await dbPut("recent", meta);
 };
 
 // --- FS / BIOS helpers ---
@@ -740,7 +769,7 @@ romsModal.addEventListener("click", (e) => {
 // Ordered rows for the manage list: recents first (already most-recent-first),
 // then orphaned save-only games sorted by name. { name, inRecent }.
 const romsForManagement = async () => {
-  let recents = await getRecentRoms();
+  let recents = await getRecentMeta();
   let seen = new Set();
   let rows = [];
   for (let r of recents) {
@@ -1042,6 +1071,9 @@ const driveDownload = async (fileId) => {
 
 // Local data worth backing up. Saves/states first so an interrupted backup
 // still captured the important (small) part before the multi-MB ROMs.
+// ROM entries are lazy (`load`, no `bytes`): the upload loop fetches each
+// ROM's bytes from its per-ROM record one at a time and lets them go after
+// the upload, so a backup never holds the whole library in memory.
 const collectLocalBackupEntries = async () => {
   let entries = [];
   for (let k of await dbKeys()) {
@@ -1053,10 +1085,10 @@ const collectLocalBackupEntries = async () => {
       entries.push({ name: k, bytes: v, rom: false });
     }
   }
-  for (let r of await getRecentRoms()) {
-    if (r?.data instanceof Uint8Array && r.data.length) {
-      entries.push({ name: "rom:" + r.name, bytes: r.data, rom: true });
-    }
+  for (let r of await getRecentMeta()) {
+    if (!r?.name) continue;
+    let name = r.name;
+    entries.push({ name: "rom:" + name, load: () => getRomBytes(name), rom: true });
   }
   return entries;
 };
@@ -1103,11 +1135,14 @@ const gdriveBackup = async () => {
     for (let i = 0; i < entries.length; i++) {
       let e = entries[i];
       let existing = remote.get(e.name);
-      if (e.rom && existing && Number(existing.size) === e.bytes.length) continue;
+      // Lazy ROM bytes: fetched here, released when `bytes` leaves scope.
+      let bytes = e.bytes ?? await e.load();
+      if (!bytes || !bytes.length) continue;
+      if (e.rom && existing && Number(existing.size) === bytes.length) continue;
       setGdriveProgress(
-        `Uploading ${e.name} — ${formatBytes(e.bytes.length)} (${i + 1}/${entries.length})…`,
+        `Uploading ${e.name} — ${formatBytes(bytes.length)} (${i + 1}/${entries.length})…`,
       );
-      await driveUploadFile(e.name, e.bytes, existing?.id);
+      await driveUploadFile(e.name, bytes, existing?.id);
       uploaded++;
     }
     setGdriveProgress("");
@@ -1149,8 +1184,8 @@ const gdriveRestoreGame = async (group, btn) => {
       await dbPut(stateKey(group.game), await driveDownload(f.state.id));
     }
     if (f.rom) {
-      let local = (await getRecentRoms()).find((r) => r.name === group.game);
-      if (!local || local.data.length !== Number(f.rom.size)) {
+      let local = await getRomBytes(group.game);
+      if (!local || local.length !== Number(f.rom.size)) {
         setGdriveProgress(
           `Downloading ROM (${formatBytes(Number(f.rom.size) || 0)})…`,
         );
@@ -1415,34 +1450,78 @@ const loadSystemSettings = async () => {
 };
 
 // --- Recent ROMs ---
+// Storage layout (per-ROM, so the home grid never loads ROM bytes):
+//   "recent"      metadata index only: [{ name, ts }], most-recent-first,
+//                 capped at MAX_RECENT
+//   "rom:<name>"  { name, data: Uint8Array } — the ROM image, fetched only
+//                 at launch/backup time
+//   "art:<name>"  Blob — optional box art (from a zip), fetched lazily by
+//                 the grid without touching the ROM bytes
+// Keeping bytes out of the index (and out of tile closures) is an iOS
+// Safari memory-pressure fix: a handful of GBA ROMs held in the JS heap was
+// enough to get the wasm JIT demoted.
 
 const MAX_RECENT = 20;
 
-const getRecentRoms = async () => {
+const romKey = (name) => "rom:" + name;
+const artKey = (name) => "art:" + name;
+
+const getRecentMeta = async () => {
   return (await dbGet("recent")) || [];
 };
 
-const saveRecentRoms = async (list) => {
+// Fetch one ROM's bytes on demand. Returns null when the record is missing.
+const getRomBytes = async (name) => {
+  let rec = await dbGet(romKey(name));
+  let d = rec?.data ?? null;
+  if (d instanceof ArrayBuffer) d = new Uint8Array(d);
+  return d instanceof Uint8Array && d.length ? d : null;
+};
+
+const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
+
+// Move `name` to the front of the metadata index (adding it if new) and
+// evict past the cap — an evicted game loses its stored ROM + art records,
+// but never its saves (romsForManagement still lists it for cleanup).
+const bumpRecentIndex = async (name) => {
+  let list = (await getRecentMeta()).filter((r) => r.name !== name);
+  list.unshift({ name, ts: Date.now() });
+  while (list.length > MAX_RECENT) {
+    let evicted = list.pop();
+    await dbDelete(romKey(evicted.name));
+    await dbDelete(artKey(evicted.name));
+  }
   await dbPut("recent", list);
 };
 
 const addRecentRom = async (name, bytes, art) => {
-  let list = (await getRecentRoms()).filter(r => r.name !== name);
-  let entry = { name, data: new Uint8Array(bytes) };
-  if (art) entry.art = art; // Blob (box art from a zip), optional
-  list.unshift(entry);
-  if (list.length > MAX_RECENT) list.length = MAX_RECENT;
-  await saveRecentRoms(list);
+  // Bytes first, index second: an interruption leaves at worst an orphaned
+  // rom: record, never an index entry pointing at nothing.
+  await dbPut(romKey(name), { name, data: new Uint8Array(bytes) });
+  if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
+  await bumpRecentIndex(name);
   refreshHomeRecent();
 };
 
-// Launch a ROM from a stored recent entry ({ name, data, art? })
-const launchRom = async (rom) => {
-  let ext = rom.name.substring(rom.name.lastIndexOf(".")).toLowerCase();
+// Recency bump for a ROM whose bytes are already stored (relaunch paths) —
+// no multi-MB rewrite of the rom: record.
+const touchRecent = async (name) => {
+  await bumpRecentIndex(name);
+  refreshHomeRecent();
+};
+
+// Launch a ROM by name, fetching its bytes from IndexedDB only now.
+const launchRom = async (name) => {
+  let data = await getRomBytes(name);
+  if (!data) {
+    showToast("This game's ROM is no longer stored — load the file again");
+    return;
+  }
+  let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
   let romFile = "rom" + ext;
-  writeToFS(romFile, rom.data);
-  await addRecentRom(rom.name, rom.data, rom.art);
-  loadRom(romFile, rom.name);
+  writeToFS(romFile, data);
+  await touchRecent(name);
+  loadRom(romFile, name);
 };
 
 // Home-screen recent grid — this is the app's game library (it replaces the
@@ -1468,17 +1547,23 @@ const updateStorageInfo = async () => {
 };
 
 const deleteRecent = async (name) => {
-  let list = (await getRecentRoms()).filter((r) => r.name !== name);
-  await saveRecentRoms(list);
+  let list = (await getRecentMeta()).filter((r) => r.name !== name);
+  await dbPut("recent", list);
+  await dbDelete(romKey(name));
+  await dbDelete(artKey(name));
   refreshHomeRecent();
 };
 
 // Object URLs for box-art thumbnails, revoked and rebuilt each render
 let homeArtUrls = [];
+// Render generation: a lazy art fetch that resolves after a newer render
+// must not touch (or leak URLs into) the fresh grid.
+let homeRenderGen = 0;
 
 const refreshHomeRecent = async () => {
   if (!db) return;
-  let roms = await getRecentRoms();
+  let roms = await getRecentMeta(); // metadata only — no ROM bytes
+  let gen = ++homeRenderGen;
   homeArtUrls.forEach(URL.revokeObjectURL);
   homeArtUrls = [];
   homeRecent.innerHTML = "";
@@ -1488,33 +1573,35 @@ const refreshHomeRecent = async () => {
   }
   homeRecentWrap.hidden = false;
   updateStorageInfo();
-  for (let rom of roms) {
-    let system = systemOf(rom.name);
+  for (let { name: romName } of roms) {
+    let system = systemOf(romName);
     let tile = document.createElement("div");
     tile.className = "home-tile";
 
     let launch = document.createElement("button");
     launch.type = "button";
     launch.className = "home-tile-launch";
-    launch.title = rom.name; // full name on hover when truncated
+    launch.title = romName; // full name on hover when truncated
 
-    let icon;
-    if (rom.art) {
-      // Box art from a zip, shown in place of the cartridge icon
-      let url = URL.createObjectURL(rom.art);
+    // Cartridge icon now, box art swapped in async if this game has any —
+    // the art Blob lives in its own record so this never deserializes ROM
+    // bytes just to draw the grid.
+    let icon = document.createElement("span");
+    icon.className = "cart cart-" + system.toLowerCase();
+    getRomArt(romName).then((art) => {
+      if (!art || gen !== homeRenderGen) return;
+      let url = URL.createObjectURL(art);
       homeArtUrls.push(url);
-      icon = document.createElement("img");
-      icon.className = "home-tile-art";
-      icon.src = url;
-      icon.alt = "";
-    } else {
-      icon = document.createElement("span");
-      icon.className = "cart cart-" + system.toLowerCase();
-    }
+      let img = document.createElement("img");
+      img.className = "home-tile-art";
+      img.src = url;
+      img.alt = "";
+      launch.replaceChild(img, icon);
+    }).catch(() => {});
 
     let name = document.createElement("span");
     name.className = "home-tile-name";
-    name.textContent = rom.name;
+    name.textContent = romName;
 
     let badge = document.createElement("span");
     badge.className = "home-tile-badge badge-" + system.toLowerCase();
@@ -1523,30 +1610,35 @@ const refreshHomeRecent = async () => {
     launch.appendChild(icon);
     launch.appendChild(name);
     launch.appendChild(badge);
-    launch.addEventListener("click", () => launchRom(rom));
+    launch.addEventListener("click", () => launchRom(romName));
 
     // 2-player local link cable: two linked cores of this ROM, one per
     // player. Trading needs both — this is how you test a link trade here.
     let link2p = document.createElement("button");
     link2p.type = "button";
     link2p.className = "home-tile-link";
-    link2p.title = "2-player link cable (" + rom.name + ")";
-    link2p.setAttribute("aria-label", "Start 2-player link: " + rom.name);
+    link2p.title = "2-player link cable (" + romName + ")";
+    link2p.setAttribute("aria-label", "Start 2-player link: " + romName);
     link2p.textContent = "2P";
-    link2p.addEventListener("click", (e) => {
+    link2p.addEventListener("click", async (e) => {
       e.stopPropagation();
-      launchLinkRom(rom);
+      let data = await getRomBytes(romName);
+      if (!data) {
+        showToast("This game's ROM is no longer stored — load the file again");
+        return;
+      }
+      launchLinkRom({ name: romName, data });
     });
 
     let del = document.createElement("button");
     del.type = "button";
     del.className = "home-tile-delete";
     del.title = "Remove from recent";
-    del.setAttribute("aria-label", "Remove " + rom.name);
+    del.setAttribute("aria-label", "Remove " + romName);
     del.innerHTML = "&times;";
     del.addEventListener("click", (e) => {
       e.stopPropagation();
-      deleteRecent(rom.name);
+      deleteRecent(romName);
     });
 
     tile.appendChild(launch);
@@ -2716,7 +2808,10 @@ document.addEventListener("keyup", (e) => shortcutKeyHandler(e, false), true);
 // of them would desync the pair (their controls are hidden by CSS).
 
 var linkMode = false;
-var linkRomEntry = null; // { name, data, art? } kept for reset + persistence
+// { name, data } for the live 2P session only — kept for reset + save
+// persistence while linked, and released (bytes and all) on exitLinkMode so
+// no ROM bytes outlive their session in the JS heap.
+var linkRomEntry = null;
 var linkIsGb = false;    // true while the linked pair is GB/GBC (160x144)
 var linkFocus = 0;       // which core the keyboard drives (click a screen to switch)
 
@@ -2861,6 +2956,7 @@ const exitLinkMode = async () => {
   if (!linkMode) return;
   if (Module._link_exit) Module._link_exit(); // final battery flush into FS
   await persistLinkSaves();
+  linkRomEntry = null; // release the session's ROM bytes
   linkMode = false;
   gpPrev.fill(false);
   document.body.classList.remove("link-mode", "link-gb");
@@ -2900,7 +2996,7 @@ const launchLinkRom = async (rom) => {
   setRewindHeld(false);
   currentRomName = null;
   currentOriginalName = null;
-  linkRomEntry = { name: rom.name, data: rom.data, art: rom.art };
+  linkRomEntry = { name: rom.name, data: rom.data };
   let ok = Module.ccall("link_init", "number", ["string", "string"], LINK_FS_ROMS);
   if (ok !== 1) {
     linkRomEntry = null;
@@ -2915,7 +3011,7 @@ const launchLinkRom = async (rom) => {
   initLinkCanvases();
   document.body.classList.add("has-game", "running", "link-mode");
   updateCanvasScaling();
-  await addRecentRom(rom.name, rom.data, rom.art);
+  await touchRecent(rom.name); // bytes are already stored — recency bump only
 };
 
 // --- Main Menu (return to the home screen without terminating the game) ---
@@ -3109,6 +3205,7 @@ var Module = {
     }
     await openDB();
     await migrateFromLocalStorage();
+    await migrateRecentFormat();
     await loadBiosFromStorage();
     await loadKeybindingsFromStorage();
     await loadLargeControlsFromStorage();
