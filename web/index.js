@@ -225,6 +225,54 @@ const log = (message, level = "info") => {
   if (shouldScroll) logDiv.scroll({ top: logDiv.scrollHeight });
 };
 
+// Viewport diagnostics for the iOS portrait layout bug (frame not full
+// width + dead space under the controls): dump every quantity that
+// determines the app column's height, so a copied device log pinpoints
+// where the missing height goes. Logged at boot, on ROM load, and after
+// orientation changes.
+const logViewportDiag = (tag) => {
+  try {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;top:0;left:0;width:0;visibility:hidden;pointer-events:none;height:100dvh";
+    document.body.appendChild(probe);
+    const dvh = probe.getBoundingClientRect().height;
+    probe.style.height = "100vh";
+    const vh = probe.getBoundingClientRect().height;
+    probe.style.height = "100svh";
+    const svh = probe.getBoundingClientRect().height;
+    probe.remove();
+    const cs = getComputedStyle(document.documentElement);
+    const rect = (el) => {
+      if (!el) return "n/a";
+      const b = el.getBoundingClientRect();
+      return `${Math.round(b.top)}..${Math.round(b.bottom)}(w${Math.round(b.width)})`;
+    };
+    const standalone =
+      navigator.standalone === true ||
+      matchMedia("(display-mode: standalone)").matches;
+    log(
+      `viewport[${tag}]: inner ${window.innerWidth}x${window.innerHeight} ` +
+        `vv ${Math.round(visualViewport ? visualViewport.height : -1)} ` +
+        `vh/svh/dvh ${Math.round(vh)}/${Math.round(svh)}/${Math.round(dvh)} ` +
+        `screen ${screen.width}x${screen.height} standalone ${standalone} ` +
+        `safe t/b ${cs.getPropertyValue("--safe-t").trim() || "?"}/` +
+        `${cs.getPropertyValue("--safe-b").trim() || "?"} | ` +
+        `body ${rect(document.body)} topbar ${rect(document.getElementById("topbar"))} ` +
+        `stage ${rect(document.getElementById("stage"))} ` +
+        `controls ${rect(document.getElementById("controls"))} ` +
+        `canvas ${rect(document.getElementById("canvas"))}`
+    );
+  } catch (e) {
+    log("viewport diag failed: " + e.message, "error");
+  }
+};
+
+window.addEventListener("load", () => setTimeout(() => logViewportDiag("boot"), 1000));
+window.addEventListener("orientationchange", () =>
+  setTimeout(() => logViewportDiag("rotate"), 1000)
+);
+
 // Mirror the console into the log view: the emulator core's own messages
 // (save-state rejections, backup-type detection, ...) arrive via
 // emscripten's default print -> console.log, which is invisible on phones
@@ -559,6 +607,15 @@ settingsTabs.forEach((t) =>
 
 const openSettingsModal = () => {
   menuDropdown.hidden = true;
+  // Build identity: version.txt fetched through the SW cache = the running
+  // build's commit, so a device can be matched to a deploy at a glance
+  fetch("version.txt")
+    .then((r) => (r.ok ? r.text() : ""))
+    .then((v) => {
+      document.getElementById("settings-version").textContent =
+        v ? "dingbat " + v.trim().slice(0, 12) : "";
+    })
+    .catch(() => {});
   updateBiosStatusText();
   kbSelection = -1;
   kbPreset.value = detectPreset(activeBindings);
@@ -2486,6 +2543,7 @@ const loadRom = async (romName, originalName) => {
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   benchReport("load");
   updateCanvasScaling();
+  setTimeout(() => logViewportDiag("romload"), 500);
 };
 
 // --- File type helpers ---

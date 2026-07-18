@@ -1494,6 +1494,15 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
+/* Build identity at the bottom of the settings modal ("dingbat <commit>") */
+.settings-version {
+  margin: 14px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
 /* Radio option rows (renderer / BIOS mode) */
 .radio-group {
   display: flex;
