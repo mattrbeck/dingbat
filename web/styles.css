@@ -621,10 +621,16 @@ body.running #canvas {
   position: absolute;
   z-index: 0;
   pointer-events: none;
-  transform: scale(1.3);
+  transform: scale(1.45);
   filter: blur(50px) saturate(1.5);
   opacity: 0.8;
   border-radius: 28px;
+  /* The sampled bitmap is opaque edge-to-edge, so blur() alone yields a blurred
+     rectangle. A radial mask feathers the halo to nothing before its outer edge
+     so it reads as a soft elliptical glow rather than a hard box. The scale is
+     bumped a touch to compensate for the halo the mask trims away. */
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
 }
 
 /* Scanlines video effect: one faint line per emulated pixel row. JS sizes and
