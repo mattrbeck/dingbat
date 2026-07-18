@@ -722,6 +722,7 @@ const openRomsModal = () => {
   menuDropdown.hidden = true;
   romsModal.classList.add("open");
   refreshRomsManageList();
+  renderGdriveSection();
   trapFocus(romsModal);
 };
 
@@ -848,6 +849,492 @@ const refreshRomsManageList = async () => {
     row.appendChild(actions);
     romsManageList.appendChild(row);
   }
+};
+
+// --- Google Drive backup (prototype) ---
+// Backs up battery saves, save states, and ROMs to the hidden per-app
+// "appDataFolder" in the user's Google Drive, and restores them on another
+// device. Pure client-side OAuth via Google Identity Services' token flow:
+// no backend, no client secret, and the access token lives in memory only
+// (never localStorage/IndexedDB) — it expires after ~1h and is silently
+// re-requested on a 401.
+//
+// Drive file names mirror the IndexedDB keys one-to-one:
+//   save:<rom name>       battery save        (overwritten on every backup)
+//   save:<rom name>-p2    2P link partner save
+//   state:<rom name>      save-state blob
+//   rom:<rom name>        ROM image           (skipped when Drive already has
+//                                              one with the same byte size —
+//                                              ROMs are immutable)
+// There is no manifest file: the appDataFolder listing itself is the index,
+// and files are matched by name client-side from a full listing, which also
+// sidesteps escaping quotes in ROM names inside Drive `q` queries.
+
+// To enable this feature, create an OAuth client ID:
+//   1. console.cloud.google.com → create (or pick) a project
+//   2. APIs & Services → Library → enable "Google Drive API"
+//   3. APIs & Services → OAuth consent screen → add the
+//      .../auth/drive.appdata scope, and add yourself as a test user while
+//      the app is unverified
+//   4. APIs & Services → Credentials → Create credentials → OAuth client ID
+//      → type "Web application" → under "Authorized JavaScript origins" add
+//      every origin the app is served from (e.g. http://localhost:8000 and
+//      the deployed https origin). No redirect URIs are needed for the
+//      token flow.
+//   5. Paste the client ID below. This flow has no client secret.
+// While empty, the modal shows a "not configured" note instead of a
+// sign-in button, and the GIS script is never loaded.
+const GDRIVE_CLIENT_ID = "";
+
+// drive.appdata = access to the hidden app folder only (no other Drive
+// files); "email" lets the UI show which account is connected (via the
+// tokeninfo endpoint).
+const GDRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata email";
+
+const GDRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
+const GDRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+
+let gdriveToken = null;       // access token, in memory only
+let gdriveEmail = null;       // best-effort display of the signed-in account
+let gdriveTokenClient = null; // GIS token client, created after script load
+let gdriveBusy = false;       // one backup/restore/list at a time
+
+// The GIS script loads lazily on first interaction so normal page loads
+// never touch Google's servers.
+let gisScriptPromise = null;
+const loadGisScript = () => {
+  gisScriptPromise ??= new Promise((resolve, reject) => {
+    let s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => {
+      gisScriptPromise = null; // allow a retry on the next click
+      reject(new Error("Couldn't load Google sign-in — check your connection"));
+    };
+    document.head.appendChild(s);
+  });
+  return gisScriptPromise;
+};
+
+// Request an access token. promptMode "" = silent refresh (no UI when the
+// Google session and a prior grant still stand); undefined = the normal
+// account-chooser/consent popup.
+const gdriveAcquireToken = async (promptMode) => {
+  await loadGisScript();
+  gdriveTokenClient ??= google.accounts.oauth2.initTokenClient({
+    client_id: GDRIVE_CLIENT_ID,
+    scope: GDRIVE_SCOPE,
+    callback: () => {}, // replaced per request below
+  });
+  return new Promise((resolve, reject) => {
+    gdriveTokenClient.callback = (resp) => {
+      if (resp.error) {
+        reject(new Error("Google sign-in failed: " + resp.error));
+        return;
+      }
+      gdriveToken = resp.access_token;
+      resolve();
+    };
+    gdriveTokenClient.error_callback = (err) => {
+      reject(new Error(
+        err?.type === "popup_failed_to_open"
+          ? "Popup blocked — allow popups for this site and try again"
+          : "Sign-in was cancelled",
+      ));
+    };
+    gdriveTokenClient.requestAccessToken(
+      promptMode === undefined ? {} : { prompt: promptMode },
+    );
+  });
+};
+
+// Best-effort: only works because GDRIVE_SCOPE includes "email".
+const gdriveFetchEmail = async () => {
+  try {
+    let res = await fetch(
+      "https://oauth2.googleapis.com/tokeninfo?access_token=" +
+        encodeURIComponent(gdriveToken),
+    );
+    if (res.ok) gdriveEmail = (await res.json()).email || null;
+  } catch {}
+};
+
+// Authenticated fetch against the Drive API. On a 401 (token expired), one
+// silent re-grant is attempted and the request replayed; if that fails the
+// user is signed out locally and must sign in again.
+const driveFetch = async (url, opts = {}) => {
+  const send = () => fetch(url, {
+    ...opts,
+    headers: { ...(opts.headers || {}), Authorization: "Bearer " + gdriveToken },
+  });
+  let res = await send();
+  if (res.status === 401) {
+    try {
+      await gdriveAcquireToken("");
+    } catch {
+      gdriveToken = null;
+      renderGdriveSection();
+      throw new Error("Google session expired — sign in again");
+    }
+    res = await send();
+  }
+  if (!res.ok) throw new Error("Drive request failed (HTTP " + res.status + ")");
+  return res;
+};
+
+// Everything in the app's hidden folder. Prototype limitation: a single page
+// of up to 1000 files, no nextPageToken paging (20 games × 4 files is far
+// below that).
+const driveListAll = async () => {
+  let url = GDRIVE_FILES + "?spaces=appDataFolder&pageSize=1000&fields=" +
+    encodeURIComponent("files(id,name,size,modifiedTime)");
+  let res = await driveFetch(url);
+  return (await res.json()).files || [];
+};
+
+// Create + upload a small file in one atomic multipart request. The bytes go
+// into the body as a raw Uint8Array inside a Blob — never string-converted.
+const driveCreateMultipart = (name, bytes) => {
+  let boundary = "dingbat" + Math.random().toString(36).slice(2);
+  let body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify({ name, parents: ["appDataFolder"] }) +
+      `\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,
+    bytes,
+    `\r\n--${boundary}--`,
+  ]);
+  return driveFetch(GDRIVE_UPLOAD + "?uploadType=multipart", {
+    method: "POST",
+    headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+    body,
+  });
+};
+
+const driveCreateEmpty = async (name) => {
+  let res = await driveFetch(GDRIVE_FILES, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, parents: ["appDataFolder"] }),
+  });
+  return (await res.json()).id;
+};
+
+const driveUpdateContent = (fileId, bytes) =>
+  driveFetch(GDRIVE_UPLOAD + "/" + fileId + "?uploadType=media", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: new Blob([bytes]),
+  });
+
+// Drive caps multipart bodies at 5 MB, so big files (ROMs) go as a bare
+// metadata create followed by a media-only content PATCH instead.
+const driveUploadFile = async (name, bytes, existingId) => {
+  if (existingId) return driveUpdateContent(existingId, bytes);
+  if (bytes.length <= 4 * 1024 * 1024) return driveCreateMultipart(name, bytes);
+  return driveUpdateContent(await driveCreateEmpty(name), bytes);
+};
+
+const driveDownload = async (fileId) => {
+  let res = await driveFetch(GDRIVE_FILES + "/" + fileId + "?alt=media");
+  return new Uint8Array(await res.arrayBuffer());
+};
+
+// Local data worth backing up. Saves/states first so an interrupted backup
+// still captured the important (small) part before the multi-MB ROMs.
+const collectLocalBackupEntries = async () => {
+  let entries = [];
+  for (let k of await dbKeys()) {
+    if (typeof k !== "string") continue;
+    if (!k.startsWith("save:") && !k.startsWith("state:")) continue;
+    let v = await dbGet(k);
+    if (v instanceof ArrayBuffer) v = new Uint8Array(v);
+    if (v instanceof Uint8Array && v.length) {
+      entries.push({ name: k, bytes: v, rom: false });
+    }
+  }
+  for (let r of await getRecentRoms()) {
+    if (r?.data instanceof Uint8Array && r.data.length) {
+      entries.push({ name: "rom:" + r.name, bytes: r.data, rom: true });
+    }
+  }
+  return entries;
+};
+
+// Map a Drive file name back to { game, kind }; null for anything a future
+// version might add. Mirrors romsWithSaveData's "-p2" folding.
+const parseDriveFileName = (n) => {
+  if (n.startsWith("rom:")) return { game: n.slice(4), kind: "rom" };
+  if (n.startsWith("state:")) return { game: n.slice(6), kind: "state" };
+  if (n.startsWith("save:")) {
+    let g = n.slice(5);
+    return g.endsWith("-p2")
+      ? { game: g.slice(0, -3), kind: "save2" }
+      : { game: g, kind: "save" };
+  }
+  return null;
+};
+
+const groupDriveFiles = (files) => {
+  let games = new Map();
+  for (let f of files) {
+    let parsed = parseDriveFileName(f.name);
+    if (!parsed) continue;
+    let g = games.get(parsed.game);
+    if (!g) games.set(parsed.game, (g = { game: parsed.game, files: {} }));
+    g.files[parsed.kind] = f;
+  }
+  return [...games.values()].sort((a, b) => a.game.localeCompare(b.game));
+};
+
+// Upload every local save/state (overwrite-always: simplest correct behavior
+// for a prototype) plus any ROM Drive doesn't already hold at the same size.
+const gdriveBackup = async () => {
+  if (gdriveBusy) {
+    showToast("A Drive operation is already running");
+    return;
+  }
+  gdriveBusy = true;
+  try {
+    setGdriveProgress("Checking what's on Drive…");
+    let remote = new Map((await driveListAll()).map((f) => [f.name, f]));
+    let entries = await collectLocalBackupEntries();
+    let uploaded = 0;
+    for (let i = 0; i < entries.length; i++) {
+      let e = entries[i];
+      let existing = remote.get(e.name);
+      if (e.rom && existing && Number(existing.size) === e.bytes.length) continue;
+      setGdriveProgress(
+        `Uploading ${e.name} — ${formatBytes(e.bytes.length)} (${i + 1}/${entries.length})…`,
+      );
+      await driveUploadFile(e.name, e.bytes, existing?.id);
+      uploaded++;
+    }
+    setGdriveProgress("");
+    showToast(uploaded
+      ? `Backed up ${uploaded} file${uploaded === 1 ? "" : "s"} to Drive`
+      : "Everything is already on Drive");
+  } catch (e) {
+    setGdriveProgress("");
+    showToast("Backup failed: " + e.message);
+  } finally {
+    gdriveBusy = false;
+  }
+};
+
+// Pull one game's files down. Saves/states overwrite local (behind the
+// two-step confirm on the Restore button); the ROM goes through the normal
+// addRecentRom path so it appears in the home grid, skipping the download
+// when an identically-sized copy is already here.
+const gdriveRestoreGame = async (group, btn) => {
+  if (gdriveBusy) {
+    showToast("A Drive operation is already running");
+    btn.disabled = false;
+    btn.disarm();
+    return;
+  }
+  gdriveBusy = true;
+  try {
+    let f = group.files;
+    if (f.save) {
+      setGdriveProgress(`Downloading save for ${group.game}…`);
+      await dbPut("save:" + group.game, await driveDownload(f.save.id));
+    }
+    if (f.save2) {
+      setGdriveProgress(`Downloading P2 save for ${group.game}…`);
+      await dbPut("save:" + group.game + "-p2", await driveDownload(f.save2.id));
+    }
+    if (f.state) {
+      setGdriveProgress(`Downloading save state for ${group.game}…`);
+      await dbPut(stateKey(group.game), await driveDownload(f.state.id));
+    }
+    if (f.rom) {
+      let local = (await getRecentRoms()).find((r) => r.name === group.game);
+      if (!local || local.data.length !== Number(f.rom.size)) {
+        setGdriveProgress(
+          `Downloading ROM (${formatBytes(Number(f.rom.size) || 0)})…`,
+        );
+        await addRecentRom(group.game, await driveDownload(f.rom.id));
+      }
+    }
+    setGdriveProgress("");
+    btn.textContent = "Restored";
+    showToast(`Restored ${group.game} from Drive`);
+    refreshRomsManageList();
+    refreshSavesDeleteList();
+    updateStorageInfo();
+  } catch (e) {
+    setGdriveProgress("");
+    btn.disabled = false;
+    btn.disarm();
+    showToast("Restore failed: " + e.message);
+  } finally {
+    gdriveBusy = false;
+  }
+};
+
+// --- Drive section UI (rendered into #gdrive-body in the roms modal) ---
+
+const gdriveBody = document.getElementById("gdrive-body");
+let gdriveProgressEl = null;
+let gdriveRestoreListEl = null;
+
+const setGdriveProgress = (text) => {
+  if (gdriveProgressEl) gdriveProgressEl.textContent = text;
+};
+
+const makeGdriveButton = (label, ghost, onClick) => {
+  let btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "button button-sm" + (ghost ? " button-ghost" : "");
+  btn.textContent = label;
+  btn.addEventListener("click", onClick);
+  return btn;
+};
+
+const renderGdriveRestoreList = (files) => {
+  if (!gdriveRestoreListEl) return;
+  gdriveRestoreListEl.innerHTML = "";
+  let groups = groupDriveFiles(files);
+  if (groups.length === 0) {
+    let p = document.createElement("p");
+    p.className = "modal-toggle-sub";
+    p.textContent = "Nothing is backed up on Drive yet.";
+    gdriveRestoreListEl.appendChild(p);
+    return;
+  }
+  for (let group of groups) {
+    let row = document.createElement("div");
+    row.className = "roms-manage-row";
+
+    let f = group.files;
+    let parts = [];
+    if (f.rom) parts.push("ROM " + formatBytes(Number(f.rom.size) || 0));
+    if (f.save) parts.push("Save");
+    if (f.save2) parts.push("P2 save");
+    if (f.state) parts.push("State");
+    let newest = Math.max(...Object.values(f).map((x) => Date.parse(x.modifiedTime) || 0));
+    if (newest > 0) parts.push(new Date(newest).toLocaleDateString());
+
+    let name = document.createElement("span");
+    name.className = "gdrive-restore-name";
+    let title = document.createElement("span");
+    title.className = "gdrive-restore-title";
+    title.textContent = group.game;
+    title.title = group.game;
+    let sub = document.createElement("span");
+    sub.className = "gdrive-restore-sub";
+    sub.textContent = parts.join(" · ");
+    name.appendChild(title);
+    name.appendChild(sub);
+    row.appendChild(name);
+
+    let btn;
+    if (isRomLoaded(group.game)) {
+      // Restoring the running game's save would race the autosave flush
+      // (whichever writes last wins) — make the user stop the game first.
+      btn = makeDisabledButton(
+        "In use",
+        "button button-sm roms-manage-btn",
+        "Stop this game before restoring its save from Drive",
+      );
+    } else {
+      btn = makeConfirmButton({
+        label: "Restore",
+        confirmLabel: "Overwrite?",
+        className: "button button-sm roms-manage-btn",
+        onConfirm: () => gdriveRestoreGame(group, btn),
+      });
+    }
+    row.appendChild(btn);
+    gdriveRestoreListEl.appendChild(row);
+  }
+};
+
+const gdriveShowRestoreList = async () => {
+  if (gdriveBusy) {
+    showToast("A Drive operation is already running");
+    return;
+  }
+  gdriveBusy = true;
+  try {
+    setGdriveProgress("Loading what's on Drive…");
+    let files = await driveListAll();
+    setGdriveProgress("");
+    renderGdriveRestoreList(files);
+  } catch (e) {
+    setGdriveProgress("");
+    showToast("Couldn't list Drive: " + e.message);
+  } finally {
+    gdriveBusy = false;
+  }
+};
+
+const gdriveSignOut = () => {
+  if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
+    google.accounts.oauth2.revoke(gdriveToken, () => {});
+  }
+  gdriveToken = null;
+  gdriveEmail = null;
+  renderGdriveSection();
+  showToast("Signed out of Google Drive");
+};
+
+const renderGdriveSection = () => {
+  if (!gdriveBody) return;
+  gdriveBody.innerHTML = "";
+  gdriveProgressEl = null;
+  gdriveRestoreListEl = null;
+
+  if (!GDRIVE_CLIENT_ID) {
+    let p = document.createElement("p");
+    p.className = "modal-toggle-sub";
+    p.textContent =
+      "Drive backup isn't configured in this build (no Google client ID).";
+    gdriveBody.appendChild(p);
+    return;
+  }
+
+  if (!gdriveToken) {
+    let btn = makeGdriveButton("Sign in with Google", false, async () => {
+      btn.disabled = true;
+      try {
+        await gdriveAcquireToken();
+        await gdriveFetchEmail();
+        renderGdriveSection();
+        showToast("Connected to Google Drive");
+      } catch (e) {
+        showToast(e.message);
+        btn.disabled = false;
+      }
+    });
+    gdriveBody.appendChild(btn);
+    return;
+  }
+
+  let status = document.createElement("p");
+  status.className = "gdrive-status";
+  status.textContent = gdriveEmail
+    ? "Connected as " + gdriveEmail
+    : "Connected to Google Drive";
+  gdriveBody.appendChild(status);
+
+  let actions = document.createElement("div");
+  actions.className = "gdrive-actions";
+  actions.appendChild(makeGdriveButton("Back up to Drive", false, gdriveBackup));
+  actions.appendChild(
+    makeGdriveButton("Restore from Drive", false, gdriveShowRestoreList),
+  );
+  actions.appendChild(makeGdriveButton("Sign out", true, gdriveSignOut));
+  gdriveBody.appendChild(actions);
+
+  gdriveProgressEl = document.createElement("p");
+  gdriveProgressEl.className = "gdrive-progress";
+  gdriveBody.appendChild(gdriveProgressEl);
+
+  gdriveRestoreListEl = document.createElement("div");
+  gdriveRestoreListEl.className = "roms-manage-list";
+  gdriveBody.appendChild(gdriveRestoreListEl);
 };
 
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
