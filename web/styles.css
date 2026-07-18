@@ -68,15 +68,9 @@
 
 body {
   margin: 0;
-  /* The app column must fill the real viewport. Sizing a fixed body with
-     viewport units (100vh/100dvh) breaks on iOS: in installed-to-home-screen
-     standalone mode (black-translucent status bar, viewport-fit=cover) WebKit
-     can resolve vh/dvh against a viewport that excludes the status-bar region
-     even though the webview itself covers the full screen — the column came up
-     ~50pt short on an iPhone 13 mini, shrinking the game frame and leaving a
-     dead gap under the touch controls. Anchoring the fixed body to all four
-     edges spans the true fixed-positioning containing block with no viewport
-     units involved. */
+  /* Fill the layout viewport (the fixed-positioning containing block).
+     Correct in browser tabs, where the layout viewport rightly excludes
+     collapsible browser chrome. See the standalone override below. */
   inset: 0;
   overflow: hidden;
   position: fixed;
@@ -89,6 +83,21 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* iOS installed-to-home-screen (standalone) mode: WebKit treats the status
+   bar like collapsible browser chrome and shorts the layout viewport by its
+   height, top-anchored — device log on an iPhone 13 mini (812pt screen):
+   inner 375x762, vh/svh/dvh 812/762/762, standalone true. The bottom 50pt
+   of the screen went unused: the stage lost height (narrowing the game
+   frame) and a dead band sat under the touch controls. Standalone has no
+   real collapsible chrome, so the large viewport (100vh = the full screen)
+   is the correct, stable height there; top:0 + height wins over the inset
+   bottom. Browser tabs keep the inset sizing above. */
+@media (display-mode: standalone) {
+  body {
+    height: 100vh;
+  }
 }
 
 button {
