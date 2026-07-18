@@ -3760,6 +3760,16 @@ const setInputs = (inputs, down) => {
   for (let id of inputs) routeP1Input(id, down);
 };
 
+// Map each direction input id to the cardinal d-pad cell that visually
+// represents it. A diagonal cell (e.g. up-left "0 2") lights BOTH arms.
+const ARM_CELL_ID = { 0: "up", 1: "down", 2: "left", 3: "right" };
+const setArms = (inputs, on) => {
+  for (let id of inputs) {
+    let cell = document.getElementById(ARM_CELL_ID[id]);
+    if (cell) cell.classList.toggle("arm-active", on);
+  }
+};
+
 // Short haptic tick for touch controls (no-op where unsupported)
 const haptic = () => {
   try { navigator.vibrate?.(8); } catch {}
@@ -3781,10 +3791,11 @@ const dpadTouchStart = (event) => {
   let element = event.target;
   if (currentDpadTouchId == null) {
     currentDpadTouchId = event.targetTouches[0].identifier;
-    if (element.hasAttribute("data-inputs")) {
+    if (element.closest("#dpad") && element.hasAttribute("data-inputs")) {
       currentDpadElement = element;
-      element.classList.add("pressed");
-      setInputs(getInputs(element), true);
+      let inputs = getInputs(element);
+      setArms(inputs, true);
+      setInputs(inputs, true);
       haptic();
     }
   }
@@ -3797,9 +3808,12 @@ const dpadTouchMove = (event) => {
   if (touch != null) {
     let element = document.elementFromPoint(touch.clientX, touch.clientY);
     if (element == currentDpadElement) return;
-    if (element == null) return;
     let oldInputs = getInputs(currentDpadElement);
-    if (element.hasAttribute("data-inputs")) {
+    // Only treat the hit element as a d-pad cell if it's actually inside
+    // #dpad. Face buttons (A/B/L/R/Select/Start) also carry data-inputs, so
+    // sliding onto them must NOT press them. A null element (finger dragged
+    // off-viewport) is likewise treated as "moved off the pad".
+    if (element && element.closest("#dpad") && element.hasAttribute("data-inputs")) {
       let newInputs = getInputs(element);
       for (let id of oldInputs) {
         if (newInputs.includes(id)) continue;
@@ -3809,13 +3823,13 @@ const dpadTouchMove = (event) => {
         if (oldInputs.includes(id)) continue;
         routeP1Input(id, true);
       }
-      currentDpadElement?.classList.remove("pressed");
-      element.classList.add("pressed");
+      setArms(oldInputs, false);
+      setArms(newInputs, true);
       currentDpadElement = element;
       haptic();
     } else {
       setInputs(oldInputs, false);
-      currentDpadElement?.classList.remove("pressed");
+      setArms(oldInputs, false);
       currentDpadElement = null;
     }
   }
@@ -3824,8 +3838,9 @@ const dpadTouchMove = (event) => {
 const dpadTouchEnd = (event) => {
   let touch = getTouch(event.changedTouches, currentDpadTouchId);
   if (touch != null) {
-    setInputs(getInputs(currentDpadElement), false);
-    currentDpadElement?.classList.remove("pressed");
+    let inputs = getInputs(currentDpadElement);
+    setInputs(inputs, false);
+    setArms(inputs, false);
     currentDpadTouchId = null;
     currentDpadElement = null;
   }

@@ -1835,7 +1835,8 @@ body.debug-2p .home-tile-link {
   -webkit-tap-highlight-color: transparent;
 }
 
-.pad-btn.pressed {
+.pad-btn.pressed,
+.pad-btn.arm-active {
   color: var(--accent);
   background: linear-gradient(180deg, #2a2410, #1d1809);
   border-color: rgba(255, 176, 77, 0.55);
@@ -2439,7 +2440,8 @@ body.rollback-mode #save-sep {
     background: none;
     box-shadow: none;
   }
-  .pad-btn.pressed {
+  .pad-btn.pressed,
+  .pad-btn.arm-active {
     color: var(--accent);
     background: none;
     border-color: rgba(255, 176, 77, 0.7);
