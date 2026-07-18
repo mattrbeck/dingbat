@@ -913,7 +913,9 @@ const refreshRomsManageList = async () => {
 //   5. Paste the client ID below. This flow has no client secret.
 // While empty, the modal shows a "not configured" note instead of a
 // sign-in button, and the GIS script is never loaded.
-const GDRIVE_CLIENT_ID = "";
+// The localStorage override lets a dev test a client ID per-origin without
+// committing it: localStorage.setItem("gdrive_client_id", "<id>") + reload.
+const GDRIVE_CLIENT_ID = localStorage.getItem("gdrive_client_id") || "";
 
 // drive.appdata = access to the hidden app folder only (no other Drive
 // files); "email" lets the UI show which account is connected (via the
