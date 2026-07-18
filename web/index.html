@@ -178,7 +178,10 @@
           <div id="home-recent-wrap" hidden>
             <div class="home-recent-head">
               <span class="home-recent-label">Recent</span>
-              <span id="storage-info"></span>
+              <span class="home-recent-meta">
+                <span id="storage-info"></span>
+                <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
+              </span>
             </div>
             <div id="home-recent"></div>
           </div>
@@ -260,6 +263,16 @@
         <p class="modal-hint saves-delete-intro">Wipe a game's stored save (and its save state) to start over from a clean cartridge.</p>
         <p id="saves-delete-empty" class="modal-toggle-sub saves-delete-empty" hidden>No games have stored save data yet.</p>
         <div id="saves-delete-list" class="saves-delete-list"></div>
+      </div>
+    </div>
+
+    <div id="roms-modal" class="modal-overlay">
+      <div class="modal">
+        <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
+        <h3>Manage ROMs and Saves</h3>
+        <p class="modal-hint">Games stored in this browser, most recently played first. Delete a game's save file to start over, or delete everything to also remove the ROM.</p>
+        <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
+        <div id="roms-manage-list" class="roms-manage-list"></div>
       </div>
     </div>
 

@@ -556,6 +556,58 @@ savesModal.addEventListener("click", (e) => {
 const savesDeleteList = document.getElementById("saves-delete-list");
 const savesDeleteEmpty = document.getElementById("saves-delete-empty");
 
+// Two-step inline confirm button (the app has no shared confirm dialog): the
+// first tap arms the button (swaps to "Confirm?" and turns red), a second tap
+// within 3.5s runs onConfirm. Returns the <button>; `disarm()` is exposed so a
+// caller can reset a sibling when another button in the same row is armed.
+const makeConfirmButton = ({
+  label,
+  confirmLabel = "Confirm?",
+  className,
+  onConfirm,
+  onArm,
+}) => {
+  let btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = className;
+  btn.textContent = label;
+  let armed = false;
+  let armTimer = null;
+  const disarm = () => {
+    armed = false;
+    clearTimeout(armTimer);
+    btn.classList.remove("armed");
+    btn.textContent = label;
+  };
+  btn.disarm = disarm;
+  btn.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      btn.classList.add("armed");
+      btn.textContent = confirmLabel;
+      armTimer = setTimeout(disarm, 3500);
+      if (onArm) onArm();
+      return;
+    }
+    clearTimeout(armTimer);
+    btn.disabled = true;
+    await onConfirm();
+  });
+  return btn;
+};
+
+// A greyed-out button used when an action can't be taken right now (e.g. the
+// game is live), mirroring the "In use" pattern in the delete lists.
+const makeDisabledButton = (label, className, title) => {
+  let btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = className;
+  btn.textContent = label;
+  btn.disabled = true;
+  if (title) btn.title = title;
+  return btn;
+};
+
 // Collect the set of ROM identities (original names) that have any save data.
 const romsWithSaveData = async () => {
   let names = new Set();
@@ -603,51 +655,34 @@ const refreshSavesDeleteList = async () => {
 
     let running = linkMode && linkRomEntry && linkRomEntry.name === name;
 
-    let btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "button button-sm saves-delete-btn";
-
+    let btn;
     if (running) {
       // A live 2P link ties up two cores writing this ROM's saves; make the
       // user exit link mode rather than delete underneath it.
-      btn.textContent = "In use";
-      btn.disabled = true;
-      btn.title = "Exit link mode to delete this game's save";
+      btn = makeDisabledButton(
+        "In use",
+        "button button-sm saves-delete-btn",
+        "Exit link mode to delete this game's save",
+      );
     } else {
-      // Two-step inline confirm (the app has no shared confirm component):
-      // first tap arms the button, second tap within a few seconds deletes.
-      let armed = false;
-      let armTimer = null;
-      const disarm = () => {
-        armed = false;
-        clearTimeout(armTimer);
-        btn.classList.remove("armed");
-        btn.textContent = "Delete";
-      };
-      btn.textContent = "Delete";
-      btn.addEventListener("click", async () => {
-        if (!armed) {
-          armed = true;
-          btn.classList.add("armed");
-          btn.textContent = "Confirm?";
-          armTimer = setTimeout(disarm, 3500);
-          return;
-        }
-        clearTimeout(armTimer);
-        btn.disabled = true;
-        await deleteSaveData(name);
-        if (isRomLoaded(name)) {
-          // The loaded game keeps its save in the core's memory and re-flushes
-          // it to the FS .sav (then IndexedDB) every few seconds, which would
-          // silently undo this delete. Wipe the FS copy and reboot the core
-          // with an empty save so the game genuinely starts fresh.
-          resetLoadedGameSave();
-          closeSavesModal();
-          showToast("Save deleted — starting fresh");
-        } else {
-          showToast("Save data deleted");
-          refreshSavesDeleteList();
-        }
+      btn = makeConfirmButton({
+        label: "Delete",
+        className: "button button-sm saves-delete-btn",
+        onConfirm: async () => {
+          await deleteSaveData(name);
+          if (isRomLoaded(name)) {
+            // The loaded game keeps its save in the core's memory and re-flushes
+            // it to the FS .sav (then IndexedDB) every few seconds, which would
+            // silently undo this delete. Wipe the FS copy and reboot the core
+            // with an empty save so the game genuinely starts fresh.
+            resetLoadedGameSave();
+            closeSavesModal();
+            showToast("Save deleted — starting fresh");
+          } else {
+            showToast("Save data deleted");
+            refreshSavesDeleteList();
+          }
+        },
       });
     }
 
@@ -670,6 +705,149 @@ const resetLoadedGameSave = () => {
   currentRomName = null;
   currentOriginalName = null;
   loadRom(romName, originalName);
+};
+
+// --- Manage ROMs and Saves modal (home-screen game library) ---
+// One row per stored game: the recents entries first (most-recently-played
+// order, matching the home grid), then any ROM whose save data outlived its
+// recents entry (evicted past the 20-item cap) so its leftovers can still be
+// cleaned up. Each row offers "Delete Save File" (wipe battery + state + P2
+// save) and "Delete Everything" (that plus removing the ROM from this browser).
+
+const romsModal = document.getElementById("roms-modal");
+const romsManageList = document.getElementById("roms-manage-list");
+const romsManageEmpty = document.getElementById("roms-manage-empty");
+
+const openRomsModal = () => {
+  menuDropdown.hidden = true;
+  romsModal.classList.add("open");
+  refreshRomsManageList();
+  trapFocus(romsModal);
+};
+
+const closeRomsModal = () => {
+  romsModal.classList.remove("open");
+  releaseFocus(romsModal);
+};
+
+document.getElementById("manage-roms").addEventListener("click", openRomsModal);
+document.getElementById("roms-close").addEventListener("click", closeRomsModal);
+romsModal.addEventListener("click", (e) => {
+  if (e.target === romsModal) closeRomsModal();
+});
+
+// Ordered rows for the manage list: recents first (already most-recent-first),
+// then orphaned save-only games sorted by name. { name, inRecent }.
+const romsForManagement = async () => {
+  let recents = await getRecentRoms();
+  let seen = new Set();
+  let rows = [];
+  for (let r of recents) {
+    if (seen.has(r.name)) continue;
+    seen.add(r.name);
+    rows.push({ name: r.name, inRecent: true });
+  }
+  for (let name of await romsWithSaveData()) {
+    if (!seen.has(name)) rows.push({ name, inRecent: false });
+  }
+  return rows;
+};
+
+const refreshRomsManageList = async () => {
+  if (!db) return;
+  let rows = await romsForManagement();
+  romsManageList.innerHTML = "";
+  romsManageEmpty.hidden = rows.length > 0;
+
+  for (let { name, inRecent } of rows) {
+    let row = document.createElement("div");
+    row.className = "roms-manage-row";
+
+    let label = document.createElement("span");
+    label.className = "roms-manage-name";
+    label.textContent = name;
+    label.title = name;
+    row.appendChild(label);
+
+    let actions = document.createElement("div");
+    actions.className = "roms-manage-actions";
+
+    // A live 2P link has two cores writing this ROM's saves; deleting under it
+    // would corrupt state, so both actions are blocked until link mode exits.
+    let linkRunning = linkMode && linkRomEntry && linkRomEntry.name === name;
+    // The single-player game currently in memory. Its save can still be wiped
+    // (we reboot it clean), but the ROM itself can't be pulled out from under a
+    // running core — there's no "unload to home" path — so full removal waits.
+    let loaded = isRomLoaded(name);
+
+    // Buttons in a row coordinate: arming one disarms any other still armed.
+    let siblings = [];
+    const disarmOthers = (except) => {
+      for (let b of siblings) if (b !== except && b.disarm) b.disarm();
+    };
+
+    let saveBtn;
+    if (linkRunning) {
+      saveBtn = makeDisabledButton(
+        "Delete Save File",
+        "button button-sm roms-manage-btn",
+        "Exit link mode to delete this game's save",
+      );
+    } else {
+      saveBtn = makeConfirmButton({
+        label: "Delete Save File",
+        className: "button button-sm roms-manage-btn",
+        onArm: () => disarmOthers(saveBtn),
+        onConfirm: async () => {
+          await deleteSaveData(name);
+          if (isRomLoaded(name)) {
+            // Reboot the loaded game clean, else its in-memory save re-flushes.
+            resetLoadedGameSave();
+            closeRomsModal();
+            showToast("Save deleted — starting fresh");
+          } else {
+            showToast("Save data deleted");
+            refreshRomsManageList();
+            refreshSavesDeleteList();
+            updateStorageInfo();
+          }
+        },
+      });
+    }
+    siblings.push(saveBtn);
+
+    let allBtn;
+    if (linkRunning || loaded) {
+      allBtn = makeDisabledButton(
+        "Delete Everything",
+        "button button-sm roms-manage-btn roms-manage-danger",
+        linkRunning
+          ? "Exit link mode to remove this game"
+          : "You're playing this game — stop it before removing the ROM",
+      );
+    } else {
+      allBtn = makeConfirmButton({
+        label: "Delete Everything",
+        className: "button button-sm roms-manage-btn roms-manage-danger",
+        onArm: () => disarmOthers(allBtn),
+        onConfirm: async () => {
+          await deleteSaveData(name);
+          if (inRecent) await deleteRecent(name); // also refreshes home grid
+          showToast("Removed from this browser");
+          refreshRomsManageList();
+          refreshSavesDeleteList();
+          refreshHomeRecent();
+          updateStorageInfo();
+        },
+      });
+    }
+    siblings.push(allBtn);
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(allBtn);
+    row.appendChild(actions);
+    romsManageList.appendChild(row);
+  }
 };
 
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
@@ -899,6 +1077,7 @@ document.addEventListener("keydown", (e) => {
       closeSettingsModal();
     }
     closeSavesModal();
+    closeRomsModal();
     closeUpdateModal();
   }
 });

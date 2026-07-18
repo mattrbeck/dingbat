@@ -806,10 +806,32 @@ body.has-game #home-resume {
   color: var(--text-faint);
 }
 
+.home-recent-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 #storage-info {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
+}
+
+.home-manage-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-faint);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.home-manage-link:hover {
+  color: var(--text);
 }
 
 #home-recent {
@@ -1549,6 +1571,58 @@ body.debug-2p .home-tile-link {
 }
 
 .saves-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Manage ROMs and Saves modal — one row per stored game, two actions each */
+.roms-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.roms-manage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.roms-manage-name {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.roms-manage-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.roms-manage-btn {
+  flex: 0 0 auto;
+}
+
+.roms-manage-btn.armed {
+  color: var(--accent-ink);
+  background: linear-gradient(180deg, #ff9b9b, var(--danger));
+  border-color: rgba(255, 107, 107, 0.6);
+  font-weight: 600;
+}
+
+.roms-manage-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
