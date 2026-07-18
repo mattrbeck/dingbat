@@ -1503,6 +1503,56 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
+/* Delete save data section (Manage Saves modal) */
+.saves-delete-intro {
+  color: var(--text-faint);
+}
+
+.saves-delete-empty {
+  margin: 0;
+}
+
+.saves-delete-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saves-delete-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.saves-delete-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.saves-delete-btn {
+  flex: 0 0 auto;
+}
+
+.saves-delete-btn.armed {
+  color: var(--accent-ink);
+  background: linear-gradient(180deg, #ff9b9b, var(--danger));
+  border-color: rgba(255, 107, 107, 0.6);
+  font-weight: 600;
+}
+
+.saves-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .modal-actions {
   display: flex;
   gap: 9px;
@@ -2445,7 +2495,13 @@ body.net-mode #load-state,
 body.net-mode #saves-modal .modal-toggle-row:has(#export-state),
 body.net-mode #saves-modal .modal-toggle-row:has(#import-state),
 body.net-mode #saves-modal .modal-toggle-row:has(#load-save),
-body.net-mode #saves-modal .modal-subhead.no-rule {
+body.net-mode #saves-modal .modal-subhead.no-rule,
+/* Hide the whole "Delete save data" section online: wiping the live game's
+   save mid-session would desync the pair. */
+body.net-mode #saves-modal .modal-subhead:has(+ .saves-delete-intro),
+body.net-mode #saves-modal .saves-delete-intro,
+body.net-mode #saves-modal .saves-delete-empty,
+body.net-mode #saves-modal .saves-delete-list {
   display: none !important;
 }
 

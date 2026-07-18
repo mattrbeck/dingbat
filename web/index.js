@@ -320,6 +320,13 @@ const dbDelete = (key) => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
+const dbKeys = () => new Promise((resolve, reject) => {
+  let tx = db.transaction("blobs", "readonly");
+  let req = tx.objectStore("blobs").getAllKeys();
+  req.onsuccess = () => resolve(req.result || []);
+  req.onerror = () => reject(req.error);
+});
+
 // Migrate localStorage data to IndexedDB on first run
 const migrateFromLocalStorage = async () => {
   const decodeBase64 = (b64) => {
@@ -523,6 +530,7 @@ const savesModal = document.getElementById("saves-modal");
 const openSavesModal = () => {
   menuDropdown.hidden = true;
   savesModal.classList.add("open");
+  refreshSavesDeleteList();
   trapFocus(savesModal);
 };
 
@@ -537,6 +545,132 @@ document.getElementById("saves-close").addEventListener("click", closeSavesModal
 savesModal.addEventListener("click", (e) => {
   if (e.target === savesModal) closeSavesModal();
 });
+
+// --- Delete save data (per-ROM) ---
+// Every game with stored save data gets a row here. "Save data" for a ROM
+// is spread across the "blobs" store under keys derived from its original
+// file name: "save:<name>" (battery), "state:<name>" (the single save-state
+// slot), and "save:<name>-p2" (the 2P-link partner's battery). Deleting a
+// game wipes all three so it truly boots as a fresh cartridge.
+
+const savesDeleteList = document.getElementById("saves-delete-list");
+const savesDeleteEmpty = document.getElementById("saves-delete-empty");
+
+// Collect the set of ROM identities (original names) that have any save data.
+const romsWithSaveData = async () => {
+  let names = new Set();
+  for (let k of await dbKeys()) {
+    if (typeof k !== "string") continue;
+    if (k.startsWith("save:")) {
+      let n = k.slice(5);
+      if (n.endsWith("-p2")) n = n.slice(0, -3); // fold P2 link save into base
+      names.add(n);
+    } else if (k.startsWith("state:")) {
+      names.add(k.slice(6));
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+};
+
+// True when this ROM is the game currently held in memory (running or paused
+// at the home screen) — deleting its stored save would just be re-persisted
+// by the next autosave flush, so this case needs special handling.
+const isRomLoaded = (name) =>
+  (!!currentOriginalName && currentOriginalName === name) ||
+  (linkMode && !!linkRomEntry && linkRomEntry.name === name);
+
+// Remove all stored save data for one ROM.
+const deleteSaveData = async (name) => {
+  await dbDelete("save:" + name);
+  await dbDelete("save:" + name + "-p2");
+  await dbDelete(stateKey(name));
+};
+
+const refreshSavesDeleteList = async () => {
+  if (!db) return;
+  let names = await romsWithSaveData();
+  savesDeleteList.innerHTML = "";
+  savesDeleteEmpty.hidden = names.length > 0;
+  for (let name of names) {
+    let row = document.createElement("div");
+    row.className = "saves-delete-row";
+
+    let label = document.createElement("span");
+    label.className = "saves-delete-name";
+    label.textContent = name;
+    label.title = name;
+    row.appendChild(label);
+
+    let running = linkMode && linkRomEntry && linkRomEntry.name === name;
+
+    let btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "button button-sm saves-delete-btn";
+
+    if (running) {
+      // A live 2P link ties up two cores writing this ROM's saves; make the
+      // user exit link mode rather than delete underneath it.
+      btn.textContent = "In use";
+      btn.disabled = true;
+      btn.title = "Exit link mode to delete this game's save";
+    } else {
+      // Two-step inline confirm (the app has no shared confirm component):
+      // first tap arms the button, second tap within a few seconds deletes.
+      let armed = false;
+      let armTimer = null;
+      const disarm = () => {
+        armed = false;
+        clearTimeout(armTimer);
+        btn.classList.remove("armed");
+        btn.textContent = "Delete";
+      };
+      btn.textContent = "Delete";
+      btn.addEventListener("click", async () => {
+        if (!armed) {
+          armed = true;
+          btn.classList.add("armed");
+          btn.textContent = "Confirm?";
+          armTimer = setTimeout(disarm, 3500);
+          return;
+        }
+        clearTimeout(armTimer);
+        btn.disabled = true;
+        await deleteSaveData(name);
+        if (isRomLoaded(name)) {
+          // The loaded game keeps its save in the core's memory and re-flushes
+          // it to the FS .sav (then IndexedDB) every few seconds, which would
+          // silently undo this delete. Wipe the FS copy and reboot the core
+          // with an empty save so the game genuinely starts fresh.
+          resetLoadedGameSave();
+          closeSavesModal();
+          showToast("Save deleted — starting fresh");
+        } else {
+          showToast("Save data deleted");
+          refreshSavesDeleteList();
+        }
+      });
+    }
+
+    row.appendChild(btn);
+    savesDeleteList.appendChild(row);
+  }
+};
+
+// Reboot the currently-loaded single-player game with no battery save. Called
+// only after its stored save has been removed from IndexedDB.
+const resetLoadedGameSave = () => {
+  if (!currentRomName || !currentOriginalName) return;
+  let romName = currentRomName;
+  let originalName = currentOriginalName;
+  // Drop the in-memory FS .sav so the fresh core doesn't reload it.
+  try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
+  // Null these first so loadRom's "persist previous save" step is skipped —
+  // otherwise it would write the old in-memory save straight back to the key
+  // we just deleted. loadRom then restoreSave()s nothing, booting clean.
+  currentRomName = null;
+  currentOriginalName = null;
+  loadRom(romName, originalName);
+};
 
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
 // JS mirrors of the wasm-side option vars; they take effect the next time a
