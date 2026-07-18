@@ -1771,6 +1771,16 @@ body.debug-2p .home-tile-link {
  */
 
 #controls {
+  /* Portrait vertical budget, shared by the cluster-height clamp below:
+     --ctl-cluster-pref  the cluster row's roomy height when space is plentiful
+     --ctl-cluster-min   how far it may compress before the game frame gives
+                         up width instead (keeps buttons finger-sized)
+     --ctl-fixed         everything in #controls that is NOT the cluster row:
+                         padding 14+16, two 14px row gaps, 46px shoulders,
+                         34px select/start — update if any of those change. */
+  --ctl-cluster-pref: min(54vw, 290px);
+  --ctl-cluster-min: min(37vw, 190px);
+  --ctl-fixed: calc(138px + var(--safe-b));
   flex: 0 0 auto;
   display: none;
   padding: 14px calc(16px + var(--safe-r)) calc(16px + var(--safe-b))
@@ -1832,7 +1842,32 @@ body.debug-2p .home-tile-link {
   /* Explicit height so d-pad/face buttons (sized via container units) have
      vertical room; the grid's 1fr row alone would collapse in an auto-height
      control strip. */
-  height: min(54vw, 290px);
+  height: var(--ctl-cluster-pref);
+}
+
+/* Portrait phones: the cluster row is the only stretchy part of the control
+   strip, so it yields exactly as much height as a FULL-WIDTH game frame needs
+   (100vw / aspect) and no more — first giving up dead slack (buttons are
+   width-capped below the row height), then gently shrinking the buttons down
+   to --ctl-cluster-min. Only when even that floor can't fit the frame does
+   the frame lose width (the JS contain-fit shrinks it inside the stage).
+   #controls itself stays the last flex row, so it always hugs the bottom and
+   any leftover space lands in the stage around the frame, never below the
+   buttons. The (orientation: portrait) guard keeps tall-landscape/tablet
+   layouts on the roomy preferred height. --game-ar-inv is height/width (a
+   multiplier, because calc() division by a var() needs Safari 16.4+);
+   0.6667 = GBA 3:2 fallback. */
+@media (pointer: coarse) and (orientation: portrait) {
+  #main-controls {
+    height: clamp(
+      var(--ctl-cluster-min),
+      calc(
+        100dvh - var(--bar-h) - var(--safe-t) - var(--ctl-fixed) - 100vw *
+          var(--game-ar-inv, 0.6667)
+      ),
+      var(--ctl-cluster-pref)
+    );
+  }
 }
 
 /* D-pad. Sizes are kept below half the row width so a central gutter always
@@ -1941,8 +1976,13 @@ body.debug-2p .home-tile-link {
  * Large controls mode: maximise the d-pad for big fingers. The d-pad grows
  * past half the width while A/B, L/R and Select/Start give up room.
  */
-body.large-controls #main-controls {
-  height: min(64vw, 330px);
+/* Only the budget variables change — the portrait clamp above keeps working
+   (a body.large-controls #main-controls height rule would out-specificity it).
+   --ctl-fixed: padding 14+16, two 14px gaps, 38px shoulders, 28px pills. */
+body.large-controls #controls {
+  --ctl-cluster-pref: min(64vw, 330px);
+  --ctl-cluster-min: min(44vw, 230px);
+  --ctl-fixed: calc(124px + var(--safe-b));
 }
 
 body.large-controls #dpad {
@@ -2174,6 +2214,13 @@ body.running.rollback-mode #rb-disconnect { display: inline-flex; }
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 50px rgba(0, 0, 0, 0.6),
     0 0 60px -20px var(--accent-glow);
+}
+
+/* GB/GBC link modes: the hidden #canvas backing may be stale, so the portrait
+   control-strip clamp gets its aspect from this class instead (JS clears the
+   body inline --game-ar-inv while linked). 0.9 = 144/160. */
+body.link-gb {
+  --game-ar-inv: 0.9;
 }
 
 /* GB/GBC linked pair: 160x144 panels are 10:9, not the GBA's 3:2. */

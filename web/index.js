@@ -1962,6 +1962,20 @@ const updateCanvasScaling = () => {
   if (canvasEl.width > 0 && canvasEl.height > 0) {
     canvasEl.style.setProperty("--game-ar", canvasEl.width / canvasEl.height);
   }
+  // Body-level INVERSE ratio (height/width): the portrait touch layout sizes
+  // the control strip from it (a full-width frame is 100vw * --game-ar-inv;
+  // a multiplier because calc() division by a var() needs Safari 16.4+). Only
+  // meaningful single-core — in link/rollback modes the #canvas backing can be
+  // stale, so drop the inline var and let the stylesheet's body.link-gb /
+  // default fallback drive it instead.
+  if (linkMode || rollbackMode) {
+    document.body.style.removeProperty("--game-ar-inv");
+  } else if (canvasEl.width > 0 && canvasEl.height > 0) {
+    document.body.style.setProperty(
+      "--game-ar-inv",
+      canvasEl.height / canvasEl.width
+    );
+  }
   const ar =
     canvasEl.width > 0 && canvasEl.height > 0
       ? canvasEl.width / canvasEl.height
