@@ -24,14 +24,15 @@ const HOST = '127.0.0.1';
 const PAIRS = parseInt(process.env.PAIRS || '100', 10);
 const RELAY_MSGS = parseInt(process.env.RELAY_MSGS || '2000', 10);
 
-function wsConnect(port) {
+function wsConnect(port, extraHeaders = '') {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, HOST, () => {
       const key = crypto.randomBytes(16).toString('base64');
       socket.write(
         'GET / HTTP/1.1\r\n' + `Host: ${HOST}\r\n` +
         'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
-        `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+        `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n` +
+        extraHeaders + '\r\n');
     });
     socket.on('error', reject);
     socket.setNoDelay(true);
@@ -131,7 +132,12 @@ async function run() {
   const [bin, ...pre] = process.env.SIGNAL_CMD
     ? process.env.SIGNAL_CMD.split(' ') : [process.execPath, SERVER];
   const label = process.env.SIGNAL_CMD || 'node server.js';
-  const server = spawn(bin, [...pre, String(PORT)], { stdio: 'ignore' });
+  // SIGNAL_STATS=1: the bench reads the live-room count off the health page
+  // (static by default). Every client also sends a unique X-Forwarded-For —
+  // honored because the bench connects via localhost — so PAIRS concurrent
+  // pairs model distinct users rather than tripping the per-IP abuse caps.
+  const server = spawn(bin, [...pre, String(PORT)],
+    { stdio: 'ignore', env: { ...process.env, SIGNAL_STATS: '1' } });
   server.on('error', (e) => { console.error('spawn error', e); process.exit(1); });
 
   for (let i = 0; ; i++) {
@@ -148,10 +154,10 @@ async function run() {
   const t0 = Date.now();
   for (let i = 0; i < PAIRS; i++) {
     const code = 'BENCH' + i.toString(36).toUpperCase();
-    const a = await wsConnect(PORT);
+    const a = await wsConnect(PORT, `X-Forwarded-For: 10.${(i >> 8) & 255}.${i & 255}.1\r\n`);
     a.send({ t: 'rendezvous', code });
     if ((await a.next()).t !== 'waiting') relayErrors++;
-    const b = await wsConnect(PORT);
+    const b = await wsConnect(PORT, `X-Forwarded-For: 10.${(i >> 8) & 255}.${i & 255}.2\r\n`);
     b.send({ t: 'rendezvous', code });
     const ap = await a.next(), bp = await b.next();
     if (ap.t !== 'paired' || ap.role !== 'host') relayErrors++;

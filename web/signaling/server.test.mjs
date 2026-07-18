@@ -19,12 +19,13 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(HERE, 'server.js');
 const PORT = 8791; // distinct from the default 8790 so a dev server can coexist
+const PORT2 = 8792; // scratch servers for the abuse-limit scenarios
 const HOST = '127.0.0.1';
 
 // ---------------- minimal WebSocket client ----------------
 // Client frames must be masked (RFC 6455); the server replies unmasked.
 
-function wsConnect(port) {
+function wsConnect(port, extraHeaders = '') {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, HOST, () => {
       const key = crypto.randomBytes(16).toString('base64');
@@ -34,7 +35,8 @@ function wsConnect(port) {
         'Upgrade: websocket\r\n' +
         'Connection: Upgrade\r\n' +
         `Sec-WebSocket-Key: ${key}\r\n` +
-        'Sec-WebSocket-Version: 13\r\n\r\n');
+        'Sec-WebSocket-Version: 13\r\n' +
+        extraHeaders + '\r\n');
     });
     socket.on('error', reject);
 
@@ -80,6 +82,7 @@ function wsConnect(port) {
     };
 
     const markClosed = () => {
+      if (!handshakeDone) reject(new Error('closed before handshake'));
       if (client.isClosed) return;
       client.isClosed = true;
       if (client.onclose) client.onclose();
@@ -169,7 +172,22 @@ async function run() {
   const [bin, ...preArgs] = process.env.SIGNAL_CMD
     ? process.env.SIGNAL_CMD.split(' ')
     : [process.execPath, SERVER];
-  const server = spawn(bin, [...preArgs, String(PORT)], { stdio: 'ignore' });
+
+  // Spawn a server on `port` with extra env, wait for it to listen, run `fn`,
+  // and always kill it. The room-lifecycle scenarios need SIGNAL_STATS=1 so
+  // the health page still reports the live-room count they poll.
+  async function withServer(port, env, fn) {
+    const srv = spawn(bin, [...preArgs, String(port)],
+      { stdio: 'ignore', env: { ...process.env, ...env } });
+    srv.on('error', (e) => { console.error('server spawn error', e); process.exit(1); });
+    for (let i = 0; ; i++) {
+      try { await httpGet(port); break; } catch { if (i > 100) throw new Error('server never came up'); await sleep(50); }
+    }
+    try { await fn(port); } finally { srv.kill(); await sleep(100); }
+  }
+
+  const server = spawn(bin, [...preArgs, String(PORT)],
+    { stdio: 'ignore', env: { ...process.env, SIGNAL_STATS: '1' } });
   server.on('error', (e) => { console.error('server spawn error', e); process.exit(1); });
 
   // Wait for the listener.
@@ -249,6 +267,99 @@ async function run() {
   } finally {
     server.kill();
   }
+
+  // One connect + rendezvous + first reply, then hang up.
+  async function rzAttempt(port, code, headers = '') {
+    const c = await wsConnect(port, headers);
+    c.send({ t: 'rendezvous', code });
+    const m = await c.next();
+    c.close();
+    return m;
+  }
+
+  // 4) Health page is static by default (no live-room count leaked); the
+  //    count only appears under SIGNAL_STATS=1 (what the sections above ran).
+  console.log('health page static without SIGNAL_STATS:');
+  await withServer(PORT2, {}, async (port) => {
+    const body = await httpGet(port);
+    assert(/Connect via WebSocket/.test(body), 'health page still answers');
+    assert(!/live room/.test(body), 'no room count in the default health page');
+  });
+
+  // 5) Per-IP rendezvous rate limit: attempts count before validation, so
+  //    short-code failures burn the window too; the 11th in a minute is cut.
+  console.log('per-IP rendezvous rate limit:');
+  await withServer(PORT2, {}, async (port) => {
+    let shortRejects = 0;
+    for (let i = 0; i < 10; i++) {
+      const m = await rzAttempt(port, 'A'); // too short -> error, but counted
+      if (m.t === 'error' && /too short/.test(m.msg)) shortRejects++;
+    }
+    assert(shortRejects === 10, 'first 10 attempts hit normal validation');
+    const m = await rzAttempt(port, 'A');
+    assert(m.t === 'error' && /too many attempts/.test(m.msg),
+      '11th attempt inside the window is rate-limited');
+  });
+
+  // 6) Per-IP concurrent-connection cap (8): the 9th socket from one IP is
+  //    turned away; a different client IP (via trusted XFF from localhost)
+  //    still gets in.
+  console.log('per-IP connection cap:');
+  await withServer(PORT2, {}, async (port) => {
+    const held = [];
+    for (let i = 0; i < 8; i++) held.push(await wsConnect(port));
+    const ninth = await wsConnect(port);
+    const m = await ninth.next();
+    assert(m.t === 'error' && /too many connections/.test(m.msg),
+      '9th concurrent socket from one IP is rejected');
+    const other = await rzAttempt(port, 'XFF1', 'X-Forwarded-For: 203.0.113.9\r\n');
+    assert(other.t === 'waiting', 'another IP (trusted XFF via localhost) still connects');
+    for (const c of held) c.close();
+    await sleep(250); // let the server observe the closes
+    const again = await rzAttempt(port, 'AGAIN');
+    assert(again.t === 'waiting', 'closing sockets releases the per-IP count');
+  });
+
+  // 7) Per-IP waiting-room cap (4): a 5th unclaimed code from one IP is
+  //    refused; pairing one of the rooms frees a slot.
+  console.log('per-IP waiting-room cap:');
+  await withServer(PORT2, {}, async (port) => {
+    const hosts = [];
+    for (let i = 1; i <= 4; i++) {
+      const c = await wsConnect(port);
+      c.send({ t: 'rendezvous', code: `WAIT${i}` });
+      assert((await c.next()).t === 'waiting', `waiting room ${i} accepted`);
+      hosts.push(c);
+    }
+    const fifth = await rzAttempt(port, 'WAIT5');
+    assert(fifth.t === 'error' && /too many open codes/.test(fifth.msg),
+      '5th unclaimed code from one IP is refused');
+    const guest = await wsConnect(port);
+    guest.send({ t: 'rendezvous', code: 'WAIT1' });
+    assert((await guest.next()).t === 'paired', 'pairing one room still works');
+    const sixth = await wsConnect(port);
+    sixth.send({ t: 'rendezvous', code: 'WAIT6' });
+    assert((await sixth.next()).t === 'waiting', 'pairing freed a waiting slot');
+    sixth.close();
+    guest.close();
+    for (const c of hosts) c.close();
+  });
+
+  // 8) Origin allowlist: only set-and-mismatched Origins are rejected. A
+  //    missing Origin is allowed by design (non-browser clients send none;
+  //    the check is CSWSH protection for browsers). Unset allowlist = allow
+  //    all, which is what every section above already exercised.
+  console.log('origin allowlist:');
+  await withServer(PORT2, { SIGNAL_ALLOWED_ORIGINS: 'https://dingbat.example' }, async (port) => {
+    let rejected = false;
+    try { await wsConnect(port, 'Origin: https://evil.example\r\n'); }
+    catch { rejected = true; }
+    assert(rejected, 'foreign Origin upgrade is rejected');
+    const ok = await rzAttempt(port, 'ORIG1', 'Origin: https://dingbat.example\r\n');
+    assert(ok.t === 'waiting', 'allowlisted Origin connects');
+    const bare = await rzAttempt(port, 'ORIG2');
+    assert(bare.t === 'waiting', 'missing Origin (non-browser client) connects');
+  });
 
   if (failures) { console.error(`\n${failures} assertion(s) failed`); process.exit(1); }
   console.log('\nall signaling room-lifecycle tests passed');

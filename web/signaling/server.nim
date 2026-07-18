@@ -26,6 +26,20 @@
 ## signal` (netplay.js), so a reverse proxy (Caddy/nginx) terminates TLS and
 ## forwards plain ws:// to this process. The path is ignored, so proxying any
 ## path here works.
+##
+## Abuse hardening (all mirrored in server.js — keep the twins in sync):
+##   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are
+##     keyed on the direct peer address, EXCEPT when the direct peer is
+##     localhost (the reverse-proxy case): then the LAST entry of
+##     X-Forwarded-For — the one appended by our trusted local proxy — is used.
+##     Earlier entries are client-supplied and forgeable, so they are ignored.
+##   - SIGNAL_ALLOWED_ORIGINS (comma-separated) rejects WebSocket upgrades whose
+##     Origin header is not listed. Unset = allow all (LAN/dev). A MISSING
+##     Origin is always allowed: non-browser clients don't send one and the
+##     header is trivially forgeable outside a browser anyway — this check is
+##     CSWSH protection for browsers, nothing more.
+##   - The health line is static; SIGNAL_STATS=1 restores the live room count
+##     (used by the test harness; don't set it on a public deployment).
 
 import std/[asyncdispatch, asyncnet, tables, sets, json, strutils, times, os,
             hashes, sha1, base64]
@@ -40,6 +54,12 @@ const
   MaxConns = 2000            # total live sockets; reject the upgrade past this
   MaxRooms = 1000            # total live rooms; reject new-room rendezvous past this
   MinCodeLen = 3             # short enough to say aloud, long enough to not collide
+  # Per-IP quotas: one address must not be able to sweep the code space (codes
+  # are user-chosen and short, so pairing is first-come) or eat the global caps.
+  MaxConnsPerIp = 8          # concurrent live sockets per client IP
+  MaxWaitingPerIp = 4        # unclaimed waiting rooms held per client IP
+  RzWindowSec = 60.0         # rendezvous rate-limit window (fixed window)
+  MaxRzPerWindow = 10        # rendezvous attempts per IP per window
 
 type
   Conn = ref object
@@ -51,6 +71,10 @@ type
     closed: bool
     createdAt: float
     lastRecv: float        # epochTime of the last inbound frame (liveness proof)
+    directIp: string       # the TCP peer address, captured at accept
+    hsXff: string          # X-Forwarded-For header seen during the handshake
+    ip: string             # effective client IP (directIp, or trusted XFF)
+    ipCounted: bool        # true once this conn is counted in ipConns
     # Last frame decoded by readFrame. Kept as fields (not an async tuple return)
     # because a string-bearing tuple returned across `await` miscompiles under
     # Nim's async on this toolchain (use-after-free in the future completion).
@@ -65,9 +89,45 @@ type
 
 proc hash(c: Conn): Hash = hash(cast[pointer](c)) # identity hash for the live-set
 
+type RzWin = tuple[start: float, count: int] # per-IP rendezvous rate window
+
 var
   rooms = initTable[string, Room]()
   conns = initHashSet[Conn]()
+  ipConns = initTable[string, int]()    # ip -> live post-handshake sockets
+  ipWaiting = initTable[string, int]()  # ip -> unclaimed waiting rooms hosted
+  rzWindows = initTable[string, RzWin]() # ip -> rendezvous attempts this window
+
+let statsEnabled = getEnv("SIGNAL_STATS") == "1"
+let allowedOrigins = block:
+  var s = initHashSet[string]()
+  for part in getEnv("SIGNAL_ALLOWED_ORIGINS").split(','):
+    let p = part.strip().toLowerAscii()
+    if p.len > 0: s.incl p
+  s
+
+# ---------------- per-IP bookkeeping ----------------
+
+proc bumpIp(t: var Table[string, int], ip: string) =
+  t[ip] = t.getOrDefault(ip) + 1
+
+proc dropIp(t: var Table[string, int], ip: string) =
+  let n = t.getOrDefault(ip) - 1
+  if n <= 0: t.del(ip) else: t[ip] = n
+
+proc isLocalPeer(ip: string): bool =
+  ip == "127.0.0.1" or ip == "::1" or ip == "::ffff:127.0.0.1"
+
+# The address per-IP limits key on. Behind the production reverse proxy every
+# direct peer is localhost, so honor X-Forwarded-For then — but ONLY then, and
+# only its LAST entry (the one appended by our trusted proxy; earlier entries
+# are client-supplied and would let an attacker dodge the limits).
+proc effectiveIp(c: Conn): string =
+  if c.directIp.len == 0: return "?"
+  if isLocalPeer(c.directIp) and c.hsXff.len > 0:
+    let last = c.hsXff.split(',')[^1].strip()
+    if last.len > 0: return last
+  c.directIp
 
 # Fold a user-typed code to the canonical form both peers must match on.
 proc normalizeCode(raw: string): string =
@@ -158,6 +218,11 @@ proc closeSock(c: Conn) =
   if c.closed: return
   c.closed = true
   conns.excl c
+  # Every disconnect path funnels through here exactly once (the c.closed guard
+  # above), so this is the single place the per-IP socket count is released.
+  if c.ipCounted:
+    c.ipCounted = false
+    dropIp(ipConns, c.ip)
   try: c.sock.close()
   except CatchableError: discard
 
@@ -171,6 +236,8 @@ proc teardown(c: Conn) =
     let room = rooms[c.code]
     if room.host == c or room.guest == c:
       rooms.del(c.code)
+      # A room deleted while still guestless was counted in ipWaiting.
+      if room.guest == nil: dropIp(ipWaiting, room.host.ip)
       let other = if room.host == c: room.guest else: room.host
       if other != nil and not other.closed:
         asyncCheck notifyClosed(other)
@@ -198,6 +265,18 @@ proc onText(c: Conn, text: string) {.async.} =
   if t != "rendezvous":
     await c.fail("expected rendezvous")
     return
+  # Per-IP rendezvous rate limit (counted before any validation): codes are
+  # short and user-chosen, so an attacker sweeping the code space — or racing
+  # a legitimate guest for the peer slot — needs many quick attempts, while
+  # real use is ~one per session.
+  let rzNow = epochTime()
+  var w = rzWindows.getOrDefault(c.ip, (start: rzNow, count: 0))
+  if rzNow - w.start >= RzWindowSec: w = (start: rzNow, count: 0)
+  w.count.inc
+  rzWindows[c.ip] = w
+  if w.count > MaxRzPerWindow:
+    await c.fail("too many attempts — wait a minute and try again")
+    return
   if c.code.len > 0:
     await c.fail("already in a room")
     return
@@ -210,8 +289,12 @@ proc onText(c: Conn, text: string) {.async.} =
     if rooms.len >= MaxRooms:
       await c.fail("server busy — try again shortly")
       return
+    if ipWaiting.getOrDefault(c.ip) >= MaxWaitingPerIp:
+      await c.fail("too many open codes from your address — try again shortly")
+      return
     c.code = code
     rooms[code] = Room(host: c, guest: nil, expireAt: epochTime() + RoomTtl)
+    bumpIp(ipWaiting, c.ip)
     await c.sendText("""{"t":"waiting"}""")
   else:
     var room = rooms[code]
@@ -221,6 +304,7 @@ proc onText(c: Conn, text: string) {.async.} =
       room.guest = c
       room.expireAt = Inf
       rooms[code] = room
+      dropIp(ipWaiting, room.host.ip)  # no longer an unclaimed waiting room
       c.code = code
       c.peer = room.host
       room.host.peer = c
@@ -237,7 +321,7 @@ proc handshake(c: Conn): Future[bool] {.async.} =
     if idx >= 0:
       let head = c.buf[0 ..< idx]
       c.buf = c.buf[idx + 4 .. ^1]
-      var key: string
+      var key, origin: string
       var isWs = false
       for line in head.splitLines():
         let colon = line.find(':')
@@ -245,15 +329,32 @@ proc handshake(c: Conn): Future[bool] {.async.} =
         let name = line[0 ..< colon].strip().toLowerAscii()
         let val = line[colon + 1 .. ^1].strip()
         if name == "sec-websocket-key": key = val
+        elif name == "origin": origin = val
+        elif name == "x-forwarded-for": c.hsXff = val
         elif name == "upgrade" and val.toLowerAscii().contains("websocket"):
           isWs = true
       if key.len == 0 or not isWs:
-        # Not a WebSocket upgrade: answer the health probe and hang up.
-        let body = "dingbat signaling server: " & $rooms.len &
-                   " live room(s). Connect via WebSocket.\n"
+        # Not a WebSocket upgrade: answer the health probe and hang up. The
+        # body is static — a live room count is a (mild) recon gift, so it is
+        # only reported when SIGNAL_STATS=1 (test harness / private ops).
+        let body = if statsEnabled:
+                     "dingbat signaling server: " & $rooms.len &
+                       " live room(s). Connect via WebSocket.\n"
+                   else:
+                     "dingbat signaling server. Connect via WebSocket.\n"
         try:
           await c.sock.send("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" &
             "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+        except CatchableError: discard
+        return false
+      # Optional CSWSH guard: when an allowlist is configured, reject browser
+      # upgrades from foreign origins. A missing Origin is deliberately allowed
+      # (non-browser clients; see the header comment).
+      if allowedOrigins.len > 0 and origin.len > 0 and
+          origin.toLowerAscii() notin allowedOrigins:
+        try:
+          await c.sock.send("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n" &
+            "Connection: close\r\n\r\n")
         except CatchableError: discard
         return false
       let accept = wsAccept(key)
@@ -275,6 +376,16 @@ proc handleClient(c: Conn) {.async.} =
     if not await handshake(c):
       closeSock(c)
       return
+    # Per-IP concurrent-socket cap. Counted only after the handshake (the
+    # effective IP may come from the proxy's X-Forwarded-For header, so it is
+    # not known earlier); pre-handshake sockets are bounded by MaxConns and
+    # the handshake timeout. Released in closeSock, once, on every path.
+    c.ip = c.effectiveIp()
+    if ipConns.getOrDefault(c.ip) >= MaxConnsPerIp:
+      await c.fail("too many connections from your address — try again shortly")
+      return
+    bumpIp(ipConns, c.ip)
+    c.ipCounted = true
     while not c.closed:
       if not await readFrame(c): break
       case c.frOp
@@ -317,8 +428,15 @@ proc reaper() {.async.} =
     for code in expired:
       let host = rooms[code].host
       rooms.del code
+      dropIp(ipWaiting, host.ip)      # expired while guestless -> was counted
       asyncCheck (proc(): Future[void] {.async.} =
         await host.fail("nobody joined — try again"))()
+    # Rate-limit windows older than the window length are dead weight; prune
+    # them here so the table can't grow without bound under an IP-hopping scan.
+    var staleIps: seq[string]
+    for ip, w in rzWindows:
+      if now - w.start >= RzWindowSec: staleIps.add ip
+    for ip in staleIps: rzWindows.del ip
 
 # ---------------- listen loop ----------------
 
@@ -339,8 +457,11 @@ proc serve(port: Port) {.async.} =
       sock.close()                          # shed load rather than grow unbounded
       continue
     sock.setSockOpt(OptNoDelay, true)         # TCP_NODELAY: relay setup promptly
+    var peerIp = ""
+    try: peerIp = sock.getPeerAddr()[0]
+    except CatchableError: discard            # peer already gone; treated as "?"
     let now = epochTime()
-    let c = Conn(sock: sock, createdAt: now, lastRecv: now)
+    let c = Conn(sock: sock, createdAt: now, lastRecv: now, directIp: peerIp)
     asyncCheck handleClient(c)
 
 when isMainModule:

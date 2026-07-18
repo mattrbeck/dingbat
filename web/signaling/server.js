@@ -32,6 +32,20 @@
 // offerer / SIO multi-mode parent). A code is a rendezvous point for exactly
 // two peers; a third using the same code is rejected. Codes are normalized to
 // uppercase alphanumerics and an unclaimed room expires after 10 minutes.
+//
+// Abuse hardening (all mirrored in server.nim — keep the twins in sync):
+//   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are
+//     keyed on the direct peer address, EXCEPT when the direct peer is
+//     localhost (the reverse-proxy case): then the LAST entry of
+//     X-Forwarded-For — the one appended by our trusted local proxy — is used.
+//     Earlier entries are client-supplied and forgeable, so they are ignored.
+//   - SIGNAL_ALLOWED_ORIGINS (comma-separated) rejects WebSocket upgrades whose
+//     Origin header is not listed. Unset = allow all (LAN/dev). A MISSING
+//     Origin is always allowed: non-browser clients don't send one and the
+//     header is trivially forgeable outside a browser anyway — this check is
+//     CSWSH protection for browsers, nothing more.
+//   - The health line is static; SIGNAL_STATS=1 restores the live room count
+//     (used by the test harness; don't set it on a public deployment).
 
 'use strict';
 
@@ -57,6 +71,46 @@ const HANDSHAKE_TIMEOUT_MS = 30 * 1000; // a socket that never sends `rendezvous
 const PING_INTERVAL_MS = 30 * 1000;
 const IDLE_TIMEOUT_MS = 90 * 1000;   // no frame (incl. pong) for this long -> dead, close
 
+// Per-IP quotas: one address must not be able to sweep the code space (codes
+// are user-chosen and short, so pairing is first-come) or eat the global caps.
+const MAX_CONNS_PER_IP = 8;          // concurrent live sockets per client IP
+const MAX_WAITING_PER_IP = 4;        // unclaimed waiting rooms held per client IP
+const RENDEZVOUS_WINDOW_MS = 60 * 1000; // rendezvous rate-limit window (fixed window)
+const MAX_RENDEZVOUS_PER_WINDOW = 10;   // rendezvous attempts per IP per window
+
+const STATS_ENABLED = process.env.SIGNAL_STATS === '1';
+const ALLOWED_ORIGINS = new Set(
+  (process.env.SIGNAL_ALLOWED_ORIGINS || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+
+// ---------------- per-IP bookkeeping ----------------
+
+const ipConns = new Map();   // ip -> live post-handshake sockets
+const ipWaiting = new Map(); // ip -> unclaimed waiting rooms hosted
+const rzWindows = new Map(); // ip -> { start, count } rendezvous attempts
+
+const bumpIp = (m, ip) => m.set(ip, (m.get(ip) || 0) + 1);
+const dropIp = (m, ip) => {
+  const n = (m.get(ip) || 0) - 1;
+  if (n <= 0) m.delete(ip); else m.set(ip, n);
+};
+
+const isLocalPeer = (ip) =>
+  ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+
+// The address per-IP limits key on. Behind the production reverse proxy every
+// direct peer is localhost, so honor X-Forwarded-For then — but ONLY then, and
+// only its LAST entry (the one appended by our trusted proxy; earlier entries
+// are client-supplied and would let an attacker dodge the limits).
+function effectiveIp(direct, xff) {
+  if (!direct) return '?';
+  if (isLocalPeer(direct) && xff) {
+    const last = String(xff).split(',').pop().trim();
+    if (last) return last;
+  }
+  return direct;
+}
+
 // Fold a user-typed code to the canonical form both peers must match on.
 const normalizeCode = (raw) =>
   String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -76,6 +130,8 @@ class WebSock {
     this.fragments = null; // in-progress fragmented message
     this.closed = false;
     this.lastRecv = Date.now(); // any inbound frame (incl. pong) proves liveness
+    this.ip = '?';         // effective client IP (set right after the upgrade)
+    this.ipCounted = false; // true once counted in ipConns
     this.onmessage = null; // (string) => void
     this.onclose = null;   // () => void
     conns.add(this);
@@ -90,6 +146,12 @@ class WebSock {
     if (this.closed) return;
     this.closed = true;
     conns.delete(this);
+    // Every disconnect path funnels through here exactly once (the guard
+    // above), so this is the single place the per-IP socket count is released.
+    if (this.ipCounted) {
+      this.ipCounted = false;
+      dropIp(ipConns, this.ip);
+    }
     this.socket.destroy();
     if (this.onclose) this.onclose();
   }
@@ -213,6 +275,8 @@ function closeRoom(code) {
   const room = rooms.get(code);
   if (!room) return;
   clearTimeout(room.timer);
+  // A room closed while still guestless was counted in ipWaiting.
+  if (!room.guest) dropIp(ipWaiting, room.host.ip);
   rooms.delete(code);
 }
 
@@ -240,12 +304,27 @@ function attach(ws) {
       return;
     }
     if (msg.t === 'rendezvous') {
+      // Per-IP rendezvous rate limit (counted before any validation): codes
+      // are short and user-chosen, so an attacker sweeping the code space —
+      // or racing a legitimate guest for the peer slot — needs many quick
+      // attempts, while real use is ~one per session.
+      const now = Date.now();
+      let w = rzWindows.get(ws.ip);
+      if (!w || now - w.start >= RENDEZVOUS_WINDOW_MS) w = { start: now, count: 0 };
+      w.count++;
+      rzWindows.set(ws.ip, w);
+      if (w.count > MAX_RENDEZVOUS_PER_WINDOW) {
+        return fail(ws, 'too many attempts — wait a minute and try again');
+      }
       if (code) return fail(ws, 'already in a room');
       const c = normalizeCode(msg.code);
       if (c.length < MIN_CODE_LEN) return fail(ws, 'code too short');
       const room = rooms.get(c);
       if (!room) {
         if (rooms.size >= MAX_ROOMS) return fail(ws, 'server busy — try again shortly');
+        if ((ipWaiting.get(ws.ip) || 0) >= MAX_WAITING_PER_IP) {
+          return fail(ws, 'too many open codes from your address — try again shortly');
+        }
         // First to arrive with this code: host it and wait for the peer.
         clearHandshakeTimer();
         code = c;
@@ -258,11 +337,13 @@ function attach(ws) {
             if (r) fail(r.host, 'nobody joined — try again');
           }, ROOM_TTL_MS),
         });
+        bumpIp(ipWaiting, ws.ip);
         send(ws, { t: 'waiting' });
       } else if (!room.guest) {
         // Second arrival: pair as guest. Two peers per code, no more.
         clearHandshakeTimer();
         room.guest = ws;
+        dropIp(ipWaiting, room.host.ip); // no longer an unclaimed waiting room
         clearTimeout(room.timer);
         room.timer = null;
         code = c;
@@ -309,15 +390,27 @@ function attach(ws) {
 
 const server = http.createServer((req, res) => {
   // Health check / friendly hint for anyone poking the port with a browser.
+  // The body is static — a live room count is a (mild) recon gift, so it is
+  // only reported when SIGNAL_STATS=1 (test harness / private ops).
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end(`dingbat signaling server: ${rooms.size} live room(s). ` +
-          'Connect via WebSocket.\n');
+  res.end(STATS_ENABLED
+    ? `dingbat signaling server: ${rooms.size} live room(s). Connect via WebSocket.\n`
+    : 'dingbat signaling server. Connect via WebSocket.\n');
 });
 
 server.on('upgrade', (req, socket, head) => {
   const key = req.headers['sec-websocket-key'];
   if (req.headers.upgrade?.toLowerCase() !== 'websocket' || !key) {
     socket.destroy();
+    return;
+  }
+  // Optional CSWSH guard: when an allowlist is configured, reject browser
+  // upgrades from foreign origins. A missing Origin is deliberately allowed
+  // (non-browser clients; see the header comment).
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.size && origin &&
+      !ALLOWED_ORIGINS.has(String(origin).toLowerCase())) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
     return;
   }
   if (conns.size >= MAX_CONNS) {
@@ -334,6 +427,14 @@ server.on('upgrade', (req, socket, head) => {
     '\r\n');
   socket.setNoDelay(true);
   const ws = new WebSock(socket);
+  // Per-IP concurrent-socket cap, released in _dead(), once, on every path.
+  ws.ip = effectiveIp(socket.remoteAddress, req.headers['x-forwarded-for']);
+  if ((ipConns.get(ws.ip) || 0) >= MAX_CONNS_PER_IP) {
+    fail(ws, 'too many connections from your address — try again shortly');
+    return;
+  }
+  bumpIp(ipConns, ws.ip);
+  ws.ipCounted = true;
   if (head && head.length) ws._ingest(head);
   attach(ws);
 });
@@ -348,6 +449,11 @@ const reaper = setInterval(() => {
     const idle = now - ws.lastRecv;
     if (idle > IDLE_TIMEOUT_MS) ws.close();
     else if (idle > PING_INTERVAL_MS) ws.ping();
+  }
+  // Rate-limit windows older than the window length are dead weight; prune
+  // them here so the map can't grow without bound under an IP-hopping scan.
+  for (const [ip, w] of rzWindows) {
+    if (now - w.start >= RENDEZVOUS_WINDOW_MS) rzWindows.delete(ip);
   }
 }, PING_INTERVAL_MS);
 reaper.unref(); // never keep the process alive just for the sweep
