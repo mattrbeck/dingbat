@@ -79,10 +79,10 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   gb.scheduler.schedule_gb(GB_FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: GbApu; gb: GB) =
-  let c1 = ch1_get_amplitude(apu.channel1)
-  let c2 = ch2_get_amplitude(apu.channel2)
-  let c3 = ch3_get_amplitude(apu.channel3)
-  let c4 = ch4_get_amplitude(apu.channel4)
+  let c1 = if apu.channel_mask[0]: ch1_get_amplitude(apu.channel1) else: 0.0'f32
+  let c2 = if apu.channel_mask[1]: ch2_get_amplitude(apu.channel2) else: 0.0'f32
+  let c3 = if apu.channel_mask[2]: ch3_get_amplitude(apu.channel3) else: 0.0'f32
+  let c4 = if apu.channel_mask[3]: ch4_get_amplitude(apu.channel4) else: 0.0'f32
   let sample_left =
     (float32(apu.left_volume) / 7.0'f32) *
     ((if (apu.nr51 and 0x80) != 0: c4 else: 0.0'f32) +
@@ -143,6 +143,7 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
     sound_enabled: false, buffer_pos: 0,
     frame_sequencer_stage: 0, first_half_of_length_period: false,
     sync: not headless,
+    channel_mask: [true, true, true, true],
     master_volume_factor: 1.0'f32,
   )
   result.buffer   = newSeq[float32](GB_APU_BUFFER_SIZE)

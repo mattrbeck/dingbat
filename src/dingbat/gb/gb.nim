@@ -268,6 +268,7 @@ type
     right_volume*:        uint8
     nr51*:                uint8
     sync*:                bool
+    channel_mask*:        array[4, bool]  # pulse 1/2, wave, noise; true = enabled
     # Master volume as a precomputed factor (1.0 = unity), applied per
     # buffer at the queue point
     master_volume_factor*: float32

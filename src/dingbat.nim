@@ -732,11 +732,19 @@ proc render_imgui() =
                               addr app.cfg.color_correction, true):
           apply_color_correction()
           save_config(app.cfg)
-        if igBeginMenu("Channels", app.emu_kind == ekGBA and app.gba_emu != nil):
-          const ch_names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
-          for ch in 0 .. 5:
-            discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
-                                       addr app.gba_emu.apu.channel_mask[ch], true)
+        let have_gba_ch = app.emu_kind == ekGBA and app.gba_emu != nil
+        let have_gb_ch  = app.emu_kind == ekGB and app.gb_emu != nil
+        if igBeginMenu("Channels", have_gba_ch or have_gb_ch):
+          if have_gba_ch:
+            const ch_names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
+            for ch in 0 .. 5:
+              discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
+                                         addr app.gba_emu.apu.channel_mask[ch], true)
+          elif have_gb_ch:
+            const ch_names = ["Pulse 1", "Pulse 2", "Wave", "Noise"]
+            for ch in 0 .. 3:
+              discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
+                                         addr app.gb_emu.apu.channel_mask[ch], true)
           igEndMenu()
         igSeparator()
         if igBeginMenu("Frame size", true):
@@ -1005,6 +1013,10 @@ proc handle_input() =
           else:
             app.gb_emu.apu.toggle_sync()
             if not app.gb_emu.apu.sync: app.gb_emu.apu.turbo = false
+        elif pressed and sym >= K_1 and sym <= K_4:
+          # Feedback is visible in the Audio/Video > Channels submenu
+          let ch = int(sym) - int(K_1)
+          app.gb_emu.apu.channel_mask[ch] = not app.gb_emu.apu.channel_mask[ch]
 
     of ControllerDeviceAdded:
       # `which` is a device index for the Added event
