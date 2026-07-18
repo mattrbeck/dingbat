@@ -2053,7 +2053,8 @@ body.debug-2p .home-tile-link {
   gap: 6px;
 }
 
-.theme-chip {
+.theme-chip,
+.choice-chip {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2068,15 +2069,34 @@ body.debug-2p .home-tile-link {
   transition: border-color 0.13s, background 0.13s, color 0.13s;
 }
 
-.theme-chip:hover {
+.theme-chip:hover,
+.choice-chip:hover {
   color: var(--text);
   background: var(--surface-2);
 }
 
-.theme-chip.selected {
+.theme-chip.selected,
+.choice-chip.selected {
   color: var(--text);
   border-color: rgba(var(--accent-rgb), 0.55);
   background: rgba(var(--accent-rgb), 0.07);
+}
+
+/* Small chip radiogroups (touch input style / joystick behavior) */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.chip-row .choice-chip {
+  justify-content: center;
+  min-width: 74px;
+}
+
+/* display:flex above would otherwise defeat hiding the joystick-mode row */
+.modal-toggle-row.hidden {
+  display: none;
 }
 
 .theme-swatch {
@@ -2498,6 +2518,91 @@ body.debug-2p .home-tile-link {
   grid-area: 3 / 3;
 }
 
+/*
+ * Joystick (optional replacement for the d-pad, body.joystick-controls).
+ * The #joystick element is the TOUCH REGION — the whole left half of the
+ * control row, so floating mode has generous room to spawn the stick under
+ * the thumb. The visible base ring is --dpad-size (sharing the d-pad's
+ * sizing rules: the large-controls / landscape overrides list #joystick
+ * next to #dpad) and sits centered in the region. Base and knob reuse the
+ * .pad-btn vocabulary so the landscape-translucent, opaque-controls and
+ * light-theme rules apply unchanged; JS moves them with element.style
+ * transforms only (never layout).
+ */
+#joystick {
+  --dpad-size: min(46cqi, 240px, 100cqb);
+  position: relative;
+  width: 50cqi;
+  height: 100%;
+  display: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.joystick-controls #dpad {
+  display: none;
+}
+
+body.joystick-controls #joystick {
+  display: block;
+}
+
+#joystick-base {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--dpad-size);
+  height: var(--dpad-size);
+  margin: calc(var(--dpad-size) / -2) 0 0 calc(var(--dpad-size) / -2);
+  border-radius: 50%;
+}
+
+/* Recessed well in the middle of the base, same trick as #dpad-center::after */
+#joystick-base::after {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+#joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44%;
+  height: 44%;
+  margin: -22% 0 0 -22%;
+  border-radius: 50%;
+  z-index: 1;
+}
+
+/* Directional feedback: a short accent arc on the rim, rotated by JS to the
+   quantized direction currently being sent (0deg = up). */
+#joystick-rim {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: rgba(var(--accent-rgb), 0.85);
+  opacity: 0;
+  transition: opacity 0.1s;
+  filter: drop-shadow(0 0 5px var(--accent-glow));
+  pointer-events: none;
+}
+
+#joystick.active #joystick-rim {
+  opacity: 1;
+}
+
+/* Snap-home animation on release (class added just for the return trip so
+   live tracking stays transition-free) */
+#joystick-base.homing,
+#joystick-knob.homing {
+  transition: transform 0.16s ease-out;
+}
+
 /* A / B face buttons */
 #ab {
   --btn-size: min(calc(46cqi / 2.7), 84px, calc(100cqb / 2.7));
@@ -2549,7 +2654,8 @@ body.large-controls #main-controls {
   height: min(64vw, 330px);
 }
 
-body.large-controls #dpad {
+body.large-controls #dpad,
+body.large-controls #joystick {
   --dpad-size: min(62cqi, 330px, 100cqb);
 }
 
@@ -2608,7 +2714,8 @@ body.large-controls .pad-pill {
     align-items: flex-end;
     padding-bottom: 8px;
   }
-  #dpad {
+  #dpad,
+  #joystick {
     --dpad-size: min(32cqi, 158px, 76cqb);
   }
   #ab {
@@ -2631,7 +2738,8 @@ body.large-controls .pad-pill {
   body.large-controls #main-controls {
     height: 100%;
   }
-  body.large-controls #dpad {
+  body.large-controls #dpad,
+  body.large-controls #joystick {
     --dpad-size: min(40cqi, 210px, 92cqb);
   }
   body.large-controls #ab {
@@ -3006,7 +3114,8 @@ body.rollback-mode #save-sep {
     box-shadow: none;
     color: rgba(var(--text-rgb), 0.5);
   }
-  #dpad > #dpad-center::after {
+  #dpad > #dpad-center::after,
+  #joystick-base::after {
     background: none;
     box-shadow: none;
   }
@@ -3032,7 +3141,8 @@ body.rollback-mode #save-sep {
     box-shadow: none;
     color: var(--text-dim);
   }
-  body.opaque-controls #dpad > #dpad-center::after {
+  body.opaque-controls #dpad > #dpad-center::after,
+  body.opaque-controls #joystick-base::after {
     background: rgba(0, 0, 0, 0.25);
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
   }

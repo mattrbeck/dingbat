@@ -346,6 +346,26 @@
               <span class="switch-track"></span>
             </label>
           </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Touch direction input</span>
+              <span class="modal-toggle-sub">D-pad buttons or an analog-style joystick</span>
+            </div>
+            <div id="control-style-picker" class="chip-row" role="radiogroup" aria-label="Touch direction input">
+              <button type="button" class="choice-chip selected" data-value="dpad" role="radio" aria-checked="true">D-pad</button>
+              <button type="button" class="choice-chip" data-value="joystick" role="radio" aria-checked="false">Joystick</button>
+            </div>
+          </div>
+          <div class="modal-toggle-row hidden" id="joystick-mode-row">
+            <div>
+              <span class="modal-row-label">Joystick behavior</span>
+              <span class="modal-toggle-sub">Fixed stays put; floating follows your thumb</span>
+            </div>
+            <div id="joystick-mode-picker" class="chip-row" role="radiogroup" aria-label="Joystick behavior">
+              <button type="button" class="choice-chip selected" data-value="fixed" role="radio" aria-checked="true">Fixed</button>
+              <button type="button" class="choice-chip" data-value="floating" role="radio" aria-checked="false">Floating</button>
+            </div>
+          </div>
           <div id="kb-section">
             <div class="modal-subhead">Keyboard</div>
             <div class="modal-row">
@@ -557,6 +577,12 @@
           <div id="downleft" data-inputs="1 2"></div>
           <div id="down" class="pad-btn" data-inputs="1"></div>
           <div id="downright" data-inputs="1 3"></div>
+        </div>
+        <div id="joystick">
+          <div id="joystick-base" class="pad-btn">
+            <div id="joystick-rim"></div>
+            <div id="joystick-knob" class="pad-btn"></div>
+          </div>
         </div>
 
         <div id="ab">

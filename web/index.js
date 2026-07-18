@@ -2496,6 +2496,60 @@ const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
 };
 
+// --- Touch direction input: d-pad (default) vs joystick + joystick behavior ---
+// Two IndexedDB keys: "control-style" ("dpad" | "joystick") and
+// "joystick-mode" ("fixed" | "floating"). body.joystick-controls swaps the
+// on-screen d-pad for the joystick; the behavior row only shows while the
+// joystick is selected.
+let controlStyle = "dpad";
+let joystickMode = "fixed";
+const controlStyleChips = Array.from(
+  document.querySelectorAll("#control-style-picker .choice-chip"));
+const joystickModeChips = Array.from(
+  document.querySelectorAll("#joystick-mode-picker .choice-chip"));
+const joystickModeRow = document.getElementById("joystick-mode-row");
+
+const syncChipGroup = (chips, value) => {
+  for (const chip of chips) {
+    const on = chip.dataset.value === value;
+    chip.classList.toggle("selected", on);
+    chip.setAttribute("aria-checked", on ? "true" : "false");
+  }
+};
+
+const applyControlStyle = (style) => {
+  controlStyle = style === "joystick" ? "joystick" : "dpad";
+  document.body.classList.toggle("joystick-controls", controlStyle === "joystick");
+  syncChipGroup(controlStyleChips, controlStyle);
+  joystickModeRow.classList.toggle("hidden", controlStyle !== "joystick");
+  // Swapping styles mid-touch must not leave direction bits stuck down
+  joystickForceRelease();
+};
+
+const applyJoystickMode = (mode) => {
+  joystickMode = mode === "floating" ? "floating" : "fixed";
+  syncChipGroup(joystickModeChips, joystickMode);
+};
+
+controlStyleChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyControlStyle(chip.dataset.value);
+    await dbPut("control-style", controlStyle);
+  })
+);
+
+joystickModeChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyJoystickMode(chip.dataset.value);
+    await dbPut("joystick-mode", joystickMode);
+  })
+);
+
+const loadControlStyleFromStorage = async () => {
+  applyControlStyle(await dbGet("control-style"));
+  applyJoystickMode(await dbGet("joystick-mode"));
+};
+
 // --- Chrome theme (background / buttons / menus color scheme) ---
 // Persisted in localStorage — NOT IndexedDB — so the inline <head> script can
 // apply it synchronously before first paint (no flash of the wrong theme).
@@ -2546,6 +2600,7 @@ themeChips.forEach((chip) =>
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
+  "control-style", "joystick-mode",
 ];
 
 const resetAllSettings = async () => {
@@ -2586,6 +2641,8 @@ const resetAllSettings = async () => {
   // Touch controls
   applyLargeControls(false);
   applyOpaqueControls(false);
+  applyControlStyle("dpad");
+  applyJoystickMode("fixed");
 
   // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
   // theme section: the <head> boot script needs a synchronous read)
@@ -3621,6 +3678,7 @@ var Module = {
     await loadKeybindingsFromStorage();
     await loadLargeControlsFromStorage();
     await loadOpaqueControlsFromStorage();
+    await loadControlStyleFromStorage();
     await loadAudioSettings();
     await loadColorCorrect();
     await loadSystemSettings();
@@ -4127,3 +4185,161 @@ document
     element.addEventListener("touchend", release);
     element.addEventListener("touchcancel", release);
   });
+
+// --- Joystick touch controls (body.joystick-controls swaps out the d-pad) ---
+// The finger's vector from the stick center is quantized to the SAME 8-way
+// carving the gamepad analog path uses (pollGamepads): past a radial
+// deadzone, a direction bit goes down when its normalized axis component
+// exceeds 0.4. At full deflection each cardinal spans ~133 degrees with ~43
+// degree diagonal-overlap windows, so a 45-degree drag reliably presses both
+// bits. Only press/release DELTAS are routed, like the d-pad handlers.
+const JOY_DEADZONE = 0.35;    // radial deadzone, fraction of the base radius
+const JOY_AXIAL = 0.4;        // same axis threshold as GP_DEADZONE
+const JOY_KNOB_TRAVEL = 0.6;  // knob-center clamp, fraction of the radius
+
+const joystickEl = document.getElementById("joystick");
+const joyBaseEl = document.getElementById("joystick-base");
+const joyKnobEl = document.getElementById("joystick-knob");
+const joyRimEl = document.getElementById("joystick-rim");
+
+var joyTouchId = null;
+let joyBits = [false, false, false, false]; // Up / Down / Left / Right
+let joyHome = null;   // base home center {x, y} + radius r (client coords)
+let joyCenter = null; // live stick center — floating mode drags it around
+let joyBounds = null; // clamp box for the floating center (region minus radius)
+
+const joyClampCenter = () => {
+  joyCenter.x = joyBounds.left > joyBounds.right
+    ? (joyBounds.left + joyBounds.right) / 2
+    : Math.min(joyBounds.right, Math.max(joyBounds.left, joyCenter.x));
+  joyCenter.y = joyBounds.top > joyBounds.bottom
+    ? (joyBounds.top + joyBounds.bottom) / 2
+    : Math.min(joyBounds.bottom, Math.max(joyBounds.top, joyCenter.y));
+};
+
+// Route only the bits that changed; haptic + rim/knob feedback on changes.
+const joyApplyBits = (want) => {
+  let changed = false;
+  for (let i = 0; i < 4; i++) {
+    if (want[i] !== joyBits[i]) {
+      routeP1Input(i, want[i]);
+      joyBits[i] = want[i];
+      changed = true;
+    }
+  }
+  const any = joyBits.some(Boolean);
+  joystickEl.classList.toggle("active", any);
+  joyKnobEl.classList.toggle("pressed", any);
+  if (any) {
+    // The rim arc points at the QUANTIZED direction actually being sent
+    // (0deg = up, clockwise), not the raw finger angle.
+    const rx = (joyBits[3] ? 1 : 0) - (joyBits[2] ? 1 : 0);
+    const ry = (joyBits[1] ? 1 : 0) - (joyBits[0] ? 1 : 0);
+    joyRimEl.style.transform =
+      `rotate(${(Math.atan2(rx, -ry) * 180) / Math.PI}deg)`;
+    if (changed) haptic();
+  }
+};
+
+const joyTrack = (cx, cy) => {
+  let dx = cx - joyCenter.x;
+  let dy = cy - joyCenter.y;
+  let mag = Math.hypot(dx, dy);
+  const r = joyHome.r;
+  if (joystickMode === "floating" && mag > r) {
+    // Finger crossed the rim: drag the base along behind it (classic
+    // follow), but never out of the touch region — a runaway base would
+    // slide under Select/Start and the face buttons.
+    const pull = (mag - r) / mag;
+    joyCenter.x += dx * pull;
+    joyCenter.y += dy * pull;
+    joyClampCenter();
+    dx = cx - joyCenter.x;
+    dy = cy - joyCenter.y;
+    mag = Math.hypot(dx, dy);
+  }
+  const want = [false, false, false, false];
+  if (mag > r * JOY_DEADZONE) {
+    const ux = dx / mag;
+    const uy = dy / mag;
+    if (uy < -JOY_AXIAL) want[0] = true;
+    if (uy > JOY_AXIAL) want[1] = true;
+    if (ux < -JOY_AXIAL) want[2] = true;
+    if (ux > JOY_AXIAL) want[3] = true;
+  }
+  // Base rides at its floating offset; knob chases the finger, clamped near
+  // the rim. Transform-only, no layout.
+  joyBaseEl.style.transform =
+    `translate(${joyCenter.x - joyHome.x}px, ${joyCenter.y - joyHome.y}px)`;
+  const lim = r * JOY_KNOB_TRAVEL;
+  const scale = mag > lim ? lim / mag : 1;
+  joyKnobEl.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`;
+  joyApplyBits(want);
+};
+
+const joystickTouchStart = (event) => {
+  event.preventDefault();
+  if (joyTouchId != null) return; // one finger drives the stick, like the d-pad
+  const touch = event.changedTouches[0];
+  joyTouchId = touch.identifier;
+  joyBaseEl.classList.remove("homing");
+  joyKnobEl.classList.remove("homing");
+  // Measure the home geometry from the untranslated base
+  joyBaseEl.style.transform = "";
+  const rect = joyBaseEl.getBoundingClientRect();
+  joyHome = {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+    r: rect.width / 2,
+  };
+  if (joystickMode === "floating") {
+    // The base spawns under the finger, clamped so it stays inside the
+    // (generous) touch region — spawn and follow share the same clamp box.
+    const region = joystickEl.getBoundingClientRect();
+    joyBounds = {
+      left: region.left + joyHome.r,
+      right: region.right - joyHome.r,
+      top: region.top + joyHome.r,
+      bottom: region.bottom - joyHome.r,
+    };
+    joyCenter = { x: touch.clientX, y: touch.clientY };
+    joyClampCenter();
+  } else {
+    joyCenter = { x: joyHome.x, y: joyHome.y };
+  }
+  joyTrack(touch.clientX, touch.clientY);
+};
+
+const joystickTouchMove = (event) => {
+  event.preventDefault();
+  if (joyTouchId == null) return;
+  const touch = getTouch(event.targetTouches, joyTouchId);
+  if (touch != null) joyTrack(touch.clientX, touch.clientY);
+};
+
+// Clear all bits and animate base + knob back home ("homing" enables the
+// transform transition just for the return trip; the next touchstart strips
+// it so live tracking stays transition-free).
+const joystickRelease = () => {
+  joyApplyBits([false, false, false, false]);
+  joyBaseEl.classList.add("homing");
+  joyKnobEl.classList.add("homing");
+  joyBaseEl.style.transform = "";
+  joyKnobEl.style.transform = "";
+  joyTouchId = null;
+};
+
+const joystickTouchEnd = (event) => {
+  if (joyTouchId == null) return;
+  if (getTouch(event.changedTouches, joyTouchId) != null) joystickRelease();
+};
+
+// Safety valve for style/mode switches while a touch is live
+const joystickForceRelease = () => {
+  if (joyTouchId != null) joystickRelease();
+};
+
+joystickEl.addEventListener("touchstart", joystickTouchStart);
+joystickEl.addEventListener("touchmove", joystickTouchMove);
+joystickEl.addEventListener("touchend", joystickTouchEnd);
+joystickEl.addEventListener("touchcancel", joystickTouchEnd);
