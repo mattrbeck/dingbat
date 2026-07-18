@@ -2280,6 +2280,31 @@ const fastForwardButton = document.getElementById("fast-forward");
 const speed2xButton = document.getElementById("speed-2x-btn");
 const rewindButton = document.getElementById("rewind");
 
+// Performance/memory telemetry for the on-page log (diagnosing iOS "slow
+// until force-quit" = wasm JIT demotion under memory pressure). _benchFrames
+// steps the LIVE core without presenting, i.e. it advances the game by n
+// frames — so it must only run right after initFromEmscripten, before any
+// gameplay (it just trims ~1s off the boot intro), and never in link/net/
+// rollback modes (loadRom is the single-core path; benchFrames itself also
+// refuses under an online link). Periodic runs would skip a second of real
+// gameplay, so the 5-minute interval below logs heap size only.
+const wasmHeapBytes = () =>
+  (Module.HEAPU8?.buffer || Module.memory?.buffer)?.byteLength || 0;
+
+const benchReport = (label) => {
+  if (typeof Module === "undefined" || !Module._benchFrames) return;
+  try {
+    const t0 = performance.now();
+    Module._benchFrames(60);
+    const ms = performance.now() - t0;
+    // The benched frames queued ~1s of audio in the wasm buffer; drop it so
+    // the first real pushAudio doesn't schedule a stale backlog.
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+    const mb = Math.round(wasmHeapBytes() / (1024 * 1024));
+    log(`bench (${label}): 60 frames in ${ms.toFixed(0)}ms, heap ${mb}MB`);
+  } catch {}
+};
+
 const loadRom = async (romName, originalName) => {
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
@@ -2305,6 +2330,7 @@ const loadRom = async (romName, originalName) => {
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  benchReport("load");
   updateCanvasScaling();
 };
 
@@ -3074,6 +3100,13 @@ const updateRumble = (timestamp) => {
 var Module = {
   canvas: (() => document.getElementById("canvas"))(),
   onRuntimeInitialized: async () => {
+    // iOS Safari kills (or JIT-demotes) tabs under process memory pressure;
+    // shrink the rewind ring's cap from 64 MB before any core exists — the
+    // ring is created at ROM load (initFromEmscripten), so setting it here
+    // covers every session.
+    if (IS_IOS && Module._setRewindCapBytes) {
+      Module._setRewindCapBytes(16 * 1024 * 1024);
+    }
     await openDB();
     await migrateFromLocalStorage();
     await loadBiosFromStorage();
@@ -3103,6 +3136,14 @@ var Module = {
     // queued lead and drop the rest (see the fastForward branch), keeping FF
     // audio realtime-rate instead of piling into overlapping buffers.
     const FF_MAX_AUDIO_LEAD = 0.15; // seconds of audio allowed queued ahead
+    // Cap on scheduled lead in ALL play modes. Steady state keeps only a few
+    // frames (<100 ms) queued, so a healthy session never comes near this;
+    // it exists for when audioCtx.currentTime stalls while state stays
+    // "running" (iOS route changes / interruptions) — without a cap, one
+    // AudioBufferSourceNode per frame accumulates at 60/s until the tab is
+    // killed. Generous vs FF_MAX_AUDIO_LEAD so 2x/catch-up bursts (which
+    // legitimately schedule a few frames at once) are never clipped.
+    const MAX_AUDIO_LEAD = 0.25;
 
     const initAudio = () => {
       if (audioCtx) return;
@@ -3129,7 +3170,10 @@ var Module = {
     let audioUnlocked = false;
     const resumeAudio = () => {
       initAudio();
-      if (audioCtx.state === "suspended") audioCtx.resume();
+      // Not just "suspended": iOS Safari parks the context in a non-standard
+      // "interrupted" state after phone calls / Siri, which also needs an
+      // explicit resume(). Attempt it for any non-running state.
+      if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
       if (!audioUnlocked) {
         audioUnlocked = true;
         // Play a silent buffer through the AudioContext to fully unlock it
@@ -3162,6 +3206,15 @@ var Module = {
       if (len === 0) return;
       const ptr = Module._getAudioBufferPtr();
       if (!ptr) return;
+      const now = audioCtx.currentTime;
+      if (playTime < now) playTime = now;
+      // Scheduled too far ahead (the audio clock stalled): drop this frame's
+      // samples — same pattern embed.js uses — instead of stacking source
+      // nodes without bound.
+      if (playTime - now > MAX_AUDIO_LEAD) {
+        Module._clearAudioBuffer();
+        return;
+      }
       const stereoSamples = len; // total float32 values (L,R,L,R,...)
       const frames = stereoSamples / 2;
       const buffer = audioCtx.createBuffer(2, frames, SAMPLE_RATE);
@@ -3174,9 +3227,8 @@ var Module = {
         right[i] = heap[i * 2 + 1];
       }
       Module._clearAudioBuffer();
-      // Schedule playback at the correct time
-      const now = audioCtx.currentTime;
-      if (playTime < now) playTime = now;
+      // Schedule playback at the correct time (playTime was clamped to the
+      // current clock above, before the lead-cap check)
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
@@ -3212,6 +3264,15 @@ var Module = {
       frameCount = 0;
     }, 1000);
 
+    // Periodic memory telemetry. The frame bench can't run here (benchReport
+    // explains why: _benchFrames advances the live game), so while a game is
+    // up just track wasm heap growth every 5 minutes.
+    setInterval(() => {
+      if (!currentRomName && !linkMode) return;
+      const mb = Math.round(wasmHeapBytes() / (1024 * 1024));
+      if (mb) log(`heap ${mb}MB`);
+    }, 5 * 60 * 1000);
+
     // Persist save data to IndexedDB every 5 seconds
     setInterval(() => {
       if (linkMode) {
@@ -3232,6 +3293,30 @@ var Module = {
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
       }
+    });
+
+    // iOS Safari frequently skips beforeunload entirely; pagehide is the
+    // reliable end-of-life signal there (it also fires when the page enters
+    // the back/forward cache). Do the same persistence work, and suspend the
+    // AudioContext so a bfcached page doesn't hold the device audio session.
+    // Note the existing visibilitychange listener (top of file) only checks
+    // for updates — nothing else suspends audio, so there's no conflict.
+    window.addEventListener("pagehide", () => {
+      if (netMode && typeof netShutdown === "function") netShutdown();
+      if (linkMode) {
+        persistLinkSaves();
+      } else if (currentRomName && currentOriginalName) {
+        persistSave(currentRomName, currentOriginalName);
+      }
+      if (audioCtx && audioCtx.state === "running") {
+        audioCtx.suspend().catch(() => {});
+      }
+    });
+    // Restored from the back/forward cache (e.persisted) with a game up:
+    // resume the context we suspended in pagehide, else the game comes back
+    // silent. resumeAudio is a no-op beyond resume() once already unlocked.
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted && (currentRomName || linkMode)) resumeAudio();
     });
 
     // "SLEEPING" indicator while the GBA is in Stop mode, shown in place of

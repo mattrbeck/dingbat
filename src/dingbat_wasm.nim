@@ -354,6 +354,16 @@ proc checkInput() =
 # initFromEmscripten (invoked from JS, post-main) creates it instead.
 var rewindHistory: Rewind = nil
 
+# Memory cap for rewind rings created from here on (default REWIND_CAP_BYTES,
+# 64 MB). JS lowers this on memory-constrained platforms (iOS Safari, where
+# process-level pressure gets the wasm JIT demoted) by calling the setter at
+# runtime-init time — before the first ROM load, so every new_rewind() call
+# site (initFromEmscripten, netlink_exit) picks it up.
+var rewindCapBytes: int = REWIND_CAP_BYTES
+
+proc setRewindCapBytes(n: cint) {.exportc.} =
+  if n > 0: rewindCapBytes = int(n)
+
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
@@ -847,7 +857,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
   prevFrame.setLen(0)  # blend history is per-core (and per-resolution)
-  rewindHistory = new_rewind()
+  rewindHistory = new_rewind(rewindCapBytes)
 
 # --- Online link mode (multiplayer phase 3b, web side) ---
 # One local GBA core linked to a remote peer over whatever byte transport
@@ -932,7 +942,7 @@ proc netlink_exit() {.exportc.} =
   if stateGba != nil:
     stateGba.set_sio_driver(NullSioDriver())
     stateGba.storage.write_save()
-  rewindHistory = new_rewind()
+  rewindHistory = new_rewind(rewindCapBytes)
 
 proc netlink_feed(data: pointer; len: cint): cint {.exportc.} =
   ## Ingest wire bytes from the transport (any chunking). A REPLY landing

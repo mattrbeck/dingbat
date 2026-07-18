@@ -263,7 +263,10 @@ var Module = {
     let audioUnlocked = false;
     const resumeAudio = () => {
       initAudio();
-      if (audioCtx.state === "suspended") audioCtx.resume();
+      // Not just "suspended": iOS Safari parks the context in a non-standard
+      // "interrupted" state after phone calls / Siri, which also needs an
+      // explicit resume(). Attempt it for any non-running state.
+      if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
       if (!audioUnlocked) {
         audioUnlocked = true;
         let silentBuf = audioCtx.createBuffer(1, 1, SAMPLE_RATE);
