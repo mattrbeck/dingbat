@@ -10,6 +10,11 @@
       name="viewport"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Stays black-translucent for every chrome theme: it's the only value
+         that lets standalone iOS draw edge-to-edge (safe-area insets), and
+         it's fixed at install time so it can't follow the theme anyway. In
+         the light theme the standalone status-bar text may sit on light
+         chrome; acceptable tradeoff vs. losing edge-to-edge everywhere. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -17,6 +22,22 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="dingbat" />
     <link rel="manifest" href="site.webmanifest" />
+    <meta name="theme-color" content="#0c0e16" />
+    <script>
+      // Apply the persisted chrome theme before first paint so a reload never
+      // flashes the default amber. The tiny bg map keeps the browser-chrome
+      // color (theme-color) in step from the first frame too; index.js later
+      // re-derives it from the live CSS tokens, so the map is only a boot hint.
+      try {
+        var t = localStorage.getItem("dingbat_theme");
+        if (t && t !== "amber") {
+          document.documentElement.setAttribute("data-theme", t);
+          var bg = { black: "#000000", light: "#e2e4ea", indigo: "#131226",
+                     fuchsia: "#1e1020", glacier: "#0d151d", emerald: "#0c1712" }[t];
+          if (bg) document.querySelector('meta[name="theme-color"]').content = bg;
+        }
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" type="text/css" href="styles.css" />
   </head>
 
@@ -474,6 +495,16 @@
               <input type="checkbox" id="ambient-glow-toggle" />
               <span class="switch-track"></span>
             </label>
+          </div>
+          <div class="modal-subhead">App theme</div>
+          <div id="theme-picker" role="radiogroup" aria-label="App theme">
+            <button type="button" class="theme-chip selected" data-theme-name="amber" role="radio" aria-checked="true"><span class="theme-swatch" aria-hidden="true"></span>Amber</button>
+            <button type="button" class="theme-chip" data-theme-name="black" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Pure Black</button>
+            <button type="button" class="theme-chip" data-theme-name="light" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Light</button>
+            <button type="button" class="theme-chip" data-theme-name="indigo" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Indigo</button>
+            <button type="button" class="theme-chip" data-theme-name="fuchsia" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Fuchsia</button>
+            <button type="button" class="theme-chip" data-theme-name="glacier" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Glacier</button>
+            <button type="button" class="theme-chip" data-theme-name="emerald" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Emerald</button>
           </div>
         </div>
         <div class="settings-reset-row">

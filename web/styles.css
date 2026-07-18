@@ -116,6 +116,298 @@
   --safe-r: env(safe-area-inset-right, 0px);
 }
 
+/*
+ * ==========================================================
+ * Chrome themes
+ * Selected in Settings → Video → App theme; persisted to
+ * localStorage ("dingbat_theme") and applied as
+ * <html data-theme="…"> by an inline script in <head> before
+ * first paint. Amber (above) is the default — no attribute.
+ * Each block overrides only the tokens that differ.
+ * ==========================================================
+ */
+
+/* ---- Pure Black: true-#000 OLED chrome, neutral gray surfaces,
+       amber accent kept (classic amber-on-black phosphor) ---- */
+:root[data-theme="black"] {
+  --bg: #000000;
+  --stage: #000000;
+  --surface-1: #0e0e0f;
+  --surface-2: #161617;
+  --surface-3: #202021;
+  --surface-hover: #29292b;
+
+  --stage-rgb: 0, 0, 0;
+  --surface-1-rgb: 14, 14, 15;
+  --text-rgb: 236, 236, 238;
+
+  /* True-black surfaces need slightly stronger hairlines to separate */
+  --border: rgba(var(--hi-rgb), 0.1);
+  --border-2: rgba(var(--hi-rgb), 0.17);
+
+  --text: #ececee;
+  --text-dim: #9c9ca4;
+  --text-faint: #63636b;
+
+  --topbar-top: #101011;
+  --topbar-bottom: #060607;
+  --surface-2-lo: #101011;
+  --stage-top: #000000;
+  --control-strip-top: #050505;
+
+  --accent-tint-top: #221d0c;
+  --btn-active-bottom: #191507;
+  --pad-pressed-bottom: #141104;
+
+  --drop-overlay-bg: rgba(0, 0, 0, 0.85);
+  --net-stall-bg: rgba(10, 8, 4, 0.75);
+}
+
+/* ---- Light: dark-on-light equivalent of the amber chrome.
+       Hairline "highlights" become dark borders; insets stay a soft
+       white bevel (correct on light surfaces); accent deepens to a
+       burnt amber that holds ≥4.5:1 as text on the light surfaces. ---- */
+:root[data-theme="light"] {
+  --bg: #e2e4ea;
+  --stage: #cdd0d9;
+  --surface-1: #eef0f5;
+  --surface-2: #f3f4f8;
+  --surface-3: #fbfcfe;
+  --surface-hover: #ffffff;
+
+  /* --hi-rgb stays white: knobs/thumbs and top-edge bevels remain
+     correct on light surfaces. Borders are overridden to dark. */
+  --accent-rgb: 156, 84, 0;
+  --accent-hi-rgb: 216, 138, 31;
+  --danger-rgb: 207, 63, 63;
+  --text-rgb: 29, 36, 51;
+  --stage-rgb: 205, 208, 217;
+  --surface-1-rgb: 238, 240, 245;
+
+  --border: rgba(24, 32, 52, 0.16);
+  --border-2: rgba(24, 32, 52, 0.28);
+  --inset-hi: rgba(255, 255, 255, 0.85);
+  --inset-lo: rgba(24, 32, 52, 0.16);
+
+  --text: #1d2433;
+  --text-dim: #4d576d;
+  --text-faint: #6d7689;
+
+  --accent: #9c5400;
+  --accent-2: #b76a0a;
+  --accent-hi: #d88a1f;
+  --accent-ink: #ffffff;
+  --accent-deep-ink: #fff7ea;
+  --accent-glow: rgba(var(--accent-rgb), 0.28);
+
+  --live: #22a55b;
+  --danger: #cf3f3f;
+  --danger-hi: #e06060;
+
+  --topbar-top: #f7f8fb;
+  --topbar-bottom: #e9ebf1;
+  --surface-2-lo: #e8eaf1;
+  --stage-top: #d8dbe2;
+  --control-strip-top: #dfe2ea;
+
+  /* Pressed/active fills invert to light amber tints; the accent
+     (#9c5400) stays the icon/label color on top of them. */
+  --accent-tint-top: #ffe7c4;
+  --btn-active-bottom: #ffdca6;
+  --pad-pressed-bottom: #f8d193;
+
+  --drop-overlay-bg: rgba(233, 236, 243, 0.85);
+  --paused-close-bg: rgba(245, 246, 250, 0.82);
+  --paused-close-bg-hover: rgba(255, 236, 236, 0.92);
+  --net-stall-bg: rgba(248, 249, 252, 0.88);
+
+  --log-text: #2a3040;
+  --log-error: #c62828;
+
+  --cart-gba-label-lo: #7a4200;
+
+  --badge-gba-fg: #4f46b8;
+  --badge-gba-bg: rgba(99, 91, 255, 0.14);
+  --badge-gb-fg: #1e7a2e;
+  --badge-gb-bg: rgba(46, 150, 60, 0.15);
+  --badge-gbc-fg: #086f77;
+  --badge-gbc-bg: rgba(20, 160, 170, 0.14);
+}
+
+/* The two white-tint hover fills are invisible on light surfaces */
+:root[data-theme="light"] .button-ghost:hover,
+:root[data-theme="light"] .modal-close:hover {
+  background: rgba(24, 32, 52, 0.07);
+}
+
+/* ---- Indigo: AGB-001 indigo shell, periwinkle accent ---- */
+:root[data-theme="indigo"] {
+  --bg: #131226;
+  --stage: #090818;
+  --surface-1: #1c1b36;
+  --surface-2: #262347;
+  --surface-3: #312d5c;
+  --surface-hover: #3b3670;
+
+  --accent-rgb: 151, 147, 240;
+  --accent-hi-rgb: 198, 196, 249;
+  --text-rgb: 233, 233, 248;
+  --stage-rgb: 9, 8, 24;
+  --surface-1-rgb: 28, 27, 54;
+
+  --text: #e9e9f8;
+  --text-dim: #9d9fc6;
+  --text-faint: #676a94;
+
+  --accent: #9793f0;
+  --accent-2: #b0adf5;
+  --accent-hi: #c6c4f9;
+  --accent-ink: #100e33;
+  --accent-deep-ink: #0b0a24;
+  --accent-glow: rgba(var(--accent-rgb), 0.35);
+
+  --topbar-top: #201e3c;
+  --topbar-bottom: #161430;
+  --surface-2-lo: #1f1d3d;
+  --stage-top: #100f22;
+  --control-strip-top: #121126;
+
+  --accent-tint-top: #232052;
+  --btn-active-bottom: #1b1941;
+  --pad-pressed-bottom: #171536;
+
+  --drop-overlay-bg: rgba(12, 11, 28, 0.82);
+  --net-stall-bg: rgba(14, 12, 34, 0.75);
+
+  --cart-gba-label-lo: #6b66d6;
+}
+
+/* ---- Fuchsia: GBA fuchsia-pink shell, hot pink accent ---- */
+:root[data-theme="fuchsia"] {
+  --bg: #1e1020;
+  --stage: #0e0710;
+  --surface-1: #2a1730;
+  --surface-2: #371e3f;
+  --surface-3: #452753;
+  --surface-hover: #533063;
+
+  --accent-rgb: 255, 123, 197;
+  --accent-hi-rgb: 255, 189, 226;
+  --text-rgb: 244, 233, 244;
+  --stage-rgb: 14, 7, 16;
+  --surface-1-rgb: 42, 23, 48;
+
+  --text: #f4e9f4;
+  --text-dim: #bb9fc0;
+  --text-faint: #83678c;
+
+  --accent: #ff7bc5;
+  --accent-2: #ff9dd4;
+  --accent-hi: #ffbde2;
+  --accent-ink: #32001c;
+  --accent-deep-ink: #1d0011;
+  --accent-glow: rgba(var(--accent-rgb), 0.32);
+
+  --topbar-top: #2e1a35;
+  --topbar-bottom: #221226;
+  --surface-2-lo: #2d1934;
+  --stage-top: #170c19;
+  --control-strip-top: #190d1c;
+
+  --accent-tint-top: #3a1c30;
+  --btn-active-bottom: #2e1526;
+  --pad-pressed-bottom: #281221;
+
+  --drop-overlay-bg: rgba(20, 9, 22, 0.82);
+  --net-stall-bg: rgba(30, 12, 26, 0.75);
+
+  --cart-gba-label-lo: #d64fa0;
+}
+
+/* ---- Glacier: translucent ice-blue GBA shell, cool blue accent ---- */
+:root[data-theme="glacier"] {
+  --bg: #0d151d;
+  --stage: #05090d;
+  --surface-1: #152230;
+  --surface-2: #1d2e40;
+  --surface-3: #273c52;
+  --surface-hover: #314a64;
+
+  --accent-rgb: 103, 209, 240;
+  --accent-hi-rgb: 182, 234, 251;
+  --text-rgb: 232, 240, 247;
+  --stage-rgb: 5, 9, 13;
+  --surface-1-rgb: 21, 34, 48;
+
+  --text: #e8f0f7;
+  --text-dim: #94a9bc;
+  --text-faint: #5d7186;
+
+  --accent: #67d1f0;
+  --accent-2: #8edff7;
+  --accent-hi: #b6eafb;
+  --accent-ink: #04222e;
+  --accent-deep-ink: #021820;
+  --accent-glow: rgba(var(--accent-rgb), 0.3);
+
+  --topbar-top: #1a2836;
+  --topbar-bottom: #121c27;
+  --surface-2-lo: #182634;
+  --stage-top: #0c1218;
+  --control-strip-top: #0e161e;
+
+  --accent-tint-top: #10303e;
+  --btn-active-bottom: #0c2631;
+  --pad-pressed-bottom: #0a212b;
+
+  --drop-overlay-bg: rgba(7, 13, 19, 0.82);
+  --net-stall-bg: rgba(6, 20, 28, 0.75);
+
+  --cart-gba-label-lo: #2fa5c9;
+}
+
+/* ---- Emerald: GB/GBA green family, emerald accent ---- */
+:root[data-theme="emerald"] {
+  --bg: #0c1712;
+  --stage: #040906;
+  --surface-1: #14241b;
+  --surface-2: #1b3024;
+  --surface-3: #253f30;
+  --surface-hover: #2e4e3c;
+
+  --accent-rgb: 78, 224, 138;
+  --accent-hi-rgb: 169, 244, 200;
+  --text-rgb: 232, 244, 236;
+  --stage-rgb: 4, 9, 6;
+  --surface-1-rgb: 20, 36, 27;
+
+  --text: #e8f4ec;
+  --text-dim: #97b3a2;
+  --text-faint: #5f7a6a;
+
+  --accent: #4ee08a;
+  --accent-2: #7cecac;
+  --accent-hi: #a9f4c8;
+  --accent-ink: #03230f;
+  --accent-deep-ink: #021808;
+  --accent-glow: rgba(var(--accent-rgb), 0.28);
+
+  --topbar-top: #182b20;
+  --topbar-bottom: #101d16;
+  --surface-2-lo: #172a1f;
+  --stage-top: #0a130d;
+  --control-strip-top: #0d1810;
+
+  --accent-tint-top: #113425;
+  --btn-active-bottom: #0d281c;
+  --pad-pressed-bottom: #0b2218;
+
+  --drop-overlay-bg: rgba(7, 15, 10, 0.82);
+  --net-stall-bg: rgba(6, 22, 12, 0.75);
+
+  --cart-gba-label-lo: #26b365;
+}
+
 *,
 *::before,
 *::after {
@@ -1751,6 +2043,92 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
+/* App theme picker (Video tab): one chip per chrome theme, with a
+   swatch showing that theme's background + accent. Swatch colors are
+   fixed per chip (they preview a theme, they don't follow the active
+   one), so they're set below rather than derived from tokens. */
+#theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.theme-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.13s, background 0.13s, color 0.13s;
+}
+
+.theme-chip:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.theme-chip.selected {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.07);
+}
+
+.theme-swatch {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--swatch-bg);
+  border: 1px solid var(--border-2);
+}
+
+.theme-swatch::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--swatch-accent);
+}
+
+.theme-chip[data-theme-name="amber"] .theme-swatch {
+  --swatch-bg: #0c0e16;
+  --swatch-accent: #ffb04d;
+}
+.theme-chip[data-theme-name="black"] .theme-swatch {
+  --swatch-bg: #000000;
+  --swatch-accent: #ffb04d;
+}
+.theme-chip[data-theme-name="light"] .theme-swatch {
+  --swatch-bg: #e2e4ea;
+  --swatch-accent: #9c5400;
+}
+.theme-chip[data-theme-name="indigo"] .theme-swatch {
+  --swatch-bg: #131226;
+  --swatch-accent: #9793f0;
+}
+.theme-chip[data-theme-name="fuchsia"] .theme-swatch {
+  --swatch-bg: #1e1020;
+  --swatch-accent: #ff7bc5;
+}
+.theme-chip[data-theme-name="glacier"] .theme-swatch {
+  --swatch-bg: #0d151d;
+  --swatch-accent: #67d1f0;
+}
+.theme-chip[data-theme-name="emerald"] .theme-swatch {
+  --swatch-bg: #0c1712;
+  --swatch-accent: #4ee08a;
+}
+
 .modal-row {
   display: flex;
   align-items: center;
@@ -2686,6 +3064,23 @@ body.rollback-mode #save-sep {
   }
   #select-start {
     gap: 12px;
+  }
+}
+
+/* Light theme, landscape translucent pads: the white outlines above are
+   nearly invisible on the light stage — flip outline/glyph dark. Kept after
+   (and re-asserting) the pressed rules because these selectors outrank them;
+   the opaque-controls opt-out is excluded (its solid look themes correctly). */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn,
+  :root[data-theme="light"] body:not(.opaque-controls) #dpad > #dpad-center {
+    border-color: rgba(24, 32, 52, 0.4);
+    color: rgba(var(--text-rgb), 0.6);
+  }
+  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.pressed,
+  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.arm-active {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.7);
   }
 }
 

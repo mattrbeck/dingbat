@@ -2496,6 +2496,47 @@ const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
 };
 
+// --- Chrome theme (background / buttons / menus color scheme) ---
+// Persisted in localStorage — NOT IndexedDB — so the inline <head> script can
+// apply it synchronously before first paint (no flash of the wrong theme).
+// "amber" is the default and maps to no data-theme attribute at all.
+const THEME_KEY = "dingbat_theme";
+const THEME_NAMES = ["amber", "black", "light", "indigo", "fuchsia", "glacier", "emerald"];
+const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+
+const applyTheme = (name) => {
+  if (!THEME_NAMES.includes(name)) name = "amber";
+  if (name === "amber") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", name);
+  for (const chip of themeChips) {
+    const on = chip.dataset.themeName === name;
+    chip.classList.toggle("selected", on);
+    chip.setAttribute("aria-checked", on ? "true" : "false");
+  }
+  // Browser/PWA chrome color follows the page background. Derived from the
+  // live token so the CSS stays the single source of truth (the inline boot
+  // script's map is only a pre-CSS hint).
+  if (themeColorMeta) {
+    themeColorMeta.content =
+      getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  }
+};
+
+themeChips.forEach((chip) =>
+  chip.addEventListener("click", () => {
+    applyTheme(chip.dataset.themeName);
+    try { localStorage.setItem(THEME_KEY, chip.dataset.themeName); } catch (e) {}
+  })
+);
+
+// Sync the picker + theme-color meta with whatever the boot script applied
+{
+  let storedTheme = "amber";
+  try { storedTheme = localStorage.getItem(THEME_KEY) || "amber"; } catch (e) {}
+  applyTheme(storedTheme);
+}
+
 // --- Reset all settings ---
 // Wipes ONLY the settings keys from IndexedDB — NOT ROMs, saves, states, BIOS,
 // box art, recents, or link saves — then restores every in-memory setting to its
@@ -2545,6 +2586,11 @@ const resetAllSettings = async () => {
   // Touch controls
   applyLargeControls(false);
   applyOpaqueControls(false);
+
+  // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
+  // theme section: the <head> boot script needs a synchronous read)
+  try { localStorage.removeItem(THEME_KEY); } catch (e) {}
+  applyTheme("amber");
 };
 
 const resetSettingsSlot = document.getElementById("reset-settings-slot");
