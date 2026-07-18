@@ -922,10 +922,10 @@ const refreshRomsManageList = async () => {
     // A live 2P link has two cores writing this ROM's saves; deleting under it
     // would corrupt state, so both actions are blocked until link mode exits.
     let linkRunning = linkMode && linkRomEntry && linkRomEntry.name === name;
-    // The single-player game currently in memory. Its save can still be wiped
-    // (we reboot it clean), but the ROM itself can't be pulled out from under a
-    // running core — there's no "unload to home" path — so full removal waits.
-    let loaded = isRomLoaded(name);
+    // The single-player game currently in memory (running or paused at home)
+    // needs no special-casing for "Delete Everything" anymore: its confirm
+    // handler unloads the game first via unloadGame(), which detaches it from
+    // the autosave flush before the stored save is deleted.
 
     // Buttons in a row coordinate: arming one disarms any other still armed.
     let siblings = [];
@@ -964,13 +964,11 @@ const refreshRomsManageList = async () => {
     siblings.push(saveBtn);
 
     let allBtn;
-    if (linkRunning || loaded) {
+    if (linkRunning) {
       allBtn = makeDisabledButton(
         "Delete Everything",
         "button button-sm roms-manage-btn roms-manage-danger",
-        linkRunning
-          ? "Exit link mode to remove this game"
-          : "You're playing this game — stop it before removing the ROM",
+        "Exit link mode to remove this game",
       );
     } else {
       allBtn = makeConfirmButton({
@@ -978,6 +976,17 @@ const refreshRomsManageList = async () => {
         className: "button button-sm roms-manage-btn roms-manage-danger",
         onArm: () => disarmOthers(allBtn),
         onConfirm: async () => {
+          if (isRomLoaded(name)) {
+            // Unload the in-memory game BEFORE deleting: unloadGame nulls
+            // currentRomName/currentOriginalName, which is what the 5s
+            // autosave interval keys on — so the in-memory save can't be
+            // re-flushed over the freshly deleted key. No final flush
+            // (flushSave: false); we are deleting this save on purpose.
+            if (!(await unloadGame({ flushSave: false }))) {
+              showToast("Exit the online session first");
+              return;
+            }
+          }
           await deleteSaveData(name);
           if (inRecent) await deleteRecent(name); // also refreshes home grid
           showToast("Removed from this browser");
@@ -3264,6 +3273,7 @@ const showMainMenu = () => {
   paused = true;
   document.body.classList.add("paused");
   document.body.classList.remove("running");
+  updatePausedCard();
   refreshHomeRecent();
   updateCanvasScaling();
 };
@@ -3280,6 +3290,78 @@ const resumeGame = () => {
 
 document.getElementById("main-menu").addEventListener("click", showMainMenu);
 document.getElementById("home-resume").addEventListener("click", resumeGame);
+
+// --- Paused-game card (home screen) ---
+// A frozen frame of the paused game shown beside Resume, so it's clear which
+// game Resume returns to. Pixels come from the wasm-side presented
+// framebuffer, exactly like the ambient glow sampler — the game canvas is a
+// WebGL context without preserveDrawingBuffer, so reading the canvas itself
+// after pausing yields nothing.
+const homePausedCard = document.getElementById("home-paused");
+const homePausedCanvas = document.getElementById("home-paused-canvas");
+const homePausedName = document.getElementById("home-paused-name");
+
+const updatePausedCard = () => {
+  homePausedCard.hidden = true;
+  // Single-core sessions only (the glow sampler's condition): 2P/online modes
+  // render to their own canvases, not the shared framebuffer.
+  if (!currentRomName || linkMode || rollbackMode || netActive()) return;
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return;
+  const [w, h] = nativeRes(); // GBA 240x160, GB/GBC 160x144
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  homePausedCanvas.width = w;
+  homePausedCanvas.height = h;
+  const ctx = homePausedCanvas.getContext("2d");
+  const img = ctx.createImageData(w, h);
+  img.data.set(heap);
+  // The wasm fb's alpha channel is not meaningful; force opaque (as the glow
+  // sampler does).
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  ctx.putImageData(img, 0, 0);
+  homePausedName.textContent = currentOriginalName;
+  homePausedName.title = currentOriginalName;
+  homePausedCard.hidden = false;
+};
+
+document.getElementById("home-paused-shot").addEventListener("click", resumeGame);
+
+// Close the paused game from the home screen: flush its save once, detach it
+// from every later flush path, and return the home screen to its fresh-boot
+// state. The orphaned core simply stays frozen in wasm memory (`paused` gates
+// the RAF loop, and every unpause path — Resume, Space, the pause button — is
+// gated on a loaded game); the next loadRom re-inits over it, which is the
+// same thing loading a second ROM over a live core has always done.
+// Returns false when there is nothing to unload (or an online/link session is
+// up, which has its own teardown paths).
+const unloadGame = async ({ flushSave = true } = {}) => {
+  if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
+  const romName = currentRomName;
+  const originalName = currentOriginalName;
+  // Detach FIRST: once these are null, the 5s autosave interval and the
+  // beforeunload/pagehide flushes all skip this game, so nothing can
+  // re-persist its save after the single flush below (or after a caller
+  // deletes the stored save).
+  currentRomName = null;
+  currentOriginalName = null;
+  if (flushSave) await persistSave(romName, originalName);
+  // Drop the FS-side .sav so a later load can't pick up battery data that
+  // IndexedDB no longer agrees with.
+  try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
+  paused = true; // keep the orphaned core frozen
+  pauseButton.classList.remove("paused", "active");
+  pauseButton.title = "Pause";
+  document.body.classList.remove("has-game", "running", "paused");
+  homePausedCard.hidden = true;
+  refreshHomeRecent();
+  updateCanvasScaling();
+  return true;
+};
+
+document.getElementById("home-paused-close").addEventListener("click", async () => {
+  if (await unloadGame()) showToast("Game closed — save kept");
+});
 
 // --- Screenshot ---
 // The GBA canvas is a WebGL context without preserveDrawingBuffer, so its

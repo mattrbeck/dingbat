@@ -742,6 +742,99 @@ body.has-game #home-resume {
   display: inline-flex;
 }
 
+/* Paused-game card — frozen frame of the game Resume returns to. Shown only
+   while a game is paused at the home screen (JS toggles [hidden]). */
+#home-paused {
+  position: relative;
+}
+
+#home-paused-shot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s, transform 0.06s;
+}
+
+#home-paused-shot:hover {
+  border-color: var(--border-2);
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+}
+
+#home-paused-shot:active {
+  transform: translateY(1px);
+}
+
+#home-paused-canvas {
+  display: block;
+  width: 192px;
+  height: auto;
+  border-radius: 5px;
+  background: #000;
+  image-rendering: pixelated;
+}
+
+.home-paused-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 192px;
+}
+
+#home-paused-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text);
+}
+
+.home-paused-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: rgba(255, 176, 77, 0.14);
+}
+
+/* Close ("unload") — ends the paused session; all stored data is kept */
+#home-paused-close {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: rgba(10, 10, 12, 0.62);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+#home-paused-close:hover {
+  color: var(--danger);
+  border-color: rgba(255, 107, 107, 0.4);
+  background: rgba(20, 12, 12, 0.8);
+}
+
 #home-brand {
   text-align: center;
 }

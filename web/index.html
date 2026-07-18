@@ -160,6 +160,18 @@
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
         <div id="home-inner">
+          <!-- Paused-game card: frozen frame of the game Resume returns to.
+               JS fills the canvas from the wasm framebuffer on Main Menu. -->
+          <div id="home-paused" hidden>
+            <button type="button" id="home-paused-shot" title="Resume game">
+              <canvas id="home-paused-canvas" width="240" height="160"></canvas>
+              <span class="home-paused-caption">
+                <span id="home-paused-name"></span>
+                <span class="home-paused-hint">Paused</span>
+              </span>
+            </button>
+            <button type="button" id="home-paused-close" title="Close game &mdash; your save is kept" aria-label="Close game">&times;</button>
+          </div>
           <button type="button" id="home-resume">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
             <span>Resume game</span>
