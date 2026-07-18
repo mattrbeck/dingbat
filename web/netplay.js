@@ -96,6 +96,9 @@ const closeNetModal = () => {
 // Open the single shared-code entry modal and stage a pending session. Both
 // players type the SAME code; the signaling server makes whoever arrives first
 // the host. No Host/Join choice — just like plugging in a link cable.
+// True while the connect modal froze the running game (so cancel can thaw it).
+let netFrozeGame = false;
+
 const openNetConnect = async (attach) => {
   if (netMode || net) await netShutdown();
   if (linkMode) await exitLinkMode();
@@ -108,6 +111,18 @@ const openNetConnect = async (attach) => {
   netSetConnecting(false);
   netModal.classList.add("open");
   trapFocus(netModal);
+  // Freeze the running game the moment this modal opens and keep it frozen
+  // through code entry, pairing, and the ROM/state transfer. The modal covers
+  // the emulation frame anyway, and letting the game keep running lets its OWN
+  // single-player link handshake ("Please wait", "Your friend is not ready")
+  // time out before the peer connects. Thawed on cancel (netShutdown) or when
+  // the session starts (launchNetRom / enterRollbackMode via rbStartIfReady).
+  netFrozeGame = !!currentRomName && !paused;
+  if (netFrozeGame) {
+    paused = true;
+    document.body.classList.add("paused");
+    pauseButton.classList.add("paused", "active");
+  }
   // Drop the cursor straight in the field so the code can be typed immediately.
   setTimeout(() => netCodeInput.focus(), 0);
 };
@@ -812,6 +827,7 @@ const rbStartIfReady = () => {
   const rb = net?.rb;
   if (!rb || !rb.inited || !rb.localReady || !rb.remoteReady || net.started) return;
   net.started = true;
+  netFrozeGame = false; // the session unfreezes below; not ours to thaw anymore
   netMode = false; // rollback drives its own RAF branch, not the SIO netStep path
   closeNetModal();
   window.rbSendInput = rbSendInput;
@@ -956,6 +972,7 @@ const launchNetRom = async () => {
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);
+  netFrozeGame = false; // the session takes over the game clock now
   paused = false;
   document.body.classList.remove("paused");
   pauseButton.classList.remove("paused", "active");
@@ -1079,6 +1096,15 @@ const netShutdown = async (opts) => {
   netStallBadge.hidden = true;
   const s = net;
   net = null;
+  // Cancelling the connect modal (or any teardown) thaws the game we froze when
+  // the modal opened — even if the handshake never got as far as creating rb.
+  if (netFrozeGame) {
+    netFrozeGame = false;
+    paused = false;
+    document.body.classList.remove("paused");
+    pauseButton.classList.remove("paused", "active");
+    pauseButton.title = "Pause";
+  }
   if (s?.rb) {
     // We froze the local game during the handshake; always unfreeze on teardown
     // (whether the session ran or the handshake failed).
