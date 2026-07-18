@@ -2502,6 +2502,18 @@ const rewindButton = document.getElementById("rewind");
 const wasmHeapBytes = () =>
   (Module.HEAPU8?.buffer || Module.memory?.buffer)?.byteLength || 0;
 
+// Pure-JS spin (~10-20ms on a healthy phone). Scales with raw CPU speed:
+// if this is slow too, the whole CPU is throttled (Low Power Mode, thermal
+// or low-battery management); if it's normal while the wasm bench is slow,
+// the problem is wasm-specific (JIT demotion / tiering).
+const jsBench = () => {
+  const t0 = performance.now();
+  let x = 0;
+  for (let i = 0; i < 20_000_000; i++) x = (x + i) | 0;
+  if (x === 42) console.log(x); // defeat dead-code elimination
+  return performance.now() - t0;
+};
+
 const benchReport = (label) => {
   if (typeof Module === "undefined" || !Module._benchFrames) return;
   try {
@@ -2512,9 +2524,32 @@ const benchReport = (label) => {
     // the first real pushAudio doesn't schedule a stale backlog.
     if (Module._clearAudioBuffer) Module._clearAudioBuffer();
     const mb = Math.round(wasmHeapBytes() / (1024 * 1024));
-    log(`bench (${label}): 60 frames in ${ms.toFixed(0)}ms, heap ${mb}MB`);
+    log(
+      `bench (${label}): 60 frames in ${ms.toFixed(0)}ms, ` +
+        `js ${jsBench().toFixed(0)}ms, heap ${mb}MB`
+    );
   } catch {}
 };
+
+// Average rAF interval over 20 frames: ~16.7ms on a 60Hz panel; ~33ms means
+// the display loop is halved — Low Power Mode's signature on iOS.
+const rafProbe = () =>
+  new Promise((resolve) => {
+    const times = [];
+    const tick = (t) => {
+      times.push(t);
+      if (times.length < 21) requestAnimationFrame(tick);
+      else resolve((times[20] - times[0]) / 20);
+    };
+    requestAnimationFrame(tick);
+  });
+
+window.addEventListener("load", () =>
+  setTimeout(async () => {
+    const avg = await rafProbe();
+    log(`display: rAF avg ${avg.toFixed(1)}ms (~${Math.round(1000 / avg)}Hz)`);
+  }, 1500)
+);
 
 const loadRom = async (romName, originalName) => {
   // Leaving 2P link mode: flush and persist both players' saves first
