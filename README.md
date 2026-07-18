@@ -84,7 +84,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
     hardware-measured "GBC-Color" model for GB/GBC
 - GB / GBC
   - Accurate sound emulation
-  - Passing 13 of 15 of blargg's [cpu_instrs](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs), [instr_timing](https://github.com/retrio/gb-test-roms/tree/master/instr_timing), and [memory timing](https://github.com/retrio/gb-test-roms/tree/master/mem_timing) ROMs (06-ld r,r and instr_timing still hang)
+  - Passing all of blargg's [cpu_instrs](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs), [instr_timing](https://github.com/retrio/gb-test-roms/tree/master/instr_timing), and [memory timing](https://github.com/retrio/gb-test-roms/tree/master/mem_timing) ROMs
   - Passing [blargg's Game Boy Color sound tests](https://github.com/retrio/gb-test-roms/tree/master/cgb_sound)
   - Passing [mooneye-gb timer tests](https://github.com/Gekkio/mooneye-gb/tree/master/tests/acceptance/timer)
   - PPU draws background, window, and sprites

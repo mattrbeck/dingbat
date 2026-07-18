@@ -520,12 +520,19 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu); cpu.b = cpu.b
     when defined(test_harness):
+      # Mooneye's magic breakpoint: LD B,B ends a test, with the verdict
+      # signalled through the registers — Fibonacci 3/5/8/13/21/34 on pass,
+      # 0x42 in all six registers on failure (test_failure sets exactly
+      # that). Only those two signatures may finish the run: LD B,B is an
+      # ordinary instruction, and e.g. blargg's 06-ld r,r and instr_timing
+      # execute it mid-test with arbitrary register values.
       if gb.test_output != nil:
         if cpu.b == 3 and cpu.c == 5 and cpu.d == 8 and
            cpu.e == 13 and cpu.h == 21 and cpu.l == 34:
           gb.test_output.mooneye_result = 0
           gb.test_output.finished = true
-        else:
+        elif cpu.b == 0x42 and cpu.c == 0x42 and cpu.d == 0x42 and
+             cpu.e == 0x42 and cpu.h == 0x42 and cpu.l == 0x42:
           gb.test_output.mooneye_result = 1
           gb.test_output.finished = true
     4,
