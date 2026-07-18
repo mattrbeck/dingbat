@@ -55,6 +55,11 @@ var frameCount {.exportc.}: cint = 0
 # here, only ever allocated from JS-invoked procs. Full implementation
 # after initFromEmscripten.
 var stateNet: NetCore = nil
+# Input-rollback online sessions (see the phase-3c block further down for how
+# they're driven). Declared here so earlier procs (e.g. wasm_set_turbo, which
+# must reach the live cores) can reference them. Mutually exclusive.
+var stateRollback: RollbackSession = nil
+var stateGbRollback: gbrb.GbRollbackSession = nil
 # Speculative rollback is opt-in for now (proven bit-identical to the blocking
 # path in the native tests, but the interactive Emerald trade is unverified):
 # JS enables it from a ?speculative=1 URL param before netlink_init/attach.
@@ -252,11 +257,20 @@ proc wasm_state_data(): pointer {.exportc.} =
 proc wasm_set_turbo(on: cint) {.exportc.} =
   ## 2x speed: the APU drops every other sample at the queue point, so JS
   ## receives realtime-rate (pitched-up) audio while running double the
-  ## frames per wall-clock second (the JS tick loop halves its frame step)
-  case stateKind
-  of ekGBA: stateGba.apu.turbo = on != 0
-  of ekGB:  stateGb.apu.turbo = on != 0
-  of ekNone: discard
+  ## frames per wall-clock second (the JS tick loop halves its frame step).
+  ## In online rollback the live cores are the session's, not stateGba/stateGb —
+  ## set turbo on those so 2x audio is decimated there too (both peers run 2x in
+  ## lockstep, so this is safe; turbo only affects sample output, not timing).
+  let t = on != 0
+  if stateRollback != nil:
+    for core in stateRollback.link.cores: core.apu.turbo = t
+  elif stateGbRollback != nil:
+    for core in stateGbRollback.link.cores: core.apu.turbo = t
+  else:
+    case stateKind
+    of ekGBA: stateGba.apu.turbo = t
+    of ekGB:  stateGb.apu.turbo = t
+    of ekNone: discard
 
 proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
@@ -544,8 +558,8 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
 # ships the returned frame's input to the peer, and feeds arriving peer inputs
 # via rollback_feed. The RollbackSession predicts + rolls back internally
 # (gba/rollback.nim). Determinism: identical build/ROM/save + deterministic RTC.
-var stateRollback: RollbackSession = nil
-var stateGbRollback: gbrb.GbRollbackSession = nil  # GB/GBC online (mutually exclusive)
+# stateRollback / stateGbRollback are declared up top (near stateNet) so
+# wasm_set_turbo can reach the live cores; rbLocal is this peer's core index.
 var rbLocal = 0
 var rbEpoch: int64 = 0
 

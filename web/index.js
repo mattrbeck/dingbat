@@ -1298,11 +1298,21 @@ var localButtons = 0;
 var rbWasLinked = false;  // the games have actually communicated over the link
 var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
 var rbLastActivity = 0;   // timestamp of the last transfer-count change
+var rbTradedHeavy = false; // a real payload (not just a handshake) has crossed
 // Auto-end this long after the games STOP transferring over the cable (they
-// closed the link — left the Cable Club). A linked game transfers every frame,
-// so any gap this long means the link is genuinely done. Erring long: a late
-// auto-disconnect is harmless (or use the button), an early one interrupts play.
-const RB_IDLE_DISCONNECT_MS = 90000; // GB idles mid-trade (room/menus); be lenient
+// closed the link — left the Cable Club). Two windows, because the two systems
+// chatter very differently:
+//  - Before any real data has crossed we stay lenient. GB Gen 2 sits idle on the
+//    cable while you walk across the Trade Center to the console, so a short
+//    window would fire before trading even starts.
+//  - Once a full trade's worth of bytes has crossed (rbTradedHeavy) we switch to
+//    a responsive window. Both GBA (transfers every frame) and GB (loops back to
+//    the still-linked trade menu, exchanging periodic sync) keep the timer alive
+//    until the players actually leave — so this only fires once the link is truly
+//    done, and then promptly. Erring late is harmless (or use the button).
+const RB_IDLE_DISCONNECT_MS = 90000;        // pre-trade: lenient (GB room/menus)
+const RB_IDLE_DISCONNECT_TRADED_MS = 20000; // post-trade: disconnect soon after leaving
+const RB_HEAVY_TRANSFER_COUNT = 300;        // byte-transfers that mean "real data moved"
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -1966,10 +1976,15 @@ window.enterRollbackMode = () => {
   gpPrev.fill(false);
   rollbackMode = true;
   rbWasLinked = false;
+  rbTradedHeavy = false;
   rbLastTransfers = 0;
   rbLastActivity = performance.now();
   paused = false;
   document.body.classList.remove("paused");
+  // The Link Cable click froze the game and lit the pause button (openNetConnect);
+  // now that the linked session is running, clear that indicator to match.
+  pauseButton.classList.remove("paused", "active");
+  pauseButton.title = "Pause";
   document.body.classList.toggle("link-gb", linkIsGb);
   document.body.classList.add("has-game", "running", "rollback-mode");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
@@ -2488,13 +2503,17 @@ var Module = {
         //    the trade menu — a short window would fire in the middle of a trade.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
+          const idleLimit = rbTradedHeavy
+            ? RB_IDLE_DISCONNECT_TRADED_MS
+            : RB_IDLE_DISCONNECT_MS;
           if (t !== rbLastTransfers) {
             rbLastTransfers = t;
             rbLastActivity = timestamp;
             if (t > 0) rbWasLinked = true;
+            if (t >= RB_HEAVY_TRANSFER_COUNT) rbTradedHeavy = true;
           } else if (document.hidden) {
             rbLastActivity = timestamp; // don't accrue idle time while throttled
-          } else if (rbWasLinked && timestamp - rbLastActivity > RB_IDLE_DISCONNECT_MS) {
+          } else if (rbWasLinked && timestamp - rbLastActivity > idleLimit) {
             rbWasLinked = false;
             if (typeof netShutdown === "function") netShutdown();
             showToast("Link idle — disconnected");
