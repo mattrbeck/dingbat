@@ -39,7 +39,7 @@ No GBA BIOS file is needed. An HLE BIOS is built in and used by default. If you 
 
 ### Link Cable / Multiplayer
 
-The link cable is emulated at three levels: two cores in one process, two dingbat processes over TCP, and online play in the browser using WebRTC with room codes. Online play supports cross-game trading (like Emerald and FireRed) and optional rollback netplay. Two tabs in the same browser can even link without a server. See `docs/link-usage.md` for details.
+The link cable is emulated at three levels: two cores in one process, two dingbat processes over TCP, and online play in the browser using WebRTC with room codes. This covers both GBA link games (Pokémon cross-game trading like Emerald and FireRed, with optional rollback netplay) and GB/GBC link games (Pokémon Gen 1/2 trades). Two tabs in the same browser can even link without a server. See `docs/link-usage.md` for details.
 
 ### Pixel-Accurate GB / GBC Rendering
 
@@ -70,6 +70,9 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Gamepad support
   - Installable as an offline-capable PWA
   - Save states, rewind, and fast forward
+  - Per-ROM save files kept in IndexedDB, with "Manage ROMs & Saves" modals
+  - Home screen with a recently-played grid
+  - Google Drive save/ROM backup (experimental)
   - Online link play with room codes
   - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE
     modes, color correction, integer scaling, scanlines, motion blur
@@ -81,9 +84,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
     hardware-measured "GBC-Color" model for GB/GBC
 - GB / GBC
   - Accurate sound emulation
-  - Passing [blargg's CPU tests](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs)
-  - Passing [blargg's instruction timing tests](https://github.com/retrio/gb-test-roms/tree/master/instr_timing)
-  - Passing [blargg's memory timing tests](https://github.com/retrio/gb-test-roms/tree/master/mem_timing)
+  - Passing 13 of 15 of blargg's [cpu_instrs](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs), [instr_timing](https://github.com/retrio/gb-test-roms/tree/master/instr_timing), and [memory timing](https://github.com/retrio/gb-test-roms/tree/master/mem_timing) ROMs (06-ld r,r and instr_timing still hang)
   - Passing [blargg's Game Boy Color sound tests](https://github.com/retrio/gb-test-roms/tree/master/cgb_sound)
   - Passing [mooneye-gb timer tests](https://github.com/Gekkio/mooneye-gb/tree/master/tests/acceptance/timer)
   - PPU draws background, window, and sprites
@@ -93,6 +94,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - MBC2 cartridges are fully supported
   - MBC3 cartridges are fully supported, including the real-time clock
   - MBC5 cartridges are supported, including the rumble motor
+  - Serial port and link cable (two cores in one process, and online in the browser via input-rollback netplay)
   - Game Boy Color support, including HDMA, double-speed mode, and palettes
 - GBA
   - Accurate sound emulation (both Direct Sound and PSGs)
@@ -110,7 +112,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Timing
     - Cycle-counted bus with waitstates and prefetch
     - DMA channel priority and preemption
-    - Passing the AGS aging cartridge MEMORY and DMA tests
+    - Passing the AGS aging cartridge (all tests except COM, which requires a second multiboot unit)
     - Timers run efficiently on the scheduler
     - Idle-loop detection to skip busy-waits
   - Storage
@@ -126,12 +128,10 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
 
 - GB / GBC
   - MBC1 multicarts
-  - MBC5 rumble
   - Other hardware bugs tested in blargg's test suite
 - GBA
-  - Timing: prefetch model rewrite (in progress)
+  - Timing: prefetch occupancy-model rewrite (scoped, see `docs/prefetch-model-rewrite.md`)
   - Storage: Game database for odd cases (Classic NES, ROMs that misreport things)
-  - RTC: gamepak IRQ
   - Sensor cartridges (tilt, gyro, solar, rumble)
 - Cheats
 - Save state slots
