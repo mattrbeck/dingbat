@@ -298,6 +298,26 @@ body.has-game #save-sep {
   display: block;
 }
 
+/* On phones the in-menu volume row sits just above this sep and is always
+   present, so the sep shows even without a game */
+@media (max-width: 560px) {
+  #save-sep {
+    display: block;
+  }
+}
+
+/* Save State | Load State share one half-width row */
+.menu-split {
+  display: flex;
+  gap: 4px;
+}
+
+.menu-split .menu-item {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
 #pause .ico-play,
 #pause.paused .ico-pause {
   display: none;
@@ -369,8 +389,7 @@ body.running #status {
 /* ...and the in-menu volume slider is only for phones (top bar has one on
    wider screens), so it doesn't duplicate the top-bar slider on desktop. */
 @media (min-width: 561px) {
-  #menu-volume,
-  #menu-volume-sep {
+  #menu-volume {
     display: none;
   }
 }
