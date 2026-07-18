@@ -306,7 +306,21 @@ const logContext = async () => {
   } catch {}
   const sw = navigator.serviceWorker && navigator.serviceWorker.controller
     ? "sw:controlled" : "sw:none";
-  return `dingbat ${version} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${navigator.userAgent}`;
+  // Vibration diagnostic: support + a live test call so real-device haptic
+  // debugging is one log-read away. vibrate(0) cancels any pulse and returns
+  // true when supported AND sticky activation exists (returns/logs a block
+  // otherwise) — the log is opened by a click, so activation is present here
+  // and the return reflects genuine device support. `act` is the page's sticky
+  // activation state; `firstAct` is the event that first granted it (or none).
+  const vibSupported = "vibrate" in navigator;
+  let vibTest = "n/a";
+  if (vibSupported) {
+    try { vibTest = String(navigator.vibrate(0)); } catch { vibTest = "err"; }
+  }
+  const act = navigator.userActivation
+    ? String(navigator.userActivation.hasBeenActive) : "?";
+  const vib = `vibrate:${vibSupported} test:${vibTest} act:${act} firstAct:${firstActivationEvent || "none"}`;
+  return `dingbat ${version} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${vib} | ${navigator.userAgent}`;
 };
 
 showLogButton.addEventListener("click", async () => {
@@ -3657,7 +3671,9 @@ const updateRumble = (timestamp) => {
     } catch {}
   }
   if (touchDevice) {
-    try { navigator.vibrate?.(30); } catch {}
+    // 45 ms (> the 25 ms button tick, < the 50 ms retrigger) reads as a
+    // distinct, near-continuous rumble rather than a light press tick.
+    try { navigator.vibrate?.(45); } catch {}
   }
 };
 
@@ -4086,9 +4102,37 @@ const setArms = (inputs, on) => {
   }
 };
 
-// Short haptic tick for touch controls (no-op where unsupported)
+// --- Vibration / haptic ---
+// navigator.vibrate needs *sticky* user activation in Chromium. Crucially,
+// touchstart does NOT grant activation (only touchend/pointerup/mousedown/
+// keydown / mouse-pointerdown do), yet our in-game buttons fire haptic() from
+// touchstart for input latency. So if the very first interaction on the page
+// is an in-game touchstart (e.g. a PWA launched straight into a game), Chrome
+// drops that first pulse and logs "Blocked call to navigator.vibrate...". Any
+// normal menu/home-screen tap sets the sticky bit before gameplay, so in
+// practice at most one pulse in a rare touch-first flow is ever at risk. We
+// bind a one-time capture-phase listener on the activation-granting events so
+// the sticky bit is established at the earliest gesture, and record which
+// event did it purely so the diagnostic log can confirm, on a real device,
+// that activation existed by the time buttons were pressed.
+let firstActivationEvent = null;
+const noteActivation = (e) => {
+  if (firstActivationEvent) return;
+  firstActivationEvent = e.type;
+  for (const ev of ["touchend", "pointerup", "mousedown", "keydown"])
+    window.removeEventListener(ev, noteActivation, true);
+};
+for (const ev of ["touchend", "pointerup", "mousedown", "keydown"])
+  window.addEventListener(ev, noteActivation, true);
+
+// Short haptic tick for touch controls (no-op where unsupported). 8 ms was
+// below the spin-up threshold of most Android vibration motors, so presses
+// felt dead; ~25 ms is the perceptible floor for a subtle "tick" without
+// reading as a notification buzz. iOS/WebKit never shipped vibrate and Firefox
+// removed it in 129 — the optional-chain + try make those silent no-ops.
+const HAPTIC_MS = 25;
 const haptic = () => {
-  try { navigator.vibrate?.(8); } catch {}
+  try { navigator.vibrate?.(HAPTIC_MS); } catch {}
 };
 
 var currentDpadTouchId = null;
