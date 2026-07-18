@@ -3,7 +3,16 @@
 const
   DMA_START_DELAY = 3
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
-  DMA_DST_MASK = [0x07FFFFFF'u32, 0x07FFFFFF'u32, 0x07FFFFFF'u32, 0x0FFFFFFF'u32]
+  # DAD keeps all 28 bits on every channel. Channels 0-2 cannot drive the
+  # gamepak bus as a destination: such writes are DROPPED at transfer time
+  # (see run_channel), NOT redirected to the 27-bit-masked internal address.
+  # Evidence (mGBA suite, hardware-captured expected values): the Memory
+  # sub-suite's testStoreSRAM does DMA0/1/2 pattern writes to 0x0E000000;
+  # a 27-bit mask would land them at VRAM 0x06000000 (BG1 screen base),
+  # yet the DMA sub-suite's "0 Imm/HBl W -SRAM" and "R+0x10" rows later
+  # observe 0x00000000 there via DMA0's genuinely-27-bit SAD (masked reads
+  # DO hit VRAM: the passing "+SRAM" rows read live text-map data).
+  DMA_DST_MASK = [0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   DMA_LEN_MASK = [0x3FFF'u16,     0x3FFF'u16,     0x3FFF'u16,     0xFFFF'u16    ]
 
 proc dma_addr_delta(ctrl: int; word_size: int): int =
@@ -188,15 +197,20 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     # known-valid regions (0x2-0x7, 0x8-0xD, 0xE-0xF).
     let src_region = bits_range(dma.src[channel], 24, 27)
     let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
+    # Only DMA3 can write to the gamepak bus (pages 8-F); channels 0-2 drop
+    # such writes entirely (no bus access, no redirect). See DMA_DST_MASK.
+    let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
     if word_size == 4:
       if src_accessible:
         dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
-      dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
+      if dst_writable:
+        dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
     else:
       if src_accessible:
         let half = uint32(dma.gba.bus.read_half(dma.src[channel]))
         dma.latch[channel] = half or (half shl 16)
-      dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
+      if dst_writable:
+        dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 

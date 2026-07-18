@@ -6,8 +6,9 @@ failing — so any change to the timing model is judged by a per-row `diff`, nev
 aggregate `END: pass/total` line (a silent regression among ~7000 rows is invisible in
 the aggregate).
 
-Captured at `main` @ **a6ec55e** (code identical to 3a65b78, which only adds the plan
-doc). Baseline: **HLE 6898 / LLE 6897** pass out of 7008 emitted rows.
+Captured 2026-07-18 at the "gba: drop DMA0-2 writes to gamepak-space destinations"
+commit (previously `main` @ a6ec55e, HLE 6898 / LLE 6897). Baseline: **HLE 6910 /
+LLE 6909** pass out of 7008 emitted rows (DMA sub-suite fully passing in both).
 
 - `mgba_rows_hle.tsv` — HLE BIOS (default; no BIOS file needed).
 - `mgba_rows_lle.tsv` — genuine BIOS (md5 `a860e8c0…`), i.e. `tests/roms/gba_bios.bin`.

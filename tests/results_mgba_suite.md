@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-07-18 16:09:37*
+*Generated: 2026-07-18 16:25:15*
 
 ## Memory tests
 
@@ -133,24 +133,9 @@ All tests passed.
 
 All tests passed.
 
-## DMA tests (1244/1256 passed)
+## DMA tests
 
-1244/1256 tests passed, 12 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| 0 Imm W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 Imm W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 HBl W -SRAM/=IWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 HBl W -SRAM/=EWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 4 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 5 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+IWRAM 6 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 3 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 4 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 5 | A5B6C7D8 | 00000000 |
-| 0 Imm W R+0x10/+EWRAM 6 | A5B6C7D8 | 00000000 |
+All tests passed.
 
 ## SIO register R/W tests
 
@@ -179,5 +164,5 @@ All tests passed.
 ## Summary
 
 - **Total:** 7008
-- **Pass:** 6898
-- **Fail:** 110
+- **Pass:** 6910
+- **Fail:** 98
