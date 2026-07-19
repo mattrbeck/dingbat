@@ -3,37 +3,7 @@
 when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
-# SDL2 audio bindings
-when not defined(test_harness):
-  when not declared(SDL_AudioSpec):
-    type
-      SDL_AudioSpec = object
-        freq:      cint
-        format:    uint16
-        channels:  uint8
-        silence:   uint8
-        samples:   uint16
-        padding:   uint16
-        size:      uint32
-        callback:  pointer
-        userdata:  pointer
-
-    const AUDIO_F32LSB = 0x8120'u16  # 32-bit float, little-endian (native on x86/ARM)
-
-    proc sdl_open_audio_gb(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-      {.importc: "SDL_OpenAudio", cdecl.}
-    proc sdl_close_audio_gb()
-      {.importc: "SDL_CloseAudio", cdecl.}
-    proc sdl_pause_audio_gb(pause_on: cint)
-      {.importc: "SDL_PauseAudio", cdecl.}
-    proc sdl_queue_audio_gb(dev: uint32; data: pointer; len: uint32): cint
-      {.importc: "SDL_QueueAudio", cdecl.}
-    proc sdl_get_queued_audio_size_gb(dev: uint32): uint32
-      {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-    proc sdl_clear_queued_audio_gb(dev: uint32)
-      {.importc: "SDL_ClearQueuedAudio", cdecl.}
-    proc sdl_delay_gb(ms: uint32)
-      {.importc: "SDL_Delay", cdecl.}
+# SDL3 audio-stream bindings shared with the GBA APU (common/sdl3_audio.nim)
 
 proc toggle_sync*(apu: GbApu) =
   apu.sync = not apu.sync
@@ -61,9 +31,9 @@ proc audio_ahead*(apu: GbApu): bool =
   when defined(test_harness):
     false
   else:
-    apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size_gb(apu.audio_dev) >
-        uint32(GB_APU_BUFFER_SIZE * 4)
+    apu.sync and apu.audio_dev != nil and
+      audio_queued(apu.audio_dev) >
+        uint32(GB_APU_BUFFER_SIZE * 4 * 2)
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
@@ -170,12 +140,13 @@ proc get_sample*(apu: GbApu; gb: GB) =
           queue_len = o
       else:
         apu.stretch_engaged = false
-      if apu.audio_dev != 0:
-        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-              uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
-        discard sdl_queue_audio_gb(apu.audio_dev,
-          addr apu.buffer[0], uint32(queue_len * 4))
+      if apu.audio_dev != nil:
+        if not apu.sync: audio_clear(apu.audio_dev)
+        # 4 buffers of headroom, not SDL2's 2: SDL3's device pulls from the
+        # stream in device-period chunks (see the GBA APU comment)
+        while audio_queued(apu.audio_dev) >
+              uint32(GB_APU_BUFFER_SIZE * 4 * 4): sdl_delay(1)
+        audio_put(apu.audio_dev, addr apu.buffer[0], uint32(queue_len * 4))
       apu.buffer_pos = 0
   gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
 
@@ -193,25 +164,19 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   result.channel3 = new_channel3(gb)
   result.channel4 = new_channel4(gb)
   when defined(test_harness):
-    result.audio_dev = 0
+    result.audio_dev = nil
   elif defined(emscripten):
-    result.audio_dev = 0  # JS handles playback via Web Audio API
+    result.audio_dev = nil  # JS handles playback via Web Audio API
   else:
-    var desired = SDL_AudioSpec(
-      freq:     cint(GB_SAMPLE_RATE), format: AUDIO_F32LSB,
-      channels: 2'u8, samples: uint16(GB_APU_BUFFER_SIZE div 2),
-      callback: nil, userdata: nil,
-    )
-    sdl_close_audio_gb()
-    # obtained must be nil so SDL converts to exactly this spec; see the
-    # matching comment in gba/apu.nim (Windows WASAPI otherwise changes the
-    # spec and audio-sync paces emulation at ~2x real time)
-    if sdl_open_audio_gb(addr desired, nil) == 0:
-      result.audio_dev = 1
-      if not headless: sdl_pause_audio_gb(0)
+    # Headless cores (the turbo second core of an in-process link) never
+    # consumed their audio under SDL2 either (device stayed paused and
+    # unsynced puts were cleared) — with streams, simply don't open one.
+    if headless:
+      result.audio_dev = nil
     else:
-      echo "Warning: GB failed to open audio device"
-      result.audio_dev = 0
+      result.audio_dev = audio_open(SDL_AUDIO_F32LE, 2, GB_SAMPLE_RATE)
+      if result.audio_dev == nil:
+        echo "Warning: GB failed to open audio device"
   let apu = result
   tick_frame_sequencer(apu, gb)
   get_sample(apu, gb)

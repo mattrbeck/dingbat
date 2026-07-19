@@ -1,5 +1,5 @@
 import std/strformat
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import imguin/[cimgui, impl_opengl, impl_sdl3]
 import ../common/scheduler
 import ../gba/gba
 

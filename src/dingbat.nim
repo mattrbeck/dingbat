@@ -1,10 +1,8 @@
 import std/[os, hashes, math, parseopt, strformat, strutils, tables, times]
 import std/[net, nativesockets]
-import sdl2 except init, quit, glBindTexture, glUnbindTexture
-import sdl2/joystick
-import sdl2/gamecontroller
+import sdl3_nim
 import zippy/ziparchives
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import imguin/[cimgui, impl_opengl, impl_sdl3]
 import imguin/glad/gl
 import stb_image/read as stbi
 import stb_image/write as stbiw
@@ -39,14 +37,16 @@ else:
 
 const LOGO_PNG_DATA = staticRead("../README/dingbat.png")
 
-# The sdl2 wrapper doesn't expose SDL_free (needed for drop-event filenames)
-proc sdl_free(mem: pointer) {.importc: "SDL_free", cdecl.}
-# ...nor SDL_GameControllerRumble (SDL >= 2.0.9; the linked SDL2 is newer).
-# Magnitudes are 0..0xFFFF; the effect auto-stops after duration_ms.
-proc game_controller_rumble(pad: GameControllerPtr;
-                            low_freq, high_freq: uint16;
-                            duration_ms: uint32): cint
-  {.importc: "SDL_GameControllerRumble", cdecl.}
+# SDL_WINDOW_* flags and SDL_WINDOWPOS_CENTERED are C #defines the sdl3_nim
+# generator misses; SDL3 pins their values as ABI.
+const SDL_WINDOW_OPENGL    = SDL_WindowFlags(0x0000000000000002'u64)
+const SDL_WINDOW_RESIZABLE = SDL_WindowFlags(0x0000000000000020'u64)
+const WINDOWPOS_CENTERED   = cint(0x2FFF0000)
+
+# SDL3's tick counter is 64-bit ms; the frontend's pacing math stays 32-bit
+# (wraps at ~49 days, same as SDL2's SDL_GetTicks).
+proc getTicks(): uint32 = uint32(SDL_GetTicks())
+proc delay(ms: uint32) = SDL_Delay(ms)
 
 # ──────────────────────────── Shaders ────────────────────────────
 
@@ -229,7 +229,7 @@ proc compile_shader(src: string; shader_type: GLenum): GLuint =
     var log_buf = newString(log_len + 1)
     glGetShaderInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Shader compile error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    SDL_Quit_proc(); system.quit(1)
 
 proc create_shader_program(): GLuint =
   let vert = compile_shader(VERT_SRC, GL_VERTEX_SHADER)
@@ -246,7 +246,7 @@ proc create_shader_program(): GLuint =
     var log_buf = newString(log_len + 1)
     glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Shader link error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    SDL_Quit_proc(); system.quit(1)
   glDeleteShader(vert)
   glDeleteShader(frag)
 
@@ -265,7 +265,7 @@ proc create_logo_shader_program(): GLuint =
     var log_buf = newString(log_len + 1)
     glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Logo shader link error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    SDL_Quit_proc(); system.quit(1)
   glDeleteShader(vert)
   glDeleteShader(frag)
 
@@ -312,8 +312,8 @@ type AppState = ref object
   gba_emu:         GBA
   gb_emu:          GB
   emu_kind:        EmuKind
-  window:          WindowPtr
-  gl_ctx:          GlContextPtr
+  window:          ptr SDL_Window
+  gl_ctx:          SDL_GLContext
   io:              ptr ImGuiIO
   game_texture:    GLuint
   logo_texture:    GLuint
@@ -466,7 +466,7 @@ proc load_rom(path: string) =
     app.gb_emu.post_init()
     app.gba_emu = nil
     app.emu_kind = ekGB
-    setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
+    discard SDL_SetWindowSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
@@ -475,7 +475,7 @@ proc load_rom(path: string) =
     app.gba_emu.post_init()
     app.gb_emu = nil
     app.emu_kind = ekGBA
-    setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
+    discard SDL_SetWindowSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   apply_master_volume()
@@ -501,7 +501,7 @@ proc load_rom(path: string) =
   while recs.len > 8: recs.setLen(8)
   app.cfg.recents = recs
   save_config(app.cfg)
-  setPosition(app.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)
+  discard SDL_SetWindowPosition(app.window, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED)
   app.paused = false
   app.pending_save = false
   app.pending_load = false
@@ -617,7 +617,7 @@ proc render_logo() =
   glUseProgram(app.logo_shader)
   glBindTexture(GL_TEXTURE_2D, app.logo_texture)
   var w, h: cint
-  getSize(app.window, w, h)
+  discard SDL_GetWindowSize(app.window, addr w, addr h)
   let window_aspect = float32(w) / float32(h)
   let aspect_loc = glGetUniformLocation(app.logo_shader, "aspect")
   let scale_loc  = glGetUniformLocation(app.logo_shader, "scale")
@@ -678,7 +678,7 @@ proc render_game() =
       # texture are untouched), and it's restored right after the draw so
       # ImGui renders unshaken.
       var w, h: cint
-      getSize(app.window, w, h)
+      discard SDL_GetWindowSize(app.window, addr w, addr h)
       rumble_flip = not rumble_flip
       let off: GLint = if rumble_flip: 1 else: -1
       glViewport(off, -off, GLsizei(w), GLsizei(h))
@@ -691,10 +691,11 @@ proc render_game() =
 
 proc show_menu_bar(): bool =
   if app.emu_kind == ekNone: return true
-  let focused    = getMouseFocus() == app.window
+  let focused    = SDL_GetMouseFocus() == app.window
   let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u32
   result = focused and not mouse_idle
-  discard showCursor(result)
+  if result: discard SDL_ShowCursor()
+  else: discard SDL_HideCursor()
 
 proc render_link_window()  # defined below, near the network-link procs
 
@@ -715,7 +716,7 @@ proc render_imgui() =
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
-  ImGui_ImplSDL2_NewFrame()
+  ImGui_ImplSDL3_NewFrame()
   igNewFrame()
 
   var overlay_h: cfloat = 10.0
@@ -844,14 +845,13 @@ proc render_imgui() =
             if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):
               app.scale = s
               case app.emu_kind
-              of ekGBA: setSize(app.window, cint(GBA_W * s), cint(GBA_H * s))
-              of ekGB:  setSize(app.window, cint(GB_W * s),  cint(GB_H * s))
+              of ekGBA: discard SDL_SetWindowSize(app.window, cint(GBA_W * s), cint(GBA_H * s))
+              of ekGB:  discard SDL_SetWindowSize(app.window, cint(GB_W * s),  cint(GB_H * s))
               of ekNone: discard
           igSeparator()
           if igMenuItem_BoolPtr(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
                                 nil, addr app.fullscreen, true):
-            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
-            discard setFullscreen(app.window, flags)
+            discard SDL_SetWindowFullscreen(app.window, app.fullscreen)
           igEndMenu()
         igEndMenu()
 
@@ -959,10 +959,10 @@ proc render_imgui() =
 
 # ──────────────────────────── Controllers ────────────────────────────
 
-# Open game controllers, keyed by joystick instance id. SDL2 emits
-# ControllerDeviceAdded for controllers already attached at init, so hotplug
-# handling below covers startup too. Every opened controller feeds player 1.
-var controllers: Table[int32, GameControllerPtr]
+# Open gamepads, keyed by joystick instance id. SDL3 emits
+# SDL_EVENT_GAMEPAD_ADDED for pads already attached at init, so hotplug
+# handling below covers startup too. Every opened pad feeds player 1.
+var controllers: Table[uint32, ptr SDL_Gamepad]
 
 # Left-stick-as-dpad and right-trigger fast-forward state (hardcoded, not
 # part of the rebindable button table)
@@ -984,7 +984,7 @@ proc bound_button_held(inp: Input): bool =
   for btn, v in app.cfg.controller_bindings.pairs:
     if v == inp:
       for pad in controllers.values:
-        if pad.getButton(GameControllerButton(btn)) != 0: return true
+        if SDL_GetGamepadButton(pad, SDL_GamepadButton(btn)): return true
   false
 
 proc set_stick_dir(inp: Input; active: bool) =
@@ -1023,24 +1023,23 @@ proc update_rumble() =
       rumble_last_pulse = now
       for pad in controllers.values:
         # 0.6 strong (low-freq) / 0.4 weak (high-freq), matching the web UI
-        discard pad.game_controller_rumble(0x9999'u16, 0x6666'u16, 80)
+        discard SDL_RumbleGamepad(pad, 0x9999'u16, 0x6666'u16, 80)
   elif was_on:
     for pad in controllers.values:
-      discard pad.game_controller_rumble(0, 0, 0)
+      discard SDL_RumbleGamepad(pad, 0, 0, 0)
 
 # ──────────────────────────── Input ────────────────────────────
 
 proc handle_input() =
-  var evt = defaultEvent
-  while pollEvent(evt):
-    discard ImGui_ImplSDL2_ProcessEvent(cast[ptr SDL_Event](addr evt))
+  var evt: SDL_Event
+  while SDL_PollEvent(addr evt):
+    discard ImGui_ImplSDL3_ProcessEvent(addr evt)
 
-    case evt.kind
-    of KeyDown, KeyUp:
-      let pressed = evt.kind == KeyDown
-      let kev     = key(evt)
-      let sym     = kev.keysym.sym
-      let mods    = kev.keysym.modstate
+    case SDL_EventType(evt.type_field)
+    of SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP:
+      let pressed = SDL_EventType(evt.type_field) == SDL_EVENT_KEY_DOWN
+      let sym     = cint(evt.key.key)
+      let mods    = int16(evt.key.mod_field)
 
       if app.io != nil and app.io[].WantCaptureKeyboard: continue
 
@@ -1048,39 +1047,38 @@ proc handle_input() =
         if not pressed: app.ce.keybindings.key_released(sym)
       elif (mods and MOD_KEY_MASK) != 0:
         if not pressed:
-          case sym
-          of K_r:
+          case cuint(sym)
+          of SDLK_R:
             if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
-          of K_p:
+          of SDLK_P:
             app.paused = not app.paused
-          of K_n:
+          of SDLK_N:
             # Frame advance would desync a live link; suppress it there.
             if app.paused and app.emu_kind != ekNone and app.netlink == nil:
               app.pending_step = true
-          of K_s:
+          of SDLK_S:
             if app.emu_kind != ekNone: app.pending_save = true
-          of K_l:
+          of SDLK_L:
             # Loading a save state mid-link would desync the pair.
             if app.emu_kind != ekNone and app.netlink == nil:
               app.pending_load = true
-          of K_f:
+          of SDLK_F:
             app.fullscreen = not app.fullscreen
-            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
-            discard setFullscreen(app.window, flags)
-          of K_q:
+            discard SDL_SetWindowFullscreen(app.window, app.fullscreen)
+          of SDLK_Q:
             app.running = false
           else: discard
-      elif sym == K_F12:
+      elif cuint(sym) == SDLK_F12:
         # Screenshot to config_dir/screenshots (fires on press, not release)
         if pressed: save_screenshot()
-      elif sym == K_BACKQUOTE:
+      elif cuint(sym) == SDLK_GRAVE:
         # Hold-to-rewind, core-agnostic (disabled while linked — it desyncs)
         app.rewinding = pressed and app.cfg.rewind and
                         app.emu_kind != ekNone and app.netlink == nil
       elif app.emu_kind == ekGBA and app.gba_emu != nil:
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
-        elif sym == K_TAB and pressed and app.netlink == nil:
+        elif cuint(sym) == SDLK_TAB and pressed and app.netlink == nil:
           # Turbo/fast-forward are suppressed while linked (they would run
           # ahead of the peer). Shift+Tab = 2x speed, Tab = unbounded fast
           # forward; the two are
@@ -1091,38 +1089,38 @@ proc handle_input() =
           else:
             app.gba_emu.apu.sync = not app.gba_emu.apu.sync
             if not app.gba_emu.apu.sync: app.gba_emu.apu.turbo = false
-        elif pressed and sym >= K_1 and sym <= K_6:
+        elif pressed and cuint(sym) >= SDLK_1 and cuint(sym) <= SDLK_6:
           # Feedback is visible in the Audio/Video > Channels submenu
-          let ch = int(sym) - int(K_1)
+          let ch = int(sym) - int(SDLK_1)
           app.gba_emu.apu.channel_mask[ch] = not app.gba_emu.apu.channel_mask[ch]
       elif app.emu_kind == ekGB and app.gb_emu != nil:
         if app.cfg.keybindings.hasKey(sym):
           app.gb_emu.handle_input(app.cfg.keybindings[sym], pressed)
-        elif sym == K_TAB and pressed:
+        elif cuint(sym) == SDLK_TAB and pressed:
           if (mods and KMOD_SHIFT_MASK) != 0:
             app.gb_emu.apu.turbo = not app.gb_emu.apu.turbo
             if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
           else:
             app.gb_emu.apu.toggle_sync()
             if not app.gb_emu.apu.sync: app.gb_emu.apu.turbo = false
-        elif pressed and sym >= K_1 and sym <= K_4:
+        elif pressed and cuint(sym) >= SDLK_1 and cuint(sym) <= SDLK_4:
           # Feedback is visible in the Audio/Video > Channels submenu
-          let ch = int(sym) - int(K_1)
+          let ch = int(sym) - int(SDLK_1)
           app.gb_emu.apu.channel_mask[ch] = not app.gb_emu.apu.channel_mask[ch]
 
-    of ControllerDeviceAdded:
-      # `which` is a device index for the Added event
-      let idx = cdevice(evt).which
-      if isGameController(cint(idx)):
-        let pad = gameControllerOpen(cint(idx))
+    of SDL_EVENT_GAMEPAD_ADDED:
+      # SDL3: `which` is the joystick instance id for Added AND Removed (the
+      # SDL2 device-index-vs-instance-id trap is gone)
+      let id = uint32(evt.gdevice.which)
+      if SDL_IsGamepad(id):
+        let pad = SDL_OpenGamepad(id)
         if pad != nil:
-          controllers[pad.getJoystick().instanceID()] = pad
+          controllers[id] = pad
 
-    of ControllerDeviceRemoved:
-      # `which` is a joystick instance id for the Removed event
-      let id = cdevice(evt).which
+    of SDL_EVENT_GAMEPAD_REMOVED:
+      let id = uint32(evt.gdevice.which)
       if controllers.hasKey(id):
-        controllers[id].close()
+        SDL_CloseGamepad(controllers[id])
         controllers.del(id)
       if controllers.len == 0:
         # Unplugged mid-press: release anything the pad was holding
@@ -1130,9 +1128,9 @@ proc handle_input() =
         for inp in Input: emu_pad_input(inp, false)
         set_fast_forward(false)
 
-    of ControllerButtonDown, ControllerButtonUp:
-      let pressed = evt.kind == ControllerButtonDown
-      let button  = cint(cbutton(evt).button)
+    of SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP:
+      let pressed = SDL_EventType(evt.type_field) == SDL_EVENT_GAMEPAD_BUTTON_DOWN
+      let button  = cint(evt.gbutton.button)
       if app.ce.controller.wants_input():
         if not pressed: app.ce.controller.button_released(button)
       elif app.cfg.controller_bindings.hasKey(button):
@@ -1141,36 +1139,35 @@ proc handle_input() =
         if pressed or not (inp in stick_dirs.low .. stick_dirs.high and stick_dirs[inp]):
           emu_pad_input(inp, pressed)
 
-    of ControllerAxisMotion:
-      let ax = caxis(evt)
-      if ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTX):
+    of SDL_EVENT_GAMEPAD_AXIS_MOTION:
+      let ax = evt.gaxis
+      if ax.axis == uint8(SDL_GAMEPAD_AXIS_LEFTX):
         set_stick_dir(Input.LEFT,  ax.value < -STICK_DEADZONE)
         set_stick_dir(Input.RIGHT, ax.value > STICK_DEADZONE)
-      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTY):
+      elif ax.axis == uint8(SDL_GAMEPAD_AXIS_LEFTY):
         set_stick_dir(Input.UP,   ax.value < -STICK_DEADZONE)
         set_stick_dir(Input.DOWN, ax.value > STICK_DEADZONE)
-      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_TRIGGERRIGHT):
+      elif ax.axis == uint8(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER):
         set_fast_forward(ax.value > TRIGGER_THRESHOLD)
 
-    of WindowEvent:
-      let wev = window(evt)
-      if wev.event == WindowEvent_SizeChanged:
-        var w, h: cint
-        getSize(app.window, w, h)
-        glViewport(0, 0, w, h)
+    of SDL_EVENT_WINDOW_RESIZED:
+      # Window events are top-level event types in SDL3, not a sub-enum
+      var w, h: cint
+      discard SDL_GetWindowSize(app.window, addr w, addr h)
+      glViewport(0, 0, w, h)
 
-    of MouseMotion:
-      app.last_mouse_tick = motion(evt).timestamp
+    of SDL_EVENT_MOUSE_MOTION:
+      # SDL3 event timestamps are ns; the menu-bar idle check runs in ms ticks
+      app.last_mouse_tick = getTicks()
 
-    of DropFile:
-      let dropped = drop(evt)
-      let path = $dropped.file
-      sdl_free(dropped.file)
+    of SDL_EVENT_DROP_FILE:
+      # SDL3 owns drop-event strings (freed after the event) — no SDL_free
+      let path = $evt.drop.data
       let ext = path.splitFile().ext.toLowerAscii()
       if ext in ROM_EXTS or ext == ".zip":
         load_rom(path)
 
-    of QuitEvent:
+    of SDL_EVENT_QUIT:
       app.running = false
 
     else: discard
@@ -1198,14 +1195,14 @@ proc update_fps_title(emulated: bool) =
                 elif app.emu_kind == ekGBA and app.gba_emu != nil and
                      app.gba_emu.cpu.stopped: "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
-    setTitle(app.window, cstring(title))
+    discard SDL_SetWindowTitle(app.window, cstring(title))
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
 
 # ──────────────────────────── GL proc loader ────────────────────────────
 
-proc gl_loader(name: cstring): pointer = glGetProcAddress(name)
+proc gl_loader(name: cstring): pointer = cast[pointer](SDL_GL_GetProcAddress(name))
 
 # ──────────────────────────── Network link ────────────────────────────
 
@@ -1585,40 +1582,40 @@ proc main() =
       cfg.use_hle = false
   if cli_run_bios: cfg.run_bios = true
 
-  # SDL2 init
-  when defined(windows):
-    # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
-    # instead of letting DWM bitmap-stretch the window on scaled displays
-    discard setHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
-  if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK or INIT_GAMECONTROLLER) != SdlSuccess:
-    echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
-  defer: sdl2.quit()
+  # SDL3 init (per-monitor DPI awareness is the default on Windows now — the
+  # SDL2 "SDL_WINDOWS_DPI_AWARENESS" hint is gone)
+  if not SDL_Init(SDL_INIT_VIDEO or SDL_INIT_AUDIO or SDL_INIT_JOYSTICK or
+                  SDL_INIT_GAMEPAD):
+    echo "SDL3 init failed: ", $SDL_GetError(); system.quit(1)
+  defer: SDL_Quit_proc()
 
   # Set GL attributes before window creation
   when defined(macosx):
-    discard glSetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
-  discard glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
-  discard glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_DOUBLEBUFFER, 1)
-  discard glSetAttribute(SDL_GL_DEPTH_SIZE, 24)
-  discard glSetAttribute(SDL_GL_STENCIL_SIZE, 8)
+    discard SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, cint(SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG))
+  discard SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, cint(SDL_GL_CONTEXT_PROFILE_CORE))
+  discard SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)
+  discard SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3)
+  discard SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1)
+  discard SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24)
+  discard SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8)
 
-  let window = createWindow(
+  # SDL3 windows spawn centered-by-default position is gone from CreateWindow's
+  # signature; center explicitly after creation.
+  let window = SDL_CreateWindow(
     "dingbat",
-    SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
     cint(GBA_W * 3), cint(GBA_H * 3),
     SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
   )
   if window == nil:
-    echo "Failed to create window: ", $sdl2.getError(); system.quit(1)
-  defer: destroyWindow(window)
+    echo "Failed to create window: ", $SDL_GetError(); system.quit(1)
+  defer: SDL_DestroyWindow(window)
+  discard SDL_SetWindowPosition(window, WINDOWPOS_CENTERED, WINDOWPOS_CENTERED)
 
-  let gl_ctx = glCreateContext(window)
+  let gl_ctx = SDL_GL_CreateContext(window)
   if gl_ctx == nil:
-    echo "Failed to create OpenGL context: ", $sdl2.getError(); system.quit(1)
-  defer: glDeleteContext(gl_ctx)
-  discard glSetSwapInterval(0)  # disable vsync
+    echo "Failed to create OpenGL context: ", $SDL_GetError(); system.quit(1)
+  defer: discard SDL_GL_DestroyContext(gl_ctx)
+  discard SDL_GL_SetSwapInterval(0)  # disable vsync
 
   # Load OpenGL function pointers
   if not gladLoadGL(gl_loader):
@@ -1639,8 +1636,7 @@ proc main() =
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
   let io_ptr = igGetIO_Nil()
-  discard ImGui_ImplSDL2_InitForOpenGL(cast[ptr SDL_Window](window),
-                                        cast[pointer](gl_ctx))
+  discard ImGui_ImplSDL3_InitForOpenGL(window, cast[pointer](gl_ctx))
   discard ImGui_Impl_opengl3_Init("#version 330")
 
   # Frontend objects
@@ -1716,11 +1712,10 @@ proc main() =
   #    120 Hz display): audio pacing happens here — skip emulation while the
   #    audio queue is ahead — so the loop keeps servicing the UI instead of
   #    blocking inside the APU's queue-drain wait.
-  var display_mode: DisplayMode
   var present_interval = 8'u32
-  if getDesktopDisplayMode(0, display_mode) == SdlSuccess and
-     display_mode.refresh_rate > 0:
-    present_interval = uint32(1000 div display_mode.refresh_rate)
+  let display_mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay())
+  if display_mode != nil and display_mode.refresh_rate > 0:
+    present_interval = uint32(1000.0 / display_mode.refresh_rate)
   var last_present = getTicks()
   # Pacing diagnostics (env-gated): DINGBAT_PACING_LOG=1 prints one line per
   # second with emulated-frame counts and SDL audio queue depth bounds, for
@@ -1825,7 +1820,7 @@ proc main() =
       glClear(GL_COLOR_BUFFER_BIT)
       render_game()
       render_imgui()
-      glSwapWindow(window)
+      discard SDL_GL_SwapWindow(window)
       presented = true
     update_fps_title(emulated)
     if not emulated and not presented:

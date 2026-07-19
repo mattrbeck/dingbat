@@ -1,5 +1,5 @@
 import std/os
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import imguin/[cimgui, impl_opengl, impl_sdl3]
 import ../common/config
 import file_explorer
 import util

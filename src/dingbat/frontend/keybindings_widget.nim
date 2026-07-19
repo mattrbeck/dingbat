@@ -1,6 +1,6 @@
 import std/[tables, options]
-import sdl2 except init, quit
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import sdl3_nim
+import imguin/[cimgui, impl_opengl, impl_sdl3]
 import ../common/[input, config]
 
 type
@@ -70,8 +70,9 @@ proc render*(w: KeybindingsWidget) =
     let btn_text =
       if keycode < 0: "---"
       elif (keycode and 0x40000000) != 0:
-        $getKeyName(getKeyFromScancode(cast[ScanCode](keycode xor 0x40000000)))
-      else: $getKeyName(keycode)
+        $SDL_GetKeyName(SDL_GetKeyFromScancode(
+          SDL_Scancode(keycode xor 0x40000000), SDL_Keymod(0), false))
+      else: $SDL_GetKeyName(SDL_Keycode(keycode))
     if selected:
       igPushStyleColor_Vec4(cint(ImGui_Col_Button), w.hovered_col)
     if igButton(cstring(btn_text & "##" & $inp), btn_size):

@@ -3,6 +3,8 @@
 
 import std/[bitops, os, strutils, times]
 import ../common/[input, scheduler, emu, resampler, serialize, timestretch]
+when not defined(test_harness) and not defined(emscripten):
+  import ../common/sdl3_audio
 when defined(test_harness):
   import ../common/test_output
 
@@ -300,7 +302,7 @@ type
     pitch_correct_ff*:    bool
     stretch:              TimeStretch
     stretch_engaged:      bool
-    audio_dev*:           uint32
+    audio_dev*:           pointer # SDL3 AudioStream (nil = not open)
     channel1*:            GbChannel1
     channel2*:            GbChannel2
     channel3*:            GbChannel3

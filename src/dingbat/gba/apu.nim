@@ -8,47 +8,7 @@ const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 
-# Minimal SDL2 audio C bindings (SDL2 is already linked via nim.cfg)
-when not defined(test_harness):
-  type
-    SDL_AudioDeviceID = uint32
-    SDL_AudioSpec = object
-      freq:      cint
-      format:    uint16
-      channels:  uint8
-      silence:   uint8
-      samples:   uint16
-      padding:   uint16
-      size:      uint32
-      callback:  pointer
-      userdata:  pointer
-
-  const AUDIO_S16LSB  = 0x8010'u16
-  const AUDIO_F32LSB  = 0x8120'u16
-  const SDL_AUDIO_ALLOW_FREQUENCY_CHANGE = cint(1)
-
-  proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-    {.importc: "SDL_OpenAudio", cdecl.}
-  proc sdl_open_audio_device(device: pointer; iscapture: cint;
-      desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec;
-      allowed_changes: cint): SDL_AudioDeviceID
-    {.importc: "SDL_OpenAudioDevice", cdecl.}
-  proc sdl_close_audio()
-    {.importc: "SDL_CloseAudio", cdecl.}
-  proc sdl_close_audio_device(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_CloseAudioDevice", cdecl.}
-  proc sdl_pause_audio(pause_on: cint)
-    {.importc: "SDL_PauseAudio", cdecl.}
-  proc sdl_pause_audio_device(dev: SDL_AudioDeviceID; pause_on: cint)
-    {.importc: "SDL_PauseAudioDevice", cdecl.}
-  proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
-    {.importc: "SDL_QueueAudio", cdecl.}
-  proc sdl_get_queued_audio_size(dev: SDL_AudioDeviceID): uint32
-    {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-  proc sdl_clear_queued_audio(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_ClearQueuedAudio", cdecl.}
-  proc sdl_delay(ms: uint32)
-    {.importc: "SDL_Delay", cdecl.}
+# SDL3 audio-stream bindings shared with the GB APU (common/sdl3_audio.nim)
 
 when defined(emscripten):
   # On emscripten, the APU pushes float32 samples to a global buffer
@@ -76,32 +36,17 @@ proc new_apu*(gba: GBA): APU =
   result.channel4 = new_channel4(gba)
   result.dma_channels = new_dma_channels(gba)
   when defined(test_harness):
-    result.audio_dev = 0
+    result.audio_dev = nil
   elif defined(emscripten):
     # No SDL audio on emscripten — JS handles playback via Web Audio API
-    result.audio_dev = 0
+    result.audio_dev = nil
   else:
-    var desired = SDL_AudioSpec(
-      freq:     APU_SAMPLE_RATE.cint,
-      format:   AUDIO_S16LSB,
-      channels: APU_CHANNELS.uint8,
-      samples:  uint16(APU_BUFFER_SIZE div APU_CHANNELS),
-      callback: nil,
-      userdata: nil,
-    )
-    sdl_close_audio()
-    # obtained must be nil: passing a non-nil obtained means
-    # SDL_AUDIO_ALLOW_ANY_CHANGE, and on Windows WASAPI hands back the
-    # mixer's native spec (float32, 44.1/48 kHz) with no conversion. The
-    # device then drains bytes ~2x faster than the APU queues them and
-    # audio-sync paces emulation at ~2x real time. nil makes SDL convert
-    # to exactly the requested spec on every platform.
-    if sdl_open_audio(addr desired, nil) == 0:
-      result.audio_dev = 1
-      sdl_pause_audio(0)
-    else:
+    # A device-bound SDL3 stream converts to the device's native spec itself,
+    # so the requested spec is always honored byte-for-byte on the put side
+    # (the SDL2 WASAPI "obtained must be nil" footgun no longer exists).
+    result.audio_dev = audio_open(SDL_AUDIO_S16LE, APU_CHANNELS, APU_SAMPLE_RATE)
+    if result.audio_dev == nil:
       echo "Warning: failed to open audio device"
-      result.audio_dev = 0
   result.tick_frame_sequencer()
   result.get_sample()
 
@@ -137,9 +82,9 @@ proc audio_ahead*(apu: APU): bool =
   when defined(test_harness):
     false
   else:
-    apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size(apu.audio_dev) >
-        uint32(APU_BUFFER_SIZE * sizeof(int16))
+    apu.sync and apu.audio_dev != nil and
+      audio_queued(apu.audio_dev) >
+        uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
 
 when not defined(test_harness) and not defined(emscripten):
   # Debug instrumentation, env-gated and zero-cost when unset:
@@ -157,8 +102,8 @@ when not defined(test_harness) and not defined(emscripten):
     audio_dump_file
 
   proc audio_queued_bytes*(apu: APU): uint32 =
-    ## Bytes currently queued to the SDL audio device (pacing diagnostics)
-    if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
+    ## Bytes currently queued to the SDL audio stream (pacing diagnostics)
+    if apu.audio_dev != nil: audio_queued(apu.audio_dev) else: 0
 
 proc timer_overflow*(apu: APU; timer: int) =
   apu.dma_channels.timer_overflow(timer)
@@ -300,16 +245,18 @@ proc get_sample*(apu: APU) =
         discard dump.writeBuffer(addr apu.buffer[0],
                                  queue_len * sizeof(int16))
         dump.flushFile()
-      if apu.audio_dev != 0:
+      if apu.audio_dev != nil:
         if not apu.sync:
-          sdl_clear_queued_audio(apu.audio_dev)
-        # Block until the queue drains to < 2 buffers to stay in sync
-        let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
-        while sdl_get_queued_audio_size(apu.audio_dev) > threshold:
+          audio_clear(apu.audio_dev)
+        # Block until the queue drains to < 4 buffers to stay in sync. SDL3's
+        # device pulls from the stream in device-period chunks; the SDL2-era
+        # 2-buffer ceiling sits below one pull period and stalls emulation.
+        let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 4)
+        while audio_queued(apu.audio_dev) > threshold:
           sdl_delay(1)
-        discard sdl_queue_audio(apu.audio_dev,
-                                 cast[pointer](addr apu.buffer[0]),
-                                 uint32(queue_len * sizeof(int16)))
+        audio_put(apu.audio_dev,
+                  cast[pointer](addr apu.buffer[0]),
+                  uint32(queue_len * sizeof(int16)))
       apu.buffer_pos = 0
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 

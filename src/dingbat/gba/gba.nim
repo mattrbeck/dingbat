@@ -4,6 +4,8 @@
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch]
+when not defined(test_harness) and not defined(emscripten):
+  import ../common/sdl3_audio
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -461,7 +463,7 @@ type
     pitch_correct_ff*:  bool
     stretch:            TimeStretch
     stretch_engaged:    bool  # tracks the stretch-path rising edge (auto-reset)
-    audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
+    audio_dev*:         pointer # SDL3 AudioStream (nil = not open)
     left_resampler*:    Resampler[float32]
     right_resampler*:   Resampler[float32]
     resample_freq*:     int

@@ -1,7 +1,5 @@
 import std/[tables, options]
-import sdl2 except init, quit
-import sdl2/joystick
-import sdl2/gamecontroller
+import sdl3_nim
 import imguin/cimgui
 import ../common/[input, config]
 
@@ -51,9 +49,7 @@ proc find_button_for_input(w: ControllerWidget; inp: Input): cint =
   return -1
 
 proc controller_connected(): bool =
-  for i in 0 ..< numJoysticks():
-    if isGameController(cint(i)): return true
-  false
+  SDL_HasGamepad()
 
 proc render*(w: ControllerWidget) =
   if not controller_connected():

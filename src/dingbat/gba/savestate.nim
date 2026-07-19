@@ -468,8 +468,8 @@ proc load_apu_state(apu: APU; r: var Reader) =
   # SDL queue backlog that belongs to the pre-load timeline
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
-    if apu.audio_dev != 0:
-      sdl_clear_queued_audio(apu.audio_dev)
+    if apu.audio_dev != nil:
+      audio_clear(apu.audio_dev)
 
 # ---- Backup storage ----
 

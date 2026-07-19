@@ -9,7 +9,7 @@ bin    = @["dingbat"]
 
 # Dependencies
 requires "nim >= 2.0.0"
-requires "sdl2 >= 2.0.4"
+requires "sdl3_nim"
 requires "imguin"
 requires "yaml"
 requires "stb_image"
