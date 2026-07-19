@@ -3348,138 +3348,35 @@ body.rollback-mode #save-sep {
   }
 }
 
-/* ---- Nearby (serverless QR) pairing ---- */
+/* ---- Manual code exchange (signaling server unreachable) ---- */
 
-/* Subtle text button that opens Nearby (and the Back link inside it). */
-.net-link-btn {
-  display: block;
-  margin: 12px auto 0;
-  padding: 4px 6px;
-  background: none;
-  border: none;
-  color: var(--accent);
+#net-manual-view[hidden] { display: none; }
+
+.net-manual-label {
+  margin: 14px 0 0;
   font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.net-link-btn:hover { color: var(--accent-hi); }
-
-/* Callout revealed when the signaling server is unresponsive for ~2s. */
-.net-nearby-callout {
-  margin-top: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
-  color: var(--text-dim);
-  font-size: 13px;
-  text-align: center;
-}
-.net-nearby-callout[hidden] { display: none; }
-
-.net-nearby-intro {
-  margin: 0 0 14px;
-  font-size: 14px;
-  color: var(--text-dim);
-  text-align: center;
-}
-
-.net-nearby-choose {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.net-nearby-choose[hidden] { display: none; }
-.net-nearby-choose .button { width: 100%; }
-.net-hint {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-align: center;
-}
-
-.net-nb-label {
-  margin: 0 0 10px;
-  font-size: 14px;
   font-weight: 600;
-  color: var(--text);
-  text-align: center;
-}
-
-.net-nearby-qr,
-.net-nearby-scan {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.net-nearby-qr[hidden],
-.net-nearby-scan[hidden] { display: none; }
-.net-nearby-scan { margin-top: 14px; }
-
-/* The QR always renders on white so any camera reads it, in either theme. */
-.net-qr-canvas {
-  width: 260px;
-  max-width: 100%;
-  height: auto;
-  image-rendering: pixelated;
-  background: #fff;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-
-.net-nb-video-wrap {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.net-nb-video {
-  width: 260px;
-  max-width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
-  background: #000;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-.net-nb-video[hidden] { display: none; }
-
-/* Copy/paste fallback (accessibility + browsers without BarcodeDetector). */
-.net-nb-copy {
-  width: 100%;
-  margin-top: 12px;
-  font-size: 13px;
   color: var(--text-dim);
 }
-.net-nb-copy > summary {
-  cursor: pointer;
-  color: var(--accent);
-  text-align: center;
-  list-style: none;
-}
-.net-nb-copy > summary::-webkit-details-marker { display: none; }
-.net-nb-text {
-  width: 100%;
-  margin-top: 8px;
+
+.net-manual-code {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 13px;
   color: var(--text);
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px;
-  resize: vertical;
-  word-break: break-all;
-  box-sizing: border-box;
+  padding: 8px 10px;
 }
-.net-nb-text:focus { outline: none; border-color: var(--accent); }
-.net-nb-copy .button { margin-top: 8px; width: 100%; }
+.net-manual-code:focus { outline: none; border-color: var(--accent); }
+/* The "Your code" box is disabled (Copy moves it); keep it legible, not grey-out. */
+input.net-manual-code:disabled {
+  color: var(--text-dim);
+  -webkit-text-fill-color: var(--text-dim);
+  opacity: 1;
+}
 
 /* "waiting for peer" badge: subtle chip over the top-right of the stage,
    shown only during sustained stalls of the emulated clock */

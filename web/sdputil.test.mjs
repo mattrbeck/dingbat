@@ -1,10 +1,11 @@
-// Tests for the compact SDP codec (web/sdputil.js) used by the serverless QR
-// "Nearby" pairing path. The codec throws away the constant boilerplate of a
+// Tests for the compact SDP codec (web/sdputil.js) used by the serverless
+// manual code exchange. The codec throws away the constant boilerplate of a
 // WebRTC data-channel SDP and keeps only what the peers actually need to connect
 // (fingerprint, ICE ufrag/pwd, candidates). A round-trip therefore is NOT
 // byte-identical — so we compare the SEMANTIC fields (parse both sides, compare
 // fingerprint / ufrag / pwd / setup / candidate set), assert the encoded string
-// fits a QR budget, and check that malformed input fails cleanly.
+// stays short enough to trade by hand, and check that malformed input fails
+// cleanly.
 //
 // Zero dependencies, mirroring web/signaling/server.test.mjs: a plain assert()
 // helper, a single run(), non-zero exit on any failure. sdputil.js is a CommonJS
@@ -45,7 +46,7 @@ const LITERAL_HOST =
     "192.168.1.42"
   );
 
-const QR_BUDGET = 300; // characters; well within QR byte mode at medium ECC
+const CODE_BUDGET = 300; // characters; short enough to paste into any messenger
 
 let failures = 0;
 function assert(cond, msg) {
@@ -76,7 +77,7 @@ async function run() {
     assert(dec && dec.type === "offer", "offer decodes with type=offer");
     sameFields(OFFER, dec.sdp, "offer");
     console.log(`  (encoded ${enc.length} chars, ${Math.ceil(enc.length * 6 / 8)} raw bytes)`);
-    assert(enc.length <= QR_BUDGET, `offer encoded ${enc.length} <= ${QR_BUDGET} char QR budget`);
+    assert(enc.length <= CODE_BUDGET, `offer encoded ${enc.length} <= ${CODE_BUDGET} char code budget`);
     // The rebuilt SDP must be independently parseable back to the same fields.
     assert(dec.sdp.includes("UDP/DTLS/SCTP webrtc-datachannel"), "rebuilt SDP has the datachannel m-line");
   }
@@ -89,7 +90,7 @@ async function run() {
     assert(dec && dec.type === "answer", "answer decodes with type=answer");
     sameFields(ANSWER, dec.sdp, "answer");
     console.log(`  (encoded ${enc.length} chars)`);
-    assert(enc.length <= QR_BUDGET, `answer encoded ${enc.length} <= ${QR_BUDGET} char QR budget`);
+    assert(enc.length <= CODE_BUDGET, `answer encoded ${enc.length} <= ${CODE_BUDGET} char code budget`);
   }
 
   console.log("literal IPv4 host candidate round-trips:");
@@ -124,6 +125,30 @@ async function run() {
       SDPCodec.encode({ type: "offer", sdp: OFFER.replace(/a=candidate:.+\r\n/g, "") }) === null,
       "SDP with no candidates -> null"
     );
+  }
+
+  console.log("answerFrom rewrites a peer's offer code into a usable answer:");
+  {
+    const enc = SDPCodec.encode({ type: "offer", sdp: OFFER });
+    const asServer = SDPCodec.answerFrom(enc, "active"); // peer will be DTLS client
+    const asClient = SDPCodec.answerFrom(enc, "passive");
+    assert(asServer && asServer.type === "answer", "answerFrom -> type answer");
+    assert(
+      SDPCodec.fields(asServer.sdp).setup === "active",
+      "requested setup role lands in a=setup (active)"
+    );
+    assert(
+      SDPCodec.fields(asClient.sdp).setup === "passive",
+      "requested setup role lands in a=setup (passive)"
+    );
+    // Everything the connection needs survives the reinterpretation.
+    sameFields(
+      OFFER.replace("a=setup:actpass", "a=setup:active"),
+      asServer.sdp,
+      "answerFrom(active)"
+    );
+    assert(SDPCodec.answerFrom(enc, "actpass") === null, "actpass is not a valid answer role");
+    assert(SDPCodec.answerFrom("garbage!!!", "active") === null, "garbage code -> null");
   }
 
   console.log("version byte guards forward compatibility:");

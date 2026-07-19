@@ -1,12 +1,12 @@
 {
   "name": "dingbat-web-tests",
   "private": true,
-  "description": "Test-only manifest for the dingbat web front-end. Deliberately has NO \"type\":\"module\" so the existing UMD/CommonJS scripts (sdputil.js, qr.js) still load as CommonJS from the .mjs tests; the tests themselves are ESM by their .mjs extension. The only devDependency is Playwright, used solely by render.test.mjs for a headless-Chromium WebGL2 pixel-readback guard. Install with `npm ci` (or `npm install`) then `npx playwright install --with-deps chromium`.",
+  "description": "Test-only manifest for the dingbat web front-end. Deliberately has NO \"type\":\"module\" so the existing UMD/CommonJS scripts (sdputil.js) still load as CommonJS from the .mjs tests; the tests themselves are ESM by their .mjs extension. The only devDependency is Playwright, used by render.test.mjs (headless-Chromium WebGL2 pixel-readback guard) and manualpair.test.mjs (symmetric manual-code WebRTC pairing guard). Install with `npm ci` (or `npm install`) then `npx playwright install --with-deps chromium`.",
   "scripts": {
     "test:uv": "node uv.test.mjs",
     "test:render": "node render.test.mjs",
     "test:sdp": "node sdputil.test.mjs",
-    "test:qr": "node qr.test.mjs"
+    "test:manualpair": "node manualpair.test.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0"

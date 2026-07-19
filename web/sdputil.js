@@ -1,9 +1,9 @@
-// --- Compact SDP codec for QR "Nearby" pairing (serverless, same-LAN WebRTC) ---
+// --- Compact SDP codec for the manual code exchange (serverless WebRTC) ---
 // The normal online path (netplay.js) trickles ICE candidates through the
 // signaling server one at a time, so a full SDP never has to fit anywhere small.
-// The "Nearby (no internet)" path has NO server: the whole offer/answer must
-// travel through a QR code (or a copy-paste string). A raw WebRTC data-channel
-// SDP is ~600–900 bytes of mostly-boilerplate — too big and wasteful for a QR.
+// The manual fallback (server unreachable) has NO server: the whole description
+// travels as a copy-pasted string. A raw WebRTC data-channel SDP is ~600–900
+// bytes of mostly-boilerplate — too big and unwieldy to trade by hand.
 //
 // This codec throws away everything that is CONSTANT for this app's single fixed
 // configuration (one ordered DataChannel, DTLS/SCTP, no media) and keeps only the
@@ -19,7 +19,7 @@
 // SEMANTICALLY equivalent: same fingerprint, same credentials, same candidates —
 // which is all WebRTC needs to establish the connection.
 //
-// Wire format (then base64url-encoded, no padding — QR byte mode at medium ECC):
+// Wire format (then base64url-encoded, no padding):
 //   u8   version (1)
 //   u8   flags:  bits0-1 setup role (0 actpass, 1 active, 2 passive)
 //                bit2    kind (0 offer, 1 answer) — informational
@@ -290,6 +290,29 @@
     }
   }
 
+  // Reinterpret a peer's encoded OFFER as the ANSWER to our own local offer.
+  //
+  // The manual code exchange is SYMMETRIC: both sides independently create an
+  // offer, encode it, and hand the string to the other side (no server, no
+  // second round trip). Standard WebRTC can't take two offers — so each side
+  // locally rewrites the peer's blob into a valid answer: same fingerprint,
+  // same ICE credentials, same candidates (which is everything the connection
+  // actually needs), but type "answer" and a concrete DTLS role in a=setup.
+  // The roles must complement each other, so the caller picks `setup` from a
+  // deterministic comparison both sides can compute (e.g. of the two code
+  // strings): the side that will be the DTLS server passes "active" (the PEER
+  // acts as client), the other passes "passive". Both peers having created
+  // data channels and both ICE agents starting out "controlling" is fine: ICE
+  // role conflicts resolve via the RFC 8445 tie-breaker, and DCEP stream ids
+  // are role-partitioned (client even / server odd) so the channels can't
+  // collide. Verified end-to-end in web/manualpair.test.mjs.
+  function answerFrom(code, setup) {
+    if (setup !== "active" && setup !== "passive") return null;
+    const d = decode(code);
+    if (!d) return null;
+    return { type: "answer", sdp: d.sdp.replace(/a=setup:\S+/, "a=setup:" + setup) };
+  }
+
   // Parse the semantic fields back out of an SDP, for tests / comparison.
   function fields(sdp) {
     const cands = [];
@@ -307,7 +330,7 @@
     };
   }
 
-  const SDPCodec = { encode, decode, fields, VERSION };
+  const SDPCodec = { encode, decode, answerFrom, fields, VERSION };
   root.SDPCodec = SDPCodec;
   if (typeof module !== "undefined" && module.exports) module.exports = SDPCodec;
 })(typeof window !== "undefined" ? window : globalThis);

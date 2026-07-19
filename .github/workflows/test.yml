@@ -113,13 +113,18 @@ jobs:
         # shipped (`v_uv = p*0.5` -> only the bottom-left quadrant, zoomed 2x).
         # Zero deps; runs on every OS.
         run: node web/uv.test.mjs
-      - name: Web render-correctness readback (headless Chromium, WebGL2)
-        # Layer-1 real guard: compiles the ACTUAL present shaders (VERT+FRAG,
-        # extracted from index.js) in Playwright's Chromium, uploads a
-        # corner-distinguishable frame, reads the canvas back and asserts each
-        # corner maps to the right source corner (catches quadrant / Y-flip /
-        # scale / upload-dims / readback bugs). WebGL2 + GLSL ES 300 needs a
-        # real browser (node's headless-gl is WebGL1-only), so it is its own
+      - name: Web browser tests (headless Chromium)
+        # Real-browser guards that can't run in plain Node:
+        #  - render.test.mjs: compiles the ACTUAL present shaders (VERT+FRAG,
+        #    extracted from index.js), uploads a corner-distinguishable frame,
+        #    reads the canvas back and asserts each corner maps to the right
+        #    source corner (catches quadrant / Y-flip / scale / upload-dims /
+        #    readback bugs). WebGL2 + GLSL ES 300 needs a real browser (node's
+        #    headless-gl is WebGL1-only).
+        #  - manualpair.test.mjs: the symmetric manual-code link fallback (both
+        #    sides offer; each rewrites the peer's code into the answer via
+        #    SDPCodec.answerFrom) against real RTCPeerConnections — asserts the
+        #    DataChannel opens and a message round-trips.
         # Linux-only step that installs ONLY Chromium.
         if: runner.os == 'Linux'
         working-directory: web
@@ -127,6 +132,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           node render.test.mjs
+          node manualpair.test.mjs
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

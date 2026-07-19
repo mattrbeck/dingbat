@@ -592,7 +592,7 @@
         <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
         <h3 id="net-title">Connect link cable</h3>
         <div id="net-connect-view">
-          <p>Agree on a code with your friend and both type it in.</p>
+          <p>Enter the same code as your friend.</p>
           <div class="net-join-row">
             <div class="net-input-wrap">
               <input id="net-code-input" type="text" name="linkcode" inputmode="latin"
@@ -604,56 +604,29 @@
             <button type="button" class="button button-primary" id="net-join-go">Connect</button>
           </div>
           <p id="net-status" class="net-status" aria-live="polite"></p>
-          <!-- Serverless same-LAN fallback. Always reachable (subtle), and the
-               connect flow makes it prominent if the signaling server is silent
-               for ~2s. -->
-          <div id="net-nearby-callout" class="net-nearby-callout" hidden>
-            Server not responding.
-          </div>
-          <button type="button" id="net-nearby-open" class="net-link-btn">
-            Same room, no internet? Pair nearby
-          </button>
         </div>
 
-        <!-- ===== Nearby (serverless QR) pairing view ===== -->
-        <div id="net-nearby-view" hidden>
-          <p class="net-nearby-intro">
-            Link two phones on the same Wi-Fi with no internet: one shows a code,
-            the other scans it, then shows a code back.
-          </p>
-          <div id="net-nearby-choose" class="net-nearby-choose">
-            <button type="button" class="button button-primary" id="net-nb-host">Show my code</button>
-            <button type="button" class="button" id="net-nb-guest">Scan a code</button>
-            <p class="net-hint">Both phones must be on the same Wi-Fi network.</p>
+        <!-- ===== Manual code exchange ===== -->
+        <!-- Shown instead of the connect view when the network is up but the
+             signaling server is unreachable: each side copies its code to the
+             other (any messenger works), pastes the friend's, and confirms. -->
+        <div id="net-manual-view" hidden>
+          <p>Trade codes with your friend.</p>
+          <p class="net-manual-label" id="net-manual-out-label">Your code:</p>
+          <div class="net-join-row">
+            <input id="net-manual-out" class="net-manual-code" type="text" disabled
+                   aria-labelledby="net-manual-out-label" />
+            <button type="button" class="button" id="net-manual-copy">Copy</button>
           </div>
-
-          <div id="net-nearby-qr" class="net-nearby-qr" hidden>
-            <p id="net-nb-qr-label" class="net-nb-label"></p>
-            <canvas id="net-nb-canvas" class="net-qr-canvas" aria-label="Pairing QR code"></canvas>
-            <details class="net-nb-copy">
-              <summary>Can't scan? Copy the code instead</summary>
-              <textarea id="net-nb-out" class="net-nb-text" readonly rows="3" aria-label="Your pairing code"></textarea>
-              <button type="button" class="button" id="net-nb-copy-btn">Copy code</button>
-            </details>
+          <p class="net-manual-label" id="net-manual-in-label">Friend's code:</p>
+          <div class="net-join-row">
+            <input id="net-manual-in" class="net-manual-code" type="text"
+                   autocomplete="off" autocorrect="off" autocapitalize="off"
+                   spellcheck="false" placeholder="Paste your friend's code"
+                   aria-labelledby="net-manual-in-label" />
+            <button type="button" class="button button-primary" id="net-manual-confirm" disabled>Confirm</button>
           </div>
-
-          <div id="net-nearby-scan" class="net-nearby-scan" hidden>
-            <p id="net-nb-scan-label" class="net-nb-label"></p>
-            <div class="net-nb-video-wrap">
-              <video id="net-nb-video" class="net-nb-video" playsinline muted hidden></video>
-              <button type="button" class="button button-primary" id="net-nb-scan-start">Scan with camera</button>
-            </div>
-            <details class="net-nb-copy">
-              <summary>Or paste your friend's code</summary>
-              <textarea id="net-nb-in" class="net-nb-text" rows="3"
-                        placeholder="Paste the code your friend shows you"
-                        aria-label="Friend's pairing code"></textarea>
-              <button type="button" class="button" id="net-nb-in-go">Use code</button>
-            </details>
-          </div>
-
-          <p id="net-nb-status" class="net-status" aria-live="polite"></p>
-          <button type="button" id="net-nb-back" class="net-link-btn">&larr; Back</button>
+          <p id="net-manual-status" class="net-status" aria-live="polite"></p>
         </div>
       </div>
     </div>
@@ -698,7 +671,6 @@
 
     <script src="index.js"></script>
     <script src="sdputil.js"></script>
-    <script src="qr.js"></script>
     <script src="netplay.js"></script>
     <script src="em.js"></script>
   </body>
