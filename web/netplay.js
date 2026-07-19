@@ -86,10 +86,16 @@ const makeSession = (attach) => ({
   stallSince: 0,
 });
 let netAttach = true;   // attach mode of the current/last pending session (for retry)
+// Timer that reveals the "Nearby (no internet)" callout when the signaling
+// server hasn't responded within ~2s (set in the connect handler).
+let nearbyHintTimer = 0;
+const NEARBY_HINT_DELAY = 2000;
 
 const closeNetModal = () => {
   netModal.classList.remove("open");
   netSetConnecting(false);
+  clearTimeout(nearbyHintTimer);
+  if (typeof nearbyReset === "function") nearbyReset();
   releaseFocus(netModal);
 };
 
@@ -109,6 +115,7 @@ const openNetConnect = async (attach) => {
   netJoinGo.disabled = false;
   netSetStatus("");
   netSetConnecting(false);
+  if (typeof nearbyReset === "function") nearbyReset();
   netModal.classList.add("open");
   trapFocus(netModal);
   // Freeze the running game the moment this modal opens and keep it frozen
@@ -483,6 +490,318 @@ const startLocalLink = (code) => {
     bc.postMessage({ ch: "hello", t: "hi", id: myId });
   } catch {}
 };
+
+// ---------------- Nearby (serverless QR) pairing ----------------
+// "Link cable in the same room, no internet." Two phones on the same Wi-Fi pair
+// with NO signaling server: the whole WebRTC offer/answer travels through a QR
+// code (or a copy-paste string). This reuses the exact same post-connect flow —
+// wireChannel() → rbConnect() — so once the DataChannel opens it is identical to
+// the server path. It is surfaced as a FALLBACK: the connect flow reveals it if
+// the signaling server is unresponsive for ~2s, and it is always reachable via a
+// subtle affordance.
+//
+// Why it differs from the server path:
+//  1. NON-TRICKLE gathering — the server path trickles ICE candidates one by one
+//     as they arrive; here there is no channel to trickle over, so we wait for
+//     ICE gathering to COMPLETE and bundle one full localDescription.
+//  2. COMPRESSION — a raw data-channel SDP is ~600–900 bytes of boilerplate.
+//     SDPCodec (sdputil.js) strips it to ~130 bytes (fingerprint + ufrag/pwd +
+//     candidates) so it fits a QR. QR.encode (qr.js) renders it.
+//  3. TWO-WAY exchange ("QR tango") — host shows an offer QR, guest scans it and
+//     shows an answer QR, host scans that. Both directions needed.
+//
+// Same-LAN reachability rides on the mDNS host candidate (uuid.local): both
+// Chrome and Safari resolve a peer's .local candidate over the local network, so
+// two phones connect even with no STUN reflexive path between them.
+
+const NEARBY_GATHER_TIMEOUT = 3500; // ms cap on waiting for ICE gathering
+
+const nbEl = (id) => document.getElementById(id);
+const netNearbyView = nbEl("net-nearby-view");
+const netConnectView = nbEl("net-connect-view");
+const netNearbyCallout = nbEl("net-nearby-callout");
+const nbChoose = nbEl("net-nearby-choose");
+const nbQrBox = nbEl("net-nearby-qr");
+const nbScanBox = nbEl("net-nearby-scan");
+const nbQrLabel = nbEl("net-nb-qr-label");
+const nbScanLabel = nbEl("net-nb-scan-label");
+const nbCanvas = nbEl("net-nb-canvas");
+const nbOut = nbEl("net-nb-out");
+const nbIn = nbEl("net-nb-in");
+const nbVideo = nbEl("net-nb-video");
+const nbScanStartBtn = nbEl("net-nb-scan-start");
+const nbStatusDiv = nbEl("net-nb-status");
+
+const nbSetStatus = (msg, isError) => {
+  if (!nbStatusDiv) return;
+  nbStatusDiv.textContent = msg || "";
+  nbStatusDiv.classList.toggle("net-error", !!isError);
+};
+
+// Wait for full ICE gathering so ONE bundled description carries every candidate.
+// Resolves on the 'complete' state (or the null-candidate sentinel), with a
+// timeout so a stuck STUN server can't hang the flow — the host mDNS candidate
+// is usually already present and is what carries the same-LAN link anyway.
+const nearbyGather = (pc) =>
+  new Promise((resolve) => {
+    if (pc.iceGatheringState === "complete") return resolve();
+    let done = false;
+    const finish = () => { if (done) return; done = true; resolve(); };
+    pc.addEventListener("icegatheringstatechange", () => {
+      if (pc.iceGatheringState === "complete") finish();
+    });
+    pc.addEventListener("icecandidate", (e) => { if (!e.candidate) finish(); });
+    setTimeout(finish, NEARBY_GATHER_TIMEOUT);
+  });
+
+// Shared connection-state handler (mirrors startRtc's, with same-Wi-Fi wording).
+const nearbyConnState = (pc) => () => {
+  if (!net || net.pc !== pc) return;
+  const st = pc.connectionState;
+  if (st === "failed") {
+    netFail(
+      net.rtcConnected
+        ? "Peer connection lost"
+        : "Couldn't connect — make sure both phones are on the same Wi-Fi"
+    );
+  } else if ((st === "disconnected" || st === "closed") && net.started) {
+    netPeerGone("Peer connection lost");
+  }
+};
+
+// ---- camera scanning (BarcodeDetector where available) ----
+// iOS Safari does NOT ship BarcodeDetector (as of 2026 it is a Chromium/Android
+// API); when it is absent we hide the camera button and steer to copy-paste,
+// which needs no camera and works everywhere. Android Chrome scans live.
+let nbScanStop = null;
+const nearbyHasScanner = () => typeof window.BarcodeDetector !== "undefined";
+
+const nearbyStopScan = () => {
+  if (nbScanStop) { try { nbScanStop(); } catch {} nbScanStop = null; }
+};
+
+const nearbyStartScan = async (onText) => {
+  if (!nearbyHasScanner()) {
+    nbSetStatus("This browser can't scan — paste the code instead", true);
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+    });
+  } catch (e) {
+    nbSetStatus(
+      e && e.name === "NotAllowedError"
+        ? "Camera blocked — allow it, or paste the code instead"
+        : "No camera available — paste the code instead",
+      true
+    );
+    return;
+  }
+  nbVideo.hidden = false;
+  nbScanStartBtn.hidden = true;
+  nbVideo.srcObject = stream;
+  try { await nbVideo.play(); } catch {}
+  const det = new window.BarcodeDetector({ formats: ["qr_code"] });
+  let stopped = false;
+  nbScanStop = () => {
+    stopped = true;
+    try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+    nbVideo.srcObject = null;
+    nbVideo.hidden = true;
+    nbScanStartBtn.hidden = false;
+  };
+  nbSetStatus("Point the camera at your friend's code…");
+  const tick = async () => {
+    if (stopped || !net) return;
+    try {
+      const codes = await det.detect(nbVideo);
+      if (codes && codes.length && codes[0].rawValue) {
+        const val = codes[0].rawValue;
+        nearbyStopScan();
+        onText(val);
+        return;
+      }
+    } catch {}
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+
+// ---- QR render ----
+const nearbyRenderQr = (text) => {
+  let q;
+  try { q = QR.encode(text); } catch { return false; }
+  const quiet = 4;
+  const dim = q.size + quiet * 2;
+  const target = 260; // css px target; snap to whole modules for crisp scans
+  const px = Math.max(3, Math.floor(target / dim));
+  nbCanvas.width = dim * px;
+  nbCanvas.height = dim * px;
+  const ctx = nbCanvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, nbCanvas.width, nbCanvas.height);
+  ctx.fillStyle = "#000000";
+  for (let y = 0; y < q.size; y++)
+    for (let x = 0; x < q.size; x++)
+      if (q.modules[y][x]) ctx.fillRect((x + quiet) * px, (y + quiet) * px, px, px);
+  return true;
+};
+
+// ---- sub-view show/hide ----
+const nearbyResetViews = () => {
+  nearbyStopScan();
+  if (nbChoose) nbChoose.hidden = false;
+  if (nbQrBox) nbQrBox.hidden = true;
+  if (nbScanBox) nbScanBox.hidden = true;
+  nbSetStatus("");
+};
+const nearbyShowQr = (label, text) => {
+  nbChoose.hidden = true;
+  if (!nearbyRenderQr(text)) {
+    nbSetStatus("Couldn't build the QR — use Copy/paste below", true);
+  }
+  nbQrLabel.textContent = label;
+  nbOut.value = text;
+  nbQrBox.hidden = false;
+};
+const nearbyShowScan = (label) => {
+  nbChoose.hidden = true;
+  nbScanLabel.textContent = label;
+  // No live scanner on browsers without BarcodeDetector; lead with paste there.
+  nbScanStartBtn.hidden = !nearbyHasScanner();
+  nbVideo.hidden = true;
+  nbScanBox.hidden = false;
+};
+const nearbyHideScan = () => { nearbyStopScan(); if (nbScanBox) nbScanBox.hidden = true; };
+
+// ---- flows ----
+// Host: build a full (non-trickle) offer, show its QR, then scan the reply.
+const nearbyHost = async () => {
+  try {
+    nbSetStatus("Preparing your code…");
+    const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
+    net.pc = pc;
+    net.isHost = true;
+    pc.onconnectionstatechange = nearbyConnState(pc);
+    // Host offers AND is unit 0 — same as the server path's offerer.
+    wireChannel(pc.createDataChannel("link", { ordered: true }));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await nearbyGather(pc);
+    const enc = SDPCodec.encode(pc.localDescription);
+    if (!enc) throw new Error("couldn't encode the offer");
+    nearbyShowQr("1. Show this code to your friend", enc);
+    nearbyShowScan("2. Then scan the code they show you back");
+    nbSetStatus("Waiting for your friend's reply…");
+  } catch (e) {
+    nbSetStatus("Couldn't start Nearby pairing: " + (e.message || e), true);
+  }
+};
+
+// Guest: scan the host's offer first (no PC until we have it).
+const nearbyGuest = () => {
+  net.isHost = false;
+  nearbyShowScan("Scan your friend's code");
+  if (!nearbyHasScanner()) nbSetStatus("Paste the code your friend shows you");
+};
+
+// Consume a decoded/pasted string. Host: it's the answer → connect. Guest:
+// it's the offer → build + show the answer, then the host scans that to connect.
+const nearbyConsume = async (text) => {
+  const desc = SDPCodec.decode((text || "").trim());
+  if (!desc) {
+    nbSetStatus("That code didn't read cleanly — try scanning again", true);
+    return;
+  }
+  try {
+    if (net.isHost) {
+      await net.pc.setRemoteDescription(desc);
+      nearbyHideScan();
+      nbSetStatus("Connecting…");
+    } else {
+      const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
+      net.pc = pc;
+      pc.onconnectionstatechange = nearbyConnState(pc);
+      pc.ondatachannel = (e) => wireChannel(e.channel);
+      await pc.setRemoteDescription(desc);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await nearbyGather(pc);
+      const enc = SDPCodec.encode(pc.localDescription);
+      if (!enc) throw new Error("couldn't encode the answer");
+      nearbyHideScan();
+      nearbyShowQr("Show this back to your friend", enc);
+      nbSetStatus("Waiting for your friend to scan…");
+    }
+  } catch (e) {
+    nbSetStatus("Pairing failed: " + (e.message || e), true);
+  }
+};
+
+// Enter the Nearby view. Cancels any in-progress server/local attempt (Nearby is
+// a distinct rendezvous) but keeps the pending session object.
+const nearbyOpen = () => {
+  if (!net) net = makeSession(netAttach);
+  clearTimeout(nearbyHintTimer);
+  // Drop any in-progress server attempt WITHOUT tripping its teardown: detach the
+  // socket handlers first, else ws.onclose fires netFail (no alt path yet) and
+  // destroys the session we're keeping for the Nearby rendezvous.
+  const ws = net.ws;
+  if (ws) {
+    try { ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null; ws.close(); } catch {}
+  }
+  net.ws = null;
+  if (net.abortLocal) { try { net.abortLocal(); } catch {} net.abortLocal = null; }
+  net.bc = null;
+  netSetConnecting(false);
+  netSetStatus("");
+  if (netConnectView) netConnectView.hidden = true;
+  if (netNearbyView) netNearbyView.hidden = false;
+  nearbyResetViews();
+};
+
+const nearbyBack = () => {
+  nearbyStopScan();
+  if (netNearbyView) netNearbyView.hidden = true;
+  if (netConnectView) netConnectView.hidden = false;
+  if (netNearbyCallout) netNearbyCallout.hidden = true;
+};
+
+// Fully reset the Nearby UI (called from modal close / shutdown).
+const nearbyReset = () => {
+  nearbyStopScan();
+  if (netNearbyView) netNearbyView.hidden = true;
+  if (netConnectView) netConnectView.hidden = false;
+  if (netNearbyCallout) netNearbyCallout.hidden = true;
+  nearbyResetViews();
+};
+
+// Wire the Nearby buttons.
+nbEl("net-nearby-open")?.addEventListener("click", nearbyOpen);
+nbEl("net-nb-back")?.addEventListener("click", nearbyBack);
+nbEl("net-nb-host")?.addEventListener("click", nearbyHost);
+nbEl("net-nb-guest")?.addEventListener("click", nearbyGuest);
+nbScanStartBtn?.addEventListener("click", () => nearbyStartScan(nearbyConsume));
+nbEl("net-nb-in-go")?.addEventListener("click", () => {
+  const v = nbIn.value.trim();
+  if (v) nearbyConsume(v);
+});
+nbEl("net-nb-copy-btn")?.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(nbOut.value);
+    showToast("Code copied");
+  } catch {
+    nbOut.select();
+  }
+});
+// Keep the emulator's key handlers from swallowing textarea input.
+[nbIn, nbOut].forEach((el) =>
+  el && ["keydown", "keypress", "keyup"].forEach((t) =>
+    el.addEventListener(t, (e) => e.stopPropagation())
+  )
+);
 
 // ---------------- input-rollback online play ----------------
 // Wire protocol over the DataChannel (binary frames, first byte = kind):
@@ -938,6 +1257,15 @@ netJoinGo.addEventListener("click", async () => {
   }
   netSetConnecting(true);
   netSetStatus("Connecting…");
+  // If the signaling server hasn't carried us anywhere within ~2s, surface the
+  // serverless "Nearby (no internet)" option (don't force it — the server may
+  // still be coming up; the callout just makes the always-present link loud).
+  clearTimeout(nearbyHintTimer);
+  nearbyHintTimer = setTimeout(() => {
+    if (net === session && !net.dc && !net.rtcConnected && !net.started) {
+      if (netNearbyCallout) netNearbyCallout.hidden = false;
+    }
+  }, NEARBY_HINT_DELAY);
   // Two paths race. Same-browser tabs pair instantly over a BroadcastChannel with
   // no server and no WebRTC; everyone else goes through the signaling server. The
   // first to connect wins (wireChannel tears the loser down). Running both means a
@@ -948,6 +1276,10 @@ netJoinGo.addEventListener("click", async () => {
     // Paired locally (net.dc set) or cancelled (net swapped) while dialing?
     if (net !== session || net.dc) return;
     sigSend({ t: "rendezvous", code });
+  } else if (net === session && !net.dc && !net.rtcConnected) {
+    // The server was unreachable outright — reveal the fallback immediately.
+    clearTimeout(nearbyHintTimer);
+    if (netNearbyCallout) netNearbyCallout.hidden = false;
   }
 });
 
@@ -1094,6 +1426,8 @@ const netPeerGone = (msg) => {
 // netMode is false.
 const netShutdown = async (opts) => {
   netStallBadge.hidden = true;
+  clearTimeout(nearbyHintTimer);
+  nearbyStopScan();
   const s = net;
   net = null;
   // Cancelling the connect modal (or any teardown) thaws the game we froze when
