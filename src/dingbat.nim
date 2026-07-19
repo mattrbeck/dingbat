@@ -66,6 +66,13 @@ void main() {
 #    panel is far less washed out than the AGB's, so the GBA curve would
 #    crush its colors. Both match the wasm build's LUTs and the screenshot
 #    path (bgr555_to_rgb) exactly.
+#
+# The upscale filters (hq4x / xBR) below are CLEAN-ROOM implementations written
+# from published ALGORITHM DESCRIPTIONS — Hyllian's xBR tutorial (the weighted
+# YUV 48:7:6 distance and the wd_red<wd_blue edge rule), the ubitux "Butchering
+# HQX" write-up, and Wikipedia's hqx/pixel-art-scaling pages. No GPL/LGPL shader
+# source was copied; the math is reimplemented in fragment form. The same code
+# is mirrored in web/index.js's GLSL ES 300 shader.
 const FRAG_SRC = """
 #version 330 core
 in vec2 tex_coord;
@@ -74,31 +81,91 @@ uniform sampler2D input_texture;
 uniform bool color_correct;
 uniform bool panel_gbc;
 uniform bool scanlines;
+uniform float tex_width;
 uniform float tex_height;
-void main() {
-  vec4 color = texture(input_texture, tex_coord);
-  float outGamma = 2.2;
-  vec3 rgb;
-  if (color_correct) {
-    if (panel_gbc) {
-      vec3 lin = pow(color.rgb, vec3(2.2)) * 0.94;
-      rgb = pow(clamp(vec3(
-        0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
-        0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
-       -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
-        vec3(1.0 / outGamma));
-    } else {
-      float lcdGamma = 4.0;
-      vec3 lin = pow(color.rgb, vec3(lcdGamma));
-      rgb = pow(vec3(
-        0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
-       30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
-      220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
-        vec3(1.0 / outGamma));
-    }
-  } else {
-    rgb = color.rgb;
+uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR
+
+vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
+
+// BT.601 YUV; the perceptual space both filters classify edges in.
+vec3 yuv(vec3 c) {
+  return vec3(dot(c, vec3( 0.299,  0.587,  0.114)),
+              dot(c, vec3(-0.169, -0.331,  0.500)),
+              dot(c, vec3( 0.500, -0.419, -0.081)));
+}
+// xBR weighted color distance: 48*|dY| + 7*|dU| + 6*|dV|.
+float df(vec3 a, vec3 b) {
+  vec3 d = abs(yuv(a) - yuv(b));
+  return d.x * 48.0 + d.y * 7.0 + d.z * 6.0;
+}
+// hqx similar/different test: per-channel YUV thresholds 48,7,6 (8-bit units).
+bool similar(vec3 a, vec3 b) {
+  vec3 d = abs(yuv(a) - yuv(b));
+  return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
+}
+
+// Sample the source texel-neighborhood around uv and smooth the pixel-art edge
+// the fragment sits on. filter_mode picks the algorithm.
+vec3 upscale(vec2 uv, vec2 tsz) {
+  vec3 E = srctex(uv);
+  if (filter_mode == 0) return E;
+  vec2 t  = 1.0 / tsz;
+  vec2 fp = fract(uv * tsz);                 // sub-texel position, 0.5 = center
+  float sx = fp.x < 0.5 ? -1.0 : 1.0;        // which diagonal corner we're in
+  float sy = fp.y < 0.5 ? -1.0 : 1.0;
+  float lx = sx > 0.0 ? fp.x : 1.0 - fp.x;   // corner-local: 0.5 at center..1 far
+  float ly = sy > 0.0 ? fp.y : 1.0 - fp.y;
+  // ramp across the anti-diagonal through the active corner (lv2-style AA)
+  float w = smoothstep(0.15, 0.85, lx + ly - 1.0);
+  vec3 Ph = srctex(uv + t * vec2(sx, 0.0));  // horizontal edge neighbor
+  vec3 Pv = srctex(uv + t * vec2(0.0, sy));  // vertical edge neighbor
+  vec3 X  = srctex(uv + t * vec2(sx, sy));   // diagonal neighbor
+
+  if (filter_mode == 1) {                    // hq4x-style (threshold + 3px blend)
+    if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
+      return mix(E, 0.5 * (Ph + Pv), w);
+    return E;
   }
+  // filter_mode == 2: xBR-lv2 edge-directed interpolation
+  vec3 C  = srctex(uv + t * vec2( sx, -sy));
+  vec3 G  = srctex(uv + t * vec2(-sx,  sy));
+  vec3 F4 = srctex(uv + t * vec2( 2.0 * sx, 0.0));
+  vec3 H5 = srctex(uv + t * vec2( 0.0, 2.0 * sy));
+  vec3 D  = srctex(uv + t * vec2(-sx, 0.0));
+  vec3 I5 = srctex(uv + t * vec2( sx, 2.0 * sy));
+  vec3 I4 = srctex(uv + t * vec2( 2.0 * sx, sy));
+  vec3 B  = srctex(uv + t * vec2( 0.0, -sy));
+  float wd_red  = df(E, C) + df(E, G) + df(X, F4) + df(X, H5) + 4.0 * df(Pv, Ph);
+  float wd_blue = df(Pv, D) + df(Pv, I5) + df(Ph, I4) + df(Ph, B) + 4.0 * df(E, X);
+  if (wd_red < wd_blue) {
+    vec3 px = df(E, Ph) <= df(E, Pv) ? Ph : Pv;
+    return mix(E, px, w);
+  }
+  return E;
+}
+
+vec3 correct(vec3 c) {
+  float outGamma = 2.2;
+  if (panel_gbc) {
+    vec3 lin = pow(c, vec3(2.2)) * 0.94;
+    return pow(clamp(vec3(
+      0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
+      0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
+     -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
+      vec3(1.0 / outGamma));
+  }
+  float lcdGamma = 4.0;
+  vec3 lin = pow(c, vec3(lcdGamma));
+  return pow(vec3(
+      0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
+     30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
+    220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
+    vec3(1.0 / outGamma));
+}
+
+void main() {
+  vec3 raw = upscale(tex_coord, vec2(tex_width, tex_height));
+  vec3 rgb = color_correct ? correct(raw) : raw;
   if (scanlines && fract(tex_coord.y * tex_height) < 0.3) {
     rgb *= 0.72;
   }
@@ -368,6 +435,8 @@ proc apply_panel_uniforms() =
               GLint(if gbc: 1 else: 0))
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"),
               if gbc: GLfloat(GB_H) else: GLfloat(GBA_H))
+  glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
+              if gbc: GLfloat(GB_W) else: GLfloat(GBA_W))
 
 proc apply_master_volume() =
   if app.gba_emu != nil:
@@ -583,6 +652,8 @@ proc render_game() =
     # Apply has no callback into this module, so a cached value could go stale
     glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
                 GLint(if app.cfg.scanlines: 1 else: 0))
+    glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
+                GLint(ord(app.cfg.video_filter)))
   case app.emu_kind
   of ekGBA:
     if app.gba_emu == nil: return

@@ -2080,6 +2080,10 @@ var integerScale = false;
 var scanlines = false;
 var motionBlur = false;
 var ambientGlow = false;
+var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" — GPU upscale filter
+// A smoothing filter and integer-scale pinning fight (integer pinning throws
+// away the fractional smoothing), so a filter suspends integer-scale layout.
+const filterActive = () => upscaleFilter !== "none";
 
 // #canvas backing store = native resolution * GL_SCALE. The game texture is
 // sampled NEAREST, so this is a crisp integer upscale (identical pixels to the
@@ -2094,6 +2098,7 @@ const integerScaleToggle = document.getElementById("integer-scale-toggle");
 const scanlinesToggle = document.getElementById("scanlines-toggle");
 const motionBlurToggle = document.getElementById("motion-blur-toggle");
 const ambientGlowToggle = document.getElementById("ambient-glow-toggle");
+const upscaleFilterSelect = document.getElementById("upscale-filter-select");
 
 // Native resolution of the running system (GBA 240x160, GB/GBC 160x144)
 const nativeRes = () =>
@@ -2129,7 +2134,7 @@ const updateCanvasScaling = () => {
       : 1.5;
   const running =
     document.body.classList.contains("running") && !!currentRomName;
-  if (integerScale && running) {
+  if (integerScale && running && !filterActive()) {
     const [w, h] = nativeRes();
     const k = Math.max(
       1,
@@ -2214,7 +2219,7 @@ const updateGlow = () => {
 // keep their own 2D-canvas blit path (deferred — see notes below).
 const glRenderer = (() => {
   let gl = null, prog = null, tex = null, lost = false;
-  let uColorCorrect, uPanelGbc, uScanlines, uTexHeight;
+  let uColorCorrect, uPanelGbc, uScanlines, uTexHeight, uTexSize, uFilter;
   let lastW = 0, lastH = 0;
 
   const VERT = `#version 300 es
@@ -2226,8 +2231,14 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
+  // The hq4x / xBR branches are CLEAN-ROOM implementations from published
+  // algorithm descriptions (Hyllian's xBR tutorial: YUV 48:7:6 distance and the
+  // wd_red<wd_blue edge rule; ubitux's "Butchering HQX" write-up + Wikipedia for
+  // the hqx per-channel YUV threshold). No GPL/LGPL shader source was copied.
+  // Same math as the desktop GL 3.3 shader (src/dingbat.nim FRAG_SRC).
   const FRAG = `#version 300 es
 precision highp float;
+precision highp int;
 precision highp usampler2D;
 in vec2 v_uv;
 out vec4 frag_color;
@@ -2236,11 +2247,71 @@ uniform bool u_color_correct;
 uniform bool u_panel_gbc;       // CGB color model vs AGB
 uniform bool u_scanlines;
 uniform float u_tex_height;     // native rows (for scanline pitch)
+uniform vec2 u_tex_size;        // native texel dimensions (w, h)
+uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
+
+ivec2 g_max;
+vec3 fetchRGB(ivec2 p) {
+  uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r;
+  return vec3(float(packed & 31u),
+              float((packed >> 5) & 31u),
+              float((packed >> 10) & 31u)) / 31.0;
+}
+vec3 yuv(vec3 c) {
+  return vec3(dot(c, vec3( 0.299,  0.587,  0.114)),
+              dot(c, vec3(-0.169, -0.331,  0.500)),
+              dot(c, vec3( 0.500, -0.419, -0.081)));
+}
+float df(vec3 a, vec3 b) {           // xBR weighted distance 48*Y+7*U+6*V
+  vec3 d = abs(yuv(a) - yuv(b));
+  return d.x * 48.0 + d.y * 7.0 + d.z * 6.0;
+}
+bool similar(vec3 a, vec3 b) {       // hqx per-channel YUV threshold (48,7,6)
+  vec3 d = abs(yuv(a) - yuv(b));
+  return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
+}
+
+vec3 upscale() {
+  g_max = ivec2(u_tex_size) - ivec2(1);
+  vec2 pos  = v_uv * u_tex_size;
+  ivec2 base = ivec2(floor(pos));
+  vec3 E = fetchRGB(base);
+  if (u_filter == 0) return E;
+  vec2 fp = fract(pos);
+  int sx = fp.x < 0.5 ? -1 : 1;
+  int sy = fp.y < 0.5 ? -1 : 1;
+  float lx = sx > 0 ? fp.x : 1.0 - fp.x;
+  float ly = sy > 0 ? fp.y : 1.0 - fp.y;
+  float w = smoothstep(0.15, 0.85, lx + ly - 1.0);
+  vec3 Ph = fetchRGB(base + ivec2(sx, 0));
+  vec3 Pv = fetchRGB(base + ivec2(0, sy));
+  vec3 X  = fetchRGB(base + ivec2(sx, sy));
+
+  if (u_filter == 1) {               // hq4x-style
+    if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
+      return mix(E, 0.5 * (Ph + Pv), w);
+    return E;
+  }
+  // u_filter == 2: xBR-lv2
+  vec3 C  = fetchRGB(base + ivec2( sx, -sy));
+  vec3 G  = fetchRGB(base + ivec2(-sx,  sy));
+  vec3 F4 = fetchRGB(base + ivec2( 2 * sx, 0));
+  vec3 H5 = fetchRGB(base + ivec2( 0, 2 * sy));
+  vec3 D  = fetchRGB(base + ivec2(-sx, 0));
+  vec3 I5 = fetchRGB(base + ivec2( sx, 2 * sy));
+  vec3 I4 = fetchRGB(base + ivec2( 2 * sx, sy));
+  vec3 B  = fetchRGB(base + ivec2( 0, -sy));
+  float wd_red  = df(E, C) + df(E, G) + df(X, F4) + df(X, H5) + 4.0 * df(Pv, Ph);
+  float wd_blue = df(Pv, D) + df(Pv, I5) + df(Ph, I4) + df(Ph, B) + 4.0 * df(E, X);
+  if (wd_red < wd_blue) {
+    vec3 px = df(E, Ph) <= df(E, Pv) ? Ph : Pv;
+    return mix(E, px, w);
+  }
+  return E;
+}
+
 void main() {
-  uint packed = texture(u_tex, v_uv).r;
-  vec3 c = vec3(float(packed & 31u),
-                float((packed >> 5) & 31u),
-                float((packed >> 10) & 31u)) / 31.0;
+  vec3 c = upscale();
   float outGamma = 2.2;
   vec3 rgb;
   if (u_color_correct) {
@@ -2297,6 +2368,8 @@ void main() {
     uPanelGbc = gl.getUniformLocation(prog, "u_panel_gbc");
     uScanlines = gl.getUniformLocation(prog, "u_scanlines");
     uTexHeight = gl.getUniformLocation(prog, "u_tex_height");
+    uTexSize = gl.getUniformLocation(prog, "u_tex_size");
+    uFilter = gl.getUniformLocation(prog, "u_filter");
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     // Integer textures must use NEAREST filtering.
@@ -2358,6 +2431,8 @@ void main() {
       gl.uniform1i(uPanelGbc, opts.panelGbc ? 1 : 0);
       gl.uniform1i(uScanlines, opts.scanlines ? 1 : 0);
       gl.uniform1f(uTexHeight, h);
+      gl.uniform2f(uTexSize, w, h);
+      gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
   };
@@ -2373,11 +2448,12 @@ const drawGame = () => {
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
     scanlines,
+    filter: upscaleFilter,
   });
 };
 
 const saveVideoSettings = () => {
-  if (db) dbPut("video", { integerScale, scanlines, motionBlur, ambientGlow });
+  if (db) dbPut("video", { integerScale, scanlines, motionBlur, ambientGlow, upscaleFilter });
 };
 
 const applyMotionBlur = () => {
@@ -2412,6 +2488,13 @@ ambientGlowToggle.addEventListener("change", () => {
   saveVideoSettings();
 });
 
+upscaleFilterSelect.addEventListener("change", () => {
+  upscaleFilter = upscaleFilterSelect.value;
+  updateCanvasScaling();  // filter suspends integer-scale layout pinning
+  drawGame();             // filter is a shader uniform — redraw to show it live
+  saveVideoSettings();
+});
+
 const loadVideoSettings = async () => {
   let v = await dbGet("video");
   if (v) {
@@ -2419,11 +2502,13 @@ const loadVideoSettings = async () => {
     scanlines = !!v.scanlines;
     motionBlur = !!v.motionBlur;
     ambientGlow = !!v.ambientGlow;
+    if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
   }
   integerScaleToggle.checked = integerScale;
   scanlinesToggle.checked = scanlines;
   motionBlurToggle.checked = motionBlur;
   ambientGlowToggle.checked = ambientGlow;
+  upscaleFilterSelect.value = upscaleFilter;
   applyMotionBlur();
   updateCanvasScaling();
 };
@@ -2828,10 +2913,12 @@ const resetAllSettings = async () => {
 
   // Video effects
   integerScale = false; scanlines = false; motionBlur = false; ambientGlow = false;
+  upscaleFilter = "none";
   integerScaleToggle.checked = false;
   scanlinesToggle.checked = false;
   motionBlurToggle.checked = false;
   ambientGlowToggle.checked = false;
+  upscaleFilterSelect.value = "none";
   glowFresh = true;
   applyMotionBlur();
   updateCanvasScaling();

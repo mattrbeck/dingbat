@@ -242,6 +242,14 @@ proc homerow_keybindings*(): Table[cint, Input] =
   result[key_name_to_code("r")]         = Input.R
 
 type
+  VideoFilter* = enum
+    ## GPU upscale filter for the game view (both front-ends). Stored by its
+    ## string value in the config so new filters can be appended without
+    ## churning saved files.
+    vfNone = "none"
+    vfHq4x = "hq4x"
+    vfXbr  = "xbr"
+
   Config* = ref object
     explorer_dir*:      string
     keybindings*:       Table[cint, Input]
@@ -258,6 +266,7 @@ type
     volume*:            int      # master volume 0..100
     mute*:              bool     # mute audio output
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
+    video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr)
     scanlines*:         bool     # darken a strip across each emulated pixel row
     frame_blend*:       bool     # blend the previous frame in (LCD ghosting)
     rewind*:            bool     # keep rewind history (hold ` to rewind)
@@ -278,6 +287,7 @@ proc new_config*(): Config =
     volume:          100,
     mute:            false,
     color_correction: true,
+    video_filter:    vfNone,
     scanlines:       false,
     frame_blend:     false,
     rewind:          true,
@@ -298,6 +308,11 @@ proc parse_config(j: JsonNode): Config =
     cfg.mute = j["mute"].getBool(false)
   if j.hasKey("color_correction"):
     cfg.color_correction = j["color_correction"].getBool(true)
+  if j.hasKey("video_filter") and j["video_filter"].kind == JString:
+    try:
+      cfg.video_filter = parseEnum[VideoFilter](j["video_filter"].getStr("none"))
+    except ValueError:
+      cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
     cfg.scanlines = j["scanlines"].getBool(false)
   if j.hasKey("frame_blend"):
@@ -398,6 +413,7 @@ proc save_config*(cfg: Config) =
   lines.add("volume: " & $cfg.volume)
   lines.add("mute: " & $cfg.mute)
   lines.add("color_correction: " & $cfg.color_correction)
+  lines.add("video_filter: " & $cfg.video_filter)
   lines.add("scanlines: " & $cfg.scanlines)
   lines.add("frame_blend: " & $cfg.frame_blend)
   lines.add("rewind: " & $cfg.rewind)

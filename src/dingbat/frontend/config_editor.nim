@@ -61,6 +61,7 @@ proc do_factory_reset(ed: ConfigEditor) =
   ed.cfg.volume              = d.volume
   ed.cfg.mute                = d.mute
   ed.cfg.color_correction    = d.color_correction
+  ed.cfg.video_filter        = d.video_filter
   ed.cfg.scanlines           = d.scanlines
   ed.cfg.frame_blend         = d.frame_blend
   ed.cfg.rewind              = d.rewind
