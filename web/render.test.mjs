@@ -19,12 +19,14 @@
 //   top-left RED   top-right GREEN
 //   bottom-left BLUE  bottom-right WHITE   center YELLOW
 //
-// A PNG of the correct filter=none render is written to /private/tmp so the
+// A PNG of the correct filter=none render is written to the OS temp dir so the
 // owner can eyeball it; the path is printed at the end.
 //
 // Run:  node web/render.test.mjs   (after: npx playwright install chromium)
 
 import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readShaders } from "./glshaders.mjs";
 
 let chromium;
@@ -179,7 +181,7 @@ async function run() {
     assert(isWhite(base.q_br), `interior bottom-right quadrant WHITE  (${base.q_br})`);
 
     // Save the correct render for eyeballing.
-    const pngPath = "/private/tmp/dingbat-render-correct.png";
+    const pngPath = join(tmpdir(), "dingbat-render-correct.png");
     writeFileSync(pngPath, Buffer.from(base.png.split(",")[1], "base64"));
     console.log(`  (wrote correct-render PNG -> ${pngPath})`);
 
