@@ -319,7 +319,10 @@ const logContext = async () => {
   }
   const act = navigator.userActivation
     ? String(navigator.userActivation.hasBeenActive) : "?";
-  const vib = `vibrate:${vibSupported} test:${vibTest} act:${act} firstAct:${firstActivationEvent || "none"}`;
+  // hblk: running count of in-game haptic() calls whose vibrate() returned
+  // false (blocked) over total calls — read after pressing a few buttons to
+  // see whether pulses are being swallowed on this device.
+  const vib = `vibrate:${vibSupported} test:${vibTest} act:${act} firstAct:${firstActivationEvent || "none"} hblk:${hapticBlocked}/${hapticCalls}`;
   return `dingbat ${version} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${vib} | ${navigator.userAgent}`;
 };
 
@@ -4134,9 +4137,42 @@ for (const ev of ["touchend", "pointerup", "mousedown", "keydown"])
 // reading as a notification buzz. iOS/WebKit never shipped vibrate and Firefox
 // removed it in 129 — the optional-chain + try make those silent no-ops.
 const HAPTIC_MS = 25;
+// Diagnostic counters surfaced in the debug-log context line as
+// hblk:<blocked>/<total>. A call counts as blocked only when vibrate()
+// exists and returns false (Chromium's "no sticky activation" / policy
+// block) — unsupported platforms (iOS, Firefox 129+) stay 0/n by design.
+let hapticCalls = 0;
+let hapticBlocked = 0;
 const haptic = () => {
-  try { navigator.vibrate?.(HAPTIC_MS); } catch {}
+  hapticCalls++;
+  try {
+    if (navigator.vibrate?.(HAPTIC_MS) === false) hapticBlocked++;
+  } catch {
+    hapticBlocked++;
+  }
 };
+
+// Settings -> Controls -> "Test vibration": one unmistakable 200 ms pulse on
+// CLICK (click always carries sticky activation), with the raw return value
+// shown inline. Separates "our haptic() path is blocked" from "this
+// phone/browser doesn't deliver web vibration at all".
+{
+  const btn = document.getElementById("vibration-test-btn");
+  let revert = null;
+  btn?.addEventListener("click", () => {
+    let label;
+    if (!("vibrate" in navigator)) {
+      label = "unsupported";
+    } else {
+      let ret;
+      try { ret = navigator.vibrate(200); } catch { ret = "err"; }
+      label = `sent (${ret})`;
+    }
+    btn.textContent = label;
+    clearTimeout(revert);
+    revert = setTimeout(() => { btn.textContent = "Test"; }, 2000);
+  });
+}
 
 var currentDpadTouchId = null;
 var currentDpadElement = null;
