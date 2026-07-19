@@ -2571,6 +2571,9 @@ const loadControlStyleFromStorage = async () => {
 const THEME_KEY = "dingbat_theme";
 const THEME_NAMES = ["amber", "black", "light", "indigo", "fuchsia", "glacier", "emerald"];
 const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
+// Null on iOS standalone: the <head> boot script removes the meta there (iOS
+// paints the below-the-layout-viewport band with theme-color, drawing an
+// opaque bar over our 100vh body's bottom edge — see the boot script note).
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
 const applyTheme = (name) => {

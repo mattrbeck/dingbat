@@ -28,13 +28,29 @@
       // flashes the default amber. The tiny bg map keeps the browser-chrome
       // color (theme-color) in step from the first frame too; index.js later
       // re-derives it from the live CSS tokens, so the map is only a boot hint.
+      //
+      // iOS installed-to-home-screen (navigator.standalone) EXCEPTION: WebKit
+      // shorts the standalone layout viewport by the status-bar height (see
+      // the display-mode:standalone note in styles.css — 812pt screen, 762pt
+      // viewport on an iPhone 13 mini), and our body is forced to 100vh so
+      // content deliberately runs into that bottom band. When a theme-color
+      // meta exists, iOS paints the outside-the-layout-viewport band with it:
+      // an opaque bar over Select/Start and the bottom of the home list. The
+      // meta buys nothing in standalone (no browser tab chrome to tint), so
+      // remove it there before first paint. Browser tabs keep the tinting;
+      // Android PWAs keep it too (navigator.standalone is iOS-only).
       try {
+        var themeMeta = document.querySelector('meta[name="theme-color"]');
+        if (navigator.standalone === true && themeMeta) {
+          themeMeta.remove();
+          themeMeta = null;
+        }
         var t = localStorage.getItem("dingbat_theme");
         if (t && t !== "amber") {
           document.documentElement.setAttribute("data-theme", t);
           var bg = { black: "#000000", light: "#e2e4ea", indigo: "#131226",
                      fuchsia: "#1e1020", glacier: "#0d151d", emerald: "#0c1712" }[t];
-          if (bg) document.querySelector('meta[name="theme-color"]').content = bg;
+          if (bg && themeMeta) themeMeta.content = bg;
         }
       } catch (e) {}
     </script>
