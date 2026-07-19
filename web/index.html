@@ -212,10 +212,18 @@
             </button>
             <button type="button" id="home-paused-close" title="Close game &mdash; your save is kept" aria-label="Close game">&times;</button>
           </div>
-          <button type="button" id="home-resume">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
-            <span>Resume game</span>
-          </button>
+          <!-- On touch devices (pointer: coarse) this wrapper becomes a
+               side-by-side row of Resume + "Load a game"; on desktop it is
+               display:contents so the layout is unchanged. -->
+          <div id="home-actions">
+            <button type="button" id="home-resume">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
+              <span>Resume game</span>
+            </button>
+            <!-- Mobile-only replacement for the big drop target below (no
+                 drag-and-drop on touch); hidden on desktop. -->
+            <button type="button" id="home-load" class="button button-primary">Load a game</button>
+          </div>
           <div id="home-brand">
             <img src="favicon.svg" alt="" id="home-logo" />
             <h1>dingbat</h1>
