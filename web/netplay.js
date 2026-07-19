@@ -101,6 +101,49 @@ const closeNetModal = () => {
   releaseFocus(netModal);
 };
 
+// ---------------- signaling server liveness probe ----------------
+// Dialed on the same cadence as index.js's update check (page load + the tab
+// becoming visible, plus every modal open), so the link modal can skip the
+// doomed shared-code attempt and open STRAIGHT to the manual code exchange
+// when the server was last seen down. Real connect attempts also feed the
+// flag, so it stays current without extra dials. Unlike the update check's
+// 24h stamp, liveness goes stale in minutes — the throttle only smooths
+// rapid tab-switch flapping.
+let sigServerUp = null; // null = never probed; otherwise last known liveness
+let sigProbeAt = 0;
+const SIG_PROBE_MIN_INTERVAL = 30000;
+const SIG_PROBE_TIMEOUT = 4000; // a silent host is "down", same as an error
+
+const probeSignalServer = () => {
+  const now = Date.now();
+  if (now - sigProbeAt < SIG_PROBE_MIN_INTERVAL) return;
+  sigProbeAt = now;
+  let ws;
+  try {
+    ws = new WebSocket(NET_SIGNAL_URL);
+  } catch {
+    sigServerUp = false;
+    return;
+  }
+  const timer = setTimeout(() => {
+    sigServerUp = false;
+    try { ws.close(); } catch {}
+  }, SIG_PROBE_TIMEOUT);
+  ws.onopen = () => {
+    sigServerUp = true;
+    clearTimeout(timer);
+    try { ws.close(); } catch {}
+  };
+  ws.onerror = () => {
+    sigServerUp = false;
+    clearTimeout(timer);
+  };
+};
+probeSignalServer();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") probeSignalServer();
+});
+
 // Open the single shared-code entry modal and stage a pending session. Both
 // players type the SAME code; the signaling server makes whoever arrives first
 // the host. No Host/Join choice — just like plugging in a link cable.
@@ -120,6 +163,13 @@ const openNetConnect = async (attach) => {
   if (typeof manualReset === "function") manualReset();
   netModal.classList.add("open");
   trapFocus(netModal);
+  // Server known-down from the last probe: no point walking into the shared-code
+  // flow — open straight onto the manual exchange (re-probing in the background
+  // so a recovered server puts the next open back on the normal path).
+  if (sigServerUp === false && navigator.onLine) {
+    probeSignalServer();
+    manualEnter();
+  }
   // Freeze the running game the moment this modal opens and keep it frozen
   // through code entry, pairing, and the ROM/state transfer. The modal covers
   // the emulation frame anyway, and letting the game keep running lets its OWN
@@ -132,8 +182,11 @@ const openNetConnect = async (attach) => {
     document.body.classList.add("paused");
     pauseButton.classList.add("paused", "active");
   }
-  // Drop the cursor straight in the field so the code can be typed immediately.
-  setTimeout(() => netCodeInput.focus(), 0);
+  // Drop the cursor straight in the field so the code can be typed immediately
+  // (the friend's-code field when we opened onto the manual exchange).
+  setTimeout(() => {
+    (netManualView && !netManualView.hidden ? manualIn : netCodeInput)?.focus();
+  }, 0);
 };
 
 // --- "Link Cable" menu button ---
@@ -202,8 +255,12 @@ const sigConnect = () =>
     // path runs in parallel for every connect, so a down server must never tear
     // a session down while that path is still live or has already won.
     const hasAltPath = () => !!(net && (net.bc || net.dc || net.rtcConnected || net.started));
-    ws.onopen = () => resolve(true);
+    ws.onopen = () => {
+      sigServerUp = true; // a real dial is as good as a probe
+      resolve(true);
+    };
     ws.onerror = () => {
+      sigServerUp = false;
       if (hasAltPath()) {
         // Only note it while we're still waiting on the local peer; once linked
         // (dc set) the server is simply irrelevant.
@@ -604,11 +661,15 @@ const manualPrepare = async () => {
   }
 };
 
-// Switch the modal from the shared-code view to the manual exchange. Called by
-// the connect flow when the signaling server is unreachable (outright error, or
-// silent for ~2s) while the network itself looks up. Cancels the in-progress
-// server/local attempts (this is a distinct rendezvous) but keeps the session.
-const manualEnter = () => {
+// Switch the modal from the shared-code view to the manual exchange. Two ways
+// in: openNetConnect() jumps here straight away when the last liveness probe
+// saw the server down, and the connect flow lands here when a live shared-code
+// attempt finds the server unreachable (outright error, or silent for ~2s) —
+// `attemptFailed` distinguishes the latter so the player is told their attempt
+// failed rather than the view just silently changing shape. Cancels the
+// in-progress server/local attempts (this is a distinct rendezvous) but keeps
+// the session.
+const manualEnter = (attemptFailed) => {
   if (!netModalOpen() || !net) return;
   if (netManualView && !netManualView.hidden) return; // already trading codes
   if (!navigator.onLine) {
@@ -630,7 +691,10 @@ const manualEnter = () => {
   net.bc = null;
   netSetConnecting(false);
   netSetStatus("");
-  manualSetStatus("");
+  manualSetStatus(
+    attemptFailed ? "Couldn't connect — the linking server didn't respond" : "",
+    true
+  );
   if (netConnectView) netConnectView.hidden = true;
   if (netManualView) netManualView.hidden = false;
   manualPrepare();
@@ -1175,7 +1239,8 @@ netJoinGo.addEventListener("click", async () => {
   clearTimeout(manualFallbackTimer);
   manualFallbackTimer = setTimeout(() => {
     if (net === session && !net.dc && !net.rtcConnected && !net.started) {
-      manualEnter();
+      sigServerUp = false;
+      manualEnter(true);
     }
   }, MANUAL_FALLBACK_DELAY);
   // Two paths race. Same-browser tabs pair instantly over a BroadcastChannel with
@@ -1191,7 +1256,7 @@ netJoinGo.addEventListener("click", async () => {
   } else if (net === session && !net.dc && !net.rtcConnected) {
     // The server was unreachable outright — switch to the fallback immediately.
     clearTimeout(manualFallbackTimer);
-    manualEnter();
+    manualEnter(true);
   }
 });
 
