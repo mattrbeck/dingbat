@@ -2722,13 +2722,19 @@ body.large-controls .pad-pill {
      but with the row bottom-aligned (align-items: flex-end) the d-pad rests
      low while a base centered at top:50% would float up to mid-height — the
      reported "joystick sits too high". Bottom-anchor the base so its resting
-     center matches the bottom-aligned d-pad's center. JS re-measures
+     center matches the bottom-aligned d-pad's center. Same story on the x
+     axis: the region is the whole left half of the row, so a base centered
+     at left:50% rests ~25% of the screen width in — far from where the d-pad
+     (a flex child hugging the row's left edge) sits. Left-anchor it so the
+     resting center matches the d-pad's landscape center. JS re-measures
      joyHome/joyBounds from the rendered rect, so floating spawn + clamp
      follow the new resting position automatically. */
   #joystick-base {
     top: auto;
     bottom: 0;
+    left: 0;
     margin-top: 0;
+    margin-left: 0;
   }
   #ab {
     --btn-size: min(calc(32cqi / 2.6), 62px, calc(76cqb / 2.6));
