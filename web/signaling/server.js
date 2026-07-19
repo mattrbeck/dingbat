@@ -24,8 +24,11 @@
 //                                                    WebRTC now
 //                     {"t":"peer-closed"}            the other side is gone
 //                     {"t":"error","msg":"..."}      then the socket closes
-//   after "paired", every other message is relayed verbatim to the peer
-//   (the web UI sends {"t":"sdp",...} and {"t":"ice",...}).
+//   after "paired", ONLY {"t":"sdp",...} and {"t":"ice",...} envelopes are
+//   relayed (their payloads are never inspected). Anything else — any other
+//   type, non-JSON, or exceeding the per-room relay byte budget — closes the
+//   room: this server connects peers and is structurally incapable of
+//   carrying game/save/ROM bytes.
 //
 // Like a physical link cable, players don't designate a host: both type the
 // same code and the FIRST to reach the server hosts (becomes the WebRTC
@@ -56,6 +59,24 @@ const PORT = parseInt(process.argv[2], 10) || parseInt(process.env.PORT, 10) || 
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const MAX_MSG_BYTES = 64 * 1024; // SDP + ICE are a few KB; anything bigger is abuse
 const MIN_CODE_LEN = 3; // user-chosen; short enough to say aloud, long enough to not collide by accident
+
+// Post-pair relay policy. The server's ONLY job after pairing is to carry the
+// WebRTC handshake; it must be structurally incapable of relaying game, save,
+// or ROM bytes (those belong on the peers' DataChannel). Two layers:
+//   1. Envelope allowlist: only {"t":"sdp"} / {"t":"ice"} messages are relayed.
+//      netplay.js sends nothing else post-pair ("rendezvous" is pre-pair
+//      only). Payloads are never inspected — the gate is the envelope type,
+//      so the server stays oblivious to what SDP/ICE mean.
+//   2. A cumulative per-room relayed-byte budget (both directions, lifetime).
+//      A real handshake is tiny: one SDP offer + answer (a few KB each) plus
+//      up to dozens of trickled ICE candidates (~200 B each) — well under
+//      32 KB in practice. 256 KB is ~10x headroom for pathological SDP yet
+//      makes sustained data tunneling through allowlisted envelopes useless.
+// Violating either closes the room in the standard error style (error to the
+// sender, peer-closed to the peer): a peer sending non-signaling traffic is
+// either a bug or abuse, never something to relay.
+const RELAY_TYPES = new Set(['sdp', 'ice']);
+const MAX_RELAY_BYTES_PER_ROOM = 256 * 1024;
 
 // Abuse / resource caps. On a tiny VPS an unbounded server is a liability:
 // a peer that opens sockets and never speaks, or spams unique codes, could
@@ -280,11 +301,32 @@ function closeRoom(code) {
   rooms.delete(code);
 }
 
+// Post-pair relay: forward only allowlisted signaling envelopes, within the
+// room's lifetime byte budget (see RELAY_TYPES above). fail() closes the
+// offender's socket, whose onclose tears the room down and peer-closes the
+// other side — the same funnel every other room-death path uses.
+function relayFrom(room, from, to) {
+  return (text) => {
+    room.relayed += Buffer.byteLength(text, 'utf8');
+    if (room.relayed > MAX_RELAY_BYTES_PER_ROOM) {
+      return fail(from, 'signaling byte budget exceeded');
+    }
+    let msg;
+    try { msg = JSON.parse(text); } catch { return fail(from, 'not JSON'); }
+    const t = msg && typeof msg === 'object' ? msg.t : null;
+    if (typeof t !== 'string' || !RELAY_TYPES.has(t)) {
+      return fail(from, 'only sdp/ice signaling is relayed');
+    }
+    to.sendText(text);
+  };
+}
+
 function attach(ws) {
   // Each socket is in exactly one of three states: fresh (no message yet),
-  // waiting (first with a code, holding a room), or paired (relaying to `peer`).
+  // waiting (first with a code, holding a room), or paired. Pairing swaps
+  // BOTH sockets' onmessage to the enforcing relay (relayFrom), so this
+  // setup handler never sees a paired socket again.
   let code = null;      // room this socket belongs to (as host or guest)
-  let peer = null;      // set once paired
 
   // A socket that connects and never rendezvouses is either a stalled client or
   // a resource-holding probe; drop it so it can't accumulate.
@@ -297,11 +339,6 @@ function attach(ws) {
       msg = JSON.parse(text);
     } catch {
       return fail(ws, 'not JSON');
-    }
-    if (peer) {
-      // Paired: relay verbatim. The server never inspects SDP/ICE.
-      peer.sendText(text);
-      return;
     }
     if (msg.t === 'rendezvous') {
       // Per-IP rendezvous rate limit (counted before any validation): codes
@@ -331,6 +368,7 @@ function attach(ws) {
         rooms.set(c, {
           host: ws,
           guest: null,
+          relayed: 0, // lifetime bytes relayed post-pair, both directions
           timer: setTimeout(() => {
             const r = rooms.get(c);
             closeRoom(c);
@@ -347,14 +385,13 @@ function attach(ws) {
         clearTimeout(room.timer);
         room.timer = null;
         code = c;
-        peer = room.host;
         // Both sides start WebRTC now. The host (first arrival) is the offerer
         // and unit 0 / multi-mode parent in the game.
         const host = room.host;
-        // Both sides swap to a tight verbatim relay: neither peer's SDP/ICE is
-        // ever inspected, so skip the JSON round-trip the setup path needed.
-        host.onmessage = (t) => ws.sendText(t);
-        ws.onmessage = (t) => host.sendText(t);
+        // Both sides swap to the enforcing relay: only sdp/ice envelopes cross,
+        // within the room's byte budget. Payload contents are never inspected.
+        host.onmessage = relayFrom(room, host, ws);
+        ws.onmessage = relayFrom(room, ws, host);
         host.onclose = () => {
           closeRoom(c);
           send(ws, { t: 'peer-closed' });

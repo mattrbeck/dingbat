@@ -178,11 +178,14 @@ async function run() {
   const peakRss = await rssKB(server.pid);
   const roomsAtPeak = await liveRooms(PORT);
 
-  // ---- Relay throughput: hammer one pair with RELAY_MSGS round-trips ----
-  const h = hosts[0], g = guests[0];
+  // ---- Relay throughput: RELAY_MSGS round-trips, round-robin over pairs ----
+  // Spread across rooms: each room has a lifetime relay byte budget (hammering
+  // one room with ~880 KB is exactly the data-tunneling abuse the server now
+  // cuts off), and round-robin models many handshakes rather than one hog.
   const payload = 'x'.repeat(400);
   const tR = Date.now();
   for (let i = 0; i < RELAY_MSGS; i++) {
+    const h = hosts[i % PAIRS], g = guests[i % PAIRS];
     h.send({ t: 'sdp', d: { n: i, p: payload } });
     const m = await g.next();
     if (m.d.n !== i) relayErrors++;
@@ -205,7 +208,7 @@ async function run() {
   console.log(`rooms live at peak           : ${roomsAtPeak} (want ${PAIRS})`);
   console.log(`rooms after disconnect churn : ${freed} (want 0)`);
   console.log(`setup+relay of all pairs     : ${loadMs} ms`);
-  console.log(`relay ${RELAY_MSGS} round-trips (1 pair): ${relayMs} ms  ` +
+  console.log(`relay ${RELAY_MSGS} round-trips (round-robin): ${relayMs} ms  ` +
               `=> ${(RELAY_MSGS / (relayMs / 1000)).toFixed(0)} msg/s, ` +
               `${(relayMs / RELAY_MSGS).toFixed(3)} ms/round-trip`);
   console.log(`RSS idle                     : ${idleRss} KB (${(idleRss / 1024).toFixed(1)} MB)`);

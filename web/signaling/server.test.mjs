@@ -48,8 +48,10 @@ function wsConnect(port, extraHeaders = '') {
     const client = {
       isClosed: false,
       onclose: null,
-      send(obj) {
-        const payload = Buffer.from(JSON.stringify(obj), 'utf8');
+      send(obj) { client.sendRaw(JSON.stringify(obj)); },
+      // Raw text frame (not necessarily JSON) — for the relay-allowlist tests.
+      sendRaw(str) {
+        const payload = Buffer.from(str, 'utf8');
         const mask = crypto.randomBytes(4);
         const len = payload.length;
         let header;
@@ -359,6 +361,140 @@ async function run() {
     assert(ok.t === 'waiting', 'allowlisted Origin connects');
     const bare = await rzAttempt(port, 'ORIG2');
     assert(bare.t === 'waiting', 'missing Origin (non-browser client) connects');
+  });
+
+  // Pair two fresh sockets on `code`. Each pair gets its own client IP (via
+  // trusted XFF from localhost) so many pairs in one section don't trip the
+  // per-IP rendezvous rate limit these tests aren't about.
+  let pairSeq = 0;
+  async function pairUp(port, code) {
+    pairSeq++;
+    const xff = (n) => `X-Forwarded-For: 198.51.100.${pairSeq * 2 + n}\r\n`;
+    const a = await wsConnect(port, xff(0));
+    a.send({ t: 'rendezvous', code });
+    if ((await a.next()).t !== 'waiting') throw new Error('pairUp: no waiting');
+    const b = await wsConnect(port, xff(1));
+    b.send({ t: 'rendezvous', code });
+    if ((await a.next()).t !== 'paired') throw new Error('pairUp: host not paired');
+    if ((await b.next()).t !== 'paired') throw new Error('pairUp: guest not paired');
+    return [a, b];
+  }
+
+  // 9) Post-pair relay allowlist: the server exists to carry the WebRTC
+  //    handshake and NOTHING else. Only {"t":"sdp"} / {"t":"ice"} envelopes
+  //    cross; any other type, rendezvous-after-pairing, or a non-JSON blob
+  //    closes the room (error to the sender, peer-closed to the peer).
+  console.log('post-pair relay allowlist (sdp/ice only):');
+  await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
+    // (a) sdp and ice relay fine, both directions, byte-for-byte.
+    {
+      const [a, b] = await pairUp(port, 'RLY1');
+      a.send({ t: 'sdp', d: { type: 'offer', sdp: 'v=0\r\no=- 1 1 IN IP4 0.0.0.0' } });
+      const sdp = await b.next();
+      assert(sdp.t === 'sdp' && sdp.d.sdp === 'v=0\r\no=- 1 1 IN IP4 0.0.0.0',
+        'sdp relays host->guest intact');
+      b.send({ t: 'ice', c: { candidate: 'candidate:1 1 udp 2122260223 x', sdpMLineIndex: 0 } });
+      const ice = await a.next();
+      assert(ice.t === 'ice' && ice.c.candidate === 'candidate:1 1 udp 2122260223 x',
+        'ice relays guest->host intact');
+      a.close(); b.close();
+      await waitRooms(port, 0);
+    }
+    // (b) a non-signaling type from the host closes the room.
+    {
+      const [a, b] = await pairUp(port, 'RLY2');
+      a.send({ t: 'rbinput', data: 'AAAA' });
+      const err = await a.next();
+      assert(err.t === 'error' && /only sdp\/ice/.test(err.msg),
+        'game-shaped type is rejected with an error');
+      assert((await b.next()).t === 'peer-closed', 'peer is told the room is gone');
+      await waitRooms(port, 0);
+    }
+    // ...and from the guest, with an arbitrary unknown type.
+    {
+      const [a, b] = await pairUp(port, 'RLY3');
+      b.send({ t: 'x' });
+      const err = await b.next();
+      assert(err.t === 'error' && /only sdp\/ice/.test(err.msg),
+        'unknown type from the guest is rejected');
+      assert((await a.next()).t === 'peer-closed', 'host notified of the closed room');
+      await waitRooms(port, 0);
+    }
+    // rendezvous is pre-pair only; post-pair it is not signaling.
+    {
+      const [a, b] = await pairUp(port, 'RLY4');
+      a.send({ t: 'rendezvous', code: 'OTHER' });
+      assert((await a.next()).t === 'error', 'rendezvous after pairing is rejected');
+      assert((await b.next()).t === 'peer-closed', 'peer notified');
+      await waitRooms(port, 0);
+    }
+    // a raw non-JSON blob (what a data tunnel would look like) closes the room.
+    {
+      const [a, b] = await pairUp(port, 'RLY5');
+      a.sendRaw('GAMEBYTES not json at all');
+      const err = await a.next();
+      assert(err.t === 'error' && /not JSON/.test(err.msg), 'raw blob is rejected');
+      assert((await b.next()).t === 'peer-closed', 'peer notified');
+      await waitRooms(port, 0);
+    }
+  });
+
+  // 10) Per-room relayed-byte budget: a real handshake is a few KB; a room
+  //     that relays 256 KB is a data tunnel and gets shut down even when every
+  //     envelope is an allowlisted type.
+  console.log('per-room relay byte budget:');
+  await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
+    // (c) sustained max-size "sdp" spam trips the budget. Each message is
+    // ~60 KB (under the 64 KB per-message cap): 4 fit under 256 KB and relay;
+    // the 5th crosses the budget and closes the room.
+    {
+      const [a, b] = await pairUp(port, 'BDG1');
+      const big = 'x'.repeat(60 * 1024);
+      let intact = 0;
+      for (let i = 0; i < 4; i++) {
+        a.send({ t: 'sdp', d: big });
+        const m = await b.next();
+        if (m.t === 'sdp' && m.d.length === big.length) intact++;
+      }
+      assert(intact === 4, 'first 4 x 60KB messages stay under budget and relay');
+      a.send({ t: 'sdp', d: big });
+      const err = await a.next();
+      assert(err.t === 'error' && /byte budget/.test(err.msg),
+        '5th pushes the room past 256KB and is cut off');
+      assert((await b.next()).t === 'peer-closed', 'peer notified of the closed room');
+      await waitRooms(port, 0);
+    }
+    // (d) a realistic WebRTC handshake is nowhere near the budget: a chunky
+    // SDP offer + answer and 40 trickled ICE candidates all relay fine.
+    {
+      const [a, b] = await pairUp(port, 'BDG2');
+      const sdpBody = 'v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\n' +
+        'a=fingerprint:sha-256 ' + 'AB:'.repeat(31) + 'CD\r\n' +
+        'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n'.repeat(20);
+      a.send({ t: 'sdp', d: { type: 'offer', sdp: sdpBody } });
+      const offer = await b.next();
+      assert(offer.t === 'sdp' && offer.d.sdp === sdpBody, 'realistic offer relays');
+      b.send({ t: 'sdp', d: { type: 'answer', sdp: sdpBody } });
+      assert((await a.next()).t === 'sdp', 'answer relays');
+      let iceOk = 0;
+      for (let i = 0; i < 40; i++) {
+        const cand = {
+          t: 'ice',
+          c: { candidate: `candidate:${i} 1 udp 2122260223 192.168.1.${i} ${40000 + i} typ srflx raddr 0.0.0.0 rport 9 generation 0 ufrag abcd`, sdpMLineIndex: 0 },
+        };
+        const [from, to] = i % 2 ? [b, a] : [a, b];
+        from.send(cand);
+        const m = await to.next();
+        if (m.t === 'ice' && m.c.candidate === cand.c.candidate) iceOk++;
+      }
+      assert(iceOk === 40, '40 trickled ICE candidates relay both ways');
+      // The room is still healthy — one more sdp goes through, no error seen.
+      a.send({ t: 'sdp', d: { type: 'offer', sdp: 'v=0 renegotiate' } });
+      assert((await b.next()).d.sdp === 'v=0 renegotiate',
+        'room still open: realistic volume is far under the budget');
+      a.close(); b.close();
+      await waitRooms(port, 0);
+    }
   });
 
   if (failures) { console.error(`\n${failures} assertion(s) failed`); process.exit(1); }

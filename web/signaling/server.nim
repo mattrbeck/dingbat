@@ -18,9 +18,11 @@
 ##                     {"t":"paired","role":"guest"}     second arrival's role
 ##                     {"t":"peer-closed"}               the other side is gone
 ##                     {"t":"error","msg":"..."}         then the socket closes
-##   after "paired", every other message is relayed verbatim to the peer
-##   (the web UI sends {"t":"sdp",...} and {"t":"ice",...}); the server never
-##   parses those.
+##   after "paired", ONLY {"t":"sdp",...} and {"t":"ice",...} envelopes are
+##   relayed (their payloads are never inspected). Anything else — any other
+##   type, non-JSON, or exceeding the per-room relay byte budget — closes the
+##   room: this server connects peers and is structurally incapable of
+##   carrying game/save/ROM bytes.
 ##
 ## TLS: none here by design. In production the browser connects to `wss://<host>/
 ## signal` (netplay.js), so a reverse proxy (Caddy/nginx) terminates TLS and
@@ -60,6 +62,24 @@ const
   MaxWaitingPerIp = 4        # unclaimed waiting rooms held per client IP
   RzWindowSec = 60.0         # rendezvous rate-limit window (fixed window)
   MaxRzPerWindow = 10        # rendezvous attempts per IP per window
+  # Post-pair relay policy. The server's ONLY job after pairing is to carry
+  # the WebRTC handshake; it must be structurally incapable of relaying game,
+  # save, or ROM bytes (those belong on the peers' DataChannel). Two layers:
+  #   1. Envelope allowlist: only {"t":"sdp"} / {"t":"ice"} messages are
+  #      relayed. netplay.js sends nothing else post-pair ("rendezvous" is
+  #      pre-pair only). Payloads are never inspected — the gate is the
+  #      envelope type, so the server stays oblivious to what SDP/ICE mean.
+  #   2. A cumulative per-room relayed-byte budget (both directions,
+  #      lifetime). A real handshake is tiny: one SDP offer + answer (a few
+  #      KB each) plus up to dozens of trickled ICE candidates (~200 B each)
+  #      — well under 32 KB in practice. 256 KB is ~10x headroom for
+  #      pathological SDP yet makes sustained data tunneling through
+  #      allowlisted envelopes useless.
+  # Violating either closes the room in the standard error style (error to
+  # the sender, peer-closed to the peer): a peer sending non-signaling
+  # traffic is either a bug or abuse, never something to relay.
+  RelayTypes = ["sdp", "ice"]
+  MaxRelayBytesPerRoom = 256 * 1024
 
 type
   Conn = ref object
@@ -86,6 +106,7 @@ type
     host: Conn
     guest: Conn
     expireAt: float        # Inf once paired; a TTL deadline while waiting
+    relayed: int           # lifetime bytes relayed post-pair, both directions
 
 proc hash(c: Conn): Hash = hash(cast[pointer](c)) # identity hash for the live-set
 
@@ -251,7 +272,25 @@ proc fail(c: Conn, msg: string) {.async.} =
 
 proc onText(c: Conn, text: string) {.async.} =
   if c.peer != nil:
-    # Paired: relay verbatim. The server never inspects SDP/ICE.
+    # Paired: relay ONLY allowlisted signaling envelopes, within the room's
+    # lifetime byte budget (see RelayTypes above). fail() tears the room down
+    # and peer-closes the other side — the standard room-death funnel.
+    if not rooms.hasKey(c.code): return  # room already torn down; drop
+    rooms[c.code].relayed += text.len
+    if rooms[c.code].relayed > MaxRelayBytesPerRoom:
+      await c.fail("signaling byte budget exceeded")
+      return
+    # Parse just the envelope type, into a plain local string (never a
+    # string-bearing tuple across `await` — see the Conn field comment).
+    var relayT = ""
+    try:
+      relayT = parseJson(text){"t"}.getStr("")
+    except CatchableError:
+      await c.fail("not JSON")
+      return
+    if relayT notin RelayTypes:
+      await c.fail("only sdp/ice signaling is relayed")
+      return
     await c.peer.sendText(text)
     return
   var t, codeRaw: string
