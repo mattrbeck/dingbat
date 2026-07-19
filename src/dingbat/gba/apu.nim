@@ -114,6 +114,20 @@ proc set_master_volume*(apu: APU; volume: int; mute: bool) =
   apu.master_volume_factor = int32(clamp(volume, 0, 100) * 256 div 100)
   apu.master_muted = mute
 
+proc set_pitch_correct_ff*(apu: APU; on: bool) =
+  ## Toggle WSOLA pitch-preserving 2x. The stretcher itself resets on the
+  ## stretch-path rising edge in get_sample, so this only flips the flag.
+  apu.pitch_correct_ff = on
+
+proc ensure_stretch(apu: APU) {.inline.} =
+  ## Lazily allocate + reset the stretcher exactly when the pitch-correct
+  ## path first engages (turbo AND pitch_correct_ff), so a fresh turbo
+  ## engagement never overlap-adds a stale buffer tail.
+  if not apu.stretch_engaged:
+    if apu.stretch == nil: apu.stretch = new_time_stretch()
+    else: apu.stretch.reset()
+    apu.stretch_engaged = true
+
 proc audio_ahead*(apu: APU): bool =
   ## True when synced audio is buffered comfortably ahead of playback. The
   ## frontend main loop uses this to pace emulation instead of blocking in
@@ -209,12 +223,29 @@ proc get_sample*(apu: APU) =
   when defined(test_harness):
     discard
   elif defined(emscripten):
-    # 2x speed drops every other sample: JS receives realtime-rate audio
-    # (pitched up an octave) while emulation runs double speed
-    apu.turbo_parity = not apu.turbo_parity
-    if not apu.turbo or apu.turbo_parity:
-      appendAudioSample(float32(total_left * 32) / 32768.0'f32,
-                         float32(total_right * 32) / 32768.0'f32)
+    let sl = float32(total_left * 32) / 32768.0'f32
+    let sr = float32(total_right * 32) / 32768.0'f32
+    if not apu.turbo:
+      # 1x: bit-identical passthrough, never routes through the stretcher.
+      apu.stretch_engaged = false
+      appendAudioSample(sl, sr)
+    elif apu.pitch_correct_ff:
+      # Pitch-correct 2x: feed every full-rate frame into WSOLA and emit its
+      # half-count output. Pull on every OTHER call — exactly the count the
+      # old decimation emitted, so pacing is unchanged.
+      apu.ensure_stretch()
+      apu.stretch.push(sl, sr)
+      apu.turbo_parity = not apu.turbo_parity
+      if apu.turbo_parity:
+        let (ol, orr) = apu.stretch.pull()
+        appendAudioSample(ol, orr)
+    else:
+      # 2x, pitch-correct off: historical every-other-sample decimation
+      # (audio pitched up an octave).
+      apu.stretch_engaged = false
+      apu.turbo_parity = not apu.turbo_parity
+      if apu.turbo_parity:
+        appendAudioSample(sl, sr)
   else:
     apu.buffer[apu.buffer_pos]     = total_left  * 32
     apu.buffer[apu.buffer_pos + 1] = total_right * 32
@@ -231,20 +262,39 @@ proc get_sample*(apu: APU) =
         let vf = apu.master_volume_factor
         for i in 0 ..< APU_BUFFER_SIZE:
           apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
-      # 2x speed: keep every other stereo frame, so the queue fills at half
-      # rate and audio-driven pacing runs emulation twice as fast (audio
-      # pitches up an octave — the classic turbo sound). At normal speed
-      # this is skipped entirely.
+      # 2x speed: emit half the output frames so the queue fills at half rate
+      # and audio-driven pacing runs emulation twice as fast. Two ways to halve:
+      #   pitch_correct_ff on  -> WSOLA time-stretch (pitch preserved)
+      #   pitch_correct_ff off -> keep every other frame (classic octave-up)
+      # Both emit exactly APU_BUFFER_SIZE/2 int16, so pacing is identical.
+      # At normal speed this is skipped entirely (1x bit-identical).
       var queue_len = APU_BUFFER_SIZE
       if apu.turbo:
-        var o = 0
-        var i = 0
-        while i < APU_BUFFER_SIZE:
-          apu.buffer[o]     = apu.buffer[i]
-          apu.buffer[o + 1] = apu.buffer[i + 1]
-          o += 2
-          i += 4
-        queue_len = o
+        if apu.pitch_correct_ff:
+          apu.ensure_stretch()
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.stretch.push(float32(apu.buffer[i]), float32(apu.buffer[i + 1]))
+            i += 2
+          var o = 0
+          for f in 0 ..< (APU_BUFFER_SIZE div 4):   # 256 frames = half
+            let (l, r) = apu.stretch.pull()
+            apu.buffer[o]     = int16(clamp(l, -32768.0'f32, 32767.0'f32))
+            apu.buffer[o + 1] = int16(clamp(r, -32768.0'f32, 32767.0'f32))
+            o += 2
+          queue_len = o
+        else:
+          apu.stretch_engaged = false
+          var o = 0
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.buffer[o]     = apu.buffer[i]
+            apu.buffer[o + 1] = apu.buffer[i + 1]
+            o += 2
+            i += 4
+          queue_len = o
+      else:
+        apu.stretch_engaged = false
       let dump = audio_dump_dest()
       if dump != nil:
         discard dump.writeBuffer(addr apu.buffer[0],

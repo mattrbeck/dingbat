@@ -444,6 +444,12 @@ proc apply_master_volume() =
   if app.gb_emu != nil:
     app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
 
+proc apply_pitch_correct_ff() =
+  if app.gba_emu != nil:
+    app.gba_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
+  if app.gb_emu != nil:
+    app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
@@ -473,6 +479,7 @@ proc load_rom(path: string) =
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   apply_master_volume()
+  apply_pitch_correct_ff()
   apply_panel_uniforms()
   blend_prev.setLen(0)  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
@@ -805,6 +812,12 @@ proc render_imgui() =
           save_config(app.cfg)
         if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
           apply_master_volume()
+          save_config(app.cfg)
+        # WSOLA time-stretch keeps 2x audio at normal pitch (instead of the
+        # classic octave-up). Off by default; slightly more CPU at 2x.
+        if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
+                              addr app.cfg.pitch_correct_ff, true):
+          apply_pitch_correct_ff()
           save_config(app.cfg)
         igSeparator()
         if igMenuItem_BoolPtr("LCD Color Correction", nil,
@@ -1638,6 +1651,7 @@ proc main() =
   ce.live_sync = proc() =
     apply_color_correction()
     apply_master_volume()
+    apply_pitch_correct_ff()
 
   app = AppState(
     cfg:             cfg,

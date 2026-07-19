@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[bitops, os, strutils, times]
-import ../common/[input, scheduler, emu, resampler, serialize]
+import ../common/[input, scheduler, emu, resampler, serialize, timestretch]
 when defined(test_harness):
   import ../common/test_output
 
@@ -296,6 +296,10 @@ type
     # audio-driven pacing runs emulation twice as fast
     turbo*:               bool
     turbo_parity:         bool  # emscripten per-sample decimation state
+    # Pitch-correct fast-forward (WSOLA); presentation-only, see the GBA APU.
+    pitch_correct_ff*:    bool
+    stretch:              TimeStretch
+    stretch_engaged:      bool
     audio_dev*:           uint32
     channel1*:            GbChannel1
     channel2*:            GbChannel2

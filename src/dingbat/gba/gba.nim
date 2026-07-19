@@ -3,7 +3,7 @@
 
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
-import ../common/[util, input, scheduler, emu, resampler, serialize]
+import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch]
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -454,6 +454,13 @@ type
     # audio-driven pacing runs emulation twice as fast
     turbo*:             bool
     turbo_parity:       bool  # emscripten per-sample decimation state
+    # Pitch-correct fast-forward: when on, WSOLA time-stretch replaces the
+    # every-other-sample decimation at 2x so audio keeps its pitch. Off = the
+    # historical cheap decimation (bit-identical to before). Presentation-only:
+    # not serialised, reset when turbo toggles on.
+    pitch_correct_ff*:  bool
+    stretch:            TimeStretch
+    stretch_engaged:    bool  # tracks the stretch-path rising edge (auto-reset)
     audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
     left_resampler*:    Resampler[float32]
     right_resampler*:   Resampler[float32]

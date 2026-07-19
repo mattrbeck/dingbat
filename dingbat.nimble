@@ -24,3 +24,6 @@ task test_build, "Build the test harness":
 
 task bench_build, "Build the headless benchmark harness":
   exec "nim c -d:test_harness -d:release --path:src -o:dingbat_bench tests/dingbat_bench.nim"
+
+task test_timestretch, "Run the WSOLA time-stretch unit test":
+  exec "nim c -r -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"

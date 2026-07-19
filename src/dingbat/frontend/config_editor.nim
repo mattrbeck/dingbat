@@ -65,6 +65,7 @@ proc do_factory_reset(ed: ConfigEditor) =
   ed.cfg.scanlines           = d.scanlines
   ed.cfg.frame_blend         = d.frame_blend
   ed.cfg.rewind              = d.rewind
+  ed.cfg.pitch_correct_ff    = d.pitch_correct_ff
   ed.do_reset()          # reload every widget's UI state from the reset cfg
   ed.do_apply()          # push widget-owned settings live + persist to disk
   if ed.live_sync != nil:

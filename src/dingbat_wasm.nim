@@ -310,6 +310,23 @@ proc wasm_set_turbo(on: cint) {.exportc.} =
     of ekGB:  stateGb.apu.turbo = t
     of ekNone: discard
 
+proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
+  ## Local audio preference: when on, 2x speed uses a WSOLA time-stretch so the
+  ## sound keeps its pitch instead of jumping an octave. Independent of the
+  ## rollback-synced turbo state — it only changes how the local APU turns the
+  ## full-rate stream into the half-count output the pacing expects, so it never
+  ## affects timing or desyncs a link. Mirror onto the live rollback cores too.
+  let t = on != 0
+  if stateRollback != nil:
+    for core in stateRollback.link.cores: core.apu.set_pitch_correct_ff(t)
+  elif stateGbRollback != nil:
+    for core in stateGbRollback.link.cores: core.apu.set_pitch_correct_ff(t)
+  else:
+    case stateKind
+    of ekGBA: stateGba.apu.set_pitch_correct_ff(t)
+    of ekGB:  stateGb.apu.set_pitch_correct_ff(t)
+    of ekNone: discard
+
 proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or

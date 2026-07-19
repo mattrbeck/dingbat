@@ -2005,7 +2005,8 @@ let audioSaveTimer = null;
 const saveAudioSettings = () => {
   if (!db) return;
   clearTimeout(audioSaveTimer);
-  audioSaveTimer = setTimeout(() => dbPut("audio", { volume, muted }), 250);
+  audioSaveTimer = setTimeout(
+    () => dbPut("audio", { volume, muted, pitchCorrectFF }), 250);
 };
 
 const setVolume = (v) => {
@@ -2032,6 +2033,9 @@ const loadAudioSettings = async () => {
     syncVolumeUI();
     if (typeof updateGain === "function") updateGain();
   }
+  if (s && typeof s.pitchCorrectFF === "boolean") pitchCorrectFF = s.pitchCorrectFF;
+  if (pcffToggle) pcffToggle.checked = pitchCorrectFF;
+  applyPitchCorrectFF();
 };
 
 for (let s of volSliders) {
@@ -2069,6 +2073,27 @@ const loadColorCorrect = async () => {
   ccToggle.checked = colorCorrect;
   applyColorCorrect();
 };
+
+// --- Pitch-correct fast-forward (WSOLA time-stretch at 2x) ---
+// Local audio preference persisted in the "audio" IDB record alongside
+// volume/mute. When on, the core time-stretches 2x audio so it keeps its pitch
+// instead of jumping an octave; independent of the rollback-synced 2x state.
+var pitchCorrectFF = false;
+const pcffToggle = document.getElementById("pitch-correct-ff-toggle");
+
+const applyPitchCorrectFF = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_pitch_correct_ff) {
+    Module._wasm_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0);
+  }
+};
+
+if (pcffToggle) {
+  pcffToggle.addEventListener("change", () => {
+    pitchCorrectFF = pcffToggle.checked;
+    applyPitchCorrectFF();
+    saveAudioSettings();
+  });
+}
 
 // --- Video effects (integer scaling, scanline overlay) ---
 // Integer scaling pins the canvas's CSS size to a whole multiple of the
@@ -2901,10 +2926,13 @@ const resetAllSettings = async () => {
   syncSystemSettingsUI();
   applySystemSettings();
 
-  // Audio (volume / mute)
+  // Audio (volume / mute / pitch-correct fast-forward)
   volume = 100; muted = false;
   syncVolumeUI();
   if (typeof updateGain === "function") updateGain();
+  pitchCorrectFF = false;
+  if (pcffToggle) pcffToggle.checked = false;
+  applyPitchCorrectFF();
 
   // Color correction
   colorCorrect = true;
@@ -3107,6 +3135,7 @@ const loadRom = async (romName, originalName) => {
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   benchReport("load");
   updateCanvasScaling();
   setTimeout(() => logViewportDiag("romload"), 500);

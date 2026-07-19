@@ -44,6 +44,17 @@ proc set_master_volume*(apu: GbApu; volume: int; mute: bool) =
   apu.master_volume_factor = float32(clamp(volume, 0, 100)) / 100.0'f32
   apu.master_muted = mute
 
+proc set_pitch_correct_ff*(apu: GbApu; on: bool) =
+  ## Toggle WSOLA pitch-preserving 2x (see the GBA APU). The stretcher resets
+  ## on the stretch-path rising edge in get_sample.
+  apu.pitch_correct_ff = on
+
+proc ensure_stretch(apu: GbApu) {.inline.} =
+  if not apu.stretch_engaged:
+    if apu.stretch == nil: apu.stretch = new_time_stretch()
+    else: apu.stretch.reset()
+    apu.stretch_engaged = true
+
 proc audio_ahead*(apu: GbApu): bool =
   ## See the GBA APU's audio_ahead: lets the frontend pace synced emulation
   ## without blocking inside the sample callback
@@ -98,11 +109,23 @@ proc get_sample*(apu: GbApu; gb: GB) =
   when defined(test_harness):
     discard
   elif defined(emscripten):
-    # 2x speed drops every other sample: JS receives realtime-rate audio
-    # (pitched up an octave) while emulation runs double speed
-    apu.turbo_parity = not apu.turbo_parity
-    if not apu.turbo or apu.turbo_parity:
-      appendAudioSample(sample_left, sample_right)
+    if not apu.turbo:
+      apu.stretch_engaged = false
+      appendAudioSample(sample_left, sample_right)   # 1x bit-identical
+    elif apu.pitch_correct_ff:
+      # Pitch-correct 2x: WSOLA, pull every OTHER frame (same count as the
+      # decimation below, so pacing is unchanged).
+      apu.ensure_stretch()
+      apu.stretch.push(sample_left, sample_right)
+      apu.turbo_parity = not apu.turbo_parity
+      if apu.turbo_parity:
+        let (ol, orr) = apu.stretch.pull()
+        appendAudioSample(ol, orr)
+    else:
+      apu.stretch_engaged = false
+      apu.turbo_parity = not apu.turbo_parity
+      if apu.turbo_parity:
+        appendAudioSample(sample_left, sample_right)  # classic octave-up
   else:
     apu.buffer[apu.buffer_pos]     = sample_left
     apu.buffer[apu.buffer_pos + 1] = sample_right
@@ -118,17 +141,35 @@ proc get_sample*(apu: GbApu; gb: GB) =
         let vf = apu.master_volume_factor
         for i in 0 ..< GB_APU_BUFFER_SIZE:
           apu.buffer[i] = apu.buffer[i] * vf
-      # 2x speed: keep every other stereo frame (see the GBA APU comment)
+      # 2x speed: emit half the frames (see the GBA APU comment). WSOLA when
+      # pitch-correct is on, else keep every other frame. Both halve the count.
       var queue_len = GB_APU_BUFFER_SIZE
       if apu.turbo:
-        var o = 0
-        var i = 0
-        while i < GB_APU_BUFFER_SIZE:
-          apu.buffer[o]     = apu.buffer[i]
-          apu.buffer[o + 1] = apu.buffer[i + 1]
-          o += 2
-          i += 4
-        queue_len = o
+        if apu.pitch_correct_ff:
+          apu.ensure_stretch()
+          var i = 0
+          while i < GB_APU_BUFFER_SIZE:
+            apu.stretch.push(apu.buffer[i], apu.buffer[i + 1])
+            i += 2
+          var o = 0
+          for f in 0 ..< (GB_APU_BUFFER_SIZE div 4):   # half
+            let (l, r) = apu.stretch.pull()
+            apu.buffer[o]     = l
+            apu.buffer[o + 1] = r
+            o += 2
+          queue_len = o
+        else:
+          apu.stretch_engaged = false
+          var o = 0
+          var i = 0
+          while i < GB_APU_BUFFER_SIZE:
+            apu.buffer[o]     = apu.buffer[i]
+            apu.buffer[o + 1] = apu.buffer[i + 1]
+            o += 2
+            i += 4
+          queue_len = o
+      else:
+        apu.stretch_engaged = false
       if apu.audio_dev != 0:
         if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
         while sdl_get_queued_audio_size_gb(apu.audio_dev) >
