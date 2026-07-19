@@ -994,28 +994,13 @@ body.running #canvas {
   mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
 }
 
-/* Scanlines video effect: one faint line per emulated pixel row. JS sizes and
-   positions the overlay to the canvas rect and sets background-size so the
-   line pitch tracks the current scale factor. */
-#scanline-overlay {
-  position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  border-radius: 4px;
-  background-image: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.28) 30%,
-    transparent 30%
-  );
-  background-repeat: repeat;
-}
+/* Scanlines are now drawn by the WebGL2 fragment shader (uniform-gated), not a
+   DOM overlay — the old #scanline-overlay element and its sizing are gone. */
 
 /* MBC5 rumble: a small transform-only jitter on the game screen while the
    cart's motor runs (body.rumbling, set by the RAF loop). Width/height are
-   deliberately untouched — integer scaling pins those — and the scanline
-   overlay shakes in lockstep so it stays glued to the canvas. */
-body.rumbling #canvas,
-body.rumbling #scanline-overlay {
+   deliberately untouched — integer scaling pins those. */
+body.rumbling #canvas {
   animation: rumble-shake 60ms linear infinite;
 }
 

@@ -179,8 +179,11 @@
 
       <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
-      <!-- Scanlines video effect: JS keeps it aligned over the canvas -->
-      <div id="scanline-overlay" hidden aria-hidden="true"></div>
+      <!-- SDL still owns a (now invisible) WebGL context for its window/renderer
+           init; we point Module.canvas here so #canvas is free for our own
+           WebGL2 game-presentation context. Nothing is ever shown on it —
+           game video is drawn on #canvas, input and audio are JS-driven. -->
+      <canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
 
       <!-- 2P link mode: two linked cores, one canvas per player -->
       <div id="link-stage">

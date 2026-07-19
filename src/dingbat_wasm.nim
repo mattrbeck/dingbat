@@ -166,42 +166,80 @@ proc make_gba(rom_path: string): GBA =
 # frames, like mGBA's "interframe blending" — the real panels' slow pixel
 # response ghosted the previous frame into the current one, and some games
 # exploit it (fast flicker for transparency). Presentation-only: emulation is
-# untouched, so it can be toggled live. prevFrame follows the module-scope
+# untouched, so it can be toggled live. prevRaw follows the module-scope
 # rule (empty here, allocated from JS-invoked procs only).
 var frameBlend = false
-var prevFrame: seq[uint32] = @[]
+var prevRaw: seq[uint16] = @[]   # raw frame-blend history (per core/resolution)
 
 proc wasm_set_frame_blend(on: cint) {.exportc.} =
   frameBlend = on != 0
-  prevFrame.setLen(0)  # drop stale history (also on core/resolution switch)
+  prevRaw.setLen(0)  # drop stale history (also on core/resolution switch)
 
-proc blend_avg(a, b: uint32): uint32 {.inline.} =
-  # Per-channel (a+b)/2 without unpacking: halve both with the low bits
-  # masked off, then add back the carry each pair of low bits would produce.
-  ((a and 0xFEFEFEFE'u32) shr 1) + ((b and 0xFEFEFEFE'u32) shr 1) +
-    (a and b and 0x01010101'u32)
+# --- WebGL2 present path ---
+# The web front end no longer presents the game through SDL's renderer. Each
+# frame it uploads the RAW BGR555 framebuffer (this pointer) to a WebGL2
+# texture and a GLSL ES 300 shader does the LCD color correction + scanlines on
+# the GPU (see web/index.js). This removes the per-frame CPU color-correction
+# LUT that used to run here — a measurable win on the JIT-throttled iPhone. The
+# LUTs above survive only for the low-rate consumers of wasm_fb_ptr (ambient
+# glow, paused-game thumbnail).
+#
+# Interframe blending stays on the CPU but works on the raw 5-bit channels
+# (cheap, and only when enabled); the blended raw frame is what gets uploaded.
+var gameRaw: seq[uint16] = @[]   # blended raw BGR555 upload buffer
+var gamePtr: pointer = nil       # pointer JS uploads this frame
 
-proc present_corrected(fb: ptr UncheckedArray[uint16]; pixels: int; pitch: cint) =
-  let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
+proc blend_avg16(a, b: uint16): uint16 {.inline.} =
+  ## Per-5-bit-channel average of two BGR555 pixels (LCD ghosting on the raw
+  ## panel values — blend first, correct on the GPU after).
+  let ar = a and 0x1F; let ag = (a shr 5) and 0x1F; let ab = (a shr 10) and 0x1F
+  let br = b and 0x1F; let bg = (b shr 5) and 0x1F; let bb = (b shr 10) and 0x1F
+  ((ar + br) shr 1) or (((ag + bg) shr 1) shl 5) or (((ab + bb) shr 1) shl 10)
+
+proc prepare_game_frame(fb: ptr UncheckedArray[uint16]; pixels: int) =
+  ## Point gamePtr at the pixels JS should upload this frame: the core's raw
+  ## framebuffer directly (zero-copy) or, with motion blur on, a blended raw
+  ## buffer. No color conversion happens here — that is the shader's job.
   if frameBlend:
-    if prevFrame.len != pixels:  # first blended frame: seed history, no ghost
-      prevFrame.setLen(pixels)
-      for i in 0 ..< pixels:
-        prevFrame[i] = lut[fb[i] and 0x7FFF]
+    if gameRaw.len != pixels: gameRaw.setLen(pixels)
+    if prevRaw.len != pixels:  # first blended frame: seed history, no ghost
+      prevRaw.setLen(pixels)
+      for i in 0 ..< pixels: prevRaw[i] = fb[i] and 0x7FFF
     for i in 0 ..< pixels:
-      let cur = lut[fb[i] and 0x7FFF]
-      rgbaBuffer[i] = blend_avg(cur, prevFrame[i])
-      prevFrame[i] = cur
+      let cur = fb[i] and 0x7FFF
+      gameRaw[i] = blend_avg16(cur, prevRaw[i])
+      prevRaw[i] = cur
+    gamePtr = addr gameRaw[0]
   else:
-    for i in 0 ..< pixels:
-      rgbaBuffer[i] = lut[fb[i] and 0x7FFF]
-  discard stateTexture.updateTexture(nil, addr rgbaBuffer[0], pitch)
+    gamePtr = addr fb[0]
+
+proc wasm_game_fb_ptr(): pointer {.exportc.} =
+  ## Pointer to this frame's raw BGR555 framebuffer for the WebGL2 uploader
+  ## (16-bit little-endian; the shader masks 0x7FFF). Valid after the last
+  ## loop_tick/netlink_tick/rewind of the RAF turn.
+  gamePtr
+
+proc wasm_panel_gbc(): cint {.exportc.} =
+  ## 1 when the running single core is GB/GBC (selects the CGB color model in
+  ## the shader), 0 for GBA. Drives the panel_gbc uniform.
+  if stateKind == ekGB: 1 else: 0
 
 proc wasm_fb_ptr(): pointer {.exportc.} =
-  ## Pointer to the last-presented single-core RGBA framebuffer (after color
-  ## correction and blending). JS samples a coarse grid from it to drive the
-  ## ambient-glow backdrop; stale-while-static is fine for that.
-  if rgbaBuffer.len > 0: addr rgbaBuffer[0] else: nil
+  ## Corrected RGBA8888 of the CURRENT single-core framebuffer, converted on
+  ## demand. No longer on the per-frame present path: only the ambient-glow
+  ## sampler (~10 Hz) and the paused-game thumbnail (one-shot) call this, so the
+  ## color-correction LUT runs at their low cadence instead of every frame.
+  let fbp = case stateKind
+    of ekGBA: (if stateGba != nil: cast[pointer](addr stateGba.ppu.framebuffer[0]) else: nil)
+    of ekGB:  (if stateGb  != nil: cast[pointer](addr stateGb.ppu.framebuffer[0]) else: nil)
+    of ekNone: nil
+  if fbp == nil: return nil
+  let fb = cast[ptr UncheckedArray[uint16]](fbp)
+  let pixels = if stateKind == ekGB: GB_W * GB_H else: GBA_W * GBA_H
+  let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
+  if rgbaBuffer.len != pixels: rgbaBuffer.setLen(pixels)
+  for i in 0 ..< pixels: rgbaBuffer[i] = lut[fb[i] and 0x7FFF]
+  addr rgbaBuffer[0]
 
 # Global audio sample buffer for JS to consume via Web Audio API.
 # The APU appends float32 stereo samples here; JS reads and clears after each frame.
@@ -374,24 +412,23 @@ proc loop_tick() {.exportc.} =
     stateGba.step_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
-    # Blending must present static frames too, so the lingering ghost of the
-    # last change decays instead of freezing into the picture
-    if frameBlend or not stateGba.ppu.frame_static:
-      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
-                        GBA_W * GBA_H, GBA_W * 4)
+    # gamePtr is refreshed every frame (even static ones) so the WebGL2
+    # uploader always has a valid pointer; the blend path decays a lingering
+    # ghost into a static picture rather than freezing it in.
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                       GBA_W * GBA_H)
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
-    present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
-                      GB_W * GB_H, GB_W * 4)
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                       GB_W * GB_H)
   of ekNone:
     return
   checkInput()
-  stateRenderer.clear()
-  discard stateRenderer.copy(stateTexture, nil, nil)
-  stateRenderer.present()
+  # No SDL present here anymore: JS uploads gamePtr to WebGL2 and draws once
+  # per RAF turn (see drawGame in web/index.js).
 
 proc wasm_rewind_pop(): cint {.exportc.} =
   ## Step rewind history back one snapshot (REWIND_INTERVAL frames) and
@@ -405,19 +442,17 @@ proc wasm_rewind_pop(): cint {.exportc.} =
     case stateKind
     of ekGBA:
       stateGba.apply_state_payload(snap)
-      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
-                        GBA_W * GBA_H, GBA_W * 4)
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                         GBA_W * GBA_H)
     of ekGB:
       stateGb.apply_state_payload(snap)
-      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
-                        GB_W * GB_H, GB_W * 4)
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                         GB_W * GB_H)
     of ekNone:
       return 0
   except CatchableError:
     return 0
-  stateRenderer.clear()
-  discard stateRenderer.copy(stateTexture, nil, nil)
-  stateRenderer.present()
+  # JS draws the restored frame (drawGame) after this returns.
   1
 
 # --- 2P local link mode (multiplayer phase 3, web side) ---
@@ -669,7 +704,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     rgbaBuffer.setLen(GB_W * GB_H)
     stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
-    prevFrame.setLen(0)
+    prevRaw.setLen(0)
     return 1
   if stateRollback == nil: return 0
   let core = stateRollback.link.cores[rbLocal]
@@ -687,7 +722,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   rgbaBuffer.setLen(GBA_W * GBA_H)
   stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
   discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
-  prevFrame.setLen(0)
+  prevRaw.setLen(0)
   1
 
 proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
@@ -856,7 +891,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
-  prevFrame.setLen(0)  # blend history is per-core (and per-resolution)
+  prevRaw.setLen(0)  # blend history is per-core (and per-resolution)
   rewindHistory = new_rewind(rewindCapBytes)
 
 # --- Online link mode (multiplayer phase 3b, web side) ---
@@ -996,13 +1031,10 @@ proc netlink_tick(): cint {.exportc.} =
     2
   of naFrame:
     inc frameCount
-    if frameBlend or not stateGba.ppu.frame_static:
-      present_corrected(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
-                        GBA_W * GBA_H, GBA_W * 4)
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                       GBA_W * GBA_H)
     checkInput()
-    stateRenderer.clear()
-    discard stateRenderer.copy(stateTexture, nil, nil)
-    stateRenderer.present()
+    # JS uploads gamePtr to WebGL2 and draws after this tick (netStep path).
     1
   of naProgress:
     1  # unreachable: the loop above only exits on the other results

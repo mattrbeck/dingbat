@@ -2059,6 +2059,7 @@ const applyColorCorrect = () => {
 ccToggle.addEventListener("change", () => {
   colorCorrect = ccToggle.checked;
   applyColorCorrect();
+  drawGame();  // reflect the shader-uniform change even while paused
   if (db) dbPut("colorCorrect", colorCorrect);
 });
 
@@ -2080,9 +2081,13 @@ var scanlines = false;
 var motionBlur = false;
 var ambientGlow = false;
 
+// #canvas backing store = native resolution * GL_SCALE. The game texture is
+// sampled NEAREST, so this is a crisp integer upscale (identical pixels to the
+// old SDL logical-size scaling) that also keeps screenshots at their prior size.
+const GL_SCALE = 4;
+
 const canvasEl = document.getElementById("canvas");
 const stageEl = document.getElementById("stage");
-const scanlineOverlay = document.getElementById("scanline-overlay");
 const glowCanvas = document.getElementById("glow-canvas");
 const glowCtx = glowCanvas.getContext("2d");
 const integerScaleToggle = document.getElementById("integer-scale-toggle");
@@ -2095,9 +2100,22 @@ const nativeRes = () =>
   currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
 
 const updateCanvasScaling = () => {
+  // WebGL2 present: WE own the #canvas backing store now (SDL renders to the
+  // hidden #sdl-canvas). Pin it to the native resolution * GL_SCALE — NEAREST
+  // texture sampling makes that a crisp integer upscale, and the extra pixels
+  // keep screenshots at their previous size. Only touch it when it actually
+  // changes: assigning canvas.width/height resets the GL drawing buffer.
+  const running0 =
+    document.body.classList.contains("running") && !!currentRomName;
+  if (running0 && !linkMode && !rollbackMode) {
+    const [nw, nh] = nativeRes();
+    const bw = nw * GL_SCALE, bh = nh * GL_SCALE;
+    if (canvasEl.width !== bw) canvasEl.width = bw;
+    if (canvasEl.height !== bh) canvasEl.height = bh;
+  }
   // Size the canvas box in JS from two live measurements: the stage's actual
-  // box and the canvas backing store's actual shape (the wasm resizes it per
-  // system: GBA 3:2, GB 10:9). CSS alone cannot do this safely — with
+  // box and the canvas backing store's actual shape (native per system:
+  // GBA 3:2, GB 10:9). CSS alone cannot do this safely — with
   // aspect-ratio, a max-height clamp squashes the picture instead of
   // shrinking it, which stretched GB games on phone portrait where the
   // in-flow touch controls leave the stage short. The --game-ar variable is
@@ -2128,26 +2146,18 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
   }
+  // Scanlines are now drawn by the WebGL2 shader (uniform-gated), not a DOM
+  // overlay — nothing to position here. Ambient glow stays a separate blurred
+  // canvas behind the game; keep it pinned to the canvas rect.
   const singleCore = running && !linkMode && !rollbackMode;
-  if ((scanlines || ambientGlow) && singleCore) {
+  if (ambientGlow && singleCore) {
     const c = canvasEl.getBoundingClientRect();
     const s = stageEl.getBoundingClientRect();
-    if (scanlines) {
-      scanlineOverlay.style.left = c.left - s.left + "px";
-      scanlineOverlay.style.top = c.top - s.top + "px";
-      scanlineOverlay.style.width = c.width + "px";
-      scanlineOverlay.style.height = c.height + "px";
-      scanlineOverlay.style.backgroundSize =
-        "100% " + c.height / nativeRes()[1] + "px";
-    }
-    if (ambientGlow) {
-      glowCanvas.style.left = c.left - s.left + "px";
-      glowCanvas.style.top = c.top - s.top + "px";
-      glowCanvas.style.width = c.width + "px";
-      glowCanvas.style.height = c.height + "px";
-    }
+    glowCanvas.style.left = c.left - s.left + "px";
+    glowCanvas.style.top = c.top - s.top + "px";
+    glowCanvas.style.width = c.width + "px";
+    glowCanvas.style.height = c.height + "px";
   }
-  scanlineOverlay.hidden = !(scanlines && singleCore);
   glowCanvas.hidden = !(ambientGlow && singleCore);
 };
 
@@ -2193,6 +2203,179 @@ const updateGlow = () => {
   glowFresh = false;
 };
 
+// --- WebGL2 game presentation ---
+// Our own WebGL2 context on #canvas draws the single-core game view (SDL is no
+// longer the visual path). The wasm core hands us the RAW BGR555 framebuffer
+// (Module._wasm_game_fb_ptr); we upload it to an R16UI integer texture and a
+// GLSL ES 300 fragment shader unpacks the 5-bit channels and applies the LCD
+// color-correction (same math as the desktop shader / the old CPU LUT) plus
+// scanlines — both uniform-gated. This removes the per-frame CPU color LUT the
+// core used to run and replaces the DOM scanline overlay. Link / rollback modes
+// keep their own 2D-canvas blit path (deferred — see notes below).
+const glRenderer = (() => {
+  let gl = null, prog = null, tex = null, lost = false;
+  let uColorCorrect, uPanelGbc, uScanlines, uTexHeight;
+  let lastW = 0, lastH = 0;
+
+  const VERT = `#version 300 es
+out vec2 v_uv;
+void main() {
+  // Full-screen triangle; v_uv flips Y so framebuffer row 0 is at the top.
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  v_uv = vec2(p.x * 0.5, 1.0 - p.y * 0.5);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  const FRAG = `#version 300 es
+precision highp float;
+precision highp usampler2D;
+in vec2 v_uv;
+out vec4 frag_color;
+uniform usampler2D u_tex;       // R16UI: raw BGR555 pixels
+uniform bool u_color_correct;
+uniform bool u_panel_gbc;       // CGB color model vs AGB
+uniform bool u_scanlines;
+uniform float u_tex_height;     // native rows (for scanline pitch)
+void main() {
+  uint packed = texture(u_tex, v_uv).r;
+  vec3 c = vec3(float(packed & 31u),
+                float((packed >> 5) & 31u),
+                float((packed >> 10) & 31u)) / 31.0;
+  float outGamma = 2.2;
+  vec3 rgb;
+  if (u_color_correct) {
+    if (u_panel_gbc) {
+      vec3 lin = pow(c, vec3(2.2)) * 0.94;
+      rgb = pow(clamp(vec3(
+        0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
+        0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
+       -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
+        vec3(1.0 / outGamma));
+    } else {
+      float lcdGamma = 4.0;
+      vec3 lin = pow(c, vec3(lcdGamma));
+      rgb = pow(vec3(
+        0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
+       30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
+      220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
+        vec3(1.0 / outGamma));
+    }
+  } else {
+    rgb = c;
+  }
+  if (u_scanlines && fract(v_uv.y * u_tex_height) < 0.3) {
+    rgb *= 0.72;
+  }
+  frag_color = vec4(rgb, 1.0);
+}`;
+
+  const compile = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      log("gl shader compile error: " + gl.getShaderInfoLog(s));
+      gl.deleteShader(s);
+      return null;
+    }
+    return s;
+  };
+
+  const build = () => {
+    const vs = compile(gl.VERTEX_SHADER, VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, FRAG);
+    if (!vs || !fs) { prog = null; return false; }
+    prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      log("gl link error: " + gl.getProgramInfoLog(prog));
+      prog = null; return false;
+    }
+    uColorCorrect = gl.getUniformLocation(prog, "u_color_correct");
+    uPanelGbc = gl.getUniformLocation(prog, "u_panel_gbc");
+    uScanlines = gl.getUniformLocation(prog, "u_scanlines");
+    uTexHeight = gl.getUniformLocation(prog, "u_tex_height");
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    // Integer textures must use NEAREST filtering.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    lastW = 0; lastH = 0;
+    return true;
+  };
+
+  const ensure = () => {
+    if (!gl) {
+      gl = canvasEl.getContext("webgl2", {
+        alpha: false, antialias: false, depth: false, stencil: false,
+        preserveDrawingBuffer: false, premultipliedAlpha: false,
+        powerPreference: "low-power",
+      });
+      if (!gl) { log("WebGL2 unavailable — game view cannot render"); return false; }
+      // Mobile Safari can drop the context under memory pressure; recover.
+      canvasEl.addEventListener("webglcontextlost", (e) => {
+        e.preventDefault();
+        lost = true; prog = null; tex = null;
+        log("gl context lost");
+      });
+      canvasEl.addEventListener("webglcontextrestored", () => {
+        lost = false;
+        log("gl context restored");
+        build();
+      });
+    }
+    if (lost) return false;
+    if (!prog && !build()) return false;
+    return true;
+  };
+
+  return {
+    // Draw the current wasm game frame. opts drives the color/scanline uniforms.
+    draw(opts) {
+      if (!ensure()) return;
+      const ptr = Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
+      if (!ptr) return;
+      const [w, h] = nativeRes();
+      // Fresh view each frame: ALLOW_MEMORY_GROWTH can detach the old buffer.
+      const view = new Uint16Array(Module.memory.buffer, ptr, w * h);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
+      if (w !== lastW || h !== lastH) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
+          gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+        lastW = w; lastH = h;
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
+          gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+      }
+      gl.viewport(0, 0, canvasEl.width, canvasEl.height);
+      gl.useProgram(prog);
+      gl.uniform1i(uColorCorrect, opts.colorCorrect ? 1 : 0);
+      gl.uniform1i(uPanelGbc, opts.panelGbc ? 1 : 0);
+      gl.uniform1i(uScanlines, opts.scanlines ? 1 : 0);
+      gl.uniform1f(uTexHeight, h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
+})();
+
+// Present one game frame via WebGL2. No-op in link / rollback modes (they blit
+// their own 2D canvases) and when no game is loaded.
+const drawGame = () => {
+  if (!currentRomName || linkMode || rollbackMode) return;
+  glRenderer.draw({
+    colorCorrect,
+    panelGbc: Module._wasm_panel_gbc
+      ? Module._wasm_panel_gbc() === 1
+      : extOf(currentRomName) !== ".gba",
+    scanlines,
+  });
+};
+
 const saveVideoSettings = () => {
   if (db) dbPut("video", { integerScale, scanlines, motionBlur, ambientGlow });
 };
@@ -2212,6 +2395,7 @@ integerScaleToggle.addEventListener("change", () => {
 scanlinesToggle.addEventListener("change", () => {
   scanlines = scanlinesToggle.checked;
   updateCanvasScaling();
+  drawGame();  // scanlines are a shader uniform now — redraw to show it live
   saveVideoSettings();
 });
 
@@ -3553,6 +3737,7 @@ const takeScreenshot = () => {
   if (paused) {
     // Paused loop isn't rendering; draw one frame, then grab it in the same task
     Module._loop_tick();
+    drawGame();
     captureCanvas();
   } else {
     pendingShot = true; // grabbed by the running loop after the next render
@@ -3684,7 +3869,11 @@ const updateRumble = (timestamp) => {
 };
 
 var Module = {
-  canvas: (() => document.getElementById("canvas"))(),
+  // SDL renders (invisibly) to a dedicated hidden canvas so its WebGL context
+  // doesn't collide with the WebGL2 context we own on the visible #canvas. A
+  // canvas can hold only one context type; game input (_setInput) and audio
+  // (Web Audio) are JS-driven, so SDL's canvas is never seen or interacted with.
+  canvas: (() => document.getElementById("sdl-canvas"))(),
   onRuntimeInitialized: async () => {
     // iOS Safari kills (or JIT-demotes) tabs under process memory pressure;
     // shrink the rewind ring's cap from 64 MB before any core exists — the
@@ -4076,9 +4265,15 @@ var Module = {
         // Prevent accumulator from growing unbounded if tab was backgrounded
         if (accumulator > step * 2) accumulator = 0;
       }
-      // Draw one guaranteed-fresh frame, then capture it in this same task
+      // Present the freshly-stepped frame through WebGL2 (single-core / online
+      // link / rewind / fast-forward paths; 2P link & rollback blit their own
+      // canvases and drawGame no-ops for them).
+      drawGame();
+      // Screenshot: draw one guaranteed-fresh frame and grab it in this task
+      // (the WebGL2 context has no preserveDrawingBuffer).
       if (pendingShot) {
         Module._loop_tick();
+        drawGame();
         captureCanvas();
       }
       updateSleepOverlay();
