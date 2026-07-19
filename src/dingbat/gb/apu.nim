@@ -62,8 +62,12 @@ proc audio_ahead*(apu: GbApu): bool =
     false
   else:
     apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size_gb(apu.audio_dev) >
-        uint32(GB_APU_BUFFER_SIZE * 4)
+      sdl_get_queued_audio_size_gb(apu.audio_dev) > GB_SYNC_AHEAD_BYTES
+
+when not defined(test_harness):
+  proc audio_queued_bytes*(apu: GbApu): uint32 =
+    ## Bytes currently queued to the SDL audio device (frame-scheduler input)
+    if apu.audio_dev != 0: sdl_get_queued_audio_size_gb(apu.audio_dev) else: 0
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
@@ -173,7 +177,7 @@ proc get_sample*(apu: GbApu; gb: GB) =
       if apu.audio_dev != 0:
         if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
         while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-              uint32(GB_APU_BUFFER_SIZE * 4 * 2): sdl_delay_gb(1)
+              GB_SYNC_BACKSTOP_BYTES: sdl_delay_gb(1)
         discard sdl_queue_audio_gb(apu.audio_dev,
           addr apu.buffer[0], uint32(queue_len * 4))
       apu.buffer_pos = 0
@@ -197,9 +201,12 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   elif defined(emscripten):
     result.audio_dev = 0  # JS handles playback via Web Audio API
   else:
+    # samples: small device buffer so audio-sync pacing releases emulated
+    # frames on a fine-grained drain clock; see the matching comment in
+    # gba/apu.nim (cuts up to a frame of cadence jitter / input latency)
     var desired = SDL_AudioSpec(
       freq:     cint(GB_SAMPLE_RATE), format: AUDIO_F32LSB,
-      channels: 2'u8, samples: uint16(GB_APU_BUFFER_SIZE div 2),
+      channels: 2'u8, samples: 128,
       callback: nil, userdata: nil,
     )
     sdl_close_audio_gb()

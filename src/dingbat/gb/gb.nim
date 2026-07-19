@@ -366,7 +366,15 @@ const GB_WIDTH*  = 160
 const GB_HEIGHT* = 144
 const GB_CLOCK_SPEED* = 4194304
 
-const GB_APU_BUFFER_SIZE* = 1024
+# Queue-push block, in float32s (128 stereo frames = 3.9 ms); small so
+# audio-sync pacing sees a fine-grained queue level (see gba/apu.nim)
+const GB_APU_BUFFER_SIZE* = 256
+# Audio-sync pacing levels in bytes of queued f32 stereo (8 bytes/frame);
+# fixed rather than derived from the push block: 4096 B = 512 frames ≈ 15.6 ms.
+# The backstop is runaway protection only — far above the normal operating
+# range so it never blocks emulation mid-frame (see gba/apu.nim)
+const GB_SYNC_AHEAD_BYTES*    = 4096'u32
+const GB_SYNC_BACKSTOP_BYTES* = 32768'u32
 const GB_SAMPLE_RATE*     = 32768
 const GB_SAMPLE_PERIOD*   = GB_CLOCK_SPEED div GB_SAMPLE_RATE
 const GB_FRAME_SEQ_RATE*  = 512

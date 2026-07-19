@@ -1,7 +1,21 @@
 # APU implementation (included by gba.nim)
 
 const APU_CHANNELS*       = 2
-const APU_BUFFER_SIZE*    = 1024
+# Queue-push block, in int16s (128 stereo frames = 3.9 ms). Kept small so the
+# SDL queue level — which audio-sync pacing reads — moves in fine steps on the
+# push side as well as the drain side; at the old 512-frame block the paced
+# emulation cadence (and input latency) jittered by most of a frame.
+const APU_BUFFER_SIZE*    = 256
+# Audio-sync pacing levels, in bytes of queued s16 stereo (4 bytes/frame).
+# Deliberately NOT derived from APU_BUFFER_SIZE: these set how much audio
+# stays buffered (latency vs. underrun margin), not the push granularity.
+# 2048 B = 512 frames ≈ 15.6 ms lead. The backstop only exists to stop a
+# runaway queue if the frontend's frame scheduler misbehaves; it sits far
+# above the normal operating range (2-8 KB) because blocking inside
+# get_sample stalls emulation mid-frame — the old 4096 B value was routinely
+# grazed by ordinary in-frame queue peaks and jittered the frame cadence.
+const APU_SYNC_AHEAD_BYTES*    = 2048'u32
+const APU_SYNC_BACKSTOP_BYTES* = 16384'u32
 const APU_SAMPLE_RATE*    = 32768
 const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
@@ -85,7 +99,14 @@ proc new_apu*(gba: GBA): APU =
       freq:     APU_SAMPLE_RATE.cint,
       format:   AUDIO_S16LSB,
       channels: APU_CHANNELS.uint8,
-      samples:  uint16(APU_BUFFER_SIZE div APU_CHANNELS),
+      # Device buffer deliberately much smaller than the queue-push block:
+      # the device drains the queue in `samples`-frame steps, and audio-sync
+      # pacing (audio_ahead) can only release the next emulated frame on one
+      # of those steps. At 512 frames (15.6 ms) the emulation cadence -- and
+      # so input latency -- jittered by up to a whole frame; 128 frames
+      # (3.9 ms) keeps the cadence within ~4 ms of the hardware frame rate
+      # and shaves ~12 ms off audio output latency as well.
+      samples:  128,
       callback: nil,
       userdata: nil,
     )
@@ -138,8 +159,7 @@ proc audio_ahead*(apu: APU): bool =
     false
   else:
     apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size(apu.audio_dev) >
-        uint32(APU_BUFFER_SIZE * sizeof(int16))
+      sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_AHEAD_BYTES
 
 when not defined(test_harness) and not defined(emscripten):
   # Debug instrumentation, env-gated and zero-cost when unset:
@@ -303,9 +323,8 @@ proc get_sample*(apu: APU) =
       if apu.audio_dev != 0:
         if not apu.sync:
           sdl_clear_queued_audio(apu.audio_dev)
-        # Block until the queue drains to < 2 buffers to stay in sync
-        let threshold = uint32(APU_BUFFER_SIZE * sizeof(int16) * 2)
-        while sdl_get_queued_audio_size(apu.audio_dev) > threshold:
+        # Block until the queue drains below the backstop to stay in sync
+        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
           sdl_delay(1)
         discard sdl_queue_audio(apu.audio_dev,
                                  cast[pointer](addr apu.buffer[0]),

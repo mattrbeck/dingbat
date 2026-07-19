@@ -1732,6 +1732,67 @@ proc main() =
   # second with emulated-frame counts and SDL audio queue depth bounds, for
   # verifying that audio-sync pacing holds the hardware frame rate (59.7275)
   # without draining the queue (qmin=0 would mean an underrun)
+  # ── Wall-clock frame scheduler (normal-speed play) ──────────────────────
+  # Releasing frames purely on audio-queue depth tied the emulation cadence to
+  # the queue's push/drain granularity, which jittered frame spacing (and so
+  # input latency) by most of a frame. Normal play instead runs each frame on
+  # a fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216 MHz; the GB
+  # frame is the same period) and uses the audio queue only as a bounds check:
+  # refill immediately when it nears underrun, hold the slot if it ran away.
+  # Turbo (2x) and fast-forward keep pure audio pacing — their frame rate is
+  # intentionally not the hardware rate.
+  let sched_freq = getPerformanceFrequency()
+  let frame_ticks = sched_freq * 280896'u64 div 16777216'u64
+  var next_frame_due = getPerformanceCounter()
+
+  var sched_refilling = true  # start with an empty queue: fill to target
+
+  proc scheduler_frame_due(queued, low, target, high: uint32): bool =
+    let now = getPerformanceCounter()
+    if next_frame_due + frame_ticks < now:
+      # Stalled (pause, hitch, held slots): resync instead of bursting a
+      # backlog of missed slots
+      next_frame_due = now
+    if queued > high: return false  # queue ran away: hold until it drains
+    # Underrun guard with hysteresis: once the queue dips below `low`, burst
+    # frames until it reaches `target`. Stopping at `low` itself would park
+    # the steady-state level right on the threshold, so every frame would
+    # re-trigger an early refill and the cadence would follow the audio
+    # drain granularity again instead of the wall clock.
+    if queued < low: sched_refilling = true
+    if sched_refilling:
+      if queued < target: return true
+      sched_refilling = false
+    now >= next_frame_due
+
+  proc scheduler_frame_ran() =
+    # Clamp to one period from now: refill-burst frames must not bank future
+    # slots (that would starve the queue right back below the refill line and
+    # turn the cadence into a burst/hold sawtooth)
+    next_frame_due = min(next_frame_due + frame_ticks,
+                         getPerformanceCounter() + frame_ticks)
+
+  proc is_paced(): bool =
+    ## True while emulation is meant to run at exactly hardware speed
+    case app.emu_kind
+    of ekGBA: app.gba_emu != nil and app.gba_emu.apu.sync and
+              not app.gba_emu.apu.turbo
+    of ekGB:  app.gb_emu != nil and app.gb_emu.apu.sync and
+              not app.gb_emu.apu.turbo
+    of ekNone: false
+
+  proc gba_frame_due(): bool =
+    let apu = app.gba_emu.apu
+    if not apu.sync or apu.turbo: return not apu.audio_ahead()
+    # s16 stereo is 4 B/frame: 1024/3072/8192 B ≈ 7.8/23.4/62.5 ms of audio
+    scheduler_frame_due(apu.audio_queued_bytes(), 1024, 3072, 8192)
+
+  proc gb_frame_due(): bool =
+    let apu = app.gb_emu.apu
+    if not apu.sync or apu.turbo: return not apu.audio_ahead()
+    # f32 stereo is 8 B/frame: the same time bounds are 2048/6144/16384 B
+    scheduler_frame_due(apu.audio_queued_bytes(), 2048, 6144, 16384)
+
   let pacing_log = getEnv("DINGBAT_PACING_LOG").len > 0
   var pace_frames = 0
   var pace_total  = 0
@@ -1739,6 +1800,44 @@ proc main() =
   var pace_max_q  = 0'u32
   var pace_start  = 0'u32
   var pace_last   = 0'u32
+  # Input-latency self-test (env-gated): DINGBAT_LATENCY_TEST=<trials> injects
+  # a synthetic UP press at the same point in the loop where polled SDL key
+  # events are applied, then measures wall-clock time until (a) the emulated
+  # framebuffer first differs — the core rendered the response — and (b) that
+  # framebuffer reaches glSwapWindow. Needs a GBA ROM whose screen is static
+  # until a keypress and responds on the next frame (tonc m7_demo.gba works:
+  # UP moves the camera). Prints per-trial lines and a summary, then quits.
+  var lat_trials = 0
+  try: lat_trials = parseInt(getEnv("DINGBAT_LATENCY_TEST", "0"))
+  except ValueError: discard
+  var lat_state = 0            # 0 settle, 1 awaiting fb change, 2 awaiting present
+  var lat_settle = 0
+  var lat_inject_at = 0'u64
+  var lat_rng = 0x9E3779B97F4A7C15'u64
+  var lat_t0, lat_t1: uint64
+  var lat_base: uint32
+  var lat_wait = 0
+  var lat_change_ms: seq[float]
+  var lat_present_ms: seq[float]
+  let lat_freq = float(getPerformanceFrequency())
+  proc lat_ms(a, b: uint64): float = float(b - a) * 1000.0 / lat_freq
+  proc lat_fb_hash(): uint32 =
+    result = 0x811C9DC5'u32
+    for v in app.gba_emu.ppu.framebuffer:
+      result = (result xor uint32(v and 0xFF)) * 0x01000193'u32
+      result = (result xor uint32(v shr 8)) * 0x01000193'u32
+  proc lat_stats(xs: seq[float]): (float, float, float) =
+    var mn = xs[0]
+    var mx = xs[0]
+    var s  = 0.0
+    for x in xs:
+      mn = min(mn, x)
+      mx = max(mx, x)
+      s += x
+    (mn, s / float(xs.len), mx)
+  if lat_trials > 0:
+    echo "LATENCY: present_interval=", present_interval, " ms, ",
+         "display refresh=", display_mode.refresh_rate, " Hz"
   while app.running:
     var emulated = false
     # Frame advance bypasses the audio pacing gate: it must run exactly one
@@ -1766,7 +1865,7 @@ proc main() =
     elif not app.paused or stepping:
       case app.emu_kind
       of ekGBA:
-        if app.gba_emu != nil and (stepping or not app.gba_emu.apu.audio_ahead()):
+        if app.gba_emu != nil and (stepping or gba_frame_due()):
           if app.netlink != nil:
             # Linked: advance through the netlink so the socket is pumped and
             # the two sides stay in lockstep. On the peer leaving or a link
@@ -1784,10 +1883,12 @@ proc main() =
             app.gba_emu.run_until_frame()
             emulated = true
       of ekGB:
-        if app.gb_emu != nil and (stepping or not app.gb_emu.apu.audio_ahead()):
+        if app.gb_emu != nil and (stepping or gb_frame_due()):
           app.gb_emu.run_until_frame()
           emulated = true
       of ekNone: discard
+      if emulated and is_paced():
+        scheduler_frame_ran()
       if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
         of ekGBA:
@@ -1795,6 +1896,40 @@ proc main() =
         of ekGB:
           discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload())
         of ekNone: discard
+    if lat_trials > 0 and app.emu_kind == ekGBA and app.gba_emu != nil and
+       not app.paused:
+      case lat_state
+      of 0:
+        if emulated:
+          inc lat_settle
+        if lat_settle >= 40:  # let the screen go static between trials
+          # Inject at a per-trial pseudo-random phase within the frame period
+          # so the trials sample the whole arrival-time distribution, not just
+          # the just-missed-a-frame worst case
+          if lat_inject_at == 0:
+            lat_rng = lat_rng * 6364136223846793005'u64 + 1442695040888963407'u64
+            lat_inject_at = getPerformanceCounter() +
+                            (lat_rng shr 33) mod frame_ticks
+          elif getPerformanceCounter() >= lat_inject_at:
+            lat_inject_at = 0
+            lat_settle = 0
+            lat_base = lat_fb_hash()
+            app.gba_emu.handle_input(UP, true)
+            lat_t0 = getPerformanceCounter()
+            lat_wait = 0
+            lat_state = 1
+      of 1:
+        if emulated:
+          if lat_fb_hash() != lat_base:
+            lat_t1 = getPerformanceCounter()
+            lat_state = 2
+          else:
+            inc lat_wait
+            if lat_wait > 10:
+              echo "LATENCY: no fb change within 10 frames — wrong ROM or key?"
+              app.gba_emu.handle_input(UP, false)
+              lat_state = 0
+      else: discard
     # Pending save/load states run here, at a guaranteed frame boundary
     if (app.pending_save or app.pending_load) and app.emu_kind != ekNone:
       process_pending_state()
@@ -1826,13 +1961,34 @@ proc main() =
     service_link_setup()  # non-blocking accept/connect for the Link window
     let now = getTicks()
     var presented = false
-    if now - last_present >= present_interval:
+    # A freshly emulated frame is presented immediately while emulation runs
+    # at realtime (audio sync on, no turbo): holding it for the next interval
+    # slot added up to a display period of input latency and beat against the
+    # emulation cadence. The interval throttle still bounds present rate when
+    # emulation outruns the display (turbo / fast-forward), and keeps the UI
+    # refreshing when nothing was emulated (paused, menus, audio ahead).
+    if (emulated and is_paced()) or now - last_present >= present_interval:
       last_present = now
       glClear(GL_COLOR_BUFFER_BIT)
       render_game()
       render_imgui()
       glSwapWindow(window)
       presented = true
+      if lat_trials > 0 and lat_state == 2:
+        let t2 = getPerformanceCounter()
+        lat_change_ms.add(lat_ms(lat_t0, lat_t1))
+        lat_present_ms.add(lat_ms(lat_t0, t2))
+        echo &"LATENCY trial {lat_present_ms.len}: " &
+             &"inject→fb-change {lat_ms(lat_t0, lat_t1):.2f} ms, " &
+             &"inject→present {lat_ms(lat_t0, t2):.2f} ms"
+        app.gba_emu.handle_input(UP, false)
+        lat_state = 0
+        if lat_present_ms.len >= lat_trials:
+          let (c0, c1, c2) = lat_stats(lat_change_ms)
+          let (p0, p1, p2) = lat_stats(lat_present_ms)
+          echo &"LATENCY inject→fb-change ms: min {c0:.2f} avg {c1:.2f} max {c2:.2f}"
+          echo &"LATENCY inject→present ms:  min {p0:.2f} avg {p1:.2f} max {p2:.2f}"
+          app.running = false
     update_fps_title(emulated)
     if not emulated and not presented:
       # Idle until audio drains or the next present slot; don't busy-spin

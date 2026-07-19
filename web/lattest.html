@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>dingbat latency harness</title></head>
+<body style="font-family: monospace; background: #111; color: #eee;">
+<h3>dingbat input-latency harness</h3>
+<pre id="out">starting…</pre>
+<iframe id="app" src="/index.html" style="width: 700px; height: 500px; border: 1px solid #444;"></iframe>
+<script>
+const out = document.getElementById("out");
+const log = (s) => { out.textContent += "\n" + s; };
+const app = document.getElementById("app");
+
+const post = (data) => fetch("http://localhost:8766/result", {
+  method: "POST", mode: "cors", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(data),
+}).catch(() => {});
+
+app.addEventListener("load", async () => {
+  const W = app.contentWindow;
+  try {
+    // Wait for the app's Module to be ready
+    for (let i = 0; i < 100 && !(W.Module && W.Module._wasm_game_fb_ptr && W.handleRomFile); i++)
+      await new Promise(r => setTimeout(r, 100));
+    const resp = await fetch("/m7_demo.gba");
+    const buf = await resp.arrayBuffer();
+    W.handleRomFile(new W.File([buf], "m7_demo.gba"));
+    await new Promise(r => setTimeout(r, 3000));
+
+    const fbHash = () => {
+      const ptr = W.Module._wasm_game_fb_ptr();
+      const fb = new W.Uint16Array(W.Module.memory.buffer, ptr, 240 * 160);
+      let h = 0x811C9DC5;
+      for (let i = 0; i < fb.length; i += 3) h = ((h ^ fb[i]) * 0x01000193) >>> 0;
+      return h;
+    };
+    const key = (type, down) => W.document.dispatchEvent(
+      new W.KeyboardEvent(type, { code: "ArrowUp", bubbles: true, cancelable: true }));
+
+    const state = { trials: [], phase: "idle", t0: 0, base: 0, cool: 0 };
+    const loop = () => {
+      if (state.phase === "waiting") {
+        const h = fbHash();
+        const now = performance.now();
+        if (h !== state.base) {
+          state.trials.push(+(now - state.t0).toFixed(2));
+          key("keyup");
+          state.phase = "cooldown"; state.cool = 0;
+        } else if (now - state.t0 > 500) {
+          state.trials.push(-1);
+          key("keyup");
+          state.phase = "cooldown"; state.cool = 0;
+        }
+      } else if (state.phase === "cooldown") {
+        if (++state.cool > 30) state.phase = "idle";
+      }
+      W.requestAnimationFrame(loop);
+    };
+    W.requestAnimationFrame(loop);
+
+    log("running 30 trials…");
+    for (let i = 0; i < 30; i++) {
+      while (state.phase !== "idle") await new Promise(r => setTimeout(r, 15));
+      await new Promise(r => setTimeout(r, 20 + Math.random() * 35));
+      state.base = fbHash();
+      state.t0 = performance.now();
+      key("keydown");
+      state.phase = "waiting";
+    }
+    while (state.phase !== "idle") await new Promise(r => setTimeout(r, 15));
+
+    const vals = state.trials.filter(v => v >= 0);
+    const res = {
+      ua: navigator.userAgent, n: vals.length,
+      failed: state.trials.length - vals.length,
+      min: Math.min(...vals),
+      avg: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2),
+      max: Math.max(...vals), trials: vals,
+    };
+    log(JSON.stringify(res, null, 2));
+    await post(res);
+    log("posted.");
+  } catch (e) {
+    log("ERROR: " + e.message);
+    await post({ error: e.message, ua: navigator.userAgent });
+  }
+}, { once: true });
+</script>
+</body>
+</html>

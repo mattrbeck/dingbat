@@ -18,9 +18,19 @@ proc check_keypad_irq(kp: Keypad) =
     kp.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
   kp.prev_irq_condition = cond
 
+when defined(test_harness):
+  # Latency-probe instrumentation: records every KEYINPUT read (low byte)
+  var keyinput_reads*: int = 0
+  var keyinput_last_read*: uint16 = 0xFFFF'u16
+
 proc `[]`*(kp: Keypad; io_addr: uint32): uint8 =
   case io_addr
-  of 0x130..0x131: read(kp.keyinput, io_addr and 1)
+  of 0x130..0x131:
+    when defined(test_harness):
+      if (io_addr and 1) == 0:
+        inc keyinput_reads
+        keyinput_last_read = toU16(kp.keyinput)
+    read(kp.keyinput, io_addr and 1)
   of 0x132..0x133: read(kp.keycnt, io_addr and 1)
   else: raise newException(Exception, "Unreachable keypad read " & hex_str(uint32(io_addr)))
 

@@ -425,6 +425,10 @@ proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
   inc frameCount
+  # Drain SDL events BEFORE stepping so anything they carry (keyboard input
+  # on the SDL path) lands in the frame about to run rather than the next
+  # one. The JS gameKeyHandler path is unaffected — it applies at event time.
+  checkInput()
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
@@ -445,7 +449,6 @@ proc loop_tick() {.exportc.} =
                        GB_W * GB_H)
   of ekNone:
     return
-  checkInput()
   # No SDL present here anymore: JS uploads gamePtr to WebGL2 and draws once
   # per RAF turn (see drawGame in web/index.js).
 
