@@ -29,17 +29,23 @@ proc render*(v: VideoWidget) =
   igSameLine(0, -1)
   help_marker("GPU pixel-art smoothing. hq4x and xBR are clean-room " &
               "implementations of the well-known edge-directed upscalers. " &
-              "None keeps crisp nearest-neighbor pixels. Color correction and " &
-              "scanlines still apply on top.")
+              "None keeps crisp nearest-neighbor pixels. Color correction " &
+              "still applies on top; scanlines are suspended while a filter " &
+              "is active.")
   igIndent(106)
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
   igUnindent(106)
   igSeparator()
+  # Grayed while a filter is active — same as the web settings modal. The
+  # checkbox keeps its state for when the filter turns off.
+  igBeginDisabled(v.filter != 0)
   discard igCheckbox("Scanlines", addr v.scanlines)
+  igEndDisabled()
   igSameLine(0, -1)
-  help_marker("Darken a strip across each emulated pixel row")
+  help_marker("Darken a strip across each emulated pixel row" &
+              (if v.filter != 0: " (suspended by the upscale filter)" else: ""))
   discard igCheckbox("Interframe blending", addr v.frame_blend)
   igSameLine(0, -1)
   help_marker("Blend the previous frame into the current one, like the LCD's ghosting")

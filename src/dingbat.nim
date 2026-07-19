@@ -656,9 +656,12 @@ proc render_game() =
     glUseProgram(app.game_shader)
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
     # Pushed every present (like the logo uniforms): the Settings window's
-    # Apply has no callback into this module, so a cached value could go stale
+    # Apply has no callback into this module, so a cached value could go stale.
+    # An active upscale filter suspends scanlines (smoothing + row-darkening
+    # fight each other) — same behavior as the web frontend.
+    let scan = app.cfg.scanlines and app.cfg.video_filter == vfNone
     glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
-                GLint(if app.cfg.scanlines: 1 else: 0))
+                GLint(if scan: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
                 GLint(ord(app.cfg.video_filter)))
   case app.emu_kind
