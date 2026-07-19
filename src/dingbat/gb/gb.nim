@@ -1,7 +1,7 @@
 # GB/GBC emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[os, strutils, times]
+import std/[bitops, os, strutils, times]
 import ../common/[input, scheduler, emu, resampler, serialize]
 when defined(test_harness):
   import ../common/test_output

@@ -18,7 +18,23 @@ proc skip_boot*(t: GbTimer; gb: GB) =
   t.tdiv = case gb.boot_model
     of bmDmg0:          0x182C'u16   # boot_div-dmg0
     of bmDmgABC, bmMgb: 0xABC8'u16   # boot_div-dmgABCmgb
-    of bmSgb, bmSgb2:   0xD85C'u16   # boot_div-S / boot_div2-S
+    of bmSgb, bmSgb2:
+      # The real SGB boot duration depends on the header byte VALUES the DMG
+      # side transfers to the SNES: mooneye's boot_div2-S exists purely to
+      # expose hardcoded durations (its source: "This test uses a different
+      # checksum bytes than the other one to expose hard-coded boot ROM
+      # durations"). The two -S ROMs differ ONLY in the global-checksum bytes
+      # at 0x14E/0x14F, whose popcount is 4 higher in boot_div2-S, and its
+      # passing DIV window sits exactly 16 T-cycles lower — i.e. each set bit
+      # in the transferred header shortens the boot by 4 T-cycles (a
+      # value-dependent branch in the bit-banged ICD2 transfer loop). Model
+      # the seed as 0xD85C (swept with boot_div-S, header popcount 273)
+      # minus 4 per extra set bit in 0x100..0x14F. Only the harness ever
+      # selects bmSgb/bmSgb2, so real carts are unaffected.
+      var bits = 0
+      for i in 0x100 .. 0x14F:
+        if i < gb.cartridge.rom.len: bits += countSetBits(gb.cartridge.rom[i])
+      uint16(0xD85C - 4 * (bits - 273))
     of bmCgb0:          0x2880'u16   # misc/boot_div-cgb0
     of bmAgb:           0x2678'u16   # misc/boot_div-A
     of bmCgbABCDE:
