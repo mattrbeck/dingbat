@@ -2251,8 +2251,12 @@ const glRenderer = (() => {
 out vec2 v_uv;
 void main() {
   // Full-screen triangle; v_uv flips Y so framebuffer row 0 is at the top.
+  // p is (0,0),(2,0),(0,2) -> clip (-1,-1),(3,-1),(-1,3): the triangle spans 4
+  // clip units, so v_uv must span 0..2 across it for the visible [-1,1] window
+  // to interpolate 0..1. Passing p directly (NOT p*0.5) is what makes the whole
+  // frame show instead of just the bottom-left quadrant zoomed 2x.
   vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  v_uv = vec2(p.x * 0.5, 1.0 - p.y * 0.5);
+  v_uv = vec2(p.x, 1.0 - p.y);
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
