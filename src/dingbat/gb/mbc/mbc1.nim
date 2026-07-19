@@ -1,4 +1,17 @@
 # MBC1 cartridge (included by gb.nim)
+#
+# MBC1M multicarts wire the cart differently: BANK1 bit 4 is not connected
+# (only 4 bits reach the ROM) and BANK2 drives ROM address lines 18-19, i.e.
+# it shifts by 4 instead of 5. The BANK1 register itself is still 5 bits wide
+# with the full-register zero check, so e.g. $10 stays $10 (wired bank 0).
+
+proc mbc1_lo_bank(cart: Mbc1): int =
+  if cart.multicart: int(cart.reg2) shl 4
+  else:              int(cart.reg2) shl 5
+
+proc mbc1_hi_bank(cart: Mbc1): int =
+  if cart.multicart: (int(cart.reg2) shl 4) or (int(cart.reg1) and 0x0F)
+  else:              (int(cart.reg2) shl 5) or int(cart.reg1)
 
 method mbc_read*(cart: Mbc1; idx: int): uint8 =
   case idx
@@ -6,11 +19,9 @@ method mbc_read*(cart: Mbc1; idx: int): uint8 =
     if cart.mode == 0:
       cart.rom[idx]
     else:
-      let bank = int(cart.reg2) shl 5
-      cart.rom[mbc_rom_bank_offset(cart, bank) + idx]
+      cart.rom[mbc_rom_bank_offset(cart, mbc1_lo_bank(cart)) + idx]
   of 0x4000..0x7FFF:
-    let bank = (int(cart.reg2) shl 5) or int(cart.reg1)
-    cart.rom[mbc_rom_bank_offset(cart, bank) + mbc_rom_offset(idx)]
+    cart.rom[mbc_rom_bank_offset(cart, mbc1_hi_bank(cart)) + mbc_rom_offset(idx)]
   of 0xA000..0xBFFF:
     if cart.ram_enabled and cart.ram.len > 0:
       if cart.mode == 0:

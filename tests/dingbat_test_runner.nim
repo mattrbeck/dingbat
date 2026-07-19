@@ -166,7 +166,16 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     let actual = if test.color: read_ppm_rgb(tmp_ppm) else: read_ppm_greyscale(tmp_ppm)
     removeFile(tmp_ppm)
     # Read expected pixels from PNG
-    let expected = read_png(test.expected_png)
+    var expected = read_png(test.expected_png)
+    if not test.color and expected.channels == 3:
+      # Greyscale comparison against an RGB reference (e.g. mooneye's
+      # sprite_priority-dmg.png stores grey shades as R=G=B truecolor):
+      # collapse to one byte per pixel via the R channel.
+      var grey = newSeq[uint8](expected.pixels.len div 3)
+      for i in 0 ..< grey.len:
+        grey[i] = expected.pixels[i * 3]
+      expected.pixels = grey
+      expected.channels = 1
     # Compare
     if actual.len != expected.pixels.len:
       return TestResult(name: test.name, passed: false,
@@ -253,6 +262,18 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
     # ROMs are model-scoped; everything else uses the default boot state. The
     # default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
     # unmapped so their long-standing passing behavior is untouched.
+    # manual-only/sprite_priority has no serial pass/fail signal — mooneye
+    # ships a reference image instead. Run it as a screenshot comparison
+    # against the bundled DMG reference (same convention as mealybug/acid2).
+    if rel == "manual-only" / "sprite_priority.gb":
+      tests.add(TestDef(
+        name: name,
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 120,
+        expected_png: rom.parentDir / "sprite_priority-dmg.png",
+      ))
+      continue
     var model = ""
     let base = rom.splitFile().name
     if base.startsWith("boot_") and '-' in base:

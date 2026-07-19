@@ -86,7 +86,45 @@ proc read_png*(path: string): PngImage =
   var prev_row = newSeq[uint8](stride)
   var curr_row = newSeq[uint8](stride)
 
-  if color_type == 3:
+  if color_type == 2:
+    # Truecolor RGB (8-bit only) — filters operate 3 bytes per pixel
+    doAssert bit_depth == 8, "RGB PNG: only 8-bit supported"
+    result.channels = 3
+    result.pixels = newSeq[uint8](width * height * 3)
+    let rgb_stride = width * 3
+    let rgb_row_bytes = rgb_stride + 1
+    var prev = newSeq[uint8](rgb_stride)
+    var curr = newSeq[uint8](rgb_stride)
+
+    for y in 0 ..< height:
+      let offset = y * rgb_row_bytes
+      let filter_type = uint8(raw[offset])
+      for i in 0 ..< rgb_stride:
+        curr[i] = uint8(raw[offset + 1 + i])
+
+      case filter_type
+      of 0: discard
+      of 1:
+        for i in 3 ..< rgb_stride:
+          curr[i] = uint8((int(curr[i]) + int(curr[i - 3])) and 0xFF)
+      of 2:
+        for i in 0 ..< rgb_stride:
+          curr[i] = uint8((int(curr[i]) + int(prev[i])) and 0xFF)
+      of 3:
+        for i in 0 ..< rgb_stride:
+          let a = if i >= 3: int(curr[i - 3]) else: 0
+          curr[i] = uint8((int(curr[i]) + (a + int(prev[i])) div 2) and 0xFF)
+      of 4:
+        for i in 0 ..< rgb_stride:
+          let a = if i >= 3: int(curr[i - 3]) else: 0
+          let c = if i >= 3: int(prev[i - 3]) else: 0
+          curr[i] = uint8((int(curr[i]) + paeth_predictor(a, int(prev[i]), c)) and 0xFF)
+      else: discard
+
+      for i in 0 ..< rgb_stride:
+        result.pixels[y * rgb_stride + i] = curr[i]
+        prev[i] = curr[i]
+  elif color_type == 3:
     # Indexed color — expand palette to RGB
     result.channels = 3
     result.pixels = newSeq[uint8](width * height * 3)

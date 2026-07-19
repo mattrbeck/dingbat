@@ -48,6 +48,7 @@ type
     mode*:        uint8
     reg1*:        uint8   # 5-bit rom bank lo
     reg2*:        uint8   # 2-bit secondary
+    multicart*:   bool    # MBC1M: only 4 bits of reg1 are wired; reg2 shifts by 4
 
   Mbc2* = ref object of Mbc
     ram_enabled*: bool

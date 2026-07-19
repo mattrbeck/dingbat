@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-18 16:25:15*
+*Generated: 2026-07-18 17:06:55*
 
 ## Game Boy - Blargg
 
@@ -62,8 +62,8 @@
 | acceptance/jp_timing | 👌 |
 | acceptance/ld_hl_sp_e_timing | 👌 |
 | acceptance/oam_dma/basic | 👌 |
-| acceptance/oam_dma/reg_read | 👀 |
-| acceptance/oam_dma/sources-GS | 👀 |
+| acceptance/oam_dma/reg_read | 👌 |
+| acceptance/oam_dma/sources-GS | 👌 |
 | acceptance/oam_dma_restart | 👌 |
 | acceptance/oam_dma_start | 👌 |
 | acceptance/oam_dma_timing | 👌 |
@@ -105,7 +105,7 @@
 | emulator-only/mbc1/bits_bank2 | 👌 |
 | emulator-only/mbc1/bits_mode | 👌 |
 | emulator-only/mbc1/bits_ramg | 👌 |
-| emulator-only/mbc1/multicart_rom_8Mb | 👀 |
+| emulator-only/mbc1/multicart_rom_8Mb | 👌 |
 | emulator-only/mbc1/ram_256kb | 👌 |
 | emulator-only/mbc1/ram_64kb | 👌 |
 | emulator-only/mbc1/rom_16Mb | 👌 |
@@ -130,7 +130,7 @@
 | emulator-only/mbc5/rom_64Mb | 👌 |
 | emulator-only/mbc5/rom_8Mb | 👌 |
 | madness/mgb_oam_dma_halt_sprites | 👀 |
-| manual-only/sprite_priority | 👀 |
+| manual-only/sprite_priority | 👌 |
 | misc/bits/unused_hwio-C | 👌 |
 | misc/boot_div-A | 👌 |
 | misc/boot_div-cgb0 | 👌 |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 119
-- **Fail:** 50
+- **Pass:** 123
+- **Fail:** 46

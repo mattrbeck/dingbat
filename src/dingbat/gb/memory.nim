@@ -8,7 +8,10 @@ proc cgb_native*(gb: GB): bool =
   gb.cgb_enabled and (gb.cgb_flag != cgbNone or gb.memory.bootrom.len > 0)
 
 proc new_gb_memory*(gb: GB): GbMemory =
-  result = GbMemory(wram_bank: 1, dma_position: 0xA1)
+  # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
+  # DMG-family models, 0x00 on CGB (Pan Docs power-up sequence).
+  result = GbMemory(wram_bank: 1, dma_position: 0xA1,
+                    dma: if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
   for i in 0 ..< 8:
     result.wram[i] = newSeq[uint8](0x1000)
   result.bootrom = @[]
@@ -83,7 +86,8 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
   of 0xFF0F:         irq_read(gb.interrupts, idx)
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx)
-  of 0xFF40..0xFF4B: ppu_read(gb.ppu, gb, idx)
+  of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
+  of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_read(gb.ppu, gb, idx)
   of 0xFF4D:
     if gb.cgb_native:
       0x7E'u8 or (uint8(mem.current_speed) shl 7) or (if mem.requested_speed_switch: 1'u8 else: 0'u8)
@@ -180,9 +184,14 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
+          # The OAM DMA unit drives the external bus directly: sources at or
+          # above 0xE000 read WRAM (the echo extends over 0xE000-0xFFFF, so
+          # 0xFE00/0xFF00 sources fetch 0xDE00/0xDF00 — mooneye sources-GS).
+          var src = int(mem.current_dma_source) + mem.dma_position
+          if src >= 0xE000: src = src and not 0x2000
           write_byte(mem, gb,
             0xFE00 + mem.dma_position,
-            read_byte(mem, gb, int(mem.current_dma_source) + mem.dma_position))
+            read_byte(mem, gb, src))
         inc mem.dma_position
       inc mem.internal_dma_timer
 
