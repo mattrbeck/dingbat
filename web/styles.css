@@ -2419,6 +2419,12 @@ body.debug-2p .home-tile-link {
   body.running #controls {
     display: grid;
   }
+  /* "Hide touch controls with a controller" (default on): a connected gamepad
+     supersedes the on-screen buttons. Higher specificity than every
+     body.running #controls display rule, including the landscape blocks. */
+  body.running.gamepad-hides-touch #controls {
+    display: none;
+  }
 }
 
 /* Tactile key base */

@@ -2836,6 +2836,29 @@ const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
 };
 
+// --- Hide touch controls while a game controller is connected (default on) ---
+// pollGamepads maintains body.gamepad-hides-touch from the live connected
+// state; the CSS gate only bites in the touch layout, so desktop is unaffected.
+const hideTouchOnGamepadToggle = document.getElementById("hide-touch-on-gamepad-toggle");
+var hideTouchOnGamepad = true;
+
+const applyHideTouchOnGamepad = (on) => {
+  hideTouchOnGamepad = on;
+  hideTouchOnGamepadToggle.checked = on;
+  if (!on) document.body.classList.remove("gamepad-hides-touch");
+  // (re-enable happens on the next pollGamepads tick)
+};
+
+hideTouchOnGamepadToggle.addEventListener("change", async () => {
+  applyHideTouchOnGamepad(hideTouchOnGamepadToggle.checked);
+  await dbPut("hide-touch-on-gamepad", hideTouchOnGamepadToggle.checked);
+});
+
+const loadHideTouchOnGamepadFromStorage = async () => {
+  const v = await dbGet("hide-touch-on-gamepad");
+  applyHideTouchOnGamepad(typeof v === "boolean" ? v : true);
+};
+
 // --- Touch direction input: d-pad (default) vs joystick + joystick behavior ---
 // Two IndexedDB keys: "control-style" ("dpad" | "joystick") and
 // "joystick-mode" ("fixed" | "floating"). body.joystick-controls swaps the
@@ -2943,7 +2966,7 @@ themeChips.forEach((chip) =>
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
-  "control-style", "joystick-mode",
+  "control-style", "joystick-mode", "hide-touch-on-gamepad",
 ];
 
 const resetAllSettings = async () => {
@@ -2992,6 +3015,7 @@ const resetAllSettings = async () => {
   applyOpaqueControls(false);
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
+  applyHideTouchOnGamepad(true);
 
   // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
   // theme section: the <head> boot script needs a synchronous read)
@@ -3960,6 +3984,8 @@ const pollGamepads = () => {
     if (ax < -GP_DEADZONE) want[2] = true;
     if (ax > GP_DEADZONE) want[3] = true;
   }
+  document.body.classList.toggle(
+    "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
   if (!anyConnected) return;
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
@@ -4038,6 +4064,7 @@ var Module = {
     await loadKeybindingsFromStorage();
     await loadLargeControlsFromStorage();
     await loadOpaqueControlsFromStorage();
+    await loadHideTouchOnGamepadFromStorage();
     await loadControlStyleFromStorage();
     await loadAudioSettings();
     await loadColorCorrect();
