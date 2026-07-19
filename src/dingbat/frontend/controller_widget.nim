@@ -4,12 +4,14 @@ import sdl2/joystick
 import sdl2/gamecontroller
 import imguin/cimgui
 import ../common/[input, config]
+import util
 
 type
   ControllerWidget* = ref object
     cfg*:         Config
     editing*:     Table[cint, Input]
     selection*:   Option[Input]
+    rumble*:      bool
     visible*:     bool
     hovered_col:  ImVec4
 
@@ -56,6 +58,13 @@ proc controller_connected(): bool =
   false
 
 proc render*(w: ControllerWidget) =
+  # Rumble is not controller-only (it also drives the viewport shake), so it
+  # renders above the no-controller early-out.
+  discard igCheckbox("Rumble", addr w.rumble)
+  igSameLine(0, -1)
+  help_marker("Vibrate the controller and shake the screen while a rumble " &
+              "cartridge's motor runs (GB MBC5 and GBA rumble carts)")
+  igSeparator()
   if not controller_connected():
     igText("No controller detected")
     w.selection = none(Input)
@@ -87,6 +96,7 @@ proc render*(w: ControllerWidget) =
 
 proc reset*(w: ControllerWidget) =
   w.selection = none(Input)
+  w.rumble = w.cfg.gb_rumble
   w.editing = initTable[cint, Input]()
   for k, v in w.cfg.controller_bindings.pairs:
     w.editing[k] = v
@@ -95,4 +105,5 @@ proc apply*(w: ControllerWidget) =
   w.cfg.controller_bindings = initTable[cint, Input]()
   for k, v in w.editing.pairs:
     w.cfg.controller_bindings[k] = v
+  w.cfg.gb_rumble = w.rumble
   w.selection = none(Input)

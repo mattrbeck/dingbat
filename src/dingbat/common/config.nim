@@ -261,6 +261,7 @@ type
     gb_bootrom_path*:   string   # GB/GBC boot ROM path
     gb_fifo*:           bool     # use FIFO PPU renderer (default true)
     gb_rumble*:         bool     # controller rumble + screen shake on rumble carts
+                                 # (GB MBC5 and GBA GPIO; "gb_" kept for config-file compat)
     use_hle*:           bool     # use HLE BIOS for SWI calls
     hle_after_bios*:    bool     # run real BIOS for init, then use HLE for SWI calls
     volume*:            int      # master volume 0..100

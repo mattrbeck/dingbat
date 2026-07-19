@@ -367,6 +367,16 @@
           </div>
           <div class="modal-toggle-row">
             <div>
+              <span class="modal-row-label">Rumble</span>
+              <span class="modal-toggle-sub">Vibration and screen shake when a rumble cartridge's motor runs (Game Boy and GBA rumble carts)</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="gb-rumble-toggle" checked />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
               <span class="modal-row-label">Touch direction input</span>
               <span class="modal-toggle-sub">D-pad buttons or an analog-style joystick</span>
             </div>
@@ -433,17 +443,6 @@
             <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
           </div>
           <p class="modal-hint">When a bootrom is set, the boot animation plays on Game Boy games.</p>
-          <div class="modal-subhead">Feedback</div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Rumble</span>
-              <span class="modal-toggle-sub">Vibration and screen shake when a rumble cartridge's motor runs</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="gb-rumble-toggle" checked />
-              <span class="switch-track"></span>
-            </label>
-          </div>
           <p class="settings-note">Renderer and boot ROM changes apply the next time a game is loaded.</p>
         </div>
 

@@ -12,6 +12,13 @@ proc new_gpio*(gba: GBA): GPIO =
 proc address_in_gpio*(address: uint32): bool =
   address >= 0x080000C4'u32 and address <= 0x080000C9'u32
 
+proc gpio_rumble*(gpio: GPIO): bool =
+  ## Cart rumble motor state. Rumble carts (Drill Dozer, WarioWare: Twisted!)
+  ## wire the motor to GPIO bit 3: on while the game drives it high as an
+  ## output. RTC uses bits 0-2 and the Boktai solar sensor reads bit 3 as an
+  ## INPUT, so an output-high bit 3 uniquely means a rumble motor running.
+  (gpio.direction and 0x8'u8) != 0 and (gpio.data and 0x8'u8) != 0
+
 proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
   case io_addr and 0xFF'u32
   of 0xC4:  # IO Port Data

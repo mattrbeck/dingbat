@@ -357,11 +357,13 @@ proc isStopped(): cint {.exportc.} =
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
 
 proc wasm_rumble(): cint {.exportc.} =
-  ## 1 while the running single-core GB cart's rumble motor is on (MBC5
-  ## rumble carts, types 0x1C-0x1E). GBA, link modes and no-core return 0 —
-  ## stateKind is only ekGB in single-core GB sessions, so no mode check is
-  ## needed. JS polls this each RAF tick to drive haptics + screen shake.
+  ## 1 while the running single-core cart's rumble motor is on: GB MBC5
+  ## rumble carts (types 0x1C-0x1E) or GBA GPIO rumble carts (Drill Dozer,
+  ## WarioWare: Twisted!). Link modes and no-core return 0 — stateKind is
+  ## only set in single-core sessions, so no mode check is needed. JS polls
+  ## this each RAF tick to drive haptics + screen shake.
   if stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
+  elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gpio_rumble(): 1
   else: 0
 
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =

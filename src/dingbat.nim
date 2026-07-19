@@ -1007,16 +1007,19 @@ proc set_fast_forward(held: bool) =
   of ekNone: discard
 
 proc update_rumble() =
-  ## Poll the GB cart's rumble motor (MBC5 rumble carts only; the base
-  ## mbc_rumble returns false everywhere else) and drive controller
+  ## Poll the cart's rumble motor — GB MBC5 rumble carts, or GBA GPIO rumble
+  ## carts (Drill Dozer, WarioWare: Twisted!) — and drive controller
   ## vibration: 80 ms effects re-triggered every 50 ms chain into a
   ## continuous buzz while the motor stays on. render_game reads rumble_on
   ## for the viewport shake. Effects die out on their own, but stopping
   ## explicitly on the off edge keeps short pulses crisp.
   let was_on = rumble_on
-  rumble_on = app.cfg.gb_rumble and app.emu_kind == ekGB and
-              app.gb_emu != nil and not app.paused and
-              app.gb_emu.cartridge.mbc_rumble()
+  let motor_on =
+    case app.emu_kind
+    of ekGB:  app.gb_emu != nil and app.gb_emu.cartridge.mbc_rumble()
+    of ekGBA: app.gba_emu != nil and app.gba_emu.bus.gpio.gpio_rumble()
+    of ekNone: false
+  rumble_on = app.cfg.gb_rumble and not app.paused and motor_on
   if rumble_on:
     let now = getTicks()
     if now - rumble_last_pulse >= 50:
