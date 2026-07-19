@@ -385,13 +385,6 @@
               <button type="button" class="choice-chip" data-value="floating" role="radio" aria-checked="false">Floating</button>
             </div>
           </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Test vibration</span>
-              <span class="modal-toggle-sub">Fires one long 200&thinsp;ms pulse to check this device supports web vibration</span>
-            </div>
-            <button type="button" class="button button-sm" id="vibration-test-btn">Test</button>
-          </div>
           <div id="kb-section">
             <div class="modal-subhead">Keyboard</div>
             <div class="modal-row">
@@ -517,7 +510,7 @@
           <div class="modal-toggle-row">
             <div>
               <span class="modal-row-label">Upscale filter</span>
-              <span class="modal-toggle-sub">GPU pixel-art smoothing (clean-room hq4x / xBR). Suspends integer scaling while active.</span>
+              <span class="modal-toggle-sub">GPU pixel-art smoothing (clean-room hq4x / xBR). Suspends integer scaling and scanlines while active.</span>
             </div>
             <select id="upscale-filter-select" class="kb-select">
               <option value="none">None</option>
@@ -525,7 +518,7 @@
               <option value="xbr">xBR</option>
             </select>
           </div>
-          <div class="modal-toggle-row">
+          <div class="modal-toggle-row" id="integer-scale-row">
             <div>
               <span class="modal-row-label">Integer scaling</span>
               <span class="modal-toggle-sub">Scale only by whole multiples for perfectly even pixels</span>
@@ -535,7 +528,7 @@
               <span class="switch-track"></span>
             </label>
           </div>
-          <div class="modal-toggle-row">
+          <div class="modal-toggle-row" id="scanlines-row">
             <div>
               <span class="modal-row-label">Scanlines</span>
               <span class="modal-toggle-sub">Overlay a faint line across each row of pixels</span>

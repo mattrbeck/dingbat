@@ -2476,9 +2476,24 @@ const drawGame = () => {
     panelGbc: Module._wasm_panel_gbc
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
-    scanlines,
+    // An upscale filter suspends scanlines (smoothing + row-darkening fight
+    // each other); the toggle keeps its state for when the filter turns off.
+    scanlines: scanlines && !filterActive(),
     filter: upscaleFilter,
   });
+};
+
+// Gray out the toggles an active upscale filter suspends (integer scaling and
+// scanlines) so the modal shows they're not in effect right now.
+const updateSuspendedVideoToggles = () => {
+  const sus = filterActive();
+  for (const [rowId, input] of [
+    ["integer-scale-row", integerScaleToggle],
+    ["scanlines-row", scanlinesToggle],
+  ]) {
+    document.getElementById(rowId)?.classList.toggle("suspended", sus);
+    input.disabled = sus;
+  }
 };
 
 const saveVideoSettings = () => {
@@ -2519,6 +2534,7 @@ ambientGlowToggle.addEventListener("change", () => {
 
 upscaleFilterSelect.addEventListener("change", () => {
   upscaleFilter = upscaleFilterSelect.value;
+  updateSuspendedVideoToggles();
   updateCanvasScaling();  // filter suspends integer-scale layout pinning
   drawGame();             // filter is a shader uniform — redraw to show it live
   saveVideoSettings();
@@ -2538,6 +2554,7 @@ const loadVideoSettings = async () => {
   motionBlurToggle.checked = motionBlur;
   ambientGlowToggle.checked = ambientGlow;
   upscaleFilterSelect.value = upscaleFilter;
+  updateSuspendedVideoToggles();
   applyMotionBlur();
   updateCanvasScaling();
 };
@@ -2951,6 +2968,7 @@ const resetAllSettings = async () => {
   motionBlurToggle.checked = false;
   ambientGlowToggle.checked = false;
   upscaleFilterSelect.value = "none";
+  updateSuspendedVideoToggles();
   glowFresh = true;
   applyMotionBlur();
   updateCanvasScaling();
@@ -4466,28 +4484,6 @@ const haptic = () => {
     hapticBlocked++;
   }
 };
-
-// Settings -> Controls -> "Test vibration": one unmistakable 200 ms pulse on
-// CLICK (click always carries sticky activation), with the raw return value
-// shown inline. Separates "our haptic() path is blocked" from "this
-// phone/browser doesn't deliver web vibration at all".
-{
-  const btn = document.getElementById("vibration-test-btn");
-  let revert = null;
-  btn?.addEventListener("click", () => {
-    let label;
-    if (!("vibrate" in navigator)) {
-      label = "unsupported";
-    } else {
-      let ret;
-      try { ret = navigator.vibrate(200); } catch { ret = "err"; }
-      label = `sent (${ret})`;
-    }
-    btn.textContent = label;
-    clearTimeout(revert);
-    revert = setTimeout(() => { btn.textContent = "Test"; }, 2000);
-  });
-}
 
 var currentDpadTouchId = null;
 var currentDpadElement = null;
