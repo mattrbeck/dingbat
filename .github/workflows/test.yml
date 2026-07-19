@@ -105,6 +105,28 @@ jobs:
         # dangles until the TTL. Zero-dep, spawns its own server on a test port.
         if: runner.os == 'Linux'
         run: node web/signaling/server.test.mjs
+      - name: Web present-shader UV tripwire (pure Node, no browser)
+        # Fast Layer-2 guard for the WebGL2 present vertex shader. Pulls the
+        # LIVE `v_uv = ...` expression out of web/index.js (glshaders.mjs) and
+        # asserts the visible screen maps to the full [0,1] texture with row 0
+        # at the top. This is the cheap tripwire for the halved-UV bug that
+        # shipped (`v_uv = p*0.5` -> only the bottom-left quadrant, zoomed 2x).
+        # Zero deps; runs on every OS.
+        run: node web/uv.test.mjs
+      - name: Web render-correctness readback (headless Chromium, WebGL2)
+        # Layer-1 real guard: compiles the ACTUAL present shaders (VERT+FRAG,
+        # extracted from index.js) in Playwright's Chromium, uploads a
+        # corner-distinguishable frame, reads the canvas back and asserts each
+        # corner maps to the right source corner (catches quadrant / Y-flip /
+        # scale / upload-dims / readback bugs). WebGL2 + GLSL ES 300 needs a
+        # real browser (node's headless-gl is WebGL1-only), so it is its own
+        # Linux-only step that installs ONLY Chromium.
+        if: runner.os == 'Linux'
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node render.test.mjs
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

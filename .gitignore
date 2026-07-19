@@ -17,6 +17,9 @@ imgui.ini
 # Nim compiler cache
 .cache/
 
+# Web test deps (Playwright, installed by the render-readback test)
+web/node_modules/
+
 # WASM build artifacts and test ROMs
 web/em.js
 web/em.wasm
