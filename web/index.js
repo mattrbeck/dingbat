@@ -2135,6 +2135,7 @@ const updateCanvasScaling = () => {
   // texture sampling makes that a crisp integer upscale, and the extra pixels
   // keep screenshots at their previous size. Only touch it when it actually
   // changes: assigning canvas.width/height resets the GL drawing buffer.
+  presentDirty = true; // resize can wipe the backing — repaint on the next tick
   const running0 =
     document.body.classList.contains("running") && !!currentRomName;
   if (running0 && !linkMode && !rollbackMode) {
@@ -2469,6 +2470,13 @@ void main() {
 
 // Present one game frame via WebGL2. No-op in link / rollback modes (they blit
 // their own 2D canvases) and when no game is loaded.
+// True when the next RAF tick must present even if emulation stepped no new
+// frame (first paint, resize wiped the canvas backing, a display setting
+// changed). Cleared after each present.
+var presentDirty = true;
+var presentSkip = false;
+var presentSkips = 0;
+
 const drawGame = () => {
   if (!currentRomName || linkMode || rollbackMode) return;
   glRenderer.draw({
@@ -4402,11 +4410,23 @@ var Module = {
         }
         // Prevent accumulator from growing unbounded if tab was backgrounded
         if (accumulator > step * 2) accumulator = 0;
+        // Emulation is 60 fps but RAF follows the display: on a 120 Hz screen
+        // every other tick steps zero frames, and re-presenting the identical
+        // frame would double the texture-upload + shader cost (noticeable
+        // with xBR on phones). Settings/resize paths set presentDirty to
+        // force a repaint even without a new frame.
+        presentSkip = framesRun === 0 && !presentDirty;
       }
       // Present the freshly-stepped frame through WebGL2 (single-core / online
       // link / rewind / fast-forward paths; 2P link & rollback blit their own
       // canvases and drawGame no-ops for them).
-      drawGame();
+      if (!presentSkip) {
+        drawGame();
+        presentDirty = false;
+      } else {
+        presentSkips++; // diagnostics: ticks that reused the shown frame
+      }
+      presentSkip = false;
       // Screenshot: draw one guaranteed-fresh frame and grab it in this task
       // (the WebGL2 context has no preserveDrawingBuffer).
       if (pendingShot) {
