@@ -1088,6 +1088,18 @@ body.has-game #home-resume {
   display: inline-flex;
 }
 
+/* Wrapper around Resume + the mobile-only "Load a game" button. On desktop it
+   is transparent to layout (display: contents) and the mobile button doesn't
+   render, so the home column is pixel-identical to before. The touch layout
+   lives in the (pointer: coarse) home block near the mobile compaction rules. */
+#home-actions {
+  display: contents;
+}
+
+#home-load {
+  display: none;
+}
+
 /* Paused-game card — frozen frame of the game Resume returns to. Shown only
    while a game is paused at the home screen (JS toggles [hidden]). */
 #home-paused {
@@ -2813,6 +2825,67 @@ body.large-controls .pad-pill {
   /* One full-width column on phones so game names aren't truncated */
   #home-recent {
     grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * Touch-device home redesign. Drag-and-drop doesn't exist on touch, so the
+ * big dashed drop target is pointless there: replace it with a compact
+ * "Load a game" button and give the freed height to the Recent grid (more
+ * games visible without scrolling). Keyed off (pointer: coarse) like the
+ * touch controls — a narrow *desktop* window keeps the drop target because
+ * drag-and-drop still works with a mouse, and desktop layout stays untouched.
+ * Flex `order` restructures the shared markup: brand first, then (when a game
+ * is paused) the frozen-frame card directly above a Resume | Load row.
+ */
+@media (pointer: coarse) {
+  #dropzone {
+    display: none;
+  }
+
+  #home-brand {
+    order: 1;
+  }
+  #home-paused {
+    order: 2;
+  }
+  #home-actions {
+    order: 3;
+  }
+  #home-recent-wrap {
+    order: 4;
+  }
+
+  /* Resume (left) | Load a game (right) side by side while paused; with no
+     game loaded only the Load button renders, centered. wrap is a guard for
+     very narrow phones. */
+  #home-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+  }
+
+  #home-load {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 11px 24px;
+    font-size: 15px;
+    border-radius: 999px;
+  }
+
+  /* In the paused row Resume is the primary action, so the Load button drops
+     from .button-primary to the neutral .button look (primary + secondary). */
+  body.has-game #home-load {
+    color: var(--text);
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+    border-color: var(--border-2);
+    box-shadow: inset 0 1px 0 var(--inset-hi);
+  }
+  body.has-game #home-load:hover {
+    background: linear-gradient(180deg, var(--surface-hover), var(--surface-3));
   }
 }
 
