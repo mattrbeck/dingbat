@@ -685,7 +685,7 @@ proc gb_skip_boot(gb: GB) =
   gb.interrupts.vblank_interrupt = true
   gb.cpu.skip_boot(gb)
   gb.memory.skip_boot(gb)
-  gb.ppu.skip_boot(gb.cgb_enabled)
+  gb.ppu.skip_boot(gb)
   gb.timer.skip_boot(gb)
 
 proc handle_saves*(gb: GB) =

@@ -43,14 +43,26 @@ method reset_render_scratch*(ppu: GbPpu) {.base.} =
   ## so it is a no-op here.
   discard
 
-method skip_boot*(ppu: GbPpu; cgb: bool) {.base.} =
+method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
   for i in 0 ..< POST_BOOT_VRAM.len:
     ppu.vram[0][i] = POST_BOOT_VRAM[i]
-  if cgb:
+  if gb.cgb_enabled:
     # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
     # reads LY=0x90); the sub-frame phase is calibrated against gambatte
     # display_startstate/stat_*, div/ and serial/ tests.
     const phase = 160  # gambatte display_startstate/stat_1+stat_2 (159..162)
+    ppu.ly = uint8(144 + phase div 456)
+    ppu.cycle_counter = int32(phase mod 456)
+    ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    ppu.first_line = false
+  elif gb.boot_model == bmDmg0:
+    # The DMG0 boot ROM hands off at a different LCD phase than DMG-ABC
+    # (which uses the ly=0/cc=0 default above): mooneye boot_hwio-dmg0 reads
+    # STAT mid-mode-3 of line 1 / LY=1 shortly after handoff, which places
+    # the handoff itself mid-VBlank. Seed found by sweeping that ROM's
+    # passing window, 540..708, and taking the center (same method as the
+    # per-model DIV seeds in timer.nim).
+    const phase = 624  # dots past the start of VBlank (line 144)
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1

@@ -22,7 +22,14 @@ proc new_gb_memory*(gb: GB): GbMemory =
 
 proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.bootrom = @[]
-  # Initial APU/PPU register state after boot ROM
+  # Initial APU/PPU register state after boot ROM (mooneye boot_hwio-*).
+  # NR52 must be written first: while the APU is powered off every other
+  # sound-register write is dropped. The NR14 write's trigger bit then starts
+  # channel 1 exactly like the boot beep does, so NR52 reads back 0xF1 — but
+  # the beep's envelope has decayed to silence by the handoff, so the live
+  # volume is zeroed after the writes (keeps the boot silent, and CGB
+  # PCM12/FF76 reads 0x00).
+  mem.write_byte(gb, 0xFF26, 0xF1)
   mem.write_byte(gb, 0xFF10, 0x80)
   mem.write_byte(gb, 0xFF11, 0xBF)
   mem.write_byte(gb, 0xFF12, 0xF3)
@@ -40,7 +47,14 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF23, 0xBF)
   mem.write_byte(gb, 0xFF24, 0x77)
   mem.write_byte(gb, 0xFF25, 0xF3)
-  mem.write_byte(gb, 0xFF26, 0xF1)
+  # Beep aftermath: channel 1 stays flagged active (NR52 bit 0) but its
+  # envelope has decayed to 0 by PC=0x100. On SGB/SGB2 the handoff happens so
+  # much later that channel 1 has been shut off entirely (boot_hwio-S expects
+  # NR52 = 0xF0).
+  gb.apu.channel1.current_volume = 0
+  gb.apu.channel1.vol_env_is_updating = false
+  if gb.boot_model in {bmSgb, bmSgb2}:
+    gb.apu.channel1.enabled = false
   mem.write_byte(gb, 0xFF40, 0x91)
   mem.write_byte(gb, 0xFF42, 0x00)
   mem.write_byte(gb, 0xFF43, 0x00)
@@ -50,6 +64,17 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF49, 0xFF)
   mem.write_byte(gb, 0xFF4A, 0x00)
   mem.write_byte(gb, 0xFF4B, 0x00)
+  if gb.cgb_enabled:
+    # CGB boot ROM leaves the palette-index ports mid-sequence after writing
+    # the (compatibility) palettes: BCPS = 0xC8, OCPS = 0xD0 (auto-increment
+    # set; mooneye misc/boot_hwio-C).
+    mem.write_byte(gb, 0xFF68, 0xC8)
+    mem.write_byte(gb, 0xFF6A, 0xD0)
+  # DMG-family boot ROMs leave both joypad select lines active (P1 reads
+  # 0xCF); SGB/CGB/AGB hand off with neither selected (P1 reads 0xFF).
+  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb}:
+    gb.joypad.button_keys = true
+    gb.joypad.direction_keys = true
   mem.write_byte(gb, 0xFFFF, 0x00)
 
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) =
@@ -97,13 +122,16 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF68..0xFF6B: ppu_read(gb.ppu, gb, idx)
   of 0xFF70:
     if gb.cgb_native: 0xF8'u8 or mem.wram_bank else: 0xFF'u8
-  of 0xFF72: mem.ff72
-  of 0xFF73: mem.ff73
+  # FF72-FF77 only exist on CGB/AGB hardware (present even in DMG-compat
+  # mode, unlike FF74 — mooneye misc/bits/unused_hwio-C); on DMG they are
+  # unmapped and read 0xFF (acceptance/bits/unused_hwio-GS).
+  of 0xFF72: (if gb.cgb_enabled: mem.ff72 else: 0xFF'u8)
+  of 0xFF73: (if gb.cgb_enabled: mem.ff73 else: 0xFF'u8)
   of 0xFF74:
     if gb.cgb_native: mem.ff74 else: 0xFF'u8
-  of 0xFF75: mem.ff75
-  of 0xFF76: 0x00'u8
-  of 0xFF77: 0x00'u8
+  of 0xFF75: (if gb.cgb_enabled: mem.ff75 or 0x8F'u8 else: 0xFF'u8)
+  of 0xFF76: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
+  of 0xFF77: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80]
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8
