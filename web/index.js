@@ -3310,12 +3310,23 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
-// A dropped file is usually a ROM/zip to load, but while a game is running a
-// dropped .sav or .state is imported into the current game instead — the same
-// flows as the Manage Saves "Import save file" / "Import state" buttons.
+// A dropped file is usually a ROM/zip to load, but a dropped .sav or .state is
+// imported into the running game instead — the same flows as the Manage Saves
+// "Import save file" / "Import state" buttons. A save/state can only target a
+// running single-player game, so reject it with a specific reason otherwise
+// (rather than falling through to the ROM loader's generic "unsupported file").
 const handleDroppedFile = (file) => {
   let ext = extOf(file.name);
-  if ((ext === ".sav" || ext === ".state") && currentOriginalName) {
+  if (ext === ".sav" || ext === ".state") {
+    let kind = ext === ".sav" ? "save file" : "save state";
+    if (linkMode || rollbackMode || netActive()) {
+      alert(`Can't import a ${kind} while a link cable is connected. Disconnect first, then try again.`);
+      return;
+    }
+    if (!currentOriginalName) {
+      alert(`Load a game first, then drop its ${kind} to import it.`);
+      return;
+    }
     let reader = new FileReader();
     reader.addEventListener("load", () => {
       let bytes = new Uint8Array(reader.result);
