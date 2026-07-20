@@ -995,7 +995,11 @@ body.running #canvas {
   z-index: 0;
   pointer-events: none;
   transform: scale(1.45);
-  filter: blur(50px) saturate(1.5);
+  /* Blur only — saturation is baked into the sampled bitmap (updateGlow), so
+     the compositor runs a single filter pass. The source is a 24x16 image blown
+     up ~60x per cell, so a smaller radius still blends the cells smoothly at a
+     fraction of the large-radius blur's GPU cost. */
+  filter: blur(32px);
   opacity: 0.8;
   border-radius: 28px;
   /* The sampled bitmap is opaque edge-to-edge, so blur() alone yields a blurred

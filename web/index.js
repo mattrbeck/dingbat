@@ -2224,9 +2224,14 @@ const updateGlow = () => {
       const sx = Math.floor(((x + 0.5) * w) / gw);
       const si = (sy * w + sx) * 4;
       const di = (y * gw + x) * 4;
-      d[di] = heap[si];
-      d[di + 1] = heap[si + 1];
-      d[di + 2] = heap[si + 2];
+      const r = heap[si], g = heap[si + 1], b = heap[si + 2];
+      // Saturation boost, folded in here (384 px) so the CSS filter is just the
+      // blur — one compositor pass instead of blur + saturate. Uint8ClampedArray
+      // clamps + rounds the assignment. Luma-preserving, matches saturate(1.5).
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      d[di] = luma + (r - luma) * 1.5;
+      d[di + 1] = luma + (g - luma) * 1.5;
+      d[di + 2] = luma + (b - luma) * 1.5;
       d[di + 3] = 255;
     }
   }
