@@ -1849,6 +1849,21 @@ document.getElementById("export-save").addEventListener("click", async () => {
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 
+// Overwrite the current game's battery save with imported .sav bytes (with the
+// same name-mismatch guard as the "Import save file" button), then reboot the
+// core so the game reloads from it. Shared by that button and by a dropped
+// .sav file. Assumes a game is loaded (callers check currentOriginalName).
+const applyImportedSave = async (bytes, fileName) => {
+  if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
+  if (stripExt(fileName) !== stripExt(currentOriginalName)) {
+    if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
+  }
+  let savName = currentRomName.substring(0, currentRomName.lastIndexOf(".")) + ".sav";
+  writeToFS(savName, bytes);
+  await dbPut("save:" + currentOriginalName, new Uint8Array(bytes));
+  loadRom(currentRomName, currentOriginalName);
+};
+
 document.getElementById("load-save").addEventListener("click", () => {
   closeSavesModal(); // success reloads the game — don't leave the modal over it
   if (!currentRomName || !currentOriginalName) {
@@ -1859,16 +1874,7 @@ document.getElementById("load-save").addEventListener("click", () => {
   // preceding confirm()/alert() consumes the transient user activation, so
   // input.click() no longer opens the file picker. Do the overwrite prompts
   // AFTER a file is chosen (inside the callback), not before opening the picker.
-  pickFile(".sav", async (bytes, fileName) => {
-    if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
-    if (stripExt(fileName) !== stripExt(currentOriginalName)) {
-      if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
-    }
-    let savName = currentRomName.substring(0, currentRomName.lastIndexOf(".")) + ".sav";
-    writeToFS(savName, bytes);
-    await dbPut("save:" + currentOriginalName, new Uint8Array(bytes));
-    loadRom(currentRomName, currentOriginalName);
-  });
+  pickFile(".sav", (bytes, fileName) => applyImportedSave(bytes, fileName));
 });
 
 // --- Save states ---
@@ -1968,13 +1974,16 @@ document.getElementById("export-state").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+// Apply an imported .state image to the running game (not persisted — use Save
+// State to keep it). Shared by the "Import state" button and a dropped .state.
+const applyImportedState = (bytes) => {
+  showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
+};
+
 document.getElementById("import-state").addEventListener("click", () => {
   menuDropdown.hidden = true;
   if (!currentOriginalName) return;
-  pickFile(".state", (bytes) => {
-    // Applied directly, not persisted — use Save State to keep it around
-    showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
-  });
+  pickFile(".state", (bytes) => applyImportedState(bytes));
 });
 
 // --- Volume control ---
@@ -3327,6 +3336,24 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
+// A dropped file is usually a ROM/zip to load, but while a game is running a
+// dropped .sav or .state is imported into the current game instead — the same
+// flows as the Manage Saves "Import save file" / "Import state" buttons.
+const handleDroppedFile = (file) => {
+  let ext = extOf(file.name);
+  if ((ext === ".sav" || ext === ".state") && currentOriginalName) {
+    let reader = new FileReader();
+    reader.addEventListener("load", () => {
+      let bytes = new Uint8Array(reader.result);
+      if (ext === ".sav") applyImportedSave(bytes, file.name);
+      else applyImportedState(bytes);
+    });
+    reader.readAsArrayBuffer(file);
+    return;
+  }
+  handleRomFile(file);
+};
+
 const openRomPicker = () => {
   menuDropdown.hidden = true;
   let input = document.createElement("input");
@@ -3373,7 +3400,7 @@ document.addEventListener("drop", (e) => {
   e.preventDefault();
   dragCounter = 0;
   dropOverlay.classList.remove("visible");
-  if (e.dataTransfer.files?.length > 0) handleRomFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
 pauseButton.addEventListener("click", () => {
