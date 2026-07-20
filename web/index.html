@@ -691,5 +691,13 @@
     <script src="sdputil.js"></script>
     <script src="netplay.js"></script>
     <script src="em.js"></script>
+    <!-- Diagnostic pacing probe: loads only with ?probe in the URL; no effect otherwise. -->
+    <script>
+      if (/[?&]probe(=|&|$)/.test(location.search)) {
+        var pp = document.createElement("script");
+        pp.src = "pacing-probe.js";
+        document.body.appendChild(pp);
+      }
+    </script>
   </body>
 </html>
