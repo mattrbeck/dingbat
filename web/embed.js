@@ -6,9 +6,9 @@ const demoMode = params.has("demo");
 
 // --- Integer scaling toggle ---
 
+const canvasEl = document.getElementById("canvas");
 if (!integerScaling) {
-  const canvas = document.getElementById("canvas");
-  canvas.classList.add("fill");
+  canvasEl.classList.add("fill");
 }
 
 // --- Emulator state ---
@@ -18,6 +18,46 @@ var paused = false;
 var fastForward = false;
 var currentRomName = null;
 var currentOriginalName = null;
+
+// --- WebGL2 game presentation ---
+// SDL no longer paints the game (commit 4c4a3e9): the core hands us a raw
+// BGR555 framebuffer and JS uploads it to a WebGL2 texture + shader. We own the
+// visible #canvas; SDL was pointed at the hidden #sdl-canvas. Same presenter as
+// the main page — see web/glpresent.js. The embed exposes no video toggles, so
+// the uniforms are fixed at the defaults index.js ships with (LCD color
+// correction on, no scanlines, no upscale filter).
+const GL_SCALE = 4; // #canvas backing store = native resolution * GL_SCALE
+
+const isGbc = () =>
+  typeof Module !== "undefined" && Module._wasm_panel_gbc
+    ? Module._wasm_panel_gbc() === 1
+    : !!(currentRomName && currentRomName !== "rom.gba");
+
+const nativeRes = () => (isGbc() ? [160, 144] : [240, 160]);
+
+const glRenderer = createGlRenderer(canvasEl, nativeRes, (m) =>
+  console.log(m)
+);
+
+// Pin the #canvas backing store to native * GL_SCALE. NEAREST sampling makes
+// that a crisp integer upscale; CSS (embed.css) sizes the displayed element.
+const resizeCanvas = () => {
+  const [nw, nh] = nativeRes();
+  const bw = nw * GL_SCALE,
+    bh = nh * GL_SCALE;
+  if (canvasEl.width !== bw) canvasEl.width = bw;
+  if (canvasEl.height !== bh) canvasEl.height = bh;
+};
+
+const drawGame = () => {
+  if (!currentRomName) return;
+  glRenderer.draw({
+    colorCorrect: true,
+    panelGbc: isGbc(),
+    scanlines: false,
+    filter: "none",
+  });
+};
 
 // --- FS helper ---
 
@@ -37,6 +77,10 @@ const loadRom = (romName, originalName) => {
   updatePauseIcon();
   fastForwardButton.classList.remove("active");
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  // Now that the core is up, wasm_panel_gbc() reports the right system: size the
+  // backing store and present the first frame immediately.
+  resizeCanvas();
+  drawGame();
 };
 
 const handleRomFile = (file) => {
@@ -230,7 +274,8 @@ const resetOverlayTimer = () => {
 // --- Emscripten Module ---
 
 var Module = {
-  canvas: (() => document.getElementById("canvas"))(),
+  // SDL renders into this hidden canvas; the visible #canvas is ours (WebGL2).
+  canvas: (() => document.getElementById("sdl-canvas"))(),
   onRuntimeInitialized: () => {
     const SAMPLE_RATE = 32768;
     const TARGET_FPS = 59.7275;
@@ -371,6 +416,9 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
       }
+      // Present once per RAF (SDL no longer paints — see the WebGL2 section
+      // above). Paused returns early, so the last frame stays on the canvas.
+      drawGame();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
