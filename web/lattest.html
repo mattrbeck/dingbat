@@ -18,12 +18,27 @@ const post = (data) => fetch("http://localhost:8766/result", {
 app.addEventListener("load", async () => {
   const W = app.contentWindow;
   try {
+    // index.js declares its globals with let/const, which live in the page's
+    // global lexical environment but are NOT window properties — invisible
+    // cross-window. Inject a bridge script into the iframe's realm (same
+    // lexical scope) to expose what the harness needs.
+    const bridge = W.document.createElement("script");
+    // Skip handleRomFile's File/FileReader step: Safari won't read a File
+    // constructed in another realm, so write the bytes into the wasm FS and
+    // load directly (same steps handleRomFile performs after the read).
+    bridge.textContent = `window.__loadRomBytes = async (bytes) => {
+      writeToFS("rom.gba", bytes);
+      await addRecentRom("m7_demo.gba", bytes);
+      await loadRom("rom.gba", "m7_demo.gba");
+    };`;
+    W.document.head.appendChild(bridge);
     // Wait for the app's Module to be ready
-    for (let i = 0; i < 100 && !(W.Module && W.Module._wasm_game_fb_ptr && W.handleRomFile); i++)
+    for (let i = 0; i < 100 && !(W.Module && W.Module._wasm_game_fb_ptr && W.__loadRomBytes); i++)
       await new Promise(r => setTimeout(r, 100));
+    if (!W.__loadRomBytes) throw new Error("bridge init failed");
     const resp = await fetch("/m7_demo.gba");
     const buf = await resp.arrayBuffer();
-    W.handleRomFile(new W.File([buf], "m7_demo.gba"));
+    await W.__loadRomBytes(new W.Uint8Array(buf.slice(0)));
     await new Promise(r => setTimeout(r, 3000));
 
     const fbHash = () => {
