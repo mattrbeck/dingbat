@@ -2823,25 +2823,12 @@ body.large-controls .pad-pill {
  * games visible without scrolling). Keyed off (pointer: coarse) like the
  * touch controls — a narrow *desktop* window keeps the drop target because
  * drag-and-drop still works with a mouse, and desktop layout stays untouched.
- * Flex `order` restructures the shared markup: brand first, then (when a game
- * is paused) the frozen-frame card directly above a Resume | Load row.
+ * The DOM order (brand, paused card, Resume | Load row, recent) already gives
+ * the paused stacking, so only the hidden drop target needs handling here.
  */
 @media (pointer: coarse) {
   #dropzone {
     display: none;
-  }
-
-  #home-brand {
-    order: 1;
-  }
-  #home-paused {
-    order: 2;
-  }
-  #home-actions {
-    order: 3;
-  }
-  #home-recent-wrap {
-    order: 4;
   }
 
   /* Resume (left) | Load a game (right) side by side while paused; with no
