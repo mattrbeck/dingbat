@@ -2201,54 +2201,18 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* Delete save data section (Manage Saves modal) */
-.saves-delete-intro {
-  color: var(--text-faint);
-}
-
-.saves-delete-empty {
-  margin: 0;
-}
-
-.saves-delete-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.saves-delete-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.saves-delete-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-}
-
-.saves-delete-btn {
+/* "Reset save file" — a two-step confirm button that arms red before it wipes
+   the current game's save (matches the settings-reset button's confirm look). */
+.saves-reset-btn {
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.saves-delete-btn.armed {
+.saves-reset-btn.armed {
   color: var(--accent-ink);
   background: linear-gradient(180deg, var(--danger-hi), var(--danger));
   border-color: rgba(var(--danger-rgb), 0.6);
   font-weight: 600;
-}
-
-.saves-delete-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Manage ROMs and Saves modal — one row per stored game, two actions each */
@@ -3530,12 +3494,8 @@ body.net-mode #saves-modal .modal-toggle-row:has(#export-state),
 body.net-mode #saves-modal .modal-toggle-row:has(#import-state),
 body.net-mode #saves-modal .modal-toggle-row:has(#load-save),
 body.net-mode #saves-modal .modal-subhead.no-rule,
-/* Hide the whole "Delete save data" section online: wiping the live game's
-   save mid-session would desync the pair. */
-body.net-mode #saves-modal .modal-subhead:has(+ .saves-delete-intro),
-body.net-mode #saves-modal .saves-delete-intro,
-body.net-mode #saves-modal .saves-delete-empty,
-body.net-mode #saves-modal .saves-delete-list {
+/* Resetting the live game's save mid-session would desync the pair. */
+body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   display: none !important;
 }
 

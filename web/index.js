@@ -693,7 +693,6 @@ const savesModal = document.getElementById("saves-modal");
 const openSavesModal = () => {
   menuDropdown.hidden = true;
   savesModal.classList.add("open");
-  refreshSavesDeleteList();
   trapFocus(savesModal);
 };
 
@@ -709,15 +708,12 @@ savesModal.addEventListener("click", (e) => {
   if (e.target === savesModal) closeSavesModal();
 });
 
-// --- Delete save data (per-ROM) ---
-// Every game with stored save data gets a row here. "Save data" for a ROM
-// is spread across the "blobs" store under keys derived from its original
-// file name: "save:<name>" (battery), "state:<name>" (the single save-state
-// slot), and "save:<name>-p2" (the 2P-link partner's battery). Deleting a
-// game wipes all three so it truly boots as a fresh cartridge.
-
-const savesDeleteList = document.getElementById("saves-delete-list");
-const savesDeleteEmpty = document.getElementById("saves-delete-empty");
+// --- Delete save data (per-ROM), shared by the home "Manage ROMs and Saves"
+// list and the in-game "Reset save file" action ---
+// "Save data" for a ROM is spread across the "blobs" store under keys derived
+// from its original file name: "save:<name>" (battery), "state:<name>" (the
+// single save-state slot), and "save:<name>-p2" (the 2P-link partner's
+// battery). Deleting a game wipes all three so it truly boots fresh.
 
 // Two-step inline confirm button (the app has no shared confirm dialog): the
 // first tap arms the button (swaps to "Confirm?" and turns red), a second tap
@@ -801,57 +797,16 @@ const deleteSaveData = async (name) => {
   await dbDelete(stateKey(name));
 };
 
-const refreshSavesDeleteList = async () => {
-  if (!db) return;
-  let names = await romsWithSaveData();
-  savesDeleteList.innerHTML = "";
-  savesDeleteEmpty.hidden = names.length > 0;
-  for (let name of names) {
-    let row = document.createElement("div");
-    row.className = "saves-delete-row";
-
-    let label = document.createElement("span");
-    label.className = "saves-delete-name";
-    label.textContent = name;
-    label.title = name;
-    row.appendChild(label);
-
-    let running = linkMode && linkRomEntry && linkRomEntry.name === name;
-
-    let btn;
-    if (running) {
-      // A live 2P link ties up two cores writing this ROM's saves; make the
-      // user exit link mode rather than delete underneath it.
-      btn = makeDisabledButton(
-        "In use",
-        "button button-sm saves-delete-btn",
-        "Exit link mode to delete this game's save",
-      );
-    } else {
-      btn = makeConfirmButton({
-        label: "Delete",
-        className: "button button-sm saves-delete-btn",
-        onConfirm: async () => {
-          await deleteSaveData(name);
-          if (isRomLoaded(name)) {
-            // The loaded game keeps its save in the core's memory and re-flushes
-            // it to the FS .sav (then IndexedDB) every few seconds, which would
-            // silently undo this delete. Wipe the FS copy and reboot the core
-            // with an empty save so the game genuinely starts fresh.
-            resetLoadedGameSave();
-            closeSavesModal();
-            showToast("Save deleted — starting fresh");
-          } else {
-            showToast("Save data deleted");
-            refreshSavesDeleteList();
-          }
-        },
-      });
-    }
-
-    row.appendChild(btn);
-    savesDeleteList.appendChild(row);
-  }
+// Wipe the running game's battery save and reboot it as a fresh cartridge. The
+// save-state slot is left untouched — it's managed separately by the modal's
+// Export/Import state actions.
+const resetCurrentSaveFile = async () => {
+  if (!currentOriginalName) return;
+  await dbDelete("save:" + currentOriginalName);
+  await dbDelete("save:" + currentOriginalName + "-p2");
+  // resetLoadedGameSave drops the in-memory FS .sav and reboots the core, so the
+  // 5s autosave interval can't re-flush the just-deleted save over the top.
+  resetLoadedGameSave();
 };
 
 // Reboot the currently-loaded single-player game with no battery save. Called
@@ -869,6 +824,28 @@ const resetLoadedGameSave = () => {
   currentOriginalName = null;
   loadRom(romName, originalName);
 };
+
+// "Reset save file" action in the in-game Manage Saves modal. A persistent
+// two-step confirm button (like Reset all settings): armed on first click,
+// wipes + reboots on the second.
+const resetSaveSlot = document.getElementById("reset-save-slot");
+if (resetSaveSlot) {
+  const resetSaveBtn = makeConfirmButton({
+    label: "Reset",
+    confirmLabel: "Confirm reset?",
+    className: "button button-sm saves-reset-btn",
+    onConfirm: async () => {
+      await resetCurrentSaveFile();
+      // Reboots the game rather than re-rendering the button; re-enable and
+      // disarm it so it works again next time the modal is opened.
+      resetSaveBtn.disabled = false;
+      resetSaveBtn.disarm();
+      closeSavesModal();
+      showToast("Save reset — starting fresh");
+    },
+  });
+  resetSaveSlot.appendChild(resetSaveBtn);
+}
 
 // --- Manage ROMs and Saves modal (home-screen game library) ---
 // One row per stored game: the recents entries first (most-recently-played
@@ -972,7 +949,6 @@ const refreshRomsManageList = async () => {
           } else {
             showToast("Save data deleted");
             refreshRomsManageList();
-            refreshSavesDeleteList();
             updateStorageInfo();
           }
         },
@@ -1008,7 +984,6 @@ const refreshRomsManageList = async () => {
           if (inRecent) await deleteRecent(name); // also refreshes home grid
           showToast("Removed from this browser");
           refreshRomsManageList();
-          refreshSavesDeleteList();
           refreshHomeRecent();
           updateStorageInfo();
         },
@@ -1341,7 +1316,6 @@ const gdriveRestoreGame = async (group, btn) => {
     btn.textContent = "Restored";
     showToast(`Restored ${group.game} from Drive`);
     refreshRomsManageList();
-    refreshSavesDeleteList();
     updateStorageInfo();
   } catch (e) {
     setGdriveProgress("");

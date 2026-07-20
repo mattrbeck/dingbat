@@ -325,10 +325,13 @@
           </div>
           <button type="button" class="button button-sm" id="load-save">Import</button>
         </div>
-        <div class="modal-subhead">Delete save data</div>
-        <p class="modal-hint saves-delete-intro">Wipe a game's stored save (and its save state) to start over from a clean cartridge.</p>
-        <p id="saves-delete-empty" class="modal-toggle-sub saves-delete-empty" hidden>No games have stored save data yet.</p>
-        <div id="saves-delete-list" class="saves-delete-list"></div>
+        <div class="modal-toggle-row">
+          <div>
+            <span class="modal-row-label">Reset save file</span>
+            <span class="modal-toggle-sub">Wipe this game's save and reload it as a fresh cartridge</span>
+          </div>
+          <span id="reset-save-slot"></span>
+        </div>
       </div>
     </div>
 
