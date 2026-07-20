@@ -49,7 +49,6 @@
   --accent-2: #ffc880;
   --accent-hi: #ffd699;         /* button-primary hover gradient top */
   --accent-ink: #2a1800;        /* ink on accent fills */
-  --accent-deep-ink: #141008;   /* darker ink (net-detect badge) */
   --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   /* ---- Status ---- */
@@ -215,7 +214,6 @@
   --accent-2: #b76a0a;
   --accent-hi: #d88a1f;
   --accent-ink: #ffffff;
-  --accent-deep-ink: #fff7ea;
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
   --live: #22a55b;
@@ -281,7 +279,6 @@
   --accent-2: #b0adf5;
   --accent-hi: #c6c4f9;
   --accent-ink: #100e33;
-  --accent-deep-ink: #0b0a24;
   --accent-glow: rgba(var(--accent-rgb), 0.35);
 
   --topbar-top: #201e3c;
@@ -323,7 +320,6 @@
   --accent-2: #ff9dd4;
   --accent-hi: #ffbde2;
   --accent-ink: #32001c;
-  --accent-deep-ink: #1d0011;
   --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   --topbar-top: #2e1a35;
@@ -365,7 +361,6 @@
   --accent-2: #8edff7;
   --accent-hi: #b6eafb;
   --accent-ink: #04222e;
-  --accent-deep-ink: #021820;
   --accent-glow: rgba(var(--accent-rgb), 0.3);
 
   --topbar-top: #1a2836;
@@ -407,7 +402,6 @@
   --accent-2: #7cecac;
   --accent-hi: #a9f4c8;
   --accent-ink: #03230f;
-  --accent-deep-ink: #021808;
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
   --topbar-top: #182b20;
@@ -3265,60 +3259,7 @@ body.rollback-mode #save-sep {
  * ==========================================================
  */
 
-/* HOST / JOIN launch buttons on GBA library tiles */
-.home-tile-net {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.home-tile-join {
-  right: 58px;
-}
-
-.home-tile-host {
-  right: 100px;
-}
-
-.home-tile:hover .home-tile-net {
-  opacity: 1;
-}
-
-.home-tile-net:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* Room-code modal */
-#net-code {
-  font-family: var(--font-mono);
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-align: center;
-  color: var(--accent);
-  padding: 14px 0 6px;
-  min-height: 58px;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
 .net-join-row {
   display: flex;
   gap: 8px;
@@ -3484,62 +3425,6 @@ body.net-mode #saves-modal .modal-subhead.no-rule,
 /* Resetting the live game's save mid-session would desync the pair. */
 body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   display: none !important;
-}
-
-/* In-game "link cable detected" badge: a tap target, unlike the passive
-   waiting-for-peer chip. Sits top-center over the stage. */
-#net-detect {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 14px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--accent-deep-ink);
-  background: var(--accent);
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3);
-  animation: net-detect-pulse 1.6s ease-in-out infinite;
-}
-
-#net-detect[hidden] {
-  display: none;
-}
-
-#net-detect:hover {
-  filter: brightness(1.08);
-}
-
-@keyframes net-detect-pulse {
-  0%, 100% { box-shadow: 0 4px 18px -4px var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
-  50% { box-shadow: 0 4px 26px 0 var(--accent-glow), 0 0 0 1px rgba(0, 0, 0, 0.3); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #net-detect { animation: none; }
-}
-
-/* Host/Join chooser in the room-code modal (opened from the badge) */
-.net-choose-row {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.net-choose-row .button {
-  width: 100%;
-  padding: 12px;
-  font-size: 14px;
 }
 
 /*
