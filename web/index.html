@@ -200,6 +200,15 @@
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
         <div id="home-inner">
+          <!-- Brand sits first in the DOM so the logo/wordmark is above the
+               frozen-frame card and Resume button on desktop, mirroring the
+               mobile paused layout. Touch layout reorders via flex `order`
+               (see the pointer:coarse home block in styles.css). -->
+          <div id="home-brand">
+            <img src="favicon.svg" alt="" id="home-logo" />
+            <h1>dingbat</h1>
+            <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
+          </div>
           <!-- Paused-game card: frozen frame of the game Resume returns to.
                JS fills the canvas from the wasm framebuffer on Main Menu. -->
           <div id="home-paused" hidden>
@@ -223,11 +232,6 @@
             <!-- Mobile-only replacement for the big drop target below (no
                  drag-and-drop on touch); hidden on desktop. -->
             <button type="button" id="home-load" class="button button-primary">Load a game</button>
-          </div>
-          <div id="home-brand">
-            <img src="favicon.svg" alt="" id="home-logo" />
-            <h1>dingbat</h1>
-            <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
           </div>
 
           <button type="button" id="dropzone">
