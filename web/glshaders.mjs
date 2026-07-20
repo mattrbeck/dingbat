@@ -1,8 +1,10 @@
-// Shared test helper: pulls the REAL WebGL2 present shaders out of web/index.js
-// so both the pure-JS UV unit test (uv.test.mjs) and the headless-Chromium GL
-// readback test (render.test.mjs) exercise the exact GLSL that ships — not a
-// reimplementation. A future edit to glRenderer's VERT/FRAG in index.js is
-// therefore what is under test: change the shader and these tests move with it.
+// Shared test helper: pulls the REAL WebGL2 present shaders out of
+// web/glpresent.js so both the pure-JS UV unit test (uv.test.mjs) and the
+// headless-Chromium GL readback test (render.test.mjs) exercise the exact GLSL
+// that ships — not a reimplementation. A future edit to createGlRenderer's
+// VERT/FRAG in glpresent.js is therefore what is under test: change the shader
+// and these tests move with it. (The shaders lived in index.js until they were
+// factored into glpresent.js, shared by the main page and the embed.)
 //
 // Motivation: a vertex-shader UV bug (`v_uv = p*0.5`, the fullscreen-triangle
 // UVs halved) made every ROM render as only the bottom-left quadrant zoomed 2x
@@ -10,11 +12,11 @@
 // frame. Fixed in bb7561b (`v_uv = vec2(p.x, 1.0 - p.y)`). These helpers make
 // that whole class (quadrant / Y-flip / scale / wrong upload dims) catchable.
 //
-// Zero runtime dependencies; reads index.js as text at import time.
+// Zero runtime dependencies; reads glpresent.js as text at import time.
 
 import { readFileSync } from "node:fs";
 
-const INDEX_JS = new URL("./index.js", import.meta.url);
+const PRESENT_JS = new URL("./glpresent.js", import.meta.url);
 
 // Extract the first backtick-delimited template literal assigned to `name`.
 // The shader literals contain no nested backticks, so a non-greedy match to the
@@ -22,12 +24,12 @@ const INDEX_JS = new URL("./index.js", import.meta.url);
 function extractLiteral(src, name) {
   const re = new RegExp("const\\s+" + name + "\\s*=\\s*`([\\s\\S]*?)`");
   const m = src.match(re);
-  if (!m) throw new Error(`could not find shader literal '${name}' in index.js`);
+  if (!m) throw new Error(`could not find shader literal '${name}' in glpresent.js`);
   return m[1];
 }
 
 export function readShaders() {
-  const src = readFileSync(INDEX_JS, "utf8");
+  const src = readFileSync(PRESENT_JS, "utf8");
   return { VERT: extractLiteral(src, "VERT"), FRAG: extractLiteral(src, "FRAG"), src };
 }
 

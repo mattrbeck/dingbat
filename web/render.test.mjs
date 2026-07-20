@@ -180,10 +180,16 @@ async function run() {
     assert(isBlue(base.q_bl), `interior bottom-left quadrant BLUE  (${base.q_bl})`);
     assert(isWhite(base.q_br), `interior bottom-right quadrant WHITE  (${base.q_br})`);
 
-    // Save the correct render for eyeballing.
-    const pngPath = join(tmpdir(), "dingbat-render-correct.png");
-    writeFileSync(pngPath, Buffer.from(base.png.split(",")[1], "base64"));
-    console.log(`  (wrote correct-render PNG -> ${pngPath})`);
+    // Save the correct render for eyeballing. Best-effort only: this is a
+    // human-diagnostic artifact, so a failed write (e.g. tmpdir ENOENT on a CI
+    // runner) must NOT fail a test whose assertions above all passed.
+    try {
+      const pngPath = join(tmpdir(), "dingbat-render-correct.png");
+      writeFileSync(pngPath, Buffer.from(base.png.split(",")[1], "base64"));
+      console.log(`  (wrote correct-render PNG -> ${pngPath})`);
+    } catch (e) {
+      console.log(`  (skipped correct-render PNG dump: ${e.message})`);
+    }
 
     // 2) Alternate paths must still produce a FULL-FRAME image: all four
     //    corners non-black and mutually distinct (not pixel-exact).

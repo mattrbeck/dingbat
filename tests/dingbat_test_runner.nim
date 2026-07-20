@@ -3,8 +3,14 @@ import zippy/ziparchives
 import png_reader
 
 let RomCacheDir =
-  when defined(windows): getTempDir() / "dingbat-test-roms"
-  else: "/tmp/dingbat-test-roms"
+  # CI sets DINGBAT_ROM_CACHE to a stable, actions/cache-backed path so the test
+  # ROMs survive between runs (no re-download, no per-run network dependency).
+  # Locally it falls back to a temp dir.
+  block:
+    let env = getEnv("DINGBAT_ROM_CACHE")
+    if env.len > 0: env
+    elif defined(windows): getTempDir() / "dingbat-test-roms"
+    else: "/tmp/dingbat-test-roms"
 
 type
   TestMode = enum
@@ -51,6 +57,23 @@ proc has_rom_files(dir: string): bool =
       return true
   false
 
+proc download_file(url, path: string) =
+  ## Fetch `url` to `path`, retrying transient network failures. CI runners
+  ## intermittently fail to reach github.com (curl exit 28, "Failed to connect
+  ## ... after 21015 ms"), which used to abort the whole suite and fail dozens of
+  ## unrelated ROM tests. --retry-all-errors makes curl itself ride those out
+  ## (connection errors included, not just HTTP 5xx); --fail avoids saving an
+  ## error page as a ROM. A genuine outage still fails hard, but only after the
+  ## retries are exhausted.
+  let cmd = "curl -L --fail --show-error --silent " &
+    "--retry 5 --retry-all-errors --retry-delay 3 " &
+    "--connect-timeout 30 --max-time 600 " &
+    &"-o {path.quoteShell} {url.quoteShell}"
+  let (output, code) = execCmdEx(cmd)
+  if code != 0:
+    echo &"Failed to download {url} (curl exit {code}): ", output
+    quit(1)
+
 proc ensure_gameboy_test_roms(): string =
   let dir = RomCacheDir / "game-boy-test-roms"
   if dirExists(dir) and has_rom_files(dir):
@@ -62,10 +85,7 @@ proc ensure_gameboy_test_roms(): string =
   createDir(RomCacheDir)
   let url = "https://github.com/c-sp/game-boy-test-roms/releases/download/v7.0/game-boy-test-roms-v7.0.zip"
   let zipfile = RomCacheDir / "gb-roms.zip"
-  let (dl_output, dl_code) = execCmdEx(&"curl -L -o {zipfile.quoteShell} {url}")
-  if dl_code != 0:
-    echo "Failed to download: ", dl_output
-    quit(1)
+  download_file(url, zipfile)
   try:
     # extractAll requires that dir not exist yet; it creates it
     extractAll(zipfile, dir)
@@ -128,10 +148,7 @@ proc ensure_rom_download(url, filename: string): string =
     return path
   echo &"Downloading {filename}..."
   createDir(RomCacheDir)
-  let (output, code) = execCmdEx(&"curl -L -o {path.quoteShell} {url}")
-  if code != 0:
-    echo "Failed to download: ", output
-    quit(1)
+  download_file(url, path)
   path
 
 proc ensure_png_download(url, filename: string): string =
@@ -140,10 +157,7 @@ proc ensure_png_download(url, filename: string): string =
   if fileExists(path):
     return path
   createDir(RomCacheDir)
-  let (output, code) = execCmdEx(&"curl -L -o {path.quoteShell} {url}")
-  if code != 0:
-    echo "Failed to download: ", output
-    quit(1)
+  download_file(url, path)
   path
 
 proc run_test(test: TestDef; harness_path: string): TestResult =
