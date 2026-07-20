@@ -59,6 +59,7 @@ class FakeElement {
   insertBefore(n) { this.children.unshift(n); return n; }
   remove() {}
   setAttribute(k, v) { this.attributes[k] = String(v); }
+  removeAttribute(k) { delete this.attributes[k]; }
   getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; }
   hasAttribute(k) { return k in this.attributes; }
   focus() {}

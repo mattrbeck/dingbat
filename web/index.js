@@ -1782,11 +1782,30 @@ document.addEventListener("keydown", (e) => {
 
 // --- Save state persistence ---
 
+// Cheap change detector so the 5s autosave doesn't structured-clone the save
+// and hit IndexedDB when nothing was written (the common case) — that write
+// occasionally landed on a frame and cost a visible stutter. FNV-1a over the
+// bytes (+ length) is a few hundred K ops on the largest saves, far cheaper
+// than the clone + IDB transaction it lets us skip.
+let lastSaveSig = null;
+let lastSaveSigKey = null;
+const saveSignature = (data) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < data.length; i++) { h ^= data[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h + ":" + data.length;
+};
+
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
   try {
     let data = FS.readFile(savName);
     if (data && data.length > 0) {
+      const sig = saveSignature(data);
+      // Unchanged since the last persist for this game: the copy is already in
+      // IndexedDB, so skip the write entirely.
+      if (lastSaveSigKey === originalName && sig === lastSaveSig) return;
+      lastSaveSig = sig;
+      lastSaveSigKey = originalName;
       await dbPut("save:" + originalName, new Uint8Array(data));
     }
   } catch {}
