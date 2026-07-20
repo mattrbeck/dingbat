@@ -163,6 +163,24 @@
   --net-stall-bg: rgba(10, 8, 4, 0.75);
 }
 
+/* OLED black: let the ambient glow bleed out of the stage and fade behind the
+   top bar and control strip. Their fills (and the stage's own) go transparent
+   so the true #000 body background is the sole backdrop and the halo reads as
+   one continuous wash. The glow drops to a negative layer so it sits behind the
+   chrome and the game screen, and the stage stops clipping it at its edges.
+   Scoped to this theme — the other themes keep their tinted chrome gradients. */
+:root[data-theme="black"] #stage {
+  overflow: visible;
+  background: transparent;
+}
+:root[data-theme="black"] #glow-canvas {
+  z-index: -1;
+}
+:root[data-theme="black"] #topbar,
+:root[data-theme="black"] #controls {
+  background: transparent;
+}
+
 /* ---- Light: dark-on-light equivalent of the amber chrome.
        Hairline "highlights" become dark borders; insets stay a soft
        white bevel (correct on light surfaces); accent deepens to a
