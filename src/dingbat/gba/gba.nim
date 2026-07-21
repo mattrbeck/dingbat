@@ -490,6 +490,7 @@ type
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine
+    cheat_hooks: MemHooks        # built once, reused each frame (see apply_cheats)
     when defined(test_harness):
       test_output*: TestOutput
 
@@ -727,15 +728,17 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
 proc apply_cheats*(gba: GBA) =
   ## Push every enabled RAM-write cheat into memory. Run once per frame.
   if gba.cheats == nil or gba.cheats.cheats.len == 0: return
-  let bus = gba.bus
-  gba.cheats.apply_ram(MemHooks(
-    read8:   proc(a: uint32): uint8  = bus.read_byte_internal(a),
-    read16:  proc(a: uint32): uint16 = bus.read_half_internal(a),
-    read32:  proc(a: uint32): uint32 = bus.read_word_internal(a),
-    write8:  proc(a: uint32; v: uint8)  = bus.write_byte_internal(a, v),
-    write16: proc(a: uint32; v: uint16) = bus.write_half_internal(a, v),
-    write32: proc(a: uint32; v: uint32) = bus.write_word_internal(a, v),
-  ))
+  if gba.cheat_hooks.read8 == nil:   # build the capturing closures once
+    let bus = gba.bus
+    gba.cheat_hooks = MemHooks(
+      read8:   proc(a: uint32): uint8  = bus.read_byte_internal(a),
+      read16:  proc(a: uint32): uint16 = bus.read_half_internal(a),
+      read32:  proc(a: uint32): uint32 = bus.read_word_internal(a),
+      write8:  proc(a: uint32; v: uint8)  = bus.write_byte_internal(a, v),
+      write16: proc(a: uint32; v: uint16) = bus.write_half_internal(a, v),
+      write32: proc(a: uint32; v: uint32) = bus.write_word_internal(a, v),
+    )
+  gba.cheats.apply_ram(gba.cheat_hooks)
 
 proc refresh_cheat_rom_patches*(gba: GBA) =
   ## Apply (or re-apply) Game Genie / GSA_PATCH ROM edits. Call at load and

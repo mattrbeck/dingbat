@@ -358,6 +358,7 @@ type
     memory*:         GbMemory
     apu*:            GbApu
     cheats*:         CheatEngine
+    cheat_hooks:     MemHooks       # built once, reused each frame
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -756,27 +757,29 @@ proc post_init*(gb: GB) =
 proc apply_cheats*(gb: GB) =
   ## Push every enabled RAM-write cheat into memory. Run once per frame.
   if gb.cheats == nil or gb.cheats.cheats.len == 0: return
-  let mem = gb.memory
-  gb.cheats.apply_ram(MemHooks(
-    read8: proc(a: uint32): uint8 =
-      read_byte(mem, gb, int(a and 0xFFFF)),
-    read16: proc(a: uint32): uint16 =
-      uint16(read_byte(mem, gb, int(a and 0xFFFF))) or
-      (uint16(read_byte(mem, gb, int((a + 1) and 0xFFFF))) shl 8),
-    read32: proc(a: uint32): uint32 =
-      var v = 0'u32
-      for i in 0u32 ..< 4u32:
-        v = v or (uint32(read_byte(mem, gb, int((a + i) and 0xFFFF))) shl (i * 8))
-      v,
-    write8: proc(a: uint32; v: uint8) =
-      write_byte(mem, gb, int(a and 0xFFFF), v),
-    write16: proc(a: uint32; v: uint16) =
-      write_byte(mem, gb, int(a and 0xFFFF), uint8(v))
-      write_byte(mem, gb, int((a + 1) and 0xFFFF), uint8(v shr 8)),
-    write32: proc(a: uint32; v: uint32) =
-      for i in 0u32 ..< 4u32:
-        write_byte(mem, gb, int((a + i) and 0xFFFF), uint8(v shr (i * 8))),
-  ))
+  if gb.cheat_hooks.read8 == nil:    # build the capturing closures once
+    let mem = gb.memory
+    gb.cheat_hooks = MemHooks(
+      read8: proc(a: uint32): uint8 =
+        read_byte(mem, gb, int(a and 0xFFFF)),
+      read16: proc(a: uint32): uint16 =
+        uint16(read_byte(mem, gb, int(a and 0xFFFF))) or
+        (uint16(read_byte(mem, gb, int((a + 1) and 0xFFFF))) shl 8),
+      read32: proc(a: uint32): uint32 =
+        var v = 0'u32
+        for i in 0u32 ..< 4u32:
+          v = v or (uint32(read_byte(mem, gb, int((a + i) and 0xFFFF))) shl (i * 8))
+        v,
+      write8: proc(a: uint32; v: uint8) =
+        write_byte(mem, gb, int(a and 0xFFFF), v),
+      write16: proc(a: uint32; v: uint16) =
+        write_byte(mem, gb, int(a and 0xFFFF), uint8(v))
+        write_byte(mem, gb, int((a + 1) and 0xFFFF), uint8(v shr 8)),
+      write32: proc(a: uint32; v: uint32) =
+        for i in 0u32 ..< 4u32:
+          write_byte(mem, gb, int((a + i) and 0xFFFF), uint8(v shr (i * 8))),
+    )
+  gb.cheats.apply_ram(gb.cheat_hooks)
 
 proc refresh_cheat_rom_patches*(gb: GB) =
   ## Apply (or re-apply) Game Genie ROM edits. Call at load and whenever the
