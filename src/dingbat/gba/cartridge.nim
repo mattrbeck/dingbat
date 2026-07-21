@@ -2,21 +2,25 @@
 
 proc new_cartridge*(rom_path: string): Cartridge =
   result = Cartridge()
-  # Allocate 32 MB of ROM space and fill with the open-bus pattern.
-  result.rom = newSeq[byte](0x02000000)
-  for a in 0 ..< result.rom.len:
-    let oob = 0xFFFF'u32 and (uint32(a) shr 1)
-    result.rom[a] = uint8(oob shr (8 * (a and 1)))
-  # Read actual ROM data.
+  let sz = int(getFileSize(rom_path))
+  # Allocate only the next power of two >= the ROM size (was a flat 32 MB): a
+  # 16 MB game now uses 16 MB, an 8 MB game 8 MB, etc. A power-of-two size lets
+  # the instruction-fetch fast path mask the address (rom_mask) with no bounds
+  # check, and reads past the ROM (which are rare) fall back to the open-bus
+  # address pattern in bus.nim. The [sz, alloc) gap stays zero (newSeq default),
+  # matching the previous non-power-of-two zero-pad behavior.
+  var alloc = 0x8000  # a small floor; every real cart is far larger
+  while alloc < sz: alloc = alloc shl 1
+  result.rom = newSeq[byte](alloc)
+  result.rom_mask = uint32(alloc - 1)
   let f = open(rom_path, fmRead)
-  discard f.readBytes(result.rom, 0, result.rom.len)
+  discard f.readBytes(result.rom, 0, sz)
   f.close()
-  let sz = getFileSize(rom_path)
-  if count_set_bits(sz) != 1:
-    let last_bit = last_set_bit(sz)
-    let next_pow = 1 shl (last_bit + 1)
-    for i in sz ..< next_pow:
-      result.rom[i] = 0
+
+proc rom_open_bus*(address: uint32): uint8 {.inline.} =
+  ## Value returned when reading past the end of the ROM: the incrementing
+  ## address on the cartridge bus, `(addr >> 1) & 0xFFFF`, split into bytes.
+  uint8((0xFFFF'u32 and (address shr 1)) shr (8 * (address and 1)))
 
 proc title*(cart: Cartridge): string =
   result = newString(12)

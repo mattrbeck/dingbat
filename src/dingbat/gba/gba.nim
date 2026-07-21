@@ -205,6 +205,11 @@ type
     fetch_c16*:  int
     fetch_c32*:  int
     fetch_ptr*:  ptr UncheckedArray[byte]
+    # Cached ROM base pointer + length for the data-read path, so a ROM read
+    # avoids chasing gba.cartridge.rom and can bounds-check cheaply (reads past
+    # the ROM fall back to the open-bus pattern). Set when the cartridge loads.
+    rom_ptr*:    ptr UncheckedArray[byte]
+    rom_len*:    uint32
     # WAITCNT-derived cycle costs per page (nonseq/seq × 16/32-bit); pages
     # 0-7 are constant, 8-D come from the ROM waitstate fields, E-F from the
     # SRAM field. Recomputed on WAITCNT writes.
@@ -468,7 +473,8 @@ type
     output_freq*:       int
 
   Cartridge* = ref object
-    rom*: seq[byte]
+    rom*: seq[byte]        ## sized to the next power of two >= the ROM file
+    rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
 
   GBA* = ref object of EmuObj
     bios_path*:  string

@@ -155,6 +155,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.bios       = newSeq[byte](0x4000)
   result.wram_board = newSeq[byte](0x40000)
   result.wram_chip  = newSeq[byte](0x08000)
+  # Cache the ROM base + length (the cartridge is loaded before the bus). The
+  # buffer never moves and is a fixed size, so a raw pointer stays valid.
+  result.rom_ptr = cast[ptr UncheckedArray[byte]](addr gba.cartridge.rom[0])
+  result.rom_len = uint32(gba.cartridge.rom.len)
   if bios_path != "" and fileExists(bios_path):
     let f = open(bios_path, fmRead)
     discard f.readBytes(result.bios, 0, result.bios.len)
@@ -207,6 +211,27 @@ proc write_u16_ptr(buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
 proc write_u32_ptr(buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
   cast[ptr uint32](addr buf[offset])[] = val
 
+# ---- ROM reads (bounds-checked; past the ROM returns the open-bus pattern) ----
+# The ROM buffer is sized to the next power of two >= the cart, not a flat 32 MB.
+# In-bounds reads (all instruction fetches and virtually all data reads) take the
+# fast path; the branch predicts perfectly, so this is free in practice.
+
+proc rom_read8(bus: Bus; address: uint32): uint8 {.inline.} =
+  let idx = address and 0x01FFFFFF'u32
+  if idx < bus.rom_len: bus.rom_ptr[idx] else: rom_open_bus(idx)
+
+proc rom_read16(bus: Bus; address: uint32): uint16 {.inline.} =
+  let idx = address and 0x01FFFFFF'u32
+  if idx + 1 < bus.rom_len: read_u16_ptr_raw(bus.rom_ptr, idx)
+  else: uint16(rom_open_bus(idx)) or (uint16(rom_open_bus(idx + 1)) shl 8)
+
+proc rom_read32(bus: Bus; address: uint32): uint32 {.inline.} =
+  let idx = address and 0x01FFFFFF'u32
+  if idx + 3 < bus.rom_len: read_u32_ptr_raw(bus.rom_ptr, idx)
+  else:
+    uint32(rom_open_bus(idx)) or (uint32(rom_open_bus(idx + 1)) shl 8) or
+    (uint32(rom_open_bus(idx + 2)) shl 16) or (uint32(rom_open_bus(idx + 3)) shl 24)
+
 # ---- internal read implementations ----
 
 proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
@@ -247,7 +272,7 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address]
     else:
-      bus.gba.cartridge.rom[address and 0x01FFFFFF'u32]
+      bus.rom_read8(address)
   of 0xE, 0xF: bus.gba.storage[address]
   else: raise newException(Exception, "Unmapped bus read: " & hex_str(address))
 
@@ -287,7 +312,7 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
     elif bus.gba.storage.eeprom_at(address):
       uint16(bus.gba.storage[address])
     else:
-      read_u16_ptr(bus.gba.cartridge.rom, address and 0x01FFFFFF'u32)
+      bus.rom_read16(address)
   of 0xE, 0xF: bus.gba.storage.read_half(orig)
   else: raise newException(Exception, "Unmapped bus read_half: " & hex_str(address))
 
@@ -337,7 +362,7 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
     elif bus.gba.storage.eeprom_at(address):
       uint32(bus.gba.storage[address])
     else:
-      read_u32_ptr(bus.gba.cartridge.rom, address and 0x01FFFFFF'u32)
+      bus.rom_read32(address)
   of 0xE, 0xF: bus.gba.storage.read_word(orig)
   else: raise newException(Exception, "Unmapped bus read_word: " & hex_str(address))
 
@@ -467,7 +492,7 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
     bus.fetch_mask = 0x7FFF'u32
   of 0x8, 0x9, 0xA, 0xB, 0xC:
     bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.gba.cartridge.rom[0])
-    bus.fetch_mask = 0x01FFFFFF'u32
+    bus.fetch_mask = bus.gba.cartridge.rom_mask
   else:
     return false
   bus.fetch_page = page

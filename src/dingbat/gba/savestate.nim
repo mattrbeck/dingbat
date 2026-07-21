@@ -582,9 +582,15 @@ proc gba_apply_state(gba: GBA; payload: string) =
   gba.interrupts.check_interrupts()
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
 
+# Canonical value stored in the state-file header's "ROM size" slot. The ROM
+# buffer is now sized to the cart's next power of two (not a flat 32 MB), but
+# this field is only a validation tag; keeping the old 32 MB constant keeps
+# state files backward/forward compatible across the resize. ROM identity comes
+# from gba_rom_checksum, not this field.
+const GBA_STATE_ROM_TAG = 0x02000000'u32
+
 proc gba_rom_checksum(gba: GBA): uint32 =
-  # The ROM buffer is padded to the full 32 MB mirror with a deterministic
-  # pattern, so hashing the first 1 MB identifies the ROM cheaply
+  # Hash the first 1 MB to identify the ROM cheaply (every real cart is larger).
   let n = min(gba.cartridge.rom.len, 0x100000)
   fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1))
 
@@ -602,14 +608,14 @@ proc state_bytes*(gba: GBA): string =
   ## Full validated state image (header + payload) for in-memory transports
   ## (web IndexedDB / downloads). Same format as .state files.
   make_state_bytes(ckGBA, gba.gba_rom_checksum(),
-                   uint32(gba.cartridge.rom.len), gba.gba_state_payload())
+                   GBA_STATE_ROM_TAG, gba.gba_state_payload())
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
   var payload: string
   try:
     payload = parse_state_payload(data, ckGBA, gba.gba_rom_checksum(),
-                                  uint32(gba.cartridge.rom.len))
+                                  GBA_STATE_ROM_TAG)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
@@ -628,7 +634,7 @@ proc save_state*(gba: GBA; path: string): bool =
   ## echoes a message on failure.
   try:
     write_state_file(path, ckGBA, gba.gba_rom_checksum(),
-                     uint32(gba.cartridge.rom.len), gba.gba_state_payload())
+                     GBA_STATE_ROM_TAG, gba.gba_state_payload())
     true
   except CatchableError:
     echo "Save state failed: ", getCurrentExceptionMsg()
@@ -641,7 +647,7 @@ proc load_state*(gba: GBA; path: string): bool =
   var payload: string
   try:
     payload = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),
-                                 uint32(gba.cartridge.rom.len))
+                                 GBA_STATE_ROM_TAG)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
