@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-18 19:19:17*
+*Generated: 2026-07-21 12:14:45*
 
 ## Game Boy - Blargg
 
@@ -70,16 +70,16 @@
 | acceptance/pop_timing | 👌 |
 | acceptance/ppu/hblank_ly_scx_timing-GS | 👀 |
 | acceptance/ppu/intr_1_2_timing-GS | 👌 |
-| acceptance/ppu/intr_2_0_timing | 👀 |
-| acceptance/ppu/intr_2_mode0_timing | 👀 |
+| acceptance/ppu/intr_2_0_timing | 👌 |
+| acceptance/ppu/intr_2_mode0_timing | 👌 |
 | acceptance/ppu/intr_2_mode0_timing_sprites | 👀 |
-| acceptance/ppu/intr_2_mode3_timing | 👀 |
-| acceptance/ppu/intr_2_oam_ok_timing | 👀 |
+| acceptance/ppu/intr_2_mode3_timing | 👌 |
+| acceptance/ppu/intr_2_oam_ok_timing | 👌 |
 | acceptance/ppu/lcdon_timing-GS | 👀 |
 | acceptance/ppu/lcdon_write_timing-GS | 👀 |
 | acceptance/ppu/stat_irq_blocking | 👌 |
-| acceptance/ppu/stat_lyc_onoff | 👀 |
-| acceptance/ppu/vblank_stat_intr-GS | 👀 |
+| acceptance/ppu/stat_lyc_onoff | 👌 |
+| acceptance/ppu/vblank_stat_intr-GS | 👌 |
 | acceptance/push_timing | 👌 |
 | acceptance/rapid_di_ei | 👌 |
 | acceptance/ret_cc_timing | 👌 |
@@ -173,26 +173,26 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 | Test | Result |
 |------|--------|
-| m2_win_en_toggle | 👀 21.6% correct (4980/23040 pixels match) |
-| m3_bgp_change | 👀 62.3% correct (14356/23040 pixels match) |
-| m3_bgp_change_sprites | 👀 59.4% correct (13684/23040 pixels match) |
-| m3_lcdc_bg_en_change | 👀 87.1% correct (20060/23040 pixels match) |
+| m2_win_en_toggle | 👌 |
+| m3_bgp_change | 👀 65.4% correct (15076/23040 pixels match) |
+| m3_bgp_change_sprites | 👀 61.9% correct (14252/23040 pixels match) |
+| m3_lcdc_bg_en_change | 👀 84.3% correct (19422/23040 pixels match) |
 | m3_lcdc_bg_map_change | 👀 89.6% correct (20654/23040 pixels match) |
 | m3_lcdc_obj_en_change | 👀 99.4% correct (22894/23040 pixels match) |
 | m3_lcdc_obj_en_change_variant | 👀 94.2% correct (21706/23040 pixels match) |
-| m3_lcdc_obj_size_change | 👀 99.3% correct (22870/23040 pixels match) |
-| m3_lcdc_obj_size_change_scx | 👀 99.1% correct (22830/23040 pixels match) |
-| m3_lcdc_tile_sel_change | 👀 86.1% correct (19834/23040 pixels match) |
-| m3_lcdc_tile_sel_win_change | 👀 83.0% correct (19134/23040 pixels match) |
+| m3_lcdc_obj_size_change | 👀 99.3% correct (22890/23040 pixels match) |
+| m3_lcdc_obj_size_change_scx | 👀 99.2% correct (22850/23040 pixels match) |
+| m3_lcdc_tile_sel_change | 👀 91.1% correct (20978/23040 pixels match) |
+| m3_lcdc_tile_sel_win_change | 👀 88.0% correct (20278/23040 pixels match) |
 | m3_lcdc_win_en_change_multiple | 👀 63.9% correct (14724/23040 pixels match) |
-| m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16962/23040 pixels match) |
+| m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16963/23040 pixels match) |
 | m3_lcdc_win_map_change | 👀 90.0% correct (20732/23040 pixels match) |
 | m3_obp0_change | 👀 98.1% correct (22608/23040 pixels match) |
 | m3_scx_high_5_bits | 👀 98.5% correct (22698/23040 pixels match) |
 | m3_scx_low_3_bits | 👀 97.7% correct (22500/23040 pixels match) |
-| m3_scy_change | 👀 43.9% correct (10109/23040 pixels match) |
-| m3_window_timing | 👀 87.5% correct (20164/23040 pixels match) |
-| m3_window_timing_wx_0 | 👀 88.1% correct (20294/23040 pixels match) |
+| m3_scy_change | 👀 50.2% correct (11574/23040 pixels match) |
+| m3_window_timing | 👀 88.6% correct (20421/23040 pixels match) |
+| m3_window_timing_wx_0 | 👀 89.3% correct (20579/23040 pixels match) |
 | m3_wx_4_change | 👀 99.0% correct (22811/23040 pixels match) |
 | m3_wx_4_change_sprites | 👀 100.0% correct (23030/23040 pixels match) |
 | m3_wx_5_change | 👀 97.2% correct (22402/23040 pixels match) |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 129
-- **Fail:** 40
+- **Pass:** 136
+- **Fail:** 33
