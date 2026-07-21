@@ -695,15 +695,22 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       prev = uint16((uint32(prev) + uint32(diff)) and 0xFFFF)
       cpu.gba.bus.write_half(dst, prev)
       dst += 2; written += 2
-  of 0x19:  # SoundBias(r0): 0 = bias level 0x000, any other value = 0x200
-    cpu.gba.apu.soundbias.bias_level = if cpu.r[0] == 0: 0x000'u16 else: 0x200'u16
+  of 0x19:  # SoundBias(r0): 0 sets SOUNDBIAS=0x000, else SOUNDBIAS=0x200.
+    # bias_level is the 9-bit field at register bits 1-9, so the 0x200 register
+    # value is bias_level 0x100 (not 0x200, which would truncate to 0).
+    cpu.gba.apu.soundbias.bias_level = if cpu.r[0] == 0: 0x000'u16 else: 0x100'u16
   of 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
     discard  # Sound driver / music player stubs (games use their own engine)
   of 0x1F:  # MidiKey2Freq
     let base_freq = cpu.gba.bus.read_word(cpu.r[0] + 4)
     let key = cast[int32](cpu.r[1])
     let pitch = cast[int32](cpu.r[2])
-    let exponent = (float64(key) - 60.0 + float64(pitch) / 256.0) / 12.0
+    # BIOS reference key is 180 (not middle-C 60): WaveData.freq stores the
+    # sample rate scaled up 10 octaves, and MidiKey2Freq divides it back down by
+    # (180 - key - pitch/256) semitones. Using 60 made every note 120 semitones
+    # (2^10 = 1024x) too high, so the M4A mixer strode through sample data ~1000x
+    # too fast -> aliased screeching (Metroid Fusion intro).
+    let exponent = (float64(key) - 180.0 + float64(pitch) / 256.0) / 12.0
     let freq = float64(base_freq) * pow(2.0, exponent)
     cpu.r[0] = uint32(freq)
   of 0x25:  # MultiBoot
