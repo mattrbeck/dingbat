@@ -53,7 +53,7 @@ type
     value*: uint64
 
   EEPROM* = ref object of StorageObj
-    gba_ref*:       GBA
+    gba_ref* {.cursor.}: GBA   # non-owning back-ref (the GBA owns storage)
     eeprom_size*:   Option[EepromSize]
     state*:         set[EepromStateFlag]
     buffer*:        EepromBuffer
@@ -63,23 +63,23 @@ type
     wrote_bits*:    int
 
   Interrupts* = ref object
-    gba*:    GBA
+    gba* {.cursor.}:    GBA
     reg_ie*: InterruptReg
     reg_if*: InterruptReg
     ime*:    bool
 
   Keypad* = ref object
-    gba*:      GBA
+    gba* {.cursor.}:      GBA
     keyinput*: KEYINPUT
     keycnt*:   KEYCNT
     prev_irq_condition*: bool  # for edge-triggering the keypad IRQ
 
   MMIO* = ref object
-    gba*:     GBA
+    gba* {.cursor.}:     GBA
     waitcnt*: WAITCNT
 
   Timer* = ref object
-    gba*:          GBA
+    gba* {.cursor.}:          GBA
     tmcnt*:        array[4, TMCNT]
     tmd*:          array[4, uint16]
     tm*:           array[4, uint16]
@@ -97,7 +97,7 @@ type
   SioDriver* = ref object of RootObj
 
   Serial* = ref object
-    gba*:        GBA
+    gba* {.cursor.}:        GBA
     driver*:     SioDriver # bound link-cable driver (never nil, not serialized)
     # Multi-mode receive latches (SIOMULTI0-3). Filled only by drivers on
     # transfer completion; CPU writes never land here, so with the null
@@ -123,7 +123,7 @@ type
     dmaIncrement = 0, dmaDecrement = 1, dmaFixed = 2, dmaIncrementReload = 3
 
   DMA* = ref object
-    gba*:       GBA
+    gba* {.cursor.}:       GBA
     dmasad*:    array[4, uint32]
     dmadad*:    array[4, uint32]
     src*:       array[4, uint32]
@@ -148,7 +148,7 @@ type
     value*: uint64
 
   RTC* = ref object
-    gba*:    GBA
+    gba* {.cursor.}:    GBA
     sck*:    bool
     sio*:    bool
     cs*:     bool
@@ -174,14 +174,14 @@ type
     irq_minute*:    int64
 
   GPIO* = ref object
-    gba*:         GBA
+    gba* {.cursor.}:         GBA
     data*:        uint8
     direction*:   uint8
     allow_reads*: bool
     rtc*:         RTC
 
   Bus* = ref object
-    gba*:        GBA
+    gba* {.cursor.}:        GBA
     # Cached to avoid a double pointer-chase on the per-fetch/per-MMIO hot
     # paths (bus_now, catch_up)
     sched*:      Scheduler
@@ -248,7 +248,7 @@ type
     write_bits*: uint16
 
   CPU* = ref object
-    gba*:         GBA
+    gba* {.cursor.}:         GBA
     r*:           array[16, uint32]
     cpsr*:        PSR
     spsr*:        PSR
@@ -315,7 +315,7 @@ type
     aff_param*: int16
 
   PPU* = ref object
-    gba*:          GBA
+    gba* {.cursor.}:          GBA
     framebuffer*:  seq[uint16]
     frame*:        bool
     layer_palettes*: array[4, array[240, uint8]]
@@ -371,7 +371,7 @@ type
     debug_layer_mask*: uint16
 
   SoundChannel* = ref object of RootObj
-    gba*:            GBA
+    gba* {.cursor.}:            GBA
     enabled*:        bool
     dac_enabled*:    bool
     length_counter*: int
@@ -423,14 +423,14 @@ type
     divisor_code*:  uint8
 
   DMAChannels* = ref object
-    gba*:       GBA
+    gba* {.cursor.}:       GBA
     fifos*:     array[2, array[32, int8]]
     positions*: array[2, int]
     sizes*:     array[2, int]
     latches*:   array[2, int16]
 
   APU* = ref object
-    gba*:               GBA
+    gba* {.cursor.}:               GBA
     soundcnt_l*:        SOUNDCNT_L
     soundcnt_h*:        SOUNDCNT_H
     sound_enabled*:     bool
@@ -638,6 +638,9 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
 proc handle_saves*(gba: GBA)
 
 proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
+  # Capture a non-owning ref: this closure is stored on the GBA's scheduler, so
+  # an owning capture would form a reference cycle back to the GBA.
+  let gba {.cursor.} = gba
   result = proc(kind: EventType) =
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
@@ -674,13 +677,16 @@ proc post_init*(gba: GBA) =
   gba.dma        = new_dma(gba)
   gba.serial     = new_serial(gba)
   gba.scheduler.dispatch = gba_dispatch(gba)
+  # Capture a non-owning ref so the pump closure (stored on the GBA's scheduler)
+  # doesn't form a reference cycle back to the GBA.
+  let g {.cursor.} = gba
   gba.scheduler.pump = proc() =
     # While a DMA burst is running, its own drain dispatched this event with
     # the clock rewound to the event's cycle; the request must instead be
     # granted at the burst's current transfer boundary, so leave it latched —
     # the burst loop runs run_pending itself after its drain completes.
-    if gba.dma.pending != 0 and not gba.bus.dma_active:
-      gba.dma.run_pending()
+    if g.dma.pending != 0 and not g.bus.dma_active:
+      g.dma.run_pending()
   gba.handle_saves()
   if not gba.run_bios:
     gba.cpu.skip_bios()

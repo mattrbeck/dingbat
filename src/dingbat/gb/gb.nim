@@ -33,7 +33,8 @@ type
     bmAgb        # Game Boy Advance / SP running a GB(C) cart
 
   Mbc* = ref object of RootObj
-    gb_ref*:       GB
+    gb_ref* {.cursor.}: GB   # back-ref to the owning GB; non-owning to avoid a
+                             # reference cycle (the GB owns the cartridge)
     rom*:          seq[uint8]
     ram*:          seq[uint8]
     sav_path*:     string
@@ -717,6 +718,9 @@ proc handle_saves*(gb: GB) =
   gb.cartridge.mbc_save()
 
 proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
+  # Non-owning capture: this closure is stored on the GB's scheduler, so an
+  # owning capture would form a reference cycle back to the GB.
+  let gb {.cursor.} = gb
   result = proc(kind: EventType) =
     case kind
     of etAPUFrameSeq:  tick_frame_sequencer(gb.apu, gb)
@@ -759,6 +763,7 @@ proc apply_cheats*(gb: GB) =
   if gb.cheats == nil or gb.cheats.cheats.len == 0: return
   if gb.cheat_hooks.read8 == nil:    # build the capturing closures once
     let mem = gb.memory
+    let gb {.cursor.} = gb   # non-owning: the closures live on gb.cheat_hooks
     gb.cheat_hooks = MemHooks(
       read8: proc(a: uint32): uint8 =
         read_byte(mem, gb, int(a and 0xFFFF)),
