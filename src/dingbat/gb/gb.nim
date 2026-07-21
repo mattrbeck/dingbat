@@ -194,6 +194,13 @@ type
     old_stat_flag*:      bool
     first_line*:         bool
     cycle_counter*:      int32
+    # STAT mode bits as observed by a CPU read. A read M-cycle samples the bus
+    # value at the START of the cycle, but the emulator ticks the PPU forward by
+    # the whole M-cycle before read_byte runs; this latch snapshots the mode at
+    # each tick entry so STAT reads see the pre-advance mode (mooneye
+    # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
+    # interrupt and must still observe the old mode).
+    read_mode*:          uint8
     # output
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool

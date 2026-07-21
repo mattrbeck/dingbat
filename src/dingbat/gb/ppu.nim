@@ -91,10 +91,19 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
+  # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
+  # bit freezes at its last value and no STAT interrupt fires (mooneye
+  # stat_lyc_onoff — LYC writes while off must not change the retained bit).
+  if not ppu.lcd_enabled:
+    return
   ppu.coincidence_flag = ppu.ly == ppu.lyc
   let stat_flag =
     (ppu.coincidence_flag   and ppu.coincidence_interrupt_enabled) or
     (ppu.mode_flag == 2     and ppu.oam_interrupt_enabled) or
+    # The OAM (mode 2) STAT interrupt also triggers at the start of vblank
+    # (line 144), simultaneously with the vblank interrupt on DMG (mooneye
+    # vblank_stat_intr).
+    (ppu.ly == 144 and ppu.mode_flag == 1 and ppu.oam_interrupt_enabled) or
     (ppu.mode_flag == 0     and ppu.hblank_interrupt_enabled) or
     (ppu.mode_flag == 1     and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
@@ -177,13 +186,26 @@ proc sprite_tile_bytes*(s: GbSprite; line: uint8; sprite_height: int): tuple[lo:
 proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   case idx
   of 0x8000..0x9FFF: ppu.vram[ppu.vram_bank][idx - 0x8000]
-  of 0xFE00..0xFE9F: ppu.sprite_table[idx - 0xFE00]
+  of 0xFE00..0xFE9F:
+    # OAM is inaccessible to the CPU during OAM scan (mode 2) and drawing
+    # (mode 3): reads return 0xFF. Uses the read-latched mode so the accessible
+    # window lines up one M-cycle late, matching STAT reads (mooneye
+    # intr_2_oam_ok_timing). first_line mode 2 reads back as mode 0, and OAM is
+    # accessible during it.
+    if lcd_enabled(ppu) and not (ppu.first_line and ppu.read_mode == 2) and
+       (ppu.read_mode == 2 or ppu.read_mode == 3):
+      0xFF'u8
+    else:
+      ppu.sprite_table[idx - 0xFE00]
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:
-    if ppu.first_line and ppu.mode_flag == 2:
-      ppu.lcd_status and 0b1111_1100'u8
+    # The mode bits (0-1) lag one read M-cycle behind the internal mode: use the
+    # snapshot taken at the start of this read's PPU tick (see GbPpu.read_mode).
+    let live = (ppu.lcd_status and 0b1111_1100'u8) or ppu.read_mode
+    if ppu.first_line and ppu.read_mode == 2:
+      live and 0b1111_1100'u8
     else:
-      ppu.lcd_status
+      live
   of 0xFF42: ppu.scy
   of 0xFF43: ppu.scx
   of 0xFF44: ppu.ly

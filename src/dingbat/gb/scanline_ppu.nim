@@ -144,6 +144,9 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                 cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
 
 method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
+  # Snapshot the mode as observed by a CPU read that samples during this M-cycle
+  # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
+  ppu.read_mode = ppu.mode_flag
   ppu.cycle_counter += int32(cycles)
   if lcd_enabled(ppu):
     if ppu.mode_flag == 2:       # OAM search

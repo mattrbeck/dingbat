@@ -274,18 +274,19 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
     inc ppu.lx
-    if ppu.lx == GB_WIDTH:
-      ppu.`mode_flag=`(0'u8, gb)
     if window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
        int(ppu.lx) + 7 >= int(ppu.wx) and not ppu.fetching_window and ppu.window_trigger:
       fifo_reset_bg(ppu, true)
 
 method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
+  # Snapshot the mode as observed by a CPU read that samples during this M-cycle
+  # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
+  ppu.read_mode = ppu.mode_flag
   if lcd_enabled(ppu):
     for _ in 0 ..< cycles:
       case ppu.mode_flag
       of 2:  # OAM search
-        if ppu.cycle_counter == 79:
+        if ppu.cycle_counter == 80:
           ppu.`mode_flag=`(3'u8, gb)
           if ppu.ly == ppu.wy: ppu.window_trigger = true
           fifo_reset_bg(ppu,
@@ -297,7 +298,13 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
       of 3:  # Drawing
-        if ppu.fetching_sprite:
+        # Mode 3 ends the dot AFTER the 160th pixel is shifted out (lx reaches
+        # GB_WIDTH), not on the same dot. Deferring the mode 0 transition by one
+        # dot makes mode 3 the hardware-correct 172 dots for SCX=0 (was 171)
+        # without changing any rendered pixel.
+        if ppu.lx >= GB_WIDTH:
+          ppu.`mode_flag=`(0'u8, gb)
+        elif ppu.fetching_sprite:
           tick_sprite_fetcher(ppu, gb)
         else:
           tick_bg_fetcher(ppu, gb)
