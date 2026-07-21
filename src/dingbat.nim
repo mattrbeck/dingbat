@@ -20,6 +20,8 @@ import dingbat/frontend/keybindings_widget
 import dingbat/frontend/controller_widget
 import dingbat/frontend/gba_debug
 import dingbat/frontend/gb_debug
+import dingbat/frontend/cheats_widget
+import dingbat/common/cheats
 
 const VERSION = "0.1.0"
 const GBA_W   = 240
@@ -324,6 +326,7 @@ type AppState = ref object
   ce:              ConfigEditor
   dbg:             GbaDebug
   gb_dbg:          GbDebug
+  cheats:          CheatsWidget
   scale:           int
   running:         bool
   paused:          bool
@@ -450,6 +453,10 @@ proc apply_pitch_correct_ff() =
   if app.gb_emu != nil:
     app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
 
+proc current_cheat_engine(): CheatEngine
+proc load_cheats()
+proc on_cheats_changed()
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
@@ -478,6 +485,11 @@ proc load_rom(path: string) =
     setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
+  # Cheats: attach the widget to this core's engine and load the sidecar.
+  app.cheats.attach(current_cheat_engine(),
+                    if app.emu_kind == ekGBA: cpGBA else: cpGB)
+  app.cheats.on_change = on_cheats_changed
+  load_cheats()
   apply_master_volume()
   apply_pitch_correct_ff()
   apply_panel_uniforms()
@@ -513,6 +525,54 @@ proc current_rom_path(): string =
   of ekGBA: (if app.gba_emu != nil: app.gba_emu.rom_path else: "")
   of ekGB:  (if app.gb_emu != nil: app.gb_emu.rom_path else: "")
   of ekNone: ""
+
+# ──────────────────────────── Cheats ────────────────────────────
+
+proc cheat_file_path(): string =
+  ## Sidecar cheat list, next to the ROM (mirrors the .sav convention).
+  let rp = current_rom_path()
+  if rp.len == 0: return ""
+  rp[0 ..< rp.rfind('.')] & ".cht"
+
+proc current_cheat_engine(): CheatEngine =
+  case app.emu_kind
+  of ekGBA: (if app.gba_emu != nil: app.gba_emu.cheats else: nil)
+  of ekGB:  (if app.gb_emu != nil: app.gb_emu.cheats else: nil)
+  of ekNone: nil
+
+proc refresh_cheat_rom_patches() =
+  case app.emu_kind
+  of ekGBA: (if app.gba_emu != nil: app.gba_emu.refresh_cheat_rom_patches())
+  of ekGB:  (if app.gb_emu != nil: app.gb_emu.refresh_cheat_rom_patches())
+  of ekNone: discard
+
+proc save_cheats() =
+  let eng = current_cheat_engine()
+  let path = cheat_file_path()
+  if eng == nil or path.len == 0: return
+  try:
+    if eng.cheats.len == 0:
+      if fileExists(path): removeFile(path)
+    else:
+      writeFile(path, eng.serialize())
+  except CatchableError as e:
+    echo "cheats: could not save ", path, ": ", e.msg
+
+proc load_cheats() =
+  ## Read the sidecar (if any) into the live engine and apply ROM patches.
+  let eng = current_cheat_engine()
+  let path = cheat_file_path()
+  if eng == nil or path.len == 0 or not fileExists(path): return
+  try:
+    eng.deserialize(readFile(path))
+    refresh_cheat_rom_patches()
+  except CatchableError as e:
+    echo "cheats: could not load ", path, ": ", e.msg
+
+proc on_cheats_changed() =
+  ## Called by the widget after any edit: re-apply ROM patches, then persist.
+  refresh_cheat_rom_patches()
+  save_cheats()
 
 proc state_file_path(): string =
   ## One slot per ROM for now; the state header reserves a slot byte so more
@@ -714,7 +774,7 @@ proc render_imgui() =
      (app.dbg == nil or
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
-     not app.link_window:
+     not app.link_window and not app.cheats.window:
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -861,6 +921,8 @@ proc render_imgui() =
       # Debug menu
       if igBeginMenu("Debug", true):
         discard igMenuItem_BoolPtr("Overlay", nil, addr app.enable_overlay, true)
+        discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
+                                   app.emu_kind != ekNone)
         igSeparator()
         if app.dbg != nil:
           app.dbg.render_menu_items()
@@ -917,6 +979,7 @@ proc render_imgui() =
     app.dbg.render_windows()
   if app.gb_dbg != nil:
     app.gb_dbg.render_windows()
+  app.cheats.render()
 
   render_link_window()
 
@@ -1672,6 +1735,7 @@ proc main() =
     game_shader:     game_shader,
     fe:              fe,
     ce:              ce,
+    cheats:          new_cheats_widget(),
     dbg:             nil,
     scale:           3,
     running:         true,
