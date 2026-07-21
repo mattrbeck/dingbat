@@ -10,6 +10,7 @@ import dingbat/gba/netcore
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gb/rollback as gbrb
+import dingbat/common/cheats
 
 const GBA_W = 240
 const GBA_H = 160
@@ -873,6 +874,38 @@ proc rollback_transfers(): cint {.exportc.} =
   if stateGbRollback != nil: return cint(stateGbRollback.link.transfers and 0x7fffffff)
   if stateRollback == nil: return 0
   cint(stateRollback.link.transfers and 0x7fffffff)
+
+# ──────────────────────────── Cheats ────────────────────────────
+
+proc current_cheat_engine(): CheatEngine =
+  case stateKind
+  of ekGBA: (if stateGba != nil: stateGba.cheats else: nil)
+  of ekGB:  (if stateGb  != nil: stateGb.cheats  else: nil)
+  of ekNone: nil
+
+proc refresh_cheat_rom_patches() =
+  case stateKind
+  of ekGBA: (if stateGba != nil: stateGba.refresh_cheat_rom_patches())
+  of ekGB:  (if stateGb  != nil: stateGb.refresh_cheat_rom_patches())
+  of ekNone: discard
+
+# Returned to JS across calls; must outlive the proc, so keep it in a global.
+var cheatErrBuf: string
+
+proc load_cheats(text: cstring): cstring {.exportc.} =
+  ## Replace the current game's cheat list with the serialized blob from JS
+  ## (the `.cht` text format). Returns a newline-separated list of parse errors
+  ## ("name: message"), or "" when every cheat parsed cleanly.
+  let eng = current_cheat_engine()
+  if eng == nil: return cstring("")
+  eng.deserialize($text)
+  refresh_cheat_rom_patches()
+  cheatErrBuf = ""
+  for c in eng.cheats:
+    if c.error.len > 0:
+      if cheatErrBuf.len > 0: cheatErrBuf.add "\n"
+      cheatErrBuf.add (if c.name.len > 0: c.name else: "?") & ": " & c.error
+  return cstring(cheatErrBuf)
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session

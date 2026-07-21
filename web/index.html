@@ -98,6 +98,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/></svg>
             <span>Manage Saves</span>
           </button>
+          <button type="button" class="menu-item" id="open-cheats" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5L12 14.9 7.5 16.8l.9-5L4.8 8.3l5-.7z"/></svg>
+            <span>Cheats</span>
+          </button>
           <button type="button" class="menu-item" id="open-settings" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
             <span>Settings</span>
@@ -332,6 +336,22 @@
           </div>
           <span id="reset-save-slot"></span>
         </div>
+      </div>
+    </div>
+
+    <div id="cheats-modal" class="modal-overlay">
+      <div class="modal">
+        <button type="button" class="modal-close" id="cheats-close" aria-label="Close">&times;</button>
+        <h3>Cheats</h3>
+        <p id="cheats-empty" class="modal-hint">No game loaded.</p>
+        <p class="modal-hint" id="cheats-help">Game Genie, GameShark and Action Replay codes. Toggle the box to enable a cheat. Codes are saved per game in this browser.</p>
+        <div id="cheats-list" class="cheats-list"></div>
+        <div class="modal-subhead">Add a cheat</div>
+        <input type="text" id="cheat-name" class="cheat-input" placeholder="Name (optional)" />
+        <textarea id="cheat-codes" class="cheat-textarea" rows="3" spellcheck="false" placeholder="One code per line"></textarea>
+        <p id="cheat-format-hint" class="modal-toggle-sub"></p>
+        <p id="cheat-error" class="cheat-error" hidden></p>
+        <button type="button" class="button button-sm" id="cheat-add">Add cheat</button>
       </div>
     </div>
 

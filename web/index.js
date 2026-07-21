@@ -708,6 +708,160 @@ savesModal.addEventListener("click", (e) => {
   if (e.target === savesModal) closeSavesModal();
 });
 
+// --- Cheats modal ---
+// JS owns the cheat list (array of {name, codes, enabled}); the Nim core owns
+// the parsed/applied form. On any edit we serialize to the shared ".cht" text
+// format, push it into the core via load_cheats (which returns parse errors),
+// and persist it per-game in IndexedDB under "cheats:<originalName>".
+
+const cheatsModal = document.getElementById("cheats-modal");
+const cheatsListEl = document.getElementById("cheats-list");
+const cheatNameEl = document.getElementById("cheat-name");
+const cheatCodesEl = document.getElementById("cheat-codes");
+const cheatErrorEl = document.getElementById("cheat-error");
+const cheatEmptyEl = document.getElementById("cheats-empty");
+const cheatHelpEl = document.getElementById("cheats-help");
+const cheatFormatHintEl = document.getElementById("cheat-format-hint");
+const CHEATS_KEY = (n) => "cheats:" + n;
+let cheatList = [];
+
+const serializeCheats = (list) => {
+  let out = "";
+  for (const c of list) {
+    out += "[" + (c.enabled ? "x" : " ") + "] " + c.name + "\n";
+    for (const line of c.codes.split("\n")) {
+      const l = line.trim();
+      if (l) out += l + "\n";
+    }
+    out += "\n";
+  }
+  return out;
+};
+
+const parseCheats = (text) => {
+  const list = [];
+  let cur = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.length >= 3 && line[0] === "[" && line[2] === "]") {
+      cur = { enabled: line[1] === "x" || line[1] === "X", name: line.slice(3).trim(), codes: "" };
+      list.push(cur);
+    } else if (cur) {
+      cur.codes += (cur.codes ? "\n" : "") + line;
+    }
+  }
+  return list;
+};
+
+const pushCheatsToCore = (text) => {
+  if (typeof Module === "undefined" || !Module.ccall) return "";
+  return Module.ccall("load_cheats", "string", ["string"], [text]) || "";
+};
+
+const showCheatError = (err) => {
+  if (err && err.length) {
+    cheatErrorEl.textContent = err;
+    cheatErrorEl.hidden = false;
+  } else {
+    cheatErrorEl.hidden = true;
+  }
+};
+
+const renderCheatList = () => {
+  const hasGame = !!currentOriginalName;
+  cheatEmptyEl.hidden = hasGame;
+  cheatHelpEl.hidden = !hasGame;
+  if (cheatFormatHintEl) {
+    const gba = hasGame && extOf(currentOriginalName) === ".gba";
+    cheatFormatHintEl.textContent = gba
+      ? "GameShark/AR v3: XXXXXXXX YYYYYYYY   ·   CodeBreaker: 82XXXXXX YYYY"
+      : "Game Genie: ABC-DEF-GHI    ·    GameShark: 011234C0";
+  }
+  cheatsListEl.innerHTML = "";
+  cheatList.forEach((c, i) => {
+    const row = document.createElement("div");
+    row.className = "cheat-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = c.enabled;
+    cb.addEventListener("change", () => { cheatList[i].enabled = cb.checked; applyCheats(); });
+    const info = document.createElement("div");
+    info.className = "cheat-row-info";
+    const nm = document.createElement("span");
+    nm.className = "cheat-row-name";
+    nm.textContent = c.name || "Cheat " + (i + 1);
+    const code = document.createElement("span");
+    code.className = "cheat-row-code";
+    code.textContent = c.codes.replace(/\n/g, "  ");
+    info.appendChild(nm);
+    info.appendChild(code);
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "cheat-del";
+    del.textContent = "×";
+    del.title = "Delete cheat";
+    del.addEventListener("click", () => { cheatList.splice(i, 1); applyCheats(); });
+    row.appendChild(cb);
+    row.appendChild(info);
+    row.appendChild(del);
+    cheatsListEl.appendChild(row);
+  });
+};
+
+const applyCheats = async () => {
+  const text = serializeCheats(cheatList);
+  const err = currentOriginalName ? pushCheatsToCore(text) : "";
+  if (currentOriginalName) {
+    if (cheatList.length) await dbPut(CHEATS_KEY(currentOriginalName), text);
+    else await dbDelete(CHEATS_KEY(currentOriginalName));
+  }
+  showCheatError(err);
+  renderCheatList();
+};
+
+// Called from loadRom after the core is built: pull this game's saved cheats
+// from IndexedDB and push them into the fresh core.
+const restoreCheats = async () => {
+  cheatList = [];
+  if (currentOriginalName) {
+    const text = await dbGet(CHEATS_KEY(currentOriginalName));
+    if (typeof text === "string" && text) cheatList = parseCheats(text);
+  }
+  pushCheatsToCore(serializeCheats(cheatList));
+  renderCheatList();
+};
+
+const openCheatsModal = () => {
+  menuDropdown.hidden = true;
+  showCheatError("");
+  renderCheatList();
+  cheatsModal.classList.add("open");
+  trapFocus(cheatsModal);
+};
+
+const closeCheatsModal = () => {
+  cheatsModal.classList.remove("open");
+  releaseFocus(cheatsModal);
+};
+
+document.getElementById("open-cheats").addEventListener("click", openCheatsModal);
+document.getElementById("cheats-close").addEventListener("click", closeCheatsModal);
+cheatsModal.addEventListener("click", (e) => {
+  if (e.target === cheatsModal) closeCheatsModal();
+});
+
+document.getElementById("cheat-add").addEventListener("click", () => {
+  if (!currentOriginalName) { showCheatError("Load a game first."); return; }
+  const codes = cheatCodesEl.value.trim();
+  if (!codes) { showCheatError("Enter at least one code."); return; }
+  const name = cheatNameEl.value.trim() || "Cheat " + (cheatList.length + 1);
+  cheatList.push({ name, codes, enabled: true });
+  cheatNameEl.value = "";
+  cheatCodesEl.value = "";
+  applyCheats();
+});
+
 // --- Delete save data (per-ROM), shared by the home "Manage ROMs and Saves"
 // list and the in-game "Reset save file" action ---
 // "Save data" for a ROM is spread across the "blobs" store under keys derived
@@ -2974,6 +3128,7 @@ const loadRom = async (romName, originalName) => {
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   benchReport("load");
   updateCanvasScaling();
