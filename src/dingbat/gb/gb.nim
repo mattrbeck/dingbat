@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[bitops, os, strutils, times]
-import ../common/[input, scheduler, emu, resampler, serialize, timestretch]
+import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats]
 when defined(test_harness):
   import ../common/test_output
 
@@ -357,6 +357,7 @@ type
     serial*:         GbSerial
     memory*:         GbMemory
     apu*:            GbApu
+    cheats*:         CheatEngine
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -672,6 +673,7 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     run_bios:     run_bios,
   )
   result.cartridge = load_cartridge(rom_path)
+  result.cheats = new_cheat_engine(cpGB)
   let cgb_byte = result.cartridge.rom[0x0143]
   result.cgb_flag = case cgb_byte
     of 0x80'u8: cgbSupport
@@ -751,7 +753,39 @@ proc post_init*(gb: GB) =
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
 
+proc apply_cheats*(gb: GB) =
+  ## Push every enabled RAM-write cheat into memory. Run once per frame.
+  if gb.cheats == nil or gb.cheats.cheats.len == 0: return
+  let mem = gb.memory
+  gb.cheats.apply_ram(MemHooks(
+    read8: proc(a: uint32): uint8 =
+      read_byte(mem, gb, int(a and 0xFFFF)),
+    read16: proc(a: uint32): uint16 =
+      uint16(read_byte(mem, gb, int(a and 0xFFFF))) or
+      (uint16(read_byte(mem, gb, int((a + 1) and 0xFFFF))) shl 8),
+    read32: proc(a: uint32): uint32 =
+      var v = 0'u32
+      for i in 0u32 ..< 4u32:
+        v = v or (uint32(read_byte(mem, gb, int((a + i) and 0xFFFF))) shl (i * 8))
+      v,
+    write8: proc(a: uint32; v: uint8) =
+      write_byte(mem, gb, int(a and 0xFFFF), v),
+    write16: proc(a: uint32; v: uint16) =
+      write_byte(mem, gb, int(a and 0xFFFF), uint8(v))
+      write_byte(mem, gb, int((a + 1) and 0xFFFF), uint8(v shr 8)),
+    write32: proc(a: uint32; v: uint32) =
+      for i in 0u32 ..< 4u32:
+        write_byte(mem, gb, int((a + i) and 0xFFFF), uint8(v shr (i * 8))),
+  ))
+
+proc refresh_cheat_rom_patches*(gb: GB) =
+  ## Apply (or re-apply) Game Genie ROM edits. Call at load and whenever the
+  ## cheat set changes.
+  if gb.cheats != nil:
+    gb.cheats.apply_rom(gb.cartridge.rom)
+
 proc step_frame*(gb: GB) =
+  gb.apply_cheats()
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
   gb.ppu.frame = false

@@ -27,3 +27,7 @@ task bench_build, "Build the headless benchmark harness":
 
 task test_timestretch, "Run the WSOLA time-stretch unit test":
   exec "nim c -r -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"
+
+task test_cheats, "Run the cheat-engine unit + integration tests":
+  exec "nim c -r -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
+  exec "nim c -r -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"

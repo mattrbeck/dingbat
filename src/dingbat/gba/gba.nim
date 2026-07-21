@@ -3,7 +3,7 @@
 
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
-import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch]
+import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -489,6 +489,7 @@ type
     apu*:        APU
     dma*:        DMA
     serial*:     Serial
+    cheats*:     CheatEngine
     when defined(test_harness):
       test_output*: TestOutput
 
@@ -631,6 +632,7 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
   )
   result.scheduler = new_scheduler()
   result.cartridge = new_cartridge(rom_path)
+  result.cheats    = new_cheat_engine(cpGBA)
 
 proc handle_saves*(gba: GBA)
 
@@ -722,7 +724,27 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.rom_free_since = 0
   base
 
+proc apply_cheats*(gba: GBA) =
+  ## Push every enabled RAM-write cheat into memory. Run once per frame.
+  if gba.cheats == nil or gba.cheats.cheats.len == 0: return
+  let bus = gba.bus
+  gba.cheats.apply_ram(MemHooks(
+    read8:   proc(a: uint32): uint8  = bus.read_byte_internal(a),
+    read16:  proc(a: uint32): uint16 = bus.read_half_internal(a),
+    read32:  proc(a: uint32): uint32 = bus.read_word_internal(a),
+    write8:  proc(a: uint32; v: uint8)  = bus.write_byte_internal(a, v),
+    write16: proc(a: uint32; v: uint16) = bus.write_half_internal(a, v),
+    write32: proc(a: uint32; v: uint32) = bus.write_word_internal(a, v),
+  ))
+
+proc refresh_cheat_rom_patches*(gba: GBA) =
+  ## Apply (or re-apply) Game Genie / GSA_PATCH ROM edits. Call at load and
+  ## whenever the cheat set changes.
+  if gba.cheats != nil:
+    gba.cheats.apply_rom(gba.cartridge.rom)
+
 proc step_frame*(gba: GBA) =
+  gba.apply_cheats()
   gba.cpu.count_cycles = 0
   while not gba.ppu.frame:
     gba.cpu.tick()
