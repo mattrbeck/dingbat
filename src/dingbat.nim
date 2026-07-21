@@ -1017,7 +1017,7 @@ proc render_imgui() =
                         cint(ImGui_WindowFlags_NoInputs) or
                         cint(ImGui_WindowFlags_NoSavedSettings)
       if igBegin("##paused_badge", nil, badge_flags):
-        igText(if app.rewinding: "<< Rewinding" else: "Paused")
+        igText(if app.rewinding: cstring"<< Rewinding" else: cstring"Paused")
       igEnd()
 
   igRender()
