@@ -43,9 +43,16 @@ web/rom.gbc
 # Generated SRAM backing for test ROMs (created at runtime, not a fixture)
 tests/roms/*.sav
 
-# Copyrighted GBA BIOS — LLE test fixture, never commit
+# Copyrighted GBA BIOS + GB boot ROMs — LLE/boot test fixtures, NEVER commit.
+# These patterns are a safety net; the real files live outside the repo
+# (~/Documents/emu/...) and are referenced by absolute path when running tests.
 gba_bios.bin
 *bios*.bin
+*boot*.bin
+dmg_rom.bin
+cgb_boot.bin
+dmg_boot.bin
+*.boot.bin
 
 # Claude Code local state
 .claude/
