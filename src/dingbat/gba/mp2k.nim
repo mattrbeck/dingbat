@@ -16,12 +16,15 @@
 #
 # Differences from NBA in this PoC (deliberate, for tractability):
 #   * SHADOW mode only: the real SoundMainRAM still runs, so we piggyback on
-#     the engine's already-computed per-channel envelope volumes instead of
-#     reimplementing MP2K's ADSR state machine. (NBA reimplements ADSR so it
-#     can predict the next frame; we lag one frame and linearly ramp.)
+#     the engine's already-computed per-channel envelope volumes (which already
+#     include masterVolume + pan) instead of reimplementing MP2K's ADSR/volume
+#     chain. NBA reimplements ADSR so it can PREDICT the next frame and ramp
+#     current->next; we read the current frame's envelope at the hook (m4a
+#     updates it in the sequencer, before this mixer) so there is no frame lag,
+#     and ramp previous->current across the frame.
 #   * Renders at the APU's 32768 Hz output rate, not NBA's 65536 Hz ring.
-#   * Raw 8-bit PCM + looping only. BDPCM-compressed samples (channel.type
-#     bit5) are detected and skipped (silenced) — flagged, not mixed.
+#   * 8-bit PCM, looping, AND m4a BDPCM ("compressed waveform", channel.type
+#     bit5) — the latter is decoded to s8 and mixed at PCM parity (not skipped).
 
 const
   MP2K_SOUNDMAIN_CRC32*   = 0x27EA7FCF'u32   # CRC-32 of SoundMain()'s first 48 bytes
@@ -76,7 +79,45 @@ const
 # requires types referenced by the GBA object to be declared before use).
 
 when defined(mp2kwav):
-  import std/streams
+  import std/[streams, math, strutils]
+  # Per-voice diagnostic accumulators (index by channel 0..11).
+  var dbgVoiceRawSq*:   array[12, float64]   # sum of (raw s8/128)^2
+  var dbgVoiceRawPk*:   array[12, float32]   # peak |raw s8/128|
+  var dbgVoiceOutSq*:   array[12, float64]   # sum of post-volume contribution^2 (L+R)
+  var dbgVoiceOutPk*:   array[12, float32]   # peak post-volume contribution
+  var dbgVoiceN*:       array[12, int]       # samples where voice was active
+  var dbgVoiceComp*:    array[12, bool]      # last-seen compressed flag
+  # Split by compressed flag: [0]=PCM, [1]=BDPCM.
+  var dbgKindRawSq*: array[2, float64]
+  var dbgKindRawPk*: array[2, float32]
+  var dbgKindN*:     array[2, int]
+  var dbgRetrigLog*: int
+  var dbgAttackSq*: float64   # summed output energy on attack (age==0) frames
+  var dbgAttackPk*: float32
+  var dbgAttackN*:  int
+  var dbgStepN*: int
+  var dbgStepDecimN*: int
+  var dbgStepMax*: float32
+  var dbgMaster*: int
+  proc mp2k_dump_attack*() =
+    if dbgAttackN > 0:
+      echo "ATTACK-frame outRMS=", sqrt(dbgAttackSq/float64(dbgAttackN)).formatFloat(ffDecimal,5),
+        " outPeak=", dbgAttackPk.formatFloat(ffDecimal,4), " n=", dbgAttackN
+  proc mp2k_dump_voices*() =
+    echo "voice  comp   activeN     rawRMS   rawPeak     outRMS   outPeak"
+    for i in 0 ..< 12:
+      if dbgVoiceN[i] == 0: continue
+      let rr = sqrt(dbgVoiceRawSq[i] / float64(dbgVoiceN[i]))
+      let orr = sqrt(dbgVoiceOutSq[i] / float64(dbgVoiceN[i]))
+      echo i, "\t", dbgVoiceComp[i], "\t", dbgVoiceN[i], "\t",
+        rr.formatFloat(ffDecimal, 4), "\t", dbgVoiceRawPk[i].formatFloat(ffDecimal, 3), "\t",
+        orr.formatFloat(ffDecimal, 5), "\t", dbgVoiceOutPk[i].formatFloat(ffDecimal, 4)
+    echo "kind   N          rawRMS(s8)   rawPeak(s8)"
+    for k in 0 ..< 2:
+      if dbgKindN[k] == 0: continue
+      let rr = sqrt(dbgKindRawSq[k] / float64(dbgKindN[k])) * 128.0
+      echo (if k == 0: "PCM " else: "BDPCM"), "\t", dbgKindN[k], "\t",
+        rr.formatFloat(ffDecimal, 3), "\t", (dbgKindRawPk[k]*128.0).formatFloat(ffDecimal, 2)
   proc mp2k_write_wav*(path: string) =
     ## Dump the captured HLE stereo samples (32768 Hz, s16) as a WAV.
     let n = mp2kWavCapture.len
@@ -127,13 +168,20 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   ## the SoundInfo channel table and refreshes each sampler's parameters and
   ## envelope endpoints. Shadow mode: envelope_volume_l/r are already computed
   ## by the real mixer, so we just consume them.
-  let master = float32(int(m.rd8(sound_info + SI_MASTER_VOL)) + 1) / 16.0'f32
+  # DIAG toggle: master_apply != 0 re-applies SoundInfo.masterVolume on top of the
+  # engine's per-side volumes (WRONG — they already include it). Default 0.
+  let master_mult =
+    if m.master_apply != 0:
+      float32(int(m.rd8(sound_info + SI_MASTER_VOL)) + 1) / 16.0'f32
+    else:
+      1.0'f32
   var maxc = int(m.rd8(sound_info + SI_MAX_CHANS))
   if maxc > MP2K_MAX_CHANNELS: maxc = MP2K_MAX_CHANNELS
   m.reverb_strength = m.rd8(sound_info + SI_REVERB)
   m.pcm_sample_rate = int(m.rd32(sound_info + SI_PCM_RATE))
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
+  when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
   # Lazily allocate the reverb delay ring the first frame a game asks for it.
   # 8 frames of stereo history, rounded to a power of two for cheap masking.
   if m.reverb_strength > 0'u8 and m.reverb_ring.len == 0:
@@ -159,13 +207,24 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     let loop_status = m.rd16(wave + 2)
     let looping = (loop_status and 0xC000'u16) != 0
     let new_wave_data = wave + 16
-    if not s.active or s.wave_data != new_wave_data or s.compressed != compressed:
+    let retrig = not s.active or s.wave_data != new_wave_data or s.compressed != compressed
+    when defined(mp2kwav):
+      if retrig and dbgRetrigLog < 40:
+        let el = int(m.rd8(base + SC_ENV_VL))
+        let er = int(m.rd8(base + SC_ENV_VR))
+        let ev = int(m.rd8(base + SC_ENV_VOL))
+        echo "RETRIG ch=", i, " comp=", compressed, " env_vl=", el, " env_vr=", er, " env_vol=", ev
+        dbgRetrigLog.inc
+    if retrig:
       # (re)trigger: reset the resampler + decode state to the sample start.
       s.cur_pos = 0
       s.resample_phase = 0
       s.should_fetch = true
       s.hist0 = 0; s.hist1 = 0; s.hist2 = 0; s.hist3 = 0
       s.active = true
+      s.age = 0
+    else:
+      s.age.inc
     s.wave_data   = new_wave_data
     s.compressed  = compressed
     if compressed: m.dbg_compressed_used.inc
@@ -185,10 +244,14 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
-    # Envelope volumes already scaled by the real mixer (0..255-ish). Ramp
-    # from last frame's end value to this frame's value across the frame.
-    let vl = float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master
-    let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master
+    # SC_ENV_VL/VR (0x0B/0x0A) are the engine's per-side volumes: envelopeVolume
+    # * (leftVolume|rightVolume) >> 8, and leftVolume/rightVolume ALREADY fold in
+    # SoundInfo.masterVolume. So we consume them directly and must NOT re-apply
+    # master (doing so double-applied it, making games with masterVol<15 — e.g.
+    # Pokémon FR/Em at 12/16 — render ~19% too quiet). Shift last frame's end
+    # value into vol_*0 and ramp toward this frame's value across the frame.
+    let vl = float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult
+    let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
     s.vol_l0 = s.vol_l1
     s.vol_r0 = s.vol_r1
     s.vol_l1 = vl
@@ -283,7 +346,11 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
       s.should_fetch = false
     let mu = s.resample_phase
     var sample: float32
-    if cubic:
+    if m.resample_mode == 2:
+      sample = s.hist0                      # zero-order hold (matches raw FIFO)
+    elif m.resample_mode == 1 or not cubic:
+      sample = s.hist0 * mu + s.hist1 * (1.0'f32 - mu)
+    elif cubic:
       # Catmull-Rom / cubic (paulbourke). hist0=newest .. hist3=oldest.
       let mu2 = mu * mu
       let a0 = s.hist0 - s.hist1 - s.hist3 + s.hist2
@@ -294,12 +361,39 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     else:
       sample = s.hist0 * mu + s.hist1 * (1.0'f32 - mu)
     sample = sample / 128.0'f32
-    let vl = s.vol_l0 * (1.0'f32 - t) + s.vol_l1 * t
-    let vr = s.vol_r0 * (1.0'f32 - t) + s.vol_r1 * t
+    var vl, vr: float32
+    case m.env_mode
+    of 1:                       # constant at current (this-frame) envelope
+      vl = s.vol_l1; vr = s.vol_r1
+    else:                       # 0: linear ramp across the frame (original)
+      vl = s.vol_l0 * (1.0'f32 - t) + s.vol_l1 * t
+      vr = s.vol_r0 * (1.0'f32 - t) + s.vol_r1 * t
     accl += sample * vl
     accr += sample * vr
+    when defined(mp2kwav):
+      let cl = sample * vl
+      let cr = sample * vr
+      dbgVoiceRawSq[i] += float64(sample) * float64(sample)
+      dbgVoiceRawPk[i] = max(dbgVoiceRawPk[i], abs(sample))
+      dbgVoiceOutSq[i] += float64(cl)*float64(cl) + float64(cr)*float64(cr)
+      dbgVoiceOutPk[i] = max(dbgVoiceOutPk[i], max(abs(cl), abs(cr)))
+      dbgVoiceN[i].inc
+      dbgVoiceComp[i] = s.compressed
+      let k = (if s.compressed: 1 else: 0)
+      dbgKindRawSq[k] += float64(sample) * float64(sample)
+      dbgKindRawPk[k] = max(dbgKindRawPk[k], abs(sample))
+      dbgKindN[k].inc
+      if s.age == 0:            # attack frame (first frame after note-on)
+        dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
+        dbgAttackPk = max(dbgAttackPk, max(abs(cl), abs(cr)))
+        dbgAttackN.inc
     # Advance the resample phase; step = playback-rate / output-rate.
     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
+    when defined(mp2kwav):
+      dbgStepN.inc
+      if rate > float32(APU_SAMPLE_RATE):
+        dbgStepDecimN.inc
+        dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
     s.resample_phase += rate / float32(APU_SAMPLE_RATE)
     if s.resample_phase >= 1.0'f32:
       let n = uint32(s.resample_phase)
@@ -338,20 +432,23 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     let l2 = tapL(7'u32); let r2 = tapR(7'u32)
     let ll = (l0*1.0'f32 + r0*0.1'f32 + l1*0.6'f32 + r1*0.25'f32 + l2*0.35'f32 + r2*0.35'f32) * norm
     let rr = (l0*0.1'f32 + r0*1.0'f32 + l1*0.25'f32 + r1*0.6'f32 + l2*0.35'f32 + r2*0.35'f32) * norm
-    let factor = float32(m.reverb_strength) / 128.0'f32
+    let rsc = (if m.rev_scale < 0'f32: 0.0'f32
+               elif m.rev_scale > 0'f32: m.rev_scale else: 1.0'f32)
+    let factor = float32(m.reverb_strength) / 128.0'f32 * rsc
     outl_f = accl + (el + ll) * factor
     outr_f = accr + (er + rr) * factor
     let idx = (w and mask) shl 1
     m.reverb_ring[idx]     = outl_f
     m.reverb_ring[idx + 1] = outr_f
     m.reverb_w = int((w + 1'u32) and mask)
-  # Scale to the DirectSound latch range the APU expects. The makeup gain is
-  # calibrated so the HLE mix sits at roughly the same loudness as the game's
-  # own FIFO output, for a fair A/B. Re-measured after adding BDPCM voices +
-  # cubic + reverb: per-game optimal makeup ranged 1.9x (Kirby) .. 2.7x (Pokémon);
-  # 2.3 is the geometric mean — HLE RMS lands within ~15% of the real FIFO for
-  # Emerald/FireRed/Advance Wars while keeping peaks well under the +-512 clamp.
-  const MP2K_MAKEUP_GAIN = 2.3'f32
+  # Scale to the DirectSound latch range the APU expects. With the master-volume
+  # double-apply fixed (see on_frame), the per-side envelope volumes already carry
+  # the full engine gain, so this makeup is close to the pure linear ÷256 mixer
+  # scale (~2.0). 2.1 centres the residual: HLE RMS lands within ~5% of the real
+  # FIFO for FireRed (+4%), Emerald (+2%) and Advance Wars (-4%), peaks < 230 (the
+  # clamp is +-512). Previously 2.3 with a masterVol double-apply left Pokémon
+  # (masterVol 12/16) ~15-19% quiet — the "quiet snares" report.
+  let MP2K_MAKEUP_GAIN = (if m.makeup > 0'f32: m.makeup else: 2.1'f32)
   let li = int32(outl_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   let ri = int32(outr_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   m.dbg_out_energy += abs(outl_f) + abs(outr_f)

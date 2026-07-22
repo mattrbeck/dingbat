@@ -513,6 +513,7 @@ type
     hist0*, hist1*, hist2*, hist3*: float32  # 4-tap history, s8 units, hist0 newest
     vol_l0*, vol_l1*: float32
     vol_r0*, vol_r1*: float32
+    age*:         int       # frames since (re)trigger; 0 on the attack frame
 
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
@@ -535,6 +536,11 @@ type
     pcm_sample_rate*: int
     reverb_strength*: uint8
     use_cubic*:      bool
+    env_mode*:       int           # DIAG: 0=ramp,1=constant-current
+    resample_mode*:  int           # DIAG: 0=cubic,1=linear,2=nearest(hold)
+    rev_scale*:      float32        # DIAG: multiplier on the reverb wet factor (default 1)
+    makeup*:         float32        # DIAG: output makeup gain override (0 => built-in default)
+    master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
     reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
     reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
 
