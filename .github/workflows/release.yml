@@ -1,0 +1,82 @@
+name: Release
+
+# Build macOS (.dmg) and Windows (.exe) artifacts on a version tag and publish
+# them to the GitHub Releases page. Binaries are UNSIGNED — see README for the
+# one-time "open anyway" steps users take on first launch.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Windows: reuse the existing mingw cross-build (static SDL2, single .exe),
+  # which runs on a Linux runner via Docker.
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build cross-compile image
+        run: docker build -t dingbat-win-cross docker/windows-cross
+      - name: Build dingbat.exe
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            dingbat-win-cross ./docker/windows-cross/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-windows
+          path: dist/windows/dingbat.exe
+          if-no-files-found: error
+
+  # macOS: native build with -d:macdist (statically links SDL2 so the .app has
+  # no Homebrew dependency), bundled into a .app + .dmg.
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: brew install sdl2
+      - name: Install Nim
+        run: |
+          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+      - name: Build (self-contained)
+        run: |
+          nimble install -y --depsOnly
+          nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
+      - name: Verify no Homebrew dependency
+        run: |
+          if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL2'; then
+            echo "::error::binary still links a non-system dylib — not self-contained"
+            otool -L dingbat_dist; exit 1
+          fi
+      - name: Bundle .app + .dmg
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ci/make-macos-app.sh dingbat_dist "${VERSION:-0.0.0}" dist/macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-macos
+          path: dist/macos/dingbat-macos.dmg
+          if-no-files-found: error
+
+  # Collect the artifacts, checksum them, and publish a Release.
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage + checksum
+        run: |
+          mkdir -p release
+          cp artifacts/dingbat-windows/dingbat.exe release/dingbat-windows-x64.exe
+          cp artifacts/dingbat-macos/dingbat-macos.dmg release/dingbat-macos.dmg
+          cd release && shasum -a 256 * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

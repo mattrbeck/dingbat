@@ -6,6 +6,13 @@ The Game Boy and Game Boy Color work would not be possible without the [Pan Docs
 
 <p align="center"><img width="800" src="README/GoldenSun.gif"></p>
 
+## Downloads
+
+Tagged releases publish prebuilt macOS (`.dmg`) and Windows (`.exe`) binaries on the [Releases](../../releases) page, built in CI. The binaries are currently **unsigned**, so the OS shows a first-launch warning:
+
+- **macOS:** the first launch is blocked ("Apple cannot check it for malicious software"). Open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**, then confirm. This is only needed once.
+- **Windows:** SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**.
+
 ## Building
 
 [SDL2](https://www.libsdl.org/) and [Dear ImGui](https://github.com/ocornut/imgui) (via [imguin](https://github.com/dinau/imguin)) are required. SDL2 is available on every major package manager.
