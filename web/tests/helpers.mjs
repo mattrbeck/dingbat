@@ -164,6 +164,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     confirmResult,
     // Tests replace this to control Drive responses.
     fetchImpl: async () => ({ ok: false, status: 599, text: async () => "", json: async () => ({}) }),
+    // navigator.storage.persist() fake: already-persisted flag, grant result,
+    // and a call counter tests assert on.
+    persisted: false,
+    persistGrant: true,
+    persistCalls: 0,
   };
 
   const lsMap = new Map(Object.entries(localStorageSeed));
@@ -215,7 +220,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
       platform: "TestPlatform",
       maxTouchPoints: 0,
       userAgent: "node-test",
-      storage: { estimate: async () => ({ usage: 12345 }) },
+      storage: {
+        estimate: async () => ({ usage: 12345 }),
+        persisted: async () => state.persisted,
+        persist: async () => { state.persistCalls++; return state.persistGrant; },
+      },
     },
     URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
@@ -286,7 +295,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
 
   return {
     api, context, idb, fetchCalls, alerts, confirms, toasts,
-    document, elements, localStorage, lsMap, sandbox,
+    document, elements, localStorage, lsMap, sandbox, state,
     setFetch: (fn) => { state.fetchImpl = fn; },
     setConfirmResult: (v) => { state.confirmResult = v; },
     runIn: (code) => vm.runInContext(code, context),

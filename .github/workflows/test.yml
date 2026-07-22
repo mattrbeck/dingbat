@@ -113,6 +113,16 @@ jobs:
           run_net tests/roms/linktest.gba multi 7788
           run_net tests/roms/normlinktest.gba normal 7789
           run_net tests/roms/norm32linktest.gba normal32 7790
+      - name: Web storage / Drive / SW unit tests (Node, zero deps)
+        # The node:vm harness suite over the REAL web/index.js (fake DOM +
+        # Map-backed IndexedDB + controllable fetch): storage layer, recents,
+        # save import/flush, Drive backup/restore, storage.persist policy —
+        # plus the sw-assets tripwire (every script index.html loads must be
+        # in the service worker's precache list; a miss = broken offline boot,
+        # which shipped once). Zero-dep node:test; Linux is enough since it
+        # exercises no OS surface.
+        if: runner.os == 'Linux'
+        run: node --test web/tests/*.test.mjs
       - name: Signaling server room lifecycle (Node)
         # The room-code rendezvous server: a code must be FREED the instant its
         # clients disconnect (e.g. two same-browser tabs that paired locally over

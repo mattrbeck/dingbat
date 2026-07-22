@@ -1820,6 +1820,24 @@ const bumpRecentIndex = async (name) => {
   await dbPut("recent", list);
 };
 
+// Ask the browser to exempt this origin's storage — the ROM library and every
+// save — from automatic eviction under disk pressure ("best-effort" storage
+// can be silently wiped). Chromium and Safari decide silently from engagement
+// heuristics, but Firefox shows a permission prompt, so the request is tied to
+// the moments the user just entrusted us with data (a ROM import, a battery-
+// save flush) rather than fired at page load, and made at most once per
+// session so a dismissed prompt never nags.
+let persistAsked = false;
+const requestPersistentStorage = () => {
+  if (persistAsked || !navigator.storage?.persist) return;
+  persistAsked = true;
+  navigator.storage
+    .persisted()
+    .then((p) => p || navigator.storage.persist())
+    .then((p) => log("persistent storage: " + (p ? "granted" : "best-effort")))
+    .catch(() => {});
+};
+
 const addRecentRom = async (name, bytes, art) => {
   // Bytes first, index second: an interruption leaves at worst an orphaned
   // rom: record, never an index entry pointing at nothing.
@@ -1827,6 +1845,7 @@ const addRecentRom = async (name, bytes, art) => {
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await bumpRecentIndex(name);
   refreshHomeRecent();
+  requestPersistentStorage();
 };
 
 // Recency bump for a ROM whose bytes are already stored (relaunch paths) —
@@ -2014,6 +2033,7 @@ const persistSave = async (romName, originalName) => {
       lastSaveSig = sig;
       lastSaveSigKey = originalName;
       await dbPut("save:" + originalName, new Uint8Array(data));
+      requestPersistentStorage();
     }
   } catch {}
 };
