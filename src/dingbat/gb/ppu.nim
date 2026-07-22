@@ -44,8 +44,12 @@ method reset_render_scratch*(ppu: GbPpu) {.base.} =
   discard
 
 method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
-  for i in 0 ..< POST_BOOT_VRAM.len:
-    ppu.vram[0][i] = POST_BOOT_VRAM[i]
+  # Reproduce the post-boot VRAM tiles: blank tile $00 (VRAM inits to zero), the
+  # Nintendo logo $01-$18 decompressed from the cart's OWN header (so no Nintendo
+  # logo data lives in our source), and the generic ® tile $19.
+  write_boot_logo(gb.cartridge.rom, ppu.vram[0])
+  for i in 0 ..< POST_BOOT_RA_TILE.len:
+    ppu.vram[0][0x190 + i] = POST_BOOT_RA_TILE[i]  # tile $19 = byte offset 400
   if gb.cgb_enabled:
     # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
     # reads LY=0x90); the sub-frame phase is calibrated against gambatte
