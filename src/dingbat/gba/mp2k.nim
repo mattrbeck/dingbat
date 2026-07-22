@@ -1,10 +1,11 @@
 # =============================================================================
 # EXPLORATORY: MP2K / M4A ("Sappy") sound-engine HLE  (included by gba.nim)
 # =============================================================================
-# High-level-emulate the GBA's common MP2K music mixer: detect the engine in
-# the ROM, read its SoundInfo struct out of guest RAM each audio frame, and
-# render the DirectSound audio ourselves at a higher quality than the game's
-# ~13 kHz FIFO stream.
+# High-level-emulate the GBA's common MP2K music mixer: detect the engine at
+# runtime via its SoundInfo work area in guest RAM (no ROM signature — see the
+# "Runtime detection" section below), read the SoundInfo struct each audio
+# frame, and render the DirectSound audio ourselves at a higher quality than
+# the game's ~13 kHz FIFO stream.
 #
 # This is a PROOF OF CONCEPT, OFF BY DEFAULT (gba.mp2k_hle). It is NOT
 # cycle-accurate. Shadow state is deliberately NOT serialized into save
@@ -51,19 +52,30 @@
 #     below for the per-flag reference semantics.
 
 const
-  # Detection signature: a CRC-32 over the first 48 bytes of the M4A engine's
-  # SoundMain() function, which is byte-identical across the ROMs that ship the
-  # stock Nintendo driver. This is a hash of factual, Nintendo-authored ROM code
-  # (the same function saptapper locates when it "detect[s] MP2k driver"; see the
-  # loveemu summary). It is ROM/format-derived, not taken from any emulator.
-  MP2K_SOUNDMAIN_CRC32*   = 0x27EA7FCF'u32   # CRC-32 of SoundMain()'s first 48 bytes
-  MP2K_SOUNDMAIN_LEN      = 48
-  # SoundMain loads the SoundMainRAM entry point from its literal pool at this
-  # byte offset (documented in the m4a sources / sappy.txt); we follow it to the
-  # PC we hook each frame.
-  MP2K_SOUNDMAINRAM_OFF   = 0x74             # literal-pool offset to SoundMainRAM ptr
+  # ---- Version-independent runtime detection --------------------------------
+  # Every m4a/MP2K build publishes a pointer to its SoundInfo work area at the
+  # fixed IWRAM slot 0x03007FF0 — the driver's SOUND_INFO_PTR, an m4a
+  # convention inside the 0x03007F00..0x03007FFF block GBATEK documents as
+  # reserved system space (the loveemu MP2K summary's RAM data map shows the
+  # sound work area; the slot address is corroborated by the driver's own
+  # behaviour, observed at runtime on every m4a game tested). The first
+  # field of SoundInfo is `ident`, ID_NUMBER = 0x68736D53 ("Smsh" reversed —
+  # per pret m4a_internal.h: "This field is normally equal to ID_NUMBER but it
+  # is set to other values during sensitive operations for locking purposes").
+  # SoundMain takes that lock by incrementing ident to ID_NUMBER+1 for the
+  # duration of its processing — sequencer, CGB update and the SoundMainRAM PCM
+  # mixer — and restores it afterwards. Both values therefore identify the
+  # engine, and the +1 value identifies "a mixer pass is in flight".
+  #
+  # Detection needs no ROM signature at all (the old approach — a CRC-32 of one
+  # specific SoundMain build plus a fixed literal-pool offset — only matched a
+  # single m4a revision): we poll the SOUND_INFO_PTR slot once per frame, and
+  # once the ident magic appears we LEARN the SoundMainRAM entry PC at runtime
+  # (see mp2k_frame_poll / probe_pc below).
   MP2K_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32   # IWRAM slot holding the SoundInfo pointer
-  MP2K_MAGIC              = 0x68736D54'u32   # SoundInfo.ident, "Tmsh" little-endian
+  MP2K_IDENT_IDLE         = 0x68736D53'u32   # SoundInfo.ident = ID_NUMBER ("Smsh", pret m4a_internal.h)
+  MP2K_IDENT_LOCK         = 0x68736D54'u32   # ID_NUMBER+1: lock held while SoundMain mixes
+  MP2K_PROBE_MAX_FAILS    = 8                # give up learning after this many mislearns
   MP2K_MAX_CHANNELS       = 12
 
   # SoundChannel field offsets, derived from m4a_internal.h (pret):
@@ -223,32 +235,6 @@ when defined(mp2kwav):
 proc new_mp2k*(gba: GBA): Mp2kHle =
   Mp2kHle(gba: gba, hook_addr: 0xFFFFFFFF'u32, engaged: false)
 
-proc detect_mp2k*(rom: openArray[byte]): tuple[hook: uint32, entry: uint32] =
-  ## Slide a 48-byte CRC window over the ROM looking for SoundMain(), then
-  ## follow the SoundMainRAM pointer at offset 0x74. Returns (hook, entry):
-  ## `hook` is past the 2-instruction prologue (safe shadow-read point) and
-  ## `entry` is the first instruction (skip-mode return point). Both are
-  ## 0xFFFFFFFF if this isn't an MP2K ROM.
-  if rom.len < MP2K_SOUNDMAIN_LEN: return (0xFFFFFFFF'u32, 0xFFFFFFFF'u32)
-  let amax = rom.len - MP2K_SOUNDMAIN_LEN
-  var a = 0
-  while a <= amax:
-    # crc32 expects openArray[char]; reinterpret the byte slice
-    let crc = crc32(cast[ptr UncheckedArray[char]](unsafeAddr rom[a]).toOpenArray(0, MP2K_SOUNDMAIN_LEN - 1))
-    if crc == MP2K_SOUNDMAIN_CRC32:
-      let raw = uint32(rom[a + MP2K_SOUNDMAINRAM_OFF]) or
-                (uint32(rom[a + MP2K_SOUNDMAINRAM_OFF + 1]) shl 8) or
-                (uint32(rom[a + MP2K_SOUNDMAINRAM_OFF + 2]) shl 16) or
-                (uint32(rom[a + MP2K_SOUNDMAINRAM_OFF + 3]) shl 24)
-      if (raw and 1) != 0:                 # Thumb pointer
-        let entry = raw and not 1'u32
-        return (entry + 4, entry)          # +4 = skip 2 Thumb instructions
-      else:                                 # ARM pointer
-        let entry = raw and not 3'u32
-        return (entry + 8, entry)          # +8 = skip 2 ARM instructions
-    a += 2
-  (0xFFFFFFFF'u32, 0xFFFFFFFF'u32)
-
 proc rd8(m: Mp2kHle; a: uint32): uint8  {.inline.} = m.gba.bus.read_byte_internal(a)
 proc rd16(m: Mp2kHle; a: uint32): uint16 {.inline.} = m.gba.bus.read_half_internal(a)
 proc rd32(m: Mp2kHle; a: uint32): uint32 {.inline.} = m.gba.bus.read_word_internal(a)
@@ -309,9 +295,12 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   ## hook re-latches every channel from the engine's SoundInfo in the restored
   ## RAM — resuming mid-note channels at the engine's own playback position
   ## (SoundChannel.ct) rather than retriggering them from the sample start.
-  ## Detection state (hook_addr / entry_addr) is ROM-derived and states are
-  ## per-ROM, so it stays valid; `engaged` is kept, and render_sample simply
-  ## emits silence until the first post-load mixer pass refills the channels.
+  ## Detection state (the learned hook_addr / entry_addr) is kept: states are
+  ## per-ROM, the state restores the IWRAM the mixer was learned from, and if
+  ## the learned PC is somehow stale for the restored timeline the lock
+  ## validation unlearns it and the frame poll re-arms probing (see
+  ## unlearn_hook below). `engaged` is kept, and render_sample simply emits
+  ## silence until the first post-load mixer pass refills the channels.
   for i in 0 ..< MP2K_MAX_CHANNELS:
     m.samplers[i] = Mp2kSampler()      # inactive, zero taps/phase/volumes
   for v in m.out_delay.mitems: v = 0
@@ -320,6 +309,50 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.reverb_w = 0
   m.frame_pos = 0
   m.resync_pending = true
+
+# =============================================================================
+# Runtime detection: learn the SoundMainRAM entry PC instead of matching a ROM
+# signature.
+#
+# How it works (all facts from pret m4a_internal.h + the loveemu MP2K summary,
+# plus this emulator's own runtime observation of the guest):
+#   * SOUND_INFO_PTR (0x03007FF0) -> SoundInfo, whose ident field is ID_NUMBER
+#     0x68736D53 at rest and ID_NUMBER+1 while SoundMain holds its lock. This
+#     identifies the engine with no ROM pattern whatsoever, on every m4a
+#     revision (custom drivers — e.g. Camelot's — never publish this magic).
+#   * The PCM mixer ("SoundMainRAM", per its name and the loveemu data map) is
+#     copied to RAM at init and jumped to from SoundMain while the lock is
+#     held, with the SoundInfo pointer in r0 (verified empirically on multiple
+#     m4a vintages by this project's harnesses; the mixer must receive the
+#     work-area pointer, and r0 is the ABI argument register).
+#   * So: once the ident magic is seen (frame poll), watch execution until an
+#     instruction is fetched from RAM (0x02/0x03 region) with r0 == &SoundInfo
+#     while ident == ID_NUMBER+1. The first such PC is the mixer entry — learn
+#     it and hook it every frame from then on, exactly like the old fixed hook.
+#   * Self-validating: the real mixer entry can ONLY execute with the lock
+#     held (SoundMain takes it before jumping). If a learned PC ever fires
+#     without the lock (nested-IRQ dispatcher in IWRAM, engine torn down and
+#     buffer reused...), the learn was wrong: blocklist it and re-learn.
+#
+# Hot-path cost: once learned, the per-instruction work is the same single PC
+# compare the fixed-address hook always did. While probing (from engine init
+# to first mixer pass, typically <2 frames) each RAM-fetched instruction adds
+# one register compare before the out-of-line probe. When HLE is off, nothing
+# runs at all.
+# =============================================================================
+
+proc unlearn_hook*(m: Mp2kHle) =
+  ## The learned PC fired without the engine lock held — impossible for the
+  ## real SoundMainRAM entry — so the learn was wrong. Blocklist the PC and
+  ## let the frame poll re-arm probing.
+  if m.hook_addr != 0xFFFFFFFF'u32 and m.probe_block_n < m.probe_block.len:
+    m.probe_block[m.probe_block_n] = m.hook_addr
+    inc m.probe_block_n
+  inc m.probe_fails
+  m.hook_addr  = 0xFFFFFFFF'u32
+  m.entry_addr = 0xFFFFFFFF'u32
+  m.engaged = false
+  for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
 
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
   ## Called once per engine audio frame (at the SoundMainRAM hook). Re-reads
@@ -528,15 +561,55 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.resync_pending = false   # one full re-latch pass done; back to normal keying
 
 proc mixer_hook*(m: Mp2kHle) =
-  ## PC-hook entry: called from cpu.tick when r15 reaches SoundMainRAM. Reads the
-  ## SoundInfo pointer and, if valid, refreshes the mixer state. The hook fires at
-  ## the mixer's entry, where the channel status still carries the START bit (the
-  ## real mixer clears it as it processes each note-on), so this is where we detect
-  ## (re)triggers.
+  ## PC-hook entry: called from cpu.tick when r15 reaches the learned
+  ## SoundMainRAM entry. Reads the SoundInfo pointer and, if the engine lock is
+  ## held (ident == ID_NUMBER+1 — always true at the real mixer entry, since
+  ## SoundMain takes the lock before jumping here), refreshes the mixer state.
+  ## The hook fires at the mixer's entry, where the channel status still
+  ## carries the START bit (the real mixer clears it as it processes each
+  ## note-on), so this is where we detect (re)triggers. A fire WITHOUT the
+  ## lock means the learned PC was wrong: unlearn and re-probe.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
-  if (sip shr 24) == 0: return                 # not yet initialised
-  if m.rd32(sip + SI_MAGIC) != MP2K_MAGIC: return
-  m.on_frame(sip)
+  if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
+    if m.rd32(sip + SI_MAGIC) == MP2K_IDENT_LOCK:
+      m.on_frame(sip)
+      return
+  m.unlearn_hook()
+
+proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
+  ## Learning probe, called from cpu.tick only while probing is armed and only
+  ## for instructions fetched from RAM with r0 == &SoundInfo (both prefiltered
+  ## inline). If the engine lock is held right now, this PC is the SoundMainRAM
+  ## mixer entry: learn it and run the first shadow pass immediately (the entry
+  ## has not executed yet, so channel state is exactly what the hook would see).
+  if m.rd32(m.probe_sound_info + SI_MAGIC) != MP2K_IDENT_LOCK: return
+  for i in 0 ..< m.probe_block_n:
+    if m.probe_block[i] == pc: return          # previously invalidated
+  m.hook_addr  = pc                            # pc may carry the Thumb bit; the
+  m.entry_addr = pc and not 1'u32              # hook compare uses it verbatim
+  m.probing = false
+  m.dbg_hook_fires.inc
+  m.mixer_hook()
+
+proc mp2k_frame_poll*(m: Mp2kHle) =
+  ## Once-per-frame presence check (2 IWRAM reads; called from step_frame only
+  ## while mp2k_hle is enabled). Version-independent: follows SOUND_INFO_PTR
+  ## (0x03007FF0) and looks for the SoundInfo ident magic. Arms PC probing
+  ## until the mixer entry is learned; disengages the HLE if the magic ever
+  ## disappears (engine torn down) so stale samplers cannot keep looping.
+  let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
+  var ident = 0'u32
+  if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
+    ident = m.rd32(sip + SI_MAGIC)
+  if m.hook_addr != 0xFFFFFFFF'u32:
+    if ident != MP2K_IDENT_IDLE and ident != MP2K_IDENT_LOCK and m.engaged:
+      m.engaged = false
+      for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
+    return
+  # Arm probing only when the engine is at rest (ident == ID_NUMBER): arming
+  # mid-pass could learn a mid-mixer PC instead of the entry.
+  m.probing = ident == MP2K_IDENT_IDLE and m.probe_fails < MP2K_PROBE_MAX_FAILS
+  if m.probing: m.probe_sound_info = sip
 
 when defined(mp2kwav):
   proc mp2k_decode_bdpcm*(data: openArray[byte]; num_samples: int): seq[float32] =
@@ -731,8 +804,9 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   (eoutl, eoutr)
 
 proc init_mp2k*(m: Mp2kHle) =
-  ## Run detection against the loaded cartridge. Safe to call after the ROM is
-  ## in memory. Leaves hook_addr = 0xFFFFFFFF when the engine isn't found.
+  ## Initialise mixer state. Detection is fully runtime-driven (see
+  ## mp2k_frame_poll / probe_pc): nothing to scan here — the hook address is
+  ## learned once the game's sound engine initialises and runs its first pass.
   m.frame_len = APU_SAMPLE_RATE div 60
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   # One output frame of DirectSound double-buffer latency (see render_sample). A
@@ -740,6 +814,3 @@ proc init_mp2k*(m: Mp2kHle) =
   m.db_delay = m.frame_len
   m.out_delay = newSeq[int16](m.frame_len * 2)
   m.out_delay_w = 0
-  let (hook, entry) = detect_mp2k(m.gba.cartridge.rom)
-  m.hook_addr = hook
-  m.entry_addr = entry

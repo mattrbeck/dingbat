@@ -4,7 +4,6 @@
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
-from ../common/linkproto import crc32
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -529,8 +528,17 @@ type
 
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
-    hook_addr*:  uint32     # SoundMainRAM PC past prologue (shadow read point)
-    entry_addr*: uint32     # SoundMainRAM first instruction (skip-mode return point)
+    hook_addr*:  uint32     # learned SoundMainRAM entry PC (0xFFFFFFFF = not learned)
+    entry_addr*: uint32     # hook_addr with the Thumb bit cleared (skip-mode return point)
+    # Runtime-detection state (see mp2k.nim "Runtime detection"): the frame
+    # poll arms `probing` once the SoundInfo ident magic appears; cpu.tick then
+    # watches for the first RAM-fetched PC with r0 == &SoundInfo while the
+    # engine lock is held — that is the mixer entry.
+    probing*:    bool       # PC probe armed (only until the hook is learned)
+    probe_sound_info*: uint32  # &SoundInfo cached for the probe's lock check
+    probe_block*: array[8, uint32]  # invalidated candidates (mislearned PCs)
+    probe_block_n*: int
+    probe_fails*: int       # mislearn count; probing gives up at 8
     skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
@@ -629,6 +637,8 @@ proc get_sample*(apu: APU)
 proc new_mp2k*(gba: GBA): Mp2kHle
 proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
+proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
+proc mp2k_frame_poll*(m: Mp2kHle)
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
@@ -802,8 +812,8 @@ proc post_init*(gba: GBA) =
     if g.dma.pending != 0 and not g.bus.dma_active:
       g.dma.run_pending()
   gba.handle_saves()
-  # EXPLORATORY: MP2K HLE. Detection runs unconditionally (cheap) so the hook
-  # address is ready; mixing only happens when gba.mp2k_hle is set.
+  # EXPLORATORY: MP2K HLE. Detection is runtime-driven (per-frame poll + PC
+  # probe, see mp2k.nim); nothing runs unless gba.mp2k_hle is set.
   gba.mp2k = new_mp2k(gba)
   gba.mp2k.init_mp2k()
   if not gba.run_bios:
@@ -872,6 +882,10 @@ proc refresh_cheat_rom_patches*(gba: GBA) =
 
 proc step_frame*(gba: GBA) =
   gba.apply_cheats()
+  # EXPLORATORY: MP2K HLE — cheap per-frame presence poll + probe arming (runs
+  # only when the HLE is enabled; see mp2k.nim "Runtime detection").
+  if gba.mp2k_hle and gba.mp2k != nil:
+    gba.mp2k.mp2k_frame_poll()
   gba.cpu.count_cycles = 0
   while not gba.ppu.frame:
     gba.cpu.tick()
