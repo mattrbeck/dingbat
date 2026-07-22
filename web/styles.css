@@ -3373,7 +3373,10 @@ body.rollback-mode #save-sep {
      subtracts padding from its contain-fit measurements, so both the
      pre-JS fallback and the JS-pinned size respect the rails. */
   body.running #stage {
-    padding: 0 var(--rail-w);
+    /* The 60px bottom band keeps the frame clear of the Select/Start
+       pills (bottom-inboard of the clusters) on aspect ratios where the
+       contain-fit would otherwise reach the stage's bottom edge. */
+    padding: 0 var(--rail-w) 60px;
   }
   /* A connected gamepad hides the touch rails ("hide touch controls with a
      controller") — give the reserved rail width back to the frame. */
@@ -3408,12 +3411,15 @@ body.rollback-mode #save-sep {
     height: 46px;
     pointer-events: auto;
   }
-  /* Select / Start top each rail: rarest press, furthest reach. */
+  /* Select / Start sit inboard of their cluster on the bottom row — the
+     GBA's own bottom placement, and a shorter thumb sweep than topping
+     the rail stack. The insets clear the cluster widths (d-pad left,
+     A/B right); the stage's bottom band above keeps the frame off them. */
   #select-start {
     position: absolute;
-    left: calc(14px + var(--safe-l));
-    right: calc(14px + var(--safe-r));
-    bottom: calc(10px + var(--safe-b) + var(--rail-btn-h, 190px) + 82px);
+    left: calc(26px + var(--safe-l) + var(--rail-cluster-l, 190px));
+    right: calc(26px + var(--safe-r) + var(--rail-cluster-r, 161px));
+    bottom: calc(18px + var(--safe-b));
     grid-area: auto;
     /* The shared landscape block's justify-self: center would shrink-wrap
        and re-center this absolutely-positioned row (grid self-alignment
@@ -3423,7 +3429,9 @@ body.rollback-mode #save-sep {
     pointer-events: none;
   }
   .pad-pill {
-    flex: 0 0 150px;
+    /* 0 1: allowed to shrink so the two pills never collide mid-screen
+       on the narrowest tablet-tier viewports. */
+    flex: 0 1 150px;
     pointer-events: auto;
   }
   body.large-controls #dpad,
@@ -3435,9 +3443,13 @@ body.rollback-mode #save-sep {
     width: calc(var(--btn-size) * 2.2);
     height: 240px;
   }
-  body.large-controls #lr,
-  body.large-controls #select-start {
+  body.large-controls #lr {
     --rail-btn-h: 240px;
+  }
+  body.large-controls #select-start {
+    /* Cluster widths grow in large mode: 240px d-pad, 92px * 2.2 A/B. */
+    --rail-cluster-l: 240px;
+    --rail-cluster-r: 203px;
   }
   body.large-controls .pad-shoulder {
     flex: 0 0 170px;
