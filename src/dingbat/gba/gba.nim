@@ -4,6 +4,7 @@
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
+from ../common/linkproto import crc32
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
@@ -493,6 +494,36 @@ type
     resample_freq*:     int
     output_freq*:       int
 
+  # EXPLORATORY: MP2K/M4A sound-engine HLE state (see mp2k.nim). Off by default.
+  Mp2kSampler* = object
+    active*:      bool
+    wave_data*:   uint32
+    rom_off*:     uint32    # cached ROM byte offset of the sample data (in_rom)
+    in_rom*:      bool      # sample bytes live in cartridge ROM (fast path)
+    num_samples*: uint32
+    loop_pos*:    uint32
+    looping*:     bool
+    freq*:        uint32
+    position*:    float32
+    vol_l0*, vol_l1*: float32
+    vol_r0*, vol_r1*: float32
+
+  Mp2kHle* = ref object
+    gba* {.cursor.}: GBA
+    hook_addr*:  uint32     # SoundMainRAM PC past prologue (shadow read point)
+    entry_addr*: uint32     # SoundMainRAM first instruction (skip-mode return point)
+    skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
+    engaged*:    bool       # a valid SoundInfo has been observed at least once
+    frame_seen*: bool
+    samplers*:   array[12, Mp2kSampler]
+    frame_len*:  int
+    frame_pos*:  int
+    compressed_skipped*: int
+    dbg_skip_fires*: int
+    dbg_hook_fires*: int
+    dbg_out_energy*: float64
+    dbg_out_count*:  int
+
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
@@ -514,6 +545,9 @@ type
     cpu*:        CPU
     ppu*:        PPU
     apu*:        APU
+    # EXPLORATORY: MP2K/M4A sound-engine HLE (off by default). See mp2k.nim.
+    mp2k*:       Mp2kHle
+    mp2k_hle*:   bool
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine
@@ -548,6 +582,10 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc timer_overflow*(apu: APU; timer: int)
 proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
+proc new_mp2k*(gba: GBA): Mp2kHle
+proc init_mp2k*(m: Mp2kHle)
+proc mixer_hook*(m: Mp2kHle)
+proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
 proc request_immediate*(dma: DMA)
@@ -612,6 +650,7 @@ include timer
 include serial
 include dma
 include bus
+include mp2k
 
 # Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)
@@ -715,6 +754,10 @@ proc post_init*(gba: GBA) =
     if g.dma.pending != 0 and not g.bus.dma_active:
       g.dma.run_pending()
   gba.handle_saves()
+  # EXPLORATORY: MP2K HLE. Detection runs unconditionally (cheap) so the hook
+  # address is ready; mixing only happens when gba.mp2k_hle is set.
+  gba.mp2k = new_mp2k(gba)
+  gba.mp2k.init_mp2k()
   if not gba.run_bios:
     gba.cpu.skip_bios()
 
