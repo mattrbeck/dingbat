@@ -98,6 +98,40 @@
   --badge-gbc-fg: #5fd6de;
   --badge-gbc-bg: rgba(79, 208, 216, 0.16);
 
+  /* ---- Touch controls (on-screen d-pad / buttons). Default to the neutral
+     surface look; device themes override these to match the real handheld's
+     buttons. --pad-* covers every pad; --btn-ab-* overrides just A/B; the
+     --frame-line brackets the screen (top bar + control strip edges). ---- */
+  --pad-top: var(--surface-3);
+  --pad-bottom: var(--surface-1);
+  --pad-border: var(--border-2);
+  --pad-label: var(--text-dim);
+  --btn-ab-top: var(--pad-top);
+  --btn-ab-bottom: var(--pad-bottom);
+  --btn-ab-border: var(--pad-border);
+  --btn-ab-border-w: 1px;
+  --btn-ab-label: var(--pad-label);
+  --pill-top: var(--pad-top);
+  --pill-bottom: var(--pad-bottom);
+  --pill-label: var(--pad-label);
+  --frame-line: var(--border);
+  /* Decorative double pinstripe across the control panel (Famicom); the
+     two lines sit just through the bottom of the d-pad / A-B cluster. */
+  --panel-stripe: transparent;
+
+  /* Chrome (top bar + screen surround + control panel). Device themes paint
+     these the shell colour with legible dark/light ink; defaults keep the
+     dark UI look so amber/black/light are unchanged. */
+  --chrome-ink: var(--text);
+  --chrome-ink-dim: var(--text-dim);
+  --chrome-btn-top: var(--surface-2);
+  --chrome-btn-bottom: var(--surface-2-lo);
+  --chrome-btn-border: var(--border);
+  --chrome-btn-hover-top: var(--surface-3);
+  --chrome-btn-hover-bottom: var(--surface-2);
+  --control-strip-bottom: var(--bg);
+  --home-bg: transparent;
+
   --radius: 11px;
   --radius-sm: 8px;
   --radius-lg: 18px;
@@ -256,168 +290,553 @@
   background: rgba(24, 32, 52, 0.07);
 }
 
-/* ---- Indigo: AGB-001 indigo shell, periwinkle accent ---- */
+/* ---- Indigo: translucent purple AGB-001 shell, blue-violet accent.
+       Hue/accent sampled from a real purple GBA (H~250). ---- */
 :root[data-theme="indigo"] {
-  --bg: #131226;
-  --stage: #090818;
-  --surface-1: #1c1b36;
-  --surface-2: #262347;
-  --surface-3: #312d5c;
-  --surface-hover: #3b3670;
+  --bg: #0d0b17;
+  --stage: #050408;
+  --surface-1: #161328;
+  --surface-2: #1d1834;
+  --surface-3: #262143;
+  --surface-hover: #312a53;
 
-  --accent-rgb: 151, 147, 240;
-  --accent-hi-rgb: 198, 196, 249;
-  --text-rgb: 233, 233, 248;
-  --stage-rgb: 9, 8, 24;
-  --surface-1-rgb: 28, 27, 54;
+  --accent-rgb: 127, 106, 231;
+  --accent-hi-rgb: 205, 199, 240;
+  --text-rgb: 236, 235, 239;
+  --stage-rgb: 5, 4, 8;
+  --surface-1-rgb: 22, 19, 40;
 
-  --text: #e9e9f8;
-  --text-dim: #9d9fc6;
-  --text-faint: #676a94;
+  --text: #ecebef;
+  --text-dim: #a19fac;
+  --text-faint: #696774;
 
-  --accent: #9793f0;
-  --accent-2: #b0adf5;
-  --accent-hi: #c6c4f9;
-  --accent-ink: #100e33;
+  --accent: #7f6ae7;
+  --accent-2: #ab9eeb;
+  --accent-hi: #cdc7f0;
+  --accent-ink: #0e0637;
   --accent-glow: rgba(var(--accent-rgb), 0.35);
 
-  --topbar-top: #201e3c;
-  --topbar-bottom: #161430;
-  --surface-2-lo: #1f1d3d;
-  --stage-top: #100f22;
-  --control-strip-top: #121126;
+  --topbar-top: #19152d;
+  --topbar-bottom: #110f1f;
+  --surface-2-lo: #1a162f;
+  --stage-top: #0b0913;
+  --control-strip-top: #0e0b18;
 
-  --accent-tint-top: #232052;
-  --btn-active-bottom: #1b1941;
-  --pad-pressed-bottom: #171536;
+  --accent-tint-top: #1c1738;
+  --btn-active-bottom: #15112a;
+  --pad-pressed-bottom: #110e22;
 
-  --drop-overlay-bg: rgba(12, 11, 28, 0.82);
-  --net-stall-bg: rgba(14, 12, 34, 0.75);
+  --drop-overlay-bg: rgba(11, 9, 19, 0.82);
+  --net-stall-bg: rgba(17, 13, 33, 0.75);
 
-  --cart-gba-label-lo: #6b66d6;
+  --cart-gba-label-lo: #705cd6;
+
+  /* Chrome = shell colour (#675ba0) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #6c60a5;
+  --topbar-bottom: #5a508c;
+  --stage: #675ba0;
+  --stage-top: #756aaa;
+  --control-strip-top: #695da3;
+  --control-strip-bottom: #615596;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.42);
+  --chrome-ink: #fbf7fd;
+  --chrome-ink-dim: #d9d2de;
+  --chrome-btn-top: rgba(0, 0, 0, 0.24);
+  --chrome-btn-bottom: rgba(0, 0, 0, 0.32);
+  --chrome-btn-border: rgba(255, 255, 255, 0.22);
+  --chrome-btn-hover-top: rgba(0, 0, 0, 0.34);
+  --chrome-btn-hover-bottom: rgba(0, 0, 0, 0.44);
+
+  /* GBA buttons: pale off-white plastic (#d5d4d9) */
+  --pad-top: #e2e2e5;
+  --pad-bottom: #c5c4cb;
+  --pad-border: rgba(20, 16, 12, 0.32);
+  --pad-label: #3a3a40;
 }
 
-/* ---- Fuchsia: GBA fuchsia-pink shell, hot pink accent ---- */
+/* ---- Fuchsia: milky translucent fuchsia-pink GBA shell, dusty-rose accent.
+       Hue/accent sampled from a real fuchsia GBA (H~336) — softer and warmer
+       than a neon hot pink. ---- */
 :root[data-theme="fuchsia"] {
-  --bg: #1e1020;
-  --stage: #0e0710;
-  --surface-1: #2a1730;
-  --surface-2: #371e3f;
-  --surface-3: #452753;
-  --surface-hover: #533063;
+  --bg: #170a0f;
+  --stage: #090406;
+  --surface-1: #28121b;
+  --surface-2: #351823;
+  --surface-3: #44202e;
+  --surface-hover: #54293a;
 
-  --accent-rgb: 255, 123, 197;
-  --accent-hi-rgb: 255, 189, 226;
-  --text-rgb: 244, 233, 244;
-  --stage-rgb: 14, 7, 16;
-  --surface-1-rgb: 42, 23, 48;
+  --accent-rgb: 232, 115, 154;
+  --accent-hi-rgb: 240, 204, 216;
+  --text-rgb: 239, 235, 237;
+  --stage-rgb: 9, 4, 6;
+  --surface-1-rgb: 40, 18, 27;
 
-  --text: #f4e9f4;
-  --text-dim: #bb9fc0;
-  --text-faint: #83678c;
+  --text: #efebed;
+  --text-dim: #ad9fa4;
+  --text-faint: #74676c;
 
-  --accent: #ff7bc5;
-  --accent-2: #ff9dd4;
-  --accent-hi: #ffbde2;
-  --accent-ink: #32001c;
+  --accent: #e8739a;
+  --accent-2: #eca2bb;
+  --accent-hi: #f0ccd8;
+  --accent-ink: #340414;
   --accent-glow: rgba(var(--accent-rgb), 0.32);
 
-  --topbar-top: #2e1a35;
-  --topbar-bottom: #221226;
-  --surface-2-lo: #2d1934;
-  --stage-top: #170c19;
-  --control-strip-top: #190d1c;
+  --topbar-top: #2e151f;
+  --topbar-bottom: #200e15;
+  --surface-2-lo: #301520;
+  --stage-top: #13090d;
+  --control-strip-top: #190b10;
 
-  --accent-tint-top: #3a1c30;
-  --btn-active-bottom: #2e1526;
-  --pad-pressed-bottom: #281221;
+  --accent-tint-top: #381724;
+  --btn-active-bottom: #2a111b;
+  --pad-pressed-bottom: #220e16;
 
-  --drop-overlay-bg: rgba(20, 9, 22, 0.82);
-  --net-stall-bg: rgba(30, 12, 26, 0.75);
+  --drop-overlay-bg: rgba(19, 9, 13, 0.82);
+  --net-stall-bg: rgba(33, 13, 21, 0.75);
 
-  --cart-gba-label-lo: #d64fa0;
+  --cart-gba-label-lo: #d1618e;
+
+  /* Chrome = shell colour (#af748c) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #b37a91;
+  --topbar-bottom: #a4617c;
+  --stage: #af748c;
+  --stage-top: #b88499;
+  --control-strip-top: #b1778f;
+  --control-strip-bottom: #a96a84;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* GBA buttons: pale off-white plastic (#d5d4d9) */
+  --pad-top: #e2e2e5;
+  --pad-bottom: #c5c4cb;
+  --pad-border: rgba(20, 16, 12, 0.32);
+  --pad-label: #3a3a40;
 }
 
-/* ---- Glacier: translucent ice-blue GBA shell, cool blue accent ---- */
+/* ---- Glacier: milky translucent clear-blue GBA shell, icy periwinkle accent.
+       Hue/accent sampled from a real glacier GBA (H~222) — periwinkle-blue,
+       not the cyan it used to be. ---- */
 :root[data-theme="glacier"] {
-  --bg: #0d151d;
-  --stage: #05090d;
-  --surface-1: #152230;
-  --surface-2: #1d2e40;
-  --surface-3: #273c52;
-  --surface-hover: #314a64;
+  --bg: #0b0e16;
+  --stage: #040608;
+  --surface-1: #131927;
+  --surface-2: #192133;
+  --surface-3: #222b42;
+  --surface-hover: #2b3752;
 
-  --accent-rgb: 103, 209, 240;
-  --accent-hi-rgb: 182, 234, 251;
-  --text-rgb: 232, 240, 247;
-  --stage-rgb: 5, 9, 13;
-  --surface-1-rgb: 21, 34, 48;
+  --accent-rgb: 118, 155, 229;
+  --accent-hi-rgb: 204, 217, 240;
+  --text-rgb: 235, 236, 239;
+  --stage-rgb: 4, 6, 8;
+  --surface-1-rgb: 19, 25, 39;
 
-  --text: #e8f0f7;
-  --text-dim: #94a9bc;
-  --text-faint: #5d7186;
+  --text: #ebecef;
+  --text-dim: #a0a3ac;
+  --text-faint: #686b74;
 
-  --accent: #67d1f0;
-  --accent-2: #8edff7;
-  --accent-hi: #b6eafb;
-  --accent-ink: #04222e;
+  --accent: #769be5;
+  --accent-2: #a4bbea;
+  --accent-hi: #ccd9f0;
+  --accent-ink: #061537;
   --accent-glow: rgba(var(--accent-rgb), 0.3);
 
-  --topbar-top: #1a2836;
-  --topbar-bottom: #121c27;
-  --surface-2-lo: #182634;
-  --stage-top: #0c1218;
-  --control-strip-top: #0e161e;
+  --topbar-top: #161d2c;
+  --topbar-bottom: #0f141f;
+  --surface-2-lo: #171e2e;
+  --stage-top: #090c13;
+  --control-strip-top: #0c0f18;
 
-  --accent-tint-top: #10303e;
-  --btn-active-bottom: #0c2631;
-  --pad-pressed-bottom: #0a212b;
+  --accent-tint-top: #182137;
+  --btn-active-bottom: #121929;
+  --pad-pressed-bottom: #0f1422;
 
-  --drop-overlay-bg: rgba(7, 13, 19, 0.82);
-  --net-stall-bg: rgba(6, 20, 28, 0.75);
+  --drop-overlay-bg: rgba(10, 12, 18, 0.82);
+  --net-stall-bg: rgba(14, 19, 32, 0.75);
 
-  --cart-gba-label-lo: #2fa5c9;
+  --cart-gba-label-lo: #5e85d4;
+
+  /* Chrome = shell colour (#999db6) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #9fa3ba;
+  --topbar-bottom: #878ca9;
+  --stage: #999db6;
+  --stage-top: #a8abc1;
+  --control-strip-top: #9ca0b8;
+  --control-strip-bottom: #9094b0;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* GBA buttons: pale off-white plastic (#d5d4d9) */
+  --pad-top: #e2e2e5;
+  --pad-bottom: #c5c4cb;
+  --pad-border: rgba(20, 16, 12, 0.32);
+  --pad-label: #3a3a40;
 }
 
-/* ---- Emerald: GB/GBA green family, emerald accent ---- */
-:root[data-theme="emerald"] {
-  --bg: #0c1712;
-  --stage: #040906;
-  --surface-1: #14241b;
-  --surface-2: #1b3024;
-  --surface-3: #253f30;
-  --surface-hover: #2e4e3c;
+/* ---- Kiwi: translucent green Game Boy Color (Nintendo's "Kiwi"),
+       grass-green accent sampled from the real shell (H~110). ---- */
+:root[data-theme="kiwi"] {
+  --bg: #0c170b;
+  --stage: #050804;
+  --surface-1: #162813;
+  --surface-2: #1c3418;
+  --surface-3: #254321;
+  --surface-hover: #2f532a;
 
-  --accent-rgb: 78, 224, 138;
-  --accent-hi-rgb: 169, 244, 200;
-  --text-rgb: 232, 244, 236;
-  --stage-rgb: 4, 9, 6;
-  --surface-1-rgb: 20, 36, 27;
+  --accent-rgb: 101, 219, 77;
+  --accent-hi-rgb: 198, 237, 192;
+  --text-rgb: 236, 239, 235;
+  --stage-rgb: 5, 8, 4;
+  --surface-1-rgb: 22, 40, 19;
 
-  --text: #e8f4ec;
-  --text-dim: #97b3a2;
-  --text-faint: #5f7a6a;
+  --text: #ecefeb;
+  --text-dim: #a1ac9f;
+  --text-faint: #697467;
 
-  --accent: #4ee08a;
-  --accent-2: #7cecac;
-  --accent-hi: #a9f4c8;
-  --accent-ink: #03230f;
+  --accent: #65db4d;
+  --accent-2: #97e189;
+  --accent-hi: #c6edc0;
+  --accent-ink: #0c3905;
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
-  --topbar-top: #182b20;
-  --topbar-bottom: #101d16;
-  --surface-2-lo: #172a1f;
-  --stage-top: #0a130d;
-  --control-strip-top: #0d1810;
+  --topbar-top: #182d15;
+  --topbar-bottom: #111f0f;
+  --surface-2-lo: #192f16;
+  --stage-top: #0b1309;
+  --control-strip-top: #0d180b;
 
-  --accent-tint-top: #113425;
-  --btn-active-bottom: #0d281c;
-  --pad-pressed-bottom: #0b2218;
+  --accent-tint-top: #1b3916;
+  --btn-active-bottom: #142a10;
+  --pad-pressed-bottom: #10230e;
 
-  --drop-overlay-bg: rgba(7, 15, 10, 0.82);
-  --net-stall-bg: rgba(6, 22, 12, 0.75);
+  --drop-overlay-bg: rgba(11, 19, 9, 0.82);
+  --net-stall-bg: rgba(16, 33, 13, 0.75);
 
-  --cart-gba-label-lo: #26b365;
+  --cart-gba-label-lo: #4dcc33;
+
+  /* Chrome = shell colour (#6ee126) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #74e22f;
+  --topbar-bottom: #60cc1c;
+  --stage: #6ee126;
+  --stage-top: #7de43c;
+  --control-strip-top: #71e22a;
+  --control-strip-bottom: #66da1e;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* GBC buttons: black plastic (#282a30) */
+  --pad-top: #34363e;
+  --pad-bottom: #1a1b1f;
+  --pad-border: rgba(0, 0, 0, 0.55);
+  --pad-label: #cfced4;
+}
+
+/* ---- DMG: the original Game Boy — warm-grey brick chrome with the
+       iconic pea-green LCD as the accent (screen green H~82). ---- */
+:root[data-theme="dmg"] {
+  --bg: #111110;
+  --stage: #070706;
+  --surface-1: #1f1e1c;
+  --surface-2: #282824;
+  --surface-3: #34332f;
+  --surface-hover: #41413c;
+
+  --accent-rgb: 156, 201, 84;
+  --accent-hi-rgb: 205, 225, 183;
+  --text-rgb: 237, 237, 237;
+  --stage-rgb: 7, 7, 6;
+  --surface-1-rgb: 31, 30, 28;
+
+  --text: #ededed;
+  --text-dim: #a7a6a5;
+  --text-faint: #6f6e6d;
+
+  --accent: #9cc954;
+  --accent-2: #b1d283;
+  --accent-hi: #cde1b7;
+  --accent-ink: #273c07;
+  --accent-glow: rgba(var(--accent-rgb), 0.28);
+
+  --topbar-top: #23221f;
+  --topbar-bottom: #181816;
+  --surface-2-lo: #242421;
+  --stage-top: #0f0f0d;
+  --control-strip-top: #131311;
+
+  --accent-tint-top: #2b331c;
+  --btn-active-bottom: #202615;
+  --pad-pressed-bottom: #1b1f11;
+
+  --drop-overlay-bg: rgba(15, 14, 13, 0.82);
+  --net-stall-bg: rgba(25, 30, 16, 0.75);
+
+  --cart-gba-label-lo: #7da63a;
+
+  /* Chrome = shell colour (#c2bcb9) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #c7c1be;
+  --topbar-bottom: #b4aca9;
+  --stage: #c2bcb9;
+  --stage-top: #cec9c7;
+  --control-strip-top: #c4bfbc;
+  --control-strip-bottom: #bbb4b1;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* DMG: black d-pad (#262828), magenta A/B (#9f295c),
+     grey Select/Start (#7f797c), blue-violet labels */
+  --pad-top: #323535;
+  --pad-bottom: #171818;
+  --pad-border: rgba(0, 0, 0, 0.55);
+  --pad-label: #9d98db;
+  --btn-ab-top: #b32e68;
+  --btn-ab-bottom: #87234e;
+  --btn-ab-border: rgba(0, 0, 0, 0.4);
+  --btn-ab-label: #f3dbe7;
+  --pill-top: #8c8689;
+  --pill-bottom: #6f6a6d;
+  /* Dark violet on the grey pills — the mid-violet pad label washed out */
+  --pill-label: #211d33;
+}
+
+/* ---- Atomic Purple: translucent Atomic Purple Game Boy Color — an
+       orchid violet, more magenta than Indigo (H~282). ---- */
+:root[data-theme="atomic-purple"] {
+  --bg: #120b16;
+  --stage: #070408;
+  --surface-1: #211327;
+  --surface-2: #2b1933;
+  --surface-3: #372242;
+  --surface-hover: #452b52;
+
+  --accent-rgb: 195, 110, 231;
+  --accent-hi-rgb: 231, 203, 240;
+  --text-rgb: 238, 235, 239;
+  --stage-rgb: 7, 4, 8;
+  --surface-1-rgb: 33, 19, 39;
+
+  --text: #eeebef;
+  --text-dim: #a8a0ac;
+  --text-faint: #706874;
+
+  --accent: #c36ee7;
+  --accent-2: #d5a3eb;
+  --accent-hi: #e7cbf0;
+  --accent-ink: #290638;
+  --accent-glow: rgba(var(--accent-rgb), 0.32);
+
+  --topbar-top: #25162c;
+  --topbar-bottom: #1a0f1f;
+  --surface-2-lo: #26172e;
+  --stage-top: #100913;
+  --control-strip-top: #140c18;
+
+  --accent-tint-top: #2d1738;
+  --btn-active-bottom: #21112a;
+  --pad-pressed-bottom: #1c0e22;
+
+  --drop-overlay-bg: rgba(15, 10, 18, 0.82);
+  --net-stall-bg: rgba(26, 13, 33, 0.75);
+
+  --cart-gba-label-lo: #ae54d4;
+
+  /* Chrome = shell colour (#9769a9) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #9b6fad;
+  --topbar-bottom: #88599b;
+  --stage: #9769a9;
+  --stage-top: #a279b2;
+  --control-strip-top: #996cab;
+  --control-strip-bottom: #905fa3;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.42);
+  --chrome-ink: #fbf7fd;
+  --chrome-ink-dim: #d9d2de;
+  --chrome-btn-top: rgba(0, 0, 0, 0.24);
+  --chrome-btn-bottom: rgba(0, 0, 0, 0.32);
+  --chrome-btn-border: rgba(255, 255, 255, 0.22);
+  --chrome-btn-hover-top: rgba(0, 0, 0, 0.34);
+  --chrome-btn-hover-bottom: rgba(0, 0, 0, 0.44);
+
+  /* GBC buttons: black plastic (#282a30) */
+  --pad-top: #34363e;
+  --pad-bottom: #1a1b1f;
+  --pad-border: rgba(0, 0, 0, 0.55);
+  --pad-label: #cfced4;
+}
+
+/* ---- Daiei: the Daiei Hawks orange GBA — a burnt orange, redder and
+       deeper than the default amber (H~22). ---- */
+:root[data-theme="daiei"] {
+  --bg: #160f0b;
+  --stage: #080605;
+  --surface-1: #271b14;
+  --surface-2: #32231a;
+  --surface-3: #412e23;
+  --surface-hover: #513a2c;
+
+  --accent-rgb: 235, 124, 51;
+  --accent-hi-rgb: 242, 210, 176;
+  --text-rgb: 239, 237, 236;
+  --stage-rgb: 8, 6, 5;
+  --surface-1-rgb: 39, 27, 20;
+
+  --text: #efedec;
+  --text-dim: #aba4a0;
+  --text-faint: #736c68;
+
+  --accent: #eb7c33;
+  --accent-2: #efa76c;
+  --accent-hi: #f2d2b0;
+  --accent-ink: #441904;
+  --accent-glow: rgba(var(--accent-rgb), 0.3);
+
+  --topbar-top: #2c1e17;
+  --topbar-bottom: #1e1510;
+  --surface-2-lo: #2d1f17;
+  --stage-top: #120d0a;
+  --control-strip-top: #18100c;
+
+  --accent-tint-top: #3b2214;
+  --btn-active-bottom: #2c190f;
+  --pad-pressed-bottom: #24150c;
+
+  --drop-overlay-bg: rgba(18, 13, 10, 0.82);
+  --net-stall-bg: rgba(34, 20, 11, 0.75);
+
+  --cart-gba-label-lo: #cf6a30;
+
+  /* Chrome = shell colour (#c76637) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #ca6c3e;
+  --topbar-bottom: #af5a30;
+  --stage: #c76637;
+  --stage-top: #cd754a;
+  --control-strip-top: #c9693a;
+  --control-strip-bottom: #bb6034;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* GBA buttons: pale off-white plastic (#d5d4d9) */
+  --pad-top: #e2e2e5;
+  --pad-bottom: #c5c4cb;
+  --pad-border: rgba(20, 16, 12, 0.32);
+  --pad-label: #3a3a40;
+}
+
+/* ---- Famicom: the Game Boy Micro Famicom edition — gold-warm chrome
+       with the Family Computer's garnet red as the accent (H~2). ---- */
+:root[data-theme="famicom"] {
+  --bg: #12110f;
+  --stage: #070706;
+  --surface-1: #211e1a;
+  --surface-2: #2a2722;
+  --surface-3: #37332d;
+  --surface-hover: #454038;
+
+  --accent-rgb: 224, 99, 92;
+  --accent-hi-rgb: 237, 194, 187;
+  --text-rgb: 238, 237, 237;
+  --stage-rgb: 7, 7, 6;
+  --surface-1-rgb: 33, 30, 26;
+
+  --text: #eeeded;
+  --text-dim: #a8a6a4;
+  --text-faint: #706e6c;
+
+  --accent: #e0635c;
+  --accent-2: #e38f87;
+  --accent-hi: #edc2bb;
+  --accent-ink: #340704;
+  --accent-glow: rgba(var(--accent-rgb), 0.3);
+
+  --topbar-top: #25221e;
+  --topbar-bottom: #191714;
+  --surface-2-lo: #26231f;
+  --stage-top: #0f0e0d;
+  --control-strip-top: #141210;
+
+  --accent-tint-top: #3c1613;
+  --btn-active-bottom: #2d100e;
+  --pad-pressed-bottom: #250d0c;
+
+  --drop-overlay-bg: rgba(15, 14, 13, 0.82);
+  --net-stall-bg: rgba(35, 13, 11, 0.75);
+
+  --cart-gba-label-lo: #c74343;
+
+  /* Chrome = Famicom gold (#b99c68) around the screen: top bar,
+     screen surround and control panel. Menus/home stay dark. */
+  --topbar-top: #bca16f;
+  --topbar-bottom: #af8e53;
+  --stage: #b99c68;
+  --stage-top: #b99c68;
+  --control-strip-top: #bb9e6b;
+  --control-strip-bottom: #b4955e;
+  --home-bg: var(--bg);
+  --frame-line: rgba(0, 0, 0, 0.34);
+  --chrome-ink: #211d1a;
+  --chrome-ink-dim: #524b45;
+  --chrome-btn-top: rgba(255, 255, 255, 0.30);
+  --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
+  --chrome-btn-border: rgba(0, 0, 0, 0.16);
+  --chrome-btn-hover-top: rgba(255, 255, 255, 0.44);
+  --chrome-btn-hover-bottom: rgba(255, 255, 255, 0.24);
+
+  /* Famicom: dark buttons (#33363b), bold red A/B rings (#b44148), and the
+     faceplate's double pinstripe across the control panel */
+  --pad-top: #3f4349;
+  --pad-bottom: #25272b;
+  --pad-border: rgba(0, 0, 0, 0.5);
+  --pad-label: #e6d9bf;
+  --btn-ab-top: #3f4349;
+  --btn-ab-bottom: #25272b;
+  --btn-ab-border: #b44148;
+  --btn-ab-border-w: 3px;
+  --btn-ab-label: #e6d9bf;
+  --dpad-border: #b44148;
+  --dpad-border-w: 3px;
+  --dpad-bar-line: transparent;
+  --panel-stripe: rgba(24, 18, 10, 0.62);
 }
 
 *,
@@ -507,8 +926,9 @@ button {
   align-items: center;
   gap: 8px;
   background: linear-gradient(180deg, var(--topbar-top), var(--topbar-bottom));
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 rgba(var(--hi-rgb), 0.03), 0 6px 18px rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid var(--frame-line);
+  /* No drop shadow: it cast a dark gradient band onto the stage below */
+  box-shadow: 0 1px 0 rgba(var(--hi-rgb), 0.03);
   position: relative;
   z-index: 50;
 }
@@ -527,9 +947,9 @@ button {
   align-items: center;
   justify-content: center;
   padding: 0;
-  color: var(--text-dim);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-2-lo));
-  border: 1px solid var(--border);
+  color: var(--chrome-ink-dim);
+  background: linear-gradient(180deg, var(--chrome-btn-top), var(--chrome-btn-bottom));
+  border: 1px solid var(--chrome-btn-border);
   border-radius: var(--radius-sm);
   box-shadow: inset 0 1px 0 var(--inset-hi), 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: pointer;
@@ -548,9 +968,9 @@ button {
 
 @media (hover: hover) {
   .icon-btn:hover {
-    color: var(--text);
-    background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
-    border-color: var(--border-2);
+    color: var(--chrome-ink);
+    background: linear-gradient(180deg, var(--chrome-btn-hover-top), var(--chrome-btn-hover-bottom));
+    border-color: var(--chrome-btn-border);
   }
 }
 
@@ -955,11 +1375,10 @@ body.fs #fullscreen-btn .ico-collapse {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(
-      120% 90% at 50% 0%,
-      var(--stage-top) 0%,
-      var(--stage) 70%
-    );
+  /* Flat: the old static radial gradient read as a permanent "glow" behind
+     the game frame even with Ambient glow off. The glow feature paints its
+     own canvas when enabled, so the surround stays flat here. */
+  background: var(--stage);
   overflow: hidden;
 }
 
@@ -999,8 +1418,11 @@ body.fs #fullscreen-btn .ico-collapse {
 body.running #canvas {
   display: block;
   border-radius: 4px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 18px 50px rgba(0, 0, 0, 0.6),
-    0 0 60px -20px var(--accent-glow);
+  /* Just a crisp 1px edge: the old 18px/50px drop shadow + accent glow read
+     as a permanent gradient behind the frame even with Ambient glow off. The
+     glow feature paints its own canvas, so the frame sits flat on the
+     background here. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 
 /* Ambient glow backdrop: a coarse sample of the frame, inflated past the
@@ -1058,6 +1480,9 @@ body.rumbling #canvas {
   flex-direction: column;
   padding: 24px;
   overflow-y: auto;
+  /* Home stays dark even when a device theme paints the stage the shell
+     colour (--home-bg defaults to transparent for non-device themes). */
+  background: var(--home-bg);
 }
 
 body.running #home {
@@ -2311,20 +2736,36 @@ body.debug-2p .home-tile-link {
   --swatch-accent: #9c5400;
 }
 .theme-chip[data-theme-name="indigo"] .theme-swatch {
-  --swatch-bg: #131226;
-  --swatch-accent: #9793f0;
+  --swatch-bg: #675ba0;
+  --swatch-accent: #7f6ae7;
 }
 .theme-chip[data-theme-name="fuchsia"] .theme-swatch {
-  --swatch-bg: #1e1020;
-  --swatch-accent: #ff7bc5;
+  --swatch-bg: #af748c;
+  --swatch-accent: #e8739a;
 }
 .theme-chip[data-theme-name="glacier"] .theme-swatch {
-  --swatch-bg: #0d151d;
-  --swatch-accent: #67d1f0;
+  --swatch-bg: #999db6;
+  --swatch-accent: #769be5;
 }
-.theme-chip[data-theme-name="emerald"] .theme-swatch {
-  --swatch-bg: #0c1712;
-  --swatch-accent: #4ee08a;
+.theme-chip[data-theme-name="kiwi"] .theme-swatch {
+  --swatch-bg: #6ee126;
+  --swatch-accent: #65db4d;
+}
+.theme-chip[data-theme-name="dmg"] .theme-swatch {
+  --swatch-bg: #c2bcb9;
+  --swatch-accent: #9cc954;
+}
+.theme-chip[data-theme-name="atomic-purple"] .theme-swatch {
+  --swatch-bg: #9769a9;
+  --swatch-accent: #c36ee7;
+}
+.theme-chip[data-theme-name="daiei"] .theme-swatch {
+  --swatch-bg: #c76637;
+  --swatch-accent: #eb7c33;
+}
+.theme-chip[data-theme-name="famicom"] .theme-swatch {
+  --swatch-bg: #b99c68;
+  --swatch-accent: #e0635c;
 }
 
 .modal-row {
@@ -2540,8 +2981,17 @@ body.debug-2p .home-tile-link {
   display: none;
   padding: 14px calc(16px + var(--safe-r)) calc(16px + var(--safe-b))
     calc(16px + var(--safe-l));
-  background: linear-gradient(180deg, var(--control-strip-top), var(--bg));
-  border-top: 1px solid var(--border);
+  /* Two optional pinstripes (--panel-stripe, transparent by default) run the
+     full width just through the bottom of the d-pad / A-B cluster — the
+     Famicom faceplate's double line. Lengths from the bottom clear the
+     Select/Start row (34px) + bottom padding + gap. No border-top: the strip
+     sits directly on the stage. */
+  background:
+    linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
+      calc(100% - var(--safe-b) - 112px) / 100% 4px no-repeat,
+    linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
+      calc(100% - var(--safe-b) - 100px) / 100% 4px no-repeat,
+    linear-gradient(180deg, var(--control-strip-top), var(--control-strip-bottom));
   gap: 14px;
   grid-template-rows: auto 1fr auto;
 }
@@ -2563,11 +3013,11 @@ body.debug-2p .home-tile-link {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-dim);
+  color: var(--pad-label);
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
-  border: 1px solid var(--border-2);
+  background: linear-gradient(180deg, var(--pad-top), var(--pad-bottom));
+  border: 1px solid var(--pad-border);
   box-shadow: inset 0 1px 0 var(--inset-hi), 0 2px 5px rgba(0, 0, 0, 0.4);
   transition: none;
   -webkit-tap-highlight-color: transparent;
@@ -2618,6 +3068,14 @@ body.debug-2p .home-tile-link {
   grid-template-rows: 1fr 1fr 1fr;
 }
 
+/* The d-pad keys can carry their own border (e.g. the Famicom's red outline
+   tracing the cross), independent of the other pads. Defaults follow the
+   shared pad border. */
+#dpad > .pad-btn {
+  border-color: var(--dpad-border, var(--pad-border));
+  border-width: var(--dpad-border-w, 1px);
+}
+
 #dpad > #upleft {
   grid-area: 1 / 1;
 }
@@ -2636,9 +3094,15 @@ body.debug-2p .home-tile-link {
 }
 #dpad > #dpad-center {
   grid-area: 2 / 2;
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
-  border-top: 1px solid var(--border-2);
-  border-bottom: 1px solid var(--border-2);
+  background: linear-gradient(180deg, var(--pad-top), var(--pad-bottom));
+  /* The horizontal bar's edge lines where it crosses the vertical bar. These
+     are interior — the cross's outer outline is fully drawn by the four arm
+     cells — so a theme with a bold d-pad outline (Famicom red) sets
+     --dpad-bar-line: transparent to keep the cross unsegmented. */
+  border-top: var(--dpad-border-w, 1px) solid
+    var(--dpad-bar-line, var(--dpad-border, var(--pad-border)));
+  border-bottom: var(--dpad-border-w, 1px) solid
+    var(--dpad-bar-line, var(--dpad-border, var(--pad-border)));
   position: relative;
 }
 #dpad > #dpad-center::after {
@@ -2765,6 +3229,13 @@ body.joystick-controls #joystick {
   border-radius: 50%;
   position: absolute;
   font-size: calc(var(--btn-size) * 0.32);
+  /* A/B carry their own device color (e.g. DMG magenta, Famicom red);
+     defaults to the shared pad look via --btn-ab-* → --pad-*. The pressed
+     state keeps winning through .pad-btn.pressed's higher specificity. */
+  color: var(--btn-ab-label);
+  background: linear-gradient(180deg, var(--btn-ab-top), var(--btn-ab-bottom));
+  border-color: var(--btn-ab-border);
+  border-width: var(--btn-ab-border-w);
 }
 
 #a {
@@ -2792,6 +3263,10 @@ body.joystick-controls #joystick {
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  /* Select/Start can differ from the d-pad (e.g. DMG's grey pills); defaults
+     to the shared pad look via --pill-* → --pad-*. */
+  color: var(--pill-label);
+  background: linear-gradient(180deg, var(--pill-top), var(--pill-bottom));
 }
 
 /*
@@ -3249,9 +3724,12 @@ body.rollback-mode #save-sep {
   }
   body.running #playback-controls {
     gap: 0;
-    border: 1px solid var(--border);
+    /* Chrome tokens, not the dark surface set: on shell-coloured top bars the
+       segmented cluster must stay frosted like the individual icon buttons,
+       or its (chrome-ink) glyphs go dark-on-dark. */
+    border: 1px solid var(--chrome-btn-border);
     border-radius: var(--radius-sm);
-    background: linear-gradient(180deg, var(--surface-2), var(--surface-2-lo));
+    background: linear-gradient(180deg, var(--chrome-btn-top), var(--chrome-btn-bottom));
     box-shadow: inset 0 1px 0 var(--inset-hi), 0 1px 2px rgba(0, 0, 0, 0.35);
     overflow: hidden;
   }
@@ -3265,7 +3743,7 @@ body.rollback-mode #save-sep {
   }
   /* Small separator between segments */
   #playback-controls .icon-btn + .icon-btn {
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--chrome-btn-border);
   }
   #playback-controls .icon-btn svg {
     width: 17px;

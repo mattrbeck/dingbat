@@ -3296,7 +3296,11 @@ const loadControlStyleFromStorage = async () => {
 // apply it synchronously before first paint (no flash of the wrong theme).
 // "amber" is the default and maps to no data-theme attribute at all.
 const THEME_KEY = "dingbat_theme";
-const THEME_NAMES = ["amber", "black", "light", "indigo", "fuchsia", "glacier", "emerald"];
+const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
+  "indigo", "fuchsia", "glacier", "daiei", "famicom"];
+// "emerald" was renamed to "kiwi" (the GBC's original color name). Migrate any
+// value persisted under the old name so it doesn't fall back to Amber.
+const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
 const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
 // Null on iOS standalone: the <head> boot script removes the meta there (iOS
 // paints the below-the-layout-viewport band with theme-color, drawing an
@@ -3304,6 +3308,7 @@ const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-ch
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
 const applyTheme = (name) => {
+  name = migrateTheme(name);
   if (!THEME_NAMES.includes(name)) name = "amber";
   if (name === "amber") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", name);
@@ -3316,8 +3321,12 @@ const applyTheme = (name) => {
   // live token so the CSS stays the single source of truth (the inline boot
   // script's map is only a pre-CSS hint).
   if (themeColorMeta) {
+    // The top bar meets the browser/status-bar chrome, so match --topbar-top
+    // (the shell colour on device themes), falling back to --bg.
+    const cs = getComputedStyle(document.documentElement);
     themeColorMeta.content =
-      getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      (cs.getPropertyValue("--topbar-top").trim() ||
+       cs.getPropertyValue("--bg").trim());
   }
 };
 
@@ -3332,7 +3341,11 @@ themeChips.forEach((chip) =>
 {
   let storedTheme = "amber";
   try { storedTheme = localStorage.getItem(THEME_KEY) || "amber"; } catch (e) {}
-  applyTheme(storedTheme);
+  const migrated = migrateTheme(storedTheme);
+  if (migrated !== storedTheme) {
+    try { localStorage.setItem(THEME_KEY, migrated); } catch (e) {}
+  }
+  applyTheme(migrated);
 }
 
 // --- Reset all settings ---

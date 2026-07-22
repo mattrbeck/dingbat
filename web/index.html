@@ -46,10 +46,15 @@
           themeMeta = null;
         }
         var t = localStorage.getItem("dingbat_theme");
+        if (t === "emerald") t = "kiwi"; // renamed to the GBC's original color name
         if (t && t !== "amber") {
           document.documentElement.setAttribute("data-theme", t);
-          var bg = { black: "#000000", light: "#e2e4ea", indigo: "#131226",
-                     fuchsia: "#1e1020", glacier: "#0d151d", emerald: "#0c1712" }[t];
+          // Device themes paint the top bar the shell colour, so the status
+          // bar / browser chrome should match the top bar, not the dark --bg.
+          var bg = { black: "#000000", light: "#e2e4ea", indigo: "#6c60a5",
+                     fuchsia: "#b37a91", glacier: "#9fa3ba", kiwi: "#74e22f",
+                     dmg: "#c7c1be", "atomic-purple": "#9b6fad",
+                     daiei: "#ca6c3e", famicom: "#bca16f" }[t];
           if (bg && themeMeta) themeMeta.content = bg;
         }
       } catch (e) {}
@@ -658,10 +663,14 @@
             <button type="button" class="theme-chip selected" data-theme-name="amber" role="radio" aria-checked="true"><span class="theme-swatch" aria-hidden="true"></span>Amber</button>
             <button type="button" class="theme-chip" data-theme-name="black" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Pure Black</button>
             <button type="button" class="theme-chip" data-theme-name="light" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Light</button>
+            <button type="button" class="theme-chip" data-theme-name="dmg" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>DMG</button>
+            <button type="button" class="theme-chip" data-theme-name="kiwi" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Kiwi</button>
+            <button type="button" class="theme-chip" data-theme-name="atomic-purple" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Atomic Purple</button>
             <button type="button" class="theme-chip" data-theme-name="indigo" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Indigo</button>
             <button type="button" class="theme-chip" data-theme-name="fuchsia" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Fuchsia</button>
             <button type="button" class="theme-chip" data-theme-name="glacier" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Glacier</button>
-            <button type="button" class="theme-chip" data-theme-name="emerald" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Emerald</button>
+            <button type="button" class="theme-chip" data-theme-name="daiei" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Daiei</button>
+            <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
           </div>
         </div>
         <div class="settings-reset-row">
