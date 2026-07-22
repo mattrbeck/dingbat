@@ -36,6 +36,10 @@
 #     Reading them at the hook (m4a updates them in the sequencer, before this
 #     mixer runs) gives no frame lag; we ramp previous->current across a frame.
 #   * Renders at the APU's 32768 Hz output rate.
+#   * DirectSound double-buffer: the real driver mixes each pcmBuffer one frame
+#     ahead of the DMA that drains it to the FIFO, so hardware audio lags the mixer
+#     pass by ~one frame. We render at the mixer pass, so we delay our output by one
+#     frame (init_mp2k / render_sample) to line up with the hardware FIFO.
 #   * 8-bit PCM, looping, AND m4a BDPCM ("compressed waveform", channel.type
 #     bit5) — the latter is decoded to s8 and mixed at PCM parity (not skipped).
 
@@ -238,14 +242,41 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     let loop_status = m.rd16(wave + 2)
     let looping = (loop_status and 0xC000'u16) != 0
     let new_wave_data = wave + 16
-    let retrig = not s.active or s.wave_data != new_wave_data or s.compressed != compressed
+    # A note-on (a fresh drum hit / re-keyed note) is flagged by the START bit
+    # (0x80) in the channel status — the m4a sequencer sets it and the mixer
+    # consumes it. We MUST restart the sample on it: a drum pattern re-keys the
+    # SAME snare sample every beat, so keying on wave_data change alone drops
+    # repeated hits while the previous one is still playing/looping. (m4a status
+    # bits per m4a_internal.h / sappy.txt.)
+    var use_start = true
     when defined(mp2kwav):
-      if retrig and dbgRetrigLog < 40:
-        let el = int(m.rd8(base + SC_ENV_VL))
-        let er = int(m.rd8(base + SC_ENV_VR))
-        let ev = int(m.rd8(base + SC_ENV_VOL))
-        echo "RETRIG ch=", i, " comp=", compressed, " env_vl=", el, " env_vr=", er, " env_vol=", ev
+      var checked {.global.} = false
+      var envStart {.global.} = true
+      if not checked:
+        checked = true
+        envStart = getEnv("DINGBAT_NOSTART") != "1"
+      use_start = envStart
+    # A note-on (fresh drum hit / re-keyed note) is flagged by the START bit (0x80)
+    # in the channel status. on_frame runs at the mixer's ENTRY, before the real
+    # mixer consumes and clears START, so the live status byte is the reliable
+    # note-on signal.
+    let started = (status and 0x80'u8) != 0
+    let retrig = (started and use_start) or
+                 not s.active or s.wave_data != new_wave_data or s.compressed != compressed
+    when defined(mp2kwav):
+      let dumpsel = getEnv("DINGBAT_CHDUMP")
+      if (dumpsel == $i or dumpsel == "all") and retrig and dbgRetrigLog < 200:
+        echo "ch", i, " st=", toHex(int(status), 2),
+          " evol=", int(m.rd8(base + SC_ENV_VOL)),
+          " evr=", int(m.rd8(base + SC_ENV_VR)),
+          " evl=", int(m.rd8(base + SC_ENV_VL)),
+          " rV=", int(m.rd8(base + SC_VOL_R)),
+          " lV=", int(m.rd8(base + SC_VOL_L)),
+          " freq=", int(m.rd32(base + SC_FREQ)),
+          " nsamp=", int(m.rd32(wave + 12))
         dbgRetrigLog.inc
+    when defined(mp2kwav):
+      if retrig: inc dbgRetrigCount
     if retrig:
       # (re)trigger: reset the resampler + decode state to the sample start.
       s.src_index = 0
@@ -279,8 +310,11 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     # * (leftVolume|rightVolume) >> 8, and leftVolume/rightVolume ALREADY fold in
     # SoundInfo.masterVolume. So we consume them directly and must NOT re-apply
     # master (doing so double-applied it, making games with masterVol<15 — e.g.
-    # Pokémon FR/Em at 12/16 — render ~19% too quiet). Shift last frame's end
-    # value into vol_*0 and ramp toward this frame's value across the frame.
+    # Pokémon FR/Em at 12/16 — render ~19% too quiet). The real mixer writes these
+    # once per SoundMainRAM pass, so they are a per-frame constant; the hook reads
+    # the value in force for this frame. Shift last frame's endpoint into vol_*0 and
+    # ramp toward this frame's value across the frame, mirroring the real driver's
+    # per-sample volume interpolation from the previous endpoint.
     let vl = float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult
     let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
     s.vol_l0 = s.vol_l1
@@ -291,8 +325,11 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.engaged = true
 
 proc mixer_hook*(m: Mp2kHle) =
-  ## PC-hook entry: called from cpu.tick when r15 reaches SoundMainRAM. Reads
-  ## the SoundInfo pointer and, if valid, refreshes the mixer state.
+  ## PC-hook entry: called from cpu.tick when r15 reaches SoundMainRAM. Reads the
+  ## SoundInfo pointer and, if valid, refreshes the mixer state. The hook fires at
+  ## the mixer's entry, where the channel status still carries the START bit (the
+  ## real mixer clears it as it processes each note-on), so this is where we detect
+  ## (re)triggers.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   if (sip shr 24) == 0: return                 # not yet initialised
   if m.rd32(sip + SI_MAGIC) != MP2K_MAGIC: return
@@ -489,16 +526,38 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   m.dbg_out_count.inc
   let outl = int16(clamp(li, -512, 511))
   let outr = int16(clamp(ri, -512, 511))
+  # DirectSound double-buffer: emit the sample from db_delay samples ago so the HLE
+  # stream lags the mixer pass by one frame, exactly as the real driver's DMA lags
+  # its pcmBuffer fill. Without this the HLE leads the hardware FIFO by ~one frame
+  # (measured: best HLE/real cross-correlation sits at a one-frame lag). A plain
+  # ring of db_delay stereo slots: the slot we are about to overwrite holds the
+  # value written db_delay samples earlier.
+  var eoutl = outl
+  var eoutr = outr
+  if m.db_delay > 0 and m.out_delay.len >= 2:
+    let slots = m.out_delay.len shr 1
+    if m.out_delay_w >= slots: m.out_delay_w = 0
+    let wi = m.out_delay_w shl 1
+    eoutl = m.out_delay[wi]
+    eoutr = m.out_delay[wi + 1]
+    m.out_delay[wi]     = outl
+    m.out_delay[wi + 1] = outr
+    m.out_delay_w = m.out_delay_w + 1
   when defined(mp2kwav):
-    mp2kWavCapture.add outl
-    mp2kWavCapture.add outr
-  (outl, outr)
+    mp2kWavCapture.add eoutl
+    mp2kWavCapture.add eoutr
+  (eoutl, eoutr)
 
 proc init_mp2k*(m: Mp2kHle) =
   ## Run detection against the loaded cartridge. Safe to call after the ROM is
   ## in memory. Leaves hook_addr = 0xFFFFFFFF when the engine isn't found.
   m.frame_len = APU_SAMPLE_RATE div 60
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
+  # One output frame of DirectSound double-buffer latency (see render_sample). A
+  # ring of frame_len stereo slots delays the HLE stream by exactly frame_len.
+  m.db_delay = m.frame_len
+  m.out_delay = newSeq[int16](m.frame_len * 2)
+  m.out_delay_w = 0
   let (hook, entry) = detect_mp2k(m.gba.cartridge.rom)
   m.hook_addr = hook
   m.entry_addr = entry

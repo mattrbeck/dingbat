@@ -547,6 +547,13 @@ type
     master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
     reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
     reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
+    # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
+    # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer
+    # pass by ~one frame. We render at the mixer pass, so without this the HLE
+    # leads the hardware FIFO by a frame. This ring delays our output to match.
+    out_delay*:      seq[int16]     # stereo output delay line (2 * db_delay slots)
+    out_delay_w*:    int            # write cursor (in stereo frames)
+    db_delay*:       int            # delay length in samples (0 disables)
 
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
@@ -666,6 +673,7 @@ include cpu
 when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var mp2kWavCapture*: seq[int16] = @[]
   var realDmaCapture*: seq[int16] = @[]
+  var dbgRetrigCount*: int = 0
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
