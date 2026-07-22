@@ -3654,7 +3654,6 @@ const openRomPicker = () => {
   input.click();
 };
 
-document.getElementById("dropzone").addEventListener("click", openRomPicker);
 // Mobile home: compact "Load a game" button shown where the drop target is
 // hidden (touch devices — no drag-and-drop there).
 document.getElementById("home-load").addEventListener("click", openRomPicker);
