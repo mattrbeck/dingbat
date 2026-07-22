@@ -238,8 +238,16 @@ proc get_sample*(apu: APU) =
   let dma_left  = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_left)  + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_left)
   let dma_right = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_right) + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_right)
   let bias = int32(apu.soundbias.bias_level)
-  let total_left  = int16(max(0, min(0x3FF, psg_left  + dma_left  + bias)) - bias)
-  let total_right = int16(max(0, min(0x3FF, psg_right + dma_right + bias)) - bias)
+  # SOUNDBIAS amplitude_resolution (bits 14-15) selects the DAC bit depth at
+  # 32768<<res Hz: 0=9-bit, 1=8-bit, 2=7-bit, 3=6-bit (GBATEK, SOUNDBIAS). We
+  # honor the depth by masking the low `res` bits of the biased 10-bit DAC
+  # value — leaving ~2 guard bits below the nominal depth (as ares does) so
+  # the truncation adds no audible quantization step. res=0 (the near-
+  # universal default) masks nothing, keeping this path bit-identical.
+  let dac_mask = int32(0x3FF) and
+                 not int32((1 shl int(apu.soundbias.amplitude_resolution)) - 1)
+  let total_left  = int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
+  let total_right = int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
   when defined(test_harness):
     discard
   elif defined(emscripten):
