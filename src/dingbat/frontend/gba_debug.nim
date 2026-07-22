@@ -59,8 +59,9 @@ proc render_layers(d: GbaDebug) =
       var shown = ((ppu.debug_layer_mask shr i) and 1) != 0
       if igCheckbox(names[i], addr shown):
         ppu.debug_layer_mask = ppu.debug_layer_mask xor (1'u16 shl i)
-        # Wake the render-skip path so a static screen repaints immediately
-        ppu.render_dirty = true
+        # Re-composite the current frame from live PPU state so the toggle is
+        # visible immediately, even while paused (self-heals next frame if not).
+        ppu.rerender_frame()
     igEndTabItem()
 
 # ──────────────────────────── IO register viewer ────────────────────────────

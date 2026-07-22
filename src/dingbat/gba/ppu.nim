@@ -650,6 +650,37 @@ proc scanline*(ppu: PPU) =
     # Prohibited modes 6/7: no background layers; show the backdrop
     ppu.composite(row_base)
 
+proc rerender_frame*(ppu: PPU) =
+  ## Re-run the visible scanline pipeline against the current PPU memory and
+  ## register state, without advancing emulation, so a paused frame reflects a
+  ## debug_layer_mask change immediately. Faithful for frames whose PPU
+  ## configuration was static all frame (the common paused case); frames that
+  ## used mid-frame HBlank effects re-render from the final line's registers.
+  ## Non-destructive: affine internal references and vcount are restored, so it
+  ## is safe to call even while emulation is running.
+  let saved_vcount = ppu.vcount
+  var saved_bgref_int = ppu.bgref_int
+  # Start the affine references at their line-0 values (matching the vblank
+  # latch that runs when vcount reaches 160).
+  for bg in 0..1:
+    for r in 0..1:
+      ppu.bgref_int[bg][r] = ppu.bgref[bg][r].num
+  # Force the render-skip logic to actually draw every line this pass.
+  ppu.render_dirty = true
+  for row in 0'u16 .. 159'u16:
+    ppu.vcount = row
+    ppu.scanline()
+    for bg in 0..1:
+      ppu.bgref_int[bg][0] += ppu.bgaff[bg][1].num  # bgx += dmx
+      ppu.bgref_int[bg][1] += ppu.bgaff[bg][3].num  # bgy += dmy
+  ppu.vcount = saved_vcount
+  ppu.bgref_int = saved_bgref_int
+  # Prime the pipeline so the next real frame after unpause still renders, and
+  # force the frontend to re-upload the (now changed) framebuffer.
+  ppu.render_dirty = true
+  ppu.skip_render = false
+  ppu.frame_static = false
+
 proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   case io_addr
   of 0x000..0x001: read(ppu.dispcnt, io_addr and 1)
