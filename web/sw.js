@@ -6,13 +6,16 @@ const ASSETS = [
   "./",
   "./index.html",
   "./index.js",
+  "./glpresent.js",
   "./sdputil.js",
   "./netplay.js",
   "./styles.css",
   "./em.js",
   "./em.wasm",
-  "./manifest.json",
+  "./site.webmanifest",
   "./apple-touch-icon-precomposed.png",
+  "./favicon.svg",
+  "./favicon-96x96.png",
   "./version.txt",
 ];
 

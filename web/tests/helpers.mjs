@@ -230,6 +230,12 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   };
   sandbox.addEventListener = () => {};
   sandbox.removeEventListener = () => {};
+  // updateCanvasScaling reads stage padding via getComputedStyle; "" keeps
+  // parseFloat() NaN-free callers happy enough (NaN paddings are tolerated —
+  // the canvas just gets no explicit size in tests) and getPropertyValue("")
+  // matches the CSS-variable reads.
+  sandbox.getComputedStyle = () =>
+    new Proxy({}, { get: (_t, p) => (p === "getPropertyValue" ? () => "" : "0") });
   sandbox.devicePixelRatio = 1;
   sandbox.innerWidth = 1024;
   sandbox.innerHeight = 768;
