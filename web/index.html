@@ -71,15 +71,19 @@
           </button>
           <hr class="menu-sep" id="main-menu-sep" />
           <div class="menu-split">
-            <button type="button" class="menu-item" id="save-state" role="menuitem" title="Save State" aria-label="Save State">
+            <button type="button" class="menu-item" id="save-state" role="menuitem" title="Quick Save" aria-label="Quick Save">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5zM8 5v4h7V5M8 19v-6h8v6"/></svg>
-              <span>Save</span>
+              <span>Quick Save</span>
             </button>
-            <button type="button" class="menu-item" id="load-state" role="menuitem" title="Load State" aria-label="Load State">
+            <button type="button" class="menu-item" id="load-state" role="menuitem" title="Quick Load" aria-label="Quick Load">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5M12 8.5V12l2.5 1.5"/></svg>
-              <span>Load</span>
+              <span>Quick Load</span>
             </button>
           </div>
+          <button type="button" class="menu-item" id="open-states" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>
+            <span>Save States</span>
+          </button>
           <button type="button" class="menu-item" id="screenshot" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
             <span>Screenshot</span>
@@ -335,6 +339,20 @@
             <span class="modal-toggle-sub">Wipe this game's save and reload it as a fresh cartridge</span>
           </div>
           <span id="reset-save-slot"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="states-modal" class="modal-overlay">
+      <div class="modal modal-states">
+        <button type="button" class="modal-close" id="states-close" aria-label="Close">&times;</button>
+        <h3>Save States</h3>
+        <p id="states-empty" class="modal-hint" hidden>Load a game to use save states.</p>
+        <p class="modal-hint">Tap a slot, then Save or Load. Slot 1 is the Quick slot.</p>
+        <div id="states-grid" class="states-grid"></div>
+        <div class="states-actions">
+          <button type="button" class="button button-sm" id="states-load" disabled>Load</button>
+          <button type="button" class="button button-sm button-primary" id="states-save" disabled>Save</button>
         </div>
       </div>
     </div>

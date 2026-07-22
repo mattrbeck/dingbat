@@ -931,7 +931,8 @@ const romsWithSaveData = async () => {
       if (n.endsWith("-p2")) n = n.slice(0, -3); // fold P2 link save into base
       names.add(n);
     } else if (k.startsWith("state:")) {
-      names.add(k.slice(6));
+      // Fold numbered slots ("state:<name>:slotN") into the base ROM identity.
+      names.add(k.slice(6).replace(/:slot\d+$/, ""));
     }
   }
   return [...names].sort((a, b) => a.localeCompare(b));
@@ -948,7 +949,12 @@ const isRomLoaded = (name) =>
 const deleteSaveData = async (name) => {
   await dbDelete("save:" + name);
   await dbDelete("save:" + name + "-p2");
-  await dbDelete(stateKey(name));
+  // All nine save-state slots and their thumbnail metadata (slot 0 is the
+  // legacy "state:<name>" key).
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    await dbDelete(slotStateKey(name, s));
+    await dbDelete(slotMetaKey(name, s));
+  }
 };
 
 // Wipe the running game's battery save and reboot it as a fresh cartridge. The
@@ -2068,40 +2074,201 @@ const applyStateBytes = (bytes) => {
   return ok;
 };
 
+// --- Save-state slots ---
+// Nine per-ROM slots. Slot 0 is the "Quick" slot and keeps the historical
+// "state:<name>" key so existing quick-saves (and Drive sync) keep working;
+// slots 1..8 add a ":slotN" suffix. The state blob stays a raw Uint8Array
+// under that key (unchanged); a small thumbnail + timestamp are stored
+// separately under "statemeta:..." so the state blobs and Drive sync are
+// untouched.
+const NUM_STATE_SLOTS = 9;
+const slotStateKey = (name, slot) =>
+  "state:" + name + (slot === 0 ? "" : ":slot" + slot);
+const slotMetaKey = (name, slot) =>
+  "statemeta:" + name + (slot === 0 ? "" : ":slot" + slot);
+
+const fmtStateTime = (ts) => {
+  try {
+    return new Date(ts).toLocaleString([], {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+};
+
+// Grab the current framebuffer as a small thumbnail dataURL (or null). Reads
+// the wasm framebuffer pointer (color-corrected, produced off the hot path),
+// so it works whether the game is running or paused and doesn't need the
+// canvas to have preserveDrawingBuffer.
+const captureThumbnail = () => {
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return null;
+  const [w, h] = nativeRes();
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  const full = document.createElement("canvas");
+  full.width = w;
+  full.height = h;
+  const fctx = full.getContext("2d");
+  const img = fctx.createImageData(w, h);
+  img.data.set(heap);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255; // opaque
+  fctx.putImageData(img, 0, 0);
+  const tw = 160;
+  const th = Math.round((tw * h) / w);
+  const small = document.createElement("canvas");
+  small.width = tw;
+  small.height = th;
+  const sctx = small.getContext("2d");
+  sctx.imageSmoothingEnabled = false;
+  sctx.drawImage(full, 0, 0, tw, th);
+  try {
+    return small.toDataURL("image/webp", 0.7);
+  } catch {
+    return small.toDataURL("image/png");
+  }
+};
+
+// Save the running core into a slot (state blob + thumbnail/timestamp meta).
+const saveToSlot = async (slot) => {
+  if (!currentOriginalName) return false;
+  const bytes = captureStateBytes();
+  if (!bytes) {
+    showToast("Couldn't capture the emulator state");
+    return false;
+  }
+  const thumb = captureThumbnail();
+  try {
+    await dbPut(slotStateKey(currentOriginalName, slot), bytes);
+    await dbPut(slotMetaKey(currentOriginalName, slot), { thumb, ts: Date.now() });
+    return true;
+  } catch (e) {
+    showToast("Save state failed: " + e.message);
+    return false;
+  }
+};
+
+// Apply a slot's state to the running game. The core validates the image
+// (version, core kind, ROM checksum, payload hash) and leaves itself untouched
+// when it doesn't match — e.g. a state saved for a different ROM.
+const loadFromSlot = async (slot) => {
+  if (!currentOriginalName) return false;
+  let bytes = null;
+  try {
+    bytes = await dbGet(slotStateKey(currentOriginalName, slot));
+  } catch (e) {
+    showToast("Load state failed: " + e.message);
+    return false;
+  }
+  if (!bytes) {
+    showToast(slot === 0 ? "No saved state for this game" : "Slot " + (slot + 1) + " is empty");
+    return false;
+  }
+  const ok = applyStateBytes(bytes);
+  showToast(ok ? "State loaded" : "State didn't match this game");
+  return ok;
+};
+
 document.getElementById("save-state").addEventListener("click", async () => {
   menuDropdown.hidden = true;
   if (!currentOriginalName) return;
-  let bytes = captureStateBytes();
-  if (!bytes) {
-    showToast("Couldn't capture the emulator state");
-    return;
-  }
-  try {
-    await dbPut(stateKey(currentOriginalName), bytes);
-    showToast("State saved");
-  } catch (e) {
-    showToast("Save state failed: " + e.message);
-  }
+  if (await saveToSlot(0)) showToast("State saved");
 });
 
 document.getElementById("load-state").addEventListener("click", async () => {
   menuDropdown.hidden = true;
   if (!currentOriginalName) return;
-  let bytes = null;
-  try {
-    bytes = await dbGet(stateKey(currentOriginalName));
-  } catch (e) {
-    showToast("Load state failed: " + e.message);
+  await loadFromSlot(0);
+});
+
+// --- Save States modal (9-slot grid with thumbnails) ---
+const statesModal = document.getElementById("states-modal");
+const statesGrid = document.getElementById("states-grid");
+const statesSaveBtn = document.getElementById("states-save");
+const statesLoadBtn = document.getElementById("states-load");
+const statesEmpty = document.getElementById("states-empty");
+let selectedSlot = 0;
+let slotHasState = [];
+
+const updateStatesButtons = () => {
+  const loaded = !!currentOriginalName;
+  statesSaveBtn.disabled = !loaded;
+  statesLoadBtn.disabled = !loaded || !slotHasState[selectedSlot];
+};
+
+const selectSlot = (s) => {
+  selectedSlot = s;
+  for (const el of statesGrid.children) {
+    el.classList.toggle("selected", Number(el.dataset.slot) === s);
+  }
+  updateStatesButtons();
+};
+
+const renderStatesGrid = async () => {
+  const name = currentOriginalName;
+  statesEmpty.hidden = !!name;
+  statesGrid.hidden = !name;
+  statesGrid.innerHTML = "";
+  slotHasState = [];
+  if (!name) {
+    updateStatesButtons();
     return;
   }
-  if (!bytes) {
-    showToast("No saved state for this game");
-    return;
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    const bytes = await dbGet(slotStateKey(name, s)).catch(() => null);
+    const meta = await dbGet(slotMetaKey(name, s)).catch(() => null);
+    const has = !!bytes;
+    slotHasState[s] = has;
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className =
+      "state-slot" + (has ? "" : " empty") + (s === selectedSlot ? " selected" : "");
+    cell.dataset.slot = s;
+    const thumb =
+      meta && meta.thumb
+        ? `<img class="slot-thumb" src="${meta.thumb}" alt="">`
+        : `<div class="slot-thumb"></div>`;
+    const when =
+      meta && meta.ts ? fmtStateTime(meta.ts) : has ? "saved" : "empty";
+    const label = s === 0 ? "1 · Quick" : String(s + 1);
+    cell.innerHTML =
+      thumb +
+      `<div class="slot-label"><span class="slot-num">${label}</span><span>${when}</span></div>`;
+    cell.addEventListener("click", () => selectSlot(s));
+    statesGrid.appendChild(cell);
   }
-  // The core validates the image (version, core kind, ROM checksum, payload
-  // hash) and leaves itself untouched when it doesn't match — e.g. a state
-  // saved for a different ROM.
-  showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
+  updateStatesButtons();
+};
+
+const openStatesModal = () => {
+  menuDropdown.hidden = true;
+  statesModal.classList.add("open");
+  trapFocus(statesModal);
+  renderStatesGrid();
+};
+
+const closeStatesModal = () => {
+  statesModal.classList.remove("open");
+  releaseFocus(statesModal);
+};
+
+document.getElementById("open-states").addEventListener("click", openStatesModal);
+document.getElementById("states-close").addEventListener("click", closeStatesModal);
+statesModal.addEventListener("click", (e) => {
+  if (e.target === statesModal) closeStatesModal();
+});
+
+statesSaveBtn.addEventListener("click", async () => {
+  if (!currentOriginalName) return;
+  if (await saveToSlot(selectedSlot)) {
+    showToast("Saved to slot " + (selectedSlot + 1));
+    await renderStatesGrid();
+  }
+});
+
+statesLoadBtn.addEventListener("click", async () => {
+  if (await loadFromSlot(selectedSlot)) closeStatesModal();
 });
 
 document.getElementById("export-state").addEventListener("click", () => {

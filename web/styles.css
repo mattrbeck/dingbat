@@ -1848,6 +1848,77 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
+/* ---- Save States modal ---- */
+.modal-states {
+  max-width: 460px;
+}
+
+.states-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.state-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface-2);
+  border: 2px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.state-slot:hover {
+  border-color: rgba(var(--accent-rgb), 0.55);
+}
+
+.state-slot.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.state-slot .slot-thumb {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: 3px;
+  background: var(--surface-3);
+  object-fit: cover;
+  image-rendering: pixelated;
+  display: block;
+}
+
+/* Empty slots show a dashed placeholder in place of a screenshot. */
+.state-slot.empty .slot-thumb {
+  border: 1px dashed var(--border-2);
+  background: transparent;
+}
+
+.state-slot .slot-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.state-slot .slot-num {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.states-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 /* A setting suspended by another (e.g. integer scaling / scanlines while an
    upscale filter is active): visibly inert, state preserved. */
 .modal-toggle-row.suspended {
