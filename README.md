@@ -54,14 +54,15 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Select BIOS
   - Rebind keys
   - Controller support
-  - Save states
+  - Save states, with nine per-ROM slots and thumbnails (plus Quick Save / Quick Load)
+  - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
   - Rewind
   - Fast forward and 2x speed
   - Pause and frame advance
   - Screenshots
   - Volume and per-channel audio controls
   - LCD color correction (per-panel: AGB and GBC models)
-  - Scanlines and interframe blending (LCD ghosting)
+  - Scanlines, interframe blending (LCD ghosting), and hq4x / xBR upscaling
   - MBC5 rumble (controller rumble + screen shake)
   - Link cable window for network play
   - Debug windows for the PPU, IO registers, and scheduler
@@ -69,8 +70,11 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Touch controls
   - Gamepad support
   - Installable as an offline-capable PWA
-  - Save states, rewind, and fast forward
+  - Save states (nine per-ROM slots with thumbnails), rewind, and fast forward
+  - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
   - Per-ROM save files kept in IndexedDB, with "Manage ROMs & Saves" modals
+  - Report a Bug: attach a save state from any point in the rewind timeline,
+    downloaded as a self-contained report file (nothing is transmitted)
   - Home screen with a recently-played grid
   - Google Drive save/ROM backup (experimental)
   - Online link play with room codes
@@ -132,9 +136,7 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
 - GBA
   - Timing: prefetch occupancy-model rewrite (scoped, see `docs/prefetch-model-rewrite.md`)
   - Storage: Game database for odd cases (Classic NES, ROMs that misreport things)
-  - Sensor cartridges (tilt, gyro, solar, rumble)
-- Cheats
-- Save state slots
+  - Sensor cartridges (tilt, gyro, solar)
 - Debugger with breakpoints and stepping
 
 ## Special Thanks
