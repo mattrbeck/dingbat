@@ -57,10 +57,10 @@ proc main() =
       emu.mp2k_hle = true
       emu.mp2k.skip = true
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
-      # EXPLORATORY: verify MP2K detection + SoundInfo reading.
+      # EXPLORATORY: verify MP2K detection + SoundInfo reading. Detection is
+      # runtime-learned (mp2k.nim), so hook_addr stays 0xFFFFFFFF until the
+      # engine's first mixer pass; the post-run summary prints the final value.
       emu.mp2k_hle = true
-      echo "MP2K hook_addr = 0x", toHex(emu.mp2k.hook_addr, 8),
-           "  (detected=", emu.mp2k.hook_addr != 0xFFFFFFFF'u32, ")"
       for f in 0 ..< warmup:
         for ev in script:
           if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
