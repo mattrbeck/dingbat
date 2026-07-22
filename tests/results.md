@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-21 12:14:45*
+*Generated: 2026-07-22 08:45:05*
 
 ## Game Boy - Blargg
 
@@ -175,21 +175,21 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 |------|--------|
 | m2_win_en_toggle | 👌 |
 | m3_bgp_change | 👀 65.4% correct (15076/23040 pixels match) |
-| m3_bgp_change_sprites | 👀 61.9% correct (14252/23040 pixels match) |
+| m3_bgp_change_sprites | 👀 66.1% correct (15224/23040 pixels match) |
 | m3_lcdc_bg_en_change | 👀 84.3% correct (19422/23040 pixels match) |
-| m3_lcdc_bg_map_change | 👀 89.6% correct (20654/23040 pixels match) |
-| m3_lcdc_obj_en_change | 👀 99.4% correct (22894/23040 pixels match) |
-| m3_lcdc_obj_en_change_variant | 👀 94.2% correct (21706/23040 pixels match) |
+| m3_lcdc_bg_map_change | 👀 91.4% correct (21056/23040 pixels match) |
+| m3_lcdc_obj_en_change | 👀 98.9% correct (22788/23040 pixels match) |
+| m3_lcdc_obj_en_change_variant | 👀 93.8% correct (21600/23040 pixels match) |
 | m3_lcdc_obj_size_change | 👀 99.3% correct (22890/23040 pixels match) |
 | m3_lcdc_obj_size_change_scx | 👀 99.2% correct (22850/23040 pixels match) |
-| m3_lcdc_tile_sel_change | 👀 91.1% correct (20978/23040 pixels match) |
-| m3_lcdc_tile_sel_win_change | 👀 88.0% correct (20278/23040 pixels match) |
+| m3_lcdc_tile_sel_change | 👀 92.8% correct (21380/23040 pixels match) |
+| m3_lcdc_tile_sel_win_change | 👀 89.8% correct (20680/23040 pixels match) |
 | m3_lcdc_win_en_change_multiple | 👀 63.9% correct (14724/23040 pixels match) |
 | m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16963/23040 pixels match) |
-| m3_lcdc_win_map_change | 👀 90.0% correct (20732/23040 pixels match) |
-| m3_obp0_change | 👀 98.1% correct (22608/23040 pixels match) |
+| m3_lcdc_win_map_change | 👀 91.7% correct (21134/23040 pixels match) |
+| m3_obp0_change | 👀 98.8% correct (22760/23040 pixels match) |
 | m3_scx_high_5_bits | 👀 98.5% correct (22698/23040 pixels match) |
-| m3_scx_low_3_bits | 👀 97.7% correct (22500/23040 pixels match) |
+| m3_scx_low_3_bits | 👌 |
 | m3_scy_change | 👀 50.2% correct (11574/23040 pixels match) |
 | m3_window_timing | 👀 88.6% correct (20421/23040 pixels match) |
 | m3_window_timing_wx_0 | 👀 89.3% correct (20579/23040 pixels match) |
@@ -201,5 +201,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 169
-- **Pass:** 136
-- **Fail:** 33
+- **Pass:** 137
+- **Fail:** 32
