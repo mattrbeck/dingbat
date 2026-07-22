@@ -7,7 +7,9 @@
 # ~13 kHz FIFO stream.
 #
 # This is a PROOF OF CONCEPT, OFF BY DEFAULT (gba.mp2k_hle). It is NOT
-# cycle-accurate and NOT wired into save-states / rollback / netplay.
+# cycle-accurate. Shadow state is deliberately NOT serialized into save
+# states (files are identical with the HLE on or off); every state/rollback
+# load instead calls mp2k_state_loaded to rebuild it from emulated RAM.
 #
 # Provenance / license: this file is an independent, MIT-licensed implementation
 # built from PUBLIC, non-copyrightable facts about Nintendo's "MusicPlayer2000"
@@ -61,7 +63,8 @@ const
 
   # SoundChannel field offsets, derived from m4a_internal.h (pret):
   #   statusFlags(0) type(1) rightVolume(2) leftVolume(3) ... envelopeVolume(9)
-  #   envelopeVolumeRight(10) envelopeVolumeLeft(11) ... frequency(0x20) wav(0x24)
+  #   envelopeVolumeRight(10) envelopeVolumeLeft(11) ... ct(0x18) fw(0x1C)
+  #   frequency(0x20) wav(0x24) currentPointer(0x28)
   SC_STATUS   = 0x00
   SC_TYPE     = 0x01
   SC_VOL_R    = 0x02
@@ -69,6 +72,7 @@ const
   SC_ENV_VOL  = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
+  SC_COUNT    = 0x18   # ct: source samples remaining until sample/loop end
   SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
   SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
@@ -194,6 +198,33 @@ proc rd8(m: Mp2kHle; a: uint32): uint8  {.inline.} = m.gba.bus.read_byte_interna
 proc rd16(m: Mp2kHle; a: uint32): uint16 {.inline.} = m.gba.bus.read_half_internal(a)
 proc rd32(m: Mp2kHle; a: uint32): uint32 {.inline.} = m.gba.bus.read_word_internal(a)
 
+proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
+             byteoff: uint32): uint8 {.inline.} =
+  ## Read one raw byte of the sample bank (fast ROM path or bus fallback).
+  if s.in_rom: rom[][(s.rom_off + byteoff) and rmask]
+  else:        m.rd8(s.wave_data + byteoff)
+
+proc mp2k_state_loaded*(m: Mp2kHle) =
+  ## Save-state / rollback load hook. The shadow mixer's state is deliberately
+  ## NOT serialized (state files are identical with the HLE on or off), so
+  ## everything derived from the pre-load timeline is stale: sampler positions,
+  ## cubic history taps, the DirectSound double-buffer delay ring, and the
+  ## reverb feedback line. Drop it all and mark a resync so the next mixer-pass
+  ## hook re-latches every channel from the engine's SoundInfo in the restored
+  ## RAM — resuming mid-note channels at the engine's own playback position
+  ## (SoundChannel.ct) rather than retriggering them from the sample start.
+  ## Detection state (hook_addr / entry_addr) is ROM-derived and states are
+  ## per-ROM, so it stays valid; `engaged` is kept, and render_sample simply
+  ## emits silence until the first post-load mixer pass refills the channels.
+  for i in 0 ..< MP2K_MAX_CHANNELS:
+    m.samplers[i] = Mp2kSampler()      # inactive, zero taps/phase/volumes
+  for v in m.out_delay.mitems: v = 0
+  m.out_delay_w = 0
+  for v in m.reverb_ring.mitems: v = 0
+  m.reverb_w = 0
+  m.frame_pos = 0
+  m.resync_pending = true
+
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
   ## Called once per engine audio frame (at the SoundMainRAM hook). Re-reads
   ## the SoundInfo channel table and refreshes each sampler's parameters and
@@ -277,14 +308,38 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         dbgRetrigLog.inc
     when defined(mp2kwav):
       if retrig: inc dbgRetrigCount
+    var resumed = false
     if retrig:
-      # (re)trigger: reset the resampler + decode state to the sample start.
-      s.src_index = 0
-      s.phase_frac = 0
-      s.need_fetch = true
-      s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
-      s.active = true
-      s.age = 0
+      if m.resync_pending and not started:
+        # First mixer pass after a save-state / rollback load: this channel was
+        # already mid-note in the engine (CH_ON without the START bit), so it
+        # must NOT restart from the sample start at full volume — that would be
+        # an audible retrigger burst the real hardware doesn't produce. The m4a
+        # SoundChannel exposes its playback position: `ct` (SC_COUNT, offset
+        # 0x18 per m4a_internal.h) holds the source samples remaining until the
+        # sample (or loop) end, so the current cursor is size - ct. Resume
+        # there; the volume endpoints below then ramp from 0 (the freshly reset
+        # vol_*1) to the engine's current volume across this one frame — a
+        # ~16 ms fade-in that also masks the rebuilt interpolation history.
+        s.phase_frac = 0
+        s.need_fetch = true
+        s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.active = true
+        s.age = 1                       # mid-note: NOT an attack frame
+        let total     = m.rd32(wave + 12)          # WaveData.size
+        let remaining = m.rd32(base + SC_COUNT)    # SoundChannel.ct
+        s.src_index =
+          if remaining >= 1'u32 and remaining <= total: total - remaining
+          else: 0'u32   # implausible ct: start over, still faded in from 0
+        resumed = true
+      else:
+        # (re)trigger: reset the resampler + decode state to the sample start.
+        s.src_index = 0
+        s.phase_frac = 0
+        s.need_fetch = true
+        s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.active = true
+        s.age = 0
     else:
       s.age.inc
     s.wave_data   = new_wave_data
@@ -306,6 +361,33 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
+    if resumed and s.src_index > 0'u32 and s.src_index < s.sample_count:
+      # Seed the resampler history at the resume point (needs in_rom/rom_off,
+      # so this runs after they are set). For plain PCM the previous source
+      # sample is read directly. For BDPCM the decoder is differential — the
+      # running accumulator (carried in tap0, see decode_src) must equal the
+      # decoded value at src_index-1 — so re-decode the current 64-sample block
+      # from its s8 base byte up to that point (≤63 steps, once per load).
+      let rom = addr m.gba.cartridge.rom
+      let rmask = m.gba.cartridge.rom_mask
+      if s.compressed:
+        var running = 0.0'f32
+        let pos0 = s.src_index and not (BDPCM_BLOCK_SAMPS - 1)
+        for p in pos0 ..< s.src_index:
+          let bo = p and (BDPCM_BLOCK_SAMPS - 1)
+          let ba = (p shr 6) * BDPCM_BLOCK_BYTES
+          var samp =
+            if bo == 0'u32: float32(cast[int8](m.wave_u8(s, rom, rmask, ba)))
+            else: running
+          var lut = m.wave_u8(s, rom, rmask, ba + (bo shr 1) + 1'u32)
+          if (bo and 1'u32) != 0'u32: lut = lut and 0x0F'u8
+          else:                       lut = lut shr 4
+          running = samp + BDPCM_LUT[lut]
+        s.tap0 = running   # 0 when src_index sits on a block boundary: the
+                           # next fetch re-reads the base byte fresh anyway
+      else:
+        s.tap0 = float32(cast[int8](m.wave_u8(s, rom, rmask, s.src_index - 1'u32)))
+      s.tap1 = s.tap0; s.tap2 = s.tap0; s.tap3 = s.tap0
     # SC_ENV_VL/VR (0x0B/0x0A) are the engine's per-side volumes: envelopeVolume
     # * (leftVolume|rightVolume) >> 8, and leftVolume/rightVolume ALREADY fold in
     # SoundInfo.masterVolume. So we consume them directly and must NOT re-apply
@@ -323,6 +405,7 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.vol_r1 = vr
   m.frame_seen = true
   m.engaged = true
+  m.resync_pending = false   # one full re-latch pass done; back to normal keying
 
 proc mixer_hook*(m: Mp2kHle) =
   ## PC-hook entry: called from cpu.tick when r15 reaches SoundMainRAM. Reads the
@@ -357,12 +440,6 @@ when defined(mp2kwav):
       samp += BDPCM_LUT[lut]
       running = samp
       result[pos] = samp
-
-proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
-             byteoff: uint32): uint8 {.inline.} =
-  ## Read one raw byte of the sample bank (fast ROM path or bus fallback).
-  if s.in_rom: rom[][(s.rom_off + byteoff) and rmask]
-  else:        m.rd8(s.wave_data + byteoff)
 
 proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
                 rmask: uint32): float32 {.inline.} =

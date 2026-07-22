@@ -526,6 +526,11 @@ type
     skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
+    # Set by mp2k_state_loaded (save-state / rollback load): the shadow mixer
+    # state is deliberately NOT serialized, so the next mixer pass must re-latch
+    # every channel from the engine's SoundInfo — resuming mid-note channels at
+    # the engine's current playback position instead of retriggering them.
+    resync_pending*: bool
     samplers*:   array[12, Mp2kSampler]
     frame_len*:  int
     frame_pos*:  int
