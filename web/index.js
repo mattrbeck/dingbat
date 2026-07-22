@@ -2271,6 +2271,165 @@ statesLoadBtn.addEventListener("click", async () => {
   if (await loadFromSlot(selectedSlot)) closeStatesModal();
 });
 
+// --- Report a Bug modal ---
+// Builds a downloadable report bundle {title, description, diagnostics, save
+// state} entirely client-side — nothing is transmitted. The save state carries
+// only emulator RAM/registers + a screenshot, never the ROM. A scrubber lets
+// the user pick the moment the bug happened from the rewind history: slider 0
+// is "now" (live state), 1..N are rewind samples (0..N-1, newest first).
+const reportModal = document.getElementById("report-modal");
+const reportTitle = document.getElementById("report-title");
+const reportDesc = document.getElementById("report-desc");
+const reportSlider = document.getElementById("report-slider");
+const reportWhen = document.getElementById("report-when");
+const reportPreview = document.getElementById("report-preview");
+const reportScrub = document.getElementById("report-scrub");
+const reportScrubHint = document.getElementById("report-scrub-hint");
+let reportWasPaused = false;
+let reportSamples = 0;
+let reportThumbs = null; // packed BGR555 thumbnails copied out of wasm
+let reportThumbW = 0;
+let reportThumbH = 0;
+
+const bgr555ToImageData = (src, off, w, h) => {
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const v = src[off + i * 2] | (src[off + i * 2 + 1] << 8);
+    out[i * 4] = Math.round((v & 31) * (255 / 31));
+    out[i * 4 + 1] = Math.round(((v >> 5) & 31) * (255 / 31));
+    out[i * 4 + 2] = Math.round(((v >> 10) & 31) * (255 / 31));
+    out[i * 4 + 3] = 255;
+  }
+  return new ImageData(out, w, h);
+};
+
+const drawReportLivePreview = () => {
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return;
+  const [w, h] = nativeRes();
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  reportPreview.width = w;
+  reportPreview.height = h;
+  const ctx = reportPreview.getContext("2d");
+  const img = ctx.createImageData(w, h);
+  img.data.set(heap);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+  ctx.putImageData(img, 0, 0);
+};
+
+const drawReportSamplePreview = (sample) => {
+  if (!reportThumbs) return;
+  const stride = reportThumbW * reportThumbH * 2;
+  const img = bgr555ToImageData(reportThumbs, sample * stride, reportThumbW, reportThumbH);
+  reportPreview.width = reportThumbW;
+  reportPreview.height = reportThumbH;
+  reportPreview.getContext("2d").putImageData(img, 0, 0);
+};
+
+const updateReportPreview = () => {
+  const v = Number(reportSlider.value);
+  if (v === 0) {
+    reportWhen.textContent = "now";
+    drawReportLivePreview();
+  } else {
+    const sample = v - 1;
+    const tenths = Module._wasm_rewind_scrub_seconds_ago(sample);
+    reportWhen.textContent = (tenths / 10).toFixed(1) + "s ago";
+    drawReportSamplePreview(sample);
+  }
+};
+
+reportSlider.addEventListener("input", updateReportPreview);
+
+const openReportModal = () => {
+  menuDropdown.hidden = true;
+  reportWasPaused = paused;
+  paused = true; // freeze emulation + the rewind ring while scrubbing
+  reportSamples = 0;
+  reportThumbs = null;
+  if (currentOriginalName && Module._wasm_rewind_scrub_generate) {
+    reportSamples = Module._wasm_rewind_scrub_generate(48);
+    if (reportSamples > 0) {
+      reportThumbW = Module._wasm_rewind_scrub_thumb_w();
+      reportThumbH = Module._wasm_rewind_scrub_thumb_h();
+      const ptr = Module._wasm_rewind_scrub_thumbs_ptr();
+      const len = reportSamples * reportThumbW * reportThumbH * 2;
+      reportThumbs = new Uint8Array(Module.memory.buffer, ptr, len).slice();
+    }
+  }
+  reportSlider.max = String(reportSamples); // 0..N, 0 = now
+  reportSlider.value = "0";
+  reportScrub.classList.toggle("disabled", !currentOriginalName);
+  reportScrubHint.hidden = reportSamples > 0;
+  updateReportPreview();
+  reportModal.classList.add("open");
+  trapFocus(reportModal);
+};
+
+const closeReportModal = () => {
+  reportModal.classList.remove("open");
+  releaseFocus(reportModal);
+  reportThumbs = null;
+  paused = reportWasPaused; // restore the prior run/pause state
+};
+
+document.getElementById("report-bug").addEventListener("click", openReportModal);
+document.getElementById("report-close").addEventListener("click", closeReportModal);
+document.getElementById("report-cancel").addEventListener("click", closeReportModal);
+reportModal.addEventListener("click", (e) => {
+  if (e.target === reportModal) closeReportModal();
+});
+
+const base64FromBytes = (bytes) => {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+};
+
+document.getElementById("report-download").addEventListener("click", async () => {
+  if (!currentOriginalName) {
+    showToast("Load a game first");
+    return;
+  }
+  const v = Number(reportSlider.value);
+  let stateBytes = null;
+  let savedFrom = "current frame";
+  if (v === 0) {
+    stateBytes = captureStateBytes();
+  } else {
+    const sample = v - 1;
+    const sz = Module._wasm_rewind_scrub_state_size(sample);
+    if (sz > 0) {
+      stateBytes = new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), sz).slice();
+      savedFrom = (Module._wasm_rewind_scrub_seconds_ago(sample) / 10).toFixed(1) + "s before report";
+    }
+  }
+  const report = {
+    kind: "dingbat-bug-report",
+    version: 1,
+    createdAt: new Date().toISOString(),
+    title: reportTitle.value.trim(),
+    description: reportDesc.value.trim(),
+    game: currentOriginalName,
+    savedFrom,
+    diagnostics: await logContext(),
+    // Emulator save state (RAM/registers + screenshot). Never the ROM.
+    state: stateBytes ? base64FromBytes(stateBytes) : null,
+  };
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  a.download = "dingbat-bugreport-" + stripExt(currentOriginalName) + "-" + stamp + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("Report downloaded");
+  closeReportModal();
+});
+
 document.getElementById("export-state").addEventListener("click", () => {
   menuDropdown.hidden = true;
   if (!currentOriginalName) return;

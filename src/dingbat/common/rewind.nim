@@ -94,3 +94,31 @@ proc pop*(rw: Rewind): string =
     rw.latest = decode_delta(rw.latest, packed)
   else:
     rw.latest = ""
+
+# --- Non-destructive access (bug-report scrubber) -------------------------
+# pop() consumes history; the scrubber needs to look at snapshots without
+# disturbing the ring or the live core, so it can present a timeline and let
+# the user pick one moment. These reconstruct snapshots from a local copy.
+
+proc snapshot_interval*(rw: Rewind): int = rw.interval
+
+iterator snapshots_newest_first*(rw: Rewind): string =
+  ## Reconstruct every retained snapshot, newest to oldest, without mutating
+  ## the ring. Snapshot 0 is the newest (== the live frame's last push).
+  if rw.latest.len > 0:
+    var cur = rw.latest
+    yield cur
+    for i in countdown(rw.deltas.len - 1, 0):
+      cur = decode_delta(cur, rw.deltas[i])
+      yield cur
+
+proc snapshot_at*(rw: Rewind; index: int): string =
+  ## Snapshot `index` steps back from the newest (0 = newest), reconstructed
+  ## non-destructively. Empty string when out of range.
+  if rw.latest.len == 0 or index < 0 or index > rw.deltas.len:
+    return ""
+  result = rw.latest
+  var d = rw.deltas.len - 1
+  for _ in 0 ..< index:
+    result = decode_delta(result, rw.deltas[d])
+    dec d

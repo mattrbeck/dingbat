@@ -111,6 +111,11 @@
             <span>Settings</span>
           </button>
           <hr class="menu-sep" />
+          <button type="button" class="menu-item" id="report-bug" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/></svg>
+            <span>Report a Bug</span>
+          </button>
+          <hr class="menu-sep" />
           <div class="menu-heading">Advanced</div>
           <button type="button" class="menu-item menu-item-muted" id="force-update" role="menuitem">
             <span>Force Update</span>
@@ -353,6 +358,31 @@
         <div class="states-actions">
           <button type="button" class="button button-sm" id="states-load" disabled>Load</button>
           <button type="button" class="button button-sm button-primary" id="states-save" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="report-modal" class="modal-overlay">
+      <div class="modal modal-report">
+        <button type="button" class="modal-close" id="report-close" aria-label="Close">&times;</button>
+        <h3>Report a Bug</h3>
+        <p class="modal-hint">Describe what went wrong. You can attach a save state from the moment it happened — scrub the timeline below to find it. Nothing is sent anywhere; this downloads a report file you can share.</p>
+        <label class="report-label" for="report-title">Title</label>
+        <input type="text" id="report-title" class="cheat-input" placeholder="Short summary" maxlength="120" />
+        <label class="report-label" for="report-desc">Description</label>
+        <textarea id="report-desc" class="report-textarea" placeholder="What happened, and what did you expect?" rows="4"></textarea>
+        <div id="report-scrub" class="report-scrub">
+          <div class="report-scrub-head">
+            <span class="report-label">Attach a moment</span>
+            <span id="report-when" class="report-when">now</span>
+          </div>
+          <canvas id="report-preview" class="report-preview" width="120" height="80"></canvas>
+          <input type="range" id="report-slider" class="report-slider" min="0" max="0" step="1" value="0" />
+          <p id="report-scrub-hint" class="modal-hint report-scrub-hint">Slide right to go further back in time. Enable Rewind in Settings to capture a longer timeline.</p>
+        </div>
+        <div class="states-actions">
+          <button type="button" class="button button-sm" id="report-cancel">Cancel</button>
+          <button type="button" class="button button-sm button-primary" id="report-download">Download report</button>
         </div>
       </div>
     </div>

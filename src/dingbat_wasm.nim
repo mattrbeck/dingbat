@@ -2,6 +2,7 @@ import std/[os, strutils, math]
 import sdl2 except init, quit
 import dingbat/common/input
 import dingbat/common/rewind
+import dingbat/common/serialize
 import dingbat/common/scheduler
 import dingbat/gba/gba
 import dingbat/gba/link
@@ -477,6 +478,100 @@ proc wasm_rewind_pop(): cint {.exportc.} =
     return 0
   # JS draws the restored frame (drawGame) after this returns.
   1
+
+# --- Rewind scrubber (bug-report timeline) ---
+# Non-destructively render thumbnails of snapshots sampled across the rewind
+# history so the "Report a bug" modal can present a timeline and let the user
+# pick the moment a bug happened. The live core is borrowed as a scratch
+# renderer (each snapshot's payload already carries its framebuffer) and its
+# state is stashed and restored, so neither the ring nor the running game is
+# disturbed. JS must pause the game while scrubbing so the ring stays stable.
+
+var scrubThumbs: seq[byte] = @[]   # packed BGR555 thumbnails, one after another
+var scrubIndices: seq[int] = @[]   # ring index (0 = newest) of each sample
+var scrubThumbW = 0
+var scrubThumbH = 0
+
+proc current_payload(): string =
+  case stateKind
+  of ekGBA: (if stateGba != nil: stateGba.state_payload() else: "")
+  of ekGB:  (if stateGb  != nil: stateGb.state_payload()  else: "")
+  of ekNone: ""
+
+proc apply_payload(payload: string) =
+  case stateKind
+  of ekGBA: stateGba.apply_state_payload(payload)
+  of ekGB:  stateGb.apply_state_payload(payload)
+  of ekNone: discard
+
+proc wasm_rewind_scrub_generate(maxSamples: cint): cint {.exportc.} =
+  ## Render up to maxSamples thumbnails sampled evenly across rewind history
+  ## (newest first). Returns the sample count; 0 when there is no history.
+  scrubThumbs = @[]
+  scrubIndices = @[]
+  if rewindHistory == nil or stateKind == ekNone: return 0
+  let count = rewindHistory.len
+  if count == 0: return 0
+  let (srcW, srcH) = if stateKind == ekGB: (GB_W, GB_H) else: (GBA_W, GBA_H)
+  scrubThumbW = 120
+  scrubThumbH = scrubThumbW * srcH div srcW
+  let maxN = max(1, int(maxSamples))
+  let stride = max(1, (count + maxN - 1) div maxN)
+  let stash = current_payload()
+  var i = 0
+  try:
+    for snap in rewindHistory.snapshots_newest_first():
+      if i mod stride == 0:
+        apply_payload(snap)
+        let fb = case stateKind
+          of ekGBA: stateGba.ppu.framebuffer
+          of ekGB:  stateGb.ppu.framebuffer
+          of ekNone: @[]
+        scrubThumbs.add downscale_bgr555(fb, srcW, srcH, scrubThumbW, scrubThumbH)
+        scrubIndices.add i
+      inc i
+  except CatchableError:
+    discard
+  if stash.len > 0:
+    try: apply_payload(stash)
+    except CatchableError: discard
+  cint(scrubIndices.len)
+
+proc wasm_rewind_scrub_count(): cint {.exportc.} = cint(scrubIndices.len)
+proc wasm_rewind_scrub_thumb_w(): cint {.exportc.} = cint(scrubThumbW)
+proc wasm_rewind_scrub_thumb_h(): cint {.exportc.} = cint(scrubThumbH)
+proc wasm_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
+  if scrubThumbs.len > 0: addr scrubThumbs[0] else: nil
+
+proc wasm_rewind_scrub_seconds_ago(sample: cint): cint {.exportc.} =
+  ## Approx wall-clock age of a sample, in tenths of a second (snapshots are
+  ## rewindHistory.snapshot_interval frames apart at ~60 fps).
+  if sample < 0 or sample >= scrubIndices.len or rewindHistory == nil: return 0
+  let frames = scrubIndices[sample] * rewindHistory.snapshot_interval
+  cint(frames * 10 div 60)
+
+proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
+  ## Reconstruct the chosen sample's snapshot, build its full .state image
+  ## (header + payload + thumbnail) into the shared stateImage buffer, restore
+  ## the live core, and return the size. Read the bytes via wasm_state_data().
+  if sample < 0 or sample >= scrubIndices.len or rewindHistory == nil:
+    return 0
+  let snap = rewindHistory.snapshot_at(scrubIndices[sample])
+  if snap.len == 0: return 0
+  let stash = current_payload()
+  stateImage = ""
+  try:
+    apply_payload(snap)
+    stateImage = case stateKind
+      of ekGBA: stateGba.state_bytes(thumbnail = true)
+      of ekGB:  stateGb.state_bytes(thumbnail = true)
+      of ekNone: ""
+  except CatchableError:
+    stateImage = ""
+  if stash.len > 0:
+    try: apply_payload(stash)
+    except CatchableError: discard
+  cint(stateImage.len)
 
 # --- 2P local link mode (multiplayer phase 3, web side) ---
 # Two GBA cores running the same ROM, wired by the in-process lockstep link
