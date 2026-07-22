@@ -457,6 +457,12 @@ proc apply_pitch_correct_ff() =
   if app.gb_emu != nil:
     app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
 
+proc apply_audio_lowpass() =
+  # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
+  # GBA DirectSound path has the FIFO imaging it targets.
+  if app.gba_emu != nil:
+    app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass)
+
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
@@ -496,6 +502,7 @@ proc load_rom(path: string) =
   load_cheats()
   apply_master_volume()
   apply_pitch_correct_ff()
+  apply_audio_lowpass()
   apply_panel_uniforms()
   blend_prev.setLen(0)  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
@@ -944,6 +951,12 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
                               addr app.cfg.pitch_correct_ff, true):
           apply_pitch_correct_ff()
+          save_config(app.cfg)
+        # Gentle analog-output low-pass (cap/speaker smoothing). Off by default
+        # → output bit-identical to unfiltered. GBA only.
+        if igMenuItem_BoolPtr("Analog low-pass filter", nil,
+                              addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
+          apply_audio_lowpass()
           save_config(app.cfg)
         igSeparator()
         if igMenuItem_BoolPtr("LCD Color Correction", nil,
@@ -1785,6 +1798,7 @@ proc main() =
     apply_color_correction()
     apply_master_volume()
     apply_pitch_correct_ff()
+    apply_audio_lowpass()
 
   app = AppState(
     cfg:             cfg,

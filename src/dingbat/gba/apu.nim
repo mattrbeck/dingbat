@@ -21,6 +21,10 @@ const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
+# One-pole low-pass coefficient for the optional analog-output filter:
+# alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz. Conservative
+# (nearly flat through the mids, a few dB down at the top octave).
+const AUDIO_LOWPASS_ALPHA* = 0.90'f32
 
 # Minimal SDL2 audio C bindings (SDL2 is already linked via nim.cfg)
 when not defined(test_harness):
@@ -134,6 +138,15 @@ proc set_master_volume*(apu: APU; volume: int; mute: bool) =
   ## branch in get_sample keeps samples bit-identical
   apu.master_volume_factor = int32(clamp(volume, 0, 100) * 256 div 100)
   apu.master_muted = mute
+
+proc set_audio_lowpass*(apu: APU; on: bool) =
+  ## Toggle the optional analog-output low-pass. Resets the filter state on
+  ## the OFF->? edge so a fresh enable never carries stale samples; off leaves
+  ## the native emit path bit-identical to the unfiltered output.
+  if not on:
+    apu.lp_left = 0
+    apu.lp_right = 0
+  apu.audio_lowpass = on
 
 proc set_pitch_correct_ff*(apu: APU; on: bool) =
   ## Toggle WSOLA pitch-preserving 2x. The stretcher itself resets on the
@@ -275,8 +288,18 @@ proc get_sample*(apu: APU) =
       if apu.turbo_parity:
         appendAudioSample(sl, sr)
   else:
-    apu.buffer[apu.buffer_pos]     = total_left  * 32
-    apu.buffer[apu.buffer_pos + 1] = total_right * 32
+    var out_l = total_left  * 32
+    var out_r = total_right * 32
+    if apu.audio_lowpass:
+      # Gentle one-pole low-pass (~12 kHz corner at 32768 Hz) modeling the
+      # cap/speaker smoothing on real hardware. alpha = 1 - exp(-2*pi*fc/fs).
+      # Guarded so the disabled path above stays bit-identical.
+      apu.lp_left  += AUDIO_LOWPASS_ALPHA * (float32(out_l) - apu.lp_left)
+      apu.lp_right += AUDIO_LOWPASS_ALPHA * (float32(out_r) - apu.lp_right)
+      out_l = int16(clamp(apu.lp_left,  -32768.0'f32, 32767.0'f32))
+      out_r = int16(clamp(apu.lp_right, -32768.0'f32, 32767.0'f32))
+    apu.buffer[apu.buffer_pos]     = out_l
+    apu.buffer[apu.buffer_pos + 1] = out_r
     apu.buffer_pos += 2
     if apu.buffer_pos >= APU_BUFFER_SIZE:
       # Master volume, applied per buffer at the queue point. Muting still

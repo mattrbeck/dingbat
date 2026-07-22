@@ -272,6 +272,7 @@ type
     frame_blend*:       bool     # blend the previous frame in (LCD ghosting)
     rewind*:            bool     # keep rewind history (hold ` to rewind)
     pitch_correct_ff*:  bool     # WSOLA pitch-preserving 2x fast-forward (off = octave-up)
+    audio_lowpass*:     bool     # analog-output low-pass on the GBA mix (cap/speaker smoothing)
 
 proc new_config*(): Config =
   Config(
@@ -294,6 +295,7 @@ proc new_config*(): Config =
     frame_blend:     false,
     rewind:          true,
     pitch_correct_ff: false,
+    audio_lowpass:   false,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -324,6 +326,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.rewind = j["rewind"].getBool(true)
   if j.hasKey("pitch_correct_ff"):
     cfg.pitch_correct_ff = j["pitch_correct_ff"].getBool(false)
+  if j.hasKey("audio_lowpass"):
+    cfg.audio_lowpass = j["audio_lowpass"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -423,6 +427,7 @@ proc save_config*(cfg: Config) =
   lines.add("frame_blend: " & $cfg.frame_blend)
   lines.add("rewind: " & $cfg.rewind)
   lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)
+  lines.add("audio_lowpass: " & $cfg.audio_lowpass)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))

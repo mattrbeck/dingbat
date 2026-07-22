@@ -481,6 +481,13 @@ type
     stretch:            TimeStretch
     stretch_engaged:    bool  # tracks the stretch-path rising edge (auto-reset)
     audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
+    # Optional analog-output low-pass (models the GBA cap/speaker smoothing).
+    # Off by default so output is bit-identical to the unfiltered path; when
+    # on, a one-pole IIR runs on the final native mix (web uses a BiquadFilter
+    # node in the AudioContext graph instead). lp_left/lp_right are the filter
+    # state; presentation-only, not serialized.
+    audio_lowpass*:     bool
+    lp_left, lp_right:  float32
     left_resampler*:    Resampler[float32]
     right_resampler*:   Resampler[float32]
     resample_freq*:     int

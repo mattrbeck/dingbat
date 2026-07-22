@@ -2552,7 +2552,7 @@ const saveAudioSettings = () => {
   if (!db) return;
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
-    () => dbPut("audio", { volume, muted, pitchCorrectFF }), 250);
+    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass }), 250);
 };
 
 const setVolume = (v) => {
@@ -2582,6 +2582,9 @@ const loadAudioSettings = async () => {
   if (s && typeof s.pitchCorrectFF === "boolean") pitchCorrectFF = s.pitchCorrectFF;
   if (pcffToggle) pcffToggle.checked = pitchCorrectFF;
   applyPitchCorrectFF();
+  if (s && typeof s.audioLowpass === "boolean") audioLowpass = s.audioLowpass;
+  if (lowpassToggle) lowpassToggle.checked = audioLowpass;
+  applyAudioLowpass();
 };
 
 for (let s of volSliders) {
@@ -2637,6 +2640,25 @@ if (pcffToggle) {
   pcffToggle.addEventListener("change", () => {
     pitchCorrectFF = pcffToggle.checked;
     applyPitchCorrectFF();
+    saveAudioSettings();
+  });
+}
+
+// --- Analog low-pass filter (optional AudioContext BiquadFilter) ---
+// Models the GBA speaker's cap/analog smoothing; off by default (routed out
+// of the graph → bit-identical to no filter). Persisted in the "audio" IDB
+// record alongside volume/mute/pitchCorrectFF.
+var audioLowpass = false;
+const lowpassToggle = document.getElementById("audio-lowpass-toggle");
+
+const applyAudioLowpass = () => {
+  if (typeof window.updateAudioLowpass === "function") window.updateAudioLowpass();
+};
+
+if (lowpassToggle) {
+  lowpassToggle.addEventListener("change", () => {
+    audioLowpass = lowpassToggle.checked;
+    applyAudioLowpass();
     saveAudioSettings();
   });
 }
@@ -4442,7 +4464,29 @@ var Module = {
     // output device rate natively, so no custom resampler is needed.
     let audioCtx = null;
     let gainNode = null;
+    let lowpassNode = null;
     let playTime = 0;
+
+    // Optional analog-output low-pass (~12 kHz), modeling the GBA speaker's
+    // cap/analog smoothing. Off by default → gain routes straight to the
+    // destination (no filter node in the path). Mirrors the native IIR.
+    const routeOutput = () => {
+      if (!audioCtx || !gainNode) return;
+      try { gainNode.disconnect(); } catch (e) {}
+      if (typeof audioLowpass !== "undefined" && audioLowpass) {
+        if (!lowpassNode) {
+          lowpassNode = audioCtx.createBiquadFilter();
+          lowpassNode.type = "lowpass";
+          lowpassNode.frequency.value = 12000;
+          lowpassNode.Q.value = 0.707;   // gentle Butterworth-ish, no resonance
+          lowpassNode.connect(audioCtx.destination);
+        }
+        gainNode.connect(lowpassNode);
+      } else {
+        gainNode.connect(audioCtx.destination);
+      }
+    };
+    window.updateAudioLowpass = () => routeOutput();
     // Audio can only play at realtime rate. When unbounded fast-forward runs the
     // core many frames per rAF, we play the frames that fit within this much
     // queued lead and drop the rest (see the fastForward branch), keeping FF
@@ -4467,7 +4511,8 @@ var Module = {
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       gainNode = audioCtx.createGain();
       gainNode.gain.value = effectiveGain();
-      gainNode.connect(audioCtx.destination);
+      lowpassNode = null;
+      routeOutput();   // gain -> (lowpass ->) destination per the toggle
       playTime = 0;
     };
 
