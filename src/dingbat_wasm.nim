@@ -177,6 +177,18 @@ proc wasm_set_frame_blend(on: cint) {.exportc.} =
   frameBlend = on != 0
   prevRaw.setLen(0)  # drop stale history (also on core/resolution switch)
 
+proc wasm_set_mp2k_hle(on: cint) {.exportc.} =
+  ## EXPLORATORY: toggle MP2K/M4A sound-engine HLE on the live GBA core at
+  ## runtime (detection already ran in post_init; this only gates the mixer).
+  ## Returns 1 if the engine was actually detected in the loaded ROM, else 0.
+  if stateKind == ekGBA and stateGba != nil:
+    stateGba.mp2k_hle = on != 0
+
+proc wasm_mp2k_available(): cint {.exportc.} =
+  ## 1 when the loaded ROM's MP2K engine was detected (HLE can do something).
+  if stateKind == ekGBA and stateGba != nil and stateGba.mp2k != nil and
+     stateGba.mp2k.engaged: 1 else: 0
+
 # --- WebGL2 present path ---
 # The web front end no longer presents the game through SDL's renderer. Each
 # frame it uploads the RAW BGR555 framebuffer (this pointer) to a WebGL2

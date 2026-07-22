@@ -5232,3 +5232,36 @@ joystickEl.addEventListener("touchstart", joystickTouchStart);
 joystickEl.addEventListener("touchmove", joystickTouchMove);
 joystickEl.addEventListener("touchend", joystickTouchEnd);
 joystickEl.addEventListener("touchcancel", joystickTouchEnd);
+
+// --- EXPLORATORY: MP2K HLE audio A/B toggle (throwaway comparison UI) ---
+// Floating button to flip the experimental sound-engine HLE on/off at runtime
+// so the same moment of gameplay can be compared with/without it. Only does
+// anything for a GBA ROM whose MP2K engine was detected.
+(() => {
+  let hleOn = false;
+  const btn = document.createElement("button");
+  Object.assign(btn.style, {
+    position: "fixed", right: "12px", bottom: "12px", zIndex: 99999,
+    padding: "10px 14px", font: "600 13px system-ui, sans-serif",
+    color: "#fff", background: "rgba(28,28,38,0.92)",
+    border: "2px solid #555", borderRadius: "8px", cursor: "pointer",
+  });
+  btn.title = "Toggle MP2K sound-engine HLE (experimental) to A/B the audio";
+  document.body.appendChild(btn);
+  const ready = () => typeof Module !== "undefined" && !!Module._wasm_set_mp2k_hle;
+  const avail = () => ready() && Module._wasm_mp2k_available &&
+                      Module._wasm_mp2k_available() === 1;
+  const refresh = () => {
+    btn.textContent = "HLE audio: " + (hleOn ? "ON" : "OFF") +
+      (!ready() ? " (loading…)" : avail() ? "" : " (no MP2K game)");
+    btn.style.borderColor = hleOn && avail() ? "#4cd08a" : "#555";
+  };
+  btn.addEventListener("click", () => {
+    if (!ready()) return;
+    hleOn = !hleOn;
+    Module._wasm_set_mp2k_hle(hleOn ? 1 : 0);
+    refresh();
+  });
+  setInterval(refresh, 1000);
+  refresh();
+})();

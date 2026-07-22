@@ -244,6 +244,9 @@ proc get_sample*(apu: APU) =
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
+  when defined(mp2kwav):
+    realDmaCapture.add raw_dma_a  # the game's OWN FIFO output, for A/B calibration
+    realDmaCapture.add raw_dma_b
   # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
   # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
   # routing/volume path below then applies unchanged, NBA-style.

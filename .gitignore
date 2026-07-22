@@ -68,3 +68,9 @@ ios/Dingbat.xcodeproj/
 ios/build/
 ios/DerivedData/
 dingbat_dist
+
+# EXPLORATORY mp2k HLE scratch binaries
+scratch_mp2kwav
+scratch_bdpcm_test
+scratch_probe
+bench_freq

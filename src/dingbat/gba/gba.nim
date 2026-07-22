@@ -504,7 +504,13 @@ type
     loop_pos*:    uint32
     looping*:     bool
     freq*:        uint32
-    position*:    float32
+    compressed*:  bool      # m4a BDPCM ("compressed waveform"), channel.type bit5
+    use_pcm_rate*: bool     # channel.type bit3: step at SoundInfo pcm_sample_rate
+    # NBA-style forward-stepping resampler state
+    cur_pos*:     uint32    # integer sample position (block/offset derived from this)
+    resample_phase*: float32   # fractional phase (mu) between fetched samples
+    should_fetch*: bool     # need to decode a new source sample this step
+    hist0*, hist1*, hist2*, hist3*: float32  # 4-tap history, s8 units, hist0 newest
     vol_l0*, vol_l1*: float32
     vol_r0*, vol_r1*: float32
 
@@ -519,10 +525,18 @@ type
     frame_len*:  int
     frame_pos*:  int
     compressed_skipped*: int
+    dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_skip_fires*: int
     dbg_hook_fires*: int
     dbg_out_energy*: float64
     dbg_out_count*:  int
+    dbg_reverb*:     uint8
+    dbg_pcm_rate*:   int
+    pcm_sample_rate*: int
+    reverb_strength*: uint8
+    use_cubic*:      bool
+    reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
+    reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
 
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
@@ -639,6 +653,9 @@ include arm/arm
 include arm/lut
 include thumb/thumb
 include cpu
+when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
+  var mp2kWavCapture*: seq[int16] = @[]
+  var realDmaCapture*: seq[int16] = @[]
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
