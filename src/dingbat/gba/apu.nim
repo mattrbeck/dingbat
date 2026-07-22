@@ -249,7 +249,8 @@ proc get_sample*(apu: APU) =
     realDmaCapture.add raw_dma_b
   # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
   # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
-  # routing/volume path below then applies unchanged, NBA-style.
+  # routing/volume path below (the GBATEK-documented FIFO sink) then applies
+  # unchanged.
   if apu.gba.mp2k_hle and apu.gba.mp2k != nil and apu.gba.mp2k.engaged:
     let (hl, hr) = apu.gba.mp2k.render_sample()
     raw_dma_a = hl

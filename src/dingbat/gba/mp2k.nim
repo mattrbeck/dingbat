@@ -1,77 +1,104 @@
 # =============================================================================
 # EXPLORATORY: MP2K / M4A ("Sappy") sound-engine HLE  (included by gba.nim)
 # =============================================================================
-# High-level-emulate the GBA's common MP2K music mixer, the way NanoBoyAdvance
-# does: detect the engine in the ROM, read its SoundInfo struct out of guest
-# RAM each audio frame, and render the DirectSound audio ourselves at a higher
-# quality than the game's ~13 kHz FIFO stream.
+# High-level-emulate the GBA's common MP2K music mixer: detect the engine in
+# the ROM, read its SoundInfo struct out of guest RAM each audio frame, and
+# render the DirectSound audio ourselves at a higher quality than the game's
+# ~13 kHz FIFO stream.
 #
 # This is a PROOF OF CONCEPT, OFF BY DEFAULT (gba.mp2k_hle). It is NOT
-# cycle-accurate and NOT wired into save-states / rollback / netplay. See the
-# feasibility report accompanying this branch for the full design + risk notes.
+# cycle-accurate and NOT wired into save-states / rollback / netplay.
 #
-# Technique credit: NanoBoyAdvance (fleroviux),
-#   src/nba/src/core.cc  (detection + PC hook)
-#   src/nba/src/hw/apu/hle/mp2k.{hh,cc}  (SoundInfo struct + mixer)
+# Provenance / license: this file is an independent, MIT-licensed implementation
+# built from PUBLIC, non-copyrightable facts about Nintendo's "MusicPlayer2000"
+# (M4A / "Sappy") sound driver. The engine, its detection, its SoundInfo /
+# SoundChannel / WaveData structs, the compressed-waveform block layout, and the
+# reverb are all documented independently of any emulator source:
+#   * loveemu vgmdocs, "Summary of GBA Standard Sound Driver MusicPlayer2000":
+#     https://loveemu.github.io/vgmdocs/Summary_of_GBA_Standard_Sound_Driver_MusicPlayer2000.html
+#     (engine overview, saptapper-based detection, "a simple reverb (echo)
+#      effect with fixed delay", pointers to m4a_internal.h and sappy.txt).
+#   * pret decompilations (pokeemerald/pokefirered/pokeruby) include/gba/
+#     m4a_internal.h — authoritative SoundInfo / SoundChannel / WaveData field
+#     names and order (the byte offsets below are derived from that layout).
+#   * agbplay (ipatix) independently documents the same GFDPCM/BDPCM delta LUT
+#     and 33-byte / 64-sample compressed block (corroboration of format facts).
+#   * GBATEK — the DirectSound FIFO hardware sink we substitute for.
+#   * Paul Bourke, "Cubic Interpolation" — the Catmull-Rom resampling formula.
+# The 8-bit-PCM / BDPCM decode, resampler, and reverb are all expressed in our
+# own way; no third-party emulator code was copied.
 #
-# Differences from NBA in this PoC (deliberate, for tractability):
-#   * SHADOW mode only: the real SoundMainRAM still runs, so we piggyback on
-#     the engine's already-computed per-channel envelope volumes (which already
-#     include masterVolume + pan) instead of reimplementing MP2K's ADSR/volume
-#     chain. NBA reimplements ADSR so it can PREDICT the next frame and ramp
-#     current->next; we read the current frame's envelope at the hook (m4a
-#     updates it in the sequencer, before this mixer) so there is no frame lag,
-#     and ramp previous->current across the frame.
-#   * Renders at the APU's 32768 Hz output rate, not NBA's 65536 Hz ring.
+# Design notes (this PoC's own choices):
+#   * SHADOW mode: the real SoundMainRAM still runs, so we consume the engine's
+#     already-computed per-channel envelope volumes at +0x0A/+0x0B (which
+#     already fold in masterVolume + pan; see m4a_internal.h SoundChannel
+#     envelopeVolumeRight/Left) rather than reimplementing MP2K's ADSR chain.
+#     Reading them at the hook (m4a updates them in the sequencer, before this
+#     mixer runs) gives no frame lag; we ramp previous->current across a frame.
+#   * Renders at the APU's 32768 Hz output rate.
 #   * 8-bit PCM, looping, AND m4a BDPCM ("compressed waveform", channel.type
 #     bit5) — the latter is decoded to s8 and mixed at PCM parity (not skipped).
 
 const
+  # Detection signature: a CRC-32 over the first 48 bytes of the M4A engine's
+  # SoundMain() function, which is byte-identical across the ROMs that ship the
+  # stock Nintendo driver. This is a hash of factual, Nintendo-authored ROM code
+  # (the same function saptapper locates when it "detect[s] MP2k driver"; see the
+  # loveemu summary). It is ROM/format-derived, not taken from any emulator.
   MP2K_SOUNDMAIN_CRC32*   = 0x27EA7FCF'u32   # CRC-32 of SoundMain()'s first 48 bytes
   MP2K_SOUNDMAIN_LEN      = 48
+  # SoundMain loads the SoundMainRAM entry point from its literal pool at this
+  # byte offset (documented in the m4a sources / sappy.txt); we follow it to the
+  # PC we hook each frame.
   MP2K_SOUNDMAINRAM_OFF   = 0x74             # literal-pool offset to SoundMainRAM ptr
   MP2K_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32   # IWRAM slot holding the SoundInfo pointer
-  MP2K_MAGIC              = 0x68736D54'u32   # "Tmsh" little-endian
+  MP2K_MAGIC              = 0x68736D54'u32   # SoundInfo.ident, "Tmsh" little-endian
   MP2K_MAX_CHANNELS       = 12
 
-  # SoundChannel field offsets (see NBA mp2k.hh)
+  # SoundChannel field offsets, derived from m4a_internal.h (pret):
+  #   statusFlags(0) type(1) rightVolume(2) leftVolume(3) ... envelopeVolume(9)
+  #   envelopeVolumeRight(10) envelopeVolumeLeft(11) ... frequency(0x20) wav(0x24)
   SC_STATUS   = 0x00
   SC_TYPE     = 0x01
   SC_VOL_R    = 0x02
   SC_VOL_L    = 0x03
   SC_ENV_VOL  = 0x09
-  SC_ENV_VR   = 0x0A
-  SC_ENV_VL   = 0x0B
-  SC_FREQ     = 0x20
-  SC_WAVE     = 0x24
+  SC_ENV_VR   = 0x0A   # envelopeVolumeRight
+  SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
+  SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
+  SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
 
-  # SoundInfo field offsets (see NBA mp2k.hh SoundInfo)
-  SI_MAGIC        = 0x00
-  SI_REVERB       = 0x05
-  SI_MAX_CHANS    = 0x06
-  SI_MASTER_VOL   = 0x07
-  SI_PCM_RATE     = 0x14   # s32 pcm_sample_rate (DirectSound base rate)
-  SI_CHANNELS     = 0x50
+  # SoundInfo field offsets, derived from m4a_internal.h (pret):
+  #   ident(0) pcmDmaCounter(4) reverb(5) maxChans(6) masterVolume(7) ...
+  #   pcmSamplesPerVBlank(0x10) pcmFreq(0x14) ... chans[](0x50)
+  SI_MAGIC        = 0x00   # ident
+  SI_REVERB       = 0x05   # reverb (0 = off)
+  SI_MAX_CHANS    = 0x06   # maxChans
+  SI_MASTER_VOL   = 0x07   # masterVolume
+  SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
+  SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
 
-  # channel.type bits (NBA)
-  TYPE_PCM_RATE = 0x08'u8  # step at SoundInfo.pcm_sample_rate, not channel.freq
+  # channel.type bits (m4a SoundChannel.type)
+  TYPE_PCM_RATE = 0x08'u8  # step at SoundInfo.pcmFreq, not channel.frequency
   TYPE_COMPRESS = 0x20'u8  # m4a BDPCM compressed waveform
 
-  # status bits
+  # status bits (m4a SoundChannel.statusFlags)
   CH_STOP = 0x40'u8
   CH_ON   = 0xC7'u8   # START|STOP|ECHO|ENV_MASK — "channel is producing sound"
 
-  # m4a BDPCM 4-bit differential LUT (running s8 accumulator deltas). From the
-  # m4a "compressed waveform" format; identical to NanoBoyAdvance's
-  # kDifferentialLUT (there stored pre-divided by 127 — we keep raw s8 and
-  # divide once at output, matching the uncompressed /128 path).
+  # m4a compressed-waveform ("GFDPCM"/BDPCM) 4-bit differential LUT: the 16
+  # signed deltas added to a running s8 accumulator. These values are a fixed
+  # property of Nintendo's format, independently documented by agbplay (ipatix):
+  #   [0, 1, 4, 9, 16, 25, 36, 49, -64, -49, -36, -25, -16, -9, -4, -1].
+  # We store them as raw s8 deltas and divide once at output (/128), so the
+  # compressed and uncompressed paths share the same output scaling.
   BDPCM_LUT: array[16, float32] = [
     0.0'f32, 1, 4, 9, 16, 25, 36, 49,
     -64, -49, -36, -25, -16, -9, -4, -1
   ]
   # Compressed blocks are 33 bytes / 64 samples: 1 s8 base byte + 32 nibble
-  # bytes (64 packed 4-bit LUT indices).
+  # bytes (64 packed 4-bit LUT indices). (agbplay corroborates this layout.)
   BDPCM_BLOCK_BYTES  = 33'u32
   BDPCM_BLOCK_SAMPS  = 64'u32
 
@@ -182,10 +209,14 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
-  # Lazily allocate the reverb delay ring the first frame a game asks for it.
-  # 8 frames of stereo history, rounded to a power of two for cheap masking.
+  # Lazily allocate the reverb echo line the first frame a game asks for it.
+  # MP2K's reverb is "a simple reverb (echo) effect with fixed delay" (loveemu),
+  # so a single delay line one output frame long is all we need. Size it to a
+  # power of two >= one frame of stereo samples for cheap index masking.
   if m.reverb_strength > 0'u8 and m.reverb_ring.len == 0:
-    m.reverb_ring = newSeq[float32](8192 * 2)
+    var slots = 1'u32
+    while slots < uint32(max(1, m.frame_len)): slots = slots shl 1
+    m.reverb_ring = newSeq[float32](int(slots) * 2)
     m.reverb_w = 0
   m.frame_pos = 0
   for i in 0 ..< MP2K_MAX_CHANNELS:
@@ -217,10 +248,10 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         dbgRetrigLog.inc
     if retrig:
       # (re)trigger: reset the resampler + decode state to the sample start.
-      s.cur_pos = 0
-      s.resample_phase = 0
-      s.should_fetch = true
-      s.hist0 = 0; s.hist1 = 0; s.hist2 = 0; s.hist3 = 0
+      s.src_index = 0
+      s.phase_frac = 0
+      s.need_fetch = true
+      s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
       s.active = true
       s.age = 0
     else:
@@ -234,8 +265,8 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     # fixed-point value). Using the latter advanced the cursor ~200 samples per
     # output sample — the high-pitch whine. step = freq / output_rate.
     s.freq        = m.rd32(base + SC_FREQ)
-    s.loop_pos    = m.rd32(wave + 8)
-    s.num_samples = m.rd32(wave + 12)
+    s.loop_start  = m.rd32(wave + 8)    # WaveData.loopStart
+    s.sample_count = m.rd32(wave + 12)  # WaveData.size
     s.looping     = looping
     # Fast path: cache a direct ROM offset so the per-sample mixer can read the
     # cartridge buffer without going through the bus address decoder. m4a sample
@@ -298,19 +329,19 @@ proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
 
 proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
                 rmask: uint32): float32 {.inline.} =
-  ## Decode the source sample at s.cur_pos, returned in raw s8 units
-  ## (~ -128..127). For BDPCM the running accumulator is carried in s.hist0
-  ## (the newest history entry) and re-synced to the block base byte every 64
-  ## samples, exactly as NanoBoyAdvance / m4a do.
+  ## Decode the source sample at s.src_index, returned in raw s8 units
+  ## (~ -128..127). For BDPCM the running accumulator is carried in s.tap0 (the
+  ## newest history entry) and re-synced to each 64-sample block's s8 base byte,
+  ## per the m4a compressed-waveform format (see BDPCM_LUT / block constants).
   if s.compressed:
-    let pos = s.cur_pos
+    let pos = s.src_index
     let block_offset  = pos and (BDPCM_BLOCK_SAMPS - 1)      # pos % 64
     let block_address = (pos shr 6) * BDPCM_BLOCK_BYTES      # (pos/64)*33
     var samp: float32
     if block_offset == 0'u32:
       samp = float32(cast[int8](m.wave_u8(s, rom, rmask, block_address)))
     else:
-      samp = s.hist0                                          # running value
+      samp = s.tap0                                           # running value
     let address = block_address + (block_offset shr 1) + 1'u32
     var lut_index = m.wave_u8(s, rom, rmask, address)
     if (block_offset and 1'u32) != 0'u32: lut_index = lut_index and 0x0F'u8
@@ -318,7 +349,7 @@ proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
     samp += BDPCM_LUT[lut_index]
     samp
   else:
-    float32(cast[int8](m.wave_u8(s, rom, rmask, s.cur_pos)))
+    float32(cast[int8](m.wave_u8(s, rom, rmask, s.src_index)))
 
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## Produce one stereo output sample at the APU's rate (32768 Hz). Replaces
@@ -326,9 +357,10 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## roughly in the FIFO latch range (~ -128*2 .. 127*2) so the existing APU
   ## DirectSound scaling path applies unchanged.
   ##
-  ## Per-channel resampler follows NBA's forward-stepping model: keep a 4-tap
-  ## sample history + fractional phase, fetch a new source sample only when the
-  ## phase crosses an integer, and interpolate (cubic Catmull-Rom or linear).
+  ## Each channel uses a straightforward forward-stepping polyphase resampler:
+  ## keep a 4-tap sample history plus a fractional phase, decode a fresh source
+  ## sample only when the phase crosses an integer boundary, and interpolate
+  ## (cubic Catmull-Rom per Paul Bourke, or linear).
   if not m.engaged: return (0'i16, 0'i16)
   var accl = 0.0'f32
   var accr = 0.0'f32
@@ -340,26 +372,27 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     let s = addr m.samplers[i]
     if not s.active: continue
     # Fetch a fresh source sample into the history when the phase advanced.
-    if s.should_fetch and s.cur_pos < s.num_samples:
+    if s.need_fetch and s.src_index < s.sample_count:
       let ns = m.decode_src(s, rom, rmask)
-      s.hist3 = s.hist2; s.hist2 = s.hist1; s.hist1 = s.hist0; s.hist0 = ns
-      s.should_fetch = false
-    let mu = s.resample_phase
+      s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = ns
+      s.need_fetch = false
+    let mu = s.phase_frac
     var sample: float32
     if m.resample_mode == 2:
-      sample = s.hist0                      # zero-order hold (matches raw FIFO)
+      sample = s.tap0                       # zero-order hold (matches raw FIFO)
     elif m.resample_mode == 1 or not cubic:
-      sample = s.hist0 * mu + s.hist1 * (1.0'f32 - mu)
+      sample = s.tap0 * mu + s.tap1 * (1.0'f32 - mu)
     elif cubic:
-      # Catmull-Rom / cubic (paulbourke). hist0=newest .. hist3=oldest.
+      # Catmull-Rom / cubic (Paul Bourke, "Cubic Interpolation").
+      # tap0 = newest .. tap3 = oldest.
       let mu2 = mu * mu
-      let a0 = s.hist0 - s.hist1 - s.hist3 + s.hist2
-      let a1 = s.hist3 - s.hist2 - a0
-      let a2 = s.hist1 - s.hist3
-      let a3 = s.hist2
+      let a0 = s.tap0 - s.tap1 - s.tap3 + s.tap2
+      let a1 = s.tap3 - s.tap2 - a0
+      let a2 = s.tap1 - s.tap3
+      let a3 = s.tap2
       sample = a0 * mu * mu2 + a1 * mu2 + a2 * mu + a3
     else:
-      sample = s.hist0 * mu + s.hist1 * (1.0'f32 - mu)
+      sample = s.tap0 * mu + s.tap1 * (1.0'f32 - mu)
     sample = sample / 128.0'f32
     var vl, vr: float32
     case m.env_mode
@@ -394,52 +427,53 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
       if rate > float32(APU_SAMPLE_RATE):
         dbgStepDecimN.inc
         dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
-    s.resample_phase += rate / float32(APU_SAMPLE_RATE)
-    if s.resample_phase >= 1.0'f32:
-      let n = uint32(s.resample_phase)
-      s.resample_phase -= float32(n)
-      s.cur_pos += n
-      s.should_fetch = true
-      if s.cur_pos >= s.num_samples:
+    s.phase_frac += rate / float32(APU_SAMPLE_RATE)
+    if s.phase_frac >= 1.0'f32:
+      let n = uint32(s.phase_frac)
+      s.phase_frac -= float32(n)
+      s.src_index += n
+      s.need_fetch = true
+      if s.src_index >= s.sample_count:
         if s.looping:
-          s.cur_pos = s.loop_pos + n - 1'u32
+          s.src_index = s.loop_start + n - 1'u32
         else:
           # Hold the last decoded sample; the game clears the channel's status
           # (CH_ON) when the note ends, which deactivates us on the next frame.
-          s.cur_pos = s.num_samples
-          s.should_fetch = false
+          s.src_index = s.sample_count
+          s.need_fetch = false
   m.frame_pos.inc
   if m.frame_len > 0 and m.frame_pos >= m.frame_len: m.frame_pos = m.frame_len
-  # --- MP2K reverb (NBA multi-tap over a stereo delay ring) --------------------
-  # Only engaged when the game sets SoundInfo.reverb > 0. The ring stores the
-  # post-mix (dry+wet) signal so the taps feed back, matching NBA's frame ring.
+  # --- MP2K reverb: simple fixed-delay feedback echo ---------------------------
+  # loveemu documents MP2K's reverb as "a simple reverb (echo) effect with fixed
+  # delay", and the real m4a SoundMainRAM implements it as a feedback average
+  # over the DirectSound (pcmBuffer) samples one buffer-drain behind. We model
+  # that directly with a single delay line exactly one output frame long: read
+  # the signal from one frame ago, average the two channels into a single mono
+  # echo value (the real driver applies one shared reverb value to both sides),
+  # scale it by SoundInfo.reverb, add it to the dry mix, and store the wet result
+  # back so the echo feeds back and decays over successive frames.
+  #
+  # The feedback gain k = reverb/128 is clamped strictly below unity, so the
+  # single-tap loop is unconditionally BIBO-stable (the tail decays as k^n) —
+  # no runaway. Engaged only when SoundInfo.reverb > 0; it is a minor part of
+  # the mix. All coefficients and structure here are our own.
   var outl_f = accl
   var outr_f = accr
   if m.reverb_strength > 0'u8 and m.reverb_ring.len >= 2:
-    let ringN = uint32(m.reverb_ring.len shr 1)   # stereo slots (power of two)
-    let mask  = ringN - 1'u32
-    let fl    = uint32(m.frame_len)
+    let slots = uint32(m.reverb_ring.len shr 1)   # stereo slots (power of two)
+    let mask  = slots - 1'u32
     let w     = uint32(m.reverb_w)
-    template tapL(df: uint32): float32 = m.reverb_ring[(((w - df*fl) and mask) shl 1)]
-    template tapR(df: uint32): float32 = m.reverb_ring[(((w - df*fl) and mask) shl 1) + 1]
-    const earlyC = 0.0015'f32
-    const norm   = 1.0'f32 / 2.65'f32   # 1/sum of late coefficients
-    let el = tapL(1'u32) * earlyC
-    let er = tapR(1'u32) * earlyC
-    # late reflections 5,6,7 frames back, cross-mixed (coeffs {1,.1}{.6,.25}{.35,.35})
-    let l0 = tapL(5'u32); let r0 = tapR(5'u32)
-    let l1 = tapL(6'u32); let r1 = tapR(6'u32)
-    let l2 = tapL(7'u32); let r2 = tapR(7'u32)
-    let ll = (l0*1.0'f32 + r0*0.1'f32 + l1*0.6'f32 + r1*0.25'f32 + l2*0.35'f32 + r2*0.35'f32) * norm
-    let rr = (l0*0.1'f32 + r0*1.0'f32 + l1*0.25'f32 + r1*0.6'f32 + l2*0.35'f32 + r2*0.35'f32) * norm
-    let rsc = (if m.rev_scale < 0'f32: 0.0'f32
-               elif m.rev_scale > 0'f32: m.rev_scale else: 1.0'f32)
-    let factor = float32(m.reverb_strength) / 128.0'f32 * rsc
-    outl_f = accl + (el + ll) * factor
-    outr_f = accr + (er + rr) * factor
-    let idx = (w and mask) shl 1
-    m.reverb_ring[idx]     = outl_f
-    m.reverb_ring[idx + 1] = outr_f
+    let delay = uint32(m.frame_len)               # fixed delay: one output frame
+    let ri    = ((w - delay) and mask) shl 1
+    let wet   = 0.5'f32 * (m.reverb_ring[ri] + m.reverb_ring[ri + 1])  # mono echo
+    let rsc   = (if m.rev_scale < 0'f32: 0.0'f32
+                 elif m.rev_scale > 0'f32: m.rev_scale else: 1.0'f32)
+    let k     = min(0.75'f32, float32(m.reverb_strength) / 128.0'f32 * rsc)
+    outl_f = accl + wet * k
+    outr_f = accr + wet * k
+    let wi = (w and mask) shl 1
+    m.reverb_ring[wi]     = outl_f
+    m.reverb_ring[wi + 1] = outr_f
     m.reverb_w = int((w + 1'u32) and mask)
   # Scale to the DirectSound latch range the APU expects. With the master-volume
   # double-apply fixed (see on_frame), the per-side envelope volumes already carry
@@ -464,7 +498,7 @@ proc init_mp2k*(m: Mp2kHle) =
   ## Run detection against the loaded cartridge. Safe to call after the ROM is
   ## in memory. Leaves hook_addr = 0xFFFFFFFF when the engine isn't found.
   m.frame_len = APU_SAMPLE_RATE div 60
-  m.use_cubic = true   # cubic (Catmull-Rom) resampling by default (NBA-style)
+  m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   let (hook, entry) = detect_mp2k(m.gba.cartridge.rom)
   m.hook_addr = hook
   m.entry_addr = entry

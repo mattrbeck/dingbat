@@ -334,8 +334,8 @@ proc tick*(cpu: CPU) =
     cpu.instr_exc_return = false
     # EXPLORATORY: MP2K HLE mixer hook. When enabled and PC reaches the engine's
     # SoundMainRAM entry, refresh the shadow mixer from SoundInfo. The real
-    # function still runs afterwards (NBA-style shadow mixing), so this only
-    # reads state — it does not alter control flow or timing.
+    # function still runs afterwards (shadow mixing), so this only reads state —
+    # it does not alter control flow or timing.
     if cpu.gba.mp2k_hle and cpu.gba.mp2k != nil and
        cpu.gba.mp2k.hook_addr != 0xFFFFFFFF'u32:
       let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)

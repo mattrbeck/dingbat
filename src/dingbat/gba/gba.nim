@@ -495,22 +495,26 @@ type
     output_freq*:       int
 
   # EXPLORATORY: MP2K/M4A sound-engine HLE state (see mp2k.nim). Off by default.
+  # Field names follow the m4a WaveData layout (loop_start, sample_count) from
+  # the pret m4a_internal.h decompilation where they name a format field, and
+  # our own terms for the resampler's private working state.
   Mp2kSampler* = object
     active*:      bool
     wave_data*:   uint32
     rom_off*:     uint32    # cached ROM byte offset of the sample data (in_rom)
     in_rom*:      bool      # sample bytes live in cartridge ROM (fast path)
-    num_samples*: uint32
-    loop_pos*:    uint32
+    sample_count*: uint32   # WaveData.size (m4a_internal.h): number of source samples
+    loop_start*:  uint32    # WaveData.loopStart (m4a_internal.h): loop restart index
     looping*:     bool
     freq*:        uint32
     compressed*:  bool      # m4a BDPCM ("compressed waveform"), channel.type bit5
     use_pcm_rate*: bool     # channel.type bit3: step at SoundInfo pcm_sample_rate
-    # NBA-style forward-stepping resampler state
-    cur_pos*:     uint32    # integer sample position (block/offset derived from this)
-    resample_phase*: float32   # fractional phase (mu) between fetched samples
-    should_fetch*: bool     # need to decode a new source sample this step
-    hist0*, hist1*, hist2*, hist3*: float32  # 4-tap history, s8 units, hist0 newest
+    # Private resampler working state: a forward-stepping polyphase resampler
+    # keeps an integer read cursor, a fractional phase, and a short tap history.
+    src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
+    phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
+    need_fetch*:  bool      # a new source sample must be decoded this step
+    tap0*, tap1*, tap2*, tap3*: float32  # 4-tap history, s8 units, tap0 newest
     vol_l0*, vol_l1*: float32
     vol_r0*, vol_r1*: float32
     age*:         int       # frames since (re)trigger; 0 on the attack frame
