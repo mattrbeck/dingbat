@@ -8,7 +8,12 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-const SOURCE = readFileSync(new URL("../index.js", import.meta.url), "utf8");
+// index.js calls createGlRenderer() at top-level eval; that helper lives in
+// glpresent.js (loaded as a separate <script> before index.js in index.html),
+// so the vm context needs it prepended too.
+const SOURCE =
+  readFileSync(new URL("../glpresent.js", import.meta.url), "utf8") + "\n" +
+  readFileSync(new URL("../index.js", import.meta.url), "utf8");
 
 // --- Fake DOM ---------------------------------------------------------------
 

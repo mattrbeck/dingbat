@@ -24,6 +24,23 @@ test("parseDriveFileName tolerates colons and quotes inside game names", async (
   eq(api.parseDriveFileName("save:x-p2.gba"), { game: "x-p2.gba", kind: "save" });
 });
 
+test("parseDriveFileName folds save-state slots + metadata into the base game", async () => {
+  const { api } = await loadApp();
+  // Slot 0 keeps the legacy keys/kinds.
+  eq(api.parseDriveFileName("state:A.gba"), { game: "A.gba", kind: "state" });
+  eq(api.parseDriveFileName("statemeta:A.gba"), { game: "A.gba", kind: "statemeta" });
+  // Slots 1..8 fold into the base game (no phantom "A.gba:slotN" game).
+  eq(api.parseDriveFileName("state:A.gba:slot3"), { game: "A.gba", kind: "state:3" });
+  eq(api.parseDriveFileName("statemeta:A.gba:slot7"),
+    { game: "A.gba", kind: "statemeta:7" });
+  // "statemeta:" is distinguished from "state:" even though it starts the same.
+  eq(api.parseDriveFileName("statemeta:A.gba:slot3"),
+    { game: "A.gba", kind: "statemeta:3" });
+  // A game name that merely contains ":slot" mid-string is not a slot suffix.
+  eq(api.parseDriveFileName("state:my:slot machine.gba"),
+    { game: "my:slot machine.gba", kind: "state" });
+});
+
 test("groupDriveFiles groups by game, sorted by name", async () => {
   const { api } = await loadApp();
   const files = [

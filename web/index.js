@@ -1358,8 +1358,22 @@ const collectLocalBackupEntries = async () => {
   let entries = [];
   for (let k of await dbKeys()) {
     if (typeof k !== "string") continue;
-    if (!k.startsWith("save:") && !k.startsWith("state:")) continue;
+    // "statemeta:" is checked explicitly: it does NOT start with "state:" (the
+    // 6th char is 'm', not ':'), so it would otherwise be dropped from backup.
+    let isMeta = k.startsWith("statemeta:");
+    if (!isMeta && !k.startsWith("save:") && !k.startsWith("state:")) continue;
     let v = await dbGet(k);
+    if (isMeta) {
+      // Slot metadata is a plain object ({ thumb, ts }), not a blob. JSON-encode
+      // it to bytes so it rides the same upload/download path as the save/state
+      // blobs; gdriveRestoreGame decodes it back into an object.
+      if (v && typeof v === "object" && !(v instanceof Uint8Array) &&
+          !(v instanceof ArrayBuffer)) {
+        let bytes = new TextEncoder().encode(JSON.stringify(v));
+        if (bytes.length) entries.push({ name: k, bytes, rom: false });
+      }
+      continue;
+    }
     if (v instanceof ArrayBuffer) v = new Uint8Array(v);
     if (v instanceof Uint8Array && v.length) {
       entries.push({ name: k, bytes: v, rom: false });
@@ -1374,10 +1388,24 @@ const collectLocalBackupEntries = async () => {
 };
 
 // Map a Drive file name back to { game, kind }; null for anything a future
-// version might add. Mirrors romsWithSaveData's "-p2" folding.
+// version might add. `kind` is the per-game grouping key (unique within a game)
+// and self-describes both the category and, for save states, the slot: slot 0
+// keeps the legacy kind ("state"/"statemeta"), slots 1..8 append ":slotN".
+// Mirrors romsWithSaveData's ":slotN" and "-p2" folding so numbered save-state
+// slots fold into the base game rather than becoming phantom "game" rows.
 const parseDriveFileName = (n) => {
   if (n.startsWith("rom:")) return { game: n.slice(4), kind: "rom" };
-  if (n.startsWith("state:")) return { game: n.slice(6), kind: "state" };
+  // Check "statemeta:" before "state:" for clarity (they don't actually
+  // collide: "statemeta:"[5] is 'm', so it fails startsWith("state:")).
+  for (let [prefix, cat] of [["statemeta:", "statemeta"], ["state:", "state"]]) {
+    if (n.startsWith(prefix)) {
+      let g = n.slice(prefix.length);
+      let m = g.match(/:slot(\d+)$/);
+      let slot = m ? Number(m[1]) : 0;
+      if (m) g = g.slice(0, m.index);
+      return { game: g, kind: slot === 0 ? cat : cat + ":" + slot };
+    }
+  }
   if (n.startsWith("save:")) {
     let g = n.slice(5);
     return g.endsWith("-p2")
@@ -1459,9 +1487,26 @@ const gdriveRestoreGame = async (group, btn) => {
       setGdriveProgress(`Downloading P2 save for ${group.game}…`);
       await dbPut("save:" + group.game + "-p2", await driveDownload(f.save2.id));
     }
-    if (f.state) {
-      setGdriveProgress(`Downloading save state for ${group.game}…`);
-      await dbPut(stateKey(group.game), await driveDownload(f.state.id));
+    // All nine save-state slots + their thumbnail/timestamp metadata. Slot 0
+    // uses the legacy "state:<name>" / "statemeta:<name>" keys; 1..8 add
+    // ":slotN" (see slotStateKey/slotMetaKey). Metadata was uploaded as JSON
+    // (see collectLocalBackupEntries) — decode it back into an object.
+    for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+      let stateKind = s === 0 ? "state" : "state:" + s;
+      let metaKind = s === 0 ? "statemeta" : "statemeta:" + s;
+      if (f[stateKind]) {
+        setGdriveProgress(
+          `Downloading save state ${s + 1} for ${group.game}…`);
+        await dbPut(slotStateKey(group.game, s),
+          await driveDownload(f[stateKind].id));
+      }
+      if (f[metaKind]) {
+        let raw = await driveDownload(f[metaKind].id);
+        try {
+          await dbPut(slotMetaKey(group.game, s),
+            JSON.parse(new TextDecoder().decode(raw)));
+        } catch { /* skip unparseable/legacy metadata */ }
+      }
     }
     if (f.rom) {
       let local = await getRomBytes(group.game);
@@ -1526,7 +1571,9 @@ const renderGdriveRestoreList = (files) => {
     if (f.rom) parts.push("ROM " + formatBytes(Number(f.rom.size) || 0));
     if (f.save) parts.push("Save");
     if (f.save2) parts.push("P2 save");
-    if (f.state) parts.push("State");
+    // Any slot counts (slot 0 = "state", slots 1..8 = "state:N").
+    if (Object.keys(f).some((k) => k === "state" || k.startsWith("state:")))
+      parts.push("State");
     let newest = Math.max(...Object.values(f).map((x) => Date.parse(x.modifiedTime) || 0));
     if (newest > 0) parts.push(new Date(newest).toLocaleDateString());
 
