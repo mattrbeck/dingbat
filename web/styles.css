@@ -3464,8 +3464,9 @@ body.rollback-mode #save-sep {
 
 /* Portrait tablets: the stacked strip already pushes d-pad / A-B to the
    side edges, but the flex-stretched shoulders balloon to half the screen
-   width and Select/Start sit in the unreachable dead center. Pin all four
-   to the strip's edges at fixed widths. */
+   width and Select/Start sit in the unreachable dead center. Shoulders
+   pin to the strip's edges at fixed widths; Select/Start sit inboard of
+   the clusters on the bottom row, matching the landscape rails. */
 @media (pointer: coarse) and (orientation: portrait) and (min-width: 700px) {
   #lr {
     justify-content: space-between;
@@ -3473,8 +3474,34 @@ body.rollback-mode #save-sep {
   .pad-shoulder {
     flex: 0 0 200px;
   }
+  /* Absolutely positioned against the strip; the collapsed grid row gives
+     its height back to the stage. Insets clear the cluster widths (16px
+     strip padding + cluster + 12px gap); bottom aligns the pills with the
+     cluster bottoms ((main-controls height - cluster height) / 2 above
+     the row's bottom edge, itself 14px row gap above the 16px padding). */
+  #controls {
+    position: relative;
+  }
   #select-start {
+    position: absolute;
+    left: calc(28px + var(--safe-l) + var(--port-cluster-l, 240px));
+    right: calc(28px + var(--safe-r) + var(--port-cluster-r, 185px));
+    bottom: calc(var(--safe-b) + var(--port-pill-b, 55px));
     justify-content: space-between;
+    pointer-events: none;
+  }
+  .pad-pill {
+    /* 0 1: allowed to shrink so the pills never collide near the 700px
+       tier threshold. */
+    flex: 0 1 150px;
+    pointer-events: auto;
+  }
+  body.large-controls #select-start {
+    /* Large mode: 330px d-pad fills the taller row (no centering gap);
+       A/B narrows to 74px * 2.05. */
+    --port-cluster-l: 330px;
+    --port-cluster-r: 152px;
+    --port-pill-b: 44px;
   }
 }
 
