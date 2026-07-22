@@ -2187,14 +2187,17 @@ const statesModal = document.getElementById("states-modal");
 const statesGrid = document.getElementById("states-grid");
 const statesSaveBtn = document.getElementById("states-save");
 const statesLoadBtn = document.getElementById("states-load");
+const statesDeleteBtn = document.getElementById("states-delete");
 const statesEmpty = document.getElementById("states-empty");
 let selectedSlot = 0;
 let slotHasState = [];
 
 const updateStatesButtons = () => {
   const loaded = !!currentOriginalName;
+  const has = loaded && slotHasState[selectedSlot];
   statesSaveBtn.disabled = !loaded;
-  statesLoadBtn.disabled = !loaded || !slotHasState[selectedSlot];
+  statesLoadBtn.disabled = !has;
+  statesDeleteBtn.disabled = !has;
 };
 
 const selectSlot = (s) => {
@@ -2271,6 +2274,16 @@ statesLoadBtn.addEventListener("click", async () => {
   if (await loadFromSlot(selectedSlot)) closeStatesModal();
 });
 
+statesDeleteBtn.addEventListener("click", async () => {
+  if (!currentOriginalName || !slotHasState[selectedSlot]) return;
+  const label = selectedSlot === 0 ? "the Quick slot" : "slot " + (selectedSlot + 1);
+  if (!confirm("Delete the save state in " + label + "? This can't be undone.")) return;
+  await dbDelete(slotStateKey(currentOriginalName, selectedSlot));
+  await dbDelete(slotMetaKey(currentOriginalName, selectedSlot));
+  showToast("Deleted " + label);
+  await renderStatesGrid();
+});
+
 // --- Report a Bug modal ---
 // Builds a downloadable report bundle {title, description, diagnostics, save
 // state} entirely client-side — nothing is transmitted. The save state carries
@@ -2327,13 +2340,17 @@ const drawReportSamplePreview = (sample) => {
   reportPreview.getContext("2d").putImageData(img, 0, 0);
 };
 
+// Slider runs 0..N with the RIGHT end (max) = "now"; sliding left goes back in
+// time. back = 0 is the live frame, back = 1..N are rewind samples 0..N-1.
+const reportSliderBack = () => reportSamples - Number(reportSlider.value);
+
 const updateReportPreview = () => {
-  const v = Number(reportSlider.value);
-  if (v === 0) {
+  const back = reportSliderBack();
+  if (back === 0) {
     reportWhen.textContent = "now";
     drawReportLivePreview();
   } else {
-    const sample = v - 1;
+    const sample = back - 1;
     const tenths = Module._wasm_rewind_scrub_seconds_ago(sample);
     reportWhen.textContent = (tenths / 10).toFixed(1) + "s ago";
     drawReportSamplePreview(sample);
@@ -2358,8 +2375,8 @@ const openReportModal = () => {
       reportThumbs = new Uint8Array(Module.memory.buffer, ptr, len).slice();
     }
   }
-  reportSlider.max = String(reportSamples); // 0..N, 0 = now
-  reportSlider.value = "0";
+  reportSlider.max = String(reportSamples); // 0..N; right end (max) = now
+  reportSlider.value = String(reportSamples);
   reportScrub.classList.toggle("disabled", !currentOriginalName);
   reportScrubHint.hidden = reportSamples > 0;
   updateReportPreview();
@@ -2394,13 +2411,13 @@ document.getElementById("report-download").addEventListener("click", async () =>
     showToast("Load a game first");
     return;
   }
-  const v = Number(reportSlider.value);
+  const back = reportSliderBack();
   let stateBytes = null;
   let savedFrom = "current frame";
-  if (v === 0) {
+  if (back === 0) {
     stateBytes = captureStateBytes();
   } else {
-    const sample = v - 1;
+    const sample = back - 1;
     const sz = Module._wasm_rewind_scrub_state_size(sample);
     if (sz > 0) {
       stateBytes = new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), sz).slice();

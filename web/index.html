@@ -355,9 +355,12 @@
         <p id="states-empty" class="modal-hint" hidden>Load a game to use save states.</p>
         <p class="modal-hint">Tap a slot, then Save or Load. Slot 1 is the Quick slot.</p>
         <div id="states-grid" class="states-grid"></div>
-        <div class="states-actions">
-          <button type="button" class="button button-sm" id="states-load" disabled>Load</button>
-          <button type="button" class="button button-sm button-primary" id="states-save" disabled>Save</button>
+        <div class="states-actions states-actions-split">
+          <button type="button" class="button button-sm button-danger" id="states-delete" disabled>Delete</button>
+          <div class="states-actions-right">
+            <button type="button" class="button button-sm" id="states-load" disabled>Load</button>
+            <button type="button" class="button button-sm button-primary" id="states-save" disabled>Save</button>
+          </div>
         </div>
       </div>
     </div>
@@ -378,7 +381,7 @@
           </div>
           <canvas id="report-preview" class="report-preview" width="120" height="80"></canvas>
           <input type="range" id="report-slider" class="report-slider" min="0" max="0" step="1" value="0" />
-          <p id="report-scrub-hint" class="modal-hint report-scrub-hint">Slide right to go further back in time. Enable Rewind in Settings to capture a longer timeline.</p>
+          <p id="report-scrub-hint" class="modal-hint report-scrub-hint">Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline.</p>
         </div>
         <div class="states-actions">
           <button type="button" class="button button-sm" id="report-cancel">Cancel</button>

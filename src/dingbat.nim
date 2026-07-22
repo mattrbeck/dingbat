@@ -608,6 +608,15 @@ proc load_state_slot(slot: int): bool =
     of ekNone: false
   if result: echo "State loaded: ", path
 
+proc delete_state_slot(slot: int) =
+  let path = state_file_path(slot)
+  if path.len > 0 and fileExists(path):
+    try:
+      removeFile(path)
+      echo "State deleted: ", path
+    except CatchableError:
+      echo "Delete state failed: ", getCurrentExceptionMsg()
+
 proc refresh_state_slots() =
   ## Scan the nine slot files, decode each embedded thumbnail into a GL texture,
   ## and hand the metadata to the Save States widget. Called when the window
@@ -1808,6 +1817,7 @@ proc main() =
   app.save_states.on_open = proc() = refresh_state_slots()
   app.save_states.on_save = proc(slot: int) = discard save_state_slot(slot)
   app.save_states.on_load = proc(slot: int) = discard load_state_slot(slot)
+  app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
 
   # Default the Join address to localhost (2 instances on one machine).
   let default_host = "127.0.0.1"

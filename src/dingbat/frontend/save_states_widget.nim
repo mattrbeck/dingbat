@@ -23,9 +23,10 @@ type
     selected*: int
     have_rom*: bool
     slots*:    array[NUM_SLOTS, StateSlot]
-    on_open*:  proc() {.closure.}         ## (re)populate slots + textures
-    on_save*:  proc(slot: int) {.closure.}
-    on_load*:  proc(slot: int) {.closure.}
+    on_open*:   proc() {.closure.}         ## (re)populate slots + textures
+    on_save*:   proc(slot: int) {.closure.}
+    on_load*:   proc(slot: int) {.closure.}
+    on_delete*: proc(slot: int) {.closure.}
     was_open:  bool
 
 proc new_save_states_widget*(): SaveStatesWidget =
@@ -92,13 +93,25 @@ proc render*(w: SaveStatesWidget) =
 
       igSeparator()
       let sel = w.slots[w.selected]
-      igText(cstring("Selected: slot " & $(w.selected + 1)))
-      if igButton("Save", ImVec2(x: 90, y: 0)):
+      const BTN_W = 90.0'f32
+      const GAP = 10.0'f32
+      # Delete on the left (disabled when the slot is empty).
+      if not sel.used: igBeginDisabled(true)
+      if igButton("Delete", ImVec2(x: BTN_W, y: 0)):
+        if w.on_delete != nil: w.on_delete(w.selected)
+        if w.on_open != nil: w.on_open()
+      if not sel.used: igEndDisabled()
+      # Save + Load, right-aligned.
+      igSameLine(0, 0)
+      var avail: ImVec2
+      igGetContentRegionAvail(addr avail)
+      igSetCursorPosX(igGetCursorPosX() + max(0.0'f32, avail.x - (BTN_W * 2 + GAP)))
+      if igButton("Save", ImVec2(x: BTN_W, y: 0)):
         if w.on_save != nil: w.on_save(w.selected)
         if w.on_open != nil: w.on_open()   # refresh the just-written thumbnail
-      igSameLine(0, 10)
+      igSameLine(0, GAP)
       if not sel.used: igBeginDisabled(true)
-      if igButton("Load", ImVec2(x: 90, y: 0)):
+      if igButton("Load", ImVec2(x: BTN_W, y: 0)):
         if w.on_load != nil: w.on_load(w.selected)
       if not sel.used: igEndDisabled()
   igEnd()

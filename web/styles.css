@@ -1919,6 +1919,27 @@ body.debug-2p .home-tile-link {
   gap: 10px;
 }
 
+/* Delete on the left, Load/Save grouped on the right. */
+.states-actions-split {
+  justify-content: space-between;
+}
+
+.states-actions-right {
+  display: flex;
+  gap: 10px;
+}
+
+.button-danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+.button-danger:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 80, 80, 0.85);
+  border-color: rgba(255, 80, 80, 0.9);
+}
+
 /* ---- Report a Bug modal ---- */
 .modal-report {
   max-width: 440px;
