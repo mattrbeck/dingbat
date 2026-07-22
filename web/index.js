@@ -2728,17 +2728,24 @@ const updateCanvasScaling = () => {
       : 1.5;
   const running =
     document.body.classList.contains("running") && !!currentRomName;
+  // Available box = stage content box: clientWidth/Height include padding,
+  // and the tablet-landscape tier reserves the control-rail width as stage
+  // padding — the frame must yield to the rails, never sit under them.
+  const stageCS = getComputedStyle(stageEl);
+  const availW =
+    stageEl.clientWidth -
+    parseFloat(stageCS.paddingLeft) - parseFloat(stageCS.paddingRight);
+  const availH =
+    stageEl.clientHeight -
+    parseFloat(stageCS.paddingTop) - parseFloat(stageCS.paddingBottom);
   if (integerScale && running && !filterActive()) {
     const [w, h] = nativeRes();
-    const k = Math.max(
-      1,
-      Math.floor(Math.min(stageEl.clientWidth / w, stageEl.clientHeight / h))
-    );
+    const k = Math.max(1, Math.floor(Math.min(availW / w, availH / h)));
     canvasEl.style.width = k * w + "px";
     canvasEl.style.height = k * h + "px";
   } else if (running) {
     // Contain-fit: as large as the stage allows without changing shape
-    const w = Math.min(stageEl.clientWidth, stageEl.clientHeight * ar);
+    const w = Math.min(availW, availH * ar);
     canvasEl.style.width = w + "px";
     canvasEl.style.height = w / ar + "px";
   } else {

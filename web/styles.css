@@ -2804,10 +2804,14 @@ body.large-controls .pad-pill {
 }
 
 /*
- * Landscape phones: flank the screen with controls instead of stacking.
- * The top bar hosts the screen; controls become side rails via fixed pads.
+ * Landscape touch devices (phones AND tablets): flank the screen with
+ * controls instead of stacking. The top bar hosts the screen; controls
+ * become side rails via fixed pads. Phone-only refinements (topbar
+ * slide-away, translucent pads) stay behind the max-height: 500px blocks
+ * below; the tablet tier (min-height: 501px, after those) re-sizes and
+ * re-anchors the rails for big screens.
  */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+@media (pointer: coarse) and (orientation: landscape) {
   body.running #controls {
     position: fixed;
     inset: 0;
@@ -2831,6 +2835,15 @@ body.large-controls .pad-pill {
     grid-row: 1 / 2;
     align-self: start;
     justify-content: space-between;
+  }
+  /* The joystick touch region is deliberately huge (the whole left half of
+     the row) and, being positioned, paints after these rows in tree order —
+     without a raise it eats touches aimed at the L shoulder (and, on
+     tablets, the absolutely-positioned shoulder/pill stacks). Buttons win. */
+  #lr,
+  #select-start {
+    position: relative;
+    z-index: 1;
   }
   .pad-shoulder {
     flex: 0 0 104px;
@@ -3320,6 +3333,136 @@ body.rollback-mode #save-sep {
   :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.arm-active {
     color: var(--accent);
     border-color: rgba(var(--accent-rgb), 0.7);
+  }
+}
+
+/*
+ * ==========================================================
+ * Tablet touch layouts
+ * ==========================================================
+ * Big touchscreens break both phone assumptions: the portrait strip's
+ * flex-stretched shoulders grow to half the screen width, and the
+ * landscape side rails only existed under max-height: 500px, so tablets
+ * fell back to the stacked phone layout with the game squeezed small.
+ * The rule here is reachability: a tablet is gripped by its side edges,
+ * so every control pins to the bottom side corners at a FIXED physical
+ * size (px caps, not viewport units) — as the screen grows the buttons
+ * stay where thumbs are, and only the frame gains. Frequency orders the
+ * stack: face buttons under the thumb, shoulders just above, the rare
+ * Select/Start above those.
+ */
+
+/* Landscape tablets: the shared landscape grid above already pins the
+   d-pad / A-B clusters to the bottom side corners; this tier keeps the
+   top bar and the opaque tactile look (the slide-away bar and translucent
+   pads are phone-cramp compromises), sizes the pads GBA-like for big
+   screens, and stacks shoulder + pill above each cluster instead of
+   leaving them at the far top corners / dead center. */
+@media (pointer: coarse) and (orientation: landscape) and (min-height: 501px) {
+  body.running {
+    /* Width reserved at each side for the control rail: pad size + outer
+       padding + a margin so the frame never sits under the buttons. */
+    --rail-w: 224px;
+  }
+  body.running.large-controls {
+    --rail-w: 274px;
+  }
+  /* The frame yields to the rails (never the other way around): reserve
+     the rail width as stage padding. The base #canvas percentage rule
+     resolves against the stage CONTENT box, and updateCanvasScaling
+     subtracts padding from its contain-fit measurements, so both the
+     pre-JS fallback and the JS-pinned size respect the rails. */
+  body.running #stage {
+    padding: 0 var(--rail-w);
+  }
+  /* A connected gamepad hides the touch rails ("hide touch controls with a
+     controller") — give the reserved rail width back to the frame. */
+  body.running.gamepad-hides-touch #stage {
+    padding: 0;
+  }
+  #dpad,
+  #joystick {
+    /* ~4 cm at iPad density — physical-handheld d-pad territory */
+    --dpad-size: 190px;
+  }
+  #ab {
+    --btn-size: 73px;
+    width: calc(var(--btn-size) * 2.2);
+    height: 190px;
+  }
+  /* Shoulders sit directly above their cluster at the screen edges (the
+     top corners are out of the thumb arc on a tablet). Absolutely
+     positioned against the fixed #controls overlay; the spanning flex row
+     itself must not eat stage taps. */
+  #lr {
+    position: absolute;
+    left: calc(14px + var(--safe-l));
+    right: calc(14px + var(--safe-r));
+    bottom: calc(10px + var(--safe-b) + var(--rail-btn-h, 190px) + 22px);
+    grid-area: auto;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .pad-shoulder {
+    flex: 0 0 150px;
+    height: 46px;
+    pointer-events: auto;
+  }
+  /* Select / Start top each rail: rarest press, furthest reach. */
+  #select-start {
+    position: absolute;
+    left: calc(14px + var(--safe-l));
+    right: calc(14px + var(--safe-r));
+    bottom: calc(10px + var(--safe-b) + var(--rail-btn-h, 190px) + 82px);
+    grid-area: auto;
+    /* The shared landscape block's justify-self: center would shrink-wrap
+       and re-center this absolutely-positioned row (grid self-alignment
+       applies to abs-pos children); stretch it back edge to edge. */
+    justify-self: stretch;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .pad-pill {
+    flex: 0 0 150px;
+    pointer-events: auto;
+  }
+  body.large-controls #dpad,
+  body.large-controls #joystick {
+    --dpad-size: 240px;
+  }
+  body.large-controls #ab {
+    --btn-size: 92px;
+    width: calc(var(--btn-size) * 2.2);
+    height: 240px;
+  }
+  body.large-controls #lr,
+  body.large-controls #select-start {
+    --rail-btn-h: 240px;
+  }
+  body.large-controls .pad-shoulder {
+    flex: 0 0 170px;
+    height: 46px;
+  }
+  body.large-controls .pad-pill {
+    flex: 0 0 150px;
+    height: 34px;
+    font-size: 11px;
+  }
+}
+
+/* Portrait tablets: the stacked strip already pushes d-pad / A-B to the
+   side edges, but the flex-stretched shoulders balloon to half the screen
+   width and Select/Start sit in the unreachable dead center. Pin all four
+   to the strip's edges at fixed widths. */
+@media (pointer: coarse) and (orientation: portrait) and (min-width: 700px) {
+  #lr {
+    justify-content: space-between;
+  }
+  .pad-shoulder {
+    flex: 0 0 200px;
+  }
+  #select-start {
+    justify-content: space-between;
   }
 }
 
