@@ -4848,6 +4848,7 @@ const haptic = () => {
 
 var currentDpadTouchId = null;
 var currentDpadElement = null;
+const dpadEl = document.getElementById("dpad");
 
 const getTouch = (touchList, touchId) => {
   for (let touch of touchList) {
@@ -4876,33 +4877,47 @@ const dpadTouchMove = (event) => {
   event.preventDefault();
   if (currentDpadTouchId == null) return;
   let touch = getTouch(event.targetTouches, currentDpadTouchId);
-  if (touch != null) {
-    let element = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (element == currentDpadElement) return;
-    let oldInputs = getInputs(currentDpadElement);
-    // Only treat the hit element as a d-pad cell if it's actually inside
-    // #dpad. Face buttons (A/B/L/R/Select/Start) also carry data-inputs, so
-    // sliding onto them must NOT press them. A null element (finger dragged
-    // off-viewport) is likewise treated as "moved off the pad".
-    if (element && element.closest("#dpad") && element.hasAttribute("data-inputs")) {
-      let newInputs = getInputs(element);
-      for (let id of oldInputs) {
-        if (newInputs.includes(id)) continue;
-        routeP1Input(id, false);
-      }
-      for (let id of newInputs) {
-        if (oldInputs.includes(id)) continue;
-        routeP1Input(id, true);
-      }
-      setArms(oldInputs, false);
-      setArms(newInputs, true);
-      currentDpadElement = element;
-      haptic();
-    } else {
-      setInputs(oldInputs, false);
-      setArms(oldInputs, false);
-      currentDpadElement = null;
+  if (touch == null) return;
+  let element = document.elementFromPoint(touch.clientX, touch.clientY);
+  if (element == currentDpadElement) return;
+  let oldInputs = getInputs(currentDpadElement);
+  // Only treat the hit element as a d-pad cell if it's actually inside #dpad.
+  // Face buttons (A/B/L/R/Select/Start) also carry data-inputs, so sliding onto
+  // them must NOT press them. A null element (finger off-viewport) is "off pad".
+  if (element && element.closest("#dpad") && element.hasAttribute("data-inputs")) {
+    let newInputs = getInputs(element);
+    for (let id of oldInputs) {
+      if (newInputs.includes(id)) continue;
+      routeP1Input(id, false);
     }
+    for (let id of newInputs) {
+      if (oldInputs.includes(id)) continue;
+      routeP1Input(id, true);
+    }
+    setArms(oldInputs, false);
+    setArms(newInputs, true);
+    currentDpadElement = element;
+    haptic();
+  } else {
+    // Slide-off tolerance: keep the current direction held while the finger is
+    // only just past the pad's edge — a common cause of dropped inputs mid-hold.
+    // Release only when it moves clearly away, or slides onto another control.
+    const onOtherControl = element && element.hasAttribute("data-inputs");
+    if (currentDpadElement && !onOtherControl) {
+      const r = dpadEl.getBoundingClientRect();
+      const margin = r.width * 0.22; // ~2/3 of a cell of forgiveness
+      if (
+        touch.clientX >= r.left - margin &&
+        touch.clientX <= r.right + margin &&
+        touch.clientY >= r.top - margin &&
+        touch.clientY <= r.bottom + margin
+      ) {
+        return; // stay on the current direction
+      }
+    }
+    setInputs(oldInputs, false);
+    setArms(oldInputs, false);
+    currentDpadElement = null;
   }
 };
 
