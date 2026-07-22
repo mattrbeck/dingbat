@@ -74,3 +74,8 @@ scratch_mp2kwav
 scratch_bdpcm_test
 scratch_probe
 bench_freq
+scratch_drums
+scratch_mkstate
+scratch_modebits_test
+scratch_stateresync
+scratch_bdpcm_test
