@@ -308,33 +308,18 @@
       <div class="modal">
         <button type="button" class="modal-close" id="saves-close" aria-label="Close">&times;</button>
         <h3>Manage Saves</h3>
-        <div class="modal-subhead no-rule">Save state</div>
-        <div class="modal-toggle-row">
-          <div>
-            <span class="modal-row-label">Export state</span>
-            <span class="modal-toggle-sub">Download a .state file — compatible with the desktop app</span>
-          </div>
-          <button type="button" class="button button-sm" id="export-state">Export</button>
-        </div>
-        <div class="modal-toggle-row">
-          <div>
-            <span class="modal-row-label">Import state</span>
-            <span class="modal-toggle-sub">Apply a .state file to the running game</span>
-          </div>
-          <button type="button" class="button button-sm" id="import-state">Import</button>
-        </div>
-        <div class="modal-subhead">Battery save</div>
+        <div class="modal-subhead no-rule">Save file</div>
         <div class="modal-toggle-row">
           <div>
             <span class="modal-row-label">Export save file</span>
-            <span class="modal-toggle-sub">Download the game's .sav file</span>
+            <span class="modal-toggle-sub">Download the game's own save (.sav) — your in-game progress</span>
           </div>
           <button type="button" class="button button-sm" id="export-save">Export</button>
         </div>
         <div class="modal-toggle-row">
           <div>
             <span class="modal-row-label">Import save file</span>
-            <span class="modal-toggle-sub">Replace the game's save and reload it</span>
+            <span class="modal-toggle-sub">Replace the game's save (.sav) and reload it</span>
           </div>
           <button type="button" class="button button-sm" id="load-save">Import</button>
         </div>
@@ -344,6 +329,21 @@
             <span class="modal-toggle-sub">Wipe this game's save and reload it as a fresh cartridge</span>
           </div>
           <span id="reset-save-slot"></span>
+        </div>
+        <div class="modal-subhead">Save state file</div>
+        <div class="modal-toggle-row">
+          <div>
+            <span class="modal-row-label">Export state</span>
+            <span class="modal-toggle-sub">Download the current state as a .state file (desktop-compatible). Manage slots in Save States.</span>
+          </div>
+          <button type="button" class="button button-sm" id="export-state">Export</button>
+        </div>
+        <div class="modal-toggle-row">
+          <div>
+            <span class="modal-row-label">Import state</span>
+            <span class="modal-toggle-sub">Apply a .state file to the running game</span>
+          </div>
+          <button type="button" class="button button-sm" id="import-state">Import</button>
         </div>
       </div>
     </div>
