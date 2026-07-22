@@ -376,11 +376,15 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.dma_channels.positions[0] = 0
         apu.dma_channels.sizes[0] = 0
         apu.dma_channels.latches[0] = 0
+        apu.dma_channels.hist[0] = [0'i16, 0, 0, 0]
+        apu.dma_channels.samples_since[0] = 0
       if bit(value, 7):  # FIFO B reset
         for i in 0..31: apu.dma_channels.fifos[1][i] = 0
         apu.dma_channels.positions[1] = 0
         apu.dma_channels.sizes[1] = 0
         apu.dma_channels.latches[1] = 0
+        apu.dma_channels.hist[1] = [0'i16, 0, 0, 0]
+        apu.dma_channels.samples_since[1] = 0
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:

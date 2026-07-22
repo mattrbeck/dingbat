@@ -433,6 +433,20 @@ type
     positions*: array[2, int]
     sizes*:     array[2, int]
     latches*:   array[2, int16]
+    # --- FIFO reconstruction (render-side, not serialized) ---
+    # Real hardware feeds the FIFO latch to a high-rate PWM DAC + analog
+    # low-pass; point-sampling the held latch at 32768 Hz folds zero-order-
+    # hold images into the audible band as hiss. We reconstruct the band-
+    # limited signal between timer-driven FIFO updates with a causal
+    # Catmull-Rom cubic (Paul Bourke, "Cubic Interpolation"). hist[ch] holds
+    # the last four latched samples (index 0 oldest .. 3 newest);
+    # samples_since counts 32768 Hz reads since the last FIFO update, and
+    # update_interval is the read count spanning the previous update period
+    # (the phase denominator).
+    hist*:            array[2, array[4, int16]]
+    samples_since*:   array[2, int32]
+    update_interval*: array[2, float32]
+    fifo_interp*:     bool   # cubic FIFO reconstruction (default on)
 
   APU* = ref object
     gba* {.cursor.}:               GBA
