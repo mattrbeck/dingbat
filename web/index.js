@@ -3563,6 +3563,9 @@ const loadRom = async (romName, originalName) => {
   fastForwardButton.classList.remove("active");
   speed2xButton.classList.remove("active");
   rewindButton.classList.remove("active");
+  // GB/GBC has no shoulder buttons: flag CSS to drop the L/R row so the
+  // frame gets that vertical space back (see body.gb-mode rules).
+  document.body.classList.toggle("gb-mode", systemOf(romName) !== "GBA");
   document.body.classList.add("has-game", "running");
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
@@ -4282,7 +4285,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   paused = true; // keep the orphaned core frozen
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
-  document.body.classList.remove("has-game", "running", "paused");
+  document.body.classList.remove("has-game", "running", "paused", "gb-mode");
   homePausedCard.hidden = true;
   refreshHomeRecent();
   updateCanvasScaling();
@@ -4535,7 +4538,14 @@ var Module = {
       if (navigator.audioSession) {
         navigator.audioSession.type = "playback";
       }
-      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      try {
+        audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      } catch (e) {
+        // Old WebKit can reject the sampleRate option outright. Fall back to
+        // the hardware rate: createBuffer() tags each buffer 32768 Hz and Web
+        // Audio resamples on playback, so scheduling stays correct.
+        audioCtx = new AudioContext();
+      }
       gainNode = audioCtx.createGain();
       gainNode.gain.value = effectiveGain();
       lowpassNode = null;
@@ -4552,12 +4562,42 @@ var Module = {
     // On iOS Safari, we also play a brief silent buffer through the AudioContext
     // and an <audio> element to ensure the audio session is fully activated.
     let audioUnlocked = false;
+    // Pre-audioSession iOS (≤16): Web Audio output obeys the ringer (silent)
+    // switch unless an <audio> element is actively playing, which promotes
+    // the whole session to "playback". A one-shot blip isn't enough — the
+    // promotion only lasts while the element plays — so those devices keep a
+    // silent element looping for the life of the page. Modern iOS is handled
+    // by navigator.audioSession in initAudio; nobody else needs any of this.
+    let silentLoopEl = null;
+    const needsSilentLoop = () =>
+      !navigator.audioSession &&
+      (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+    const silentWavURL = () => {
+      // 0.25 s of 8 kHz mono 8-bit silence (0x80), built inline — looping a
+      // microscopic file (like the 1-sample one-shot below) would be churn.
+      const n = 2000;
+      const buf = new Uint8Array(44 + n).fill(0x80, 44);
+      const dv = new DataView(buf.buffer);
+      const tag = (off, s) => { for (let i = 0; i < s.length; i++) buf[off + i] = s.charCodeAt(i); };
+      tag(0, "RIFF"); dv.setUint32(4, 36 + n, true); tag(8, "WAVE");
+      tag(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+      dv.setUint16(22, 1, true); dv.setUint32(24, 8000, true);
+      dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true);
+      dv.setUint16(34, 8, true); tag(36, "data"); dv.setUint32(40, n, true);
+      return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    };
     const resumeAudio = () => {
       initAudio();
       // Not just "suspended": iOS Safari parks the context in a non-standard
       // "interrupted" state after phone calls / Siri, which also needs an
       // explicit resume(). Attempt it for any non-running state.
       if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+      // Outside the unlock branch on purpose: retried until it sticks. On old
+      // iOS the touchstart listener runs this first and its play() is refused
+      // (see the touchend note below); pagehide also pauses the loop, and
+      // pageshow funnels back through here.
+      if (silentLoopEl && silentLoopEl.paused) silentLoopEl.play().catch(() => {});
       if (!audioUnlocked) {
         audioUnlocked = true;
         // Play a silent buffer through the AudioContext to fully unlock it
@@ -4566,14 +4606,25 @@ var Module = {
         src.buffer = silentBuf;
         src.connect(audioCtx.destination);
         src.start(0);
-        // Also play through an <audio> element as a fallback for older iOS
-        let a = new Audio("data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==");
-        a.play().catch(() => {});
+        // Also play through an <audio> element to activate the audio session
+        if (needsSilentLoop()) {
+          silentLoopEl = new Audio(silentWavURL());
+          silentLoopEl.loop = true;
+          silentLoopEl.play().catch(() => {});
+        } else {
+          let a = new Audio("data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==");
+          a.play().catch(() => {});
+        }
       }
     };
     document.addEventListener("click", resumeAudio, { once: false });
     document.addEventListener("keydown", resumeAudio, { once: false });
     document.addEventListener("touchstart", resumeAudio, { once: false });
+    // Old iOS WebKit only counts touchEND (and the click it synthesizes) as a
+    // user gesture for media playback, and the touch controls preventDefault
+    // so taps on them never synthesize a click. Without this, a player who
+    // only ever touches the d-pad/buttons would never unlock audio there.
+    document.addEventListener("touchend", resumeAudio, { once: false });
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") {
@@ -4695,6 +4746,9 @@ var Module = {
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});
       }
+      // The legacy-iOS silent loop holds the audio session too; resumeAudio
+      // (via pageshow) restarts it.
+      if (silentLoopEl) silentLoopEl.pause();
     });
     // Restored from the back/forward cache (e.persisted) with a game up:
     // resume the context we suspended in pagehide, else the game comes back

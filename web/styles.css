@@ -471,6 +471,22 @@ body {
   body {
     height: 100vh;
   }
+  /* Legacy status-bar iPhones (home-button class, e.g. SE 1st gen on iOS 15):
+     the standalone webview sits BELOW the opaque 20pt status bar instead of
+     under an overlaying one, so 100vh (the full screen) overhangs the screen
+     bottom by exactly those 20pt — clipping Select/Start. Detect the case by
+     its signature, safe-area-inset-top = 0 (notch devices report >= 44px and
+     the max() zeroes the correction). iOS-only via -webkit-touch-callout so
+     Android/desktop PWAs (where inset-top is also 0 but 100vh is already the
+     window height) keep the plain sizing; ditto legacy landscape, where iOS
+     hides the status bar. */
+  @supports (-webkit-touch-callout: none) {
+    @media (orientation: portrait) {
+      body {
+        height: calc(100vh - max(0px, 20px - env(safe-area-inset-top, 0px)));
+      }
+    }
+  }
 }
 
 button {
@@ -1524,7 +1540,10 @@ body.debug-2p .home-tile-link {
 }
 .home-tile-link:hover {
   color: var(--accent);
+  /* rgba lines: pre-Safari-16.2 fallback, overridden where color-mix parses */
+  background: rgba(var(--accent-rgb), 0.14);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: rgba(var(--accent-rgb), 0.4);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
@@ -2914,6 +2933,96 @@ body.large-controls .pad-pill {
 }
 
 /*
+ * GB/GBC (body.gb-mode, set on ROM load; body.link-gb for the 2P pair): the
+ * system has no shoulder buttons, so the L/R row is dead weight — drop it AND
+ * its grid track (a hidden item leaves a 0px track whose two gaps linger) and
+ * hand the height back to the stage. In landscape the rails overlay the frame
+ * (explicitly placed, so removing #lr shifts nothing) and just declutter.
+ */
+body.gb-mode #lr,
+body.link-gb #lr {
+  display: none;
+}
+body.gb-mode #controls,
+body.link-gb #controls {
+  grid-template-rows: 1fr auto;
+}
+
+/*
+ * Short-portrait compression (4-inch class: iPhone SE 1st gen / 5s, 320x568).
+ * The control strip's fixed rows otherwise squeeze the stage below what an
+ * edge-to-edge 3:2 canvas needs (~213px at 320 wide), letterboxing the game.
+ * Compress the chrome rows and gutters — NOT the d-pad/face buttons — to hand
+ * ~30px back to the stage. Taller phones (667px-class and up) already reach
+ * full width and keep the roomier default spacing.
+ */
+@media (pointer: coarse) and (orientation: portrait) and (max-height: 620px) {
+  #controls {
+    padding-top: 10px;
+    padding-bottom: calc(12px + var(--safe-b));
+    gap: 10px;
+  }
+  .pad-shoulder {
+    height: 36px;
+  }
+  .pad-pill {
+    height: 28px;
+  }
+}
+
+/*
+ * Container-query fallback (iOS 15 / pre-Safari-16). Container units (cqi/cqb)
+ * parse fine inside custom properties on old WebKit — custom props accept any
+ * token stream — so the cq declarations above still win the cascade there and
+ * then fail at var() substitution, collapsing the d-pad and face buttons to
+ * intrinsic size. A plain "fallback line above" therefore can't work; this
+ * @supports-not block (skipped entirely by cq-capable browsers) re-declares
+ * the sizes in viewport units, approximating the container's geometry:
+ * #main-controls spans the viewport width minus strip padding (cqi ≈ vw) and
+ * its height is capped well above what the px caps below allow, so dropping
+ * the 100cqb terms is safe. The fixed-size tablet tier (min-height: 501px,
+ * later in source) still overrides these on old iPads.
+ */
+@supports not (width: 1cqi) {
+  #dpad,
+  #joystick {
+    --dpad-size: min(46vw, 240px);
+  }
+  #joystick {
+    width: 50%; /* = 50cqi: % of width resolves against the same container */
+  }
+  #ab {
+    --btn-size: min(calc(46vw / 2.7), 84px);
+    height: min(46vw, 240px);
+  }
+  body.large-controls #dpad,
+  body.large-controls #joystick {
+    --dpad-size: min(62vw, 330px);
+  }
+  body.large-controls #ab {
+    --btn-size: min(calc(42vw / 2.8), 74px);
+  }
+  @media (pointer: coarse) and (orientation: landscape) {
+    #dpad,
+    #joystick {
+      --dpad-size: min(32vw, 158px, 76vh);
+    }
+    #ab {
+      --btn-size: min(calc(32vw / 2.6), 62px);
+      height: min(32vw, 180px, 76vh);
+    }
+    body.large-controls #dpad,
+    body.large-controls #joystick {
+      --dpad-size: min(40vw, 210px, 92vh);
+    }
+    body.large-controls #ab {
+      --btn-size: min(calc(40vw / 2.6), 82px);
+      height: min(46vw, 240px, 92vh);
+    }
+  }
+}
+
+/*
  * Mobile home-screen compaction. Placed after the base home rules so these
  * win on source order (equal specificity) — the logo + wordmark must never be
  * clipped behind the load box on short phones.
@@ -3002,6 +3111,7 @@ body.running.rollback-mode.link-gb .link-pane canvas {
   padding: 0 14px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.14); /* pre-Safari-16.2 fallback */
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
   font-size: 12.5px;
@@ -3020,6 +3130,7 @@ body.running.rollback-mode.link-gb .link-pane canvas {
   stroke-linejoin: round;
 }
 #rb-disconnect:hover {
+  background: rgba(var(--accent-rgb), 0.26); /* pre-Safari-16.2 fallback */
   background: color-mix(in srgb, var(--accent) 26%, transparent);
 }
 body.running.rollback-mode #rb-disconnect { display: inline-flex; }
