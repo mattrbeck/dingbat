@@ -500,11 +500,23 @@ proc apply_state_payload*(gb: GB; payload: string) =
   ## corrupt input; no rollback — trusted callers only.
   gb.gb_apply_state(payload)
 
-proc state_bytes*(gb: GB): string =
+const GB_THUMB_W = 120
+const GB_THUMB_H = GB_THUMB_W * 144 div 160   # preserve 10:9 → 120x108
+
+proc gb_thumbnail(gb: GB): seq[byte] =
+  downscale_bgr555(gb.ppu.framebuffer, 160, 144, GB_THUMB_W, GB_THUMB_H)
+
+proc state_bytes*(gb: GB; thumbnail = false): string =
   ## Full validated state image (header + payload) for in-memory transports
-  ## (web IndexedDB / downloads). Same format as .state files.
-  make_state_bytes(ckGB, gb.gb_rom_checksum(),
-                   uint32(gb.cartridge.rom.len), gb.gb_state_payload())
+  ## (web IndexedDB / downloads). Same format as .state files. With thumbnail,
+  ## a downscaled BGR555 screenshot trailer is appended (ignored by old readers).
+  let payload = gb.gb_state_payload()
+  if thumbnail:
+    make_state_bytes(ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len),
+                     payload, gb.gb_thumbnail(), uint16(GB_THUMB_W), uint16(GB_THUMB_H))
+  else:
+    make_state_bytes(ckGB, gb.gb_rom_checksum(),
+                     uint32(gb.cartridge.rom.len), payload)
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
@@ -524,13 +536,18 @@ proc load_state_bytes*(gb: GB; data: string): bool =
     gb.gb_apply_state(backup)
     false
 
-proc save_state*(gb: GB; path: string): bool =
+proc save_state*(gb: GB; path: string; thumbnail = false): bool =
   ## Serialize the full emulator state to path. Must only be called at a
   ## frame boundary (right after step_frame returns). Returns false and
   ## echoes a message on failure.
   try:
-    write_state_file(path, ckGB, gb.gb_rom_checksum(),
-                     uint32(gb.cartridge.rom.len), gb.gb_state_payload())
+    if thumbnail:
+      write_state_file(path, ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len),
+                       gb.gb_state_payload(), gb.gb_thumbnail(),
+                       uint16(GB_THUMB_W), uint16(GB_THUMB_H))
+    else:
+      write_state_file(path, ckGB, gb.gb_rom_checksum(),
+                       uint32(gb.cartridge.rom.len), gb.gb_state_payload())
     true
   except CatchableError:
     echo "Save state failed: ", getCurrentExceptionMsg()

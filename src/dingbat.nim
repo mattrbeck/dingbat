@@ -21,7 +21,9 @@ import dingbat/frontend/controller_widget
 import dingbat/frontend/gba_debug
 import dingbat/frontend/gb_debug
 import dingbat/frontend/cheats_widget
+import dingbat/frontend/save_states_widget
 import dingbat/common/cheats
+import dingbat/common/serialize
 
 const VERSION = "0.1.0"
 const GBA_W   = 240
@@ -327,6 +329,8 @@ type AppState = ref object
   dbg:             GbaDebug
   gb_dbg:          GbDebug
   cheats:          CheatsWidget
+  save_states:     SaveStatesWidget
+  state_slot_texs: array[NUM_SLOTS, GLuint]  # thumbnails for the grid (0 = none)
   scale:           int
   running:         bool
   paused:          bool
@@ -574,34 +578,81 @@ proc on_cheats_changed() =
   refresh_cheat_rom_patches()
   save_cheats()
 
-proc state_file_path(): string =
-  ## One slot per ROM for now; the state header reserves a slot byte so more
-  ## slots can be added later
+proc state_file_path(slot = 0): string =
+  ## Per-ROM state files. Slot 0 is the "Quick" slot and keeps the historical
+  ## `<rom>.state` name so existing saves stay loadable; slots 1..8 add a
+  ## `.slotN` suffix.
   let rom = current_rom_path()
   if rom.len == 0: return ""
-  config_dir() / "states" / rom.extractFilename() & ".state"
+  let base = config_dir() / "states" / rom.extractFilename()
+  if slot == 0: base & ".state"
+  else: base & ".slot" & $slot & ".state"
+
+proc save_state_slot(slot: int): bool =
+  ## Synchronous save of a numbered slot (with a thumbnail). Callers must be at
+  ## a frame boundary — true during process_pending_state and render_imgui.
+  let path = state_file_path(slot)
+  if path.len == 0: return false
+  result = case app.emu_kind
+    of ekGBA: app.gba_emu.save_state(path, thumbnail = true)
+    of ekGB:  app.gb_emu.save_state(path, thumbnail = true)
+    of ekNone: false
+  if result: echo "State saved: ", path
+
+proc load_state_slot(slot: int): bool =
+  let path = state_file_path(slot)
+  if path.len == 0: return false
+  result = case app.emu_kind
+    of ekGBA: app.gba_emu.load_state(path)
+    of ekGB:  app.gb_emu.load_state(path)
+    of ekNone: false
+  if result: echo "State loaded: ", path
+
+proc refresh_state_slots() =
+  ## Scan the nine slot files, decode each embedded thumbnail into a GL texture,
+  ## and hand the metadata to the Save States widget. Called when the window
+  ## opens and right after a save — never on the hot path.
+  let w = app.save_states
+  w.have_rom = app.emu_kind != ekNone
+  for i in 0 ..< NUM_SLOTS:
+    let path = state_file_path(i)
+    if path.len == 0 or not fileExists(path):
+      w.set_slot(i, used = false, label = "", tex = 0, tw = 0, th = 0)
+      continue
+    var label = ""
+    try:
+      label = getFileInfo(path).lastWriteTime.local.format("MM-dd  HH:mm")
+    except CatchableError: discard
+    var data = ""
+    try: data = readFile(path)
+    except CatchableError: discard
+    let (tw, th, pixels) = parse_state_thumbnail(data)
+    if pixels.len > 0:
+      if app.state_slot_texs[i] == 0:
+        glGenTextures(1, addr app.state_slot_texs[i])
+      glBindTexture(GL_TEXTURE_2D, app.state_slot_texs[i])
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_LINEAR))
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_LINEAR))
+      glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
+                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, addr pixels[0])
+      w.set_slot(i, used = true, label = label,
+                 tex = uint64(app.state_slot_texs[i]),
+                 tw = float32(tw), th = float32(th))
+    else:
+      # File exists but carries no thumbnail (older save / quick-save on a
+      # pre-thumbnail build): still selectable, just no preview.
+      w.set_slot(i, used = true, label = label, tex = 0, tw = 0, th = 0)
 
 proc process_pending_state() =
   ## Runs between frames only (right after run_until_frame returns, or while
-  ## paused), so the core is always at a frame boundary here. Success/failure
-  ## is echoed for now; the bool results are ready for a future toast/OSD.
-  let path = state_file_path()
+  ## paused), so the core is always at a frame boundary here. Quick Save/Load
+  ## act on slot 0.
   if app.pending_save:
     app.pending_save = false
-    if path.len > 0:
-      let ok = case app.emu_kind
-        of ekGBA: app.gba_emu.save_state(path)
-        of ekGB:  app.gb_emu.save_state(path)
-        of ekNone: false
-      if ok: echo "State saved: ", path
+    discard save_state_slot(0)
   if app.pending_load:
     app.pending_load = false
-    if path.len > 0:
-      let ok = case app.emu_kind
-        of ekGBA: app.gba_emu.load_state(path)
-        of ekGB:  app.gb_emu.load_state(path)
-        of ekNone: false
-      if ok: echo "State loaded: ", path
+    discard load_state_slot(0)
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
@@ -774,7 +825,8 @@ proc render_imgui() =
      (app.dbg == nil or
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
-     not app.link_window and not app.cheats.window:
+     not app.link_window and not app.cheats.window and
+     not app.save_states.window:
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -801,12 +853,14 @@ proc render_imgui() =
           igEndMenu()
         igSeparator()
         let game_loaded = app.emu_kind != ekNone
-        if igMenuItem_Bool(cstring("Save State  " & MOD_KEY_STR & "+S"),
+        if igMenuItem_Bool(cstring("Quick Save  " & MOD_KEY_STR & "+S"),
                            nil, false, game_loaded):
           app.pending_save = true
-        if igMenuItem_Bool(cstring("Load State  " & MOD_KEY_STR & "+L"),
+        if igMenuItem_Bool(cstring("Quick Load  " & MOD_KEY_STR & "+L"),
                            nil, false, game_loaded):
           app.pending_load = true
+        if igMenuItem_Bool("Save States...", nil, false, game_loaded):
+          app.save_states.window = true
         if igMenuItem_Bool("Screenshot  F12", nil, false, game_loaded):
           save_screenshot()
         igSeparator()
@@ -980,6 +1034,7 @@ proc render_imgui() =
   if app.gb_dbg != nil:
     app.gb_dbg.render_windows()
   app.cheats.render()
+  app.save_states.render()
 
   render_link_window()
 
@@ -1736,6 +1791,7 @@ proc main() =
     fe:              fe,
     ce:              ce,
     cheats:          new_cheats_widget(),
+    save_states:     new_save_states_widget(),
     dbg:             nil,
     scale:           3,
     running:         true,
@@ -1746,6 +1802,13 @@ proc main() =
     rewind:          new_rewind(),
     link_port:       LINK_DEFAULT_PORT,
   )
+  # Save States widget: the app owns the files, textures and core, so the
+  # widget just calls back. Save/Load run synchronously here — render_imgui is
+  # always reached at a frame boundary (right after process_pending_state).
+  app.save_states.on_open = proc() = refresh_state_slots()
+  app.save_states.on_save = proc(slot: int) = discard save_state_slot(slot)
+  app.save_states.on_load = proc(slot: int) = discard load_state_slot(slot)
+
   # Default the Join address to localhost (2 instances on one machine).
   let default_host = "127.0.0.1"
   for i, c in default_host: app.link_host_buf[i] = c

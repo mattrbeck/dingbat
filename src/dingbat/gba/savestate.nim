@@ -604,11 +604,22 @@ proc apply_state_payload*(gba: GBA; payload: string) =
   ## corrupt input; no rollback — trusted callers only.
   gba.gba_apply_state(payload)
 
-proc state_bytes*(gba: GBA): string =
+const GBA_THUMB_W = 120
+const GBA_THUMB_H = GBA_THUMB_W * 160 div 240   # preserve 3:2 → 120x80
+
+proc gba_thumbnail(gba: GBA): seq[byte] =
+  downscale_bgr555(gba.ppu.framebuffer, 240, 160, GBA_THUMB_W, GBA_THUMB_H)
+
+proc state_bytes*(gba: GBA; thumbnail = false): string =
   ## Full validated state image (header + payload) for in-memory transports
-  ## (web IndexedDB / downloads). Same format as .state files.
-  make_state_bytes(ckGBA, gba.gba_rom_checksum(),
-                   GBA_STATE_ROM_TAG, gba.gba_state_payload())
+  ## (web IndexedDB / downloads). Same format as .state files. With thumbnail,
+  ## a downscaled BGR555 screenshot trailer is appended (ignored by old readers).
+  let payload = gba.gba_state_payload()
+  if thumbnail:
+    make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
+                     gba.gba_thumbnail(), uint16(GBA_THUMB_W), uint16(GBA_THUMB_H))
+  else:
+    make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload)
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
@@ -628,13 +639,18 @@ proc load_state_bytes*(gba: GBA; data: string): bool =
     gba.gba_apply_state(backup)
     false
 
-proc save_state*(gba: GBA; path: string): bool =
+proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
   ## Serialize the full emulator state to path. Must only be called at a
   ## frame boundary (right after step_frame returns). Returns false and
   ## echoes a message on failure.
   try:
-    write_state_file(path, ckGBA, gba.gba_rom_checksum(),
-                     GBA_STATE_ROM_TAG, gba.gba_state_payload())
+    if thumbnail:
+      write_state_file(path, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
+                       gba.gba_state_payload(), gba.gba_thumbnail(),
+                       uint16(GBA_THUMB_W), uint16(GBA_THUMB_H))
+    else:
+      write_state_file(path, ckGBA, gba.gba_rom_checksum(),
+                       GBA_STATE_ROM_TAG, gba.gba_state_payload())
     true
   except CatchableError:
     echo "Save state failed: ", getCurrentExceptionMsg()

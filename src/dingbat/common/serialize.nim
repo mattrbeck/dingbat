@@ -21,9 +21,14 @@ type
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
   STATE_VERSION* = 4'u32  # v4: GB serial port state (link cable support)
-  # magic(8) version(4) core(1) slot(1) reserved(2) rom_checksum(4)
+  # magic(8) version(4) core(1) slot(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)
   STATE_HEADER_SIZE* = 32
+  # Optional trailer after the payload, flagged in the header's flags field.
+  # It lives OUTSIDE the hash-validated payload so the per-subsystem serializers
+  # are untouched; readers that don't know about it slice by payload_len and
+  # ignore the extra bytes. Layout: thumb_w(2) thumb_h(2) len(4) BGR555 pixels.
+  STATE_FLAG_THUMBNAIL* = 0x0001'u16
 
 proc state_error(msg: string): ref StateError =
   newException(StateError, msg)
@@ -138,21 +143,43 @@ proc fnv1a*(data: string): uint32 =
 
 # ==================== State file header ====================
 
-proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
-                       payload: string): string =
-  ## Full state-file image (header + payload) as bytes, for file storage or
-  ## in-memory transports (web IndexedDB, downloads)
-  var w = Writer()
+proc write_state_header(w: var Writer; core: CoreKind;
+                        rom_checksum, rom_size: uint32;
+                        payload: string; flags: uint16) =
   w.buf.add(STATE_MAGIC)
   w.write_u32(STATE_VERSION)
   w.write_u8(uint8(core))
   w.write_u8(0'u8)   # slot (reserved for future multi-slot support)
-  w.write_u16(0'u16) # reserved flags
+  w.write_u16(flags)
   w.write_u32(rom_checksum)
   w.write_u32(rom_size)
   w.write_u32(uint32(payload.len))
   w.write_u32(fnv1a(payload))
   w.buf.add(payload)
+
+proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
+                       payload: string): string =
+  ## Full state-file image (header + payload) as bytes, for file storage or
+  ## in-memory transports (web IndexedDB, downloads)
+  var w = Writer()
+  write_state_header(w, core, rom_checksum, rom_size, payload, 0'u16)
+  w.buf
+
+proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
+                       payload: string; thumbnail: openArray[byte];
+                       thumb_w, thumb_h: uint16): string =
+  ## As above, plus a thumbnail trailer (BGR555 pixels, thumb_w*thumb_h) after
+  ## the payload. The trailer is outside the hash-validated payload; old readers
+  ## ignore it. Falls back to a plain image if the thumbnail is empty/degenerate.
+  let has_thumb = thumbnail.len == int(thumb_w) * int(thumb_h) * 2 and
+                  thumb_w > 0'u16 and thumb_h > 0'u16
+  let flags = if has_thumb: STATE_FLAG_THUMBNAIL else: 0'u16
+  var w = Writer()
+  write_state_header(w, core, rom_checksum, rom_size, payload, flags)
+  if has_thumb:
+    w.write_u16(thumb_w)
+    w.write_u16(thumb_h)
+    w.write_seq_u8(thumbnail)   # u32 length prefix + raw BGR555 bytes
   w.buf
 
 proc write_state_file*(path: string; core: CoreKind;
@@ -161,6 +188,30 @@ proc write_state_file*(path: string; core: CoreKind;
   if parent.len > 0:
     createDir(parent)
   writeFile(path, make_state_bytes(core, rom_checksum, rom_size, payload))
+
+proc write_state_file*(path: string; core: CoreKind;
+                       rom_checksum, rom_size: uint32; payload: string;
+                       thumbnail: openArray[byte]; thumb_w, thumb_h: uint16) =
+  let parent = path.parentDir
+  if parent.len > 0:
+    createDir(parent)
+  writeFile(path, make_state_bytes(core, rom_checksum, rom_size, payload,
+                                   thumbnail, thumb_w, thumb_h))
+
+proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int): seq[byte] =
+  ## Nearest-neighbor downscale of a BGR555 framebuffer, returned as
+  ## little-endian BGR555 bytes (2 per pixel) — the same pixel format the
+  ## thumbnail trailer stores. Cheap and on-demand (never on the hot path).
+  result = newSeq[byte](dst_w * dst_h * 2)
+  if src_w <= 0 or src_h <= 0 or dst_w <= 0 or dst_h <= 0: return
+  for y in 0 ..< dst_h:
+    let sy = y * src_h div dst_h
+    for x in 0 ..< dst_w:
+      let sx = x * src_w div dst_w
+      let px = src[sy * src_w + sx]
+      let o = (y * dst_w + x) * 2
+      result[o]     = byte(px and 0xFF)
+      result[o + 1] = byte((px shr 8) and 0xFF)
 
 proc parse_state_payload*(data: string; core: CoreKind;
                           rom_checksum, rom_size: uint32;
@@ -185,11 +236,34 @@ proc parse_state_payload*(data: string; core: CoreKind;
     raise state_error("save state belongs to a different ROM")
   let payload_len = int(r.read_u32())
   let payload_hash = r.read_u32()
-  if data.len - STATE_HEADER_SIZE != payload_len:
+  # `<`, not `!=`: an optional trailer (e.g. thumbnail) may follow the payload.
+  if data.len - STATE_HEADER_SIZE < payload_len:
     raise state_error("save state is truncated or corrupt")
   result = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
   if fnv1a(result) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
+
+proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
+  ## Extracts the optional thumbnail trailer (BGR555 pixels). Returns (0,0,@[])
+  ## if absent, and is fully defensive — it never raises, so a malformed trailer
+  ## can't break state loading or a thumbnail grid.
+  result = (0, 0, @[])
+  if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
+    return
+  let flags = uint16(byte(data[14])) or (uint16(byte(data[15])) shl 8)
+  if (flags and STATE_FLAG_THUMBNAIL) == 0:
+    return
+  try:
+    var hr = Reader(buf: data, pos: 24)   # payload_len field
+    let payload_len = int(hr.read_u32())
+    var r = Reader(buf: data, pos: STATE_HEADER_SIZE + payload_len)
+    let tw = int(r.read_u16())
+    let th = int(r.read_u16())
+    let pixels = r.read_seq_u8()
+    if tw > 0 and th > 0 and pixels.len == tw * th * 2:
+      result = (tw, th, pixels)
+  except CatchableError:
+    result = (0, 0, @[])
 
 proc read_state_payload*(path: string; core: CoreKind;
                          rom_checksum, rom_size: uint32): string =
