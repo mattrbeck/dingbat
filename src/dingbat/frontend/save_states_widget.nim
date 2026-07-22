@@ -101,11 +101,13 @@ proc render*(w: SaveStatesWidget) =
         if w.on_delete != nil: w.on_delete(w.selected)
         if w.on_open != nil: w.on_open()
       if not sel.used: igEndDisabled()
-      # Save + Load, right-aligned.
+      # Save + Load, right-aligned. Positioned from the window width (a stable
+      # imguin API) rather than igGetContentRegionAvail, whose ImVec2-return
+      # signature differs across imguin versions and broke the Windows build.
+      const PAD = 8.0'f32
       igSameLine(0, 0)
-      var avail: ImVec2
-      igGetContentRegionAvail(addr avail)
-      igSetCursorPosX(igGetCursorPosX() + max(0.0'f32, avail.x - (BTN_W * 2 + GAP)))
+      igSetCursorPosX(max(igGetCursorPosX(),
+                          igGetWindowWidth() - (BTN_W * 2 + GAP + PAD)))
       if igButton("Save", ImVec2(x: BTN_W, y: 0)):
         if w.on_save != nil: w.on_save(w.selected)
         if w.on_open != nil: w.on_open()   # refresh the just-written thumbnail
