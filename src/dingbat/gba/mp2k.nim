@@ -44,6 +44,11 @@
 #     frame (init_mp2k / render_sample) to line up with the hardware FIFO.
 #   * 8-bit PCM, looping, AND m4a BDPCM ("compressed waveform", channel.type
 #     bit5) — the latter is decoded to s8 and mixed at PCM parity (not skipped).
+#   * All DirectSound channel.type mode bits are handled: TYPE_FIX (fixed-rate
+#     playback at SoundInfo.pcmFreq), TYPE_REV (reversed, one-shot playback —
+#     e.g. Pokémon faint cries), TYPE_CMP (BDPCM), and their combinations, plus
+#     note-on sample start offsets (SoundChannel.count). See the TYPE_* table
+#     below for the per-flag reference semantics.
 
 const
   # Detection signature: a CRC-32 over the first 48 bytes of the M4A engine's
@@ -72,7 +77,10 @@ const
   SC_ENV_VOL  = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
-  SC_COUNT    = 0x18   # ct: source samples remaining until sample/loop end
+  SC_COUNT    = 0x18   # count/ct: at note-on (START set) this holds the sample
+                       # start offset ply_note stored there; the mixer then
+                       # rewrites it to the source samples remaining until
+                       # sample/loop end (used for save-state resume)
   SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
   SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
@@ -87,26 +95,73 @@ const
   SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
   SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
 
-  # channel.type bits (m4a SoundChannel.type)
-  TYPE_PCM_RATE = 0x08'u8  # step at SoundInfo.pcmFreq, not channel.frequency
-  TYPE_COMPRESS = 0x20'u8  # m4a BDPCM compressed waveform
+  # channel.type bits. The sequencer copies the instrument's ToneData.type byte
+  # verbatim into SoundChannel.type at note-on (pret pokeemerald m4a_1.s, ply_note),
+  # so these are the TONEDATA_TYPE_* flags of constants/m4a_constants.inc:
+  #   TYPE_CGB (0x07): nonzero low bits select a CGB (PSG) channel 1-4; such notes
+  #     are allocated to the CgbChans array and never reach a DirectSound
+  #     SoundChannel, so a DirectSound channel always has these bits clear.
+  #   TYPE_FIX (0x08): fixed-rate playback — the mixer's phase step is forced to
+  #     1.0 source sample per output sample (m4a_1.s: "movne r8, 0x800000" in
+  #     SoundMainRAM_Unk1, and the raw copy loop in the plain path), i.e. the
+  #     sample plays at exactly SoundInfo.pcmFreq with channel.frequency ignored.
+  #   TYPE_REV (0x10): reversed playback — the mixer reflects the read pointer to
+  #     the END of the sample data and reads with descending addresses, so the
+  #     last source sample plays first (SoundMainRAM_Unk1 init + its backward
+  #     read loops). The reversed paths never consult the loop registers: when
+  #     the sample count is exhausted the channel is stopped (statusFlags = 0),
+  #     so reversed playback is always one-shot.
+  #   TYPE_CMP (0x20): compressed (BDPCM) waveform. CMP or REV route the mixer
+  #     into its special-case renderer; within it, compressed decode is engaged
+  #     only when WaveData.type != 0 (the u16 at wave+0 — pret's wav2agb writes
+  #     1 for DPCM data, 0 for plain PCM). All four CMP/REV/FIX combinations are
+  #     valid: CMP+REV plays the compressed stream backward (one-shot), FIX with
+  #     either forces the 1.0 step. Forward CMP playback does support looping.
+  #   TYPE_SPL (0x40, key split) and TYPE_RHY (0x80, rhythm): instrument-table
+  #     lookup flags consumed by the sequencer when picking the sub-instrument;
+  #     they can remain set in SoundChannel.type but the mixer ignores them.
+  TYPE_CGB = 0x07'u8
+  TYPE_FIX = 0x08'u8
+  TYPE_REV = 0x10'u8
+  TYPE_CMP = 0x20'u8
+  TYPE_SPL = 0x40'u8
+  TYPE_RHY = 0x80'u8
 
-  # status bits (m4a SoundChannel.statusFlags)
-  CH_STOP = 0x40'u8
-  CH_ON   = 0xC7'u8   # START|STOP|ECHO|ENV_MASK — "channel is producing sound"
+  # status bits (m4a SoundChannel.statusFlags — SOUND_CHANNEL_SF_* in pret
+  # pokeemerald constants/m4a_constants.inc):
+  #   START (0x80): note-on request from the sequencer; the mixer consumes it.
+  #   STOP (0x40): note-off request; envelope enters release.
+  #   SPECIAL (0x20): mixer-internal latch — "CMP/REV pointer already
+  #     initialised" (set on the first mixer pass of such a channel).
+  #   LOOP (0x10): set at note start when WaveData.flags carries the loop bits
+  #     (0xC0 at wave+3).
+  #   IEC (0x04): pseudo-echo tail — when the release envelope decays below
+  #     SoundChannel.pseudoEchoVolume, the driver holds the envelope at that
+  #     volume and counts pseudoEchoLength down once per frame, killing the
+  #     channel at zero (m4a_1.s envelope prologue). Shadow mode inherits all of
+  #     this for free: we consume envelopeVolumeRight/Left, which the real
+  #     driver computes AFTER the release/IEC handling each frame.
+  #   ENV (0x03): envelope phase (3=attack, 2=decay, 1=sustain, 0=release).
+  CH_START = 0x80'u8
+  CH_STOP  = 0x40'u8
+  CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
 
   # m4a compressed-waveform ("GFDPCM"/BDPCM) 4-bit differential LUT: the 16
   # signed deltas added to a running s8 accumulator. These values are a fixed
-  # property of Nintendo's format, independently documented by agbplay (ipatix):
+  # property of Nintendo's format (gDeltaEncodingTable in pret pokeemerald
+  # src/m4a_tables.c; agbplay independently corroborates):
   #   [0, 1, 4, 9, 16, 25, 36, 49, -64, -49, -36, -25, -16, -9, -4, -1].
-  # We store them as raw s8 deltas and divide once at output (/128), so the
-  # compressed and uncompressed paths share the same output scaling.
-  BDPCM_LUT: array[16, float32] = [
-    0.0'f32, 1, 4, 9, 16, 25, 36, 49,
+  BDPCM_LUT: array[16, int8] = [
+    0'i8, 1, 4, 9, 16, 25, 36, 49,
     -64, -49, -36, -25, -16, -9, -4, -1
   ]
   # Compressed blocks are 33 bytes / 64 samples: 1 s8 base byte + 32 nibble
-  # bytes (64 packed 4-bit LUT indices). (agbplay corroborates this layout.)
+  # bytes. Per the shipped decoder (SoundMainRAM_Unk2 in pret pokeemerald
+  # src/m4a_1.s): sample 0 of a block is the RAW base byte; sample 1 takes the
+  # LOW nibble of the first delta byte (its high nibble is never read); each
+  # subsequent byte then supplies its high nibble followed by its low nibble
+  # (63 used nibbles for samples 1..63). The accumulator wraps at 8 bits (the
+  # driver decodes through strb/ldrsb).
   BDPCM_BLOCK_BYTES  = 33'u32
   BDPCM_BLOCK_SAMPS  = 64'u32
 
@@ -204,6 +259,47 @@ proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
   if s.in_rom: rom[][(s.rom_off + byteoff) and rmask]
   else:        m.rd8(s.wave_data + byteoff)
 
+proc bdpcm_decode_block(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
+                        rmask: uint32; blk: uint32) =
+  ## Decode one whole 33-byte/64-sample BDPCM block into the sampler's block
+  ## cache — the same strategy as the real driver, which decodes block-at-a-
+  ## time into sDecodingBuffer keyed by a cached block index (SoundMainRAM_Unk2
+  ## in pret pokeemerald src/m4a_1.s). Nibble order per that routine: sample 0
+  ## is the raw s8 base byte; sample 1 uses the LOW nibble of the first delta
+  ## byte (its high nibble is never read); each subsequent byte supplies its
+  ## high nibble then its low nibble. The accumulator wraps at 8 bits, exactly
+  ## like the driver's strb/ldrsb round trip. Decoding whole blocks (rather
+  ## than sample-at-a-time) keeps the stream correct however the resampler
+  ## lands on it: decimating steps that skip source samples, reversed reads,
+  ## and loop wrap-backs all just index into the decoded block.
+  let base = blk * BDPCM_BLOCK_BYTES
+  var acc = cast[int8](m.wave_u8(s, rom, rmask, base))
+  s.blk[0] = acc
+  for i in 1 ..< int(BDPCM_BLOCK_SAMPS):
+    let b = m.wave_u8(s, rom, rmask, base + uint32(i shr 1) + 1'u32)
+    let nib = (if (i and 1) != 0: b and 0x0F'u8 else: b shr 4)
+    acc = cast[int8](int(acc) + int(BDPCM_LUT[nib]))
+    s.blk[i] = acc
+  s.blk_index = blk
+
+proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
+                rmask: uint32): float32 {.inline.} =
+  ## Decode the source sample at the sampler's current play position, returned
+  ## in raw s8 units (~ -128..127). Reversed channels (TONEDATA_TYPE_REV) read
+  ## the wave back-to-front: the real mixer reflects its read pointer to the
+  ## sample end and reads with descending addresses (SoundMainRAM_Unk1 in pret
+  ## pokeemerald src/m4a_1.s), so play position p maps to source index
+  ## sample_count-1-p (sample_count already excludes any note start offset;
+  ## see on_frame).
+  let pos = (if s.reversed: s.sample_count - 1'u32 - s.src_index
+             else: s.src_index)
+  if s.compressed:
+    if (pos shr 6) != s.blk_index:
+      m.bdpcm_decode_block(s, rom, rmask, pos shr 6)
+    float32(s.blk[int(pos and (BDPCM_BLOCK_SAMPS - 1'u32))])
+  else:
+    float32(cast[int8](m.wave_u8(s, rom, rmask, pos)))
+
 proc mp2k_state_loaded*(m: Mp2kHle) =
   ## Save-state / rollback load hook. The shadow mixer's state is deliberately
   ## NOT serialized (state files are identical with the HLE on or off), so
@@ -265,11 +361,19 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       s.active = false
       continue
     let ctype = m.rd8(base + SC_TYPE)
-    let compressed = (ctype and TYPE_COMPRESS) != 0
     let wave = m.rd32(base + SC_WAVE)
     if wave == 0 or (wave shr 24) == 0: # null / bogus pointer
       s.active = false
       continue
+    # DirectSound mode bits (see the TYPE_* table above). CMP or REV route the
+    # real mixer into its special-case renderer (SoundMainRAM_Unk1 in pret
+    # pokeemerald m4a_1.s); inside it, compressed decode is selected by
+    # WaveData.type != 0 (the u16 at wave+0), NOT by the channel bit alone —
+    # so a REV-only channel with a plain wave plays uncompressed backward, and
+    # a CMP-flagged channel with a plain wave header plays uncompressed.
+    let reversed   = (ctype and TYPE_REV) != 0
+    let compressed = (ctype and (TYPE_CMP or TYPE_REV)) != 0 and
+                     m.rd16(wave + 0) != 0'u16
     let loop_status = m.rd16(wave + 2)
     let looping = (loop_status and 0xC000'u16) != 0
     let new_wave_data = wave + 16
@@ -291,9 +395,10 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     # in the channel status. on_frame runs at the mixer's ENTRY, before the real
     # mixer consumes and clears START, so the live status byte is the reliable
     # note-on signal.
-    let started = (status and 0x80'u8) != 0
+    let started = (status and CH_START) != 0
     let retrig = (started and use_start) or
-                 not s.active or s.wave_data != new_wave_data or s.compressed != compressed
+                 not s.active or s.wave_data != new_wave_data or
+                 s.compressed != compressed or s.reversed != reversed
     when defined(mp2kwav):
       let dumpsel = getEnv("DINGBAT_CHDUMP")
       if (dumpsel == $i or dumpsel == "all") and retrig and dbgRetrigLog < 200:
@@ -317,13 +422,19 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         # an audible retrigger burst the real hardware doesn't produce. The m4a
         # SoundChannel exposes its playback position: `ct` (SC_COUNT, offset
         # 0x18 per m4a_internal.h) holds the source samples remaining until the
-        # sample (or loop) end, so the current cursor is size - ct. Resume
+        # sample (or loop) end. The mixer set count = size - offset at note-on
+        # and decrements it per source sample consumed, so size - ct is the
+        # forward cursor AND (for a reversed channel, whose note start offset
+        # is unrecoverable post-hoc — assume 0) the consumed-sample count our
+        # reversed src_index tracks: one formula covers both directions. Resume
         # there; the volume endpoints below then ramp from 0 (the freshly reset
         # vol_*1) to the engine's current volume across this one frame — a
         # ~16 ms fade-in that also masks the rebuilt interpolation history.
         s.phase_frac = 0
         s.need_fetch = true
         s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.start_off = 0
+        s.blk_index = 0xFFFFFFFF'u32
         s.active = true
         s.age = 1                       # mid-note: NOT an attack frame
         let total     = m.rd32(wave + 12)          # WaveData.size
@@ -333,27 +444,51 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
           else: 0'u32   # implausible ct: start over, still faded in from 0
         resumed = true
       else:
-        # (re)trigger: reset the resampler + decode state to the sample start.
-        s.src_index = 0
+        # (re)trigger: reset the resampler + decode state to the note's start.
+        # ply_note stores a sample start offset in SoundChannel.count at note-on
+        # and the mixer's START handler consumes it as currentPointer =
+        # wav->data + count, count = wav->size - count (pret pokeemerald m4a_1.s),
+        # so honor it when the START bit keyed this retrigger.
+        var start_off = 0'u32
+        if started:
+          start_off = m.rd32(base + SC_COUNT)
+          if start_off >= m.rd32(wave + 12): start_off = 0
+        s.start_off = start_off
+        # Forward playback begins at the offset; reversed playback begins at the
+        # END of the (offset-trimmed) data and src_index counts samples consumed.
+        s.src_index = (if reversed: 0'u32 else: start_off)
         s.phase_frac = 0
         s.need_fetch = true
         s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.blk_index = 0xFFFFFFFF'u32
         s.active = true
         s.age = 0
     else:
       s.age.inc
     s.wave_data   = new_wave_data
     s.compressed  = compressed
+    s.reversed    = reversed
     if compressed: m.dbg_compressed_used.inc
-    s.use_pcm_rate = (ctype and TYPE_PCM_RATE) != 0
+    s.use_pcm_rate = (ctype and TYPE_FIX) != 0
     # Resample rate = the CHANNEL's per-note playback frequency (SoundChannel
     # +0x20, in Hz), NOT the sample header's base freq at wave+4 (a large
     # fixed-point value). Using the latter advanced the cursor ~200 samples per
     # output sample — the high-pitch whine. step = freq / output_rate.
     s.freq        = m.rd32(base + SC_FREQ)
     s.loop_start  = m.rd32(wave + 8)    # WaveData.loopStart
-    s.sample_count = m.rd32(wave + 12)  # WaveData.size
-    s.looping     = looping
+    # WaveData.size = number of source samples. A reversed channel covers
+    # [0, size-offset): the real mixer reflects currentPointer to
+    # data + size - offset and walks DOWN to data[0] (SoundMainRAM_Unk1 REV
+    # init in pret pokeemerald m4a_1.s), so its playable length is
+    # size - offset and play position p maps to source index
+    # (size - offset - 1) - p (see decode_src).
+    let total = m.rd32(wave + 12)
+    s.sample_count = (if reversed and s.start_off < total: total - s.start_off
+                      else: total)
+    # The reference driver's reversed paths never consult the loop registers —
+    # count exhaustion silences the channel (m4a_1.s, the special renderer's
+    # end-of-data branch writes statusFlags = 0) — so REV is always one-shot.
+    s.looping     = looping and not reversed
     # Fast path: cache a direct ROM offset so the per-sample mixer can read the
     # cartridge buffer without going through the bus address decoder. m4a sample
     # banks live in ROM (0x08000000..0x0DFFFFFF).
@@ -363,30 +498,15 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
     if resumed and s.src_index > 0'u32 and s.src_index < s.sample_count:
       # Seed the resampler history at the resume point (needs in_rom/rom_off,
-      # so this runs after they are set). For plain PCM the previous source
-      # sample is read directly. For BDPCM the decoder is differential — the
-      # running accumulator (carried in tap0, see decode_src) must equal the
-      # decoded value at src_index-1 — so re-decode the current 64-sample block
-      # from its s8 base byte up to that point (≤63 steps, once per load).
+      # so this runs after they are set) with the source sample preceding it
+      # in play order. The block-cache BDPCM decoder (decode_src) lands on a
+      # mid-block position natively — decoding the whole block on demand — so
+      # no differential-accumulator re-seeding is needed.
       let rom = addr m.gba.cartridge.rom
       let rmask = m.gba.cartridge.rom_mask
-      if s.compressed:
-        var running = 0.0'f32
-        let pos0 = s.src_index and not (BDPCM_BLOCK_SAMPS - 1)
-        for p in pos0 ..< s.src_index:
-          let bo = p and (BDPCM_BLOCK_SAMPS - 1)
-          let ba = (p shr 6) * BDPCM_BLOCK_BYTES
-          var samp =
-            if bo == 0'u32: float32(cast[int8](m.wave_u8(s, rom, rmask, ba)))
-            else: running
-          var lut = m.wave_u8(s, rom, rmask, ba + (bo shr 1) + 1'u32)
-          if (bo and 1'u32) != 0'u32: lut = lut and 0x0F'u8
-          else:                       lut = lut shr 4
-          running = samp + BDPCM_LUT[lut]
-        s.tap0 = running   # 0 when src_index sits on a block boundary: the
-                           # next fetch re-reads the base byte fresh anyway
-      else:
-        s.tap0 = float32(cast[int8](m.wave_u8(s, rom, rmask, s.src_index - 1'u32)))
+      s.src_index.dec
+      s.tap0 = m.decode_src(s, rom, rmask)
+      s.src_index.inc
       s.tap1 = s.tap0; s.tap2 = s.tap0; s.tap3 = s.tap0
     # SC_ENV_VL/VR (0x0B/0x0A) are the engine's per-side volumes: envelopeVolume
     # * (leftVolume|rightVolume) >> 8, and leftVolume/rightVolume ALREADY fold in
@@ -421,49 +541,26 @@ proc mixer_hook*(m: Mp2kHle) =
 when defined(mp2kwav):
   proc mp2k_decode_bdpcm*(data: openArray[byte]; num_samples: int): seq[float32] =
     ## Standalone reference decode of an m4a BDPCM ("compressed waveform")
-    ## buffer, in raw s8 units. Mirrors decode_src() below exactly (the running
-    ## accumulator there is carried in the newest history slot). Used by the
-    ## test harness to validate the LUT + 33-byte/64-sample block layout against
+    ## buffer, in raw s8 units. Mirrors bdpcm_decode_block() below (and the
+    ## shipped decoder, SoundMainRAM_Unk2 in pret pokeemerald src/m4a_1.s):
+    ## per 33-byte/64-sample block, sample 0 is the raw s8 base byte, sample 1
+    ## uses the LOW nibble of the first delta byte (its high nibble is unused),
+    ## and each later byte supplies high then low nibble; the accumulator wraps
+    ## at 8 bits. Used by the test harness to validate the block layout against
     ## hand-computed values.
     result = newSeq[float32](num_samples)
-    var running = 0.0'f32
+    var acc = 0'i8
     for pos in 0 ..< num_samples:
       let block_offset  = uint32(pos) and (BDPCM_BLOCK_SAMPS - 1)
       let block_address = (uint32(pos) shr 6) * BDPCM_BLOCK_BYTES
-      var samp: float32
-      if block_offset == 0'u32: samp = float32(cast[int8](data[block_address]))
-      else:                     samp = running
-      let address = block_address + (block_offset shr 1) + 1'u32
-      var lut = data[address]
-      if (block_offset and 1'u32) != 0'u32: lut = lut and 0x0F'u8
-      else:                                 lut = lut shr 4
-      samp += BDPCM_LUT[lut]
-      running = samp
-      result[pos] = samp
-
-proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
-                rmask: uint32): float32 {.inline.} =
-  ## Decode the source sample at s.src_index, returned in raw s8 units
-  ## (~ -128..127). For BDPCM the running accumulator is carried in s.tap0 (the
-  ## newest history entry) and re-synced to each 64-sample block's s8 base byte,
-  ## per the m4a compressed-waveform format (see BDPCM_LUT / block constants).
-  if s.compressed:
-    let pos = s.src_index
-    let block_offset  = pos and (BDPCM_BLOCK_SAMPS - 1)      # pos % 64
-    let block_address = (pos shr 6) * BDPCM_BLOCK_BYTES      # (pos/64)*33
-    var samp: float32
-    if block_offset == 0'u32:
-      samp = float32(cast[int8](m.wave_u8(s, rom, rmask, block_address)))
-    else:
-      samp = s.tap0                                           # running value
-    let address = block_address + (block_offset shr 1) + 1'u32
-    var lut_index = m.wave_u8(s, rom, rmask, address)
-    if (block_offset and 1'u32) != 0'u32: lut_index = lut_index and 0x0F'u8
-    else:                                 lut_index = lut_index shr 4
-    samp += BDPCM_LUT[lut_index]
-    samp
-  else:
-    float32(cast[int8](m.wave_u8(s, rom, rmask, s.src_index)))
+      if block_offset == 0'u32:
+        acc = cast[int8](data[block_address])
+      else:
+        var lut = data[block_address + (block_offset shr 1) + 1'u32]
+        if (block_offset and 1'u32) != 0'u32: lut = lut and 0x0F'u8
+        else:                                 lut = lut shr 4
+        acc = cast[int8](int(acc) + int(BDPCM_LUT[lut]))
+      result[pos] = float32(acc)
 
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## Produce one stereo output sample at the APU's rate (32768 Hz). Replaces
@@ -534,7 +631,12 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
         dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
         dbgAttackPk = max(dbgAttackPk, max(abs(cl), abs(cr)))
         dbgAttackN.inc
-    # Advance the resample phase; step = playback-rate / output-rate.
+    # Advance the resample phase; step = playback-rate / output-rate. A
+    # TYPE_FIX channel plays at exactly SoundInfo.pcmFreq — the real mixer
+    # forces its step to 1.0 source sample per pcmFreq output sample and
+    # ignores channel.frequency entirely (pret pokeemerald m4a_1.s: the plain
+    # path's raw copy loop, and "movne r8, 0x800000" in SoundMainRAM_Unk1) —
+    # so its rate here is the engine's pcmFreq, not the per-note frequency.
     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
     when defined(mp2kwav):
       dbgStepN.inc
@@ -548,7 +650,10 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
       s.src_index += n
       s.need_fetch = true
       if s.src_index >= s.sample_count:
-        if s.looping:
+        # Reversed playback is one-shot: the reference driver's REV paths never
+        # consult the loop registers and stop the channel when the sample count
+        # is exhausted (pret pokeemerald m4a_1.s, SoundMainRAM_Unk1).
+        if s.looping and not s.reversed:
           s.src_index = s.loop_start + n - 1'u32
         else:
           # Hold the last decoded sample; the game clears the channel's status

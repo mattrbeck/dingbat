@@ -507,8 +507,16 @@ type
     loop_start*:  uint32    # WaveData.loopStart (m4a_internal.h): loop restart index
     looping*:     bool
     freq*:        uint32
-    compressed*:  bool      # m4a BDPCM ("compressed waveform"), channel.type bit5
-    use_pcm_rate*: bool     # channel.type bit3: step at SoundInfo pcm_sample_rate
+    compressed*:  bool      # m4a BDPCM ("compressed waveform"): TONEDATA_TYPE_CMP/REV
+                            # routing with a compressed WaveData header (see mp2k.nim)
+    use_pcm_rate*: bool     # TONEDATA_TYPE_FIX (type bit3): step at SoundInfo.pcmFreq
+    reversed*:    bool      # TONEDATA_TYPE_REV (type bit4): play the sample backward
+    start_off*:   uint32    # note-on sample start offset (SoundChannel.count at START)
+    # BDPCM decoded-block cache, mirroring the real driver's block-at-a-time
+    # decode into sDecodingBuffer keyed by a cached block index (SoundChannel
+    # xpi; see SoundMainRAM_Unk2 in pret pokeemerald m4a_1.s):
+    blk_index*:   uint32    # block number currently decoded in blk (0xFFFFFFFF = none)
+    blk*:         array[64, int8]  # decoded s8 samples of that block
     # Private resampler working state: a forward-stepping polyphase resampler
     # keeps an integer read cursor, a fractional phase, and a short tap history.
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
