@@ -588,6 +588,17 @@ type
     skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
+    # Frames since the learned mixer hook last fired (incremented by the frame
+    # poll, zeroed by on_frame; saturates). When SoundMain stops running —
+    # m4aSoundVSyncOff parks ident and a stock driver's SoundMain refuses to
+    # run — the engine provably is not producing the FIFO stream, so
+    # substitution must pass the real stream through (Disney's Lilo & Stitch
+    # VSyncOffs its idle m4a at the title screen and re-points DMA1 at its own
+    # streamer's buffer; substituting the dead engine's silence muted the
+    # whole soundtrack). Reversible by design: the moment the mixer runs
+    # again, substitution resumes — unlike fifo_foreign, no enhancement is
+    # permanently sacrificed. See mp2k.nim `mixer_live`.
+    hook_stale*: int32
     # Set by mp2k_state_loaded (save-state / rollback load): the shadow mixer
     # state is deliberately NOT serialized, so the next mixer pass must re-latch
     # every channel from the engine's SoundInfo — resuming mid-note channels at
@@ -726,6 +737,7 @@ proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
 proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
+proc mixer_live*(m: Mp2kHle): bool
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)

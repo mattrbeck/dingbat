@@ -88,6 +88,11 @@ const
   MP2K_IDENT_LOCK_VOFF    = 0x68736D5E'u32   # ID_NUMBER+11: locked, VSync off
   MP2K_PROBE_MAX_FAILS    = 8                # give up learning after this many mislearns
   MP2K_MAX_CHANNELS       = 12
+  # Frames the learned hook may go silent before substitution is suspended
+  # (see mixer_live below). A live SoundMain fires every V-blank, so the stale
+  # counter oscillates 0..1; a few frames of grace tolerate lag-frame skipped
+  # passes without flapping.
+  MP2K_HOOK_STALE_MAX     = 4'i32
 
   # SoundChannel field offsets, derived from m4a_internal.h (pret):
   #   statusFlags(0) type(1) rightVolume(2) leftVolume(3) ... envelopeVolume(9)
@@ -264,6 +269,23 @@ when defined(mp2kwav):
 proc new_mp2k*(gba: GBA): Mp2kHle =
   Mp2kHle(gba: gba, hook_addr: 0xFFFFFFFF'u32, engaged: false)
 
+proc mixer_live*(m: Mp2kHle): bool =
+  ## True while the engine's mixer is actually running (the learned hook fired
+  ## within the last few frames). SoundMain runs once per V-blank whenever the
+  ## engine is alive — including the modified VSyncOff vintages (Mother 3),
+  ## whose lock dance keeps firing the hook at ident +10/+11. When it STOPS
+  ## (stock m4aSoundVSyncOff parks ident at +10 and SoundMain refuses to run;
+  ## or the engine is torn down without scribbling ident), the engine cannot
+  ## be the producer of any FIFO audio, so the substitution must step aside
+  ## and let the game's own stream through. Observed in the wild: Disney's
+  ## Lilo & Stitch VSyncOffs its idle m4a at the title and streams the entire
+  ## soundtrack via its own DMA1 buffer — with substitution still armed, the
+  ## HLE replaced that music with shadow silence. Unlike the fifo_foreign
+  ## latch this is fully reversible: the next mixer pass re-arms substitution
+  ## (on_frame re-latches all channels from SoundInfo each pass, and the
+  ## ct-based position resync snaps any staleness).
+  m.hook_stale <= MP2K_HOOK_STALE_MAX
+
 proc rd8(m: Mp2kHle; a: uint32): uint8  {.inline.} = m.gba.bus.read_byte_internal(a)
 proc rd16(m: Mp2kHle; a: uint32): uint16 {.inline.} = m.gba.bus.read_half_internal(a)
 proc rd32(m: Mp2kHle; a: uint32): uint32 {.inline.} = m.gba.bus.read_word_internal(a)
@@ -355,6 +377,8 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.ab_n = 0
   m.shadow_quiet_age = 0   # the restored ring may hold pre-load engine audio
                            # our reset shadow doesn't: give it the tail grace
+  m.hook_stale = 0         # assume the restored engine is live; if it is
+                           # parked, the counter regrows within the grace
 
 # =============================================================================
 # Runtime detection: learn the SoundMainRAM entry PC instead of matching a ROM
@@ -804,6 +828,7 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       # else: both silent — neutral, hold the evidence count
   m.frame_seen = true
   m.engaged = true
+  m.hook_stale = 0           # the mixer demonstrably ran this frame
   m.resync_pending = false   # one full re-latch pass done; back to normal keying
 
 proc mixer_hook*(m: Mp2kHle) =
@@ -856,6 +881,11 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
        ident != MP2K_IDENT_IDLE_VOFF and ident != MP2K_IDENT_LOCK_VOFF:
       m.engaged = false
       for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
+    # Mixer liveness (see mixer_live): count the frames since the hook last
+    # fired. on_frame zeroes this, so a running SoundMain holds it at 0..1;
+    # a parked one (stock m4aSoundVSyncOff) lets it grow past the grace and
+    # substitution steps aside until the mixer runs again.
+    if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
     return
   # Arm probing only when the engine is at rest (ident == ID_NUMBER, in
   # either VSync form): arming mid-pass could learn a mid-mixer PC instead of
