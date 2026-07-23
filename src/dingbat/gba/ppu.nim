@@ -317,19 +317,30 @@ proc render_sprites*(ppu: PPU) =
   let sprites = ppu.sprites_ptr()
   let num_sprites = 128  # OAM has 128 sprites
   let bitmap_mode = ppu.dispcnt.bg_mode >= 3
+  # Per-scanline OBJ rendering time budget (hardware sprite cycle limit):
+  # the OBJ engine has 1210 cycles per line, or 954 when DISPCNT's H-Blank
+  # Interval Free bit frees the h-blank gap for CPU OAM access. A regular
+  # sprite on the line costs `width` cycles, an affine sprite 10 + 2*width
+  # (over its double-size footprint); once the budget runs out, later OAM
+  # entries do not render at all. The FDS-generation Famicom Mini carts rely
+  # on this: they park full-width black masking sprites at the end of OAM
+  # behind enough on-line sprites that real hardware never has time to draw
+  # them. Costs and cutoff granularity match mGBA (GBAVideoRendererCleanOAM /
+  # PreprocessSpriteLayer): the sprite that exhausts the budget still draws
+  # fully, subsequent ones are dropped.
+  var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
   for s_idx in 0 ..< num_sprites:
+    if obj_cycles <= 0: break
     let sprite = sprites[s_idx]
-    if sprite.obj_shape == 3: continue
     if sprite.affine_mode == 0b10: continue
-    # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
-    # below 512 don't render
-    if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: continue
+    # Prohibited shape 3 draws nothing but still occupies OBJ time below
+    let shape3 = sprite.obj_shape == 3
     var x_coord = cast[int16](bits_range(sprite.attr1, 0, 8))
     var y_coord = cast[int16](bits_range(sprite.attr0, 0, 7))
     if x_coord > 239: x_coord -= 512
     if y_coord > 159: y_coord -= 256
-    let orig_width  = SIZES[sprite.obj_shape][sprite.obj_size][0]
-    let orig_height = SIZES[sprite.obj_shape][sprite.obj_size][1]
+    let orig_width  = if shape3: 0 else: SIZES[sprite.obj_shape][sprite.obj_size][0]
+    let orig_height = if shape3: 0 else: SIZES[sprite.obj_shape][sprite.obj_size][1]
     var width  = orig_width
     var height = orig_height
     var center_x = int(x_coord) + width div 2
@@ -350,6 +361,15 @@ proc render_sprites*(ppu: PPU) =
       pa = 0x100; pb = 0; pc = 0; pd = 0x100
     let vc = int(ppu.vcount)
     if not (int(y_coord) <= vc and vc < int(y_coord) + height): continue
+    # Sprites fully outside the 240px window (raw x in [240, 512-width))
+    # never enter the OBJ pipeline: no pixels and no time charged
+    if int(x_coord) + width < 0: continue
+    # On-line sprite: charge its OBJ rendering time
+    obj_cycles -= (if bit(sprite.attr0, 8): 10 + 2 * width else: width)
+    if shape3: continue
+    # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
+    # below 512 don't render (but the sprite still occupies OBJ time)
+    if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: continue
     # Mosaic sprites sample from the first pixel of each screen-space block
     let obj_mosaic = bit(sprite.attr0, 12)
     let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
