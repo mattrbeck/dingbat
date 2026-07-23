@@ -608,6 +608,22 @@ const pickFile = (accept, callback) => {
 
 // Tab bar: one pane visible at a time
 const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+const settingsTabBar = document.getElementById("settings-tabs");
+const settingsTabsWrap = document.getElementById("settings-tabs-wrap");
+
+// Edge scrims on the wrapper signal that the bar can scroll further in that
+// direction (the tab bar overflows on narrow phones). Re-checked on scroll,
+// resize, tab selection and modal open — clientWidth is 0 while the modal is
+// closed, so the open-time call does the first real measurement.
+const updateTabsScrollHints = () => {
+  const el = settingsTabBar;
+  settingsTabsWrap.classList.toggle("can-scroll-left", el.scrollLeft > 1);
+  settingsTabsWrap.classList.toggle(
+    "can-scroll-right", el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+};
+
+settingsTabBar.addEventListener("scroll", updateTabsScrollHints, { passive: true });
+window.addEventListener("resize", updateTabsScrollHints);
 
 const selectSettingsTab = (name) => {
   for (let t of settingsTabs) {
@@ -618,6 +634,7 @@ const selectSettingsTab = (name) => {
     // The tab bar scrolls on narrow screens — keep the active tab in view
     if (on) t.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+  updateTabsScrollHints();
 };
 
 settingsTabs.forEach((t) =>
@@ -640,6 +657,7 @@ const openSettingsModal = () => {
   kbPreset.value = detectPreset(activeBindings);
   renderKbBindings();
   settingsModal.classList.add("open");
+  updateTabsScrollHints();  // first measurable layout: modal was display:none
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
 };
