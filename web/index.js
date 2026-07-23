@@ -1693,18 +1693,8 @@ const renderGdriveSection = () => {
   if (!gdriveToken) {
     let btn = makeGdriveButton("Sign in with Google", false, async () => {
       btn.disabled = true;
-      try {
-        await gdriveAcquireToken();
-        await gdriveFetchEmail();
-        renderGdriveSection();
-        showToast("Connected to Google Drive");
-        refreshSyncUI();
-        // First connection (or a prior "decide later"): offer to set up sync.
-        if (syncPrefs.mode == null) await promptSyncSetup();
-      } catch (e) {
-        showToast(e.message);
-        btn.disabled = false;
-      }
+      try { await gdriveConnect(); }
+      catch (e) { showToast(e.message); btn.disabled = false; }
     });
     gdriveBody.appendChild(btn);
     return;
@@ -2413,6 +2403,18 @@ const handleSyncedRomDeletion = async (game) => {
   await saveSyncPrefs();
 };
 
+// Connect to Drive from anywhere (Manage modal or the empty-library card):
+// acquire a token, refresh both surfaces, and — on first connection — offer to
+// set up sync. Throws on failure so callers can re-enable their button.
+const gdriveConnect = async () => {
+  await gdriveAcquireToken();
+  await gdriveFetchEmail();
+  refreshSyncUI(); // re-renders the Manage modal's Drive section if it's open
+  showToast("Connected to Google Drive");
+  if (syncPrefs.mode == null) await promptSyncSetup();
+  refreshHomeRecent(); // swaps the empty-card sign-in button for the grid
+};
+
 // --- Sync UI surfaces ----------------------------------------------------
 const homeSyncBtn = document.getElementById("home-sync");
 const refreshSyncUI = () => {
@@ -2599,8 +2601,47 @@ const launchRom = async (name) => {
 // Home-screen recent grid — this is the app's game library (it replaces the
 // old Recent modal: launch, remove, and storage usage all live here).
 const homeRecentWrap = document.getElementById("home-recent-wrap");
+const homeRecentHead = document.getElementById("home-recent-head");
 const homeRecent = document.getElementById("home-recent");
 const storageInfo = document.getElementById("storage-info");
+
+// Empty-library placeholder. Its whole reason for existing beyond "you have no
+// games" is Drive: on a fresh device this is the ONLY way to reach sign-in
+// (the Manage-ROMs link that normally hosts it lives in the recents header,
+// which is hidden when the library is empty). So configured-but-signed-out
+// users get a direct sign-in button here; already-connected users get a pull.
+const buildEmptyLibraryCard = () => {
+  let card = document.createElement("div");
+  card.className = "home-empty";
+  let msg = document.createElement("p");
+  msg.className = "home-empty-msg";
+  msg.textContent = "No games yet — load one to get started.";
+  card.appendChild(msg);
+  if (GDRIVE_CLIENT_ID && !gdriveToken) {
+    let sub = document.createElement("p");
+    sub.className = "home-empty-sub";
+    sub.textContent = "Already have games backed up to Google Drive?";
+    card.appendChild(sub);
+    let btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "button button-sm";
+    btn.textContent = "Sign in to Google Drive";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try { await gdriveConnect(); }
+      catch (e) { showToast(e.message); btn.disabled = false; }
+    });
+    card.appendChild(btn);
+  } else if (GDRIVE_CLIENT_ID && syncActive()) {
+    let btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "button button-sm";
+    btn.textContent = "Sync now";
+    btn.addEventListener("click", () => runFullSync({ label: "Syncing" }));
+    card.appendChild(btn);
+  }
+  return card;
+};
 
 const formatBytes = (bytes) => {
   if (bytes < 1024) return bytes + " B";
@@ -2640,9 +2681,15 @@ const refreshHomeRecent = async () => {
   homeArtUrls = [];
   homeRecent.innerHTML = "";
   if (roms.length === 0) {
-    homeRecentWrap.hidden = true;
+    // Keep the section visible (empty state) so Drive sign-in stays reachable,
+    // but drop the "Recent"/Manage header since there's nothing to manage yet.
+    homeRecentWrap.hidden = false;
+    if (homeRecentHead) homeRecentHead.hidden = true;
+    storageInfo.textContent = "";
+    homeRecent.appendChild(buildEmptyLibraryCard());
     return;
   }
+  if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   updateStorageInfo();
   for (let { name: romName } of roms) {

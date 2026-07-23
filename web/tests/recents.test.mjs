@@ -60,8 +60,11 @@ test("deleteRecent removes index + rom + art but never save data", async () => {
   assert.equal(app.idb.get("rom:A.gba"), undefined);
   assert.equal(app.idb.get("art:A.gba"), undefined);
   eq(app.idb.get("save:A.gba"), u8(5));
-  // Empty index re-hides the home grid (and with it the Manage/Drive entry point)
-  assert.equal(app.elements.get("home-recent-wrap").hidden, true);
+  // An empty library keeps the section visible (empty-state card, which hosts
+  // the Drive sign-in entry point) but drops the "Recent"/Manage header.
+  await settle();
+  assert.equal(app.elements.get("home-recent-wrap").hidden, false);
+  assert.equal(app.elements.get("home-recent-head").hidden, true);
 });
 
 test("X.gb and X.gbc key separately everywhere (full-name keying)", async () => {

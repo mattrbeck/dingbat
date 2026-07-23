@@ -1806,6 +1806,28 @@ body.has-game #home-load:hover {
   gap: 8px;
 }
 
+/* Empty-library placeholder (no games yet) — hosts the Drive sign-in entry */
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-sm);
+}
+.home-empty-msg {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.home-empty-sub {
+  margin: 6px 0 2px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
 .home-tile {
   position: relative;
   border-radius: var(--radius-sm);

@@ -155,6 +155,31 @@ test("flushSync uploads a dirty save, then skips it when unchanged", async () =>
   assert.equal(uploads2, 1, "unchanged save is not re-uploaded");
 });
 
+// ── Empty-library card hosts the Drive entry point ──────────────────────────
+
+test("empty-library card offers Drive sign-in when configured + signed out", async () => {
+  const app = await loadApp({ localStorageSeed: { gdrive_client_id: "cid" } });
+  const labels = app.runIn("buildEmptyLibraryCard().children.map((c) => c.textContent)");
+  assert.ok(labels.some((t) => /Sign in to Google Drive/.test(t)),
+    "sign-in button present: " + JSON.stringify(labels));
+});
+
+test("empty-library card offers Sync now when already syncing", async () => {
+  const app = await loadApp({ localStorageSeed: { gdrive_client_id: "cid" } });
+  signIn(app, { mode: "all" });
+  const labels = app.runIn("buildEmptyLibraryCard().children.map((c) => c.textContent)");
+  assert.ok(labels.some((t) => /Sync now/.test(t)),
+    "sync-now button present: " + JSON.stringify(labels));
+  assert.ok(!labels.some((t) => /Sign in/.test(t)), "no redundant sign-in");
+});
+
+test("empty-library card has no Drive button when unconfigured", async () => {
+  const app = await loadApp(); // no client id
+  const labels = app.runIn("buildEmptyLibraryCard().children.map((c) => c.textContent)");
+  assert.ok(!labels.some((t) => /Google Drive|Sync now/.test(t)),
+    "no Drive entry without a client id: " + JSON.stringify(labels));
+});
+
 test("flushSync propagates a queued delete to Drive", async () => {
   const app = await loadApp();
   const drive = makeDrive([["state:Game.gba", u8(9, 9)]]);
