@@ -458,6 +458,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
       # The real BIOS leaves the display in forced blank, not zeroed
       cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
+      # ...and resets the affine parameters to the identity transform, not
+      # zero (mGBA's HLE stores 0x100 to BG2PA/PD and BG3PA/PD the same
+      # way). Spider-Man: Mysterio's Menace calls RegisterRamReset(0xFD) at
+      # boot and never writes the affine registers: its mode-4 comic viewer
+      # relies on the BIOS-left identity matrix.
+      cpu.gba.bus.write_half(0x04000020'u32, 0x0100'u16)  # BG2PA
+      cpu.gba.bus.write_half(0x04000026'u32, 0x0100'u16)  # BG2PD
+      cpu.gba.bus.write_half(0x04000030'u32, 0x0100'u16)  # BG3PA
+      cpu.gba.bus.write_half(0x04000036'u32, 0x0100'u16)  # BG3PD
     # Cost of the real BIOS reset paths, measured per flag bit against
     # real-BIOS execution (stmia fill loops: EWRAM ~6.6 cycles/word, VRAM
     # ~2.6, IWRAM ~1.65, plus the register-reset sequences). The RAM clears
