@@ -79,3 +79,7 @@ scratch_mkstate
 scratch_modebits_test
 scratch_stateresync
 scratch_bdpcm_test
+tools/romfuzz/dingbat_nav
+tools/romfuzz/mgba_runner
+tools/romfuzz/nba_runner
+__pycache__/

@@ -86,7 +86,9 @@ proc irq*(cpu: CPU) =
       cpu.gba.bus.add_cycles(if cpu.last_instr_exc_return: 1 else: 2)
 
 proc und*(cpu: CPU) =
-  let lr = cpu.r[15] - 4'u32
+  # ARM7TDMI Undefined Instruction trap: LR_und holds the address of the
+  # instruction after the undefined one (PC - 4 in ARM, PC - 2 in THUMB)
+  let lr = cpu.r[15] - (if cpu.cpsr.thumb: 2'u32 else: 4'u32)
   let old_cpsr = cpu.cpsr
   cpu.switch_mode(modeUND)
   cpu.spsr = old_cpsr
@@ -123,6 +125,7 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
 
 proc clear_pipeline*(cpu: CPU) =
   cpu.pipeline.clear()
+  cpu.refill_pending = true
   # Pipeline refill: two sequential fetches at the branch destination
   # (1 cycle each in IWRAM/BIOS, waitstate-dependent in EWRAM/ROM)
   let page = int(bits_range(cpu.r[15], 24, 27))
@@ -142,6 +145,7 @@ proc clear_pipeline*(cpu: CPU) =
     cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait32_s[page]))
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
+  cpu.refill_pending = false
   if cpu.pipeline.size == 0:
     if cpu.cpsr.thumb:
       cpu.r[15] = cpu.r[15] and not 1'u32
