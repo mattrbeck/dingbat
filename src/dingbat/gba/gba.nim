@@ -691,6 +691,21 @@ type
     rev_slot*:       int           # current frame slot (the one being overwritten)
     rev_pos*:        int           # intra-frame sample index within the slot
     rev_period*:     int           # ring length in V-blank frames = SoundInfo.pcmDmaPeriod
+    # The ring is kept at the ENGINE's sample rate (pcmSamplesPerVBlank cells
+    # per slot), exactly like the real pcmBuffer: our 32768 Hz wet output is
+    # point-sampled into cells and the seed taps replay a cell across the
+    # output samples it spans (zero-order hold — the same shape the real DMA/
+    # DAC replay gives the drained buffer). Keeping the ring at our full
+    # render rate made the recirculated content too broadband: the real
+    # buffer's band-limited content self-correlates ~3.5x more at the
+    # one-frame tap lag, and the 4-tap seed (two consecutive frames) turns
+    # that correlation into loop gain — the high-reverb cluster's missing
+    # tail energy (FireRed forced-reverb A/B: ratio 1.00 at reverb 50 sliding
+    # to 0.91 at 100 before this).
+    rev_spv*:        int           # cells per slot = SoundInfo.pcmSamplesPerVBlank
+    rev_phase*:      float32       # cell-position accumulator (pcmFreq/32768 per sample)
+    rev_cell*:       int           # last cell written this pass (-1 = none)
+    rev_seed*:       float32       # seed held across the current cell's output samples
                                    # (SampleFreqSet: PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank)
     # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
     # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer

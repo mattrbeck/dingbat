@@ -364,6 +364,9 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   for v in m.reverb_ring.mitems: v = 0
   m.rev_slot = 0
   m.rev_pos = 0
+  m.rev_phase = 0
+  m.rev_cell = -1
+  m.rev_seed = 0
   m.frame_pos = 0
   m.resync_pending = true
   # Foreign-feeder detection: the streak/counter baseline are timeline-derived
@@ -481,6 +484,12 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.rev_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
   if m.rev_period < 1: m.rev_period = 1     # degenerate guard; real drivers
   elif m.rev_period > 16: m.rev_period = 16 # use 2..12 (PCM_DMA_BUF_SIZE/spv)
+  # Cells per slot = the engine's own pcmSamplesPerVBlank (the ring runs at
+  # the ENGINE rate — see the Mp2kHle field comments and the render_sample
+  # reverb block).
+  m.rev_spv = int(m.rd16(sound_info + SI_SPV))
+  if m.rev_spv < 16: m.rev_spv = 16
+  elif m.rev_spv > MP2K_REV_SLOT_LEN: m.rev_spv = MP2K_REV_SLOT_LEN
   if m.reverb_ring.len != m.rev_period * MP2K_REV_SLOT_LEN * 2:
     m.reverb_ring = newSeq[float32](m.rev_period * MP2K_REV_SLOT_LEN * 2)
   # Slot cursor: derived from the engine's own pcmDmaCounter exactly as
@@ -493,7 +502,13 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     let cnt = int(m.rd8(sound_info + SI_DMA_COUNTER))
     m.rev_slot = (if cnt <= 1: 0 else: m.rev_period - (cnt - 1))
     if m.rev_slot < 0 or m.rev_slot >= m.rev_period: m.rev_slot = 0
+    when defined(mp2kwav):
+      if getEnv("DINGBAT_SLOTTRACE") == "1" and m.dbg_hook_fires < 40:
+        echo "pass ", m.dbg_hook_fires, " cnt=", cnt, " slot=", m.rev_slot,
+          " period=", m.rev_period, " spv=", m.rev_spv
   m.rev_pos = 0
+  m.rev_phase = 0
+  m.rev_cell = -1
   m.frame_pos = 0
   for i in 0 ..< MP2K_MAX_CHANNELS:
     let s = addr m.samplers[i]
@@ -1158,13 +1173,22 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   #
   # Mapping to this HLE's 32768 Hz render: the reference's seed addressing is
   # per-SLOT and intra-frame-indexed (sample i of this pass pairs with sample i
-  # of the passes P and P-1 V-blanks ago), NOT a fixed sample-count delay. We
-  # reproduce that shape directly at our rate: reverb_ring is rev_period slots
-  # of MP2K_REV_SLOT_LEN stereo float samples; on_frame advances the slot
-  # cursor once per mixer pass (as the real pcmDmaCounter-derived cursor does)
-  # and rev_pos walks the slot per output sample, reading both taps at the
-  # same intra-frame index before overwriting the current slot with this
-  # pass's wet output. Our floats are in s8-buffer/128 units (a voice
+  # of the passes P and P-1 V-blanks ago), NOT a fixed sample-count delay —
+  # and, crucially, the buffer runs at the ENGINE's pcmFreq. reverb_ring is
+  # therefore kept at that rate too: rev_period slots of rev_spv
+  # (pcmSamplesPerVBlank) stereo cells. rev_phase advances pcmFreq/32768
+  # cells per output sample (per pass that is exactly spv cells — the real
+  # cursor cadence); on cell entry the seed is computed from the same cell of
+  # the P- and (P-1)-pass-old slots and this pass's wet output is
+  # point-sampled into the cell, then the seed is HELD across the cell's
+  # remaining output samples — the zero-order hold the real DMA/DAC replay
+  # applies to the drained buffer. An earlier revision kept the ring at our
+  # full 32768 Hz render rate; that recirculated broadband content whose
+  # one-frame-lag self-correlation is ~3.5x lower than the real band-limited
+  # buffer's, and since the 4-tap seed sums two CONSECUTIVE frames, the
+  # correlation is loop gain: the high-reverb tail came out audibly light
+  # (forced-reverb A/B on FireRed: 1.00 at reverb 50 sliding to 0.91 at 100;
+  # flat after this change). Our floats are in s8-buffer/128 units (a voice
   # contributes sample/128 * envelopeVolume/255, matching the reference's
   # byte-lane vol*sample accumulation scale), so "(sum * reverb) asr 9" maps
   # verbatim to sum_f * reverb / 512. Conscious deviations, each sub-LSB on
@@ -1178,22 +1202,31 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   var outr_f = accr
   if m.reverb_ring.len > 0:
     let cap  = MP2K_REV_SLOT_LEN
-    let i    = (if m.rev_pos < cap: m.rev_pos else: cap - 1)
+    var i    = int(m.rev_phase)
+    if i >= m.rev_spv: i = m.rev_spv - 1
     let cur  = (m.rev_slot * cap + i) * 2
-    let nxts = (if m.rev_slot + 1 >= m.rev_period: 0 else: m.rev_slot + 1)
-    let nxt  = (nxts * cap + i) * 2
-    if m.reverb_strength > 0'u8:
-      let sum  = m.reverb_ring[cur] + m.reverb_ring[cur + 1] +
-                 m.reverb_ring[nxt] + m.reverb_ring[nxt + 1]
-      let seed = sum * float32(m.reverb_strength) * (1.0'f32 / 512.0'f32)
-      outl_f = accl + seed
-      outr_f = accr + seed
-    # reverb == 0 must stay bit-identical to the no-reverb path: outl_f/outr_f
-    # are untouched above, and this store only maintains the (dry) history —
-    # matching the real NoReverb zero-fill + voice accumulation, after which
-    # the pcmBuffer holds the dry frame.
-    m.reverb_ring[cur]     = outl_f
-    m.reverb_ring[cur + 1] = outr_f
+    if i != m.rev_cell:
+      # Cell entry: compute this cell's seed from the old ring content, then
+      # store this pass's wet value (the cell's first output sample — the
+      # point-sampling the engine's own pcmFreq mixing implies).
+      let nxts = (if m.rev_slot + 1 >= m.rev_period: 0 else: m.rev_slot + 1)
+      let nxt  = (nxts * cap + i) * 2
+      if m.reverb_strength > 0'u8:
+        let sum  = m.reverb_ring[cur] + m.reverb_ring[cur + 1] +
+                   m.reverb_ring[nxt] + m.reverb_ring[nxt + 1]
+        m.rev_seed = sum * float32(m.reverb_strength) * (1.0'f32 / 512.0'f32)
+      else:
+        m.rev_seed = 0
+      # reverb == 0 must stay bit-identical to the no-reverb path: rev_seed is
+      # 0 above, and this store only maintains the (dry) history — matching
+      # the real NoReverb zero-fill + voice accumulation, after which the
+      # pcmBuffer holds the dry frame.
+      m.reverb_ring[cur]     = accl + m.rev_seed
+      m.reverb_ring[cur + 1] = accr + m.rev_seed
+      m.rev_cell = i
+    outl_f = accl + m.rev_seed
+    outr_f = accr + m.rev_seed
+    m.rev_phase += float32(m.pcm_sample_rate) * (1.0'f32 / float32(APU_SAMPLE_RATE))
     m.rev_pos.inc
   # Scale to the DirectSound latch range the APU expects. With the master-volume
   # double-apply fixed (see on_frame), the per-side envelope volumes already carry
