@@ -335,7 +335,13 @@ type
   PPU* = ref object
     gba* {.cursor.}:          GBA
     framebuffer*:  seq[uint16]
-    frame*:        bool
+    # Count of frame boundaries reached but not yet consumed by a
+    # step_frame/end_frame pair. A counter (not a bool) because one CPU
+    # "instruction" can span several frames: HLE BIOS decompression SWIs run
+    # atomically (faithful — the real BIOS keeps IRQs disabled throughout),
+    # and the frames elapsing inside must not collapse into one or the
+    # frontend's frame count drifts against real hardware.
+    frame*:        int
     layer_palettes*: array[4, array[240, uint8]]
     sprite_pixels*: array[240, SpritePixel]
     # BG2 line buffers for the direct-color bitmap modes (3 and 5)
@@ -852,7 +858,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   ## 1024 cycles) is preserved across the rebase. Returns the subtracted
   ## base so a link coordinator (link.nim) can keep cross-core cycle
   ## comparisons valid across rebases.
-  gba.ppu.frame = false
+  if gba.ppu.frame > 0: dec gba.ppu.frame
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
@@ -915,7 +921,7 @@ proc step_frame*(gba: GBA) =
   if gba.mp2k_hle and gba.mp2k != nil:
     gba.mp2k.mp2k_frame_poll()
   gba.cpu.count_cycles = 0
-  while not gba.ppu.frame:
+  while gba.ppu.frame == 0:
     gba.cpu.tick()
   gba.end_frame()
 

@@ -312,7 +312,7 @@ proc load_ppu_state(ppu: PPU; r: var Reader) =
   r.read_seq_u16_into(ppu.framebuffer)
   # Per-scanline compositing scratch is recomputed; force a full re-render so
   # the render-skip optimization can't display stale pre-load pixels
-  ppu.frame = false
+  ppu.frame = 0
   ppu.render_dirty = true
   ppu.skip_render = false
   ppu.frame_static = false

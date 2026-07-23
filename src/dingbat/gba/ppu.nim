@@ -12,7 +12,7 @@ const SIZES*: array[3, array[4, array[2, int]]] = [
 proc new_ppu*(gba: GBA): PPU =
   result = PPU(gba: gba)
   result.framebuffer    = newSeq[uint16](0x9600)
-  result.frame          = false
+  result.frame          = 0
   result.pram           = newSeq[byte](0x400)
   result.vram           = newSeq[byte](0x18000)
   result.oam            = newSeq[byte](0x400)
@@ -94,7 +94,7 @@ proc end_hblank*(ppu: PPU) =
   ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc draw*(ppu: PPU) =
-  ppu.frame = true
+  inc ppu.frame
   # True only when every scanline of this frame was skipped: the framebuffer
   # is bit-identical to the previous frame, so frontends can skip the
   # texture upload as well

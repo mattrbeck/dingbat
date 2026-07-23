@@ -121,10 +121,10 @@ proc step_frame*(link: Link) =
     let gba = link.cores[best]
     let local_target = gba.scheduler.cycles + CycleCount(LINK_SLICE)
     link.active[best] = true
-    while gba.scheduler.cycles < local_target and not gba.ppu.frame:
+    while gba.scheduler.cycles < local_target and gba.ppu.frame == 0:
       gba.advance_once()
     link.active[best] = false
-    if gba.ppu.frame:
+    if gba.ppu.frame > 0:
       link.frame_done[best] = true
   for i in 0 ..< link.cores.len:
     link.offsets[i] += int64(link.cores[i].end_frame())
@@ -203,7 +203,7 @@ proc complete_multi(link: Link; parent: int) =
       let g = link.cores[i]
       let deadline = g.scheduler.cycles + CycleCount(2336)
       while g.interrupts.reg_if.serial and g.scheduler.cycles < deadline and
-            not g.ppu.frame:
+            g.ppu.frame == 0:
         advance_once(g)
   when defined(linkTrace):
     if onMultiRound != nil:

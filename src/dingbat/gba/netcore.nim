@@ -717,7 +717,7 @@ proc rollback_and_replay(nc: NetCore; from_cycle: int64) =
       gba.scheduler.fast_forward()
     else:
       gba.cpu.tick()
-    if gba.ppu.frame:
+    if gba.ppu.frame > 0:
       nc.offset += int64(gba.end_frame())
       nc.take_checkpoint()  # regenerate this frame's (now-corrected) checkpoint
   nc.replaying = false
@@ -954,7 +954,7 @@ proc try_advance*(nc: NetCore): NetAdvance =
   if nc.now() - nc.last_clock_sent >= CLOCK_INTERVAL:
     nc.send_clock()
   let target = gba.scheduler.cycles + CycleCount(NETLINK_SLICE)
-  while gba.scheduler.cycles < target and not gba.ppu.frame:
+  while gba.scheduler.cycles < target and gba.ppu.frame == 0:
     if gba.cpu.halted:
       gba.scheduler.fast_forward()
     else:
@@ -966,7 +966,7 @@ proc try_advance*(nc: NetCore): NetAdvance =
       # stall for. Do NOT free-run emulation past the bounded lead — hand
       # control back so the next call re-evaluates the stall with phase idle.
       return naProgress
-  if gba.ppu.frame:
+  if gba.ppu.frame > 0:
     nc.send_clock()
     nc.offset += int64(gba.end_frame())
     nc.in_frame = false

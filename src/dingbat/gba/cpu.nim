@@ -400,5 +400,5 @@ proc tick*(cpu: CPU) =
   else:
     # Sleep tight: drain event batches until something wakes the CPU or the
     # frame ends, without bouncing through step_frame/tick for every event
-    while cpu.halted and not cpu.gba.ppu.frame:
+    while cpu.halted and cpu.gba.ppu.frame == 0:
       cpu.gba.scheduler.fast_forward()
