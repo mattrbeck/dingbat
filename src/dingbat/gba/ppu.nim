@@ -363,9 +363,13 @@ proc render_sprites*(ppu: PPU) =
       # OBJ character fetches wrap within the 32K of OBJ VRAM (matches
       # mGBA's offset mask and NanoBoyAdvance's tile index mask)
       if bit(sprite.attr0, 13):  # 8bpp
-        tile_id = tile_id shr 1
-        tile_id += offset
-        pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
+        # The attr2 character name always counts 32-byte units. In 1D mapping
+        # an odd name starts fetches half a tile in (32 bytes); only 2D
+        # mapping forces the low bit clear (matches mGBA's `align` mask and
+        # NanoBoyAdvance's CalculateTileNumber8BPP)
+        if not ppu.dispcnt.obj_mapping_1d:
+          tile_id = tile_id and not 1
+        pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(offset) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
       else:
         tile_id += offset
         let palettes = ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(tile_y) * 4 + (uint32(tile_x) shr 1)) and 0x7FFF)]
