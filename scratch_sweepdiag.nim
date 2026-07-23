@@ -140,17 +140,8 @@ proc main() =
        "  retrig=", dbgRetrigCount
   echo "fifoServed A=", dbgFifoServed[0], " B=", dbgFifoServed[1],
        "  fifoEmpty A=", dbgFifoEmpty[0], " B=", dbgFifoEmpty[1]
-  block:
-    var a = 0.0
-    for v in dbgDrainB: a += float(v)*float(v)
-    if dbgDrainB.len > 0:
-      echo "drained B bytes rms=", sqrt(a/float(dbgDrainB.len)), " n=", dbgDrainB.len
-    echo "fifoWrites A=", dbgFifoWrites[0], " B=", dbgFifoWrites[1],
-         " drops A=", dbgFifoDrop[0], " B=", dbgFifoDrop[1]
-    var hist = "run-start size hist (B): "
-    for i in 0 .. 32:
-      if dbgRunSizeHist[i] > 0: hist.add $i & ":" & $dbgRunSizeHist[i] & " "
-    echo hist
+  echo "fifoWrites A=", dbgFifoWrites[0], " B=", dbgFifoWrites[1],
+       " drops A=", dbgFifoDrop[0], " B=", dbgFifoDrop[1]
   block:
     let fh = open("/tmp/real_capture.bin", fmWrite)
     if realDmaCapture.len > 0:

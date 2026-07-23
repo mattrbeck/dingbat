@@ -784,10 +784,8 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var mp2kWavCapture*: seq[int16] = @[]
   var dbgFifoEmpty*: array[2, int]
   var dbgFifoServed*: array[2, int]
-  var dbgDrainB*: seq[int8]
   var dbgFifoDrop*: array[2, int]
   var dbgFifoWrites*: array[2, int]
-  var dbgRunSizeHist*: array[33, int]   # FIFO B size at FIFO-DMA run start
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
 include apu/abstract_channels

@@ -74,9 +74,7 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
       if dc.sizes[channel] > 0:
-        when defined(mp2kwav):
-          inc dbgFifoServed[channel]
-          if channel == 1: dbgDrainB.add dc.fifos[channel][dc.positions[channel]]
+        when defined(mp2kwav): inc dbgFifoServed[channel]
         log("Timer overflow good; channel:" & $channel & ", timer:" & $timer)
         let sample = int16(dc.fifos[channel][dc.positions[channel]]) shl 1
         dc.latches[channel] = sample

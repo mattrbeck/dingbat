@@ -135,10 +135,6 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   if start_timing == 3:  # Special
     if channel == 1 or channel == 2:  # FIFO
-      when defined(mp2kwav):
-        if channel == 2:
-          let sz = dma.gba.apu.dma_channels.sizes[1]
-          dbgRunSizeHist[min(max(sz,0),32)].inc
       len = 4
       word_size = 4
       dest_ctrl = 2  # Fixed
