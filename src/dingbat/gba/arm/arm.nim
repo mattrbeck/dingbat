@@ -139,6 +139,29 @@ proc hle_charge_body(cpu: CPU; t0: int64; model: int) {.inline.} =
   if model > charged:
     cpu.idle(model - charged)
 
+proc bios_addr_check(address, length: uint32): bool {.inline.} =
+  ## The real BIOS's source-region validation subroutine (BIOS 0xBA4), called
+  ## by every copy/decompression SWI (CpuSet, CpuFastSet, BitUnPack,
+  ## HuffUnComp, LZ77/RL/Diff) before touching memory. Returns false when the
+  ## real BIOS silently skips the whole operation: zero length, source below
+  ## 0x02000000 (BIOS dump protection), or source+length reaching outside
+  ## the 0x02000000-0x0FFFFFFF address bits. Faithful to the routine's exact
+  ## arithmetic: length is masked to 25 bits before the end-address test, and
+  ## "valid" means (addr & 0x0E000000) != 0 at both ends. Games rely on the
+  ## skip: Riviera's decompression queue ends with a src=0xFFFFFFFF entry
+  ## that must be a no-op (decompressing the open-bus "header" instead
+  ## overwrites all of EWRAM and blackscreens the game).
+  if length == 0: return false
+  if (address and 0x0E000000'u32) == 0: return false
+  ((address + (length and 0x01FFFFFF'u32)) and 0x0E000000'u32) != 0
+
+# Routine-body cost of a validation-skipped copy/decompression SWI: entry
+# push, (for the LZ77/RL/Diff shapes) the header ldr, the 0xBA4 check and the
+# early-out epilogue. Instruction-counted from the BIOS disassembly; the
+# handful of cycles' spread between the ARM and thumb routine shapes doesn't
+# matter for a path that does no work.
+const BIOS_CHECK_SKIP_COST = 26
+
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## Input-dependent cost of the real BIOS divide loop (same shape as the
   ## charge in hle_div; kept separate so ArcTan2 can price its internal Div).
@@ -342,35 +365,42 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       else:
         if fill: 46 + int(bus.wait16_n[sp]) + int(count) * (7 + int(bus.wait16_n[dp]))
         else:    46 + int(count) * (9 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp]))
-    # Addresses are NOT aligned: normal memory aligns on the bus anyway, and
-    # SRAM (8-bit bus) genuinely sees the unaligned byte address. Reads from
-    # the protected BIOS/unused region return 0 (hardware-verified by the
-    # mGBA suite memory tests).
-    let src_protected = bits_range(src, 24, 27) <= 0x1
-    if word_mode:
-      let fill_val = if src_protected: 0'u32 else: cpu.gba.bus.read_word(src)
-      for i in 0'u32 ..< count:
-        let val = if fill: fill_val
-                  elif src_protected: 0'u32
-                  else: cpu.gba.bus.read_word(src)
-        cpu.gba.bus.write_word(dst, val)
-        if not fill: src += 4
-        dst += 4
+    # The real BIOS validates the source before any access (byte length is
+    # count*4 even in halfword mode — the check runs before the halving) and
+    # returns with registers and memory untouched when it fails. This also
+    # covers the old "reads from the protected BIOS region return 0" special
+    # case: such sources never reach the copy loop at all.
+    if not bios_addr_check(src, count shl 2):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
     else:
-      # The real BIOS uses ldrh: an odd source address reads rotated, so the
-      # stored halfword is the addressed byte (ldrh+strh; hardware-verified)
-      let fill_val = if src_protected: 0'u16
-                     else: uint16(cpu.gba.bus.read_half_rotate(src))
-      for i in 0'u32 ..< count:
-        let val = if fill: fill_val
-                  elif src_protected: 0'u16
-                  else: uint16(cpu.gba.bus.read_half_rotate(src))
-        cpu.gba.bus.write_half(dst, val)
-        if not fill: src += 2
-        dst += 2
-    cpu.r[0] = src
-    cpu.r[1] = dst
-    cpu.hle_charge_body(body_t0, cpuset_model)
+      # Addresses are NOT aligned: normal memory aligns on the bus anyway, and
+      # SRAM (8-bit bus) genuinely sees the unaligned byte address.
+      if word_mode:
+        # The word paths use ldmia r0!/stmia r1!, so r0/r1 come back advanced
+        # (fill still pops one source word)
+        let fill_val = cpu.gba.bus.read_word(src)
+        if fill: src += 4
+        for i in 0'u32 ..< count:
+          let val = if fill: fill_val
+                    else: cpu.gba.bus.read_word(src)
+          cpu.gba.bus.write_word(dst, val)
+          if not fill: src += 4
+          dst += 4
+        cpu.r[0] = src
+        cpu.r[1] = dst
+      else:
+        # The real BIOS uses ldrh: an odd source address reads rotated, so the
+        # stored halfword is the addressed byte (ldrh+strh; hardware-verified).
+        # The halfword paths index with an offset register (ldrh/strh [rX, r5])
+        # and leave r0/r1 unmodified.
+        let fill_val = uint16(cpu.gba.bus.read_half_rotate(src))
+        for i in 0'u32 ..< count:
+          let val = if fill: fill_val
+                    else: uint16(cpu.gba.bus.read_half_rotate(src))
+          cpu.gba.bus.write_half(dst, val)
+          if not fill: src += 2
+          dst += 2
+      cpu.hle_charge_body(body_t0, cpuset_model)
   of 0x01:  # RegisterRamReset
     let flags = cpu.r[0]
     if bit(flags, 0):  # Clear 256K EWRAM
@@ -451,24 +481,29 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x0C:  # CpuFastSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
-    let src_protected = bits_range(src, 24, 27) <= 0x1
     let ctrl = cpu.r[2]
-    let count = (bits_range(ctrl, 0, 20) + 7) and not 7'u32  # round up to multiple of 8
-    # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
-    # (calibrated against the mGBA suite "CpuSet" timing test, which uses
-    # swi 0xC despite its name)
-    cpu.idle(int(count) + 5)
-    let fill = bit(ctrl, 24)
-    let fill_val = if src_protected: 0'u32 else: cpu.gba.bus.read_word(src)
-    for i in 0'u32 ..< count:
-      let val = if fill: fill_val
-                elif src_protected: 0'u32
-                else: cpu.gba.bus.read_word(src)
-      cpu.gba.bus.write_word(dst, val)
-      if not fill: src += 4
-      dst += 4
-    cpu.r[0] = src
-    cpu.r[1] = dst
+    let raw_count = bits_range(ctrl, 0, 20)
+    # The real BIOS validates before the copy using the UNROUNDED byte length
+    # (the ldm/stm bursts round up to 8 words only afterwards), and returns
+    # with registers and memory untouched when the check fails
+    if not bios_addr_check(src, raw_count shl 2):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+    else:
+      let count = (raw_count + 7) and not 7'u32  # round up to multiple of 8
+      # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
+      # (calibrated against the mGBA suite "CpuSet" timing test, which uses
+      # swi 0xC despite its name)
+      cpu.idle(int(count) + 5)
+      let fill = bit(ctrl, 24)
+      let fill_val = cpu.gba.bus.read_word(src)
+      for i in 0'u32 ..< count:
+        let val = if fill: fill_val
+                  else: cpu.gba.bus.read_word(src)
+        cpu.gba.bus.write_word(dst, val)
+        if not fill: src += 4
+        dst += 4
+      cpu.r[0] = src
+      cpu.r[1] = dst
   of 0x0D:  # GetBiosChecksum
     cpu.r[0] = 0xBAAE187F'u32
   of 0x0E:  # BgAffineSet
@@ -549,6 +584,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # The real BIOS reads the header first (ldr r5, [r0], #4), then validates
+    # the post-increment source with the header's length before decompressing
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var remaining = decomp_len
     var n_flags, n_lit, n_tok, n_runb = 0
@@ -594,6 +634,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Same real-BIOS validation as the Wram variant (header read first)
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var buf = newSeq[uint8](decomp_len)
     var buf_pos: uint32 = 0
     var n_flags, n_lit, n_tok, n_runb = 0
@@ -642,6 +686,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var dst = cpu.r[1]
     let info = cpu.r[2]
     let src_len = uint32(cpu.gba.bus.read_half(info))
+    # The real BIOS reads the source length halfword from the info block,
+    # then validates the source region before touching anything else
+    if not bios_addr_check(src, src_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     let src_width = uint32(cpu.gba.bus[info + 2])
     let dest_width = uint32(cpu.gba.bus[info + 3])
     let data_offset = cpu.gba.bus.read_word(info + 4)
@@ -675,6 +724,13 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
     let dst_page = int(bits_range(cpu.r[1], 24, 27))
+    # The real BIOS (routine at 0x1014) validates the raw source address
+    # before reading anything, with a constant 0x02000000 as the "length"
+    # (which contributes no bits to the end-address test, so this is a pure
+    # source-region check)
+    if not bios_addr_check(src, 0x02000000'u32):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     let header = cpu.gba.bus.read_word(src)
     let data_size = header and 0xF  # 4 or 8 bits
     let decomp_len = header shr 8
@@ -691,17 +747,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var cur_node = tree_start
     var cur_word: uint32 = 0
     var bits_left: int = 0
-    var n_inwords, n_steps, n_leaves, n_outwords = 0
+    var n_node, n_leaf, n_words, n_outw = 0
     while written < decomp_len:
       if bits_left == 0:
         cur_word = cpu.gba.bus.read_word(data_pos)
         data_pos += 4
         bits_left = 32
-        n_inwords += 1
+        n_words += 1
       let cur_bit = (cur_word shr 31) and 1
       cur_word = cur_word shl 1
       bits_left -= 1
-      n_steps += 1
       let node_val = uint32(cpu.gba.bus[cur_node])
       let child_offset = node_val and 0x3F
       let right_is_leaf = bit(node_val, 6)
@@ -711,7 +766,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let child_addr = next_addr + (if is_right: 1'u32 else: 0'u32)
       let is_leaf = if is_right: right_is_leaf else: left_is_leaf
       if is_leaf:
-        n_leaves += 1
+        n_leaf += 1
         let leaf_val = uint32(cpu.gba.bus[child_addr])
         if data_size == 4:
           out_word = out_word or (leaf_val shl out_bits)
@@ -725,28 +780,31 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           written += 4
           out_word = 0
           out_bits = 0
-          n_outwords += 1
+          n_outw += 1
         cur_node = tree_start
       else:
+        n_node += 1
         cur_node = child_addr
-    # Cost of the real BIOS loop (ARM routine at 0x1014). Every consumed input
-    # bit walks one tree node (two ldrb of the node byte, address arithmetic:
-    # ~25 cycles + 2 nonseq byte reads); a step that lands on a leaf
-    # additionally reads the leaf value and merges it into the output word
-    # (~17 more + 1 byte read); each completed output word is one str (+Dw),
-    # and each 32-bit refill of the bit buffer is one ldr from the source
-    # (+Rw). Constants from instruction-cycle counting of the disassembly,
-    # cross-checked against real-BIOS execution of this game's boot chain.
+    # Cost of the real BIOS bit-by-bit tree walk (routine at 0x1014): every
+    # consumed input bit costs a fixed instruction budget plus two ldrb tree
+    # reads at the source page (the BIOS re-reads the node byte for the leaf
+    # flags); a leaf additionally reads the symbol byte (ldrb), reloads the
+    # per-word symbol target from the stack and resets to the tree root; each
+    # completed output word pays one str at the destination and each 32-bit
+    # bitstream refill one ldr at the source. Constants instruction-counted
+    # from the disassembly and calibrated against real-BIOS execution in
+    # dingbat (scratch_swicalib.nim: 4/8-bit symbols, tree depths 1-8, ROM
+    # and EWRAM sources, EWRAM and IWRAM destinations): cycle-exact on every
+    # odd-depth stream, within 0.5% on even depths (a source-layout parity
+    # artifact of the synthetic left-spine calibration trees).
     block:
       let bus = cpu.gba.bus
-      let rn = int(bus.wait16_n[src_page])
-      let rw = int(bus.wait32_n[src_page])
-      let dw = int(bus.wait32_n[dst_page])
-      cpu.hle_charge_body(body_t0, 50 + rw +
-        n_inwords * (6 + rw) +
-        (n_steps - n_leaves) * (25 + 2 * rn) +
-        n_leaves * (42 + 3 * rn) +
-        n_outwords * (1 + dw))
+      let b = int(bus.wait16_n[src_page])   # nonseq byte read at src
+      let w = int(bus.wait32_n[src_page])   # nonseq word read at src
+      let d = int(bus.wait32_n[dst_page])   # nonseq word write at dst
+      cpu.hle_charge_body(body_t0, 57 + 2 * b + w +
+        n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) +
+        n_outw * d + n_words * (9 + w))
   of 0x14:  # RLUnCompWram (8-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -754,6 +812,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Real-BIOS validation: header read first, then the source check
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var written: uint32 = 0
     var n_flags, n_lit, n_rruns, n_runb = 0
@@ -794,6 +856,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Real-BIOS validation: header read first, then the source check
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var written: uint32 = 0
     var out_buf: uint16 = 0
@@ -846,6 +912,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Real-BIOS validation: header read first, then the source check
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var written: uint32 = 0
     var prev = cpu.gba.bus[src]; src += 1
@@ -861,6 +931,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Real-BIOS validation: header read first, then the source check
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var written: uint32 = 0
     var out_buf: uint16 = 0
@@ -884,6 +958,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
+    # Real-BIOS validation: header read first, then the source check
+    if not bios_addr_check(src, decomp_len):
+      cpu.idle(BIOS_CHECK_SKIP_COST)
+      return
     var dst = cpu.r[1]
     var written: uint32 = 0
     var prev = cpu.gba.bus.read_half(src); src += 2
