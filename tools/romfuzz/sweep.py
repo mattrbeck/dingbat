@@ -50,20 +50,35 @@ def sweep_title(workdir, title, rom_base):
     # isolate save files: each emulator variant gets its own copy of the ROM
     result = {'title': title, 'rom': rom_base, 'slug': slug, 'shots': {}, 'error': None}
     try:
+        # A reference emulator crashing on a ROM (NBA segfaults on Pokemon
+        # Pinball R&S) shouldn't fail the title — fall back to the other
+        # reference and record the crash.
+        ref_crashed = None
         for emu in RUNNERS:
             emudir = os.path.join(rundir, emu)
             os.makedirs(emudir, exist_ok=True)
             romcopy = os.path.join(emudir, 'rom.gba')
             if not os.path.exists(romcopy):
                 shutil.copy(os.path.join(workdir, 'roms', rom_base), romcopy)
-            run_one(emu, romcopy, os.path.join(emudir, emu), SCRIPT, SHOTS,
-                    state=(emu == 'dhle'))
+            try:
+                run_one(emu, romcopy, os.path.join(emudir, emu), SCRIPT, SHOTS,
+                        state=(emu == 'dhle'))
+            except Exception:
+                if emu == 'nba':
+                    ref_crashed = 'nba'
+                else:
+                    raise
+        if ref_crashed:
+            result['ref_crashed'] = ref_crashed
+        MARK = {'verdict': 'REF-CRASH', 'exact': 0, 'mae': 0,
+                'phash_hamming': 0, 'ncc': 0}
         for f in SHOTS:
             shot = {}
             paths = {e: os.path.join(rundir, e, f'{e}.f{f:04}.ppm') for e in RUNNERS}
-            shot['ref_control'] = imgdiff.metrics(paths['mgba'], paths['nba'])
+            have_nba = ref_crashed != 'nba'
+            shot['ref_control'] = imgdiff.metrics(paths['mgba'], paths['nba']) if have_nba else dict(MARK)
             shot['dhle_vs_mgba'] = imgdiff.metrics(paths['mgba'], paths['dhle'])
-            shot['dhle_vs_nba'] = imgdiff.metrics(paths['nba'], paths['dhle'])
+            shot['dhle_vs_nba'] = imgdiff.metrics(paths['nba'], paths['dhle']) if have_nba else dict(MARK)
             shot['dreal_vs_mgba'] = imgdiff.metrics(paths['mgba'], paths['dreal'])
             result['shots'][f] = shot
         # Final verdict: dingbat passes a checkpoint if it matches EITHER
@@ -76,7 +91,8 @@ def sweep_title(workdir, title, rom_base):
         RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR']
         for f in SHOTS:
             shot = result['shots'][f]
-            direct = min((shot['dhle_vs_mgba']['verdict'], shot['dhle_vs_nba']['verdict']),
+            direct = min((v for v in (shot['dhle_vs_mgba']['verdict'],
+                                      shot['dhle_vs_nba']['verdict']) if v in RANK),
                          key=RANK.index)
             if direct in OK:
                 shot['final'] = direct
@@ -85,6 +101,8 @@ def sweep_title(workdir, title, rom_base):
             burst_frames = sorted(set(max(1, f + d) for d in BURST))
             best_overall = direct
             for ref in ('mgba', 'nba'):
+                if ref == ref_crashed:
+                    continue
                 emudir = os.path.join(rundir, ref)
                 run_one(ref, os.path.join(emudir, 'rom.gba'),
                         os.path.join(emudir, f'burst{f}'), SCRIPT, burst_frames)

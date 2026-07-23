@@ -9,12 +9,18 @@ import base64, html, json, os, sys
 
 RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR']
 
-# slug -> (frames to embed, caption)
+# slug -> (frames to embed, caption). Fixed-bug sections pull these from the
+# pre-fix archive (workdir/archive-prefix/img) so the bug stays illustrated
+# even though current runs render correctly.
 EMBED = {
-    'super-mario-advance': ([800], 'f800 — references at the Choose a Game menu; dingbat reports corrupt save data on a fresh boot.'),
-    'super-mario-advance-3-yoshi-s-island': ([2000], 'f2000 — same storybook scene, but dingbat’s colors are badly wrong (blend/brightness).'),
-    'tony-hawk-s-pro-skater-2': ([2000], 'f2000 — dingbat matches the references except the skater portrait, which renders as noise tiles.'),
-    'doom': ([1200], 'f1200 (pre-fix) — timing, not rendering: references (identical to each other) still on the title; dingbat-HLE booted ~75 frames faster and already caught the scripted START press. Fixed by HLE BIOS cost calibration (a9ca2a9): HLE title arrival now f875, pixel-identical to real BIOS.'),
+    'super-mario-advance': ([800], 'Pre-fix f800 — references at the Choose a Game menu; dingbat reports corrupt save data on a fresh boot.'),
+    'super-mario-advance-3-yoshi-s-island': ([2000], 'Pre-fix f2000 — same storybook scene, wrong colors (a 7-frame phase lead, not a blend bug).'),
+    'tony-hawk-s-pro-skater-2': ([2000], 'Pre-fix f2000 — dingbat matches the references except the skater portrait, which renders as noise tiles.'),
+    'doom': ([1200], 'Pre-fix f1200 — timing, not rendering: references (identical to each other) still on the title; dingbat-HLE booted ~75 frames faster and already caught the scripted START press. Fixed by HLE BIOS cost calibration: HLE title arrival now matches real BIOS.'),
+    'pokemon-pinball-ruby-sapphire': ([2000], 'Pre-fix f2000 (mGBA left, dingbat right; NBA segfaults on this cart) — dingbat hung on a black screen from boot.'),
+    'classic-nes-series-metroid': ([800], 'Pre-fix f800 — references in the attract mode; dingbat on the cart’s anti-emulation screen.'),
+    'dragon-ball-z-the-legacy-of-goku': ([2000], 'Pre-fix f2000 — same FMV intro at wildly different phases; dingbat also framed the video wrong (bitmap-mode affine ignored).'),
+    'riviera-the-promised-land': ([1200], 'Pre-fix f1200 — references at the title; dingbat black under the HLE BIOS (EWRAM destroyed by an unvalidated decompression call).'),
 }
 
 def img_uri(path):
@@ -57,6 +63,21 @@ def main():
         ('Super Mario Advance 3 — Yoshi’s Island', 'super-mario-advance-3-yoshi-s-island',
          'HLE LZ77 cost + frame counting — fixed, commits a9ca2a9 + fa36c81',
          'Not a PPU bug: blend registers, PRAM and VRAM were byte-identical to mGBA — the whole cinematic ran 7 frames ahead, and the “wrong colors” are the same scene earlier in its 128-frame cloud-drift cycle. The lead came from HLE LZ77UnCompVram undercharging (six back-to-back ~70KB decompressions behind the boot fade) plus ppu.frame being a bool that collapsed frames elapsing inside a multi-frame atomic SWI. Post-fix: pixel-identical to mGBA at every checkpoint; Kirby (also decompression-heavy) went exact too.'),
+        ('Pokémon Pinball — Ruby & Sapphire', 'pokemon-pinball-ruby-sapphire',
+         'MSR writes the CPSR T bit + RamReset IE/IF/WAITCNT/IME — fixed, commit a5f07bd',
+         'The intro packer switches to Thumb via MSR (ROM 0x086BC080, with a Thumb bx r0 hand-placed in the low halfword of A+8 for the ARM7TDMI’s post-MSR pipeline); dingbat pinned the T bit and hung black. The same trick segfaults NanoBoyAdvance outright (upstream issue drafted). HLE RegisterRamReset bit 7 also had to clear IE/IF/WAITCNT/IME like the real BIOS. Post-fix: title menu matches mGBA, both BIOS modes.'),
+        ('Classic NES Series — Metroid', 'classic-nes-series-metroid',
+         'EEPROM sizing from .sav + Classic NES ROM mirroring — fixed, commit faebadc',
+         'The cart’s protection failed because dingbat sized the EEPROM from a neighboring 8KB .sav (mGBA writes 8KB files even for 4Kbit chips), desyncing the 6-bit-address serial protocol — the signature handshake then failed and the cart showed “GAME PAK ERROR”. EEPROM size now always derives from the command DMA count (also makes mGBA save imports work); EEPROM-cart SRAM-region reads return 0xFF; exactly-1MiB Classic NES mask ROMs mirror 4×. Post-fix: attract mode pixel-identical to mGBA.'),
+        ('Dragon Ball Z — The Legacy of Goku', 'dragon-ball-z-the-legacy-of-goku',
+         'Bitmap-mode BG2 affine + PA/PD reset + Huff/RL SWI costs — fixed, commit 201c1b0',
+         'Three compounding causes: the PPU ignored BG2 affine scaling in bitmap modes 3/4/5 (the FMV player upscales reduced-height frames; VRAM was byte-identical to mGBA but framing was wrong); BG2/BG3 PA/PD reset to 0 instead of the hardware’s 0x100 identity; and HuffUnComp/RLUnComp were uncosted in HLE (~6 frames of real BIOS boot time), shifting every audio/IRQ-paced scene event. Post-fix: pixel-identical to mGBA at a constant 2-frame HLE lead.'),
+        ('Riviera — The Promised Land', 'riviera-the-promised-land',
+         'Real-BIOS source validation for decompression SWIs — fixed, commit d7c65ff',
+         'The game’s decompression queue ends with a terminator entry (src=0xFFFFFFFF). The real BIOS validates source regions in every copy/decompression SWI (routine 0xBA4) and silently skips invalid calls; dingbat’s HLE decompressed ~64KB of open-bus garbage over live EWRAM. All SWI entry checks now match the real BIOS’s per-routine check points, including CpuSet’s register writeback. Post-fix: HLE pixel-identical to mGBA at f2000.'),
+        ('Klonoa — Empire of Dreams', 'klonoa-empire-of-dreams',
+         'HuffUnComp cost model — fixed, commit d7c65ff',
+         'Boot Huffman-decompresses ~20KB via 13 HuffUnComp calls charged only bus accesses (real tree walk ≈35 cycles/input-bit). Cost model instruction-counted from the BIOS routine at 0x1014 and calibrated cycle-exact against real-BIOS execution. Post-fix: f800 and f2000 pixel-identical to mGBA (was NCC 0.86).'),
     ]
     bugs = []
 
@@ -66,7 +87,10 @@ def main():
         if slug in EMBED:
             frames, cap = EMBED[slug]
             for f in frames:
-                p = os.path.join(workdir, 'report', 'img', f'{slug}.f{f:04}.png')
+                # fixed bugs illustrate the PRE-FIX state from the archive
+                p = os.path.join(workdir, 'archive-prefix', 'img', f'{slug}.f{f:04}.png')
+                if not os.path.exists(p):
+                    p = os.path.join(workdir, 'report', 'img', f'{slug}.f{f:04}.png')
                 if os.path.exists(p):
                     parts.append(f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="{html.escape(title)} frame {f}"></div>'
                                  f'<figcaption>{html.escape(cap)}</figcaption></figure>')
@@ -94,7 +118,9 @@ def main():
 
     def timing_section():
         frames, cap = EMBED['doom']
-        p = os.path.join(workdir, 'report', 'img', f'doom.f{frames[0]:04}.png')
+        p = os.path.join(workdir, 'archive-prefix', 'img', f'doom.f{frames[0]:04}.png')
+        if not os.path.exists(p):
+            p = os.path.join(workdir, 'report', 'img', f'doom.f{frames[0]:04}.png')
         if not os.path.exists(p):
             return ''
         return (f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="Doom"></div>'
@@ -221,10 +247,17 @@ disagree with each other.</p>
 NanoBoyAdvance runner (libnba), dingbat runner (HLE + real BIOS, save states),
 perceptual differ <code>imgdiff.py</code>, orchestrator <code>sweep.py</code>. All emulators
 skip the BIOS logo so frame 0 is the first game frame; dingbat also ran with the
-real BIOS to attribute HLE-BIOS-specific differences (none of the bugs above are
-HLE-specific). Full run artifacts — per-title screenshots for every emulator,
-composites, and dingbat save states at every checkpoint — are in the report
-bundle (<code>report.md</code>, <code>img/</code>, <code>states/</code>).</p>
+real BIOS to attribute HLE-BIOS-specific differences. Full run artifacts —
+per-title screenshots for every emulator, composites, and dingbat save states
+at every checkpoint — are in the report bundle (<code>report.md</code>,
+<code>img/</code>, <code>states/</code>); pre-fix captures are preserved in
+<code>pre-fix-archive/</code>.</p>
+<p class="method"><strong>Suite-coverage note:</strong> a full pre/post row diff
+of the mGBA test suite (7008 rows, HLE and real-BIOS modes) shows the fixes
+changed <em>zero</em> rows — the suite has no coverage for any of the fixed
+behaviors (MSR T-bit, odd 8bpp OBJ tiles in 1D mapping, EEPROM sizing protocol,
+bitmap-mode affine, HLE SWI costs/validation, IO write atomicity). This
+game-level sweep is currently the only regression coverage for them.</p>
 </main>
 '''
     open(out, 'w').write(page)
