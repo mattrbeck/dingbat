@@ -339,8 +339,15 @@ proc get_sample*(apu: APU) =
   # universal default) masks nothing, keeping this path bit-identical.
   let dac_mask = int32(0x3FF) and
                  not int32((1 shl int(apu.soundbias.amplitude_resolution)) - 1)
-  let total_left  = int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
-  let total_right = int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
+  # Stop (sleep) mode halts the system clock, so the sound generators stop
+  # advancing and the DAC produces no fresh output (GBATEK: entering Stop
+  # stops sound; games are expected to blank video/sound themselves, but
+  # Golden Sun relies on the clock halt and leaves SOUNDCNT_X enabled). Emit
+  # silence instead of looping the last tone forever. We only gate the output
+  # here — the scheduler keeps running so the keypad wake IRQ is still served.
+  let stopped = apu.gba.cpu.stopped
+  let total_left  = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
+  let total_right = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
   when defined(test_harness):
     discard
   elif defined(emscripten):
