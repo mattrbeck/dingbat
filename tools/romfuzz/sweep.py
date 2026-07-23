@@ -106,12 +106,16 @@ def main():
     workdir = sys.argv[1]
     jobs = 6
     title_filter = None
+    selected = 'selected_roms.json'
+    out = 'results.json'
     args = sys.argv[2:]
     while args:
         a = args.pop(0)
         if a == '--jobs': jobs = int(args.pop(0))
         elif a == '--titles': title_filter = args.pop(0).lower()
-    sel = json.load(open(os.path.join(workdir, 'selected_roms.json')))
+        elif a == '--selected': selected = args.pop(0)
+        elif a == '--out': out = args.pop(0)
+    sel = json.load(open(os.path.join(workdir, selected)))
     if title_filter:
         sel = {t: r for t, r in sel.items() if title_filter in t.lower()}
     results = []
@@ -125,8 +129,8 @@ def main():
                 key=['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR'].index, default='?')
             print(f"[{len(results)}/{len(futs)}] {res['title']}: {worst}", flush=True)
     results.sort(key=lambda r: r['title'])
-    json.dump(results, open(os.path.join(workdir, 'results.json'), 'w'), indent=1)
-    print('wrote', os.path.join(workdir, 'results.json'))
+    json.dump(results, open(os.path.join(workdir, out), 'w'), indent=1)
+    print('wrote', os.path.join(workdir, out))
 
 if __name__ == '__main__':
     main()

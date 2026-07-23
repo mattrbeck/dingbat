@@ -45,6 +45,9 @@ def main():
     os.makedirs(os.path.join(reportdir, 'img'), exist_ok=True)
     os.makedirs(os.path.join(reportdir, 'states'), exist_ok=True)
     results = json.load(open(os.path.join(workdir, 'results.json')))
+    extra = os.path.join(workdir, 'results2_merged.json')
+    if os.path.exists(extra):
+        results += json.load(open(extra))
     notes = {}
     npath = os.path.join(workdir, 'notes.json')
     if os.path.exists(npath):

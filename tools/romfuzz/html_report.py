@@ -11,12 +11,10 @@ RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR']
 
 # slug -> (frames to embed, caption)
 EMBED = {
-    'spongebob-squarepants-volume-1': ([1600], 'f1600 — references (left, middle) both black during video playback; dingbat (right) shows the ROM’s Game Boy Player lockout screen.'),
     'super-mario-advance': ([800], 'f800 — references at the Choose a Game menu; dingbat reports corrupt save data on a fresh boot.'),
     'super-mario-advance-3-yoshi-s-island': ([2000], 'f2000 — same storybook scene, but dingbat’s colors are badly wrong (blend/brightness).'),
-    'tony-hawk-s-pro-skater-2': ([2000], 'f2000 — dingbat matches NBA except the skater portrait, which renders as noise tiles.'),
-    'doom': ([1200], 'f1200 — timing skew, not a bug: references still on the title; dingbat already caught the scripted START press. With no input all three are pixel-identical.'),
-    'castlevania-aria-of-sorrow': ([2000], 'f2000 — the common benign pattern: dingbat (right) matches NBA (middle) exactly; only mGBA (left) is a menu behind.'),
+    'tony-hawk-s-pro-skater-2': ([2000], 'f2000 — dingbat matches the references except the skater portrait, which renders as noise tiles.'),
+    'doom': ([1200], 'f1200 (pre-fix) — timing, not rendering: references (identical to each other) still on the title; dingbat-HLE booted ~75 frames faster and already caught the scripted START press. Fixed by HLE BIOS cost calibration (a9ca2a9): HLE title arrival now f875, pixel-identical to real BIOS.'),
 }
 
 def img_uri(path):
@@ -30,6 +28,9 @@ def chip(v):
 def main():
     workdir, out = sys.argv[1], sys.argv[2]
     results = json.load(open(os.path.join(workdir, 'results.json')))
+    extra = os.path.join(workdir, 'results2_merged.json')
+    if os.path.exists(extra):
+        results += json.load(open(extra))
     notes = json.load(open(os.path.join(workdir, 'notes.json')))
     for r in results:
         r['overall'] = 'ERROR' if r['error'] else max(
@@ -40,49 +41,64 @@ def main():
     for r in results:
         counts[r['overall']] = counts.get(r['overall'], 0) + 1
 
-    bugs = [
+    fixed = [
         ('SpongeBob SquarePants — Volume 1 (GBA Video)', 'spongebob-squarepants-volume-1',
-         'Game Boy Player detection false-positive', 'Renders “NOT COMPATIBLE WITH GAME BOY PLAYER”; both references play the video (and are pixel-identical to each other). Same with HLE and real BIOS — expect every GBA Video cart to fail the same way. Fix in progress.'),
+         'Phantom keypad IRQ — fixed, commit c92de8c',
+         'The “Not compatible with Game Boy Player” screen is a normal boot phase of GBA Video carts; dingbat boot-looped on it forever. A byte-decomposed 16-bit KEYCNT store let the keypad-IRQ check observe a transient (0xC00F→0x0000 passes through 0xC000 = AND-mode empty mask, vacuously true), latching a phantom IRQ that fired the cart’s soft-reset handler every boot. KEYCNT stores now commit atomically; KEYINPUT bits 10-15 read 0. Post-fix: pixel-identical to both references at 3 of 4 checkpoints; f1200 is a mid-video playback-sync offset that resyncs by f1600.'),
         ('Golden Sun — The Lost Age', 'golden-sun-the-lost-age',
-         'CPU crash (ARMv4T undefined instruction)',
-         'Crashes within the first frames: Unimplemented THUMB instruction 0xE92D (thumb.nim:303). 0xE800–0xEFFF is undefined on ARMv4T; references run the ROM fine. The harness also exits 0 despite the crash. Fix in progress.'),
-        ('Super Mario Advance', 'super-mario-advance',
-         'EEPROM save emulation',
-         '“The saved data is corrupt.” on every boot with zero input; the game formats the save and continues, wiping progress each boot. References boot clean.'),
-        ('Super Mario Advance 3 — Yoshi’s Island', 'super-mario-advance-3-yoshi-s-island',
-         'PPU blending / brightness',
-         'The storybook intro renders saturated purple / murky green where references show pale pastels. Composition and text are correct; earlier checkpoints match NBA — the bug is specific to this scene’s color effects.'),
+         'SMC-vs-pipeline-refill + ARMv4T UND exception — fixed, commit c92de8c',
+         'Crashed in the first frames on THUMB 0xE92D: the game DMAs an ARM trampoline onto the stack at a just-branched-to address, and dingbat’s self-modifying-code pipeline capture pre-filled stale bytes in the branch-to-refill window. Fixed with a refill-pending guard, plus a hardware-accurate undefined-instruction exception so junk execution can never crash the process again. Post-fix: clean to f2000, MINOR vs both references. mGBA suite unchanged at baseline (HLE 6910/7008, LLE 6909/7008).'),
         ('Tony Hawk’s Pro Skater 2', 'tony-hawk-s-pro-skater-2',
-         'Decompression / bitmap-OBJ edge case',
-         'Skater-select matches NBA at ~98% — but the portrait photo is persistent garbled noise, with both HLE and real BIOS.'),
+         '8bpp OBJ tile indexing in 1D mapping — fixed, commit e901913',
+         'The skater portrait (an odd-indexed 256-color sprite in 1D mapping) rendered as noise: the OBJ renderer force-cleared the tile index’s low bit unconditionally, but hardware only forces it in 2D mapping — in 1D mapping an odd name starts 32 bytes into a tile pair, so every fetch landed half a tile early. Post-fix the portrait is pixel-identical to mGBA; a second skater verified too.'),
+        ('Super Mario Advance', 'super-mario-advance',
+         'EEPROM size autodetect + write-settle window — fixed, commit 38927b5',
+         'The size-autodetect rule was unsatisfiable (compared the DMA transfer count against ≤6, but real counts are 9/73 for 4Kbit vs 17/81 for 64Kbit), so every 4Kbit cart parsed 14 address bits instead of 6 and desynced the serial protocol — SMA’s save checksum failed every boot and it reformatted. Writes also completed instantly where real EEPROMs read busy ~6.5 ms (added mGBA’s 115000-cycle settle window). Post-fix: boots clean with a correct 512-byte save that persists; SMA2/SMA3 (64Kbit) unaffected.'),
+        ('Super Mario Advance 3 — Yoshi’s Island', 'super-mario-advance-3-yoshi-s-island',
+         'HLE LZ77 cost + frame counting — fixed, commits a9ca2a9 + fa36c81',
+         'Not a PPU bug: blend registers, PRAM and VRAM were byte-identical to mGBA — the whole cinematic ran 7 frames ahead, and the “wrong colors” are the same scene earlier in its 128-frame cloud-drift cycle. The lead came from HLE LZ77UnCompVram undercharging (six back-to-back ~70KB decompressions behind the boot fade) plus ppu.frame being a bool that collapsed frames elapsing inside a multi-frame atomic SWI. Post-fix: pixel-identical to mGBA at every checkpoint; Kirby (also decompression-heavy) went exact too.'),
     ]
+    bugs = []
 
-    def bug_section():
-        parts = []
-        for i, (title, slug, cls, desc) in enumerate(bugs, 1):
-            parts.append(f'<article class="bug"><h3><span class="bugno">{i}</span>{html.escape(title)}</h3>'
-                         f'<p class="bugclass">{html.escape(cls)}</p><p>{html.escape(desc)}</p>')
-            if slug in EMBED:
-                frames, cap = EMBED[slug]
-                for f in frames:
-                    p = os.path.join(workdir, 'report', 'img', f'{slug}.f{f:04}.png')
-                    if os.path.exists(p):
-                        parts.append(f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="{html.escape(title)} frame {f}"></div>'
-                                     f'<figcaption>{html.escape(cap)}</figcaption></figure>')
-            st = f'states/{slug}.f2000.state'
-            if os.path.exists(os.path.join(workdir, 'report', st)):
-                parts.append(f'<p class="statenote">Save state: <code>{st}</code> (dingbat format, report bundle)</p>')
-            parts.append('</article>')
+    def bug_article(i, title, slug, cls, desc, fixed_cls=''):
+        parts = [f'<article class="bug{fixed_cls}"><h3><span class="bugno{fixed_cls}">{i}</span>{html.escape(title)}</h3>'
+                 f'<p class="bugclass">{html.escape(cls)}</p><p>{html.escape(desc)}</p>']
+        if slug in EMBED:
+            frames, cap = EMBED[slug]
+            for f in frames:
+                p = os.path.join(workdir, 'report', 'img', f'{slug}.f{f:04}.png')
+                if os.path.exists(p):
+                    parts.append(f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="{html.escape(title)} frame {f}"></div>'
+                                 f'<figcaption>{html.escape(cap)}</figcaption></figure>')
+        st = f'states/{slug}.f2000.state'
+        if os.path.exists(os.path.join(workdir, 'report', st)):
+            parts.append(f'<p class="statenote">Save state: <code>{st}</code> (dingbat format, report bundle)</p>')
+        parts.append('</article>')
         return '\n'.join(parts)
 
+    def fixed_section():
+        parts = []
+        before = os.path.join(workdir, 'spongebob-before-fix.png')
+        for i, (title, slug, cls, desc) in enumerate(fixed, 1):
+            extra = ''
+            if slug == 'spongebob-squarepants-volume-1' and os.path.exists(before):
+                extra = (f'<figure><div class="shotwrap"><img src="{img_uri(before)}" alt="before fix"></div>'
+                         f'<figcaption>Before the fix (f1600): references (left, middle) both black during video playback; '
+                         f'dingbat (right) stuck forever on the boot notice.</figcaption></figure>')
+            art = bug_article(i, title, slug, cls, desc, fixed_cls=' fixedbug')
+            parts.append(art.replace('</article>', extra + '</article>'))
+        return '\n'.join(parts)
+
+    def bug_section():
+        return '\n'.join(bug_article(i, *b) for i, b in enumerate(bugs, 1))
+
     def timing_section():
-        out = []
-        for slug, label in [('doom', 'Doom'), ('castlevania-aria-of-sorrow', 'Castlevania — Aria of Sorrow')]:
-            frames, cap = EMBED[slug]
-            p = os.path.join(workdir, 'report', 'img', f'{slug}.f{frames[0]:04}.png')
-            out.append(f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="{label}"></div>'
-                       f'<figcaption><strong>{label}</strong>: {html.escape(cap)}</figcaption></figure>')
-        return '\n'.join(out)
+        frames, cap = EMBED['doom']
+        p = os.path.join(workdir, 'report', 'img', f'doom.f{frames[0]:04}.png')
+        if not os.path.exists(p):
+            return ''
+        return (f'<figure><div class="shotwrap"><img src="{img_uri(p)}" alt="Doom"></div>'
+                f'<figcaption><strong>Doom</strong>: {html.escape(cap)}</figcaption></figure>')
 
     rows = []
     for r in results:
@@ -136,6 +152,8 @@ padding:3px 7px;border-radius:4px;background:var(--chipbg);white-space:nowrap}
 padding:18px 20px;margin:0 0 18px}
 .bugno{font:600 .8rem/1 ui-monospace,Menlo,monospace;color:var(--bad);
 border:1px solid var(--bad);border-radius:4px;padding:3px 7px}
+.bugno.fixedbug{color:var(--ok);border-color:var(--ok)}
+h2 .chip{vertical-align:middle;margin-left:8px}
 .bugclass{font:600 .72rem/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;
 text-transform:uppercase;color:var(--accent);margin:6px 0 8px}
 .bug p{margin:6px 0;max-width:72ch}
@@ -165,23 +183,31 @@ tr:last-child td{border-bottom:none}
 <main>
 <p class="eyebrow">dingbat &middot; cross-emulator fuzz &middot; 2026-07-22</p>
 <h1>ROM compatibility sweep: dingbat vs mGBA &amp; NanoBoyAdvance</h1>
-<p class="sub">{len(results)} popular GBA titles ran headless for 2000 frames in all three
-emulators with an identical input script, screenshots at four checkpoints, and
-perceptual diffing (exact pixels + downscaled correlation + average hash). A
-checkpoint passes when dingbat matches either reference, directly or within a
-&plusmn;45-frame skew window.</p>
+<p class="sub">{len(results)} popular GBA titles (two 50-title popularity batches) ran headless
+for 2000 frames in all three emulators with an identical input script,
+screenshots at four checkpoints, and perceptual diffing (exact pixels +
+downscaled correlation + average hash). A checkpoint passes when dingbat
+matches either reference, directly or within a &plusmn;45-frame skew window.</p>
 <div class="tiles">{tiles}</div>
 
-<h2>Real bugs found</h2>
-{bug_section()}
+<h2>Fixed during this session <span class="chip ok">commit c92de8c on main</span></h2>
+{fixed_section()}
+
+{('<h2>Open bugs</h2>' + bug_section()) if bugs else '<h2>Open bugs</h2><p class="method">None — every real difference found by the sweep is fixed on main.</p>'}
 
 <h2>Timing skew, not incompatibility</h2>
-<p class="method">Doom, Star Wars Episode III, Castlevania Harmony of Dissonance and
-Mario Party Advance flagged in the scripted run but are pixel-identical (or
-blink-phase close) with no input: dingbat runs their boot sequences faster than
-both references, so the scripted presses land on different screens. The other
-flagged titles all match NanoBoyAdvance exactly — only mGBA, which accumulates
-the most lag frames, trails a screen behind.</p>
+<p class="method">Doom — <strong>fixed (commit a9ca2a9)</strong>. A BIOS-parity experiment showed
+core timing was fine (full-BIOS runs align across all three emulators;
+dingbat-with-real-BIOS matches the references at ~f875) and isolated the gap to
+HLE BIOS call costs: Doom's boot makes 69 LZ77UnCompVram calls that were
+charged ~41k cycles each vs ~540k for the real BIOS routine. Per-SWI cost
+models (CpuSet, LZ77, affine, ArcTan2, RamReset) derived from the BIOS
+disassembly and validated cycle-exactly with a calibration ROM close the gap:
+HLE title arrival is now f875, pixel-identical to real BIOS, and Emerald /
+Aria of Sorrow HLE-vs-real boot parity tightened too. The remaining flagged
+titles (Castlevania HoD, DKC 1/2, Kirby, Minish Cap, Mario Party Advance) are
+animation/progression phase drift at or below the level the two references
+disagree with each other.</p>
 {timing_section()}
 
 <h2>All titles</h2>
