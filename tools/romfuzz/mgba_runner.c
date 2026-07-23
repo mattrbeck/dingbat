@@ -12,6 +12,8 @@
 #include <mgba/core/config.h>
 #include <mgba/core/log.h>
 #include <mgba-util/vfs.h>
+#include <mgba/internal/arm/arm.h>
+#include <mgba/internal/gba/gba.h>
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -120,6 +122,47 @@ int main(int argc, char** argv) {
   int max_frame = 0;
   for (int i = 0; i < g_nshots; ++i)
     if (g_shots[i] > max_frame) max_frame = g_shots[i];
+
+  /* ROMFUZZ_TRACE=<path>:<ninstr>: instead of running frames, single-step
+   * <ninstr> instructions logging "pc r0 r1" per line, then exit. */
+  const char* tr = getenv("ROMFUZZ_TRACE");
+  if (tr) {
+    char trpath[1024];
+    long n = 1000000;
+    const char* colon = strrchr(tr, ':');
+    if (colon) {
+      size_t len = (size_t)(colon - tr);
+      memcpy(trpath, tr, len); trpath[len] = 0;
+      n = atol(colon + 1);
+    } else {
+      snprintf(trpath, sizeof trpath, "%s", tr);
+    }
+    FILE* tf = fopen(trpath, "w");
+    if (!tf) { perror(trpath); return 3; }
+    struct ARMCore* cpu = core->cpu;
+    for (long i = 0; i < n; ++i) {
+      uint32_t pc = cpu->gprs[15] - (cpu->executionMode == MODE_THUMB ? 4 : 8);
+      fprintf(tf, "%08X %08X %08X\n", pc, cpu->gprs[0], cpu->gprs[1]);
+      core->step(core);
+    }
+    fclose(tf);
+    /* ROMFUZZ_DUMP=<hexaddr>:<hexlen>:<path>: dump memory after the trace */
+    const char* du = getenv("ROMFUZZ_DUMP");
+    if (du) {
+      uint32_t a0, len;
+      char dpath[1024];
+      if (sscanf(du, "%x:%x:%1023s", &a0, &len, dpath) == 3) {
+        FILE* df = fopen(dpath, "wb");
+        for (uint32_t a = a0; a < a0 + len; ++a) {
+          uint8_t b = core->busRead8(core, a);
+          fwrite(&b, 1, 1, df);
+        }
+        fclose(df);
+      }
+    }
+    core->deinit(core);
+    return 0;
+  }
 
   uint32_t keys = 0;
   for (int f = 0; f <= max_frame; ++f) {

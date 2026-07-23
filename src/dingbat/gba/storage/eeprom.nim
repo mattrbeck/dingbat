@@ -19,13 +19,6 @@ proc file_size*(sz: EepromSize): int =
   of eeprom4k:  0x200
   of eeprom64k: 0x2000
 
-proc eeprom_size_from_file_size*(size: int64): Option[EepromSize] =
-  if size > 0:
-    if size > 0x200: some(eeprom64k)
-    else:            some(eeprom4k)
-  else:
-    none(EepromSize)
-
 proc eeprom_size_from_dma_length*(length: int): EepromSize =
   ## The first EEPROM command DMA reveals the chip's address width via its
   ## programmed transfer count (each transfer clocks one serial bit):
@@ -49,14 +42,27 @@ proc clear*(buf: var EepromBuffer) =
   buf.value = 0
 
 proc set_eeprom_size(ep: EEPROM; sz: Option[EepromSize]) =
+  ## Adopt the detected chip size, preserving any bytes already loaded from a
+  ## .sav (data always lives at the start of the file, whatever its length).
   if sz.isSome:
     let s = sz.get
     ep.eeprom_size = sz
-    ep.memory = newSeq[byte](s.file_size)
-    for i in 0 ..< ep.memory.len:
+    let old_len = ep.memory.len
+    ep.memory.setLen(s.file_size)
+    for i in old_len ..< ep.memory.len:
       ep.memory[i] = 0xFF
 
-proc new_eeprom*(gba: GBA; file_size: int64): EEPROM =
+proc new_eeprom*(gba: GBA): EEPROM =
+  ## The chip size (4Kbit, 6-bit addresses vs 64Kbit, 14-bit addresses) is NOT
+  ## taken from an existing .sav file: emulators routinely write 8 KB EEPROM
+  ## saves even for 4Kbit chips (mGBA always does), so the file size proves
+  ## nothing about the chip. Sizing from such a file made dingbat expect
+  ## 14-bit addresses from Classic NES Series - Metroid (a 4Kbit/6-bit game),
+  ## its EEPROM protection handshake failed, and the cart's "GAME PAK ERROR"
+  ## anti-emulation screen came up. The real address width is revealed by the
+  ## first command's DMA transfer count (see eeprom_size_from_dma_length), so
+  ## detection is deferred until then; the buffer starts at the largest size
+  ## and is shrunk on detection, keeping data loaded from the .sav.
   result = EEPROM(
     state: {esReady},
     address: 0,
@@ -68,9 +74,14 @@ proc new_eeprom*(gba: GBA; file_size: int64): EEPROM =
   result.memory = newSeq[byte](0x2000)
   for i in 0 ..< result.memory.len:
     result.memory[i] = 0xFF
-  result.set_eeprom_size(eeprom_size_from_file_size(file_size))
 
 method `[]`*(ep: EEPROM; address: uint32): uint8 =
+  # The EEPROM answers only in the DMA-addressed cart region (0x0D). The SRAM
+  # chip-select region (0x0E/0x0F) hits no chip on an EEPROM-only cart: reads
+  # float high (0xFF, as on mGBA) and must not clock the serial protocol.
+  # Classic NES Series carts probe 0x0E000000 for absent SRAM at boot.
+  if (address shr 24) != 0x0D'u32:
+    return 0xFF'u8
   if esReadIgnore in ep.state:
     ep.ignored_reads += 1
     if ep.ignored_reads == 4:
@@ -91,6 +102,11 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
   return if ep.eeprom_now() < ep.busy_until: 0'u8 else: 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
+  # Writes outside the 0x0D region (e.g. SRAM-probe pokes at 0x0E000000)
+  # never reach the EEPROM's serial line; dropping them keeps stray bits out
+  # of the command stream.
+  if (address shr 24) != 0x0D'u32:
+    return
   if ep.state == {esRead} or ep.state == {esReadIgnore}:
     return
   let v = int(value and 1)

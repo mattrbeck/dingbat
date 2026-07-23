@@ -763,11 +763,8 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
   let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
   let t = find_storage_type(rom_path)
   echo "Backup type: ", t, ", save path: ", save_path
-  var existing_save_size: int64 = -1
-  if fileExists(save_path):
-    existing_save_size = getFileSize(save_path)
   result = case t
-    of stEEPROM:                        new_eeprom(gba, existing_save_size)
+    of stEEPROM:                        new_eeprom(gba)
     of stSRAM:                          new_sram()
     of stFLASH, stFLASH512, stFLASH1M:  new_flash(t)
   result.save_path = save_path

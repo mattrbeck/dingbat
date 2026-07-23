@@ -507,7 +507,7 @@ proc load_storage_state(st: Storage; r: var Reader) =
     raise newException(StateError, "save state backup type mismatch")
   let mem = r.read_seq_u8()
   if st of EEPROM:
-    # EEPROM buffers are sized lazily (from an existing .sav or the first DMA)
+    # EEPROM buffers are sized lazily (from the first command's DMA length)
     st.memory = mem
   else:
     if mem.len != st.memory.len:
