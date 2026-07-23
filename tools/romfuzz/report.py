@@ -44,10 +44,15 @@ def main():
     workdir, reportdir = sys.argv[1], sys.argv[2]
     os.makedirs(os.path.join(reportdir, 'img'), exist_ok=True)
     os.makedirs(os.path.join(reportdir, 'states'), exist_ok=True)
-    results = json.load(open(os.path.join(workdir, 'results.json')))
-    extra = os.path.join(workdir, 'results2_merged.json')
-    if os.path.exists(extra):
-        results += json.load(open(extra))
+    reg = os.path.join(workdir, 'results_regression.json')
+    if os.path.exists(reg):
+        results = json.load(open(reg))
+    else:
+        results = json.load(open(os.path.join(workdir, 'results.json')))
+        for extra_name in ('results2_merged.json', 'results3.json'):
+            extra = os.path.join(workdir, extra_name)
+            if os.path.exists(extra):
+                results += json.load(open(extra))
     notes = {}
     npath = os.path.join(workdir, 'notes.json')
     if os.path.exists(npath):

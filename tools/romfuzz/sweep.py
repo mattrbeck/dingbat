@@ -24,6 +24,8 @@ RUNNERS = {
 SCRIPT = '300:START,500:START,820:START,1220:A,1620:A'
 SHOTS = [800, 1200, 1600, 2000]
 BURST = list(range(-45, 50, 5))  # verification window around a checkpoint
+AUTO_NOINPUT = False   # for flagged titles, also compare a no-input run
+PRUNE_CLEAN = False    # delete run artifacts for clean titles (bulk mode)
 
 def slugify(title):
     return re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
@@ -116,6 +118,27 @@ def sweep_title(workdir, title, rom_base):
                 shot[f'skew_{ref}'] = {'best_frame': best[1], **best[2]}
                 best_overall = min((best_overall, best[2]['verdict']), key=RANK.index)
             shot['final'] = best_overall
+        worst = max((s['final'] for s in result['shots'].values()),
+                    key=RANK.index, default='IDENTICAL')
+        # Auto-triage: a flagged title gets a no-input control run — screens
+        # converge on static screens, so a clean no-input comparison means
+        # the scripted divergence was input-landing skew, not a real bug.
+        if AUTO_NOINPUT and worst not in OK:
+            ni_prefix_d = os.path.join(rundir, 'dhle', 'noinput')
+            ni_prefix_m = os.path.join(rundir, 'mgba', 'noinput')
+            try:
+                run_one('dhle', os.path.join(rundir, 'dhle', 'rom.gba'),
+                        ni_prefix_d, '', [2000])
+                run_one('mgba', os.path.join(rundir, 'mgba', 'rom.gba'),
+                        ni_prefix_m, '', [2000])
+                result['noinput_f2000'] = imgdiff.metrics(
+                    ni_prefix_m + '.f2000.ppm', ni_prefix_d + '.f2000.ppm')
+            except Exception as e:
+                result['noinput_f2000'] = {'verdict': 'ERROR', 'err': str(e)[-100:]}
+        if PRUNE_CLEAN:
+            ni = result.get('noinput_f2000', {}).get('verdict')
+            if worst in OK or ni in OK:
+                shutil.rmtree(rundir, ignore_errors=True)
     except Exception as e:
         result['error'] = str(e)[-500:]
     return result
@@ -133,6 +156,10 @@ def main():
         elif a == '--titles': title_filter = args.pop(0).lower()
         elif a == '--selected': selected = args.pop(0)
         elif a == '--out': out = args.pop(0)
+        elif a == '--auto-noinput':
+            global AUTO_NOINPUT; AUTO_NOINPUT = True
+        elif a == '--prune-clean':
+            global PRUNE_CLEAN; PRUNE_CLEAN = True
     sel = json.load(open(os.path.join(workdir, selected)))
     if title_filter:
         sel = {t: r for t, r in sel.items() if title_filter in t.lower()}

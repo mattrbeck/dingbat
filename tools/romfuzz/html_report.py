@@ -33,10 +33,15 @@ def chip(v):
 
 def main():
     workdir, out = sys.argv[1], sys.argv[2]
-    results = json.load(open(os.path.join(workdir, 'results.json')))
-    extra = os.path.join(workdir, 'results2_merged.json')
-    if os.path.exists(extra):
-        results += json.load(open(extra))
+    reg = os.path.join(workdir, 'results_regression.json')
+    if os.path.exists(reg):
+        results = json.load(open(reg))
+    else:
+        results = json.load(open(os.path.join(workdir, 'results.json')))
+        for extra_name in ('results2_merged.json', 'results3.json'):
+            extra = os.path.join(workdir, extra_name)
+            if os.path.exists(extra):
+                results += json.load(open(extra))
     notes = json.load(open(os.path.join(workdir, 'notes.json')))
     for r in results:
         r['overall'] = 'ERROR' if r['error'] else max(
@@ -127,7 +132,12 @@ def main():
                 f'<figcaption><strong>Doom</strong>: {html.escape(cap)}</figcaption></figure>')
 
     rows = []
-    for r in results:
+    full_n = len(results)
+    shown = [r for r in results if r['overall'] not in ('IDENTICAL', 'MINOR')] or results
+    clean_note = (f'<p class="method">Showing the {len(shown)} titles with remaining '
+                  f'differences; the other {full_n - len(shown)} titles are clean '
+                  f'(pixel-identical or minor). Full {full_n}-title table in report.md.</p>')                  if len(shown) < full_n else ''
+    for r in shown:
         cells = ''.join(
             f'<td>{chip(r["shots"].get(str(f), {}).get("final", "—")) if not r["error"] else chip("ERROR")}</td>'
             for f in [800, 1200, 1600, 2000])
@@ -209,7 +219,7 @@ tr:last-child td{border-bottom:none}
 <main>
 <p class="eyebrow">dingbat &middot; cross-emulator fuzz &middot; 2026-07-22</p>
 <h1>ROM compatibility sweep: dingbat vs mGBA &amp; NanoBoyAdvance</h1>
-<p class="sub">{len(results)} popular GBA titles (two 50-title popularity batches) ran headless
+<p class="sub">{len(results)} popular GBA titles (three popularity batches) ran headless
 for 2000 frames in all three emulators with an identical input script,
 screenshots at four checkpoints, and perceptual diffing (exact pixels +
 downscaled correlation + average hash). A checkpoint passes when dingbat
@@ -236,7 +246,8 @@ animation/progression phase drift at or below the level the two references
 disagree with each other.</p>
 {timing_section()}
 
-<h2>All titles</h2>
+<h2>Remaining differences</h2>
+{clean_note}
 <div class="tablewrap"><table>
 <thead><tr><th>Title</th><th>Overall</th><th>f800</th><th>f1200</th><th>f1600</th><th>f2000</th></tr></thead>
 <tbody>{table}</tbody>
