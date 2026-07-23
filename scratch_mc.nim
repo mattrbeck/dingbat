@@ -11,7 +11,6 @@ proc main() =
     echo "LOAD STATE FAILED"; quit(1)
   emu.mp2k_hle = true
   if getEnv("DINGBAT_RSMODE") != "": emu.mp2k.resample_mode = parseInt(getEnv("DINGBAT_RSMODE"))
-  if getEnv("DINGBAT_REVSC") != "": emu.mp2k.rev_scale = parseFloat(getEnv("DINGBAT_REVSC"))
   if getEnv("DINGBAT_ENVMODE") != "": emu.mp2k.env_mode = parseInt(getEnv("DINGBAT_ENVMODE"))
   if getEnv("DINGBAT_MAKEUP") != "": emu.mp2k.makeup = parseFloat(getEnv("DINGBAT_MAKEUP"))
   let frames = if paramCount() >= 3: parseInt(paramStr(3)) else: 600

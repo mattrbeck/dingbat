@@ -10,7 +10,6 @@ proc main() =
     echo "LOAD STATE FAILED"; quit(1)
   emu.mp2k_hle = true
   if getEnv("DINGBAT_RSMODE") != "": emu.mp2k.resample_mode = parseInt(getEnv("DINGBAT_RSMODE"))
-  if getEnv("DINGBAT_REVSC") != "": emu.mp2k.rev_scale = parseFloat(getEnv("DINGBAT_REVSC"))
   if getEnv("DINGBAT_ENVMODE") != "": emu.mp2k.env_mode = parseInt(getEnv("DINGBAT_ENVMODE"))
   if getEnv("DINGBAT_DBDELAY") != "": emu.mp2k.db_delay = parseInt(getEnv("DINGBAT_DBDELAY"))
   let frames = if paramCount() >= 3: parseInt(paramStr(3)) else: 150
@@ -31,7 +30,9 @@ proc main() =
     for v in s: a += float(v) * float(v)
     sqrt(a / float(s.len))
   echo "engaged=", emu.mp2k.engaged, "  retriggers=", dbgRetrigCount,
-       "  hook_fires=", emu.mp2k.dbg_hook_fires
+       "  hook_fires=", emu.mp2k.dbg_hook_fires,
+       "  reverb=", emu.mp2k.reverb_strength, "  period=", emu.mp2k.rev_period,
+       "  mono=", emu.mp2k.mono_mode
   echo "HLE rms=", rms(mp2kWavCapture), "  REAL rms=", rms(realDmaCapture)
 
 main()

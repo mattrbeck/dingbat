@@ -576,7 +576,6 @@ type
     use_cubic*:      bool
     env_mode*:       int           # DIAG: 0=ramp,1=constant-current
     resample_mode*:  int           # DIAG: 0=cubic,1=linear,2=nearest(hold)
-    rev_scale*:      float32        # DIAG: multiplier on the reverb wet factor (default 1)
     makeup*:         float32        # DIAG: output makeup gain override (0 => built-in default)
     master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
     # FIFO topology, observed from the live DMA registers each mixer pass (see
@@ -585,11 +584,15 @@ type
     # with a single per-channel volume at SoundChannel+0x0A and +0x0B unused.
     # 0 = stereo (L->FIFO A, R->FIFO B), 1 = mono via FIFO A, 2 = mono via B.
     mono_mode*:      int
-    reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
-    reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
-    rev_period*:     int           # echo delay in frames = SoundInfo.pcmDmaPeriod
-                                   # (the pcmBuffer DMA ring length the real
-                                   # reverb feeds back across); min 1
+    # Faithful m4a reverb state: a shadow of the engine's pcmBuffer frame ring
+    # (s8 pcmBuffer[PCM_DMA_BUF_SIZE * 2] in pret m4a_internal.h — a ring of
+    # pcmDmaPeriod one-V-blank slots per stereo half) kept at our render rate.
+    # See the "MP2K reverb" block in mp2k.nim render_sample for the algorithm.
+    reverb_ring*:    seq[float32]  # rev_period slots x MP2K_REV_SLOT_LEN stereo samples
+    rev_slot*:       int           # current frame slot (the one being overwritten)
+    rev_pos*:        int           # intra-frame sample index within the slot
+    rev_period*:     int           # ring length in V-blank frames = SoundInfo.pcmDmaPeriod
+                                   # (SampleFreqSet: PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank)
     # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
     # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer
     # pass by ~one frame. We render at the mixer pass, so without this the HLE

@@ -102,6 +102,9 @@ const
   #   ident(0) pcmDmaCounter(4) reverb(5) maxChans(6) masterVolume(7) ...
   #   pcmSamplesPerVBlank(0x10) pcmFreq(0x14) ... chans[](0x50)
   SI_MAGIC        = 0x00   # ident
+  SI_DMA_COUNTER  = 0x04   # pcmDmaCounter: V-blanks left before the DMA restarts
+                           # at pcmBuffer start (m4aSoundVSync reloads it from
+                           # pcmDmaPeriod at 0 — pret pokeemerald src/m4a_1.s)
   SI_REVERB       = 0x05   # reverb (0 = off)
   SI_MAX_CHANS    = 0x06   # maxChans
   SI_MASTER_VOL   = 0x07   # masterVolume
@@ -178,6 +181,15 @@ const
   # driver decodes through strb/ldrsb).
   BDPCM_BLOCK_BYTES  = 33'u32
   BDPCM_BLOCK_SAMPS  = 64'u32
+
+  # Reverb frame-ring slot capacity, in stereo samples at our 32768 Hz render
+  # rate. One engine mixer pass spans one V-blank = 32768 / 59.7275 Hz ~ 549
+  # output samples (the reference's own pcmFreq derivation uses the same
+  # 59.7275 Hz refresh: pret pokeemerald src/m4a.c SampleFreqSet). 1024 gives
+  # comfortable headroom for frame-length jitter; samples beyond a pass's
+  # actual length are simply never read back (the taps index by intra-frame
+  # position, and consecutive passes have near-identical lengths).
+  MP2K_REV_SLOT_LEN = 1024
 
 # NOTE: Mp2kSampler / Mp2kHle types live in gba.nim's main type section (Nim
 # requires types referenced by the GBA object to be declared before use).
@@ -308,7 +320,8 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   for v in m.out_delay.mitems: v = 0
   m.out_delay_w = 0
   for v in m.reverb_ring.mitems: v = 0
-  m.reverb_w = 0
+  m.rev_slot = 0
+  m.rev_pos = 0
   m.frame_pos = 0
   m.resync_pending = true
 
@@ -396,23 +409,31 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
-  # Lazily allocate the reverb echo line the first frame a game asks for it.
-  # MP2K's reverb is "a simple reverb (echo) effect with fixed delay" (loveemu):
-  # the mixer seeds each frame's pcmBuffer slot from the content it is about to
-  # overwrite — the frame mixed pcmDmaPeriod V-blanks ago, which the DMA just
-  # finished playing — scaled by reverb/128. So the echo delay is pcmDmaPeriod
-  # FRAMES (e.g. 7 in pret pokeemerald's PCM_DMA_BUF_SIZE, 6 in Minish Cap),
-  # not one. Read the period live and size the ring to a power of two >= that
-  # many output frames of stereo samples for cheap index masking.
+  # Reverb frame ring — our shadow of the engine's pcmBuffer slot ring (see the
+  # "MP2K reverb" block in render_sample for the seed algorithm and citations).
+  # SoundInfo.pcmDmaPeriod (+0x0B, pret m4a_internal.h) is the ring length in
+  # V-blank frames: SampleFreqSet sets pcmDmaPeriod = PCM_DMA_BUF_SIZE /
+  # pcmSamplesPerVBlank (pret pokeemerald src/m4a.c) — 7 in pokeemerald,
+  # 6 in Minish Cap. The ring is kept ALWAYS (once engaged), not just while
+  # reverb > 0: the real pcmBuffer holds the last pcmDmaPeriod frames of
+  # output unconditionally, so a mid-song reverb-on immediately echoes real
+  # history rather than silence.
   m.rev_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
-  if m.rev_period < 1: m.rev_period = 1
-  elif m.rev_period > 16: m.rev_period = 16
-  if m.reverb_strength > 0'u8 and
-     m.reverb_ring.len < m.rev_period * max(1, m.frame_len) * 2:
-    var slots = 1'u32
-    while slots < uint32(m.rev_period * max(1, m.frame_len)): slots = slots shl 1
-    m.reverb_ring = newSeq[float32](int(slots) * 2)
-    m.reverb_w = 0
+  if m.rev_period < 1: m.rev_period = 1     # degenerate guard; real drivers
+  elif m.rev_period > 16: m.rev_period = 16 # use 2..12 (PCM_DMA_BUF_SIZE/spv)
+  if m.reverb_ring.len != m.rev_period * MP2K_REV_SLOT_LEN * 2:
+    m.reverb_ring = newSeq[float32](m.rev_period * MP2K_REV_SLOT_LEN * 2)
+  # Slot cursor: derived from the engine's own pcmDmaCounter exactly as
+  # SoundMain derives its pcmBuffer frame cursor (label SoundMain_5 in pret
+  # pokeemerald src/m4a_1.s: r5 = pcmBuffer + pcmSamplesPerVBlank *
+  # (pcmDmaPeriod - (pcmDmaCounter - 1)) when pcmDmaCounter >= 2, else slot 0),
+  # so we track the real ring phase verbatim — including across skipped
+  # mixer passes — rather than assuming one advance per hook fire.
+  block:
+    let cnt = int(m.rd8(sound_info + SI_DMA_COUNTER))
+    m.rev_slot = (if cnt <= 1: 0 else: m.rev_period - (cnt - 1))
+    if m.rev_slot < 0 or m.rev_slot >= m.rev_period: m.rev_slot = 0
+  m.rev_pos = 0
   m.frame_pos = 0
   for i in 0 ..< MP2K_MAX_CHANNELS:
     let s = addr m.samplers[i]
@@ -773,40 +794,78 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
           s.need_fetch = false
   m.frame_pos.inc
   if m.frame_len > 0 and m.frame_pos >= m.frame_len: m.frame_pos = m.frame_len
-  # --- MP2K reverb: simple fixed-delay feedback echo ---------------------------
-  # loveemu documents MP2K's reverb as "a simple reverb (echo) effect with fixed
-  # delay", and the real m4a SoundMainRAM implements it as a feedback average
-  # over the DirectSound (pcmBuffer) samples one buffer-drain behind. We model
-  # that directly with a single delay line exactly one output frame long: read
-  # the signal from one frame ago, average the two channels into a single mono
-  # echo value (the real driver applies one shared reverb value to both sides),
-  # scale it by SoundInfo.reverb, add it to the dry mix, and store the wet result
-  # back so the echo feeds back and decays over successive frames.
+  # --- MP2K reverb: the m4a SoundMainRAM buffer-seed algorithm -----------------
+  # Reference: pret pokeemerald src/m4a_1.s + include/gba/m4a_internal.h (with
+  # loveemu's MP2K summary corroborating the "echo with fixed delay" design).
+  # SoundInfo.pcmBuffer is s8 pcmBuffer[PCM_DMA_BUF_SIZE * 2]: the first half
+  # is the FIFO-A (left) stream, the second the FIFO-B (right) stream (m4a.c
+  # SoundInit: REG_DMA1SAD = pcmBuffer, REG_DMA2SAD = pcmBuffer +
+  # PCM_DMA_BUF_SIZE). Each half is a ring of pcmDmaPeriod one-V-blank slots,
+  # and the slot SoundMain is about to fill holds the audio mixed pcmDmaPeriod
+  # V-blanks ago — the frame the DMA just finished playing (cursor derivation:
+  # see on_frame). SoundMainRAM seeds that slot BEFORE any voice is mixed
+  # (label SoundMainRAM_Reverb, ARM loop _081DCEC4): for each sample i of the
+  # frame slot,
+  #     sum = curL[i] + curR[i] + nextL[i] + nextR[i]
+  #       — four signed-byte reads ("ldrsb"): BOTH stereo halves of the slot
+  #         being overwritten (age pcmDmaPeriod frames) and of the FOLLOWING
+  #         slot (age pcmDmaPeriod-1 frames; r7 = r5 + pcmSamplesPerVBlank,
+  #         wrapping to slot 0 when pcmDmaCounter == 2: "cmp r4, 2 /
+  #         addeq r7, r0, o_SoundInfo_pcmBuffer");
+  #     out = (sum * reverb) asr 9        ("mul r1, r0, r3 / mov r0, r1, asr 9")
+  #     if (out and 0x80) != 0: out += 1  ("tst r0, 0x80 / addne r0, r0, 1" —
+  #         nudges negative results up one LSB toward zero)
+  #     curL[i] = out; curR[i] = out      (ONE mono seed stored to both halves:
+  #         "strb r0, [r5, r6] / strb r0, [r5], 1")
+  # The channel loop then ACCUMULATES every voice on top of the seed — it loads
+  # the existing buffer words and adds ("ldr r6, [r5] ... add r6, r1, r6,
+  # ror 8 ... str r6, [r5], 0x4") — so the stored slot is the WET frame and
+  # the seed is the feedback path: a two-tap (P and P-1 frames) feedback comb
+  # with per-tap gain reverb/512 per sample pair. With reverb <= 127 the total
+  # feedback gain is 4*127/512 < 1, so the loop is BIBO-stable, exactly like
+  # the original. When reverb == 0 SoundMainRAM_NoReverb zero-fills the slot
+  # instead and the voices accumulate onto silence — the buffer then simply
+  # holds the dry mix.
   #
-  # The feedback gain k = reverb/128 is clamped strictly below unity, so the
-  # single-tap loop is unconditionally BIBO-stable (the tail decays as k^n) —
-  # no runaway. Engaged only when SoundInfo.reverb > 0; it is a minor part of
-  # the mix. All coefficients and structure here are our own.
+  # Mapping to this HLE's 32768 Hz render: the reference's seed addressing is
+  # per-SLOT and intra-frame-indexed (sample i of this pass pairs with sample i
+  # of the passes P and P-1 V-blanks ago), NOT a fixed sample-count delay. We
+  # reproduce that shape directly at our rate: reverb_ring is rev_period slots
+  # of MP2K_REV_SLOT_LEN stereo float samples; on_frame advances the slot
+  # cursor once per mixer pass (as the real pcmDmaCounter-derived cursor does)
+  # and rev_pos walks the slot per output sample, reading both taps at the
+  # same intra-frame index before overwriting the current slot with this
+  # pass's wet output. Our floats are in s8-buffer/128 units (a voice
+  # contributes sample/128 * envelopeVolume/255, matching the reference's
+  # byte-lane vol*sample accumulation scale), so "(sum * reverb) asr 9" maps
+  # verbatim to sum_f * reverb / 512. Conscious deviations, each sub-LSB on
+  # the reference's s8 scale (< 1/128 per tap, invisible in a float pipeline):
+  # the bit7 +1 negative nudge and the s8 store quantization/wrap are omitted.
+  # MONO vintages (see on_frame; e.g. Minish Cap) keep the same formula: our
+  # two accumulator sides are identical there, so the four-read sum degrades
+  # to 2*(cur + next) with the same /512 — the natural mono form of the
+  # reference arithmetic (verified against the real FIFO by A/B RMS).
   var outl_f = accl
   var outr_f = accr
-  if m.reverb_strength > 0'u8 and m.reverb_ring.len >= 2:
-    let slots = uint32(m.reverb_ring.len shr 1)   # stereo slots (power of two)
-    let mask  = slots - 1'u32
-    let w     = uint32(m.reverb_w)
-    # Fixed delay = the engine's pcmBuffer DMA ring length (pcmDmaPeriod frames;
-    # see on_frame) — the real reverb feeds back the frame the DMA just played.
-    let delay = uint32(m.frame_len * max(1, m.rev_period))
-    let ri    = ((w - delay) and mask) shl 1
-    let wet   = 0.5'f32 * (m.reverb_ring[ri] + m.reverb_ring[ri + 1])  # mono echo
-    let rsc   = (if m.rev_scale < 0'f32: 0.0'f32
-                 elif m.rev_scale > 0'f32: m.rev_scale else: 1.0'f32)
-    let k     = min(0.75'f32, float32(m.reverb_strength) / 128.0'f32 * rsc)
-    outl_f = accl + wet * k
-    outr_f = accr + wet * k
-    let wi = (w and mask) shl 1
-    m.reverb_ring[wi]     = outl_f
-    m.reverb_ring[wi + 1] = outr_f
-    m.reverb_w = int((w + 1'u32) and mask)
+  if m.reverb_ring.len > 0:
+    let cap  = MP2K_REV_SLOT_LEN
+    let i    = (if m.rev_pos < cap: m.rev_pos else: cap - 1)
+    let cur  = (m.rev_slot * cap + i) * 2
+    let nxts = (if m.rev_slot + 1 >= m.rev_period: 0 else: m.rev_slot + 1)
+    let nxt  = (nxts * cap + i) * 2
+    if m.reverb_strength > 0'u8:
+      let sum  = m.reverb_ring[cur] + m.reverb_ring[cur + 1] +
+                 m.reverb_ring[nxt] + m.reverb_ring[nxt + 1]
+      let seed = sum * float32(m.reverb_strength) * (1.0'f32 / 512.0'f32)
+      outl_f = accl + seed
+      outr_f = accr + seed
+    # reverb == 0 must stay bit-identical to the no-reverb path: outl_f/outr_f
+    # are untouched above, and this store only maintains the (dry) history —
+    # matching the real NoReverb zero-fill + voice accumulation, after which
+    # the pcmBuffer holds the dry frame.
+    m.reverb_ring[cur]     = outl_f
+    m.reverb_ring[cur + 1] = outr_f
+    m.rev_pos.inc
   # Scale to the DirectSound latch range the APU expects. With the master-volume
   # double-apply fixed (see on_frame), the per-side envelope volumes already carry
   # the full engine gain, so this makeup is close to the pure linear ÷256 mixer
