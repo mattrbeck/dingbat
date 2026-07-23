@@ -129,11 +129,18 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
   if ppu.hdma5 == 0xFF: ppu.hdma_active = false
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
-  if mode == 0 and ppu.hdma_active: ppu_step_hdma(ppu, gb)
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
   ppu_handle_stat_interrupt(ppu, gb)
+  # The HBlank DMA step must run AFTER lcd_status reflects mode 0: the block
+  # copy ticks the PPU (mem_tick_components in ppu_copy_hdma_block), and a
+  # nested tick that still observes mode 3 re-enters the FIFO renderer's
+  # level-triggered `lx >= GB_WIDTH` mode-0 transition and recurses until the
+  # stack overflows (Pokemon Crystal crashed at boot). With the status updated
+  # first, nested ticks dispatch to the mode-0 branch and simply advance the
+  # HBlank dot counter while the copy is in flight.
+  if mode == 0 and ppu.hdma_active: ppu_step_hdma(ppu, gb)
 
 proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
   palette[0] = val and 0x3

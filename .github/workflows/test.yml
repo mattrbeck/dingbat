@@ -49,6 +49,15 @@ jobs:
         run: nim c -d:test_harness -d:release --path:src --path:tests -o:dingbat_test_runner tests/dingbat_test_runner.nim
       - name: Run tests
         run: ./dingbat_test_runner
+      - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
+        # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
+        # ticks the PPU from inside the mode 3->0 transition; if lcd_status
+        # doesn't reflect mode 0 before the copy runs, the FIFO renderer's
+        # level-triggered transition re-fires and recurses until the stack
+        # overflows (native segfault / web "Maximum call stack size exceeded").
+        # Pass = the process survives the frame run.
+        shell: bash
+        run: ./dingbat_test tests/roms/gbhdmatest.gbc --mode=screenshot --timeout=120 --screenshot=hdmatest.ppm
       - name: Link acceptance (in-process lockstep)
         shell: bash
         run: |
