@@ -264,8 +264,18 @@ proc get_sample*(apu: APU) =
   # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
   # routing/volume path below (the GBATEK-documented FIFO sink) then applies
   # unchanged.
-  if apu.gba.mp2k_hle and apu.gba.mp2k != nil and apu.gba.mp2k.engaged:
+  # fifo_foreign: the game streams its own audio into pcmBuffer (m4a channels
+  # all idle while the buffer carries sound — see mp2k.nim on_frame); the
+  # shadow mixer cannot render that, so leave the real FIFO stream alone.
+  if apu.gba.mp2k_hle and apu.gba.mp2k != nil and apu.gba.mp2k.engaged and
+     not apu.gba.mp2k.fifo_foreign:
     let (hl, hr) = apu.gba.mp2k.render_sample()
+    # Feed the foreign-feeder energy comparison (see mp2k.nim on_frame) with
+    # the REAL drained FIFO stream vs the shadow render it would replace.
+    let m = apu.gba.mp2k
+    m.real_abs_acc += int64(abs(int(raw_dma_a)) + abs(int(raw_dma_b)))
+    m.hle_abs_acc  += int64(abs(int(hl)) + abs(int(hr)))
+    inc m.ab_n
     raw_dma_a = hl
     raw_dma_b = hr
   let dma_a = if apu.channel_mask[4]: raw_dma_a else: 0'i16

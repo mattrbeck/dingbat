@@ -594,6 +594,8 @@ type
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_skip_fires*: int
     dbg_hook_fires*: int
+    dbg_probe_hits*: int   # probe prefilter passes (RAM PC + r0 == &SoundInfo)
+    dbg_probe_ident*: uint32  # ident seen at the last probe hit
     dbg_out_energy*: float64
     dbg_out_count*:  int
     dbg_reverb*:     uint8
@@ -611,6 +613,33 @@ type
     # with a single per-channel volume at SoundChannel+0x0A and +0x0B unused.
     # 0 = stereo (L->FIFO A, R->FIFO B), 1 = mono via FIFO A, 2 = mono via B.
     mono_mode*:      int
+    # Foreign FIFO feeder detected (see on_frame): some games ship the m4a
+    # driver (for SFX/jingles) but stream their MUSIC into the DirectSound
+    # FIFOs with their OWN code — e.g. Batman Vengeance / Altered Beast /
+    # Army Men CPU-write the FIFO registers from a timer IRQ; no m4a
+    # SoundChannel is ever active, so the shadow mixer would substitute
+    # silence for real music. The m4a driver only ever feeds the FIFOs via
+    # DMA1/2 in special timing sourcing its own pcmBuffer, so any other
+    # sustained feeder means the engine does not own the audio stream:
+    # substitution is latched off for the session (the shadow stays inert).
+    fifo_foreign*:   bool
+    foreign_streak*: int
+    fifo_cpu_bytes*: int   # FIFO bytes written by anything but special DMA1/2
+    fifo_cpu_last*:  int   # counter snapshot at the previous mixer pass
+    # Real-vs-shadow energy comparison (the catch-all foreign signal: some
+    # streamers fill pcmBuffer just-in-time mid-frame and erase it after the
+    # DMA drains, invisible to any state poll). Accumulated per output sample
+    # in apu.get_sample, evaluated per mixer pass in on_frame.
+    real_abs_acc*:   int64  # sum |real FIFO latch| since last mixer pass
+    hle_abs_acc*:    int64  # sum |shadow render|  since last mixer pass
+    ab_n*:           int    # samples accumulated
+    dbg_real_avg*:   float32
+    dbg_hle_avg*:    float32
+    # Mixer passes since the shadow last produced audio. Gates energy-based
+    # foreign evidence: for up to pcmDmaPeriod (<= 16) frames after a song
+    # stops, the REAL ring legitimately drains audio our (1-frame-delayed)
+    # shadow no longer renders — that tail must not count as foreign.
+    shadow_quiet_age*: int
     # Faithful m4a reverb state: a shadow of the engine's pcmBuffer frame ring
     # (s8 pcmBuffer[PCM_DMA_BUF_SIZE * 2] in pret m4a_internal.h — a ring of
     # pcmDmaPeriod one-V-blank slots per stereo half) kept at our render rate.

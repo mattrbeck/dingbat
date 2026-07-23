@@ -33,6 +33,17 @@ proc dma_channels_read*(dc: DMAChannels; address: uint32): uint8 =
 
 proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
   let channel = int(bit(address, 2))
+  # MP2K HLE foreign-feeder provenance (see mp2k.nim on_frame): the m4a driver
+  # only feeds the FIFOs via DMA1/2 in special (FIFO) timing. Count bytes
+  # arriving any other way (CPU stores, immediate/other DMA) so the HLE can
+  # tell when a game streams its own audio and must not be substituted.
+  if dc.gba.mp2k != nil:
+    let d = dc.gba.dma
+    let by_fifo_dma = dc.gba.bus.dma_active and
+                      (d.current_priority == 1 or d.current_priority == 2) and
+                      d.dmacnt_h[d.current_priority].start_timing == 3
+    if not by_fifo_dma:
+      inc dc.gba.mp2k.fifo_cpu_bytes
   if dc.sizes[channel] < 32:
     dc.fifos[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = cast[int8](value)
     dc.sizes[channel] += 1

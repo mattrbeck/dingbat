@@ -76,6 +76,16 @@ const
   MP2K_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32   # IWRAM slot holding the SoundInfo pointer
   MP2K_IDENT_IDLE         = 0x68736D53'u32   # SoundInfo.ident = ID_NUMBER ("Smsh", pret m4a_internal.h)
   MP2K_IDENT_LOCK         = 0x68736D54'u32   # ID_NUMBER+1: lock held while SoundMain mixes
+  # m4aSoundVSyncOff parks ident at +10 (pret pokeemerald src/m4a.c: "if ident
+  # is ID_NUMBER or ID_NUMBER+1, ident += 10"; VSyncOn subtracts it back).
+  # A stock driver's SoundMain refuses to run in that state, but modified m4a
+  # vintages (Mother 3, the bit Generations series) do their own V-blank DMA
+  # maintenance and run the whole engine with ident parked at +10 — the
+  # SoundMain lock dance then happens as +10 <-> +11. Accept both forms
+  # everywhere; for a stock driver the +10 state simply never mixes, so the
+  # widened acceptance can never mislearn from it.
+  MP2K_IDENT_IDLE_VOFF    = 0x68736D5D'u32   # ID_NUMBER+10: idle, VSync off
+  MP2K_IDENT_LOCK_VOFF    = 0x68736D5E'u32   # ID_NUMBER+11: locked, VSync off
   MP2K_PROBE_MAX_FAILS    = 8                # give up learning after this many mislearns
   MP2K_MAX_CHANNELS       = 12
 
@@ -109,8 +119,12 @@ const
   SI_MAX_CHANS    = 0x06   # maxChans
   SI_MASTER_VOL   = 0x07   # masterVolume
   SI_DMA_PERIOD   = 0x0B   # pcmDmaPeriod: pcmBuffer ring length in V-blank frames
+  SI_SPV          = 0x10   # pcmSamplesPerVBlank
   SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
   SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
+  SI_PCM_BUFFER   = 0x350  # s8 pcmBuffer[PCM_DMA_BUF_SIZE*2] — follows the 12
+                           # fixed 64-byte chans slots (0x50 + 12*64), matching
+                           # the DMA1SAD every standard driver programs
 
   # channel.type bits. The sequencer copies the instrument's ToneData.type byte
   # verbatim into SoundChannel.type at note-on (pret pokeemerald m4a_1.s, ply_note),
@@ -324,6 +338,17 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.rev_pos = 0
   m.frame_pos = 0
   m.resync_pending = true
+  # Foreign-feeder detection: the streak/counter baseline are timeline-derived
+  # — drop them. The fifo_foreign LATCH is kept: it describes the ROM's driver
+  # usage, not the timeline, and re-latching would substitute our silence over
+  # the game's streamed music for several frames after every load.
+  m.foreign_streak = 0
+  m.fifo_cpu_last = m.fifo_cpu_bytes
+  m.real_abs_acc = 0
+  m.hle_abs_acc = 0
+  m.ab_n = 0
+  m.shadow_quiet_age = 0   # the restored ring may hold pre-load engine audio
+                           # our reset shadow doesn't: give it the tail grace
 
 # =============================================================================
 # Runtime detection: learn the SoundMainRAM entry PC instead of matching a ROM
@@ -615,6 +640,81 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.vol_r0 = s.vol_r1
     s.vol_l1 = vl
     s.vol_r1 = vr
+  # --- Foreign FIFO feeder detection -------------------------------------------
+  # Some games ship m4a (SFX/jingles) but stream their MUSIC around the
+  # engine's channel structs (observed: Batman Vengeance, Altered Beast,
+  # Army Men — their streamer fills pcmBuffer just-in-time mid-frame and
+  # erases it after the DMA drains, so no SoundChannel is ever active and any
+  # state poll sees a silent buffer). Substituting our shadow render would
+  # replace their music with silence. Three engine/bus-state signals, each
+  # sustained over consecutive mixer passes, latch substitution off for the
+  # session (never keyed on game ID):
+  #   * FIFO register bytes written by anything but special-timing DMA1/2
+  #     (fifo_cpu_bytes, counted at the FIFO write port) — the m4a driver
+  #     only ever feeds the FIFOs through those DMAs;
+  #   * a special-timing FIFO DMA sourcing OUTSIDE the SoundInfo work area
+  #     (m4a's pcmBuffer is embedded in SoundInfo at +0x350);
+  #   * the catch-all: the real drained FIFO stream persistently carries
+  #     energy while our shadow render is persistently silent. A genuinely
+  #     engine-owned stream cannot sound while every channel we mirror is
+  #     idle — and if the shadow were ever wrongly silent for another
+  #     reason, falling back to the game's own audio is the right failure
+  #     mode anyway.
+  # Evidence model (foreign audio is BURSTY — Batman's stingers alternate with
+  # silence — so a consecutive-streak rule never accumulates):
+  #   evidence — provenance hit (CPU bytes / bad SAD), or the real stream
+  #     audible while our shadow render is silent;
+  #   refutation — the shadow itself is producing audio with no provenance
+  #     hit (the engine demonstrably owns the stream): reset;
+  #   neutral — both silent: hold the count.
+  # A few evidence passes (frames of un-renderable audible audio) latch
+  # substitution off for the session.
+  block:
+    if not m.fifo_foreign:
+      var provenance = m.fifo_cpu_bytes - m.fifo_cpu_last >= 64
+      m.fifo_cpu_last = m.fifo_cpu_bytes
+      for c in 1 .. 2:
+        if m.gba.dma.dmacnt_h[c].enable and
+           m.gba.dma.dmacnt_h[c].start_timing == 3 and
+           (m.gba.dma.dmadad[c] == 0x040000A0'u32 or
+            m.gba.dma.dmadad[c] == 0x040000A4'u32):
+          let sad = m.gba.dma.dmasad[c]
+          if sad < sound_info or sad >= sound_info + 0x4000'u32:
+            provenance = true
+      # Real-vs-shadow energy over the samples since the last mixer pass
+      # (accumulated in apu.get_sample). Units are FIFO latch units (s8*2):
+      # real avg(|L|+|R|) >= 4 is clearly audible; shadow avg < 0.25 is
+      # genuinely silent (not merely quiet).
+      var real_loud = false
+      var shadow_loud = false
+      if m.ab_n > 0:
+        when defined(mp2kwav):
+          m.dbg_real_avg = float32(m.real_abs_acc) / float32(m.ab_n)
+          m.dbg_hle_avg  = float32(m.hle_abs_acc) / float32(m.ab_n)
+        real_loud   = m.real_abs_acc >= int64(m.ab_n) * 4
+        shadow_loud = m.hle_abs_acc >= int64(m.ab_n) div 4
+        m.real_abs_acc = 0
+        m.hle_abs_acc = 0
+        m.ab_n = 0
+      if shadow_loud: m.shadow_quiet_age = 0
+      elif m.shadow_quiet_age < 1000: inc m.shadow_quiet_age
+      # Energy evidence only counts once the shadow has been silent longer
+      # than the real ring could still be draining engine-mixed audio (the
+      # pcmBuffer holds up to pcmDmaPeriod <= 16 frames our shadow's 1-frame
+      # delay line does not): a song-stop drain tail is not foreign.
+      if provenance or (real_loud and m.shadow_quiet_age > 16):
+        inc m.foreign_streak
+        # 3 evidence passes: an evidence pass is a full frame of clearly
+        # audible foreign audio while our shadow (voices AND reverb tail) is
+        # bit-silent outside any drain-tail window — essentially impossible
+        # for an engine-owned stream, so a few hits suffice. Games with very
+        # sparse foreign stingers (Altered Beast's title hits) still latch
+        # within seconds.
+        if m.foreign_streak >= 3:
+          m.fifo_foreign = true
+      elif shadow_loud:
+        m.foreign_streak = 0
+      # else: both silent — neutral, hold the evidence count
   m.frame_seen = true
   m.engaged = true
   m.resync_pending = false   # one full re-latch pass done; back to normal keying
@@ -630,7 +730,8 @@ proc mixer_hook*(m: Mp2kHle) =
   ## lock means the learned PC was wrong: unlearn and re-probe.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
-    if m.rd32(sip + SI_MAGIC) == MP2K_IDENT_LOCK:
+    let ident = m.rd32(sip + SI_MAGIC)
+    if ident == MP2K_IDENT_LOCK or ident == MP2K_IDENT_LOCK_VOFF:
       m.on_frame(sip)
       return
   m.unlearn_hook()
@@ -641,7 +742,10 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
   ## inline). If the engine lock is held right now, this PC is the SoundMainRAM
   ## mixer entry: learn it and run the first shadow pass immediately (the entry
   ## has not executed yet, so channel state is exactly what the hook would see).
-  if m.rd32(m.probe_sound_info + SI_MAGIC) != MP2K_IDENT_LOCK: return
+  let ident = m.rd32(m.probe_sound_info + SI_MAGIC)
+  inc m.dbg_probe_hits
+  m.dbg_probe_ident = ident
+  if ident != MP2K_IDENT_LOCK and ident != MP2K_IDENT_LOCK_VOFF: return
   for i in 0 ..< m.probe_block_n:
     if m.probe_block[i] == pc: return          # previously invalidated
   m.hook_addr  = pc                            # pc may carry the Thumb bit; the
@@ -661,13 +765,16 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
     ident = m.rd32(sip + SI_MAGIC)
   if m.hook_addr != 0xFFFFFFFF'u32:
-    if ident != MP2K_IDENT_IDLE and ident != MP2K_IDENT_LOCK and m.engaged:
+    if m.engaged and ident != MP2K_IDENT_IDLE and ident != MP2K_IDENT_LOCK and
+       ident != MP2K_IDENT_IDLE_VOFF and ident != MP2K_IDENT_LOCK_VOFF:
       m.engaged = false
       for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
     return
-  # Arm probing only when the engine is at rest (ident == ID_NUMBER): arming
-  # mid-pass could learn a mid-mixer PC instead of the entry.
-  m.probing = ident == MP2K_IDENT_IDLE and m.probe_fails < MP2K_PROBE_MAX_FAILS
+  # Arm probing only when the engine is at rest (ident == ID_NUMBER, in
+  # either VSync form): arming mid-pass could learn a mid-mixer PC instead of
+  # the entry.
+  m.probing = (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF) and
+              m.probe_fails < MP2K_PROBE_MAX_FAILS
   if m.probing: m.probe_sound_info = sip
 
 when defined(mp2kwav):
