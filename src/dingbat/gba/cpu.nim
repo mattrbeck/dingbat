@@ -1,13 +1,23 @@
 # CPU implementation (included by gba.nim)
 
 proc mode_bank*(m: CpuMode): int =
-  case m
-  of modeUSR, modeSYS: 0
-  of modeFIQ:          1
-  of modeIRQ:          2
-  of modeSVC:          3
-  of modeABT:          4
-  of modeUND:          5
+  # `m` comes from guest-controlled bits (SPSR mode field on exception return,
+  # MSR CPSR writes), so it can hold any 5-bit pattern, not just the defined
+  # modes: Prince of Tennis 2004 runs into the weeds and executes a data word
+  # as `subs pc, lr` with SPSR mode bits 0x1E. Hardware copies the raw bits
+  # into the CPSR and register banking degrades gracefully; like mGBA's
+  # _ARMSelectBank, map unrecognized patterns to the user bank instead of
+  # trapping on the (previously exhaustive) case.
+  # (Dispatch on the raw ordinal: an exhaustive enum case would treat the
+  # else as unreachable and compile invalid values into a trap.)
+  case uint32(m)
+  of uint32(modeUSR), uint32(modeSYS): 0
+  of uint32(modeFIQ):                  1
+  of uint32(modeIRQ):                  2
+  of uint32(modeSVC):                  3
+  of uint32(modeABT):                  4
+  of uint32(modeUND):                  5
+  else:                                0  # invalid pattern: no banked registers
 
 proc new_cpu*(gba: GBA): CPU =
   result = CPU(
@@ -334,9 +344,20 @@ proc tick*(cpu: CPU) =
     if cur == cpu.halt_resume_addr:
       cpu.gba.bus.add_cycles(int(cpu.halt_resume_charge))
       cpu.halt_resume_charge = 0
-      # The dispatcher's exit path pops the caller's r12 back (the Halt/Stop
-      # routines held ip = 0x04000000 while halted; see hle_intr_wait)
+      # The dispatcher's exit path pops the caller's r12 back (staged in its
+      # SVC-stack slot by Halt/Stop and the interruptible decompression
+      # parks alike)
       cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
+      if cpu.halt_resume_pop:
+        # Halt/Stop held the dispatcher's {r2, lr} frame live (System sp
+        # shifted down 8; r2 = HALTCNT value, lr = 0x170 while halted) —
+        # pop it back. Decompression parks never shifted sp, so they skip
+        # this (their r2/lr were never touched).
+        cpu.halt_resume_pop = false
+        let usp = cpu.sys_sp() + 8
+        cpu.r[2] = cpu.gba.bus.read_word_internal(usp - 8)
+        cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
+        cpu.set_sys_sp(usp)
   if not cpu.halted:
     cpu.instr_exc_return = false
     # EXPLORATORY: MP2K HLE mixer hook. When enabled and PC reaches the

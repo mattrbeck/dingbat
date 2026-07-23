@@ -20,7 +20,11 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
-  STATE_VERSION* = 4'u32  # v4: GB serial port state (link cable support)
+  STATE_VERSION* = 5'u32  # v5: HLE BIOS IntrWait/Halt keep the dispatcher's
+                          # System-stack frame live (sp sits 16/8 bytes lower
+                          # while halted); v4 mid-halt states would resume with
+                          # a mis-restored sp, so they are refused instead.
+                          # (v4: GB serial port state, link cable support)
   # magic(8) version(4) core(1) slot(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)
   STATE_HEADER_SIZE* = 32

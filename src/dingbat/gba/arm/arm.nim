@@ -75,6 +75,26 @@ proc svc_sp(cpu: CPU): uint32 {.inline.} =
   if cast[CpuMode](cpu.cpsr.mode) == modeSVC: cpu.r[13]
   else: cpu.reg_banks[mode_bank(modeSVC)][5]
 
+proc sys_sp(cpu: CPU): uint32 {.inline.} =
+  ## The System/User-mode stack pointer (live r13 when the caller is in a
+  ## bank-0 mode, the banked one otherwise). The real BIOS's SWI dispatcher
+  ## switches to System mode before running every routine, so all routine
+  ## stack traffic goes through this stack.
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[13]
+  else: cpu.reg_banks[0][5]
+
+proc sys_lr(cpu: CPU): uint32 {.inline.} =
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[14]
+  else: cpu.reg_banks[0][6]
+
+proc set_sys_lr(cpu: CPU; v: uint32) {.inline.} =
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[14] = v
+  else: cpu.reg_banks[0][6] = v
+
+proc set_sys_sp(cpu: CPU; v: uint32) {.inline.} =
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[13] = v
+  else: cpu.reg_banks[0][5] = v
+
 proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
   ## IntrWait per GBATEK: forcefully sets IME=1, then halts until the user
   ## IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8.
@@ -92,6 +112,12 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
   ## back (the dispatcher pops it), r0 holds the matched flag bits and r3 is
   ## 0 (routine scratch, mov r3, #0 at 0x334).
   cpu.gba.interrupts.ime = true
+  # Routine frame (ARM 0x330, System stack): push {r4, lr} with lr = 0x170
+  # below the dispatcher's {r2, lr} pair (written by hle_swi)
+  block:
+    let usp = cpu.sys_sp()
+    cpu.gba.bus.write_word_internal(usp - 12, 0x170'u32)
+    cpu.gba.bus.write_word_internal(usp - 16, cpu.r[4])
   let mirror = cpu.read_intr_mirror()
   if discard_old:
     cpu.write_intr_mirror(mirror and not mask)
@@ -106,13 +132,24 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
   # uses (push {fp, ip, lr} at 0x140 puts ip at [sp_svc - 8]). HLE SWIs
   # never touch memory below the SVC sp, so the slot survives the wait; it
   # also travels inside save states and rollback snapshots for free.
-  # (Deliberately not modeled: the real sp decrements, the r2/r4/fp/lr
-  # values the routines hold while halted, and the halt-at-least-once quirk
-  # of discard_old=false — no handler convention depends on them, and
-  # mGBA's HLE BIOS skips them too.)
   cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
   cpu.r[12] = 0x04000000'u32
   cpu.r[3] = 0
+  # Handler-visible register state of the real halt loop (0x344-0x34C, System
+  # mode): r4 = 1 (the IME re-enable constant), r2 = the mirror value the last
+  # check subroutine pass read, and — critically — lr_sys = 0x34C, the `bl
+  # 0x358` return address. Nested user IRQ dispatchers that run their
+  # callbacks in System mode push this lr, so it becomes stack residue games
+  # can (and do) observe; Prince of Tennis 2004's sound engine reads such a
+  # word and wedges its mixer without it.
+  cpu.r[4] = 1
+  cpu.r[2] = uint32(cpu.read_intr_mirror())
+  cpu.set_sys_lr(0x34C'u32)
+  # The dispatcher + routine frames stay live for the whole wait: the System
+  # sp sits 16 bytes down, so nested IRQ dispatch frames land below them the
+  # way they do on hardware (instead of overwriting the saved r2/lr pair).
+  # Restored (+16, the pops) on the resume path in check_intr_wait.
+  cpu.set_sys_sp(cpu.sys_sp() - 16)
   # While halted r0 holds the last check's matched bits: the discarded old
   # flags on entry (0x358 runs before the first halt), 0 otherwise
   if discard_old: cpu.r[0] = uint32(mirror and mask)
@@ -137,10 +174,19 @@ proc check_intr_wait*(cpu: CPU) =
     cpu.intr_wait_active = false
     # Real-routine return protocol: r0 = matched flag bits, r3 = 0, and the
     # caller's r12 comes back from the dispatcher's SVC-stack slot (see
-    # hle_intr_wait)
+    # hle_intr_wait). r2/r4/lr pop back from the System-stack frames the
+    # entry wrote — normally the caller's own values, but if a handler
+    # scribbled on those slots the real pops would fetch the scribbles, so
+    # read the memory rather than keeping shadow copies.
     cpu.r[0] = uint32(hit)
     cpu.r[3] = 0
     cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
+    block:
+      let usp = cpu.sys_sp() + 16  # pop the routine + dispatcher frames
+      cpu.r[4] = cpu.gba.bus.read_word_internal(usp - 16)
+      cpu.r[2] = cpu.gba.bus.read_word_internal(usp - 8)
+      cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
+      cpu.set_sys_sp(usp)
     # The IRQ handler ran through the (stub) BIOS and rewrote the open-bus
     # latch; the real BIOS's IntrWait exit path leaves 0xE3A02004
     cpu.gba.bus.bios_latch = 0xE3A02004'u32
@@ -153,10 +199,14 @@ proc check_intr_wait*(cpu: CPU) =
     # dispatcher restore 0x170-0x184 (12) + movs pc, lr (3+refill 2, IWRAM)
     cpu.gba.bus.add_cycles(44)  # INTRWAIT_TUNE
   else:
-    # Re-halt with the check subroutine's register state: r0 = 0 (no match)
-    # and r12 = 0x04000000, the convention user IRQ dispatchers rely on
+    # Re-halt with the check subroutine's register state: r0 = 0 (no match),
+    # r12 = 0x04000000, r2 = the mirror it just read, r4 = 1, and lr_sys back
+    # on the halt loop's bl-return (see hle_intr_wait)
     cpu.r[0] = 0
     cpu.r[12] = 0x04000000'u32
+    cpu.r[2] = uint32(cpu.read_intr_mirror())
+    cpu.r[4] = 1
+    cpu.set_sys_lr(0x34C'u32)
     cpu.halted = true
     # Wake immediately if an enabled interrupt is already pending
     cpu.gba.interrupts.schedule_interrupt_check()
@@ -303,6 +353,9 @@ proc hle_charge_body_interruptible(cpu: CPU; t0: int64; model: int) =
     cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
     cpu.halt_resume_charge = int32(remain)
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
+    # Unlike Halt/Stop, the System sp was not shifted for this park: the
+    # resume must only pay the charge, not pop the dispatcher frame
+    cpu.halt_resume_pop = false
 
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## Input-dependent cost of the real BIOS divide loop (same shape as the
@@ -339,6 +392,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # Anchor for the routine-body cost models (everything before this point is
   # the shared dispatch + caller refill, common to all SWIs)
   let body_t0 = cpu.hle_body_start()
+  # Real-BIOS SWI dispatch (0x140) switches to System mode and pushes
+  # {r2, lr} onto the SYSTEM/USER stack before calling every routine; the
+  # routines push their own frames below that. The pops restore everything,
+  # but the words STAY in memory below sp — deterministic residue that games
+  # can observe by reading uninitialized stack (Prince of Tennis 2004's
+  # sound engine reads such a slot and takes a different path without it).
+  # Model the dispatcher pair here and the per-routine frames below.
+  if swi_num != 0x00:  # SoftReset wipes this RAM anyway
+    let usp = cpu.sys_sp()
+    cpu.gba.bus.write_word_internal(usp - 4, cpu.sys_lr())
+    cpu.gba.bus.write_word_internal(usp - 8, cpu.r[2])
   case swi_num
   of 0x00:  # SoftReset — or, executed inside the stub BIOS, the boot traps
     # The caller's ISA decides how far the arm/thumb SWI handler steps the PC
@@ -459,11 +523,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
     cpu.halt_resume_charge = HALT_RETURN_COST
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
-    # The real routine (0x1A0) halts with ip = 0x04000000 — the register
-    # convention user IRQ dispatchers may rely on (see hle_intr_wait); the
-    # caller's r12 is restored from the dispatcher's SVC-stack slot on resume
+    # The real routine (0x1A0) halts with ip = 0x04000000, r2 = 0 and
+    # lr_sys = 0x170 (the dispatcher trampoline) — register state user IRQ
+    # dispatchers can observe (see hle_intr_wait); the caller's r12/r2/lr are
+    # restored from the dispatcher's stack slots on resume
     cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
     cpu.r[12] = 0x04000000'u32
+    cpu.r[2] = 0
+    cpu.set_sys_lr(0x170'u32)
+    cpu.set_sys_sp(cpu.sys_sp() - 8)  # dispatcher {r2, lr} frame stays live
+    cpu.halt_resume_pop = true        # ...and the resume pops it back
     cpu.halted = true
     # Halt exits when IE & IF is nonzero (IME is don't care), including
     # interrupts that were already pending on entry
@@ -474,9 +543,14 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
     cpu.halt_resume_charge = HALT_RETURN_COST
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
-    # Same halted-r12 convention as Halt (real routine 0x1A8 shares 0x1AC)
+    # Same halted-register convention as Halt (real routine 0x1A8 shares
+    # 0x1AC; its r2 holds 0x80, the Stop flag it wrote to HALTCNT)
     cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
     cpu.r[12] = 0x04000000'u32
+    cpu.r[2] = 0x80
+    cpu.set_sys_lr(0x170'u32)
+    cpu.set_sys_sp(cpu.sys_sp() - 8)  # dispatcher {r2, lr} frame stays live
+    cpu.halt_resume_pop = true        # ...and the resume pops it back
     cpu.halted = true
     cpu.stopped = true
     # Stop blanks the LCD without any memory write; force a re-render
@@ -589,6 +663,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[3] = 0x170'u32
     cpu.hle_charge_body(body_t0, atan2_model)
   of 0x0B:  # CpuSet
+    # Routine frame (thumb 0xB4C, System stack): push {r4, r5, lr}; the exit
+    # is `pop {r4, r5}; pop {r3}; bx r3`, so r3 comes back holding the
+    # dispatcher return address 0x170 on every path (validation-skip too).
+    block:
+      let usp = cpu.sys_sp()
+      cpu.gba.bus.write_word_internal(usp - 12, 0x170'u32)
+      cpu.gba.bus.write_word_internal(usp - 16, cpu.r[5])
+      cpu.gba.bus.write_word_internal(usp - 20, cpu.r[4])
+    cpu.r[3] = 0x170'u32
     var src = cpu.r[0]
     var dst = cpu.r[1]
     let ctrl = cpu.r[2]
@@ -843,6 +926,12 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
                 park(flags, remain)
         flags = flags and not (1'u32 shl bit_idx)
   of 0x0C:  # CpuFastSet
+    # Routine frame (ARM 0xBC4, System stack): push {r4-r10, lr}, lr = 0x170
+    block:
+      let usp = cpu.sys_sp()
+      cpu.gba.bus.write_word_internal(usp - 12, 0x170'u32)
+      for i in 0 .. 6:  # r10 at usp-16 down to r4 at usp-40
+        cpu.gba.bus.write_word_internal(usp - 16 - uint32(i * 4), cpu.r[10 - i])
     var src = cpu.r[0]
     var dst = cpu.r[1]
     let ctrl = cpu.r[2]
@@ -883,6 +972,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.idle(int(done) + 5 - overhead_charged)
       cpu.r[0] = src
       cpu.r[1] = dst
+      # The real routine's stm bursts go through r2-r9; r2 is restored by the
+      # dispatcher pop but r3 keeps the last word stored
+      if done > 0:
+        cpu.r[3] = if fill: fill_val
+                   else: cpu.gba.bus.read_word_internal(dst - 4)
       if interrupted:
         cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
         cpu.hle_swi_rewind()

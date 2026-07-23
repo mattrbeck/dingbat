@@ -323,6 +323,11 @@ type
     # Charged once when execution reaches the instruction after the SWI.
     halt_resume_charge*:    int32
     halt_resume_addr*:      uint32
+    # True when the parked charge belongs to a Halt/Stop SWI, whose entry
+    # left the dispatcher's {r2, lr} frame live (System sp shifted down 8);
+    # the resume must pop it. Interruptible decompression SWIs park charges
+    # on the same fields but never shift sp, so their resume must not.
+    halt_resume_pop*:       bool
     # Waitloop fields
     attempt_waitloop_detection*: bool
     cache_waitloop_results*:     bool
