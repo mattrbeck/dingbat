@@ -245,8 +245,21 @@ proc get_sample*(apu: APU) =
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
   when defined(mp2kwav):
-    realDmaCapture.add raw_dma_a  # the game's OWN FIFO output, for A/B calibration
-    realDmaCapture.add raw_dma_b
+    # The game's OWN FIFO output, for A/B calibration against the HLE render.
+    # When the HLE is enabled, capture over EXACTLY the span the HLE captures
+    # (mp2kWavCapture only accumulates while engaged — render_sample below):
+    # gating both streams on the same predicate keeps them sample-aligned, so
+    # a single run's "HLE rms vs REAL rms" compares the same audio span. This
+    # matters for games whose engine engages late: Mother 3's modified m4a
+    # holds SoundInfo.ident at ID_NUMBER+10 through a ~10 s init/intro, and
+    # capturing the real FIFO from power-on padded REAL with that leading
+    # silence — deflating its RMS ~19% and making the HLE read "~+23% hot"
+    # when the span-matched streams actually agree to within a few percent.
+    # With the HLE disabled (e.g. DINGBAT_NOHLE=1 reference runs) there is no
+    # HLE span to match, so capture the whole run as before.
+    if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or apu.gba.mp2k.engaged:
+      realDmaCapture.add raw_dma_a
+      realDmaCapture.add raw_dma_b
   # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
   # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
   # routing/volume path below (the GBATEK-documented FIFO sink) then applies
