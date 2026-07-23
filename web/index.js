@@ -1121,6 +1121,7 @@ const refreshRomsManageList = async () => {
         onArm: () => disarmOthers(saveBtn),
         onConfirm: async () => {
           await deleteSaveData(name);
+          queueSaveDataDeletes(name); // mirror the wipe to Drive (if synced)
           if (isRomLoaded(name)) {
             // Reboot the loaded game clean, else its in-memory save re-flushes.
             resetLoadedGameSave();
@@ -1160,6 +1161,9 @@ const refreshRomsManageList = async () => {
               return;
             }
           }
+          // Requirement #4: offer to remove the Drive copy (or keep it and
+          // detach the game from sync). No-op / no prompt when signed out.
+          await handleSyncedRomDeletion(name);
           await deleteSaveData(name);
           if (inRecent) await deleteRecent(name); // also refreshes home grid
           showToast("Removed from this browser");
@@ -1657,7 +1661,14 @@ const gdriveSignOut = () => {
   }
   gdriveToken = null;
   gdriveEmail = null;
+  // Stand down the background sync: no token means shouldSyncGame is false, so
+  // pending work would no-op anyway, but clear it eagerly.
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+  syncUpQueue.clear();
+  syncDelQueue.clear();
+  syncConflicts.clear();
   renderGdriveSection();
+  refreshSyncUI();
   showToast("Signed out of Google Drive");
 };
 
@@ -1684,6 +1695,9 @@ const renderGdriveSection = () => {
         await gdriveFetchEmail();
         renderGdriveSection();
         showToast("Connected to Google Drive");
+        refreshSyncUI();
+        // First connection (or a prior "decide later"): offer to set up sync.
+        if (syncPrefs.mode == null) await promptSyncSetup();
       } catch (e) {
         showToast(e.message);
         btn.disabled = false;
@@ -1695,17 +1709,42 @@ const renderGdriveSection = () => {
 
   let status = document.createElement("p");
   status.className = "gdrive-status";
-  status.textContent = gdriveEmail
-    ? "Connected as " + gdriveEmail
-    : "Connected to Google Drive";
+  let modeText = syncPrefs.mode === "all"
+    ? " · syncing all games"
+    : syncPrefs.mode === "selected"
+    ? ` · syncing ${syncPrefs.selected.length} game${syncPrefs.selected.length === 1 ? "" : "s"}`
+    : syncPrefs.mode === "off"
+    ? " · sync off"
+    : "";
+  status.textContent =
+    (gdriveEmail ? "Connected as " + gdriveEmail : "Connected to Google Drive") +
+    modeText;
   gdriveBody.appendChild(status);
+
+  if (syncConflicts.size) {
+    let warn = makeGdriveButton(
+      "Resolve " + syncConflicts.size + " sync conflict" +
+        (syncConflicts.size === 1 ? "" : "s"),
+      false,
+      () => resolveConflicts([...syncConflicts.values()]),
+    );
+    warn.classList.add("sync-conflict-cta");
+    gdriveBody.appendChild(warn);
+  }
 
   let actions = document.createElement("div");
   actions.className = "gdrive-actions";
-  actions.appendChild(makeGdriveButton("Back up to Drive", false, gdriveBackup));
-  actions.appendChild(
-    makeGdriveButton("Restore from Drive", false, gdriveShowRestoreList),
-  );
+  if (syncActive()) {
+    actions.appendChild(
+      makeGdriveButton("Sync now", false, () => runFullSync({ label: "Syncing" })),
+    );
+  }
+  actions.appendChild(makeGdriveButton(
+    syncPrefs.mode == null || syncPrefs.mode === "off" ? "Turn on sync" : "Sync settings",
+    !syncActive(), promptSyncSetup,
+  ));
+  actions.appendChild(makeGdriveButton("Back up all", true, gdriveBackup));
+  actions.appendChild(makeGdriveButton("Restore…", true, gdriveShowRestoreList));
   actions.appendChild(makeGdriveButton("Sign out", true, gdriveSignOut));
   gdriveBody.appendChild(actions);
 
@@ -1717,6 +1756,669 @@ const renderGdriveSection = () => {
   gdriveRestoreListEl.className = "roms-manage-list";
   gdriveBody.appendChild(gdriveRestoreListEl);
 };
+
+// ============================================================================
+// Google Drive SYNC — bidirectional mirroring layered on top of the backup
+// primitives above. This whole subsystem is INERT unless the user has signed
+// in AND chosen a sync mode: `shouldSyncGame`/`syncActive` both short-circuit
+// on a missing token, every hook checks them, and no dialog or button appears
+// for signed-out users. Requirement #5 (signed-out UI unchanged) rests on that.
+// ============================================================================
+
+// Persisted under the "gdrive_sync" IndexedDB key. `mode`:
+//   null        never chosen — prompt on next sign-in
+//   "off"       signed in, syncing nothing
+//   "all"       sync every game except those in `excluded`
+//   "selected"  sync only the games listed in `selected`
+// `sigs`  maps a Drive file name -> the content signature both sides last
+//         agreed on (cheap dirty-check + three-way conflict detection).
+// `rmt`   maps a Drive file name -> the remote modifiedTime we last observed,
+//         so a background upload can notice another device changed the file.
+let syncPrefs = { mode: null, selected: [], excluded: [], sigs: {}, rmt: {} };
+// In-memory registry of unresolved conflicts (Drive name -> conflict record).
+let syncConflicts = new Map();
+
+const loadSyncPrefs = async () => {
+  let s = await dbGet("gdrive_sync");
+  if (s && typeof s === "object") {
+    syncPrefs = {
+      mode: s.mode ?? null,
+      selected: Array.isArray(s.selected) ? s.selected : [],
+      excluded: Array.isArray(s.excluded) ? s.excluded : [],
+      sigs: s.sigs && typeof s.sigs === "object" ? s.sigs : {},
+      rmt: s.rmt && typeof s.rmt === "object" ? s.rmt : {},
+    };
+  }
+};
+const saveSyncPrefs = () => dbPut("gdrive_sync", syncPrefs);
+
+// Does this game currently participate in sync? Signed-out / off => never.
+const shouldSyncGame = (game) => {
+  if (!gdriveToken) return false;
+  if (syncPrefs.mode === "all") return !syncPrefs.excluded.includes(game);
+  if (syncPrefs.mode === "selected") return syncPrefs.selected.includes(game);
+  return false;
+};
+// Is sync doing anything at all right now (used to gate the UI + auto-upload)?
+const syncActive = () =>
+  !!gdriveToken && (syncPrefs.mode === "all" || syncPrefs.mode === "selected");
+
+// A game is detached from sync (requirement #4 "local-only"): dropped from the
+// selected list and, in all-mode, added to the exclusion list so it is neither
+// re-uploaded nor re-downloaded.
+const detachGameFromSync = (game) => {
+  syncPrefs.selected = syncPrefs.selected.filter((g) => g !== game);
+  if (syncPrefs.mode === "all" && !syncPrefs.excluded.includes(game)) {
+    syncPrefs.excluded.push(game);
+  }
+};
+
+const driveDelete = (fileId) =>
+  driveFetch(GDRIVE_FILES + "/" + fileId, { method: "DELETE" });
+
+// --- Human-readable names ------------------------------------------------
+const kindLabel = (kind) => {
+  if (kind === "rom") return "ROM";
+  if (kind === "save") return "save file";
+  if (kind === "save2") return "P2 link save";
+  if (kind === "state" || kind === "statemeta") return "save state (Quick)";
+  let m = String(kind).match(/:(\d+)$/);
+  if (m) return "save state (slot " + (Number(m[1]) + 1) + ")";
+  return String(kind);
+};
+const prettyName = (name) => {
+  let p = parseDriveFileName(name);
+  return p ? p.game + " — " + kindLabel(p.kind) : name;
+};
+const sigOfBytes = (bytes) => saveSignature(bytes); // FNV-1a + length
+
+// --- Local <-> Drive byte plumbing --------------------------------------
+// Drive file names ARE the IndexedDB keys, so parseDriveFileName classifies
+// local keys too. Returns Map<driveName, { game, kind }>.
+const localSyncFiles = async () => {
+  let out = new Map();
+  for (let k of await dbKeys()) {
+    if (typeof k !== "string") continue;
+    let parsed = parseDriveFileName(k);
+    if (parsed) out.set(k, parsed);
+  }
+  return out;
+};
+const localGameNames = async () => {
+  let s = new Set((await getRecentMeta()).map((r) => r.name).filter(Boolean));
+  for (let n of await romsWithSaveData()) s.add(n);
+  return [...s].sort((a, b) => a.localeCompare(b));
+};
+// Read a Drive-named local key as upload-ready bytes (meta objects JSON-encoded,
+// mirroring collectLocalBackupEntries). null when absent/empty.
+const readSyncBytes = async (key) => {
+  let v = await dbGet(key);
+  if (key.startsWith("rom:")) {
+    let d = v?.data;
+    return d && d.length ? new Uint8Array(d) : null;
+  }
+  if (key.startsWith("statemeta:")) {
+    if (v && typeof v === "object" && !(v instanceof Uint8Array) &&
+        !(v instanceof ArrayBuffer)) {
+      let b = new TextEncoder().encode(JSON.stringify(v));
+      return b.length ? b : null;
+    }
+    return null;
+  }
+  if (v instanceof ArrayBuffer) v = new Uint8Array(v);
+  return v instanceof Uint8Array && v.length ? v : null;
+};
+// Write a file downloaded from Drive back into local storage. ROMs go through
+// addRecentRom so they show up in the grid; everything else is a keyed put.
+const writeSyncBytes = async (name, bytes) => {
+  if (name.startsWith("rom:")) {
+    await addRecentRom(name.slice(4), bytes);
+    return;
+  }
+  if (name.startsWith("statemeta:")) {
+    try { await dbPut(name, JSON.parse(new TextDecoder().decode(bytes))); }
+    catch {}
+    return;
+  }
+  await dbPut(name, bytes);
+};
+
+// --- Lightweight modal builders (the app has no generic dialog helper) ----
+// Builds a .modal-overlay on the fly, matching the static modals, and wires
+// dismissal (X / backdrop / Escape) to onDismiss. Callers fill `body`.
+const buildSyncModal = ({ title, hint, onDismiss }) => {
+  let overlay = document.createElement("div");
+  overlay.className = "modal-overlay sync-modal";
+  let modal = document.createElement("div");
+  modal.className = "modal";
+  overlay.appendChild(modal);
+  let closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "modal-close";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.innerHTML = "&times;";
+  modal.appendChild(closeBtn);
+  let h = document.createElement("h3");
+  h.textContent = title;
+  modal.appendChild(h);
+  if (hint) {
+    let p = document.createElement("p");
+    p.className = "modal-hint";
+    p.textContent = hint;
+    modal.appendChild(p);
+  }
+  let body = document.createElement("div");
+  modal.appendChild(body);
+  document.body.appendChild(overlay);
+  overlay.classList.add("open");
+  trapFocus(overlay);
+  // Capture-phase so our Escape fires before the app's global modal handler.
+  let onKey = (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); if (onDismiss) onDismiss(); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  if (onDismiss) {
+    closeBtn.addEventListener("click", onDismiss);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) onDismiss(); });
+  } else {
+    closeBtn.hidden = true;
+  }
+  let dismiss = () => {
+    document.removeEventListener("keydown", onKey, true);
+    releaseFocus(overlay);
+    overlay.remove();
+  };
+  return { overlay, modal, body, dismiss };
+};
+
+// A titled prompt with a vertical stack of buttons. Resolves to the chosen
+// value, or null if dismissed.
+const openChoiceModal = ({ title, hint, choices }) =>
+  new Promise((resolve) => {
+    let m;
+    let done = (v) => { m.dismiss(); resolve(v); };
+    m = buildSyncModal({ title, hint, onDismiss: () => done(null) });
+    let stack = document.createElement("div");
+    stack.className = "sync-choice-stack";
+    for (let c of choices) {
+      let b = document.createElement("button");
+      b.type = "button";
+      b.className = "button" +
+        (c.primary ? " button-primary" : c.ghost ? " button-ghost" : "");
+      b.textContent = c.label;
+      b.addEventListener("click", () => done(c.value));
+      stack.appendChild(b);
+    }
+    m.body.appendChild(stack);
+  });
+
+// A checkbox list + confirm. Resolves to the array of checked ids, or null if
+// dismissed.
+const openSelectModal = ({ title, hint, items, confirmLabel, emptyText }) =>
+  new Promise((resolve) => {
+    let m;
+    let done = (v) => { m.dismiss(); resolve(v); };
+    m = buildSyncModal({ title, hint, onDismiss: () => done(null) });
+    if (!items.length) {
+      let p = document.createElement("p");
+      p.className = "modal-toggle-sub";
+      p.textContent = emptyText || "Nothing here.";
+      m.body.appendChild(p);
+      let ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "button sync-select-confirm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", () => done([]));
+      m.body.appendChild(ok);
+      return;
+    }
+    let list = document.createElement("div");
+    list.className = "sync-select-list";
+    let checks = [];
+    for (let it of items) {
+      let row = document.createElement("label");
+      row.className = "sync-select-row";
+      let cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!it.checked;
+      let span = document.createElement("span");
+      span.textContent = it.label;
+      row.appendChild(cb);
+      row.appendChild(span);
+      list.appendChild(row);
+      checks.push({ id: it.id, cb });
+    }
+    m.body.appendChild(list);
+    let bar = document.createElement("div");
+    bar.className = "sync-select-bar";
+    let all = document.createElement("button");
+    all.type = "button";
+    all.className = "button button-sm button-ghost";
+    all.textContent = "Select all";
+    all.addEventListener("click", () => checks.forEach((c) => (c.cb.checked = true)));
+    let none = document.createElement("button");
+    none.type = "button";
+    none.className = "button button-sm button-ghost";
+    none.textContent = "Select none";
+    none.addEventListener("click", () => checks.forEach((c) => (c.cb.checked = false)));
+    bar.appendChild(all);
+    bar.appendChild(none);
+    m.body.appendChild(bar);
+    let confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "button button-primary sync-select-confirm";
+    confirm.textContent = confirmLabel || "Continue";
+    confirm.addEventListener("click", () =>
+      done(checks.filter((c) => c.cb.checked).map((c) => c.id)));
+    m.body.appendChild(confirm);
+  });
+
+// One modal listing every conflicting file with Local / Drive / Skip choices,
+// plus "keep all" shortcuts. Applying a choice resolves that row immediately;
+// Skip parks the conflict in the registry for later. Resolves when the list
+// empties or the modal is dismissed.
+const resolveConflicts = (conflicts) =>
+  new Promise((resolve) => {
+    let remaining = conflicts.slice();
+    let m, renderRows;
+    let finish = async () => {
+      m.dismiss();
+      await saveSyncPrefs();
+      refreshSyncUI();
+      resolve();
+    };
+    m = buildSyncModal({
+      title: "Sync conflicts",
+      hint: "These files changed on both this device and Drive. Choose which copy to keep.",
+      onDismiss: () => finish(),
+    });
+    let apply = async (c, dir) => {
+      if (dir === "skip") {
+        syncConflicts.set(c.name, c); // keep for later
+      } else {
+        try {
+          if (dir === "local") {
+            await driveUploadFile(c.name, c.localBytes, c.file.id);
+            syncPrefs.sigs[c.name] = c.ls;
+          } else {
+            if (isRomLoaded(c.game) && !c.name.startsWith("rom:")) {
+              showToast("Reload " + c.game + " to apply the Drive copy");
+            }
+            await writeSyncBytes(c.name, c.remoteBytes);
+            if (c.name.startsWith("rom:")) refreshHomeRecent();
+            syncPrefs.sigs[c.name] = c.rs;
+            syncPrefs.rmt[c.name] = c.file.modifiedTime;
+          }
+        } catch (e) { showToast("Couldn't resolve: " + e.message); return; }
+        syncConflicts.delete(c.name);
+      }
+      remaining = remaining.filter((x) => x !== c);
+      renderRows();
+    };
+    let bar = document.createElement("div");
+    bar.className = "sync-select-bar";
+    let allLocal = document.createElement("button");
+    allLocal.type = "button";
+    allLocal.className = "button button-sm";
+    allLocal.textContent = "Keep all local";
+    allLocal.addEventListener("click", async () => {
+      for (let c of remaining.slice()) await apply(c, "local");
+    });
+    let allDrive = document.createElement("button");
+    allDrive.type = "button";
+    allDrive.className = "button button-sm";
+    allDrive.textContent = "Keep all Drive";
+    allDrive.addEventListener("click", async () => {
+      for (let c of remaining.slice()) await apply(c, "drive");
+    });
+    bar.appendChild(allLocal);
+    bar.appendChild(allDrive);
+    m.body.appendChild(bar);
+    let listEl = document.createElement("div");
+    listEl.className = "sync-conflict-list";
+    m.body.appendChild(listEl);
+    renderRows = () => {
+      if (!remaining.length) { finish(); return; }
+      listEl.innerHTML = "";
+      for (let c of remaining) {
+        let row = document.createElement("div");
+        row.className = "sync-conflict-row";
+        let nm = document.createElement("span");
+        nm.className = "sync-conflict-name";
+        nm.textContent = prettyName(c.name);
+        nm.title = prettyName(c.name);
+        row.appendChild(nm);
+        let acts = document.createElement("div");
+        acts.className = "sync-conflict-actions";
+        for (let [dir, lbl, ghost, tip] of [
+          ["local", "Local", false, "Keep this device's copy"],
+          ["drive", "Drive", false, "Keep the Drive copy"],
+          ["skip", "Skip", true, "Leave this conflict for now"],
+        ]) {
+          let b = document.createElement("button");
+          b.type = "button";
+          b.className = "button button-sm" + (ghost ? " button-ghost" : "");
+          b.textContent = lbl;
+          b.title = tip;
+          b.addEventListener("click", () => apply(c, dir));
+          acts.appendChild(b);
+        }
+        row.appendChild(acts);
+        listEl.appendChild(row);
+      }
+    };
+    renderRows();
+  });
+
+// --- Full bidirectional reconcile (Sync now / "Yes" / selected setup) -----
+// Non-conflicting differences are applied immediately; genuine two-sided
+// divergences go to the conflict modal. `scope` is a Set of game names, or
+// null to use current sync membership.
+const runFullSync = async ({ scope, label } = {}) => {
+  if (!gdriveToken) return;
+  if (gdriveBusy) { showToast("A Drive operation is already running"); return; }
+  gdriveBusy = true;
+  setGdriveProgress((label || "Syncing") + "…");
+  let touchedGrid = false;
+  try {
+    let remote = new Map((await driveListAll()).map((f) => [f.name, f]));
+    let local = await localSyncFiles();
+    let inScope = (game) => (scope ? scope.has(game) : shouldSyncGame(game));
+    let names = new Set([...remote.keys(), ...local.keys()]);
+    let uploads = [];   // driveName
+    let downloads = []; // { name, file, bytes? }
+    let conflicts = [];
+    for (let name of names) {
+      let parsed = parseDriveFileName(name);
+      if (!parsed || !inScope(parsed.game)) continue;
+      let r = remote.get(name);
+      let hasLocal = local.has(name);
+      if (hasLocal && !r) { uploads.push(name); continue; }
+      if (!hasLocal && r) { downloads.push({ name, file: r }); continue; }
+      if (name.startsWith("rom:")) continue; // ROMs compared by name only
+      // Both sides present and non-ROM: compare content.
+      setGdriveProgress("Comparing " + prettyName(name) + "…");
+      let localBytes = await readSyncBytes(name);
+      let remoteBytes = await driveDownload(r.id);
+      let ls = localBytes ? sigOfBytes(localBytes) : null;
+      let rs = remoteBytes ? sigOfBytes(remoteBytes) : null;
+      if (ls === rs) {
+        syncPrefs.sigs[name] = ls;
+        syncPrefs.rmt[name] = r.modifiedTime;
+        continue;
+      }
+      let agreed = syncPrefs.sigs[name];
+      if (agreed != null && agreed === rs) { uploads.push(name); continue; }
+      if (agreed != null && agreed === ls) {
+        downloads.push({ name, file: r, bytes: remoteBytes });
+        continue;
+      }
+      conflicts.push({ name, game: parsed.game, kind: parsed.kind, file: r,
+        localBytes, remoteBytes, ls, rs });
+    }
+    let up = 0, down = 0;
+    for (let name of uploads) {
+      let bytes = await readSyncBytes(name);
+      if (!bytes) continue;
+      setGdriveProgress("Uploading " + prettyName(name) + "…");
+      await driveUploadFile(name, bytes, remote.get(name)?.id);
+      syncPrefs.sigs[name] = name.startsWith("rom:") ? null : sigOfBytes(bytes);
+      up++;
+    }
+    for (let d of downloads) {
+      let parsed = parseDriveFileName(d.name);
+      // Don't clobber the running game's save/state under the autosave loop.
+      if (isRomLoaded(parsed.game) && !d.name.startsWith("rom:")) continue;
+      setGdriveProgress("Downloading " + prettyName(d.name) + "…");
+      let bytes = d.bytes || await driveDownload(d.file.id);
+      await writeSyncBytes(d.name, bytes);
+      if (d.name.startsWith("rom:")) touchedGrid = true;
+      else syncPrefs.sigs[d.name] = sigOfBytes(bytes);
+      syncPrefs.rmt[d.name] = d.file.modifiedTime;
+      down++;
+    }
+    if (up) {
+      let after = new Map((await driveListAll()).map((f) => [f.name, f]));
+      for (let name of uploads) {
+        let f = after.get(name);
+        if (f) syncPrefs.rmt[name] = f.modifiedTime;
+      }
+    }
+    await saveSyncPrefs();
+    setGdriveProgress("");
+    if (conflicts.length) await resolveConflicts(conflicts);
+    let parts = [];
+    if (up) parts.push("uploaded " + up);
+    if (down) parts.push("downloaded " + down);
+    showToast(parts.length ? "Sync: " + parts.join(", ")
+      : conflicts.length ? "Resolve conflicts to finish"
+      : "Everything is in sync");
+  } catch (e) {
+    setGdriveProgress("");
+    showToast("Sync failed: " + e.message);
+  } finally {
+    gdriveBusy = false;
+    if (touchedGrid) refreshHomeRecent();
+    refreshSyncUI();
+  }
+};
+
+// --- Debounced background auto-sync (requirement #3) ----------------------
+// Hooks mark individual files dirty; a timer coalesces them into one Drive
+// pass. Uploads skip files whose signature is unchanged, and refuse to clobber
+// a file another device modified (surfacing it as a conflict instead).
+let syncUpQueue = new Set();
+let syncDelQueue = new Set();
+let syncTimer = null;
+const SYNC_DEBOUNCE_MS = 8000;
+
+const scheduleSyncFlush = () => {
+  if (!syncActive()) { syncUpQueue.clear(); syncDelQueue.clear(); return; }
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(flushSync, SYNC_DEBOUNCE_MS);
+};
+const markSyncUpload = (name) => {
+  let p = parseDriveFileName(name);
+  if (!p || !shouldSyncGame(p.game)) return;
+  syncUpQueue.add(name);
+  scheduleSyncFlush();
+};
+const markSyncDelete = (name) => {
+  let p = parseDriveFileName(name);
+  if (!p || !shouldSyncGame(p.game)) return;
+  syncDelQueue.add(name);
+  scheduleSyncFlush();
+};
+// Queue every local file for a game (used right after a ROM import).
+const markSyncUploadGame = (game) => {
+  if (!shouldSyncGame(game)) return;
+  localSyncFiles().then((local) => {
+    for (let [name, info] of local) if (info.game === game) syncUpQueue.add(name);
+    scheduleSyncFlush();
+  });
+};
+// Queue the standard save/state keys for deletion on Drive (save-file wipe).
+const queueSaveDataDeletes = (name) => {
+  markSyncDelete("save:" + name);
+  markSyncDelete("save:" + name + "-p2");
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    markSyncDelete(slotStateKey(name, s));
+    markSyncDelete(slotMetaKey(name, s));
+  }
+};
+
+const flushSync = async () => {
+  syncTimer = null;
+  if (!syncActive()) { syncUpQueue.clear(); syncDelQueue.clear(); return; }
+  if (gdriveBusy) { scheduleSyncFlush(); return; } // retry after current op
+  let ups = [...syncUpQueue]; syncUpQueue.clear();
+  let dels = [...syncDelQueue]; syncDelQueue.clear();
+  if (!ups.length && !dels.length) return;
+  gdriveBusy = true;
+  let newConflicts = [];
+  try {
+    let remote = new Map((await driveListAll()).map((f) => [f.name, f]));
+    for (let name of dels) {
+      let r = remote.get(name);
+      if (r) { try { await driveDelete(r.id); } catch {} }
+      delete syncPrefs.sigs[name];
+      delete syncPrefs.rmt[name];
+    }
+    for (let name of ups) {
+      let p = parseDriveFileName(name);
+      if (!p || !shouldSyncGame(p.game)) continue;
+      let bytes = await readSyncBytes(name);
+      if (!bytes) continue;
+      let r = remote.get(name);
+      if (name.startsWith("rom:")) {
+        if (!r) await driveUploadFile(name, bytes); // ROMs by name only
+        continue;
+      }
+      let sig = sigOfBytes(bytes);
+      if (r && sig === syncPrefs.sigs[name]) continue; // nothing new locally
+      if (r) {
+        let seen = syncPrefs.rmt[name];
+        if (seen != null && r.modifiedTime !== seen) {
+          // Another device wrote this file since our last sync — don't clobber.
+          let remoteBytes = await driveDownload(r.id);
+          newConflicts.push({ name, game: p.game, kind: p.kind, file: r,
+            localBytes: bytes, remoteBytes, ls: sig, rs: sigOfBytes(remoteBytes) });
+          continue;
+        }
+      }
+      await driveUploadFile(name, bytes, r?.id);
+      syncPrefs.sigs[name] = sig;
+    }
+    let after = new Map((await driveListAll()).map((f) => [f.name, f]));
+    for (let name of ups) {
+      let f = after.get(name);
+      if (f) syncPrefs.rmt[name] = f.modifiedTime;
+    }
+    await saveSyncPrefs();
+    if (newConflicts.length) {
+      for (let c of newConflicts) syncConflicts.set(c.name, c);
+      showToast(newConflicts.length + " sync conflict" +
+        (newConflicts.length > 1 ? "s" : "") + " — open Manage ROMs to resolve");
+      refreshSyncUI();
+    }
+  } catch (e) {
+    ups.forEach((n) => syncUpQueue.add(n)); // retry on transient failure
+    dels.forEach((n) => syncDelQueue.add(n));
+    console.warn("Drive sync flush failed:", e);
+  } finally {
+    gdriveBusy = false;
+    if (syncUpQueue.size || syncDelQueue.size) scheduleSyncFlush();
+  }
+};
+
+// --- Sign-in setup flow (requirement #1) ---------------------------------
+const promptSyncSetup = async () => {
+  let choice = await openChoiceModal({
+    title: "Sync your games?",
+    hint: "Keep ROMs, saves, and save states backed up and mirrored across your devices through Google Drive.",
+    choices: [
+      { label: "Yes — sync everything", value: "all", primary: true },
+      { label: "Selected ROMs only", value: "selected" },
+      { label: "No, don't sync", value: "off", ghost: true },
+    ],
+  });
+  if (choice == null) return; // dismissed => decide later, leave mode unset
+  if (choice === "off") {
+    syncPrefs.mode = "off";
+    await saveSyncPrefs();
+    refreshSyncUI();
+    return;
+  }
+  if (choice === "all") {
+    syncPrefs.mode = "all";
+    await saveSyncPrefs();
+    refreshSyncUI();
+    await runFullSync({ label: "Syncing everything" });
+    return;
+  }
+  await runSelectedSetup();
+};
+
+// "Selected ROMs only": two sequential modals — which Drive games to pull, and
+// which local games to push. Their union becomes the synced set.
+const runSelectedSetup = async () => {
+  let remoteFiles;
+  try { remoteFiles = await driveListAll(); }
+  catch (e) { showToast("Couldn't reach Drive: " + e.message); return; }
+  let remoteGames = [...new Set(remoteFiles
+    .map((f) => parseDriveFileName(f.name)?.game).filter(Boolean))].sort();
+  let localGames = await localGameNames();
+
+  let toDownload = await openSelectModal({
+    title: "Download from Drive",
+    hint: "Pick games stored on Drive to copy onto this device.",
+    items: remoteGames.map((g) => ({ id: g, label: g, checked: false })),
+    confirmLabel: "Next",
+    emptyText: "No games are backed up on Drive yet.",
+  });
+  if (toDownload == null) return; // cancelled the whole setup
+  let toUpload = await openSelectModal({
+    title: "Upload to Drive",
+    hint: "Pick games on this device to back up to Drive.",
+    items: localGames.map((g) => ({ id: g, label: g, checked: false })),
+    confirmLabel: "Sync selected",
+    emptyText: "No games are stored on this device yet.",
+  });
+  if (toUpload == null) return;
+
+  let selected = [...new Set([...toDownload, ...toUpload])];
+  syncPrefs.mode = "selected";
+  syncPrefs.selected = selected;
+  await saveSyncPrefs();
+  refreshSyncUI();
+  if (selected.length) {
+    await runFullSync({ scope: new Set(selected), label: "Syncing selected games" });
+  } else {
+    showToast("No games selected for sync");
+  }
+};
+
+// Called before a ROM is fully removed locally (requirement #4). If the game is
+// synced and present on Drive, ask whether to also delete it there or keep the
+// backup and stop syncing the game. No-op when signed out / not syncing.
+const handleSyncedRomDeletion = async (game) => {
+  if (!syncActive() || !shouldSyncGame(game)) return;
+  let onDrive;
+  try {
+    onDrive = (await driveListAll())
+      .filter((f) => parseDriveFileName(f.name)?.game === game);
+  } catch { return; } // offline: leave Drive untouched, don't block local delete
+  if (!onDrive.length) { detachGameFromSync(game); await saveSyncPrefs(); return; }
+  let choice = await openChoiceModal({
+    title: "Also delete from Drive?",
+    hint: '"' + game + '" is synced. Keep its backup on Drive (and stop syncing this game), or delete it from Drive too?',
+    choices: [
+      { label: "Keep on Drive, stop syncing", value: "keep", primary: true },
+      { label: "Delete from Drive too", value: "delete", ghost: true },
+    ],
+  });
+  if (choice === "delete") {
+    for (let f of onDrive) {
+      try { await driveDelete(f.id); } catch {}
+      delete syncPrefs.sigs[f.name];
+      delete syncPrefs.rmt[f.name];
+    }
+    showToast('Deleted "' + game + '" from Drive');
+  }
+  // Either choice (and dismissal) detaches the game so it isn't re-synced.
+  detachGameFromSync(game);
+  await saveSyncPrefs();
+};
+
+// --- Sync UI surfaces ----------------------------------------------------
+const homeSyncBtn = document.getElementById("home-sync");
+const refreshSyncUI = () => {
+  if (homeSyncBtn) homeSyncBtn.hidden = !syncActive();
+  if (romsModal.classList.contains("open")) renderGdriveSection();
+};
+if (homeSyncBtn) {
+  homeSyncBtn.addEventListener("click", () => runFullSync({ label: "Syncing" }));
+}
 
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
 // JS mirrors of the wasm-side option vars; they take effect the next time a
@@ -1866,6 +2568,8 @@ const addRecentRom = async (name, bytes, art) => {
   await bumpRecentIndex(name);
   refreshHomeRecent();
   requestPersistentStorage();
+  // Back the freshly-imported game up to Drive soon (no-op unless it syncs).
+  markSyncUploadGame(name);
 };
 
 // Recency bump for a ROM whose bytes are already stored (relaunch paths) —
@@ -2054,6 +2758,8 @@ const persistSave = async (romName, originalName) => {
       lastSaveSigKey = originalName;
       await dbPut("save:" + originalName, new Uint8Array(data));
       requestPersistentStorage();
+      markSyncUpload("save:" + originalName); // truly-dirty save -> Drive soon
+
     }
   } catch {}
 };
@@ -2229,6 +2935,8 @@ const saveToSlot = async (slot) => {
   try {
     await dbPut(slotStateKey(currentOriginalName, slot), bytes);
     await dbPut(slotMetaKey(currentOriginalName, slot), { thumb, ts: Date.now() });
+    markSyncUpload(slotStateKey(currentOriginalName, slot));
+    markSyncUpload(slotMetaKey(currentOriginalName, slot));
     return true;
   } catch (e) {
     showToast("Save state failed: " + e.message);
@@ -2367,6 +3075,8 @@ statesDeleteBtn.addEventListener("click", async () => {
   if (!confirm("Delete the save state in " + label + "? This can't be undone.")) return;
   await dbDelete(slotStateKey(currentOriginalName, selectedSlot));
   await dbDelete(slotMetaKey(currentOriginalName, selectedSlot));
+  markSyncDelete(slotStateKey(currentOriginalName, selectedSlot));
+  markSyncDelete(slotMetaKey(currentOriginalName, selectedSlot));
   showToast("Deleted " + label);
   await renderStatesGrid();
 });
@@ -4546,6 +5256,8 @@ var Module = {
     await loadColorCorrect();
     await loadSystemSettings();
     await loadVideoSettings();
+    await loadSyncPrefs();
+    refreshSyncUI();
     refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate

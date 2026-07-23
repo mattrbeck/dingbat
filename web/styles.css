@@ -4417,6 +4417,97 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   color: var(--text-faint);
 }
 
+/* ───────────────────────── Google Drive sync ───────────────────────── */
+/* Vertical button stack for the "Sync your games?" / delete-from-Drive prompts */
+.sync-choice-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sync-choice-stack .button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Checkbox pick-lists for "Selected ROMs only" */
+.sync-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.sync-select-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sync-select-row:hover {
+  background: var(--surface-2);
+}
+.sync-select-row input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #3b82f6);
+}
+.sync-select-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-select-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.sync-select-confirm {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Conflict list */
+.sync-conflict-cta {
+  margin: 0 0 10px;
+  border-color: var(--warn, #d08770);
+  color: var(--warn, #d08770);
+}
+.sync-conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sync-conflict-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.sync-conflict-name {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-conflict-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ─────────────────────────── Cheats modal ─────────────────────────── */
 .cheats-list {
   display: flex;
