@@ -1083,11 +1083,11 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   # Scale to the DirectSound latch range the APU expects. With the master-volume
   # double-apply fixed (see on_frame), the per-side envelope volumes already carry
   # the full engine gain, so this makeup is close to the pure linear ÷256 mixer
-  # scale (~2.0). 2.1 centres the residual: HLE RMS lands within ~5% of the real
-  # FIFO for FireRed (+4%), Emerald (+2%) and Advance Wars (-4%), peaks < 230 (the
-  # clamp is +-512). Previously 2.3 with a masterVol double-apply left Pokémon
-  # (masterVol 12/16) ~15-19% quiet — the "quiet snares" report.
-  let MP2K_MAKEUP_GAIN = (if m.makeup > 0'f32: m.makeup else: 2.1'f32)
+  # scale (~2.0). Recalibrated 2.1 -> 2.025 after the 2026-07 sweep fixes
+  # (attack frames, position resync, FIFO-drop repair cleaned the REAL
+  # reference): the 738-game archive A/B put the median HLE/REAL RMS at 1.037
+  # with 2.1, so 2.1/1.037 centres the corpus at 1.0 (IQR 0.96..1.03).
+  let MP2K_MAKEUP_GAIN = (if m.makeup > 0'f32: m.makeup else: 2.025'f32)
   let li = int32(outl_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   let ri = int32(outr_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   m.dbg_out_energy += abs(outl_f) + abs(outr_f)
