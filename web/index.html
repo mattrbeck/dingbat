@@ -418,13 +418,15 @@
       <div class="modal modal-settings">
         <button type="button" class="modal-close" id="settings-close" aria-label="Close">&times;</button>
         <h3>Settings</h3>
-        <div id="settings-tabs" role="tablist" aria-label="Settings sections">
-          <button type="button" class="settings-tab active" data-tab="controls" role="tab" aria-selected="true">Controls</button>
-          <button type="button" class="settings-tab" data-tab="gb" role="tab" aria-selected="false">Game Boy</button>
-          <button type="button" class="settings-tab" data-tab="gba" role="tab" aria-selected="false">GBA</button>
-          <button type="button" class="settings-tab" data-tab="video" role="tab" aria-selected="false">Video</button>
-          <button type="button" class="settings-tab" data-tab="audio" role="tab" aria-selected="false">Audio</button>
-          <button type="button" class="settings-tab" data-tab="general" role="tab" aria-selected="false">General</button>
+        <div id="settings-tabs-wrap">
+          <div id="settings-tabs" role="tablist" aria-label="Settings sections">
+            <button type="button" class="settings-tab active" data-tab="controls" role="tab" aria-selected="true">Controls</button>
+            <button type="button" class="settings-tab" data-tab="gb" role="tab" aria-selected="false">Game Boy</button>
+            <button type="button" class="settings-tab" data-tab="gba" role="tab" aria-selected="false">GBA</button>
+            <button type="button" class="settings-tab" data-tab="video" role="tab" aria-selected="false">Video</button>
+            <button type="button" class="settings-tab" data-tab="audio" role="tab" aria-selected="false">Audio</button>
+            <button type="button" class="settings-tab" data-tab="general" role="tab" aria-selected="false">General</button>
+          </div>
         </div>
 
         <div class="settings-pane" id="settings-pane-controls" role="tabpanel">

@@ -2512,10 +2512,50 @@ body.debug-2p .home-tile-link {
   max-width: 460px;
 }
 
+/* Wrapper exists to host the non-scrolling edge scrims — the bar itself
+   scrolls, so gradients on it would scroll along with the content */
+#settings-tabs-wrap {
+  position: relative;
+  margin-bottom: 18px;
+}
+
+/* Edge scrims: shown (via JS class) only while the bar can scroll that way.
+   A shadow rather than a fade-to-background so it stays visible even when
+   the cutoff lands exactly on the gap between two tabs. --inset-lo is the
+   theme-tuned dark-shadow token (softer on the light theme). */
+#settings-tabs-wrap::before,
+#settings-tabs-wrap::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 22px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+#settings-tabs-wrap::before {
+  left: 1px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: linear-gradient(to right, var(--inset-lo), rgba(0, 0, 0, 0));
+}
+
+#settings-tabs-wrap::after {
+  right: 1px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: linear-gradient(to left, var(--inset-lo), rgba(0, 0, 0, 0));
+}
+
+#settings-tabs-wrap.can-scroll-left::before,
+#settings-tabs-wrap.can-scroll-right::after {
+  opacity: 1;
+}
+
 #settings-tabs {
   display: flex;
   gap: 4px;
-  margin-bottom: 18px;
   padding: 3px;
   background: var(--surface-2);
   border: 1px solid var(--border);
