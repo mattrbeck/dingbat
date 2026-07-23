@@ -2103,6 +2103,43 @@ const resolveConflicts = (conflicts) =>
     renderRows();
   });
 
+// A blocking, non-dismissable progress modal for full syncs. It sits over the
+// home screen so the recents grid populating underneath (ROM downloads call
+// addRecentRom -> refreshHomeRecent) is hidden until the whole sync finishes —
+// the grid is only revealed, fully populated, when this closes.
+const openSyncProgress = (title) => {
+  let m = buildSyncModal({ title, onDismiss: null }); // no X / backdrop / Escape
+  let msg = document.createElement("p");
+  msg.className = "sync-progress-msg";
+  msg.textContent = "Checking Drive…";
+  let barWrap = document.createElement("div");
+  barWrap.className = "sync-progress-bar";
+  let fill = document.createElement("div");
+  fill.className = "sync-progress-fill indeterminate";
+  barWrap.appendChild(fill);
+  let count = document.createElement("p");
+  count.className = "sync-progress-count";
+  m.body.appendChild(msg);
+  m.body.appendChild(barWrap);
+  m.body.appendChild(count);
+  let closed = false;
+  return {
+    setText: (t) => { if (t) msg.textContent = t; },
+    // total > 0 => determinate bar + "n / total"; total 0 => animated barber pole
+    setProgress: (done, total) => {
+      if (total > 0) {
+        fill.classList.remove("indeterminate");
+        fill.style.width = Math.min(100, Math.round((done / total) * 100)) + "%";
+        count.textContent = done + " / " + total;
+      } else {
+        fill.classList.add("indeterminate");
+        count.textContent = "";
+      }
+    },
+    close: () => { if (!closed) { closed = true; m.dismiss(); } },
+  };
+};
+
 // --- Full bidirectional reconcile (Sync now / "Yes" / selected setup) -----
 // Non-conflicting differences are applied immediately; genuine two-sided
 // divergences go to the conflict modal. `scope` is a Set of game names, or
@@ -2111,9 +2148,12 @@ const runFullSync = async ({ scope, label } = {}) => {
   if (!gdriveToken) return;
   if (gdriveBusy) { showToast("A Drive operation is already running"); return; }
   gdriveBusy = true;
-  setGdriveProgress((label || "Syncing") + "…");
+  let prog = openSyncProgress(label || "Syncing your games");
+  // Mirror progress to both the blocking modal and the Manage-modal line.
+  let report = (t) => { prog.setText(t); setGdriveProgress(t); };
   let touchedGrid = false;
   try {
+    report("Checking Drive…");
     let remote = new Map((await driveListAll()).map((f) => [f.name, f]));
     let local = await localSyncFiles();
     let inScope = (game) => (scope ? scope.has(game) : shouldSyncGame(game));
@@ -2130,7 +2170,7 @@ const runFullSync = async ({ scope, label } = {}) => {
       if (!hasLocal && r) { downloads.push({ name, file: r }); continue; }
       if (name.startsWith("rom:")) continue; // ROMs compared by name only
       // Both sides present and non-ROM: compare content.
-      setGdriveProgress("Comparing " + prettyName(name) + "…");
+      report("Comparing " + prettyName(name) + "…");
       let localBytes = await readSyncBytes(name);
       let remoteBytes = await driveDownload(r.id);
       let ls = localBytes ? sigOfBytes(localBytes) : null;
@@ -2149,28 +2189,37 @@ const runFullSync = async ({ scope, label } = {}) => {
       conflicts.push({ name, game: parsed.game, kind: parsed.kind, file: r,
         localBytes, remoteBytes, ls, rs });
     }
+    // Now the total work is known — switch the bar to determinate.
+    let total = uploads.length + downloads.length;
+    let done = 0;
+    prog.setProgress(0, total);
     let up = 0, down = 0;
     for (let name of uploads) {
       let bytes = await readSyncBytes(name);
-      if (!bytes) continue;
-      setGdriveProgress("Uploading " + prettyName(name) + "…");
-      await driveUploadFile(name, bytes, remote.get(name)?.id);
-      syncPrefs.sigs[name] = name.startsWith("rom:") ? null : sigOfBytes(bytes);
-      up++;
+      if (bytes) {
+        report("Uploading " + prettyName(name) + "…");
+        await driveUploadFile(name, bytes, remote.get(name)?.id);
+        syncPrefs.sigs[name] = name.startsWith("rom:") ? null : sigOfBytes(bytes);
+        up++;
+      }
+      prog.setProgress(++done, total);
     }
     for (let d of downloads) {
       let parsed = parseDriveFileName(d.name);
       // Don't clobber the running game's save/state under the autosave loop.
-      if (isRomLoaded(parsed.game) && !d.name.startsWith("rom:")) continue;
-      setGdriveProgress("Downloading " + prettyName(d.name) + "…");
-      let bytes = d.bytes || await driveDownload(d.file.id);
-      await writeSyncBytes(d.name, bytes);
-      if (d.name.startsWith("rom:")) touchedGrid = true;
-      else syncPrefs.sigs[d.name] = sigOfBytes(bytes);
-      syncPrefs.rmt[d.name] = d.file.modifiedTime;
-      down++;
+      if (!(isRomLoaded(parsed.game) && !d.name.startsWith("rom:"))) {
+        report("Downloading " + prettyName(d.name) + "…");
+        let bytes = d.bytes || await driveDownload(d.file.id);
+        await writeSyncBytes(d.name, bytes);
+        if (d.name.startsWith("rom:")) touchedGrid = true;
+        else syncPrefs.sigs[d.name] = sigOfBytes(bytes);
+        syncPrefs.rmt[d.name] = d.file.modifiedTime;
+        down++;
+      }
+      prog.setProgress(++done, total);
     }
     if (up) {
+      report("Finishing up…");
       let after = new Map((await driveListAll()).map((f) => [f.name, f]));
       for (let name of uploads) {
         let f = after.get(name);
@@ -2179,6 +2228,9 @@ const runFullSync = async ({ scope, label } = {}) => {
     }
     await saveSyncPrefs();
     setGdriveProgress("");
+    // Reveal the finished grid before any conflict prompt takes over.
+    prog.close();
+    if (touchedGrid) { refreshHomeRecent(); touchedGrid = false; }
     if (conflicts.length) await resolveConflicts(conflicts);
     let parts = [];
     if (up) parts.push("uploaded " + up);
@@ -2191,6 +2243,7 @@ const runFullSync = async ({ scope, label } = {}) => {
     showToast("Sync failed: " + e.message);
   } finally {
     gdriveBusy = false;
+    prog.close();
     if (touchedGrid) refreshHomeRecent();
     refreshSyncUI();
   }
