@@ -2076,10 +2076,24 @@ body.debug-2p .home-tile-link {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  /* More tabs than fit on a narrow phone: scroll horizontally, no scrollbar
+     (a tab clipped at the edge is the scroll affordance) */
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* When scrolling a tab into view, stop short of the edge so a sliver of
+     the neighboring tab stays visible as a "there's more" hint */
+  scroll-padding: 0 28px;
+}
+
+#settings-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .settings-tab {
-  flex: 1 1 0;
+  /* Grow to fill the bar when there's room, but never shrink below the
+     label — overflow scrolls instead */
+  flex: 1 0 auto;
   padding: 7px 4px;
   font-size: 12.5px;
   font-weight: 600;
@@ -2122,7 +2136,7 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* "Reset all settings" footer row in the settings modal */
+/* "Reset all settings" row at the bottom of the General tab */
 .settings-reset-row {
   display: flex;
   align-items: center;

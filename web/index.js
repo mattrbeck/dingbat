@@ -615,6 +615,8 @@ const selectSettingsTab = (name) => {
     t.classList.toggle("active", on);
     t.setAttribute("aria-selected", on ? "true" : "false");
     document.getElementById("settings-pane-" + t.dataset.tab).hidden = !on;
+    // The tab bar scrolls on narrow screens — keep the active tab in view
+    if (on) t.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 };
 

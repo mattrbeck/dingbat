@@ -418,6 +418,8 @@
           <button type="button" class="settings-tab" data-tab="gb" role="tab" aria-selected="false">Game Boy</button>
           <button type="button" class="settings-tab" data-tab="gba" role="tab" aria-selected="false">GBA</button>
           <button type="button" class="settings-tab" data-tab="video" role="tab" aria-selected="false">Video</button>
+          <button type="button" class="settings-tab" data-tab="audio" role="tab" aria-selected="false">Audio</button>
+          <button type="button" class="settings-tab" data-tab="general" role="tab" aria-selected="false">General</button>
         </div>
 
         <div class="settings-pane" id="settings-pane-controls" role="tabpanel">
@@ -570,28 +572,7 @@
         </div>
 
         <div class="settings-pane" id="settings-pane-video" role="tabpanel" hidden>
-          <div class="modal-subhead no-rule">Sound</div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Pitch-correct fast-forward</span>
-              <span class="modal-toggle-sub">Keep audio at its normal pitch during 2× speed (time-stretch instead of jumping up an octave). Slightly more CPU.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="pitch-correct-ff-toggle" />
-              <span class="switch-track"></span>
-            </label>
-          </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Analog low-pass filter</span>
-              <span class="modal-toggle-sub">Gently soften the high end to mimic the GBA speaker's cap/analog smoothing. GBA only; off by default.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="audio-lowpass-toggle" />
-              <span class="switch-track"></span>
-            </label>
-          </div>
-          <div class="modal-subhead">Display</div>
+          <div class="modal-subhead no-rule">Display</div>
           <div class="modal-toggle-row">
             <div>
               <span class="modal-row-label">Color correction</span>
@@ -653,7 +634,33 @@
               <span class="switch-track"></span>
             </label>
           </div>
-          <div class="modal-subhead">App theme</div>
+        </div>
+
+        <div class="settings-pane" id="settings-pane-audio" role="tabpanel" hidden>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Pitch-correct fast-forward</span>
+              <span class="modal-toggle-sub">Keep audio at its normal pitch during 2× speed (time-stretch instead of jumping up an octave). Slightly more CPU.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="pitch-correct-ff-toggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Analog low-pass filter</span>
+              <span class="modal-toggle-sub">Gently soften the high end to mimic the GBA speaker's cap/analog smoothing. GBA only; off by default.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="audio-lowpass-toggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-pane" id="settings-pane-general" role="tabpanel" hidden>
+          <div class="modal-subhead no-rule">App theme</div>
           <div id="theme-picker" role="radiogroup" aria-label="App theme">
             <button type="button" class="theme-chip selected" data-theme-name="amber" role="radio" aria-checked="true"><span class="theme-swatch" aria-hidden="true"></span>Amber</button>
             <button type="button" class="theme-chip" data-theme-name="black" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Pure Black</button>
@@ -663,13 +670,13 @@
             <button type="button" class="theme-chip" data-theme-name="glacier" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Glacier</button>
             <button type="button" class="theme-chip" data-theme-name="emerald" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Emerald</button>
           </div>
-        </div>
-        <div class="settings-reset-row">
-          <div>
-            <span class="modal-row-label">Reset all settings</span>
-            <span class="modal-toggle-sub">Restore controls, audio, video and system options to defaults. Your games and saves are kept.</span>
+          <div class="settings-reset-row">
+            <div>
+              <span class="modal-row-label">Reset all settings</span>
+              <span class="modal-toggle-sub">Restore controls, audio, video and system options to defaults. Your games and saves are kept.</span>
+            </div>
+            <span id="reset-settings-slot"></span>
           </div>
-          <span id="reset-settings-slot"></span>
         </div>
         <p class="settings-version" id="settings-version"></p>
       </div>
