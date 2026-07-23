@@ -112,6 +112,42 @@ const SWI_HLE_BASE = 48
 # (mGBA suite SIO timing tests) aligned with the real-BIOS execution order.
 const HALT_RETURN_COST = 21
 
+# --- Real-BIOS routine-body cost models -------------------------------------
+#
+# The copy/decompression SWIs below charge the difference between what the
+# real BIOS routine costs and what the HLE implementation's own bus accesses
+# already charged. The models were derived by instruction-cycle counting of
+# the BIOS disassembly (routines at 0xB4C CpuSet, 0x10FC LZ77UnCompWram,
+# 0x1194 LZ77UnCompVram) and verified cycle-exact against real-BIOS execution
+# in dingbat on calibration streams (all-literal / min-run / max-run / mixed
+# LZ77 payloads; copies and fills across IWRAM/EWRAM/VRAM/ROM at both default
+# and 3,1 ROM waitstates). Fixed constants are the routine body cost beyond
+# the shared dispatch (SWI_HLE_BASE) and caller refill, which are charged
+# separately above and match the real dispatch/refill region-for-region.
+# Per-unit terms scale with the waitstates of the source/destination pages,
+# using nonsequential costs: the BIOS loops interleave their (0-wait BIOS)
+# instruction fetches with the data accesses, so no data burst survives.
+
+proc hle_body_start(cpu: CPU): int64 {.inline.} =
+  int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
+
+proc hle_charge_body(cpu: CPU; t0: int64; model: int) {.inline.} =
+  ## Top up whatever the HLE body has charged since `t0` (its actual bus
+  ## accesses) to `model`, the cost of the real BIOS routine body. O(1):
+  ## one subtraction and one idle block per call.
+  let charged = int(cpu.hle_body_start() - t0)
+  if model > charged:
+    cpu.idle(model - charged)
+
+proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
+  ## Input-dependent cost of the real BIOS divide loop (same shape as the
+  ## charge in hle_div; kept separate so ArcTan2 can price its internal Div).
+  let n = uint32(abs(int64(numer)) and 0xFFFFFFFF)
+  let d = uint32(abs(int64(denom)) and 0xFFFFFFFF)
+  if d == 0: return 19
+  let quot_bits = max(0, countLeadingZeroBits(d) - countLeadingZeroBits(max(n, 1'u32)) - 1)
+  19 + quot_bits * 13
+
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
   ## Only used when no real BIOS file is provided.
@@ -136,6 +172,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     bus.rom_hot = false
     bus.rom_next_addr = 1  # never matches (halfword-aligned addresses)
     bus.rom_free_since = bus.gba.scheduler.cycles + CycleCount(bus.cycles)
+  # Anchor for the routine-body cost models (everything before this point is
+  # the shared dispatch + caller refill, common to all SWIs)
+  let body_t0 = cpu.hle_body_start()
   case swi_num
   of 0x00:  # SoftReset
     let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
@@ -219,6 +258,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     ## Matches real BIOS: full 32-bit signed inputs, same branching logic.
     let x = cast[int32](cpu.r[0])
     let y = cast[int32](cpu.r[1])
+    # Cost of the real BIOS routine: octant fixups + an internal BIOS Div of
+    # the ratio + the fixed-iteration ArcTan polynomial. Calibrated against
+    # real-BIOS execution (axis cases exact, octants within ~40 cycles).
+    let atan2_model =
+      if y == 0: 26
+      elif x == 0: 28
+      else:
+        let swap = abs(int64(x)) >= abs(int64(y))
+        let num = cast[int32]((if swap: int64(y) else: int64(x)) shl 14)
+        let den = if swap: x else: y
+        70 + hle_div_body_cost(num, den) + 48
     if y == 0:
       if x >= 0:
         cpu.r[0] = 0
@@ -268,6 +318,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             bios_arctan(cpu)
             cpu.r[0] = 0xC000'u32 - cpu.r[0]
     cpu.r[3] = 0x170'u32
+    cpu.hle_charge_body(body_t0, atan2_model)
   of 0x0B:  # CpuSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -275,8 +326,22 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let count = bits_range(ctrl, 0, 20)
     let fill = bit(ctrl, 24)
     let word_mode = bit(ctrl, 26)
-    # Loop overhead of the real BIOS copy loop beyond the bus accesses
-    cpu.idle(int(count))
+    # Cost of the real BIOS's thumb copy/fill loop (routine at 0xB4C). Every
+    # data access is nonsequential (BIOS instruction fetches sit between
+    # them), so per-unit cost = loop instructions + N-cost of src read +
+    # N-cost of dst write; fills read src once (folded into the fixed part).
+    # Verified cycle-exact against real-BIOS execution for word/half x
+    # copy/fill across IWRAM/EWRAM/VRAM/ROM at two waitstate settings.
+    let cpuset_model = block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(src, 24, 27))
+      let dp = int(bits_range(dst, 24, 27))
+      if word_mode:
+        if fill: 44 + int(bus.wait32_n[sp]) + int(count) * (6 + int(bus.wait32_n[dp]))
+        else:    44 + int(count) * (8 + int(bus.wait32_n[sp]) + int(bus.wait32_n[dp]))
+      else:
+        if fill: 46 + int(bus.wait16_n[sp]) + int(count) * (7 + int(bus.wait16_n[dp]))
+        else:    46 + int(count) * (9 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp]))
     # Addresses are NOT aligned: normal memory aligns on the bus anyway, and
     # SRAM (8-bit bus) genuinely sees the unaligned byte address. Reads from
     # the protected BIOS/unused region return 0 (hardware-verified by the
@@ -305,6 +370,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         dst += 2
     cpu.r[0] = src
     cpu.r[1] = dst
+    cpu.hle_charge_body(body_t0, cpuset_model)
   of 0x01:  # RegisterRamReset
     let flags = cpu.r[0]
     if bit(flags, 0):  # Clear 256K EWRAM
@@ -350,15 +416,22 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
       # The real BIOS leaves the display in forced blank, not zeroed
       cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
-    # Simulate cycle cost with APU events suppressed
+    # Cost of the real BIOS reset paths, measured per flag bit against
+    # real-BIOS execution (stmia fill loops: EWRAM ~6.6 cycles/word, VRAM
+    # ~2.6, IWRAM ~1.65, plus the register-reset sequences). The RAM clears
+    # above bypass the bus, so hle_charge_body tops the I/O writes that WERE
+    # charged up to the modeled total. APU events stay suppressed during the
+    # jump.
     var hle_cycles = 0
-    if bit(flags, 0): hle_cycles += 192000
-    if bit(flags, 1): hle_cycles += 2000
-    if bit(flags, 2): hle_cycles += 500
-    if bit(flags, 3): hle_cycles += 48000
-    if bit(flags, 4): hle_cycles += 500
-    if bit(flags, 5) or bit(flags, 6) or bit(flags, 7): hle_cycles += 5000
-    cpu.gba.bus.add_cycles(hle_cycles)
+    if bit(flags, 0): hle_cycles += 434375  # 256K EWRAM
+    if bit(flags, 1): hle_cycles += 13303   # 32K IWRAM (minus last 0x200)
+    if bit(flags, 2): hle_cycles += 871     # palette
+    if bit(flags, 3): hle_cycles += 64711   # 96K VRAM
+    if bit(flags, 4): hle_cycles += 615     # OAM
+    if bit(flags, 5): hle_cycles += 289     # SIO registers
+    if bit(flags, 6): hle_cycles += 338     # sound registers
+    if bit(flags, 7): hle_cycles += 549     # remaining I/O
+    cpu.hle_charge_body(body_t0, hle_cycles)
     # Re-schedule APU events after cycle advance
     if bit(flags, 6):
       cpu.gba.apu.tick_frame_sequencer()
@@ -390,6 +463,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var src = cpu.r[0]
     var dst = cpu.r[1]
     let count = cpu.r[2]
+    # Real BIOS cost per entry: fixed-point sin/cos lookups, four 16x16
+    # multiplies and the src/dst accesses (2 words + 3 halfwords read,
+    # 4 halfwords + 2 words written), all nonsequential. Calibrated against
+    # real-BIOS execution (IWRAM structs exact, EWRAM within 5/entry).
+    let affine_model = block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(src, 24, 27))
+      let dp = int(bits_range(dst, 24, 27))
+      23 + int(count) * (73 + 2 * int(bus.wait32_n[sp]) + 3 * int(bus.wait16_n[sp]) +
+                         4 * int(bus.wait16_n[dp]) + 2 * int(bus.wait32_n[dp]))
     for i in 0'u32 ..< count:
       let center_org_x = cast[int32](cpu.gba.bus.read_word(src))
       let center_org_y = cast[int32](cpu.gba.bus.read_word(src + 4))
@@ -415,11 +498,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_word(dst + 12, cast[uint32](start_y))
       src += 20
       dst += 16
+    cpu.hle_charge_body(body_t0, affine_model)
   of 0x0F:  # ObjAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
     var count = cpu.r[2]
     let dst_stride = cpu.r[3]
+    # Real BIOS cost per entry: sin/cos lookups + two multiplies + 3 halfword
+    # reads and 4 halfword writes, all nonsequential. Calibrated cycle-exact
+    # against real-BIOS execution for IWRAM and EWRAM structs (stride 2 and
+    # 8 cost the same).
+    let affine_model = block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(src, 24, 27))
+      let dp = int(bits_range(dst, 24, 27))
+      15 + int(count) * (45 + 3 * int(bus.wait16_n[sp]) + 4 * int(bus.wait16_n[dp]))
     while count > 0:
       let sx = cast[int32](cast[int16](cpu.gba.bus.read_half(src)))
       let sy = cast[int32](cast[int16](cpu.gba.bus.read_half(src + 2)))
@@ -436,15 +529,19 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_half(dst, uint16(sin_val_y));           dst += dst_stride  # pc
       cpu.gba.bus.write_half(dst, uint16(cos_val_y));           dst += dst_stride  # pd
       count -= 1
+    cpu.hle_charge_body(body_t0, affine_model)
   of 0x11:  # LZ77UnCompWram (8-bit writes)
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     var dst = cpu.r[1]
     var remaining = decomp_len
+    var n_flags, n_lit, n_tok, n_runb = 0
     while remaining > 0:
-      let flags = cpu.gba.bus[src]; src += 1
+      let flags = cpu.gba.bus[src]; src += 1; n_flags += 1
       for i in 0 ..< 8:
         if remaining == 0: break
         if bit(flags, 7 - i):
@@ -453,27 +550,43 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           let b2 = uint32(cpu.gba.bus[src]); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
+          n_tok += 1
           for j in 0'u32 ..< length:
             if remaining == 0: break
             cpu.gba.bus[dst] = cpu.gba.bus[dst - offset - 1]
-            dst += 1; remaining -= 1
+            dst += 1; remaining -= 1; n_runb += 1
         else:
           # Uncompressed byte
           cpu.gba.bus[dst] = cpu.gba.bus[src]
-          src += 1; dst += 1; remaining -= 1
+          src += 1; dst += 1; remaining -= 1; n_lit += 1
+    # Cost of the real BIOS loop (routine at 0x10FC), per token kind. Rn/Db
+    # are the nonsequential byte access costs at the src/dst pages (the
+    # BIOS's ldrb/strb never form a data burst). Verified cycle-exact
+    # against real-BIOS execution on calibration streams at two waitstate
+    # settings; run bytes cost 7+2*Db (ldrb dst-offset + strb + loop).
+    block:
+      let bus = cpu.gba.bus
+      let rn = int(bus.wait16_n[src_page])
+      let db = int(bus.wait16_n[dst_page])
+      cpu.hle_charge_body(body_t0, 29 + int(bus.wait32_n[src_page]) +
+        n_flags * (9 + rn) + n_lit * (16 + rn + db) +
+        n_tok * (22 + 3 * rn) + n_runb * (7 + 2 * db))
   of 0x12:  # LZ77UnCompVram (16-bit writes)
     # Decompress into a local buffer first, then copy to VRAM via halfword
     # writes.  Direct VRAM decompression breaks back-references because
     # bytes are buffered into halfwords and not flushed until the second
     # byte arrives — reads of the unflushed byte hit stale VRAM.
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     var buf = newSeq[uint8](decomp_len)
     var buf_pos: uint32 = 0
+    var n_flags, n_lit, n_tok, n_runb = 0
     while buf_pos < decomp_len:
-      let flags = cpu.gba.bus[src]; src += 1
+      let flags = cpu.gba.bus[src]; src += 1; n_flags += 1
       for i in 0 ..< 8:
         if buf_pos >= decomp_len: break
         if bit(flags, 7 - i):
@@ -481,13 +594,14 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           let b2 = uint32(cpu.gba.bus[src]); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
+          n_tok += 1
           for j in 0'u32 ..< length:
             if buf_pos >= decomp_len: break
             buf[buf_pos] = buf[buf_pos - offset - 1]
-            buf_pos += 1
+            buf_pos += 1; n_runb += 1
         else:
           buf[buf_pos] = cpu.gba.bus[src]
-          src += 1; buf_pos += 1
+          src += 1; buf_pos += 1; n_lit += 1
     # Write to destination using halfword writes
     var dst = cpu.r[1]
     var idx: uint32 = 0
@@ -498,6 +612,19 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       else:
         cpu.gba.bus.write_half(dst, uint16(buf[idx]))
         dst += 2; idx += 1
+    # Cost of the real BIOS loop (routine at 0x1194). Heavier than the Wram
+    # variant: it buffers output bytes into halfwords with register-shift
+    # ops and reads back-references from the destination with ldrh, so run
+    # bytes cost 21+Dh and each completed output halfword adds one strh
+    # (+Dh). Verified cycle-exact against real-BIOS execution on calibration
+    # streams (VRAM and EWRAM destinations, two waitstate settings).
+    block:
+      let bus = cpu.gba.bus
+      let rn = int(bus.wait16_n[src_page])
+      let dh = int(bus.wait16_n[dst_page])
+      cpu.hle_charge_body(body_t0, 39 + int(bus.wait32_n[src_page]) +
+        n_flags * (9 + rn) + n_lit * (20 + rn) + n_tok * (25 + 3 * rn) +
+        n_runb * (21 + dh) + dh * int(decomp_len div 2))
   of 0x10:  # BitUnPack
     var src = cpu.r[0]
     var dst = cpu.r[1]
