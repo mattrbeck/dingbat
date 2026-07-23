@@ -1764,6 +1764,12 @@ body.has-game #home-load:hover {
   margin-bottom: 10px;
 }
 
+/* display:flex above would otherwise defeat the [hidden] attribute the empty
+   library state sets on the header. */
+.home-recent-head[hidden] {
+  display: none;
+}
+
 .home-recent-label {
   font-size: 11px;
   font-weight: 600;
@@ -1806,8 +1812,14 @@ body.has-game #home-load:hover {
   gap: 8px;
 }
 
-/* Empty-library placeholder (no games yet) — hosts the Drive sign-in entry */
+/* Empty-library placeholder (no games yet) — hosts the Drive sign-in entry.
+   #home-recent is an auto-fill grid, so span every column and center the box
+   with margin auto rather than letting it sit in the first 210px track. */
 .home-empty {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: 100%;
+  max-width: 360px;
   display: flex;
   flex-direction: column;
   align-items: center;
