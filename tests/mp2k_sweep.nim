@@ -8,6 +8,9 @@
 # Usage: mp2k_sweep <rom> [frames=900]
 # Env:   DINGBAT_NOHLE=1          boot with the HLE disarmed (isolation runs)
 #        DINGBAT_SWEEP_TIMEOUT=s  wall-clock budget before bailing (default 120)
+#        DINGBAT_SWEEP_DRIVE=1    mash A/START (menu-gated titles: health
+#                                 screens, title menus — e.g. Mother 3's
+#                                 press-any-button intro gate)
 #
 # Reported fields (all from THIS run):
 #   rom            basename
@@ -30,6 +33,7 @@
 import std/[os, strutils, math, json, monotimes, times]
 import dingbat/gba/gba
 import dingbat/common/test_output
+import dingbat/common/input
 
 const
   IDENT_IDLE = 0x68736D53'u32
@@ -75,9 +79,14 @@ proc main() =
     ident_last = 0'u32
     frames_run = 0
     timed_out = false
+  let drive = getEnv("DINGBAT_SWEEP_DRIVE") == "1"
   let t0 = getMonoTime()
   try:
     for f in 0 ..< frames:
+      if drive:
+        let phase = (f div 8) mod 4
+        let btn = (if (f div 32) mod 2 == 0: A else: START)
+        emu.keypad.handle_input(btn, phase < 2)
       emu.step_frame()
       inc frames_run
       if emu.mp2k.engaged:
