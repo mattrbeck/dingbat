@@ -506,6 +506,98 @@ type
     resample_freq*:     int
     output_freq*:       int
 
+  # EXPLORATORY: MP2K/M4A sound-engine HLE state (see mp2k.nim). Off by default.
+  # Field names follow the m4a WaveData layout (loop_start, sample_count) from
+  # the pret m4a_internal.h decompilation where they name a format field, and
+  # our own terms for the resampler's private working state.
+  Mp2kSampler* = object
+    active*:      bool
+    wave_data*:   uint32
+    rom_off*:     uint32    # cached ROM byte offset of the sample data (in_rom)
+    in_rom*:      bool      # sample bytes live in cartridge ROM (fast path)
+    sample_count*: uint32   # WaveData.size (m4a_internal.h): number of source samples
+    loop_start*:  uint32    # WaveData.loopStart (m4a_internal.h): loop restart index
+    looping*:     bool
+    freq*:        uint32
+    compressed*:  bool      # m4a BDPCM ("compressed waveform"): TONEDATA_TYPE_CMP/REV
+                            # routing with a compressed WaveData header (see mp2k.nim)
+    use_pcm_rate*: bool     # TONEDATA_TYPE_FIX (type bit3): step at SoundInfo.pcmFreq
+    reversed*:    bool      # TONEDATA_TYPE_REV (type bit4): play the sample backward
+    start_off*:   uint32    # note-on sample start offset (SoundChannel.count at START)
+    # BDPCM decoded-block cache, mirroring the real driver's block-at-a-time
+    # decode into sDecodingBuffer keyed by a cached block index (SoundChannel
+    # xpi; see SoundMainRAM_Unk2 in pret pokeemerald m4a_1.s):
+    blk_index*:   uint32    # block number currently decoded in blk (0xFFFFFFFF = none)
+    blk*:         array[64, int8]  # decoded s8 samples of that block
+    # Private resampler working state: a forward-stepping polyphase resampler
+    # keeps an integer read cursor, a fractional phase, and a short tap history.
+    src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
+    phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
+    need_fetch*:  bool      # a new source sample must be decoded this step
+    tap0*, tap1*, tap2*, tap3*: float32  # 4-tap history, s8 units, tap0 newest
+    vol_l0*, vol_l1*: float32
+    vol_r0*, vol_r1*: float32
+    age*:         int       # frames since (re)trigger; 0 on the attack frame
+
+  Mp2kHle* = ref object
+    gba* {.cursor.}: GBA
+    hook_addr*:  uint32     # learned SoundMainRAM entry PC (0xFFFFFFFF = not learned)
+    entry_addr*: uint32     # hook_addr with the Thumb bit cleared (skip-mode return point)
+    # Runtime-detection state (see mp2k.nim "Runtime detection"): the frame
+    # poll arms `probing` once the SoundInfo ident magic appears; cpu.tick then
+    # watches for the first RAM-fetched PC with r0 == &SoundInfo while the
+    # engine lock is held — that is the mixer entry.
+    probing*:    bool       # PC probe armed (only until the hook is learned)
+    probe_sound_info*: uint32  # &SoundInfo cached for the probe's lock check
+    probe_block*: array[8, uint32]  # invalidated candidates (mislearned PCs)
+    probe_block_n*: int
+    probe_fails*: int       # mislearn count; probing gives up at 8
+    skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
+    engaged*:    bool       # a valid SoundInfo has been observed at least once
+    frame_seen*: bool
+    # Set by mp2k_state_loaded (save-state / rollback load): the shadow mixer
+    # state is deliberately NOT serialized, so the next mixer pass must re-latch
+    # every channel from the engine's SoundInfo — resuming mid-note channels at
+    # the engine's current playback position instead of retriggering them.
+    resync_pending*: bool
+    samplers*:   array[12, Mp2kSampler]
+    frame_len*:  int
+    frame_pos*:  int
+    compressed_skipped*: int
+    dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
+    dbg_skip_fires*: int
+    dbg_hook_fires*: int
+    dbg_out_energy*: float64
+    dbg_out_count*:  int
+    dbg_reverb*:     uint8
+    dbg_pcm_rate*:   int
+    pcm_sample_rate*: int
+    reverb_strength*: uint8
+    use_cubic*:      bool
+    env_mode*:       int           # DIAG: 0=ramp,1=constant-current
+    resample_mode*:  int           # DIAG: 0=cubic,1=linear,2=nearest(hold)
+    rev_scale*:      float32        # DIAG: multiplier on the reverb wet factor (default 1)
+    makeup*:         float32        # DIAG: output makeup gain override (0 => built-in default)
+    master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
+    # FIFO topology, observed from the live DMA registers each mixer pass (see
+    # on_frame): some m4a vintages mix MONO — one pcmBuffer fed to a single
+    # FIFO (e.g. Minish Cap: DMA1->FIFO A routed to both speakers, DMA2 off),
+    # with a single per-channel volume at SoundChannel+0x0A and +0x0B unused.
+    # 0 = stereo (L->FIFO A, R->FIFO B), 1 = mono via FIFO A, 2 = mono via B.
+    mono_mode*:      int
+    reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
+    reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
+    rev_period*:     int           # echo delay in frames = SoundInfo.pcmDmaPeriod
+                                   # (the pcmBuffer DMA ring length the real
+                                   # reverb feeds back across); min 1
+    # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
+    # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer
+    # pass by ~one frame. We render at the mixer pass, so without this the HLE
+    # leads the hardware FIFO by a frame. This ring delays our output to match.
+    out_delay*:      seq[int16]     # stereo output delay line (2 * db_delay slots)
+    out_delay_w*:    int            # write cursor (in stereo frames)
+    db_delay*:       int            # delay length in samples (0 disables)
+
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
@@ -527,6 +619,9 @@ type
     cpu*:        CPU
     ppu*:        PPU
     apu*:        APU
+    # EXPLORATORY: MP2K/M4A sound-engine HLE (off by default). See mp2k.nim.
+    mp2k*:       Mp2kHle
+    mp2k_hle*:   bool
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine
@@ -561,6 +656,12 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc timer_overflow*(apu: APU; timer: int)
 proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
+proc new_mp2k*(gba: GBA): Mp2kHle
+proc init_mp2k*(m: Mp2kHle)
+proc mixer_hook*(m: Mp2kHle)
+proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
+proc mp2k_frame_poll*(m: Mp2kHle)
+proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
 proc request_immediate*(dma: DMA)
@@ -614,6 +715,10 @@ include arm/arm
 include arm/lut
 include thumb/thumb
 include cpu
+when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
+  var mp2kWavCapture*: seq[int16] = @[]
+  var realDmaCapture*: seq[int16] = @[]
+  var dbgRetrigCount*: int = 0
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
@@ -625,6 +730,7 @@ include timer
 include serial
 include dma
 include bus
+include mp2k
 
 # Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)
@@ -728,6 +834,10 @@ proc post_init*(gba: GBA) =
     if g.dma.pending != 0 and not g.bus.dma_active:
       g.dma.run_pending()
   gba.handle_saves()
+  # EXPLORATORY: MP2K HLE. Detection is runtime-driven (per-frame poll + PC
+  # probe, see mp2k.nim); nothing runs unless gba.mp2k_hle is set.
+  gba.mp2k = new_mp2k(gba)
+  gba.mp2k.init_mp2k()
   if not gba.run_bios:
     gba.cpu.skip_bios()
 
@@ -800,6 +910,10 @@ proc refresh_cheat_rom_patches*(gba: GBA) =
 
 proc step_frame*(gba: GBA) =
   gba.apply_cheats()
+  # EXPLORATORY: MP2K HLE — cheap per-frame presence poll + probe arming (runs
+  # only when the HLE is enabled; see mp2k.nim "Runtime detection").
+  if gba.mp2k_hle and gba.mp2k != nil:
+    gba.mp2k.mp2k_frame_poll()
   gba.cpu.count_cycles = 0
   while not gba.ppu.frame:
     gba.cpu.tick()

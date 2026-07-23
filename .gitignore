@@ -68,6 +68,17 @@ ios/Dingbat.xcodeproj/
 ios/build/
 ios/DerivedData/
 dingbat_dist
+
+# EXPLORATORY mp2k HLE scratch binaries
+scratch_mp2kwav
+scratch_bdpcm_test
+scratch_probe
+bench_freq
+scratch_drums
+scratch_mkstate
+scratch_modebits_test
+scratch_stateresync
+scratch_bdpcm_test
 tools/romfuzz/dingbat_nav
 tools/romfuzz/mgba_runner
 tools/romfuzz/nba_runner
@@ -79,3 +90,12 @@ __pycache__/
 /*.gba
 /*.zip
 /*.sav
+# Scratch harness binaries (HLE audio branch)
+scratch_drums
+scratch_mkstate
+scratch_stateresync
+scratch_modebits_test
+scratch_bdpcm_test
+scratch_mp2k_boot
+scratch_mc
+dingbat_bench_hle

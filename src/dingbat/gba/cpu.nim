@@ -308,6 +308,10 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
     cpu.cpsr.overflow = bit(not (operand_1 xor operand_2) and (operand_2 xor res), 31)
   res
 
+when defined(pcprofile):
+  var prof_cycles*: array[16, uint64]
+  var prof_iwram*: array[32, uint64]   # per-1KB bucket of IWRAM 0x03000000..0x03007FFF
+
 proc tick*(cpu: CPU) =
   # Take a pending IRQ before the IntrWait re-halt check: the handler must
   # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
@@ -332,6 +336,46 @@ proc tick*(cpu: CPU) =
       cpu.halt_resume_charge = 0
   if not cpu.halted:
     cpu.instr_exc_return = false
+    # EXPLORATORY: MP2K HLE mixer hook. When enabled and PC reaches the
+    # engine's (runtime-learned) SoundMainRAM entry, refresh the shadow mixer
+    # from SoundInfo. The real function still runs afterwards (shadow mixing),
+    # so this only reads state — it does not alter control flow or timing.
+    # Until the entry is learned, and only while the frame poll has armed
+    # probing (SoundInfo ident magic present), watch for the first RAM-fetched
+    # instruction with r0 == &SoundInfo while the engine lock is held: that is
+    # the mixer entry (see mp2k.nim "Runtime detection").
+    if cpu.gba.mp2k_hle and cpu.gba.mp2k != nil:
+      let m = cpu.gba.mp2k
+      if m.hook_addr != 0xFFFFFFFF'u32:
+        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+        if cur == m.hook_addr:
+          m.dbg_hook_fires.inc
+          m.mixer_hook()
+          if m.skip:
+            m.dbg_skip_fires.inc
+            # EXPERIMENTAL perf probe: BX LR to skip the real mixer body and
+            # reclaim its CPU cycles. The hook sits at the mixer's entry,
+            # BEFORE any stack push, so r14 still holds the return address and
+            # sp is untouched. NOT correct (the engine's per-frame envelope
+            # ramp normally happens inside this function) — this measures the
+            # performance ceiling of an aggressive HLE only, not a shippable
+            # path.
+            let lr = cpu.r[14]
+            cpu.cpsr.thumb = (lr and 1) != 0
+            cpu.r[15] = if cpu.cpsr.thumb: lr and not 1'u32 else: lr and not 3'u32
+            cpu.clear_pipeline()
+            return
+      elif m.probing:
+        # Learning probe (bounded: engine-init to first mixer pass). Inline
+        # prefilter: RAM-region PC and r0 == &SoundInfo; the out-of-line probe
+        # does the lock check and the learn.
+        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+        let region = cur shr 24
+        if (region == 0x02'u32 or region == 0x03'u32) and
+           cpu.r[0] == m.probe_sound_info:
+          m.probe_pc(cur)
+    when defined(pcprofile):
+      let prof_region = bits_range(cpu.r[15], 24, 27)
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:
       cpu.thumb_execute(instr)
@@ -340,6 +384,10 @@ proc tick*(cpu: CPU) =
     cpu.last_instr_exc_return = cpu.instr_exc_return
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
+    when defined(pcprofile):
+      prof_cycles[prof_region] += uint64(max(1, total))
+      if prof_region == 3:
+        prof_iwram[(cpu.r[15] shr 10) and 31] += uint64(max(1, total))
     if total == 0: remaining = 1  # forward-progress guarantee
     cpu.gba.bus.cycles = 0
     cpu.gba.bus.synced = 0

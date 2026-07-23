@@ -2592,7 +2592,7 @@ const saveAudioSettings = () => {
   if (!db) return;
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
-    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass }), 250);
+    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass, mp2kHle }), 250);
 };
 
 const setVolume = (v) => {
@@ -2625,6 +2625,9 @@ const loadAudioSettings = async () => {
   if (s && typeof s.audioLowpass === "boolean") audioLowpass = s.audioLowpass;
   if (lowpassToggle) lowpassToggle.checked = audioLowpass;
   applyAudioLowpass();
+  if (s && typeof s.mp2kHle === "boolean") mp2kHle = s.mp2kHle;
+  if (mp2kHleToggle) mp2kHleToggle.checked = mp2kHle;
+  applyMp2kHle();
 };
 
 for (let s of volSliders) {
@@ -2680,6 +2683,29 @@ if (pcffToggle) {
   pcffToggle.addEventListener("change", () => {
     pitchCorrectFF = pcffToggle.checked;
     applyPitchCorrectFF();
+    saveAudioSettings();
+  });
+}
+
+// --- MP2K sound-engine HLE ("Improve audio quality in supported titles") ---
+// Experimental opt-in: re-renders GBA music above the FIFO's ~13 kHz when the
+// runtime detection recognizes Nintendo's MP2K/m4a engine in the loaded game.
+// The wasm side remembers the preference for future cores (make_gba) and
+// applies it to the live core, so this only needs to push on change / init.
+// Persisted in the "audio" IDB record alongside volume/mute/pitchCorrectFF.
+var mp2kHle = false;
+const mp2kHleToggle = document.getElementById("mp2k-hle-toggle");
+
+const applyMp2kHle = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
+    Module._wasm_set_mp2k_hle(mp2kHle ? 1 : 0);
+  }
+};
+
+if (mp2kHleToggle) {
+  mp2kHleToggle.addEventListener("change", () => {
+    mp2kHle = mp2kHleToggle.checked;
+    applyMp2kHle();
     saveAudioSettings();
   });
 }
@@ -3396,6 +3422,12 @@ const resetAllSettings = async () => {
   pitchCorrectFF = false;
   if (pcffToggle) pcffToggle.checked = false;
   applyPitchCorrectFF();
+  mp2kHle = false;
+  if (mp2kHleToggle) mp2kHleToggle.checked = false;
+  applyMp2kHle();
+  audioLowpass = false;   // (was previously missed by reset)
+  if (lowpassToggle) lowpassToggle.checked = false;
+  applyAudioLowpass();
 
   // Color correction
   colorCorrect = true;
@@ -3605,6 +3637,7 @@ const loadRom = async (romName, originalName) => {
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
+  applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   benchReport("load");
   updateCanvasScaling();
   setTimeout(() => logViewportDiag("romload"), 500);
@@ -5319,3 +5352,4 @@ joystickEl.addEventListener("touchstart", joystickTouchStart);
 joystickEl.addEventListener("touchmove", joystickTouchMove);
 joystickEl.addEventListener("touchend", joystickTouchEnd);
 joystickEl.addEventListener("touchcancel", joystickTouchEnd);
+

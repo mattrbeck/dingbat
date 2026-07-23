@@ -243,7 +243,18 @@ proc get_sample*(apu: APU) =
   let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
-  let (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
+  var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
+  when defined(mp2kwav):
+    realDmaCapture.add raw_dma_a  # the game's OWN FIFO output, for A/B calibration
+    realDmaCapture.add raw_dma_b
+  # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
+  # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
+  # routing/volume path below (the GBATEK-documented FIFO sink) then applies
+  # unchanged.
+  if apu.gba.mp2k_hle and apu.gba.mp2k != nil and apu.gba.mp2k.engaged:
+    let (hl, hr) = apu.gba.mp2k.render_sample()
+    raw_dma_a = hl
+    raw_dma_b = hr
   let dma_a = if apu.channel_mask[4]: raw_dma_a else: 0'i16
   let dma_b = if apu.channel_mask[5]: raw_dma_b else: 0'i16
   let dma_a_scaled = int32(dma_a) shl apu.soundcnt_h.dma_sound_a_volume

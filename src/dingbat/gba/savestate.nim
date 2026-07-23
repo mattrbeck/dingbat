@@ -585,6 +585,13 @@ proc gba_apply_state(gba: GBA; payload: string) =
   # WAITCNT-derived bus timing tables.
   gba.interrupts.check_interrupts()
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
+  # The MP2K HLE shadow mixer's state is deliberately not serialized (state
+  # files stay byte-identical with the HLE on or off); it is rebuilt from the
+  # restored RAM instead. Reset it and re-latch on the next mixer-pass hook.
+  # gba_apply_state is the single funnel for every load path (load_state,
+  # load_state_bytes, apply_state_payload/rollback), so this covers them all.
+  if gba.mp2k != nil:
+    gba.mp2k.mp2k_state_loaded()
 
 # Canonical value stored in the state-file header's "ROM size" slot. The ROM
 # buffer is now sized to the cart's next power of two (not a flat 32 MB), but

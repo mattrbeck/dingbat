@@ -51,6 +51,46 @@ proc main() =
     let emu = new_gba(bios, rom_path, run_bios = false, use_hle = bios.len == 0)
     emu.test_output = test_out
     emu.post_init()
+    if getEnv("DINGBAT_MP2K") == "1":
+      emu.mp2k_hle = true
+    if getEnv("DINGBAT_MP2K_SKIP") == "1":
+      emu.mp2k_hle = true
+      emu.mp2k.skip = true
+    if getEnv("DINGBAT_MP2K_DUMP") == "1":
+      # EXPLORATORY: verify MP2K detection + SoundInfo reading. Detection is
+      # runtime-learned (mp2k.nim), so hook_addr stays 0xFFFFFFFF until the
+      # engine's first mixer pass; the post-run summary prints the final value.
+      emu.mp2k_hle = true
+      for f in 0 ..< warmup:
+        for ev in script:
+          if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
+        emu.step_frame()
+      var proc_bytes = "SoundMainRAM prologue @entry: "
+      for k in 0'u32 ..< 12'u32:
+        proc_bytes.add toHex(emu.bus.read_half_internal(emu.mp2k.entry_addr + k*2), 4) & " "
+      echo proc_bytes
+      let sip = emu.bus.read_word_internal(0x03007FF0'u32)
+      echo "SoundInfo ptr @03007FF0 = 0x", toHex(sip, 8)
+      if (sip shr 24) != 0:
+        let magic = emu.bus.read_word_internal(sip)
+        echo "  magic = 0x", toHex(magic, 8), "  (ok=", magic == 0x68736D54'u32, ")"
+        echo "  maxChans=", emu.bus.read_byte_internal(sip + 6),
+             " masterVol=", emu.bus.read_byte_internal(sip + 7)
+        echo "  engaged=", emu.mp2k.engaged, " compressed_skipped=", emu.mp2k.compressed_skipped
+        var active = 0
+        for i in 0 ..< 12:
+          let cb = sip + 0x50'u32 + uint32(i) * 64
+          let status = emu.bus.read_byte_internal(cb)
+          if (status and 0xC7'u8) != 0:
+            active.inc
+            let wave = emu.bus.read_word_internal(cb + 0x24)
+            echo "  ch", i, " status=0x", toHex(status, 2),
+                 " type=0x", toHex(emu.bus.read_byte_internal(cb + 1), 2),
+                 " envVol=", emu.bus.read_byte_internal(cb + 9),
+                 " freq=", emu.bus.read_word_internal(cb + 0x20),
+                 " wave=0x", toHex(wave, 8)
+        echo "  active channels = ", active
+      return
     if getEnv("DINGBAT_BENCH_HASH") == "1":
       var h = 0xCBF29CE484222325'u64
       for f in 0 ..< warmup + frames:
@@ -79,6 +119,29 @@ proc main() =
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+    if emu.mp2k != nil and emu.mp2k_hle:
+      echo "  mp2k: entry=0x", toHex(emu.mp2k.entry_addr, 8),
+           " hook=0x", toHex(emu.mp2k.hook_addr, 8),
+           " skip_fires=", emu.mp2k.dbg_skip_fires,
+           " hook_fires=", emu.mp2k.dbg_hook_fires,
+           " engaged=", emu.mp2k.engaged,
+           " avg_out_energy=", (if emu.mp2k.dbg_out_count > 0:
+             formatFloat(emu.mp2k.dbg_out_energy / emu.mp2k.dbg_out_count.float, ffDecimal, 4) else: "0")
+    when defined(pcprofile):
+      var tot = 0'u64
+      for r in 0..15: tot += gba.prof_cycles[r]
+      let names = ["BIOS", "unused", "EWRAM", "IWRAM", "MMIO", "PRAM", "VRAM", "OAM",
+                   "ROM0", "ROM0h", "ROM1", "ROM1h", "ROM2", "ROM2h", "SRAM", "SRAMh"]
+      echo "--- PC cycle profile (region: cycles, %) ---"
+      for r in 0..15:
+        if gba.prof_cycles[r] > 0:
+          echo names[r], ": ", gba.prof_cycles[r], "  ",
+            formatFloat(gba.prof_cycles[r].float * 100.0 / tot.float, ffDecimal, 2), "%"
+      echo "--- IWRAM per-1KB (addr: cycles, % of total) ---"
+      for b in 0..31:
+        if gba.prof_iwram[b] > 0:
+          echo toHex(0x03000000'u32 + uint32(b) * 1024, 8), ": ", gba.prof_iwram[b], "  ",
+            formatFloat(gba.prof_iwram[b].float * 100.0 / tot.float, ffDecimal, 2), "%"
   else:
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
     emu.test_output = test_out

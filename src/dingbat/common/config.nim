@@ -273,6 +273,7 @@ type
     rewind*:            bool     # keep rewind history (hold ` to rewind)
     pitch_correct_ff*:  bool     # WSOLA pitch-preserving 2x fast-forward (off = octave-up)
     audio_lowpass*:     bool     # analog-output low-pass on the GBA mix (cap/speaker smoothing)
+    mp2k_hle*:          bool     # experimental MP2K sound-engine HLE (auto-engages on detection)
 
 proc new_config*(): Config =
   Config(
@@ -296,6 +297,7 @@ proc new_config*(): Config =
     rewind:          true,
     pitch_correct_ff: false,
     audio_lowpass:   false,
+    mp2k_hle:        false,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -328,6 +330,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.pitch_correct_ff = j["pitch_correct_ff"].getBool(false)
   if j.hasKey("audio_lowpass"):
     cfg.audio_lowpass = j["audio_lowpass"].getBool(false)
+  if j.hasKey("mp2k_hle"):
+    cfg.mp2k_hle = j["mp2k_hle"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -428,6 +432,7 @@ proc save_config*(cfg: Config) =
   lines.add("rewind: " & $cfg.rewind)
   lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)
   lines.add("audio_lowpass: " & $cfg.audio_lowpass)
+  lines.add("mp2k_hle: " & $cfg.mp2k_hle)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))
