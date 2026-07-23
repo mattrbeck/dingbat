@@ -1,5 +1,5 @@
 # =============================================================================
-# EXPLORATORY: MP2K / M4A ("Sappy") sound-engine HLE  (included by gba.nim)
+# MP2K / M4A ("Sappy") sound-engine HLE  (included by gba.nim)
 # =============================================================================
 # High-level-emulate the GBA's common MP2K music mixer: detect the engine at
 # runtime via its SoundInfo work area in guest RAM (no ROM signature — see the
@@ -7,10 +7,11 @@
 # frame, and render the DirectSound audio ourselves at a higher quality than
 # the game's ~13 kHz FIFO stream.
 #
-# This is a PROOF OF CONCEPT, OFF BY DEFAULT (gba.mp2k_hle). It is NOT
-# cycle-accurate. Shadow state is deliberately NOT serialized into save
-# states (files are identical with the HLE on or off); every state/rollback
-# load instead calls mp2k_state_loaded to rebuild it from emulated RAM.
+# EXPERIMENTAL and OFF BY DEFAULT (gba.mp2k_hle; the "Improve audio quality"
+# setting in both frontends). It is NOT cycle-accurate. Shadow state is
+# deliberately NOT serialized into save states (files are identical with the
+# HLE on or off); every state/rollback load instead calls mp2k_state_loaded
+# to rebuild it from emulated RAM.
 #
 # Provenance / license: this file is an independent, MIT-licensed implementation
 # built from PUBLIC, non-copyrightable facts about Nintendo's "MusicPlayer2000"

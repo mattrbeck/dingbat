@@ -641,6 +641,16 @@
         <div class="settings-pane" id="settings-pane-audio" role="tabpanel" hidden>
           <div class="modal-toggle-row">
             <div>
+              <span class="modal-row-label">Improve audio quality in supported titles</span>
+              <span class="modal-toggle-sub">Experimental. Re-renders music at higher quality in GBA games built on Nintendo's standard sound engine (most are). Applies automatically when a supported game is detected; other games are unaffected.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="mp2k-hle-toggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-toggle-row">
+            <div>
               <span class="modal-row-label">Pitch-correct fast-forward</span>
               <span class="modal-toggle-sub">Keep audio at its normal pitch during 2× speed (time-stretch instead of jumping up an octave). Slightly more CPU.</span>
             </div>

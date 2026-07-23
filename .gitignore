@@ -83,3 +83,13 @@ tools/romfuzz/dingbat_nav
 tools/romfuzz/mgba_runner
 tools/romfuzz/nba_runner
 __pycache__/
+
+# Scratch harness binaries (HLE audio branch)
+scratch_drums
+scratch_mkstate
+scratch_stateresync
+scratch_modebits_test
+scratch_bdpcm_test
+scratch_mp2k_boot
+scratch_mc
+dingbat_bench_hle

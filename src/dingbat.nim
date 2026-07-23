@@ -463,6 +463,13 @@ proc apply_audio_lowpass() =
   if app.gba_emu != nil:
     app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass)
 
+proc apply_mp2k_hle() =
+  # Experimental MP2K sound-engine HLE. Arming the flag costs nothing on its
+  # own — the HLE only engages when the runtime detection recognizes the
+  # engine in the loaded game (mp2k.nim), so this is safe to leave on.
+  if app.gba_emu != nil:
+    app.gba_emu.mp2k_hle = app.cfg.mp2k_hle
+
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
@@ -503,6 +510,7 @@ proc load_rom(path: string) =
   apply_master_volume()
   apply_pitch_correct_ff()
   apply_audio_lowpass()
+  apply_mp2k_hle()
   apply_panel_uniforms()
   blend_prev.setLen(0)  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
@@ -957,6 +965,12 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Analog low-pass filter", nil,
                               addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
           apply_audio_lowpass()
+          save_config(app.cfg)
+        # Experimental MP2K sound-engine HLE; auto-engages per-game when the
+        # engine is detected, other games are unaffected. Off by default.
+        if igMenuItem_BoolPtr("Improve audio quality (experimental)", nil,
+                              addr app.cfg.mp2k_hle, true):
+          apply_mp2k_hle()
           save_config(app.cfg)
         igSeparator()
         if igMenuItem_BoolPtr("LCD Color Correction", nil,
@@ -1799,6 +1813,7 @@ proc main() =
     apply_master_volume()
     apply_pitch_correct_ff()
     apply_audio_lowpass()
+    apply_mp2k_hle()
 
   app = AppState(
     cfg:             cfg,

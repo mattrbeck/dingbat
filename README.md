@@ -109,6 +109,9 @@ The GB / GBC PPU offers two implementations: a cycle-accurate FIFO renderer (the
   - Game Boy Color support, including HDMA, double-speed mode, and palettes
 - GBA
   - Accurate sound emulation (both Direct Sound and PSGs)
+  - Optional "Improve audio quality" mode (experimental): games built on
+    Nintendo's standard MP2K/M4A sound engine are detected at runtime and
+    their music is re-rendered per-note above the FIFO's native mix rate
   - HLE BIOS, so no BIOS file is required
   - PPU features
     - Modes 0-5

@@ -142,6 +142,7 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
 var optGbFifo = true
 var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
 var optGbaRunBios = true
+var optMp2kHle = false        # MP2K sound-engine HLE (opt-in, engages on detection)
 
 proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
   optGbFifo = fifo != 0
@@ -159,10 +160,11 @@ proc make_gba(rom_path: string): GBA =
   let have_bios = fileExists("bios.bin")
   let bios = if have_bios: "bios.bin" else: ""
   let mode = if have_bios: optGbaBiosMode else: 0
-  new_gba(bios, rom_path,
-          run_bios = have_bios and optGbaRunBios,
-          use_hle = mode == 0,
-          hle_after_bios = mode == 2)
+  result = new_gba(bios, rom_path,
+                   run_bios = have_bios and optGbaRunBios,
+                   use_hle = mode == 0,
+                   hle_after_bios = mode == 2)
+  result.mp2k_hle = optMp2kHle
 
 # Interframe blending (LCD ghosting): presents the average of the last two
 # frames, like mGBA's "interframe blending" — the real panels' slow pixel
@@ -178,11 +180,13 @@ proc wasm_set_frame_blend(on: cint) {.exportc.} =
   prevRaw.setLen(0)  # drop stale history (also on core/resolution switch)
 
 proc wasm_set_mp2k_hle(on: cint) {.exportc.} =
-  ## EXPLORATORY: toggle MP2K/M4A sound-engine HLE on the live GBA core at
-  ## runtime (detection already ran in post_init; this only gates the mixer).
-  ## Returns 1 if the engine was actually detected in the loaded ROM, else 0.
+  ## Toggle MP2K/M4A sound-engine HLE ("Improve audio quality"): remembered for
+  ## cores created later (make_gba) AND applied to the live GBA core, so the
+  ## settings switch works mid-game. Arming it costs nothing on its own — the
+  ## HLE only engages when the runtime detection actually finds the engine.
+  optMp2kHle = on != 0
   if stateKind == ekGBA and stateGba != nil:
-    stateGba.mp2k_hle = on != 0
+    stateGba.mp2k_hle = optMp2kHle
 
 proc wasm_mp2k_available(): cint {.exportc.} =
   ## 1 when the loaded ROM's MP2K engine was detected (HLE can do something).
