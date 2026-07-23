@@ -104,6 +104,7 @@ const
   SI_REVERB       = 0x05   # reverb (0 = off)
   SI_MAX_CHANS    = 0x06   # maxChans
   SI_MASTER_VOL   = 0x07   # masterVolume
+  SI_DMA_PERIOD   = 0x0B   # pcmDmaPeriod: pcmBuffer ring length in V-blank frames
   SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
   SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
 
@@ -368,18 +369,47 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       1.0'f32
   var maxc = int(m.rd8(sound_info + SI_MAX_CHANS))
   if maxc > MP2K_MAX_CHANNELS: maxc = MP2K_MAX_CHANNELS
+  # FIFO topology: observe which FIFO(s) the engine actually feeds, from the
+  # live sound-DMA registers (channels 1/2 are the only FIFO-capable ones —
+  # GBATEK). The standard stereo driver runs DMA1->FIFO A (left) and
+  # DMA2->FIFO B (right); some m4a vintages mix MONO instead — one pcmBuffer
+  # through a single FIFO (e.g. Minish Cap: DMA1->FIFO A with SOUNDCNT_H
+  # routing A to both speakers and DMA2 disabled), and a single per-channel
+  # volume in the +0x0A slot with +0x0B unused (observed live: +0x0A ==
+  # envelopeVolume * avg(rightVolume, leftVolume) >> 8, +0x0B always 0).
+  # Keying on the DMA registers is exactly what the real signal path does, so
+  # it is vintage-independent: substitute only the FIFO(s) the driver drives.
+  block:
+    var fed_a = false
+    var fed_b = false
+    for c in 1 .. 2:
+      if m.gba.dma.dmacnt_h[c].enable and
+         m.gba.dma.dmacnt_h[c].start_timing == 3:   # special = FIFO timing
+        if   m.gba.dma.dmadad[c] == 0x040000A0'u32: fed_a = true
+        elif m.gba.dma.dmadad[c] == 0x040000A4'u32: fed_b = true
+    m.mono_mode = (if fed_a and not fed_b: 1
+                   elif fed_b and not fed_a: 2
+                   else: 0)
   m.reverb_strength = m.rd8(sound_info + SI_REVERB)
   m.pcm_sample_rate = int(m.rd32(sound_info + SI_PCM_RATE))
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
   # Lazily allocate the reverb echo line the first frame a game asks for it.
-  # MP2K's reverb is "a simple reverb (echo) effect with fixed delay" (loveemu),
-  # so a single delay line one output frame long is all we need. Size it to a
-  # power of two >= one frame of stereo samples for cheap index masking.
-  if m.reverb_strength > 0'u8 and m.reverb_ring.len == 0:
+  # MP2K's reverb is "a simple reverb (echo) effect with fixed delay" (loveemu):
+  # the mixer seeds each frame's pcmBuffer slot from the content it is about to
+  # overwrite — the frame mixed pcmDmaPeriod V-blanks ago, which the DMA just
+  # finished playing — scaled by reverb/128. So the echo delay is pcmDmaPeriod
+  # FRAMES (e.g. 7 in pret pokeemerald's PCM_DMA_BUF_SIZE, 6 in Minish Cap),
+  # not one. Read the period live and size the ring to a power of two >= that
+  # many output frames of stereo samples for cheap index masking.
+  m.rev_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
+  if m.rev_period < 1: m.rev_period = 1
+  elif m.rev_period > 16: m.rev_period = 16
+  if m.reverb_strength > 0'u8 and
+     m.reverb_ring.len < m.rev_period * max(1, m.frame_len) * 2:
     var slots = 1'u32
-    while slots < uint32(max(1, m.frame_len)): slots = slots shl 1
+    while slots < uint32(m.rev_period * max(1, m.frame_len)): slots = slots shl 1
     m.reverb_ring = newSeq[float32](int(slots) * 2)
     m.reverb_w = 0
   m.frame_pos = 0
@@ -550,8 +580,15 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     # the value in force for this frame. Shift last frame's endpoint into vol_*0 and
     # ramp toward this frame's value across the frame, mirroring the real driver's
     # per-sample volume interpolation from the previous endpoint.
-    let vl = float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult
+    # MONO vintages (see the FIFO-topology block above) fold pan away entirely:
+    # the mixer computes ONE volume — envelopeVolume * avg(rV, lV) >> 8 — into
+    # the +0x0A slot and leaves +0x0B at 0. Consume that single volume for both
+    # accumulator sides (they stay identical; the output router below then
+    # feeds the one fed FIFO). Reading +0x0B as "left" there would silence the
+    # mix — that was the Minish Cap "HLE way quieter" bug.
     let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
+    let vl = (if m.mono_mode != 0: vr
+              else: float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult)
     s.vol_l0 = s.vol_l1
     s.vol_r0 = s.vol_r1
     s.vol_l1 = vl
@@ -755,7 +792,9 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     let slots = uint32(m.reverb_ring.len shr 1)   # stereo slots (power of two)
     let mask  = slots - 1'u32
     let w     = uint32(m.reverb_w)
-    let delay = uint32(m.frame_len)               # fixed delay: one output frame
+    # Fixed delay = the engine's pcmBuffer DMA ring length (pcmDmaPeriod frames;
+    # see on_frame) — the real reverb feeds back the frame the DMA just played.
+    let delay = uint32(m.frame_len * max(1, m.rev_period))
     let ri    = ((w - delay) and mask) shl 1
     let wet   = 0.5'f32 * (m.reverb_ring[ri] + m.reverb_ring[ri + 1])  # mono echo
     let rsc   = (if m.rev_scale < 0'f32: 0.0'f32
@@ -779,8 +818,17 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   let ri = int32(outr_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   m.dbg_out_energy += abs(outl_f) + abs(outr_f)
   m.dbg_out_count.inc
-  let outl = int16(clamp(li, -512, 511))
-  let outr = int16(clamp(ri, -512, 511))
+  var outl = int16(clamp(li, -512, 511))
+  var outr = int16(clamp(ri, -512, 511))
+  # Route to the FIFO(s) the engine actually feeds (see on_frame). render_sample
+  # returns (FIFO A, FIFO B). A mono driver drives a single FIFO; the other one
+  # never receives data on real hardware, so it must be substituted with
+  # silence — injecting our second accumulator there would add sound on a FIFO
+  # the game may still have routed to a speaker.
+  case m.mono_mode
+  of 1: outr = 0            # mono via FIFO A (outl == outr already; B silent)
+  of 2: outl = 0            # mono via FIFO B
+  else: discard
   # DirectSound double-buffer: emit the sample from db_delay samples ago so the HLE
   # stream lags the mixer pass by one frame, exactly as the real driver's DMA lags
   # its pcmBuffer fill. Without this the HLE leads the hardware FIFO by ~one frame

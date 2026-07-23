@@ -574,8 +574,17 @@ type
     rev_scale*:      float32        # DIAG: multiplier on the reverb wet factor (default 1)
     makeup*:         float32        # DIAG: output makeup gain override (0 => built-in default)
     master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
+    # FIFO topology, observed from the live DMA registers each mixer pass (see
+    # on_frame): some m4a vintages mix MONO — one pcmBuffer fed to a single
+    # FIFO (e.g. Minish Cap: DMA1->FIFO A routed to both speakers, DMA2 off),
+    # with a single per-channel volume at SoundChannel+0x0A and +0x0B unused.
+    # 0 = stereo (L->FIFO A, R->FIFO B), 1 = mono via FIFO A, 2 = mono via B.
+    mono_mode*:      int
     reverb_ring*:    seq[float32]  # stereo delay ring for MP2K reverb
     reverb_w*:       int           # write cursor into reverb_ring (in stereo frames)
+    rev_period*:     int           # echo delay in frames = SoundInfo.pcmDmaPeriod
+                                   # (the pcmBuffer DMA ring length the real
+                                   # reverb feeds back across); min 1
     # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
     # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer
     # pass by ~one frame. We render at the mixer pass, so without this the HLE
