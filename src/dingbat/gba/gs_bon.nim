@@ -103,6 +103,148 @@
 #     [Corroboration: ipatix/gba-hq-mixer (MIT) documents this driver
 #     family's buffer-feedback reverb design; agbplay documents distinct
 #     'gs1'/'gs2' reverb models for these games — facts only, no code.]
+#
+# Golden Sun: The Lost Age (USA/Europe) ships a DIFFERENT build of the same
+# driver family. Facts from our own probes/disassembly of ITS IWRAM copy
+# (scratch_tla_stab + the gsprobe trace; same clean-room method as GS1):
+#   * Same SOUND_INFO_PTR slot 0x03007FF0 -> SoundInfo at 0x02005850, same
+#     "Smsh" ident, never locked. Stock SoundInfo/SoundChannel field layout
+#     (verified live: reverb=50, masterVolume=15, freq idx 9 -> pcmFreq
+#     31536 Hz, pcmSamplesPerVBlank=528, pcmDmaPeriod=3, maxChans=10).
+#   * DMA FIFO buffers are NOT at SoundInfo+0x350: DMA1 (left) drains
+#     0x02003A90, DMA2 (right) 0x020046F0 — 0xC60 apart, BELOW SoundInfo
+#     (3-chunk rings, 0x420 bytes per per-frame chunk). Not used by this HLE
+#     (we substitute at the FIFO latch), documented for completeness.
+#   * The IWRAM block is larger (runs past 0x03001000). Runtime-stable range
+#     0x030001FA..0x030009AB (per-byte last-change tracking over 2000 frames);
+#     the self-modifying inner mixing loops start at +0x9AC. Fingerprint below
+#     covers 0x400..0x9A7. Per-channel processing entry (Thumb): 0x030007B5,
+#     entered once per frame with r0=chan count (10), r1=DMA chunk index,
+#     r2=chunk byte offset — the exact analog of GS1's +0x658 entry, channel
+#     state PRE-update at entry, so the same shadow scheme applies.
+#   * Envelope semantics (our disassembly at +0x7B4): note-on/attack/decay/
+#     pseudo-echo identical to GS1, but RELEASE is LINEAR: env -= 256-release
+#     (negative -> pseudo-echo/kill), where GS1's is multiplicative
+#     env*release>>8.
+#   * Per-side gain: sideVol * (env + env>>3) >> 9 — the driver boosts the
+#     stored envelope by 9/8 before the volume multiply (GS1 does not).
+#   * Stereo lanes: SAME as GS1 — the +2 volume byte feeds the FIFO-A (left)
+#     stream, +3 the FIFO-B (right) stream. (The TLA branch originally
+#     carried a "swapped vs GS1" flag, but it was measured against the
+#     pre-polish GS1 baseline which itself had the lanes backwards; per-side
+#     RMS/correlation against the real FIFOs confirms +2 -> A on BOTH
+#     builds, so there is no per-build swap.)
+#   * Inner mixer: s8 samples with 2-tap linear interpolation, 528-sample
+#     chunks, same channel struct usage (ct/+0x18, freq Hz/+0x20, wave/+0x24,
+#     cur/+0x28) — the shadow machinery carries over unchanged.
+#   * Synth instruments: same WaveData size==0 && loopStart==0 marker and the
+#     same data[1..5] oscillator descriptor format as GS1 (verified against
+#     the ROM's synth entries; both observed ones are duty-squares).
+#   * Native-rate drums: channel type bit 0x08 = play at pcmFreq with no
+#     resampling (our disasm of +0xC1C; matches agbplay's documented 31 kHz
+#     TLA drums). Defensive: the sequencer writes freq=31536 for these
+#     channels anyway.
+#   * Reverb + output stage (from our disassembly of TLA's live output loop,
+#     the ARM function at block +0xD44..+0xE84, entered through the Thumb
+#     `bx pc` thunk at +0xD40; dumps taken in five scenes — title, two
+#     in-game, synth-heavy, prologue — all agree):
+#       - The mix buffer (word per stereo frame, low half = left, same as
+#         GS1) lives at 0x03006FC0 (literal at block +0xEE8). The output
+#         loop processes two frames per iteration with packed-halfword
+#         SIMD-in-a-register tricks (0x80008000 sign masks).
+#       - PACK: each 16-bit mix half is packed to the FIFO ring as a DITHERED
+#         BYTE PAIR — 0x420 bytes per 528-frame chunk, i.e. TWO bytes per
+#         sample per ring, played by the FIFO at 2x pcmFreq (63072 Hz):
+#           t  = half (+0x40 on "bias" frames)   [see the +0xD1C nibble below]
+#           n  = t < 0 ? 0x40 : 0
+#           byteA = (t + n) >> 7,  byteB = (t + n - 0x40) >> 7
+#         byteA is stored first; byteA-byteB is always 0 or 1 (verified on
+#         live ring dumps), so the pair carries a half-LSB of extra
+#         resolution (9-bit effective through the 8-bit DAC at 2x rate).
+#         Whether the +0x40 bias is applied is chosen per frame by the low
+#         nibble of the word at +0xD1C ((nib & 12) == 0 -> bias): the loop's
+#         back-branch at +0xE64 is runtime-patched between two entry points
+#         (+0xDB0 with bias / +0xDB8 without) from the candidates at
+#         +0xE88/+0xE8C. The nibble word is a ~10-frame rotating schedule
+#         maintained by the caller (feeder semantics not derived; the HLE
+#         reads the live nibble each frame instead of modeling it).
+#         Halfword overflow saturates via the +0xE90 helper so the packed
+#         byte clamps to s8 (mix half effectively [-0x4000,0x3FBF]).
+#       - REVERB: the mix-buffer seed for the next pass is a pure function of
+#         the QUANTIZED ring bytes (unlike GS1, the dry mix halfword never
+#         feeds back directly — everything recirculates through the s8 FIFO
+#         bytes). Per frame i, with rings A(left)/B(right) read at the write
+#         position BEFORE being overwritten (bytes from P=3 passes ago, i.e.
+#         P+1=4 frames back for the consuming pass):
+#           seedL = cLA*qA_L[-4f] + cLB*qA_R[-4f] + ownL
+#           seedR = cRA*qA_L[-4f] + cRB*qA_R[-4f] + 32*qA_L[-1f-176smp]
+#         where the coefficient halfword pairs live as DATA literals at
+#         +0xD38 = (cRA<<16)|cLA = 0xFFF80035 -> cLA=53, cRA=-8 and
+#         +0xD3C = (cRB<<16)|cLB = 0x0034FFF8 -> cLB=-8, cRB=52, applied by
+#         multiplying the s8 byte by the packed word (mul/mla at +0xE00/
+#         +0xE10; the inter-lane borrow leakage of that trick is <= 1 LSB and
+#         not replicated). 53/128 = 0.4140625 and -8/128 = -0.0625 match the
+#         'gs2' coefficients agbplay documents (facts only) — note the real
+#         driver's right-side same-tap is 52, not 53, and the cross taps into
+#         the seed come from ring A only:
+#           - ownL (+0xE34..+0xE44): the CURRENT pass's just-written left
+#             byteB, v=(b<<24)+(b<<17) wrapped u32, contribution = v asr 19
+#             = b*32.25 (+64 when b<0 from the logical-shift fold) — a
+#             1-frame same-side left tap of gain ~1/4.
+#           - the right-lane tap (+0xE48..+0xE54, `add r2, r2, fp, lsl #21`)
+#             reads left byteA bytes through a second runtime-advanced
+#             pointer (+0xD2C) offset so the read is a CONSTANT 176 samples
+#             (the +0xD30 literal, = spv/3) behind the current write pos —
+#             i.e. left output delayed 1 frame + 176 samples, gain 32/128.
+#         The two-segment loop split (+0xD30/+0xD34 bookkeeping) exists only
+#         to keep that 176-sample distance across chunk boundaries.
+#       - The coefficients are NOT runtime-patched: the packed words appear
+#         exactly once in the whole ROM (the block's boot-copy source at file
+#         +0x12F0) and are identical in all five probed scenes. The HLE still
+#         live-reads them and validates the tap instructions each frame
+#         (gs_parse_tla_reverb) — unrecognized code turns reverb off (safe
+#         non-engagement) without silencing the dry path.
+#     The HLE renders this model integer-exact in halfword/byte units and at
+#     the DRIVER's own rate: gs_tla_step_driver produces one 31536 Hz sample
+#     per driver tick (channels step with the driver's own freq*divFreq/2^23
+#     increment, so resample phase and alias fold match the real mixer;
+#     native drums land on step 1.0 = sample-exact), and gs_render_sample
+#     resamples the dithered pair to the 32768 Hz latch as the pair mean
+#     (gsholdsel DIAG selects hold-exact bytes instead). The seed model was
+#     VALIDATED BIT-EXACTLY against the live driver: 528/528 mix-buffer seed
+#     words match our prediction from the ring bytes on every probed frame
+#     (scratch_tla_seeddump + the offline checker) — including the packed-
+#     lane carry leakage, the pair-fold u32 wraps and the +64 negative-side
+#     fold, all of which are replicated verbatim. The old TLA makeup
+#     calibration (0.9624) is gone along with the placeholder echo model —
+#     the mapping is exact by construction.
+#   * Interpolation segment: the real mixer interpolates [s[n], s[n+1]] AT
+#     position n; a trailing-tap pipeline (fetch s[n] but interpolate two
+#     taps back, as the GS1 render path does) delays every voice by ~2
+#     SOURCE samples — at TLA's 2.6 kHz bass rates that is a 20+ output-
+#     sample PER-VOICE skew which decorrelated the full mix even though solo
+#     voices measured fine. The TLA path fetches the current segment's 4-tap
+#     neighborhood instead (no voice delay). NOTE: GS1's path still carries
+#     the trailing-tap delay; at 21 kHz rates the skew is small and GS1 is
+#     kept bit-identical — removing it there is a possible future gain but
+#     needs its own re-verification pass.
+#   * Known honest gaps (measured, small): the real driver idles at a ~0.2-
+#     0.8 RMS (latch units, i.e. below one byte LSB) noise floor after music
+#     stops — a self-sustaining quantization limit cycle of the byte-domain
+#     feedback (persists even with the coefficient words zeroed and the tap
+#     instructions nop'd, so part of it is fed by the channel path itself);
+#     reproducing it needs a bit-exact integer DRY mixer too, and the HLE
+#     deliberately renders clean silence instead. Dry-path float-vs-integer
+#     rounding also keeps the byte streams from being bit-equal, so the
+#     chaotic wet coupling diverges in detail (statistically alike).
+#     Fidelity vs the real FIFO (30 s windows, cubic default build):
+#     title corr 0.87/0.86 L/R, calm in-game 0.89/0.83, overworld 0.86/0.83,
+#     storm-prologue scenes (10-channel pressure, alias-heavy rain noise)
+#     0.76-0.79; RMS ratio 1.01-1.04 everywhere (was: title 0.81/0.76,
+#     in-game 0.61-0.73, RMS 0.84-0.98 with the echo model). Per-scene
+#     best-lag spread stays within +-0.1 frame of the calibrated db_delay
+#     (the real FIFO's DMA-ring phase differs per save-state; a constant
+#     cannot fold it to zero).
 
 const
   GS_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32
@@ -135,9 +277,13 @@ type GsBonBuild = object
                      # fingerprint base (Thumb bit set to match cpu.tick's
                      # PC-with-thumb-bit compare)
   max_chans: int     # the build's PCM channel count (<= GS_MAX_CHANNELS)
+  linear_release: bool   # release: env -= 256-release (TLA) vs env*release>>8
+  env_gain_boost: bool   # gain: sideVol*(env + env>>3)>>9 (TLA) vs sideVol*env>>9
+  native_rate_drums: bool # channel type bit 0x08 = play at pcmFreq, no resampling
   # Reverb model (see the header): grmParsedShift live-parses the runtime-
-  # patched asr instructions at rev_insn (GS1).
-  # Builds that were not probed on real dumps never reach this path
+  # patched asr instructions at rev_insn (GS1); grmByteMatrix runs the TLA
+  # byte-domain matrix with coefficients live-read from the GS_TLA_* words.
+  # Builds that were not probed on real dumps never reach either path
   # (fingerprint non-match = non-engagement); do NOT guess addresses.
   rev_model: GsRevModel
   rev_insn_off: uint32 # grmParsedShift: first reverb-coefficient instruction
@@ -145,8 +291,9 @@ type GsBonBuild = object
                        # offset from the fingerprint base (0 = none)
   # Output calibration (A/B vs the real FIFO on the build's title music):
   db_delay_frames: float32  # double-buffer latency, video frames
-  makeup: float32           # grmParsedShift output makeup gain on the
-                            # *128 FIFO-latch mapping
+  makeup: float32           # grmParsedShift-only output makeup gain on the
+                            # *128 FIFO-latch mapping (grmByteMatrix is
+                            # integer-exact and never needs one)
 
 const GS_BUILDS = [
   # Golden Sun (USA) — all values from our own runtime probes/disassembly of
@@ -173,20 +320,70 @@ const GS_BUILDS = [
              fp_first: 0xE020C001'u32, fp_crc: 0x7CB231AD'u32,
              entry_off: 0x2D9'u32,            # block +0x658 | Thumb
              max_chans: 8,
+             linear_release: false, env_gain_boost: false,
+             native_rate_drums: false,        # no type-0x08 path in the GS1 block
              rev_model: grmParsedShift,
              rev_insn_off: 0x858'u32,         # block +0xBD8: real reverb,
                                               # live-parsed coefficients
              db_delay_frames: 1.0'f32,
              makeup: 1.0'f32),                # the *128 mapping is exact for GS1
+  # Golden Sun: The Lost Age (USA/Europe) — see the header's TLA section.
+  # USA links the block at 0x03000000, fingerprint region at block +0x400.
+  #
+  # Regional coverage (same survey; block boot-copy source at file 0x5B8):
+  #   * (UE)/[!], (G), (F), (I), (S): whole 0xF00 compare window (block
+  #     through the output/reverb function and its literals) BYTE-IDENTICAL
+  #     to USA; title A/B numbers identical to USA (ratio 1.017/1.012,
+  #     corr 0.79/0.78).
+  #   * Ougon no Taiyou - Ushinawareshi Toki (J): the SAME single-byte
+  #     delta as GS1-J (the +0x318 utility's `#0x1C` -> `#0x18` bound —
+  #     same function, TLA links it 0x104 later in the block); title A/B
+  #     equal to USA.
+  #   * Chinese translation dumps patch two instructions INSIDE that same
+  #     utility (block+0x324 `bic r3, r3, #3` -> `mov r3, r3`, +0x328
+  #     `lsls r3, r3, #17` -> `movs r3, r3`) — still outside every path the
+  #     HLE consumes; scene-aligned title A/B equal to USA (1.018/1.012,
+  #     corr 0.80/0.78).
   # Mario Golf: Advance Tour / Mario Tennis: Power Tour ship a RELATED but
-  # different build of this driver family. They are deliberately UNSUPPORTED:
+  # different build of this driver family (most 16-byte probes of the TLA
+  # fingerprint appear in their ROMs, but the region as a whole differs —
+  # e.g. Camelot 4-bit ADPCM support). They are deliberately UNSUPPORTED:
   # the CRC rejects them and fp_give_up stops the scan (verified safely
   # non-engaging on U/J dumps of both, real audio unaffected).
+  GsBonBuild(name: "TLA",
+             fp_len: 0x5A8,
+             fp_first: 0x189500E0'u32, fp_crc: 0xA4FBC0C7'u32,
+             entry_off: 0x3B5'u32,            # block +0x7B4 | Thumb
+             max_chans: 10,
+             linear_release: true, env_gain_boost: true,
+             native_rate_drums: true,
+             rev_model: grmByteMatrix,        # real reverb, byte-domain matrix
+             rev_insn_off: 0,
+             db_delay_frames: 1.9'f32),       # 3-chunk ring drains ~2 frames after mix
 ]
 
 const
+  # TLA (grmByteMatrix) live-block locations — the output loop's data words
+  # and the tap instructions the per-frame validation checks (all inside the
+  # scene-stable block +0xD44..+0xE84 function; see the header's TLA reverb
+  # notes). Offsets from the fingerprint base (g.fp_addr = block +0x400 on
+  # this build). These are specific to the probed TLA build; a new build
+  # needs its own probed row AND its own offsets.
+  GS_TLA_COEF_A_OFF  = 0x938'u32  # (cRA<<16)|cLA packed multiplier for old ring-A bytes
+  GS_TLA_COEF_B_OFF  = 0x93C'u32  # (cRB<<16)|cLB packed multiplier for old ring-B bytes
+  GS_TLA_CROSS_OFF   = 0x930'u32  # right-lane cross-tap distance, driver samples (176)
+  GS_TLA_NIBBLE_OFF  = 0x91C'u32  # pack-bias nibble schedule word
+  GS_TLA_CHECKS  = [
+    (0x9FC'u32, 0xE1D520D0'u32),  # ldrsb r2, [r5]        (old ring-A tap)
+    (0xA00'u32, 0xE0020291'u32),  # mul   r2, r1, r2      (packed coef multiply)
+    (0xA10'u32, 0xE0222B96'u32),  # mla   r2, r6, fp, r2  (old ring-B tap)
+    (0xA38'u32, 0xE08773A7'u32),  # add   r7, r7, r7, lsr #7  (own-L tap fold)
+    (0xA4C'u32, 0xE0822A8B'u32),  # add   r2, r2, fp, lsl #21 (right-lane cross tap)
+  ]
+
+const
   # SoundChannel field offsets (stock m4a layout, pret m4a_internal.h;
-  # runtime-verified for GS1):
+  # runtime-verified for GS1 and TLA):
   GSC_STATUS   = 0x00
   GSC_TYPE     = 0x01
   GSC_VOL_A    = 0x02   # FIFO-A-lane volume (pret m4a names +2 'rightVolume',
@@ -240,6 +437,15 @@ proc gs_state_loaded*(g: GsBonHle) =
   for v in g.rev_ring.mitems: v = 0
   g.rev_slot = 0
   g.rev_pos = 0
+  for v in g.tla_al.mitems: v = 0
+  for v in g.tla_bl.mitems: v = 0
+  for v in g.tla_ar.mitems: v = 0
+  g.tla_w = 0
+  for v in g.tla_fstart.mitems: v = 0
+  g.tla_fidx = 0
+  g.tla_acc = 0
+  g.tla_fpos = 0
+  for v in g.tla_cur.mitems: v = 0
   g.frame_pos = 0
   g.resync_pending = true
 
@@ -331,7 +537,7 @@ proc gs_frame_poll*(g: GsBonHle) =
 
 proc gs_env_step(g: GsBonHle; base: uint32; status: uint8): tuple[env: uint8, alive: bool, started: bool] =
   ## Shadow replica of the driver's per-frame envelope update (our disassembly
-  ## of the IWRAM code at GS1 block+0x658; stock m4a ADSR
+  ## of the IWRAM code at GS1 block+0x658 / TLA block+0x7B4; stock m4a ADSR
   ## semantics). The hook runs BEFORE the driver processes the channel this
   ## frame, so the RAM env value is last frame's — this predicts the value the
   ## driver is about to compute and use for this frame's chunk. Nothing is
@@ -353,6 +559,15 @@ proc gs_env_step(g: GsBonHle; base: uint32; status: uint8): tuple[env: uint8, al
   if (status and GS_STOP) != 0:
     let rel = uint32(g.grd8(base + GSC_RELEASE))
     let echo = g.grd8(base + GSC_ECHO_VOL)
+    if GS_BUILDS[g.build].linear_release:
+      # TLA build: linear release, env -= 256-release; a negative result goes
+      # straight to the pseudo-echo/kill path (our disassembly at +0x7F8).
+      let dec = 256'u32 - rel
+      if uint32(env) >= dec:
+        let e = uint32(env) - dec
+        if e > uint32(echo): return (uint8(e), true, false)
+      if echo == 0: return (0'u8, false, false)
+      return (echo, true, false)
     # GS1 build: multiplicative release, env = env*release >> 8.
     let e = (uint32(env) * rel) shr 8
     if e > uint32(echo): return (uint8(e), true, false)
@@ -399,6 +614,37 @@ proc gs_parse_reverb(g: GsBonHle) =
       g.rev_coef_new = 1.0'f32 / float32(1 shl (a - 16))
       g.rev_coef_old = 1.0'f32 / float32(1 shl (b - 17))
 
+proc gs_parse_tla_reverb(g: GsBonHle) =
+  ## TLA (grmByteMatrix): latch this frame's pack bias from the live +0xD1C
+  ## nibble schedule, then validate the output loop's tap instructions and
+  ## read the packed coefficient/delay data words (header: "Reverb + output
+  ## stage"). The coefficients are believed fixed (single ROM occurrence, five
+  ## scenes probed identical) but are still live-read; any unexpected code or
+  ## implausible coefficient turns reverb off for the frame without touching
+  ## the dry path (safe non-engagement, mirroring gs_parse_reverb).
+  g.tla_bias = (g.grd32(g.fp_addr + GS_TLA_NIBBLE_OFF) and 12'u32) == 0
+  g.tla_rev_ok = false
+  for (o, v) in GS_TLA_CHECKS:
+    if g.grd32(g.fp_addr + o) != v: return
+  let ca = g.grd32(g.fp_addr + GS_TLA_COEF_A_OFF)
+  let cb = g.grd32(g.fp_addr + GS_TLA_COEF_B_OFF)
+  let cla = int32(cast[int16](uint16(ca and 0xFFFF'u32)))
+  let cra = int32(cast[int16](uint16(ca shr 16)))
+  let clb = int32(cast[int16](uint16(cb and 0xFFFF'u32)))
+  let crb = int32(cast[int16](uint16(cb shr 16)))
+  # Sanity: |coef|/128 is a feedback gain; anything >= 2.0 is not a plausible
+  # stable configuration and more likely means foreign code/data.
+  if abs(cla) > 255 or abs(cra) > 255 or abs(clb) > 255 or abs(crb) > 255:
+    return
+  g.tla_cla = cla; g.tla_cra = cra; g.tla_clb = clb; g.tla_crb = crb
+  g.tla_wa = ca; g.tla_wb = cb
+  var spv = int(g.grd16(g.sound_info + GSI_SPV))
+  if spv < 128 or spv > 2048: spv = 528
+  g.tla_spv = spv
+  # Cross-tap distance in driver samples (the model renders at driver rate).
+  g.tla_cross = clamp(int(g.grd32(g.fp_addr + GS_TLA_CROSS_OFF)), 0, spv)
+  g.tla_rev_ok = true
+
 proc gs_on_frame(g: GsBonHle) =
   ## Refresh every sampler from SoundInfo once per video frame, at the mixer
   ## entry (channel state untouched by the driver for this frame yet).
@@ -436,6 +682,29 @@ proc gs_on_frame(g: GsBonHle) =
       g.rev_slot = 0
     g.rev_slot = (if g.rev_slot + 1 >= g.rev_period + 1: 0 else: g.rev_slot + 1)
     g.rev_pos = 0
+  of grmByteMatrix:
+    # REAL reverb model (TLA): live-validate the output loop and latch the
+    # packed coefficients + pack bias, and size the byte-history rings to
+    # cover the deepest tap ((rev_period+1) frames) with headroom.
+    g.gs_parse_tla_reverb()
+    # The model renders at DRIVER rate (tla_spv samples per frame); size the
+    # byte-history rings to cover the deepest tap ((rev_period+1) frames) and
+    # anchor the taps on the recorded per-frame cursors so slight cadence
+    # drift between our driver-time accumulator and the hook never skews the
+    # tap geometry.
+    let need = (g.rev_period + 2) * (g.tla_spv + 8) + 4
+    var slots = 1024
+    while slots < need: slots = slots shl 1
+    if g.tla_al.len != slots:
+      g.tla_al = newSeq[int8](slots)
+      g.tla_bl = newSeq[int8](slots)
+      g.tla_ar = newSeq[int8](slots)
+      g.tla_w = 0
+      for v in g.tla_fstart.mitems: v = 0
+      g.tla_fidx = 0
+    g.tla_fidx = (g.tla_fidx + 1) and (g.tla_fstart.len - 1)
+    g.tla_fstart[g.tla_fidx] = g.tla_w
+    g.tla_fpos = 0
   g.frame_pos = 0
   for i in 0 ..< GS_MAX_CHANNELS:
     let s = addr g.samplers[i]
@@ -509,6 +778,13 @@ proc gs_on_frame(g: GsBonHle) =
     s.wave_data    = data
     s.synth        = synth
     s.freq         = g.grd32(base + GSC_FREQ)
+    let native_drum = GS_BUILDS[g.build].native_rate_drums and
+                      (ctype and 0x08'u8) != 0 and not synth
+    if native_drum:
+      # Native-rate path (TLA type bit 0x08): the driver copies one source
+      # sample per mixed sample with no resampling, so the playback rate is
+      # the mixer's own pcmFreq and the channel freq field is not consulted.
+      s.freq = uint32(g.src_rate)
     s.loop_start   = loop_start
     s.sample_count = size
     s.looping      = looping and not synth
@@ -516,9 +792,20 @@ proc gs_on_frame(g: GsBonHle) =
     # integer step arithmetic (freq * divFreq, 9.23 per source sample — see
     # the div_freq note above): the effective playback rate is
     # freq * divFreq/2^23 * srcRate, slightly sharp of nominal on hardware.
-    let eff_hz = float64(s.freq) * float64(g.div_freq) *
-                 float64(g.src_rate) / 8388608.0
-    s.freq_step = float32(eff_hz / float64(APU_SAMPLE_RATE))
+    # Native-rate drums bypass the resampler entirely: exactly srcRate.
+    let eff_hz =
+      if native_drum: float64(g.src_rate)
+      else: float64(s.freq) * float64(g.div_freq) *
+            float64(g.src_rate) / 8388608.0
+    s.freq_step =
+      if GS_BUILDS[g.build].rev_model == grmByteMatrix:
+        # Driver-rate rendering (TLA): step per DRIVER output sample — the
+        # driver's own freq*divFreq/2^23 resampler increment, so the source
+        # walk (and its alias fold) matches the real mixer exactly; native
+        # drums come out at step 1.0 (sample-exact copy).
+        float32(eff_hz / float64(g.src_rate))
+      else:
+        float32(eff_hz / float64(APU_SAMPLE_RATE))
     if synth:
       # Oscillator phase accumulators (2^32 = one period of 64 source
       # samples, exactly the driver's wrapping 32-bit phase register):
@@ -528,6 +815,10 @@ proc gs_on_frame(g: GsBonHle) =
                             (64.0 * float64(APU_SAMPLE_RATE)))
       s.saw_step   = uint32(eff_hz * 4294967296.0 /
                             (64.0 * float64(g.src_rate)))
+      if GS_BUILDS[g.build].rev_model == grmByteMatrix:
+        # Driver-rate rendering: the oscillator clock IS the driver sample
+        # clock (gs_tla_step_driver calls gs_synth_sample with ratio 1).
+        s.synth_step = s.saw_step
       # Per-frame duty-modulation step + threshold (see header: the exact
       # once-per-frame computation from the block's +0xC94 square path,
       # including the mvnmi fold and the WRAPPING u32 mla).
@@ -540,11 +831,14 @@ proc gs_on_frame(g: GsBonHle) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = data and 0x01FFFFFF'u32
-    # Per-side gains, exactly the driver's formula: sideVol * env >> 9, in
-    # 0..63 — normalized to 0..1 against 64. +2 feeds the FIFO-A (our l) lane,
-    # +3 the FIFO-B (our r) lane — see the GSC_VOL_A note. Ramp last frame's
-    # endpoint to this frame's across the frame, like the MP2K HLE.
-    let enveff = uint32(env)
+    # Per-side gains, exactly the driver's formula: sideVol * env >> 9 (the
+    # TLA build boosts the stored envelope by 9/8 first), in 0..63 —
+    # normalized to 0..1 against 64. +2 feeds the FIFO-A (our l) lane, +3
+    # the FIFO-B (our r) lane on BOTH builds — see the GSC_VOL_A note. Ramp
+    # last frame's endpoint to this frame's across the frame, like the MP2K
+    # HLE.
+    let enveff = uint32(env) +
+                 (if GS_BUILDS[g.build].env_gain_boost: uint32(env) shr 3 else: 0'u32)
     let gl = float32((uint32(g.grd8(base + GSC_VOL_A)) * enveff) shr 9) / 64.0'f32
     let gr = float32((uint32(g.grd8(base + GSC_VOL_B)) * enveff) shr 9) / 64.0'f32
     if retrig and not g.resync_pending:
@@ -614,13 +908,189 @@ proc gs_synth_sample(s: ptr GsBonSampler; src_ratio: float32): float32 {.inline.
     result = (if p < 0x80000000'u32: float32(int32(p shr 23)) - 128.0'f32
               else: 384.0'f32 - float32(int32(p shr 23)))
 
+proc gs_tla_step_driver(g: GsBonHle) =
+  ## One DRIVER-rate (pcmFreq, 31536 Hz) sample of the TLA model: mix every
+  ## channel one driver step — the source walk uses the driver's own
+  ## freq*divFreq/2^23 increment on the driver's output grid, so resampling
+  ## phase and alias fold match the real mixer — then apply the byte-matrix
+  ## reverb seed, pack the dithered byte pair, and push the bytes into the
+  ## tap history rings. The pair is latched in tla_cur for the hold-
+  ## resampling output path in gs_render_sample.
+  var accl = 0.0'f32
+  var accr = 0.0'f32
+  let spv = (if g.tla_spv > 0: g.tla_spv else: 528)
+  let t = min(1.0'f32, float32(g.tla_fpos) / float32(spv))
+  let rom = addr g.gba.cartridge.rom
+  let rmask = g.gba.cartridge.rom_mask
+  for i in 0 ..< GS_MAX_CHANNELS:
+    let s = addr g.samplers[i]
+    if not s.active: continue
+    var sample: float32
+    if s.synth:
+      # Oscillator at the driver clock (synth_step == saw_step on this build).
+      sample = gs_synth_sample(s, 1.0'f32)
+    else:
+      if s.need_fetch and s.src_index < s.sample_count:
+        # The real mixer interpolates the segment [s[n], s[n+1]] AT position
+        # n (ldrsb [r3] / ldrsb [r3,#1] in the inner loop) — fetch the
+        # 4-tap neighborhood of the CURRENT segment so the voice carries no
+        # resampling delay. (The GS1 path's trailing-tap pipeline delays
+        # each voice by ~2 source samples, which at TLA's low-rate voices —
+        # 2.6 kHz basses — is a 20+ output-sample per-voice skew that
+        # decorrelates the full mix; measured per-solo-voice lag spread.)
+        let n = int64(s.src_index)
+        let last = int64(s.sample_count) - 1
+        template rd_at(i: int64): float32 =
+          block:
+            var ix = i
+            if ix > last:
+              if s.looping and s.loop_start < s.sample_count:
+                ix = int64(s.loop_start) +
+                     (ix - int64(s.sample_count)) mod
+                       int64(s.sample_count - s.loop_start)
+              else:
+                ix = last
+            if ix < 0: ix = 0
+            g.gs_wave_s8(s, rom, rmask, uint32(ix))
+        s.tap3 = rd_at(n - 1)
+        s.tap2 = rd_at(n)
+        s.tap1 = rd_at(n + 1)
+        s.tap0 = rd_at(n + 2)
+        s.need_fetch = false
+      let mu = s.phase_frac
+      when defined(gslinear):
+        # DIAG build: the real mixer's linear interpolation.
+        sample = s.tap2 + (s.tap1 - s.tap2) * mu
+      else:
+        # Catmull-Rom cubic (Paul Bourke), tap0 newest .. tap3 oldest.
+        let mu2 = mu * mu
+        let a0 = s.tap0 - s.tap1 - s.tap3 + s.tap2
+        let a1 = s.tap3 - s.tap2 - a0
+        let a2 = s.tap1 - s.tap3
+        let a3 = s.tap2
+        sample = a0 * mu * mu2 + a1 * mu2 + a2 * mu + a3
+      s.phase_frac += s.freq_step
+      if s.phase_frac >= 1.0'f32:
+        let n = uint32(s.phase_frac)
+        s.phase_frac -= float32(n)
+        s.src_index += n
+        s.need_fetch = true
+        if s.src_index >= s.sample_count:
+          if s.looping and s.loop_start < s.sample_count:
+            s.src_index = s.loop_start +
+              ((s.src_index - s.sample_count) mod (s.sample_count - s.loop_start))
+          else:
+            s.src_index = s.sample_count
+            s.need_fetch = false
+    sample = sample / 128.0'f32
+    when defined(gsstepvol):
+      let vl = s.vol_l1   # DIAG: per-frame stepped volumes, like the real mixer
+      let vr = s.vol_r1
+    else:
+      let vl = s.vol_l0 * (1.0'f32 - t) + s.vol_l1 * t
+      let vr = s.vol_r0 * (1.0'f32 - t) + s.vol_r1 * t
+    accl += sample * vl
+    accr += sample * vr
+  g.tla_fpos.inc
+  # --- Reverb + pack, byte-matrix model (header: "Reverb + output stage").
+  # Integer-exact in the driver's units: mix halfword = norm*8192, FIFO byte
+  # = halfword>>7. The seed the real driver writes back for the next pass is
+  # a pure function of the quantized FIFO bytes, so the wet history IS the
+  # byte history: three rings (left byteA/byteB, right byteA), taps at
+  # (rev_period+1) frames (the ring matrix, read-before-write), 1 frame (the
+  # own-left tap) and 1 frame + 176 driver samples (right-lane cross tap).
+  if g.tla_al.len == 0: return
+  # Dry mix in the driver's halfword units (half = norm*8192). The real
+  # channels mla into the packed seed word; per-lane float accumulation +
+  # floor is the one sub-LSB approximation this path keeps.
+  var xl = int32(floor(accl * 8192.0'f32))
+  var xr = int32(floor(accr * 8192.0'f32))
+  let mask = g.tla_al.len - 1
+  let w = g.tla_w and mask
+  if g.tla_rev_ok:
+    # Anchor each tap on the recorded frame-start cursors: "K frames back,
+    # same intra-frame offset" — exactly the real ring geometry.
+    let fmask = g.tla_fstart.len - 1
+    let fi = g.tla_w - g.tla_fstart[g.tla_fidx]     # intra-frame offset
+    let f1 = g.tla_fstart[(g.tla_fidx - 1) and fmask]
+    let fr = g.tla_fstart[(g.tla_fidx - (g.rev_period + 1)) and fmask]
+    let la4 = int32(g.tla_al[(fr + fi) and mask])  # ring-A byte, P+1 frames back
+    let ra4 = int32(g.tla_ar[(fr + fi) and mask])  # ring-B byte, P+1 frames back
+    let lac = int32(g.tla_al[(f1 + fi - g.tla_cross) and mask])  # 1f+176smp back
+    # The seed word is built with PACKED-halfword arithmetic on one u32,
+    # replicating the ARM code's lane-carry/borrow leakage bit-exactly —
+    # the leakage terms are what sustain the real driver's audible
+    # low-level reverb limit cycle after notes die (verified vs a solo
+    # capture: the real tail rings at byte +-1 indefinitely; a clean
+    # per-lane model decays to hard zero instead):
+    #   * mul/mla by the packed coefficient words (borrow crosses lanes),
+    #   * the own-left tap pair fold S=(b1<<24)|(b0<<8); S+=S>>7 with its
+    #     u32 wraps and the +64 negative-side fold, applied ror16 to the
+    #     even frame of the pair and direct to the odd (the loop processes
+    #     frame pairs; chunks are even-length so pair parity = fi&1),
+    #   * the right-lane cross tap fp<<21 (no low-lane bits, borrow only).
+    let b0 = uint32(cast[uint8](g.tla_bl[(f1 + (fi and not 1)) and mask]))
+    let b1 = uint32(cast[uint8](g.tla_bl[(f1 + (fi or 1)) and mask]))
+    let sp = (b1 shl 24) + (b0 shl 8)
+    let ss = sp + (sp shr 7)
+    let own = (if (fi and 1) == 0: ashr(cast[int32]((ss shl 16) or (ss shr 16)), 19)
+               else: ashr(cast[int32](ss), 19))
+    var sw = g.tla_wa * cast[uint32](la4) + g.tla_wb * cast[uint32](ra4)
+    sw = sw + cast[uint32](own) + cast[uint32](lac shl 21)
+    xl += int32(cast[int16](uint16(sw and 0xFFFF'u32)))
+    xr += int32(cast[int16](uint16(sw shr 16)))
+  # Halfword saturation: the +0xE90 slow path clamps so the packed byte
+  # stays s8 — approximated as clamping the half to [-0x4000, 0x3FBF]
+  # (the real slow path's exact clip values differ but only engage on
+  # hard overdrive).
+  xl = clamp(xl, -0x4000'i32, 0x3FBF'i32)
+  xr = clamp(xr, -0x4000'i32, 0x3FBF'i32)
+  # Dithered byte-pair pack (byteA then byteB on the real 2x-rate FIFO),
+  # again as packed-u32 arithmetic so the +0x40 bias adds / negative fold /
+  # -0x40 borrow leak between lanes exactly like the real loop.
+  var p = uint32(cast[uint16](int16(xl))) or (uint32(cast[uint16](int16(xr))) shl 16)
+  if g.tla_bias: p = p + 0x00400040'u32
+  p = p + ((p and 0x80008000'u32) shr 9)          # +0x40 on negative halves
+  let p3 = p - 0x00400040'u32
+  let al = cast[int8](uint8((p shr 7) and 0xFF))
+  let bl = cast[int8](uint8((p3 shr 7) and 0xFF))
+  let ar = cast[int8](uint8((p shr 23) and 0xFF))
+  let br = cast[int8](uint8((p3 shr 23) and 0xFF))
+  g.tla_al[w] = al
+  g.tla_bl[w] = bl
+  g.tla_ar[w] = ar
+  g.tla_w.inc   # unwrapped; masked on access
+  g.tla_cur = [al, bl, ar, br]
+
 proc gs_render_sample*(g: GsBonHle): tuple[l: int16, r: int16] =
   ## Substitute for the DirectSound FIFO A/B latches (A=left, B=right — the
   ## driver's DMA1 buffer is the left channel; verified by A/B correlation).
   if not g.engaged: return (0'i16, 0'i16)
   var outl = 0'i16
   var outr = 0'i16
-  block:
+  if g.rev_model == grmByteMatrix:
+    # Driver-rate model (TLA): advance driver time by src_rate/32768 per
+    # output tick and hold-resample the dithered FIFO byte pair exactly like
+    # the hardware latch — byteA plays the first half of each driver-sample
+    # period, byteB the second (the real FIFO runs at 2x pcmFreq). The <<1
+    # is the APU's own FIFO byte scaling, so this path has no makeup knob.
+    g.tla_acc += (if g.src_rate > 0: g.src_rate else: 31536)
+    if g.tla_acc >= APU_SAMPLE_RATE:
+      g.tla_acc -= APU_SAMPLE_RATE
+      g.gs_tla_step_driver()
+    when defined(gsholdsel):
+      # DIAG: hold-exact byte selection (matches the raw latch structure).
+      let sel = (if g.tla_acc * 2 < APU_SAMPLE_RATE: 0 else: 1)
+      outl = int16(int(g.tla_cur[sel]) * 2)
+      outr = int16(int(g.tla_cur[2 + sel]) * 2)
+    else:
+      # Pair mean: byteA+byteB — the analog average the hardware DAC pair
+      # produces, carrying the half-LSB dither resolution.
+      outl = int16(int(g.tla_cur[0]) + int(g.tla_cur[1]))
+      outr = int16(int(g.tla_cur[2]) + int(g.tla_cur[3]))
+    # Shared tail below (double-buffer delay + capture).
+  else:
+   block:
     var accl = 0.0'f32
     var accr = 0.0'f32
     let t = (if g.frame_len > 0: float32(g.frame_pos) / float32(g.frame_len) else: 0.0'f32)
