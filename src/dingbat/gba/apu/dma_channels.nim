@@ -44,10 +44,12 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
                       d.dmacnt_h[d.current_priority].start_timing == 3
     if not by_fifo_dma:
       inc dc.gba.mp2k.fifo_cpu_bytes
+  when defined(mp2kwav): inc dbgFifoWrites[channel]
   if dc.sizes[channel] < 32:
     dc.fifos[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = cast[int8](value)
     dc.sizes[channel] += 1
   else:
+    when defined(mp2kwav): inc dbgFifoDrop[channel]
     log("Writing " & hex_str(value) & " to fifo " & $channel & " but it's already full")
 
 proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
@@ -72,6 +74,9 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
       if dc.sizes[channel] > 0:
+        when defined(mp2kwav):
+          inc dbgFifoServed[channel]
+          if channel == 1: dbgDrainB.add dc.fifos[channel][dc.positions[channel]]
         log("Timer overflow good; channel:" & $channel & ", timer:" & $timer)
         let sample = int16(dc.fifos[channel][dc.positions[channel]]) shl 1
         dc.latches[channel] = sample
@@ -79,6 +84,7 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
         dc.positions[channel] = (dc.positions[channel] + 1) mod 32
         dc.sizes[channel] -= 1
       else:
+        when defined(mp2kwav): inc dbgFifoEmpty[channel]
         log("Timer overflow but empty; channel:" & $channel & ", timer:" & $timer)
         dc.latches[channel] = 0
         dc.push_fifo_sample(channel, 0)

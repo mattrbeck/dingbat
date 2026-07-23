@@ -135,6 +135,10 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   if start_timing == 3:  # Special
     if channel == 1 or channel == 2:  # FIFO
+      when defined(mp2kwav):
+        if channel == 2:
+          let sz = dma.gba.apu.dma_channels.sizes[1]
+          dbgRunSizeHist[min(max(sz,0),32)].inc
       len = 4
       word_size = 4
       dest_ctrl = 2  # Fixed
@@ -247,6 +251,18 @@ proc run_pending*(dma: DMA) =
     # Re-check enable: a burst that ran between request and grant may have
     # written this channel's control register
     if not dma.dmacnt_h[ch].enable: continue
+    # Sound FIFO DMA requests are LEVEL-conditioned on the FIFO state, not
+    # edge-latched: a timer overflow that lands inside this channel's own
+    # in-flight burst (the drain dispatches at a transfer boundary while the
+    # refill is still short of 16 bytes) would latch a second request that
+    # survives the burst — and the extra grant then pushes 16 bytes into an
+    # almost-full FIFO, dropping most of them, i.e. the audio stream skips
+    # forward. Real hardware deasserts the request once the FIFO is refilled,
+    # so re-check the level at grant time. (Observed: ~2% of drains at
+    # 21 kHz vintages — Densetsu no Sutafi 3 lost ~4% of its stream bytes to
+    # these skips, splattering broadband noise over the real FIFO audio.)
+    if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
+      if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16: continue
     let saved = dma.current_priority
     dma.current_priority = ch
     dma.run_channel(ch, nested = saved < 4)

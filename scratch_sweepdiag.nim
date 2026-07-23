@@ -48,12 +48,79 @@ proc main() =
         let b = cast[int8](emu.bus.read_byte_internal(sip + 0x350'u32 + uint32(off)))
         if abs(int(b)) > pk: pk = abs(int(b))
       line.add " spv=" & $spv & " period=" & $period & " bufPeak(0xC60)=" & $pk
+      line.add " pcmFreq=" & $emu.bus.read_word_internal(sip + 0x14) &
+               " divFreq=" & $emu.bus.read_word_internal(sip + 0x18)
     line.add " dmaSrcInternal[1]=" & toHex(emu.dma.src[1], 8) &
              " [2]=" & toHex(emu.dma.src[2], 8)
+    line.add " sndh[Avol=" & $emu.apu.soundcnt_h.dma_sound_a_volume &
+             " A_L=" & $emu.apu.soundcnt_h.dma_sound_a_left &
+             " A_R=" & $emu.apu.soundcnt_h.dma_sound_a_right &
+             " Bvol=" & $emu.apu.soundcnt_h.dma_sound_b_volume &
+             " B_L=" & $emu.apu.soundcnt_h.dma_sound_b_left &
+             " B_R=" & $emu.apu.soundcnt_h.dma_sound_b_right &
+             " Atmr=" & $emu.apu.soundcnt_h.dma_sound_a_timer &
+             " Btmr=" & $emu.apu.soundcnt_h.dma_sound_b_timer & "]" &
+             " tm0d=" & $emu.timer.tmd[0] & " tm1d=" & $emu.timer.tmd[1]
+    if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
+      var ea = 0.0
+      var eb = 0.0
+      for off in 0 ..< 0x630:
+        let a = float(cast[int8](emu.bus.read_byte_internal(sip + 0x350'u32 + uint32(off))))
+        let b = float(cast[int8](emu.bus.read_byte_internal(sip + 0x350'u32 + 0x630'u32 + uint32(off))))
+        ea += a*a; eb += b*b
+      line.add " bufArms=" & $sqrt(ea/1584.0) & " bufBrms=" & $sqrt(eb/1584.0)
     echo line
+    # full channel-struct dump
+    if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
+      for i in 0 ..< 12:
+        let base = sip + 0x50'u32 + uint32(i)*64
+        let st = emu.bus.read_byte_internal(base)
+        if (st and 0xC7'u8) == 0: continue
+        echo "  ch", i, " st=", toHex(st,2),
+          " type=", toHex(emu.bus.read_byte_internal(base+1),2),
+          " rV=", emu.bus.read_byte_internal(base+2),
+          " lV=", emu.bus.read_byte_internal(base+3),
+          " atk=", emu.bus.read_byte_internal(base+4),
+          " evol=", emu.bus.read_byte_internal(base+9),
+          " evr=", emu.bus.read_byte_internal(base+10),
+          " evl=", emu.bus.read_byte_internal(base+11),
+          " ct=", emu.bus.read_word_internal(base+0x18),
+          " fw=", emu.bus.read_word_internal(base+0x1C),
+          " freq=", emu.bus.read_word_internal(base+0x20),
+          " wave=", toHex(emu.bus.read_word_internal(base+0x24),8),
+          " cp=", toHex(emu.bus.read_word_internal(base+0x28),8),
+          " sampActive=", emu.mp2k.samplers[i].active,
+          " srcIdx=", emu.mp2k.samplers[i].src_index,
+          " sampCnt=", emu.mp2k.samplers[i].sample_count,
+          " sampLoop=", emu.mp2k.samplers[i].looping,
+          " sampVolR=", emu.mp2k.samplers[i].vol_r1
+  # raw pcmBuffer B-half slice dump at a mid-run frame
   var lastN = 0
+  var sliceDone = false
+  var lastWB = 0
+  var lastDB = 0
+  var lastSB = 0
   for f in 0 ..< frames:
     emu.step_frame()
+    if f >= 395 and f < 415:
+      let sip2 = emu.bus.read_word_internal(0x03007FF0'u32)
+      if (sip2 shr 24) == 0x02'u32 or (sip2 shr 24) == 0x03'u32:
+        echo "f=", f, " pcmDmaCounter=", emu.bus.read_byte_internal(sip2 + 4),
+             " src2=", toHex(emu.dma.src[2],8),
+             " wB=", dbgFifoWrites[1] - lastWB, " drB=", dbgFifoDrop[1] - lastDB,
+             " served=", dbgFifoServed[1] - lastSB
+        lastWB = dbgFifoWrites[1]; lastDB = dbgFifoDrop[1]; lastSB = dbgFifoServed[1]
+    if f == 450 and not sliceDone:
+      sliceDone = true
+      let sip = emu.bus.read_word_internal(0x03007FF0'u32)
+      if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
+        var lineA = "bufA slice: "
+        var lineB = "bufB slice: "
+        for off in 0 ..< 96:
+          lineA.add $int(cast[int8](emu.bus.read_byte_internal(sip + 0x350'u32 + uint32(off)))) & " "
+          lineB.add $int(cast[int8](emu.bus.read_byte_internal(sip + 0x350'u32 + 0x630'u32 + uint32(off)))) & " "
+        echo lineA
+        echo lineB
     if every > 0 and f mod every == 0:
       dump(f)
       var a = 0.0
@@ -71,5 +138,36 @@ proc main() =
     sqrt(a / float(s.len))
   echo "HLE rms=", rms(mp2kWavCapture), "  REAL rms=", rms(realDmaCapture),
        "  retrig=", dbgRetrigCount
+  echo "fifoServed A=", dbgFifoServed[0], " B=", dbgFifoServed[1],
+       "  fifoEmpty A=", dbgFifoEmpty[0], " B=", dbgFifoEmpty[1]
+  block:
+    var a = 0.0
+    for v in dbgDrainB: a += float(v)*float(v)
+    if dbgDrainB.len > 0:
+      echo "drained B bytes rms=", sqrt(a/float(dbgDrainB.len)), " n=", dbgDrainB.len
+    echo "fifoWrites A=", dbgFifoWrites[0], " B=", dbgFifoWrites[1],
+         " drops A=", dbgFifoDrop[0], " B=", dbgFifoDrop[1]
+    var hist = "run-start size hist (B): "
+    for i in 0 .. 32:
+      if dbgRunSizeHist[i] > 0: hist.add $i & ":" & $dbgRunSizeHist[i] & " "
+    echo hist
+  block:
+    let fh = open("/tmp/real_capture.bin", fmWrite)
+    if realDmaCapture.len > 0:
+      discard fh.writeBuffer(addr realDmaCapture[0], realDmaCapture.len * 2)
+    fh.close()
+    let fh2 = open("/tmp/hle_capture.bin", fmWrite)
+    if mp2kWavCapture.len > 0:
+      discard fh2.writeBuffer(addr mp2kWavCapture[0], mp2kWavCapture.len * 2)
+    fh2.close()
+  # Dump the learned mixer body (IWRAM around the hook) for offline disasm.
+  if emu.mp2k.entry_addr != 0xFFFFFFFF'u32:
+    var buf = newSeq[byte](0x800)
+    for i in 0 ..< buf.len:
+      buf[i] = emu.bus.read_byte_internal(emu.mp2k.entry_addr + uint32(i))
+    let fh3 = open("/tmp/mixer_body.bin", fmWrite)
+    discard fh3.writeBuffer(addr buf[0], buf.len)
+    fh3.close()
+    echo "mixer body dumped from ", toHex(emu.mp2k.entry_addr, 8)
 
 main()

@@ -561,6 +561,12 @@ type
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
     phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
     need_fetch*:  bool      # a new source sample must be decoded this step
+    hist_gap*:    uint32    # source samples skipped by a decimating (step > 1)
+                            # advance; the next fetch backfills the tap history
+                            # with the ADJACENT samples so interpolation always
+                            # spans neighbouring source samples (like the real
+                            # mixer), never stride-spaced fetches — which would
+                            # act as a lowpass and gut bright decimated voices
     tap0*, tap1*, tap2*, tap3*: float32  # 4-tap history, s8 units, tap0 newest
     vol_l0*, vol_l1*: float32
     vol_r0*, vol_r1*: float32
@@ -776,6 +782,12 @@ include thumb/thumb
 include cpu
 when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var mp2kWavCapture*: seq[int16] = @[]
+  var dbgFifoEmpty*: array[2, int]
+  var dbgFifoServed*: array[2, int]
+  var dbgDrainB*: seq[int8]
+  var dbgFifoDrop*: array[2, int]
+  var dbgFifoWrites*: array[2, int]
+  var dbgRunSizeHist*: array[33, int]   # FIFO B size at FIFO-DMA run start
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
 include apu/abstract_channels

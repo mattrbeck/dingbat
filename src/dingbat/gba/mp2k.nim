@@ -97,6 +97,7 @@ const
   SC_TYPE     = 0x01
   SC_VOL_R    = 0x02
   SC_VOL_L    = 0x03
+  SC_ATTACK   = 0x04   # ADSR attack rate (added to envelopeVolume per frame)
   SC_ENV_VOL  = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
@@ -296,23 +297,28 @@ proc bdpcm_decode_block(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
     s.blk[i] = acc
   s.blk_index = blk
 
-proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
-                rmask: uint32): float32 {.inline.} =
-  ## Decode the source sample at the sampler's current play position, returned
-  ## in raw s8 units (~ -128..127). Reversed channels (TONEDATA_TYPE_REV) read
-  ## the wave back-to-front: the real mixer reflects its read pointer to the
-  ## sample end and reads with descending addresses (SoundMainRAM_Unk1 in pret
-  ## pokeemerald src/m4a_1.s), so play position p maps to source index
+proc decode_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
+               rmask: uint32; play_pos: uint32): float32 {.inline.} =
+  ## Decode the source sample at an explicit play position, returned in raw
+  ## s8 units (~ -128..127). Reversed channels (TONEDATA_TYPE_REV) read the
+  ## wave back-to-front: the real mixer reflects its read pointer to the
+  ## sample end and reads with descending addresses (SoundMainRAM_Unk1 in
+  ## pret pokeemerald src/m4a_1.s), so play position p maps to source index
   ## sample_count-1-p (sample_count already excludes any note start offset;
   ## see on_frame).
-  let pos = (if s.reversed: s.sample_count - 1'u32 - s.src_index
-             else: s.src_index)
+  let pos = (if s.reversed: s.sample_count - 1'u32 - play_pos
+             else: play_pos)
   if s.compressed:
     if (pos shr 6) != s.blk_index:
       m.bdpcm_decode_block(s, rom, rmask, pos shr 6)
     float32(s.blk[int(pos and (BDPCM_BLOCK_SAMPS - 1'u32))])
   else:
     float32(cast[int8](m.wave_u8(s, rom, rmask, pos)))
+
+proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
+                rmask: uint32): float32 {.inline.} =
+  ## Decode the source sample at the sampler's current play position.
+  m.decode_at(s, rom, rmask, s.src_index)
 
 proc mp2k_state_loaded*(m: Mp2kHle) =
   ## Save-state / rollback load hook. The shadow mixer's state is deliberately
@@ -513,6 +519,7 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       let dumpsel = getEnv("DINGBAT_CHDUMP")
       if (dumpsel == $i or dumpsel == "all") and retrig and dbgRetrigLog < 200:
         echo "ch", i, " st=", toHex(int(status), 2),
+          " ct=", int(m.rd32(base + SC_COUNT)),
           " evol=", int(m.rd8(base + SC_ENV_VOL)),
           " evr=", int(m.rd8(base + SC_ENV_VR)),
           " evl=", int(m.rd8(base + SC_ENV_VL)),
@@ -575,6 +582,43 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         s.age = 0
     else:
       s.age.inc
+      # Continuous position resync against the engine's own cursor. Some
+      # driver builds keep MORE than the mixer in RAM (ALttP Four Swords:
+      # SoundMain itself), so the learned hook can fire a stage BEFORE the
+      # sequencer — a note-on then shows a stale SoundChannel.count and our
+      # sampler starts thousands of samples off (missing/garbled notes; the
+      # whole-song RMS sat at ~0.61 of real). The engine's ct (SC_COUNT) is
+      # ground truth on every pass after the note-on: consumed = size - ct
+      # (the mixer sets ct = size - offset at START and decrements per source
+      # sample; the loop reload keeps the same coordinate). Snap only on
+      # gross divergence (> 1024 source samples) so resampler jitter and
+      # loop-wrap transients never trigger it; the snap self-corrects any
+      # stale note-on within one frame, keyed purely on engine state.
+      let ctv = m.rd32(base + SC_COUNT)
+      let total_sz = m.rd32(wave + 12)
+      if ctv >= 1'u32 and ctv <= total_sz:
+        let engine_pos = total_sz - ctv
+        let our_pos = (if s.reversed: s.start_off + s.src_index
+                       else: s.src_index)
+        let diff = (if engine_pos > our_pos: engine_pos - our_pos
+                    else: our_pos - engine_pos)
+        if diff > 1024'u32:
+          if s.reversed:
+            s.src_index = (if engine_pos >= s.start_off:
+                             engine_pos - s.start_off else: 0'u32)
+          else:
+            s.src_index = engine_pos
+          s.phase_frac = 0
+          s.need_fetch = true
+          s.hist_gap = 0
+          s.blk_index = 0xFFFFFFFF'u32
+          if s.src_index > 0'u32 and s.src_index < s.sample_count:
+            # Seed the interpolation history from the sample preceding the
+            # new position (same strategy as the save-state resume path).
+            let rom0 = addr m.gba.cartridge.rom
+            let rmask0 = m.gba.cartridge.rom_mask
+            let pv = m.decode_at(s, rom0, rmask0, s.src_index - 1'u32)
+            s.tap0 = pv; s.tap1 = pv; s.tap2 = pv; s.tap3 = pv
     s.wave_data   = new_wave_data
     s.compressed  = compressed
     s.reversed    = reversed
@@ -636,10 +680,45 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
     let vl = (if m.mono_mode != 0: vr
               else: float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult)
-    s.vol_l0 = s.vol_l1
-    s.vol_r0 = s.vol_r1
-    s.vol_l1 = vl
-    s.vol_r1 = vr
+    if retrig and started and not resumed:
+      # Note-on attack frame. The engine computes this pass's envelope INSIDE
+      # SoundMainRAM, AFTER our entry hook reads — so +0x0A/+0x0B still hold
+      # the channel's previous (usually zero/released) values, and using them
+      # silenced the first frame of every note. Short percussive hits carry
+      # most of their energy in that frame — this was the "missing drum
+      # transients" deficit (Densetsu no Sutafi 3, ALttP: real top-1% ~3x the
+      # HLE's). Reproduce the driver's own first attack step instead
+      # (m4a_1.s envelope prologue: envelopeVolume starts at 0 and gains
+      # `attack` per pass, clamped at 255; the per-side volumes are then
+      # evol * rightVolume/leftVolume >> 8, with rV/lV already folding in
+      # masterVolume), and mix the whole frame FLAT at it — the real pass
+      # mixes at a per-frame-constant envelope, not a ramp from zero. MONO
+      # vintages fold pan away as evol * avg(rV, lV) >> 8 (see the FIFO
+      # topology note above).
+      # Exact first-pass formula, read from the mixer itself (SoundMainRAM
+      # envelope prologue, disassembled from FireRed/Sutafi IWRAM: the START
+      # path zeroes envelopeVolume and falls into the attack add, then
+      # envelopeVolumeRight/Left = env * (masterVolume+1)/16 * rV/lV >> 8 —
+      # masterVolume is folded in HERE, not in rightVolume/leftVolume).
+      let atk = min(int(m.rd8(base + SC_ATTACK)), 255)
+      let mvs = (atk * (int(m.rd8(sound_info + SI_MASTER_VOL)) + 1)) shr 4
+      let rvb = int(m.rd8(base + SC_VOL_R))
+      let lvb = int(m.rd8(base + SC_VOL_L))
+      var svr = float32((mvs * rvb) shr 8) / 255.0'f32 * master_mult
+      var svl = float32((mvs * lvb) shr 8) / 255.0'f32 * master_mult
+      if m.mono_mode != 0:
+        let v = float32((mvs * ((rvb + lvb) shr 1)) shr 8) / 255.0'f32 * master_mult
+        svr = v
+        svl = v
+      s.vol_l0 = svl
+      s.vol_r0 = svr
+      s.vol_l1 = svl
+      s.vol_r1 = svr
+    else:
+      s.vol_l0 = s.vol_l1
+      s.vol_r0 = s.vol_r1
+      s.vol_l1 = vl
+      s.vol_r1 = vr
   # --- Foreign FIFO feeder detection -------------------------------------------
   # Some games ship m4a (SFX/jingles) but stream their MUSIC around the
   # engine's channel structs (observed: Batman Vengeance, Altered Beast,
@@ -698,11 +777,19 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         m.ab_n = 0
       if shadow_loud: m.shadow_quiet_age = 0
       elif m.shadow_quiet_age < 1000: inc m.shadow_quiet_age
-      # Energy evidence only counts once the shadow has been silent longer
-      # than the real ring could still be draining engine-mixed audio (the
-      # pcmBuffer holds up to pcmDmaPeriod <= 16 frames our shadow's 1-frame
-      # delay line does not): a song-stop drain tail is not foreign.
-      if provenance or (real_loud and m.shadow_quiet_age > 16):
+      # Energy evidence requires the engine's channels to be ALL idle: with a
+      # channel active the engine owns whatever is sounding, and any shadow
+      # silence is our own problem (e.g. the one-frame envelope lag at note-on
+      # — which false-latched Densetsu no Sutafi 3's song start), never
+      # foreignness. It also only counts once the shadow has been silent
+      # longer than the real ring could still be draining engine-mixed audio
+      # (the pcmBuffer holds up to pcmDmaPeriod <= 16 frames our shadow's
+      # 1-frame delay line does not): a song-stop drain tail is not foreign.
+      var any_active = false
+      for i in 0 ..< MP2K_MAX_CHANNELS:
+        if m.samplers[i].active: any_active = true
+      if provenance or
+         (real_loud and not any_active and m.shadow_quiet_age > 16):
         inc m.foreign_streak
         # 3 evidence passes: an evidence pass is a full frame of clearly
         # audible foreign audio while our shadow (voices AND reverb tail) is
@@ -822,7 +909,23 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     let s = addr m.samplers[i]
     if not s.active: continue
     # Fetch a fresh source sample into the history when the phase advanced.
+    # A decimating advance (step > 1) skipped hist_gap source samples: first
+    # backfill the history with the samples ADJACENT to the new position, so
+    # the interpolation below always spans neighbouring source samples — the
+    # real mixer point-samples at the exact stride position (its linear
+    # interpolation is between adjacent samples; pret pokeemerald m4a_1.s).
+    # Interpolating stride-spaced fetches instead acted as a triangle lowpass
+    # over the stride and gutted bright decimated voices (Densetsu no Sutafi
+    # 3's 44-93 kHz notes lost 10-30x of their >2 kHz energy).
     if s.need_fetch and s.src_index < s.sample_count:
+      if s.hist_gap > 0'u32:
+        var j = min(s.hist_gap, 3'u32)
+        while j >= 1'u32:
+          if s.src_index >= j:
+            let bs = m.decode_at(s, rom, rmask, s.src_index - j)
+            s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = bs
+          dec j
+        s.hist_gap = 0
       let ns = m.decode_src(s, rom, rmask)
       s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = ns
       s.need_fetch = false
@@ -888,6 +991,10 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
       s.phase_frac -= float32(n)
       s.src_index += n
       s.need_fetch = true
+      if n > 1'u32:
+        # Decimating advance: remember how many source samples were skipped
+        # so the next fetch backfills the tap history with adjacent samples.
+        s.hist_gap = min(s.hist_gap + (n - 1'u32), 3'u32)
       if s.src_index >= s.sample_count:
         # Reversed playback is one-shot: the reference driver's REV paths never
         # consult the loop registers and stop the channel when the sample count
