@@ -24,10 +24,13 @@ proc new_ppu*(gba: GBA): PPU =
     result.bghofs[i] = BGOFS()
     result.bgvofs[i] = BGOFS()
   for i in 0..1:
-    result.bgaff[i][0] = BGAFF()
+    # PA/PD reset to 1.0 (0x100) on hardware — identity transform (mGBA's
+    # GBAIOInit does the same). Games like Doom rely on this in mode 4
+    # without ever writing the affine registers.
+    result.bgaff[i][0] = cast[BGAFF](0x100'u16)
     result.bgaff[i][1] = BGAFF()
     result.bgaff[i][2] = BGAFF()
-    result.bgaff[i][3] = BGAFF()
+    result.bgaff[i][3] = cast[BGAFF](0x100'u16)
     result.bgref[i][0] = BGREF()
     result.bgref[i][1] = BGREF()
     result.bgref_int[i][0] = 0
@@ -252,30 +255,50 @@ proc render_bitmap*(ppu: PPU) =
   ## Fill the BG2 line buffers for the bitmap modes (3/4/5), honoring the
   ## BG2 enable bit and mosaic. Modes 3/5 produce direct BGR555 colors;
   ## mode 4 is paletted and uses the regular layer pipeline.
+  ## BG2 is an AFFINE layer in the bitmap modes: PA/PC and the internal
+  ## reference point apply exactly as in modes 1/2, sampling the bitmap as a
+  ## texture (out-of-range = transparent; the wrap bit has no effect here).
+  ## DBZ Legacy of Goku's intro FMV relies on this, upscaling reduced-height
+  ## video cells to the full screen with PD < 1.0.
   let mode = int(ppu.dispcnt.bg_mode)
   ppu.bitmap_direct = mode != 4
   for col in 0..239: ppu.bg2_direct_opaque[col] = false
   if not bit(uint16(ppu.dispcnt), 10): return  # BG2 disabled
-  var row = uint32(ppu.vcount)
+  let dx = ppu.bgaff[0][0].num
+  let dy = ppu.bgaff[0][2].num
+  var int_x = ppu.bgref_int[0][0]
+  var int_y = ppu.bgref_int[0][1]
   if ppu.bgcnt[2].mosaic:
-    row -= row mod (uint32(ppu.mosaic.bg_mosiac_v_size) + 1)
+    # Vertical mosaic: reuse the internal coordinates latched on the first
+    # line of the mosaic block (same scheme as render_aff_bg)
+    let v = uint16(ppu.mosaic.bg_mosiac_v_size) + 1
+    if ppu.vcount mod v == 0:
+      ppu.mosaic_bgref_int[0] = [int_x, int_y]
+    else:
+      int_x = ppu.mosaic_bgref_int[0][0]
+      int_y = ppu.mosaic_bgref_int[0][1]
+  let (width, height) = if mode == 5: (160'i32, 128'i32) else: (240'i32, 160'i32)
+  let base: uint32 =
+    if mode != 3 and ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
   case mode
-  of 3:
-    let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[0])
+  of 3, 5:
+    let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[base])
     for col in 0..239:
-      ppu.bg2_direct[col] = vram_u16[row * 240 + uint32(col)]
-      ppu.bg2_direct_opaque[col] = true
-  of 4:
-    let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
-    for col in 0..239:
-      ppu.layer_palettes[2][col] = ppu.vram[base + row * 240 + uint32(col)]
-  of 5:
-    if row < 128:
-      let base: uint32 = if ppu.dispcnt.display_frame_select: 0xA000'u32 else: 0
-      let vram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.vram[base])
-      for col in 0..159:
-        ppu.bg2_direct[col] = vram_u16[row * 160 + uint32(col)]
+      let px = int_x shr 8
+      let py = int_y shr 8
+      int_x += dx
+      int_y += dy
+      if px >= 0 and px < width and py >= 0 and py < height:
+        ppu.bg2_direct[col] = vram_u16[uint32(py) * uint32(width) + uint32(px)]
         ppu.bg2_direct_opaque[col] = true
+  of 4:
+    for col in 0..239:
+      let px = int_x shr 8
+      let py = int_y shr 8
+      int_x += dx
+      int_y += dy
+      if px >= 0 and px < width and py >= 0 and py < height:
+        ppu.layer_palettes[2][col] = ppu.vram[base + uint32(py) * 240 + uint32(px)]
   else: discard
   if ppu.bgcnt[2].mosaic:
     let h = int(ppu.mosaic.bg_mosiac_h_size) + 1

@@ -673,6 +673,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         bit_pos += src_width
   of 0x13:  # HuffUnComp
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
     let header = cpu.gba.bus.read_word(src)
     let data_size = header and 0xF  # 4 or 8 bits
     let decomp_len = header shr 8
@@ -689,14 +691,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var cur_node = tree_start
     var cur_word: uint32 = 0
     var bits_left: int = 0
+    var n_inwords, n_steps, n_leaves, n_outwords = 0
     while written < decomp_len:
       if bits_left == 0:
         cur_word = cpu.gba.bus.read_word(data_pos)
         data_pos += 4
         bits_left = 32
+        n_inwords += 1
       let cur_bit = (cur_word shr 31) and 1
       cur_word = cur_word shl 1
       bits_left -= 1
+      n_steps += 1
       let node_val = uint32(cpu.gba.bus[cur_node])
       let child_offset = node_val and 0x3F
       let right_is_leaf = bit(node_val, 6)
@@ -706,6 +711,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let child_addr = next_addr + (if is_right: 1'u32 else: 0'u32)
       let is_leaf = if is_right: right_is_leaf else: left_is_leaf
       if is_leaf:
+        n_leaves += 1
         let leaf_val = uint32(cpu.gba.bus[child_addr])
         if data_size == 4:
           out_word = out_word or (leaf_val shl out_bits)
@@ -719,35 +725,72 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           written += 4
           out_word = 0
           out_bits = 0
+          n_outwords += 1
         cur_node = tree_start
       else:
         cur_node = child_addr
+    # Cost of the real BIOS loop (ARM routine at 0x1014). Every consumed input
+    # bit walks one tree node (two ldrb of the node byte, address arithmetic:
+    # ~25 cycles + 2 nonseq byte reads); a step that lands on a leaf
+    # additionally reads the leaf value and merges it into the output word
+    # (~17 more + 1 byte read); each completed output word is one str (+Dw),
+    # and each 32-bit refill of the bit buffer is one ldr from the source
+    # (+Rw). Constants from instruction-cycle counting of the disassembly,
+    # cross-checked against real-BIOS execution of this game's boot chain.
+    block:
+      let bus = cpu.gba.bus
+      let rn = int(bus.wait16_n[src_page])
+      let rw = int(bus.wait32_n[src_page])
+      let dw = int(bus.wait32_n[dst_page])
+      cpu.hle_charge_body(body_t0, 50 + rw +
+        n_inwords * (6 + rw) +
+        (n_steps - n_leaves) * (25 + 2 * rn) +
+        n_leaves * (42 + 3 * rn) +
+        n_outwords * (1 + dw))
   of 0x14:  # RLUnCompWram (8-bit writes)
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     var dst = cpu.r[1]
     var written: uint32 = 0
+    var n_flags, n_lit, n_rruns, n_runb = 0
     while written < decomp_len:
-      let flag = uint32(cpu.gba.bus[src]); src += 1
+      let flag = uint32(cpu.gba.bus[src]); src += 1; n_flags += 1
       if bit(flag, 7):
         # Compressed run
         let length = (flag and 0x7F) + 3
         let val = cpu.gba.bus[src]; src += 1
+        n_rruns += 1
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
           cpu.gba.bus[dst] = val
-          dst += 1; written += 1
+          dst += 1; written += 1; n_runb += 1
       else:
         # Uncompressed run
         let length = (flag and 0x7F) + 1
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
           cpu.gba.bus[dst] = cpu.gba.bus[src]
-          src += 1; dst += 1; written += 1
+          src += 1; dst += 1; written += 1; n_lit += 1
+    # Cost of the real BIOS loop (Thumb routine at 0x1278): flag byte decode
+    # ~10 + one nonseq byte read; literal bytes ldrb+strb (~11 + Rn + Db);
+    # runs read their fill byte once (~9 + Rn) then strb per output byte
+    # (~7 + Db). Constants from instruction-cycle counting of the
+    # disassembly, cross-checked against real-BIOS execution.
+    block:
+      let bus = cpu.gba.bus
+      let rn = int(bus.wait16_n[src_page])
+      let db = int(bus.wait16_n[dst_page])
+      cpu.hle_charge_body(body_t0, 40 + int(bus.wait32_n[src_page]) +
+        n_flags * (10 + rn) + n_lit * (11 + rn + db) +
+        n_rruns * (9 + rn) + n_runb * (7 + db))
   of 0x15:  # RLUnCompVram (16-bit writes)
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
@@ -755,12 +798,14 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var written: uint32 = 0
     var out_buf: uint16 = 0
     var out_idx: uint32 = 0
+    var n_flags, n_lit, n_rruns, n_runb, n_halves = 0
     while written < decomp_len:
-      let flag = uint32(cpu.gba.bus[src]); src += 1
+      let flag = uint32(cpu.gba.bus[src]); src += 1; n_flags += 1
       if bit(flag, 7):
         # Compressed run
         let length = (flag and 0x7F) + 3
         let val = cpu.gba.bus[src]; src += 1
+        n_rruns += 1
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
           if (out_idx and 1) == 0:
@@ -768,7 +813,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           else:
             out_buf = out_buf or (uint16(val) shl 8)
             cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
-          dst += 1; written += 1; out_idx += 1
+            n_halves += 1
+          dst += 1; written += 1; out_idx += 1; n_runb += 1
       else:
         # Uncompressed run
         let length = (flag and 0x7F) + 1
@@ -780,7 +826,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           else:
             out_buf = out_buf or (uint16(val) shl 8)
             cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
-          dst += 1; written += 1; out_idx += 1
+            n_halves += 1
+          dst += 1; written += 1; out_idx += 1; n_lit += 1
+    # Cost of the real BIOS loop (Thumb routine at 0x12C0): heavier than the
+    # Wram variant — the flag decode spills through the stack (~18 + Rn),
+    # literal bytes buffer into halfwords (~14 + Rn), run bytes replay the
+    # spilled fill byte (~13), and each completed output halfword is one
+    # strh (+Dh). Constants from instruction-cycle counting of the
+    # disassembly, cross-checked against real-BIOS execution.
+    block:
+      let bus = cpu.gba.bus
+      let rn = int(bus.wait16_n[src_page])
+      let dh = int(bus.wait16_n[dst_page])
+      cpu.hle_charge_body(body_t0, 45 + int(bus.wait32_n[src_page]) +
+        n_flags * (18 + rn) + n_lit * (14 + rn) +
+        n_rruns * (10 + rn) + n_runb * 13 + n_halves * (2 + dh))
   of 0x16:  # Diff8bitUnFilterWram (8-bit writes)
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
