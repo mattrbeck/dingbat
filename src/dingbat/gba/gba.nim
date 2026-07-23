@@ -588,6 +588,17 @@ type
     skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
+    # Frames since the learned mixer hook last fired (incremented by the frame
+    # poll, zeroed by on_frame; saturates). When SoundMain stops running —
+    # m4aSoundVSyncOff parks ident and a stock driver's SoundMain refuses to
+    # run — the engine provably is not producing the FIFO stream, so
+    # substitution must pass the real stream through (Disney's Lilo & Stitch
+    # VSyncOffs its idle m4a at the title screen and re-points DMA1 at its own
+    # streamer's buffer; substituting the dead engine's silence muted the
+    # whole soundtrack). Reversible by design: the moment the mixer runs
+    # again, substitution resumes — unlike fifo_foreign, no enhancement is
+    # permanently sacrificed. See mp2k.nim `mixer_live`.
+    hook_stale*: int32
     # Set by mp2k_state_loaded (save-state / rollback load): the shadow mixer
     # state is deliberately NOT serialized, so the next mixer pass must re-latch
     # every channel from the engine's SoundInfo — resuming mid-note channels at
@@ -600,6 +611,9 @@ type
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_skip_fires*: int
     dbg_hook_fires*: int
+    dbg_overlay_triggers*: int  # overlay passthrough entries (idle->held)
+    dbg_overlay_passes*: int    # mixer passes spent in overlay passthrough
+    dbg_unlatches*: int         # fifo_foreign latches reversed by agreement
     dbg_probe_hits*: int   # probe prefilter passes (RAM PC + r0 == &SoundInfo)
     dbg_probe_ident*: uint32  # ident seen at the last probe hit
     dbg_out_energy*: float64
@@ -636,9 +650,32 @@ type
     # streamers fill pcmBuffer just-in-time mid-frame and erase it after the
     # DMA drains, invisible to any state poll). Accumulated per output sample
     # in apu.get_sample, evaluated per mixer pass in on_frame.
-    real_abs_acc*:   int64  # sum |real FIFO latch| since last mixer pass
-    hle_abs_acc*:    int64  # sum |shadow render|  since last mixer pass
+    # Split per FIFO side: some games overlay their own stream onto ONE half
+    # of the engine's pcmBuffer (Kinniku Banzuke streams announcer speech into
+    # the B half while m4a music plays), so a combined sum dilutes the signal.
+    real_abs_a*:     int64  # sum |real FIFO A latch| since last mixer pass
+    real_abs_b*:     int64  # sum |real FIFO B latch| since last mixer pass
+    hle_abs_l*:      int64  # sum |shadow render L|   since last mixer pass
+    hle_abs_r*:      int64  # sum |shadow render R|   since last mixer pass
     ab_n*:           int    # samples accumulated
+    # Transient foreign-overlay passthrough (see on_frame): when the real
+    # drained stream on either FIFO side carries sustained energy well above
+    # our shadow render of the same side, the game is streaming audio the
+    # engine (and therefore our shadow) does not produce — announcer speech,
+    # voice-clip stingers — mixed AROUND the m4a channels into pcmBuffer or
+    # the FIFOs just-in-time. While held, the real stream is emitted and the
+    # shadow keeps rendering warm underneath (span-matched captures, seamless
+    # resume). Reversible per pass — unlike fifo_foreign, no enhancement is
+    # permanently sacrificed. Decremented on clean passes; re-armed on
+    # evidence, so sentence-cadence speech does not flap.
+    overlay_hold*:   int32
+    # EXE3-class unlatch (see on_frame): while fifo_foreign is latched but m4a
+    # channels are active, the shadow keeps rendering un-emitted so sustained
+    # shadow-vs-real agreement can prove the engine owns the stream and re-arm
+    # substitution. unlatch_watch mirrors "any sampler active" for apu's
+    # watch-render branch; unlatch_agree counts consecutive agreement passes.
+    unlatch_watch*:  bool
+    unlatch_agree*:  int32
     dbg_real_avg*:   float32
     dbg_hle_avg*:    float32
     # Mixer passes since the shadow last produced audio. Gates energy-based
@@ -654,6 +691,21 @@ type
     rev_slot*:       int           # current frame slot (the one being overwritten)
     rev_pos*:        int           # intra-frame sample index within the slot
     rev_period*:     int           # ring length in V-blank frames = SoundInfo.pcmDmaPeriod
+    # The ring is kept at the ENGINE's sample rate (pcmSamplesPerVBlank cells
+    # per slot), exactly like the real pcmBuffer: our 32768 Hz wet output is
+    # point-sampled into cells and the seed taps replay a cell across the
+    # output samples it spans (zero-order hold — the same shape the real DMA/
+    # DAC replay gives the drained buffer). Keeping the ring at our full
+    # render rate made the recirculated content too broadband: the real
+    # buffer's band-limited content self-correlates ~3.5x more at the
+    # one-frame tap lag, and the 4-tap seed (two consecutive frames) turns
+    # that correlation into loop gain — the high-reverb cluster's missing
+    # tail energy (FireRed forced-reverb A/B: ratio 1.00 at reverb 50 sliding
+    # to 0.91 at 100 before this).
+    rev_spv*:        int           # cells per slot = SoundInfo.pcmSamplesPerVBlank
+    rev_phase*:      float32       # cell-position accumulator (pcmFreq/32768 per sample)
+    rev_cell*:       int           # last cell written this pass (-1 = none)
+    rev_seed*:       float32       # seed held across the current cell's output samples
                                    # (SampleFreqSet: PCM_DMA_BUF_SIZE / pcmSamplesPerVBlank)
     # DirectSound double-buffer emulation: the real m4a driver mixes a pcmBuffer
     # one frame ahead of the DMA that plays it, so its FIFO output lags the mixer
@@ -726,6 +778,7 @@ proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
 proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
+proc mixer_live*(m: Mp2kHle): bool
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
