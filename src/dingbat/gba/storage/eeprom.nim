@@ -1,5 +1,14 @@
 # EEPROM storage implementation (included by gba.nim)
 
+const EEPROM_SETTLE_CYCLES = 115000
+  ## Programming time after a write command (~6.9 ms; GBATEK gives ~6.5 ms
+  ## max). While settling, the ready-poll read returns 0. Constant matches
+  ## mGBA; NanoBoyAdvance uses 101400.
+
+proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
+  # Same expression as bus_now (bus.nim is included after this file)
+  ep.gba_ref.bus.sched.cycles + CycleCount(ep.gba_ref.bus.cycles)
+
 proc addr_bits*(sz: EepromSize): int =
   case sz
   of eeprom4k:  6
@@ -18,7 +27,12 @@ proc eeprom_size_from_file_size*(size: int64): Option[EepromSize] =
     none(EepromSize)
 
 proc eeprom_size_from_dma_length*(length: int): EepromSize =
-  if length <= 6: eeprom4k else: eeprom64k
+  ## The first EEPROM command DMA reveals the chip's address width via its
+  ## programmed transfer count (each transfer clocks one serial bit):
+  ##   4Kbit  (6-bit addr):  read-setup = 2+6+1  = 9,  write = 2+6+64+1  = 73
+  ##   64Kbit (14-bit addr): read-setup = 2+14+1 = 17, write = 2+14+64+1 = 81
+  ## (Same rule as mGBA/NanoBoyAdvance; anything unexpected defaults to 64Kbit.)
+  if length == 9 or length == 73: eeprom4k else: eeprom64k
 
 # EepromBuffer procs
 proc push*(buf: var EepromBuffer; value: int) =
@@ -72,7 +86,9 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
       ep.buffer.clear()
       ep.read_bits = 0
     return value
-  return 1'u8
+  # Ready poll: 0 while a previous write command is still programming the
+  # cell (~6.9 ms), 1 once settled (mGBA/NBA model the same busy window)
+  return if ep.eeprom_now() < ep.busy_until: 0'u8 else: 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
   if ep.state == {esRead} or ep.state == {esReadIgnore}:
@@ -106,6 +122,9 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     let mask = 1'u8 shl bit_pos
     ep.memory[base] = (cur and not mask) or (uint8(v) shl bit_pos)
     ep.dirty = true
+    # Each data bit restarts the programming window, so the chip reads busy
+    # for EEPROM_SETTLE_CYCLES after the LAST bit (mirrors mGBA's dust timer)
+    ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
     ep.wrote_bits += 1
     if ep.wrote_bits == 64:
       ep.buffer.clear()

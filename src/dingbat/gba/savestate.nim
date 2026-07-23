@@ -535,6 +535,10 @@ proc load_storage_state(st: Storage; r: var Reader) =
     ep.ignored_reads = int(r.read_i32())
     ep.read_bits = int(r.read_i32())
     ep.wrote_bits = int(r.read_i32())
+    # busy_until (write-settle window, <=115000 cycles) is not in the format;
+    # treat any in-flight programming as settled. States are frame-boundary
+    # only, so at worst a ready-poll observes ready ~0.4 frames early.
+    ep.busy_until = 0
   # Persist the restored backup memory to the .sav on the next flush
   st.dirty = true
 

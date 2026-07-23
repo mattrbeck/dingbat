@@ -61,6 +61,11 @@ type
     ignored_reads*: int
     read_bits*:     int
     wrote_bits*:    int
+    # Absolute bus cycle until which the chip is programming (busy) after a
+    # write; the ready-poll read returns 0 until then. Rebased each frame by
+    # end_frame (like bus.rom_free_since); deliberately NOT serialized in
+    # save states (reset to 0 on load — see load_storage_state).
+    busy_until*:    CycleCount
 
   Interrupts* = ref object
     gba* {.cursor.}:    GBA
@@ -764,6 +769,12 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.rom_free_since -= base
   else:
     gba.bus.rom_free_since = 0
+  if gba.storage of EEPROM:
+    let ep = EEPROM(gba.storage)
+    if ep.busy_until >= base:
+      ep.busy_until -= base
+    else:
+      ep.busy_until = 0
   base
 
 proc apply_cheats*(gba: GBA) =
