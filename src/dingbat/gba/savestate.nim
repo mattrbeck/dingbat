@@ -594,6 +594,8 @@ proc gba_apply_state(gba: GBA; payload: string) =
   # load_state_bytes, apply_state_payload/rollback), so this covers them all.
   if gba.mp2k != nil:
     gba.mp2k.mp2k_state_loaded()
+  if gba.gs_bon != nil:
+    gba.gs_bon.gs_state_loaded()
 
 # Canonical value stored in the state-file header's "ROM size" slot. The ROM
 # buffer is now sized to the cart's next power of two (not a flat 32 MB), but

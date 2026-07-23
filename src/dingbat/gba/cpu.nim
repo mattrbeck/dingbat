@@ -322,6 +322,12 @@ when defined(pcprofile):
   var prof_cycles*: array[16, uint64]
   var prof_iwram*: array[32, uint64]   # per-1KB bucket of IWRAM 0x03000000..0x03007FFF
 
+when defined(gsprobe):
+  # Throwaway Golden Sun probe state (see the gsprobe block in tick).
+  var gsProbePc*: array[0x800, uint32]   # halfword-granular PC hit counts, 0x03000000..0xFFF
+  var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
+  var gsProbeIn*: bool
+
 proc tick*(cpu: CPU) =
   # Take a pending IRQ before the IntrWait re-halt check: the handler must
   # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
@@ -398,6 +404,39 @@ proc tick*(cpu: CPU) =
         if (region == 0x02'u32 or region == 0x03'u32) and
            cpu.r[0] == m.probe_sound_info:
           m.probe_pc(cur)
+    # Camelot "Bon" HLE (Golden Sun) mixer-entry hook — fires once
+    # per frame at the driver's per-channel processing entry (see gs_bon.nim).
+    # Shadow-only: reads state, never alters control flow.
+    if cpu.gba.mp2k_hle and cpu.gba.gs_bon != nil and cpu.gba.gs_bon.engaged:
+      let g = cpu.gba.gs_bon
+      let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+      if cur == g.hook_addr:
+        g.gs_mixer_hook()
+    when defined(gsprobe):
+      # Throwaway Golden Sun "Bon" mixer probe: histogram of executed IWRAM
+      # PCs + entry events (outside IWRAM -> inside), with caller LR/r0-r3.
+      block:
+        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+        let inIw = (cur shr 24) == 0x03'u32 and (cur and 0x7FFF'u32) < 0x1000'u32
+        if inIw:
+          gsProbePc[int((cur and 0xFFF'u32) shr 1)].inc
+          if not gsProbeIn and gsProbeLog.len < 4000:
+            gsProbeLog.add (cur, cpu.r[14], cpu.r[0], cpu.r[1], cpu.r[2],
+                            uint32(cpu.gba.ppu.vcount))
+            # At interesting entries, also snapshot ch0/ch1 status+env+START
+            if cur == 0x3000380'u32 or cur == 0x3000659'u32:
+              let sip = cpu.gba.bus.read_word_internal(0x03007FF0'u32)
+              var packed = 0'u32
+              for c in 0 ..< 4:
+                let st = cpu.gba.bus.read_byte_internal(sip + 0x50 + uint32(c)*64)
+                packed = packed or (uint32(st) shl (c*8))
+              var envs = 0'u32
+              for c in 0 ..< 4:
+                let ev = cpu.gba.bus.read_byte_internal(sip + 0x50 + uint32(c)*64 + 9)
+                envs = envs or (uint32(ev) shl (c*8))
+              gsProbeLog.add (0xFFFF'u32, packed, envs, 0'u32, 0'u32,
+                              uint32(cpu.gba.ppu.vcount))
+        gsProbeIn = inIw
     when defined(pcprofile):
       let prof_region = bits_range(cpu.r[15], 24, 27)
     let instr = cpu.read_instr()

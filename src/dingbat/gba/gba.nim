@@ -715,6 +715,80 @@ type
     out_delay_w*:    int            # write cursor (in stereo frames)
     db_delay*:       int            # delay length in samples (0 disables)
 
+  # Camelot "Bon" sound-driver HLE state (Golden Sun; see
+  # gs_bon.nim). Off by default; shares the mp2k_hle enable flag but keeps its
+  # own engaged state (the two HLEs are structurally mutually exclusive).
+  GsBonSampler* = object
+    active*:      bool
+    synth*:       bool      # oscillator instrument (WaveData size==0 && loopStart==0)
+    synth_kind*:  uint8     # 0=duty-modulated square, 1=saw, else triangle
+    duty_base*, duty_step*, duty_depth*, duty_phase0*, duty_acc*: uint8
+    duty_thresh*: uint32    # square duty threshold vs the 32-bit phase (per frame)
+    phase_u*:     uint32    # oscillator phase accumulator (2^32 = one period)
+    synth_step*:  uint32    # phase step per 32768 Hz output sample
+    saw_step*:    uint32    # phase step per SOURCE-rate sample (saw IIR sim)
+    saw_iir*:     int32     # saw shaper state (the driver's r2 = r9 + r2>>1)
+    src_carry*:   float32   # source-rate clock remainder for the saw sim
+    wave_data*:   uint32    # sample data start (WaveData + 16)
+    rom_off*:     uint32
+    in_rom*:      bool
+    sample_count*: uint32   # WaveData.size
+    loop_start*:  uint32    # WaveData.loopStart
+    looping*:     bool
+    freq*:        uint32    # channel playback rate, Hz
+    freq_step*:   float32   # per-output-sample step (source samples or phase)
+    src_index*:   uint32
+    phase_frac*:  float32
+    need_fetch*:  bool
+    tap0*, tap1*, tap2*, tap3*: float32
+    vol_l0*, vol_l1*: float32
+    vol_r0*, vol_r1*: float32
+    age*:         int
+
+  GsRevModel* = enum
+    ## Which reverb algorithm a Bon-driver build ships (see gs_bon.nim):
+    grmParsedShift   # GS1: seed gains are runtime-patched asr instructions,
+                     # live-parsed from the IWRAM code every frame
+
+  GsBonHle* = ref object
+    gba* {.cursor.}: GBA
+    engaged*:    bool
+    build*:      int        # index into gs_bon.nim's GS_BUILDS table
+    fp_addr*:    uint32     # fingerprint match base found by the IWRAM scan;
+                            # every per-build hook/parse address is an offset
+                            # from this (regional builds relocate the block)
+    hook_addr*:  uint32     # mixer per-channel entry PC (fingerprint-selected)
+    sound_info*: uint32
+    fp_fails*:   int        # fingerprint mismatches while the magic is present
+    fp_give_up*: bool
+    resync_pending*: bool
+    samplers*:   array[12, GsBonSampler]
+    frame_len*:  int
+    frame_pos*:  int
+    engaged_frames*: int
+    dbg_hook_fires*: int
+    dbg_synth_chframes*: int   # channel-frames where a synth instrument was live
+    dbg_waves*: seq[uint32]    # distinct WaveData pointers observed (mp2kwav builds)
+    reverb_strength*: uint8
+    rev_period*: int        # DMA ring length in frames = SoundInfo.pcmDmaPeriod
+    rev_model*:  GsRevModel # per-build reverb algorithm (set at engage)
+    rev_insn_addr*: uint32  # grmParsedShift: addr of the runtime-patched reverb
+                            # tap instructions (0 = reverb off, a DIAG state)
+    rev_coef_new*: float32  # 1-frame same-side tap gain (parsed from live code)
+    rev_coef_old*: float32  # (P+1)-frame cross-side tap gain (parsed from live code)
+    src_rate*:   int        # SoundInfo.pcmFreq (the driver's native mix rate)
+    div_freq*:   uint32     # SoundInfo divFreq: per-Hz resampler step (9.23)
+    makeup*:     float32    # DIAG: output makeup gain override (0 => per-build)
+    db_delay_ovr*: bool     # DIAG: harness set db_delay; engage must not touch it
+    # grmParsedShift wet-history ring: rev_period+1 slots of GS_REV_SLOT_LEN
+    # stereo samples (see gs_bon.nim gs_render_sample).
+    rev_ring*:   seq[float32]
+    rev_slot*:   int        # slot being written this mixer pass
+    rev_pos*:    int        # intra-frame sample index within the slot
+    out_delay*:  seq[int16]
+    out_delay_w*: int
+    db_delay*:   int
+
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
@@ -739,6 +813,8 @@ type
     # EXPLORATORY: MP2K/M4A sound-engine HLE (off by default). See mp2k.nim.
     mp2k*:       Mp2kHle
     mp2k_hle*:   bool
+    # Camelot "Bon" driver HLE (Golden Sun). See gs_bon.nim.
+    gs_bon*:     GsBonHle
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine
@@ -780,6 +856,11 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
 proc mixer_live*(m: Mp2kHle): bool
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
+proc new_gs_bon*(gba: GBA): GsBonHle
+proc init_gs_bon*(g: GsBonHle)
+proc gs_mixer_hook*(g: GsBonHle)
+proc gs_frame_poll*(g: GsBonHle)
+proc gs_render_sample*(g: GsBonHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
 proc request_immediate*(dma: DMA)
@@ -853,6 +934,7 @@ include serial
 include dma
 include bus
 include mp2k
+include gs_bon
 
 # Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)
@@ -957,6 +1039,8 @@ proc post_init*(gba: GBA) =
   # probe, see mp2k.nim); nothing runs unless gba.mp2k_hle is set.
   gba.mp2k = new_mp2k(gba)
   gba.mp2k.init_mp2k()
+  gba.gs_bon = new_gs_bon(gba)
+  gba.gs_bon.init_gs_bon()
   if not gba.run_bios:
     gba.cpu.skip_bios()
 
@@ -1033,6 +1117,10 @@ proc step_frame*(gba: GBA) =
   # only when the HLE is enabled; see mp2k.nim "Runtime detection").
   if gba.mp2k_hle and gba.mp2k != nil:
     gba.mp2k.mp2k_frame_poll()
+  # Camelot "Bon" HLE (Golden Sun) — same enable flag, its own
+  # magic + code-fingerprint detection (see gs_bon.nim).
+  if gba.mp2k_hle and gba.gs_bon != nil:
+    gba.gs_bon.gs_frame_poll()
   gba.cpu.count_cycles = 0
   while gba.ppu.frame == 0:
     gba.cpu.tick()

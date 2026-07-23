@@ -266,9 +266,11 @@ proc get_sample*(apu: APU) =
     # silence — deflating its RMS ~19% and making the HLE read "~+23% hot"
     # when the span-matched streams actually agree to within a few percent.
     # With the HLE disabled (e.g. DINGBAT_NOHLE=1 reference runs) there is no
-    # HLE span to match, so capture the whole run as before.
+    # HLE span to match, so capture the whole run as before. On Camelot "Bon"
+    # driver games the MP2K HLE structurally never engages — there the span
+    # gate is the gs_bon engagement instead (same alignment rationale).
     if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst or
-       mp2k_watch:
+       mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a
       realDmaCapture.add raw_dma_b
   # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
@@ -324,6 +326,12 @@ proc get_sample*(apu: APU) =
       if mp2kWavCapture.len >= 2:
         mp2kWavCapture[mp2kWavCapture.len - 2] = raw_dma_a
         mp2kWavCapture[mp2kWavCapture.len - 1] = raw_dma_b
+  # Camelot "Bon" HLE (Golden Sun) — same substitution for its
+  # own engine (structurally never engaged at the same time as the MP2K HLE).
+  elif apu.gba.mp2k_hle and apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged:
+    let (hl, hr) = apu.gba.gs_bon.gs_render_sample()
+    raw_dma_a = hl
+    raw_dma_b = hr
   let dma_a = if apu.channel_mask[4]: raw_dma_a else: 0'i16
   let dma_b = if apu.channel_mask[5]: raw_dma_b else: 0'i16
   let dma_a_scaled = int32(dma_a) shl apu.soundcnt_h.dma_sound_a_volume
