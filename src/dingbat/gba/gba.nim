@@ -258,6 +258,14 @@ type
     cpsr*:        PSR
     spsr*:        PSR
     pipeline*:    Pipeline
+    # True between a PC write (pipeline flush) and the first opcode fetch at
+    # the destination: hardware has not fetched anything there yet, so a write
+    # landing near the new PC in that window (an immediate DMA granted right
+    # after the branch) must be visible to the refill — the self-modifying-code
+    # pipeline capture in write_*_internal has to stand down or it snapshots
+    # stale memory (Golden Sun TLA DMAs a `bx pc` trampoline onto the stack
+    # and branches to it before the transfer has run)
+    refill_pending*: bool
     reg_banks*:   array[6, array[7, uint32]]
     spsr_banks*:  array[6, uint32]
     halted*:      bool

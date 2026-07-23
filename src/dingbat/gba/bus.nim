@@ -167,6 +167,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # Minimal BIOS stub: IRQ vector at 0x18 branches to the handler at 0x128
     # (matching the real BIOS layout, so IRQ dispatch costs the same 3-cycle
     # branch) which dispatches to the user handler at [0x03FFFFFC].
+    #   0x004: b 0x1C                         EA000004  (UND vector)
+    #   0x01C: subs pc, lr, #4                E25EF004
     #   0x018: b 0x128                        EA000042
     #   0x128: stmfd sp!, {r0-r3, r12, lr}   E92D500F
     #   0x12C: mov   r0, #0x04000000          E3A00301
@@ -174,6 +176,12 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     #   0x134: ldr   pc, [r0, #-4]            E510F004
     #   0x138: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
     #   0x13C: subs  pc, lr, #4               E25EF004
+    # UND vector (same word as the real BIOS at 0x04): the real handler's
+    # non-debug path restores SPSR and returns with subs pc, lr, #4 — the
+    # register save/restore nets out, so the stub keeps only the return
+    # (mGBA's HLE BIOS undefBase does the same)
+    write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
+    write_stub_u32(result.bios, 0x01C, 0xE25EF004'u32)
     write_stub_u32(result.bios, 0x018, 0xEA000042'u32)
     write_stub_u32(result.bios, 0x128, 0xE92D500F'u32)
     write_stub_u32(result.bios, 0x12C, 0xE3A00301'u32)
@@ -380,7 +388,13 @@ else:
 
 proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   if bits_range(address, 28, 31) > 0: return
-  if address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
+  # Self-modifying-code pipeline capture: a write landing on the two opcodes
+  # the hardware pipeline has already fetched must not affect execution, so
+  # snapshot the pre-write values. Stand down while a refill is pending (right
+  # after a PC write): nothing has been fetched at the new PC yet, and the
+  # refill must observe the write (Golden Sun TLA's DMA-built stack trampoline)
+  if not bus.gba.cpu.refill_pending and
+     address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
   of 0x2: bus.wram_board[address and 0x3FFFF'u32] = value
@@ -411,7 +425,8 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
   if bits_range(address, 28, 31) > 0: return
   let orig = address
   let address = address and not 1'u32
-  if address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
+  if not bus.gba.cpu.refill_pending and
+     address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
   of 0x2: write_u16_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
@@ -419,8 +434,13 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     write_u16_ptr(bus.wram_chip, address and 0x7FFF'u32, value)
     chipWatch(bus, address and 0x7FFF'u32, uint32(value), 2)
   of 0x4:
-    bus.write_byte_internal(address, uint8(value))
-    bus.write_byte_internal(address + 1, uint8(value shr 8))
+    if (address and 0xFFFFFF'u32) == 0x132'u32:
+      # KEYCNT: keep the 16-bit store atomic so the keypad IRQ check never
+      # observes a half-written transient (see write_keycnt16).
+      bus.gba.keypad.write_keycnt16(value)
+    else:
+      bus.write_byte_internal(address, uint8(value))
+      bus.write_byte_internal(address + 1, uint8(value shr 8))
   of 0x5:
     bus.gba.ppu.render_dirty = true
     write_u16_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
@@ -445,7 +465,8 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
   if bits_range(address, 28, 31) > 0: return
   let orig = address
   let address = address and not 3'u32
-  if address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
+  if not bus.gba.cpu.refill_pending and
+     address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
   of 0x2: write_u32_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
@@ -453,10 +474,17 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     write_u32_ptr(bus.wram_chip, address and 0x7FFF'u32, value)
     chipWatch(bus, address and 0x7FFF'u32, value, 4)
   of 0x4:
-    bus.write_byte_internal(address,     uint8(value))
-    bus.write_byte_internal(address + 1, uint8(value shr 8))
-    bus.write_byte_internal(address + 2, uint8(value shr 16))
-    bus.write_byte_internal(address + 3, uint8(value shr 24))
+    if (address and 0xFFFFFF'u32) == 0x130'u32:
+      # Word store covering KEYINPUT (read-only) + KEYCNT: commit KEYCNT
+      # atomically (see write_keycnt16).
+      bus.write_byte_internal(address,     uint8(value))
+      bus.write_byte_internal(address + 1, uint8(value shr 8))
+      bus.gba.keypad.write_keycnt16(uint16(value shr 16))
+    else:
+      bus.write_byte_internal(address,     uint8(value))
+      bus.write_byte_internal(address + 1, uint8(value shr 8))
+      bus.write_byte_internal(address + 2, uint8(value shr 16))
+      bus.write_byte_internal(address + 3, uint8(value shr 24))
   of 0x5:
     bus.gba.ppu.render_dirty = true
     write_u32_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)

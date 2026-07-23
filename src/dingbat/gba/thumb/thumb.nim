@@ -299,8 +299,11 @@ proc thumb_move_shifted_register*[op: static uint32](cpu: CPU; instr: uint32) =
   cpu.cpsr.carry = carry_out
   cpu.step_thumb()
 
-proc thumb_unimplemented*(cpu: CPU; instr: uint32) =
-  raise newException(Exception, "Unimplemented THUMB instruction: " & hex_str(uint16(instr)))
+proc thumb_undefined*(cpu: CPU; instr: uint32) =
+  # Genuinely undefined THUMB encodings — 0xE800-0xEFFF (the BLX suffix only
+  # exists on ARMv5), Bcc with cond=0b1110, BX with H1 set, and the unassigned
+  # misc-group slots — take the Undefined Instruction trap on the ARM7TDMI
+  cpu.und()
 
 macro thumbLutBuilder(): untyped =
   result = newTree(nnkBracket)
@@ -310,6 +313,7 @@ macro thumbLutBuilder(): untyped =
       of "1111......": call("thumb_long_branch_link", i.bit(5))
       of "11100.....": call("thumb_unconditional_branch")
       of "11011111..": call("thumb_software_interrupt")
+      of "11011110..": call("thumb_undefined")  # cond=0b1110 is undefined
       of "1101......": call("thumb_conditional_branch", bits_range(i, 2, 5))
       of "1100......": call("thumb_multiple_load_store", i.bit(5))
       of "1011.10...": call("thumb_push_pop_registers", i.bit(5), i.bit(2))
@@ -321,12 +325,13 @@ macro thumbLutBuilder(): untyped =
       of "0101..1...": call("thumb_load_store_sign_extended", bits_range(i, 4, 5))
       of "0101..0...": call("thumb_load_store_register_offset", bits_range(i, 4, 5))
       of "01001.....": call("thumb_pc_relative_load")
+      of "010001111.": call("thumb_undefined")  # BX with H1 (BLX Rm is ARMv5)
       of "010001....": call("thumb_high_reg_branch_exchange", bits_range(i, 2, 3), i.bit(1), i.bit(0))
       of "010000....": call("thumb_alu_operations", bits_range(i, 0, 3))
       of "001.......": call("thumb_move_compare_add_subtract", bits_range(i, 5, 6))
       of "00011.....": call("thumb_add_subtract", i.bit(4), i.bit(3))
       of "000.......": call("thumb_move_shifted_register", bits_range(i, 5, 6))
-      else:            call("thumb_unimplemented")
+      else:            call("thumb_undefined")
 
 {.push warning[UnreachableCode]: off.}
 const thumbLut = thumbLutBuilder()

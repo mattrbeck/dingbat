@@ -68,3 +68,7 @@ ios/Dingbat.xcodeproj/
 ios/build/
 ios/DerivedData/
 dingbat_dist
+tools/romfuzz/dingbat_nav
+tools/romfuzz/mgba_runner
+tools/romfuzz/nba_runner
+__pycache__/
