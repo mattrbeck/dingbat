@@ -242,6 +242,17 @@ type
     # the scheduler up so the DMA preempts the CPU at its exact start cycle
     # (a read one instruction after the enable must see the DMA'd data)
     dma_pending*: bool
+    # Open-bus latch left by DMA: the last word a DMA moved stays on the data
+    # bus, so an unmapped-address read made by the DMA itself, or by the FIRST
+    # CPU instruction executed after the burst returns the bus, sees that word
+    # instead of the CPU prefetch (the CPU hasn't driven the bus in between).
+    # dma_open_bus_armed is set when a burst hands the bus back and cleared at
+    # the next instruction boundary (cpu.tick). Matches mGBA's gba->bus +
+    # dmaPC-distance model. Hello Kitty Collection: Miracle Fashion Maker's
+    # boot walks a NULL task list through open bus and only terminates when a
+    # sound-FIFO DMA's final zero word appears in one of these reads.
+    dma_open_bus*:       uint32
+    dma_open_bus_armed*: bool
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,

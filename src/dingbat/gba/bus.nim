@@ -658,6 +658,14 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   log("Reading open bus at " & hex_str(address))
   let shift = (address and 3) * 8
+  # A DMA is the last bus master to have driven the data bus: reads of
+  # unmapped space made by the DMA itself, or by the first CPU instruction
+  # after the burst hands the bus back, return the last word the DMA moved
+  # (the CPU prefetcher hasn't overwritten the latch yet). Matches mGBA's
+  # gba->bus / dmaPC model and hardware (GBATEK "Reading from Unused Memory":
+  # "after DMA: recently transferred data").
+  if bus.dma_active or bus.dma_open_bus_armed:
+    return uint8(bus.dma_open_bus shr shift)
   let pc = bus.gba.cpu.r[15]
   # Guard: if PC is in MMIO, unmapped memory, or otherwise unreadable, avoid
   # infinite recursion (region 0x1 reads recurse back into this proc)

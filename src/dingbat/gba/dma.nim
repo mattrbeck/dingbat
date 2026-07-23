@@ -211,6 +211,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         dma.latch[channel] = half or (half shl 16)
       if dst_writable:
         dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
+    # The moved word stays latched on the data bus (open-bus reads see it
+    # until the CPU's own activity replaces it — see Bus.dma_open_bus)
+    dma.gba.bus.dma_open_bus = dma.latch[channel]
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 
@@ -252,5 +255,9 @@ proc run_pending*(dma: DMA) =
     # The bus changed masters: the CPU (or a paused outer DMA burst)
     # continues with a nonsequential access
     bus.dma_active = saved < 4
+    if saved == 4:
+      # Bus handed back to the CPU: the first instruction it executes still
+      # sees the DMA's last word on open-bus reads (cleared in cpu.tick)
+      bus.dma_open_bus_armed = true
     bus.rom_next_addr = 1
     bus.rom_next_addr2 = 1

@@ -384,6 +384,11 @@ proc tick*(cpu: CPU) =
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
+    # The DMA open-bus latch is visible only until the CPU completes an
+    # instruction (its own fetches/reads then own the bus). Cleared BEFORE
+    # scheduler.tick so a DMA fired at this instruction's boundary arms the
+    # latch for the NEXT instruction.
+    cpu.gba.bus.dma_open_bus_armed = false
     cpu.last_instr_exc_return = cpu.instr_exc_return
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
