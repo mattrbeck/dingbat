@@ -984,6 +984,9 @@ const resetCurrentSaveFile = async () => {
   if (!currentOriginalName) return;
   await dbDelete("save:" + currentOriginalName);
   await dbDelete("save:" + currentOriginalName + "-p2");
+  // Mirror rule: a local save deletion propagates to Drive (no-op if not synced).
+  markSyncDelete("save:" + currentOriginalName);
+  markSyncDelete("save:" + currentOriginalName + "-p2");
   // resetLoadedGameSave drops the in-memory FS .sav and reboots the core, so the
   // 5s autosave interval can't re-flush the just-deleted save over the top.
   resetLoadedGameSave();
@@ -2702,12 +2705,16 @@ const refreshHomeRecent = async () => {
     let del = document.createElement("button");
     del.type = "button";
     del.className = "home-tile-delete";
-    del.title = "Remove from recent";
-    del.setAttribute("aria-label", "Remove " + romName);
+    // Curation, not deletion: this only clears the game off the Recent grid.
+    // Its save stays put, and nothing on Drive is touched — deleting a game for
+    // real (and choosing what happens to its Drive backup) lives in Manage ROMs.
+    del.title = "Remove from Recent (keeps your save)";
+    del.setAttribute("aria-label", "Remove " + romName + " from Recent (keeps your save)");
     del.innerHTML = "&times;";
-    del.addEventListener("click", (e) => {
+    del.addEventListener("click", async (e) => {
       e.stopPropagation();
-      deleteRecent(romName);
+      await deleteRecent(romName);
+      showToast("Removed from Recent — your save is kept");
     });
 
     tile.appendChild(launch);
