@@ -414,6 +414,18 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
       for offset in 0x15C'u32..0x1FF'u32:
         cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+      # The "other registers" group also covers the interrupt/waitstate
+      # block: the real BIOS clears IE, acknowledges ALL pending IF bits,
+      # resets WAITCNT, and clears IME (mGBA's HLE does the same). Pokemon
+      # Pinball R/S relies on this: its boot code points 0x03007FFC at its
+      # IntrMain and calls RegisterRamReset while the previous program's
+      # sound-DMA IRQs are still enabled and firing; without the IE/IF/IME
+      # clear, a stale DMA IRQ dispatches through the not-yet-built handler
+      # table and jumps to address 0.
+      cpu.gba.bus.write_half(0x04000200'u32, 0x0000'u16)  # IE
+      cpu.gba.bus.write_half(0x04000202'u32, 0xFFFF'u16)  # IF (ack all)
+      cpu.gba.bus.write_half(0x04000204'u32, 0x0000'u16)  # WAITCNT
+      cpu.gba.bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
       # The real BIOS leaves the display in forced blank, not zeroed
       cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
     # Cost of the real BIOS reset paths, measured per flag bit against
@@ -1140,12 +1152,24 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
       if has_spsr:
         cpu.spsr = cast[PSR]((uint32(cpu.spsr) and not mask) or value)
     else:
-      let thumb = cpu.cpsr.thumb
       let was_irq_disabled = cpu.cpsr.irq_disable
       if (mask and 0xFF) > 0:
         cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
       cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
-      cpu.cpsr.thumb = thumb
+      if cpu.cpsr.thumb:
+        # MSR really does write the T bit on ARM7TDMI (architecturally
+        # UNPREDICTABLE, but well-defined on this core and relied on by
+        # commercial software: Pokemon Pinball R/S's decompressor exits via
+        # `msr cpsr, r2` with T set followed by a Thumb `bx r0`). The switch
+        # happens mid-pipeline, so the two words already prefetched as ARM
+        # are reinterpreted (mGBA-verified hardware model): the next opcode
+        # (at A+4) executes as a Thumb nop, then the LOW halfword of the word
+        # at A+8 executes, and fetching resumes at A+12. We stage the two
+        # reinterpreted opcodes in the pipeline buffer; the usual +4 step
+        # below leaves r15 tracking mGBA's PC exactly through the hand-off.
+        cpu.pipeline.clear()
+        cpu.pipeline.push(0x46C0'u32)  # Thumb nop (mov r8, r8)
+        cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
       if was_irq_disabled and not cpu.cpsr.irq_disable:
         cpu.gba.interrupts.schedule_interrupt_check()
   else:  # MRS
