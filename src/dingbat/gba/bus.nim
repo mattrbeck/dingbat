@@ -164,6 +164,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     discard f.readBytes(result.bios, 0, result.bios.len)
     f.close()
   else:
+    result.stub_bios = true
     # Minimal BIOS stub: IRQ vector at 0x18 branches to the handler at 0x128
     # (matching the real BIOS layout, so IRQ dispatch costs the same 3-cycle
     # branch) which dispatches to the user handler at [0x03FFFFFC].
@@ -193,6 +194,88 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # pipeline latch reads the same values as the real BIOS leaves
     write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
     write_stub_u32(result.bios, 0x144, 0xE55EC002'u32)
+    # Reset vector: games jump to 0x00000000 to trigger a warm re-boot
+    # (Earthworm Jim 2's IRQ dispatcher calls a NULL handler slot; on
+    # hardware the BIOS boot re-runs the logo sequence and re-enters the
+    # ROM). The swi traps into the HLE (recognized by pc == 8), which
+    # applies the boot's I/O effects and parks execution in the wait loop
+    # below; a second trap at the end re-enters the ROM (see hle_swi 0x00).
+    write_stub_u32(result.bios, 0x000, 0xEF000000'u32)  # swi 0 (boot trap)
+    # Boot wait loop (r0 = 0x04000000, r2 = vblank count, set by the trap):
+    # count r2 vcount==160 edges, then run to scanline 126, where the real
+    # boot hands control to the ROM. Executing stub code keeps the ~271-frame
+    # wait inside the normal per-frame loop and makes the state
+    # save/rollback-transparent (the whole continuation is PC + r0-r2).
+    write_stub_u32(result.bios, 0x200, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
+    write_stub_u32(result.bios, 0x204, 0xE35100A0'u32)  # cmp  r1, #160
+    write_stub_u32(result.bios, 0x208, 0x1AFFFFFC'u32)  # bne  0x200
+    write_stub_u32(result.bios, 0x20C, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
+    write_stub_u32(result.bios, 0x210, 0xE35100A0'u32)  # cmp  r1, #160
+    write_stub_u32(result.bios, 0x214, 0x0AFFFFFC'u32)  # beq  0x20C
+    write_stub_u32(result.bios, 0x218, 0xE2522001'u32)  # subs r2, r2, #1
+    write_stub_u32(result.bios, 0x21C, 0x1AFFFFF7'u32)  # bne  0x200
+    write_stub_u32(result.bios, 0x220, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
+    write_stub_u32(result.bios, 0x224, 0xE351007E'u32)  # cmp  r1, #126
+    write_stub_u32(result.bios, 0x228, 0x1AFFFFFC'u32)  # bne  0x220
+    write_stub_u32(result.bios, 0x22C, 0xEF000000'u32)  # swi 0 (boot finish)
+    # SoundGetJumpList (SWI 0x2A) support: the table of 36 sound-driver
+    # function addresses the real BIOS copies to [r0] (BIOS 0x3738), with
+    # the same values as the real BIOS so games that stash or compare the
+    # pointers see the real thing. The stub carries executable code at those
+    # addresses: entry 35 (0x23B0, "channel clear": zeroes 16 words at r0,
+    # preserving r4 via ip like the real routine) is implemented because
+    # Cyberdrive Zoids calls it during sound-driver init; the remaining
+    # entries return immediately (bx lr) — the driver work they would do is
+    # the BIOS-resident MP2K engine, which the HLE does not model.
+    const JUMP_LIST = [0x2665'u32, 0x26CF, 0x26EF, 0x2709, 0x271D, 0x2665,
+                       0x2665, 0x2665, 0x2665, 0x274B, 0x2755, 0x2769,
+                       0x277B, 0x27A9, 0x27BB, 0x27CF, 0x27E3, 0x27F5,
+                       0x2805, 0x280F, 0x281F, 0x2665, 0x2665, 0x2837,
+                       0x2665, 0x2665, 0x2665, 0x284B, 0x2665, 0x2629,
+                       0x170B, 0x23E7, 0x1535, 0x159D, 0x23C7, 0x23B1]
+    for i, v in JUMP_LIST:
+      write_stub_u32(result.bios, 0x3738 + i * 4, v)
+      # bx lr at each entry (halfword-aligned thumb targets)
+      let t = int(v and not 1'u32)
+      result.bios[t]     = 0x70'u8
+      result.bios[t + 1] = 0x47'u8
+    # Entry 35, the real routine at 0x23B0 (verbatim):
+    #   mov ip, r4; movs r1-r4, #0; 4x stmia r0!, {r1-r4}; mov r4, ip; bx lr
+    for i, h in [0x46A4'u16, 0x2100, 0x2200, 0x2300, 0x2400,
+                 0xC01E, 0xC01E, 0xC01E, 0xC01E, 0x4664, 0x4770]:
+      result.bios[0x23B0 + i * 2]     = uint8(h and 0xFF)
+      result.bios[0x23B0 + i * 2 + 1] = uint8(h shr 8)
+    # SoundDriverMain dispatch (SWI 0x1C jumps here; thumb, at the real
+    # routine's address 0x1DC4): the lock/callback portion of the BIOS
+    # SoundMain — check the SoundInfo ident magic at [0x03007FF0], lock
+    # (ident+1), call the game-registered hooks [info+32]([info+36]) and
+    # [info+40](info) (the ROM-resident music player: Cyberdrive Zoids'
+    # main loop blocks until these have run), unlock and return. The BIOS
+    # PCM mixer that follows in the real routine is not modeled.
+    # The stub runs in SVC mode with the SVC stack and banked lr, like the
+    # real routine under the real dispatcher (hle_swi 0x1C stages the mode
+    # switch); the closing `swi 0` traps are the dispatcher's `movs pc, lr`
+    # exit, which the HLE performs (restore SPSR_svc, return to lr_svc).
+    #   ldr r2, =0x03007FF0; ldr r0, [r2]; ldr r2, =magic; ldr r3, [r0]
+    #   cmp r3, r2; bne ret; adds r3, #1; str r3, [r0]      ; lock
+    #   push {r4, lr}; adds r4, r0, #0
+    #   ldr r3, [r4, #32]; cmp r3, #0; beq 1f
+    #   ldr r0, [r4, #36]; bl call
+    # 1: ldr r3, [r4, #40]; cmp r3, #0; beq 2f
+    #   adds r0, r4, #0; bl call
+    # 2: ldr r2, =magic; str r2, [r4]                        ; unlock
+    #   pop {r4}; pop {r3}; mov lr, r3; swi 0
+    # call: bx r3      ret: swi 0
+    for i, h in [0x4A0F'u16, 0x6810, 0x4A0F, 0x6803, 0x4293, 0xD116,
+                 0x3301, 0x6003, 0xB510, 0x1C04, 0x6A23, 0x2B00,
+                 0xD002, 0x6A60, 0xF000, 0xF80C, 0x6AA3, 0x2B00,
+                 0xD002, 0x1C20, 0xF000, 0xF806, 0x4A05, 0x6022,
+                 0xBC10, 0xBC08, 0x469E, 0xDF00, 0x4718, 0xDF00,
+                 0x0000, 0x0000]:
+      result.bios[0x1DC4 + i * 2]     = uint8(h and 0xFF)
+      result.bios[0x1DC4 + i * 2 + 1] = uint8(h shr 8)
+    write_stub_u32(result.bios, 0x1E04, 0x03007FF0'u32)
+    write_stub_u32(result.bios, 0x1E08, 0x68736D53'u32)
   result.gpio = new_gpio(gba)
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
 

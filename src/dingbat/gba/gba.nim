@@ -196,6 +196,11 @@ type
     # into the instruction total and resets it
     synced*:     int
     bios*:       seq[byte]
+    # True when no BIOS file was loaded and `bios` holds the HLE stub
+    # (IRQ dispatcher, reset-vector boot code, sound-driver trampolines).
+    # The HLE SWI paths that jump into stub code check this so they stay
+    # inert when a real BIOS image is mapped (hle_after_bios mode).
+    stub_bios*:  bool
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
     gpio*:       GPIO

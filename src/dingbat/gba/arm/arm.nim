@@ -24,17 +24,30 @@ proc bios_arctan(cpu: CPU) =
   cpu.r[1] = cast[uint32](r1)
   cpu.r[3] = cast[uint32](r3)
 
+proc div_align_shifts(n, d: uint32): int {.inline.} =
+  ## Iteration count of the real BIOS divide's alignment loop (0x3C8):
+  ## r2 starts at |denom| and doubles while r2 < |numer| >> 1 (cmp r2,
+  ## r0 lsr #1 / lslls / bcc). The unwind loop (0x3D4) then runs exactly one
+  ## more pass than this, so the routine's input-dependent cost is 13 cycles
+  ## per alignment shift. Closed form: hb(n)-hb(d), minus one when the
+  ## mantissa comparison d << (s-1) >= n >> 1 stops the loop a step early
+  ## (the old always-minus-one model undercharged inputs like 0x1FF00/0x200
+  ## by 13 cycles; Muppets On With The Show accumulated that into a
+  ## frame-timing race).
+  if n shr 1 <= d: return 0
+  let s = countLeadingZeroBits(d) - countLeadingZeroBits(n)  # >= 1 here
+  if (d shl (s - 1)) >= (n shr 1): s - 1 else: s
+
 proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
   let numer = int64(cast[int32](cpu.r[numer_reg]))
   let denom = int64(cast[int32](cpu.r[denom_reg]))
-  # The real BIOS divide loops once per quotient bit; calibrated against the
-  # mGBA suite's "BIOS Division" timing tests
+  # The real BIOS divide loops once per alignment shift; calibrated against
+  # the mGBA suite's "BIOS Division" timing tests
   block:
     let n = uint32(abs(numer) and 0xFFFFFFFF)
     let d = uint32(abs(denom) and 0xFFFFFFFF)
     if d != 0:
-      let quot_bits = max(0, countLeadingZeroBits(d) - countLeadingZeroBits(max(n, 1'u32)) - 1)
-      cpu.idle(19 + quot_bits * 13)
+      cpu.idle(19 + div_align_shifts(n, d) * 13)
   if denom == 0:
     cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
     cpu.r[1] = uint32(numer and 0xFFFFFFFF)
@@ -248,14 +261,56 @@ proc hle_swi_rewind(cpu: CPU) =
   else:
     discard cpu.set_reg(15, cpu.r[15] - 12)
 
+proc hle_charge_units_interruptible(cpu: CPU; n: int): int =
+  ## Charge `n` idle cycles in chunks with the scheduler kept caught up.
+  ## Returns 0 when fully charged, or the un-charged remainder if an IRQ
+  ## became deliverable first (the caller parks/encodes it).
+  var remain = n
+  const CHUNK = 64
+  while remain > 0:
+    let step = min(remain, CHUNK)
+    cpu.idle(step)
+    remain -= step
+    if remain > 0:
+      cpu.gba.bus.catch_up()
+      if cpu.hle_irq_deliverable():
+        return remain
+  0
+
+proc hle_charge_body_interruptible(cpu: CPU; t0: int64; model: int) =
+  ## hle_charge_body for the decompression SWIs, which the real BIOS runs
+  ## with the caller's IRQ mask: the remaining routine time is charged in
+  ## chunks with the scheduler kept caught up, so an interrupt that fires
+  ## mid-routine is delivered at its faithful cycle position instead of one
+  ## end-of-SWI lump (a >1-frame LZ77UnCompVram otherwise swallows a whole
+  ## vblank: two vblanks merge into one IF bit and the game's per-frame IRQ
+  ## work runs once too few — Muppets On With The Show wedges its scene
+  ## loader on exactly that). When an IRQ becomes deliverable before the
+  ## routine time is exhausted, the un-charged remainder is parked on the
+  ## halt-resume mechanism (already serialized in save states) and is paid
+  ## when execution returns to the instruction after the SWI; the caller's
+  ## r12 is staged in the dispatcher's SVC-stack slot, which the resume path
+  ## pops back — exactly the slot the real dispatcher's push {fp, ip, lr}
+  ## uses, so the restore is faithful and a no-op value-wise.
+  ##
+  ## Deviation (documented in docs/hle-bios-shortcomings.md): the memory
+  ## effects of the decompression completed before the handler runs, so a
+  ## handler that inspects the destination mid-call sees finished output
+  ## where the real BIOS would show a partial one. Total cost is unchanged;
+  ## no re-dispatch is paid (the real routine resumes mid-body).
+  let remain = cpu.hle_charge_units_interruptible(model - int(cpu.hle_body_start() - t0))
+  if remain > 0:
+    cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
+    cpu.halt_resume_charge = int32(remain)
+    cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
+
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## Input-dependent cost of the real BIOS divide loop (same shape as the
   ## charge in hle_div; kept separate so ArcTan2 can price its internal Div).
   let n = uint32(abs(int64(numer)) and 0xFFFFFFFF)
   let d = uint32(abs(int64(denom)) and 0xFFFFFFFF)
   if d == 0: return 19
-  let quot_bits = max(0, countLeadingZeroBits(d) - countLeadingZeroBits(max(n, 1'u32)) - 1)
-  19 + quot_bits * 13
+  19 + div_align_shifts(n, d) * 13
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS dispatch for the most common GBA SWI calls.
@@ -285,26 +340,119 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # the shared dispatch + caller refill, common to all SWIs)
   let body_t0 = cpu.hle_body_start()
   case swi_num
-  of 0x00:  # SoftReset
-    let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
-    for i in 0x7E00 ..< 0x8000:
-      cpu.gba.bus.wram_chip[i] = 0
-    # Enter system mode through switch_mode so the live r13/r14 rebank; a
-    # direct CPSR write would leave the previous mode's registers active
-    cpu.switch_mode(modeSYS)
-    cpu.cpsr = cast[PSR](uint32(modeSYS))
-    for i in 0 .. 12:
-      cpu.r[i] = 0
-    cpu.r[13] = 0x03007F00'u32
-    cpu.r[14] = 0
-    cpu.reg_banks[mode_bank(modeUSR)][5] = 0x03007F00'u32
-    cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
-    cpu.reg_banks[mode_bank(modeIRQ)][6] = 0
-    cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
-    cpu.reg_banks[mode_bank(modeSVC)][6] = 0
-    cpu.intr_wait_active = false
-    let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
-    discard cpu.set_reg(15, reset_addr)
+  of 0x00:  # SoftReset — or, executed inside the stub BIOS, the boot traps
+    # The caller's ISA decides how far the arm/thumb SWI handler steps the PC
+    # after we return; capture it before any CPSR change so the final
+    # set_reg(15) can aim exactly at the entry point (landing convention:
+    # set_reg(15, target - step) + caller step -> executing `target`).
+    let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+    if cpu.r[15] == 0x1DFE'u32 or cpu.r[15] == 0x1E02'u32:
+      # SoundMain stub epilogue (see hle_swi 0x1C / new_bus): the real
+      # dispatcher's `movs pc, lr` — restore the caller's CPSR from
+      # SPSR_svc and return to lr_svc
+      let target = cpu.r[14] and not 1'u32
+      let spsr = cpu.spsr
+      cpu.switch_mode(cast[CpuMode](spsr.mode))
+      cpu.cpsr = spsr
+      # This swi came from the thumb stub, so the thumb handler steps the
+      # PC by 2 after we return
+      discard cpu.set_reg(15, target - 2)
+    elif cpu.r[15] == 8'u32:
+      # Boot trap #1: the game jumped to the reset vector (0x00000000).
+      # The real BIOS re-runs its full boot: it blanks the display,
+      # silences/deconfigures the peripherals, clears its work RAM, replays
+      # the ~271-frame logo sequence and re-enters the ROM at scanline 126
+      # with the post-boot register file. I/O deltas below were measured by
+      # diffing dingbat's real-BIOS machine state just before a warm
+      # jump-to-0 against the state at the boot's ROM re-entry (Earthworm
+      # Jim 2, whose IRQ dispatcher calls through a NULL handler slot and
+      # relies on the resulting reboot). Not modeled: the Nintendo logo
+      # image/palette in VRAM (forced blank hides nothing on the real boot;
+      # the HLE shows a blank screen for the logo's duration) and the boot
+      # jingle.
+      let bus = cpu.gba.bus
+      bus.write_half(0x04000000'u32, 0x0080'u16)  # DISPCNT: forced blank
+      bus.write_half(0x04000004'u32, 0x0000'u16)  # DISPSTAT
+      for a in countup(0x04000008'u32, 0x0400001E'u32, 2):  # BGxCNT, scrolls
+        bus.write_half(a, 0)
+      # BG2/BG3 affine left at the identity transform (like RegisterRamReset)
+      for base in [0x04000020'u32, 0x04000030'u32]:
+        bus.write_half(base, 0x0100'u16)          # PA
+        bus.write_half(base + 2, 0)               # PB
+        bus.write_half(base + 4, 0)               # PC
+        bus.write_half(base + 6, 0x0100'u16)      # PD
+        bus.write_word(base + 8, 0)               # X
+        bus.write_word(base + 12, 0)              # Y
+      for a in countup(0x04000040'u32, 0x04000054'u32, 2):  # WIN/MOSAIC/BLD
+        bus.write_half(a, 0)
+      # Sound: channel registers cleared while the master enable is still
+      # on (they are write-protected when it is off), FIFOs reset, then the
+      # master switched off — the measured end state of the boot jingle
+      bus.write_half(0x04000084'u32, 0x0080'u16)
+      for a in countup(0x04000060'u32, 0x04000080'u32, 2):
+        bus.write_half(a, 0)
+      bus.write_half(0x04000082'u32, 0x880E'u16)
+      bus.write_half(0x04000084'u32, 0x0000'u16)
+      bus.write_half(0x04000088'u32, 0x0200'u16)  # SOUNDBIAS
+      # DMA + timers off (counters stay frozen, matching the real boot)
+      for a in [0x040000BA'u32, 0x040000C6'u32, 0x040000D2'u32, 0x040000DE'u32,
+                0x04000102'u32, 0x04000106'u32, 0x0400010A'u32, 0x0400010E'u32]:
+        bus.write_half(a, 0)
+      bus.write_half(0x04000132'u32, 0x0000'u16)  # KEYCNT
+      bus.write_half(0x04000134'u32, 0x800F'u16)  # RCNT (boot's multiboot probe)
+      bus.write_half(0x04000200'u32, 0x0000'u16)  # IE
+      bus.write_half(0x04000202'u32, 0xFFFF'u16)  # IF: acknowledge everything
+      bus.write_half(0x04000204'u32, 0x0000'u16)  # WAITCNT
+      bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
+      for i in 0x7E00 ..< 0x8000:                 # BIOS work RAM
+        bus.wram_chip[i] = 0
+      cpu.intr_wait_active = false
+      # Park execution in the stub's wait loop (r0/r2 are its inputs); the
+      # whole continuation is architectural, so save states and rollback
+      # need nothing extra
+      cpu.r[0] = 0x04000000'u32
+      cpu.r[2] = 270  # vblank starts between vector entry and ROM re-entry
+      discard cpu.set_reg(15, 0x200'u32 - isa_step)
+    elif cpu.r[15] == 0x234'u32:
+      # Boot trap #2: the wait loop finished at scanline 126 — hand the ROM
+      # the measured post-boot register file
+      cpu.switch_mode(modeSYS)
+      cpu.cpsr = cast[PSR](uint32(modeSYS))
+      for i in 0 .. 12:
+        cpu.r[i] = 0
+      cpu.r[13] = 0x03007F00'u32
+      cpu.r[14] = 0x08000000'u32
+      cpu.reg_banks[mode_bank(modeUSR)][5] = 0x03007F00'u32
+      cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
+      cpu.reg_banks[mode_bank(modeIRQ)][6] = 0
+      cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
+      cpu.reg_banks[mode_bank(modeSVC)][6] = 0
+      cpu.gba.bus.bios_latch = 0xE129F000'u32  # boot exit leaves its msr
+      discard cpu.set_reg(15, 0x08000000'u32 - isa_step)
+    else:
+      let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
+      for i in 0x7E00 ..< 0x8000:
+        cpu.gba.bus.wram_chip[i] = 0
+      # Enter system mode through switch_mode so the live r13/r14 rebank; a
+      # direct CPSR write would leave the previous mode's registers active
+      cpu.switch_mode(modeSYS)
+      cpu.cpsr = cast[PSR](uint32(modeSYS))
+      for i in 0 .. 12:
+        cpu.r[i] = 0
+      cpu.r[13] = 0x03007F00'u32
+      cpu.r[14] = 0
+      cpu.reg_banks[mode_bank(modeUSR)][5] = 0x03007F00'u32
+      cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
+      cpu.reg_banks[mode_bank(modeIRQ)][6] = 0
+      cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
+      cpu.reg_banks[mode_bank(modeSVC)][6] = 0
+      cpu.intr_wait_active = false
+      let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
+      # The caller's SWI handler steps the PC after we return; aim one
+      # instruction short so execution enters exactly at reset_addr (the
+      # unadjusted set_reg skipped the target's first instruction — the
+      # `b entrypoint` at 0x08000000 for a header-first ROM)
+      discard cpu.set_reg(15, reset_addr - isa_step)
   of 0x02:  # Halt
     # Move the BIOS's post-wake return cost out of the upfront charge and
     # onto the resume boundary (see HALT_RETURN_COST)
@@ -543,91 +691,157 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
         cpu.hle_swi_rewind()
   of 0x01:  # RegisterRamReset
-    let flags = cpu.r[0]
-    if bit(flags, 0):  # Clear 256K EWRAM
-      for i in 0 ..< 0x40000: cpu.gba.bus.wram_board[i] = 0
-    if bit(flags, 1):  # Clear 32K IWRAM (except last 0x200)
-      for i in 0 ..< 0x7E00: cpu.gba.bus.wram_chip[i] = 0
-    if bit(flags, 2):  # Clear palette
-      for i in 0 ..< 0x400: cpu.gba.ppu.pram[i] = 0
-    if bit(flags, 3):  # Clear VRAM
-      for i in 0 ..< 0x18000: cpu.gba.ppu.vram[i] = 0
-    if bit(flags, 4):  # Clear OAM
-      for i in 0 ..< 0x400: cpu.gba.ppu.oam[i] = 0
-    if bit(flags, 5):  # Reset SIO
-      cpu.gba.serial.siocnt = 0
-      cpu.gba.serial.rcnt = 0
-    if bit(flags, 6):  # Reset sound (0x4000060–0x4000084)
-      cpu.gba.scheduler.clear(etAPUChannel1)
-      cpu.gba.scheduler.clear(etAPUChannel2)
-      cpu.gba.scheduler.clear(etAPUChannel3)
-      cpu.gba.scheduler.clear(etAPUChannel4)
-      cpu.gba.scheduler.clear(etAPUFrameSeq)
-      cpu.gba.scheduler.clear(etAPUSample)
-      cpu.gba.apu.sound_enabled = true
-      # Real BIOS clears 0x60–0xAF per GBATEK (includes wave RAM at 0x90–0x9F)
-      for offset in 0x60'u32..0x84'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for offset in 0x90'u32..0x9F'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for ch in 0..1:
-        for i in 0..31: cpu.gba.apu.dma_channels.fifos[ch][i] = 0
-        cpu.gba.apu.dma_channels.positions[ch] = 0
-        cpu.gba.apu.dma_channels.sizes[ch]     = 0
-        cpu.gba.apu.dma_channels.latches[ch]   = 0
-      cpu.gba.apu.soundcnt_h = SOUNDCNT_H()
-    if bit(flags, 7):  # Reset all other I/O (except SIO and sound)
-      for offset in 0x000'u32..0x05F'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for offset in 0x0B0'u32..0x11F'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for offset in 0x130'u32..0x133'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      for offset in 0x15C'u32..0x1FF'u32:
-        cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-      # The "other registers" group also covers the interrupt/waitstate
-      # block: the real BIOS clears IE, acknowledges ALL pending IF bits,
-      # resets WAITCNT, and clears IME (mGBA's HLE does the same). Pokemon
-      # Pinball R/S relies on this: its boot code points 0x03007FFC at its
-      # IntrMain and calls RegisterRamReset while the previous program's
-      # sound-DMA IRQs are still enabled and firing; without the IE/IF/IME
-      # clear, a stale DMA IRQ dispatches through the not-yet-built handler
-      # table and jumps to address 0.
-      cpu.gba.bus.write_half(0x04000200'u32, 0x0000'u16)  # IE
-      cpu.gba.bus.write_half(0x04000202'u32, 0xFFFF'u16)  # IF (ack all)
-      cpu.gba.bus.write_half(0x04000204'u32, 0x0000'u16)  # WAITCNT
-      cpu.gba.bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
-      # The real BIOS leaves the display in forced blank, not zeroed
-      cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
-      # ...and resets the affine parameters to the identity transform, not
-      # zero (mGBA's HLE stores 0x100 to BG2PA/PD and BG3PA/PD the same
-      # way). Spider-Man: Mysterio's Menace calls RegisterRamReset(0xFD) at
-      # boot and never writes the affine registers: its mode-4 comic viewer
-      # relies on the BIOS-left identity matrix.
-      cpu.gba.bus.write_half(0x04000020'u32, 0x0100'u16)  # BG2PA
-      cpu.gba.bus.write_half(0x04000026'u32, 0x0100'u16)  # BG2PD
-      cpu.gba.bus.write_half(0x04000030'u32, 0x0100'u16)  # BG3PA
-      cpu.gba.bus.write_half(0x04000036'u32, 0x0100'u16)  # BG3PD
-    # Cost of the real BIOS reset paths, measured per flag bit against
-    # real-BIOS execution (stmia fill loops: EWRAM ~6.6 cycles/word, VRAM
-    # ~2.6, IWRAM ~1.65, plus the register-reset sequences). The RAM clears
-    # above bypass the bus, so hle_charge_body tops the I/O writes that WERE
-    # charged up to the modeled total. APU events stay suppressed during the
-    # jump.
-    var hle_cycles = 0
-    if bit(flags, 0): hle_cycles += 434375  # 256K EWRAM
-    if bit(flags, 1): hle_cycles += 13303   # 32K IWRAM (minus last 0x200)
-    if bit(flags, 2): hle_cycles += 871     # palette
-    if bit(flags, 3): hle_cycles += 64711   # 96K VRAM
-    if bit(flags, 4): hle_cycles += 615     # OAM
-    if bit(flags, 5): hle_cycles += 289     # SIO registers
-    if bit(flags, 6): hle_cycles += 338     # sound registers
-    if bit(flags, 7): hle_cycles += 549     # remaining I/O
-    cpu.hle_charge_body(body_t0, hle_cycles)
-    # Re-schedule APU events after cycle advance
-    if bit(flags, 6):
-      cpu.gba.apu.tick_frame_sequencer()
-      cpu.gba.apu.get_sample()
+    # The real routine (0x9C2) processes the flag groups in this order:
+    # "other" I/O (bit 7), SIO (5), sound (6), EWRAM (0), VRAM (3), OAM (4),
+    # palette (2), IWRAM last (1) — and, like the copy SWIs, runs with the
+    # caller's IRQ mask, so its long RAM-clear loops are preempted by any
+    # deliverable interrupt with the clears only partially done. Games rely
+    # on both properties: Robot Wars - Advanced Destruction calls
+    # RegisterRamReset(EWRAM|IWRAM) with vblank IRQs live; the vblank lands
+    # inside the ~434k-cycle EWRAM clear and must be dispatched through the
+    # game's IWRAM handler table, which the real routine has not reached yet
+    # (IWRAM is cleared last). An atomic HLE defers that IRQ until after the
+    # table is wiped and the game's dispatcher wedges in its unhandled-IRQ
+    # loop (permanent black screen).
+    #
+    # The HLE therefore charges each phase in chunks, clears the RAM regions
+    # progressively in step with the charged time (ascending, like the
+    # BIOS's stmia memset), and on preemption rewinds the PC onto the SWI
+    # with a continuation encoded in r0: bit 31 marker, un-charged remainder
+    # of the current phase in bits 8-29, still-pending flag bits in the low
+    # byte (the interrupted phase's own bit stays set; the clear offset is
+    # derived from the remainder, so park/resume is deterministic). The real
+    # routine keeps its flags in a register the whole time too (r7); handler-
+    # visible registers mid-routine are routine scratch either way.
+    # A fresh call is never misread: the marker bit plus a remainder outside
+    # the possible phase-cost range (> 434375) falls back to a fresh call,
+    # and the flags byte is the low 8 bits in both encodings.
+    block ram_reset:
+      var flags = cpu.r[0] and 0xFF'u32
+      var resume = 0
+      if (cpu.r[0] and 0x80000000'u32) != 0:
+        let r = int((cpu.r[0] shr 8) and 0x3FFFFF)
+        if r > 0 and r <= 434375:
+          resume = r
+      # (bit, phase cost, region size for progressive RAM clears; 0 = I/O)
+      const PHASES = [(7, 549, 0), (5, 289, 0), (6, 338, 0),
+                      (0, 434375, 0x40000), (3, 64711, 0x18000),
+                      (4, 615, 0x400), (2, 871, 0x400), (1, 13303, 0x7E00)]
+      template park(remaining_flags: uint32; remain: int) =
+        cpu.r[0] = 0x80000000'u32 or (uint32(remain) shl 8) or remaining_flags
+        cpu.hle_swi_rewind()
+        break ram_reset
+      template clear_ram(bit_idx: int; lo, hi: int) =
+        ## Clear bytes [lo, hi) of the region selected by bit_idx
+        case bit_idx
+        of 0:
+          for i in lo ..< hi: cpu.gba.bus.wram_board[i] = 0
+        of 3:
+          for i in lo ..< hi: cpu.gba.ppu.vram[i] = 0
+        of 4:
+          for i in lo ..< hi: cpu.gba.ppu.oam[i] = 0
+        of 2:
+          for i in lo ..< hi: cpu.gba.ppu.pram[i] = 0
+        else:
+          for i in lo ..< hi: cpu.gba.bus.wram_chip[i] = 0
+      for (bit_idx, phase_cost, region_size) in PHASES:
+        if not bit(flags, bit_idx): continue
+        let continuing = resume > 0
+        var charge = phase_cost
+        if continuing:
+          charge = resume
+          resume = 0
+        if region_size == 0:
+          # I/O reset phases: the writes are quick and idempotent, so they
+          # run (again, on the resumed path) up front, then the phase time
+          # is charged. Re-acknowledging IF on a resumed bit-7 phase cannot
+          # swallow the preempting IRQ: writing IE/IME to 0 makes further
+          # phases non-preemptible in the first place.
+          let phase_t0 = cpu.hle_body_start()
+          case bit_idx
+          of 5:  # Reset SIO
+            cpu.gba.serial.siocnt = 0
+            cpu.gba.serial.rcnt = 0
+          of 6:  # Reset sound (0x4000060-0x4000084)
+            cpu.gba.scheduler.clear(etAPUChannel1)
+            cpu.gba.scheduler.clear(etAPUChannel2)
+            cpu.gba.scheduler.clear(etAPUChannel3)
+            cpu.gba.scheduler.clear(etAPUChannel4)
+            cpu.gba.scheduler.clear(etAPUFrameSeq)
+            cpu.gba.scheduler.clear(etAPUSample)
+            cpu.gba.apu.sound_enabled = true
+            # Real BIOS clears 0x60-0xAF per GBATEK (includes wave RAM at 0x90-0x9F)
+            for offset in 0x60'u32..0x84'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            for offset in 0x90'u32..0x9F'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            for ch in 0..1:
+              for i in 0..31: cpu.gba.apu.dma_channels.fifos[ch][i] = 0
+              cpu.gba.apu.dma_channels.positions[ch] = 0
+              cpu.gba.apu.dma_channels.sizes[ch]     = 0
+              cpu.gba.apu.dma_channels.latches[ch]   = 0
+            cpu.gba.apu.soundcnt_h = SOUNDCNT_H()
+            # Re-schedule APU events before any preemption can happen, so a
+            # parked phase can never leave them cleared
+            cpu.gba.apu.tick_frame_sequencer()
+            cpu.gba.apu.get_sample()
+          else:  # bit 7: reset all other I/O (except SIO and sound)
+            for offset in 0x000'u32..0x05F'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            for offset in 0x0B0'u32..0x11F'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            for offset in 0x130'u32..0x133'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            for offset in 0x15C'u32..0x1FF'u32:
+              cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            # The "other registers" group also covers the interrupt/waitstate
+            # block: the real BIOS clears IE, acknowledges ALL pending IF bits,
+            # resets WAITCNT, and clears IME (mGBA's HLE does the same). Pokemon
+            # Pinball R/S relies on this: its boot code points 0x03007FFC at its
+            # IntrMain and calls RegisterRamReset while the previous program's
+            # sound-DMA IRQs are still enabled and firing; without the IE/IF/IME
+            # clear, a stale DMA IRQ dispatches through the not-yet-built handler
+            # table and jumps to address 0.
+            cpu.gba.bus.write_half(0x04000200'u32, 0x0000'u16)  # IE
+            cpu.gba.bus.write_half(0x04000202'u32, 0xFFFF'u16)  # IF (ack all)
+            cpu.gba.bus.write_half(0x04000204'u32, 0x0000'u16)  # WAITCNT
+            cpu.gba.bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
+            # The real BIOS leaves the display in forced blank, not zeroed
+            cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
+            # ...and resets the affine parameters to the identity transform, not
+            # zero (mGBA's HLE stores 0x100 to BG2PA/PD and BG3PA/PD the same
+            # way). Spider-Man: Mysterio's Menace calls RegisterRamReset(0xFD) at
+            # boot and never writes the affine registers: its mode-4 comic viewer
+            # relies on the BIOS-left identity matrix.
+            cpu.gba.bus.write_half(0x04000020'u32, 0x0100'u16)  # BG2PA
+            cpu.gba.bus.write_half(0x04000026'u32, 0x0100'u16)  # BG2PD
+            cpu.gba.bus.write_half(0x04000030'u32, 0x0100'u16)  # BG3PA
+            cpu.gba.bus.write_half(0x04000036'u32, 0x0100'u16)  # BG3PD
+          # Top the phase's own I/O-write charges up to the phase cost, in
+          # preemptible chunks
+          if not continuing:
+            charge = max(0, phase_cost - int(cpu.hle_body_start() - phase_t0))
+          let remain = cpu.hle_charge_units_interruptible(charge)
+          if remain > 0:
+            park(flags and not (1'u32 shl bit_idx), remain)
+        else:
+          # RAM clear phases: clear in ascending order in step with the
+          # charged time (byte offset derived from the remaining charge, so
+          # the same mapping holds across park/resume)
+          template offset_at(rem: int): int =
+            region_size - int(int64(region_size) * int64(rem) div int64(phase_cost))
+          var remain = charge
+          const CHUNK = 64
+          while remain > 0:
+            let step = min(remain, CHUNK)
+            clear_ram(bit_idx, offset_at(remain), offset_at(remain - step))
+            cpu.idle(step)
+            remain -= step
+            if remain > 0:
+              cpu.gba.bus.catch_up()
+              if cpu.hle_irq_deliverable():
+                park(flags, remain)
+        flags = flags and not (1'u32 shl bit_idx)
   of 0x0C:  # CpuFastSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -788,7 +1002,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let db = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body(body_t0, 29 + int(bus.wait32_n[src_page]) +
+      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[src_page]) +
         n_flags * (9 + rn) + n_lit * (16 + rn + db) +
         n_tok * (22 + 3 * rn) + n_runb * (7 + 2 * db))
   of 0x12:  # LZ77UnCompVram (16-bit writes)
@@ -846,7 +1060,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let dh = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body(body_t0, 39 + int(bus.wait32_n[src_page]) +
+      cpu.hle_charge_body_interruptible(body_t0, 39 + int(bus.wait32_n[src_page]) +
         n_flags * (9 + rn) + n_lit * (20 + rn) + n_tok * (25 + 3 * rn) +
         n_runb * (21 + dh) + dh * int(decomp_len div 2))
   of 0x10:  # BitUnPack
@@ -970,7 +1184,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let b = int(bus.wait16_n[src_page])   # nonseq byte read at src
       let w = int(bus.wait32_n[src_page])   # nonseq word read at src
       let d = int(bus.wait32_n[dst_page])   # nonseq word write at dst
-      cpu.hle_charge_body(body_t0, 57 + 2 * b + w +
+      cpu.hle_charge_body_interruptible(body_t0, 57 + 2 * b + w +
         n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) +
         n_outw * d + n_words * (9 + w))
   of 0x14:  # RLUnCompWram (8-bit writes)
@@ -1014,7 +1228,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let db = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body(body_t0, 40 + int(bus.wait32_n[src_page]) +
+      cpu.hle_charge_body_interruptible(body_t0, 40 + int(bus.wait32_n[src_page]) +
         n_flags * (10 + rn) + n_lit * (11 + rn + db) +
         n_rruns * (9 + rn) + n_runb * (7 + db))
   of 0x15:  # RLUnCompVram (16-bit writes)
@@ -1072,7 +1286,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let dh = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body(body_t0, 45 + int(bus.wait32_n[src_page]) +
+      cpu.hle_charge_body_interruptible(body_t0, 45 + int(bus.wait32_n[src_page]) +
         n_flags * (18 + rn) + n_lit * (14 + rn) +
         n_rruns * (10 + rn) + n_runb * 13 + n_halves * (2 + dh))
   of 0x16:  # Diff8bitUnFilterWram (8-bit writes)
@@ -1144,8 +1358,61 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # bias_level is the 9-bit field at register bits 1-9, so the 0x200 register
     # value is bias_level 0x100 (not 0x200, which would truncate to 0).
     cpu.gba.apu.soundbias.bias_level = if cpu.r[0] == 0: 0x000'u16 else: 0x100'u16
-  of 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
+  of 0x1A, 0x1B, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
     discard  # Sound driver / music player stubs (games use their own engine)
+  of 0x1C:  # SoundDriverMain
+    if not cpu.gba.bus.stub_bios:
+      # A real BIOS image is mapped (hle_after_bios): the stub trampolines
+      # are absent, so keep the historical no-op behavior
+      return
+    # Execute the stub-BIOS SoundMain dispatch (thumb code at the real
+    # routine's address, 0x1DC4): it checks the SoundInfo ident magic at
+    # [0x03007FF0] — returning immediately when no MP2K driver is installed,
+    # like the real routine — and otherwise locks the engine and calls the
+    # game's registered ROM callbacks before unlocking. Games that drive
+    # the BIOS-resident MP2K engine (Cyberdrive Zoids: SoundGetJumpList +
+    # swi 0x1C every frame) block their main loop on state those callbacks
+    # advance; with the old no-op they never booted. The BIOS PCM mixer is
+    # not modeled (documented gap). Like the real dispatcher, the stub runs
+    # in SVC mode on the SVC stack with the caller's r14 safely banked; its
+    # closing `swi 0` is the dispatcher's `movs pc, lr` exit, handled as an
+    # HLE trap (see the 0x00 case).
+    let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+    let old_cpsr = cpu.cpsr
+    let ret = cpu.r[15] - isa_step
+    cpu.switch_mode(modeSVC)
+    cpu.spsr = old_cpsr
+    cpu.r[14] = ret
+    cpu.cpsr.thumb = true
+    discard cpu.set_reg(15, 0x1DC4'u32 - isa_step)
+  of 0x2A:  # SoundGetJumpList
+    # Copies the 36 sound-driver function pointers from the BIOS table
+    # (0x3738) to [r0] — the same values as the real BIOS; the stub BIOS
+    # backs them with code (see new_bus). Register protocol of the real
+    # routine (0x2692): r0 advances past the destination (stmia r0!), r1
+    # counts down to 0, r2 ends past the table, r3 holds the last entry.
+    block:
+      var dst = cpu.r[0]
+      var last = 0'u32
+      for i in 0 ..< 36:
+        # Direct table read: the BIOS-protection latch does not apply (the
+        # real routine executes from BIOS while it copies)
+        let o = 0x3738 + i * 4
+        last = uint32(cpu.gba.bus.bios[o]) or
+               (uint32(cpu.gba.bus.bios[o + 1]) shl 8) or
+               (uint32(cpu.gba.bus.bios[o + 2]) shl 16) or
+               (uint32(cpu.gba.bus.bios[o + 3]) shl 24)
+        cpu.gba.bus.write_word(dst, last)
+        dst += 4
+      cpu.r[0] = dst
+      cpu.r[1] = 0
+      cpu.r[2] = 0x37C8'u32
+      cpu.r[3] = last
+      # Instruction-counted from the real routine: per word, the table ldr,
+      # the 0xBA4-style validation subroutine and the stmia at the
+      # destination (+6 entry/exit)
+      let dst_page = int(bits_range(cpu.r[0], 24, 27))
+      cpu.hle_charge_body(body_t0, 6 + 36 * (33 + int(cpu.gba.bus.wait32_n[dst_page])))
   of 0x1F:  # MidiKey2Freq
     let base_freq = cpu.gba.bus.read_word(cpu.r[0] + 4)
     let key = cast[int32](cpu.r[1])
