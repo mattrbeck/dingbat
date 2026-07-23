@@ -250,6 +250,10 @@ proc get_sample*(apu: APU) =
   let mp2k_subst = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and not apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live
+  # Latched-foreign shadow watch (un-emitted render for the unlatch test).
+  let mp2k_watch = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
+                   apu.gba.mp2k.engaged and apu.gba.mp2k.fifo_foreign and
+                   apu.gba.mp2k.mixer_live and apu.gba.mp2k.unlatch_watch
   when defined(mp2kwav):
     # The game's OWN FIFO output, for A/B calibration against the HLE render.
     # When the HLE is enabled, capture over EXACTLY the span the HLE captures
@@ -263,7 +267,8 @@ proc get_sample*(apu: APU) =
     # when the span-matched streams actually agree to within a few percent.
     # With the HLE disabled (e.g. DINGBAT_NOHLE=1 reference runs) there is no
     # HLE span to match, so capture the whole run as before.
-    if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst:
+    if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst or
+       mp2k_watch:
       realDmaCapture.add raw_dma_a
       realDmaCapture.add raw_dma_b
   # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
@@ -275,14 +280,50 @@ proc get_sample*(apu: APU) =
   # shadow mixer cannot render that, so leave the real FIFO stream alone.
   if mp2k_subst:
     let (hl, hr) = apu.gba.mp2k.render_sample()
-    # Feed the foreign-feeder energy comparison (see mp2k.nim on_frame) with
-    # the REAL drained FIFO stream vs the shadow render it would replace.
+    # Feed the foreign-feeder / overlay energy comparisons (see mp2k.nim
+    # on_frame) with the REAL drained FIFO stream vs the shadow render it
+    # would replace, split per FIFO side.
     let m = apu.gba.mp2k
-    m.real_abs_acc += int64(abs(int(raw_dma_a)) + abs(int(raw_dma_b)))
-    m.hle_abs_acc  += int64(abs(int(hl)) + abs(int(hr)))
+    m.real_abs_a += int64(abs(int(raw_dma_a)))
+    m.real_abs_b += int64(abs(int(raw_dma_b)))
+    m.hle_abs_l  += int64(abs(int(hl)))
+    m.hle_abs_r  += int64(abs(int(hr)))
     inc m.ab_n
-    raw_dma_a = hl
-    raw_dma_b = hr
+    if m.overlay_hold > 0:
+      # Transient foreign overlay detected (announcer speech / voice-clip
+      # stingers streamed around the engine — see mp2k.nim on_frame): emit
+      # the game's real stream; the shadow above keeps rendering so its
+      # samplers, delay ring and reverb history stay warm for a seamless
+      # return to substitution.
+      when defined(mp2kwav):
+        # Keep the capture reflecting what is actually EMITTED (the A/B
+        # metric measures the user-audible stream): render_sample appended
+        # its own output; overwrite with the passthrough values.
+        if mp2kWavCapture.len >= 2:
+          mp2kWavCapture[mp2kWavCapture.len - 2] = raw_dma_a
+          mp2kWavCapture[mp2kWavCapture.len - 1] = raw_dma_b
+    else:
+      raw_dma_a = hl
+      raw_dma_b = hr
+  elif mp2k_watch:
+    # Latched-foreign but the engine's channels are ACTIVE: render the shadow
+    # without emitting it and accumulate the same per-side energies, so
+    # on_frame's unlatch test can measure sustained shadow-vs-real agreement
+    # (see mp2k.nim — the EXE3-class boot-clip latch is reversed this way).
+    let m = apu.gba.mp2k
+    let (hl, hr) = m.render_sample()
+    m.real_abs_a += int64(abs(int(raw_dma_a)))
+    m.real_abs_b += int64(abs(int(raw_dma_b)))
+    m.hle_abs_l  += int64(abs(int(hl)))
+    m.hle_abs_r  += int64(abs(int(hr)))
+    inc m.ab_n
+    when defined(mp2kwav):
+      # render_sample appended its (un-emitted) output to the HLE capture;
+      # keep the A/B spans matched by capturing the real stream too, and make
+      # the HLE capture reflect what is actually emitted (the real stream).
+      if mp2kWavCapture.len >= 2:
+        mp2kWavCapture[mp2kWavCapture.len - 2] = raw_dma_a
+        mp2kWavCapture[mp2kWavCapture.len - 1] = raw_dma_b
   let dma_a = if apu.channel_mask[4]: raw_dma_a else: 0'i16
   let dma_b = if apu.channel_mask[5]: raw_dma_b else: 0'i16
   let dma_a_scaled = int32(dma_a) shl apu.soundcnt_h.dma_sound_a_volume

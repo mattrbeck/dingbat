@@ -611,6 +611,9 @@ type
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_skip_fires*: int
     dbg_hook_fires*: int
+    dbg_overlay_triggers*: int  # overlay passthrough entries (idle->held)
+    dbg_overlay_passes*: int    # mixer passes spent in overlay passthrough
+    dbg_unlatches*: int         # fifo_foreign latches reversed by agreement
     dbg_probe_hits*: int   # probe prefilter passes (RAM PC + r0 == &SoundInfo)
     dbg_probe_ident*: uint32  # ident seen at the last probe hit
     dbg_out_energy*: float64
@@ -647,9 +650,32 @@ type
     # streamers fill pcmBuffer just-in-time mid-frame and erase it after the
     # DMA drains, invisible to any state poll). Accumulated per output sample
     # in apu.get_sample, evaluated per mixer pass in on_frame.
-    real_abs_acc*:   int64  # sum |real FIFO latch| since last mixer pass
-    hle_abs_acc*:    int64  # sum |shadow render|  since last mixer pass
+    # Split per FIFO side: some games overlay their own stream onto ONE half
+    # of the engine's pcmBuffer (Kinniku Banzuke streams announcer speech into
+    # the B half while m4a music plays), so a combined sum dilutes the signal.
+    real_abs_a*:     int64  # sum |real FIFO A latch| since last mixer pass
+    real_abs_b*:     int64  # sum |real FIFO B latch| since last mixer pass
+    hle_abs_l*:      int64  # sum |shadow render L|   since last mixer pass
+    hle_abs_r*:      int64  # sum |shadow render R|   since last mixer pass
     ab_n*:           int    # samples accumulated
+    # Transient foreign-overlay passthrough (see on_frame): when the real
+    # drained stream on either FIFO side carries sustained energy well above
+    # our shadow render of the same side, the game is streaming audio the
+    # engine (and therefore our shadow) does not produce — announcer speech,
+    # voice-clip stingers — mixed AROUND the m4a channels into pcmBuffer or
+    # the FIFOs just-in-time. While held, the real stream is emitted and the
+    # shadow keeps rendering warm underneath (span-matched captures, seamless
+    # resume). Reversible per pass — unlike fifo_foreign, no enhancement is
+    # permanently sacrificed. Decremented on clean passes; re-armed on
+    # evidence, so sentence-cadence speech does not flap.
+    overlay_hold*:   int32
+    # EXE3-class unlatch (see on_frame): while fifo_foreign is latched but m4a
+    # channels are active, the shadow keeps rendering un-emitted so sustained
+    # shadow-vs-real agreement can prove the engine owns the stream and re-arm
+    # substitution. unlatch_watch mirrors "any sampler active" for apu's
+    # watch-render branch; unlatch_agree counts consecutive agreement passes.
+    unlatch_watch*:  bool
+    unlatch_agree*:  int32
     dbg_real_avg*:   float32
     dbg_hle_avg*:    float32
     # Mixer passes since the shadow last produced audio. Gates energy-based

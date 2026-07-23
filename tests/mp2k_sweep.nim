@@ -139,6 +139,9 @@ proc main() =
     "ratio": (if rr > 0: hr / rr else: 0.0),
     "hle_n": mp2kWavCapture.len,
     "real_n": realDmaCapture.len,
+    "overlay_trig": emu.mp2k.dbg_overlay_triggers,
+    "overlay_passes": emu.mp2k.dbg_overlay_passes,
+    "unlatches": emu.mp2k.dbg_unlatches,
     "wall_s": wall
   })
 

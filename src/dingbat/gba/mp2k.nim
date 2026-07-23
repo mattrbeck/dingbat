@@ -372,9 +372,14 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   # the game's streamed music for several frames after every load.
   m.foreign_streak = 0
   m.fifo_cpu_last = m.fifo_cpu_bytes
-  m.real_abs_acc = 0
-  m.hle_abs_acc = 0
+  m.real_abs_a = 0
+  m.real_abs_b = 0
+  m.hle_abs_l = 0
+  m.hle_abs_r = 0
   m.ab_n = 0
+  m.overlay_hold = 0
+  m.unlatch_watch = false   # samplers were just dropped
+  m.unlatch_agree = 0
   m.shadow_quiet_age = 0   # the restored ring may hold pre-load engine audio
                            # our reset shadow doesn't: give it the tail grace
   m.hook_stale = 0         # assume the restored engine is live; if it is
@@ -773,6 +778,56 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   # A few evidence passes (frames of un-renderable audible audio) latch
   # substitution off for the session.
   block:
+    if m.fifo_foreign:
+      # --- Latched: earn the way back (EXE3-class unlatch) -------------------
+      # The latch fires on a few frames of un-renderable audio — for many
+      # games that is ONE boot-time streamed voice clip played while their
+      # perfectly ordinary m4a engine idles (Rockman EXE 3 latches at the
+      # title screen this way; 49 of the sweep's 75 latched titles show
+      # active m4a channels afterwards). Sacrificing enhancement for the
+      # whole session over that is the wrong trade — but only provably so
+      # once the engine DEMONSTRABLY owns the stream. So while latched, if
+      # any m4a channel is active, apu.get_sample keeps the shadow rendering
+      # (without emitting — see unlatch_watch) and accumulates the same
+      # per-side energies; sustained agreement between the shadow and the
+      # real stream (each side within 2x, real audible, channels active, 60
+      # CONSECUTIVE passes — a full second) proves the engine is the
+      # producer, and substitution is re-armed. Safety:
+      #   * true-foreign games (Batman Vengeance / Altered Beast / Army Men)
+      #     never key an m4a channel, so no pass ever qualifies — they can
+      #     never unlatch, whatever their foreign stream does;
+      #   * a hybrid mid-clip has real >> shadow on some side —
+      #     disagreement, counter resets; unlatch waits for a clean second;
+      #   * if an unlatch is ever wrong, the overlay passthrough covers the
+      #     mismatch within one pass and the standard evidence re-latches —
+      #     bounded to ~a frame of misattributed audio, no flapping.
+      var any_active = false
+      for i in 0 ..< MP2K_MAX_CHANNELS:
+        if m.samplers[i].active: any_active = true
+      m.unlatch_watch = any_active
+      if m.ab_n > 0:
+        let agree_l = m.hle_abs_l * 2 >= m.real_abs_a and
+                      m.real_abs_a * 2 >= m.hle_abs_l
+        let agree_r = m.hle_abs_r * 2 >= m.real_abs_b and
+                      m.real_abs_b * 2 >= m.hle_abs_r
+        let audible = m.real_abs_a + m.real_abs_b >= int64(m.ab_n) * 2
+        if any_active and audible and agree_l and agree_r:
+          inc m.unlatch_agree
+          if m.unlatch_agree >= 60:
+            m.fifo_foreign = false
+            m.foreign_streak = 0
+            m.unlatch_agree = 0
+            m.shadow_quiet_age = 0
+            inc m.dbg_unlatches
+        else:
+          m.unlatch_agree = 0
+        m.real_abs_a = 0
+        m.real_abs_b = 0
+        m.hle_abs_l = 0
+        m.hle_abs_r = 0
+        m.ab_n = 0
+      else:
+        m.unlatch_agree = 0
     if not m.fifo_foreign:
       var provenance = m.fifo_cpu_bytes - m.fifo_cpu_last >= 64
       m.fifo_cpu_last = m.fifo_cpu_bytes
@@ -791,13 +846,43 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       var real_loud = false
       var shadow_loud = false
       if m.ab_n > 0:
+        let real_sum = m.real_abs_a + m.real_abs_b
+        let hle_sum  = m.hle_abs_l + m.hle_abs_r
         when defined(mp2kwav):
-          m.dbg_real_avg = float32(m.real_abs_acc) / float32(m.ab_n)
-          m.dbg_hle_avg  = float32(m.hle_abs_acc) / float32(m.ab_n)
-        real_loud   = m.real_abs_acc >= int64(m.ab_n) * 4
-        shadow_loud = m.hle_abs_acc >= int64(m.ab_n) div 4
-        m.real_abs_acc = 0
-        m.hle_abs_acc = 0
+          m.dbg_real_avg = float32(real_sum) / float32(m.ab_n)
+          m.dbg_hle_avg  = float32(hle_sum) / float32(m.ab_n)
+        real_loud   = real_sum >= int64(m.ab_n) * 4
+        shadow_loud = hle_sum >= int64(m.ab_n) div 4
+        # --- Transient foreign-overlay passthrough ---------------------------
+        # Hybrid games overlay their OWN stream on top of (or interleaved
+        # with) the engine's output: Kinniku Banzuke 2 streams announcer
+        # speech into the pcmBuffer B half while m4a music plays (real B ~4x
+        # our R while real A tracks our L); Shin Megami Tensei II streams
+        # intro stingers just-in-time while the engine idles (buffer reads
+        # zero even at frame end — invisible to any state poll). Our shadow
+        # cannot render audio that never goes through the SoundChannels, so
+        # substituting replaces it with silence. Per-side detection: a real
+        # FIFO side carrying more than TWICE our shadow's same side plus an
+        # audibility floor cannot be the engine's own mix (the engine writes
+        # both halves from the same channel loop with byte-bounded volumes we
+        # mirror; verified corpus tracks within ~1.35x even in the reverb>=75
+        # cluster). While held, apu.get_sample emits the REAL stream and the
+        # shadow keeps rendering warm underneath — reversible per pass, so a
+        # speech pause flips back to enhanced output ~half a second later and
+        # nothing is permanently sacrificed (unlike fifo_foreign). The hold
+        # spans sentence-cadence gaps so it cannot flap mid-speech.
+        let over_l = m.real_abs_a >= m.hle_abs_l * 3 + int64(m.ab_n) * 4
+        let over_r = m.real_abs_b >= m.hle_abs_r * 3 + int64(m.ab_n) * 4
+        if over_l or over_r:
+          if m.overlay_hold == 0: inc m.dbg_overlay_triggers
+          m.overlay_hold = 30
+        elif m.overlay_hold > 0:
+          dec m.overlay_hold
+        if m.overlay_hold > 0: inc m.dbg_overlay_passes
+        m.real_abs_a = 0
+        m.real_abs_b = 0
+        m.hle_abs_l = 0
+        m.hle_abs_r = 0
         m.ab_n = 0
       if shadow_loud: m.shadow_quiet_age = 0
       elif m.shadow_quiet_age < 1000: inc m.shadow_quiet_age
