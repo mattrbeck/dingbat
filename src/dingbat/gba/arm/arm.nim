@@ -55,11 +55,29 @@ proc write_intr_mirror(cpu: CPU; value: uint16) {.inline.} =
   cpu.gba.bus.wram_chip[0x7FF8] = uint8(value)
   cpu.gba.bus.wram_chip[0x7FF9] = uint8(value shr 8)
 
+proc svc_sp(cpu: CPU): uint32 {.inline.} =
+  ## The supervisor-mode stack pointer (live r13 when the caller is in SVC
+  ## mode, the banked one otherwise) — where the real BIOS's SWI dispatcher
+  ## keeps its register frame.
+  if cast[CpuMode](cpu.cpsr.mode) == modeSVC: cpu.r[13]
+  else: cpu.reg_banks[mode_bank(modeSVC)][5]
+
 proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
   ## IntrWait per GBATEK: forcefully sets IME=1, then halts until the user
   ## IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8.
   ## With discard_old=false, returns immediately if a masked flag is already
   ## set. Matched mirror flags are acknowledged (cleared) on return.
+  ##
+  ## Register protocol of the real routine (0x330, check subroutine 0x358):
+  ## while halted the handler-visible r12 is 0x04000000 — the check
+  ## subroutine loads it (mov ip, 0x04000000) before every halt, and user
+  ## IRQ dispatchers rely on it: devkitARM's crt0 acknowledges the IntrWait
+  ## mirror with `strh r0, [ip, #-8]` (0x03FFFFF8, an IWRAM mirror of
+  ## 0x03007FF8). Without it the handler's mirror write lands at [caller_r12
+  ## - 8] and IntrWait never returns (Bubble Bobble Old & New, Card
+  ## E-Reader: permanent black screen). On return the caller's r12 comes
+  ## back (the dispatcher pops it), r0 holds the matched flag bits and r3 is
+  ## 0 (routine scratch, mov r3, #0 at 0x334).
   cpu.gba.interrupts.ime = true
   let mirror = cpu.read_intr_mirror()
   if discard_old:
@@ -68,7 +86,23 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
     let hit = mirror and mask
     if hit != 0:
       cpu.write_intr_mirror(mirror and not hit)
+      cpu.r[0] = uint32(hit)
+      cpu.r[3] = 0
       return
+  # Save the caller's r12 in the exact SVC-stack slot the real dispatcher
+  # uses (push {fp, ip, lr} at 0x140 puts ip at [sp_svc - 8]). HLE SWIs
+  # never touch memory below the SVC sp, so the slot survives the wait; it
+  # also travels inside save states and rollback snapshots for free.
+  # (Deliberately not modeled: the real sp decrements, the r2/r4/fp/lr
+  # values the routines hold while halted, and the halt-at-least-once quirk
+  # of discard_old=false — no handler convention depends on them, and
+  # mGBA's HLE BIOS skips them too.)
+  cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
+  cpu.r[12] = 0x04000000'u32
+  cpu.r[3] = 0
+  # While halted r0 holds the last check's matched bits: the discarded old
+  # flags on entry (0x358 runs before the first halt), 0 otherwise
+  if discard_old: cpu.r[0] = uint32(mirror and mask)
   cpu.intr_wait_active = true
   cpu.intr_wait_mask = mask
   # Address of the instruction following the SWI (r15 is pipeline-ahead)
@@ -82,9 +116,18 @@ proc check_intr_wait*(cpu: CPU) =
   ## (i.e. the user IRQ handler has returned). Re-halts unless a requested
   ## flag has appeared in the BIOS interrupt flags mirror.
   let hit = cpu.read_intr_mirror() and cpu.intr_wait_mask
+  # Every pass through the real check subroutine re-enables IME on its way
+  # out (0x370), even if the user handler turned it off
+  cpu.gba.interrupts.ime = true
   if hit != 0:
     cpu.write_intr_mirror(cpu.read_intr_mirror() and not hit)
     cpu.intr_wait_active = false
+    # Real-routine return protocol: r0 = matched flag bits, r3 = 0, and the
+    # caller's r12 comes back from the dispatcher's SVC-stack slot (see
+    # hle_intr_wait)
+    cpu.r[0] = uint32(hit)
+    cpu.r[3] = 0
+    cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
     # The IRQ handler ran through the (stub) BIOS and rewrote the open-bus
     # latch; the real BIOS's IntrWait exit path leaves 0xE3A02004
     cpu.gba.bus.bios_latch = 0xE3A02004'u32
@@ -97,7 +140,13 @@ proc check_intr_wait*(cpu: CPU) =
     # dispatcher restore 0x170-0x184 (12) + movs pc, lr (3+refill 2, IWRAM)
     cpu.gba.bus.add_cycles(44)  # INTRWAIT_TUNE
   else:
+    # Re-halt with the check subroutine's register state: r0 = 0 (no match)
+    # and r12 = 0x04000000, the convention user IRQ dispatchers rely on
+    cpu.r[0] = 0
+    cpu.r[12] = 0x04000000'u32
     cpu.halted = true
+    # Wake immediately if an enabled interrupt is already pending
+    cpu.gba.interrupts.schedule_interrupt_check()
 
 # Cycle cost of the real BIOS's SWI entry/dispatch/return path (exception
 # entry, register saves, jump-table dispatch, return), excluding the
@@ -162,6 +211,43 @@ proc bios_addr_check(address, length: uint32): bool {.inline.} =
 # matter for a path that does no work.
 const BIOS_CHECK_SKIP_COST = 26
 
+# The real BIOS's copy SWIs run with the caller's IRQ mask (the dispatcher
+# restores the I bit before jumping to the routine), so a long CpuSet /
+# CpuFastSet is preempted mid-loop by any deliverable interrupt and resumes
+# afterwards. Games rely on this: Card E-Reader boot-loads a 22 KB IWRAM
+# program over its own live IRQ handler with one CpuSet call, counting on
+# the vblank IRQ being serviced (through the OLD handler) before the copy
+# reaches and replaces it — an atomic HLE copy defers that IRQ into the
+# half-overwritten handler and wedges the game. The HLE therefore checks
+# every HLE_COPY_IRQ_CHECK units whether an interrupt has become
+# deliverable; if so it stops, winds r0/r1/r2 forward to describe the
+# remaining span and rewinds the PC onto the SWI instruction itself, so the
+# pending IRQ is taken and the re-executed SWI continues the copy. All
+# continuation state lives in the architectural registers (like the real
+# routine's), so save states and rollback snapshots need nothing extra.
+#
+# Known deviations from the real routine, only on the interrupted path: the
+# halfword forms' r0/r1 advance (the real routine indexes with an offset
+# register and leaves them untouched) and r2's count field counts down; the
+# re-dispatch also re-charges the SWI entry/validation overhead (~50
+# cycles per interruption). The decompression SWIs stay atomic.
+const HLE_COPY_IRQ_CHECK = 32
+
+proc hle_irq_deliverable(cpu: CPU): bool {.inline.} =
+  let intr = cpu.gba.interrupts
+  intr.ime and not cpu.cpsr.irq_disable and
+    ((uint16(intr.reg_ie) and uint16(intr.reg_if)) != 0)
+
+proc hle_swi_rewind(cpu: CPU) =
+  ## Rewind the PC onto the SWI instruction currently being handled, so it
+  ## re-executes after the pending IRQ is serviced. The caller (arm/thumb
+  ## software-interrupt handler) still steps the PC after hle_swi returns,
+  ## so aim one instruction short of the SWI itself.
+  if cpu.cpsr.thumb:
+    discard cpu.set_reg(15, cpu.r[15] - 6)
+  else:
+    discard cpu.set_reg(15, cpu.r[15] - 12)
+
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## Input-dependent cost of the real BIOS divide loop (same shape as the
   ## charge in hle_div; kept separate so ArcTan2 can price its internal Div).
@@ -225,6 +311,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
     cpu.halt_resume_charge = HALT_RETURN_COST
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
+    # The real routine (0x1A0) halts with ip = 0x04000000 — the register
+    # convention user IRQ dispatchers may rely on (see hle_intr_wait); the
+    # caller's r12 is restored from the dispatcher's SVC-stack slot on resume
+    cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
+    cpu.r[12] = 0x04000000'u32
     cpu.halted = true
     # Halt exits when IE & IF is nonzero (IME is don't care), including
     # interrupts that were already pending on entry
@@ -235,6 +326,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
     cpu.halt_resume_charge = HALT_RETURN_COST
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
+    # Same halted-r12 convention as Halt (real routine 0x1A8 shares 0x1AC)
+    cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
+    cpu.r[12] = 0x04000000'u32
     cpu.halted = true
     cpu.stopped = true
     # Stop blanks the LCD without any memory write; force a re-render
@@ -245,6 +339,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     cpu.hle_intr_wait(cpu.r[0] != 0, uint16(cpu.r[1]))
   of 0x05:  # VBlankIntrWait = IntrWait(1, 1)
+    # The real entry point (0x328) loads the IntrWait arguments into r0/r1;
+    # r1 survives to the caller (r0 is overwritten by the matched flags)
+    cpu.r[0] = 1
+    cpu.r[1] = 1
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
     # Input-dependent cost of the real BIOS routine. The hardware algorithm
@@ -349,22 +447,6 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let count = bits_range(ctrl, 0, 20)
     let fill = bit(ctrl, 24)
     let word_mode = bit(ctrl, 26)
-    # Cost of the real BIOS's thumb copy/fill loop (routine at 0xB4C). Every
-    # data access is nonsequential (BIOS instruction fetches sit between
-    # them), so per-unit cost = loop instructions + N-cost of src read +
-    # N-cost of dst write; fills read src once (folded into the fixed part).
-    # Verified cycle-exact against real-BIOS execution for word/half x
-    # copy/fill across IWRAM/EWRAM/VRAM/ROM at two waitstate settings.
-    let cpuset_model = block:
-      let bus = cpu.gba.bus
-      let sp = int(bits_range(src, 24, 27))
-      let dp = int(bits_range(dst, 24, 27))
-      if word_mode:
-        if fill: 44 + int(bus.wait32_n[sp]) + int(count) * (6 + int(bus.wait32_n[dp]))
-        else:    44 + int(count) * (8 + int(bus.wait32_n[sp]) + int(bus.wait32_n[dp]))
-      else:
-        if fill: 46 + int(bus.wait16_n[sp]) + int(count) * (7 + int(bus.wait16_n[dp]))
-        else:    46 + int(count) * (9 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp]))
     # The real BIOS validates the source before any access (byte length is
     # count*4 even in halfword mode — the check runs before the halving) and
     # returns with registers and memory untouched when it fails. This also
@@ -375,18 +457,53 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     else:
       # Addresses are NOT aligned: normal memory aligns on the bus anyway, and
       # SRAM (8-bit bus) genuinely sees the unaligned byte address.
+      let src_page = int(bits_range(src, 24, 27))
+      let dst_page = int(bits_range(dst, 24, 27))
+      # Per-unit/fixed real-routine costs (see the model block below). The
+      # per-chunk top-up keeps simulated time in step with the real loop so
+      # peripheral events and IRQs land mid-copy at faithful cycle positions
+      # (the HLE's own bus accesses undercharge — e.g. prefetched ROM reads —
+      # and a single end-of-SWI top-up would defer a mid-copy vblank until
+      # after every byte has been written).
+      let model_fixed = block:
+        let bus = cpu.gba.bus
+        if word_mode:
+          if fill: 44 + int(bus.wait32_n[src_page]) else: 44
+        else:
+          if fill: 46 + int(bus.wait16_n[src_page]) else: 46
+      let model_unit = block:
+        let bus = cpu.gba.bus
+        if word_mode:
+          if fill: 6 + int(bus.wait32_n[dst_page])
+          else:    8 + int(bus.wait32_n[src_page]) + int(bus.wait32_n[dst_page])
+        else:
+          if fill: 7 + int(bus.wait16_n[dst_page])
+          else:    9 + int(bus.wait16_n[src_page]) + int(bus.wait16_n[dst_page])
+      var done = 0'u32
+      var interrupted = false
       if word_mode:
         # The word paths use ldmia r0!/stmia r1!, so r0/r1 come back advanced
         # (fill still pops one source word)
         let fill_val = cpu.gba.bus.read_word(src)
         if fill: src += 4
-        for i in 0'u32 ..< count:
+        while done < count:
           let val = if fill: fill_val
                     else: cpu.gba.bus.read_word(src)
           cpu.gba.bus.write_word(dst, val)
           if not fill: src += 4
           dst += 4
-        cpu.r[0] = src
+          inc done
+          if (done and (HLE_COPY_IRQ_CHECK - 1)) == 0 and done < count:
+            let target = model_fixed + model_unit * int(done)
+            let charged = int(cpu.hle_body_start() - body_t0)
+            if target > charged: cpu.idle(target - charged)
+            cpu.gba.bus.catch_up()
+            if cpu.hle_irq_deliverable():
+              interrupted = true
+              break
+        # On interruption the continuation re-reads its fill word from r0,
+        # so the fill's source pop must not happen until the last leg
+        cpu.r[0] = if interrupted and fill: src - 4 else: src
         cpu.r[1] = dst
       else:
         # The real BIOS uses ldrh: an odd source address reads rotated, so the
@@ -394,13 +511,37 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         # The halfword paths index with an offset register (ldrh/strh [rX, r5])
         # and leave r0/r1 unmodified.
         let fill_val = uint16(cpu.gba.bus.read_half_rotate(src))
-        for i in 0'u32 ..< count:
+        while done < count:
           let val = if fill: fill_val
                     else: uint16(cpu.gba.bus.read_half_rotate(src))
           cpu.gba.bus.write_half(dst, val)
           if not fill: src += 2
           dst += 2
-      cpu.hle_charge_body(body_t0, cpuset_model)
+          inc done
+          if (done and (HLE_COPY_IRQ_CHECK - 1)) == 0 and done < count:
+            let target = model_fixed + model_unit * int(done)
+            let charged = int(cpu.hle_body_start() - body_t0)
+            if target > charged: cpu.idle(target - charged)
+            cpu.gba.bus.catch_up()
+            if cpu.hle_irq_deliverable():
+              interrupted = true
+              break
+        if interrupted:
+          # Continuation state (deviation: the real routine's offset-register
+          # form leaves r0/r1 untouched — see HLE_COPY_IRQ_CHECK notes)
+          cpu.r[0] = src
+          cpu.r[1] = dst
+      # Cost of the real BIOS's thumb copy/fill loop (routine at 0xB4C), for
+      # the units actually performed. Every data access is nonsequential
+      # (BIOS instruction fetches sit between them), so per-unit cost = loop
+      # instructions + N-cost of src read + N-cost of dst write; fills read
+      # src once (folded into the fixed part). Verified cycle-exact against
+      # real-BIOS execution for word/half x copy/fill across
+      # IWRAM/EWRAM/VRAM/ROM at two waitstate settings.
+      cpu.hle_charge_body(body_t0, model_fixed + model_unit * int(done))
+      if interrupted:
+        cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
+        cpu.hle_swi_rewind()
   of 0x01:  # RegisterRamReset
     let flags = cpu.r[0]
     if bit(flags, 0):  # Clear 256K EWRAM
@@ -499,20 +640,38 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.idle(BIOS_CHECK_SKIP_COST)
     else:
       let count = (raw_count + 7) and not 7'u32  # round up to multiple of 8
-      # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
-      # (calibrated against the mGBA suite "CpuSet" timing test, which uses
-      # swi 0xC despite its name)
-      cpu.idle(int(count) + 5)
       let fill = bit(ctrl, 24)
       let fill_val = cpu.gba.bus.read_word(src)
-      for i in 0'u32 ..< count:
+      var done = 0'u32
+      var overhead_charged = 0
+      var interrupted = false
+      while done < count:
         let val = if fill: fill_val
                   else: cpu.gba.bus.read_word(src)
         cpu.gba.bus.write_word(dst, val)
         if not fill: src += 4
         dst += 4
+        inc done
+        # Interruptible like the real ldmia/stmia loop; the check interval is
+        # a multiple of the 8-word burst so the remaining count stays one too
+        # (see HLE_COPY_IRQ_CHECK notes). The loop-overhead charge is spread
+        # over the chunks so mid-copy events land at faithful cycle positions.
+        if (done and (HLE_COPY_IRQ_CHECK - 1)) == 0 and done < count:
+          cpu.idle(HLE_COPY_IRQ_CHECK)
+          overhead_charged += HLE_COPY_IRQ_CHECK
+          cpu.gba.bus.catch_up()
+          if cpu.hle_irq_deliverable():
+            interrupted = true
+            break
+      # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
+      # (calibrated against the mGBA suite "CpuSet" timing test, which uses
+      # swi 0xC despite its name), for the words actually transferred
+      cpu.idle(int(done) + 5 - overhead_charged)
       cpu.r[0] = src
       cpu.r[1] = dst
+      if interrupted:
+        cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
+        cpu.hle_swi_rewind()
   of 0x0D:  # GetBiosChecksum
     cpu.r[0] = 0xBAAE187F'u32
   of 0x0E:  # BgAffineSet

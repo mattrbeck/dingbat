@@ -334,6 +334,9 @@ proc tick*(cpu: CPU) =
     if cur == cpu.halt_resume_addr:
       cpu.gba.bus.add_cycles(int(cpu.halt_resume_charge))
       cpu.halt_resume_charge = 0
+      # The dispatcher's exit path pops the caller's r12 back (the Halt/Stop
+      # routines held ip = 0x04000000 while halted; see hle_intr_wait)
+      cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
   if not cpu.halted:
     cpu.instr_exc_return = false
     # EXPLORATORY: MP2K HLE mixer hook. When enabled and PC reaches the

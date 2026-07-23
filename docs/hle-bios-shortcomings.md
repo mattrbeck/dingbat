@@ -1,6 +1,42 @@
 # HLE BIOS Shortcomings
 
-Comparison of three BIOS modes against the mGBA test suite (2026-03-23).
+## Remaining known gaps (2026-07-22)
+
+The halted-register protocol and copy-SWI interruptibility landed 2026-07-22
+(Bubble Bobble Old & New, Card E-Reader): user IRQ handlers now see
+r12 = 0x04000000 while the CPU waits inside Halt/Stop/IntrWait (the devkitARM
+crt0 convention for the IntrWait mirror ack), the caller's r12 is restored via
+the real dispatcher's SVC-stack slot, IntrWait returns the real r0/r1/r3
+protocol, and CpuSet/CpuFastSet are preempted mid-loop by deliverable IRQs
+with time charged in step with the real routine. Still deliberately
+unmodeled:
+
+- **Decompression SWIs are atomic**: LZ77/Huffman/RL/Diff/BitUnPack cannot be
+  interrupted mid-stream (the real routines run with the caller's IRQ mask).
+  A game that overwrites its live IRQ handler with a decompression call and
+  relies on a mid-call IRQ would hit the same class of bug the E-Reader hit
+  with CpuSet.
+- **Interrupted-copy register remnants**: when an IRQ preempts CpuSet /
+  CpuFastSet, the continuation state lives in r0/r1/r2 (PC rewound onto the
+  SWI). On the interrupted path only, the halfword forms' r0/r1 advance
+  (the real routine leaves them untouched) and r2's count field counts down;
+  each preemption also re-pays the SWI dispatch (~50 cycles).
+- **IntrWait(discard=0) returns without halting when a masked flag is already
+  set** (mGBA behavior). The real routine always halts at least once, and its
+  first halt uses the caller's stale r12 for the HALTCNT store (hardware
+  quirk).
+- **Handler-visible r2/r4/lr/r11 during the wait** keep their caller values
+  (real: mirror value / 1 / BIOS return address / spsr scratch). No known
+  convention reads them; mGBA's HLE BIOS deviates the same way.
+- **Nested IntrWait** (an IRQ handler itself calling IntrWait/Halt while one
+  is active) overwrites the single set of resume fields; the real BIOS necks
+  through the stack.
+
+## Comparison of three BIOS modes against the mGBA test suite (2026-03-23)
+
+The tables below are stale (pre-2026-07): Div/Sqrt/ArcTan/CpuSet and the
+rest of the jump table have long since been implemented and calibrated —
+current scores are HLE 6910/7008, official-BIOS LLE 6909/7008.
 
 ## Test Suite Results by BIOS Mode
 
