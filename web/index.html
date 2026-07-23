@@ -167,6 +167,19 @@
         <span class="update-dot" aria-hidden="true"></span>Update
       </button>
 
+      <!-- Enhanced-audio indicator: lights up when a sound-engine HLE (MP2K /
+           Golden Sun "Bon" driver) is enabled in settings AND actually detected
+           and substituting audio right now. Informational, not a control. -->
+      <div id="hle-indicator" role="status" hidden
+           title="Enhanced audio active — high-quality sound-engine emulation"
+           aria-label="Enhanced audio active">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 17V4l10-2v12"/>
+          <circle cx="6.5" cy="17" r="2.5"/>
+          <circle cx="16.5" cy="14" r="2.5"/>
+        </svg>
+      </div>
+
       <div id="volume-control">
         <button type="button" class="icon-btn" id="mute-btn" title="Mute" aria-label="Mute">
           <svg class="ico-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>

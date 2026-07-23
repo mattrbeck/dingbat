@@ -4835,6 +4835,29 @@ var Module = {
       }
     };
 
+    // "Enhanced audio" note: lit when a sound-engine HLE (MP2K / Golden Sun
+    // "Bon" driver) is enabled in settings AND detected+substituting right now.
+    // Two-stage toggle so the CSS opacity/scale transition plays: unhide first,
+    // then add .on on the next frame.
+    const hleIndicator = document.getElementById("hle-indicator");
+    let hleActive = false;
+    const updateHleIndicator = () => {
+      const on = !!(
+        Module._wasm_hle_audio_active && Module._wasm_hle_audio_active()
+      );
+      if (on === hleActive) return;
+      hleActive = on;
+      if (on) {
+        hleIndicator.hidden = false;
+        // reflow so the class add animates from the hidden state
+        void hleIndicator.offsetWidth;
+        hleIndicator.classList.add("on");
+      } else {
+        hleIndicator.classList.remove("on");
+        hleIndicator.hidden = true;
+      }
+    };
+
     // Advance the online-link core by whatever the shared `accumulator`
     // affords, capped so a long stall can't later burst. Called from the RAF
     // loop (after accumulator is topped up with real elapsed time) AND from
@@ -5015,6 +5038,7 @@ var Module = {
         captureCanvas();
       }
       updateSleepOverlay();
+      updateHleIndicator();
       updateGlow();
       updateRumble(timestamp);
       watchCanvasBacking();

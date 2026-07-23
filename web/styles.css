@@ -1219,6 +1219,53 @@ body.running #status {
   }
 }
 
+/* --- Enhanced-audio (sound-engine HLE) indicator --- */
+#hle-indicator {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 36px;
+  color: var(--accent);
+  /* Fade/scale in when engaged so it never pops abruptly */
+  opacity: 1;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+#hle-indicator[hidden] {
+  display: none;
+}
+
+/* Staged reveal: JS unhides first, then adds .on for the transition */
+#hle-indicator:not(.on) {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+#hle-indicator svg {
+  width: 18px;
+  height: 18px;
+}
+
+#hle-indicator svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#hle-indicator svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* Gentle glow so it reads as "lit", echoing the running-status LED */
+#hle-indicator.on svg {
+  filter: drop-shadow(0 0 3px var(--accent-glow));
+}
+
 /* --- Volume --- */
 #volume-control {
   display: inline-flex;

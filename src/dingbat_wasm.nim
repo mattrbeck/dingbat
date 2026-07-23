@@ -193,6 +193,18 @@ proc wasm_mp2k_available(): cint {.exportc.} =
   if stateKind == ekGBA and stateGba != nil and stateGba.mp2k != nil and
      stateGba.mp2k.engaged: 1 else: 0
 
+proc wasm_hle_audio_active(): cint {.exportc.} =
+  ## 1 when a sound-engine HLE is enabled AND actually substituting audio right
+  ## now — i.e. its driver was detected and its mixer is live. Covers both the
+  ## MP2K/M4A HLE (engaged + mixer_live: engaged alone can idle while the game
+  ## streams its own audio, see mixer_live) and the Camelot "Bon" driver HLE
+  ## (Golden Sun). Drives the top-bar "HLE audio" indicator note.
+  if stateKind != ekGBA or stateGba == nil or not stateGba.mp2k_hle: return 0
+  if stateGba.mp2k != nil and stateGba.mp2k.engaged and
+     stateGba.mp2k.mixer_live(): return 1
+  if stateGba.gs_bon != nil and stateGba.gs_bon.engaged: return 1
+  return 0
+
 # --- WebGL2 present path ---
 # The web front end no longer presents the game through SDL's renderer. Each
 # frame it uploads the RAW BGR555 framebuffer (this pointer) to a WebGL2
