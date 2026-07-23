@@ -90,11 +90,12 @@ int main(int argc, char** argv) {
   core->init(core);
   mCoreInitConfig(core, NULL);
   mCoreConfigSetValue(&core->config, "idleOptimization", "ignore");
-  /* skip the boot logo so frame 0 is the first game frame in every emulator.
+  /* skip the boot logo so frame 0 is the first game frame in every emulator,
+   * unless ROMFUZZ_RUN_BIOS is set (full-BIOS timing experiments).
    * NB: core->loadConfig does NOT map config values into core->opts (that's
    * mCoreConfigMap, called only by the higher-level mCoreLoadConfig), so set
    * the opt directly — reset() reads core->opts.skipBios. */
-  core->opts.skipBios = true;
+  core->opts.skipBios = getenv("ROMFUZZ_RUN_BIOS") == NULL;
   /* keep .sav files next to the outprefix, not the shared ROM dir */
   char savedir[1024];
   snprintf(savedir, sizeof savedir, "%s", prefix);

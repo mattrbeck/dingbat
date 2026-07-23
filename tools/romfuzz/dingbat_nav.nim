@@ -53,9 +53,11 @@ proc main() =
 
   let use_hle = bios == "hle"
   # run_bios=false skips the boot logo so frame 0 is the first game frame,
-  # matching the skip-bios configs of the mGBA/NBA runners.
+  # matching the skip-bios configs of the mGBA/NBA runners. ROMFUZZ_RUN_BIOS
+  # plays the full boot (needs a real BIOS) for timing experiments.
+  let run_bios = getEnv("ROMFUZZ_RUN_BIOS") != "" and not use_hle
   let emu = new_gba(if use_hle: "" else: bios, rom_path,
-                    run_bios = false, use_hle = use_hle)
+                    run_bios = run_bios, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()
 

@@ -92,8 +92,9 @@ int main(int argc, char** argv) {
   auto config = std::make_shared<nba::Config>();
   auto video = std::make_shared<CaptureVideo>();
   config->video_dev = video;
-  /* skip the boot logo so frame 0 is the first game frame in every emulator */
-  config->skip_bios = true;
+  /* skip the boot logo so frame 0 is the first game frame in every emulator,
+   * unless ROMFUZZ_RUN_BIOS is set (full-BIOS timing experiments) */
+  config->skip_bios = getenv("ROMFUZZ_RUN_BIOS") == nullptr;
 
   auto core = nba::CreateCore(config);
   if (nba::BIOSLoader::Load(core, bios) != nba::BIOSLoader::Result::Success) {
