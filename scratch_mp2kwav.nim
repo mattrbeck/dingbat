@@ -10,7 +10,6 @@ proc main() =
   emu.mp2k_hle = true
   emu.mp2k.env_mode = parseInt(getEnv("MP2K_ENV", "0"))
   emu.mp2k.resample_mode = parseInt(getEnv("MP2K_RS", "0"))
-  emu.mp2k.rev_scale = parseFloat(getEnv("MP2K_REVSCALE", "1"))
   emu.mp2k.makeup = parseFloat(getEnv("MP2K_MAKEUP", "0"))
   emu.mp2k.master_apply = parseInt(getEnv("MP2K_MASTER", "0"))
   let frames = parseInt(paramStr(2))
