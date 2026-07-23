@@ -72,3 +72,10 @@ tools/romfuzz/dingbat_nav
 tools/romfuzz/mgba_runner
 tools/romfuzz/nba_runner
 __pycache__/
+
+# never commit ROM sweep artifacts (reports may reference ROM provenance; ROMs are copyrighted)
+/romfuzz-report/
+/roms/
+/*.gba
+/*.zip
+/*.sav
