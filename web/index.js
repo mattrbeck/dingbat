@@ -1138,6 +1138,15 @@ const romsForManagement = async () => {
 const refreshRomsManageList = async () => {
   if (!db) return;
   let rows = await romsForManagement();
+  // A remote-only entry (on Drive, nothing stored here) has no local save to
+  // Reset — it's "just deletable", so those rows show only Delete. Work out
+  // what this device actually holds.
+  let keys = await dbKeys();
+  let localRoms = new Set();
+  for (let k of keys) {
+    if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
+  }
+  let withSaves = new Set(await romsWithSaveData());
   romsManageList.innerHTML = "";
   romsManageEmpty.hidden = rows.length > 0;
   syncRomsSortButton();
@@ -1175,14 +1184,17 @@ const refreshRomsManageList = async () => {
     // Delete = remove the game outright (ROM + save data).
     // When signed in both mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
-    let saveBtn;
-    if (linkRunning) {
+    // Reset only makes sense when there's local save data to wipe. A remote-only
+    // game has none, so it gets Delete alone.
+    let hasLocalData = localRoms.has(name) || withSaves.has(name);
+    let saveBtn = null;
+    if (hasLocalData && linkRunning) {
       saveBtn = makeDisabledButton(
         "Reset",
         "button button-sm roms-manage-btn",
         "Exit link mode to reset this game's save",
       );
-    } else {
+    } else if (hasLocalData) {
       saveBtn = makeConfirmButton({
         label: "Reset",
         confirmLabel: "Delete all save data?",
@@ -1203,7 +1215,7 @@ const refreshRomsManageList = async () => {
         },
       });
     }
-    siblings.push(saveBtn);
+    if (saveBtn) siblings.push(saveBtn);
 
     let allBtn;
     if (linkRunning) {
@@ -1241,7 +1253,7 @@ const refreshRomsManageList = async () => {
     }
     siblings.push(allBtn);
 
-    actions.appendChild(saveBtn);
+    if (saveBtn) actions.appendChild(saveBtn);
     actions.appendChild(allBtn);
     row.appendChild(actions);
     romsManageList.appendChild(row);
@@ -2612,24 +2624,24 @@ const refreshHomeRecent = async () => {
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   updateStorageInfo();
-  // When signed in the grid is the MERGED cross-device library, so some
-  // entries are games this device doesn't hold yet — those render as
-  // "Drive-only" tiles that download on tap instead of launching.
+  // The grid is the merged cross-device library, so some entries are games this
+  // device doesn't hold bytes for. Those render as "Drive-only" download tiles —
+  // whether or not we're signed in. Signed out, a game that lives on Drive but
+  // isn't downloaded here must still read as "needs download" (tap prompts
+  // sign-in) rather than masquerading as a stored game whose launch then fails.
   let localRoms = new Set();
-  if (syncActive()) {
-    let keys = await dbKeys();
-    // A newer render may have started (and cleared the grid) during that
-    // await; appending our tiles too would double every game. Seen live on
-    // first sign-in, where merge + downloads fire refreshes back-to-back.
-    // The art callbacks below re-check gen the same way.
-    if (gen !== homeRenderGen) return;
-    for (let k of keys) {
-      if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
-    }
+  let keys = await dbKeys();
+  // A newer render may have started (and cleared the grid) during that await;
+  // appending our tiles too would double every game. Seen live on first sign-in,
+  // where merge + downloads fire refreshes back-to-back. The art callbacks below
+  // re-check gen the same way.
+  if (gen !== homeRenderGen) return;
+  for (let k of keys) {
+    if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
   for (let { name: romName } of roms) {
     let system = systemOf(romName);
-    let driveOnly = syncActive() && !localRoms.has(romName);
+    let driveOnly = !localRoms.has(romName);
     let busy = syncDownloading.has(romName);
     let tile = document.createElement("div");
     tile.className = "home-tile" + (driveOnly ? " home-tile-cloud" : "");
@@ -2638,7 +2650,8 @@ const refreshHomeRecent = async () => {
     launch.type = "button";
     launch.className = "home-tile-launch";
     launch.title = driveOnly
-      ? romName + " — on Drive, tap to download"
+      ? romName + (syncActive() ? " — on Drive, tap to download"
+                                : " — on Drive, tap to sign in and download")
       : romName;
 
     // The system chip is the game's identity slot: one place, one signal (it
@@ -2668,6 +2681,14 @@ const refreshHomeRecent = async () => {
     launch.addEventListener("click", async () => {
       if (!driveOnly) { launchRom(romName); return; }
       if (syncDownloading.has(romName)) return;
+      if (!syncActive()) {
+        // On Drive but not downloaded here, and signed out. The click is a user
+        // gesture, so open Drive sign-in; on success continue to download and
+        // launch. If it's cancelled, the tile stays a download tile.
+        try { await gdriveConnect(); }
+        catch (e) { showToast(e.message); return; }
+        if (!syncActive()) return;
+      }
       if (await downloadGame(romName)) launchRom(romName);
     });
 
