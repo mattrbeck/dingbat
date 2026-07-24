@@ -1,5 +1,12 @@
 # Front-end parity & gap analysis (2026-07-15)
 
+> **Stale — historical snapshot.** This survey describes the code as of
+> 2026-07-15 and has since been overtaken: cheats shipped on both front-ends
+> (`common/cheats.nim`, the web Cheats modal), display filters exist
+> (scanlines, hq4x/xBR, LCD grid), and the save/sync story was rebuilt around
+> Google Drive. Read it for the survey method and the parity axes, not for
+> current facts; `docs/features.md` tracks what actually exists.
+
 A survey of dingbat across five axes — correctness, features, quality-of-life,
 polish, and **web ↔ native feature parity** — plus the low-hanging fruit that
 was implemented in the same pass. Netcode/link/signaling files were excluded
