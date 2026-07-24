@@ -14,14 +14,19 @@ proc ch3_step*(ch: GbChannel3; gb: GB) =
   gb.scheduler.schedule_gb(int(ch3_frequency_timer(ch)),
     etAPUChannel3)
 
-proc ch3_get_amplitude*(ch: GbChannel3): float32 =
+proc ch3_dac_input*(ch: GbChannel3): uint8 =
+  ## Current 4-bit digital output (0-15), pre-DAC — see ch1_dac_input.
   if ch.enabled and ch.dac_enabled:
     let nibble = if (ch.wave_ram_position and 1) == 0:
                    (ch.wave_ram_sample_buffer shr 4) and 0x0F
                  else:
                    ch.wave_ram_sample_buffer and 0x0F
-    let dac_in = int(nibble) shr ch.volume_code_shift
-    float32(float64(dac_in) / 7.5 - 1.0)
+    nibble shr ch.volume_code_shift
+  else: 0'u8
+
+proc ch3_get_amplitude*(ch: GbChannel3): float32 =
+  if ch.enabled and ch.dac_enabled:
+    float32(float64(ch.ch3_dac_input()) / 7.5 - 1.0)
   else: 0.0'f32
 
 proc ch3_read*(ch: GbChannel3; idx: int): uint8 =
