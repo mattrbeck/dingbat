@@ -43,7 +43,7 @@ type
     wait_state_2_second_access* {.bitsize: 1.}: uint16
     phi_terminal_output*        {.bitsize: 2.}: uint16
     not_used*                   {.bitsize: 1.}: bool
-    gamepack_prefetch_buffer*   {.bitsize: 1.}: bool
+    gamepak_prefetch_buffer*    {.bitsize: 1.}: bool
     gamepak_type*               {.bitsize: 1.}: bool
 
   InterruptReg* {.packed.} = object
@@ -182,10 +182,10 @@ type
     not_used_obj*                    {.bitsize: 2.}: uint16
 
   MOSAIC* {.packed.} = object
-    bg_mosiac_h_size*  {.bitsize: 4.}: uint16
-    bg_mosiac_v_size*  {.bitsize: 4.}: uint16
-    obj_mosiac_h_size* {.bitsize: 4.}: uint16
-    obj_mosiac_v_size* {.bitsize: 4.}: uint16
+    bg_mosaic_h_size*  {.bitsize: 4.}: uint16
+    bg_mosaic_v_size*  {.bitsize: 4.}: uint16
+    obj_mosaic_h_size* {.bitsize: 4.}: uint16
+    obj_mosaic_v_size* {.bitsize: 4.}: uint16
 
   BLDCNT* {.packed.} = object
     bg0_1st_target_pixel* {.bitsize: 1.}: bool

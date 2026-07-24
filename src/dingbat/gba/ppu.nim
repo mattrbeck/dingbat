@@ -154,7 +154,7 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
   let character_base  = 0x4000'u32 * uint32(bgcnt.character_base_block)
   var vc = uint32(ppu.vcount)
   if bgcnt.mosaic:
-    vc -= vc mod (uint32(ppu.mosaic.bg_mosiac_v_size) + 1)
+    vc -= vc mod (uint32(ppu.mosaic.bg_mosaic_v_size) + 1)
   let effective_row   = (vc + uint32(bgvofs.offset)) and uint32(bg_height)
   let tile_y          = effective_row shr 3
   let is_8bpp         = bgcnt.color_mode_8bpp
@@ -213,7 +213,7 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
           dst[col + k] = p or (if p != 0: bank else: 0'u8)
     col += span
   if bgcnt.mosaic:
-    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
     if h > 1:
       for col in 0..239:
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
@@ -229,7 +229,7 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
   if bgcnt.mosaic:
     # Vertical mosaic: reuse the internal coordinates latched on the first
     # line of the mosaic block
-    let v = uint16(ppu.mosaic.bg_mosiac_v_size) + 1
+    let v = uint16(ppu.mosaic.bg_mosaic_v_size) + 1
     if ppu.vcount mod v == 0:
       ppu.mosaic_bgref_int[bg_idx] = [int_x, int_y]
     else:
@@ -254,7 +254,7 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
     let pal_idx = ppu.vram[character_base + 0x40'u32 * uint32(tile_id) + uint32(8 * (py and 7)) + uint32(px and 7)]
     ppu.layer_palettes[bg][col] = pal_idx
   if bgcnt.mosaic:
-    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
     if h > 1:
       for col in 0..239:
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
@@ -279,7 +279,7 @@ proc render_bitmap*(ppu: PPU) =
   if ppu.bgcnt[2].mosaic:
     # Vertical mosaic: reuse the internal coordinates latched on the first
     # line of the mosaic block (same scheme as render_aff_bg)
-    let v = uint16(ppu.mosaic.bg_mosiac_v_size) + 1
+    let v = uint16(ppu.mosaic.bg_mosaic_v_size) + 1
     if ppu.vcount mod v == 0:
       ppu.mosaic_bgref_int[0] = [int_x, int_y]
     else:
@@ -309,7 +309,7 @@ proc render_bitmap*(ppu: PPU) =
         ppu.layer_palettes[2][col] = ppu.vram[base + uint32(py) * 240 + uint32(px)]
   else: discard
   if ppu.bgcnt[2].mosaic:
-    let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
     if h > 1:
       for col in 0..239:
         let src = col - col mod h
@@ -380,8 +380,8 @@ proc render_sprites*(ppu: PPU) =
     if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: continue
     # Mosaic sprites sample from the first pixel of each screen-space block
     let obj_mosaic = bit(sprite.attr0, 12)
-    let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
-    let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosiac_v_size) + 1) else: vc
+    let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosaic_h_size) + 1 else: 1
+    let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosaic_v_size) + 1) else: vc
     let iy     = vc_m - center_y
     let flip_x = bit(sprite.attr1, 12) and not bit(sprite.attr0, 8)
     let flip_y = bit(sprite.attr1, 13) and not bit(sprite.attr0, 8)

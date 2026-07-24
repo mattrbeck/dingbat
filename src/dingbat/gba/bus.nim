@@ -38,7 +38,7 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[page] = sram
     bus.wait32_n[page] = sram
     bus.wait32_s[page] = sram
-  bus.prefetch_on = w.gamepack_prefetch_buffer
+  bus.prefetch_on = w.gamepak_prefetch_buffer
 
 proc bus_now(bus: Bus): CycleCount {.inline.} =
   bus.sched.cycles + CycleCount(bus.cycles)
