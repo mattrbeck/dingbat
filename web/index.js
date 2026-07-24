@@ -1134,8 +1134,8 @@ const refreshRomsManageList = async () => {
 
     let label = document.createElement("span");
     label.className = "roms-manage-name";
-    label.textContent = name;
-    label.title = name;
+    label.textContent = displayName(name);
+    label.title = name; // full filename (with extension) for disambiguation
     row.appendChild(label);
 
     let actions = document.createElement("div");
@@ -1499,17 +1499,14 @@ const renderGdriveSection = () => {
   }
 
   if (!gdriveToken) {
+    // No sub-caption here: the static hint right above this section already
+    // says exactly what signing in does — repeating it read as a glitch.
     let btn = makeGdriveButton("Sign in with Google", false, async () => {
       btn.disabled = true;
       try { await gdriveConnect(); }
       catch (e) { showToast(e.message); btn.disabled = false; }
     });
     gdriveBody.appendChild(btn);
-    let p = document.createElement("p");
-    p.className = "modal-toggle-sub";
-    p.textContent =
-      "Signing in keeps your games, saves, and save states mirrored across your devices.";
-    gdriveBody.appendChild(p);
     return;
   }
 
@@ -2450,7 +2447,7 @@ const buildEmptyLibraryCard = () => {
     let btn = document.createElement("button");
     btn.type = "button";
     btn.className = "button button-sm";
-    btn.textContent = "Sign in to Google Drive";
+    btn.textContent = "Sign in with Google"; // same label as Manage ROMs
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       try { await gdriveConnect(); }
@@ -2566,7 +2563,7 @@ const refreshHomeRecent = async () => {
 
     let name = document.createElement("span");
     name.className = "home-tile-name";
-    name.textContent = romName;
+    name.textContent = displayName(romName); // full name stays in launch.title
 
     launch.appendChild(icon);
     launch.appendChild(name);
@@ -2697,6 +2694,10 @@ document.getElementById("export-save").addEventListener("click", async () => {
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
+// What the library UI shows for a game: the filename without its extension
+// (the GB/GBA chip already says what kind of cartridge it is; full filename
+// stays in tooltips). Falls back to the raw name if there's no extension.
+const displayName = (name) => stripExt(name) || name;
 
 // Overwrite the current game's battery save with imported .sav bytes (with the
 // same name-mismatch guard as the "Import save file" button), then reboot the
@@ -4936,7 +4937,7 @@ const updatePausedCard = () => {
   // sampler does).
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
   ctx.putImageData(img, 0, 0);
-  homePausedName.textContent = currentOriginalName;
+  homePausedName.textContent = displayName(currentOriginalName);
   homePausedName.title = currentOriginalName;
   homePausedCard.hidden = false;
 };
