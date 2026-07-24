@@ -445,17 +445,26 @@ proc apply_panel_uniforms() =
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
               if gbc: GLfloat(GB_W) else: GLfloat(GBA_W))
 
-proc apply_master_volume() =
+template each_live_apu(apu, body: untyped) =
+  ## Run `body` against whichever core's APU is live. At most one of the two
+  ## is ever non-nil, but both are tested here so callers state the setting
+  ## once instead of writing the nil-check pair (and risk updating only one).
+  ## `body` must typecheck against both APU and GbApu — settings only the GBA
+  ## has, like the analog low-pass and the MP2K HLE, stay explicit below.
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+    let apu = app.gba_emu.apu
+    body
   if app.gb_emu != nil:
-    app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+    let apu = app.gb_emu.apu
+    body
+
+proc apply_master_volume() =
+  each_live_apu(apu):
+    apu.set_master_volume(app.cfg.volume, app.cfg.mute)
 
 proc apply_pitch_correct_ff() =
-  if app.gba_emu != nil:
-    app.gba_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
-  if app.gb_emu != nil:
-    app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
+  each_live_apu(apu):
+    apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
 
 proc apply_audio_lowpass() =
   # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
@@ -1156,12 +1165,8 @@ proc set_fast_forward(held: bool) =
   # state and assign sync directly instead of toggling per event
   if held == pad_ff_held: return
   pad_ff_held = held
-  case app.emu_kind
-  of ekGBA:
-    if app.gba_emu != nil: app.gba_emu.apu.sync = not held
-  of ekGB:
-    if app.gb_emu != nil: app.gb_emu.apu.sync = not held
-  of ekNone: discard
+  each_live_apu(apu):
+    apu.sync = not held
 
 proc update_rumble() =
   ## Poll the cart's rumble motor — GB MBC5 rumble carts, or GBA GPIO rumble
