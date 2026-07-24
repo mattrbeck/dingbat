@@ -21,6 +21,7 @@ proc new_cartridge*(rom_path: string): Cartridge =
   if sz == 0x100000: alloc = 0x400000
   result.rom = newSeq[byte](alloc)
   result.rom_mask = uint32(alloc - 1)
+  result.rom_size = sz
   let f = open(rom_path, fmRead)
   discard f.readBytes(result.rom, 0, sz)
   f.close()

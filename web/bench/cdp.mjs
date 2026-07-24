@@ -35,6 +35,11 @@ const send = (method, params) =>
     ws.send(JSON.stringify({ id: i, method, params }));
   });
 
+// CDP_THROTTLE=<n> slows the renderer by n x (Emulation.setCPUThrottlingRate),
+// a rough stand-in for older hardware. Reset to 1 when done.
+const throttle = Number(process.env.CDP_THROTTLE || 1);
+if (throttle !== 1) await send("Emulation.setCPUThrottlingRate", { rate: throttle });
+
 const expr = process.argv[2];
 const r = await send("Runtime.evaluate", {
   expression: expr,

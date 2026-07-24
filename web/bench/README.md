@@ -43,3 +43,30 @@ that look like a catastrophic regression and are purely an artifact.
 Always benchmark against a Chrome launched with a visible window, and sanity
 check `navigator.webdriver === false` plus the JS spin time before trusting a
 result.
+
+## Simulating an old device
+
+`cdp.mjs` honours `CDP_THROTTLE=<n>`, which applies
+`Emulation.setCPUThrottlingRate` — a rough stand-in for slower hardware.
+Measured on an M2, FireRed from the in-game save state with audio HLE on:
+
+| throttle | fps | realtime |
+|---|---|---|
+| 1x | 447.9 | 7.50x |
+| 2x | 213.9 | 3.58x |
+| 4x | 105.5 | 1.77x |
+| 6x | 70.3 | 1.18x |
+| 8x | 52.5 | 0.88x |
+
+So full speed needs hardware no more than ~7x slower than an M2 performance
+core. Read that as the headroom budget, not a device compatibility list —
+throttling scales compute but not cache or memory latency.
+
+## Memory over a session
+
+`session.js` adds `window.benchSession()`, which loads several ROMs back to
+back and reports wasm heap plus how many ROM bytes are still sitting in the
+Emscripten FS. Note that MEMFS keeps file contents on the **JS** heap, so
+`Module.memory.buffer.byteLength` does not account for them — check
+`FS.stat()` sizes, and treat `performance.memory.usedJSHeapSize` as too
+GC-noisy to attribute megabytes with.

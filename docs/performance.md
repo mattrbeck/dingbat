@@ -448,3 +448,87 @@ mostly measuring.
 renderer's hardest code, a doubled offline payload, and no benefit on the
 oldest devices. Revisit only if the compositor's share grows substantially, or
 if a future baseline makes SIMD assumable without a fallback.
+
+---
+
+## Old / constrained devices (2026-07-24)
+
+Different problem from raw throughput. What follows is measured on an M2 with
+CPU throttling as a stand-in for slow hardware; treat it as a headroom budget,
+not a device compatibility list (throttling scales compute but not cache or
+memory latency).
+
+### Headroom
+
+FireRed from the in-game save state, audio HLE on, emulation only:
+
+| throttle | fps | realtime |
+|---|---|---|
+| 1x | 447.9 | 7.50x |
+| 2x | 213.9 | 3.58x |
+| 4x | 105.5 | 1.77x |
+| 6x | 70.3 | 1.18x |
+| 8x | 52.5 | **0.88x** |
+
+Full speed needs hardware no worse than ~7x slower than an M2 performance core,
+and that is emulation alone — presentation, audio scheduling and touch handling
+come out of the same budget.
+
+### The dominant risk is JIT demotion, not instruction count
+
+An A9-class phone lands somewhere around 1.2-1.9x realtime by this budget:
+playable with little margin. But if Safari demotes the tab's wasm to its
+baseline compiler under memory pressure, the multiplier is far larger than
+anything on the optimization list — it turns a 1.5x-realtime device into a
+sub-realtime one in one step. That is the "slow until force-quit" symptom.
+
+**So on these devices, memory stability buys more frames than any amount of
+micro-optimization.** A 5% throughput win is irrelevant next to staying under
+the tab's memory budget. Rank work accordingly.
+
+### Shipped: cache the ROM CRC instead of re-reading the ROM
+
+`netlink_init` and `netlink_attach` each re-read the entire ROM back out of the
+Emscripten FS purely to `crc32` it — a full 16 MB read plus a 16 MB transient
+allocation for a 4-byte result, at exactly the moment (starting online play) a
+pressured phone can least afford a spike. The CRC is now computed once at load
+from the cartridge buffer.
+
+`Cartridge` gained `rom_size` (the true file length, i.e. the buffer minus its
+power-of-two zero pad and minus the Classic NES 4x mirrors) so the hash covers
+exactly the bytes a peer gets from hashing the file. Verified byte-identical to
+`crc32(readFile(rom))` across all 60 local ROMs — the value is wire-visible, so
+a mismatch would reject real peers.
+
+### Known, not fixed: the ROM is resident twice
+
+A 16 MB game occupies 16 MB in the cartridge buffer *and* 16 MB in the
+Emscripten FS for the whole session. MEMFS keeps file contents on the JS heap,
+so this does **not** show up in `Module.memory.buffer.byteLength` — it is
+invisible to the obvious instrument but entirely real to the tab's memory
+budget, which is what iOS Safari kills on.
+
+Deleting the FS copy after load looks trivial and **is a trap**: three paths
+reboot the core by calling `loadRom` again *without* re-staging the ROM —
+the Reset button (`index.js:4618`), the post-save-delete reboot
+(`resetLoadedGameSave`), and the save-import reboot (`applyImportedSave`). The
+FS file is the only copy of those bytes the JS side can reach. Deleting it
+breaks Reset.
+
+The right fix is a wasm-side reset that rebuilds the core from the cartridge it
+already holds, after which the FS copy can be dropped at load. That also makes
+Reset cheaper (no 16 MB FS write and re-read). Re-staging from IndexedDB
+instead was considered and rejected: it makes Reset async and dependent on a
+store that can fail in private mode or when quota-bound.
+
+### Other candidates, unmeasured
+
+- **Rewind ring.** Capped at 16 MB on iOS. On the oldest devices that is a
+  large slice of the budget for a feature that is arguably a desktop luxury —
+  worth making adaptive, or opt-in below some device threshold.
+- **Startup.** 1.2 MB of wasm has to be compiled by Safari's baseline compiler
+  before anything runs. Worth timing on real hardware before assuming it is
+  fine.
+- **Audio buffer sizing.** Underruns are heard as stutter and cost more
+  perceived quality than a few fps; the pacing margin that is right on a
+  desktop may be too tight when the device is at 1.2x realtime.

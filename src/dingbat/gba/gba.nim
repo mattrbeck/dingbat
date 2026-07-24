@@ -804,6 +804,11 @@ type
   Cartridge* = ref object
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
+    rom_size*: int         ## bytes actually read from the file, i.e. rom minus
+                           ## the power-of-two zero pad (and minus the Classic
+                           ## NES 4x mirrors). The netplay ROM CRC is taken over
+                           ## exactly this range, so it matches a peer that
+                           ## hashed the file itself.
 
   GBA* = ref object of EmuObj
     bios_path*:  string

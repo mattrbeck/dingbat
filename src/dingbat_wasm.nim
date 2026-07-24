@@ -72,6 +72,19 @@ proc netlink_set_speculative(on: cint) {.exportc.} =
 var netOut: string = ""       # drained frames awaiting pickup by JS
 var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
 var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
+# CRC32 of the running GBA ROM, computed once at load straight from the
+# cartridge buffer. Both netlink entry points used to re-read the whole ROM back
+# out of the Emscripten FS purely to hash it — a full 16 MB read and a 16 MB
+# transient allocation for a 4-byte result, incurred at exactly the moment
+# (starting online play) when a memory-pressured phone can least afford a spike.
+#
+# The FS copy itself has to stay: reset, save-delete reboot and save-import
+# reboot all call loadRom again without re-staging the ROM, so the file is the
+# only copy of those bytes the JS side can reach. Freeing it (a 16 MB game is
+# otherwise resident twice for the whole session) needs a wasm-side reset that
+# rebuilds the core from the existing cartridge — see docs/performance.md.
+var curRomCrc: uint32 = 0
+var curRomCrcValid = false
 
 # LCD color correction. SDL's renderer API has no shader hook, but the 15-bit
 # BGR555 domain is small enough to precompute exhaustively as BGR555 ->
@@ -1047,6 +1060,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateTexture = nil
   if ext in [".gb", ".gbc"]:
     stateKind = ekGB
+    curRomCrcValid = false  # the cached CRC belongs to a GBA cart
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
     stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
     stateGb.post_init()
@@ -1063,6 +1077,12 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
     stateGba = make_gba(path)
     stateGba.post_init()
+    # Hash the cartridge buffer over its true (unpadded) length — the same
+    # bytes a peer gets from hashing the file, so the wire value is unchanged.
+    let cart = stateGba.cartridge
+    curRomCrc = crc32(cast[ptr UncheckedArray[char]](addr cart.rom[0])
+                        .toOpenArray(0, cart.rom_size - 1))
+    curRomCrcValid = true
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
     rgbaBuffer.setLen(GBA_W * GBA_H)
@@ -1099,9 +1119,8 @@ proc netlink_init(rom_path: cstring; is_host: cint;
   initFromEmscripten(rom_path)  # also tears down any previous session
   if stateKind != ekGBA: return 0
   rewindHistory = nil  # rewinding one side would desync the pair
-  let rom = readFile($rom_path)
   stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
-                          rom_crc = crc32(rom),
+                          rom_crc = curRomCrc,
                           strict_crc = allow_crc_mismatch == 0,
                           lead = NETLINK_LEAD_RAF,
                           speculative = specEnabled)
@@ -1125,11 +1144,10 @@ proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
   ## the core's current cycle so both sides start near zero; the bounded-lead
   ## sync absorbs whatever skew remains. Returns 1 on success.
   if stateKind != ekGBA or stateGba == nil or stateNet != nil: return 0
-  if curRomPath.len == 0 or not fileExists(curRomPath): return 0
+  if not curRomCrcValid: return 0
   rewindHistory = nil  # rewinding one side would desync the pair
-  let rom = readFile(curRomPath)
   stateNet = new_net_core(stateGba, id = (if is_host != 0: 0 else: 1),
-                          rom_crc = crc32(rom),
+                          rom_crc = curRomCrc,
                           strict_crc = allow_crc_mismatch == 0,
                           lead = NETLINK_LEAD_RAF,
                           speculative = specEnabled)
