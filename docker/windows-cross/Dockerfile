@@ -9,7 +9,10 @@
 #     dingbat-win-cross ./docker/windows-cross/build.sh
 FROM nimlang/nim:2.2.6-ubuntu-regular
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Acquire::Retries rides out the transient mirror failures CI hits; without it
+# a single 5xx from an ubuntu mirror fails the whole image build.
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         mingw-w64 curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,7 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # cross-gcc's default search path; nim.cfg references the SDL2 include dir
 # and links libSDL2.a statically.
 ARG SDL2_VERSION=2.32.8
-RUN curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz" \
+# CI has no docker layer cache, so this re-downloads on every build — hence the
+# retries (--retry-all-errors covers connection failures, not just HTTP 5xx).
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
+        "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz" \
         | tar xz -C /tmp \
     && cp -r /tmp/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/include/* /usr/x86_64-w64-mingw32/include/ \
     && cp -r /tmp/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/lib/* /usr/x86_64-w64-mingw32/lib/ \

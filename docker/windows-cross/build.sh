@@ -8,7 +8,21 @@ set -eu
 # git refuses to operate on it (and nimble shells out to git) without this
 git config --global --add safe.directory /src 2>/dev/null || true
 
-nimble install --depsOnly -y
+# nimble resolves every dependency by querying its git remote for tags, so this
+# one command depends on github.com AND gitlab.com being up (a gitlab 502 on
+# stb_image-Nim has already failed a build). Retry the whole resolve; it is
+# idempotent, and already-installed packages make the retry cheap.
+i=1
+while :; do
+  nimble install --depsOnly -y && break
+  if [ "$i" -ge 3 ]; then
+    echo "nimble install --depsOnly failed after $i attempts" >&2
+    exit 1
+  fi
+  echo "nimble install --depsOnly failed (attempt $i), retrying in 15s..." >&2
+  sleep 15
+  i=$((i + 1))
+done
 
 mkdir -p dist/windows
 

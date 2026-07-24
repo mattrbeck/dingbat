@@ -24,8 +24,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nim
+        # A deploy is the one job we least want to lose to a network blip: it
+        # is what actually ships the web build. choosenim fetches its script
+        # and then the toolchain; retry both.
         run: |
-          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          set -eo pipefail
+          .github/scripts/retry.sh 3 bash -c \
+            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
           echo "$HOME/.nimble/bin" >> $GITHUB_PATH
 
       - uses: mymindstorm/setup-emsdk@v14
@@ -33,7 +39,9 @@ jobs:
           version: "4.0.23"
 
       - name: Install nimble dependencies
-        run: nimble install -y sdl2
+        # nimble queries the package's git remote for tags, so this needs
+        # github.com up at exactly this second.
+        run: .github/scripts/retry.sh 3 nimble install -y sdl2
 
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim

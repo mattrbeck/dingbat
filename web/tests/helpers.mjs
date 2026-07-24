@@ -169,6 +169,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     persisted: false,
     persistGrant: true,
     persistCalls: 0,
+    // matchMedia() queries that should report matches:true (e.g.
+    // "(display-mode: standalone)"). Everything else reports false.
+    mediaMatches: {},
   };
 
   const lsMap = new Map(Object.entries(localStorageSeed));
@@ -231,6 +234,18 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
         persist: async () => { state.persistCalls++; return state.persistGrant; },
       },
     },
+    // index.js evaluates matchMedia("(display-mode: standalone)") at module
+    // scope, so a missing stub is not a soft failure — it aborts the whole
+    // eval and every test in the suite. Reports "not matching" for any query;
+    // `state.mediaMatches` lets a test opt a query into matching.
+    matchMedia: (query) => ({
+      media: String(query),
+      matches: !!state.mediaMatches[String(query)],
+      onchange: null,
+      addEventListener() {}, removeEventListener() {},
+      addListener() {}, removeListener() {},
+      dispatchEvent: () => false,
+    }),
     URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
     FileReader: FakeFileReader,
@@ -258,7 +273,26 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   sandbox.globalThis = sandbox;
 
   const context = vm.createContext(sandbox);
-  vm.runInContext(SOURCE, context, { filename: "web/index.js" });
+  try {
+    vm.runInContext(SOURCE, context, { filename: "web/index.js" });
+  } catch (e) {
+    // A browser global index.js newly touches at module scope (matchMedia,
+    // screen, visualViewport, ...) aborts the eval, and every test in every
+    // file then fails with the same bare ReferenceError. Say what to do.
+    const missing = /^(\w+) is not defined$/.exec(e?.message || "")?.[1];
+    if (missing) {
+      const message =
+        `${e.message} — web/index.js uses the browser global \`${missing}\` ` +
+        `at module scope, but the node:vm sandbox in web/tests/helpers.mjs ` +
+        `does not stub it. Add a \`${missing}\` stub to \`sandbox\` there.`;
+      // The reporter prints .stack, which embeds the original message, so
+      // rewrite both — otherwise the hint is invisible in CI logs.
+      const frames = String(e.stack || "").split("\n").slice(1).join("\n");
+      e.message = message;
+      e.stack = `${e.name}: ${message}\n${frames}`;
+    }
+    throw e;
+  }
 
   // Harvest the app's top-level lexical bindings. Scripts run in the same
   // context share the global lexical environment, so const/let function

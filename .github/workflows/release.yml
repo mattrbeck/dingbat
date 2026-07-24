@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build cross-compile image
-        run: docker build -t dingbat-win-cross docker/windows-cross
+        run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
       - name: Build dingbat.exe
         run: |
           docker run --rm -v "$PWD":/src -w /src \
@@ -36,15 +36,21 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      # Every fetch below is retried: a release runs once per tag, and losing
+      # one to a transient 5xx means re-running the whole workflow by hand.
       - name: Install SDL2
-        run: brew install sdl2
+        run: .github/scripts/retry.sh 3 brew install sdl2
       - name: Install Nim
         run: |
-          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          set -eo pipefail
+          .github/scripts/retry.sh 3 bash -c \
+            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
           echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
       - name: Build (self-contained)
         run: |
-          nimble install -y --depsOnly
+          set -e
+          .github/scripts/retry.sh 3 nimble install -y --depsOnly
           nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
       - name: Verify no Homebrew dependency
         run: |

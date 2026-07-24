@@ -147,6 +147,17 @@ jobs:
         # shipped (`v_uv = p*0.5` -> only the bottom-left quadrant, zoomed 2x).
         # Zero deps; runs on every OS.
         run: node web/uv.test.mjs
+      - name: Cache Playwright's Chromium
+        # ~150 MB pulled from playwright's CDN on every run otherwise — the
+        # largest single network dependency in the job. Exact-key only (keyed
+        # on the lockfile): a playwright bump must miss and re-download, and
+        # `playwright install` still re-fetches anything the cache is missing.
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
       - name: Web browser tests (headless Chromium)
         # Real-browser guards that can't run in plain Node:
         #  - render.test.mjs: compiles the ACTUAL present shaders (VERT+FRAG,
@@ -162,9 +173,13 @@ jobs:
         # Linux-only step that installs ONLY Chromium.
         if: runner.os == 'Linux'
         working-directory: web
+        # npm ci and the Chromium download are the two remaining unguarded
+        # network fetches in this job; both are idempotent, so retry them
+        # rather than let a registry blip fail the suite.
         run: |
-          npm ci
-          npx playwright install --with-deps chromium
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
           node render.test.mjs
           node manualpair.test.mjs
       - name: Upload test results

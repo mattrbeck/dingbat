@@ -10,7 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build cross-compile image
-        run: docker build -t dingbat-win-cross docker/windows-cross
+        # Pulls the nim base image and apt/SDL2 over the network on every run
+        # (no layer cache on the runner), so a transient registry/mirror hiccup
+        # would otherwise be a red build.
+        run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
       - name: Build dingbat.exe
         run: |
           docker run --rm -v "$PWD":/src -w /src \
