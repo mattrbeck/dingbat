@@ -2186,6 +2186,27 @@ const resumeDriveSession = async () => {
   }
 };
 
+// The GIS token client re-grants through a popup window even for the silent
+// prompt:"" refresh — there is no invisible path for the OAuth token model. So
+// requesting a token needs a user gesture, or the browser's popup blocker kills
+// it and flags the address bar. On load we therefore don't request anything; we
+// arm a one-shot handler that runs the silent re-grant on the first real
+// interaction (which an emulator user supplies within seconds — a keypress or a
+// tap). With the Google session and prior grant still standing that popup opens
+// and closes with no visible chooser, so sync just resumes.
+let driveResumeArmed = false;
+const armDriveResumeOnGesture = () => {
+  if (driveResumeArmed) return;
+  if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
+  driveResumeArmed = true;
+  const events = ["pointerdown", "keydown", "touchstart"];
+  const onGesture = () => {
+    events.forEach((e) => window.removeEventListener(e, onGesture, true));
+    resumeDriveSession();
+  };
+  events.forEach((e) => window.addEventListener(e, onGesture, true));
+};
+
 // --- Sync triggers --------------------------------------------------------
 // No push channel exists, so pull on the moments that matter and poll gently.
 // The poll also retries a stuck flush: queued changes normally drain via the
@@ -5169,10 +5190,11 @@ var Module = {
     refreshSyncUI();
     startSyncTriggers();
     // The access token is memory-only, so a reload lands signed out. If this
-    // browser was connected before, try a silent re-grant (no UI): it succeeds
-    // whenever the Google session and the prior consent still stand, so sync
-    // just resumes instead of demanding a sign-in click every reload.
-    resumeDriveSession();
+    // browser was connected before, re-grant silently — but only on the first
+    // user gesture, since the token popup is gesture-gated (see
+    // armDriveResumeOnGesture). Requesting it here on load would just trip the
+    // popup blocker and flag the address bar.
+    armDriveResumeOnGesture();
     refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
