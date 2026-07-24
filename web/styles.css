@@ -4502,16 +4502,38 @@ body.sync-shown #status {
 .home-tile-cloud .home-tile-launch:hover {
   opacity: 1;
 }
+/* Its own tap target (a real button): download-without-launch. Padding widens
+   the hit area within the launch button's reserved right padding; the glyph
+   stays visually where it was. */
 .home-tile-dl {
   position: absolute;
   top: 50%;
-  right: 8px;
+  right: 2px;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 6px;
   color: var(--text-faint);
-  pointer-events: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.home-tile-dl:hover {
+  color: var(--accent);
+  background: rgba(var(--hi-rgb), 0.08);
+  border-color: var(--border-2);
+}
+.home-tile-dl:active {
+  transform: translateY(-50%) scale(0.92);
+}
+.home-tile-dl.is-busy {
+  cursor: default;
+  color: var(--text-faint);
+  background: none;
+  border-color: transparent;
 }
 .home-tile-dl svg {
   width: 15px;

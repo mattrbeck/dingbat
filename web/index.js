@@ -2224,6 +2224,16 @@ const gdriveConnect = async () => {
   refreshHomeRecent();
 };
 
+// Ensure we hold a Drive session before a download. Already signed in → true.
+// Signed out → open sign-in (callers invoke this from a click, so the popup is
+// gesture-allowed); returns whether we ended up connected.
+const ensureDriveSignedIn = async () => {
+  if (syncActive()) return true;
+  try { await gdriveConnect(); }
+  catch (e) { showToast(e.message); return false; }
+  return syncActive();
+};
+
 // Silent re-grant on boot for a browser that was connected before. Failure is
 // expected and silent (session expired / consent revoked) — the user simply
 // sees the signed-out state.
@@ -2678,31 +2688,38 @@ const refreshHomeRecent = async () => {
 
     launch.appendChild(icon);
     launch.appendChild(name);
+    // Clicking anywhere on the tile body downloads (signing in first if needed)
+    // and launches. The download glyph is a separate target (below) that
+    // downloads without launching.
     launch.addEventListener("click", async () => {
       if (!driveOnly) { launchRom(romName); return; }
       if (syncDownloading.has(romName)) return;
-      if (!syncActive()) {
-        // On Drive but not downloaded here, and signed out. The click is a user
-        // gesture, so open Drive sign-in; on success continue to download and
-        // launch. If it's cancelled, the tile stays a download tile.
-        try { await gdriveConnect(); }
-        catch (e) { showToast(e.message); return; }
-        if (!syncActive()) return;
-      }
+      if (!(await ensureDriveSignedIn())) return;
       if (await downloadGame(romName)) launchRom(romName);
     });
 
     tile.appendChild(launch);
 
     if (driveOnly) {
-      // Download affordance sits where the 2P/remove controls would be on a
-      // local tile, so the tile never carries both sets at once.
-      let dl = document.createElement("span");
+      // Its own click target: hitting exactly the download glyph downloads the
+      // ROM + saves WITHOUT launching (grab it for later), while a click on the
+      // rest of the tile downloads and launches. Sits where the 2P/remove
+      // controls would be on a local tile, so the tile never carries both.
+      let dl = document.createElement("button");
+      dl.type = "button";
       dl.className = "home-tile-dl" + (busy ? " is-busy" : "");
-      dl.setAttribute("aria-hidden", "true");
+      dl.disabled = busy;
+      dl.title = romName + " — download without launching";
+      dl.setAttribute("aria-label", "Download " + displayName(romName));
       dl.innerHTML = busy
         ? '<svg class="sync-spin" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>'
         : '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 19h14"/></svg>';
+      dl.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (syncDownloading.has(romName)) return;
+        if (!(await ensureDriveSignedIn())) return;
+        await downloadGame(romName); // download only — no launch
+      });
       tile.appendChild(dl);
     } else {
       // 2-player local link cable: two linked cores of this ROM, one per
