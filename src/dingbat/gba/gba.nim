@@ -939,7 +939,12 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgFifoWrites*: array[2, int]
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
-include apu/abstract_channels
+# Aliases naming this core's channel base types for the shared PSG
+# length/envelope logic, which both cores include (see the file header).
+type
+  SoundChannelBase     = SoundChannel
+  VolumeEnvChannelBase = VolumeEnvelopeChannel
+include ../common/psg_envelope
 include apu/channel1
 include apu/channel2
 include apu/channel3

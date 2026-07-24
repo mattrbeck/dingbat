@@ -640,7 +640,12 @@ include mbc/mbc1
 include mbc/mbc2
 include mbc/mbc3
 include mbc/mbc5
-include apu/abstract_channels
+# Aliases naming this core's channel base types for the shared PSG
+# length/envelope logic, which both cores include (see the file header).
+type
+  SoundChannelBase     = GbSoundChannel
+  VolumeEnvChannelBase = GbVolumeEnvChannel
+include ../common/psg_envelope
 include apu/channel1
 include apu/channel2
 include apu/channel3
