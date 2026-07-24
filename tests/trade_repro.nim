@@ -341,7 +341,7 @@ proc runRollback(cfg: Config): Verdict =
   let g0 = mk(cfg.rom0)
   let g1 = mk(cfg.rom1)
   let lnk = new_link(@[g0, g1])
-  let sess = new_rollback_session(lnk, 0, maxAhead = max(12, cfg.delay + 6))
+  let sess = new_rollback_session(lnk, 0, max_ahead = max(12, cfg.delay + 6))
   # Precompute per-frame input masks: core 0 local (drives tick), core 1 remote.
   var p0 = newSeq[uint16](cfg.frames)
   var p1 = newSeq[uint16](cfg.frames)

@@ -922,19 +922,19 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   frameCount = 0
   1
 
-proc rollback_tick(localBits: cint): cint {.exportc.} =
+proc rollback_tick(local_bits: cint): cint {.exportc.} =
   ## Advance one presentation frame with the local input + prediction. Returns
-  ## the frame index just simulated (ship it to the peer with `localBits`), or
+  ## the frame index just simulated (ship it to the peer with `local_bits`), or
   ## -1 if stalled at the prediction window. Renders the local core.
   if stateGbRollback != nil:
-    if gbrb.tick(stateGbRollback, uint16(localBits)) == gbrb.grbStalled: return -1
+    if gbrb.tick(stateGbRollback, uint16(local_bits)) == gbrb.grbStalled: return -1
     inc frameCount
     gb_rollback_render()
     var gevt = defaultEvent
     while pollEvent(gevt): discard
     return cint(stateGbRollback.head - 1)
   if stateRollback == nil: return -1
-  let st = stateRollback.tick(uint16(localBits))
+  let st = stateRollback.tick(uint16(local_bits))
   if st == rbStalled: return -1
   inc frameCount
   rollback_render()
