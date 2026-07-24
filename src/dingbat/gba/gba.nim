@@ -957,7 +957,6 @@ include mmio
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
   let t = find_storage_type(rom_path)
-  echo "Backup type: ", t, ", save path: ", save_path
   result = case t
     of stEEPROM:                        new_eeprom(gba)
     of stSRAM:                          new_sram()
