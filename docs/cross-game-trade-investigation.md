@@ -1,6 +1,14 @@
 # Cross-game Pokémon trade — "Communication error" investigation
 
-Status: **root cause identified, not yet fixed.** Handoff for a future session.
+> **Status update (2026-07-23): believed resolved.** Emerald↔FireRed trades have since
+> been run successfully end to end, so the failure described below no longer reproduces.
+> The fix was not isolated to a single commit — the timing work landed after 2026-07-14
+> most likely closed the ~1-frame drift. The analysis below is kept for its method and
+> for the link-timing detail it documents, but its conclusions describe a state the
+> emulator is no longer in. Re-verify before acting on any of it.
+
+Status (at time of writing, 2026-07-14): **root cause identified, not yet fixed.**
+Handoff for a future session.
 
 Over-the-internet (and local 2P) trading works for **same-game** pairs (Emerald↔Emerald)
 but every **cross-game** pair (Emerald↔Ruby, Emerald↔FireRed) fails with the in-game

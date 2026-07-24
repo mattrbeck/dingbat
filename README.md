@@ -4,32 +4,24 @@
 
 <h3 align="center"><a href="https://gba.mattrb.com">▶ Play it in your browser</a></h3>
 
-<p align="center">No install, no account, no BIOS file. Add it to your home screen and it works offline.</p>
-
 <p align="center"><img width="800" src="README/GoldenSun.gif"></p>
 
 ## Highlights
 
-**Online link cable, with room codes.** Trade and battle over the internet — one player
-shares a room code, the other pastes it, and you're connected. Optional rollback netplay
-hides the latency. Two tabs in the same browser link with no server involved at all.
-Covers GBA link games and Game Boy / Game Boy Color Gen 1–2 trades.
-→ [Multiplayer guide](docs/link-usage.md)
+**Online link cable.** Trade and battle over the internet using room codes, including
+cross-game Pokémon trades like Emerald↔FireRed. Optional rollback netplay. Two tabs in
+the same browser link with no server at all. → [Multiplayer guide](docs/link-usage.md)
 
-**Enhanced MP2K audio.** Games built on Nintendo's standard MP2K/M4A sound engine are
-detected at runtime and their music is re-rendered per note, well above the hardware
-FIFO's native mix rate. The same songs, without the muffle. Optional, and off by default.
+**Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine is
+re-rendered per note, above the hardware's native mix rate. Optional.
 
-**No BIOS file required.** An HLE BIOS is built in, so you can drop in a ROM and play
-immediately. If you have a real BIOS dump, it's supported — but nothing here needs one.
+**No BIOS file required.** An HLE BIOS is built in. Real BIOS dumps are also supported.
 
-**Accuracy you can check.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge
-(everything except COM, which needs a second multiboot unit), blargg + mooneye +
-dmg-acid2 + cgb-acid2 on the Game Boy side, and a cycle-accurate FIFO PPU for games like
-Prehistorik Man that depend on one.
+**Accuracy.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge, blargg,
+mooneye, dmg-acid2, and cgb-acid2. The default Game Boy PPU is a cycle-accurate FIFO
+renderer, for games like Prehistorik Man that need one.
 
-**Cross-device sync** *(experimental)*. Back up saves, save states, and ROMs to your own
-Google Drive, then pick a game up again on another device.
+**Cross-device sync.** Back up saves, save states, and ROMs to your own Google Drive.
 
 <p align="center"><img width="400" src="README/gbc_silver_rival_battle.gif"> <img width="400" src="README/linksawakening.gif"></p>
 
@@ -45,12 +37,11 @@ Those binaries are **unsigned**, so the OS warns on first launch — on macOS, o
 
 ## Documentation
 
-| | |
-|---|---|
-| [Features](docs/features.md) | Everything the emulator and both front-ends support, plus remaining work |
-| [Usage](docs/usage.md) | Loading ROMs, BIOS files, save files, and picking a GB renderer |
-| [Multiplayer](docs/link-usage.md) | Link cable setups: local 2P, online room codes, native TCP |
-| [Building](docs/building.md) | Native, WebAssembly, and cross-compiled Windows builds |
+- [**Features**](docs/features.md) — everything both front-ends and both systems support,
+  plus remaining work
+- [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files, GB renderer choice
+- [**Multiplayer**](docs/link-usage.md) — local 2P, online room codes, native TCP
+- [**Building**](docs/building.md) — native, WebAssembly, and Windows cross-builds
 
 ## Acknowledgements
 
@@ -69,7 +60,8 @@ with insightful feedback and targeted test ROMs:
 [DenSinH](https://github.com/DenSinH),
 [fleroviux](https://github.com/fleroviux),
 [destoer](https://github.com/destoer),
-[GhostRain0](https://github.com/GhostRain0).
+[GhostRain0](https://github.com/GhostRain0),
+[bmchtech](https://github.com/bmchtech).
 
 ## Contributors
 

@@ -15,7 +15,7 @@ The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way
 - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
 - Per-ROM save files kept in IndexedDB, with "Manage ROMs & Saves" modals
 - Online link play with room codes
-- Google Drive save/ROM backup (experimental — see the caveat below)
+- Google Drive save/ROM backup — see the setup note below
 - Report a Bug: attach a save state from any point in the rewind timeline, downloaded
   as a self-contained report file. Nothing is transmitted.
 - Desktop keyboard shortcuts: pause, fast forward, rewind, save states, screenshot,
@@ -27,10 +27,10 @@ The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way
 - Per-panel color correction: mGBA's AGB model for GBA, the hardware-measured
   "GBC-Color" model for GB/GBC
 
-> **Google Drive caveat.** The Drive integration reads its OAuth client ID from the
-> `gdrive_client_id` key in `localStorage`, defaulting to empty. Builds without one
-> configured show "Drive backup isn't configured in this build" and the feature is inert.
-> Backup is also manual-only today — there is no automatic reconnect or retry.
+> **Drive setup note.** The Drive integration reads its OAuth client ID from the
+> `gdrive_client_id` key in `localStorage`. A build without one configured shows
+> "Drive backup isn't configured in this build" and the feature is inert. Backup is
+> manual-only today — there is no automatic reconnect or retry.
 
 ## Native front-end
 
@@ -89,8 +89,7 @@ The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way
 - Timing:
   - Cycle-counted bus with waitstates and prefetch
   - DMA channel priority and preemption
-  - Passing the AGS aging cartridge — all tests except COM, which requires a second
-    multiboot unit
+  - Passing the AGS aging cartridge
   - Timers run on the scheduler
   - Idle-loop detection to skip busy-waits
 - Storage: Flash, SRAM, EEPROM
@@ -126,13 +125,6 @@ percent-of-pixels-matching rather than pass/fail.
 - Timing: prefetch occupancy-model rewrite (scoped, see [prefetch-model-rewrite.md](prefetch-model-rewrite.md))
 - Storage: game database for odd cases (Classic NES, ROMs that misreport their save type)
 - Sensor cartridges (tilt, gyro, solar)
-
-**Multiplayer**
-
-- Cross-game Pokémon trades (Emerald↔Ruby, Emerald↔FireRed) fail with an in-game
-  "Communication error". Same-game pairs work. Root cause identified as a ~1-frame
-  timing drift, not yet fixed — see
-  [cross-game-trade-investigation.md](cross-game-trade-investigation.md).
 
 **Tooling**
 
