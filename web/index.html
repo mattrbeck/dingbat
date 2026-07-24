@@ -158,8 +158,13 @@
 
       <div id="topbar-spacer"></div>
 
+      <!-- Drive sync state. This slot used to hold a colour-coded run/pause/
+           sleep LED whose meaning was opaque; it now carries something
+           actionable instead. Deliberately muted (never the accent — that's
+           the enhanced-audio indicator's job). Phones show the icon alone and
+           reveal the wording on tap. -->
       <div id="status" aria-live="polite">
-        <span class="led" aria-hidden="true"></span>
+        <button type="button" id="sync-indicator" hidden></button>
         <span id="fps"></span>
       </div>
 
@@ -419,11 +424,11 @@
       <div class="modal">
         <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
         <h3>Manage ROMs and Saves</h3>
-        <p class="modal-hint">Games stored in this browser, most recently played first. Delete a game's save file to start over, or delete everything to also remove the ROM.</p>
+        <p class="modal-hint">Your games, most recently played first. <b>Reset</b> deletes a game's save data so you can start over; <b>Delete</b> removes the ROM and its save data. While you're signed in to Drive, both apply to all your devices.</p>
         <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
         <div id="roms-manage-list" class="roms-manage-list"></div>
         <div class="modal-subhead">Google Drive</div>
-        <p class="modal-hint">Back up saves and ROMs to your Google account's hidden app storage, and restore them on another device. Nothing shows up in your regular Drive files.</p>
+        <p class="modal-hint">Signing in keeps your games, saves, and save states mirrored across your devices. Everything lives in your Google account's hidden app storage — nothing shows up in your regular Drive files.</p>
         <div id="gdrive-body"></div>
       </div>
     </div>
