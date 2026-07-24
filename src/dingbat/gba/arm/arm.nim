@@ -1829,9 +1829,16 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         # commercial software: Pokemon Pinball R/S's decompressor exits via
         # `msr cpsr, r2` with T set followed by a Thumb `bx r0`). The switch
         # happens mid-pipeline, so the two words already prefetched as ARM
-        # are reinterpreted (mGBA-verified hardware model): the next opcode
-        # (at A+4) executes as a Thumb nop, then the LOW halfword of the word
-        # at A+8 executes, and fetching resumes at A+12. We stage the two
+        # are reinterpreted: the next opcode (at A+4) executes as a Thumb nop,
+        # then the LOW halfword of the word at A+8 executes, and fetching
+        # resumes at A+12 -- note that skips the halfword at A+10.
+        #
+        # This model is mGBA-DERIVED, not hardware-verified: it mirrors mGBA's
+        # MSR handler (prefetch[0] = nop, prefetch[1] = low half, PC += 2).
+        # Pokemon Pinball only proves the A+8 slot runs, because its A+8 slot
+        # is a branch -- the A+10 skip is untested either way. tests/roms/
+        # msrthumb.gba probes all of this on real hardware; see MSRTHUMB.md.
+        # We stage the two
         # reinterpreted opcodes in the pipeline buffer; the usual +4 step
         # below leaves r15 tracking mGBA's PC exactly through the hand-off.
         cpu.pipeline.clear()
