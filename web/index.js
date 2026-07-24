@@ -2488,7 +2488,13 @@ const refreshHomeRecent = async () => {
   // "Drive-only" tiles that download on tap instead of launching.
   let localRoms = new Set();
   if (syncActive()) {
-    for (let k of await dbKeys()) {
+    let keys = await dbKeys();
+    // A newer render may have started (and cleared the grid) during that
+    // await; appending our tiles too would double every game. Seen live on
+    // first sign-in, where merge + downloads fire refreshes back-to-back.
+    // The art callbacks below re-check gen the same way.
+    if (gen !== homeRenderGen) return;
+    for (let k of keys) {
       if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
     }
   }
