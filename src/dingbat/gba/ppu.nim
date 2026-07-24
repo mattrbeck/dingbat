@@ -139,26 +139,6 @@ proc bgr16_mul*(a: uint16; coeff: int): uint16 =
 proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
 
-proc apply_h_mosaic(ppu: PPU; bg: int) =
-  ## Horizontal BG mosaic (MOSAIC bg_mosaic_h_size): every block of `h`
-  ## columns repeats its leftmost pixel. Runs as a post-pass over the
-  ## finished palette-index line, so it is shared by the regular, affine and
-  ## mode-4 bitmap renderers. h == 1 is the no-op default and returns early.
-  let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
-  if h <= 1: return
-  for col in 0 .. 239:
-    ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
-
-proc apply_h_mosaic_direct(ppu: PPU) =
-  ## apply_h_mosaic for the BG2 direct-color bitmap line (modes 3/5), which
-  ## carries BGR555 pixels plus an opacity flag instead of palette indices.
-  let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
-  if h <= 1: return
-  for col in 0 .. 239:
-    let src = col - col mod h
-    ppu.bg2_direct[col]        = ppu.bg2_direct[src]
-    ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
-
 proc render_reg_bg*(ppu: PPU; bg: int) =
   if not ppu.dispcnt.bg_enable(bg): return
   let bgcnt  = ppu.bgcnt[bg]
@@ -233,7 +213,10 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
           dst[col + k] = p or (if p != 0: bank else: 0'u8)
     col += span
   if bgcnt.mosaic:
-    ppu.apply_h_mosaic(bg)
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
   if not ppu.dispcnt.bg_enable(bg): return
@@ -271,7 +254,10 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
     let pal_idx = ppu.vram[character_base + 0x40'u32 * uint32(tile_id) + uint32(8 * (py and 7)) + uint32(px and 7)]
     ppu.layer_palettes[bg][col] = pal_idx
   if bgcnt.mosaic:
-    ppu.apply_h_mosaic(bg)
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_bitmap*(ppu: PPU) =
   ## Fill the BG2 line buffers for the bitmap modes (3/4/5), honoring the
@@ -323,10 +309,15 @@ proc render_bitmap*(ppu: PPU) =
         ppu.layer_palettes[2][col] = ppu.vram[base + uint32(py) * 240 + uint32(px)]
   else: discard
   if ppu.bgcnt[2].mosaic:
-    # `mode` is loop-invariant, so pick the line format once instead of
-    # re-testing it on all 240 columns as the old inline version did.
-    if mode == 4: ppu.apply_h_mosaic(2)
-    else:         ppu.apply_h_mosaic_direct()
+    let h = int(ppu.mosaic.bg_mosaic_h_size) + 1
+    if h > 1:
+      for col in 0..239:
+        let src = col - col mod h
+        if mode == 4:
+          ppu.layer_palettes[2][col] = ppu.layer_palettes[2][src]
+        else:
+          ppu.bg2_direct[col] = ppu.bg2_direct[src]
+          ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
 
 proc render_sprites*(ppu: PPU) =
   if not ppu.dispcnt.obj_enable: return
