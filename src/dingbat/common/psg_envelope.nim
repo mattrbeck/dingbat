@@ -6,7 +6,9 @@
 # NRx4 trigger/length-enable sequence — are the SAME silicon on both. They used
 # to exist twice as line-for-line copies that had already drifted in spelling,
 # so an accuracy fix had to be remembered in two places. It didn't get
-# remembered — see the following commit for what that cost.
+# remembered: the GBA's channel-3 trigger delay was a straight copy of the GB's
+# `+ 6` even though every period formula around it is scaled x4 for the faster
+# clock (see PSG_WAVE_TRIGGER_DELAY below).
 #
 # It is `include`d rather than imported because each core is one big shared
 # scope (see the include lists in gb.nim / gba.nim). Each core defines the
@@ -150,7 +152,11 @@ proc psg_lfsr_step*(ch: NoiseChannelBase) =
 
 # ---- Channel 3: wave trigger delay ------------------------------------------
 
-const PSG_WAVE_TRIGGER_DELAY* = 6
+const PSG_WAVE_TRIGGER_DELAY* = 6 * PSG_CLOCK_MULT
   ## Triggering the wave channel restarts its frequency timer 6 CPU cycles late
-  ## (a documented DMG/CGB quirk). Kept at the historical literal for now; the
-  ## next commit scales it by PSG_CLOCK_MULT.
+  ## (a documented DMG/CGB quirk). PSG_CLOCK_MULT scales it to the host core's
+  ## clock: 1 on the GB (4.19 MHz), 4 on the GBA (16.78 MHz), which runs the
+  ## same sound hardware from a 4x clock. The GBA previously used a bare 6 —
+  ## a copy of the GB constant that never got the x4 that every surrounding
+  ## period formula has — making its wave-trigger delay a quarter of the
+  ## hardware's.
