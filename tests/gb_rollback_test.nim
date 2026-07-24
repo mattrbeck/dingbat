@@ -98,9 +98,9 @@ proc main() =
     for m in q_ba:
       if m[0] <= step: a.feed_remote(m[1], m[2]) else: keepBA.add m
     q_ba = keepBA
-    if a.head < frames and a.tick(inputMask(0, a.head)) == grbAdvanced:
+    if a.head < frames and a.tick(inputMask(0, a.head)) == rbAdvanced:
       q_ab.add((step + delay, a.head - 1, inputMask(0, a.head - 1)))
-    if b.head < frames and b.tick(inputMask(1, b.head)) == grbAdvanced:
+    if b.head < frames and b.tick(inputMask(1, b.head)) == rbAdvanced:
       q_ba.add((step + delay2, b.head - 1, inputMask(1, b.head - 1)))
 
   if shotdir.len > 0:

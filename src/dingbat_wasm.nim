@@ -927,7 +927,7 @@ proc rollback_tick(local_bits: cint): cint {.exportc.} =
   ## the frame index just simulated (ship it to the peer with `local_bits`), or
   ## -1 if stalled at the prediction window. Renders the local core.
   if stateGbRollback != nil:
-    if gbrb.tick(stateGbRollback, uint16(local_bits)) == gbrb.grbStalled: return -1
+    if gbrb.tick(stateGbRollback, uint16(local_bits)) == gbrb.rbStalled: return -1
     inc frameCount
     gb_rollback_render()
     var gevt = defaultEvent
