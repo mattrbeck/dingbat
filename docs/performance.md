@@ -286,26 +286,78 @@ Native, HLE on, leaf-weighted:
 | `render_sample` (HLE mixing) | ~1.2% |
 | `analyze_loop` (waitloop detection) | ~1.1% |
 
-## Next candidates, roughly by value
+## Follow-up round: each candidate measured (2026-07-24, same session)
 
-1. **CPU dispatch prologue.** `tick` re-tests `cpu.halted` up to four times
-   and separately checks `irq_line`, `intr_wait_active` and
-   `halt_resume_charge` every instruction, all rare. Collapsing them into one
-   "something pending" bitmask tested once should recover a few percent — the
-   same shape of win as the HLE hook collapse above.
-2. **Instruction-fetch page cache.** `fetch_half` is ~6.7%. A cached
-   (base pointer, limit, waitstate) tuple for the current fetch page,
-   invalidated on branch and region change, removes most of the region
-   dispatch on sequential fetches.
-3. **Layer-at-a-time compositing.** The current compositor walks layers
-   per pixel with a data-dependent early-out, which cannot vectorize. Building
-   each BG row and combining rows with vectorized priority-select is the
-   restructure that would make wasm SIMD128 / NEON usable here — the largest
-   remaining structural opportunity for the PPU.
-4. **`render_sprites` span batching**, mirroring what §2 did for backgrounds.
-5. **wasm SIMD128** (`-msimd128`) for the 4bpp nibble expansion and the
-   BGR555 blend math. Baseline in every current browser, but it needs either a
-   second build or runtime feature detection for older targets.
+Every item on the original list was implemented or probed and **all but one
+came back neutral**. Recorded here so the effort is not spent twice.
+
+Re-profiled first, because the pre-`-mno-outline` ranking was distorted by the
+`OUTLINED_FUNCTION_*` noise. Clean attribution, native, HLE on, 6880 samples:
+
+| Component | Share |
+|---|---|
+| `cpu.tick` self | 24.4% |
+| `composite` | 11.8% |
+| `bus.fetch_half` | 11.5% |
+| `render_reg_bg` | 8.5% |
+| `render_sprites` | 3.6% |
+| `scheduler.schedule` | 3.4% |
+| `render_sample` (HLE mixing) | 1.7% |
+| `analyze_loop` (waitloop detection) | 1.2% |
+
+### Results
+
+1. **CPU dispatch prologue — NEUTRAL, reverted.** Restructured so `halted` is
+   tested once up front and returns early, making the `not cpu.halted` guards
+   on the IRQ and IntrWait checks redundant (safe: `irq()` only ever wakes the
+   CPU; only `check_intr_wait` can re-halt). Pixel-identical, and 724 vs 729
+   fps — no better than baseline. Clang already keeps these flags in registers.
+2. **Instruction-fetch page cache — ALREADY EXISTS.** `install_fetch_cache`
+   caches (pointer, mask, 16/32-bit cost) per page and the ROM path has a
+   `rom_hot` straight-line fast path. The original entry was written without
+   checking; `research_cached_interpreter.md` already said so. The remaining
+   11.5% is genuine fetch + waitstate work, not dispatch overhead.
+3. **`render_sprites` invariant hoisting — NEUTRAL, reverted.** Hoisted eight
+   sprite-constant values (obj_mode, priority, 8bpp, mapping, palette bank,
+   tile id) out of the per-pixel loop and clipped the loop bounds instead of
+   sweeping the full width with a `continue`. Pixel-identical across 60 ROMs
+   and flat on FireRed, Metal Slug, Kirby and Sonic Pinball alike — clang's
+   LICM was already hoisting all of it.
+4. **wasm SIMD128 — +1.6%, NOT shipped.** `-msimd128` builds cleanly and does
+   change codegen: 472.9 -> 480.5 fps (HLE off), 450.2 -> 458.7 (HLE on),
+   best-of-9. Too small to justify the compatibility cost: wasm SIMD needs
+   Safari 16.4+, so it would break the iOS 15 targets the frontend explicitly
+   supports. Revisit only as a second build behind feature detection — or once
+   §5 gives it something worth vectorizing.
+
+### Ceilings, so the next attempt is not a guess
+
+Measured by stubbing each stage out entirely. These are *valid* probes: the
+emulated CPU never reads the framebuffer, so deleting render work cannot change
+what the game executes. (Contrast the CPU-prologue probe, which was invalid —
+skipping it stopped IRQs, froze the game and "measured" 2.3x.)
+
+| Probe | fps | Ceiling vs 695.7 baseline |
+|---|---|---|
+| compositor removed entirely | 775.0 | **+11.4%** |
+| `render_reg_bg` removed entirely | 729.3 | +4.8% |
+
+So **layer-at-a-time compositing is the only structural PPU item left worth
+attempting**, and even a perfect rewrite caps at +11.4% — realistically half
+that. It is also the highest-risk code in the renderer (blending, windows,
+sprite priority, semi-transparent objects), so it wants a dedicated session
+with the 60-ROM hash A/B in the loop from the first commit. `render_reg_bg` is
+done: 8.5% of profile with a 4.8% ceiling means it is already near optimal.
+
+### The general lesson from this round
+
+After `-mno-outline`, clang -O3 is already performing the micro-optimizations —
+LICM, register promotion of hot flags, redundant-load elimination. Hand-hoisting
+invariants out of inner loops now measures as noise. What remains in `tick`,
+`fetch_half` and the instruction handlers is genuine work, not overhead. Future
+gains have to come from doing *less work* (structural change) rather than doing
+the same work more tidily, and every candidate should get a stub-out ceiling
+probe before anyone writes the optimization.
 
 See `docs/research_cached_interpreter.md` before reaching for a block cache or
 JIT: the decoded-block ceiling was measured at only +8-12% because the
