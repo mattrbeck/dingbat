@@ -254,6 +254,59 @@ test("syncPollTick is a no-op when signed out", async () => {
   assert.equal(driveCalls.length, 0);
 });
 
+// ── Reconciliation: Drive lost files this device still holds ────────────────
+// sigs remember what was once uploaded; the listing is the truth. A wiped app
+// folder or a different signed-in account must not leave local games
+// permanently "synced by sig" yet absent from Drive.
+
+test("flushSync uploads a queued file whose sig says synced but Drive lacks it", async () => {
+  const app = await loadApp();
+  const drive = makeDrive(); // empty — the "new account" case
+  app.setFetch(drive.fetch);
+  signIn(app);
+  app.idb.set("rom:Game.gba", { name: "Game.gba", data: u8(1, 2, 3) });
+  // Pretend a past session uploaded this exact content (to another account).
+  app.api.syncState.sigs["rom:Game.gba"] = app.runIn("sigOfBytes")(u8(1, 2, 3));
+
+  app.api.markUpload("rom:Game.gba");
+  await app.api.flushSync();
+  await settle();
+  assert.ok(drive.byName.has("rom:Game.gba"),
+    "missing-on-Drive file re-uploads despite a matching sig");
+});
+
+test("pullSync queues local files missing from Drive, skipping tombstones", async () => {
+  const app = await loadApp();
+  const drive = makeDrive({
+    library: new TextEncoder().encode(JSON.stringify({
+      recents: [], tomb: [{ name: "Dead.gba", ts: 99 }],
+    })),
+  });
+  app.setFetch(drive.fetch);
+  signIn(app);
+  app.setConfirmResult(false); // tombstone prompt (if any): accept deletion
+  app.idb.set("rom:Live.gba", { name: "Live.gba", data: u8(7) });
+  app.idb.set("save:Live.gba", u8(8));
+  app.idb.set("recent", [{ name: "Live.gba", ts: 5 }]);
+  // Sigs claim both files were uploaded once.
+  app.api.syncState.sigs["rom:Live.gba"] = "stale";
+  app.api.syncState.sigs["save:Live.gba"] = "stale";
+
+  await app.api.pullSync();
+  await settle();
+  assert.ok(app.api.syncState.queueUp.includes("rom:Live.gba"),
+    "missing ROM queued for re-upload");
+  assert.ok(app.api.syncState.queueUp.includes("save:Live.gba"),
+    "missing save queued for re-upload");
+  assert.ok(!app.api.syncState.queueUp.some((n) => n.includes("Dead.gba")),
+    "tombstoned game not resurrected");
+
+  await app.api.flushSync();
+  await settle();
+  assert.ok(drive.byName.has("rom:Live.gba") && drive.byName.has("save:Live.gba"),
+    "flush lands both on Drive");
+});
+
 // ── On-demand download of a Drive-only game ────────────────────────────────
 
 test("downloadGame pulls a Drive-only game's files into local storage", async () => {

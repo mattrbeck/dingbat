@@ -1869,8 +1869,13 @@ const flushSyncInner = async () => {
       if (bytes) {
         let r = remote.get(name);
         let sig = sigOfBytes(bytes);
-        // ROMs are immutable: presence by name is enough.
-        if (!(name.startsWith("rom:") && r) && sig !== syncState.sigs[name]) {
+        // The listing is the truth about what Drive holds; sigs only remember
+        // what THIS device once uploaded. A queued file that's missing
+        // remotely uploads regardless of its sig — otherwise a wiped app
+        // folder or a different signed-in account never receives it. When
+        // the file IS present: ROMs are immutable (presence is enough) and
+        // anything else re-uploads only when its bytes changed.
+        if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
           await driveUploadFile(name, bytes, r?.id);
           syncState.sigs[name] = sig;
         }
@@ -1903,6 +1908,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   syncBusy = true;
   if (!silent) setSyncStatus("syncing");
   let gridDirty = false;
+  let queuedMissing = false;
   try {
     let remote = await driveListMap();
     let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
@@ -1951,6 +1957,20 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       local.delete(name);
     }
 
+    // Reconcile upward: queue anything this device holds that the listing
+    // lacks. sigs only remember what was once uploaded — if the app folder
+    // was wiped or a different account signed in, every local game is
+    // "already synced" by sig yet absent from Drive, and nothing would ever
+    // re-upload it. Tombstoned games stay deleted.
+    for (let [name, p] of local) {
+      if (remote.has(name)) continue;
+      if (lib.tomb.some((t) => t.name === p.game)) continue;
+      if (!syncState.queueUp.includes(name)) {
+        syncState.queueUp.push(name);
+        queuedMissing = true;
+      }
+    }
+
     // Adopt the merged library locally.
     syncState.tomb = lib.tomb;
     // The merged library is the grid — do NOT cap it at MAX_RECENT, or every
@@ -1969,6 +1989,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   }
   syncBusy = false;
   refreshSyncStatus();
+  // Queued-missing files flush on the normal debounce (after syncBusy clears
+  // — flushes are serialized behind this pull anyway).
+  if (queuedMissing) scheduleFlush();
   if (gridDirty) refreshHomeRecent();
 };
 
