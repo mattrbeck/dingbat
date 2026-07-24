@@ -337,19 +337,19 @@ proc save_channel_env(ch: VolumeEnvelopeChannel; w: var Writer) =
   save_channel_base(ch, w)
   w.write_u8(ch.starting_volume)
   w.write_bool(ch.envelope_add_mode)
-  w.write_u8(ch.period_ve)
-  w.write_u8(ch.volume_envelope_timer)
+  w.write_u8(ch.envelope_period)
+  w.write_u8(ch.envelope_timer)
   w.write_u8(ch.current_volume)
-  w.write_bool(ch.volume_envelope_is_updating)
+  w.write_bool(ch.envelope_is_updating)
 
 proc load_channel_env(ch: VolumeEnvelopeChannel; r: var Reader) =
   load_channel_base(ch, r)
   ch.starting_volume = r.read_u8()
   ch.envelope_add_mode = r.read_bool()
-  ch.period_ve = r.read_u8()
-  ch.volume_envelope_timer = r.read_u8()
+  ch.envelope_period = r.read_u8()
+  ch.envelope_timer = r.read_u8()
   ch.current_volume = r.read_u8()
-  ch.volume_envelope_is_updating = r.read_bool()
+  ch.envelope_is_updating = r.read_bool()
 
 proc save_apu_state(apu: APU; w: var Writer) =
   w.write_tag(GBA_SEC_APU)

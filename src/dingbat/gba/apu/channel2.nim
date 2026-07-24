@@ -18,8 +18,8 @@ proc new_channel2*(gba: GBA): Channel2 =
     gba: gba,
     enabled: false, dac_enabled: false,
     length_counter: 0, length_enable: false,
-    starting_volume: 0, envelope_add_mode: false, period_ve: 0,
-    volume_envelope_timer: 0, current_volume: 0, volume_envelope_is_updating: false,
+    starting_volume: 0, envelope_add_mode: false, envelope_period: 0,
+    envelope_timer: 0, current_volume: 0, envelope_is_updating: false,
     wave_duty_position: 0,
     duty: 0, length_load: 0, frequency_ch2: 0,
   )

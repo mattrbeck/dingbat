@@ -241,12 +241,12 @@ type
     length_enable*:  bool
 
   GbVolumeEnvChannel* = ref object of GbSoundChannel
-    starting_volume*:        uint8
-    envelope_add_mode*:      bool
-    period*:                 uint8
-    volume_envelope_timer*:  uint8
-    current_volume*:         uint8
-    vol_env_is_updating*:    bool
+    starting_volume*:      uint8
+    envelope_add_mode*:    bool
+    envelope_period*:      uint8
+    envelope_timer*:       uint8
+    current_volume*:       uint8
+    envelope_is_updating*: bool
 
   GbChannel1* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int

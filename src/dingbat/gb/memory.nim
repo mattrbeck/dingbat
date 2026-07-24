@@ -52,7 +52,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   # much later that channel 1 has been shut off entirely (boot_hwio-S expects
   # NR52 = 0xF0).
   gb.apu.channel1.current_volume = 0
-  gb.apu.channel1.vol_env_is_updating = false
+  gb.apu.channel1.envelope_is_updating = false
   if gb.boot_model in {bmSgb, bmSgb2}:
     gb.apu.channel1.enabled = false
   mem.write_byte(gb, 0xFF40, 0x91)

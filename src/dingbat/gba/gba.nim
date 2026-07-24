@@ -435,12 +435,12 @@ type
     length_enable*:  bool
 
   VolumeEnvelopeChannel* = ref object of SoundChannel
-    starting_volume*:          uint8
-    envelope_add_mode*:        bool
-    period_ve*:                uint8
-    volume_envelope_timer*:    uint8
-    current_volume*:           uint8
-    volume_envelope_is_updating*: bool
+    starting_volume*:      uint8
+    envelope_add_mode*:    bool
+    envelope_period*:      uint8
+    envelope_timer*:       uint8
+    current_volume*:       uint8
+    envelope_is_updating*: bool
 
   Channel1* = ref object of VolumeEnvelopeChannel
     wave_duty_position*: int
