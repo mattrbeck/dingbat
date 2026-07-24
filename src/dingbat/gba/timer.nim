@@ -15,7 +15,7 @@ proc ticks_between(anchor, now: CycleCount; period: int): uint32 {.inline.} =
 
 proc cycles_until_overflow(tim: Timer; num: int): int =
   # From the anchor cycle: overflow fires on the (0x10000 - tm)-th tick
-  let period = TIMER_PERIODS[tim.tmcnt[num].frequency]
+  let period = TIMER_PERIODS[tim.tmcnt[num].prescaler]
   let anchor = tim.cycle_enabled[num]
   let target = CycleCount(period) * (anchor div CycleCount(period) + CycleCount(0x10000 - int(tim.tm[num])))
   int(target - tim.gba.scheduler.cycles)
@@ -63,7 +63,7 @@ proc get_current_tm(tim: Timer; num: int): uint16 =
     # an enable write; the counter hasn't started yet
     if now <= tim.cycle_enabled[num]: return tim.tm[num]
     tim.tm[num] + uint16(ticks_between(tim.cycle_enabled[num], now,
-                                       TIMER_PERIODS[tim.tmcnt[num].frequency]))
+                                       TIMER_PERIODS[tim.tmcnt[num].prescaler]))
   else:
     tim.tm[num]
 

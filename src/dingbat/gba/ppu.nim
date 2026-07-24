@@ -140,7 +140,7 @@ proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
 
 proc render_reg_bg*(ppu: PPU; bg: int) =
-  if not bit(uint16(ppu.dispcnt), 8 + bg): return
+  if not ppu.dispcnt.bg_enable(bg): return
   let bgcnt  = ppu.bgcnt[bg]
   let bghofs = ppu.bghofs[bg]
   let bgvofs = ppu.bgvofs[bg]
@@ -219,7 +219,7 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
-  if not bit(uint16(ppu.dispcnt), 8 + bg): return
+  if not ppu.dispcnt.bg_enable(bg): return
   let bgcnt = ppu.bgcnt[bg]
   let bg_idx = bg - 2
   let dx = ppu.bgaff[bg_idx][0].num
@@ -271,7 +271,7 @@ proc render_bitmap*(ppu: PPU) =
   let mode = int(ppu.dispcnt.bg_mode)
   ppu.bitmap_direct = mode != 4
   for col in 0..239: ppu.bg2_direct_opaque[col] = false
-  if not bit(uint16(ppu.dispcnt), 10): return  # BG2 disabled
+  if not ppu.dispcnt.bg2_enable: return
   let dx = ppu.bgaff[0][0].num
   let dy = ppu.bgaff[0][2].num
   var int_x = ppu.bgref_int[0][0]
@@ -320,7 +320,7 @@ proc render_bitmap*(ppu: PPU) =
           ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
 
 proc render_sprites*(ppu: PPU) =
-  if not bit(uint16(ppu.dispcnt), 12): return
+  if not ppu.dispcnt.obj_enable: return
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
   let num_sprites = 128  # OAM has 128 sprites
@@ -500,7 +500,7 @@ proc compute_layer_walk*(ppu: PPU) =
   for p in 0 .. 3:
     for bg in 0 .. 3:
       if int(ppu.bgcnt[bg].priority) == p and
-         bit(uint16(ppu.dispcnt), 8 + bg) and bit(ppu.debug_layer_mask, bg):
+         ppu.dispcnt.bg_enable(bg) and bit(ppu.debug_layer_mask, bg):
         ppu.walk_bgs[n]   = int8(bg)
         ppu.walk_prios[n] = int8(p)
         inc n
@@ -595,13 +595,15 @@ proc composite*(ppu: PPU; row_base: uint32) =
   if not windows_active and not blending_possible:
     # Fast path (most scanlines): every layer is enabled screen-wide and no
     # color math can apply, so the first opaque pixel in priority order wins
-    let obj_enable = bit(uint16(ppu.dispcnt.default_enable_bits), 4) and
-                     bit(ppu.debug_layer_mask, 4)
+    # Register enable AND the debug layer mask — not the raw DISPCNT bit, so
+    # it gets its own name rather than shadowing dispcnt.obj_enable.
+    let sprites_visible = ppu.dispcnt.obj_enable and
+                          bit(ppu.debug_layer_mask, 4)
     let walk_n = ppu.walk_n
     for col in 0 .. 239:
       let sp = ppu.sprite_pixels[col]
       var sprio = 4
-      if obj_enable and sp.palette != 0: sprio = int(sp.priority)
+      if sprites_visible and sp.palette != 0: sprio = int(sp.priority)
       var color = pram_u16[0]
       block found:
         for i in 0 ..< walk_n:
@@ -625,7 +627,7 @@ proc composite*(ppu: PPU; row_base: uint32) =
     if windows_active:
       ppu.compute_line_enables()
     else:
-      let bits = uint16(ppu.dispcnt.default_enable_bits) and ppu.debug_layer_mask
+      let bits = ppu.dispcnt.layer_enable_bits and ppu.debug_layer_mask
       for col in 0 .. 239:
         ppu.line_enables[col] = bits
         ppu.line_effects[col] = true

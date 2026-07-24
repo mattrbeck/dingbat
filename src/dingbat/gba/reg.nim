@@ -102,14 +102,14 @@ type
     dest_control*   {.bitsize: 2.}: uint16
     source_control* {.bitsize: 2.}: uint16
     repeat*         {.bitsize: 1.}: bool
-    xfer_type*      {.bitsize: 1.}: uint16
+    is_32bit*       {.bitsize: 1.}: uint16
     game_pak*       {.bitsize: 1.}: bool
     start_timing*   {.bitsize: 2.}: uint16
     irq_enable*     {.bitsize: 1.}: bool
     enable*         {.bitsize: 1.}: bool
 
   TMCNT* {.packed.} = object
-    frequency*  {.bitsize: 2.}: uint16
+    prescaler*  {.bitsize: 2.}: uint16
     cascade*    {.bitsize: 1.}: bool
     not_used_2* {.bitsize: 3.}: uint16
     irq_enable* {.bitsize: 1.}: bool
@@ -123,7 +123,14 @@ type
     hblank_interval_free* {.bitsize: 1.}: bool
     obj_mapping_1d*       {.bitsize: 1.}: bool
     forced_blank*         {.bitsize: 1.}: bool
-    default_enable_bits*  {.bitsize: 5.}: uint16
+    # GBATEK "Screen Display BG0-3 / OBJ" (bits 8-12). Named individually so
+    # callers read a field instead of a raw bit index; layer_enable_bits below
+    # returns all five as a group for the debug-mask paths.
+    bg0_enable*           {.bitsize: 1.}: bool
+    bg1_enable*           {.bitsize: 1.}: bool
+    bg2_enable*           {.bitsize: 1.}: bool
+    bg3_enable*           {.bitsize: 1.}: bool
+    obj_enable*           {.bitsize: 1.}: bool
     window_0_display*     {.bitsize: 1.}: bool
     window_1_display*     {.bitsize: 1.}: bool
     obj_window_display*   {.bitsize: 1.}: bool
@@ -295,3 +302,13 @@ proc num*(self: BGREF): int32 {.inline.} =
 
 proc layer_target*(self: BLDCNT; layer, target: int): bool {.inline.} =
   bit(toU16(self), layer + (target - 1) * 8)
+
+proc bg_enable*(self: DISPCNT; bg: int): bool {.inline.} =
+  ## Per-BG "Screen Display" bit (DISPCNT bits 8-11), indexed by BG number for
+  ## the layer loops. Equivalent to the bg0_enable..bg3_enable fields.
+  bit(toU16(self), 8 + bg)
+
+proc layer_enable_bits*(self: DISPCNT): uint16 {.inline.} =
+  ## BG0-3 + OBJ display bits (8-12) as one 5-bit group, LSB = BG0. Used where
+  ## the enables are AND-ed against a debug layer mask of the same layout.
+  bits_range(toU16(self), 8, 12)

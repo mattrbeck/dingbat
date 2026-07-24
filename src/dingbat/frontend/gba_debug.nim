@@ -98,7 +98,7 @@ proc render_io_display(d: GbaDebug) =
   let dc = ppu.dispcnt
   tx(fmt"DISPCNT  {toU16(dc):04X}  mode {dc.bg_mode}, frame {uint16(dc.display_frame_select)}, " &
      fmt"forced blank {onoff(dc.forced_blank)}, obj {(if dc.obj_mapping_1d: '1' else: '2')}D")
-  tx(fmt"  layers: {layer_bits_str(uint16(dc.default_enable_bits))}")
+  tx(fmt"  layers: {layer_bits_str(dc.layer_enable_bits)}")
   var wins = ""
   if dc.window_0_display: wins.add " win0"
   if dc.window_1_display: wins.add " win1"
@@ -173,7 +173,7 @@ proc render_io_timers(d: GbaDebug) =
     let base = 0x100'u32 + uint32(n) * 4
     let count = uint16(tim[base]) or (uint16(tim[base + 1]) shl 8)
     let cnt = tim.tmcnt[n]
-    var flags = if cnt.cascade: "cascade" else: freqs[cnt.frequency]
+    var flags = if cnt.cascade: "cascade" else: freqs[cnt.prescaler]
     if cnt.irq_enable: flags.add " irq"
     flags.add (if cnt.enable: " ENABLED" else: " off")
     tx(fmt"TM{n}  count {count:04X}  reload {tim.tmd[n]:04X}  ctrl {toU16(cnt):04X}  {flags}")
@@ -186,7 +186,7 @@ proc render_io_dma(d: GbaDebug) =
     tx(fmt"DMA{n}  src {dma.dmasad[n]:08X}  dst {dma.dmadad[n]:08X}  " &
        fmt"count {dma.dmacnt_l[n]:04X}  ctrl {toU16(cnt):04X}")
     if cnt.enable:
-      var flags = fmt"{timings[cnt.start_timing]}, {(if cnt.xfer_type == 1: 32 else: 16)}-bit"
+      var flags = fmt"{timings[cnt.start_timing]}, {(if cnt.is_32bit == 1: 32 else: 16)}-bit"
       if cnt.repeat: flags.add ", repeat"
       if cnt.irq_enable: flags.add ", irq"
       tx(fmt"  ENABLED: {flags}  (cur src {dma.src[n]:08X} dst {dma.dst[n]:08X})")

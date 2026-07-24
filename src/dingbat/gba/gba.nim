@@ -1081,7 +1081,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
       # keeps prescaler phase) and compensate the counter value. No overflow
       # can hide in the skipped window - the overflow event would have fired
       # and re-anchored.
-      let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].frequency])
+      let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].prescaler])
       let deficit = base - gba.timer.cycle_enabled[i]
       let k = (deficit + period - 1) div period
       gba.timer.cycle_enabled[i] = gba.timer.cycle_enabled[i] + k * period - base

@@ -76,7 +76,7 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
       # Hardware force-aligns DMA addresses to the transfer size
-      let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
+      let align = if dma.dmacnt_h[channel].is_32bit != 0: not 3'u32 else: not 1'u32
       dma.src[channel] = dma.dmasad[channel] and align
       dma.dst[channel] = dma.dmadad[channel] and align
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
@@ -124,7 +124,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   let start_timing   = int(dma.dmacnt_h[channel].start_timing)
   let source_control = int(dma.dmacnt_h[channel].source_control)
   let dest_control   = int(dma.dmacnt_h[channel].dest_control)
-  var word_size      = 2 shl int(dma.dmacnt_h[channel].xfer_type)  # 2 or 4
+  var word_size      = 2 shl int(dma.dmacnt_h[channel].is_32bit)  # 2 or 4
   var len            = int(dma.dmacnt_l[channel])
   if len == 0:
     len = int(DMA_LEN_MASK[channel]) + 1
