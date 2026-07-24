@@ -21,14 +21,14 @@ proc new_channel2*(gba: GBA): Channel2 =
     starting_volume: 0, envelope_add_mode: false, envelope_period: 0,
     envelope_timer: 0, current_volume: 0, envelope_is_updating: false,
     wave_duty_position: 0,
-    duty: 0, length_load: 0, frequency_ch2: 0,
+    duty: 0, length_load: 0, frequency: 0,
   )
 
 proc ch2_step_wave*(ch: Channel2) =
   ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
 
 proc ch2_frequency_timer*(ch: Channel2): uint32 =
-  (0x800'u32 - uint32(ch.frequency_ch2)) * 4 * 4
+  (0x800'u32 - uint32(ch.frequency)) * 4 * 4
 
 proc ch2_step*(ch: Channel2) =
   ch.ch2_step_wave()
@@ -56,9 +56,9 @@ proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
     ch.length_counter = 0x40 - int(ch.length_load)
   of 0x69: ch.write_nrx2(value)
   of 0x6A, 0x6B: discard
-  of 0x6C: ch.frequency_ch2 = (ch.frequency_ch2 and 0x0700'u16) or uint16(value)
+  of 0x6C: ch.frequency = (ch.frequency and 0x0700'u16) or uint16(value)
   of 0x6D:
-    ch.frequency_ch2 = (ch.frequency_ch2 and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
+    ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
     let length_enable = (value and 0x40) > 0
     if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
       ch.length_counter -= 1

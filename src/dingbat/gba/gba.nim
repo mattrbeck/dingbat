@@ -447,20 +447,20 @@ type
     wave_duty_position*: int
     sweep_period*:       uint8
     negate*:             bool
-    shift_ch1*:          uint8
+    shift*:          uint8
     sweep_timer*:        uint8
     frequency_shadow*:   uint16
     sweep_enabled*:      bool
-    negate_has_been_used*: bool
+    negate_used*: bool
     duty*:               uint8
     length_load*:        uint8
-    frequency_ch1*:      uint16
+    frequency*:      uint16
 
   Channel2* = ref object of VolumeEnvelopeChannel
     wave_duty_position*: int
     duty*:               uint8
     length_load*:        uint8
-    frequency_ch2*:      uint16
+    frequency*:      uint16
 
   Channel3* = ref object of SoundChannel
     wave_ram*:              array[2, seq[byte]]
@@ -468,14 +468,14 @@ type
     wave_ram_sample_buffer*: uint8
     wave_ram_dimension*:    bool
     wave_ram_bank*:         uint8
-    length_load_ch3*:       uint8
+    length_load*:       uint8
     volume_code*:           uint8
     volume_force*:          bool
-    frequency_ch3*:         uint16
+    frequency*:         uint16
 
   Channel4* = ref object of VolumeEnvelopeChannel
     lfsr*:          uint16
-    length_load_ch4*: uint8
+    length_load*: uint8
     clock_shift*:   uint8
     width_mode*:    uint8
     divisor_code*:  uint8

@@ -14,7 +14,7 @@ proc new_channel4*(gba: GBA): Channel4 =
     starting_volume: 0, envelope_add_mode: false, envelope_period: 0,
     envelope_timer: 0, current_volume: 0, envelope_is_updating: false,
     lfsr: 0,
-    length_load_ch4: 0,
+    length_load: 0,
     clock_shift: 0, width_mode: 0, divisor_code: 0,
   )
 
@@ -50,8 +50,8 @@ proc ch4_read*(ch: Channel4; address: uint32): uint8 =
 proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
   case address
   of 0x78:
-    ch.length_load_ch4  = value and 0x3F
-    ch.length_counter   = 0x40 - int(ch.length_load_ch4)
+    ch.length_load  = value and 0x3F
+    ch.length_counter   = 0x40 - int(ch.length_load)
   of 0x79: ch.write_nrx2(value)
   of 0x7A, 0x7B: discard
   of 0x7C:

@@ -229,21 +229,21 @@ proc visit_apu[S](apu: APU; s: var S) =
     s.visit_i32  ch.wave_duty_position
     s.visit_u8   ch.sweep_period
     s.visit_bool ch.negate
-    s.visit_u8   ch.shift_ch1
+    s.visit_u8   ch.shift
     s.visit_u8   ch.sweep_timer
     s.visit_u16  ch.frequency_shadow
     s.visit_bool ch.sweep_enabled
-    s.visit_bool ch.negate_has_been_used
+    s.visit_bool ch.negate_used
     s.visit_u8   ch.duty
     s.visit_u8   ch.length_load
-    s.visit_u16  ch.frequency_ch1
+    s.visit_u16  ch.frequency
   block:
     let ch = apu.channel2
     visit_channel_env(ch, s)
     s.visit_i32 ch.wave_duty_position
     s.visit_u8  ch.duty
     s.visit_u8  ch.length_load
-    s.visit_u16 ch.frequency_ch2
+    s.visit_u16 ch.frequency
   block:
     let ch = apu.channel3
     visit_channel_base(ch, s)
@@ -253,15 +253,15 @@ proc visit_apu[S](apu: APU; s: var S) =
     s.visit_u8    ch.wave_ram_sample_buffer
     s.visit_bool  ch.wave_ram_dimension
     s.visit_u8    ch.wave_ram_bank
-    s.visit_u8    ch.length_load_ch3
+    s.visit_u8    ch.length_load
     s.visit_u8    ch.volume_code
     s.visit_bool  ch.volume_force
-    s.visit_u16   ch.frequency_ch3
+    s.visit_u16   ch.frequency
   block:
     let ch = apu.channel4
     visit_channel_env(ch, s)
     s.visit_u16 ch.lfsr
-    s.visit_u8  ch.length_load_ch4
+    s.visit_u8  ch.length_load
     s.visit_u8  ch.clock_shift
     s.visit_u8  ch.width_mode
     s.visit_u8  ch.divisor_code

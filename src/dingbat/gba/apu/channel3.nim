@@ -19,9 +19,9 @@ proc new_channel3*(gba: GBA): Channel3 =
     wave_ram_sample_buffer: 0,
     wave_ram_dimension: false,
     wave_ram_bank: 0,
-    length_load_ch3: 0,
+    length_load: 0,
     volume_code: 0, volume_force: false,
-    frequency_ch3: 0,
+    frequency: 0,
   )
   for bank in 0..1:
     result.wave_ram[bank] = newSeq[byte](WAVE_RAM_SIZE)
@@ -37,7 +37,7 @@ proc ch3_step_wave*(ch: Channel3) =
     (full_sample shr (if (ch.wave_ram_position and 1) == 0: 4 else: 0)) and 0xF
 
 proc ch3_frequency_timer*(ch: Channel3): uint32 =
-  (0x800'u32 - uint32(ch.frequency_ch3)) * 2 * 4
+  (0x800'u32 - uint32(ch.frequency)) * 2 * 4
 
 proc ch3_step*(ch: Channel3) =
   ch.ch3_step_wave()
@@ -78,14 +78,14 @@ proc ch3_write*(ch: Channel3; address: uint32; value: uint8) =
     ch.wave_ram_bank    = bits_range(value, 6, 6)
   of 0x71: discard
   of 0x72:
-    ch.length_load_ch3  = value
+    ch.length_load  = value
     ch.length_counter   = 0x100 - int(value)
   of 0x73:
     ch.volume_code  = (value and 0x60) shr 5
     ch.volume_force = bit(value, 7)
-  of 0x74: ch.frequency_ch3 = (ch.frequency_ch3 and 0x0700'u16) or uint16(value)
+  of 0x74: ch.frequency = (ch.frequency and 0x0700'u16) or uint16(value)
   of 0x75:
-    ch.frequency_ch3 = (ch.frequency_ch3 and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
+    ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
     let length_enable = (value and 0x40) > 0
     if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
       ch.length_counter -= 1
