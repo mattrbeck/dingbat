@@ -31,7 +31,7 @@
 #     the hardware's output capacitor removes; unifying them would change GBA
 #     output for no accuracy gain, so they stay per-core.
 
-proc length_step*(ch: SoundChannelBase) =
+proc length_step*(ch: SoundChannelBase) {.inline.} =
   if ch.length_enable and ch.length_counter > 0:
     dec ch.length_counter
     if ch.length_counter == 0:
@@ -78,7 +78,7 @@ proc volume_step*(ch: VolumeEnvChannelBase) =
 
 proc psg_write_nrx4*(ch: SoundChannelBase; value: uint8;
                      first_half_of_length_period: bool;
-                     max_length: int): bool {.discardable.} =
+                     max_length: int): bool {.inline, discardable.} =
   ## Shared handling of NRx4 bits 6-7, the fiddliest corner of the PSG and the
   ## one blargg's dmg_sound 02/03/08 hammer hardest:
   ##
@@ -142,7 +142,7 @@ proc psg_sweep_trigger*(ch: SweepChannelBase) =
 
 # ---- Channel 4: noise LFSR -------------------------------------------------
 
-proc psg_lfsr_step*(ch: NoiseChannelBase) =
+proc psg_lfsr_step*(ch: NoiseChannelBase) {.inline.} =
   ## 15-bit LFSR, XOR of the low two bits fed back into bit 14 (and bit 6 as
   ## well in 7-bit width mode, shortening the period).
   let new_bit = (ch.lfsr and 0b01'u16) xor ((ch.lfsr and 0b10'u16) shr 1)
