@@ -67,19 +67,24 @@ proc apu_div_bit(gb: GB): int {.inline.} =
 
 proc timer_tick*(t: GbTimer; gb: GB; cycles: int) =
   let serial = gb.serial
-  let apu_bit = apu_div_bit(gb)
   for _ in 0 ..< cycles:
     if t.countdown > -1: dec t.countdown
     if t.countdown == 0: timer_reload_tima(t, gb)
-    let apu_before = (t.tdiv shr apu_bit) and 1
     t.tdiv = t.tdiv + 1
-    # Frame sequencer is clocked BY the divider, not by its own timer — so a
-    # DIV write (below) or a speed switch shifts its phase, exactly as on
-    # hardware. Edge is computed within the tick, so nothing extra to persist.
-    if apu_before == 1 and ((t.tdiv shr apu_bit) and 1) == 0:
-      tick_frame_sequencer(gb.apu, gb)
     timer_check_edge(t, gb)
     if serial.shifting: serial_tick(serial, gb)
+
+proc apu_div_period*(gb: GB): int {.inline.} =
+  ## Divider counts between APU-tap falling edges (8192 single / 16384 double
+  ## speed — 512 Hz either way). These are raw scheduler cycles, so schedule
+  ## them with `schedule`, not `schedule_gb` (which would scale them again).
+  2 shl apu_div_bit(gb)
+
+proc apu_div_phase*(t: GbTimer; gb: GB): int =
+  ## Raw cycles until the divider's APU tap next falls. Equals the full period
+  ## when the divider sits exactly on an edge boundary.
+  let period = apu_div_period(gb)
+  period - (int(t.tdiv) and (period - 1))
 
 proc timer_read*(t: GbTimer; idx: int): uint8 =
   case idx
@@ -94,10 +99,17 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   of 0xFF04:
     # Resetting DIV drops every divider bit at once. If the APU tap was high,
     # that is a falling edge and the frame sequencer steps EARLY — this is what
-    # SameSuite's apu/div_* tests check, and games use it to phase-lock audio.
+    # SameSuite's apu/div_* tests check, and games use to phase-lock audio.
+    # The sequencer is otherwise a scheduled event, so re-aim it at the new
+    # phase. This costs ~0.8% on Crystal because games write DIV often; a lazy
+    # re-aim (letting the stale event notice when it fires) is cheaper but NOT
+    # equivalent — it can skip an edge falling before the stale target, and
+    # measurably loses a SameSuite test.
     let apu_before = (t.tdiv shr apu_div_bit(gb)) and 1
     t.tdiv = 0
     if apu_before == 1: tick_frame_sequencer(gb.apu, gb)
+    gb.scheduler.clear(etAPUFrameSeq)
+    gb.scheduler.schedule(apu_div_phase(t, gb), etAPUFrameSeq)
     timer_check_edge(t, gb, on_write = true)
     # The serial clock tap sees the reset too; a high->low transition of
     # the tapped bit shifts (gambatte start_late_div_write serial tests)

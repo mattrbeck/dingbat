@@ -219,8 +219,9 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       echo "Warning: GB failed to open audio device"
       result.audio_dev = 0
   let apu = result
-  # No frame-sequencer event to prime: it is clocked by the divider now
-  # (timer.nim), so it starts on the first falling edge of the DIV tap.
+  # The frame-sequencer event is primed in post_init instead of here: it is a
+  # tap on the divider, so its phase comes from tdiv, which skip_boot seeds
+  # per hardware model only after every component exists.
   get_sample(apu, gb)
 
 proc apu_read*(apu: GbApu; idx: int): uint8 =
