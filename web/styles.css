@@ -1016,6 +1016,24 @@ button {
   animation: menu-in 0.13s ease-out;
 }
 
+/* Bottom scrim while the dropdown scrolls (phone landscape): a sticky fade
+   pinned to the scrollport's bottom edge, so the clipped item visibly
+   dissolves instead of reading as the end of the menu. Sticky keeps it
+   anchored while scrolling; at the very bottom it overlaps only the final
+   item's padding. No JS: when nothing overflows there's nothing to clip and
+   the fade sits under the closing padding, invisible. */
+#menu-dropdown::after {
+  content: "";
+  display: block;
+  position: sticky;
+  bottom: -6px; /* cancel the container padding so it hugs the true edge */
+  height: 26px;
+  margin: -26px -6px -6px; /* overlay the last item, span the full width */
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0), var(--surface-1) 85%);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
 @keyframes menu-in {
   from {
     opacity: 0;
@@ -2265,14 +2283,28 @@ body.debug-2p .home-tile-link {
 .state-slot .slot-label {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 6px;
   font-size: 11px;
   color: var(--text-dim);
 }
 
+/* One line, always: "1 · Quick" must never wrap under a long timestamp —
+   the slot number stays whole and the time ellipsizes instead. */
+.state-slot .slot-label > span {
+  white-space: nowrap;
+}
+
+.state-slot .slot-label > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .state-slot .slot-num {
   font-weight: 700;
   color: var(--text);
+  flex-shrink: 0;
 }
 
 .states-actions {
@@ -2468,16 +2500,17 @@ body.debug-2p .home-tile-link {
 }
 
 /* Edge scrims: shown (via JS class) only while the bar can scroll that way.
-   A shadow rather than a fade-to-background so it stays visible even when
-   the cutoff lands exactly on the gap between two tabs. --inset-lo is the
-   theme-tuned dark-shadow token (softer on the light theme). */
+   Two layers each: an opaque fade to the strip surface (clipped tab text
+   visibly dissolves — the shadow alone had near-zero contrast on the dark
+   themes and read as a hard clip), over the --inset-lo shadow that keeps the
+   edge marked even when the cutoff lands exactly on the gap between tabs. */
 #settings-tabs-wrap::before,
 #settings-tabs-wrap::after {
   content: "";
   position: absolute;
   top: 1px;
   bottom: 1px;
-  width: 22px;
+  width: 28px;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s;
@@ -2487,13 +2520,17 @@ body.debug-2p .home-tile-link {
 #settings-tabs-wrap::before {
   left: 1px;
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  background: linear-gradient(to right, var(--inset-lo), rgba(0, 0, 0, 0));
+  background:
+    linear-gradient(to right, var(--surface-2) 20%, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, var(--inset-lo), rgba(0, 0, 0, 0));
 }
 
 #settings-tabs-wrap::after {
   right: 1px;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: linear-gradient(to left, var(--inset-lo), rgba(0, 0, 0, 0));
+  background:
+    linear-gradient(to left, var(--surface-2) 20%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left, var(--inset-lo), rgba(0, 0, 0, 0));
 }
 
 #settings-tabs-wrap.can-scroll-left::before,
