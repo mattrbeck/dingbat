@@ -7,15 +7,16 @@ The full feature list for both front-ends and both emulated systems. The
 
 The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way to play.
 
-- Installable as an offline-capable PWA, with a home screen and recently-played grid
+- Installable as an offline-capable PWA, with a home screen library grid
 - Touch controls, with layouts for phones and tablets in both orientations
 - Gamepad support
 - Save states: nine per-ROM slots with thumbnails, plus Quick Save / Quick Load
 - Rewind and fast forward
 - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
-- Per-ROM save files kept in IndexedDB, with "Manage ROMs & Saves" modals
+- Per-ROM save files kept in IndexedDB, with a "Manage ROMs and Saves" modal for
+  resetting save data or deleting a game outright
 - Online link play with room codes
-- Google Drive save/ROM backup — see the setup note below
+- Google Drive cross-device sync — see below
 - Report a Bug: attach a save state from any point in the rewind timeline, downloaded
   as a self-contained report file. Nothing is transmitted.
 - Desktop keyboard shortcuts: pause, fast forward, rewind, save states, screenshot,
@@ -27,10 +28,31 @@ The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way
 - Per-panel color correction: mGBA's AGB model for GBA, the hardware-measured
   "GBC-Color" model for GB/GBC
 
-> **Drive setup note.** The Drive integration reads its OAuth client ID from the
-> `gdrive_client_id` key in `localStorage`. A build without one configured shows
-> "Drive backup isn't configured in this build" and the feature is inert. Backup is
-> manual-only today — there is no automatic reconnect or retry.
+### Google Drive sync
+
+Signing in *is* turning sync on; signed out, none of it runs and the app behaves exactly
+as it did before.
+
+- One "library" file on Drive holds the merged recents plus tombstones, so the home grid
+  is your library on every device. ROMs are never bulk-downloaded — a game you only have
+  on another device shows as a dashed tile and fetches on tap.
+- Saves, save states, and ROMs upload from a persisted dirty queue, flushed 2s after the
+  last change and at most 10s after the first. Uploads skip files whose signature hasn't
+  changed, and a queue that outlives a reload is not lost.
+- Pulls happen on sign-in, app start, refocus, regained connectivity, a 3-minute poll,
+  and manual "Sync now".
+- Deleting a game writes a tombstone so other devices drop it too, but only after asking
+  — the "removed on another device" modal offers Continue (drop local) or Restore (keep
+  and re-upload, clearing the tombstone).
+- The top bar's status indicator reports sync state.
+
+Scope is `drive.appdata`, so dingbat can only see its own hidden app folder — never the
+rest of your Drive. The OAuth client ID ships in source, which is safe for the GIS
+implicit flow: there is no client secret, and access is gated by the Authorized
+JavaScript origins allowlist. Two rules bite when adding an origin for a new deployment
+or dev port: https is required off localhost, and Google rejects raw IP addresses, so an
+`http://192.168.x.x` LAN origin can never be registered. Setting `gdrive_client_id` in
+`localStorage` overrides the shipped ID to point a build at a different client.
 
 ## Native front-end
 

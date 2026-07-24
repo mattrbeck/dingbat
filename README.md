@@ -14,7 +14,8 @@ local network. → [Multiplayer guide](docs/link-usage.md)
 **Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine is
 re-rendered per note, above the hardware's native mix rate. Optional.
 
-**Cross-device sync.** Back up saves, save states, and ROMs to your own Google Drive.
+**Cross-device sync.** Your games, saves, and save states sync through Google Drive, so
+you can put a game down on one device and pick it up on another.
 
 **Accuracy.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge, blargg,
 mooneye, dmg-acid2, and cgb-acid2 all pass.

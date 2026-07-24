@@ -3,7 +3,9 @@
 ## Loading games
 
 In the browser, drop a ROM onto the page or pick one from the home screen's
-recently-played grid. Games you've loaded before stay available offline.
+library grid. Games you've loaded before stay available offline. If you're signed in to
+Google Drive, the grid is your library across every device — a game you only have
+elsewhere shows as a dashed tile and downloads when you tap it.
 
 With the native build, run the `dingbat` executable. To open a specific ROM directly,
 pass it as an argument (`./dingbat /path/to/rom`) or drag the file onto the window.
@@ -26,7 +28,8 @@ The web build offers the same choice through the settings panel.
 ## Save files
 
 Native builds write `.sav` files next to the ROM. The browser keeps a save file per ROM
-in IndexedDB; "Manage ROMs & Saves" lets you export, import, or reset them.
+in IndexedDB; "Manage ROMs and Saves" lets you reset a game's save data or delete the game
+outright. Both mirror to Drive when you're signed in, and stay local when you aren't.
 
 Game Boy save files are compatible with other emulators such as BGB, so you can move a
 save between them.
