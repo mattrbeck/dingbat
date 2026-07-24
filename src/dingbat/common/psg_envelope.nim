@@ -153,10 +153,26 @@ proc psg_lfsr_step*(ch: NoiseChannelBase) {.inline.} =
 # ---- Channel 3: wave trigger delay ------------------------------------------
 
 const PSG_WAVE_TRIGGER_DELAY* = 6 * PSG_CLOCK_MULT
-  ## Triggering the wave channel restarts its frequency timer 6 CPU cycles late
-  ## (a documented DMG/CGB quirk). PSG_CLOCK_MULT scales it to the host core's
-  ## clock: 1 on the GB (4.19 MHz), 4 on the GBA (16.78 MHz), which runs the
-  ## same sound hardware from a 4x clock. The GBA previously used a bare 6 —
-  ## a copy of the GB constant that never got the x4 that every surrounding
-  ## period formula has — making its wave-trigger delay a quarter of the
-  ## hardware's.
+  ## Extra delay before the wave channel's frequency timer restarts on trigger.
+  ##
+  ## The VALUE (6) is not documented anywhere I could find — not GBATEK, not
+  ## Pan Docs, not the usual write-ups. It predates dingbat's git history
+  ## (both cores' copies arrive in the same squashed import commit), so treat
+  ## it as inherited emulator lore, not established fact. Pan Docs does
+  ## describe the surrounding behaviour — triggering CH3 does not immediately
+  ## play wave RAM, and the first sample read is index 1, not 0 — so *some*
+  ## startup delay is real; only this magnitude is unverified. SameSuite's
+  ## apu/channel_3 tests can settle it on hardware (see notes/psg-hardware-test).
+  ##
+  ## The SCALING, by contrast, is solid. GBATEK gives the GBA's channel-3
+  ## sample rate as 2097152/(2048-n) Hz — the identical formula to the GB's —
+  ## so the PSG keeps the same absolute timebase on both machines, while the
+  ## CPU clock the scheduler counts in goes from 4.194304 MHz to 16.78 MHz
+  ## (GBATEK: "16*1024*1024 Hz"). A fixed physical delay is therefore 4x more
+  ## GBA cycles, exactly as every other period formula in the GBA channels
+  ## already accounts for. The GBA previously used a bare 6, so whatever this
+  ## delay is meant to be, it was a quarter of it there.
+  ##
+  ## In short: 6-vs-24 is a consistency fix between the two cores, and the GB
+  ## side is unchanged (multiplier 1). Whether 6 is the right number in the
+  ## first place is an open question for both.
