@@ -46,14 +46,14 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   of 2:
     length_step(apu.channel1); length_step(apu.channel2)
     length_step(apu.channel3); length_step(apu.channel4)
-    sweep_step(apu.channel1, gb)
+    psg_sweep_step(apu.channel1)
   of 4:
     length_step(apu.channel1); length_step(apu.channel2)
     length_step(apu.channel3); length_step(apu.channel4)
   of 6:
     length_step(apu.channel1); length_step(apu.channel2)
     length_step(apu.channel3); length_step(apu.channel4)
-    sweep_step(apu.channel1, gb)
+    psg_sweep_step(apu.channel1)
   of 7:
     volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
   else: discard

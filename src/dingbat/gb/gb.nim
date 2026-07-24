@@ -643,9 +643,12 @@ include mbc/mbc3
 include mbc/mbc5
 # Aliases naming this core's channel base types for the shared PSG
 # length/envelope logic, which both cores include (see the file header).
+const PSG_CLOCK_MULT = 1   # GB PSG runs at the 4.19 MHz CPU clock
 type
   SoundChannelBase     = GbSoundChannel
   VolumeEnvChannelBase = GbVolumeEnvChannel
+  SweepChannelBase     = GbChannel1
+  NoiseChannelBase     = GbChannel4
 include ../common/psg_envelope
 include apu/channel1
 include apu/channel2

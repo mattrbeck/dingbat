@@ -44,19 +44,8 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
     ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
   of 0xFF19:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
-    let len_enable = (val and 0x40) != 0
-    if gb.apu.first_half_of_length_period and not ch.length_enable and len_enable and ch.length_counter > 0:
-      dec ch.length_counter
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = len_enable
-    if (val and 0x80) != 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and gb.apu.first_half_of_length_period:
-          dec ch.length_counter
+    if ch.psg_write_nrx4(val, gb.apu.first_half_of_length_period, 0x40):
       gb.scheduler.clear(etAPUChannel2)
-      gb.scheduler.schedule_gb(int(ch2_frequency_timer(ch)),
-        etAPUChannel2)
+      gb.scheduler.schedule_gb(int(ch2_frequency_timer(ch)), etAPUChannel2)
       init_volume_envelope(ch)
   else: discard

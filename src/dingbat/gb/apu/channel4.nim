@@ -7,14 +7,8 @@ proc ch4_frequency_timer(ch: GbChannel4): uint32 =
   (if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift
 
 proc ch4_step*(ch: GbChannel4; gb: GB) =
-  let new_bit = (ch.lfsr and 0b01'u16) xor ((ch.lfsr and 0b10'u16) shr 1)
-  ch.lfsr = ch.lfsr shr 1
-  ch.lfsr = ch.lfsr or (new_bit shl 14)
-  if ch.width_mode != 0:
-    ch.lfsr = ch.lfsr and not (1'u16 shl 6)
-    ch.lfsr = ch.lfsr or (new_bit shl 6)
-  gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
-    etAPUChannel4)
+  psg_lfsr_step(ch)
+  gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)), etAPUChannel4)
 
 proc ch4_get_amplitude*(ch: GbChannel4): float32 =
   if ch.enabled and ch.dac_enabled:
@@ -42,20 +36,9 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
     ch.width_mode    = (val and 0x08) shr 3
     ch.divisor_code  = val and 0x07
   of 0xFF23:
-    let len_enable = (val and 0x40) != 0
-    if gb.apu.first_half_of_length_period and not ch.length_enable and len_enable and ch.length_counter > 0:
-      dec ch.length_counter
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = len_enable
-    if (val and 0x80) != 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and gb.apu.first_half_of_length_period:
-          dec ch.length_counter
+    if ch.psg_write_nrx4(val, gb.apu.first_half_of_length_period, 0x40):
       gb.scheduler.clear(etAPUChannel4)
-      gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
-        etAPUChannel4)
+      gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)), etAPUChannel4)
       init_volume_envelope(ch)
       ch.lfsr = 0x7FFF'u16
   else: discard

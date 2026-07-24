@@ -19,12 +19,7 @@ proc new_channel4*(gba: GBA): Channel4 =
   )
 
 proc ch4_step_wave*(ch: Channel4) =
-  let new_bit = uint16(ch.lfsr and 0b01) xor uint16((ch.lfsr and 0b10) shr 1)
-  ch.lfsr = ch.lfsr shr 1
-  ch.lfsr = ch.lfsr or (new_bit shl 14)
-  if ch.width_mode != 0:
-    ch.lfsr = ch.lfsr and not (1'u16 shl 6)
-    ch.lfsr = ch.lfsr or (new_bit shl 6)
+  psg_lfsr_step(ch)
 
 proc ch4_frequency_timer*(ch: Channel4): uint32 =
   ((if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift) * 4
@@ -59,20 +54,9 @@ proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
     ch.width_mode    = (value and 0x08) shr 3
     ch.divisor_code  = value and 0x07
   of 0x7D:
-    let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    if ch.psg_write_nrx4(value, ch.gba.apu.first_half_of_length_period, 0x40):
       ch.gba.scheduler.clear(etAPUChannel4)
-      let ft = ch.ch4_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel4)
+      ch.gba.scheduler.schedule(int(ch.ch4_frequency_timer()), etAPUChannel4)
       ch.init_volume_envelope()
       ch.lfsr = 0x7FFF'u16
   of 0x7E, 0x7F: discard

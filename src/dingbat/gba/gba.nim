@@ -942,9 +942,12 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgRetrigCount*: int = 0
 # Aliases naming this core's channel base types for the shared PSG
 # length/envelope logic, which both cores include (see the file header).
+const PSG_CLOCK_MULT = 4   # same PSG, clocked from the 16.78 MHz CPU clock
 type
   SoundChannelBase     = SoundChannel
   VolumeEnvChannelBase = VolumeEnvelopeChannel
+  SweepChannelBase     = Channel1
+  NoiseChannelBase     = Channel4
 include ../common/psg_envelope
 include apu/channel1
 include apu/channel2

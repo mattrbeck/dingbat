@@ -164,7 +164,7 @@ proc tick_frame_sequencer*(apu: APU) =
   of 2:
     apu.channel1.length_step(); apu.channel2.length_step()
     apu.channel3.length_step(); apu.channel4.length_step()
-    apu.channel1.sweep_step()
+    psg_sweep_step(apu.channel1)
   of 3: discard
   of 4:
     apu.channel1.length_step(); apu.channel2.length_step()
@@ -173,7 +173,7 @@ proc tick_frame_sequencer*(apu: APU) =
   of 6:
     apu.channel1.length_step(); apu.channel2.length_step()
     apu.channel3.length_step(); apu.channel4.length_step()
-    apu.channel1.sweep_step()
+    psg_sweep_step(apu.channel1)
   of 7:
     apu.channel1.volume_step()
     apu.channel2.volume_step()

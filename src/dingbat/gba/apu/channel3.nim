@@ -86,20 +86,10 @@ proc ch3_write*(ch: Channel3; address: uint32; value: uint8) =
   of 0x74: ch.frequency = (ch.frequency and 0x0700'u16) or uint16(value)
   of 0x75:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
-    let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x100
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    if ch.psg_write_nrx4(value, ch.gba.apu.first_half_of_length_period, 0x100):
       ch.gba.scheduler.clear(etAPUChannel3)
-      let ft = ch.ch3_frequency_timer() + 6
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel3)
+      ch.gba.scheduler.schedule(
+        int(ch.ch3_frequency_timer()) + PSG_WAVE_TRIGGER_DELAY, etAPUChannel3)
       ch.wave_ram_position = 0
   of 0x76, 0x77: discard
   of WAVE_RAM_LOW..WAVE_RAM_HIGH:

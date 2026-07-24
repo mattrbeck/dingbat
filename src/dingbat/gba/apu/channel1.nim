@@ -37,24 +37,6 @@ proc ch1_step*(ch: Channel1) =
   let ft = ch.ch1_frequency_timer()
   ch.gba.scheduler.schedule(int(ft), etAPUChannel1)
 
-proc ch1_frequency_calculation*(ch: Channel1): uint16 =
-  let shifted    = ch.frequency_shadow shr ch.shift
-  var calculated = uint32(ch.frequency_shadow) + uint32(if ch.negate: -int(shifted) else: int(shifted))
-  if ch.negate: ch.negate_used = true
-  if calculated > 0x07FF: ch.enabled = false
-  uint16(calculated)
-
-proc sweep_step*(ch: Channel1) =
-  if ch.sweep_timer > 0: ch.sweep_timer -= 1
-  if ch.sweep_timer == 0:
-    ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8
-    if ch.sweep_enabled and ch.sweep_period > 0:
-      let calculated = ch.ch1_frequency_calculation()
-      if calculated <= 0x07FF and ch.shift > 0:
-        ch.frequency_shadow = calculated
-        ch.frequency    = calculated
-        discard ch.ch1_frequency_calculation()
-
 proc ch1_get_amplitude*(ch: Channel1): int16 =
   if ch.enabled and ch.dac_enabled:
     int16(WAVE_DUTY_CH1[ch.duty][ch.wave_duty_position]) * int16(ch.current_volume)
@@ -85,26 +67,10 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
   of 0x64: ch.frequency = (ch.frequency and 0x0700'u16) or uint16(value)
   of 0x65:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
-    let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    if ch.psg_write_nrx4(value, ch.gba.apu.first_half_of_length_period, 0x40):
       ch.gba.scheduler.clear(etAPUChannel1)
-      let ft = ch.ch1_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel1)
+      ch.gba.scheduler.schedule(int(ch.ch1_frequency_timer()), etAPUChannel1)
       ch.init_volume_envelope()
-      ch.frequency_shadow     = ch.frequency
-      ch.sweep_timer          = if ch.sweep_period > 0: ch.sweep_period else: 8
-      ch.sweep_enabled        = ch.sweep_period > 0 or ch.shift > 0
-      ch.negate_used = false
-      if ch.shift > 0:
-        discard ch.ch1_frequency_calculation()
+      psg_sweep_trigger(ch)
   of 0x66, 0x67: discard
   else: echo "Writing to invalid Channel1 register: ", hex_str(uint16(address))

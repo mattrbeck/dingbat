@@ -59,20 +59,9 @@ proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
   of 0x6C: ch.frequency = (ch.frequency and 0x0700'u16) or uint16(value)
   of 0x6D:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
-    let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    if ch.psg_write_nrx4(value, ch.gba.apu.first_half_of_length_period, 0x40):
       ch.gba.scheduler.clear(etAPUChannel2)
-      let ft = ch.ch2_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel2)
+      ch.gba.scheduler.schedule(int(ch.ch2_frequency_timer()), etAPUChannel2)
       ch.init_volume_envelope()
   of 0x6E, 0x6F: discard
   else: echo "Writing to invalid Channel2 register: ", hex_str(uint16(address))
