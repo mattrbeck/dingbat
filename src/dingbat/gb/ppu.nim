@@ -9,7 +9,7 @@ proc new_ppu_base(cgb: bool): GbPpu =
   )
   result.vram[0] = newSeq[uint8](0x2000)
   result.vram[1] = newSeq[uint8](0x2000)
-  result.sprite_table = newSeq[uint8](0xA0)
+  result.oam = newSeq[uint8](0xA0)
   result.framebuffer  = newSeq[uint16](GB_WIDTH * GB_HEIGHT)
   result.bgp  = [0'u8, 0, 0, 0]
   result.obp0 = [0'u8, 0, 0, 0]
@@ -207,7 +207,7 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
        (ppu.read_mode == 2 or ppu.read_mode == 3):
       0xFF'u8
     else:
-      ppu.sprite_table[idx - 0xFE00]
+      ppu.oam[idx - 0xFE00]
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:
     # The mode bits (0-1) lag one read M-cycle behind the internal mode: use the
@@ -248,7 +248,7 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
 proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   case idx
   of 0x8000..0x9FFF: ppu.vram[ppu.vram_bank][idx - 0x8000] = val
-  of 0xFE00..0xFE9F: ppu.sprite_table[idx - 0xFE00] = val
+  of 0xFE00..0xFE9F: ppu.oam[idx - 0xFE00] = val
   of 0xFF40:
     if (val and 0x80) != 0 and not ppu.lcd_enabled:
       ppu.ly = 0

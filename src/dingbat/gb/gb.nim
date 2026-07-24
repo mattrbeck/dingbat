@@ -182,7 +182,7 @@ type
     obj_auto_increment*: bool
     # VRAM (2 banks)
     vram*:          array[2, seq[uint8]]
-    sprite_table*:  seq[uint8]         # OAM 160 bytes
+    oam*:           seq[uint8]         # 160 bytes, 40 sprites x 4
     # HDMA
     hdma1*, hdma2*, hdma3*, hdma4*, hdma5*: uint8
     hdma_src*:      uint16

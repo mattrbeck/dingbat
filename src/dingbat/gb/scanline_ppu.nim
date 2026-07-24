@@ -7,7 +7,7 @@ proc new_gb_scanline_ppu*(gb: GB): GbScanlinePpu =
     scy: base.scy, scx: base.scx, ly: base.ly, lyc: base.lyc,
     bgp: base.bgp, obp0: base.obp0, obp1: base.obp1, wy: base.wy, wx: base.wx,
     vram: base.vram, vram_bank: base.vram_bank,
-    sprite_table: base.sprite_table,
+    oam: base.oam,
     pram: base.pram, palette_index: base.palette_index, auto_increment: base.auto_increment,
     obj_pram: base.obj_pram, obj_palette_index: base.obj_palette_index,
     obj_auto_increment: base.obj_auto_increment,
@@ -27,10 +27,10 @@ proc scanline_get_sprites*(ppu: GbScanlinePpu; gb: GB): seq[GbSprite] =
   var sprite_addr = 0
   while sprite_addr <= 0x9C:
     let s = GbSprite(
-      y:          ppu.sprite_table[sprite_addr],
-      x:          ppu.sprite_table[sprite_addr + 1],
-      tile_num:   ppu.sprite_table[sprite_addr + 2],
-      attributes: ppu.sprite_table[sprite_addr + 3],
+      y:          ppu.oam[sprite_addr],
+      x:          ppu.oam[sprite_addr + 1],
+      tile_num:   ppu.oam[sprite_addr + 2],
+      attributes: ppu.oam[sprite_addr + 3],
       oam_idx:    uint8(sprite_addr),
     )
     if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
