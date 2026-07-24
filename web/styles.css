@@ -2863,8 +2863,25 @@ body.debug-2p .home-tile-link {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 60vh;
   overflow-y: auto;
+}
+
+/* Fit the whole modal within the screen with the ROM list as the ONLY scroll
+   region, so the header and the Drive sign-in stay visible. Previously the
+   list had its own 60vh scroller AND the modal scrolled, so on a phone you
+   scrolled the list, then the modal itself scrolled to reveal Drive. Now it's
+   a flex column against the shared .modal max-height: the list flexes into the
+   leftover space (min-height:0 lets it shrink below its content and scroll),
+   while everything above and the Drive section below hold their place. */
+#roms-modal .modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#roms-modal .roms-manage-list {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .roms-manage-row {
