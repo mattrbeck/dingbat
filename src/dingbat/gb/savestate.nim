@@ -24,359 +24,205 @@ const
 
 # ---- CPU ----
 
-proc save_cpu_state(cpu: GbCpu; w: var Writer) =
-  w.write_tag(GB_SEC_CPU)
-  w.write_u16(cpu.af)
-  w.write_u16(cpu.bc)
-  w.write_u16(cpu.de)
-  w.write_u16(cpu.hl)
-  w.write_u16(cpu.pc)
-  w.write_u16(cpu.sp)
-  w.write_bool(cpu.ime)
-  w.write_bool(cpu.halted)
-  w.write_bool(cpu.halt_bug)
-
-proc load_cpu_state(cpu: GbCpu; r: var Reader) =
-  r.expect_tag(GB_SEC_CPU)
-  cpu.af = r.read_u16()
-  cpu.bc = r.read_u16()
-  cpu.de = r.read_u16()
-  cpu.hl = r.read_u16()
-  cpu.pc = r.read_u16()
-  cpu.sp = r.read_u16()
-  cpu.ime = r.read_bool()
-  cpu.halted = r.read_bool()
-  cpu.halt_bug = r.read_bool()
-  cpu.cached_hl = -1  # per-instruction scratch
+proc visit_cpu[S](cpu: GbCpu; s: var S) =
+  s.visit_tag GB_SEC_CPU
+  s.visit_u16 cpu.af
+  s.visit_u16 cpu.bc
+  s.visit_u16 cpu.de
+  s.visit_u16 cpu.hl
+  s.visit_u16 cpu.pc
+  s.visit_u16 cpu.sp
+  s.visit_bool cpu.ime
+  s.visit_bool cpu.halted
+  s.visit_bool cpu.halt_bug
+  when S is Reader:
+    cpu.cached_hl = -1  # per-instruction scratch
 
 # ---- Interrupts / Timer / Joypad ----
 
-proc save_irq_state(irq: GbInterrupts; w: var Writer) =
-  w.write_tag(GB_SEC_IRQ)
-  w.write_u8(irq_read(irq, 0xFF0F))
-  w.write_u8(irq_read(irq, 0xFFFF))
+proc visit_irq[S](irq: GbInterrupts; s: var S) =
+  # IF/IE are spread across individual bool fields, so they round-trip through
+  # the same MMIO accessors the CPU uses rather than as plain fields.
+  s.visit_tag GB_SEC_IRQ
+  when S is Reader:
+    irq_write(irq, 0xFF0F, s.read_u8())
+    irq_write(irq, 0xFFFF, s.read_u8())
+  else:
+    s.write_u8(irq_read(irq, 0xFF0F))
+    s.write_u8(irq_read(irq, 0xFFFF))
 
-proc load_irq_state(irq: GbInterrupts; r: var Reader) =
-  r.expect_tag(GB_SEC_IRQ)
-  irq_write(irq, 0xFF0F, r.read_u8())
-  irq_write(irq, 0xFFFF, r.read_u8())
+proc visit_timer[S](t: GbTimer; s: var S) =
+  s.visit_tag GB_SEC_TIMER
+  s.visit_u16  t.tdiv
+  s.visit_u8   t.tima
+  s.visit_u8   t.tma
+  s.visit_bool t.enabled
+  s.visit_u8   t.clock_select
+  s.visit_i32  t.bit_for_tima
+  s.visit_bool t.previous_bit
+  s.visit_i32  t.countdown
 
-proc save_timer_state(t: GbTimer; w: var Writer) =
-  w.write_tag(GB_SEC_TIMER)
-  w.write_u16(t.tdiv)
-  w.write_u8(t.tima)
-  w.write_u8(t.tma)
-  w.write_bool(t.enabled)
-  w.write_u8(t.clock_select)
-  w.write_i32(int32(t.bit_for_tima))
-  w.write_bool(t.previous_bit)
-  w.write_i32(int32(t.countdown))
-
-proc load_timer_state(t: GbTimer; r: var Reader) =
-  r.expect_tag(GB_SEC_TIMER)
-  t.tdiv = r.read_u16()
-  t.tima = r.read_u8()
-  t.tma = r.read_u8()
-  t.enabled = r.read_bool()
-  t.clock_select = r.read_u8()
-  t.bit_for_tima = int(r.read_i32())
-  t.previous_bit = r.read_bool()
-  t.countdown = int(r.read_i32())
-
-proc save_serial_state(s: GbSerial; w: var Writer) =
+proc visit_serial[S](ser: GbSerial; s: var S) =
   # The driver (link cable binding) is not serialized; see set_serial_driver
-  w.write_tag(GB_SEC_SER)
-  w.write_u8(s.sb)
-  w.write_u8(s.sc)
-  w.write_u8(s.out_latch)
-  w.write_u8(uint8(s.bits_remaining))
-  w.write_u8(s.clock_history)
-  w.write_bool(s.shifting)
+  s.visit_tag GB_SEC_SER
+  s.visit_u8   ser.sb
+  s.visit_u8   ser.sc
+  s.visit_u8   ser.out_latch
+  s.visit_u8   ser.bits_remaining
+  s.visit_u8   ser.clock_history
+  s.visit_bool ser.shifting
 
-proc load_serial_state(s: GbSerial; r: var Reader) =
-  r.expect_tag(GB_SEC_SER)
-  s.sb = r.read_u8()
-  s.sc = r.read_u8()
-  s.out_latch = r.read_u8()
-  s.bits_remaining = int(r.read_u8())
-  s.clock_history = r.read_u8()
-  s.shifting = r.read_bool()
-
-proc save_joypad_state(j: GbJoypad; w: var Writer) =
+proc visit_joypad[S](j: GbJoypad; s: var S) =
   # Only the select lines (written by the game); pressed-key state stays
   # live since it reflects currently held host keys
-  w.write_tag(GB_SEC_JOY)
-  w.write_bool(j.button_keys)
-  w.write_bool(j.direction_keys)
-
-proc load_joypad_state(j: GbJoypad; r: var Reader) =
-  r.expect_tag(GB_SEC_JOY)
-  j.button_keys = r.read_bool()
-  j.direction_keys = r.read_bool()
+  s.visit_tag GB_SEC_JOY
+  s.visit_bool j.button_keys
+  s.visit_bool j.direction_keys
 
 # ---- Memory ----
 
-proc save_mem_state(mem: GbMemory; w: var Writer) =
-  w.write_tag(GB_SEC_MEM)
-  for i in 0 ..< 8: w.write_bytes(mem.wram[i])
-  w.write_u8(mem.wram_bank)
-  w.write_bytes(mem.hram)
-  w.write_seq_u8(mem.bootrom)
-  w.write_u8(mem.ff72)
-  w.write_u8(mem.ff73)
-  w.write_u8(mem.ff74)
-  w.write_u8(mem.ff75)
-  w.write_u8(mem.dma)
-  w.write_u16(mem.current_dma_source)
-  w.write_i32(int32(mem.internal_dma_timer))
-  w.write_i32(int32(mem.dma_position))
-  w.write_bool(mem.requested_oam_dma)
-  w.write_u8(mem.next_dma_counter)
-  w.write_bool(mem.requested_speed_switch)
-  w.write_u8(mem.current_speed)
-
-proc load_mem_state(mem: GbMemory; r: var Reader) =
-  r.expect_tag(GB_SEC_MEM)
-  for i in 0 ..< 8: r.read_bytes(mem.wram[i])
-  mem.wram_bank = r.read_u8()
-  r.read_bytes(mem.hram)
-  mem.bootrom = r.read_seq_u8()
-  mem.ff72 = r.read_u8()
-  mem.ff73 = r.read_u8()
-  mem.ff74 = r.read_u8()
-  mem.ff75 = r.read_u8()
-  mem.dma = r.read_u8()
-  mem.current_dma_source = r.read_u16()
-  mem.internal_dma_timer = int(r.read_i32())
-  mem.dma_position = int(r.read_i32())
-  mem.requested_oam_dma = r.read_bool()
-  mem.next_dma_counter = r.read_u8()
-  mem.requested_speed_switch = r.read_bool()
-  mem.current_speed = r.read_u8()
-  mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
+proc visit_mem[S](mem: GbMemory; s: var S) =
+  s.visit_tag GB_SEC_MEM
+  for i in 0 ..< 8: s.visit_bytes mem.wram[i]
+  s.visit_u8    mem.wram_bank
+  s.visit_bytes mem.hram
+  # Length-prefixed and resized on load, so it can't use visit_bytes
+  when S is Reader: mem.bootrom = s.read_seq_u8()
+  else:             s.write_seq_u8(mem.bootrom)
+  s.visit_u8   mem.ff72
+  s.visit_u8   mem.ff73
+  s.visit_u8   mem.ff74
+  s.visit_u8   mem.ff75
+  s.visit_u8   mem.dma
+  s.visit_u16  mem.current_dma_source
+  s.visit_i32  mem.internal_dma_timer
+  s.visit_i32  mem.dma_position
+  s.visit_bool mem.requested_oam_dma
+  s.visit_u8   mem.next_dma_counter
+  s.visit_bool mem.requested_speed_switch
+  s.visit_u8   mem.current_speed
+  when S is Reader:
+    mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
 
 # ---- PPU (renderer-agnostic base state only, see file comment) ----
 
-proc save_ppu_state(ppu: GbPpu; w: var Writer) =
-  w.write_tag(GB_SEC_PPU)
-  w.write_u8(ppu.lcd_control)
-  w.write_u8(ppu.lcd_status)
-  w.write_u8(ppu.scy)
-  w.write_u8(ppu.scx)
-  w.write_u8(ppu.ly)
-  w.write_u8(ppu.lyc)
-  w.write_bytes(ppu.bgp)
-  w.write_bytes(ppu.obp0)
-  w.write_bytes(ppu.obp1)
-  w.write_u8(ppu.wy)
-  w.write_u8(ppu.wx)
-  w.write_u8(ppu.vram_bank)
-  w.write_bytes(ppu.pram)
-  w.write_u8(ppu.palette_index)
-  w.write_bool(ppu.auto_increment)
-  w.write_bytes(ppu.obj_pram)
-  w.write_u8(ppu.obj_palette_index)
-  w.write_bool(ppu.obj_auto_increment)
-  w.write_bytes(ppu.vram[0])
-  w.write_bytes(ppu.vram[1])
-  w.write_bytes(ppu.oam)
-  w.write_u8(ppu.hdma1)
-  w.write_u8(ppu.hdma2)
-  w.write_u8(ppu.hdma3)
-  w.write_u8(ppu.hdma4)
-  w.write_u8(ppu.hdma5)
-  w.write_u16(ppu.hdma_src)
-  w.write_u16(ppu.hdma_dst)
-  w.write_u16(ppu.hdma_pos)
-  w.write_bool(ppu.hdma_active)
-  w.write_bool(ppu.window_trigger)
-  w.write_i32(int32(ppu.current_window_line))
-  w.write_bool(ppu.old_stat_flag)
-  w.write_bool(ppu.first_line)
-  w.write_i32(ppu.cycle_counter)
-  w.write_bool(ppu.ran_bios)
-  w.write_seq_u16(ppu.framebuffer)
-
-proc load_ppu_state(ppu: GbPpu; r: var Reader) =
-  r.expect_tag(GB_SEC_PPU)
-  ppu.lcd_control = r.read_u8()
-  ppu.lcd_status = r.read_u8()
-  ppu.scy = r.read_u8()
-  ppu.scx = r.read_u8()
-  ppu.ly = r.read_u8()
-  ppu.lyc = r.read_u8()
-  r.read_bytes(ppu.bgp)
-  r.read_bytes(ppu.obp0)
-  r.read_bytes(ppu.obp1)
-  ppu.wy = r.read_u8()
-  ppu.wx = r.read_u8()
-  ppu.vram_bank = r.read_u8()
-  r.read_bytes(ppu.pram)
-  ppu.palette_index = r.read_u8()
-  ppu.auto_increment = r.read_bool()
-  r.read_bytes(ppu.obj_pram)
-  ppu.obj_palette_index = r.read_u8()
-  ppu.obj_auto_increment = r.read_bool()
-  r.read_bytes(ppu.vram[0])
-  r.read_bytes(ppu.vram[1])
-  r.read_bytes(ppu.oam)
-  ppu.hdma1 = r.read_u8()
-  ppu.hdma2 = r.read_u8()
-  ppu.hdma3 = r.read_u8()
-  ppu.hdma4 = r.read_u8()
-  ppu.hdma5 = r.read_u8()
-  ppu.hdma_src = r.read_u16()
-  ppu.hdma_dst = r.read_u16()
-  ppu.hdma_pos = r.read_u16()
-  ppu.hdma_active = r.read_bool()
-  ppu.window_trigger = r.read_bool()
-  ppu.current_window_line = int(r.read_i32())
-  ppu.old_stat_flag = r.read_bool()
-  ppu.first_line = r.read_bool()
-  ppu.cycle_counter = r.read_i32()
-  ppu.ran_bios = r.read_bool()
-  r.read_seq_u16_into(ppu.framebuffer)
-  ppu.frame = false
-  # Renderer scratch isn't serialized; clear it so a load onto a running
-  # core (rollback) can't inherit stale per-line fetch state.
-  ppu.reset_render_scratch()
+proc visit_ppu[S](ppu: GbPpu; s: var S) =
+  s.visit_tag GB_SEC_PPU
+  s.visit_u8    ppu.lcd_control
+  s.visit_u8    ppu.lcd_status
+  s.visit_u8    ppu.scy
+  s.visit_u8    ppu.scx
+  s.visit_u8    ppu.ly
+  s.visit_u8    ppu.lyc
+  s.visit_bytes ppu.bgp
+  s.visit_bytes ppu.obp0
+  s.visit_bytes ppu.obp1
+  s.visit_u8    ppu.wy
+  s.visit_u8    ppu.wx
+  s.visit_u8    ppu.vram_bank
+  s.visit_bytes ppu.pram
+  s.visit_u8    ppu.palette_index
+  s.visit_bool  ppu.auto_increment
+  s.visit_bytes ppu.obj_pram
+  s.visit_u8    ppu.obj_palette_index
+  s.visit_bool  ppu.obj_auto_increment
+  s.visit_bytes ppu.vram[0]
+  s.visit_bytes ppu.vram[1]
+  s.visit_bytes ppu.oam
+  s.visit_u8    ppu.hdma1
+  s.visit_u8    ppu.hdma2
+  s.visit_u8    ppu.hdma3
+  s.visit_u8    ppu.hdma4
+  s.visit_u8    ppu.hdma5
+  s.visit_u16   ppu.hdma_src
+  s.visit_u16   ppu.hdma_dst
+  s.visit_u16   ppu.hdma_pos
+  s.visit_bool  ppu.hdma_active
+  s.visit_bool  ppu.window_trigger
+  s.visit_i32   ppu.current_window_line
+  s.visit_bool  ppu.old_stat_flag
+  s.visit_bool  ppu.first_line
+  s.visit_i32   ppu.cycle_counter
+  s.visit_bool  ppu.ran_bios
+  s.visit_seq_u16 ppu.framebuffer
+  when S is Reader:
+    ppu.frame = false
+    # Renderer scratch isn't serialized; clear it so a load onto a running
+    # core (rollback) can't inherit stale per-line fetch state.
+    ppu.reset_render_scratch()
 
 # ---- APU ----
 
-proc save_channel_base(ch: GbSoundChannel; w: var Writer) =
-  w.write_bool(ch.enabled)
-  w.write_bool(ch.dac_enabled)
-  w.write_i32(int32(ch.length_counter))
-  w.write_bool(ch.length_enable)
+proc visit_channel_base[S](ch: GbSoundChannel; s: var S) =
+  s.visit_bool ch.enabled
+  s.visit_bool ch.dac_enabled
+  s.visit_i32  ch.length_counter
+  s.visit_bool ch.length_enable
 
-proc load_channel_base(ch: GbSoundChannel; r: var Reader) =
-  ch.enabled = r.read_bool()
-  ch.dac_enabled = r.read_bool()
-  ch.length_counter = int(r.read_i32())
-  ch.length_enable = r.read_bool()
+proc visit_channel_env[S](ch: GbVolumeEnvChannel; s: var S) =
+  visit_channel_base(ch, s)
+  s.visit_u8   ch.starting_volume
+  s.visit_bool ch.envelope_add_mode
+  s.visit_u8   ch.envelope_period
+  s.visit_u8   ch.envelope_timer
+  s.visit_u8   ch.current_volume
+  s.visit_bool ch.envelope_is_updating
 
-proc save_channel_env(ch: GbVolumeEnvChannel; w: var Writer) =
-  save_channel_base(ch, w)
-  w.write_u8(ch.starting_volume)
-  w.write_bool(ch.envelope_add_mode)
-  w.write_u8(ch.envelope_period)
-  w.write_u8(ch.envelope_timer)
-  w.write_u8(ch.current_volume)
-  w.write_bool(ch.envelope_is_updating)
-
-proc load_channel_env(ch: GbVolumeEnvChannel; r: var Reader) =
-  load_channel_base(ch, r)
-  ch.starting_volume = r.read_u8()
-  ch.envelope_add_mode = r.read_bool()
-  ch.envelope_period = r.read_u8()
-  ch.envelope_timer = r.read_u8()
-  ch.current_volume = r.read_u8()
-  ch.envelope_is_updating = r.read_bool()
-
-proc save_apu_state(apu: GbApu; w: var Writer) =
-  w.write_tag(GB_SEC_APU)
-  w.write_bool(apu.sound_enabled)
-  w.write_u8(uint8(apu.frame_sequencer_stage))
-  w.write_bool(apu.first_half_of_length_period)
-  w.write_bool(apu.left_enable)
-  w.write_u8(apu.left_volume)
-  w.write_bool(apu.right_enable)
-  w.write_u8(apu.right_volume)
-  w.write_u8(apu.nr51)
+proc visit_apu[S](apu: GbApu; s: var S) =
+  s.visit_tag GB_SEC_APU
+  s.visit_bool apu.sound_enabled
+  s.visit_u8   apu.frame_sequencer_stage
+  s.visit_bool apu.first_half_of_length_period
+  s.visit_bool apu.left_enable
+  s.visit_u8   apu.left_volume
+  s.visit_bool apu.right_enable
+  s.visit_u8   apu.right_volume
+  s.visit_u8   apu.nr51
   block:
     let ch = apu.channel1
-    save_channel_env(ch, w)
-    w.write_i32(int32(ch.wave_duty_position))
-    w.write_u8(ch.sweep_period)
-    w.write_bool(ch.negate)
-    w.write_u8(ch.shift)
-    w.write_u8(ch.sweep_timer)
-    w.write_u16(ch.frequency_shadow)
-    w.write_bool(ch.sweep_enabled)
-    w.write_bool(ch.negate_used)
-    w.write_u8(ch.duty)
-    w.write_u8(ch.length_load)
-    w.write_u16(ch.frequency)
+    visit_channel_env(ch, s)
+    s.visit_i32  ch.wave_duty_position
+    s.visit_u8   ch.sweep_period
+    s.visit_bool ch.negate
+    s.visit_u8   ch.shift
+    s.visit_u8   ch.sweep_timer
+    s.visit_u16  ch.frequency_shadow
+    s.visit_bool ch.sweep_enabled
+    s.visit_bool ch.negate_used
+    s.visit_u8   ch.duty
+    s.visit_u8   ch.length_load
+    s.visit_u16  ch.frequency
   block:
     let ch = apu.channel2
-    save_channel_env(ch, w)
-    w.write_i32(int32(ch.wave_duty_position))
-    w.write_u8(ch.duty)
-    w.write_u8(ch.length_load)
-    w.write_u16(ch.frequency)
+    visit_channel_env(ch, s)
+    s.visit_i32 ch.wave_duty_position
+    s.visit_u8  ch.duty
+    s.visit_u8  ch.length_load
+    s.visit_u16 ch.frequency
   block:
     let ch = apu.channel3
-    save_channel_base(ch, w)
-    w.write_bytes(ch.wave_ram)
-    w.write_u8(ch.wave_ram_position)
-    w.write_u8(ch.wave_ram_sample_buffer)
-    w.write_u8(ch.length_load)
-    w.write_u8(ch.volume_code)
-    w.write_u8(ch.volume_code_shift)
-    w.write_u16(ch.frequency)
+    visit_channel_base(ch, s)
+    s.visit_bytes ch.wave_ram
+    s.visit_u8    ch.wave_ram_position
+    s.visit_u8    ch.wave_ram_sample_buffer
+    s.visit_u8    ch.length_load
+    s.visit_u8    ch.volume_code
+    s.visit_u8    ch.volume_code_shift
+    s.visit_u16   ch.frequency
   block:
     let ch = apu.channel4
-    save_channel_env(ch, w)
-    w.write_u16(ch.lfsr)
-    w.write_u8(ch.length_load)
-    w.write_u8(ch.clock_shift)
-    w.write_u8(ch.width_mode)
-    w.write_u8(ch.divisor_code)
-
-proc load_apu_state(apu: GbApu; r: var Reader) =
-  r.expect_tag(GB_SEC_APU)
-  apu.sound_enabled = r.read_bool()
-  apu.frame_sequencer_stage = int(r.read_u8())
-  apu.first_half_of_length_period = r.read_bool()
-  apu.left_enable = r.read_bool()
-  apu.left_volume = r.read_u8()
-  apu.right_enable = r.read_bool()
-  apu.right_volume = r.read_u8()
-  apu.nr51 = r.read_u8()
-  block:
-    let ch = apu.channel1
-    load_channel_env(ch, r)
-    ch.wave_duty_position = int(r.read_i32())
-    ch.sweep_period = r.read_u8()
-    ch.negate = r.read_bool()
-    ch.shift = r.read_u8()
-    ch.sweep_timer = r.read_u8()
-    ch.frequency_shadow = r.read_u16()
-    ch.sweep_enabled = r.read_bool()
-    ch.negate_used = r.read_bool()
-    ch.duty = r.read_u8()
-    ch.length_load = r.read_u8()
-    ch.frequency = r.read_u16()
-  block:
-    let ch = apu.channel2
-    load_channel_env(ch, r)
-    ch.wave_duty_position = int(r.read_i32())
-    ch.duty = r.read_u8()
-    ch.length_load = r.read_u8()
-    ch.frequency = r.read_u16()
-  block:
-    let ch = apu.channel3
-    load_channel_base(ch, r)
-    r.read_bytes(ch.wave_ram)
-    ch.wave_ram_position = r.read_u8()
-    ch.wave_ram_sample_buffer = r.read_u8()
-    ch.length_load = r.read_u8()
-    ch.volume_code = r.read_u8()
-    ch.volume_code_shift = r.read_u8()
-    ch.frequency = r.read_u16()
-  block:
-    let ch = apu.channel4
-    load_channel_env(ch, r)
-    ch.lfsr = r.read_u16()
-    ch.length_load = r.read_u8()
-    ch.clock_shift = r.read_u8()
-    ch.width_mode = r.read_u8()
-    ch.divisor_code = r.read_u8()
-  # Restart audio pacing cleanly (see GBA load_apu_state)
-  apu.buffer_pos = 0
-  when not defined(test_harness) and not defined(emscripten):
-    if apu.audio_dev != 0:
-      sdl_clear_queued_audio_gb(apu.audio_dev)
+    visit_channel_env(ch, s)
+    s.visit_u16 ch.lfsr
+    s.visit_u8  ch.length_load
+    s.visit_u8  ch.clock_shift
+    s.visit_u8  ch.width_mode
+    s.visit_u8  ch.divisor_code
+  when S is Reader:
+    # Restart audio pacing cleanly (see the GBA visit_apu)
+    apu.buffer_pos = 0
+    when not defined(test_harness) and not defined(emscripten):
+      if apu.audio_dev != 0:
+        sdl_clear_queued_audio_gb(apu.audio_dev)
 
 # ---- Cartridge / MBC ----
 
@@ -456,35 +302,35 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
 
 proc gb_state_payload(gb: GB): string =
   var w = Writer()
-  save_cpu_state(gb.cpu, w)
-  save_irq_state(gb.interrupts, w)
-  save_timer_state(gb.timer, w)
-  save_serial_state(gb.serial, w)
-  save_joypad_state(gb.joypad, w)
-  save_mem_state(gb.memory, w)
+  visit_cpu(gb.cpu, w)
+  visit_irq(gb.interrupts, w)
+  visit_timer(gb.timer, w)
+  visit_serial(gb.serial, w)
+  visit_joypad(gb.joypad, w)
+  visit_mem(gb.memory, w)
   w.write_bool(gb.cgb_enabled)
   w.write_tag(GB_SEC_SCHED)
   gb.scheduler.save_to(w)
-  save_ppu_state(gb.ppu, w)
-  save_apu_state(gb.apu, w)
-  save_mbc_state(gb.cartridge, w)
+  visit_ppu(gb.ppu, w)
+  visit_apu(gb.apu, w)
+  save_mbc_state(gb.cartridge, w)   # asymmetric: see the section comment
   w.write_tag(GB_SEC_END)
   w.buf
 
 proc gb_apply_state(gb: GB; payload: string) =
   var r = Reader(buf: payload)
-  load_cpu_state(gb.cpu, r)
-  load_irq_state(gb.interrupts, r)
-  load_timer_state(gb.timer, r)
-  load_serial_state(gb.serial, r)
-  load_joypad_state(gb.joypad, r)
-  load_mem_state(gb.memory, r)
+  visit_cpu(gb.cpu, r)
+  visit_irq(gb.interrupts, r)
+  visit_timer(gb.timer, r)
+  visit_serial(gb.serial, r)
+  visit_joypad(gb.joypad, r)
+  visit_mem(gb.memory, r)
   gb.cgb_enabled = r.read_bool()
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r)
-  load_ppu_state(gb.ppu, r)
-  load_apu_state(gb.apu, r)
-  load_mbc_state(gb.cartridge, r)
+  visit_ppu(gb.ppu, r)
+  visit_apu(gb.apu, r)
+  load_mbc_state(gb.cartridge, r)   # asymmetric: see the section comment
   r.expect_tag(GB_SEC_END)
 
 proc gb_rom_checksum(gb: GB): uint32 =
