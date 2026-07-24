@@ -94,7 +94,12 @@ proc mem_tick_extra*(mem: GbMemory; gb: GB; total_expected: int) =
   mem_reset_cycle_count(mem)
 
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
-  if mem.bootrom.len > 0 and (idx < 0x100 or (idx >= 0x200 and idx < 0x900)):
+  # The CGB boot ROM is 0x900 bytes with a hole at 0x100..0x1FF, where the
+  # cartridge header shows through; the DMG one is a flat 0x100. Bounding by
+  # the actual length is what keeps a DMG boot ROM from being read past its
+  # end for every address up to 0x8FF.
+  if mem.bootrom.len > 0 and idx < mem.bootrom.len and
+     (idx < 0x100 or idx >= 0x200):
     return mem.bootrom[idx]
   case idx
   of 0x0000..0x3FFF: mbc_read(gb.cartridge, idx)
@@ -149,7 +154,10 @@ proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.next_dma_counter  = 0
 
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
-  if idx == 0xFF50 and val == 0x11:
+  # Any write with bit 0 set unmaps the boot ROM, permanently. The CGB boot
+  # ROM ends with 0x11 but the DMG one writes 0x01, so testing for 0x11 left
+  # a DMG boot ROM mapped forever and the cartridge never started.
+  if idx == 0xFF50 and (val and 1) != 0:
     mem.bootrom = @[]
     gb.cgb_enabled = gb.cgb_flag != cgbNone
   case idx
