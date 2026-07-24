@@ -1206,23 +1206,26 @@ const refreshRomsManageList = async () => {
 // and files are matched by name client-side from a full listing, which also
 // sidesteps escaping quotes in ROM names inside Drive `q` queries.
 
-// To enable this feature, create an OAuth client ID:
-//   1. console.cloud.google.com → create (or pick) a project
-//   2. APIs & Services → Library → enable "Google Drive API"
-//   3. APIs & Services → OAuth consent screen → add the
-//      .../auth/drive.appdata scope, and add yourself as a test user while
-//      the app is unverified
-//   4. APIs & Services → Credentials → Create credentials → OAuth client ID
-//      → type "Web application" → under "Authorized JavaScript origins" add
-//      every origin the app is served from (e.g. http://localhost:8000 and
-//      the deployed https origin). No redirect URIs are needed for the
-//      token flow.
-//   5. Paste the client ID below. This flow has no client secret.
-// While empty, the modal shows a "not configured" note instead of a
-// sign-in button, and the GIS script is never loaded.
-// The localStorage override lets a dev test a client ID per-origin without
-// committing it: localStorage.setItem("gdrive_client_id", "<id>") + reload.
-const GDRIVE_CLIENT_ID = localStorage.getItem("gdrive_client_id") || "";
+// The OAuth client ID below is PUBLIC BY DESIGN and safe in source: this is
+// the GIS token (implicit) flow, which has no client secret. What actually
+// protects the client is the "Authorized JavaScript origins" allowlist in the
+// Cloud Console — a token is only ever issued to a page served from a
+// registered origin — plus the drive.appdata scope, which can reach nothing
+// but this app's own hidden folder.
+//
+// Adding a new origin (each deployment, and each dev port):
+//   console.cloud.google.com → Google Auth Platform → Clients → this client →
+//   Authorized JavaScript origins. Scheme + host (+ port), no path, no
+//   trailing slash. Must be https unless it's localhost — Google rejects raw
+//   IP addresses, so an http://192.168.x.x LAN origin can never work.
+//   No redirect URIs are needed for the token flow.
+//
+// The localStorage override lets a dev point a build at a different client
+// without editing source: localStorage.setItem("gdrive_client_id", "<id>").
+// If this were ever emptied, the Drive section degrades to a "not configured"
+// note and the GIS script is never loaded.
+const GDRIVE_CLIENT_ID = localStorage.getItem("gdrive_client_id") ||
+  "44914400148-bkh9oiu6ian098gbg5jecns4js5d849f.apps.googleusercontent.com";
 
 // drive.appdata = access to the hidden app folder only (no other Drive
 // files); "email" lets the UI show which account is connected (via the
