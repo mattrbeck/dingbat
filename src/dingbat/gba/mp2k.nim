@@ -963,6 +963,9 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
   m.hook_addr  = pc                            # pc may carry the Thumb bit; the
   m.entry_addr = pc and not 1'u32              # hook compare uses it verbatim
   m.probing = false
+  # The hook just moved from "probing" to "armed" mid-frame; re-fold it into
+  # the CPU sentinel now rather than waiting for the next frame poll.
+  m.gba.refresh_hle_hook()
   m.dbg_hook_fires.inc
   m.mixer_hook()
 

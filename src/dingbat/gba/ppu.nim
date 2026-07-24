@@ -162,48 +162,56 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
   let ty_base         = int(tile_y) * 32
   let ty_extra        = if int(tile_y) >= 32 and bgcnt.screen_size == 0b11: 0x0400 else: 0
   let row_in_tile     = effective_row and 7
-  var prev_tile_x: uint32 = 0xFFFFFFFF'u32
-  var screen_entry: uint16
-  var tile_id: uint16
-  var flip_x_mask: int
-  var y: int
-  var tile_base_8bpp: uint32
-  var tile_base_4bpp: uint32
-  var palette_bank_shift: uint32
-  for col in 0..239:
+  # Walk the scanline one tile span at a time instead of one pixel at a time.
+  # The old loop recomputed the effective column, re-derived tile_x and tested
+  # it against the previous column's on all 240 pixels to catch the ~30 tile
+  # boundaries that actually matter, then re-tested is_8bpp per pixel. Spans
+  # hoist all of that: a span never crosses a tile boundary (and never wraps,
+  # since bg_width+1 is 256 or 512 — both multiples of 8), so the screen entry,
+  # tile row base, flip mask and palette bank are each computed once per tile.
+  let dst = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
+  let vram = cast[ptr UncheckedArray[uint8]](addr ppu.vram[0])
+  var col = 0
+  while col < 240:
     let effective_col = (uint32(col) + uint32(bghofs.offset)) and uint32(bg_width)
     let tile_x        = effective_col shr 3
-    if tile_x != prev_tile_x:
-      prev_tile_x = tile_x
-      let se_idx = ty_base + int(tile_x) + (if int(tile_x) >= 32: 0x03E0 else: 0) + ty_extra
-      screen_entry = uint16(ppu.vram[screen_base + uint32(se_idx) * 2 + 1]) shl 8 or
-                     uint16(ppu.vram[screen_base + uint32(se_idx) * 2])
-      tile_id = bits_range(screen_entry, 0, 9)
-      flip_x_mask = 7 * int(screen_entry shr 10 and 1)
-      y = int(row_in_tile) xor (7 * int(screen_entry shr 11 and 1))
-      if is_8bpp:
-        tile_base_8bpp = character_base + uint32(tile_id) * 0x40 + uint32(y) * 8
-      else:
-        tile_base_4bpp = character_base + uint32(tile_id) * 0x20 + uint32(y) * 4
-        palette_bank_shift = uint32(bits_range(screen_entry, 12, 15)) shl 4
-    let x = int(effective_col and 7) xor flip_x_mask
-    var pal_idx: uint32
+    let x_in_tile     = int(effective_col and 7)
+    let span          = min(8 - x_in_tile, 240 - col)
+    let se_idx = ty_base + int(tile_x) + (if int(tile_x) >= 32: 0x03E0 else: 0) + ty_extra
+    let screen_entry = uint16(vram[screen_base + uint32(se_idx) * 2 + 1]) shl 8 or
+                       uint16(vram[screen_base + uint32(se_idx) * 2])
+    let tile_id     = bits_range(screen_entry, 0, 9)
+    let flip_x_mask = 7 * int(screen_entry shr 10 and 1)
+    let y           = int(row_in_tile) xor (7 * int(screen_entry shr 11 and 1))
     if is_8bpp:
+      let tile_base = character_base + uint32(tile_id) * 0x40 + uint32(y) * 8
       # The BG unit can't fetch character data from OBJ VRAM; such tiles
       # render transparent (row bases are 4-byte aligned, so checking the
       # row start suffices)
-      if tile_base_8bpp >= 0x10000'u32:
-        pal_idx = 0
+      if tile_base >= 0x10000'u32:
+        for k in 0 ..< span: dst[col + k] = 0
       else:
-        pal_idx = uint32(ppu.vram[tile_base_8bpp + uint32(x)])
+        for k in 0 ..< span:
+          dst[col + k] = vram[tile_base + uint32((x_in_tile + k) xor flip_x_mask)]
     else:
-      if tile_base_4bpp >= 0x10000'u32:
-        pal_idx = 0
+      let tile_base = character_base + uint32(tile_id) * 0x20 + uint32(y) * 4
+      let bank = uint8(bits_range(screen_entry, 12, 15) shl 4)
+      if tile_base >= 0x10000'u32:
+        for k in 0 ..< span: dst[col + k] = 0
       else:
-        let palettes = ppu.vram[tile_base_4bpp + (uint32(x) shr 1)]
-        pal_idx = uint32((palettes shr (uint32(x and 1) * 4)) and 0xF)
-        if pal_idx > 0: pal_idx += palette_bank_shift
-    ppu.layer_palettes[bg][col] = uint8(pal_idx)
+        # A 4bpp tile row is exactly 4 bytes = 8 nibbles, and tile_base is
+        # 4-byte aligned (character_base, tile stride and row stride are all
+        # multiples of 4), so pull the whole row as one word and shift each
+        # pixel out. That replaces span byte loads with a single load, and the
+        # branchless bank add keeps the tail loop vectorizable.
+        let row = cast[ptr uint32](addr vram[tile_base])[]
+        for k in 0 ..< span:
+          let x = (x_in_tile + k) xor flip_x_mask
+          let p = uint8((row shr (uint32(x) * 4)) and 0xF)
+          # Palette index 0 is transparent in every bank, so it must NOT take
+          # the bank offset.
+          dst[col + k] = p or (if p != 0: bank else: 0'u8)
+    col += span
   if bgcnt.mosaic:
     let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
     if h > 1:
@@ -537,7 +545,13 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
 
 proc next_layer(ppu: PPU; pram_u16: ptr UncheckedArray[uint16];
                 enable_bits: uint16; col: int;
-                pos: var int): tuple[layer: int, color: uint16, blends: bool] =
+                pos: var int): tuple[layer: int, color: uint16, blends: bool]
+                {.inline.} =
+  ## Inlined deliberately: this runs 1-3 times per pixel on the windowed /
+  ## blending scanline path, and out of line the three-field tuple return was
+  ## going through memory (sret) on every call instead of staying in
+  ## registers. Inlining also lets the compiler hoist walk_n / walk_bgs /
+  ## bitmap_direct out of the column loop in `composite`.
   ## Scan the flattened layer walk starting at `pos` and return the next
   ## opaque pixel; layer 5 is the backdrop. `pos` encodes the walk index in
   ## its upper bits and "sprite already taken" in bit 0, so a caller can

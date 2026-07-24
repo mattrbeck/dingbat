@@ -51,6 +51,15 @@ proc main() =
     let emu = new_gba(bios, rom_path, run_bios = false, use_hle = bios.len == 0)
     emu.test_output = test_out
     emu.post_init()
+    # DINGBAT_BENCH_STATE loads a .state image before the warmup, so a
+    # benchmark can measure a specific in-game scene (a busy overworld or
+    # battle) instead of whatever the boot intro happens to be showing. The
+    # image must come from the same ROM — load_state_bytes rejects mismatches.
+    let state_path = getEnv("DINGBAT_BENCH_STATE")
+    if state_path.len > 0:
+      if not emu.load_state_bytes(readFile(state_path)):
+        echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
+        quit(1)
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
     if getEnv("DINGBAT_MP2K_SKIP") == "1":

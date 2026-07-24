@@ -328,6 +328,60 @@ when defined(gsprobe):
   var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
   var gsProbeIn*: bool
 
+const NO_HLE_HOOK* = 0xFFFFFFFF'u32
+  ## hle_hook_pc sentinel: no audio-HLE hook armed. A real hook PC is a
+  ## RAM-resident instruction address, so this can never collide.
+
+proc refresh_hle_hook*(gba: GBA) =
+  ## Recompute the CPU's collapsed audio-HLE hook sentinel. Called once per
+  ## frame (after the driver frame polls) and again whenever MP2K learns its
+  ## mixer entry mid-frame, so every arm/disarm/re-point is picked up.
+  ##
+  ## One slot serves both drivers because they are mutually exclusive by
+  ## construction: gs_frame_poll refuses to engage once MP2K has learned a
+  ## hook, and MP2K only ever probes on its own SoundInfo ident, which the
+  ## Camelot work area never presents.
+  var pc = NO_HLE_HOOK
+  var probing = false
+  if gba.mp2k_hle:
+    if gba.mp2k != nil:
+      if gba.mp2k.hook_addr != 0xFFFFFFFF'u32: pc = gba.mp2k.hook_addr
+      elif gba.mp2k.probing: probing = true
+    if pc == NO_HLE_HOOK and gba.gs_bon != nil and gba.gs_bon.engaged:
+      pc = gba.gs_bon.hook_addr
+  gba.cpu.hle_hook_pc = pc
+  gba.cpu.hle_probing = probing
+
+proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
+  ## Run whichever audio-HLE hook is armed at `cur`. Returns true when the
+  ## caller must leave tick immediately because PC was rewritten.
+  let gba = cpu.gba
+  let m = gba.mp2k
+  if m != nil and cur == m.hook_addr:
+    m.dbg_hook_fires.inc
+    m.mixer_hook()
+    if m.skip:
+      m.dbg_skip_fires.inc
+      # EXPERIMENTAL perf probe: BX LR to skip the real mixer body and
+      # reclaim its CPU cycles. The hook sits at the mixer's entry, BEFORE
+      # any stack push, so r14 still holds the return address and sp is
+      # untouched. NOT correct (the engine's per-frame envelope ramp normally
+      # happens inside this function) — this measures the performance ceiling
+      # of an aggressive HLE only, not a shippable path.
+      let lr = cpu.r[14]
+      cpu.cpsr.thumb = (lr and 1) != 0
+      cpu.r[15] = if cpu.cpsr.thumb: lr and not 1'u32 else: lr and not 3'u32
+      cpu.clear_pipeline()
+      return true
+    return false
+  # Camelot "Bon" HLE (Golden Sun) mixer-entry hook — fires once per frame at
+  # the driver's per-channel processing entry. Shadow-only: reads state,
+  # never alters control flow.
+  let g = gba.gs_bon
+  if g != nil and g.engaged and cur == g.hook_addr:
+    g.gs_mixer_hook()
+  false
+
 proc tick*(cpu: CPU) =
   # Take a pending IRQ before the IntrWait re-halt check: the handler must
   # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
@@ -366,52 +420,26 @@ proc tick*(cpu: CPU) =
         cpu.set_sys_sp(usp)
   if not cpu.halted:
     cpu.instr_exc_return = false
-    # EXPLORATORY: MP2K HLE mixer hook. When enabled and PC reaches the
-    # engine's (runtime-learned) SoundMainRAM entry, refresh the shadow mixer
-    # from SoundInfo. The real function still runs afterwards (shadow mixing),
-    # so this only reads state — it does not alter control flow or timing.
-    # Until the entry is learned, and only while the frame poll has armed
-    # probing (SoundInfo ident magic present), watch for the first RAM-fetched
-    # instruction with r0 == &SoundInfo while the engine lock is held: that is
-    # the mixer entry (see mp2k.nim "Runtime detection").
-    if cpu.gba.mp2k_hle and cpu.gba.mp2k != nil:
-      let m = cpu.gba.mp2k
-      if m.hook_addr != 0xFFFFFFFF'u32:
-        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-        if cur == m.hook_addr:
-          m.dbg_hook_fires.inc
-          m.mixer_hook()
-          if m.skip:
-            m.dbg_skip_fires.inc
-            # EXPERIMENTAL perf probe: BX LR to skip the real mixer body and
-            # reclaim its CPU cycles. The hook sits at the mixer's entry,
-            # BEFORE any stack push, so r14 still holds the return address and
-            # sp is untouched. NOT correct (the engine's per-frame envelope
-            # ramp normally happens inside this function) — this measures the
-            # performance ceiling of an aggressive HLE only, not a shippable
-            # path.
-            let lr = cpu.r[14]
-            cpu.cpsr.thumb = (lr and 1) != 0
-            cpu.r[15] = if cpu.cpsr.thumb: lr and not 1'u32 else: lr and not 3'u32
-            cpu.clear_pipeline()
-            return
-      elif m.probing:
+    # EXPLORATORY: audio-HLE mixer hooks (MP2K's runtime-learned SoundMainRAM
+    # entry, its bounded learning probe, and the Camelot "Bon" entry). All
+    # three fire at most once per frame but sat on the per-instruction path,
+    # each re-testing its own enable flag + driver pointer + address — more
+    # host time than the mixing itself. They now share one sentinel compare
+    # (see refresh_hle_hook); the work moves out of line into fire_hle_hook.
+    # With HLE off this is a single load and a perfectly-predicted branch.
+    if cpu.hle_hook_pc != NO_HLE_HOOK or cpu.hle_probing:
+      let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+      if cur == cpu.hle_hook_pc:
+        if cpu.fire_hle_hook(cur): return
+      elif cpu.hle_probing:
         # Learning probe (bounded: engine-init to first mixer pass). Inline
         # prefilter: RAM-region PC and r0 == &SoundInfo; the out-of-line probe
         # does the lock check and the learn.
-        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+        let m = cpu.gba.mp2k
         let region = cur shr 24
         if (region == 0x02'u32 or region == 0x03'u32) and
            cpu.r[0] == m.probe_sound_info:
           m.probe_pc(cur)
-    # Camelot "Bon" HLE (Golden Sun) mixer-entry hook — fires once
-    # per frame at the driver's per-channel processing entry (see gs_bon.nim).
-    # Shadow-only: reads state, never alters control flow.
-    if cpu.gba.mp2k_hle and cpu.gba.gs_bon != nil and cpu.gba.gs_bon.engaged:
-      let g = cpu.gba.gs_bon
-      let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-      if cur == g.hook_addr:
-        g.gs_mixer_hook()
     when defined(gsprobe):
       # Throwaway Golden Sun "Bon" mixer probe: histogram of executed IWRAM
       # PCs + entry events (outside IWRAM -> inside), with caller LR/r0-r3.

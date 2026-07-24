@@ -90,3 +90,12 @@ __pycache__/
 /*.gba
 /*.zip
 /*.sav
+
+# Browser perf bench: ROMs/states are supplied locally (see web/bench/README.md)
+web/bench/*.gba
+web/bench/*.gb
+web/bench/*.gbc
+web/bench/*.state
+web/bench/*.sav
+dingbat_bench_d
+dingbat_bench_orig

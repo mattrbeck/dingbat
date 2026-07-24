@@ -340,6 +340,18 @@ type
     last_non_waitloop*:          uint32
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
+    # Audio-HLE hook dispatch, collapsed to one hot-path compare. The MP2K
+    # mixer hook, its bounded learning probe, and the Camelot "Bon" hook all
+    # sit on the per-instruction path but fire at most once per frame, so
+    # testing each one's enable flag + pointer + address every instruction
+    # cost more than the mixing itself. Instead every arming site calls
+    # refresh_hle_hook, which folds them into a single sentinel:
+    #   hle_hook_pc  -- the pre-pipeline PC that fires a hook, or NO_HLE_HOOK
+    #   hle_probing  -- true only during the bounded MP2K learning probe
+    # Both are false/sentinel whenever audio HLE is off, so the non-HLE path
+    # pays one load and one perfectly-predicted branch.
+    hle_hook_pc*:                uint32
+    hle_probing*:                bool
 
   SpritePixel* = object
     priority*: uint16
@@ -1120,6 +1132,10 @@ proc step_frame*(gba: GBA) =
   # magic + code-fingerprint detection (see gs_bon.nim).
   if gba.mp2k_hle and gba.gs_bon != nil:
     gba.gs_bon.gs_frame_poll()
+  # Fold whatever the polls just armed (and any external mp2k_hle toggle) into
+  # the CPU's single hot-path hook sentinel. Unconditional: this is also what
+  # disarms the hook when the setting is turned off or a driver tears down.
+  gba.refresh_hle_hook()
   gba.cpu.count_cycles = 0
   while gba.ppu.frame == 0:
     gba.cpu.tick()

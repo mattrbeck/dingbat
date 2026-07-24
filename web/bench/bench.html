@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>dingbat perf bench</title>
+  <style>
+    body { font: 13px/1.5 ui-monospace, monospace; background:#111; color:#ddd; padding:16px; }
+    pre { white-space: pre-wrap; }
+    #out { border:1px solid #333; padding:8px; min-height:200px; }
+  </style>
+</head>
+<body>
+<h3>dingbat throughput bench</h3>
+<canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
+<pre id="out">booting…</pre>
+<script>
+// NOTE: em.js declares plenty of short top-level names (`out`, `err`, `log`…).
+// Everything here is scoped inside an IIFE / on `window` to avoid colliding.
+const bOut = document.getElementById("out");
+const bLog = (s) => { bOut.textContent += s + "\n"; console.log(s); };
+window.benchReady = false;
+
+var Module = {
+  canvas: document.getElementById("sdl-canvas"),
+  preRun: [],
+  onRuntimeInitialized: () => { window.benchRuntimeUp = true; },
+};
+
+// Fetch ROM + state before the module boots so preRun can plant the ROM in FS.
+const romP = fetch("PokemonFireRed.gba").then(r => r.arrayBuffer());
+const stP  = fetch("PokemonFireRed.state").then(r => r.arrayBuffer());
+
+let ROM = null, STATE = null;
+
+window.benchInit = async () => {
+  ROM = new Uint8Array(await romP);
+  STATE = new Uint8Array(await stP);
+  Module.FS.writeFile("PokemonFireRed.gba", ROM);
+  Module.ccall("initFromEmscripten", null, ["string"], ["PokemonFireRed.gba"]);
+  return { rom: ROM.length, state: STATE.length };
+};
+
+// Load the save state into the live core.
+window.benchLoadState = () => {
+  const p = Module._malloc(STATE.length);
+  // Build the heap view AFTER _malloc — growth can detach the old buffer.
+  new Uint8Array(Module.memory.buffer, p, STATE.length).set(STATE);
+  const ok = Module._wasm_load_state(p, STATE.length);
+  Module._free(p);
+  return ok === 1;
+};
+
+window.benchSetHle = (on) => {
+  Module._wasm_set_mp2k_hle(on ? 1 : 0);
+  return Module._wasm_hle_audio_active ? Module._wasm_hle_audio_active() : -1;
+};
+
+window.benchHleActive = () => Module._wasm_hle_audio_active();
+
+// Run `frames` frames of pure emulation, return fps. Audio buffer is drained
+// so the wasm-side ring doesn't grow without bound across a long run.
+window.benchRun = (frames) => {
+  const t0 = performance.now();
+  Module._benchFrames(frames);
+  const ms = performance.now() - t0;
+  if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+  return { frames, ms, fps: frames * 1000 / ms };
+};
+
+// Median-of-N trial for stable numbers.
+window.benchTrial = (frames, reps) => {
+  const r = [];
+  for (let i = 0; i < reps; i++) r.push(window.benchRun(frames).fps);
+  r.sort((a, b) => a - b);
+  return { median: r[(r.length / 2) | 0], min: r[0], max: r[r.length - 1], all: r };
+};
+</script>
+<script async src="../em.js"></script>
+</body>
+</html>
