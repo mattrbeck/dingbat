@@ -884,34 +884,23 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* iOS installed-to-home-screen (standalone) mode: WebKit treats the status
-   bar like collapsible browser chrome and shorts the layout viewport by its
-   height, top-anchored — device log on an iPhone 13 mini (812pt screen):
-   inner 375x762, vh/svh/dvh 812/762/762, standalone true. The bottom 50pt
-   of the screen went unused: the stage lost height (narrowing the game
-   frame) and a dead band sat under the touch controls. Standalone has no
-   real collapsible chrome, so the large viewport (100vh = the full screen)
-   is the correct, stable height there; top:0 + height wins over the inset
-   bottom. Browser tabs keep the inset sizing above. */
+/* iOS installed-to-home-screen (standalone) mode: WebKit shorts the layout
+   viewport, top-anchored — device log on an iPhone 13 mini (812pt screen):
+   inner 375x762, vh/svh/dvh 812/762/762, standalone true. The 50pt below the
+   small viewport (762..812) is NOT part of the web page: iOS paints it with the
+   PWA manifest background_color, which CSS can't reach.
+
+   We used to force body height:100vh (the full 812) to "reclaim" that band —
+   but that pushed Select/Start and the bottom of the home ROM list INTO it,
+   where the dark manifest colour is composited over them: the reported dark bar
+   covering the buttons. Size to the small viewport instead (100svh = the always
+   -visible 762) so all interactive content stays above the band. The band is
+   still there below, but it now sits under nothing — it can only be recoloured
+   via the manifest (see site.webmanifest), not CSS. svh (iOS 15.4+) falls back
+   to the inset:0 sizing above, which is the same 762 on older iOS. */
 @media (display-mode: standalone) {
   body {
-    height: 100vh;
-  }
-  /* Legacy status-bar iPhones (home-button class, e.g. SE 1st gen on iOS 15):
-     the standalone webview sits BELOW the opaque 20pt status bar instead of
-     under an overlaying one, so 100vh (the full screen) overhangs the screen
-     bottom by exactly those 20pt — clipping Select/Start. Detect the case by
-     its signature, safe-area-inset-top = 0 (notch devices report >= 44px and
-     the max() zeroes the correction). iOS-only via -webkit-touch-callout so
-     Android/desktop PWAs (where inset-top is also 0 but 100vh is already the
-     window height) keep the plain sizing; ditto legacy landscape, where iOS
-     hides the status bar. */
-  @supports (-webkit-touch-callout: none) {
-    @media (orientation: portrait) {
-      body {
-        height: calc(100vh - max(0px, 20px - env(safe-area-inset-top, 0px)));
-      }
-    }
+    height: 100svh;
   }
 }
 
