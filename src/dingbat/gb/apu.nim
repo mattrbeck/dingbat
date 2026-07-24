@@ -91,7 +91,6 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   else: discard
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
-  gb.scheduler.schedule_gb(GB_FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: GbApu; gb: GB) =
   let c1 = if apu.channel_mask[0]: ch1_get_amplitude(apu.channel1) else: 0.0'f32
@@ -220,7 +219,8 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       echo "Warning: GB failed to open audio device"
       result.audio_dev = 0
   let apu = result
-  tick_frame_sequencer(apu, gb)
+  # No frame-sequencer event to prime: it is clocked by the divider now
+  # (timer.nim), so it starts on the first falling edge of the DIV tap.
   get_sample(apu, gb)
 
 proc apu_read*(apu: GbApu; idx: int): uint8 =

@@ -55,12 +55,29 @@ proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
         t.countdown = 4
   t.previous_bit = current_bit
 
+proc apu_div_bit(gb: GB): int {.inline.} =
+  ## Which bit of the internal divider clocks the APU frame sequencer.
+  ##
+  ## Pan Docs: the DIV-APU counter steps on a FALLING edge of DIV bit 4 (bit 5
+  ## in double speed). DIV is the divider's high byte, so DIV bit 4 is internal
+  ## bit 12: it toggles every 4096 counts, i.e. a 8192-count period = 512 Hz at
+  ## 4.194304 MHz. In double speed the divider runs twice as fast, so the tap
+  ## moves up one bit to keep the sequencer at 512 Hz.
+  12 + int(gb.memory.current_speed)
+
 proc timer_tick*(t: GbTimer; gb: GB; cycles: int) =
   let serial = gb.serial
+  let apu_bit = apu_div_bit(gb)
   for _ in 0 ..< cycles:
     if t.countdown > -1: dec t.countdown
     if t.countdown == 0: timer_reload_tima(t, gb)
+    let apu_before = (t.tdiv shr apu_bit) and 1
     t.tdiv = t.tdiv + 1
+    # Frame sequencer is clocked BY the divider, not by its own timer — so a
+    # DIV write (below) or a speed switch shifts its phase, exactly as on
+    # hardware. Edge is computed within the tick, so nothing extra to persist.
+    if apu_before == 1 and ((t.tdiv shr apu_bit) and 1) == 0:
+      tick_frame_sequencer(gb.apu, gb)
     timer_check_edge(t, gb)
     if serial.shifting: serial_tick(serial, gb)
 
@@ -75,7 +92,12 @@ proc timer_read*(t: GbTimer; idx: int): uint8 =
 proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   case idx
   of 0xFF04:
+    # Resetting DIV drops every divider bit at once. If the APU tap was high,
+    # that is a falling edge and the frame sequencer steps EARLY — this is what
+    # SameSuite's apu/div_* tests check, and games use it to phase-lock audio.
+    let apu_before = (t.tdiv shr apu_div_bit(gb)) and 1
     t.tdiv = 0
+    if apu_before == 1: tick_frame_sequencer(gb.apu, gb)
     timer_check_edge(t, gb, on_write = true)
     # The serial clock tap sees the reset too; a high->low transition of
     # the tapped bit shifts (gambatte start_late_div_write serial tests)

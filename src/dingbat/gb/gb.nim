@@ -731,7 +731,11 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
   let gb {.cursor.} = gb
   result = proc(kind: EventType) =
     case kind
-    of etAPUFrameSeq:  tick_frame_sequencer(gb.apu, gb)
+    of etAPUFrameSeq:
+      # The frame sequencer is divider-clocked (timer.nim); nothing schedules
+      # this any more. The case stays so a pre-change save state carrying a
+      # pending event still loads, and is deliberately a no-op.
+      discard
     of etAPUSample:    get_sample(gb.apu, gb)
     of etAPUChannel1:  ch1_step(gb.apu.channel1, gb)
     of etAPUChannel2:  ch2_step(gb.apu.channel2, gb)
