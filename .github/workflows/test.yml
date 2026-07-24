@@ -1,5 +1,7 @@
 name: Test Suite
-on: [push, pull_request]
+# workflow_dispatch so a suspected flake can be re-run on demand (gh workflow
+# run "Test Suite") without pushing a dummy commit.
+on: [push, pull_request, workflow_dispatch]
 jobs:
   test:
     strategy:
