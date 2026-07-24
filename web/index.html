@@ -33,18 +33,14 @@
       // shorts the standalone layout viewport by the status-bar height (see
       // the display-mode:standalone note in styles.css — 812pt screen, 762pt
       // viewport on an iPhone 13 mini), and our body is forced to 100vh so
-      // content deliberately runs into that bottom band. When a theme-color
-      // meta exists, iOS paints the outside-the-layout-viewport band with it:
-      // an opaque bar over Select/Start and the bottom of the home list. The
-      // meta buys nothing in standalone (no browser tab chrome to tint), so
-      // remove it there before first paint. Browser tabs keep the tinting;
-      // Android PWAs keep it too (navigator.standalone is iOS-only).
+      // content runs into that bottom band. iOS paints that below-the-viewport
+      // band with the theme-color meta — so it must match the SCREEN BOTTOM
+      // (the controls deck / page --bg), or it reads as a bar over Select/Start
+      // and the home list. Removing the meta doesn't help: iOS then paints the
+      // band its default black. index.js sets the exact --bg once CSS loads;
+      // here we just seed a close value so first paint isn't black.
       try {
         var themeMeta = document.querySelector('meta[name="theme-color"]');
-        if (navigator.standalone === true && themeMeta) {
-          themeMeta.remove();
-          themeMeta = null;
-        }
         var t = localStorage.getItem("dingbat_theme");
         if (t === "emerald") t = "kiwi"; // renamed to the GBC's original color name
         if (t && t !== "amber") {

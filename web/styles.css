@@ -858,6 +858,13 @@
  * ==========================================================
  */
 
+html {
+  /* Paint the viewport canvas so no region the fixed body doesn't cover — iOS
+     safe-area insets, the standalone below-the-viewport band — shows the
+     browser's default black behind us. Follows the theme via --bg. */
+  background: var(--bg);
+}
+
 body {
   margin: 0;
   /* Fill the layout viewport (the fixed-positioning containing block).

@@ -4102,10 +4102,13 @@ const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
 // value persisted under the old name so it doesn't fall back to Amber.
 const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
 const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
-// Null on iOS standalone: the <head> boot script removes the meta there (iOS
-// paints the below-the-layout-viewport band with theme-color, drawing an
-// opaque bar over our 100vh body's bottom edge — see the boot script note).
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+// iOS standalone paints the below-the-layout-viewport band at the SCREEN BOTTOM
+// (over Select/Start + the home list) with theme-color, so there it must match
+// the deck/page bottom (--bg), not the top bar. In a browser tab theme-color
+// tints the browser chrome, which meets the top bar (--topbar-top).
+const IS_STANDALONE = navigator.standalone === true ||
+  matchMedia("(display-mode: standalone)").matches;
 
 const applyTheme = (name) => {
   name = migrateTheme(name);
@@ -4121,12 +4124,13 @@ const applyTheme = (name) => {
   // live token so the CSS stays the single source of truth (the inline boot
   // script's map is only a pre-CSS hint).
   if (themeColorMeta) {
-    // The top bar meets the browser/status-bar chrome, so match --topbar-top
-    // (the shell colour on device themes), falling back to --bg.
     const cs = getComputedStyle(document.documentElement);
-    themeColorMeta.content =
-      (cs.getPropertyValue("--topbar-top").trim() ||
-       cs.getPropertyValue("--bg").trim());
+    const bg = cs.getPropertyValue("--bg").trim();
+    const topbar = cs.getPropertyValue("--topbar-top").trim();
+    // Standalone: theme-color is the bottom band → match the deck/page bottom
+    // (--bg) so it blends in. Browser tab: it tints the chrome that meets the
+    // top bar → match --topbar-top.
+    themeColorMeta.content = IS_STANDALONE ? (bg || topbar) : (topbar || bg);
   }
 };
 
