@@ -1296,9 +1296,30 @@ const GDRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata email";
 const GDRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
 const GDRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 
-let gdriveToken = null;       // access token, in memory only
+let gdriveToken = null;       // access token
+let gdriveTokenExp = 0;       // epoch ms the access token stops being valid
 let gdriveEmail = null;       // best-effort display of the signed-in account
 let gdriveTokenClient = null; // GIS token client, created after script load
+
+// Persist the access token + expiry so a reload within its lifetime (~1h)
+// resumes with NO popup. The token model gives no refresh token and its
+// re-grant is a gesture-gated popup, so without this every reload — and every
+// app update, which force-reloads — lands signed out until the user interacts.
+// The token is short-lived, scoped to drive.appdata + email, and same-origin;
+// storing it beside the other Drive state is an acceptable trade for not
+// dropping the session on every update.
+const persistDriveToken = () => {
+  syncState.token = gdriveToken;
+  syncState.tokenExp = gdriveTokenExp;
+  saveSyncState();
+};
+const clearDriveToken = () => {
+  gdriveToken = null;
+  gdriveTokenExp = 0;
+  syncState.token = null;
+  syncState.tokenExp = 0;
+  saveSyncState();
+};
 
 // The GIS script loads lazily on first interaction so normal page loads
 // never touch Google's servers.
@@ -1335,6 +1356,10 @@ const gdriveAcquireToken = async (promptMode) => {
         return;
       }
       gdriveToken = resp.access_token;
+      // expires_in is seconds; keep a 60s margin so we never send a token that
+      // expires mid-request.
+      gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
+      persistDriveToken();
       resolve();
     };
     gdriveTokenClient.error_callback = (err) => {
@@ -1374,7 +1399,7 @@ const driveFetch = async (url, opts = {}) => {
     try {
       await gdriveAcquireToken("");
     } catch {
-      gdriveToken = null;
+      clearDriveToken();
       renderGdriveSection();
       throw new Error("Google session expired — sign in again");
     }
@@ -1486,10 +1511,9 @@ const gdriveSignOut = () => {
   if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(gdriveToken, () => {});
   }
-  gdriveToken = null;
   gdriveEmail = null;
   syncState.connected = false;
-  saveSyncState();
+  clearDriveToken(); // also drops the persisted token + saves
   // Stand down background sync. Queued work stays on disk rather than being
   // dropped: sign back in and it flushes then.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
@@ -1595,6 +1619,8 @@ const loadSyncState = async () => {
       sigs: s.sigs && typeof s.sigs === "object" ? s.sigs : {},
       rmt: s.rmt && typeof s.rmt === "object" ? s.rmt : {},
       connected: !!s.connected,
+      token: typeof s.token === "string" ? s.token : null,
+      tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
     };
   }
 };
@@ -2221,6 +2247,41 @@ const armDriveResumeOnGesture = () => {
     resumeDriveSession();
   };
   events.forEach((e) => window.addEventListener(e, onGesture, true));
+};
+
+// Boot resume. If the persisted access token is still within its lifetime,
+// reuse it directly — no popup, no gesture — so a reload or app update doesn't
+// drop the session. The token is confirmed live via the tokeninfo endpoint (a
+// plain fetch, never a popup), so a revoked token falls back to the
+// gesture-gated re-grant instead of flashing a blocked popup. Only when there's
+// no usable token do we arm the first-gesture re-grant.
+const resumeDriveOnBoot = async () => {
+  if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
+  if (syncState.token && syncState.tokenExp > Date.now() + 5000) {
+    gdriveToken = syncState.token;
+    gdriveTokenExp = syncState.tokenExp;
+    let live = false;
+    try {
+      const r = await fetch(
+        "https://oauth2.googleapis.com/tokeninfo?access_token=" +
+          encodeURIComponent(gdriveToken),
+      );
+      live = r.ok;
+      if (live) gdriveEmail = (await r.json()).email || null;
+    } catch {
+      // Offline at boot: keep the token rather than signing out; the normal
+      // sync path retries and its 401 handling covers a genuinely dead token.
+      live = true;
+    }
+    if (live) {
+      refreshSyncUI();
+      refreshHomeRecent();
+      pullSync();
+      return;
+    }
+    clearDriveToken();
+  }
+  armDriveResumeOnGesture();
 };
 
 // --- Sync triggers --------------------------------------------------------
@@ -5205,12 +5266,10 @@ var Module = {
     await loadRomsSort();
     refreshSyncUI();
     startSyncTriggers();
-    // The access token is memory-only, so a reload lands signed out. If this
-    // browser was connected before, re-grant silently — but only on the first
-    // user gesture, since the token popup is gesture-gated (see
-    // armDriveResumeOnGesture). Requesting it here on load would just trip the
-    // popup blocker and flag the address bar.
-    armDriveResumeOnGesture();
+    // Resume Drive: reuse a still-valid persisted token with no popup (so an
+    // app update / reload keeps the session), else re-grant on the first user
+    // gesture (the token popup is gesture-gated). See resumeDriveOnBoot.
+    resumeDriveOnBoot();
     refreshHomeRecent();
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
