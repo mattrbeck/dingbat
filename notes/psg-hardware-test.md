@@ -1,56 +1,41 @@
 # Validating the PSG against real hardware
 
-Two GB/GBA sound behaviours in dingbat currently rest on argument rather than
-measurement. Both are testable on real hardware with a flash cart. This note
-records what to test, how, and what each result would mean.
+Two GB/GBA sound behaviours rested on argument rather than measurement. One is
+now settled in software (see below) by implementing PCM12/PCM34 and running
+SameSuite; the other still wants a flash cart. This note records what was
+measured, and what is left to test on hardware.
 
-## Open question 1 — the wave-channel trigger delay (magnitude)
+Also recorded here: SameSuite APU is now a usable oracle for dingbat, and it
+says the GB APU has a lot of headroom — 8/70 as of this writing.
 
-`common/psg_envelope.nim` restarts channel 3's frequency timer at
-`period + PSG_WAVE_TRIGGER_DELAY`, where the delay is 6 CPU cycles on the GB.
-That 6 is inherited emulator lore: it is **not** in GBATEK, **not** in Pan Docs,
-and predates dingbat's git history. What Pan Docs *does* establish is that some
-startup delay is real — triggering CH3 doesn't immediately play wave RAM, and
-the first sample read is index 1 rather than 0.
+## RESOLVED — the wave-channel trigger delay is 5-6 T-cycles
 
-### How to measure it (CGB, cheapest and most precise)
+Originally open, now settled *without* hardware. SameSuite's apu tests observe
+the channels through the CGB's **PCM12/PCM34** registers ($FF76/$FF77, read-only
+mirrors of each channel's current 4-bit digital output). dingbat stubbed both to
+`0x00`, so every PCM-based test failed at the observation layer and told us
+nothing. Implementing them turned the suite into a working oracle.
 
-The CGB exposes **PCM34 at $FF77** (read-only, undocumented but well known):
-low nibble = channel 3's current PCM amplitude. This is exactly how LIJI32's
-SameSuite observes wave-channel timing from the CPU — see
-`apu/channel_3/channel_3_freq_change_delay.asm`, which reads `rPCM34` at swept
-cycle offsets to find where a behaviour boundary lands.
+Sweeping `PSG_WAVE_TRIGGER_DELAY` against the two tests that pin it down:
 
-Procedure:
+| delay | channel_3_restart_delay | channel_3_shift_delay |
+|-------|-------------------------|-----------------------|
+| 3     | FAIL                    | FAIL                  |
+| 4     | FAIL                    | FAIL                  |
+| 5     | **PASS**                | **PASS**              |
+| 6     | **PASS**                | **PASS**              |
+| 7     | FAIL                    | FAIL                  |
+| 8     | FAIL                    | FAIL                  |
+| 9     | FAIL                    | FAIL                  |
+| 12    | FAIL                    | FAIL                  |
 
-1. Fill wave RAM with a ramp so every sample index is distinguishable
-   (`$01 $23 $45 ...` gives sample *i* the value *i*).
-2. Pick a slow period so single-cycle resolution is easy to read
-   (small `n` in NR33/NR34 → long `(2048-n)*2` T-cycle sample period).
-3. Enable the DAC (NR30 = $80), set volume to 100% (NR32 = $20).
-4. Trigger (NR34 bit 7), then execute exactly *N* `nop`s, then `ld a, [$FF77]`.
-5. Sweep *N* over a range covering the expected delay and record the amplitude
-   for each. The *N* at which the value first changes from the pre-trigger
-   sample to sample index 1 is the trigger→first-fetch delay in T-cycles.
-6. Run the identical ROM under dingbat (`--mode=sram`, dumping results to cart
-   RAM) and diff the two tables.
+SameSuite is validated against real CGB hardware, so this is hardware evidence at
+one remove: the delay is real, and 5-6 T-cycles. The tests can't separate 5 from
+6; dingbat uses 6. That also retroactively justifies scaling it x4 for the GBA —
+it is a genuine physical delay, not a fudge, so it must be expressed in each
+core's cycle units.
 
-A table that matches with the constant at 6 confirms the inherited value; a
-consistent offset tells you the correct one directly.
-
-### Cheaper first step — run the suites that already exist
-
-Before writing anything, run these on hardware and on dingbat and diff:
-
-* **SameSuite** `apu/channel_3/*` (hardware-verified against a real CGB)
-* **blargg** `dmg_sound` / `cgb_sound`
-
-Both are already downloaded into the test ROM cache. Note two gaps on our side:
-`dingbat_test_runner` does **not** run either sound suite (only `cpu_instrs`,
-`instr_timing`, `mem_timing`), and while `dmg_sound` 01-04 pass via
-`--mode=sram --model=dmg`, subtests 05-12 and all of `cgb_sound` never report a
-result under our harness. Worth fixing regardless of the hardware work — that is
-free coverage we already have on disk.
+No flash cart needed for this one after all.
 
 ## Open question 2 — GBA wave RAM bank selection (suspected bug, NOT yet fixed)
 
@@ -84,7 +69,7 @@ This one needs no amplitude readback, so it is much easier than question 1:
 Do this with the channel both enabled and disabled — the enabled case also
 settles whether the GB's play-position aliasing applies on GBA.
 
-## Why question 1 can't be measured directly on a GBA
+## Why the delay can't be measured directly on a GBA
 
 The GBA has **no** equivalent of PCM12/PCM34 — GBATEK documents no register
 exposing PSG output amplitude, and those two are CGB-only. Combined with the
@@ -100,3 +85,48 @@ in each core's cycle units. GBATEK's identical sample-rate formula
 
 A GBA/GBA SP running a `.gbc` on the flash cart exercises the CGB core, not the
 GBA's native sound path, so it validates the PSG value but not the GBA wiring.
+
+## Current SameSuite APU standing (GB core)
+
+Implementing PCM12/PCM34 took the suite from 3/70 to 8/70 — the gain is small
+but the point is that the remaining 62 failures are now *real* results about the
+APU rather than artefacts of a missing observation register.
+
+```
+                              before   after
+SameSuite apu (70 tests)       3        8
+  channel_1 (21)               0        0
+  channel_2 (16)               0        0
+  channel_3 (16)               3        5
+  channel_4 (11)               0        0
+  div_* (5)                    0        0
+```
+
+These are demanding tests — they check APU behaviour at single-T-cycle
+resolution and alignment against DIV, which dingbat's event-scheduler APU does
+not currently model. Treat 8/70 as a baseline to improve against, not as a
+regression. `channel_3_restart_delay` and `channel_3_shift_delay` are the two
+that pinned down the trigger delay above.
+
+To run them:
+
+```
+./dingbat_test <rom> --mode=mooneye --color --model=cgb --timeout=3000
+```
+
+SameSuite uses the mooneye convention (`LD B,B` then B=3 C=5 D=8 E=13 H=21 L=34).
+The ROMs ship in the test-ROM bundle under `same-suite/apu/`. Note that some of
+them only pass on CPU CGB E per SameSuite's own README, so a handful may be
+unreachable without per-revision boot models.
+
+## Other suites not currently wired into the runner
+
+`dingbat_test_runner` builds tests only for blargg `cpu_instrs`, `instr_timing`
+and `mem_timing`. Also sitting unused in the bundle:
+
+* `blargg/dmg_sound`, `blargg/cgb_sound` — run with
+  `--mode=sram --model=dmg`. dmg_sound 01-registers, 02-len ctr, 03-trigger and
+  04-sweep all pass. Subtests 05-12, and all of cgb_sound, never write their
+  result under our harness (they neither pass nor report a failure) — cause not
+  yet diagnosed.
+* `same-suite/` beyond apu — dma, ppu, interrupt, sgb.

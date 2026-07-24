@@ -130,8 +130,19 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF74:
     if gb.cgb_native: mem.ff74 else: 0xFF'u8
   of 0xFF75: (if gb.cgb_enabled: mem.ff75 or 0x8F'u8 else: 0xFF'u8)
-  of 0xFF76: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
-  of 0xFF77: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
+  # PCM12/PCM34: read-only mirrors of the four channels' CURRENT 4-bit digital
+  # output, low nibble first (CH1/CH3), high nibble second (CH2/CH4). Officially
+  # undocumented but present on every CGB, and the only way software can observe
+  # APU state at cycle resolution — SameSuite's whole apu/ directory is built on
+  # them. Off channels read 0.
+  of 0xFF76:
+    if gb.cgb_enabled:
+      gb.apu.channel1.ch1_dac_input() or (gb.apu.channel2.ch2_dac_input() shl 4)
+    else: 0xFF'u8
+  of 0xFF77:
+    if gb.cgb_enabled:
+      gb.apu.channel3.ch3_dac_input() or (gb.apu.channel4.ch4_dac_input() shl 4)
+    else: 0xFF'u8
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80]
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8

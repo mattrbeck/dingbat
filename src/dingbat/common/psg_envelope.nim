@@ -155,14 +155,20 @@ proc psg_lfsr_step*(ch: NoiseChannelBase) {.inline.} =
 const PSG_WAVE_TRIGGER_DELAY* = 6 * PSG_CLOCK_MULT
   ## Extra delay before the wave channel's frequency timer restarts on trigger.
   ##
-  ## The VALUE (6) is not documented anywhere I could find — not GBATEK, not
-  ## Pan Docs, not the usual write-ups. It predates dingbat's git history
-  ## (both cores' copies arrive in the same squashed import commit), so treat
-  ## it as inherited emulator lore, not established fact. Pan Docs does
-  ## describe the surrounding behaviour — triggering CH3 does not immediately
-  ## play wave RAM, and the first sample read is index 1, not 0 — so *some*
-  ## startup delay is real; only this magnitude is unverified. SameSuite's
-  ## apu/channel_3 tests can settle it on hardware (see notes/psg-hardware-test).
+  ## The VALUE (6) is documented nowhere — not GBATEK, not Pan Docs, not the
+  ## usual write-ups — but it IS empirically confirmed. SameSuite (validated
+  ## against real CGB hardware) has two tests that pin it down, and sweeping
+  ## this constant against them gives:
+  ##
+  ##   delay:                3     4     5     6     7     8     9    12
+  ##   channel_3_restart_delay  FAIL FAIL  PASS  PASS  FAIL  FAIL  FAIL  FAIL
+  ##   channel_3_shift_delay    FAIL FAIL  PASS  PASS  FAIL  FAIL  FAIL  FAIL
+  ##
+  ## So the delay is real and is 5-6 T-cycles; the tests cannot separate 5 from
+  ## 6, and 6 is what dingbat has always used. Pan Docs corroborates the shape
+  ## (triggering CH3 does not immediately play wave RAM; the first sample read
+  ## is index 1, not 0). Running these requires PCM12/PCM34 at $FF76/$FF77 —
+  ## see notes/psg-hardware-test.md.
   ##
   ## The SCALING, by contrast, is solid. GBATEK gives the GBA's channel-3
   ## sample rate as 2097152/(2048-n) Hz — the identical formula to the GB's —
