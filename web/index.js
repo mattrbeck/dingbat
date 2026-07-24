@@ -2168,9 +2168,20 @@ const resumeDriveSession = async () => {
 
 // --- Sync triggers --------------------------------------------------------
 // No push channel exists, so pull on the moments that matter and poll gently.
+// The poll also retries a stuck flush: queued changes normally drain via the
+// debounce timers or the `online` event, but when Drive is unreachable while
+// the browser still considers itself online (Drive outage, blocking proxy)
+// no `online` event will ever fire — without this, "Offline — your changes
+// will sync when you reconnect" held until the user made another change or
+// switched tabs.
+const syncPollTick = () => {
+  if (!syncActive()) return;
+  if (pendingCount()) flushSync().then(() => pullSync());
+  else pullSync();
+};
 const startSyncTriggers = () => {
   if (syncPollTimer) clearInterval(syncPollTimer);
-  syncPollTimer = setInterval(() => { if (syncActive()) pullSync(); }, SYNC_POLL_MS);
+  syncPollTimer = setInterval(syncPollTick, SYNC_POLL_MS);
 };
 window.addEventListener("online", () => {
   if (!syncActive()) return;

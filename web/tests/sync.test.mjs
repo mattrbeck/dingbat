@@ -217,6 +217,43 @@ test("deleteGameEverywhere clears local data and tombstones the game", async () 
   assert.ok(app.api.syncState.queueDel.includes("rom:A.gba"));
 });
 
+// ── Poll doubles as flush retry ─────────────────────────────────────────────
+// A flush that fails while the browser still thinks it's online (Drive
+// outage, blocking proxy) gets no `online` event; the gentle poll must retry
+// the queued work, or "will sync when you reconnect" never comes true.
+
+test("syncPollTick retries queued uploads after the backend heals", async () => {
+  const app = await loadApp();
+  const drive = makeDrive();
+  signIn(app);
+  app.idb.set("save:Game.gba", u8(65, 66));
+
+  // Backend down (but navigator stays "online"): the flush fails and the
+  // queue keeps the entry.
+  app.setFetch(async () => { throw new TypeError("Failed to fetch"); });
+  app.api.markUpload("save:Game.gba");
+  await app.api.flushSync();
+  await settle();
+  eq(app.api.syncState.queueUp, ["save:Game.gba"], "queue survives the outage");
+  assert.ok(!drive.byName.has("save:Game.gba"));
+
+  // Backend heals; the next poll tick must drain the queue on its own.
+  app.setFetch(drive.fetch);
+  app.api.syncPollTick();
+  for (let i = 0; i < 10; i++) await settle(); // flush → pull chain
+  assert.ok(drive.byName.has("save:Game.gba"), "poll retried the upload");
+  eq(app.api.syncState.queueUp, [], "queue drained");
+});
+
+test("syncPollTick is a no-op when signed out", async () => {
+  const app = await loadApp();
+  app.api.gdriveToken = null;
+  app.api.syncPollTick();
+  await settle();
+  const driveCalls = app.fetchCalls.filter((c) => c.url.includes("googleapis.com"));
+  assert.equal(driveCalls.length, 0);
+});
+
 // ── On-demand download of a Drive-only game ────────────────────────────────
 
 test("downloadGame pulls a Drive-only game's files into local storage", async () => {

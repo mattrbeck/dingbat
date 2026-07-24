@@ -274,7 +274,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     parseDriveFileName, driveFetch, driveListAll,
     driveUploadFile, driveDownload,
     localSyncFiles, mergeLibrary, syncActive, loadSyncState,
-    markUpload, markDelete, markGameUpload, flushSync, pullSync,
+    markUpload, markDelete, markGameUpload, flushSync, pullSync, syncPollTick,
     downloadGame, deleteGameEverywhere, resetGameSaves, queueSaveDataDeletes,
     get syncState() { return syncState; },
     set syncState(v) { syncState = v; },
