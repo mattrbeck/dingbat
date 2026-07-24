@@ -14,17 +14,17 @@ local network. → [Multiplayer guide](docs/link-usage.md)
 **Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine is
 re-rendered per note, above the hardware's native mix rate. Optional.
 
+**Cross-device sync.** Back up saves, save states, and ROMs to your own Google Drive.
+
+**Accuracy.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge, blargg,
+mooneye, dmg-acid2, and cgb-acid2 all pass.
+
 **No BIOS file required.** An HLE BIOS is built in, though you can supply a real BIOS
 dump instead.
 
-**Accuracy.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge, blargg,
-mooneye, dmg-acid2, and cgb-acid2. The default Game Boy PPU is a cycle-accurate FIFO
-renderer, for games like Prehistorik Man.
-
-**Cross-device sync.** Back up saves, save states, and ROMs to your own Google Drive.
-
 **Everything else.** Nine save-state slots with thumbnails, rewind, fast forward, cheats,
-hq4x / xBR upscaling, and per-panel LCD color correction.
+hq4x / xBR upscaling, per-panel LCD color correction, and a cycle-accurate Game Boy FIFO
+PPU for games like Prehistorik Man.
 
 ## Downloads
 
