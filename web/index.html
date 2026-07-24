@@ -10,12 +10,13 @@
       name="viewport"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <!-- Stays black-translucent for every chrome theme: it's the only value
-         that lets standalone iOS draw edge-to-edge (safe-area insets), and
-         it's fixed at install time so it can't follow the theme anyway. In
-         the light theme the standalone status-bar text may sit on light
-         chrome; acceptable tradeoff vs. losing edge-to-edge everywhere. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Deliberately NO apple-mobile-web-app-status-bar-style. black-translucent
+         offsets the standalone viewport UP by the status-bar height without
+         growing it — that offset is the bottom "chin gap". Omitting it (the
+         default style) lets iOS reserve the status bar and fill BOTH safe areas
+         from the theme-color meta below, which index.js keeps in step with the
+         chrome theme — so the strips match the app instead of a static dark bar. -->
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="shortcut icon" href="favicon.ico" />
@@ -25,20 +26,11 @@
     <meta name="theme-color" content="#0c0e16" />
     <script>
       // Apply the persisted chrome theme before first paint so a reload never
-      // flashes the default amber. The tiny bg map keeps the browser-chrome
-      // color (theme-color) in step from the first frame too; index.js later
-      // re-derives it from the live CSS tokens, so the map is only a boot hint.
-      //
-      // iOS installed-to-home-screen (navigator.standalone) EXCEPTION: WebKit
-      // shorts the standalone layout viewport by the status-bar height (see
-      // the display-mode:standalone note in styles.css — 812pt screen, 762pt
-      // viewport on an iPhone 13 mini), and our body is forced to 100vh so
-      // content runs into that bottom band. iOS paints that below-the-viewport
-      // band with the theme-color meta — so it must match the SCREEN BOTTOM
-      // (the controls deck / page --bg), or it reads as a bar over Select/Start
-      // and the home list. Removing the meta doesn't help: iOS then paints the
-      // band its default black. index.js sets the exact --bg once CSS loads;
-      // here we just seed a close value so first paint isn't black.
+      // flashes the default amber. The tiny bg map keeps the theme-color meta in
+      // step from the first frame too; index.js later re-derives it from the live
+      // CSS tokens, so the map is only a boot hint. The theme-color meta is what
+      // iOS fills the standalone safe areas (status bar + home indicator) with —
+      // kept present and theme-matched in every mode now (no black-translucent).
       try {
         var themeMeta = document.querySelector('meta[name="theme-color"]');
         var t = localStorage.getItem("dingbat_theme");

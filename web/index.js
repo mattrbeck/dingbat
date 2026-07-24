@@ -4102,13 +4102,9 @@ const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
 // value persisted under the old name so it doesn't fall back to Amber.
 const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
 const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
+// Present in every mode now (the boot script keeps it): iOS fills the standalone
+// safe areas from it, and browser tabs tint their chrome with it.
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-// iOS standalone paints the below-the-layout-viewport band at the SCREEN BOTTOM
-// (over Select/Start + the home list) with theme-color, so there it must match
-// the deck/page bottom (--bg), not the top bar. In a browser tab theme-color
-// tints the browser chrome, which meets the top bar (--topbar-top).
-const IS_STANDALONE = navigator.standalone === true ||
-  matchMedia("(display-mode: standalone)").matches;
 
 const applyTheme = (name) => {
   name = migrateTheme(name);
@@ -4120,17 +4116,16 @@ const applyTheme = (name) => {
     chip.classList.toggle("selected", on);
     chip.setAttribute("aria-checked", on ? "true" : "false");
   }
-  // Browser/PWA chrome color follows the page background. Derived from the
-  // live token so the CSS stays the single source of truth (the inline boot
-  // script's map is only a pre-CSS hint).
+  // The theme-color meta is what iOS fills the standalone safe areas (status bar
+  // + home-indicator strip) with, and what tints browser chrome in a tab. Match
+  // --bg (the page / controls-deck bottom) so the bottom strip blends into the
+  // app under every theme. Derived from the live token so CSS stays the single
+  // source of truth (the boot-script map is only a pre-CSS hint).
   if (themeColorMeta) {
     const cs = getComputedStyle(document.documentElement);
-    const bg = cs.getPropertyValue("--bg").trim();
-    const topbar = cs.getPropertyValue("--topbar-top").trim();
-    // Standalone: theme-color is the bottom band → match the deck/page bottom
-    // (--bg) so it blends in. Browser tab: it tints the chrome that meets the
-    // top bar → match --topbar-top.
-    themeColorMeta.content = IS_STANDALONE ? (bg || topbar) : (topbar || bg);
+    themeColorMeta.content =
+      (cs.getPropertyValue("--bg").trim() ||
+       cs.getPropertyValue("--topbar-top").trim());
   }
 };
 
