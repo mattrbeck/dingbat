@@ -135,6 +135,71 @@ proc expect_tag*(r: var Reader; tag: uint8) =
   if got != tag:
     raise state_error("state section marker mismatch (corrupt or incompatible state)")
 
+# ==================== Bidirectional visitors ====================
+#
+# Each subsystem's save and load used to be two hand-mirrored procs listing
+# every field twice. That is the shape where a field added to save but not to
+# load silently corrupts states, so instead a subsystem now describes its
+# layout ONCE as a generic `visit_x[S](obj; s: var S)` and is instantiated
+# with S = Writer to save and S = Reader to load. The overload pairs below are
+# what makes one body do both; they are exact inverses by construction, and
+# the wire bytes are unchanged from the hand-written versions.
+#
+# Naming:
+#   visit_u8/u16/u32/u64/i32  store through that wire width, CONVERTING (use
+#                             when the field's in-memory type is wider, e.g.
+#                             an `int` field stored as i32)
+#   visit_bits16/bits32       store a same-sized value by CAST, for packed
+#                             register objects and for signed fields whose
+#                             bit pattern must survive round-tripping
+#   visit_bool/bytes/seq_u16/tag  as their write_*/read_* counterparts
+#
+# Load-only fixups (invalidating caches, resetting per-frame scratch) go in
+# the shared body under `when S is Reader:`.
+
+proc visit_bool*(w: var Writer; v: var bool) {.inline.} = w.write_bool(v)
+proc visit_bool*(r: var Reader; v: var bool) {.inline.} = v = r.read_bool()
+
+proc visit_u8*[T](w: var Writer; v: var T) {.inline.} = w.write_u8(uint8(v))
+proc visit_u8*[T](r: var Reader; v: var T) {.inline.} = v = T(r.read_u8())
+
+proc visit_u16*[T](w: var Writer; v: var T) {.inline.} = w.write_u16(uint16(v))
+proc visit_u16*[T](r: var Reader; v: var T) {.inline.} = v = T(r.read_u16())
+
+proc visit_u32*[T](w: var Writer; v: var T) {.inline.} = w.write_u32(uint32(v))
+proc visit_u32*[T](r: var Reader; v: var T) {.inline.} = v = T(r.read_u32())
+
+proc visit_u64*[T](w: var Writer; v: var T) {.inline.} = w.write_u64(uint64(v))
+proc visit_u64*[T](r: var Reader; v: var T) {.inline.} = v = T(r.read_u64())
+
+proc visit_i32*[T](w: var Writer; v: var T) {.inline.} = w.write_i32(int32(v))
+proc visit_i32*[T](r: var Reader; v: var T) {.inline.} = v = T(r.read_i32())
+
+proc visit_i8*(w: var Writer; v: var int8) {.inline.} = w.write_i8(v)
+proc visit_i8*(r: var Reader; v: var int8) {.inline.} = v = r.read_i8()
+
+proc visit_i16*(w: var Writer; v: var int16) {.inline.} = w.write_i16(v)
+proc visit_i16*(r: var Reader; v: var int16) {.inline.} = v = r.read_i16()
+
+# bits16/bits32 reinterpret rather than convert, so T must genuinely be that
+# width — every caller passes a {.packed.} 16/32-bit register object or a
+# same-width signed scalar. (sizeof(T) can't be asserted here: Nim won't
+# evaluate it at compile time for a packed object behind a generic param.)
+proc visit_bits16*[T](w: var Writer; v: var T) {.inline.} = w.write_u16(cast[uint16](v))
+proc visit_bits16*[T](r: var Reader; v: var T) {.inline.} = v = cast[T](r.read_u16())
+
+proc visit_bits32*[T](w: var Writer; v: var T) {.inline.} = w.write_u32(cast[uint32](v))
+proc visit_bits32*[T](r: var Reader; v: var T) {.inline.} = v = cast[T](r.read_u32())
+
+proc visit_bytes*(w: var Writer; d: var openArray[byte]) {.inline.} = w.write_bytes(d)
+proc visit_bytes*(r: var Reader; d: var openArray[byte]) {.inline.} = r.read_bytes(d)
+
+proc visit_seq_u16*(w: var Writer; d: var openArray[uint16]) {.inline.} = w.write_seq_u16(d)
+proc visit_seq_u16*(r: var Reader; d: var openArray[uint16]) {.inline.} = r.read_seq_u16_into(d)
+
+proc visit_tag*(w: var Writer; tag: uint8) {.inline.} = w.write_tag(tag)
+proc visit_tag*(r: var Reader; tag: uint8) {.inline.} = r.expect_tag(tag)
+
 # ==================== Hashing ====================
 
 proc fnv1a*(data: openArray[byte]): uint32 =
