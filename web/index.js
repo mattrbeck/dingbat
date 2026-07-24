@@ -561,10 +561,26 @@ const loadBiosFromStorage = async () => {
 const menuBtn = document.getElementById("menu-btn");
 const menuDropdown = document.getElementById("menu-dropdown");
 
+// Show the bottom scrim only while more items sit below the fold, so it never
+// permanently fades the last item (Toggle Log) in windows tall enough that the
+// menu doesn't scroll. Re-checked on open/scroll/resize; scrollHeight reads 0
+// while hidden, so the open-time call does the first real measurement.
+const updateMenuScrollHint = () => {
+  menuDropdown.classList.toggle(
+    "can-scroll-down",
+    menuDropdown.scrollTop + menuDropdown.clientHeight <
+      menuDropdown.scrollHeight - 1,
+  );
+};
+
 menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   menuDropdown.hidden = !menuDropdown.hidden;
+  if (!menuDropdown.hidden) updateMenuScrollHint();
 });
+
+menuDropdown.addEventListener("scroll", updateMenuScrollHint, { passive: true });
+window.addEventListener("resize", updateMenuScrollHint);
 
 document.addEventListener("click", () => {
   menuDropdown.hidden = true;

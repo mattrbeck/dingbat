@@ -1019,19 +1019,33 @@ button {
 /* Bottom scrim while the dropdown scrolls (phone landscape): a sticky fade
    pinned to the scrollport's bottom edge, so the clipped item visibly
    dissolves instead of reading as the end of the menu. Sticky keeps it
-   anchored while scrolling; at the very bottom it overlaps only the final
-   item's padding. No JS: when nothing overflows there's nothing to clip and
-   the fade sits under the closing padding, invisible. */
+   anchored while scrolling. It overlays the final item, so it only paints
+   (opacity 1) while more items actually sit below the fold — the
+   .can-scroll-down class is toggled from JS on open/scroll/resize, exactly
+   like the settings tab-bar scrims. Kept in layout at opacity 0 the rest of
+   the time (not display:none) so its presence can't shift the overflow
+   measurement that decides whether to show it. */
 #menu-dropdown::after {
   content: "";
   display: block;
   position: sticky;
-  bottom: -6px; /* cancel the container padding so it hugs the true edge */
+  bottom: 0;
   height: 26px;
-  margin: -26px -6px -6px; /* overlay the last item, span the full width */
+  /* Overlay the last item with a net-zero footprint: the -26px top margin
+     cancels the 26px height so the scrim adds nothing to scrollHeight, and
+     bottom:0 (not a negative offset) keeps it from extending the scroll
+     region. A non-zero bottom offset here made the menu perpetually 6px
+     scrollable, which pinned the fade over the last item forever. */
+  margin-top: -26px;
   pointer-events: none;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0), var(--surface-1) 85%);
   border-radius: 0 0 var(--radius) var(--radius);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+#menu-dropdown.can-scroll-down::after {
+  opacity: 1;
 }
 
 @keyframes menu-in {
