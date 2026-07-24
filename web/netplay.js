@@ -771,9 +771,13 @@ manualCopyBtn?.addEventListener("click", async () => {
   showToast("Code copied");
 });
 // Keep the emulator's key handlers from swallowing input; Enter confirms.
+// Escape must still dismiss the modal: stopping propagation here means the
+// document-level Escape handler below never sees it while this field has
+// focus (which it always does — the modal focuses it on open).
 manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
   manualIn.addEventListener(t, (e) => {
     if (t === "keydown" && e.key === "Enter" && !manualConfirm.disabled) manualConfirmGo();
+    if (t === "keydown" && e.key === "Escape") netDismissModal();
     e.stopPropagation();
   })
 );
@@ -1268,6 +1272,9 @@ netJoinGo.addEventListener("click", async () => {
 ["keydown", "keypress", "keyup"].forEach((type) =>
   netCodeInput.addEventListener(type, (e) => {
     if (type === "keydown" && e.key === "Enter") netJoinGo.click();
+    // Same Escape carve-out as the manual-code input: propagation stops here,
+    // so dismiss directly instead of relying on the document handler.
+    if (type === "keydown" && e.key === "Escape") netDismissModal();
     e.stopPropagation();
   })
 );

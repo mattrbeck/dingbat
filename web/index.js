@@ -371,6 +371,7 @@ document.getElementById("log-copy").addEventListener("click", async () => {
 
 let modalReturnFocus = null;
 let modalTrapHandler = null;
+let modalTrapOverlay = null; // which overlay owns the current trap
 
 const modalFocusables = (overlay) =>
   Array.from(
@@ -380,6 +381,7 @@ const modalFocusables = (overlay) =>
   );
 
 const trapFocus = (overlay) => {
+  modalTrapOverlay = overlay;
   modalReturnFocus = document.activeElement;
   let f = modalFocusables(overlay);
   if (f.length) f[0].focus();
@@ -400,6 +402,13 @@ const trapFocus = (overlay) => {
 };
 
 const releaseFocus = (overlay) => {
+  // Only the overlay that owns the trap may release it. The global Escape
+  // handler calls every modal's closer blindly; without this check the first
+  // closer in that list would null the handler/focus state on behalf of a
+  // different, actually-open modal (leaking its Tab-trap listener and
+  // restoring focus prematurely).
+  if (modalTrapOverlay !== overlay) return;
+  modalTrapOverlay = null;
   if (modalTrapHandler) overlay.removeEventListener("keydown", modalTrapHandler);
   modalTrapHandler = null;
   try {
@@ -2565,7 +2574,10 @@ const refreshHomeRecent = async () => {
   }
 };
 
-// Close any open modal on Escape
+// Close any open modal on Escape. Every modal belongs here (the net modal is
+// the one exception — netplay.js owns its dismissal, which also abandons a
+// pending session). Backdrop click and the × button already cover all of
+// them; Escape must stay in step or a modal reads as "stuck".
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     // Don't close settings if we're rebinding a key — the capture handler eats it
@@ -2575,6 +2587,9 @@ document.addEventListener("keydown", (e) => {
     closeSavesModal();
     closeRomsModal();
     closeUpdateModal();
+    closeStatesModal();
+    closeCheatsModal();
+    closeReportModal();
   }
 });
 
@@ -3030,6 +3045,10 @@ const openReportModal = () => {
 };
 
 const closeReportModal = () => {
+  // Guard: the global Escape handler calls every modal's closer blindly, and
+  // this one has side effects — restoring `paused` from a stale
+  // reportWasPaused would silently unpause a game the user paused later.
+  if (!reportModal.classList.contains("open")) return;
   reportModal.classList.remove("open");
   releaseFocus(reportModal);
   reportThumbs = null;

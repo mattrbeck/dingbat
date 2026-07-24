@@ -179,6 +179,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   };
 
   const elements = new Map();
+  // Document-level listeners are recorded (not just swallowed) so tests can
+  // dispatch synthetic events — e.g. the global Escape-closes-modals handler.
+  const docListeners = {};
   const document = {
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, new FakeElement());
@@ -187,8 +190,10 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     createElement: (tag) => new FakeElement(tag),
     querySelectorAll: () => [],
     querySelector: () => null,
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, fn) { (docListeners[type] ??= []).push(fn); },
+    removeEventListener(type, fn) {
+      docListeners[type] = (docListeners[type] || []).filter((f) => f !== fn);
+    },
     elementFromPoint: () => null,
     visibilityState: "visible",
     body: new FakeElement("body"),
@@ -297,9 +302,19 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     get: () => toasts[toasts.length - 1] ?? "",
   });
 
+  // Fire every recorded document-level listener of `type` with a stub-filled
+  // event, awaiting async handlers (mirrors FakeElement.dispatch).
+  const dispatchDoc = async (type, ev = {}) => {
+    ev.preventDefault ??= () => {};
+    ev.stopPropagation ??= () => {};
+    ev.stopImmediatePropagation ??= () => {};
+    for (const f of docListeners[type] || []) await f(ev);
+  };
+
   return {
     api, context, idb, fetchCalls, alerts, confirms, toasts,
     document, elements, localStorage, lsMap, sandbox, state,
+    docListeners, dispatchDoc,
     setFetch: (fn) => { state.fetchImpl = fn; },
     setConfirmResult: (v) => { state.confirmResult = v; },
     runIn: (code) => vm.runInContext(code, context),
