@@ -3,38 +3,6 @@
 when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
-# SDL2 audio bindings
-when not defined(test_harness):
-  when not declared(SDL_AudioSpec):
-    type
-      SDL_AudioSpec = object
-        freq:      cint
-        format:    uint16
-        channels:  uint8
-        silence:   uint8
-        samples:   uint16
-        padding:   uint16
-        size:      uint32
-        callback:  pointer
-        userdata:  pointer
-
-    const AUDIO_F32LSB = 0x8120'u16  # 32-bit float, little-endian (native on x86/ARM)
-
-    proc sdl_open_audio_gb(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-      {.importc: "SDL_OpenAudio", cdecl.}
-    proc sdl_close_audio_gb()
-      {.importc: "SDL_CloseAudio", cdecl.}
-    proc sdl_pause_audio_gb(pause_on: cint)
-      {.importc: "SDL_PauseAudio", cdecl.}
-    proc sdl_queue_audio_gb(dev: uint32; data: pointer; len: uint32): cint
-      {.importc: "SDL_QueueAudio", cdecl.}
-    proc sdl_get_queued_audio_size_gb(dev: uint32): uint32
-      {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-    proc sdl_clear_queued_audio_gb(dev: uint32)
-      {.importc: "SDL_ClearQueuedAudio", cdecl.}
-    proc sdl_delay_gb(ms: uint32)
-      {.importc: "SDL_Delay", cdecl.}
-
 proc toggle_sync*(apu: GbApu) =
   apu.sync = not apu.sync
 
@@ -62,12 +30,12 @@ proc audio_ahead*(apu: GbApu): bool =
     false
   else:
     apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size_gb(apu.audio_dev) > GB_SYNC_AHEAD_BYTES
+      sdl_get_queued_audio_size(apu.audio_dev) > GB_SYNC_AHEAD_BYTES
 
 when not defined(test_harness):
   proc audio_queued_bytes*(apu: GbApu): uint32 =
     ## Bytes currently queued to the SDL audio device (frame-scheduler input)
-    if apu.audio_dev != 0: sdl_get_queued_audio_size_gb(apu.audio_dev) else: 0
+    if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
@@ -175,10 +143,10 @@ proc get_sample*(apu: GbApu; gb: GB) =
       else:
         apu.stretch_engaged = false
       if apu.audio_dev != 0:
-        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-              GB_SYNC_BACKSTOP_BYTES: sdl_delay_gb(1)
-        discard sdl_queue_audio_gb(apu.audio_dev,
+        if not apu.sync: sdl_clear_queued_audio(apu.audio_dev)
+        while sdl_get_queued_audio_size(apu.audio_dev) >
+              GB_SYNC_BACKSTOP_BYTES: sdl_delay(1)
+        discard sdl_queue_audio(apu.audio_dev,
           addr apu.buffer[0], uint32(queue_len * 4))
       apu.buffer_pos = 0
   gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
@@ -209,13 +177,13 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       channels: 2'u8, samples: 128,
       callback: nil, userdata: nil,
     )
-    sdl_close_audio_gb()
+    sdl_close_audio()
     # obtained must be nil so SDL converts to exactly this spec; see the
     # matching comment in gba/apu.nim (Windows WASAPI otherwise changes the
     # spec and audio-sync paces emulation at ~2x real time)
-    if sdl_open_audio_gb(addr desired, nil) == 0:
+    if sdl_open_audio(addr desired, nil) == 0:
       result.audio_dev = 1
-      if not headless: sdl_pause_audio_gb(0)
+      if not headless: sdl_pause_audio(0)
     else:
       echo "Warning: GB failed to open audio device"
       result.audio_dev = 0

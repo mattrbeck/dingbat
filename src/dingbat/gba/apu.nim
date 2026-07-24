@@ -26,48 +26,6 @@ const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 # (nearly flat through the mids, a few dB down at the top octave).
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
 
-# Minimal SDL2 audio C bindings (SDL2 is already linked via nim.cfg)
-when not defined(test_harness):
-  type
-    SDL_AudioDeviceID = uint32
-    SDL_AudioSpec = object
-      freq:      cint
-      format:    uint16
-      channels:  uint8
-      silence:   uint8
-      samples:   uint16
-      padding:   uint16
-      size:      uint32
-      callback:  pointer
-      userdata:  pointer
-
-  const AUDIO_S16LSB  = 0x8010'u16
-  const AUDIO_F32LSB  = 0x8120'u16
-  const SDL_AUDIO_ALLOW_FREQUENCY_CHANGE = cint(1)
-
-  proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-    {.importc: "SDL_OpenAudio", cdecl.}
-  proc sdl_open_audio_device(device: pointer; iscapture: cint;
-      desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec;
-      allowed_changes: cint): SDL_AudioDeviceID
-    {.importc: "SDL_OpenAudioDevice", cdecl.}
-  proc sdl_close_audio()
-    {.importc: "SDL_CloseAudio", cdecl.}
-  proc sdl_close_audio_device(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_CloseAudioDevice", cdecl.}
-  proc sdl_pause_audio(pause_on: cint)
-    {.importc: "SDL_PauseAudio", cdecl.}
-  proc sdl_pause_audio_device(dev: SDL_AudioDeviceID; pause_on: cint)
-    {.importc: "SDL_PauseAudioDevice", cdecl.}
-  proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
-    {.importc: "SDL_QueueAudio", cdecl.}
-  proc sdl_get_queued_audio_size(dev: SDL_AudioDeviceID): uint32
-    {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-  proc sdl_clear_queued_audio(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_ClearQueuedAudio", cdecl.}
-  proc sdl_delay(ms: uint32)
-    {.importc: "SDL_Delay", cdecl.}
-
 when defined(emscripten):
   # On emscripten, the APU pushes float32 samples to a global buffer
   # (in dingbat_wasm.nim) that JS consumes via the Web Audio API.

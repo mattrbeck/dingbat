@@ -222,7 +222,7 @@ proc visit_apu[S](apu: GbApu; s: var S) =
     apu.buffer_pos = 0
     when not defined(test_harness) and not defined(emscripten):
       if apu.audio_dev != 0:
-        sdl_clear_queued_audio_gb(apu.audio_dev)
+        sdl_clear_queued_audio(apu.audio_dev)
 
 # ---- Cartridge / MBC ----
 

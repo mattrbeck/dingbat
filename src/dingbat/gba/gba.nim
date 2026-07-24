@@ -4,6 +4,7 @@
 import std/[options, times, os, strutils, math, sets]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
+import ../common/sdl_audio
 when defined(test_harness):
   import ../common/test_output
 import lut_macros
