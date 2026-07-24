@@ -1060,8 +1060,38 @@ romsModal.addEventListener("click", (e) => {
   if (e.target === romsModal) closeRomsModal();
 });
 
+// How the manage list is ordered. "recent" is the play order the grid uses;
+// "alpha" is for auditing a long library, where recency tells you nothing about
+// where a given game sits.
+let romsSort = "recent";
+const romsSortBtn = document.getElementById("roms-sort");
+
+const loadRomsSort = async () => {
+  let v = await dbGet("roms_sort");
+  if (v === "recent" || v === "alpha") romsSort = v;
+  syncRomsSortButton();
+};
+const syncRomsSortButton = () => {
+  if (!romsSortBtn) return;
+  romsSortBtn.textContent =
+    romsSort === "alpha" ? "Sort: A–Z" : "Sort: Last played";
+  romsSortBtn.title = romsSort === "alpha"
+    ? "Sorted alphabetically — click to sort by last played"
+    : "Sorted by last played — click to sort alphabetically";
+};
+if (romsSortBtn) {
+  romsSortBtn.addEventListener("click", async () => {
+    romsSort = romsSort === "alpha" ? "recent" : "alpha";
+    syncRomsSortButton();
+    await dbPut("roms_sort", romsSort);
+    refreshRomsManageList();
+  });
+}
+
 // Ordered rows for the manage list: recents first (already most-recent-first),
 // then orphaned save-only games sorted by name. { name, inRecent }.
+// Under "alpha" the two groups merge into one A–Z list, since the recent /
+// orphan split is only meaningful when the order is recency.
 const romsForManagement = async () => {
   let recents = await getRecentMeta();
   let seen = new Set();
@@ -1074,6 +1104,9 @@ const romsForManagement = async () => {
   for (let name of await romsWithSaveData()) {
     if (!seen.has(name)) rows.push({ name, inRecent: false });
   }
+  if (romsSort === "alpha") {
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
   return rows;
 };
 
@@ -1082,6 +1115,9 @@ const refreshRomsManageList = async () => {
   let rows = await romsForManagement();
   romsManageList.innerHTML = "";
   romsManageEmpty.hidden = rows.length > 0;
+  syncRomsSortButton();
+  // Sorting an empty or single-game list is noise.
+  if (romsSortBtn) romsSortBtn.parentElement.hidden = rows.length < 2;
 
   for (let { name, inRecent } of rows) {
     let row = document.createElement("div");
@@ -1710,10 +1746,15 @@ const setSyncStatus = (s) => {
   if (syncDoneTimer) { clearTimeout(syncDoneTimer); syncDoneTimer = null; }
   syncStatus = s;
   renderSyncIndicator();
+  refreshHomeSyncButton();
   if (s === "done") {
     syncDoneTimer = setTimeout(() => {
       syncDoneTimer = null;
-      if (syncStatus === "done") { syncStatus = "idle"; renderSyncIndicator(); }
+      if (syncStatus === "done") {
+        syncStatus = "idle";
+        renderSyncIndicator();
+        refreshHomeSyncButton();
+      }
     }, 2600);
   }
 };
@@ -1775,12 +1816,33 @@ const queueSaveDataDeletes = (name) => {
   }
 };
 
+// Drive operations run one at a time, but a busy engine must DEFER work, never
+// drop it. An earlier version returned early while another op was in flight,
+// which raced on mobile: returning from the sign-in sheet fires
+// visibilitychange, whose flush+pull collided with gdriveConnect's own
+// runFullSync, and whichever lost silently skipped its push or its pull — so a
+// freshly signed-in phone showed an empty grid until the 3-minute poll bailed
+// it out. Queueing instead makes sign-in deterministic.
+let syncChain = Promise.resolve();
+const runExclusive = (fn) => {
+  const run = syncChain.then(() => fn());
+  syncChain = run.catch(() => {}); // a failed op must not poison the chain
+  return run;
+};
+// One pending pull is enough; extra triggers while one is queued collapse.
+let pullQueued = false;
+
 // Push the queue. Anything that fails stays queued for the next attempt, so a
 // dropped connection degrades to "syncs later" rather than losing data.
-const flushSync = async () => {
+const flushSync = (...a) => {
+  // Disarm at call time, not when the queued flush finally runs — otherwise a
+  // flush waiting behind a long pull leaves the debounce armed and re-queues.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (syncCapTimer) { clearTimeout(syncCapTimer); syncCapTimer = null; }
-  if (!syncActive() || syncBusy) return;
+  return runExclusive(() => flushSyncInner(...a));
+};
+const flushSyncInner = async () => {
+  if (!syncActive()) return;
   if (!pendingCount() && !syncState.tomb.length) { refreshSyncStatus(); return; }
   syncBusy = true;
   setSyncStatus("syncing");
@@ -1822,8 +1884,13 @@ const flushSync = async () => {
 };
 
 // --- Pull (down-sync): merged library, tombstones, saves for local games ---
-const pullSync = async ({ silent = true } = {}) => {
-  if (!syncActive() || syncBusy) return;
+const pullSync = (opts = {}) => {
+  if (pullQueued) return syncChain; // already one waiting; don't pile up
+  pullQueued = true;
+  return runExclusive(() => { pullQueued = false; return pullSyncInner(opts); });
+};
+const pullSyncInner = async ({ silent = true } = {}) => {
+  if (!syncActive()) return;
   syncBusy = true;
   if (!silent) setSyncStatus("syncing");
   let gridDirty = false;
@@ -1877,7 +1944,11 @@ const pullSync = async ({ silent = true } = {}) => {
 
     // Adopt the merged library locally.
     syncState.tomb = lib.tomb;
-    await dbPut("recent", lib.recents.slice(0, MAX_RECENT));
+    // The merged library is the grid — do NOT cap it at MAX_RECENT, or every
+    // game past the 20th silently vanishes with no way to see or download it.
+    // MAX_RECENT still bounds how many ROMs this device keeps bytes for
+    // (bumpRecentIndex), which just turns the rest into Drive-only tiles.
+    await dbPut("recent", lib.recents);
     await writeDriveLibrary(lib, remote);
     await saveSyncState();
     gridDirty = true;
@@ -2108,8 +2179,23 @@ document.addEventListener("visibilitychange", () => {
 
 // --- Sync UI surfaces -----------------------------------------------------
 const homeSyncBtn = document.getElementById("home-sync");
+
+// The grid's own sync affordance doubles as its progress readout: while a sync
+// is running the "Sync" link becomes a spinner + "Syncing…" and stops being
+// clickable, so activity is visible right where the games are.
+const refreshHomeSyncButton = () => {
+  if (!homeSyncBtn) return;
+  homeSyncBtn.hidden = !syncActive();
+  const busy = syncStatus === "syncing";
+  homeSyncBtn.disabled = busy;
+  homeSyncBtn.innerHTML = busy
+    ? '<svg class="sync-spin" viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>Syncing…'
+    : "Sync";
+};
+
 const refreshSyncUI = () => {
-  if (homeSyncBtn) homeSyncBtn.hidden = !syncActive();
+  refreshHomeSyncButton();
   renderSyncIndicator();
   if (romsModal.classList.contains("open")) renderGdriveSection();
 };
@@ -2231,11 +2317,15 @@ const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
 const bumpRecentIndex = async (name) => {
   let list = (await getRecentMeta()).filter((r) => r.name !== name);
   list.unshift({ name, ts: Date.now() });
-  while (list.length > MAX_RECENT) {
-    let evicted = list.pop();
-    await dbDelete(romKey(evicted.name));
-    await dbDelete(artKey(evicted.name));
+  // Past MAX_RECENT this device stops holding ROM bytes. Signed in, the entry
+  // stays in the index and simply becomes a Drive-only tile — the bytes are
+  // re-downloadable, so the library stays whole. Signed out there'd be nothing
+  // to come back to, so the entry is dropped as before.
+  for (let i = MAX_RECENT; i < list.length; i++) {
+    await dbDelete(romKey(list[i].name));
+    await dbDelete(artKey(list[i].name));
   }
+  if (!syncActive()) list = list.slice(0, MAX_RECENT);
   await dbPut("recent", list);
 };
 
@@ -5015,6 +5105,7 @@ var Module = {
     await loadSystemSettings();
     await loadVideoSettings();
     await loadSyncState();
+    await loadRomsSort();
     refreshSyncUI();
     startSyncTriggers();
     // The access token is memory-only, so a reload lands signed out. If this

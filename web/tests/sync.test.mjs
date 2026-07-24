@@ -237,3 +237,54 @@ test("downloadGame pulls a Drive-only game's files into local storage", async ()
   eq((app.idb.get("recent") || []).map((r) => r.name), ["B.gba"],
     "and it entered the recents index");
 });
+
+// ── Concurrency: work is deferred, never dropped ───────────────────────────
+
+test("a pull is deferred, not dropped, when another op is in flight", async () => {
+  const app = await loadApp();
+  const lib = { recents: [{ name: "FromDrive.gba", ts: 500 }], tomb: [] };
+  const drive = makeDrive({ library: new TextEncoder().encode(JSON.stringify(lib)) });
+  // Hold the upload open so the flush is genuinely mid-flight when the pull
+  // arrives — otherwise the flush finishes first and there is no race to test.
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  app.setFetch(async (url, opts) => {
+    if (String(url).includes("uploadType")) await gate;
+    return drive.fetch(url, opts);
+  });
+  signIn(app);
+  app.idb.set("save:Local.gba", u8(65));
+  app.api.markUpload("save:Local.gba"); // give the flush real work to do
+
+  // Regression: signing in on mobile fires visibilitychange (returning from the
+  // OAuth sheet) while gdriveConnect runs its own sync. The old busy guard made
+  // whichever op lost the race silently skip its pull, so a freshly signed-in
+  // phone sat on an empty grid until the 3-minute poll rescued it.
+  const flushing = app.api.flushSync();
+  await settle();                       // flush is now parked on the upload
+  const pulling = app.api.pullSync();   // old code dropped this on the floor
+  release();
+  await flushing;
+  await pulling;
+  await settle();
+
+  const names = (app.idb.get("recent") || []).map((r) => r.name);
+  assert.ok(names.includes("FromDrive.gba"),
+    "pull ran despite the concurrent flush, got: " + JSON.stringify(names));
+});
+
+test("the merged library is not truncated at MAX_RECENT", async () => {
+  const app = await loadApp();
+  const recents = Array.from({ length: 25 }, (_, i) => ({ name: `G${i}.gba`, ts: 1000 - i }));
+  const drive = makeDrive({
+    library: new TextEncoder().encode(JSON.stringify({ recents, tomb: [] })),
+  });
+  app.setFetch(drive.fetch);
+  signIn(app);
+
+  await app.api.pullSync();
+  await settle();
+  // Capping here would make every game past the 20th unreachable: invisible in
+  // the grid and therefore impossible to download.
+  assert.equal((app.idb.get("recent") || []).length, 25);
+});
