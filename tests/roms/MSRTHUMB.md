@@ -69,10 +69,30 @@ P0 ROM 20  00 00 09 00 0 00EB
   overhead. Only compare rows that share the same MEM.
 * `P6`/`P7` are the literal Pinball shape and print **BX OK** when the guest's
   own prefetched `bx r0` is honoured, **BX NO** otherwise.
+* `P8` (`FLG`) uses `msr cpsr_f` — the flags byte does not contain T, so the CPU
+  must stay in ARM state whatever the operand holds. Expect `00 00 00 00 F7`.
+* `P9` (`USR`) repeats the ordinary probe from User mode, where control-byte
+  writes are supposed to be ignored. Expect `00 00 00 00 F7`. It runs last
+  because USR is a one-way door on this core.
 * A row of `--` means that probe never completed. Rows are painted *before*
   each probe runs, so if the CPU wedges on some behaviour this test did not
   anticipate, the first `--` row names the probe that did it. `ALL PROBES
-  COMPLETED` at the bottom means all eight returned.
+  COMPLETED` at the bottom means all ten returned.
+
+### The line to report back
+
+The bottom line collapses the six generic probes when they agree:
+
+```
+SAME 00 00 09 00 F0 PIN OK
+```
+
+That is the whole result in one line — `SAME` means P0–P5 all produced the same
+signature, followed by R4 R5 R6 R7, the flags nibble, and the Pinball verdict.
+If it instead says **`P0-5 DIFFER - READ TABLE`** in red, the memory region or
+the mode-switch variant changed the answer and the per-row table is the real
+result. Either way, also report the `P8` and `P9` rows, which the summary does
+not cover.
 
 ### Signature → model
 
@@ -90,16 +110,16 @@ P0 ROM 20  00 00 09 00 0 00EB
 
 Measured with this ROM, 2026-07-24:
 
-| emulator | P0–P5 | P6/P7 |
-|---|---|---|
-| dingbat | `00 00 09 00` F=0 | BX OK |
-| mGBA 0.10.x | `00 00 09 00` F=0 | BX OK |
-| NanoBoyAdvance | **SIGSEGV** | — |
+| emulator | P0–P5 | P6/P7 | P8 `cpsr_f` | P9 User mode |
+|---|---|---|---|---|
+| dingbat | `00 00 09 00` F=0 | BX OK | `00 00 00 00` F=7 | `00 00 09 00` **F=0** |
+| mGBA 0.10.x | `00 00 09 00` F=0 | BX OK | `00 00 00 00` F=7 | `00 00 09 00` **F=0** |
+| NanoBoyAdvance | **SIGSEGV** | — | — | — |
 
 dingbat and mGBA agree exactly (only the cycle column differs). That is not
-independent confirmation: `arm.nim`'s handler was written *from* mGBA's, and
-its comment claims the model is "mGBA-verified hardware" — mGBA-derived would
-be the honest description. Nobody has checked it against silicon.
+independent confirmation: `arm.nim`'s handler was written *from* mGBA's. Its
+comment used to claim the model was "mGBA-verified hardware"; that has been
+corrected to mGBA-derived, because nobody has checked it against silicon.
 
 The specific thing nobody has checked is the **A+10 skip**. mGBA's `MSR`
 handler sets `prefetch[0]` to a Thumb `nop`, `prefetch[1]` to the low halfword
@@ -109,6 +129,25 @@ that. It is invisible in Pokémon Pinball because the instruction at A+8 is a
 branch, so A+10 would never have run anyway. If the hardware column comes back
 `00 00 09 81`, both emulators are wrong in the same place and both need the
 same one-line fix.
+
+### Second open question: T from User mode
+
+`P9` turned up a disagreement nobody was looking for. In User mode only the
+condition flags are writable — the control byte, where T lives, is supposed to
+be protected. NBA implements that (`if (state.cpsr.f.mode == MODE_USR) mask &=
+0xFF000000;`). **dingbat and mGBA both do not**, and let unprivileged code flip
+T (and the mode bits) at will:
+
+* dingbat `arm_psr_transfer` has no privilege check at all before
+  `cpu.switch_mode(...)` and the CPSR write.
+* mGBA guards `PSR_PRIV_MASK` on `privilegeMode != MODE_USER`, but applies
+  `PSR_STATE_MASK` (the T bit) unconditionally.
+
+So `P9` should read `00 00 00 00 F7` on hardware. If it reads `00 00 09 00 F0`,
+that would be the surprise. Either way this is cheap to fix once measured, and
+it is a straight architectural conformance question rather than an
+UNPREDICTABLE-corner one — the ARM ARM is unambiguous, which makes dingbat and
+mGBA the likely-wrong parties here.
 
 ### NanoBoyAdvance
 
@@ -130,9 +169,18 @@ is a 32 KiB reproducer for it (exit 139).
 
 ## Follow-ups this ROM does not cover
 
-* **User mode.** A control-byte write from USR should be ignored, so T should
-  not change. Not probed here: USR is a one-way door on this core without an
-  exception to climb back out of, and the answer is well documented.
+* **FIQ banking.** `P3`–`P5` switch to IRQ mode, whose banked registers the
+  payload never touches. Switching to FIQ instead would additionally test
+  *when* the bank switch becomes visible to the reinterpreted slots, since FIQ
+  banks r8–r12 — but the probe uses r8/r9/r12 (and r10/r11 to get home), so it
+  would need the FIQ bank pre-loaded first. Left out deliberately: getting that
+  wrong makes the test itself the bug.
+* **Thumb → ARM via MSR.** Not an oversight — it does not exist. ARMv4T has no
+  Thumb `MSR`, so the only way out of Thumb state is `BX` or an exception
+  return, both of which are well defined.
+* **Cart prefetch.** The ROM rows run with whatever `WAITCNT` the BIOS left.
+  Toggling the prefetch unit should not change *which* words are in the
+  pipeline, only the cycle column.
 * **Regression test.** No CI guard is wired up on purpose — locking in the
   current signature would freeze a model that is still a guess. Once the
   hardware column exists, `--mode=screenshot` plus a framebuffer hash is the

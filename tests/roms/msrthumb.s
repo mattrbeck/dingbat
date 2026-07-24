@@ -48,11 +48,18 @@
 @   00 00 00 00 0  pipeline fully flushed, refetched at A+12
 @   ** ** ** ** 4  the T write did not take effect at all
 @
-@ Probe 6/7 is the literal Pokemon Pinball shape (`msr` + 0x00000000 +
-@ 0xE0A04700, whose low half is `bx r0`); it prints OK when the guest's own
+@ Probes 6/7 are the literal Pokemon Pinball shape (`msr` + 0x00000000 +
+@ 0xE0A04700, whose low half is `bx r0`); they print OK when the guest's own
 @ branch is honoured.
 @
-@ Each probe is run from ROM, IWRAM and EWRAM: the fetch that landed in the
+@ Probe 8 uses `msr cpsr_f` instead: the flags byte does not contain T, so the
+@ CPU must stay in ARM state no matter what the operand holds (expect F=7).
+@ Probe 9 repeats the ordinary probe from User mode, where control-byte writes
+@ are supposed to be ignored, so T must not change (expect F=7). Probe 9 MUST
+@ stay last -- USR is a one-way door here, with no way back to a privileged
+@ mode afterwards.
+@
+@ Probes 0-5 run from ROM, IWRAM and EWRAM: the fetch that landed in the
 @ pipeline is 16-bit on the cart bus and 32-bit in IWRAM, which is exactly the
 @ kind of thing that could change the answer.
 @ =============================================================================
@@ -69,10 +76,10 @@ _start:
     .equ WITNESS_W2,  0x02000000    @ ARM-decode witness for W2
     .equ WITNESS_W1,  0x02000404    @ ARM-decode witness for W1
     .equ VAR_IDX,     0x02000800
-    .equ RESULTS,     0x02001000    @ 8 records x 32 bytes
+    .equ RESULTS,     0x02001000    @ NUM_PROBES records x 32 bytes
     .equ EWRAM_BLOB,  0x02008000
     .equ IWRAM_BLOB,  0x03000000
-    .equ NUM_PROBES,  8
+    .equ NUM_PROBES,  10
     .equ MAGIC,       0xA5A5A5A5
 
 entry:
@@ -89,7 +96,7 @@ entry:
     bl      draw_report
     ldr     r0, =str_done
     mov     r1, #0
-    mov     r2, #ROW_Y+NUM_PROBES*ROW_DY+28
+    mov     r2, #ROW_Y+NUM_PROBES*ROW_DY+16
     ldr     r3, =0x03E0
     bl      puts
 
@@ -129,13 +136,14 @@ probe_loop:
     ldr     r0, [r1]
 
     ldr     r1, =probe_table
-    add     r1, r1, r0, lsl #2      @ entry stride is 20 bytes
+    add     r1, r1, r0, lsl #3      @ entry stride is 24 bytes
     add     r1, r1, r0, lsl #4
     ldr     r6, [r1, #0]            @ where to run it from
     ldr     r12, [r1, #4]           @ CPSR and-mask
     ldr     r8, [r1, #8]            @ CPSR or-mask
     ldr     r2, [r1, #12]           @ blob start
     ldr     r3, [r1, #16]           @ blob end
+    ldr     r9, [r1, #20]           @ pre-mode (0 = leave the mode alone)
 
     cmp     r6, r2                  @ copy the blob unless it runs in place
     beq     blob_ready
@@ -174,6 +182,8 @@ blob_ready:
     ldr     r1, =WITNESS_W2         @ r1 = probe store base
     ldr     r3, =MAGIC              @ r3 = value an ARM-decoded slot stores
     ldr     r10, =probe_ret
+    cmp     r9, #0                  @ enter a different CPU mode for this probe?
+    msrne   cpsr_c, r9
     mov     pc, r6
 
 probe_ret:
@@ -230,25 +240,27 @@ probes_done:
 @              r10 = return address, r11 = result record, r12 = CPSR and-mask.
 @ Position independent: it is copied verbatim into IWRAM and EWRAM.
 @ =============================================================================
+@ One definition of the payload, instantiated per MSR form, so the variants
+@ cannot drift apart. \msrop is the instruction under test.
+    .macro  MSRPROBE name, msrop
     .align  2
-probe_blob:
+\name:
     mov     r4, #0
     mov     r5, #0
     mov     r6, #0
     mov     r7, #0
     mov     r9, #0                  @ index register for W2-as-ARM: offset 0
-    mrs     r2, cpsr
-    and     r2, r2, r12
-    orr     r2, r2, r8
     mov     r0, #0
     subs    r0, r0, #1              @ borrow => carry clear => `cc` slots fire
+    mrs     r2, cpsr                @ snapshot AFTER the carry clear: the cpsr_f
+    and     r2, r2, r12             @ variant writes the flags byte back, and
+    orr     r2, r2, r8              @ must not resurrect the old carry
 
-probe_msr:
-    msr     cpsr_c, r2              @ <- A
+    \msrop                          @ <- A
     .word   0x35813404              @ <- A+4  (W1, already decoded as ARM)
     .word   0x37813609              @ <- A+8  (W2, already fetched as ARM)
     .thumb
-    b       probe_conv              @ <- A+12 (Thumb) / low half of a `cs` no-op
+    b       99f                     @ <- A+12 (Thumb) / low half of a `cs` no-op
     .hword  0x2000                  @ <- A+14 (Thumb `mov r0,#0`), never reached
     .arm
 
@@ -263,9 +275,7 @@ probe_msr:
     bx      r10
 
     .thumb
-    .thumb_func
-probe_conv:
-    mov     r0, r11
+99: mov     r0, r11
     str     r4, [r0, #0]
     str     r5, [r0, #4]
     str     r6, [r0, #8]
@@ -273,7 +283,14 @@ probe_conv:
     bx      r10                     @ r10 is even: back to ARM state
     .arm
     .align  2
-probe_blob_end:
+\name\()_end:
+    .endm
+
+    @ The instruction under test. `cpsr_c` selects the control byte, which is
+    @ where T lives; `cpsr_f` selects only the flags byte, so it must NOT be
+    @ able to change T no matter what the operand holds.
+    MSRPROBE probe_blob,   "msr cpsr_c, r2"
+    MSRPROBE probe_blob_f, "msr cpsr_f, r2"
 
 @ =============================================================================
 @ Pokemon Pinball: Ruby & Sapphire's actual exit shape, byte for byte.
@@ -324,16 +341,26 @@ pin_blob_end:
 @ =============================================================================
 @ Probe table: dest, cpsr and-mask, cpsr or-mask, blob start, blob end
 @ =============================================================================
+@ dest, cpsr and-mask, cpsr or-mask, blob start, blob end, pre-mode
+@ (pre-mode 0 = run in the current mode; otherwise a CPSR control byte to
+@ install immediately before entering the blob).
     .align  2
 probe_table:
-    .word   probe_blob,  0xFFFFFFFF, 0x00000020, probe_blob, probe_blob_end
-    .word   IWRAM_BLOB,  0xFFFFFFFF, 0x00000020, probe_blob, probe_blob_end
-    .word   EWRAM_BLOB,  0xFFFFFFFF, 0x00000020, probe_blob, probe_blob_end
-    .word   probe_blob,  0xFFFFFFE0, 0x00000032, probe_blob, probe_blob_end
-    .word   IWRAM_BLOB,  0xFFFFFFE0, 0x00000032, probe_blob, probe_blob_end
-    .word   EWRAM_BLOB,  0xFFFFFFE0, 0x00000032, probe_blob, probe_blob_end
-    .word   pin_blob,    0xFFFFFFE0, 0x0000003F, pin_blob,   pin_blob_end
-    .word   IWRAM_BLOB,  0xFFFFFFE0, 0x0000003F, pin_blob,   pin_blob_end
+    .word   probe_blob,   0xFFFFFFFF, 0x00000020, probe_blob,   probe_blob_end,   0
+    .word   IWRAM_BLOB,   0xFFFFFFFF, 0x00000020, probe_blob,   probe_blob_end,   0
+    .word   EWRAM_BLOB,   0xFFFFFFFF, 0x00000020, probe_blob,   probe_blob_end,   0
+    .word   probe_blob,   0xFFFFFFE0, 0x00000032, probe_blob,   probe_blob_end,   0
+    .word   IWRAM_BLOB,   0xFFFFFFE0, 0x00000032, probe_blob,   probe_blob_end,   0
+    .word   EWRAM_BLOB,   0xFFFFFFE0, 0x00000032, probe_blob,   probe_blob_end,   0
+    .word   pin_blob,     0xFFFFFFE0, 0x0000003F, pin_blob,     pin_blob_end,     0
+    .word   IWRAM_BLOB,   0xFFFFFFE0, 0x0000003F, pin_blob,     pin_blob_end,     0
+    @ `msr cpsr_f` with T set in the operand: the flags byte does not contain
+    @ T, so this must leave the CPU in ARM state (expect F=7, R4-R7 all 00).
+    .word   IWRAM_BLOB,   0xFFFFFFFF, 0x00000020, probe_blob_f, probe_blob_f_end, 0
+    @ Same probe from User mode, where control-byte writes are ignored, so T
+    @ must not change (expect F=7). MUST BE LAST: USR is a one-way door here --
+    @ nothing after it can get back to a privileged mode.
+    .word   IWRAM_BLOB,   0xFFFFFFFF, 0x00000020, probe_blob,   probe_blob_end,   0xD0
 
 @ =============================================================================
 @ Report
@@ -346,7 +373,7 @@ probe_table:
     .equ COL_R7,   19
     .equ COL_F,    22
     .equ COL_CYC,  24
-    .equ ROW_Y,    40
+    .equ ROW_Y,    32
     .equ ROW_DY,   10
 
 draw_report:
@@ -392,7 +419,7 @@ report_row:
     bl      puts
 
     ldr     r0, =probe_table        @ or-mask, low byte
-    add     r0, r0, r9, lsl #2
+    add     r0, r0, r9, lsl #3
     add     r0, r0, r9, lsl #4
     ldr     r0, [r0, #8]
     mov     r1, #COL_MSK*8
@@ -469,17 +496,114 @@ row_next:
     cmp     r9, #NUM_PROBES
     blo     report_row
 
-    ldr     r0, =str_w1
-    mov     r1, #0
-    mov     r2, #ROW_Y+NUM_PROBES*ROW_DY+8
-    ldr     r3, =0x4210
-    bl      puts
-    ldr     r0, =str_w2
-    mov     r1, #0
-    mov     r2, #ROW_Y+NUM_PROBES*ROW_DY+18
-    ldr     r3, =0x4210
+    bl      draw_summary
+    ldmfd   sp!, {r4-r11, pc}
+
+@ One line that collapses the six generic probes when they agree, so the whole
+@ result can be reported without transcribing the table.
+    .equ SUM_Y, ROW_Y+NUM_PROBES*ROW_DY+6
+
+draw_summary:
+    stmfd   sp!, {r4-r11, lr}
+    ldr     r11, =RESULTS
+    mov     r8, #1                  @ "all six agree" until proven otherwise
+    mov     r9, #1
+sum_cmp:
+    ldr     r0, =RESULTS
+    add     r0, r0, r9, lsl #5
+    ldr     r1, [r11, #0]
+    ldr     r2, [r0, #0]
+    cmp     r1, r2
+    movne   r8, #0
+    ldr     r1, [r11, #4]
+    ldr     r2, [r0, #4]
+    cmp     r1, r2
+    movne   r8, #0
+    ldr     r1, [r11, #8]
+    ldr     r2, [r0, #8]
+    cmp     r1, r2
+    movne   r8, #0
+    ldr     r1, [r11, #12]
+    ldr     r2, [r0, #12]
+    cmp     r1, r2
+    movne   r8, #0
+    ldr     r1, [r11, #24]
+    ldr     r2, [r0, #24]
+    eor     r1, r1, r2
+    tst     r1, #7                  @ flags differ?
+    movne   r8, #0
+    tst     r1, #0x100              @ ...or one of them never ran
+    movne   r8, #0
+    add     r9, r9, #1
+    cmp     r9, #6
+    blo     sum_cmp
+
+    ldr     r0, =str_blank          @ draw_summary runs once per probe; wipe the
+    mov     r1, #0                  @ line so a short verdict cannot leave the
+    mov     r2, #SUM_Y              @ tail of a longer earlier one behind
+    ldr     r3, =0x0000
     bl      puts
 
+    cmp     r8, #0
+    beq     sum_differ
+
+    ldr     r0, =str_same
+    mov     r1, #0
+    mov     r2, #SUM_Y
+    ldr     r3, =0x7FFF
+    bl      puts
+
+    ldr     r3, =0x7FFF
+    ldr     r0, [r11, #0]
+    mov     r1, #5*8
+    mov     r2, #SUM_Y
+    bl      put_hex8
+    ldr     r0, [r11, #4]
+    mov     r1, #8*8
+    mov     r2, #SUM_Y
+    bl      put_hex8
+    ldr     r0, [r11, #8]
+    mov     r1, #11*8
+    mov     r2, #SUM_Y
+    bl      put_hex8
+    ldr     r0, [r11, #12]
+    mov     r1, #14*8
+    mov     r2, #SUM_Y
+    bl      put_hex8
+    mov     r0, #'F'
+    mov     r1, #17*8
+    mov     r2, #SUM_Y
+    bl      putc
+    ldr     r0, [r11, #24]
+    and     r0, r0, #7
+    add     r0, r0, #'0'
+    mov     r1, #18*8
+    mov     r2, #SUM_Y
+    ldr     r3, =0x7FFF
+    bl      putc
+    b       sum_pin
+
+sum_differ:
+    ldr     r0, =str_differ
+    mov     r1, #0
+    mov     r2, #SUM_Y
+    ldr     r3, =0x001F
+    bl      puts
+    b       sum_out
+
+sum_pin:
+    ldr     r0, =RESULTS            @ probe 6 = the Pokemon Pinball shape
+    ldr     r0, [r0, #(6*32)+24]
+    tst     r0, #8
+    ldreq   r0, =str_pinno
+    ldrne   r0, =str_pinok
+    ldreq   r3, =0x001F
+    ldrne   r3, =0x03E0
+    mov     r1, #20*8
+    mov     r2, #SUM_Y
+    bl      puts
+
+sum_out:
     ldmfd   sp!, {r4-r11, pc}
 
     .ltorg
@@ -619,10 +743,16 @@ str_ok:
     .asciz  "BX OK       "         @ padded: blanks the stale R6/R7 cells
 str_no:
     .asciz  "BX NO       "
-str_w1:
-    .asciz  "W1 35813404 A+4 A+6"
-str_w2:
-    .asciz  "W2 37813609 A+8 A+10"
+str_blank:
+    .asciz  "                              "
+str_same:
+    .asciz  "SAME"
+str_differ:
+    .asciz  "P0-5 DIFFER - READ TABLE"
+str_pinok:
+    .asciz  "PIN OK"
+str_pinno:
+    .asciz  "PIN NO"
 
     .align  2
 mem_names:
@@ -634,6 +764,8 @@ mem_names:
     .asciz  "EWR"
     .asciz  "PIN"
     .asciz  "PIW"
+    .asciz  "FLG"
+    .asciz  "USR"
 
     .align  2
     .include "msrthumb_font.inc"
