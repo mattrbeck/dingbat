@@ -4371,6 +4371,42 @@ body.sync-shown #status {
   }
 }
 
+/* The grid's Sync link doubles as a progress readout while a sync runs. */
+#home-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* display:inline-flex above would otherwise defeat the [hidden] attribute
+   used to keep this out of the bar when signed out. */
+#home-sync[hidden] {
+  display: none;
+}
+#home-sync svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#home-sync[disabled] {
+  cursor: default;
+  text-decoration: none;
+  color: var(--text-faint);
+}
+
+/* Manage ROMs sort toggle */
+.roms-sort-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 10px;
+}
+.roms-sort-row[hidden] {
+  display: none;
+}
+
 /* Tile system chip — one identity slot per tile (replaced the cartridge glyph
    and the duplicate corner badge). Box art takes the same slot when present. */
 .sys-chip {

@@ -424,8 +424,11 @@
       <div class="modal">
         <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
         <h3>Manage ROMs and Saves</h3>
-        <p class="modal-hint">Your games, most recently played first. <b>Reset</b> deletes a game's save data so you can start over; <b>Delete</b> removes the ROM and its save data. While you're signed in to Drive, both apply to all your devices.</p>
+        <p class="modal-hint">Your games. <b>Reset</b> deletes a game's save data so you can start over; <b>Delete</b> removes the ROM and its save data. While you're signed in to Drive, both apply to all your devices.</p>
         <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
+        <div class="roms-sort-row">
+          <button type="button" class="button button-sm button-ghost" id="roms-sort"></button>
+        </div>
         <div id="roms-manage-list" class="roms-manage-list"></div>
         <div class="modal-subhead">Google Drive</div>
         <p class="modal-hint">Signing in keeps your games, saves, and save states mirrored across your devices. Everything lives in your Google account's hidden app storage — nothing shows up in your regular Drive files.</p>
