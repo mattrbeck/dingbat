@@ -363,3 +363,88 @@ See `docs/research_cached_interpreter.md` before reaching for a block cache or
 JIT: the decoded-block ceiling was measured at only +8-12% because the
 cycle-accurate timing model cannot be precomputed, and any such change has to
 preserve the bit-exact determinism the rollback netplay depends on.
+
+---
+
+## Investigation: layer-at-a-time SIMD compositing (2026-07-24) — NO-GO
+
+Assessed the one structural item the previous round left open. Recommendation
+is **don't build it**, on cost/benefit rather than impossibility.
+
+### The prize, measured on web (the target)
+
+Stubbing the compositor out entirely, best-of-9 in a real Chrome window:
+
+| | baseline | compositor removed | ceiling |
+|---|---|---|---|
+| HLE off | 468.6 | 511.5 | **+9.2%** |
+| HLE on | 445.5 | 484.6 | +8.8% |
+
+That is the hard ceiling for *deleting* the compositor. Any rewrite still has
+to do the work, so it captures a fraction — realistically 3-5%.
+
+### Feasibility: better than expected
+
+The obvious objection — wasm SIMD128 has no gather instruction, and the
+compositor's core operation is a PRAM palette lookup — turns out not to bite.
+Replacing every palette lookup with a constant (keeping the walk and all
+opacity tests intact) measured **469.3 vs 468.6 fps: no change at all**. PRAM
+is 1 KB and permanently L1-resident, so the gather is free.
+
+So the compositor's ~9% is the *walk logic* — per-pixel loop, opacity tests,
+priority comparisons, branches — which is exactly what a branchless 16-lane
+byte pass would vectorize well. `layer_palettes` is already laid out as one
+contiguous 240-byte row per BG, which is the right shape for it.
+
+### Why it is still a no-go
+
+**It is three implementations, not one.** `composite` has three paths and all
+three carry real games (400-frame samples from boot):
+
+| Game | fast | blend-only | windowed |
+|---|---|---|---|
+| Mega Man Zero | 92% | — | 7% |
+| Metal Slug Advance | 91% | 8% | — |
+| Kirby: Nightmare in Dream Land | 89% | — | 10% |
+| Pokemon Emerald | 78% | 21% | — |
+| Pokemon FireRed (title) | 24% | — | 75% |
+| Final Fantasy Tactics Advance | 32% | — | 67% |
+| Advance Wars | — | 32% | 67% |
+| Superstar Saga | 18% | 81% | — |
+| Golden Sun | 2% | 97% | — |
+| Metroid Fusion | — | 100% | — |
+
+The fast path is the only easy one to vectorize. The blend path conditionally
+runs a *second* layer walk per pixel to find the blend target — data-dependent
+work that does not vectorize cleanly. The windowed path has a per-pixel enable
+mask and per-pixel effect flag.
+
+And note the FireRed save state this whole round was tuned against is **100%
+windowed** — the hardest path. A fast-path-only SIMD compositor would do
+nothing for the exact workload that prompted the work.
+
+**The devices that need it most are the ones that cannot run it.** wasm SIMD
+needs Safari 16.4+ (March 2023). The iOS 15 devices the frontend explicitly
+supports (see the iOS 15 compat work) are iPhone 6s-X era — precisely the slow,
+battery-constrained hardware a speedup would help, and precisely the hardware
+that would fall back to the scalar path.
+
+**The bundle cost is real.** Feature detection itself is the easy part —
+`WebAssembly.validate()` on a tiny SIMD module is reliable and needs no UA
+sniffing. The problem is `web/sw.js`, which precaches `./em.js` and `./em.wasm`
+by fixed name for the offline PWA. Two bundles means either precaching both
+(offline install goes 1.2 MB -> 2.4 MB of wasm) or making service-worker
+install feature-dependent, which is a meaningfully more fragile install path
+for an app with a deliberate offline story.
+
+**And the scalar path never goes away.** Every compositor change would have to
+be made and verified twice, in the most correctness-sensitive code in the
+renderer — the code the 6910/7008 mGBA suite score and the 60-ROM pixel A/B are
+mostly measuring.
+
+### Verdict
+
+3-5% on web, for three SIMD implementations, permanent dual maintenance of the
+renderer's hardest code, a doubled offline payload, and no benefit on the
+oldest devices. Revisit only if the compositor's share grows substantially, or
+if a future baseline makes SIMD assumable without a fallback.
