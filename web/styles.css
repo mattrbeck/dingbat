@@ -2039,7 +2039,10 @@ body.debug-2p .home-tile-link {
 
 #toast {
   position: absolute;
-  z-index: 350;
+  /* Above .modal-overlay (500): toasts fired while a modal is open (Quick
+     Save's confirmation, sync notices) must not render dimmed behind the
+     overlay's backdrop. */
+  z-index: 600;
   left: 50%;
   bottom: 20px;
   transform: translate(-50%, 8px);
