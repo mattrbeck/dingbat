@@ -202,6 +202,11 @@ type
     # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
     # interrupt and must still observe the old mode).
     read_mode*:          uint8
+    # Dots elapsed since the last frame pushed while the LCD was off. Hardware
+    # keeps refreshing the panel at the same rate whether or not the PPU is
+    # driving it, so a disabled LCD must still produce frames — see the
+    # lcd_off_frame helper.
+    lcd_off_dots*:       int32
     # output
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool
@@ -689,8 +694,12 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     of 0x80'u8: cgbSupport
     of 0xC0'u8: cgbExclusive
     else:       cgbNone
-  result.cgb_enabled = (bootrom_path.len > 0 and run_bios) or
-                       result.cgb_flag != cgbNone or force_cgb
+  # A boot ROM only implies CGB mode when it *is* a CGB boot ROM: the DMG one
+  # is 256 bytes, the CGB one 0x900. Sizing it (rather than assuming CGB for
+  # any boot ROM) lets a DMG boot ROM boot a DMG cart as a DMG.
+  let cgb_bootrom = bootrom_path.len > 0 and run_bios and
+                    fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
+  result.cgb_enabled = cgb_bootrom or result.cgb_flag != cgbNone or force_cgb
   # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
   # The test harness may override this (via --model) before post_init to drive
   # the model-specific mooneye boot_regs/boot_div acceptance ROMs.

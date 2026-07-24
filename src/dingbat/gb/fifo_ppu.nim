@@ -334,3 +334,4 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
+    lcd_off_frame(ppu, gb, cycles)

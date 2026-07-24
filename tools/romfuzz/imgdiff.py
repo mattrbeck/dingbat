@@ -92,6 +92,12 @@ def metrics(pa, pb):
     # sits near the mean — so MINOR also accepts a tiny mean absolute error.
     if exact == 1.0:
         verdict = 'IDENTICAL'
+    elif exact > 0.995 and mae < 3.0:
+        # A handful of differing pixels is never a scene change, whatever the
+        # correlation says. Needed because ncc is defined as 0 when one side is
+        # flat: a blank screen with two stray pixels scored MAJOR at 99.99%
+        # pixel-identical.
+        verdict = 'MINOR'
     elif ncc > 0.99 and (ham <= 1 or mae < 3.0):
         verdict = 'MINOR'
     elif ncc > 0.90:
