@@ -82,6 +82,14 @@ static void write_dump(const char* path, GB_gameboy_t* gb) {
   }
   fwrite(gb->background_palettes_data, 1, 0x40, f);
   fwrite(gb->object_palettes_data, 1, 0x40, f);
+  /* Work RAM and HRAM too: when VRAM diverges but OAM and the palettes do not,
+   * the CPU computed different data, and this is where it computed it. */
+  fwrite(gb->ram, 1, gb->ram_size, f);
+  if (gb->ram_size < 0x8000) {          /* pad DMG's 8K to the CGB 32K layout */
+    static const uint8_t zero[0x8000] = {0};
+    fwrite(zero, 1, 0x8000 - gb->ram_size, f);
+  }
+  fwrite(gb->hram, 1, 0x7F, f);
   fclose(f);
 }
 
