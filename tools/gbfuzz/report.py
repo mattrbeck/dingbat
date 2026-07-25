@@ -26,6 +26,21 @@ def worst_of(res):
                default='?')
 
 
+def divergence(r):
+    """How far from SameBoy this title is, worst-first when sorted descending.
+
+    Ranked bucket first so a MAJOR never sorts under a DIFFERENT, then the
+    fraction of pixels that differ at the worst checkpoint, then how many
+    checkpoints diverged at all.
+    """
+    bad = [s for s in r['shots'].values() if s['final'] not in OK]
+    if not bad:
+        return (-1, 0.0, 0)
+    rank = max(RANK.index(s['final']) for s in bad)
+    worst = max(1.0 - s['dingbat_vs_sameboy'].get('exact', 0.0) for s in bad)
+    return (rank, worst, len(bad))
+
+
 def png_data_uri(ppm_path):
     try:
         w, h, rgb = imgdiff.read_ppm(ppm_path)
@@ -226,6 +241,40 @@ def render(workdir, results, notes_html, out_path):
         h.append('<section>' + notes_html + '</section>')
 
     frames = sorted(int(x) for x in results[0]['shots'])
+
+    diff_rows = sorted((r for r in results if worst_of(r) not in OK),
+                       key=divergence, reverse=True)
+    if diff_rows:
+        h.append('<section><h2>Titles that differ from SameBoy</h2>'
+                 '<p class="note">Most different first. "Worst px" is the share '
+                 'of pixels that differ at the checkpoint that diverged most; '
+                 '"vs mGBA" and "SameBoy vs mGBA" are context only &mdash; a '
+                 'divergence where the two references also disagree is a '
+                 'different kind of problem from one where they agree.</p>'
+                 '<div class="scroll"><table>')
+        h.append('<tr><th>Title</th><th>Verdict</th><th>Worst px</th>'
+                 '<th>Bad checkpoints</th><th>vs mGBA</th>'
+                 '<th>SameBoy vs mGBA</th><th>No input</th><th>ROM</th></tr>')
+        for r in diff_rows:
+            w = worst_of(r)
+            bad = [(f, sh) for f, sh in r['shots'].items() if sh['final'] not in OK]
+            _, worstpx, nbad = divergence(r)
+            mg = min((sh['dingbat_vs_mgba']['verdict'] for f, sh in bad),
+                     key=lambda v: RANK.index(v) if v in RANK else 99)
+            rc = max((sh['ref_control']['verdict'] for f, sh in bad),
+                     key=lambda v: RANK.index(v) if v in RANK else 99)
+            ni = r.get('noinput_f1650', {}).get('verdict', '—')
+            cps = ', '.join(f'f{f}' for f, _ in sorted(bad, key=lambda x: int(x[0])))
+            h.append(f'<tr><td>{r["title"]}</td>'
+                     f'<td><span class="chip v-{w}">{w}</span></td>'
+                     f'<td class="num">{worstpx*100:.1f}%</td>'
+                     f'<td class="num">{nbad}/{len(r["shots"])} &nbsp;<span class="rom">{cps}</span></td>'
+                     f'<td><span class="chip v-{mg}">{mg[:4]}</span></td>'
+                     f'<td><span class="chip v-{rc}">{rc[:4]}</span></td>'
+                     f'<td class="rom">{ni}</td>'
+                     f'<td class="rom">{r["rom"]}</td></tr>')
+        h.append('</table></div></section>')
+
     h.append('<section><h2>All titles</h2><div class="scroll"><table>')
     h.append('<tr><th>Title</th><th>Verdict</th>'
              + ''.join(f'<th>f{f}</th>' for f in frames) + '<th>ROM</th></tr>')
@@ -278,6 +327,7 @@ def card(workdir, r, full):
         bits.append(f'no-input control: {ni}')
     h.append(f'<div class="meta">{" &middot; ".join(bits)}</div>')
     h.append('<div class="shots">')
+    shown = 0
     for f in sorted(r['shots'], key=int):
         shot = r['shots'][f]
         emus = EMUS if full else ('dingbat',)
@@ -291,10 +341,13 @@ def card(workdir, r, full):
             cap = LABEL[emu]
             if full and emu == 'dingbat':
                 cap += f' &middot; {shot["dingbat_vs_sameboy"]["exact"]*100:.1f}% px'
+            shown += 1
             h.append(f'<div class="shot"><img src="{uri}" alt="{LABEL[emu]} at '
                      f'frame {f} of {r["title"]}"><div class="cap">{cap}</div></div>')
         h.append('</div></div>')
     h.append('</div></div>')
+    if not shown:
+        return ''      # artifacts pruned (bulk mode); the tables still list it
     return '\n'.join(h)
 
 
