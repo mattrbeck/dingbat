@@ -17,6 +17,10 @@ RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR', 'REF-CRASH', 'ERROR']
 OK = ('IDENTICAL', 'MINOR')
 EMUS = ('sameboy', 'mgba', 'dingbat')
 LABEL = {'sameboy': 'SameBoy', 'mgba': 'mGBA', 'dingbat': 'dingbat'}
+# Screenshots are inlined, so a whole-library run would otherwise produce a
+# page too large to open. Flagged titles always show theirs; the clean gallery
+# is a sample.
+CLEAN_GALLERY = 48
 
 
 def worst_of(res):
@@ -321,12 +325,17 @@ def render(workdir, results, notes_html, out_path):
             h.append(card(workdir, r, full=True))
         h.append('</section>')
 
+    clean = [r for r in results if worst_of(r) in OK]
+    gallery = clean[:CLEAN_GALLERY]
     h.append('<section><h2>Clean titles</h2>'
              '<p class="note">dingbat\'s own progression. Start and A are '
              'pressed between checkpoints to walk the title screen and the '
-             'opening menus; every frame below matched a reference.</p>')
-    for r in sorted((r for r in results if worst_of(r) in OK),
-                    key=lambda r: r['title']):
+             'opening menus; every frame below matched SameBoy.'
+             + (f' Showing {len(gallery)} of {len(clean)} &mdash; the rest are '
+                'in the table above, and a whole-library run prunes their '
+                'screenshots as it goes.' if len(clean) > len(gallery) else '')
+             + '</p>')
+    for r in sorted(gallery, key=lambda r: r['title']):
         h.append(card(workdir, r, full=False))
     h.append('</section></div>')
 
@@ -349,7 +358,14 @@ def card(workdir, r, full):
     h.append(f'<div class="meta">{" &middot; ".join(bits)}</div>')
     h.append('<div class="shots">')
     shown = 0
-    for f in sorted(r['shots'], key=int):
+    frames = sorted(r['shots'], key=int)
+    if full:
+        # Only the checkpoints that actually diverged. A flagged title usually
+        # matches at most of them, and over a whole-library run the matching
+        # ones are most of the page weight for none of the information.
+        diverged = [f for f in frames if r['shots'][f]['final'] not in OK]
+        frames = diverged or frames
+    for f in frames:
         shot = r['shots'][f]
         emus = EMUS if full else ('dingbat',)
         h.append(f'<div class="cp"><div class="cph"><span>frame {f}</span>'
