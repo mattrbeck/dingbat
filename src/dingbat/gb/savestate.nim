@@ -392,6 +392,9 @@ proc mbc_kind_tag(cart: Mbc): uint8 =
   elif cart of Mbc3: 3'u8
   elif cart of Mbc5: 5'u8
   elif cart of Mbc7: 7'u8
+  # The Hudson mappers have no MBC number; their cartridge-type bytes stand in
+  elif cart of Huc1: 0xFF'u8
+  elif cart of Huc3: 0xFE'u8
   else: 0'u8
 
 proc save_mbc_state(cart: Mbc; w: var Writer) =
@@ -441,6 +444,26 @@ proc save_mbc_state(cart: Mbc; w: var Writer) =
     w.write_u16(c.read_bits)
     w.write_u8(uint8(c.argument_bits_left))
     w.write_bool(c.eeprom_write_enabled)
+  elif cart of Huc1:
+    let c = Huc1(cart)
+    w.write_u8(c.bank_low)
+    w.write_u8(c.bank_high)
+    w.write_bool(c.ir_mode)
+  elif cart of Huc3:
+    let c = Huc3(cart)
+    w.write_u8(c.rom_bank_num)
+    w.write_u8(c.ram_bank_num)
+    w.write_u8(c.mode)
+    # The microcontroller's register window carries the clock, so it goes in
+    # whole. So does the mailbox: issuing a command takes several writes across
+    # two window modes, and a state taken between them would resume with a
+    # half-built command. cart_ir is live emitter drive and is left out, as
+    # Mbc5Rumble.rumble is.
+    for v in c.regs: w.write_u8(v)
+    w.write_u8(c.access_addr)
+    w.write_u8(c.mailbox)
+    w.write_u8(c.response)
+    w.write_u64(uint64(c.last_second))
 
 proc load_mbc_state(cart: Mbc; r: var Reader) =
   r.expect_tag(GB_SEC_MBC)
@@ -490,6 +513,21 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.read_bits = r.read_u16()
     c.argument_bits_left = int(r.read_u8())
     c.eeprom_write_enabled = r.read_bool()
+  elif cart of Huc1:
+    let c = Huc1(cart)
+    c.bank_low = r.read_u8()
+    c.bank_high = r.read_u8()
+    c.ir_mode = r.read_bool()
+  elif cart of Huc3:
+    let c = Huc3(cart)
+    c.rom_bank_num = r.read_u8()
+    c.ram_bank_num = r.read_u8()
+    c.mode = r.read_u8()
+    for i in 0 ..< c.regs.len: c.regs[i] = r.read_u8()
+    c.access_addr = r.read_u8()
+    c.mailbox = r.read_u8()
+    c.response = r.read_u8()
+    c.last_second = int64(r.read_u64())
   # Persist the restored cart RAM to the .sav on the next flush
   if cart.has_battery and cart.ram.len > 0:
     cart.ram_dirty = true

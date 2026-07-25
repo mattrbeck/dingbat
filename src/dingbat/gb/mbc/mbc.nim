@@ -42,9 +42,11 @@ proc load_cartridge*(rom_path: string): Mbc =
   let cart_type = rom[0x0147]
   let has_ram     = (cart_type in [0x02'u8, 0x03, 0x08, 0x09,
                                     0x0C, 0x0D, 0x10, 0x12, 0x13,
-                                    0x1A, 0x1B, 0x1D, 0x1E, 0x22])
+                                    0x1A, 0x1B, 0x1D, 0x1E, 0x22,
+                                    0xFE, 0xFF])
   let has_battery = (cart_type in [0x03'u8, 0x06, 0x09, 0x0D, 0x0F,
-                                    0x10, 0x13, 0x1B, 0x1E, 0x22])
+                                    0x10, 0x13, 0x1B, 0x1E, 0x22,
+                                    0xFE, 0xFF])
 
   let ram_sz = case rom[0x0149]
     of 0x01: 0x0800
@@ -99,6 +101,22 @@ proc load_cartridge*(rom_path: string): Mbc =
                  x_latch: 0x8000, y_latch: 0x8000, latch_ready: true,
                  read_bits: 0xFFFF, eeprom_do: true)
     for i in 0 ..< c.ram.len: c.ram[i] = 0xFF
+    cart = c
+  of 0xFE:
+    # HuC3's battery backs the clock as well as the RAM, so the clock needs a
+    # starting point even when there is no .sav to load one from: SameBoy powers
+    # up with the counters at zero and the timestamp at the host's current
+    # second, which is what makes the first minute tick land where it does.
+    let c = Huc3(rom: rom, ram: newSeq[uint8](ram_sz),
+                 sav_path: sav_path, has_battery: has_battery,
+                 rom_bank_num: 1, last_second: gb_rtc_now())
+    cart = c
+  of 0xFF:
+    # bank_low powers up at 1 like every other mapper's bank register, but
+    # unlike them a later write of 0 is honoured and maps bank 0 twice.
+    let c = Huc1(rom: rom, ram: newSeq[uint8](ram_sz),
+                 sav_path: sav_path, has_battery: has_battery,
+                 bank_low: 1)
     cart = c
   else:
     echo "Warning: unimplemented cartridge type 0x", toHex(cart_type, 2), ", treating as ROM"

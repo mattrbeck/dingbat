@@ -95,6 +95,30 @@ type
     argument_bits_left*:   int
     eeprom_write_enabled*: bool
 
+  Huc1* = ref object of Mbc
+    # Cart type 0xFF (Hudson HuC1). Not the MBC1 relative it is usually said to
+    # be: cart RAM has no enable line, and the register that would be MBC1's RAM
+    # enable instead chooses whether 0xA000-0xBFFF sees RAM or the cartridge's
+    # infrared transceiver. See mbc/huc1.nim.
+    bank_low*:  uint8  # 0x4000-0x7FFF bank; NOT remapped away from 0
+    bank_high*: uint8  # RAM bank (it never reaches the ROM)
+    ir_mode*:   bool   # 0x0E written to 0x0000-0x1FFF maps IR in at 0xA000
+    cart_ir*:   bool   # emitter drive; transient, like Mbc5Rumble.rumble
+
+  Huc3* = ref object of Mbc
+    # Cart type 0xFE (Hudson HuC3). MBC5-shaped banking plus a 4-bit
+    # microcontroller — clock, alarm and tone generator — reached through a
+    # mailbox at 0xA000-0xBFFF. See mbc/huc3.nim for the protocol.
+    rom_bank_num*: uint8
+    ram_bank_num*: uint8
+    mode*:         uint8   # what 0xA000-0xBFFF currently decodes to
+    regs*:         array[256, uint8]  # the MCU's memory window, one nibble each
+    access_addr*:  uint8   # nibble the next read/write command targets
+    mailbox*:      uint8   # last value written to the command window (7 bits)
+    response*:     uint8   # nibble the last executed command produced
+    last_second*:  int64   # unix second the clock has been advanced through
+    cart_ir*:      bool
+
   # ---- CPU ----
   GbCpu* = ref object
     af*:         uint16
@@ -536,7 +560,9 @@ proc mbc_ram_bank_offset*(cart: Mbc; bank_num: int): int =
 
 proc mbc_ram_offset*(idx: int): int = idx - 0xA000
 
-const RTC_SECOND_CYCLES* = 4194304  # one RTC tick per emulated second
+const
+  RTC_SECOND_CYCLES* = 4194304  # one RTC tick per emulated second
+  MINUTES_PER_DAY*   = 60 * 24
 
 # Deterministic-RTC override for lockstep/rollback netplay. With two peers the
 # MBC3 clock must NOT read the local wall clock (it would differ between peers)
@@ -643,12 +669,103 @@ proc rtc_load_footer(cart: Mbc3; data: string) =
     ts = ts or (int64(get_u32(data, base + 44)) shl 32)
   cart.rtc_catch_up(gb_rtc_now() - ts)
 
+# HuC3's clock lives inside the cartridge's microcontroller, in the same nibble
+# window its other registers do: a minute-of-day counter at 0x10-0x12 and a day
+# counter at 0x13-0x15, both little-endian nibble triples. Everything below
+# knows that layout; mbc/huc3.nim knows the protocol that reaches it.
+
+const
+  # Nibble addresses inside that window. Only these have been pinned down; the
+  # games use plenty more that nobody has identified.
+  HUC3_SNAPSHOT*  = 0x00  # 0x00-0x06, where the clock is copied to be read
+  HUC3_CLOCK*     = 0x10  # 0x10-0x12 minute of day, 0x13-0x15 days, 0x16 unknown
+  HUC3_CLOCK_LEN* = 7     # a cartridge dump shows 0x10-0x16 copied across whole
+  HUC3_EVENT*     = 0x58  # 0x58-0x5A event minutes, 0x5B-0x5D event days
+  HUC3_DAY_WRAP*  = 0x1000  # the day counter is three nibbles and no more
+
+proc nyb3*(cart: Huc3; at: int): int =
+  int(cart.regs[at]) or (int(cart.regs[at + 1]) shl 4) or (int(cart.regs[at + 2]) shl 8)
+
+proc set_nyb3*(cart: Huc3; at, v: int) =
+  cart.regs[at]     = uint8(v and 0xF)
+  cart.regs[at + 1] = uint8((v shr 4) and 0xF)
+  cart.regs[at + 2] = uint8((v shr 8) and 0xF)
+
+proc huc3_now_minutes*(cart: Huc3): int =
+  ## The clock as one number, for arithmetic that has to cross a day boundary
+  cart.nyb3(HUC3_CLOCK + 3) * MINUTES_PER_DAY + cart.nyb3(HUC3_CLOCK)
+
+proc huc3_advance_minutes(cart: Huc3; count: int) =
+  if count <= 0: return
+  let minutes = cart.nyb3(HUC3_CLOCK) + count
+  cart.set_nyb3(HUC3_CLOCK, minutes mod MINUTES_PER_DAY)
+  cart.set_nyb3(HUC3_CLOCK + 3,
+                (cart.nyb3(HUC3_CLOCK + 3) + minutes div MINUTES_PER_DAY) mod HUC3_DAY_WRAP)
+
+proc huc3_advance_to(cart: Huc3; now: int64) =
+  ## Step the clock over every whole minute between last_second and now. Keeping
+  ## last_second rather than resetting it means the minute ticks stay on the
+  ## host's minute boundaries across a save and reload, instead of restarting
+  ## the minute every time the game is launched.
+  let elapsed = now div 60 - cart.last_second div 60
+  if elapsed <= 0: return
+  cart.last_second += elapsed * 60
+  # A whole day-counter cycle is as far as the clock can meaningfully move, and
+  # capping there also keeps a nonsense timestamp out of a 32-bit int (the web
+  # build's) on the way into the nibble arithmetic.
+  cart.huc3_advance_minutes(int(min(elapsed, HUC3_DAY_WRAP * MINUTES_PER_DAY)))
+
+proc huc3_rtc_schedule*(cart: Huc3) =
+  if gb_rtc_frozen(): return  # deterministic mode: clock frozen, never ticks
+  cart.gb_ref.scheduler.clear(etRtcSecond)
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+
+proc huc3_rtc_tick*(cart: Huc3) =
+  if gb_rtc_frozen(): return
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+  cart.huc3_advance_to(cart.last_second + 1)
+
+# Battery footer: the unix second the clock was last stepped through, then the
+# whole 256-nibble register window packed two nibbles to a byte. The window is
+# the state — clock, event time, tone selection and whatever else that
+# cartridge's microcontroller keeps there — so saving a hand-picked subset of it
+# would lose whatever a given game happens to use. This is dingbat's own layout;
+# no other emulator writes it, because no other emulator keeps the window whole.
+const HUC3_FOOTER_LEN = 8 + 128
+
+proc huc3_footer(cart: Huc3): string =
+  result = newStringOfCap(HUC3_FOOTER_LEN)
+  let ts = uint64(cart.last_second)
+  for i in 0 .. 7: result.add(char((ts shr (8 * i)) and 0xFF))
+  for i in 0 ..< 128:
+    result.add(char(cart.regs[i * 2] or (cart.regs[i * 2 + 1] shl 4)))
+
+proc huc3_load_footer(cart: Huc3; data: string) =
+  let base = cart.ram.len
+  if data.len - base < HUC3_FOOTER_LEN: return  # RAM-only save: keep the power-on clock
+  var ts: int64 = 0
+  for i in 0 .. 7: ts = ts or (int64(uint8(data[base + i])) shl (8 * i))
+  for i in 0 ..< 128:
+    let b = uint8(data[base + 8 + i])
+    cart.regs[i * 2]     = b and 0x0F
+    cart.regs[i * 2 + 1] = b shr 4
+  cart.last_second = ts
+  let now = gb_rtc_now()
+  if ts > now:
+    # Saved in the future: the clock would sit still until the host caught up,
+    # so treat the host as authoritative and carry on from here instead.
+    cart.last_second = now
+  else:
+    cart.huc3_advance_to(now)
+
 proc mbc_save*(cart: Mbc) =
   if cart.ram_dirty and cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:
     try:
       var data = cast[string](cart.ram)
       if cart of Mbc3 and Mbc3(cart).has_rtc:
         data.add(rtc_footer(Mbc3(cart)))
+      elif cart of Huc3:
+        data.add(huc3_footer(Huc3(cart)))
       writeFile(cart.sav_path, data)
       cart.ram_dirty = false
     except IOError, OSError:
@@ -663,6 +780,8 @@ proc mbc_load*(cart: Mbc) =
       cart.ram[i] = uint8(data[i])
     if cart of Mbc3 and Mbc3(cart).has_rtc:
       rtc_load_footer(Mbc3(cart), data)
+    elif cart of Huc3:
+      huc3_load_footer(Huc3(cart), data)
 
 # ==================== INCLUDES ====================
 include mbc/mbc
@@ -672,6 +791,8 @@ include mbc/mbc2
 include mbc/mbc3
 include mbc/mbc5
 include mbc/mbc7
+include mbc/huc1
+include mbc/huc3
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
@@ -777,6 +898,7 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     of etSaves:        gb.handle_saves()
     of etRtcSecond:
       if gb.cartridge of Mbc3: Mbc3(gb.cartridge).rtc_tick()
+      elif gb.cartridge of Huc3: Huc3(gb.cartridge).huc3_rtc_tick()
     else: discard
 
 proc post_init*(gb: GB) =
@@ -798,6 +920,8 @@ proc post_init*(gb: GB) =
     let c = Mbc3(gb.cartridge)
     if c.has_rtc and not c.rtc_halted():
       c.rtc_schedule_full()
+  elif gb.cartridge of Huc3:
+    Huc3(gb.cartridge).huc3_rtc_schedule()
   gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
