@@ -112,6 +112,19 @@ static uint32_t rgb_encode(GB_gameboy_t* gb, uint8_t r, uint8_t g, uint8_t b) {
 
 static void vblank(GB_gameboy_t* gb, GB_vblank_type_t type) { (void) gb; (void) type; }
 
+/* GBFUZZ_TRACE=<path>:<startframe>:<count> — log <count> instructions as
+ * "PC OP" from the start of <startframe>, in the same format the dingbat
+ * runner emits, so the two can be diffed directly. */
+static FILE* g_trace;
+static long g_trace_left;
+static void exec_cb(GB_gameboy_t* gb, uint16_t addr, uint8_t opcode) {
+  (void) gb;
+  if (g_trace && g_trace_left > 0) {
+    fprintf(g_trace, "%04X %02X\n", addr, opcode);
+    --g_trace_left;
+  }
+}
+
 static void log_cb(GB_gameboy_t* gb, const char* string, GB_log_attributes_t attributes) {
   (void) gb; (void) string; (void) attributes;
 }
@@ -193,7 +206,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  char trpath[1024] = {0};
+  int tr_start = -1;
+  const char* tr = getenv("GBFUZZ_TRACE");
+  if (tr && sscanf(tr, "%1023[^:]:%d:%ld", trpath, &tr_start, &g_trace_left) == 3)
+    GB_set_execution_callback(&gb, exec_cb);
+
   for (int f = 0; f <= max_frame; ++f) {
+    if (f == tr_start && trpath[0]) g_trace = fopen(trpath, "w");
     for (int i = 0; i < g_nev; ++i)
       if (g_ev[i].frame == f) GB_set_key_state(&gb, g_ev[i].key, g_ev[i].press);
     GB_run_frame(&gb);
@@ -208,6 +228,7 @@ int main(int argc, char** argv) {
         }
       }
   }
+  if (g_trace) fclose(g_trace);
   GB_free(&gb);
   return 0;
 }
