@@ -189,6 +189,13 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   if (val and 0x80) != 0:
     ppu.hdma_active = true
     ppu.hdma_pos    = 0
+    # Arming an HBlank transfer while the PPU is *already* in HBlank starts it
+    # right away — the edge into mode 0 has passed, so waiting for the next one
+    # would lose a block per transfer. With the LCD off the mode reads 0
+    # forever, which is why an armed transfer still makes exactly this much
+    # progress and no more.
+    if ppu.mode_flag == 0 or not ppu.lcd_enabled:
+      ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
       for bn in 0 .. int(ppu.hdma5):
