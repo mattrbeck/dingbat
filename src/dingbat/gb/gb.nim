@@ -83,9 +83,9 @@ type
     # -1.0 .. 1.0, 0.0 = level; they are live input, not saved state.
     accel_x*, accel_y*: float
     x_latch*, y_latch*: uint16  # sampled by the 0x55/0xAA latch sequence
-    latch_ready*:       bool     # the 0x55 arrived; tracked (and saved) for
-                                 # parity with SameBoy, which likewise does not
-                                 # make the 0xAA conditional on it
+    latch_ready*:       bool     # a 0x55 has armed the latch; the 0xAA only
+                                 # samples when it has (Pan Docs: re-latching
+                                 # without erasing first yields no change)
     # 93LC56 serial EEPROM port. One bit is shifted per rising clock edge;
     # eeprom_command is an 11-bit shift register (start bit, 2 opcode bits,
     # 8 address bits) and read_bits shifts data back out on DO.

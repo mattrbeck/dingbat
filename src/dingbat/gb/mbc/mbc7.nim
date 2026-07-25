@@ -130,7 +130,10 @@ proc mbc7_reg_write(cart: Mbc7; idx: int; val: uint8) =
       cart.x_latch = 0x8000
       cart.y_latch = 0x8000
   of 1:
-    if val == 0xAA:
+    # Pan Docs: "you cannot re-latch the accelerometer value without first
+    # erasing it; attempts to do so yield no change" — so the 0xAA only takes a
+    # sample when a 0x55 has armed it.
+    if val == 0xAA and cart.latch_ready:
       cart.latch_ready = false
       cart.x_latch = uint16((MBC7_ACCEL_CENTER +
                              int(MBC7_ACCEL_SCALE.float * cart.accel_x)) and 0xFFFF)
