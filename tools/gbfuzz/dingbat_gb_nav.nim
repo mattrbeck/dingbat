@@ -72,7 +72,9 @@ proc main() =
     if tok.len > 0: shots.add(parseInt(tok))
   let flags = args[5 .. ^1]
   let want_state = "--state" in flags
-  let fifo = "--scanline" notin flags
+  # GBFUZZ_SCANLINE runs the whole sweep on the scanline renderer, to
+  # separate renderer bugs from core bugs.
+  let fifo = "--scanline" notin flags and getEnv("GBFUZZ_SCANLINE") == ""
 
   # All three runners play the boot ROM out of <bootromdir> by default and
   # count frame 0 from power-on, so no emulator's skip-boot shortcut can show

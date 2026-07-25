@@ -189,6 +189,7 @@ type
     hdma_dst*:      uint16
     hdma_pos*:      uint16
     hdma_active*:   bool
+    hdma_copying*:  bool   # re-entrancy guard; see ppu_step_hdma
     # window state
     window_trigger*:     bool
     current_window_line*: int

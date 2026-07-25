@@ -30,11 +30,13 @@ REFS = ('sameboy', 'mgba')
 # frames; the DMG one is ~60).
 SCRIPT = '260:START,420:A,600:START,800:A,1000:A,1250:START,1500:A'
 SHOTS = [350, 700, 1150, 1650]
-# Verification window around a checkpoint. Wide on purpose: a cutscene that
-# one emulator lets run a second longer than another puts the scripted A press
-# on a different screen, and the resulting offset is far larger than the
-# frame-or-two of lag skew a narrow window cancels.
-BURST = list(range(-150, 151, 10))
+# Verification window around a checkpoint: dense near zero, coarse far out.
+# Wide because a cutscene one emulator lets run a second longer than another
+# puts the scripted A press on a different screen, and that offset dwarfs the
+# frame-or-two of lag skew a narrow window cancels. Dense because water and
+# fire animations cycle every few frames, so a coarse step walks straight past
+# the matching phase and reports a scene difference that isn't one.
+BURST = sorted(set(list(range(-12, 13)) + list(range(-150, 151, 10))))
 AUTO_NOINPUT = False   # for flagged titles, also compare a no-input run
 PRUNE_CLEAN = False    # delete run artifacts for clean titles (bulk mode)
 TIMEOUT = 600
