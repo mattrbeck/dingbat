@@ -113,6 +113,10 @@ proc load_joypad_state(j: GbJoypad; r: var Reader) =
   r.expect_tag(GB_SEC_JOY)
   j.button_keys = r.read_bool()
   j.direction_keys = r.read_bool()
+  # Key presses are live input rather than saved state, so re-seed the
+  # joypad-interrupt edge detector from whatever is held now. Keeping the
+  # pre-load value could otherwise manufacture a phantom press interrupt.
+  joypad_sync(j)
 
 # ---- Memory ----
 

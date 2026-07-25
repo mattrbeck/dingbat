@@ -137,6 +137,7 @@ type
     jselect*:        bool
     b*:              bool
     a*:              bool
+    prev_lines*:     uint8  # last P1 low nibble, for joypad-interrupt edges
 
   # ---- PPU pixel types ----
   GbPixel* = object
@@ -820,7 +821,7 @@ proc step_frame*(gb: GB) =
 method run_until_frame*(gb: GB) = gb.step_frame()
 
 method handle_input*(gb: GB; inp: Input; pressed: bool) {.base.} =
-  gb.joypad.handle_input(inp, pressed)
+  gb.joypad.handle_input(gb, inp, pressed)
 
 method toggle_sync*(gb: GB) =
   gb.apu.toggle_sync()
