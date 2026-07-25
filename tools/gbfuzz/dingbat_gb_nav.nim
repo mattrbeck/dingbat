@@ -118,10 +118,33 @@ proc main() =
     echo "boot_frames ", n
     quit(0)
 
+  # GBFUZZ_TRACE=<path>:<startframe>:<count> — log <count> instructions as
+  # "PC OP" from the start of <startframe>, for diffing against the SameBoy
+  # runner's identically-formatted trace.
+  when defined(gbfuzz_trace):
+    var tr_path = ""
+    var tr_start = 0
+    var tr_count = 0
+    var tr_file: File
+    var tr_written = 0
+    let tr_env = getEnv("GBFUZZ_TRACE")
+    if tr_env.len > 0:
+      let parts = tr_env.split(':')
+      tr_path = parts[0]
+      tr_start = parseInt(parts[1])
+      tr_count = parseInt(parts[2])
+      tr_file = open(tr_path, fmWrite)
+
   var max_frame = 0
   for s in shots: max_frame = max(max_frame, s)
 
   for f in 0 .. max_frame:
+    when defined(gbfuzz_trace):
+      if tr_path.len > 0 and f == tr_start:
+        gbfuzz_trace_hook = proc(pc: uint16; opcode: uint8) =
+          if tr_written < tr_count:
+            tr_file.write(&"{pc:04X} {opcode:02X}\n")
+            inc tr_written
     for ev in script:
       if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
     emu.step_frame()

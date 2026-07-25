@@ -71,11 +71,19 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
       clear_interrupt(gb.interrupts, interrupt)
       mem_tick_extra(gb.memory, gb, 20)
 
+when defined(gbfuzz_trace):
+  # Instruction trace for cross-emulator divergence hunting (tools/gbfuzz).
+  # Compiled out of every normal build; see gbfuzz_trace_hook.
+  var gbfuzz_trace_hook*: proc(pc: uint16; opcode: uint8) {.closure.}
+
 proc tick*(cpu: GbCpu; gb: GB) =
   let cycles_taken =
     if cpu.halted:
       4
     else:
+      when defined(gbfuzz_trace):
+        if gbfuzz_trace_hook != nil:
+          gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
       let opcode = mem_read(gb.memory, gb, int(cpu.pc))
       UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
