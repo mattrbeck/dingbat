@@ -1,7 +1,9 @@
 # MBC7 cartridge (included by gb.nim)
 #
-# Modelled on SameBoy's MBC7, which this mapper is verified against frame-for-
-# frame. Two things about it are unlike every other GB cartridge:
+# Written from Pan Docs (gbdev.io/pandocs/MBC7.html) and the 93LC56 datasheet
+# it cites; SameBoy is used only as a behavioural cross-check to verify the
+# result frame-for-frame. Two things about it are unlike every other GB
+# cartridge:
 #
 #   * The 0xA000 window is gated twice. 0x0000-0x1FFF must see exactly 0x0A and
 #     0x4000-0x5FFF exactly 0x40; either one alone leaves the window reading
@@ -11,16 +13,17 @@
 #     The save data lives in a 93LC56 EEPROM reached one bit at a time through
 #     register 0x8, so a "RAM write" there is a clock edge, not a store.
 
-# 0x81D0 is what a level cartridge reports and 0x70 (112) is one g of travel per
-# axis. The neutral value matters beyond taste: Kirby integrates the difference
-# from centre, so a centre off by even a few units sends the ball drifting on
-# its own.
+# Pan Docs: the 16-bit reading is "centered at the value 81D0" and "Earth's
+# gravity affects the value by roughly $70". The centre matters beyond taste:
+# Kirby integrates the difference from it, so a centre off by even a few units
+# sends the ball drifting on its own.
 const
   MBC7_ACCEL_CENTER = 0x81D0
   MBC7_ACCEL_SCALE  = 0x70
 
-# The EEPROM is 128 16-bit words. `ram` holds them little-endian, which is the
-# byte order SameBoy's battery files use, so .sav files interchange.
+# 256 bytes as 128 16-bit words (Pan Docs: "data is addressed 16 bits at a
+# time"). `ram` holds them little-endian, which also happens to match the
+# battery files SameBoy writes, so .sav files interchange between the two.
 proc ee_word(cart: Mbc7; index: int): uint16 =
   uint16(cart.ram[index * 2]) or (uint16(cart.ram[index * 2 + 1]) shl 8)
 
@@ -90,12 +93,10 @@ proc eeprom_clock(cart: Mbc7) =
       if (cart.eeprom_command and 0x100'u16) != 0:
         cart.ee_or_word(int(cart.eeprom_command and 0x7F'u16), bit)
       else:
-        # WRAL. SameBoy stops one word short of the 128th and this matches it:
-        # neither game uses WRAL for anything but blanking the chip (where the
-        # preceding all-zero fill already covers word 0x7F), so the difference
-        # is unobservable, and diverging would break the frame-for-frame
-        # comparison the rest of this mapper was verified with.
-        for i in 0 ..< 0x7F: cart.ee_or_word(i, bit)
+        # WRAL fills the whole chip, all 128 words (Pan Docs: "fill EEPROM with
+        # value"). Neither game uses it for anything but blanking, so the last
+        # word is not observable in them either way.
+        for i in 0 ..< 0x80: cart.ee_or_word(i, bit)
       cart.ram_dirty = true
     if cart.argument_bits_left == 0:
       cart.eeprom_command = 0
