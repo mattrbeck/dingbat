@@ -391,6 +391,7 @@ proc mbc_kind_tag(cart: Mbc): uint8 =
   elif cart of Mbc2: 2'u8
   elif cart of Mbc3: 3'u8
   elif cart of Mbc5: 5'u8
+  elif cart of Mbc7: 7'u8
   else: 0'u8
 
 proc save_mbc_state(cart: Mbc; w: var Writer) =
@@ -421,6 +422,25 @@ proc save_mbc_state(cart: Mbc; w: var Writer) =
     w.write_bool(c.ram_enabled)
     w.write_u16(c.rom_bank_num)
     w.write_u8(c.ram_bank_num)
+  elif cart of Mbc7:
+    let c = Mbc7(cart)
+    w.write_bool(c.ram_enabled)
+    w.write_bool(c.secondary_enable)
+    w.write_u8(c.rom_bank_num)
+    w.write_u16(c.x_latch)
+    w.write_u16(c.y_latch)
+    w.write_bool(c.latch_ready)
+    # The EEPROM port has to go too: a state taken mid-command would otherwise
+    # resume with a half-shifted command and corrupt the save. accel_x/accel_y
+    # are live input and are not part of the state (see Mbc5Rumble.rumble).
+    w.write_bool(c.eeprom_do)
+    w.write_bool(c.eeprom_di)
+    w.write_bool(c.eeprom_clk)
+    w.write_bool(c.eeprom_cs)
+    w.write_u16(c.eeprom_command)
+    w.write_u16(c.read_bits)
+    w.write_u8(uint8(c.argument_bits_left))
+    w.write_bool(c.eeprom_write_enabled)
 
 proc load_mbc_state(cart: Mbc; r: var Reader) =
   r.expect_tag(GB_SEC_MBC)
@@ -454,6 +474,22 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.ram_enabled = r.read_bool()
     c.rom_bank_num = r.read_u16()
     c.ram_bank_num = r.read_u8()
+  elif cart of Mbc7:
+    let c = Mbc7(cart)
+    c.ram_enabled = r.read_bool()
+    c.secondary_enable = r.read_bool()
+    c.rom_bank_num = r.read_u8()
+    c.x_latch = r.read_u16()
+    c.y_latch = r.read_u16()
+    c.latch_ready = r.read_bool()
+    c.eeprom_do = r.read_bool()
+    c.eeprom_di = r.read_bool()
+    c.eeprom_clk = r.read_bool()
+    c.eeprom_cs = r.read_bool()
+    c.eeprom_command = r.read_u16()
+    c.read_bits = r.read_u16()
+    c.argument_bits_left = int(r.read_u8())
+    c.eeprom_write_enabled = r.read_bool()
   # Persist the restored cart RAM to the .sav on the next flush
   if cart.has_battery and cart.ram.len > 0:
     cart.ram_dirty = true

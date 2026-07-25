@@ -42,9 +42,9 @@ proc load_cartridge*(rom_path: string): Mbc =
   let cart_type = rom[0x0147]
   let has_ram     = (cart_type in [0x02'u8, 0x03, 0x08, 0x09,
                                     0x0C, 0x0D, 0x10, 0x12, 0x13,
-                                    0x1A, 0x1B, 0x1D, 0x1E])
+                                    0x1A, 0x1B, 0x1D, 0x1E, 0x22])
   let has_battery = (cart_type in [0x03'u8, 0x06, 0x09, 0x0D, 0x0F,
-                                    0x10, 0x13, 0x1B, 0x1E])
+                                    0x10, 0x13, 0x1B, 0x1E, 0x22])
 
   let ram_sz = case rom[0x0149]
     of 0x01: 0x0800
@@ -88,6 +88,17 @@ proc load_cartridge*(rom_path: string): Mbc =
     let c = Mbc5Rumble(rom: rom, ram: newSeq[uint8](ram_sz),
                        sav_path: sav_path, has_battery: has_battery,
                        rom_bank_num: 1)
+    cart = c
+  of 0x22:
+    # The header's RAM-size byte is 0 on MBC7 carts; the save is the 256-byte
+    # EEPROM. An erased EEPROM reads all-ones, and the games check for that to
+    # decide whether the cartridge holds a save, so power-on has to be 0xFF and
+    # not the zeroes newSeq would give.
+    let c = Mbc7(rom: rom, ram: newSeq[uint8](0x100),
+                 sav_path: sav_path, has_battery: has_battery,
+                 x_latch: 0x8000, y_latch: 0x8000, latch_ready: true,
+                 read_bits: 0xFFFF, eeprom_do: true)
+    for i in 0 ..< c.ram.len: c.ram[i] = 0xFF
     cart = c
   else:
     echo "Warning: unimplemented cartridge type 0x", toHex(cart_type, 2), ", treating as ROM"

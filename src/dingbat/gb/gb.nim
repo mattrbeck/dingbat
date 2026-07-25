@@ -71,6 +71,30 @@ type
     rom_bank_num*:   uint16
     ram_bank_num*:   uint8
 
+  Mbc7* = ref object of Mbc
+    # Cart type 0x22 (Kirby Tilt 'n' Tumble, Command Master). There is no cart
+    # RAM: 0xA000-0xAFFF is a register file exposing a two-axis accelerometer
+    # and the serial port of a 93LC56 EEPROM, and that EEPROM (128 words =
+    # 256 bytes, held in `ram`) is what the battery backs up.
+    ram_enabled*:      bool  # 0x0A written to 0x0000-0x1FFF
+    secondary_enable*: bool  # 0x40 written to 0x4000-0x5FFF; BOTH must be set
+    rom_bank_num*:     uint8
+    # Accelerometer. accel_x/accel_y are the frontend's tilt in the range
+    # -1.0 .. 1.0, 0.0 = level; they are live input, not saved state.
+    accel_x*, accel_y*: float
+    x_latch*, y_latch*: uint16  # sampled by the 0x55/0xAA latch sequence
+    latch_ready*:       bool     # the 0x55 arrived; tracked (and saved) for
+                                 # parity with SameBoy, which likewise does not
+                                 # make the 0xAA conditional on it
+    # 93LC56 serial EEPROM port. One bit is shifted per rising clock edge;
+    # eeprom_command is an 11-bit shift register (start bit, 2 opcode bits,
+    # 8 address bits) and read_bits shifts data back out on DO.
+    eeprom_do*, eeprom_di*, eeprom_clk*, eeprom_cs*: bool
+    eeprom_command*:       uint16
+    read_bits*:            uint16
+    argument_bits_left*:   int
+    eeprom_write_enabled*: bool
+
   # ---- CPU ----
   GbCpu* = ref object
     af*:         uint16
@@ -647,6 +671,7 @@ include mbc/mbc1
 include mbc/mbc2
 include mbc/mbc3
 include mbc/mbc5
+include mbc/mbc7
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2

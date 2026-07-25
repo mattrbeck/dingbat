@@ -11,6 +11,9 @@
  * skip-boot timeline instead (dingbat's shipping default); SameBoy has no
  * skip-boot API, so it reaches the same point by burning the boot animation.
  *
+ * GBFUZZ_BATTERY=<path> loads and re-saves a battery save around the run, for
+ * comparing what a title does on a second boot.
+ *
  * Model follows the cartridge CGB flag: DMG-only carts run on a DMG-B, CGB
  * carts on a CGB-E. SGB is never selected — its 256x224 bordered output is
  * not comparable with the other runners' 160x144.
@@ -179,6 +182,14 @@ int main(int argc, char** argv) {
     return 3;
   }
 
+  /* GBFUZZ_BATTERY=<path>: load that battery save before running and write it
+   * back afterwards. Off by default — a sweep must not carry state between
+   * runs — but battery-backed behaviour (does the title find its save on the
+   * second boot?) cannot be compared without it. dingbat's runner does the
+   * same implicitly, via the .sav it keeps beside the ROM. */
+  const char* battery = getenv("GBFUZZ_BATTERY");
+  if (battery && battery[0]) GB_load_battery(&gb, battery);
+
   static uint32_t vbuf[W * H];
   GB_set_pixels_output(&gb, vbuf);
   GB_set_rgb_encode_callback(&gb, rgb_encode);
@@ -229,6 +240,7 @@ int main(int argc, char** argv) {
       }
   }
   if (g_trace) fclose(g_trace);
+  if (battery && battery[0]) GB_save_battery(&gb, battery);
   GB_free(&gb);
   return 0;
 }
