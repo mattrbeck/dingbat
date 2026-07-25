@@ -169,7 +169,7 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xE000..0xFDFF: write_byte(mem, gb, idx - 0x2000, val)
   of 0xFE00..0xFE9F: ppu_write(gb.ppu, gb, idx, val)
   of 0xFEA0..0xFEFF: discard
-  of 0xFF00:         joypad_write(gb.joypad, val)
+  of 0xFF00:         joypad_write(gb.joypad, gb, val)
   of 0xFF01..0xFF02: serial_write(gb.serial, gb, idx, val)
   of 0xFF04..0xFF07: timer_write(gb.timer, gb, idx, val)
   of 0xFF0F:         irq_write(gb.interrupts, idx, val)
