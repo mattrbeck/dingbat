@@ -68,6 +68,23 @@ static void parse_script(char* s) {
   }
 }
 
+/* GBFUZZ_DUMP: alongside each shot, write the PPU-visible memory that produced
+ * it — OAM, both VRAM banks and the two palette blocks — so a divergence can be
+ * traced to whichever of them differs rather than guessed at from pixels. */
+static void write_dump(const char* path, GB_gameboy_t* gb) {
+  FILE* f = fopen(path, "wb");
+  if (!f) { perror(path); return; }
+  fwrite(gb->oam, 1, sizeof gb->oam, f);
+  fwrite(gb->vram, 1, gb->vram_size, f);
+  if (gb->vram_size < 0x4000) {   /* pad DMG's single bank to the CGB layout */
+    static const uint8_t zero[0x2000] = {0};
+    fwrite(zero, 1, 0x4000 - gb->vram_size, f);
+  }
+  fwrite(gb->background_palettes_data, 1, 0x40, f);
+  fwrite(gb->object_palettes_data, 1, 0x40, f);
+  fclose(f);
+}
+
 static void write_ppm(const char* path, const uint32_t* buf) {
   FILE* f = fopen(path, "wb");
   if (!f) { perror(path); exit(3); }
@@ -171,6 +188,10 @@ int main(int argc, char** argv) {
         char path[1024];
         snprintf(path, sizeof path, "%s.f%04d.ppm", prefix, f);
         write_ppm(path, vbuf);
+        if (getenv("GBFUZZ_DUMP")) {
+          snprintf(path, sizeof path, "%s.f%04d.mem", prefix, f);
+          write_dump(path, &gb);
+        }
       }
   }
   GB_free(&gb);

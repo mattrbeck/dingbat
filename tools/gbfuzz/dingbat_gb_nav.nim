@@ -57,6 +57,17 @@ proc write_ppm(path: string; buf: seq[uint16]; dmg: bool) =
     f.write(char(uint8((b5 shl 3) or (b5 shr 2))))
   f.close()
 
+proc write_dump(path: string; emu: GB) =
+  ## Companion to the SameBoy runner's GBFUZZ_DUMP: the PPU-visible memory
+  ## behind a shot, in the same layout, so the two can be diffed directly.
+  var f = open(path, fmWrite)
+  discard f.writeBuffer(unsafeAddr emu.ppu.sprite_table[0], emu.ppu.sprite_table.len)
+  for bank in 0 .. 1:
+    discard f.writeBuffer(unsafeAddr emu.ppu.vram[bank][0], emu.ppu.vram[bank].len)
+  discard f.writeBuffer(unsafeAddr emu.ppu.pram[0], emu.ppu.pram.len)
+  discard f.writeBuffer(unsafeAddr emu.ppu.obj_pram[0], emu.ppu.obj_pram.len)
+  f.close()
+
 proc main() =
   let args = commandLineParams()
   if args.len < 5:
@@ -111,6 +122,8 @@ proc main() =
     emu.step_frame()
     if f in shots:
       write_ppm(&"{prefix}.f{f:04}.ppm", emu.ppu.framebuffer, dmg)
+      if getEnv("GBFUZZ_DUMP") != "":
+        write_dump(&"{prefix}.f{f:04}.mem", emu)
       if want_state:
         if not emu.save_state(&"{prefix}.f{f:04}.state"):
           stderr.writeLine "save_state failed at frame " & $f

@@ -279,8 +279,12 @@ POPULAR = [
     "Toy Story 2",
 ]
 
+# Not a game, or not a dump worth judging dingbat against: betas and hacks
+# diverge legitimately, and the BIOS/boot-ROM dumps that ship inside these sets
+# are not cartridges at all.
 BAD = re.compile(r'\b(beta|proto|prototype|demo|sample|unl|pirate|hack|program|'
-                 r'test program|debug)\b|\[b\d?\]|\[h\d?\]|\[t\d?\]|\[a\d?\]|\[p\d?\]',
+                 r'test program|debug)\b|\[b\d?\]|\[h\d?\]|\[t\d?\]|\[a\d?\]|\[p\d?\]'
+                 r'|^\[BIOS\]|\bboot rom\b',
                  re.I)
 
 
