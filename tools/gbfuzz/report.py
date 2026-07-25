@@ -258,7 +258,8 @@ def render(workdir, results, notes_html, out_path):
     if notes_html:
         h.append('<section>' + notes_html + '</section>')
 
-    frames = sorted(int(x) for x in results[0]['shots'])
+    frames = sorted(int(x) for x in next(
+        (r['shots'] for r in results if r['shots']), {}))
 
     diff_rows = sorted((r for r in results if worst_of(r) not in OK),
                        key=divergence, reverse=True)
@@ -275,6 +276,13 @@ def render(workdir, results, notes_html, out_path):
                  '<th>SameBoy vs mGBA</th><th>No input</th><th>ROM</th></tr>')
         split_done = False
         for r in diff_rows:
+            if not r['shots']:
+                # The title errored before producing a checkpoint at all.
+                h.append(f'<tr><td>{r["title"]}</td>'
+                         f'<td><span class="chip v-ERROR">ERROR</span></td>'
+                         f'<td colspan="5" class="rom">{(r.get("error") or "")[:160]}</td>'
+                         f'<td class="rom">{r["rom"]}</td></tr>')
+                continue
             if not split_done and not diverges_unprompted(r):
                 split_done = True
                 h.append('<tr><td colspan="8" class="rom" style="padding-top:.9rem">'
@@ -305,10 +313,11 @@ def render(workdir, results, notes_html, out_path):
              + ''.join(f'<th>f{f}</th>' for f in frames) + '<th>ROM</th></tr>')
     for r in sorted(results, key=lambda r: r['title']):
         w = worst_of(r)
-        cells = ''.join(
+        cells = (''.join(
             f'<td><span class="chip v-{r["shots"][f]["final"]}">'
             f'{r["shots"][f]["final"][:4]}</span></td>'
             for f in sorted(r['shots'], key=int))
+            or f'<td colspan="{len(frames)}" class="rom">no checkpoints</td>')
         h.append(f'<tr><td>{r["title"]}</td>'
                  f'<td><span class="chip v-{w}">{w}</span></td>{cells}'
                  f'<td class="rom">{r["rom"]}</td></tr>')
@@ -399,9 +408,16 @@ def main():
         else: files.append(a)
     if not files:
         files = ['results_b1.json']
-    results = []
+
+    # Later files win per title. A whole-library sweep is a discovery pass and
+    # its flags get re-verified against the final build afterwards, so passing
+    # the recheck results last replaces the stale entries.
+    by_title = {}
     for fn in files:
-        results += json.load(open(os.path.join(workdir, fn)))
+        for r in json.load(open(os.path.join(workdir, fn))):
+            by_title[r['title']] = r
+    results = list(by_title.values())
+
     notes_html = open(notes).read() if notes else ''
     render(workdir, results, notes_html, out)
 
