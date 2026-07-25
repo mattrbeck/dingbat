@@ -141,11 +141,18 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; block_number: int) =
   ppu.hdma5 = ppu.hdma5 - 1
 
 proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
+  # The block copy ticks the PPU, which can drive another mode change; without
+  # this guard a nested transition back into mode 0 re-enters the copy and
+  # recurses until the stack overflows.
+  if ppu.hdma_copying: return
+  ppu.hdma_copying = true
   ppu_copy_hdma_block(ppu, gb, int(ppu.hdma_pos))
   ppu.hdma_pos += 1
   if ppu.hdma5 == 0xFF: ppu.hdma_active = false
+  ppu.hdma_copying = false
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
+  let prev_mode = ppu.mode_flag
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
@@ -157,7 +164,14 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # stack overflows (Pokemon Crystal crashed at boot). With the status updated
   # first, nested ticks dispatch to the mode-0 branch and simply advance the
   # HBlank dot counter while the copy is in flight.
-  if mode == 0 and ppu.hdma_active: ppu_step_hdma(ppu, gb)
+  #
+  # One block per *entry* into HBlank, and only while the LCD is driving the
+  # modes. The disabled-LCD path re-asserts mode 0 on every tick, so a
+  # level-triggered step ran a block per tick and never terminated (Kirby
+  # Tilt 'n' Tumble crashed the process this way); with the LCD off there are
+  # no HBlank periods for an armed transfer to advance on.
+  if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
+    ppu_step_hdma(ppu, gb)
 
 proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
   palette[0] = val and 0x3

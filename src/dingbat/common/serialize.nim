@@ -20,7 +20,11 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
-  STATE_VERSION* = 5'u32  # v5: HLE BIOS IntrWait/Halt keep the dispatcher's
+  STATE_VERSION* = 6'u32  # v6: GB PPU carries the disabled-LCD frame counter,
+                          # which sets when the next frame is pushed while the
+                          # LCD is off; a v5 state would resume with the wrong
+                          # phase (and desync a rollback peer).
+                          # v5: HLE BIOS IntrWait/Halt keep the dispatcher's
                           # System-stack frame live (sp sits 16/8 bytes lower
                           # while halted); v4 mid-halt states would resume with
                           # a mis-restored sp, so they are refused instead.
