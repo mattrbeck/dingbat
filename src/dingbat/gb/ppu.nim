@@ -76,21 +76,27 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
 proc lcd_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x80) != 0
 
 const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
+# Turning the LCD back on pushes a frame straight away once this much time has
+# gone by since the last one, so the panel's output rate survives the gap.
+const LCD_ON_FRAME_DOTS* = 10 * 456
 
-proc lcd_off_frame*(ppu: GbPpu; gb: GB; cycles: int) {.inline.} =
-  ## Drive frame output while the LCD is disabled. The panel keeps refreshing
-  ## at the usual rate with the PPU switched off, showing white; a game that
-  ## turns the LCD off to bulk-load VRAM must not stop producing frames.
-  ## Without this, step_frame (which runs until ppu.frame is set) makes no
-  ## progress for as long as the LCD is off — the emulator drops those frames
-  ## and, for a game that idles with the LCD off, never returns at all.
-  ppu.lcd_off_dots += int32(cycles)
-  if ppu.lcd_off_dots < DOTS_PER_FRAME: return
-  ppu.lcd_off_dots -= DOTS_PER_FRAME
-  # White: 0x7FFF on CGB, the lightest DMG shade otherwise.
+proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
+  ## Push a frame the PPU did not draw: the panel shows white with the PPU
+  ## switched off.
   let blank = if gb.cgb_enabled: 0x7FFF'u16 else: DMG_COLORS[0]
   for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = blank
   ppu.frame = true
+  ppu.dots_since_frame = 0
+
+proc lcd_off_frame*(ppu: GbPpu; gb: GB) {.inline.} =
+  ## Drive frame output while the LCD is disabled. The panel keeps refreshing
+  ## at the usual rate with the PPU switched off; a game that turns the LCD off
+  ## to bulk-load VRAM must not stop producing frames. Without this, step_frame
+  ## (which runs until ppu.frame is set) makes no progress for as long as the
+  ## LCD is off — the emulator drops those frames and, for a game that idles
+  ## with the LCD off, never returns at all.
+  if ppu.dots_since_frame >= DOTS_PER_FRAME:
+    ppu_blank_frame(ppu, gb)
 proc window_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x40
 proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) != 0
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
@@ -289,10 +295,16 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   of 0xFE00..0xFE9F: ppu.sprite_table[idx - 0xFE00] = val
   of 0xFF40:
     if (val and 0x80) != 0 and not ppu.lcd_enabled:
+      # The PPU restarts at the top of the frame, so the next frame it draws is
+      # a whole frame away. If enough time has already passed since the last
+      # one, hardware pushes a frame now rather than let the gap stretch —
+      # skipping it leaves the emulator one frame ahead of the panel for the
+      # rest of the run, and games toggle the LCD constantly.
+      if ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
+        ppu_blank_frame(ppu, gb)
       ppu.ly = 0
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
-      ppu.lcd_off_dots = 0   # the PPU drives the frame clock again
     ppu.lcd_control = val
     ppu_handle_stat_interrupt(ppu, gb)
   of 0xFF41:
