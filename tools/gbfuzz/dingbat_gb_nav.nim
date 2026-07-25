@@ -66,6 +66,11 @@ proc write_dump(path: string; emu: GB) =
     discard f.writeBuffer(unsafeAddr emu.ppu.vram[bank][0], emu.ppu.vram[bank].len)
   discard f.writeBuffer(unsafeAddr emu.ppu.pram[0], emu.ppu.pram.len)
   discard f.writeBuffer(unsafeAddr emu.ppu.obj_pram[0], emu.ppu.obj_pram.len)
+  # Work RAM and HRAM too — see the SameBoy runner: this is where a CPU-level
+  # divergence shows up before it reaches VRAM.
+  for bank in 0 .. 7:
+    discard f.writeBuffer(unsafeAddr emu.memory.wram[bank][0], emu.memory.wram[bank].len)
+  discard f.writeBuffer(unsafeAddr emu.memory.hram[0], emu.memory.hram.len)
   f.close()
 
 proc main() =
