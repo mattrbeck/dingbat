@@ -119,6 +119,74 @@ type
     last_second*:  int64   # unix second the clock has been advanced through
     cart_ir*:      bool
 
+  Mmm01* = ref object of Mbc
+    # Cart types 0x0B-0x0D (Taito Variety Pack, Momotarou Collection 2 and the
+    # other multi-game compilations). Powers up showing a menu program held in
+    # the last 32 KiB of the cartridge, then turns into an MBC1 for whichever
+    # contained game the menu selected. See mbc/mmm01.nim.
+    ram_enabled*:   bool
+    mapped*:        bool   # Mapping Enable: the menu has handed over to a game
+    rom_bank_low*:  uint8  # 5 bits; the MBC1 bank register
+    rom_bank_mid*:  uint8  # 2 bits; game select (swaps with ram_bank_low when
+                           # multiplex is on)
+    rom_bank_high*: uint8  # 2 bits; game select
+    ram_bank_low*:  uint8  # 2 bits; the MBC1 RAM bank register
+    ram_bank_high*: uint8  # 2 bits; game select
+    rom_bank_mask*: uint8  # write-lock over rom_bank_low; bit 0 is always clear
+    ram_bank_mask*: uint8  # write-lock over ram_bank_low
+    mbc1_mode*:     bool
+    mode_locked*:   bool   # MBC1 Mode Write Lock
+    multiplex*:     bool
+    rom_rotate*:    int    # dump-order fix-up; see mbc/mmm01.nim
+
+  Mbc6* = ref object of Mbc
+    # Cart type 0x20 (Net de Get - Minigame @ 100). Two independently banked
+    # 8 KiB ROM windows and two independently banked 4 KiB RAM windows, either
+    # ROM window switchable onto an 8 Mbit flash chip that the game downloads
+    # minigames into over the Mobile Adapter. See mbc/mbc6.nim.
+    ram_enabled*: bool
+    ram_bank_a*, ram_bank_b*: uint8         # 3 bits each; 4 KiB banks
+    rom_bank_a*, rom_bank_b*: uint8         # 7 bits each; 8 KiB banks
+    flash_select_a*, flash_select_b*: bool  # window shows flash rather than ROM
+    flash_enabled*:       bool   # /CE to the flash chip
+    flash_write_enabled*: bool   # /WP; guards sector 0 and the hidden region
+    flash*:        seq[uint8]    # 1 MiB main array, battery-backed
+    flash_hidden*: seq[uint8]    # the 256 bytes behind the hidden-region commands
+    flash_sector0_protected*: bool  # set by the Protect Sector 0 command;
+                                    # non-volatile on the real chip
+    flash_read_mode*:      uint8 # array / JEDEC ID / status / hidden region
+    flash_status*:         uint8
+    flash_cmd_step*:       int   # position in the JEDEC unlock sequence
+    flash_setup*:          uint8 # command byte awaiting its second unlock
+    flash_program_addr*:   int   # last address programmed; a repeat commits it
+    flash_program_hidden*: bool
+
+  PocketCamera* = ref object of Mbc
+    # Cart type 0xFC (Game Boy Camera / Pocket Camera). MBC3-shaped banking plus
+    # 54 registers that take over 0xA000-0xBFFF when bit 4 of the RAM bank
+    # register is set: a shutter, five of the M64282FP image sensor's own
+    # registers, and a 4x4x3 threshold matrix. See mbc/camera.nim.
+    ram_enabled*:   bool
+    rom_bank_num*:  uint8
+    ram_bank_num*:  uint8
+    regs_mapped*:   bool
+    regs*:          array[0x36, uint8]
+    capture_cycles_left*: int  # non-zero while a capture is running or paused
+    # The image source. nil means the built-in synthetic scene; a frontend with
+    # a real camera installs its own through set_camera_source. Live input, not
+    # state, so it is left out of save states as Mbc7.accel_x is.
+    sensor*: proc(x, y: int): uint8
+
+  Tama5* = ref object of Mbc
+    # Cart type 0xFD (Game de Hakken!! Tamagotchi Osutchi to Mesutchi). A
+    # nibble-at-a-time port onto a 4-bit microcontroller that owns 32 bytes of
+    # SRAM and a TC8521AM real-time clock. See mbc/tama5.nim.
+    reg_index*:   uint8                      # last write to 0xA001
+    regs*:        array[16, uint8]           # the nibble register file
+    rtc_pages*:   array[4, array[13, uint8]] # timer, alarm, two free pages
+    page_reg*:    uint8   # the PAGE register, shared across all four pages
+    last_second*: int64   # unix second the clock has been advanced through
+
   # ---- CPU ----
   GbCpu* = ref object
     af*:         uint16
@@ -758,6 +826,235 @@ proc huc3_load_footer(cart: Huc3; data: string) =
   else:
     cart.huc3_advance_to(now)
 
+# TAMA5's clock is a TC8521AM reached through the cartridge's microcontroller.
+# Its layout is four pages of thirteen 4-bit registers plus three registers
+# shared between the pages, all from endrift's tables in the gbdev thread
+# (https://gbdev.gg8.se/forums/viewtopic.php?id=469, post #1). mbc/tama5.nim
+# knows the protocol that reaches them; what is here is the clock itself.
+#
+#   page 0, TIMER   0 sec 1s   1 sec 10s  2 min 1s  3 min 10s  4 hour 1s
+#                   5 hour 10s 6 weekday  7 day 1s  8 day 10s  9 month 1s
+#                   A month 10s          B year 1s  C year 10s
+#   page 1, ALARM   same fields where an alarm has one, plus A = 24-hour mode
+#                   and B = the leap-year counter
+#   pages 2 and 3   "free pages, which are effectively just 13 4-bit RAM
+#                   addresses each"
+
+const
+  # Per-register wired-bit widths: "RTC registers only have a certain number of
+  # bits wired up, so writing to bits that aren't used during normal function
+  # won't do anything and will read out as zero" (endrift, post #1).
+  TAMA5_RTC_MASK*: array[4, array[13, uint8]] = [
+    [0xF'u8, 0x7, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0xF, 0x1, 0xF, 0xF],
+    # Alarm page: registers 0, 1, 9 and C have no bits at all; A is the 1-bit
+    # 24-hour mode flag and B the 2-bit leap-year counter.
+    [0x0'u8, 0x0, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0x0, 0x1, 0x3, 0x0],
+    [0xF'u8, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF],
+    [0xF'u8, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF, 0xF]]
+
+  # A cartridge that has been in a drawer for a decade should not spend that
+  # long in a catch-up loop, and the Tamagotchi has nothing useful to say about
+  # a gap this size anyway.
+  TAMA5_MAX_CATCHUP_DAYS = 4000
+
+proc tama5_24h(cart: Tama5): bool =
+  ## Alarm page register A. endrift, post #1: "A: 24-hour mode when set (1-bit)"
+  (cart.rtc_pages[1][0x0A] and 1) != 0
+
+proc tama5_get_minutes*(cart: Tama5): int =
+  int(cart.rtc_pages[0][3]) * 10 + int(cart.rtc_pages[0][2])
+
+proc tama5_set_minutes*(cart: Tama5; v: int) =
+  cart.rtc_pages[0][3] = uint8((v div 10) and 0x7)
+  cart.rtc_pages[0][2] = uint8(v mod 10)
+
+proc tama5_get_hours*(cart: Tama5): int =
+  ## The register pair as the game wrote it, which in 12-hour mode carries the
+  ## PM flag in the tens digit rather than being a plain number.
+  int(cart.rtc_pages[0][5]) * 10 + int(cart.rtc_pages[0][4])
+
+proc tama5_set_hours*(cart: Tama5; v: int) =
+  cart.rtc_pages[0][5] = uint8((v div 10) and 0x3)
+  cart.rtc_pages[0][4] = uint8(v mod 10)
+
+proc tama5_hour24(cart: Tama5): int =
+  ## The hour as a 0-23 number, for arithmetic that has to cross midnight.
+  let t = cart.rtc_pages[0]
+  if cart.tama5_24h(): (int(t[5] and 3) * 10 + int(t[4])) mod 24
+  else:
+    # endrift, post #1: "in 12 hour mode, the high bit signals PM, so 11 PM/23
+    # 10s digit would be 0b10 in 24 hour mode, but 0b11 in 12 hour mode, as it's
+    # 1X:XX PM". So bit 0 of the tens digit is the digit and bit 1 is PM.
+    let h12 = int(t[5] and 1) * 10 + int(t[4])
+    ((h12 mod 12) + (if (t[5] and 2) != 0: 12 else: 0)) mod 24
+
+proc tama5_set_hour24(cart: Tama5; h: int) =
+  if cart.tama5_24h():
+    cart.rtc_pages[0][5] = uint8((h div 10) and 3)
+    cart.rtc_pages[0][4] = uint8(h mod 10)
+  else:
+    var h12 = h mod 12
+    if h12 == 0: h12 = 12
+    cart.rtc_pages[0][5] = uint8((h12 div 10) or (if h >= 12: 2 else: 0))
+    cart.rtc_pages[0][4] = uint8(h12 mod 10)
+
+proc tama5_days_in_month(month, leap_counter: int): int =
+  # endrift, post #1: the alarm page's register B is a 2-bit counter and "the
+  # year is treated as a leap year if 0". It is separate from the year so that
+  # software can still call year 00 a common year, as 2100 will be.
+  case month
+  of 2:                      (if leap_counter == 0: 29 else: 28)
+  of 4, 6, 9, 11:            30
+  else:                      31
+
+proc tama5_advance*(cart: Tama5; seconds: int64) =
+  ## Step the clock forward. Written as arithmetic rather than a per-second loop
+  ## so that catching up after the emulator has been closed for a month costs
+  ## the same as one tick.
+  if seconds <= 0: return
+  var total = int64(int(cart.rtc_pages[0][1]) * 10 + int(cart.rtc_pages[0][0])) +
+              int64(cart.tama5_get_minutes()) * 60 +
+              int64(cart.tama5_hour24()) * 3600 + seconds
+  var days = int(min(total div 86400, int64(TAMA5_MAX_CATCHUP_DAYS)))
+  let tod = int(total mod 86400)
+
+  cart.rtc_pages[0][0] = uint8((tod mod 60) mod 10)
+  cart.rtc_pages[0][1] = uint8((tod mod 60) div 10)
+  cart.tama5_set_minutes((tod div 60) mod 60)
+  cart.tama5_set_hour24(tod div 3600)
+  if days <= 0: return
+
+  var t = addr cart.rtc_pages[0]
+  var dow   = int(t[6]) mod 7
+  var day   = max(int(t[8]) * 10 + int(t[7]), 1)
+  var month = clamp(int(t[0x0A]) * 10 + int(t[9]), 1, 12)
+  var year  = int(t[0x0C]) * 10 + int(t[0x0B])
+  var leap  = int(cart.rtc_pages[1][0x0B] and 3)
+  while days > 0:
+    dec days
+    inc day
+    dow = (dow + 1) mod 7
+    if day > tama5_days_in_month(month, leap):
+      day = 1
+      inc month
+      if month > 12:
+        month = 1
+        year = (year + 1) mod 100
+        # The leap counter has to move with the year or February would be 29
+        # days long forever. Nobody has published what the TC8521AM does with it
+        # on rollover; counting it up is the only reading that keeps the "0 means
+        # leap" rule meaningful.
+        leap = (leap + 1) and 3
+  t[6]      = uint8(dow)
+  t[7]      = uint8(day mod 10)
+  t[8]      = uint8(day div 10)
+  t[9]      = uint8(month mod 10)
+  t[0x0A]   = uint8(month div 10)
+  t[0x0B]   = uint8(year mod 10)
+  t[0x0C]   = uint8(year div 10)
+  cart.rtc_pages[1][0x0B] = uint8(leap)
+
+proc tama5_seed_clock*(cart: Tama5) =
+  ## Power-on state when there is no battery file. The TC8521AM runs off its own
+  ## cell whether or not the Game Boy is on, so a cartridge always has *some*
+  ## time in it; seeding from the host clock is the same choice HuC3 makes here,
+  ## and spares the player setting a date the host already knows. UTC rather
+  ## than local time so that the deterministic-RTC override gives both netplay
+  ## peers the same answer.
+  let now = utc(fromUnix(gb_rtc_now()))
+  cart.rtc_pages[1][0x0A] = 1   # 24-hour mode, so the seeded hour reads plainly
+  cart.tama5_set_hour24(now.hour)
+  cart.tama5_set_minutes(now.minute)
+  cart.rtc_pages[0][0] = uint8(now.second mod 10)
+  cart.rtc_pages[0][1] = uint8(now.second div 10)
+  cart.rtc_pages[0][6] = uint8(ord(now.weekday) mod 7)
+  cart.rtc_pages[0][7] = uint8(now.monthday mod 10)
+  cart.rtc_pages[0][8] = uint8(now.monthday div 10)
+  cart.rtc_pages[0][9] = uint8(ord(now.month) mod 10)
+  cart.rtc_pages[0][0x0A] = uint8(ord(now.month) div 10)
+  cart.rtc_pages[0][0x0B] = uint8((now.year mod 100) mod 10)
+  cart.rtc_pages[0][0x0C] = uint8((now.year mod 100) div 10)
+  cart.rtc_pages[1][0x0B] = uint8(now.year mod 4)   # 0 = this year is a leap year
+  cart.last_second = gb_rtc_now()
+
+proc tama5_rtc_schedule*(cart: Tama5) =
+  if gb_rtc_frozen(): return  # deterministic mode: clock frozen, never ticks
+  cart.gb_ref.scheduler.clear(etRtcSecond)
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+
+proc tama5_rtc_tick*(cart: Tama5) =
+  if gb_rtc_frozen(): return
+  cart.gb_ref.scheduler.schedule_gb(RTC_SECOND_CYCLES, etRtcSecond)
+  # PAGE register bit 3 is TIMER ENABLE (endrift, post #1); with it clear the
+  # counters stand still, which is the state a cartridge powers up in until the
+  # game issues TAMA6 command 0x41.
+  if (cart.page_reg and 0x08) != 0:
+    cart.tama5_advance(1)
+    cart.ram_dirty = true
+  cart.last_second += 1
+
+# Battery footer. Unlike HuC3's, this layout is not dingbat's own: FlashGBX (a
+# cartridge reader/writer) and mGBA both write a TAMA5 .sav as 32 bytes of SRAM
+# followed by four pages of sixteen nibbles packed low-nibble-first, then a
+# 64-bit little-endian unix timestamp. No document specifies it — the clock
+# lives in the TC8521AM, not in a file — but matching those two means a save can
+# move between dingbat, mGBA and a real cartridge.
+const TAMA5_FOOTER_LEN = 4 * 8 + 8
+
+proc tama5_page_nibble(cart: Tama5; page, reg: int): uint8 =
+  if reg <= 0x0C: cart.rtc_pages[page][reg]
+  elif reg == 0x0D: cart.page_reg and 0x0F   # shared across pages; stored in each
+  else: 0'u8                                 # E and F read back as zeros
+
+proc tama5_footer(cart: Tama5): string =
+  result = newStringOfCap(TAMA5_FOOTER_LEN)
+  for p in 0 .. 3:
+    for i in 0 .. 7:
+      result.add(char(cart.tama5_page_nibble(p, i * 2) or
+                      (cart.tama5_page_nibble(p, i * 2 + 1) shl 4)))
+  let ts = uint64(cart.last_second)
+  for i in 0 .. 7: result.add(char((ts shr (8 * i)) and 0xFF))
+
+proc tama5_load_footer(cart: Tama5; data: string) =
+  let base = cart.ram.len
+  if data.len - base < TAMA5_FOOTER_LEN: return  # RAM-only save: keep the seeded clock
+  for p in 0 .. 3:
+    for i in 0 .. 7:
+      let b = uint8(data[base + p * 8 + i])
+      if i * 2 <= 0x0C: cart.rtc_pages[p][i * 2] = b and 0x0F
+      if i * 2 + 1 <= 0x0C: cart.rtc_pages[p][i * 2 + 1] = b shr 4
+      if i * 2 + 1 == 0x0D and p == 0: cart.page_reg = b shr 4
+  var ts: int64 = 0
+  for i in 0 .. 7: ts = ts or (int64(uint8(data[base + 32 + i])) shl (8 * i))
+  let now = gb_rtc_now()
+  # Saved in the future (or with no timestamp at all): treat the host as
+  # authoritative and carry on from here, as the HuC3 loader does.
+  if ts <= 0 or ts > now:
+    cart.last_second = now
+  else:
+    cart.last_second = now
+    if (cart.page_reg and 0x08) != 0: cart.tama5_advance(now - ts)
+
+# MBC6's flash is as much a part of the save as its SRAM is — it is what the
+# game downloaded — so it rides along in the same file. dingbat's own layout;
+# no other emulator implements MBC6 at all.
+const MBC6_FOOTER_LEN = 0x100000 + 0x100 + 1
+
+proc mbc6_footer(cart: Mbc6): string =
+  result = newStringOfCap(MBC6_FOOTER_LEN)
+  for b in cart.flash: result.add(char(b))
+  for b in cart.flash_hidden: result.add(char(b))
+  result.add(char(if cart.flash_sector0_protected: 1 else: 0))
+
+proc mbc6_load_footer(cart: Mbc6; data: string) =
+  let base = cart.ram.len
+  if data.len - base < MBC6_FOOTER_LEN: return  # RAM-only save: keep blank flash
+  for i in 0 ..< cart.flash.len: cart.flash[i] = uint8(data[base + i])
+  for i in 0 ..< cart.flash_hidden.len:
+    cart.flash_hidden[i] = uint8(data[base + cart.flash.len + i])
+  cart.flash_sector0_protected =
+    data[base + cart.flash.len + cart.flash_hidden.len] != '\0'
+
 proc mbc_save*(cart: Mbc) =
   if cart.ram_dirty and cart.has_battery and cart.sav_path.len > 0 and cart.ram.len > 0:
     try:
@@ -766,6 +1063,10 @@ proc mbc_save*(cart: Mbc) =
         data.add(rtc_footer(Mbc3(cart)))
       elif cart of Huc3:
         data.add(huc3_footer(Huc3(cart)))
+      elif cart of Tama5:
+        data.add(tama5_footer(Tama5(cart)))
+      elif cart of Mbc6:
+        data.add(mbc6_footer(Mbc6(cart)))
       writeFile(cart.sav_path, data)
       cart.ram_dirty = false
     except IOError, OSError:
@@ -782,6 +1083,10 @@ proc mbc_load*(cart: Mbc) =
       rtc_load_footer(Mbc3(cart), data)
     elif cart of Huc3:
       huc3_load_footer(Huc3(cart), data)
+    elif cart of Tama5:
+      tama5_load_footer(Tama5(cart), data)
+    elif cart of Mbc6:
+      mbc6_load_footer(Mbc6(cart), data)
 
 # ==================== INCLUDES ====================
 include mbc/mbc
@@ -793,6 +1098,10 @@ include mbc/mbc5
 include mbc/mbc7
 include mbc/huc1
 include mbc/huc3
+include mbc/mmm01
+include mbc/mbc6
+include mbc/camera
+include mbc/tama5
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
@@ -899,6 +1208,9 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     of etRtcSecond:
       if gb.cartridge of Mbc3: Mbc3(gb.cartridge).rtc_tick()
       elif gb.cartridge of Huc3: Huc3(gb.cartridge).huc3_rtc_tick()
+      elif gb.cartridge of Tama5: Tama5(gb.cartridge).tama5_rtc_tick()
+    of etCameraDone:
+      if gb.cartridge of PocketCamera: PocketCamera(gb.cartridge).camera_done()
     else: discard
 
 proc post_init*(gb: GB) =
@@ -922,6 +1234,8 @@ proc post_init*(gb: GB) =
       c.rtc_schedule_full()
   elif gb.cartridge of Huc3:
     Huc3(gb.cartridge).huc3_rtc_schedule()
+  elif gb.cartridge of Tama5:
+    Tama5(gb.cartridge).tama5_rtc_schedule()
   gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)

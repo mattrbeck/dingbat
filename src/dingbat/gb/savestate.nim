@@ -391,8 +391,12 @@ proc mbc_kind_tag(cart: Mbc): uint8 =
   elif cart of Mbc2: 2'u8
   elif cart of Mbc3: 3'u8
   elif cart of Mbc5: 5'u8
+  elif cart of Mbc6: 6'u8
   elif cart of Mbc7: 7'u8
-  # The Hudson mappers have no MBC number; their cartridge-type bytes stand in
+  # The mappers with no MBC number use their cartridge-type bytes instead
+  elif cart of Mmm01: 0x0B'u8
+  elif cart of PocketCamera: 0xFC'u8
+  elif cart of Tama5: 0xFD'u8
   elif cart of Huc1: 0xFF'u8
   elif cart of Huc3: 0xFE'u8
   else: 0'u8
@@ -444,6 +448,68 @@ proc save_mbc_state(cart: Mbc; w: var Writer) =
     w.write_u16(c.read_bits)
     w.write_u8(uint8(c.argument_bits_left))
     w.write_bool(c.eeprom_write_enabled)
+  elif cart of Mmm01:
+    let c = Mmm01(cart)
+    # rom_rotate is derived from the ROM file, not from anything the running
+    # program did, so it is rebuilt at load and left out here.
+    w.write_bool(c.ram_enabled)
+    w.write_bool(c.mapped)
+    w.write_u8(c.rom_bank_low)
+    w.write_u8(c.rom_bank_mid)
+    w.write_u8(c.rom_bank_high)
+    w.write_u8(c.ram_bank_low)
+    w.write_u8(c.ram_bank_high)
+    w.write_u8(c.rom_bank_mask)
+    w.write_u8(c.ram_bank_mask)
+    w.write_bool(c.mbc1_mode)
+    w.write_bool(c.mode_locked)
+    w.write_bool(c.multiplex)
+  elif cart of Mbc6:
+    let c = Mbc6(cart)
+    w.write_bool(c.ram_enabled)
+    w.write_u8(c.ram_bank_a)
+    w.write_u8(c.ram_bank_b)
+    w.write_u8(c.rom_bank_a)
+    w.write_u8(c.rom_bank_b)
+    w.write_bool(c.flash_select_a)
+    w.write_bool(c.flash_select_b)
+    w.write_bool(c.flash_enabled)
+    w.write_bool(c.flash_write_enabled)
+    # The flash array is half of what the battery keeps — it is the minigames
+    # the player downloaded — so a state without it would restore a cartridge
+    # that had forgotten them. The command state goes too: a state taken between
+    # the unlock writes and the command byte would otherwise resume mid-sequence.
+    w.write_seq_u8(c.flash)
+    w.write_seq_u8(c.flash_hidden)
+    w.write_bool(c.flash_sector0_protected)
+    w.write_u8(c.flash_read_mode)
+    w.write_u8(c.flash_status)
+    w.write_int(c.flash_cmd_step)
+    w.write_u8(c.flash_setup)
+    w.write_int(c.flash_program_addr)
+    w.write_bool(c.flash_program_hidden)
+  elif cart of PocketCamera:
+    let c = PocketCamera(cart)
+    w.write_bool(c.ram_enabled)
+    w.write_u8(c.rom_bank_num)
+    w.write_u8(c.ram_bank_num)
+    w.write_bool(c.regs_mapped)
+    # All 54 registers: the 4x4 threshold matrix is as much live configuration
+    # as the exposure is. capture_cycles_left carries a paused capture across;
+    # a running one is already in the scheduler's own state. `sensor` is live
+    # input and is left out, as Mbc7.accel_x is.
+    for v in c.regs: w.write_u8(v)
+    w.write_int(c.capture_cycles_left)
+  elif cart of Tama5:
+    let c = Tama5(cart)
+    # The nibble register file has to go whole: a command is several writes long
+    # and a state taken between them would resume with half of one staged.
+    w.write_u8(c.reg_index)
+    for v in c.regs: w.write_u8(v)
+    for p in 0 .. 3:
+      for i in 0 .. 12: w.write_u8(c.rtc_pages[p][i])
+    w.write_u8(c.page_reg)
+    w.write_u64(uint64(c.last_second))
   elif cart of Huc1:
     let c = Huc1(cart)
     w.write_u8(c.bank_low)
@@ -513,6 +579,62 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.read_bits = r.read_u16()
     c.argument_bits_left = int(r.read_u8())
     c.eeprom_write_enabled = r.read_bool()
+  elif cart of Mmm01:
+    let c = Mmm01(cart)
+    c.ram_enabled   = r.read_bool()
+    c.mapped        = r.read_bool()
+    c.rom_bank_low  = r.read_u8()
+    c.rom_bank_mid  = r.read_u8()
+    c.rom_bank_high = r.read_u8()
+    c.ram_bank_low  = r.read_u8()
+    c.ram_bank_high = r.read_u8()
+    c.rom_bank_mask = r.read_u8()
+    c.ram_bank_mask = r.read_u8()
+    c.mbc1_mode     = r.read_bool()
+    c.mode_locked   = r.read_bool()
+    c.multiplex     = r.read_bool()
+  elif cart of Mbc6:
+    let c = Mbc6(cart)
+    c.ram_enabled = r.read_bool()
+    c.ram_bank_a  = r.read_u8()
+    c.ram_bank_b  = r.read_u8()
+    c.rom_bank_a  = r.read_u8()
+    c.rom_bank_b  = r.read_u8()
+    c.flash_select_a = r.read_bool()
+    c.flash_select_b = r.read_bool()
+    c.flash_enabled  = r.read_bool()
+    c.flash_write_enabled = r.read_bool()
+    let fl = r.read_seq_u8()
+    if fl.len != c.flash.len:
+      raise newException(StateError, "save state MBC6 flash size mismatch")
+    c.flash = fl
+    let hid = r.read_seq_u8()
+    if hid.len != c.flash_hidden.len:
+      raise newException(StateError, "save state MBC6 hidden region size mismatch")
+    c.flash_hidden = hid
+    c.flash_sector0_protected = r.read_bool()
+    c.flash_read_mode      = r.read_u8()
+    c.flash_status         = r.read_u8()
+    c.flash_cmd_step       = r.read_int()
+    c.flash_setup          = r.read_u8()
+    c.flash_program_addr   = r.read_int()
+    c.flash_program_hidden = r.read_bool()
+  elif cart of PocketCamera:
+    let c = PocketCamera(cart)
+    c.ram_enabled  = r.read_bool()
+    c.rom_bank_num = r.read_u8()
+    c.ram_bank_num = r.read_u8()
+    c.regs_mapped  = r.read_bool()
+    for i in 0 ..< c.regs.len: c.regs[i] = r.read_u8()
+    c.capture_cycles_left = r.read_int()
+  elif cart of Tama5:
+    let c = Tama5(cart)
+    c.reg_index = r.read_u8()
+    for i in 0 ..< c.regs.len: c.regs[i] = r.read_u8()
+    for p in 0 .. 3:
+      for i in 0 .. 12: c.rtc_pages[p][i] = r.read_u8()
+    c.page_reg    = r.read_u8()
+    c.last_second = int64(r.read_u64())
   elif cart of Huc1:
     let c = Huc1(cart)
     c.bank_low = r.read_u8()

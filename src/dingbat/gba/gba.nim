@@ -1025,7 +1025,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etSerial:        gba.serial.serial_transfer_complete()
     of etDMA:           gba.dma.request_immediate()
     of etRtcSecond:     gba.rtc_irq_poll()
-    of etHandleInput, etIME: discard
+    of etHandleInput, etIME, etCameraDone: discard
 
 proc post_init*(gba: GBA) =
   gba.storage    = new_storage(gba, gba.rom_path)

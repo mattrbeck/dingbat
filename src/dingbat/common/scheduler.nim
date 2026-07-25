@@ -21,6 +21,9 @@ type
     etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag, etPPUEndHBlank
     etTimer0, etTimer1, etTimer2, etTimer3
     etSerial, etDMA
+    # Appended, never inserted: the ordinal of every kind above is part of
+    # the save-state format. Drives the Game Boy Camera's capture countdown.
+    etCameraDone
 
   Event* = object
     cycles*: CycleCount
