@@ -3,6 +3,10 @@
 dingbat, screenshot at checkpoints, diff perceptually, verify divergences
 against reference bursts to cancel frame skew.
 
+SameBoy is the authority: a checkpoint passes only when dingbat matches it.
+mGBA is run and reported alongside as context — agreeing with mGBA where
+SameBoy differs tells you the shape of a divergence, but it is not a pass.
+
 Usage: sweep.py <workdir> [--jobs N] [--titles substr] [--selected f] [--out f]
   workdir needs: selected_roms.json (title -> rom basename), roms/<basename>,
                  boot/{dmg,cgb}_boot.bin
@@ -42,7 +46,9 @@ PRUNE_CLEAN = False    # delete run artifacts for clean titles (bulk mode)
 TIMEOUT = 600
 
 OK = ('IDENTICAL', 'MINOR')
-RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR']
+# Worst-last. REF-CRASH ranks above MAJOR because it means SameBoy itself never
+# produced a frame to judge against, so the title is unverified rather than bad.
+RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR', 'REF-CRASH']
 
 
 def slugify(title):
@@ -104,22 +110,23 @@ def sweep_title(workdir, title, rom_base):
                     imgdiff.metrics(paths[ref], paths['dingbat'])
                     if ref in live_refs else dict(MARK))
             result['shots'][f] = shot
-        # Final verdict: dingbat passes a checkpoint if it matches EITHER
-        # reference. When both direct comparisons fail, re-check against
-        # reference bursts around the checkpoint to cancel lag-frame skew
-        # (emulators accumulate different lag, so inputs can land on different
-        # screens — the two references diverge from each other this way too).
+        # Final verdict: dingbat must match SameBoy. When the direct comparison
+        # fails, re-check against a burst of SameBoy frames around the
+        # checkpoint to cancel lag-frame skew — emulators accumulate different
+        # lag, so a scripted press can land on a different screen without
+        # anything being rendered wrong. mGBA gets the same burst treatment
+        # purely so the report can say whether dingbat lines up with it.
         for f in SHOTS:
             shot = result['shots'][f]
-            direct = min((shot[f'dingbat_vs_{r}']['verdict'] for r in REFS
-                          if shot[f'dingbat_vs_{r}']['verdict'] in RANK),
-                         key=RANK.index, default='MAJOR')
-            if direct in OK:
-                shot['final'] = direct
+            authority = shot['dingbat_vs_sameboy']['verdict']
+            if authority in OK:
+                shot['final'] = authority
+                continue
+            if 'sameboy' not in live_refs:
+                shot['final'] = 'REF-CRASH'
                 continue
             dshot = os.path.join(rundir, 'dingbat', f'dingbat.f{f:04}.ppm')
             burst_frames = sorted(set(max(1, f + d) for d in BURST))
-            best_overall = direct
             for ref in live_refs:
                 emudir = os.path.join(rundir, ref)
                 run_one(workdir, ref, os.path.join(emudir, 'rom' + ext),
@@ -132,8 +139,15 @@ def sweep_title(workdir, title, rom_base):
                     if best is None or key > best[0]:
                         best = (key, bf, m)
                 shot[f'skew_{ref}'] = {'best_frame': best[1], **best[2]}
-                best_overall = min((best_overall, best[2]['verdict']), key=RANK.index)
-            shot['final'] = best_overall
+                # The burst is ~55 frames per reference per checkpoint; keeping
+                # them would cost more disk than every other artifact combined
+                # over a full-library run, and the metrics are already recorded.
+                for bf in burst_frames:
+                    try:
+                        os.remove(os.path.join(emudir, f'burst{f}.f{bf:04}.ppm'))
+                    except OSError:
+                        pass
+            shot['final'] = shot['skew_sameboy']['verdict']
         worst = max((s['final'] for s in result['shots'].values()),
                     key=RANK.index, default='IDENTICAL')
         # Auto-triage: a flagged title gets a no-input control run — screens
