@@ -133,12 +133,18 @@ int main(int argc, char** argv) {
   if (got < sizeof hdr) { fprintf(stderr, "rom too small: %s\n", rom); return 3; }
   int is_cgb = (hdr[0x143] & 0x80) != 0;
 
+  /* Determinism, and it has to come first: GB_init seeds RAM, OAM and the CGB
+   * palettes through GB_random(), whose generator is seeded from time(NULL) by
+   * a library constructor. Disabling it afterwards leaves that one power-up
+   * fill drawn from the wall clock, so every run of the same ROM starts from
+   * different uninitialised memory and any game that reads it before writing
+   * it diverges non-reproducibly. Disabled, GB_random() returns 0, which is
+   * also what the other two emulators power up with. */
+  GB_random_set_enabled(false);
+  GB_random_seed(0);
   GB_gameboy_t gb;
   GB_init(&gb, is_cgb ? GB_MODEL_CGB_E : GB_MODEL_DMG_B);
   GB_set_log_callback(&gb, log_cb);
-  /* Determinism: no host entropy in uninitialised memory, no host clock. */
-  GB_random_set_enabled(false);
-  GB_random_seed(0);
 
   char bootpath[1024];
   snprintf(bootpath, sizeof bootpath, "%s/%s", bootdir,
