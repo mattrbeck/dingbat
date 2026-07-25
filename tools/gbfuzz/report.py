@@ -26,19 +26,33 @@ def worst_of(res):
                default='?')
 
 
+def diverges_unprompted(r):
+    """True when the title differs from SameBoy with no input at all.
+
+    The scripted run presses Start and A at fixed frames, and plenty of games
+    seed their RNG from whatever the timer holds when a button is read — so a
+    one-frame difference in where a press lands legitimately produces a
+    completely different screen. The no-input control removes that variable:
+    if dingbat still matches SameBoy without input, the scripted divergence
+    came from the script, not from the emulator.
+    """
+    ni = r.get('noinput_f1650', {}).get('verdict')
+    return ni is None or ni not in OK
+
+
 def divergence(r):
     """How far from SameBoy this title is, worst-first when sorted descending.
 
-    Ranked bucket first so a MAJOR never sorts under a DIFFERENT, then the
-    fraction of pixels that differ at the worst checkpoint, then how many
-    checkpoints diverged at all.
+    Titles that diverge with no input sort above ones that only diverge under
+    the scripted presses, then the ranked bucket so a MAJOR never sorts under a
+    DIFFERENT, then the share of pixels that differ at the worst checkpoint.
     """
     bad = [s for s in r['shots'].values() if s['final'] not in OK]
     if not bad:
-        return (-1, 0.0, 0)
+        return (0, -1, 0.0, 0)
     rank = max(RANK.index(s['final']) for s in bad)
     worst = max(1.0 - s['dingbat_vs_sameboy'].get('exact', 0.0) for s in bad)
-    return (rank, worst, len(bad))
+    return (1 if diverges_unprompted(r) else 0, rank, worst, len(bad))
 
 
 def png_data_uri(ppm_path):
@@ -255,10 +269,17 @@ def render(workdir, results, notes_html, out_path):
         h.append('<tr><th>Title</th><th>Verdict</th><th>Worst px</th>'
                  '<th>Bad checkpoints</th><th>vs mGBA</th>'
                  '<th>SameBoy vs mGBA</th><th>No input</th><th>ROM</th></tr>')
+        split_done = False
         for r in diff_rows:
+            if not split_done and not diverges_unprompted(r):
+                split_done = True
+                h.append('<tr><td colspan="8" class="rom" style="padding-top:.9rem">'
+                         '&darr; below here dingbat matches SameBoy with no input '
+                         '&mdash; the divergence only appears under the scripted '
+                         'presses</td></tr>')
             w = worst_of(r)
             bad = [(f, sh) for f, sh in r['shots'].items() if sh['final'] not in OK]
-            _, worstpx, nbad = divergence(r)
+            _, _, worstpx, nbad = divergence(r)
             mg = min((sh['dingbat_vs_mgba']['verdict'] for f, sh in bad),
                      key=lambda v: RANK.index(v) if v in RANK else 99)
             rc = max((sh['ref_control']['verdict'] for f, sh in bad),
