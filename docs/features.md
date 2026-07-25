@@ -5,7 +5,7 @@ The full feature list for both front-ends and both emulated systems. The
 
 ## Web front-end
 
-The browser build at [gba.mattrb.com](https://gba.mattrb.com) is the default way to play.
+The browser build at [dingbat.gg](https://dingbat.gg) is the default way to play.
 
 - Installable as an offline-capable PWA, with a home screen library grid
 - Touch controls, with layouts for phones and tablets in both orientations

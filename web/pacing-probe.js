@@ -111,7 +111,7 @@
     const s = stats();
     const lines = [
       `dingbat pacing probe — ${f(s.sec)}s`,
-      `origin: ${location.protocol}//${location.host}${httpOnIOS ? "  ⚠ HTTP on iOS = no JIT (use https://gba.mattrb.com)" : ""}${noHeap ? "  [heap/GC not available on this browser]" : ""}`,
+      `origin: ${location.protocol}//${location.host}${httpOnIOS ? "  ⚠ HTTP on iOS = no JIT (use https://dingbat.gg)" : ""}${noHeap ? "  [heap/GC not available on this browser]" : ""}`,
       `frames: avg ${f(s.avg, 1)}ms  p95 ${f(s.p95, 1)}  max ${f(s.max, 1)}  |  16-20ms ${s.b1620}  20-33ms ${s.b2033}  >33ms ${s.b33}`,
       `audio: scheduled ${s.sched}  underruns ${s.ur}  (coupled w/ frame stall ${s.coupled})`,
       `  lead ms: p50 ${f(s.leadP50, 1)}  p95 ${f(s.leadP95, 1)}  min ${f(s.leadMin, 1)}`,

@@ -2,7 +2,7 @@
 
 <p align="center">A Game Boy, Game Boy Color, and Game Boy Advance emulator written in Nim.</p>
 
-<h3 align="center"><a href="https://gba.mattrb.com">▶ Play it in your browser</a></h3>
+<h3 align="center"><a href="https://dingbat.gg">▶ Play it in your browser</a></h3>
 
 <p align="center"><img width="800" src="README/GoldenSun.gif"></p>
 

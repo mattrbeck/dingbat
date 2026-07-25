@@ -1,6 +1,6 @@
 # Building
 
-Most people should just use [gba.mattrb.com](https://gba.mattrb.com) or a
+Most people should just use [dingbat.gg](https://dingbat.gg) or a
 [release binary](../../../releases). These instructions are for working on dingbat
 itself.
 
