@@ -114,8 +114,13 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
   of fsGetTile:
     let (map, offset) =
       if ppu.fetching_window:
+        # Wraps inside the 32x32 tile map exactly as the background fetch
+        # below does. Without the mask a long enough line runs fetcher_x past
+        # the end of the map and then off the end of VRAM itself — an
+        # out-of-bounds read (The Fish Files crashed the emulator here).
         let m = if window_tile_map(ppu) == 0: 0x1800 else: 0x1C00
-        let o = ppu.fetcher_x + ((ppu.current_window_line shr 3) * 32)
+        let o = (ppu.fetcher_x and 0x1F) +
+                ((((ppu.current_window_line shr 3) * 32)) and 0x3FF)
         (m, o)
       else:
         let m = if bg_tile_map(ppu) == 0: 0x1800 else: 0x1C00
