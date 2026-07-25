@@ -204,11 +204,11 @@ type
     # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
     # interrupt and must still observe the old mode).
     read_mode*:          uint8
-    # Dots elapsed since the last frame pushed while the LCD was off. Hardware
-    # keeps refreshing the panel at the same rate whether or not the PPU is
-    # driving it, so a disabled LCD must still produce frames — see the
-    # lcd_off_frame helper.
-    lcd_off_dots*:       int32
+    # Dots since the last frame was pushed, counted whether or not the PPU is
+    # driving the panel. The panel refreshes at a fixed rate regardless, so
+    # this is what keeps frame output steady across an LCD that switches off
+    # and on again — see lcd_off_frame and ppu_lcd_enabled.
+    dots_since_frame*:   int32
     # output
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool

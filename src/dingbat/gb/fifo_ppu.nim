@@ -282,6 +282,9 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
   # Snapshot the mode as observed by a CPU read that samples during this M-cycle
   # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag
+  # Counted on both paths: the panel's refresh clock runs whether or not the
+  # PPU is driving it (see ppu_blank_frame).
+  ppu.dots_since_frame += int32(cycles)
   if lcd_enabled(ppu):
     for _ in 0 ..< cycles:
       case ppu.mode_flag
@@ -317,6 +320,7 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
             ppu.frame = true
+            ppu.dots_since_frame = 0
             ppu.current_window_line = -1
           else:
             ppu.`mode_flag=`(2'u8, gb)
@@ -334,4 +338,4 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
-    lcd_off_frame(ppu, gb, cycles)
+    lcd_off_frame(ppu, gb)
