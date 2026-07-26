@@ -12,6 +12,7 @@ import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/common/input
 import dingbat/common/test_output
+from dingbat/common/scheduler import rebase
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 
@@ -152,16 +153,76 @@ proc main() =
           echo toHex(0x03000000'u32 + uint32(b) * 1024, 8), ": ", gba.prof_iwram[b], "  ",
             formatFloat(gba.prof_iwram[b].float * 100.0 / tot.float, ffDecimal, 2), "%"
   else:
-    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+    # DINGBAT_BENCH_RENDERER selects the GB pixel pipeline: "fifo" (the
+    # shipping default, per-dot) or "scanline" (per-line). Anything else is
+    # rejected rather than silently falling back, so a typo can't quietly
+    # benchmark the wrong renderer.
+    let renderer = getEnv("DINGBAT_BENCH_RENDERER", "fifo")
+    if renderer notin ["fifo", "scanline"]:
+      echo "bench: DINGBAT_BENCH_RENDERER must be fifo or scanline, got: ", renderer
+      quit(1)
+    let emu = new_gb("", rom_path, fifo = renderer == "fifo",
+                     headless = true, run_bios = false)
     emu.test_output = test_out
     emu.post_init()
-    for _ in 0 ..< warmup: emu.step_frame()
+    # As on the GBA path: load an in-game scene rather than measuring whatever
+    # the boot intro happens to be showing. A title screen exercises almost
+    # none of the PPU or CPU that gameplay does.
+    let state_path = getEnv("DINGBAT_BENCH_STATE")
+    if state_path.len > 0:
+      if not emu.load_state_bytes(readFile(state_path)):
+        echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
+        quit(1)
+
+    # The GB core emits frames while the LCD is off (see lcd_off_frame), so a
+    # fixed frame count is NOT a fixed amount of work: a build that changes
+    # frame-emission behaviour does different work for the same frame count.
+    # Stepping the frame by hand (rather than through step_frame) lets the
+    # rebase return value be summed into an exact emulated-cycle total, which
+    # IS comparable across builds.
+    var total_cycles = 0'u64
+    template run_scripted(f: int) =
+      for ev in script:
+        if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
+      emu.apply_cheats()
+      while not emu.ppu.frame:
+        emu.cpu.tick(emu)
+      emu.ppu.frame = false
+      total_cycles += uint64(emu.scheduler.rebase())
+
+    if getEnv("DINGBAT_BENCH_HASH") == "1":
+      var h = 0xCBF29CE484222325'u64
+      for f in 0 ..< warmup + frames:
+        run_scripted(f)
+        h = fnv(h, emu.ppu.framebuffer)
+        echo f, " ", toHex(h)
+      return
+    # Writes a .state after the warmup, so a scripted run can manufacture the
+    # in-game scene that later runs load with DINGBAT_BENCH_STATE.
+    let save_path = getEnv("DINGBAT_BENCH_SAVESTATE")
+    if save_path.len > 0:
+      for f in 0 ..< warmup: run_scripted(f)
+      if not emu.save_state(save_path): quit(1)
+      echo "bench: wrote state after ", warmup, " frames: ", save_path
+      return
+    let dump_frame = getEnv("DINGBAT_BENCH_DUMP")
+    if dump_frame.len > 0:
+      for f in 0 .. parseInt(dump_frame): run_scripted(f)
+      let fh = open(getEnv("DINGBAT_BENCH_DUMP_PATH", "/tmp/fb.bin"), fmWrite)
+      discard fh.writeBuffer(addr emu.ppu.framebuffer[0], emu.ppu.framebuffer.len * 2)
+      fh.close()
+      return
+
+    for f in 0 ..< warmup: run_scripted(f)
+    total_cycles = 0
     let start = getMonoTime()
-    for _ in 0 ..< frames: emu.step_frame()
+    for i in 0 ..< frames: run_scripted(warmup + i)
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+    echo "  cycles=", total_cycles, " mcps=",
+         formatFloat(total_cycles.float / elapsed / 1e6, ffDecimal, 2)
 
 main()
