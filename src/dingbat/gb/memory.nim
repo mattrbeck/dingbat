@@ -109,8 +109,8 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
      (idx < 0x100 or idx >= 0x200):
     return mem.bootrom[idx]
   case idx
-  of 0x0000..0x3FFF: mbc_read(gb.cartridge, idx)
-  of 0x4000..0x7FFF: mbc_read(gb.cartridge, idx)
+  of 0x0000..0x3FFF: mbc_read_rom_lo(gb.cartridge, idx)
+  of 0x4000..0x7FFF: mbc_read_rom_hi(gb.cartridge, idx)
   of 0x8000..0x9FFF: ppu_read(gb.ppu, gb, idx)
   of 0xA000..0xBFFF: mbc_read(gb.cartridge, idx)
   of 0xC000..0xCFFF: mem.wram[0][idx - 0xC000]
@@ -174,7 +174,11 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     mem.bootrom = @[]
     gb.cgb_enabled = gb.cgb_flag != cgbNone
   case idx
-  of 0x0000..0x7FFF: mbc_write(gb.cartridge, idx, val)
+  of 0x0000..0x7FFF:
+    mbc_write(gb.cartridge, idx, val)
+    # Resync point 1 of 3 (see mbc_sync_rom_map): every banking register on
+    # every mapper with a flat map is written through this window.
+    mbc_sync_rom_map(gb.cartridge)
   of 0x8000..0x9FFF: ppu_write(gb.ppu, gb, idx, val)
   of 0xA000..0xBFFF: mbc_write(gb.cartridge, idx, val)
   of 0xC000..0xCFFF: mem.wram[0][idx - 0xC000] = val

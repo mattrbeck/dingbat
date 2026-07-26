@@ -650,6 +650,11 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.mailbox = r.read_u8()
     c.response = r.read_u8()
     c.last_second = int64(r.read_u64())
+  # Resync point 3 of 3: the banking registers above were written directly,
+  # not through mbc_write, so the flat-ROM cache is stale until now. Missing
+  # this would leave a loaded state (and every rollback restore) reading the
+  # pre-load ROM bank.
+  mbc_sync_rom_map(cart)
   # Persist the restored cart RAM to the .sav on the next flush
   if cart.has_battery and cart.ram.len > 0:
     cart.ram_dirty = true

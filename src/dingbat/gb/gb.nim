@@ -41,6 +41,13 @@ type
     has_battery*:  bool
     ram_dirty*:    bool
     save_error_reported*: bool
+    # Flat-ROM window cache -- see mbc_sync_rom_map in mbc/mbc.nim. Derived
+    # state, never serialized: it is recomputed from the banking registers
+    # after every cartridge write and after a state load. `flat_rom` defaults
+    # to false so an Mbc that has not been synced falls back to the method.
+    flat_rom*:     bool
+    rom_lo_base*:  int   # byte offset in `rom` that address 0x0000 maps to
+    rom_hi_base*:  int   # byte offset in `rom` that address 0x4000 maps to
 
   MbcRom* = ref object of Mbc
 

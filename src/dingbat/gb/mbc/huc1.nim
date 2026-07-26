@@ -18,6 +18,9 @@
 # candidate width behaves identically once the shared bank helpers wrap the
 # result over a power-of-two ROM or RAM, which is every real cartridge.
 
+method mbc_rom_map*(cart: Huc1): (int, int) =
+  (0, mbc_rom_bank_offset(cart, int(cart.bank_low)))
+
 method mbc_read*(cart: Huc1; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

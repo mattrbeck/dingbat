@@ -26,6 +26,10 @@ proc rtc_write(cart: Mbc3; reg: int; val: uint8) =
     cart.rtc_live[4] = val and 0xC1
   else: discard
 
+method mbc_rom_map*(cart: Mbc3): (int, int) =
+  ## The RTC lives behind 0xA000-0xBFFF and never moves the ROM window.
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
+
 method mbc_read*(cart: Mbc3; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

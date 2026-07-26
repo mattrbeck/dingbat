@@ -13,6 +13,12 @@ proc mbc1_hi_bank(cart: Mbc1): int =
   if cart.multicart: (int(cart.reg2) shl 4) or (int(cart.reg1) and 0x0F)
   else:              (int(cart.reg2) shl 5) or int(cart.reg1)
 
+method mbc_rom_map*(cart: Mbc1): (int, int) =
+  ## Mode 1 is what unlocks the low window; the expressions are the ones
+  ## mbc_read uses below.
+  ((if cart.mode == 0: 0 else: mbc_rom_bank_offset(cart, mbc1_lo_bank(cart))),
+   mbc_rom_bank_offset(cart, mbc1_hi_bank(cart)))
+
 method mbc_read*(cart: Mbc1; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF:

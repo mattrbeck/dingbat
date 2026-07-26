@@ -1,5 +1,8 @@
 # MBC2 cartridge (included by gb.nim)
 
+method mbc_rom_map*(cart: Mbc2): (int, int) =
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank)))
+
 method mbc_read*(cart: Mbc2; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

@@ -37,6 +37,85 @@ proc is_mbc1_multicart(rom: seq[uint8]): bool =
 
 method mbc_read*(cart: Mbc; idx: int): uint8 {.base.} = 0xFF'u8
 method mbc_write*(cart: Mbc; idx: int; val: uint8) {.base.} = discard
+
+# ---------------------------------------------------------------------------
+# Flat-ROM window cache
+#
+# `mbc_read` is a method, so every instruction fetch paid a dynamic dispatch, a
+# chckNilDisp and the post-call error-flag test. For every mapper here except
+# MBC6 the CPU's 0x0000-0x7FFF window is nothing but two flat 16 KiB views into
+# `rom`: address A below 0x4000 reads rom[lo + A], and A at or above it reads
+# rom[hi + A - 0x4000]. mbc_rom_map returns those two offsets so read_byte can
+# index straight into the buffer; a mapper that cannot be described that way
+# returns (-1, -1) and keeps the method call.
+#
+# The bases are a pure function of the banking registers, and the registers only
+# move on a write into 0x0000-0x7FFF. The complete set of points that can change
+# the map, and where each is resynced:
+#
+#   1. Any cartridge write below 0x8000 -- every banking register on every
+#      mapper here is written through this window. gb/memory.nim write_byte,
+#      immediately after mbc_write.
+#   2. Cartridge construction, including MBC1's multicart detection and MMM01's
+#      rom_rotate, both of which are decided from the ROM image at load time.
+#      load_cartridge.
+#   3. Save-state / rollback-snapshot load, which writes the banking registers
+#      back directly rather than through mbc_write. gb/savestate.nim
+#      load_mbc_state.
+#
+# Two mappers deliberately opt out by not overriding the base method:
+#   * MBC6 splits 0x4000-0x7FFF into two independent 8 KiB windows that can each
+#     be ROM or flash, so there is no single `hi`.
+#   * TAMA5 selects its ROM bank from registers written through 0xA000-0xBFFF,
+#     which is NOT one of the resync points above; giving it a map would need a
+#     sync on every cart-RAM write, which costs more than the one cartridge it
+#     would speed up is worth.
+# Build with -d:mbc_map_check to have every ROM read cross-checked against the
+# method at runtime (tools/gbfuzz sweep, see notes).
+# ---------------------------------------------------------------------------
+
+method mbc_rom_map*(cart: Mbc): (int, int) {.base.} = (-1, -1)
+  ## Byte offsets into `rom` for the 0x0000 and 0x4000 windows, or (-1, -1)
+  ## when this mapper's ROM window is not two flat views.
+
+proc mbc_sync_rom_map*(cart: Mbc) =
+  ## Recompute the cache. Cheap (one virtual call) and only on the three
+  ## events enumerated above, never on a read.
+  let (lo, hi) = mbc_rom_map(cart)
+  cart.rom_lo_base = lo
+  cart.rom_hi_base = hi
+  cart.flat_rom = lo >= 0 and hi >= 0
+
+when defined(mbc_map_check):
+  proc mbc_map_fail(idx, got, want: int) {.noinline.} =
+    echo "mbc_map_check: ROM read 0x", toHex(uint16(idx), 4),
+         " fast=0x", toHex(uint8(got), 2), " method=0x", toHex(uint8(want), 2)
+    quit(3)
+
+proc mbc_read_rom_lo*(cart: Mbc; idx: int): uint8 {.inline.} =
+  ## 0x0000-0x3FFF. Identical index (and therefore identical bounds check) to
+  ## the `cart.rom[...]` the method would have run.
+  when defined(mbc_map_check):
+    let want = mbc_read(cart, idx)
+    if cart.flat_rom:
+      let got = cart.rom[cart.rom_lo_base + idx]
+      if got != want: mbc_map_fail(idx, int(got), int(want))
+    return want
+  else:
+    if cart.flat_rom: cart.rom[cart.rom_lo_base + idx]
+    else: mbc_read(cart, idx)
+
+proc mbc_read_rom_hi*(cart: Mbc; idx: int): uint8 {.inline.} =
+  ## 0x4000-0x7FFF.
+  when defined(mbc_map_check):
+    let want = mbc_read(cart, idx)
+    if cart.flat_rom:
+      let got = cart.rom[cart.rom_hi_base + (idx - 0x4000)]
+      if got != want: mbc_map_fail(idx, int(got), int(want))
+    return want
+  else:
+    if cart.flat_rom: cart.rom[cart.rom_hi_base + (idx - 0x4000)]
+    else: mbc_read(cart, idx)
 # Frontends poll this each frame to drive controller/haptic rumble.
 method mbc_rumble*(cart: Mbc): bool {.base.} = false
 
@@ -180,4 +259,8 @@ proc load_cartridge*(rom_path: string): Mbc =
     cart = c
 
   mbc_load(cart)
+  # Resync point 2 of 3: MBC1's multicart detection and MMM01's rom_rotate are
+  # both decided from the ROM image here, so the map is only well defined once
+  # the cartridge object exists.
+  mbc_sync_rom_map(cart)
   result = cart

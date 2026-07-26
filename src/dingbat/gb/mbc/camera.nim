@@ -286,6 +286,9 @@ proc camera_reg_read(cart: PocketCamera; idx: int): uint8 =
   # $00 when read."
   if ((idx - 0xA000) and 0x7F) == 0: cart.regs[0] and 0x07 else: 0x00'u8
 
+method mbc_rom_map*(cart: PocketCamera): (int, int) =
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
+
 method mbc_read*(cart: PocketCamera; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

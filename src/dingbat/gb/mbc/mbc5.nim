@@ -1,5 +1,9 @@
 # MBC5 cartridge (included by gb.nim)
 
+method mbc_rom_map*(cart: Mbc5): (int, int) =
+  ## Mbc5Rumble inherits this: the motor bit only steals RAM-bank bits.
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
+
 method mbc_read*(cart: Mbc5; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

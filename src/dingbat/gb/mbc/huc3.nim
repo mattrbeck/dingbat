@@ -120,6 +120,9 @@ proc huc3_window_write(cart: Huc3; val: uint8): bool =
     true
   else: false     # 0xA falls through to RAM; 0 and the rest drop the write
 
+method mbc_rom_map*(cart: Huc3): (int, int) =
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
+
 method mbc_read*(cart: Huc3; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

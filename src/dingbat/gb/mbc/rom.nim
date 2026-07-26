@@ -1,5 +1,8 @@
 # ROM (no MBC) cartridge (included by gb.nim via mbc.nim chain)
 
+method mbc_rom_map*(cart: MbcRom): (int, int) = (0, 0x4000)
+  ## Both windows are the identity: mbc_read indexes rom[idx] for either.
+
 method mbc_read*(cart: MbcRom; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]

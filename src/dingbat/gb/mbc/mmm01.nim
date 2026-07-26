@@ -91,6 +91,13 @@ proc mmm01_ram_bank(cart: Mmm01): int =
     # game is locked to its own RAM bank 0 while its game-select bits survive.
     int(cart.ram_bank_low and cart.ram_bank_mask) or (int(cart.ram_bank_high) shl 2)
 
+method mbc_rom_map*(cart: Mmm01): (int, int) =
+  ## Both windows move: unmapped, they are the two halves of the menu.
+  (mmm01_rom_offset(cart, (if cart.mapped: mmm01_low_bank(cart)
+                           else: mmm01_menu_bank(cart))),
+   mmm01_rom_offset(cart, (if cart.mapped: mmm01_high_bank(cart)
+                           else: mmm01_menu_bank(cart) + 1)))
+
 method mbc_read*(cart: Mmm01; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF:

@@ -148,6 +148,10 @@ proc mbc7_reg_write(cart: Mbc7; idx: int; val: uint8) =
     cart.eeprom_clk = (val and 0x40) != 0
   else: discard
 
+method mbc_rom_map*(cart: Mbc7): (int, int) =
+  ## No bank-0 remap here either -- rom_bank_num is used raw, as below.
+  (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
+
 method mbc_read*(cart: Mbc7; idx: int): uint8 =
   case idx
   of 0x0000..0x3FFF: cart.rom[idx]
