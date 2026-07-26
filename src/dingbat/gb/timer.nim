@@ -55,7 +55,7 @@ proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
         t.countdown = 4
   t.previous_bit = current_bit
 
-proc timer_tick*(t: GbTimer; gb: GB; cycles: int) =
+proc timer_tick_slow(t: GbTimer; gb: GB; cycles: int) =
   let serial = gb.serial
   for _ in 0 ..< cycles:
     if t.countdown > -1: dec t.countdown
@@ -63,6 +63,43 @@ proc timer_tick*(t: GbTimer; gb: GB; cycles: int) =
     t.tdiv = t.tdiv + 1
     timer_check_edge(t, gb)
     if serial.shifting: serial_tick(serial, gb)
+
+proc timer_tick*(t: GbTimer; gb: GB; cycles: int) {.inline.} =
+  let serial = gb.serial
+  # Fast path. The per-cycle loop below is called for every 4 T-cycles of
+  # every memory access — it was ~16% of a CGB profile and ~18% of a DMG one —
+  # yet in the overwhelming majority of those calls nothing at all happens
+  # except the 16-bit divider counting up.
+  #
+  # Everything the loop can do is driven by one of three things, all of which
+  # can be decided for the whole span up front:
+  #   * the pending-TIMA-reload countdown (only live for 4 cycles after an
+  #     overflow, and it is < 0 the rest of the time),
+  #   * a serial shift (only while an internally-clocked transfer runs),
+  #   * a falling edge of the DIV bit TIMA is tapped off.
+  # None of them can *start* inside the span: countdown and shifting are only
+  # armed by register writes, which happen between ticks.
+  #
+  # The tapped bit falls exactly when the incremented counter crosses a
+  # multiple of 2^(bit+1), so the number of edges in the span is a subtraction
+  # of two shifts. previous_bit is invariably `enabled and bit(tdiv)` on
+  # entry — every path that changes tdiv, TAC or the tap runs
+  # timer_check_edge — so no edge means TIMA cannot move, and all that is left
+  # is to advance the counter and re-latch the bit. Bit-identical to the loop.
+  if t.countdown < 0 and not serial.shifting:
+    let t0 = uint32(t.tdiv)
+    let t1 = t0 + uint32(cycles)
+    let cur = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
+    let shift = t.bit_for_tima + 1
+    # `previous_bit == cur` re-establishes the invariant locally rather than
+    # trusting it, so the fast path is correct even if some future caller
+    # changes tdiv without running an edge check.
+    if t.previous_bit == cur and
+       (not t.enabled or (t1 shr shift) == (t0 shr shift)):
+      t.tdiv = uint16(t1 and 0xFFFF'u32)
+      t.previous_bit = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
+      return
+  timer_tick_slow(t, gb, cycles)
 
 proc timer_read*(t: GbTimer; idx: int): uint8 =
   case idx

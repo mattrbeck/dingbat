@@ -13,8 +13,20 @@ proc ch4_step*(ch: GbChannel4; gb: GB) =
   if ch.width_mode != 0:
     ch.lfsr = ch.lfsr and not (1'u16 shl 6)
     ch.lfsr = ch.lfsr or (new_bit shl 6)
-  gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
-    etAPUChannel4)
+  # Stop the LFSR clock while the channel is off. Games park a silent noise
+  # channel at a short divisor and leave it there — Shantae spends ~7900
+  # scheduler events per frame here, Pokemon Crystal ~8800 (Crystal's are all
+  # while the channel is playing, so it keeps every one of them).
+  #
+  # Nothing can observe a disabled channel's LFSR: ch4_get_amplitude gates on
+  # `enabled`, the register file exposes no LFSR bits, and NR52 reports
+  # `enabled` rather than any shift state. The only way back to enabled is the
+  # NR44 trigger, which reloads the LFSR with 0x7FFF and re-arms this event
+  # from scratch (ch4_write below) — so whatever the shift register did while
+  # silent is discarded either way. Bit-identical output, one fewer event.
+  if ch.enabled:
+    gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
+      etAPUChannel4)
 
 proc ch4_get_amplitude*(ch: GbChannel4): float32 =
   if ch.enabled and ch.dac_enabled:

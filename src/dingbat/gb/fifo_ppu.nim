@@ -95,17 +95,28 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   if ppu.fifo.size == 0:
     let bg_en = bg_display(ppu) or gb.cgb_enabled
     inc ppu.fetcher_x
+    # The FIFO is empty here, so where head/tail happen to sit in the ring is
+    # not observable (nothing reads an empty BG FIFO, and only the sprite FIFO
+    # is ever indexed). Rewinding them to 0 turns the eight pushes into eight
+    # contiguous stores with no per-pixel wrap mask.
+    ppu.fifo.head = 0
+    ppu.fifo.tail = 8
+    ppu.fifo.size = 8
+    let attrs     = ppu.tile_attrs
+    let flip      = (attrs and 0b0010_0000) != 0
+    let palette   = attrs and 0x7
+    let obj_to_bg = (attrs and 0x80) shr 7
+    let lo = ppu.tile_data_low
+    let hi = ppu.tile_data_high
     for col in 0 ..< 8:
-      let shift = if (ppu.tile_attrs and 0b0010_0000) != 0: col else: 7 - col
-      let lsb = (ppu.tile_data_low  shr shift) and 0x1
-      let msb = (ppu.tile_data_high shr shift) and 0x1
-      let color = uint8((msb shl 1) or lsb)
-      fifo_push(ppu.fifo, GbPixel(
+      let shift = if flip: col else: 7 - col
+      let color = uint8((((hi shr shift) and 0x1) shl 1) or ((lo shr shift) and 0x1))
+      ppu.fifo.data[col] = GbPixel(
         color:     if bg_en: color else: 0'u8,
-        palette:   ppu.tile_attrs and 0x7,
+        palette:   palette,
         oam_idx:   0,
-        obj_to_bg: (ppu.tile_attrs and 0x80) shr 7,
-      ))
+        obj_to_bg: obj_to_bg,
+      )
     return true
   return false
 
@@ -163,7 +174,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
   of fsSleep:
     inc ppu.fetch_counter
 
-  ppu.fetch_counter = ppu.fetch_counter mod 8
+  # Counter is never negative and never exceeds 8, so the mask is the `mod 8`
+  # it replaces without the signed-remainder correction.
+  ppu.fetch_counter = ppu.fetch_counter and 7
 
 proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ## Read sprite tile data and merge into the sprite FIFO.
@@ -279,11 +292,15 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
     inc ppu.lx
-    if window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-       int(ppu.lx) + 7 >= int(ppu.wx) and not ppu.fetching_window and ppu.window_trigger:
+    # Same conjunction, cheapest and most selective terms first: two plain
+    # bool fields reject almost every dot before any register decode or
+    # comparison runs. All five terms are side-effect-free reads.
+    if not ppu.fetching_window and ppu.window_trigger and
+       window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
+       int(ppu.lx) + 7 >= int(ppu.wx):
       fifo_reset_bg(ppu, true)
 
-method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
+proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
   # Snapshot the mode as observed by a CPU read that samples during this M-cycle
   # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag
@@ -291,8 +308,27 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
   # PPU is driving it (see ppu_blank_frame).
   ppu.dots_since_frame += int32(cycles)
   if lcd_enabled(ppu):
-    for _ in 0 ..< cycles:
-      case ppu.mode_flag
+    var remaining = cycles
+    while remaining > 0:
+      # Modes 0, 1 and 2 do nothing at all until the dot counter reaches a
+      # single trigger value — mode 3 is the only one that has per-dot work.
+      # Those three account for roughly 60% of the dots in a frame, so the
+      # loop below jumps straight to the next dot that can do something
+      # instead of re-dispatching the mode switch for each one. Same
+      # sequence of actions at the same dot counts; only the no-op iterations
+      # are collapsed. The one level-triggered rule in the set (LY 153
+      # snapping back to 0 once the counter passes 4) opts out of the jump,
+      # so it still fires on exactly the dot it used to.
+      let m = ppu.mode_flag
+      if m != 3:
+        let target = if m == 2: 80'i32 else: 456'i32
+        if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
+          let skip = min(remaining, int(target - ppu.cycle_counter))
+          ppu.cycle_counter += int32(skip)
+          remaining -= skip
+          continue
+      dec remaining
+      case m
       of 2:  # OAM search
         if ppu.cycle_counter == 80:
           ppu.`mode_flag=`(3'u8, gb)
@@ -344,3 +380,8 @@ method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     lcd_off_frame(ppu, gb)
+
+method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
+  ## Polymorphic entry point. The hot path (mem_tick_components) calls
+  ## fifo_tick directly through GB.fifo_ppu and never reaches this.
+  fifo_tick(ppu, gb, cycles)

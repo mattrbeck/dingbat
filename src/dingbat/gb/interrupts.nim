@@ -46,8 +46,16 @@ proc irq_read*(irq: GbInterrupts; idx: int): uint8 =
     (if irq.vblank_enabled:   0x01'u8 else: 0'u8)
   else: 0xFF'u8
 
-proc interrupt_ready*(irq: GbInterrupts): bool =
-  (irq_read(irq, 0xFF0F) and irq_read(irq, 0xFFFF) and 0x1F) != 0
+proc interrupt_ready*(irq: GbInterrupts): bool {.inline.} =
+  ## Run after every instruction and on every HALT. Testing the five
+  ## request/enable pairs directly is the same predicate the packed form
+  ## computes — irq_read's 0xE0 and top_3_ie_bits padding is masked off by the
+  ## 0x1F — without building the two IF/IE bytes to throw them away.
+  (irq.vblank_interrupt   and irq.vblank_enabled)   or
+  (irq.lcd_stat_interrupt and irq.lcd_stat_enabled) or
+  (irq.timer_interrupt    and irq.timer_enabled)    or
+  (irq.serial_interrupt   and irq.serial_enabled)   or
+  (irq.joypad_interrupt   and irq.joypad_enabled)
 
 proc irq_write*(irq: GbInterrupts; idx: int; val: uint8) =
   case idx

@@ -477,6 +477,11 @@ type
     interrupts*:     GbInterrupts
     joypad*:         GbJoypad
     ppu*:            GbPpu
+    # The same object as `ppu` when the FIFO renderer is selected, nil for the
+    # scanline one. Lets the per-M-cycle component tick reach the shipping
+    # renderer as a direct call instead of a method dispatch (which showed up
+    # as ~2-3% of a profile in chckNilDisp alone). Non-owning: `ppu` owns it.
+    fifo_ppu* {.cursor.}: GbFifoPpu
     timer*:          GbTimer
     serial*:         GbSerial
     memory*:         GbMemory
@@ -1115,7 +1120,7 @@ include serial
 include timer
 include joypad
 # Forward declarations needed by ppu.nim (defined in memory.nim included later)
-proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false)
+proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
@@ -1219,9 +1224,12 @@ proc post_init*(gb: GB) =
   gb.apu        = new_gb_apu(gb, gb.headless)
   gb.joypad     = new_gb_joypad()
   if gb.fifo:
-    gb.ppu = new_gb_fifo_ppu(gb)
+    let p = new_gb_fifo_ppu(gb)
+    gb.ppu = p
+    gb.fifo_ppu = p
   else:
     gb.ppu = new_gb_scanline_ppu(gb)
+    gb.fifo_ppu = nil
   gb.timer  = new_gb_timer()
   gb.serial = new_gb_serial()
   gb.memory = new_gb_memory(gb)
