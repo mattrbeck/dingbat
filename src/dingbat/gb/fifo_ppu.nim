@@ -325,6 +325,22 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.cycle_counter += int32(skip)
           remaining -= skip
           continue
+      elif ppu.lx < GB_WIDTH:
+        # Mode 3 is the one mode with genuine per-dot work, so it cannot be
+        # collapsed the way the skip above collapses the other three — but it
+        # does not need the mode re-decoded on every one of its ~26,000 dots a
+        # frame either. Nothing inside the pipeline changes the mode: only the
+        # `lx >= GB_WIDTH` test does, and that is the loop condition. Same
+        # actions on the same dots as the generic path below, which still
+        # handles the dot that ends mode 3.
+        while remaining > 0 and ppu.lx < GB_WIDTH:
+          if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
+          else:
+            tick_bg_fetcher(ppu, gb)
+            tick_shifter(ppu, gb)
+          ppu.cycle_counter += 1
+          dec remaining
+        continue
       dec remaining
       case m
       of 2:  # OAM search

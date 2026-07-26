@@ -281,3 +281,240 @@ Alone in the Dark in-game **+6.1%**, Pokemon Crystal in-game **+7.1%**, Crystal
 boot **+13.3%**, Tetris **+7.7%**, Shantae +2.4%, Zelda: Link's Awakening +0.7%.
 The per-event cost works out at ~3 ns, so the win scales linearly with the event
 count a title was burning; the theoretical 70,224/frame ceiling would be ~+27%.
+
+### GB core: generalising lazy catch-up past the APU (2026-07-26, branch `lazy-catchup`)
+
+Follow-up to the APU work above: the same "keep a last-synced cycle, materialise
+only at the points that can observe it" idea applied to the rest of the GB core,
+plus the dispatch cost it exposed once the event traffic was gone.
+
+**Profile first** (Apple M-series, `sample`, self time, idle threads excluded).
+Alone in the Dark and Pokemon Blue, in-game after a scripted nav, at `c7fb1a7`:
+
+| symbol | AitD | Blue |
+|---|---|---|
+| `fifo_tick` | 17.7% | 18.4% |
+| `tick_shifter` | 12.8% | 22.1% |
+| `mem_tick_components` | 17.0% | 11.9% |
+| `read_byte` | 8.7% | 8.1% |
+| `timer_tick_slow` | 7.9% | — |
+| `mbc_read` (2 instantiations) | 7.0% | 6.1% |
+| `tick_bg_fetcher` (incl. `.cold`) | 5.4% | 9.8% |
+| `chckNilDisp` | 1.7% | 1.5% |
+
+i.e. PPU ~48% / ~54%, memory path ~16%, everything else small. The one place this
+differs from an earlier profile is the timer: Blue never enables it, Alone in the
+Dark runs it with TAC=`0b01` (tap bit 3, an edge every 16 T-cycles) and pays 8%.
+
+#### 1. FIFO PPU: idle spans cost no call (bit-identical)
+
+Modes 0, 1 and 2 do nothing until the dot counter reaches a single trigger value,
+and together they are ~65% of the 70,224 dots in a frame. The loop inside
+`fifo_tick` already collapsed those dots — but `fifo_tick` itself was a
+non-inlined call made once per 4 T-cycles of *every* memory access, ~17,500 times
+a frame, just to reach that collapse. The skip branch is now an `{.inline.}`
+prologue and the loop moved to `fifo_tick_slow`.
+
+**Observation points** (at the guard in `fifo_ppu.nim`): while a span stays
+strictly inside one idle stretch there is no mode change, no LY change, no
+STAT/VBlank interrupt, no HDMA block and no pixel. Two level-triggered rules opt
+out and fall through to the loop exactly as they did inside it — mode 3, and
+mode 1 with LY 153 — as does an LCD that is off. `read_mode` is still latched on
+the fast path: `mode_flag` cannot change there, but a *preceding* slow tick may
+have changed it, and a STAT read would then observe a mode two M-cycles old.
+
+#### 2. Timer: closed-form TIMA (bit-identical)
+
+The fast path bailed to the per-cycle loop as soon as one falling edge of the
+tapped DIV bit landed in the span. The number of edges in `(t0, t1]` is
+`floor(t1/2^s) - floor(t0/2^s)` for `s = bit_for_tima + 1`, and that count *is*
+the TIMA advance — `previous_bit` is high at every one of those cycles by
+construction. Exact across the divider's 16-bit wrap because 65536 is a multiple
+of `2^s` for every tap (`s <= 10`), so `t1` can be left unwrapped for the shift.
+
+A TIMA **overflow** is the one case that is not closed form: it arms a 4-cycle
+countdown whose expiry (reload from TMA + the timer IRQ) has to land on its own
+cycle, and the countdown can expire inside the same span. That still falls through
+to the loop — which is also the only path that raises an interrupt, so the lazy
+path provably cannot skip one. A *disabled* timer now short-circuits before
+computing the tap at all, which is where Pokemon Blue's share of this win is.
+
+The full lazy form (drop `timer_tick` from `mem_tick_components` entirely and
+schedule the next overflow, as mGBA's `GBATimerUpdateRegister` does) was **not**
+done: DIV is also the GB serial clock's tap, and `timer_tick_slow` drives
+`serial_tick` per cycle, so a fully lazy timer needs the serial shifter's
+observation points too. Closed-form batching gets most of the win with none of
+that coupling.
+
+#### 3. Mode 3: one dispatch per span, not per dot (bit-identical)
+
+Mode 3 is the one mode with genuine per-dot work, so it cannot be collapsed —
+but it does not need the mode re-decoded on each of its ~26,000 dots a frame
+either. Nothing inside the pixel pipeline changes the mode: only the
+`lx >= GB_WIDTH` test does, and that becomes the loop condition, with the dot
+that actually ends mode 3 still handled by the generic path. Worth **+1.8%** on
+its own on three of four titles measured, which is more than the shape of the
+change suggests.
+
+#### 4. ROM window: devirtualised (bit-identical, and machine-checked)
+
+Once the event traffic was gone, `mbc_read` — a Nim `method`, so dynamic dispatch
++ `chckNilDisp` + the post-call error-flag test Nim's goto-exceptions emit — was
+the biggest single non-PPU cost, for what is almost always one array index. For
+every mapper except MBC6 the CPU's 0x0000-0x7FFF window is two flat 16 KiB views
+into `rom`. A new `mbc_rom_map` method returns the two base offsets (written next
+to each mapper's own `mbc_read`, in the same expressions, so they cannot drift
+apart unnoticed) and `read_byte` indexes the buffer directly — same index, so the
+same bounds check.
+
+**Observation points** here are "what can move the bases", all three enumerated
+and resynced in `mbc/mbc.nim`: any cartridge write below 0x8000; cartridge
+construction (MBC1 multicart detection, MMM01 `rom_rotate`); and save-state /
+rollback-snapshot load, which writes the banking registers back directly rather
+than through `mbc_write`. **Missing that third one would have left every rollback
+restore reading the pre-load ROM bank** — it is the kind of gap that produces a
+netplay desync rather than a visible bug.
+
+MBC6 opts out (0x4000-0x7FFF is two independent 8 KiB windows, each ROM or
+flash — there is no single `hi`). TAMA5 opts out because its ROM bank comes from
+registers written through 0xA000-0xBFFF, which is *not* one of the resync points;
+covering it would cost a virtual call on every cart-RAM write for one cartridge.
+
+**Proved, not argued**: `-d:mbc_map_check` compiles every ROM read as "compute
+both, compare, abort on mismatch". Over 160 sweep titles — the 140 regular ones
+plus `tools/gbfuzz`'s mapper set, which is where the HuC1/HuC3/MBC7/MMM01/TAMA5
+coverage lives — it never fired, and that build's screenshots were byte-identical
+to baseline. The harness was falsified first: skewing the MBC5 base by 16 makes it
+abort on Alone in the Dark inside 350 frames.
+
+#### Measured
+
+Wall clock was unusable — the machine sat at load ~18, where best-of-9 interleaved
+runs still swung ±2.6% between two builds of *identical source*. **Instructions
+retired** (`/usr/bin/time -l`) repeated to ±0.5% on the same pair and is the
+primary metric below; wall clock (best of N, interleaved, per-build ROM scratch
+dirs, `.sav` cleared) is the sanity check.
+
+| title | instructions | wall (best of 9) |
+|---|---|---|
+| Alone in the Dark | **+18.8%** | +28.6% |
+| Shantae | **+14.9%** | +13.4% |
+| Zelda: Link's Awakening DX | **+12.1%** | +11.3% |
+| Pokemon Blue | **+11.6%** | +11.4% |
+| Tetris | **+11.2%** | +11.3% |
+| Pokemon Crystal | **+8.0%** | +9.4% |
+
+Gates, all against a baseline build of `c7fb1a7`: `dingbat_gb_nav` checkpoint
+screenshots byte-identical on 140/140 sweep titles; `DINGBAT_GB_AUDIO_DUMP` PCM
+byte-identical on 6/6 titles; `dingbat_test_runner` 169/137/32 with `results.md`
+differing only in its timestamp; `--apu` 22/94 with identical per-test verdicts;
+`gbhdmatest.gbc` screenshot byte-identical; `gblinktest` PASS; `stateroundtrip`,
+`rollback` and `rollbacknet` MATCH; save states byte-identical across builds and
+cross-loadable (MBC1/MBC3/MBC5, 300 frames to the same framebuffer hash);
+headless, native SDL and wasm all build.
+
+#### Tried and rejected
+
+**Mode 3 cannot be made lazy in the useful sense.** The pixel pipeline is the
+remaining ~35% of the GB profile and it is genuinely per-dot. It is worth being
+precise about *why*, because the naive argument says it should work: the
+framebuffer is not CPU-observable until the frame ends, LY and the STAT mode bits
+are constant throughout mode 3, VRAM/OAM stay blocked throughout, and no interrupt
+fires until it ends. So in principle the whole of mode 3 could be deferred.
+
+Two things kill it. First, the CPU can *write* VRAM, OAM (including via OAM DMA)
+and the PPU registers mid-line, and the renderer reads all of those per dot — so
+the pipeline must be materialised before any such write, and a raster-effect game
+does exactly that. Second, and fatally: **the end of mode 3 is observable** (it is
+the mode-0 STAT interrupt, the HBlank DMA trigger, and when VRAM becomes
+accessible again), and its exact dot is not known without running the pipeline.
+A hybrid would therefore have to either (a) use the analytic mode-3 length formula
+— which is an approximation of what this FIFO produces and would move timing on
+the mooneye/mealybug tests, i.e. an accuracy regression — or (b) run the line
+speculatively and roll back on a mid-line write. (b) is bit-identical in principle
+but the win is only the outer loop's dispatch, since the per-dot work is unchanged,
+and it would be *slower* for exactly the raster-effect titles that need the FIFO in
+the first place.
+
+The cheap subset of the idea — not re-dispatching the mode per dot — is item 3
+above and is worth +1.8%. That is all that was on the table.
+
+Note also that dingbat's existing scanline renderer is not a drop-in for the
+"batch a clean line" half of a hybrid: it does not produce the FIFO's pixels
+byte-for-byte, so using it per-line would fail the screenshot gate. A hybrid
+needs a *new* batch renderer that is bit-exact with the FIFO.
+
+**Sprites as a fixed `array[10, GbSprite]`** instead of a `seq`: reverted.
+`tick_shifter` consults the list on every mode-3 dot, and the seq costs a pointer
+chase plus a bounds check to reach element 0, plus a heap allocation, an ARC
+destructor and an `O(n) delete(0)` per line — it looked like a clear win.
+Measured: **0.3-0.6% WORSE** in instructions retired on 4 of 6 titles, neutral on
+the other two. The insertion sort's explicit shift loop costs more than the seq's
+`memmove`, and 50 bytes of inline array pushes the genuinely hot `GbFifoPpu`
+fields (the FIFO, `lx`, the fetcher counters) further apart. Not worth re-trying
+without a layout change.
+
+**Turning off bounds checks** on the hot path would be a large win — the native
+build is `-d:release`, which keeps `raiseIndexError2` and therefore the
+`nimErrorFlag()` test after every call in `read_byte` — but that is a project
+policy decision, not a perf change, and the codebase has at least one comment
+(The Fish Files, `tick_bg_fetcher`) about an out-of-bounds VRAM read that a check
+caught. Left alone. Worth knowing that the **wasm** build already compiles with
+`-d:danger`, so its profile is not the same shape as the native one.
+
+#### GBA core: the same idea, unimplemented, with numbers
+
+Investigated but deliberately not implemented on this branch. **The GBA PSG still
+has the exact pre-`c7fb1a7` problem, and worse.** `gba/apu/channel4.nim`'s
+`ch4_step` reschedules `etAPUChannel4` unconditionally — not even gated on
+`enabled` — and with the power-on divisor that is one event every 32 cycles,
+8,778 per frame. Measured event census over 1200 frames: `etAPUChannel4` is
+**81.3%** of all scheduler events in Pokemon Emerald, 75.8% in Golden Sun, 83.5%
+in Mother 3, 81.5% in Kirby, and the count is the same ±0.2% in all four because
+it is fixed by the reset divisor rather than by anything the game does.
+
+The damage is larger than the event count suggests: a permanent 32-cycle
+`next_event` horizon defeats three separate inline fast paths — `scheduler.tick`,
+`bus.catch_up` (so every MMIO access takes the slow path), and
+`scheduler.fast_forward`, which is what HALT and the whole waitloop-detection
+subsystem rely on. Mother 3 spends 46% of its runtime in `schedule` +
+`fast_forward` alone.
+
+Measured with a proxy that does the same LFSR work without the event chain,
+framebuffer-hash-identical: **−12% to −31% instructions retired, +14% to +45%
+throughput** (Kirby +45%, Emerald +41%, Golden Sun +29%, Mother 3 +14%).
+Note the cheap half-fix — gating the reschedule on `ch.enabled` — measures
+**exactly zero**: the m4a driver leaves CH4 genuinely enabled, so unlike Alone in
+the Dark on the GB there is no parked-silent-channel shortcut. The win requires
+the real lazy conversion.
+
+The port is near-mechanical and *simpler* than the GB one: no CGB speed switch, no
+PCM12/PCM34 observation point, and `gba.end_frame` already does the rebase (with
+`keep_phase_mask`) that bounds staleness. The pieces: `next_step` on each channel;
+observation points at `get_sample`, `tick_frame_sequencer`, `0x60-0x89` register
+writes, wave-RAM read/write while CH3 is enabled, and `end_frame`; drop
+`etAPUChannel1..4` from `gba_dispatch` while **keeping the enum ordinals** (they
+are savestate format); round-trip `next_step` through those events in
+`gba/savestate.nim` as the GB one does. One extra hazard the GB did not have:
+`gba/rollback.nim`'s `LinkSnapshot` must carry `next_step` — see
+`rollback-multirecv-desync` in the notes for what happens when it does not.
+
+Everything else on the GBA is already lazy or already scheduler-driven, and that
+is the more useful half of the finding: the **timers** are a textbook
+implementation of this exact pattern (`ticks_between(anchor, now, period)`, one
+overflow event per running channel, cascade channels scheduling nothing —
+matching mGBA's `GBATimerUpdateRegister` and NanoBoyAdvance's
+`Timer::ReadCounter`); the **PPU** is already collapsed to one `ppu.scanline()`
+per line driven by 4 events, and its state is a function of VRAM/OAM/PRAM
+*contents* rather than of elapsed cycles, so it is not a candidate at all;
+**DMA** bursts are per-unit on purpose (that is what implements priority
+preemption and the CPU stall accounting); the **bus** already *is* a lazy
+catch-up and is a victim of the APU rather than a candidate; **SIO** schedules
+one completion event.
+
+Reference points for the PSG work: mGBA's `GBAudioRun` (`src/gb/audio.c:485`) is
+shared by its GB and GBA cores and has **zero** per-channel events — only
+`sampleEvent` and the frame sequencer — and batches ch4's LFSR ("Batch 5 steps at
+a time when possible"). NanoBoyAdvance's `QuadChannel::Generate` /
+`NoiseChannel::Generate` are where dingbat is today, i.e. one event per waveform
+sub-period; it is not a design to copy for a constrained target.
