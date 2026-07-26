@@ -90,15 +90,39 @@ proc timer_tick*(t: GbTimer; gb: GB; cycles: int) {.inline.} =
     let t0 = uint32(t.tdiv)
     let t1 = t0 + uint32(cycles)
     let cur = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
-    let shift = t.bit_for_tima + 1
     # `previous_bit == cur` re-establishes the invariant locally rather than
     # trusting it, so the fast path is correct even if some future caller
     # changes tdiv without running an edge check.
-    if t.previous_bit == cur and
-       (not t.enabled or (t1 shr shift) == (t0 shr shift)):
-      t.tdiv = uint16(t1 and 0xFFFF'u32)
-      t.previous_bit = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
-      return
+    if t.previous_bit == cur:
+      if not t.enabled:
+        # No tap, so no edge can occur and TIMA cannot move: all the loop did
+        # was count the divider up and re-latch a bit that stays false.
+        t.tdiv = uint16(t1 and 0xFFFF'u32)
+        t.previous_bit = false
+        return
+      # Closed-form TIMA advance. The tapped bit falls exactly when the
+      # incremented counter crosses a multiple of 2^(bit+1), so the number of
+      # falling edges in (t0, t1] is floor(t1/2^s) - floor(t0/2^s). That count
+      # is what the per-cycle loop would have added to TIMA -- previous_bit is
+      # true at every one of those cycles by construction (the bit is high for
+      # the whole half-period leading up to a fall). It stays exact across the
+      # divider's 16-bit wrap because 65536 is a multiple of 2^s for every tap
+      # (s <= 10), so t1 may be left unwrapped for the shift.
+      #
+      # An overflow is the one thing that is NOT closed form: it arms a
+      # 4-cycle countdown whose expiry (reload from TMA + timer IRQ) has to
+      # land on its own cycle, and the countdown can then expire INSIDE the
+      # same span. That case falls through to the loop, which is where it was
+      # always handled. TIMA can advance by at most one step per 2^s cycles,
+      # so for the 4-cycle spans this is called with the fall-through is one
+      # span in 2^s -- rare, and it is the only path that raises an interrupt.
+      let shift = t.bit_for_tima + 1
+      let edges = int((t1 shr shift) - (t0 shr shift))
+      if int(t.tima) + edges <= 0xFF:
+        t.tima = uint8(int(t.tima) + edges)
+        t.tdiv = uint16(t1 and 0xFFFF'u32)
+        t.previous_bit = (t.tdiv and (1'u16 shl t.bit_for_tima)) != 0
+        return
   timer_tick_slow(t, gb, cycles)
 
 proc timer_read*(t: GbTimer; idx: int): uint8 =

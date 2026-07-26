@@ -300,13 +300,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
        int(ppu.lx) + 7 >= int(ppu.wx):
       fifo_reset_bg(ppu, true)
 
-proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
-  # Snapshot the mode as observed by a CPU read that samples during this M-cycle
-  # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
-  ppu.read_mode = ppu.mode_flag
-  # Counted on both paths: the panel's refresh clock runs whether or not the
-  # PPU is driving it (see ppu_blank_frame).
-  ppu.dots_since_frame += int32(cycles)
+proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
+  ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
+  ## out of fifo_tick so the idle case (below) inlines into the caller; the
+  ## read_mode latch and the dots_since_frame counter are updated by fifo_tick
+  ## on both paths before this runs.
   if lcd_enabled(ppu):
     var remaining = cycles
     while remaining > 0:
@@ -380,6 +378,45 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     lcd_off_frame(ppu, gb)
+
+proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
+  # Snapshot the mode as observed by a CPU read that samples during this M-cycle
+  # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
+  # Still written on the idle path: mode_flag cannot change there, but a
+  # PRECEDING slow tick may have changed it, and read_mode would then be a
+  # mode older than the start of this M-cycle (a STAT read would see the mode
+  # from two M-cycles ago).
+  let m = ppu.lcd_status and 3'u8
+  ppu.read_mode = m
+  # Counted on both paths: the panel's refresh clock runs whether or not the
+  # PPU is driving it (see ppu_blank_frame).
+  ppu.dots_since_frame += int32(cycles)
+  # ---- Lazy idle span -----------------------------------------------------
+  # This is the first iteration of fifo_tick_slow's skip branch, hoisted out
+  # of the call so the case it covers costs nothing but a compare. Modes 0, 1
+  # and 2 do nothing at all until the dot counter reaches one trigger value,
+  # and together they are ~65% of the 70,224 dots in a frame -- yet this proc
+  # is entered once per 4 T-cycles of every memory access, so that call was
+  # being paid ~11,000 times a frame to advance a counter.
+  #
+  # Nothing else in the PPU is observable while the span stays strictly inside
+  # an idle stretch: no mode change, no LY change, no STAT/VBlank interrupt,
+  # no HDMA block, no pixel. The two level-triggered rules opt out and fall
+  # through to the loop, exactly as they did there:
+  #   * mode 3 (a pixel per dot), and
+  #   * mode 1 with LY 153 (LY snaps back to 0 once the counter passes 4).
+  # An LCD that is off also falls through -- that path re-asserts mode 0 and
+  # drives the blank-frame clock every tick.
+  if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
+    let target = if m == 2: 80'i32 else: 456'i32
+    let next = ppu.cycle_counter + int32(cycles)
+    # `<=` not `<`: landing exactly on the target is what the loop did too --
+    # it consumed the whole span in one skip and left the transition for the
+    # next entry, where cycle_counter == target fails `cycle_counter < target`.
+    if next <= target and (m != 1 or ppu.ly != 153):
+      ppu.cycle_counter = next
+      return
+  fifo_tick_slow(ppu, gb, cycles)
 
 method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Polymorphic entry point. The hot path (mem_tick_components) calls
