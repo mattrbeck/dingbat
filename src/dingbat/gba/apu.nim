@@ -73,6 +73,45 @@ when defined(emscripten):
   # (in dingbat_wasm.nim) that JS consumes via the Web Audio API.
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
+when not defined(emscripten):
+  # Debug instrumentation, env-gated and zero-cost when unset (one bool test in
+  # get_sample). Mirrors the GB APU's DINGBAT_GB_AUDIO_DUMP:
+  #   DINGBAT_GBA_AUDIO_DUMP=<path>  writes every mixed sample as raw s16le
+  #   stereo, interleaved L,R, at APU_SAMPLE_RATE (32768 Hz).
+  # Unlike the older DINGBAT_AUDIO_DUMP (which taps the bytes queued to SDL and
+  # so only exists in the native build) this one sits OUTSIDE the test_harness
+  # gate and taps the mixed sample before the output switch, so the headless
+  # test build dumps too -- which is what makes it usable as an APU oracle:
+  # byte-comparing two builds' audio is the audio equivalent of the
+  # byte-identical screenshot gate, and a screenshot gate alone provably does
+  # not catch APU phase errors.
+  var gba_audio_dump_file: File = nil
+  var gba_audio_dump_on = false
+  var gba_audio_dump_claimed = false
+  var gba_audio_dump_pending = 0
+
+  proc gba_audio_dump_claim() =
+    ## Called once per APU construction. The first APU created claims the file,
+    ## so a 2P link session dumps player 1 rather than interleaving both.
+    if gba_audio_dump_claimed: return
+    gba_audio_dump_claimed = true
+    let path = getEnv("DINGBAT_GBA_AUDIO_DUMP")
+    if path.len > 0:
+      gba_audio_dump_file = open(path, fmWrite)
+      gba_audio_dump_on = true
+
+  proc gba_audio_dump_write(left, right: int16) =
+    var frame: array[2, int16]
+    frame[0] = left
+    frame[1] = right
+    discard gba_audio_dump_file.writeBuffer(addr frame[0], sizeof(frame))
+    # stdio buffers the writes; flush about once a second so an interrupted run
+    # still leaves a readable dump
+    inc gba_audio_dump_pending
+    if gba_audio_dump_pending >= APU_SAMPLE_RATE:
+      gba_audio_dump_pending = 0
+      gba_audio_dump_file.flushFile()
+
 proc new_apu*(gba: GBA): APU =
   result = APU(
     gba: gba,
@@ -93,6 +132,8 @@ proc new_apu*(gba: GBA): APU =
   result.channel3 = new_channel3(gba)
   result.channel4 = new_channel4(gba)
   result.dma_channels = new_dma_channels(gba)
+  when not defined(emscripten):
+    gba_audio_dump_claim()
   when defined(test_harness):
     result.audio_dev = 0
   elif defined(emscripten):
@@ -356,6 +397,10 @@ proc get_sample*(apu: APU) =
   let stopped = apu.gba.cpu.stopped
   let total_left  = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
   let total_right = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
+  when not defined(emscripten):
+    # Before the output switch on purpose: the test_harness branch below drops
+    # the sample, and the oracle needs it.
+    if gba_audio_dump_on: gba_audio_dump_write(total_left, total_right)
   when defined(test_harness):
     discard
   elif defined(emscripten):
