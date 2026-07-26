@@ -16,9 +16,10 @@ proc new_channel4*(gba: GBA): Channel4 =
     lfsr: 0,
     length_load_ch4: 0,
     clock_shift: 0, width_mode: 0, divisor_code: 0,
+    next_step: GBA_NO_STEP, arm_delay: 0,
   )
 
-proc ch4_step_wave*(ch: Channel4) =
+proc ch4_shift(ch: Channel4) {.inline.} =
   let new_bit = uint16(ch.lfsr and 0b01) xor uint16((ch.lfsr and 0b10) shr 1)
   ch.lfsr = ch.lfsr shr 1
   ch.lfsr = ch.lfsr or (new_bit shl 14)
@@ -29,10 +30,36 @@ proc ch4_step_wave*(ch: Channel4) =
 proc ch4_frequency_timer*(ch: Channel4): uint32 =
   ((if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift) * 4
 
-proc ch4_step*(ch: Channel4) =
-  ch.ch4_step_wave()
-  let ft = ch.ch4_frequency_timer()
-  ch.gba.scheduler.schedule(int(ft), etAPUChannel4)
+proc ch4_catchup_slow(ch: Channel4; observer_period: uint32) =
+  let now    = ch.gba.scheduler.cycles
+  let period = CycleCount(ch.ch4_frequency_timer())
+  let steps = gba_steps_due(now - ch.next_step, period, ch.arm_delay,
+                            observer_period)
+  if steps == 0: return
+  # Unlike the other three this is O(steps): the LFSR has no cheap closed form.
+  # The win is that it iterates in a tight loop instead of paying a scheduler
+  # insert + heap pop + closure dispatch per shift — and that the scheduler's
+  # event horizon is no longer pinned at 32 cycles, which is what defeated
+  # HALT/fast_forward and bus.catch_up. Bounded because end_frame catches every
+  # channel up, so at most one frame of shifts (<= 8778 at the power-on
+  # divisor) can accumulate — exactly the number the old event chain ran anyway.
+  #
+  # NOTE the old ch4_step re-armed UNCONDITIONALLY, not gated on `enabled` the
+  # way the GB core's did, so there is no park-when-disabled case to model here:
+  # once triggered, this chain runs until RegisterRamReset or a re-trigger.
+  for _ in 0 ..< steps: ch4_shift(ch)
+  ch.next_step += steps * period
+  # The step now pending was armed by the one before it, i.e. one CURRENT
+  # period ago.
+  ch.arm_delay = uint32(period)
+
+proc ch4_catchup_at*(ch: Channel4; observer_period: uint32) {.inline.} =
+  ## See ch1_catchup_at. O(steps), not O(1).
+  if ch.next_step > ch.gba.scheduler.cycles: return
+  ch4_catchup_slow(ch, observer_period)
+
+proc ch4_catchup*(ch: Channel4) {.inline.} =
+  ch4_catchup_at(ch, GBA_OBS_CPU)
 
 proc ch4_get_amplitude*(ch: Channel4): int16 =
   if ch.enabled and ch.dac_enabled:
@@ -48,6 +75,8 @@ proc ch4_read*(ch: Channel4; address: uint32): uint8 =
   else: 0'u8
 
 proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
+  # apu[]= caught the LFSR up first, so a divisor/shift/width/trigger change
+  # below only affects shifts from now on.
   case address
   of 0x78:
     ch.length_load_ch4  = value and 0x3F
@@ -70,9 +99,10 @@ proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
         ch.length_counter = 0x40
         if ch.length_enable and ch.gba.apu.first_half_of_length_period:
           ch.length_counter -= 1
-      ch.gba.scheduler.clear(etAPUChannel4)
-      let ft = ch.ch4_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel4)
+      # Same as clear(etAPUChannel4) + schedule(period); see ch1_write.
+      let arm4 = ch.ch4_frequency_timer()
+      ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm4)
+      ch.arm_delay = arm4
       ch.init_volume_envelope()
       ch.lfsr = 0x7FFF'u16
   of 0x7E, 0x7F: discard

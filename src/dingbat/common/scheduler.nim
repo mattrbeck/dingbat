@@ -141,6 +141,29 @@ proc fast_forward*(s: Scheduler) =
   s.cycles = s.next_event
   s.call_current()
 
+proc fast_forward_bounded*(s: Scheduler; bound: CycleCount) =
+  ## fast_forward that may not skip past `bound`.
+  ##
+  ## The unbounded form snaps `cycles` to whatever the next scheduled event
+  ## happens to be, which makes emulated time inside an idle loop depend on
+  ## WHICH events exist rather than on the loop. A spin loop polling a hardware
+  ## register re-reads it once per skip, so the skip length IS that loop's
+  ## sampling resolution — and the GBA PSG's per-waveform-period events used to
+  ## hold that resolution at ~32 cycles by accident (see gba/apu.nim). Callers
+  ## that keep deadlines OUTSIDE evbuf must pass their soonest one here, or
+  ## moving those deadlines out of the scheduler silently coarsens every idle
+  ## loop in the machine.
+  ##
+  ## When the bound bites, nothing is due, so there is nothing to dispatch: just
+  ## advance and let the caller re-run the loop body. `bound` must be strictly
+  ## ahead of `cycles` (or high(CycleCount) for "no bound") — forward progress
+  ## in the caller's loop depends on it.
+  if bound < s.next_event:
+    s.cycles = bound
+  else:
+    s.cycles = s.next_event
+    s.call_current()
+
 proc rebase*(s: Scheduler; keep_phase_mask: CycleCount = 0): CycleCount {.discardable.} =
   ## NOTE: the GB APU keeps per-channel deadlines OUTSIDE this array (lazy
   ## catch-up, see gb/apu/channel1.nim). Every caller must hand the returned

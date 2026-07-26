@@ -37,6 +37,7 @@ proc write_ppm(path: string; buf: seq[uint16]) =
     f.write(char(uint8((b5 shl 3) or (b5 shr 2))))
   f.close()
 
+
 proc main() =
   let args = commandLineParams()
   if args.len < 5:
@@ -60,6 +61,17 @@ proc main() =
                     run_bios = run_bios, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()
+  # See tests/dingbat_bench.nim: holds the idle-loop fast-forward out of an A/B
+  # so a scheduler change can be compared with that variable fixed.
+  if getEnv("DINGBAT_NO_WAITLOOP") == "1":
+    emu.cpu.attempt_waitloop_detection = false
+  # RTC carts (Pokemon Ruby/Sapphire/Emerald) read the host wall clock, so two
+  # runs of the SAME binary produce different save states. Freeze it when a
+  # comparison needs state files to be reproducible; the framebuffer gate does
+  # not need this, since the clock does not reach the picture in a short run.
+  let rtc_epoch = getEnv("ROMFUZZ_RTC_EPOCH")
+  if rtc_epoch.len > 0:
+    emu.enable_deterministic_rtc(parseBiggestInt(rtc_epoch))
 
   var max_frame = 0
   for s in shots: max_frame = max(max_frame, s)
@@ -67,6 +79,30 @@ proc main() =
   for f in 0 .. max_frame:
     for ev in script:
       if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
+    when defined(psgdim):
+      # Force CH3 into 64-step (two-bank) wave mode at a short period so the
+      # bank-flip-on-wrap path in ch3_catchup gets exercised (a trigger resets
+      # the pointer, so re-trigger only occasionally); the
+      # -d:psgverify shadow loop then checks the closed form against the old
+      # per-period stepping. No commercial title in the sweep set uses
+      # dimension=1, so this is the only way to cover it.
+      emu.bus[0x04000084'u32] = 0x80'u8            # master sound enable
+      emu.bus[0x04000080'u32] = 0x77'u8            # PSG L/R enable + volumes
+      emu.bus[0x04000081'u32] = 0x77'u8
+      emu.bus[0x04000082'u32] = 0x02'u8            # PSG volume 100%
+      for i in 0'u32 .. 15'u32:                    # fill both wave banks
+        emu.bus[0x04000090'u32 + i] = uint8(0x10 * (i and 7) + ((i + f.uint32) and 7))
+      emu.bus[0x04000070'u32] = 0xE0'u8            # DAC on, bank 1, dimension on
+      for i in 0'u32 .. 15'u32:
+        emu.bus[0x04000090'u32 + i] = uint8(0xF0 - 0x10 * (i and 7))
+      emu.bus[0x04000070'u32] = 0xA0'u8            # DAC on, bank 0, dimension on
+      emu.bus[0x04000072'u32] = 0x00'u8            # length
+      emu.bus[0x04000073'u32] = 0x20'u8            # volume 100%
+      # Short period (freq 0x7F0 -> 128 cycles/step) so the 32-entry pointer
+      # wraps several times between observations; only re-trigger occasionally,
+      # since a trigger resets the pointer to 0.
+      emu.bus[0x04000074'u32] = 0xF0'u8
+      emu.bus[0x04000075'u32] = (if (f mod 97) == 0: 0x87'u8 else: 0x07'u8)
     emu.step_frame()
     if f in shots:
       write_ppm(&"{prefix}.f{f:04}.ppm", emu.ppu.framebuffer)

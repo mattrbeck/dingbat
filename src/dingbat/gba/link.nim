@@ -345,6 +345,10 @@ proc capture_state*(link: Link): LinkSnapshot =
   result.payloads = newSeq[string](link.cores.len)
   result.multi_recv = newSeq[array[4, uint16]](link.cores.len)
   for i, c in link.cores:
+    # state_payload carries the PSG channels' waveform deadlines: savestate.nim
+    # round-trips next_step through the etAPUChannel* events it replaced, so a
+    # rollback restore puts the waveform phase back exactly (unserialized state
+    # here has caused real netplay desyncs before — see multi_recv below).
     result.payloads[i] = c.state_payload()
     # SIOMULTI0-3 receive latches are NOT in state_payload (savestate treats
     # them as session state refreshed by the next transfer), but a rollback

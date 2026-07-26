@@ -22,18 +22,36 @@ proc new_channel2*(gba: GBA): Channel2 =
     volume_envelope_timer: 0, current_volume: 0, volume_envelope_is_updating: false,
     wave_duty_position: 0,
     duty: 0, length_load: 0, frequency_ch2: 0,
+    next_step: GBA_NO_STEP, arm_delay: 0,
   )
-
-proc ch2_step_wave*(ch: Channel2) =
-  ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
 
 proc ch2_frequency_timer*(ch: Channel2): uint32 =
   (0x800'u32 - uint32(ch.frequency_ch2)) * 4 * 4
 
-proc ch2_step*(ch: Channel2) =
-  ch.ch2_step_wave()
-  let ft = ch.ch2_frequency_timer()
-  ch.gba.scheduler.schedule(int(ft), etAPUChannel2)
+proc ch2_catchup_slow(ch: Channel2; observer_period: uint32) =
+  let now    = ch.gba.scheduler.cycles
+  let period = CycleCount(ch.ch2_frequency_timer())
+  let steps = gba_steps_due(now - ch.next_step, period, ch.arm_delay,
+                            observer_period)
+  if steps == 0: return
+  when defined(psgverify):
+    var want = ch.wave_duty_position
+    for _ in 0 ..< steps: want = (want + 1) and 7
+  ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  when defined(psgverify):
+    doAssert want == ch.wave_duty_position, "ch2 closed form != naive loop"
+  ch.next_step += steps * period
+  # The step now pending was armed by the one before it, i.e. one CURRENT
+  # period ago.
+  ch.arm_delay = uint32(period)
+
+proc ch2_catchup_at*(ch: Channel2; observer_period: uint32) {.inline.} =
+  ## See ch1_catchup_at.
+  if ch.next_step > ch.gba.scheduler.cycles: return
+  ch2_catchup_slow(ch, observer_period)
+
+proc ch2_catchup*(ch: Channel2) {.inline.} =
+  ch2_catchup_at(ch, GBA_OBS_CPU)
 
 proc ch2_get_amplitude*(ch: Channel2): int16 =
   if ch.enabled and ch.dac_enabled:
@@ -49,6 +67,7 @@ proc ch2_read*(ch: Channel2; address: uint32): uint8 =
   else: 0'u8
 
 proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
+  # apu[]= caught the duty counter up first; see ch1_write.
   case address
   of 0x68:
     ch.duty        = (value and 0xC0) shr 6
@@ -70,9 +89,10 @@ proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
         ch.length_counter = 0x40
         if ch.length_enable and ch.gba.apu.first_half_of_length_period:
           ch.length_counter -= 1
-      ch.gba.scheduler.clear(etAPUChannel2)
-      let ft = ch.ch2_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel2)
+      # Same as clear(etAPUChannel2) + schedule(period); see ch1_write.
+      let arm2 = ch.ch2_frequency_timer()
+      ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm2)
+      ch.arm_delay = arm2
       ch.init_volume_envelope()
   of 0x6E, 0x6F: discard
   else: echo "Writing to invalid Channel2 register: ", hex_str(uint16(address))

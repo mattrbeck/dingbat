@@ -24,18 +24,46 @@ proc new_channel1*(gba: GBA): Channel1 =
     sweep_period: 0, negate: false, shift_ch1: 0,
     sweep_timer: 0, frequency_shadow: 0, sweep_enabled: false, negate_has_been_used: false,
     duty: 0, length_load: 0, frequency_ch1: 0,
+    next_step: GBA_NO_STEP, arm_delay: 0,
   )
-
-proc ch1_step_wave*(ch: Channel1) =
-  ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
 
 proc ch1_frequency_timer*(ch: Channel1): uint32 =
   (0x800'u32 - uint32(ch.frequency_ch1)) * 4 * 4
 
-proc ch1_step*(ch: Channel1) =
-  ch.ch1_step_wave()
-  let ft = ch.ch1_frequency_timer()
-  ch.gba.scheduler.schedule(int(ft), etAPUChannel1)
+proc ch1_catchup_slow(ch: Channel1; observer_period: uint32) =
+  let now    = ch.gba.scheduler.cycles
+  let period = CycleCount(ch.ch1_frequency_timer())
+  # next_step is the absolute cycle of the FIRST pending step, so every step
+  # after it is one period apart — which is also true across a mid-flight
+  # frequency write, because the old event would have fired at its already-set
+  # target and only then reloaded with the new period.
+  let steps = gba_steps_due(now - ch.next_step, period, ch.arm_delay,
+                            observer_period)
+  if steps == 0: return
+  when defined(psgverify):
+    var want = ch.wave_duty_position
+    for _ in 0 ..< steps: want = (want + 1) and 7
+  ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  when defined(psgverify):
+    doAssert want == ch.wave_duty_position, "ch1 closed form != naive loop"
+  ch.next_step += steps * period
+  # The step now pending was armed by the one before it, i.e. one CURRENT
+  # period ago.
+  ch.arm_delay = uint32(period)
+
+proc ch1_catchup_at*(ch: Channel1; observer_period: uint32) {.inline.} =
+  ## Bring wave_duty_position up to scheduler.cycles. Closed form: the duty
+  ## counter is a free-running mod-8 counter, so N periods of advance is
+  ## (pos + N) and 7 — no iteration, and cost independent of the frequency.
+  ## Must be called before anything that can observe the duty position or
+  ## change the period; see the observation-point list in apu.nim.
+  ## observer_period is the caller's own period in cycles (GBA_OBS_CPU for an
+  ## MMIO access) and only affects a step landing on this exact cycle.
+  if ch.next_step > ch.gba.scheduler.cycles: return   # not due (or parked)
+  ch1_catchup_slow(ch, observer_period)
+
+proc ch1_catchup*(ch: Channel1) {.inline.} =
+  ch1_catchup_at(ch, GBA_OBS_CPU)
 
 proc ch1_frequency_calculation*(ch: Channel1): uint16 =
   let shifted    = ch.frequency_shadow shr ch.shift_ch1
@@ -45,6 +73,9 @@ proc ch1_frequency_calculation*(ch: Channel1): uint16 =
   uint16(calculated)
 
 proc sweep_step*(ch: Channel1) =
+  # The caller (tick_frame_sequencer) has already caught the duty counter up:
+  # this can change frequency_ch1, and the collapsed cycles must be priced with
+  # the period that was actually in force for them.
   if ch.sweep_timer > 0: ch.sweep_timer -= 1
   if ch.sweep_timer == 0:
     ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8
@@ -70,6 +101,8 @@ proc ch1_read*(ch: Channel1; address: uint32): uint8 =
   else: 0'u8
 
 proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
+  # apu[]= caught the duty counter up to the current cycle before getting here,
+  # so a period/duty/trigger change below only affects steps from now on.
   case address
   of 0x60:
     ch.sweep_period = (value and 0x70) shr 4
@@ -96,9 +129,13 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
         ch.length_counter = 0x40
         if ch.length_enable and ch.gba.apu.first_half_of_length_period:
           ch.length_counter -= 1
-      ch.gba.scheduler.clear(etAPUChannel1)
-      let ft = ch.ch1_frequency_timer()
-      ch.gba.scheduler.schedule(int(ft), etAPUChannel1)
+      # Same as the old clear(etAPUChannel1) + schedule(period): re-arm a full
+      # period from now. The duty POSITION deliberately carries across a trigger
+      # (hardware only resets it when the APU is powered off) — which is why the
+      # phase has to be caught up rather than parked.
+      let arm1 = ch.ch1_frequency_timer()
+      ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm1)
+      ch.arm_delay = arm1
       ch.init_volume_envelope()
       ch.frequency_shadow     = ch.frequency_ch1
       ch.sweep_timer          = if ch.sweep_period > 0: ch.sweep_period else: 8

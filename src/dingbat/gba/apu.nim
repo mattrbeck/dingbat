@@ -234,10 +234,117 @@ when not defined(test_harness) and not defined(emscripten):
     ## Bytes currently queued to the SDL audio device (pacing diagnostics)
     if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
 
+# ---------------------------------------------------------------------------
+# Lazy waveform catch-up (the four legacy Game Boy PSG channels)
+#
+# Channels 1-4 used to schedule one scheduler event per waveform period, and
+# channel 4 re-armed UNCONDITIONALLY — not even gated on the channel being
+# enabled. At the power-on divisor that is one event every 32 cycles forever:
+# 81% of all scheduler events in Pokemon Emerald, 84% in Mother 3, and the same
+# absolute count in every title because it is fixed by the reset divisor rather
+# than by anything the game does. Worse than the raw dispatch cost, it pinned
+# scheduler.next_event 32 cycles out permanently, which defeats scheduler.tick's
+# fast path, bus.catch_up's fast path, and every skip-ahead the HALT/waitloop
+# subsystem exists to perform.
+#
+# Gating the re-arm on `enabled` measures exactly zero: the m4a sound driver
+# leaves channel 4 genuinely on. There is no parked-silent-channel shortcut
+# here, so each channel now carries a `next_step` deadline and is advanced in
+# closed form when something can observe it — pos = (pos + N) and 7 for a
+# square, (pos + N) mod 32 (plus a bank flip per wrap) for the wave pointer.
+# This is what mGBA (GBAudioRun, src/gb/audio.c — shared with its GBA path) and
+# Gambatte (DutyUnit::updatePos) do. It is phase-exact, so a trigger still
+# inherits the free-running phase the way hardware does (hardware only resets
+# the duty counter on an APU power-off), which PARKING the channels would not.
+#
+# The complete set of observation points, and where each is handled:
+#
+#   1. etAPUSample / get_sample — reads every channel's amplitude. Handled
+#      below, gated on `enabled` because a disabled channel's amplitude is 0
+#      regardless of phase. 549 samples/frame vs ~8800 channel events.
+#   2. etAPUFrameSeq / tick_frame_sequencer — sweep_step rewrites CH1's
+#      frequency (i.e. its period), so every channel must be current first.
+#   3. Any write to 0x60-0x84 or wave RAM 0x90-0x9F — may change the period, the
+#      duty, the wave bank/dimension, or trigger. `[]=` catches the target
+#      channel up BEFORE the write lands, so collapsed cycles always use the
+#      period that was actually in force for them. SOUNDCNT_X (0x84) syncs all
+#      four: its power-off arm rewrites every channel register.
+#   4. Wave RAM READ at 0x90-0x9F — while CH3 is enabled this resolves against
+#      wave_ram_position, not the address (GBATEK), so `[]` syncs CH3 first.
+#   5. SOUNDCNT_X (0x84) READ — its channel-active bits report `enabled`, and no
+#      catch-up ever writes `enabled` (they only touch phase state), so no sync
+#      is needed. Documented at the read.
+#   6. RegisterRamReset's sound phase (SWI 0x01, arm/arm.nim) — the one place
+#      outside this file that cleared the etAPUChannel* events. apu_park_steps.
+#   7. The per-frame scheduler rebase — next_step is an ABSOLUTE cycle and has
+#      to move with the events. gba.end_frame; also bounds how stale a deadline
+#      can get, which keeps CH4's shift loop and the wasm uint32 CycleCount safe.
+#   8. Save states, and therefore rollback + netplay LinkSnapshots (which are
+#      built from state_payload) — savestate.nim converts next_step to and from
+#      an etAPUChannel* event, so the state format is byte-identical to the
+#      pre-catch-up one in both directions and snapshots stay interchangeable.
+#
+# Points the GB core has and the GBA does not: there is no PCM12/PCM34 register
+# pair on the GBA (GBATEK's sound map runs 4000060h-40000A7h and has no
+# equivalent of the CGB's FF76/FF77), and there is no CGB double-speed switch,
+# so scheduler.speed is always 0 here and the deadlines need no rescaling. The
+# DirectSound FIFO channels (dma_channels.nim) are timer/DMA driven and share
+# no state with the PSG.
+# ---------------------------------------------------------------------------
+
+proc apu_catchup_all*(apu: APU) {.inline.} =
+  ## Materialize all four channels at the current cycle. Used by the observation
+  ## points that can touch any channel (frame sequencer, SOUNDCNT_X writes, the
+  ## per-frame rebase, save states).
+  apu.channel1.ch1_catchup()
+  apu.channel2.ch2_catchup()
+  apu.channel3.ch3_catchup()
+  apu.channel4.ch4_catchup()
+
+proc apu_next_step*(apu: APU): CycleCount {.inline.} =
+  ## Soonest pending waveform step across the four channels, or GBA_NO_STEP.
+  ##
+  ## These deadlines are scheduler events in all but name; they simply no longer
+  ## occupy a slot in evbuf. Anything that skips the clock forward on the
+  ## strength of "nothing is scheduled until X" has to treat them as scheduled —
+  ## see cpu.tick's waitloop path, which is the one place that does.
+  result = apu.channel1.next_step
+  if apu.channel2.next_step < result: result = apu.channel2.next_step
+  if apu.channel3.next_step < result: result = apu.channel3.next_step
+  if apu.channel4.next_step < result: result = apu.channel4.next_step
+
+proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
+  ## Shift the channel deadlines down by the same base scheduler.rebase just
+  ## subtracted from every pending event. Callers must have caught the channels
+  ## up first, so each deadline is strictly in the future and cannot underflow.
+  template adj(ch: untyped) =
+    if ch.next_step != GBA_NO_STEP: ch.next_step -= base
+  adj(apu.channel1)
+  adj(apu.channel2)
+  adj(apu.channel3)
+  adj(apu.channel4)
+
+proc apu_park_steps*(apu: APU) =
+  ## Drop every pending waveform step without applying it — the exact effect the
+  ## old scheduler.clear(etAPUChannel1..4) had. Only RegisterRamReset's sound
+  ## phase does this; it then rewrites the whole register block, and nothing
+  ## re-arms a channel until the next trigger.
+  apu.channel1.next_step = GBA_NO_STEP
+  apu.channel2.next_step = GBA_NO_STEP
+  apu.channel3.next_step = GBA_NO_STEP
+  apu.channel4.next_step = GBA_NO_STEP
+
 proc timer_overflow*(apu: APU; timer: int) =
   apu.dma_channels.timer_overflow(timer)
 
 proc tick_frame_sequencer*(apu: APU) =
+  # sweep_step rewrites CH1's frequency — i.e. its step period — so every
+  # channel has to be current before any of this runs.
+  const OBS = uint32(FRAME_SEQ_PERIOD)
+  apu.channel1.ch1_catchup_at(OBS)
+  apu.channel2.ch2_catchup_at(OBS)
+  apu.channel3.ch3_catchup_at(OBS)
+  apu.channel4.ch4_catchup_at(OBS)
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -267,6 +374,17 @@ proc tick_frame_sequencer*(apu: APU) =
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: APU) =
+  # Gated on `enabled` because a disabled channel's amplitude is 0 regardless of
+  # phase — its steps simply accumulate until the next thing that CAN see it (a
+  # register write, the frame sequencer, or the end-of-frame rebase), and the
+  # closed form then replays them exactly. NOT gated on channel_mask: that is a
+  # debug mute, and skipping the catch-up would let CH4's shift loop fall
+  # further behind than the once-a-frame bound this relies on.
+  const OBS = uint32(APU_SAMPLE_PERIOD)
+  if apu.channel1.enabled: apu.channel1.ch1_catchup_at(OBS)
+  if apu.channel2.enabled: apu.channel2.ch2_catchup_at(OBS)
+  if apu.channel3.enabled: apu.channel3.ch3_catchup_at(OBS)
+  if apu.channel4.enabled: apu.channel4.ch4_catchup_at(OBS)
   let ch1 = if apu.channel_mask[0]: apu.channel1.ch1_get_amplitude() else: 0'i16
   let ch2 = if apu.channel_mask[1]: apu.channel2.ch2_get_amplitude() else: 0'i16
   let ch3 = if apu.channel_mask[2]: apu.channel3.ch3_get_amplitude() else: 0'i16
@@ -504,6 +622,11 @@ proc get_sample*(apu: APU) =
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 
 proc `[]`*(apu: APU; io_addr: uint32): uint8 =
+  # Only wave RAM needs a sync: 0x90-0x9F resolves against wave_ram_position
+  # while CH3 is enabled. Everything else here reports register bits, or (0x84)
+  # `enabled`, and no catch-up ever writes `enabled`.
+  if io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH:
+    apu.channel3.ch3_catchup()
   if ch1_in_range(io_addr):      apu.channel1.ch1_read(io_addr)
   elif ch2_in_range(io_addr):    apu.channel2.ch2_read(io_addr)
   elif ch3_in_range(io_addr):    apu.channel3.ch3_read(io_addr)
@@ -529,6 +652,18 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
           (io_addr >= 0x82 and io_addr <= 0x89) or
           (io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH)):
     return
+  # Materialize the target channel BEFORE the write lands, so any period / duty
+  # / bank / trigger change only affects steps from this cycle on, and so a
+  # wave-RAM write resolves against the right wave_ram_position.
+  if ch1_in_range(io_addr):      apu.channel1.ch1_catchup()
+  elif ch2_in_range(io_addr):    apu.channel2.ch2_catchup()
+  elif ch3_in_range(io_addr):    apu.channel3.ch3_catchup()
+  elif ch4_in_range(io_addr):    apu.channel4.ch4_catchup()
+  elif io_addr == 0x84:
+    # SOUNDCNT_X. The power-off arm rewrites every channel register (recursing
+    # through the branches above), but sync all four anyway: it is a rare write
+    # and it keeps the power-on reset from depending on that recursion.
+    apu.apu_catchup_all()
   if ch1_in_range(io_addr):      apu.channel1.ch1_write(io_addr, value)
   elif ch2_in_range(io_addr):    apu.channel2.ch2_write(io_addr, value)
   elif ch3_in_range(io_addr):    apu.channel3.ch3_write(io_addr, value)

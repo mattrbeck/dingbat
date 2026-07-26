@@ -188,7 +188,14 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     # locals hold our progress while the higher-priority burst runs.
     if preemptible:
       let bus = dma.gba.bus
-      if bus.sched.cycles + CycleCount(bus.cycles) >= bus.sched.next_event:
+      # The PSG's waveform deadlines are events in all but name (gba/apu.nim),
+      # so they gate this drain exactly as they did when they sat in evbuf —
+      # without them the drain fires less often, scheduler.cycles lags the
+      # burst's true position, and anything the burst reaches that calls
+      # scheduler.schedule anchors its delay early.
+      dma.gba.apu.apu_catchup_all()
+      if bus.sched.cycles + CycleCount(bus.cycles) >=
+         min(bus.sched.next_event, dma.gba.apu.apu_next_step()):
         bus.catch_up()
       if dma.pending != 0:
         dma.run_pending()

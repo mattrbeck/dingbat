@@ -846,10 +846,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             cpu.gba.serial.siocnt = 0
             cpu.gba.serial.rcnt = 0
           of 6:  # Reset sound (0x4000060-0x4000084)
-            cpu.gba.scheduler.clear(etAPUChannel1)
-            cpu.gba.scheduler.clear(etAPUChannel2)
-            cpu.gba.scheduler.clear(etAPUChannel3)
-            cpu.gba.scheduler.clear(etAPUChannel4)
+            # The PSG channels' waveform deadlines live outside the scheduler's
+            # event array now (see gba/apu.nim), so park them instead of
+            # clearing four events. Deliberately NOT a catch-up: clearing the
+            # events discarded the pending steps, and so does this.
+            cpu.gba.apu.apu_park_steps()
             cpu.gba.scheduler.clear(etAPUFrameSeq)
             cpu.gba.scheduler.clear(etAPUSample)
             cpu.gba.apu.sound_enabled = true

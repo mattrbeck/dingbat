@@ -444,6 +444,20 @@ type
 
   Channel1* = ref object of VolumeEnvelopeChannel
     wave_duty_position*: int
+    # Absolute scheduler cycle of the next waveform step, or GBA_NO_STEP when
+    # the channel has never been triggered (or was parked by RegisterRamReset).
+    # Replaces a per-period scheduler event: the phase is advanced in closed
+    # form when something observes it (see ch1_catchup and the observation-point
+    # list in gba/apu.nim). NOT serialized as a field — savestate.nim converts
+    # it to/from an etAPUChannel1 event so the state format is unchanged, which
+    # is also what carries it through rollback/netplay LinkSnapshots.
+    next_step*:          CycleCount
+    # Delay the pending step was armed with. Only used to reproduce the old
+    # scheduler's tie-break when a step lands on exactly an observer's cycle
+    # (gba_steps_due); it differs from the current period across a mid-flight
+    # frequency write and after a trigger. Transient — savestate.nim rebuilds
+    # it from the period on load.
+    arm_delay*:          uint32
     sweep_period*:       uint8
     negate*:             bool
     shift_ch1*:          uint8
@@ -457,11 +471,15 @@ type
 
   Channel2* = ref object of VolumeEnvelopeChannel
     wave_duty_position*: int
+    next_step*:          CycleCount   # see Channel1.next_step
+    arm_delay*:          uint32       # see Channel1.arm_delay
     duty*:               uint8
     length_load*:        uint8
     frequency_ch2*:      uint16
 
   Channel3* = ref object of SoundChannel
+    next_step*:             CycleCount   # see Channel1.next_step
+    arm_delay*:             uint32       # see Channel1.arm_delay
     wave_ram*:              array[2, seq[byte]]
     wave_ram_position*:     uint8
     wave_ram_sample_buffer*: uint8
@@ -473,6 +491,8 @@ type
     frequency_ch3*:         uint16
 
   Channel4* = ref object of VolumeEnvelopeChannel
+    next_step*:     CycleCount   # see Channel1.next_step
+    arm_delay*:     uint32       # see Channel1.arm_delay
     lfsr*:          uint16
     length_load_ch4*: uint8
     clock_shift*:   uint8
@@ -866,6 +886,9 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc timer_overflow*(apu: APU; timer: int)
 proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
+proc apu_park_steps*(apu: APU)
+proc apu_catchup_all*(apu: APU) {.inline.}
+proc apu_next_step*(apu: APU): CycleCount {.inline.}
 proc new_mp2k*(gba: GBA): Mp2kHle
 proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
@@ -1008,10 +1031,14 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
-    of etAPUChannel1:   gba.apu.channel1.ch1_step()
-    of etAPUChannel2:   gba.apu.channel2.ch2_step()
-    of etAPUChannel3:   gba.apu.channel3.ch3_step()
-    of etAPUChannel4:   gba.apu.channel4.ch4_step()
+    # The PSG no longer schedules per-waveform-period channel events — each
+    # channel carries a next_step deadline advanced in closed form at the points
+    # that can observe it (see gba/apu.nim). These arms stay reachable only for a
+    # state saved by an older build, whose etAPUChannel* events gba_apply_state
+    # drains into next_step before the first tick; if one ever slips through,
+    # dropping it is strictly better than restarting an event chain that nothing
+    # reads.
+    of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: discard
     of etPPUStartLine:     gba.ppu.start_line()
     of etPPUStartHBlank:   gba.ppu.start_hblank()
     of etPPUSetHBlankFlag: gba.ppu.set_hblank_flag()
@@ -1072,7 +1099,17 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   ## base so a link coordinator (link.nim) can keep cross-core cycle
   ## comparisons valid across rebases.
   if gba.ppu.frame > 0: dec gba.ppu.frame
+  # The PSG channels' next_step deadlines are ABSOLUTE cycles held outside the
+  # scheduler's event array, so they have to move with the events. Catching them
+  # up first is what makes the subtraction safe (every deadline is then strictly
+  # in the future) AND doubles as the staleness valve: no deadline is ever more
+  # than one frame behind, which bounds channel 4's shift loop and keeps the
+  # wasm build's uint32 cycle counter from wrapping under a channel nobody has
+  # looked at. end_frame is the single funnel for every GBA rebase (step_frame,
+  # link.nim, netcore.nim), so this covers them all.
+  gba.apu.apu_catchup_all()
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
+  gba.apu.apu_rebase(base)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base

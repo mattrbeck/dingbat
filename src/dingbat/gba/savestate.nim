@@ -546,12 +546,64 @@ proc load_storage_state(st: Storage; r: var Reader) =
 
 # ---- Top level ----
 
+# ---- PSG waveform deadlines <-> scheduler events ----
+#
+# The channels' next_step deadlines replaced one etAPUChannel<N> scheduler event
+# per armed channel (see gba/apu.nim). Rather than append four new fields to a
+# positional, unversioned state format, round-trip them through the events they
+# replaced: the payload stays byte-identical to the pre-catch-up format, so a
+# state written here still loads in an older build and vice versa — which is
+# also what keeps rollback and netplay snapshots (link.nim's LinkSnapshot is
+# built from state_payload) carrying the deadlines across a restore.
+
+proc apu_arm_state_events(gba: GBA) =
+  # Deadlines are absolute scheduler cycles, which is what schedule() takes as
+  # a delay from scheduler.cycles; the catch-up guarantees each one is in the
+  # future, so the delay is positive.
+  gba.apu.apu_catchup_all()
+  template arm(ch: untyped; et: EventType) =
+    if ch.next_step != GBA_NO_STEP:
+      gba.scheduler.schedule(int(ch.next_step - gba.scheduler.cycles), et)
+  arm(gba.apu.channel1, etAPUChannel1)
+  arm(gba.apu.channel2, etAPUChannel2)
+  arm(gba.apu.channel3, etAPUChannel3)
+  arm(gba.apu.channel4, etAPUChannel4)
+
+proc apu_disarm_state_events(gba: GBA) =
+  gba.scheduler.clear(etAPUChannel1)
+  gba.scheduler.clear(etAPUChannel2)
+  gba.scheduler.clear(etAPUChannel3)
+  gba.scheduler.clear(etAPUChannel4)
+
+proc apu_extract_state_events(gba: GBA) =
+  # `et` rather than `kind`: a template parameter named `kind` would be
+  # substituted into `ev.kind` too and turn it into a bogus field access.
+  template take(ch: untyped; et: EventType; arm: uint32) =
+    ch.next_step = GBA_NO_STEP
+    for ev in gba.scheduler.events:
+      if ev.kind == et: ch.next_step = ev.cycles
+    gba.scheduler.clear(et)
+    # arm_delay is the delay the pending step was armed with; a scheduler event
+    # only ever stored its TARGET, so neither this build nor the pre-catch-up
+    # one can recover it from a state file. Rebuilt as the current period, which
+    # is what it is except across a frequency write that has not been followed
+    # by a step. It is read only to break an exact-cycle tie between a waveform
+    # step and the sample/frame-sequencer event, so the worst case is one
+    # channel stepping one sample early or late, once, after a load.
+    ch.arm_delay = arm
+  take(gba.apu.channel1, etAPUChannel1, gba.apu.channel1.ch1_frequency_timer())
+  take(gba.apu.channel2, etAPUChannel2, gba.apu.channel2.ch2_frequency_timer())
+  take(gba.apu.channel3, etAPUChannel3, gba.apu.channel3.ch3_frequency_timer())
+  take(gba.apu.channel4, etAPUChannel4, gba.apu.channel4.ch4_frequency_timer())
+
 proc gba_state_payload(gba: GBA): string =
   var w = Writer()
   save_cpu_state(gba.cpu, w)
   save_bus_state(gba.bus, w)
   w.write_tag(GBA_SEC_SCHED)
+  gba.apu_arm_state_events()
   gba.scheduler.save_to(w)
+  gba.apu_disarm_state_events()
   save_irq_state(gba.interrupts, w)
   save_mmio_state(gba.mmio, w)
   save_keypad_state(gba.keypad, w)
@@ -580,6 +632,7 @@ proc gba_apply_state(gba: GBA; payload: string) =
   load_gpio_state(gba.bus.gpio, r)
   load_ppu_state(gba.ppu, r)
   load_apu_state(gba.apu, r)
+  gba.apu_extract_state_events()
   load_storage_state(gba.storage, r)
   r.expect_tag(GBA_SEC_END)
   # irq_line is derived from IE/IF/IME and not serialized; recompute it so a

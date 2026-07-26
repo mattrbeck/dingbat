@@ -489,7 +489,22 @@ proc tick*(cpu: CPU) =
     cpu.gba.bus.synced = 0
     cpu.count_cycles += max(1, total)
     if cpu.entered_waitloop:
-      cpu.gba.scheduler.fast_forward()
+      # An idle loop only re-reads what it polls once per skip, so the skip
+      # length IS that loop's sampling resolution, and the loop body's own
+      # fetches move absolute-cycle bus state (rom_free_since) whether it polls
+      # a register or RAM. The PSG's waveform deadlines used to be scheduler
+      # events and were holding that resolution at ~32 cycles; moving them out
+      # of evbuf (gba/apu.nim) let a skip run to the next PPU or sample event
+      # instead, and the mGBA suite's "H-blank bit start" flips — which spin on
+      # DISPSTAT and time the gaps with TM0 — went from 3-48 cycles out to
+      # 124-394. They are events in every sense except which array they live in,
+      # so they bound the skip here exactly as they did when they were queued.
+      #
+      # Catching the channels up first is what makes every deadline strictly
+      # ahead of scheduler.cycles, which fast_forward_bounded needs to keep this
+      # loop making progress.
+      cpu.gba.apu.apu_catchup_all()
+      cpu.gba.scheduler.fast_forward_bounded(cpu.gba.apu.apu_next_step())
       cpu.entered_waitloop = false
     else:
       cpu.gba.scheduler.tick(remaining)

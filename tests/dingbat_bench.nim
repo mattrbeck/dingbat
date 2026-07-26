@@ -60,6 +60,14 @@ proc main() =
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
+    # DINGBAT_NO_WAITLOOP=1 turns off idle-loop fast-forwarding. The waitloop
+    # path SNAPS scheduler.cycles to the next pending event and discards the
+    # loop body's own cycles, so which events happen to be pending changes the
+    # exact cycle a spin loop exits on. That makes it the one thing that can
+    # move emulated timing when a change only REMOVES scheduler events — set
+    # this on both builds to A/B a scheduler change with that variable held.
+    if getEnv("DINGBAT_NO_WAITLOOP") == "1":
+      emu.cpu.attempt_waitloop_detection = false
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
     if getEnv("DINGBAT_MP2K_SKIP") == "1":

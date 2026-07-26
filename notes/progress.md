@@ -462,9 +462,9 @@ policy decision, not a perf change, and the codebase has at least one comment
 caught. Left alone. Worth knowing that the **wasm** build already compiles with
 `-d:danger`, so its profile is not the same shape as the native one.
 
-#### GBA core: the same idea, unimplemented, with numbers
+#### GBA core: the same idea — the census that motivated the work
 
-Investigated but deliberately not implemented on this branch. **The GBA PSG still
+**The GBA PSG had
 has the exact pre-`c7fb1a7` problem, and worse.** `gba/apu/channel4.nim`'s
 `ch4_step` reschedules `etAPUChannel4` unconditionally — not even gated on
 `enabled` — and with the power-on divisor that is one event every 32 cycles,
@@ -518,3 +518,149 @@ shared by its GB and GBA cores and has **zero** per-channel events — only
 a time when possible"). NanoBoyAdvance's `QuadChannel::Generate` /
 `NoiseChannel::Generate` are where dingbat is today, i.e. one event per waveform
 sub-period; it is not a design to copy for a constrained target.
+
+#### GBA core: landed
+
+Done, on `gba-apu-lazy`. Numbers are instructions retired (`/usr/bin/time -l`),
+min of 7 interleaved runs from an in-game save state, 900 frames; the noise floor
+from two runs of the same binary was **±0.002%** on the min and ≤0.078%
+run-to-run spread. fps is best-of-7 (noise ±0.56%).
+
+| title       | instructions | fps      |
+|-------------|--------------|----------|
+| Golden Sun  | **−9.5%**  | **+16.2%** |
+| Mother 3    | **−4.8%**  | **+12.6%** |
+| Pokemon Emerald | **−2.2%** | **+6.4%** |
+| Kirby: Nightmare in Dream Land | **−2.5%** | **+5.8%** |
+
+Scheduler dispatches per frame fell from ~10,800 to ~1,970 (−82%);
+`etAPUChannel4` alone was 8,778/frame — 81% of all events — in every one of the
+four titles, as the census above predicted.
+
+**That is a lot less than the +14-45% the proxy promised, and the gap is the
+interesting part of this round.** See "the bound" below: the proxy measured a
+build that had silently coarsened every idle loop in the machine, and buying that
+accuracy back costs Emerald 44 points of throughput and Kirby 20. Golden Sun and
+Mother 3 keep essentially all of theirs, because their win came from the dispatch
+cost rather than from deeper skips.
+
+The observation points are enumerated above `apu_catchup_all` in `gba/apu.nim`.
+Two GBA-specific notes: the wave channel's 64-step mode flips `wave_ram_bank`
+once per wrap, so the closed form is `bank ^= ((pos + N) div 32) and 1`; and
+channel 4's old `ch4_step` re-armed **unconditionally**, so unlike the GB there is
+no park-when-disabled case to model — a triggered chain runs until
+`RegisterRamReset` or a re-trigger. CH4 still iterates the LFSR (a tight loop, not
+one scheduler dispatch per shift); mGBA batches 5 shifts at a time and there is a
+clean closed form for k ≤ 14 shifts (`s' = (s >> k) | (((s xor (s>>1)) and ((1<<k)-1)) << (15-k))`,
+valid while the feedback bits are still original state), but at the measured
+8,778 shifts/frame the loop is ~0.3% of a frame and it was not worth the
+divergence risk. Build with `-d:psgverify` to shadow every closed-form catch-up
+with the per-period loop it replaced and assert they agree.
+
+**The tie-break needed one more piece than the GB version.** When a waveform step
+lands on exactly the observer's cycle, the old scheduler resolved it in favour of
+whichever event was armed more recently — i.e. the shorter *delay*, which is not
+always the current period: a frequency write changes the period without moving
+the already-armed step, and a trigger arms with the frequency timer in force at
+trigger time (+6 on CH3). Channels therefore carry `arm_delay` alongside
+`next_step`. Modelling only "current period" left Mother 3 differing on 0.075% of
+samples. `arm_delay` is transient (rebuilt as the current period on state load);
+the state format is unchanged, which is what keeps rollback/netplay snapshots
+interchangeable.
+
+##### The bound, and why the first attempt regressed
+
+Taking events out of the scheduler is **not** behaviour-neutral, because two
+places in the core decide how far to skip the clock by reading
+`scheduler.next_event`:
+
+1. `cpu.tick`'s idle-loop path calls `scheduler.fast_forward()`, which snaps
+   `scheduler.cycles` to `next_event` and discards the loop body's own cycles.
+   A spin loop re-reads what it polls once per skip, so **the skip length is that
+   loop's sampling resolution**, and the body's fetches move `rom_free_since`,
+   which is absolute-cycle state.
+2. `dma.nim`'s mid-burst preemption check only drained accumulated bus cycles
+   into the scheduler when an event was already due, so `scheduler.cycles` (the
+   anchor for anything the burst schedules) lagged the burst's true position.
+
+The PSG's 32-cycle channel-4 chain was holding both at a fine granularity **by
+accident**. The first version of this branch removed it and left both unbounded,
+which measured as: the mGBA suite's six "H-blank bit start Flip" values — a loop
+that spins on DISPSTAT and times the gaps with TM0 (`suite/src/misc-edge.c`) —
+went from 3-48 cycles out to **124-394** (one of them landed on exactly 0x200,
+the 512-cycle sample-event period, which is what gave the mechanism away), and
+Emerald's and Mother 3's PCM drifted on 1.27% / 0.49% of samples.
+
+The fix is to state the bound instead of inheriting it: the deadlines are still
+events, they just live outside `evbuf`, so both places consult
+`apu_next_step()`. `scheduler.fast_forward_bounded` takes the ceiling; the DMA
+drain takes `min(next_event, apu_next_step())`. With that, every row of
+`results_mgba_suite.md` and all four titles' PCM are byte-identical to `main`.
+
+Alternatives measured and rejected:
+
+* **A fixed cap on the skip** (`cycles + N`, N a constant) — physically the more
+  defensible bound, since a real Thumb spin loop resolves ~15 cycles. At N=4 the
+  suite's total H-blank error *improves* on baseline (130 → 59 cycles, score
+  6910 → 6912) and at N=32 three of the six rows pass exactly. But no N
+  reproduces the old sampling phase, so audio is no longer bit-identical, and one
+  row (Flip 1) is worse than baseline at every N tried. Rejected under the
+  no-regression constraint, but worth knowing it exists: if the constraint ever
+  becomes "closest to hardware" rather than "identical to the previous build",
+  a cap of 4-16 is measurably better than either build.
+* **Bounding only loops that poll MMIO** — a PSG step cannot change RAM, so a
+  RAM-polling loop looks safe to skip freely, and only 1,800 of Emerald's
+  3,875,881 waitloop skips per 600 frames touch MMIO (Kirby 1,200 of 3,020,289;
+  Mother 3 7,200 of 7,200; Golden Sun has none at all). It does not work: the
+  loop *body* fetches from the gamepak, which moves `rom_free_since`, so how many
+  times it runs is observable. Emerald's PCM went straight back to 1.27%.
+  Extending the test to "polls MMIO **or** fetches from ROM" is bit-identical
+  again, but measured within noise of bounding everything (Emerald +6.29% vs
+  +6.42%), because those loops are in ROM. Not worth the extra state.
+
+##### Verification
+
+`-d:psgverify` shadows every closed-form catch-up with the per-period loop the
+events used to run and asserts they land on the same state; it passed over 20 GBA
+titles × 2000 frames, and a deliberately-broken control confirmed the assert
+fires. No title in the sweep set uses CH3's 64-step mode, so `-d:psgdim` in
+`tools/romfuzz/dingbat_nav` forces it (~35,000 bank flips per title, verified).
+`DINGBAT_GBA_AUDIO_DUMP` + `tools/pcmdiff.py` is the PCM oracle.
+
+Gates, all against a build of `main` at `669eb99`: `dingbat_test_runner`
+169/137/32 with `results.md` differing only in its timestamp and **every row of
+`results_mgba_suite.md` byte-identical** (6910/7008); `--apu` 94 verdicts
+identical (22/94); PCM byte-identical on Emerald, Golden Sun, Mother 3 and Kirby
+over 3000 frames both from boot and from an in-game save state, in the default
+configuration; `dingbat_nav` checkpoint framebuffers byte-identical on 20/20 GBA
+titles; `dingbat_gb_nav` byte-identical on 365/365 GB/GBC titles; stateroundtrip,
+rewindtest, linktest ×4, attachtest, rollback, rollbacknet, speclink ×3,
+speclinkbench and gbhdmatest all pass; wasm, native SDL and headless all compile.
+
+Two harness facts worth inheriting, because both cost time here:
+
+* **`results_mgba_suite.md` is fully deterministic** — it is a usable gate, both
+  columns, all 98 rows. An earlier draft of this note claimed the `Expected`
+  column shuffled between runs; that was wrong. `dingbat_test_runner` is only a
+  driver: it shells out to `./dingbat_test` for every case, so comparing "two
+  runs of the same runner binary" compares whatever `dingbat_test` happens to be
+  sitting in the working directory. Rebuild **both**. Note also that the column
+  headed `Actual` holds the value the ROM expects and the one headed `Expected`
+  holds what dingbat measured — the labels are the wrong way round, and checking
+  the first one is a gate that can never fail.
+* **Save states are not run-to-run stable for RTC carts.** Two runs of the same
+  binary on Pokemon Emerald or Ruby differ in 6 bytes (the payload hash plus the
+  game's copy of the clock); non-RTC titles are stable at 0. `dingbat_nav` now
+  takes `ROMFUZZ_RTC_EPOCH` to freeze it. The framebuffer gate never needed it.
+
+One state-file caveat, since the GB write-up claimed strict byte-identity and
+this one cannot: the payload FORMAT is unchanged and states cross-load between
+this build and `main` with identical framebuffer hashes (verified on 5 titles,
+both directions), but the re-armed `etAPUChannel*` events are inserted at save
+time, so when a channel deadline ties with a real event the two land in the
+serialized array in the other order. One checkpoint of 80 across the 20-title
+sweep hit it (Mega Man Battle Network at frame 1200: `etAPUChannel2` and
+`etPPUEndHBlank` swapped). It is inert here — the dispatch arm for those kinds is
+`discard` and the deadline is extracted into `next_step` either way — and
+reconstructing the original order would need each event's arm time, which the
+scheduler never stored.
