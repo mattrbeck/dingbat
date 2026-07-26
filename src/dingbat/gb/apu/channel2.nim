@@ -8,15 +8,31 @@ const WAVE_DUTY2: array[4, array[8, uint8]] = [
 ]
 
 proc new_channel2*(gb: GB): GbChannel2 =
-  GbChannel2(enabled: false, dac_enabled: false, length_counter: 0)
+  GbChannel2(enabled: false, dac_enabled: false, length_counter: 0,
+             next_step: GB_NO_STEP)
 
 proc ch2_frequency_timer(ch: GbChannel2): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 4
 
-proc ch2_step*(ch: GbChannel2; gb: GB) =
-  ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
-  gb.scheduler.schedule_gb(int(ch2_frequency_timer(ch)),
-    etAPUChannel2)
+proc ch2_period(ch: GbChannel2; gb: GB): CycleCount {.inline.} =
+  CycleCount(ch2_frequency_timer(ch)) shl gb.scheduler.speed
+
+proc ch2_catchup_slow(ch: GbChannel2; gb: GB; observer_period: uint32) =
+  let now    = gb.scheduler.cycles
+  let ticks  = ch2_frequency_timer(ch)
+  let period = CycleCount(ticks) shl gb.scheduler.speed
+  let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
+  if steps == 0: return
+  ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  ch.next_step += steps * period
+
+proc ch2_catchup_at*(ch: GbChannel2; gb: GB; observer_period: uint32) {.inline.} =
+  ## See ch1_catchup_at.
+  if ch.next_step > gb.scheduler.cycles: return
+  ch2_catchup_slow(ch, gb, observer_period)
+
+proc ch2_catchup*(ch: GbChannel2; gb: GB) {.inline.} =
+  ch2_catchup_at(ch, gb, GB_OBS_CPU)
 
 proc ch2_get_amplitude*(ch: GbChannel2): float32 =
   if ch.enabled and ch.dac_enabled:
@@ -55,8 +71,6 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      gb.scheduler.clear(etAPUChannel2)
-      gb.scheduler.schedule_gb(int(ch2_frequency_timer(ch)),
-        etAPUChannel2)
+      ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
       init_volume_envelope(ch)
   else: discard

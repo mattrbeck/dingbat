@@ -35,6 +35,42 @@ when not defined(test_harness):
     proc sdl_delay_gb(ms: uint32)
       {.importc: "SDL_Delay", cdecl.}
 
+when not defined(emscripten):
+  # Debug instrumentation, env-gated and zero-cost when unset (one bool test in
+  # get_sample). Mirrors the GBA APU's DINGBAT_AUDIO_DUMP:
+  #   DINGBAT_GB_AUDIO_DUMP=<path>  writes every mixed sample as raw s16le
+  #   stereo, interleaved L,R, at GB_SAMPLE_RATE (32768 Hz).
+  # Unlike the GBA hook this one sits outside the test_harness gate and taps the
+  # mixed sample before the output path, so the headless test build dumps too --
+  # which is what makes it usable as an APU oracle (byte-comparing two builds'
+  # audio is the audio equivalent of the byte-identical screenshot gate).
+  var gb_audio_dump_file: File = nil
+  var gb_audio_dump_on = false
+  var gb_audio_dump_claimed = false
+  var gb_audio_dump_pending = 0
+
+  proc gb_audio_dump_claim() =
+    ## Called once per APU construction. The first APU created claims the file,
+    ## so a 2P link session dumps player 1 rather than interleaving both.
+    if gb_audio_dump_claimed: return
+    gb_audio_dump_claimed = true
+    let path = getEnv("DINGBAT_GB_AUDIO_DUMP")
+    if path.len > 0:
+      gb_audio_dump_file = open(path, fmWrite)
+      gb_audio_dump_on = true
+
+  proc gb_audio_dump_write(left, right: float32) =
+    var frame: array[2, int16]
+    frame[0] = int16(clamp(left  * 32767.0'f32, -32768.0'f32, 32767.0'f32))
+    frame[1] = int16(clamp(right * 32767.0'f32, -32768.0'f32, 32767.0'f32))
+    discard gb_audio_dump_file.writeBuffer(addr frame[0], sizeof(frame))
+    # stdio buffers the writes; flush about once a second so an interrupted run
+    # still leaves a readable dump
+    inc gb_audio_dump_pending
+    if gb_audio_dump_pending >= GB_SAMPLE_RATE:
+      gb_audio_dump_pending = 0
+      gb_audio_dump_file.flushFile()
+
 proc toggle_sync*(apu: GbApu) =
   apu.sync = not apu.sync
 
@@ -69,7 +105,100 @@ when not defined(test_harness):
     ## Bytes currently queued to the SDL audio device (frame-scheduler input)
     if apu.audio_dev != 0: sdl_get_queued_audio_size_gb(apu.audio_dev) else: 0
 
+# ---------------------------------------------------------------------------
+# Lazy waveform catch-up
+#
+# Channels 1-4 used to schedule one scheduler event per waveform period. A
+# square parked at frequency 0x7FF steps every 4 T-cycles = 17,556 events per
+# frame per channel; Alone in the Dark leaves three DISABLED channels there and
+# burned ~70k events/frame producing silence. Instead each channel now carries a
+# `next_step` deadline and is advanced in closed form when something can observe
+# it -- pos = (pos + N) and 7 for a square, (pos + N) mod 32 for the wave
+# pointer. This is what mGBA (GBAudioRun, src/gb/audio.c:503) and Gambatte
+# (DutyUnit::updatePos) do; it is phase-exact, so a trigger still inherits the
+# free-running phase the way hardware does (hardware only resets the duty
+# counter on an APU power-off), which parking the channels would not.
+#
+# The complete set of observation points, and where each is handled:
+#
+#   1. etAPUSample / get_sample -- reads every channel's amplitude.
+#      Handled below. ~549/frame at 32768 Hz vs 70k channel events.
+#   2. 0xFF30-0xFF3F wave RAM read AND write while CH3 is enabled -- resolves
+#      against wave_ram_position, not the address. apu_read/apu_write.
+#   3. 0xFF76/0xFF77 PCM12/PCM34 -- expose the raw per-channel digital output.
+#      Stubbed to 0x00 on this branch; the catch-up call is wired up anyway so
+#      the real implementation drops in without a correctness question.
+#   4. Any 0xFF10-0xFF26 register write -- may change the period, the duty, or
+#      trigger. apu_write catches the target channel up first so collapsed
+#      cycles always use the period that was actually in force for them.
+#   5. Frame-sequencer ticks -- length_step can clear `enabled` (a CH4 park
+#      point) and sweep_step rewrites ch1.frequency. tick_frame_sequencer.
+#   6. NR52 channel-active bits -- report `enabled` only, which no catch-up
+#      changes, so no sync is needed (documented at apu_read).
+#   7. CGB speed switch -- rescales the deadline exactly as the scheduler
+#      rescales pending events. gb/memory.nim stop_instr.
+#   8. Per-frame scheduler rebase -- next_step is an ABSOLUTE cycle and has to
+#      move with the events. gb_rebase below; also bounds how stale a deadline
+#      can get, which keeps CH4's loop and the uint32 wasm CycleCount safe.
+#   9. Save states / rollback+netplay snapshots -- savestate.nim converts
+#      next_step to and from an etAPUChannel* event, so the state format is
+#      byte-identical to the pre-catch-up one in both directions.
+# ---------------------------------------------------------------------------
+
+proc apu_catchup_all*(apu: GbApu; gb: GB) {.inline.} =
+  ## Materialize all four channels at the current cycle. Used by the
+  ## observation points that can touch any channel (frame sequencer, sample,
+  ## NR52 writes, speed switch, rebase).
+  ch1_catchup(apu.channel1, gb)
+  ch2_catchup(apu.channel2, gb)
+  ch3_catchup(apu.channel3, gb)
+  ch4_catchup(apu.channel4, gb)
+
+proc apu_rebase*(apu: GbApu; base: CycleCount) {.inline.} =
+  ## Shift the channel deadlines down by the same base scheduler.rebase just
+  ## subtracted from every pending event. Callers must have caught the channels
+  ## up first, so each deadline is strictly in the future and cannot underflow.
+  template adj(ch: untyped) =
+    if ch.next_step != GB_NO_STEP: ch.next_step -= base
+  adj(apu.channel1)
+  adj(apu.channel2)
+  adj(apu.channel3)
+  adj(apu.channel4)
+
+proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
+  ## CGB speed switch. Mirrors Scheduler.`speed_mode=`: the remaining delay is
+  ## stored in CPU cycles, so entering double speed doubles it and leaving
+  ## halves it. Channels are caught up first so "remaining" is well defined.
+  apu_catchup_all(apu, gb)
+  let now = gb.scheduler.cycles
+  template adj(ch: untyped) =
+    if ch.next_step != GB_NO_STEP:
+      let remaining = ch.next_step - now
+      ch.next_step = now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
+                            else:                     remaining shr (old_speed - new_speed))
+  adj(apu.channel1)
+  adj(apu.channel2)
+  adj(apu.channel3)
+  adj(apu.channel4)
+
+proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
+  ## Frame-boundary scheduler rebase (see Scheduler.rebase). Catching the APU
+  ## channels up first is what makes the subtraction safe AND doubles as the
+  ## staleness valve: no deadline is ever more than one frame behind, which
+  ## bounds CH4's shift loop and keeps the wasm build's uint32 cycle counter
+  ## from wrapping under a channel nobody has looked at.
+  gb.apu.apu_catchup_all(gb)
+  result = gb.scheduler.rebase()
+  gb.apu.apu_rebase(result)
+
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
+  # length_step can clear `enabled` (parks CH4) and sweep_step rewrites
+  # ch1.frequency, so every channel has to be current first.
+  const OBS = uint32(GB_FRAME_SEQ_PERIOD)
+  ch1_catchup_at(apu.channel1, gb, OBS)
+  ch2_catchup_at(apu.channel2, gb, OBS)
+  ch3_catchup_at(apu.channel3, gb, OBS)
+  ch4_catchup_at(apu.channel4, gb, OBS)
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -94,6 +223,18 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   gb.scheduler.schedule_gb(GB_FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: GbApu; gb: GB) =
+  # Gated on `enabled` because a disabled channel's amplitude is 0 regardless
+  # of phase -- that is the whole win: the three silent channels Alone in the
+  # Dark parks at 0x7FF now cost nothing per sample, and their phase is still
+  # exact because the closed form is evaluated from the stale deadline at the
+  # next thing that CAN see it (a trigger, or the frame-boundary rebase).
+  # NOT gated on channel_mask: that is a debug mute, and skipping the catch-up
+  # would let CH4's shift loop fall behind by more than a frame.
+  const OBS = uint32(GB_SAMPLE_PERIOD)
+  if apu.channel1.enabled: ch1_catchup_at(apu.channel1, gb, OBS)
+  if apu.channel2.enabled: ch2_catchup_at(apu.channel2, gb, OBS)
+  if apu.channel3.enabled: ch3_catchup_at(apu.channel3, gb, OBS)
+  if apu.channel4.enabled: ch4_catchup_at(apu.channel4, gb, OBS)
   let c1 = if apu.channel_mask[0]: ch1_get_amplitude(apu.channel1) else: 0.0'f32
   let c2 = if apu.channel_mask[1]: ch2_get_amplitude(apu.channel2) else: 0.0'f32
   let c3 = if apu.channel_mask[2]: ch3_get_amplitude(apu.channel3) else: 0.0'f32
@@ -110,6 +251,10 @@ proc get_sample*(apu: GbApu; gb: GB) =
      (if (apu.nr51 and 0x04) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32)) / 4.0'f32
+  when not defined(emscripten):
+    # Before the output switch on purpose: the test_harness branch below drops
+    # the sample, and the oracle needs it.
+    if gb_audio_dump_on: gb_audio_dump_write(sample_left, sample_right)
   when defined(test_harness):
     discard
   elif defined(emscripten):
@@ -196,6 +341,8 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   result.channel2 = new_channel2(gb)
   result.channel3 = new_channel3(gb)
   result.channel4 = new_channel4(gb)
+  when not defined(emscripten):
+    gb_audio_dump_claim()
   when defined(test_harness):
     result.audio_dev = 0
   elif defined(emscripten):
@@ -223,7 +370,11 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   tick_frame_sequencer(apu, gb)
   get_sample(apu, gb)
 
-proc apu_read*(apu: GbApu; idx: int): uint8 =
+proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
+  # Only wave RAM needs a sync: 0xFF30-0xFF3F resolves against
+  # wave_ram_position while CH3 is enabled. Everything else here reports
+  # register bits or `enabled` (NR52), none of which a catch-up can change.
+  if idx >= 0xFF30: ch3_catchup(apu.channel3, gb)
   case idx
   of 0xFF10..0xFF14: ch1_read(apu.channel1, idx)
   of 0xFF16..0xFF19: ch2_read(apu.channel2, idx)
@@ -244,6 +395,19 @@ proc apu_read*(apu: GbApu; idx: int): uint8 =
 
 proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
   if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F): return
+  # Materialize the target channel BEFORE the write lands, so any period /
+  # duty / trigger change only affects steps from this cycle on, and so a
+  # wave-RAM write resolves against the right wave_ram_position.
+  case idx
+  of 0xFF10..0xFF14: ch1_catchup(apu.channel1, gb)
+  of 0xFF16..0xFF19: ch2_catchup(apu.channel2, gb)
+  of 0xFF1A..0xFF1E, 0xFF30..0xFF3F: ch3_catchup(apu.channel3, gb)
+  of 0xFF20..0xFF23: ch4_catchup(apu.channel4, gb)
+  # NR52 power-off rewrites every channel register (recursing through the arms
+  # above), but sync all four anyway: it is a rare write and it keeps the
+  # power-on reset from depending on that recursion.
+  of 0xFF26: apu_catchup_all(apu, gb)
+  else: discard
   case idx
   of 0xFF10..0xFF14: ch1_write(apu.channel1, idx, val, gb)
   of 0xFF16..0xFF19: ch2_write(apu.channel2, idx, val, gb)

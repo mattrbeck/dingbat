@@ -14,6 +14,13 @@
  * GBFUZZ_BATTERY=<path> loads and re-saves a battery save around the run, for
  * comparing what a title does on a second boot.
  *
+ * GBFUZZ_PCM=<path> with GBFUZZ_PCM_FRAMES=<N> dumps N frames of audio as raw
+ * s16le stereo at 32768 Hz -- the same bytes dingbat's DINGBAT_GB_AUDIO_DUMP
+ * writes, for tools/pcmdiff.py. See the block in main() for the knobs. Sample
+ * equality with dingbat is not achievable: SameBoy band-limits each channel
+ * and models DAC charge/discharge, dingbat emits the raw DAC mix. Use
+ * pcmdiff.py --correlate for this pair.
+ *
  * Model follows the cartridge CGB flag: DMG-only carts run on a DMG-B, CGB
  * carts on a CGB-E. SGB is never selected — its 256x224 bordered output is
  * not comparable with the other runners' 160x144.
@@ -115,6 +122,19 @@ static uint32_t rgb_encode(GB_gameboy_t* gb, uint8_t r, uint8_t g, uint8_t b) {
 
 static void vblank(GB_gameboy_t* gb, GB_vblank_type_t type) { (void) gb; (void) type; }
 
+/* GBFUZZ_PCM=<path> — write every mixed sample as raw s16le stereo, the same
+ * byte format dingbat's DINGBAT_GB_AUDIO_DUMP produces, so tools/pcmdiff.py
+ * reads both. GB_sample_t is {int16_t left; int16_t right;} (a union with a
+ * uint32 under GB_INTERNAL, same layout), so the struct goes straight out. */
+static FILE* g_pcm;
+static bool g_pcm_armed;
+static void pcm_cb(GB_gameboy_t* gb, GB_sample_t* sample) {
+  (void) gb;
+  /* Armed only once the boot ROM is out of the way, so the dump starts at the
+   * same point in the timeline as dingbat's (which never runs the boot ROM). */
+  if (g_pcm_armed) fwrite(sample, sizeof *sample, 1, g_pcm);
+}
+
 /* GBFUZZ_TRACE=<path>:<startframe>:<count> — log <count> instructions as
  * "PC OP" from the start of <startframe>, in the same format the dingbat
  * runner emits, so the two can be diffed directly. */
@@ -202,6 +222,49 @@ int main(int argc, char** argv) {
   for (int i = 0; i < g_nshots; ++i)
     if (g_shots[i] > max_frame) max_frame = g_shots[i];
 
+  /* PCM dump.
+   *   GBFUZZ_PCM=<path>          enable; raw s16le stereo, no header
+   *   GBFUZZ_PCM_FRAMES=<N>      run N frames for the dump (default: the
+   *                              highest requested screenshot frame + 1)
+   *   GBFUZZ_PCM_RATE=<hz>       default 32768, matching GB_SAMPLE_RATE
+   *   GBFUZZ_PCM_HIGHPASS=off|accurate|dc   default off, i.e. dingbat's
+   *                              unfiltered DAC output is the target
+   *   GBFUZZ_PCM_INTERFERENCE=<f>  default 0. The analog interference model
+   *                              uses rand(), so any nonzero value makes the
+   *                              run non-reproducible -- leave it off.
+   *
+   * The sample rate has to be set here, before the boot burn below, not once
+   * the boot ROM has finished: GB_set_sample_rate shrinks
+   * apu_output.max_cycles_per_sample from 0x400 to ~64, and switching it
+   * mid-run lets one already-scheduled coarse APU batch through, which trips
+   * `assert(sample_fraction < (4 << 28))` in GB_apu_run. Enabling it before
+   * the first GB_run_frame keeps the batch size small throughout; the boot
+   * ROM's own audio is discarded by g_pcm_armed instead.
+   *
+   * Rate and callback go together: SameBoy asserts a callback is installed
+   * whenever the sample rate is nonzero. */
+  const char* pcm_path = getenv("GBFUZZ_PCM");
+  if (pcm_path && pcm_path[0]) {
+    g_pcm = fopen(pcm_path, "wb");
+    if (!g_pcm) { perror(pcm_path); return 3; }
+    const char* hp = getenv("GBFUZZ_PCM_HIGHPASS");
+    GB_highpass_mode_t hpmode = GB_HIGHPASS_OFF;
+    if (hp && !strcasecmp(hp, "accurate")) hpmode = GB_HIGHPASS_ACCURATE;
+    else if (hp && !strcasecmp(hp, "dc"))  hpmode = GB_HIGHPASS_REMOVE_DC_OFFSET;
+    GB_set_highpass_filter_mode(&gb, hpmode);
+    const char* itf = getenv("GBFUZZ_PCM_INTERFERENCE");
+    GB_set_interference_volume(&gb, itf ? atof(itf) : 0.0);
+    const char* rate = getenv("GBFUZZ_PCM_RATE");
+    unsigned hz = rate && rate[0] ? (unsigned) atoi(rate) : 32768u;
+    GB_apu_set_sample_callback(&gb, pcm_cb);
+    GB_set_sample_rate(&gb, hz);
+    const char* pf = getenv("GBFUZZ_PCM_FRAMES");
+    if (pf && pf[0]) {
+      int n = atoi(pf);
+      if (n > max_frame + 1) max_frame = n - 1;
+    }
+  }
+
   if (getenv("GBFUZZ_BOOT_FRAMES")) {
     int n = 0;
     while (n < 1000 && !gb.boot_rom_finished) { GB_run_frame(&gb); ++n; }
@@ -216,6 +279,8 @@ int main(int argc, char** argv) {
       return 4;
     }
   }
+
+  if (g_pcm) g_pcm_armed = true;   /* boot ROM is done; start recording */
 
   char trpath[1024] = {0};
   int tr_start = -1;
@@ -240,6 +305,13 @@ int main(int argc, char** argv) {
       }
   }
   if (g_trace) fclose(g_trace);
+  if (g_pcm) {
+    /* Detach before the file closes: GB_free runs the APU one last time. */
+    GB_set_sample_rate(&gb, 0);
+    GB_apu_set_sample_callback(&gb, NULL);
+    fclose(g_pcm);
+    g_pcm = NULL;
+  }
   if (battery && battery[0]) GB_save_battery(&gb, battery);
   GB_free(&gb);
   return 0;

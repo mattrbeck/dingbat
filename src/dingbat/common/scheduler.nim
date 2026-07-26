@@ -55,6 +55,12 @@ type
 proc new_scheduler*(): Scheduler =
   result = Scheduler(next_event: high(CycleCount))
 
+proc speed*(s: Scheduler): uint8 {.inline.} = s.current_speed
+  ## CGB speed shift (0 = normal, 1 = double). schedule_gb scales every
+  ## non-etIME delay by this, so anything keeping its own deadlines in
+  ## scheduler cycles (the GB APU channels' lazy catch-up) must scale by it
+  ## too, and must be rescaled alongside pending events on a speed switch.
+
 iterator events*(s: Scheduler): Event =
   ## Pending events, soonest last (kept for debug UIs and RTC queries)
   for i in 0 ..< s.nevents:
@@ -136,6 +142,10 @@ proc fast_forward*(s: Scheduler) =
   s.call_current()
 
 proc rebase*(s: Scheduler; keep_phase_mask: CycleCount = 0): CycleCount {.discardable.} =
+  ## NOTE: the GB APU keeps per-channel deadlines OUTSIDE this array (lazy
+  ## catch-up, see gb/apu/channel1.nim). Every caller must hand the returned
+  ## base to gb_rebase/apu_rebase so those deadlines move with the events.
+  ##
   ## Subtract the current cycle count (rounded down to keep the low
   ## keep_phase_mask bits — GBA timers derive prescaler phase from the
   ## absolute cycle count) from all event targets. Returns the subtracted
@@ -179,6 +189,8 @@ proc load_from*(s: Scheduler; r: var Reader) =
   s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
+  ## NOTE: as with rebase, the GB APU's per-channel deadlines live outside
+  ## evbuf; gb/memory.nim's stop_instr rescales them around this call.
   let old = s.current_speed
   if speed == old: return
   s.current_speed = speed

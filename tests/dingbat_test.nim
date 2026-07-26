@@ -1239,6 +1239,14 @@ proc main() =
           quit(1)
     emu.test_output = test_out
     emu.post_init()
+    if mode == tmSram:
+      # blargg's SRAM-reporting ROMs (dmg_sound/cgb_sound/oam_bug/...) must run
+      # against a blank battery and must not leave one behind: a .sav dropped
+      # next to the ROM by an earlier run is loaded back at construction, and
+      # its finished status byte is read as *this* run's verdict before the ROM
+      # has executed an instruction. Wipe the RAM and detach the save file.
+      for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
+      emu.cartridge.sav_path = ""
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
       emu.step_frame()
@@ -1247,9 +1255,14 @@ proc main() =
            test_out.serial_buffer.contains("Failed"):
           test_out.finished = true
       if mode == tmSram and emu.cartridge.ram.len >= 4:
+        # Signature "DEB061" at $A001..$A003 marks the result block valid, but
+        # blargg's framework writes it up front with status $80 = "still
+        # running" and only replaces that byte with the verdict (0 = pass) when
+        # the test ends. Latching $80 scores every test as a failure.
         if emu.cartridge.ram[1] == 0xDE'u8 and
            emu.cartridge.ram[2] == 0xB0'u8 and
-           emu.cartridge.ram[3] == 0x61'u8:
+           emu.cartridge.ram[3] == 0x61'u8 and
+           emu.cartridge.ram[0] != 0x80'u8:
           test_out.sram_status = emu.cartridge.ram[0]
           var text = ""
           for i in 4 ..< emu.cartridge.ram.len:

@@ -260,6 +260,52 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
       ))
   tests
 
+proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef] =
+  ## blargg's dmg_sound / cgb_sound APU suites (rom_singles). Unlike cpu_instrs
+  ## these print nothing to the serial port: they report through the newer
+  ## framework's SRAM protocol ($A000 status byte + "DEB061" signature + text),
+  ## which is what tmSram reads. cgb_sound asserts CGB APU behavior from a
+  ## DMG-flagged cart, so it needs the CGB boot state (cgb = true); dmg_sound is
+  ## DMG-only. Opt-in, see --apu in main().
+  var tests: seq[TestDef]
+  let singles = sound_dir / "rom_singles"
+  if not dirExists(singles):
+    echo &"  Warning: blargg {suite} rom_singles directory not found"
+    return tests
+  for rom in find_roms(singles, ".gb"):
+    let name = rom.splitFile().name
+    tests.add(TestDef(
+      name: "blargg/" & suite & "/" & name,
+      rom_path: rom,
+      mode: tmSram,
+      timeout: 1800,
+      cgb: cgb,
+    ))
+  tests
+
+proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
+  ## SameSuite's sample-accurate APU tests. They signal the verdict with
+  ## mooneye's magic LD B,B breakpoint (registers = fibonacci 3/5/8/13/21/34 on
+  ## pass), so tmMooneye reads them as-is. Every one of them samples the CGB-only
+  ## PCM12/PCM34 registers, so they all run on CGB hardware (per the suite's
+  ## README, pre-CGB devices only pass the div_write_trigger pair). Opt-in, see
+  ## --apu in main().
+  var tests: seq[TestDef]
+  let apu_dir = samesuite_dir / "apu"
+  if not dirExists(apu_dir):
+    echo "  Warning: same-suite apu directory not found"
+    return tests
+  for rom in find_roms_recursive(apu_dir, ".gb"):
+    let rel = rom.relativePath(apu_dir)
+    tests.add(TestDef(
+      name: "same-suite/apu/" & rel.changeFileExt(""),
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: true,
+    ))
+  tests
+
 proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   var tests: seq[TestDef]
   let mooneye_dir = roms_dir / "mooneye-test-suite"
@@ -566,6 +612,7 @@ proc main() =
     quit(1)
 
   var bios_path = ""
+  var apu_only = false
   var p = initOptParser(commandLineParams())
   while true:
     p.next()
@@ -578,7 +625,46 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         bios_path = v
+      of "apu":
+        apu_only = true
+      of "suite":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        if v == "apu": apu_only = true
+        else:
+          echo "Unknown suite: ", v, " (only 'apu' can be selected)"
+          quit(1)
       else: discard
+
+  # The GB APU suites are opt-in (--apu, or --suite=apu). They are deliberately
+  # NOT part of the default run: most of SameSuite's sample-accurate tests fail
+  # today, and folding them in would change both the headline case count and
+  # tests/results.md. So --apu runs only them and prints its tallies rather than
+  # rewriting any results file.
+  if apu_only:
+    let gb_roms = ensure_gameboy_test_roms()
+    let no_previous = initTable[string, bool]()
+    var apu_suites: seq[SuiteResults]
+    var apu_regressions: seq[string]
+    apu_suites.add(run_suite("Game Boy - Blargg dmg_sound",
+      build_blargg_sound_tests(gb_roms / "blargg" / "dmg_sound", "dmg_sound", cgb = false),
+      harness, no_previous, apu_regressions))
+    apu_suites.add(run_suite("Game Boy - Blargg cgb_sound",
+      build_blargg_sound_tests(gb_roms / "blargg" / "cgb_sound", "cgb_sound", cgb = true),
+      harness, no_previous, apu_regressions))
+    apu_suites.add(run_suite("Game Boy - SameSuite APU",
+      build_samesuite_apu_tests(gb_roms / "same-suite"),
+      harness, no_previous, apu_regressions))
+    var apu_total = 0
+    var apu_pass = 0
+    echo ""
+    for suite in apu_suites:
+      let passes = suite.results.countIt(it.passed)
+      echo &"{suite.suite_name}: {passes}/{suite.results.len} pass"
+      apu_total += suite.results.len
+      apu_pass += passes
+    echo &"\nAPU total: {apu_total}, Pass: {apu_pass}, Fail: {apu_total - apu_pass}"
+    quit(0)
 
   let results_path = getCurrentDir() / "tests" / "results.md"
   let previous = load_previous_results(results_path)

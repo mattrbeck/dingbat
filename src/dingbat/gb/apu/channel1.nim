@@ -9,14 +9,42 @@ const WAVE_DUTY1: array[4, array[8, uint8]] = [
 
 proc new_channel1*(gb: GB): GbChannel1 =
   GbChannel1(enabled: false, dac_enabled: false, length_counter: 0,
-             sweep_period: 0)
+             sweep_period: 0, next_step: GB_NO_STEP)
 
 proc ch1_frequency_timer(ch: GbChannel1): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 4
 
-proc ch1_step*(ch: GbChannel1; gb: GB) =
-  ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
-  gb.scheduler.schedule_gb(int(ch1_frequency_timer(ch)), etAPUChannel1)
+proc ch1_period(ch: GbChannel1; gb: GB): CycleCount {.inline.} =
+  ## Duty-step period in SCHEDULER cycles (schedule_gb scaled every APU delay
+  ## by the speed shift, so the deadline arithmetic has to as well).
+  CycleCount(ch1_frequency_timer(ch)) shl gb.scheduler.speed
+
+proc ch1_catchup_slow(ch: GbChannel1; gb: GB; observer_period: uint32) =
+  let now    = gb.scheduler.cycles
+  let ticks  = ch1_frequency_timer(ch)
+  let period = CycleCount(ticks) shl gb.scheduler.speed
+  # next_step is the absolute cycle of the FIRST pending step, so every step
+  # after it is one period apart -- which is also true across a mid-flight
+  # NR13/NR14 frequency write, because the old event would have fired at its
+  # already-set target and only then reloaded with the new period.
+  let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
+  if steps == 0: return
+  ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  ch.next_step += steps * period
+
+proc ch1_catchup_at*(ch: GbChannel1; gb: GB; observer_period: uint32) {.inline.} =
+  ## Bring wave_duty_position up to gb.scheduler.cycles. Closed form: the duty
+  ## counter is a free-running mod-8 counter, so N periods of advance is
+  ## (pos + N) and 7 -- no iteration, and cost independent of the frequency.
+  ## Must be called before anything that can observe the duty position or
+  ## change the period; see the observation-point list in apu.nim.
+  ## observer_period is the caller's own T-cycle period (GB_OBS_CPU for a CPU
+  ## access) and only affects a step landing on this exact cycle.
+  if ch.next_step > gb.scheduler.cycles: return   # not due (or never triggered)
+  ch1_catchup_slow(ch, gb, observer_period)
+
+proc ch1_catchup*(ch: GbChannel1; gb: GB) {.inline.} =
+  ch1_catchup_at(ch, gb, GB_OBS_CPU)
 
 proc ch1_frequency_calc(ch: GbChannel1): uint16 =
   let shifted = ch.frequency_shadow shr ch.shift
@@ -26,6 +54,9 @@ proc ch1_frequency_calc(ch: GbChannel1): uint16 =
   result = uint16(calc and 0x7FFF)
 
 proc sweep_step*(ch: GbChannel1; gb: GB) =
+  # The caller (tick_frame_sequencer) has already caught the duty counter up:
+  # this can change ch.frequency, and the catch-up period must be the one that
+  # was in force for the cycles being collapsed.
   if ch.sweep_timer > 0: dec ch.sweep_timer
   if ch.sweep_timer == 0:
     ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
@@ -52,6 +83,8 @@ proc ch1_read*(ch: GbChannel1; idx: int): uint8 =
   else:      0xFF'u8
 
 proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
+  # apu_write caught the duty counter up to the current cycle before getting
+  # here, so a period/duty change below only affects steps from now on.
   case idx
   of 0xFF10:
     ch.sweep_period = (val and 0x70) shr 4
@@ -79,9 +112,11 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      gb.scheduler.clear(etAPUChannel1)
-      gb.scheduler.schedule_gb(int(ch1_frequency_timer(ch)),
-        etAPUChannel1)
+      # Same as the old clear(etAPUChannel1) + schedule_gb(period): re-arm a
+      # full period from now. The duty POSITION deliberately carries across a
+      # trigger (hardware only resets it when the APU is powered off) -- which
+      # is why the phase has to be caught up rather than parked.
+      ch.next_step = gb.scheduler.cycles + ch1_period(ch, gb)
       init_volume_envelope(ch)
       ch.frequency_shadow = ch.frequency
       ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8'u8

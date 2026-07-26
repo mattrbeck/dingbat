@@ -1,18 +1,37 @@
 # GB APU Channel 3 - Wave output (included by gb.nim)
 
 proc new_channel3*(gb: GB): GbChannel3 =
-  result = GbChannel3(enabled: false, dac_enabled: false, length_counter: 0)
+  result = GbChannel3(enabled: false, dac_enabled: false, length_counter: 0,
+                      next_step: GB_NO_STEP)
   for i in 0 ..< 16:
     result.wave_ram[i] = if (i and 1) == 0: 0x00'u8 else: 0xFF'u8
 
 proc ch3_frequency_timer(ch: GbChannel3): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 2
 
-proc ch3_step*(ch: GbChannel3; gb: GB) =
-  ch.wave_ram_position = (ch.wave_ram_position + 1) mod 32
+proc ch3_period(ch: GbChannel3; gb: GB): CycleCount {.inline.} =
+  CycleCount(ch3_frequency_timer(ch)) shl gb.scheduler.speed
+
+proc ch3_catchup_slow(ch: GbChannel3; gb: GB; observer_period: uint32) =
+  let now    = gb.scheduler.cycles
+  let ticks  = ch3_frequency_timer(ch)
+  let period = CycleCount(ticks) shl gb.scheduler.speed
+  let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
+  if steps == 0: return
+  # Only the LAST read matters: wave_ram is immutable between catch-ups
+  # (0xFF30-0xFF3F accesses catch up first), so the intermediate sample-buffer
+  # loads a per-period loop would do are all overwritten.
+  ch.wave_ram_position = uint8((int(ch.wave_ram_position) + int(steps mod 32)) mod 32)
   ch.wave_ram_sample_buffer = ch.wave_ram[ch.wave_ram_position div 2]
-  gb.scheduler.schedule_gb(int(ch3_frequency_timer(ch)),
-    etAPUChannel3)
+  ch.next_step += steps * period
+
+proc ch3_catchup_at*(ch: GbChannel3; gb: GB; observer_period: uint32) {.inline.} =
+  ## See ch1_catchup_at. The wave pointer is a free-running mod-32 counter.
+  if ch.next_step > gb.scheduler.cycles: return
+  ch3_catchup_slow(ch, gb, observer_period)
+
+proc ch3_catchup*(ch: GbChannel3; gb: GB) {.inline.} =
+  ch3_catchup_at(ch, gb, GB_OBS_CPU)
 
 proc ch3_get_amplitude*(ch: GbChannel3): float32 =
   if ch.enabled and ch.dac_enabled:
@@ -25,6 +44,8 @@ proc ch3_get_amplitude*(ch: GbChannel3): float32 =
   else: 0.0'f32
 
 proc ch3_read*(ch: GbChannel3; idx: int): uint8 =
+  # 0xFF30-0xFF3F while enabled returns the byte CH3 is currently playing, so
+  # apu_read catches the wave pointer up before calling this.
   case idx
   of 0xFF1A: 0x7F'u8 or (if ch.dac_enabled: 0x80'u8 else: 0'u8)
   of 0xFF1B: 0xFF'u8
@@ -67,9 +88,13 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x100
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      gb.scheduler.clear(etAPUChannel3)
-      gb.scheduler.schedule_gb(int(ch3_frequency_timer(ch)) + 6,
-        etAPUChannel3)
+      # Same as clear(etAPUChannel3) + schedule_gb(period + 6). The +6 is
+      # inside the speed shift, as schedule_gb had it.
+      ch.next_step = gb.scheduler.cycles +
+        (CycleCount(ch3_frequency_timer(ch) + 6) shl gb.scheduler.speed)
+      # Index resets, but wave_ram_sample_buffer deliberately does NOT: the
+      # last byte read keeps being output until CH3 next reads one (Pan Docs),
+      # so the pre-trigger buffer is observable and has to be materialized.
       ch.wave_ram_position = 0
   of 0xFF30..0xFF3F:
     if ch.enabled: ch.wave_ram[ch.wave_ram_position div 2] = val

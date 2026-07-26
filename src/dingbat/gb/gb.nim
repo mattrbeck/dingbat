@@ -373,6 +373,12 @@ type
 
   GbChannel1* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    # Absolute scheduler cycle of the next duty step, or GB_NO_STEP when the
+    # channel has never been triggered. Replaces a per-period scheduler event:
+    # the duty counter is advanced in closed form when something observes it
+    # (see ch1_catchup). NOT serialized as a field -- savestate.nim converts
+    # it to/from an etAPUChannel1 event so the state format is unchanged.
+    next_step*:          CycleCount
     sweep_period*:       uint8
     negate*:             bool
     shift*:              uint8
@@ -386,11 +392,13 @@ type
 
   GbChannel2* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    next_step*:          CycleCount   # see GbChannel1.next_step
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
 
   GbChannel3* = ref object of GbSoundChannel
+    next_step*:              CycleCount   # see GbChannel1.next_step
     wave_ram*:               array[16, uint8]
     wave_ram_position*:      uint8
     wave_ram_sample_buffer*: uint8
@@ -400,6 +408,7 @@ type
     frequency*:              uint16
 
   GbChannel4* = ref object of GbVolumeEnvChannel
+    next_step*:    CycleCount   # see GbChannel1.next_step
     lfsr*:         uint16
     length_load*:  uint8
     clock_shift*:  uint8
@@ -1204,10 +1213,14 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     case kind
     of etAPUFrameSeq:  tick_frame_sequencer(gb.apu, gb)
     of etAPUSample:    get_sample(gb.apu, gb)
-    of etAPUChannel1:  ch1_step(gb.apu.channel1, gb)
-    of etAPUChannel2:  ch2_step(gb.apu.channel2, gb)
-    of etAPUChannel3:  ch3_step(gb.apu.channel3, gb)
-    of etAPUChannel4:  ch4_step(gb.apu.channel4, gb)
+    # The GB core no longer schedules per-waveform-period channel events --
+    # each channel carries a next_step deadline advanced in closed form at the
+    # points that can observe it (see gb/apu/channel1.nim). These arms stay
+    # reachable only for a state saved by an older build, whose etAPUChannel*
+    # events gb_apply_state drains into next_step before the first tick; if one
+    # ever slips through, dropping it is strictly better than restarting a
+    # 4-cycle event chain that nothing reads.
+    of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: discard
     of etIME:          gb.cpu.ime = true
     of etSaves:        gb.handle_saves()
     of etRtcSecond:
@@ -1287,7 +1300,7 @@ proc step_frame*(gb: GB) =
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
   gb.ppu.frame = false
-  gb.scheduler.rebase()
+  gb.gb_rebase()
 
 method run_until_frame*(gb: GB) = gb.step_frame()
 

@@ -122,7 +122,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF01..0xFF02: serial_read(gb.serial, gb, idx)
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
   of 0xFF0F:         irq_read(gb.interrupts, idx)
-  of 0xFF10..0xFF3F: apu_read(gb.apu, idx)
+  of 0xFF10..0xFF3F: apu_read(gb.apu, idx, gb)
   of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_read(gb.ppu, gb, idx)
   of 0xFF4D:
@@ -142,8 +142,14 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF74:
     if gb.cgb_native: mem.ff74 else: 0xFF'u8
   of 0xFF75: (if gb.cgb_enabled: mem.ff75 or 0x8F'u8 else: 0xFF'u8)
-  of 0xFF76: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
-  of 0xFF77: (if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
+  # PCM12/PCM34: the raw digital output of channels 1+2 / 3+4. Stubbed to 0x00
+  # (implemented on worktree-samesuite-apu). The APU channels advance lazily, so
+  # a real implementation MUST sync first -- the call is already here so wiring
+  # up the real read is a one-line change with no correctness question left.
+  of 0xFF76:
+    if gb.cgb_enabled: (apu_catchup_all(gb.apu, gb); 0x00'u8) else: 0xFF'u8
+  of 0xFF77:
+    if gb.cgb_enabled: (apu_catchup_all(gb.apu, gb); 0x00'u8) else: 0xFF'u8
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80]
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8
@@ -248,5 +254,9 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
 proc stop_instr*(mem: GbMemory; gb: GB) =
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
+    let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
+    # The APU channels' next_step deadlines live outside the scheduler's event
+    # array, so rescale them the same way `speed_mode=` rescales events.
+    gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.`speed_mode=`(mem.current_speed)

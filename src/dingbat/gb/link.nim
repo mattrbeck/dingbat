@@ -90,7 +90,9 @@ proc step_frame*(link: GbLink) =
       link.frame_done[best] = true
   for i in 0 ..< link.cores.len:
     link.cores[i].ppu.frame = false
-    link.offsets[i] += int64(link.cores[i].scheduler.rebase())
+    # gb_rebase, not scheduler.rebase: the APU channels' deadlines are
+    # absolute cycles held outside the event array (see gb/apu.nim).
+    link.offsets[i] += int64(link.cores[i].gb_rebase())
 
 when defined(gbLinkTrace):
   # Debug hook (-d:gbLinkTrace): one call per completed transfer with the

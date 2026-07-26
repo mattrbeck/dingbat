@@ -178,3 +178,106 @@ without any wrapper — fields are accessed directly as struct members.
 | GB/GBC MBC    | Working       | ROM, MBC1/2/3/5; battery saves                  |
 | GB/GBC Timer  | Working       | DIV/TIMA/TMA/TAC; falling-edge detection         |
 | GB/GBC Misc   | Working       | Joypad, OAM DMA, CGB double-speed, WRAM banks    |
+
+### GB APU: lazy closed-form waveform catch-up (replaces per-period scheduler events)
+
+**Problem**: `gb/apu/channel{1,2,3,4}.nim` scheduled one scheduler event per
+waveform period. A square channel's period is `(0x800 - frequency) * 4` T-cycles,
+so a channel parked near frequency `0x7FF` fires every few cycles. Alone in the
+Dark leaves ch1/ch2/ch3 parked at ~`0x7FC` while all three are **disabled**, and
+measured **20,113 channel events per frame, 100% of them on disabled channels**,
+producing no audio at all. (The often-quoted 70,224/frame is the theoretical
+ceiling — four channels at exactly `0x7FF` — not a state any measured title
+reaches.) Pokemon Crystal spends 8,778 events/frame in the noise channel and
+Tetris 3,996.
+
+**Fix**: each channel now carries `next_step`, the absolute scheduler cycle of
+its next waveform step, and is advanced *in closed form* only when something can
+observe it. A square's duty counter is a free-running mod-8 counter, so N periods
+of advance is `pos = (pos + N) and 7`; the wave pointer is mod-32. Cost is
+independent of frequency, and a disabled channel costs nothing at all until the
+next thing that can see it. This is what mGBA (`GBAudioRun`, `src/gb/audio.c:503`
+— `diff /= period; index = (index + diff) & 7`) and Gambatte
+(`DutyUnit::updatePos`) do. Phase is preserved exactly, so a trigger still
+inherits the free-running duty position the way hardware does — hardware only
+resets the duty counter on an APU power-off, which is why *parking* disabled
+channels (freezing the phase) would have been wrong even though SameBoy does it.
+
+Channel 4 still iterates: the LFSR has no cheap closed form (Gambatte exploits
+`reg ^ reg>>1` == 15 shifts; not worth the divergence risk). The win there is
+that it iterates in a tight loop instead of paying a scheduler insert + heap pop
++ closure dispatch per shift.
+
+**Observation points** (the whole correctness argument; the list is in
+`gb/apu.nim` above `apu_catchup_all`): `etAPUSample`; wave RAM read *and* write
+at `0xFF30-0xFF3F`; `PCM12`/`PCM34` at `0xFF76`/`0xFF77` (stubbed to 0x00 today,
+but the sync call is wired up so the real implementation drops in); every
+`0xFF10-0xFF26` register write; frame-sequencer ticks (`length_step` can clear
+`enabled`, which parks ch4; `sweep_step` rewrites `ch1.frequency`); `NR52`
+channel-active bits (report `enabled`, which no catch-up changes — no sync
+needed); the CGB speed switch; the per-frame `scheduler.rebase()`; and save
+states / rollback snapshots.
+
+Two things fall out of the rebase hook being mandatory: it bounds how stale a
+deadline can get (one frame), which bounds ch4's loop and keeps the wasm build's
+`uint32` `CycleCount` from wrapping under a channel nobody has looked at.
+
+**Save-state format is unchanged.** Rather than append four fields to a
+positional, unversioned format, `savestate.nim` round-trips `next_step` through
+the `etAPUChannel<N>` events it replaced (`apu_arm_state_events` /
+`apu_extract_state_events`). Verified: a state written by this build is
+**byte-identical** to one written by the pre-change build, and each loads in the
+other. That also keeps rollback/netplay snapshots interchangeable.
+
+**The scheduler tie-break had to be reproduced.** When a waveform step landed on
+exactly the cycle an observing event ran on, both were due at the same cycle and
+`Scheduler.schedule` gave priority to the more recently scheduled one — i.e. the
+one with the *shorter* period, since each re-arms itself one period ahead. So a
+channel whose period is shorter than the observer's stepped first, and a longer
+one stepped after. Getting this wrong is the difference between "phase-exact" and
+bit-identical: before modelling it, 7 of 8 test titles differed in the PCM diff;
+after, 5 of 8 are byte-identical. See `gb_steps_due` in `apu/abstract_channels.nim`.
+
+**Known non-exact case (deliberate).** When a channel's step period is *exactly*
+equal to an observing event's period, the two events were armed on the same cycle
+and the old code's tie winner **alternated** with every shared cycle — producing
+0 then 2 steps per sample rather than 1. The alternation phase depends on
+insertion history and cannot be reconstructed without new serialized state, so
+this resolves them uniformly as "include" (one step per sample). Every remaining
+PCM difference against the pre-change build is confined to this case: measured
+over 3.3M samples per title, 100% of differing samples were on a channel whose
+period was exactly 128 T-cycles = `GB_SAMPLE_PERIOD` (ch4 with `NR43 = 0x22` is
+the common trigger; squares hit it at frequency `0x7E0`, ch3 at `0x7C0`). It
+affects 0.02–0.13% of samples by a fraction of one channel's DAC swing, and the
+uniform behaviour is the more defensible of the two — a period equal to the
+sample interval *should* advance one step per sample. Cross-checked against
+SameBoy: per-100ms RMS envelope Pearson is identical to 4 decimal places between
+the two builds (Pokemon Blue +0.9735 vs +0.9734, Crystal +0.9967 both, Oracle of
+Seasons +0.9996 both), i.e. the difference is below the resolution of the
+cross-emulator gate. Making it bit-identical would cost a per-channel tie-parity
+bit in the save state, breaking format compatibility, to reproduce an artifact of
+our scheduler's insertion order that no hardware behaviour corresponds to.
+
+**APU oracle (built for this change; there was none before).**
+- `./dingbat_test_runner --apu` runs 94 GB APU cases — blargg `dmg_sound` (7/12),
+  blargg `cgb_sound` (12/12), SameSuite `apu` (3/70). Opt-in so the default run
+  stays at 169/137/32. Two harness fixes were needed to make blargg's sound ROMs
+  score at all: `tmSram` latched the `0x80` "still running" status as the verdict,
+  and a stale `.sav` next to the ROM was read back as the verdict at frame 0.
+- `DINGBAT_GB_AUDIO_DUMP=<path>` writes the mixed GB output as raw s16le stereo
+  at 32768 Hz, from the headless test build; `tools/pcmdiff.py` diffs two dumps
+  byte-for-byte (strict) or by cross-correlation and RMS envelope (`--correlate`).
+  Byte-comparing two builds' PCM is the audio equivalent of the byte-identical
+  screenshot gate, and it is what caught the tie-break bug — the framebuffer was
+  identical across all 140 sweep titles the whole time.
+- `GBFUZZ_PCM=<path>` + `GBFUZZ_PCM_FRAMES=<N>` do the same for SameBoy in
+  `tools/gbfuzz/sameboy_runner.c`. Sample equality with SameBoy is not achievable
+  (it band-limits and models DAC charge); use `--correlate`, gate on envelope
+  Pearson >= 0.7.
+
+**Measured** (best-of-7, interleaved, `.sav` cleared, per-build ROM copies;
+noise floor from two builds of identical source was −1.24%..+0.59%):
+Alone in the Dark in-game **+6.1%**, Pokemon Crystal in-game **+7.1%**, Crystal
+boot **+13.3%**, Tetris **+7.7%**, Shantae +2.4%, Zelda: Link's Awakening +0.7%.
+The per-event cost works out at ~3 ns, so the win scales linearly with the event
+count a title was burning; the theoretical 70,224/frame ceiling would be ~+27%.

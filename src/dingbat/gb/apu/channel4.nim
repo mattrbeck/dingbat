@@ -1,32 +1,57 @@
 # GB APU Channel 4 - LFSR Noise (included by gb.nim)
 
 proc new_channel4*(gb: GB): GbChannel4 =
-  GbChannel4(enabled: false, dac_enabled: false, length_counter: 0)
+  GbChannel4(enabled: false, dac_enabled: false, length_counter: 0,
+             next_step: GB_NO_STEP)
 
 proc ch4_frequency_timer(ch: GbChannel4): uint32 =
   (if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift
 
-proc ch4_step*(ch: GbChannel4; gb: GB) =
+proc ch4_period(ch: GbChannel4; gb: GB): CycleCount {.inline.} =
+  CycleCount(ch4_frequency_timer(ch)) shl gb.scheduler.speed
+
+proc ch4_shift(ch: GbChannel4) {.inline.} =
   let new_bit = (ch.lfsr and 0b01'u16) xor ((ch.lfsr and 0b10'u16) shr 1)
   ch.lfsr = ch.lfsr shr 1
   ch.lfsr = ch.lfsr or (new_bit shl 14)
   if ch.width_mode != 0:
     ch.lfsr = ch.lfsr and not (1'u16 shl 6)
     ch.lfsr = ch.lfsr or (new_bit shl 6)
-  # Stop the LFSR clock while the channel is off. Games park a silent noise
-  # channel at a short divisor and leave it there — Shantae spends ~7900
-  # scheduler events per frame here, Pokemon Crystal ~8800 (Crystal's are all
-  # while the channel is playing, so it keeps every one of them).
-  #
-  # Nothing can observe a disabled channel's LFSR: ch4_get_amplitude gates on
-  # `enabled`, the register file exposes no LFSR bits, and NR52 reports
-  # `enabled` rather than any shift state. The only way back to enabled is the
-  # NR44 trigger, which reloads the LFSR with 0x7FFF and re-arms this event
-  # from scratch (ch4_write below) — so whatever the shift register did while
-  # silent is discarded either way. Bit-identical output, one fewer event.
-  if ch.enabled:
-    gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
-      etAPUChannel4)
+
+proc ch4_catchup_slow(ch: GbChannel4; gb: GB; observer_period: uint32) =
+  let now    = gb.scheduler.cycles
+  let ticks  = ch4_frequency_timer(ch)
+  let period = CycleCount(ticks) shl gb.scheduler.speed
+  let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
+  # steps == 0 means the tie went to the observer, so nothing has happened yet
+  # -- checking `enabled` before this would park the channel a step early.
+  if steps == 0: return
+  # A disabled channel's chain dies after ONE more step: the old ch4_step did
+  # the shift unconditionally and only the RESCHEDULE was gated on `enabled`.
+  # Every path that clears ch4.enabled (length_step via the frame sequencer,
+  # write_NRx2's DAC check, NR52 power-off) catches this channel up first, so
+  # next_step is always past the moment of disabling when we get here.
+  if not ch.enabled:
+    ch4_shift(ch)
+    ch.next_step = GB_NO_STEP
+    return
+  # The LFSR has no cheap closed form (Gambatte exploits reg^(reg>>1) == 15
+  # shifts; not worth the divergence risk here), so this still iterates. The
+  # win is that it iterates in a tight loop instead of paying a scheduler
+  # insert + heap pop + closure dispatch per shift. Bounded because
+  # apu_catchup_all runs at every frame boundary, so at most one frame of
+  # shifts (<= 8778 at the shortest divisor) can accumulate -- exactly the
+  # number the old event chain would have run anyway.
+  for _ in 0 ..< steps: ch4_shift(ch)
+  ch.next_step += steps * period
+
+proc ch4_catchup_at*(ch: GbChannel4; gb: GB; observer_period: uint32) {.inline.} =
+  ## See ch1_catchup_at. Unlike the other three this is O(steps), not O(1).
+  if ch.next_step > gb.scheduler.cycles: return
+  ch4_catchup_slow(ch, gb, observer_period)
+
+proc ch4_catchup*(ch: GbChannel4; gb: GB) {.inline.} =
+  ch4_catchup_at(ch, gb, GB_OBS_CPU)
 
 proc ch4_get_amplitude*(ch: GbChannel4): float32 =
   if ch.enabled and ch.dac_enabled:
@@ -65,9 +90,7 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      gb.scheduler.clear(etAPUChannel4)
-      gb.scheduler.schedule_gb(int(ch4_frequency_timer(ch)),
-        etAPUChannel4)
+      ch.next_step = gb.scheduler.cycles + ch4_period(ch, gb)
       init_volume_envelope(ch)
       ch.lfsr = 0x7FFF'u16
   else: discard

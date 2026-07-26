@@ -656,6 +656,46 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
 
 # ---- Top level ----
 
+# ---- APU waveform deadlines <-> scheduler events ----
+#
+# The channels' next_step deadlines replaced one etAPUChannel<N> scheduler event
+# per armed channel (see gb/apu.nim). Rather than append four new fields to a
+# positional, unversioned state format, round-trip them through the events they
+# replaced: the payload stays byte-identical to the pre-catch-up format, so a
+# state written here still loads in an older build and vice versa -- which also
+# keeps rollback/netplay snapshots interchangeable across the change.
+
+proc apu_arm_state_events(gb: GB) =
+  # Deadlines are in scheduler cycles, which is exactly what schedule() takes;
+  # the catch-up guarantees each one is in the future so the delay is positive.
+  gb.apu.apu_catchup_all(gb)
+  template arm(ch: untyped; et: EventType) =
+    if ch.next_step != GB_NO_STEP:
+      gb.scheduler.schedule(int(ch.next_step - gb.scheduler.cycles), et)
+  arm(gb.apu.channel1, etAPUChannel1)
+  arm(gb.apu.channel2, etAPUChannel2)
+  arm(gb.apu.channel3, etAPUChannel3)
+  arm(gb.apu.channel4, etAPUChannel4)
+
+proc apu_disarm_state_events(gb: GB) =
+  gb.scheduler.clear(etAPUChannel1)
+  gb.scheduler.clear(etAPUChannel2)
+  gb.scheduler.clear(etAPUChannel3)
+  gb.scheduler.clear(etAPUChannel4)
+
+proc apu_extract_state_events(gb: GB) =
+  # `et` rather than `kind`: a template parameter named `kind` would be
+  # substituted into `ev.kind` too and turn it into a bogus field access.
+  template take(ch: untyped; et: EventType) =
+    ch.next_step = GB_NO_STEP
+    for ev in gb.scheduler.events:
+      if ev.kind == et: ch.next_step = ev.cycles
+    gb.scheduler.clear(et)
+  take(gb.apu.channel1, etAPUChannel1)
+  take(gb.apu.channel2, etAPUChannel2)
+  take(gb.apu.channel3, etAPUChannel3)
+  take(gb.apu.channel4, etAPUChannel4)
+
 proc gb_state_payload(gb: GB): string =
   var w = Writer()
   save_cpu_state(gb.cpu, w)
@@ -666,7 +706,9 @@ proc gb_state_payload(gb: GB): string =
   save_mem_state(gb.memory, w)
   w.write_bool(gb.cgb_enabled)
   w.write_tag(GB_SEC_SCHED)
+  gb.apu_arm_state_events()
   gb.scheduler.save_to(w)
+  gb.apu_disarm_state_events()
   save_ppu_state(gb.ppu, w)
   save_apu_state(gb.apu, w)
   save_mbc_state(gb.cartridge, w)
@@ -686,6 +728,7 @@ proc gb_apply_state(gb: GB; payload: string) =
   gb.scheduler.load_from(r)
   load_ppu_state(gb.ppu, r)
   load_apu_state(gb.apu, r)
+  gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
   r.expect_tag(GB_SEC_END)
 

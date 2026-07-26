@@ -12,7 +12,6 @@ import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/common/input
 import dingbat/common/test_output
-from dingbat/common/scheduler import rebase
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 
@@ -188,7 +187,11 @@ proc main() =
       while not emu.ppu.frame:
         emu.cpu.tick(emu)
       emu.ppu.frame = false
-      total_cycles += uint64(emu.scheduler.rebase())
+      # gb_rebase, not scheduler.rebase: it also catches the lazily-advanced
+      # APU channels up and moves their deadlines with the events, which is
+      # what step_frame does. Calling the raw scheduler rebase here would
+      # leave the channel deadlines pointing at pre-rebase cycles.
+      total_cycles += uint64(emu.gb_rebase())
 
     if getEnv("DINGBAT_BENCH_HASH") == "1":
       var h = 0xCBF29CE484222325'u64
