@@ -9,10 +9,35 @@ Run them with:
 ./dingbat_test <rom> --mode=mooneye --color --model=cgb --timeout=3000
 ```
 
+or, for the whole suite at once alongside the two blargg sound suites:
+
+```
+./dingbat_test_runner --apu
+```
+
+which is opt-in and not part of the default gate (most of these fail, and they
+would swamp `tests/results.md`). Current APU tally across all three: 29/94.
+
 SameSuite uses the mooneye convention (`LD B,B`, then B=3 C=5 D=8 E=13 H=21
 L=34). ROMs ship in the test-ROM bundle under `same-suite/apu/`. Note its README
 says some apu tests only pass on CPU CGB E, so a few may be unreachable without
-per-revision boot models. `dingbat_test_runner` does not run this suite.
+per-revision boot models.
+
+## Two things this work depends on that are easy to get wrong
+
+**FF76/FF77 must catch the channels up before reading.** The PSG channels
+advance lazily — their phase is only materialized at an observation point, and
+these registers *are* an observation point. Reading them without syncing first
+returns the phase from whenever the channel was last touched, which is exactly
+the failure mode the whole suite is built to detect. This is not defensive
+coding; omit it and the tests read stale data.
+
+**Do not reset `frame_sequencer_stage` when the APU is powered off.** Pan Docs
+documents the sequencer being reset when the APU is powered *on*, and the
+power-on path already does it. Adding it to the power-off path as well looks
+harmless and costs `blargg/cgb_sound/08-len ctr during power`. The rest of the
+power-off phase reset (both squares' duty position, the wave sample position) is
+documented and is what earns the channel_3/channel_4 passes — keep that.
 
 ## How to read a failure as data
 
