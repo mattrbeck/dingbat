@@ -302,8 +302,25 @@ window.addEventListener("unhandledrejection", (e) => {
 const logContext = async () => {
   let version = "unknown";
   try {
+    // Cache-first on purpose: this is the version of the build the tab is
+    // actually EXECUTING, which is the only one worth reporting. A new worker
+    // stays waiting until Update is pressed, so the origin can be several
+    // deploys ahead of the running code.
     version = (await (await fetch("version.txt")).text()).trim().slice(0, 12);
   } catch {}
+  // ...and the origin's version, via a probe sw.js passes to the network, so a
+  // stale running build is visible in the log instead of having to be deduced.
+  // Measuring performance against the wrong build is otherwise invisible: the
+  // page looks current because every network check reports the new version.
+  let originVersion = "";
+  try {
+    const fresh = (await (await fetch("version.txt", { cache: "no-store" })).text())
+      .trim().slice(0, 12);
+    if (fresh && fresh !== version) originVersion = fresh;
+  } catch {}
+  const versionField = originVersion
+    ? version + " (origin " + originVersion + " \u2014 UPDATE PENDING)"
+    : version;
   const sw = navigator.serviceWorker && navigator.serviceWorker.controller
     ? "sw:controlled" : "sw:none";
   // Vibration diagnostic: support + a live test call so real-device haptic
@@ -323,7 +340,7 @@ const logContext = async () => {
   // false (blocked) over total calls — read after pressing a few buttons to
   // see whether pulses are being swallowed on this device.
   const vib = `vibrate:${vibSupported} test:${vibTest} act:${act} firstAct:${firstActivationEvent || "none"} hblk:${hapticBlocked}/${hapticCalls}`;
-  return `dingbat ${version} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${vib} | ${navigator.userAgent}`;
+  return `dingbat ${versionField} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${vib} | ${navigator.userAgent}`;
 };
 
 showLogButton.addEventListener("click", async () => {
