@@ -573,6 +573,7 @@ type SpanWalk = object
   prio:   array[4, int32]
   layer:  array[4, int32]
   direct: array[4, bool]                        # bitmap direct-colour BG2
+  sel1:   array[4, bool]                        # BLDCNT 1st-target
   row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
 
 proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
@@ -630,6 +631,75 @@ proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
     of 3: opaque_loop(3, false)
     else: opaque_loop(4, false)
 
+proc composite_span_shade(ppu: PPU; w: SpanWalk; row_base: uint32;
+                          lo, hi: int; obj_enable: bool) =
+  ## Span whose only reachable colour effect is brighten or darken: no
+  ## semi-transparent OBJ pixel can appear and the blend mode is not alpha, so
+  ## the layer under the top one can never matter. That makes the pixel loop
+  ## the opaque walk plus one shade of the winning colour, and it specialises
+  ## on the walk length exactly the same way.
+  let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
+  let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
+  let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
+  let bg2d     = cast[ptr UncheckedArray[uint16]](addr ppu.bg2_direct[0])
+  let bg2o     = cast[ptr UncheckedArray[bool]](addr ppu.bg2_direct_opaque[0])
+  let bld      = uint16(ppu.bldcnt)
+  let backdrop = pram_u16[0]
+  let sel_obj  = bit(bld, 4)
+  let sel_bd   = bit(bld, 5)
+  let evy      = uint64(min(16, int(ppu.bldy.evy_coefficient)))
+  let brighten = ppu.bldcnt.blend_mode == 2
+  let white    = bgr16_spread(0x7FFF'u16)
+  template shade(c: uint16): uint16 =
+    let s = bgr16_spread(c)
+    let d = (((if brighten: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
+    if brighten: bgr16_pack_sat(s + d) else: bgr16_pack_sat(s - d)
+  template shade_loop(NN: static int; DIRECT: static bool) =
+    for col in lo ..< hi:
+      let sp = sprites[col]
+      let spal = int(sp.palette)
+      var sprio = 4'i32
+      if obj_enable and spal != 0: sprio = int32(sp.priority)
+      var color = backdrop
+      var sel = sel_bd
+      block found:
+        for i in 0 ..< NN:
+          if sprio <= w.prio[i]:
+            color = pram_u16[0x100 + spal]
+            sel = sel_obj
+            break found
+          when DIRECT:
+            if w.direct[i]:
+              if bg2o[col]:
+                color = bg2d[col]
+                sel = w.sel1[i]
+                break found
+              continue
+          let palette = int(w.row[i][col])
+          if palette != 0:
+            color = pram_u16[palette]
+            sel = w.sel1[i]
+            break found
+        if sprio < 4:
+          color = pram_u16[0x100 + spal]
+          sel = sel_obj
+      if sel: color = shade(color)
+      fb[row_base + uint32(col)] = color
+  if ppu.bitmap_direct:
+    case w.n
+    of 0: shade_loop(0, true)
+    of 1: shade_loop(1, true)
+    of 2: shade_loop(2, true)
+    of 3: shade_loop(3, true)
+    else: shade_loop(4, true)
+  else:
+    case w.n
+    of 0: shade_loop(0, false)
+    of 1: shade_loop(1, false)
+    of 2: shade_loop(2, false)
+    of 3: shade_loop(3, false)
+    else: shade_loop(4, false)
+
 proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
                     enable_bits: uint16; effects: bool) =
   let obj_enable = bit(enable_bits, 4)
@@ -645,6 +715,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.prio[k]   = int32(ppu.walk_prios[i])
       w.layer[k]  = int32(bg)
       w.direct[k] = ppu.bitmap_direct and bg == 2
+      w.sel1[k]   = bit(uint16(ppu.bldcnt), bg)
       w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
       appear = appear or (1'u16 shl bg)
       w.n = k + 1
@@ -659,6 +730,12 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0))
   if not can_blend:
     ppu.composite_span_opaque(w, row_base, lo, hi, obj_enable)
+    return
+  # Brighten/darken with no semi-transparent OBJ pixel in play never needs the
+  # layer below the top one, which is the whole reason the general loop below
+  # is shaped the way it is. Split it out.
+  if ppu.bldcnt.blend_mode != 1 and not (obj_enable and ppu.line_sprite_blend):
+    ppu.composite_span_shade(w, row_base, lo, hi, obj_enable)
     return
 
   # Colour math is reachable in this span: find the top layer, then the layer
