@@ -574,6 +574,7 @@ type SpanWalk = object
   layer:  array[4, int32]
   direct: array[4, bool]                        # bitmap direct-colour BG2
   sel1:   array[4, bool]                        # BLDCNT 1st-target
+  sel2:   array[4, bool]                        # BLDCNT 2nd-target
   row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
 
 proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
@@ -716,6 +717,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.layer[k]  = int32(bg)
       w.direct[k] = ppu.bitmap_direct and bg == 2
       w.sel1[k]   = bit(uint16(ppu.bldcnt), bg)
+      w.sel2[k]   = bit(uint16(ppu.bldcnt), bg + 8)
       w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
       appear = appear or (1'u16 shl bg)
       w.n = k + 1
@@ -773,78 +775,111 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     elif blend_mode == 3: bgr16_pack_sat(s - d)
     else:                 top_u16
 
-  # Walk the layer list for column `col` starting at `idx`, stopping at the
-  # first opaque pixel. `sprio` is the OBJ priority to merge in (4 = no OBJ
-  # pixel here, or it was already taken as the layer above).
-  template scan(col, idx, sprio, spal, out_layer, out_color, out_blends) =
-    out_layer = 5
-    out_color = backdrop
-    out_blends = false
-    block done:
-      while idx < w.n:
-        if sprio <= w.prio[idx]:
-          out_layer = 4
-          out_color = pram_u16[0x100 + spal]
-          out_blends = sprites[col].blends
-          idx = idx or SPRITE_TAKEN
-          break done
-        if w.direct[idx]:
-          if bg2o[col]:
-            out_layer = int(w.layer[idx])
-            out_color = bg2d[col]
-            inc idx
-            break done
-        else:
-          let palette = int(w.row[idx][col])
+  let sel1_obj = bit(bld, 4)
+  let sel1_bd  = bit(bld, 5)
+  let sel2_obj = bit(bld, 4 + 8)
+  let sel2_bd  = bit(bld, 5 + 8)
+
+  # The search for the TOP layer runs on every pixel, so it gets the same
+  # per-walk-length instantiation as the opaque and shade loops. The search
+  # for the bottom does not: it starts at a runtime walk position, and it is
+  # reached on 0-14% of pixels across the benchmark titles, so it stays the
+  # general loop above.
+  template blend_loop(NN: static int; DIRECT: static bool) =
+    for col in lo ..< hi:
+      let sp = sprites[col]
+      let spal = int(sp.palette)
+      var sprio = 4'i32
+      if obj_enable and spal != 0: sprio = int32(sp.priority)
+      # `idx` carries the walk position plus a "OBJ already taken" flag in a
+      # spare bit, so the search for the blend bottom resumes where the top
+      # left off instead of restarting.
+      var idx = NN or SPRITE_TAKEN
+      var top_color = backdrop
+      var top_blends = false
+      var top_selected = sel1_bd
+      block found:
+        for i in 0 ..< NN:
+          if sprio <= w.prio[i]:
+            top_color = pram_u16[0x100 + spal]
+            top_blends = sp.blends
+            top_selected = sel1_obj
+            idx = i or SPRITE_TAKEN
+            break found
+          when DIRECT:
+            if w.direct[i]:
+              if bg2o[col]:
+                top_color = bg2d[col]
+                top_selected = w.sel1[i]
+                idx = i + 1
+                break found
+              continue
+          let palette = int(w.row[i][col])
           if palette != 0:
-            out_layer = int(w.layer[idx])
-            out_color = pram_u16[palette]
-            inc idx
-            break done
-        inc idx
-      # Off the end of the walk: an OBJ pixel behind every BG still beats the
-      # backdrop.
-      idx = idx or SPRITE_TAKEN
-      if sprio < 4:
-        out_layer = 4
-        out_color = pram_u16[0x100 + spal]
-        out_blends = sprites[col].blends
-
-  for col in lo ..< hi:
-    let sp = sprites[col]
-    let spal = int(sp.palette)
-    var sprio = 4'i32
-    if obj_enable and spal != 0: sprio = int32(sp.priority)
-    # `idx` carries the walk position plus a "OBJ already taken" flag in a
-    # spare bit, so the search for the blend bottom resumes where the top left
-    # off instead of restarting.
-    var idx = 0
-    var top_layer: int
-    var top_color: uint16
-    var top_blends: bool
-    scan(col, idx, sprio, spal, top_layer, top_color, top_blends)
-    var color = top_color
-    # 1st-target = BLDCNT bit `layer`, 2nd-target = bit `layer + 8`. The
-    # second layer is only searched when the result can depend on it: a
-    # semi-transparent OBJ on top, or alpha blending with a selected top.
-    let top_selected = bit(bld, top_layer)
-    if top_blends or (top_selected and blend_mode == 1):
-      var bsprio = 4'i32
-      if (idx and SPRITE_TAKEN) == 0 and obj_enable and spal != 0:
-        bsprio = int32(sp.priority)
-      var bidx = idx and not SPRITE_TAKEN
-      var bot_layer: int
-      var bot_color: uint16
-      var bot_blends: bool
-      scan(col, bidx, bsprio, spal, bot_layer, bot_color, bot_blends)
-      if bit(bld, bot_layer + 8):
-        color = alpha(top_color, bot_color)
-      elif top_blends and top_selected and blend_mode != 1:
+            top_color = pram_u16[palette]
+            top_selected = w.sel1[i]
+            idx = i + 1
+            break found
+        if sprio < 4:
+          top_color = pram_u16[0x100 + spal]
+          top_blends = sp.blends
+          top_selected = sel1_obj
+      var color = top_color
+      # 1st-target = BLDCNT bit `layer`, 2nd-target = bit `layer + 8`. The
+      # second layer is only searched when the result can depend on it: a
+      # semi-transparent OBJ on top, or alpha blending with a selected top.
+      if top_blends or (top_selected and blend_mode == 1):
+        var bsprio = 4'i32
+        if (idx and SPRITE_TAKEN) == 0 and obj_enable and spal != 0:
+          bsprio = int32(sp.priority)
+        var bidx = idx and not SPRITE_TAKEN
+        var bot_selected = sel2_bd
+        var bot_color = backdrop
+        block bfound:
+          while bidx < NN:
+            if bsprio <= w.prio[bidx]:
+              bot_color = pram_u16[0x100 + spal]
+              bot_selected = sel2_obj
+              break bfound
+            when DIRECT:
+              if w.direct[bidx]:
+                if bg2o[col]:
+                  bot_color = bg2d[col]
+                  bot_selected = w.sel2[bidx]
+                  break bfound
+                inc bidx
+                continue
+            let palette = int(w.row[bidx][col])
+            if palette != 0:
+              bot_color = pram_u16[palette]
+              bot_selected = w.sel2[bidx]
+              break bfound
+            inc bidx
+          if bsprio < 4:
+            bot_color = pram_u16[0x100 + spal]
+            bot_selected = sel2_obj
+        if bot_selected:
+          color = alpha(top_color, bot_color)
+        elif top_blends and top_selected and blend_mode != 1:
+          color = brighten_darken(top_color)
+      elif top_selected and blend_mode != 0:
         color = brighten_darken(top_color)
-    elif top_selected and blend_mode != 0:
-      color = brighten_darken(top_color)
-    fb[row_base + uint32(col)] = color
+      fb[row_base + uint32(col)] = color
 
+  if ppu.bitmap_direct:
+    case w.n
+    of 0: blend_loop(0, true)
+    of 1: blend_loop(1, true)
+    of 2: blend_loop(2, true)
+    of 3: blend_loop(3, true)
+    else: blend_loop(4, true)
+  else:
+    case w.n
+    of 0: blend_loop(0, false)
+    of 1: blend_loop(1, false)
+    of 2: blend_loop(2, false)
+    of 3: blend_loop(3, false)
+    else: blend_loop(4, false)
 
 proc composite*(ppu: PPU; row_base: uint32) =
   ppu.compute_layer_walk()
