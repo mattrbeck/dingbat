@@ -9,22 +9,25 @@
 // fast-forward. Native numbers cannot answer that: the browser runs a
 // different compiler (emcc -O3, and the wasm build is -d:danger while the
 // native bench is -d:release), and the web frame loop wraps emulation in
-// per-frame work that dingbat_bench never executes. This driver measures
-// three things per (build, ROM) so those can be separated:
+// per-frame work that dingbat_bench never executes. This driver measures four
+// things per (build, ROM) so those can be separated:
 //
-//   emu   — Module._benchFrames(N): emulation ONLY. No LUT convert, no rewind
-//           snapshot, no audio, no present. The wasm analogue of the native
-//           bench, and the number the core work should move.
-//   tick  — Module._loop_tick() in a bare loop: emulation + prepare_game_frame
-//           (BGR555 LUT convert) + the rewind ring's periodic state
-//           serialize/XOR/deflate. This is what the app's frame loop calls.
+//   emu   — Module._benchFrames(N): emulation ONLY. No rewind snapshot, no
+//           audio, no present. The wasm analogue of the native bench, and the
+//           number the core work should move.
+//   tick  — Module._loop_tick() in a bare loop: what the app's frame loop
+//           actually calls, i.e. emulation plus prepare_game_frame plus the
+//           rewind ring's periodic state serialize/XOR/deflate.
+//   draw  — the app's own drawGame(): texture upload plus present shader. In
+//           fast-forward this runs once per RAF TICK, not once per emulated
+//           frame, so divide by frames-per-tick for its per-frame share.
 //   ff    — the app's real uncapped fast-forward, driven by clicking the real
 //           #fast-forward button and reading the app's own #fps counter. This
 //           is exactly what the user measures.
 //
 // (emu vs tick) attributes any shortfall to loop_tick's non-emulation work;
-// (tick vs ff) attributes the rest to the browser frame loop — RAF cadence,
-// the 16 ms budget's quantisation, audio scheduling and presentation.
+// (tick + draw vs ff) attributes the rest to the browser frame loop — RAF
+// cadence, the 16 ms per-tick budget's quantisation, and audio scheduling.
 //
 // Method notes, all of them load-bearing:
 //   * One static server per build, so each build gets its own ORIGIN. That
@@ -61,7 +64,8 @@ import { extname, join, resolve, basename } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
-  PAGE_PREP, PAGE_CORE_TRIALS, PAGE_FF, PAGE_RAF, PAGE_SHOT,
+  PAGE_PREP, PAGE_CORE_TRIALS, PAGE_DRAW_TRIALS, PAGE_FFSIM, PAGE_FF, PAGE_RAF,
+  PAGE_SHOT,
 } from "./pagelib.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -232,7 +236,7 @@ console.log(`engine: ${ENGINE} ${browser.version()} headless=${!HEADED} audio=${
 
 // results[build][rom] = { emu: [msPerFrame...], tick: [...], ff: [fps...] }
 const results = {};
-const note = (b, r) => ((results[b] ??= {})[r] ??= { emu: [], tick: [], ff: [], raf: [] });
+const note = (b, r) => ((results[b] ??= {})[r] ??= { emu: [], tick: [], ff: [], raf: [], draw: [], ffsim: [] });
 
 const measure = async (build, romName, romPath) => {
   const { port } = servers.get(build);
@@ -267,17 +271,24 @@ const measure = async (build, romName, romPath) => {
     const core = await page.evaluate(PAGE_CORE_TRIALS, {
       frames: TRIAL_FRAMES, trials: EMU_TRIALS,
     });
+    const draw = await page.evaluate(PAGE_DRAW_TRIALS, { calls: 200, trials: 5 });
+    const ffsim = [];
+    for (let i = 0; i < 3; i++) ffsim.push(await page.evaluate(PAGE_FFSIM, { frames: TRIAL_FRAMES }));
     const ff = await page.evaluate(PAGE_FF, { samples: FF_SAMPLES });
 
     const rec = note(build, romName);
     rec.emu.push(...core.emu);
     rec.tick.push(...core.tick);
     rec.ff.push(...ff.fps);
+    rec.draw.push(...draw);
+    rec.ffsim.push(...ffsim);
     rec.raf.push(raf);
     rec.stateBytes = prep.stateBytes;
     console.log(
       `  ${build} ${romName.padEnd(10)} emu ${Math.min(...core.emu).toFixed(3)}ms ` +
       `tick ${Math.min(...core.tick).toFixed(3)}ms ` +
+      `ffsim ${Math.min(...ffsim).toFixed(3)}ms ` +
+      `draw ${Math.min(...draw).toFixed(3)}ms ` +
       `ff ${ff.fps.length ? Math.max(...ff.fps) : "?"}fps ` +
       `raf ${raf.toFixed(1)}ms state ${(prep.stateBytes / 1024).toFixed(0)}KB` +
       (errs.length ? `  [pageerror: ${errs[0].slice(0, 80)}]` : "")
@@ -311,7 +322,7 @@ const base = BUILDS[0];
 const head = ["rom", "metric", ...BUILDS.map((b) => b.slice(0, 7)), "delta vs " + base.slice(0, 7)];
 const rows = [head];
 for (const [romName] of ROMS) {
-  for (const metric of ["emu", "tick", "ff"]) {
+  for (const metric of ["emu", "tick", "ffsim", "draw", "ff"]) {
     const vals = BUILDS.map((b) => {
       const r = results[b]?.[romName];
       if (!r) return NaN;

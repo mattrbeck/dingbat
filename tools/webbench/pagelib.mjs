@@ -73,6 +73,55 @@ export const PAGE_CORE_TRIALS = ({ frames, trials }) => {
   return out;
 };
 
+// The fast-forward loop's body, replicated exactly, timed per frame.
+//
+// index.js's FF branch is not just loop_tick: for every emulated frame it also
+// consults performance.now() for the 16 ms budget and either pushes that
+// frame's audio or throws it away with _clearAudioBuffer. Those are per-FRAME
+// costs, so unlike the once-per-tick present they do NOT shrink as emulation
+// gets cheaper — they are what makes the observed fps gain come in under the
+// emulation gain. This isolates them: (ffsim - tick) is the per-frame JS
+// overhead of the loop itself, with no RAF and no present involved.
+//
+// Kept structurally identical to the shipped loop rather than shared with it;
+// if index.js's FF branch changes, this stops matching and should be updated.
+export const PAGE_FFSIM = ({ frames }) => {
+  window.__benchRestore();
+  const t0 = performance.now();
+  let n = 0;
+  const start = performance.now();
+  while (n < frames) {
+    performance.now() - start;         // the budget check the real loop makes
+    Module._loop_tick();
+    Module._clearAudioBuffer();        // the no-audio-room branch
+    n++;
+  }
+  return (performance.now() - t0) / frames;
+};
+
+// The present path, measured directly: the app's own drawGame() — texture
+// upload of the raw BGR555 framebuffer plus the present shader. In fast-forward
+// this runs ONCE PER RAF TICK while loop_tick runs as many times as fit in the
+// tick's 16 ms budget, so its per-emulated-frame share is this divided by the
+// frames-per-tick count. drawGame is a top-level const in index.js, which
+// cannot be reassigned but can be READ by name from an evaluate.
+//
+// Caveat, stated because it bounds the conclusion: this is CPU submit time.
+// GPU work runs asynchronously, so a GPU-bound present would show up here only
+// as back-pressure on a later call, and headless Chromium's ANGLE/SwiftShader
+// path does that work on the CPU anyway. Treat it as "what the frame loop
+// blocks on", which is the quantity the fast-forward budget cares about.
+export const PAGE_DRAW_TRIALS = ({ calls, trials }) => {
+  const out = [];
+  for (let t = 0; t < trials; t++) {
+    drawGame(); // warm the first-call path out of the sample
+    const t0 = performance.now();
+    for (let i = 0; i < calls; i++) drawGame();
+    out.push((performance.now() - t0) / calls);
+  }
+  return out;
+};
+
 // The app's real uncapped fast-forward: clicks the real #fast-forward button
 // and reads the app's own #fps counter — the exact number the user reports.
 export const PAGE_FF = async ({ samples }) => {
@@ -97,10 +146,23 @@ export const PAGE_FF = async ({ samples }) => {
 
 // Average RAF interval — the tick cadence the fast-forward loop's fixed 16 ms
 // per-tick budget is quantised to.
+//
+// The 3 s bail-out is not belt-and-braces: a browser window that is not
+// actually being composited (a headed run with no visible window, an occluded
+// or backgrounded tab) delivers NO animation frames at all, and page.evaluate
+// has no default timeout, so without this the whole harness hangs silently
+// instead of reporting a useless RAF rate. Returns 0 when RAF never ran, which
+// also invalidates the fast-forward numbers from that run — the FF loop IS a
+// RAF loop.
 export const PAGE_RAF = () =>
   new Promise((res) => {
     const ts = [];
-    const tick = (t) => { ts.push(t); ts.length < 31 ? requestAnimationFrame(tick) : res((ts[30] - ts[0]) / 30); };
+    const bail = setTimeout(() => res(ts.length > 1 ? (ts[ts.length - 1] - ts[0]) / (ts.length - 1) : 0), 3000);
+    const tick = (t) => {
+      ts.push(t);
+      if (ts.length < 31) requestAnimationFrame(tick);
+      else { clearTimeout(bail); res((ts[30] - ts[0]) / 30); }
+    };
     requestAnimationFrame(tick);
   });
 
