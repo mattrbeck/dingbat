@@ -413,6 +413,7 @@ type
     line_enables*: array[240, uint16]
     line_effects*: array[240, bool]
     line_sprite_blend*: bool  # any semi-transparent sprite pixel on this line
+    line_obj_window*: bool    # any OBJ-window sprite pixel on this line
     # Render skipping: render_dirty is set by anything that can change the
     # picture (VRAM/PRAM/OAM writes, PPU register writes, Stop transitions).
     # When a full frame passes with no such change, the framebuffer already

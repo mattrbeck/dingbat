@@ -2,6 +2,10 @@
 
 const SPRITE_PIXEL_DEFAULT* = SpritePixel(priority: 4, palette: 0, blends: false, window: false)
 
+# Flag bit OR'd into a layer-walk index to record that the OBJ layer has
+# already been consumed, so resuming the walk for a blend bottom skips it.
+const SPRITE_TAKEN = 0x40
+
 # SIZES[shape][size] = (width, height)
 const SIZES*: array[3, array[4, array[2, int]]] = [
   [[8,8],   [16,16], [32,32], [64,64]],  # square
@@ -432,6 +436,7 @@ proc render_sprites*(ppu: PPU) =
       if obj_mode == 0b10:  # object window
         if pal_idx > 0:
           ppu.sprite_pixels[col].window = true
+          ppu.line_obj_window = true
       elif spr_priority < int(ppu.sprite_pixels[col].priority) or ppu.sprite_pixels[col].palette == 0:
         ppu.sprite_pixels[col].priority = uint16(spr_priority)
         if pal_idx > 0:
@@ -543,122 +548,205 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
     bgr16_pack_sat(s - (((s * evy) shr 4) and BGR_LANE_MASK))
   else: top_u16
 
-proc next_layer(ppu: PPU; pram_u16: ptr UncheckedArray[uint16];
-                enable_bits: uint16; col: int;
-                pos: var int): tuple[layer: int, color: uint16, blends: bool]
-                {.inline.} =
-  ## Inlined deliberately: this runs 1-3 times per pixel on the windowed /
-  ## blending scanline path, and out of line the three-field tuple return was
-  ## going through memory (sret) on every call instead of staying in
-  ## registers. Inlining also lets the compiler hoist walk_n / walk_bgs /
-  ## bitmap_direct out of the column loop in `composite`.
-  ## Scan the flattened layer walk starting at `pos` and return the next
-  ## opaque pixel; layer 5 is the backdrop. `pos` encodes the walk index in
-  ## its upper bits and "sprite already taken" in bit 0, so a caller can
-  ## resume the walk to find the second layer for blending. The sprite layer
-  ## sits in front of the first walk entry whose priority is >= the sprite's
-  ## (slot 0 of each priority on hardware).
-  let sp = ppu.sprite_pixels[col]
-  var sprio = 4
-  if (pos and 1) == 0 and bit(enable_bits, 4) and sp.palette != 0:
-    sprio = int(sp.priority)
-  let taken = pos and 1
-  var idx = pos shr 1
-  while idx < ppu.walk_n:
-    if sprio <= int(ppu.walk_prios[idx]):
-      pos = (idx shl 1) or 1
-      return (4, pram_u16[0x100 + int(sp.palette)], sp.blends)
-    let bg = int(ppu.walk_bgs[idx])
-    inc idx
-    if bit(enable_bits, bg):
-      if ppu.bitmap_direct and bg == 2:
-        if ppu.bg2_direct_opaque[col]:
-          pos = (idx shl 1) or taken
-          return (2, ppu.bg2_direct[col], false)
-      else:
-        let palette = int(ppu.layer_palettes[bg][col])
-        if palette != 0:
-          pos = (idx shl 1) or taken
-          return (bg, pram_u16[palette], false)
-  pos = (idx shl 1) or 1
-  if sprio < 4:
-    return (4, pram_u16[0x100 + int(sp.palette)], sp.blends)
-  (5, pram_u16[0], false)
+# --- Compositing ---------------------------------------------------------
+#
+# Compositing runs per span of columns that share one window configuration,
+# not per pixel. Everything a span holds constant -- which layers the window
+# enables, their priority order, where each layer's line buffer starts, and
+# whether any colour math can apply at all -- is resolved once at the top of
+# `composite_span` and the inner loop then only walks opaque pixels.
+#
+# The two inner loops differ only in whether colour math is reachable. The
+# no-effect loop is the same "first opaque pixel in priority order wins" logic
+# the old fast path used, and it is what the great majority of real columns
+# take: a window that turns effects off, or a blend configuration whose
+# 1st-target set is empty for the layers this window enables, can never change
+# a pixel, so searching for a second layer or testing BLDCNT per pixel is pure
+# waste. Measured over nine titles, 52-100% of the columns that reach the
+# windowed/blending path fall in that class (Emerald from an in-game save
+# state: 100%).
 
-proc composite*(ppu: PPU; row_base: uint32) =
-  ppu.compute_layer_walk()
+type SpanWalk = object
+  ## The layer walk filtered down to one span's enabled layers.
+  n:      int
+  prio:   array[4, int32]
+  layer:  array[4, int32]
+  direct: array[4, bool]                        # bitmap direct-colour BG2
+  row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
+
+proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
+                    enable_bits: uint16; effects: bool) =
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
-  let windows_active = ppu.dispcnt.window_0_display or
-                       ppu.dispcnt.window_1_display or
-                       ppu.dispcnt.obj_window_display
-  let blending_possible = ppu.bldcnt.blend_mode != 0 or ppu.line_sprite_blend
-  if not windows_active and not blending_possible:
-    # Fast path (most scanlines): every layer is enabled screen-wide and no
-    # color math can apply, so the first opaque pixel in priority order wins
-    let obj_enable = bit(uint16(ppu.dispcnt.default_enable_bits), 4) and
-                     bit(ppu.debug_layer_mask, 4)
-    let walk_n = ppu.walk_n
-    for col in 0 .. 239:
-      let sp = ppu.sprite_pixels[col]
-      var sprio = 4
-      if obj_enable and sp.palette != 0: sprio = int(sp.priority)
-      var color = pram_u16[0]
+  let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
+  let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
+  let bg2d     = cast[ptr UncheckedArray[uint16]](addr ppu.bg2_direct[0])
+  let bg2o     = cast[ptr UncheckedArray[bool]](addr ppu.bg2_direct_opaque[0])
+  let bld        = uint16(ppu.bldcnt)
+  let blend_mode = int(ppu.bldcnt.blend_mode)
+  let obj_enable = bit(enable_bits, 4)
+  let backdrop   = pram_u16[0]
+
+  var w: SpanWalk
+  # Layers that can end up on top somewhere in this span. The backdrop always
+  # can (every layer may be transparent); OBJ only when the window enables it.
+  var appear = 0x20'u16
+  if obj_enable: appear = appear or 0x10'u16
+  for i in 0 ..< ppu.walk_n:
+    let bg = int(ppu.walk_bgs[i])
+    if bit(enable_bits, bg):
+      let k = w.n
+      w.prio[k]   = int32(ppu.walk_prios[i])
+      w.layer[k]  = int32(bg)
+      w.direct[k] = ppu.bitmap_direct and bg == 2
+      w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
+      appear = appear or (1'u16 shl bg)
+      w.n = k + 1
+
+  # Walk the layer list for column `col` starting at `idx`, stopping at the
+  # first opaque pixel. `sprio` is the OBJ priority to merge in (4 = no OBJ
+  # pixel here, or it was already taken as the layer above).
+  template scan(col, idx, sprio, spal, out_layer, out_color, out_blends) =
+    out_layer = 5
+    out_color = backdrop
+    out_blends = false
+    block done:
+      while idx < w.n:
+        if sprio <= w.prio[idx]:
+          out_layer = 4
+          out_color = pram_u16[0x100 + spal]
+          out_blends = sprites[col].blends
+          idx = idx or SPRITE_TAKEN
+          break done
+        if w.direct[idx]:
+          if bg2o[col]:
+            out_layer = int(w.layer[idx])
+            out_color = bg2d[col]
+            inc idx
+            break done
+        else:
+          let palette = int(w.row[idx][col])
+          if palette != 0:
+            out_layer = int(w.layer[idx])
+            out_color = pram_u16[palette]
+            inc idx
+            break done
+        inc idx
+      # Off the end of the walk: an OBJ pixel behind every BG still beats the
+      # backdrop.
+      idx = idx or SPRITE_TAKEN
+      if sprio < 4:
+        out_layer = 4
+        out_color = pram_u16[0x100 + spal]
+        out_blends = sprites[col].blends
+
+  # Can colour math change any pixel in this span? Alpha/brighten/darken all
+  # require the top layer to be a BLDCNT 1st target, and a semi-transparent
+  # OBJ pixel forces alpha regardless of the blend mode -- so if neither is
+  # reachable here, the whole effects apparatus is dead code for this span.
+  let can_blend = effects and
+    ((obj_enable and ppu.line_sprite_blend) or
+     (blend_mode != 0 and (bld and 0x3F'u16 and appear) != 0))
+
+  if not can_blend:
+    for col in lo ..< hi:
+      let sp = sprites[col]
+      let spal = int(sp.palette)
+      var sprio = 4'i32
+      if obj_enable and spal != 0: sprio = int32(sp.priority)
+      var color = backdrop
       block found:
-        for i in 0 ..< walk_n:
-          if sprio <= int(ppu.walk_prios[i]):
-            color = pram_u16[0x100 + int(sp.palette)]
+        for i in 0 ..< w.n:
+          if sprio <= w.prio[i]:
+            color = pram_u16[0x100 + spal]
             break found
-          let bg = int(ppu.walk_bgs[i])
-          if ppu.bitmap_direct and bg == 2:
-            if ppu.bg2_direct_opaque[col]:
-              color = ppu.bg2_direct[col]
+          if w.direct[i]:
+            if bg2o[col]:
+              color = bg2d[col]
               break found
           else:
-            let palette = int(ppu.layer_palettes[bg][col])
+            let palette = int(w.row[i][col])
             if palette != 0:
               color = pram_u16[palette]
               break found
         if sprio < 4:
-          color = pram_u16[0x100 + int(sp.palette)]
-      ppu.framebuffer[row_base + uint32(col)] = color
-  else:
-    if windows_active:
-      ppu.compute_line_enables()
+          color = pram_u16[0x100 + spal]
+      fb[row_base + uint32(col)] = color
+    return
+
+  for col in lo ..< hi:
+    let sp = sprites[col]
+    let spal = int(sp.palette)
+    var sprio = 4'i32
+    if obj_enable and spal != 0: sprio = int32(sp.priority)
+    # `idx` carries the walk position plus a "OBJ already taken" flag in its
+    # high bit, so the search for the blend bottom resumes where the top left
+    # off instead of restarting.
+    var idx = 0
+    var top_layer: int
+    var top_color: uint16
+    var top_blends: bool
+    scan(col, idx, sprio, spal, top_layer, top_color, top_blends)
+    var color = top_color
+    # 1st-target = BLDCNT bit `layer`, 2nd-target = bit `layer + 8`. The
+    # second layer is only searched when the result can depend on it: a
+    # semi-transparent OBJ on top, or alpha blending with a selected top.
+    let top_selected = bit(bld, top_layer)
+    if top_blends or (top_selected and blend_mode == 1):
+      var bsprio = 4'i32
+      if (idx and SPRITE_TAKEN) == 0 and obj_enable and spal != 0:
+        bsprio = int32(sp.priority)
+      var bidx = idx and not SPRITE_TAKEN
+      var bot_layer: int
+      var bot_color: uint16
+      var bot_blends: bool
+      scan(col, bidx, bsprio, spal, bot_layer, bot_color, bot_blends)
+      if bit(bld, bot_layer + 8):
+        color = ppu.blend_colors(top_color, bot_color, 1)
+      elif top_blends and top_selected and blend_mode != 1:
+        color = ppu.blend_colors(top_color, 0, blend_mode)
+    elif top_selected and blend_mode != 0:
+      color = ppu.blend_colors(top_color, 0, blend_mode)
+    fb[row_base + uint32(col)] = color
+
+proc composite*(ppu: PPU; row_base: uint32) =
+  ppu.compute_layer_walk()
+  let vc = ppu.vcount
+  let dbg_mask = ppu.debug_layer_mask
+  # Which window sources actually apply to THIS line? win0/win1 only inside
+  # their vertical range, the OBJ window only when a sprite wrote an
+  # OBJ-window pixel (tracked in render_sprites, so no per-column scan). When
+  # none of them do, every column shares one enable mask and there is no need
+  # to build (or read back) the per-column tables at all.
+  let win0_on = ppu.dispcnt.window_0_display and
+                window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
+  let win1_on = ppu.dispcnt.window_1_display and
+                window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2))
+  let objwin_on = ppu.dispcnt.obj_window_display and ppu.line_obj_window
+  if not (win0_on or win1_on or objwin_on):
+    let any_window = ppu.dispcnt.window_0_display or
+                     ppu.dispcnt.window_1_display or
+                     ppu.dispcnt.obj_window_display
+    if any_window:
+      ppu.composite_span(row_base, 0, 240,
+                         uint16(ppu.winout.outside_enable_bits) and dbg_mask,
+                         ppu.winout.outside_color_special_effect)
     else:
-      let bits = uint16(ppu.dispcnt.default_enable_bits) and ppu.debug_layer_mask
-      for col in 0 .. 239:
-        ppu.line_enables[col] = bits
-        ppu.line_effects[col] = true
-    let bld = uint16(ppu.bldcnt)
-    let blend_mode = int(ppu.bldcnt.blend_mode)
-    for col in 0 .. 239:
-      let enable_bits = ppu.line_enables[col]
-      var pos = 0
-      let (top_layer, top_color, top_blends) =
-        ppu.next_layer(pram_u16, enable_bits, col, pos)
-      var color = top_color
-      if ppu.line_effects[col]:
-        # 1st-target = bldcnt bit `layer`, 2nd-target = bit `layer + 8`.
-        # The second layer is only searched when the result can depend on it:
-        # a semi-transparent sprite on top, or alpha blending with a selected
-        # top layer.
-        let top_selected = bit(bld, top_layer)
-        if top_blends:
-          let (bot_layer, bot_color, _) =
-            ppu.next_layer(pram_u16, enable_bits, col, pos)
-          if bit(bld, bot_layer + 8):
-            color = ppu.blend_colors(top_color, bot_color, 1)
-          elif top_selected and blend_mode != 1:
-            color = ppu.blend_colors(top_color, 0, blend_mode)
-        elif top_selected:
-          if blend_mode == 1:
-            let (bot_layer, bot_color, _) =
-              ppu.next_layer(pram_u16, enable_bits, col, pos)
-            if bit(bld, bot_layer + 8):
-              color = ppu.blend_colors(top_color, bot_color, 1)
-          elif blend_mode != 0:
-            color = ppu.blend_colors(top_color, 0, blend_mode)
-      ppu.framebuffer[row_base + uint32(col)] = color
+      ppu.composite_span(row_base, 0, 240,
+                         uint16(ppu.dispcnt.default_enable_bits) and dbg_mask,
+                         true)
+    return
+  ppu.compute_line_enables()
+  # Split the line into runs of identical window state and composite each one
+  # with the enable mask hoisted out of the pixel loop.
+  var col = 0
+  while col < 240:
+    let bits = ppu.line_enables[col]
+    let eff  = ppu.line_effects[col]
+    var e = col + 1
+    while e < 240 and ppu.line_enables[e] == bits and ppu.line_effects[e] == eff:
+      inc e
+    ppu.composite_span(row_base, col, e, bits, eff)
+    col = e
 
 proc scanline*(ppu: PPU) =
   # Render skipping: when a full frame passes without any change to VRAM,
@@ -696,6 +784,7 @@ proc scanline*(ppu: PPU) =
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
   ppu.bitmap_direct = false
   ppu.line_sprite_blend = false
+  ppu.line_obj_window = false
   case ppu.dispcnt.bg_mode
   of 0:
     ppu.render_reg_bg(0); ppu.render_reg_bg(1)
