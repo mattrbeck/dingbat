@@ -673,6 +673,28 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   let bld        = uint16(ppu.bldcnt)
   let blend_mode = int(ppu.bldcnt.blend_mode)
   let backdrop   = pram_u16[0]
+  # BLDALPHA/BLDY are constant for the span, so extract the coefficients once
+  # here instead of re-reading the bitfields inside blend_colors on every
+  # blended pixel.
+  let eva = uint64(min(16, int(ppu.bldalpha.eva_coefficient)))
+  let evb = uint64(min(16, int(ppu.bldalpha.evb_coefficient)))
+  let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
+  let white = bgr16_spread(0x7FFF'u16)
+
+  template alpha(top_u16, bot_u16: uint16): uint16 =
+    let t = ((bgr16_spread(top_u16) * eva) shr 4) and BGR_LANE_MASK
+    let b = ((bgr16_spread(bot_u16) * evb) shr 4) and BGR_LANE_MASK
+    bgr16_pack_sat(t + b)
+
+  template brighten_darken(top_u16: uint16): uint16 =
+    # blend_mode is 2 (brighten toward white) or 3 (darken toward black);
+    # mode 0/1 reach here only through the semi-transparent-OBJ fallback,
+    # where the hardware result is the unmodified top layer.
+    let s = bgr16_spread(top_u16)
+    let d = (((if blend_mode == 2: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
+    if blend_mode == 2:   bgr16_pack_sat(s + d)
+    elif blend_mode == 3: bgr16_pack_sat(s - d)
+    else:                 top_u16
 
   # Walk the layer list for column `col` starting at `idx`, stopping at the
   # first opaque pixel. `sprio` is the OBJ priority to merge in (4 = no OBJ
@@ -739,11 +761,11 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       var bot_blends: bool
       scan(col, bidx, bsprio, spal, bot_layer, bot_color, bot_blends)
       if bit(bld, bot_layer + 8):
-        color = ppu.blend_colors(top_color, bot_color, 1)
+        color = alpha(top_color, bot_color)
       elif top_blends and top_selected and blend_mode != 1:
-        color = ppu.blend_colors(top_color, 0, blend_mode)
+        color = brighten_darken(top_color)
     elif top_selected and blend_mode != 0:
-      color = ppu.blend_colors(top_color, 0, blend_mode)
+      color = brighten_darken(top_color)
     fb[row_base + uint32(col)] = color
 
 
