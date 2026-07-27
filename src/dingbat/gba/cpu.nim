@@ -1,5 +1,9 @@
 # CPU implementation (included by gba.nim)
 
+when defined(gbaskipcap):
+  const gbaskipcap* {.intdefine.}: int = 4
+    ## Cycles an idle-loop skip may advance at once (see the waitloop path).
+
 proc mode_bank*(m: CpuMode): int =
   # `m` comes from guest-controlled bits (SPSR mode field on exception return,
   # MSR CPSR writes), so it can hold any 5-bit pattern, not just the defined
@@ -503,8 +507,19 @@ proc tick*(cpu: CPU) =
       # Catching the channels up first is what makes every deadline strictly
       # ahead of scheduler.cycles, which fast_forward_bounded needs to keep this
       # loop making progress.
-      cpu.gba.apu.apu_catchup_all()
-      cpu.gba.scheduler.fast_forward_bounded(cpu.gba.apu.apu_next_step())
+      when defined(gbaskipcap):
+        # -d:gbaskipcap=N bounds the skip by a stated constant instead of by
+        # whatever the PSG's soonest deadline happens to be. A real Thumb spin
+        # loop resolves ~15 cycles, so a small constant is the physically
+        # defensible resolution; the PSG deadline is an inherited accident that
+        # merely happens to be fine-grained. No catch-up is needed first: the
+        # bound is trivially ahead of `cycles`, and the channels catch up in
+        # closed form at their own observation points regardless.
+        cpu.gba.scheduler.fast_forward_bounded(
+          cpu.gba.scheduler.cycles + CycleCount(gbaskipcap))
+      else:
+        cpu.gba.apu.apu_catchup_all()
+        cpu.gba.scheduler.fast_forward_bounded(cpu.gba.apu.apu_next_step())
       cpu.entered_waitloop = false
     else:
       cpu.gba.scheduler.tick(remaining)

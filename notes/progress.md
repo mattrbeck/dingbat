@@ -599,15 +599,39 @@ drain takes `min(next_event, apu_next_step())`. With that, every row of
 
 Alternatives measured and rejected:
 
-* **A fixed cap on the skip** (`cycles + N`, N a constant) — physically the more
-  defensible bound, since a real Thumb spin loop resolves ~15 cycles. At N=4 the
-  suite's total H-blank error *improves* on baseline (130 → 59 cycles, score
-  6910 → 6912) and at N=32 three of the six rows pass exactly. But no N
-  reproduces the old sampling phase, so audio is no longer bit-identical, and one
-  row (Flip 1) is worse than baseline at every N tried. Rejected under the
-  no-regression constraint, but worth knowing it exists: if the constraint ever
-  becomes "closest to hardware" rather than "identical to the previous build",
-  a cap of 4-16 is measurably better than either build.
+* **A fixed cap on the skip** (`cycles + N`, N a constant, `-d:gbaskipcap=N`) —
+  physically the more defensible bound, since a real Thumb spin loop resolves ~15
+  cycles. It is measurably more accurate and *substantially slower*, and an
+  earlier revision of this note recorded only the first half. Measured 2026-07-26,
+  instructions retired (min of 5) on Pokemon Emerald from an in-game save state,
+  against the shipped adaptive bound:
+
+  | bound                | suite | H-blank err | instructions |
+  |----------------------|-------|-------------|--------------|
+  | `apu_next_step()`    | 6910  | 130 cycles  | —            |
+  | N=4                  | 6912  | 59          | **-65.6%**   |
+  | N=8                  | 6910  | 83          | -50.1%       |
+  | N=16                 | 6910  | 77          | -33.4%       |
+  | N=32                 | 6913  | 89          | -19.1%       |
+  | N=64                 | 6912  | 125         | -9.2%        |
+
+  So it is a monotone accuracy/throughput trade with no free point, not a win
+  being left on the table. `apu_next_step()` beats every constant on throughput
+  because it is ADAPTIVE: the deadline sits far out while the channels are idle
+  and tightens only when they are active, so it buys long skips where they are
+  free and short ones where they are observable. A constant can only do one.
+  One row (Flip 1) is worse than baseline at every N, and no N reproduces the old
+  sampling phase, so audio also stops being bit-identical. Kept behind the define
+  rather than adopted: it costs ~1.65x the CPU work in an idle-heavy scene to buy
+  71 cycles of H-blank error and two suite tests.
+
+* **Clipping only the adaptive bound's outliers** (`min(apu_next_step(), cycles + N)`)
+  — tried at N=128/256/512 hoping to buy accuracy cheaply. It buys none: score,
+  total error and all six per-row deltas are IDENTICAL to the unclipped bound at
+  every N, while costing -4.6%/-1.3%/-0.02%. The error therefore does not come
+  from occasional over-long skips; it comes from the TYPICAL skip being ~32
+  cycles rather than ~4, which is exactly the part that cannot be tightened for
+  free. Removed.
 * **Bounding only loops that poll MMIO** — a PSG step cannot change RAM, so a
   RAM-polling loop looks safe to skip freely, and only 1,800 of Emerald's
   3,875,881 waitloop skips per 600 frames touch MMIO (Kirby 1,200 of 3,020,289;
