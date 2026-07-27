@@ -53,10 +53,15 @@ proc ch4_catchup_at*(ch: GbChannel4; gb: GB; observer_period: uint32) {.inline.}
 proc ch4_catchup*(ch: GbChannel4; gb: GB) {.inline.} =
   ch4_catchup_at(ch, gb, GB_OBS_CPU)
 
+proc ch4_dac_input*(ch: GbChannel4): uint8 =
+  ## Current 4-bit digital output (0-15), pre-DAC — see ch1_dac_input.
+  if ch.enabled and ch.dac_enabled:
+    uint8(int(not ch.lfsr and 1'u16) * int(ch.current_volume))
+  else: 0'u8
+
 proc ch4_get_amplitude*(ch: GbChannel4): float32 =
   if ch.enabled and ch.dac_enabled:
-    let dac_in = int(not ch.lfsr and 1'u16) * int(ch.current_volume)
-    float32(float64(dac_in) / 7.5 - 1.0)
+    float32(float64(ch.ch4_dac_input()) / 7.5 - 1.0)
   else: 0.0'f32
 
 proc ch4_read*(ch: GbChannel4; idx: int): uint8 =

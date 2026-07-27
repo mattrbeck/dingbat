@@ -220,7 +220,6 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   else: discard
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
-  gb.scheduler.schedule_gb(GB_FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: GbApu; gb: GB) =
   # Gated on `enabled` because a disabled channel's amplitude is 0 regardless
@@ -367,7 +366,9 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       echo "Warning: GB failed to open audio device"
       result.audio_dev = 0
   let apu = result
-  tick_frame_sequencer(apu, gb)
+  # The frame-sequencer event is primed in post_init instead of here: it is a
+  # tap on the divider, so its phase comes from tdiv, which skip_boot seeds
+  # per hardware model only after every component exists.
   get_sample(apu, gb)
 
 proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
@@ -423,6 +424,17 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
     if (val and 0x80) == 0 and apu.sound_enabled:
       for i in 0xFF10..0xFF25: apu_write(apu, i, 0x00'u8, gb)
       apu.sound_enabled = false
+      # Powering the APU off resets the channels' INTERNAL phase too, not just
+      # their registers: the square channels' duty position, the wave channel's
+      # sample position and the DIV-APU counter all restart from 0. Wave RAM
+      # contents survive. Without this a channel retriggered after an off/on
+      # resumes at whatever duty position happened to be current, so its output
+      # is phase-shifted by an arbitrary amount — which is exactly what
+      # SameSuite's channel_1/channel_2 tests measure, since every one of their
+      # subtests brackets the setup with an APU off/on.
+      apu.channel1.wave_duty_position = 0
+      apu.channel2.wave_duty_position = 0
+      apu.channel3.wave_ram_position = 0
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0

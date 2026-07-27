@@ -1218,7 +1218,11 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
   let gb {.cursor.} = gb
   result = proc(kind: EventType) =
     case kind
-    of etAPUFrameSeq:  tick_frame_sequencer(gb.apu, gb)
+    of etAPUFrameSeq:
+      # Models the falling edge of the divider's APU tap. Free-running at the
+      # tap's own period; a DIV write re-aims it (timer.nim).
+      tick_frame_sequencer(gb.apu, gb)
+      gb.scheduler.schedule(apu_div_period(gb), etAPUFrameSeq)
     of etAPUSample:    get_sample(gb.apu, gb)
     # The GB core no longer schedules per-waveform-period channel events --
     # each channel carries a next_step deadline advanced in closed form at the
@@ -1267,6 +1271,11 @@ proc post_init*(gb: GB) =
   gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
+  # Align the frame sequencer to the divider's phase. It models the falling
+  # edge of DIV bit 4 (5 in double speed), so where it lands depends on tdiv,
+  # which gb_skip_boot has just seeded per hardware model.
+  gb.scheduler.clear(etAPUFrameSeq)
+  gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
 
 proc apply_cheats*(gb: GB) =
   ## Push every enabled RAM-write cheat into memory. Run once per frame.

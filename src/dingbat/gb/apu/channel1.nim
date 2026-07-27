@@ -67,10 +67,16 @@ proc sweep_step*(ch: GbChannel1; gb: GB) =
         ch.frequency         = calc
         discard ch1_frequency_calc(ch)
 
+proc ch1_dac_input*(ch: GbChannel1): uint8 =
+  ## Current 4-bit digital output (0-15), pre-DAC. This is what the CGB's
+  ## PCM12 register exposes; 0 while the channel is off.
+  if ch.enabled and ch.dac_enabled:
+    uint8(int(WAVE_DUTY1[ch.duty][ch.wave_duty_position]) * int(ch.current_volume))
+  else: 0'u8
+
 proc ch1_get_amplitude*(ch: GbChannel1): float32 =
   if ch.enabled and ch.dac_enabled:
-    let dac_in = int(WAVE_DUTY1[ch.duty][ch.wave_duty_position]) * int(ch.current_volume)
-    float32(float64(dac_in) / 7.5 - 1.0)
+    float32(float64(ch.ch1_dac_input()) / 7.5 - 1.0)
   else: 0.0'f32
 
 proc ch1_read*(ch: GbChannel1; idx: int): uint8 =
