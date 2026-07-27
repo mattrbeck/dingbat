@@ -567,25 +567,72 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
 # state: 100%).
 
 type SpanWalk = object
-  ## The layer walk filtered down to one span's enabled layers.
+  ## The layer walk filtered down to one span's enabled layers, with
+  ## everything that is constant across the span resolved up front.
   n:      int
   prio:   array[4, int32]
   layer:  array[4, int32]
   direct: array[4, bool]                        # bitmap direct-colour BG2
   row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
 
-proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
-                    enable_bits: uint16; effects: bool) =
+proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
+                           lo, hi: int; obj_enable: bool) =
+  ## Span where no colour math can apply: the first opaque pixel in priority
+  ## order is the answer. Instantiated per walk length -- the walk is at most
+  ## four entries and its length is fixed for the span, so with the trip count
+  ## constant the loop unrolls and each layer's priority and row pointer stays
+  ## in a register instead of being re-loaded per pixel. The bitmap
+  ## direct-colour test is hoisted the same way; it is false in every tile
+  ## mode.
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
   let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
   let bg2d     = cast[ptr UncheckedArray[uint16]](addr ppu.bg2_direct[0])
   let bg2o     = cast[ptr UncheckedArray[bool]](addr ppu.bg2_direct_opaque[0])
-  let bld        = uint16(ppu.bldcnt)
-  let blend_mode = int(ppu.bldcnt.blend_mode)
-  let obj_enable = bit(enable_bits, 4)
-  let backdrop   = pram_u16[0]
+  let backdrop = pram_u16[0]
+  template opaque_loop(NN: static int; DIRECT: static bool) =
+    for col in lo ..< hi:
+      let sp = sprites[col]
+      let spal = int(sp.palette)
+      var sprio = 4'i32
+      if obj_enable and spal != 0: sprio = int32(sp.priority)
+      var color = backdrop
+      block found:
+        for i in 0 ..< NN:
+          if sprio <= w.prio[i]:
+            color = pram_u16[0x100 + spal]
+            break found
+          when DIRECT:
+            if w.direct[i]:
+              if bg2o[col]:
+                color = bg2d[col]
+                break found
+              continue
+          let palette = int(w.row[i][col])
+          if palette != 0:
+            color = pram_u16[palette]
+            break found
+        if sprio < 4:
+          color = pram_u16[0x100 + spal]
+      fb[row_base + uint32(col)] = color
+  if ppu.bitmap_direct:
+    case w.n
+    of 0: opaque_loop(0, true)
+    of 1: opaque_loop(1, true)
+    of 2: opaque_loop(2, true)
+    of 3: opaque_loop(3, true)
+    else: opaque_loop(4, true)
+  else:
+    case w.n
+    of 0: opaque_loop(0, false)
+    of 1: opaque_loop(1, false)
+    of 2: opaque_loop(2, false)
+    of 3: opaque_loop(3, false)
+    else: opaque_loop(4, false)
 
+proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
+                    enable_bits: uint16; effects: bool) =
+  let obj_enable = bit(enable_bits, 4)
   var w: SpanWalk
   # Layers that can end up on top somewhere in this span. The backdrop always
   # can (every layer may be transparent); OBJ only when the window enables it.
@@ -601,6 +648,31 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
       appear = appear or (1'u16 shl bg)
       w.n = k + 1
+
+  # Can colour math change any pixel in this span? Alpha/brighten/darken all
+  # require the top layer to be a BLDCNT 1st target, and a semi-transparent
+  # OBJ pixel forces alpha regardless of the blend mode -- so if neither is
+  # reachable here, the whole effects apparatus is dead code for this span.
+  let can_blend = effects and
+    ((obj_enable and ppu.line_sprite_blend) or
+     (ppu.bldcnt.blend_mode != 0 and
+      (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0))
+  if not can_blend:
+    ppu.composite_span_opaque(w, row_base, lo, hi, obj_enable)
+    return
+
+  # Colour math is reachable in this span: find the top layer, then the layer
+  # under it when (and only when) the result can depend on it. Kept in this
+  # proc rather than split out like the opaque loop, so that the walk stays a
+  # plain local the compiler can keep in registers across the pixel loop.
+  let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
+  let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
+  let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
+  let bg2d     = cast[ptr UncheckedArray[uint16]](addr ppu.bg2_direct[0])
+  let bg2o     = cast[ptr UncheckedArray[bool]](addr ppu.bg2_direct_opaque[0])
+  let bld        = uint16(ppu.bldcnt)
+  let blend_mode = int(ppu.bldcnt.blend_mode)
+  let backdrop   = pram_u16[0]
 
   # Walk the layer list for column `col` starting at `idx`, stopping at the
   # first opaque pixel. `sprio` is the OBJ priority to merge in (4 = no OBJ
@@ -639,47 +711,13 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
         out_color = pram_u16[0x100 + spal]
         out_blends = sprites[col].blends
 
-  # Can colour math change any pixel in this span? Alpha/brighten/darken all
-  # require the top layer to be a BLDCNT 1st target, and a semi-transparent
-  # OBJ pixel forces alpha regardless of the blend mode -- so if neither is
-  # reachable here, the whole effects apparatus is dead code for this span.
-  let can_blend = effects and
-    ((obj_enable and ppu.line_sprite_blend) or
-     (blend_mode != 0 and (bld and 0x3F'u16 and appear) != 0))
-
-  if not can_blend:
-    for col in lo ..< hi:
-      let sp = sprites[col]
-      let spal = int(sp.palette)
-      var sprio = 4'i32
-      if obj_enable and spal != 0: sprio = int32(sp.priority)
-      var color = backdrop
-      block found:
-        for i in 0 ..< w.n:
-          if sprio <= w.prio[i]:
-            color = pram_u16[0x100 + spal]
-            break found
-          if w.direct[i]:
-            if bg2o[col]:
-              color = bg2d[col]
-              break found
-          else:
-            let palette = int(w.row[i][col])
-            if palette != 0:
-              color = pram_u16[palette]
-              break found
-        if sprio < 4:
-          color = pram_u16[0x100 + spal]
-      fb[row_base + uint32(col)] = color
-    return
-
   for col in lo ..< hi:
     let sp = sprites[col]
     let spal = int(sp.palette)
     var sprio = 4'i32
     if obj_enable and spal != 0: sprio = int32(sp.priority)
-    # `idx` carries the walk position plus a "OBJ already taken" flag in its
-    # high bit, so the search for the blend bottom resumes where the top left
+    # `idx` carries the walk position plus a "OBJ already taken" flag in a
+    # spare bit, so the search for the blend bottom resumes where the top left
     # off instead of restarting.
     var idx = 0
     var top_layer: int
@@ -707,6 +745,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     elif top_selected and blend_mode != 0:
       color = ppu.blend_colors(top_color, 0, blend_mode)
     fb[row_base + uint32(col)] = color
+
 
 proc composite*(ppu: PPU; row_base: uint32) =
   ppu.compute_layer_walk()
