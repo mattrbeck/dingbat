@@ -205,6 +205,12 @@ const startServer = (webDir, romMap) =>
 
 // --- driver -----------------------------------------------------------------
 const romMap = new Map(ROMS.map(([, p]) => [basename(p), p]));
+// --state <file>: start every trial from a REAL save state (e.g. one exported
+// from the user's device) instead of one captured after a fixed boot. It rides
+// the /roms/ route so the server needs no new case. The state format is only
+// guaranteed within a STATE_VERSION, so every build under test must share one.
+const STATE_PATH = arg("state", "");
+if (STATE_PATH) romMap.set(basename(STATE_PATH), STATE_PATH);
 
 const servers = new Map();
 for (const b of BUILDS) {
@@ -259,6 +265,7 @@ const measure = async (build, romName, romPath) => {
 
     const prep = await page.evaluate(PAGE_PREP, {
       romFile: basename(romPath), bootFrames: BOOT_FRAMES,
+      stateFile: STATE_PATH ? basename(STATE_PATH) : "",
     });
     if (SHOTS) {
       const { mkdir, writeFile } = await import("node:fs/promises");

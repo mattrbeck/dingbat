@@ -17,7 +17,7 @@
 // to get past logos into a title/attract scene with music running — these
 // optimisations live in the APU/PPU/timer paths, so a silent black boot screen
 // would understate them.
-export const PAGE_PREP = async ({ romFile, bootFrames }) => {
+export const PAGE_PREP = async ({ romFile, bootFrames, stateFile }) => {
   const resp = await fetch("/roms/" + encodeURIComponent(romFile));
   if (!resp.ok) throw new Error("rom fetch failed " + resp.status);
   const bytes = new Uint8Array(await resp.arrayBuffer());
@@ -33,9 +33,20 @@ export const PAGE_PREP = async ({ romFile, bootFrames }) => {
   // move under ALLOW_MEMORY_GROWTH, so take a fresh view on every access —
   // exactly what index.js does for the audio buffer.
   const u8 = () => Module.HEAPU8 || new Uint8Array(Module.memory.buffer);
-  const size = Module._wasm_state_size();
-  const ptr = Module._wasm_state_data();
-  window.__benchState = u8().slice(ptr, ptr + size);
+  let size, ptr;
+  if (stateFile) {
+    // A supplied state replaces the captured one. It is loaded once here so a
+    // version/format rejection fails prep loudly rather than silently leaving
+    // every trial measuring the post-boot scene instead of the intended one.
+    const sr = await fetch("/roms/" + encodeURIComponent(stateFile));
+    if (!sr.ok) throw new Error("state fetch failed " + sr.status);
+    window.__benchState = new Uint8Array(await sr.arrayBuffer());
+    size = window.__benchState.length;
+  } else {
+    size = Module._wasm_state_size();
+    ptr = Module._wasm_state_data();
+    window.__benchState = u8().slice(ptr, ptr + size);
+  }
   window.__benchRestore = () => {
     const s = window.__benchState;
     const p = Module._malloc(s.length);
@@ -45,6 +56,7 @@ export const PAGE_PREP = async ({ romFile, bootFrames }) => {
     Module._clearAudioBuffer();
     if (!ok) throw new Error("state restore rejected");
   };
+  if (stateFile) window.__benchRestore();   // fail now, not silently per-trial
   return { stateBytes: size };
 };
 
