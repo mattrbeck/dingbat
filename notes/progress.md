@@ -688,3 +688,55 @@ sweep hit it (Mega Man Battle Network at frame 1200: `etAPUChannel2` and
 `discard` and the deadline is extracted into `next_step` either way — and
 reconstructing the original order would need each event's arm time, which the
 scheduler never stored.
+
+## GBA PPU: lazy layer materialization investigated, no-go (2026-07-26)
+
+The question was whether the PSG's lazy catch-up could be carried to the PPU:
+render layers on demand and let compositing pull what it needs, so BG pixels
+hidden under a higher-priority opaque layer are never produced. `next_layer`
+does stop at the first opaque layer, so the wasted work is real in principle.
+
+It is not real in practice, and the reason is measurable. Elision is only sound
+on `composite`'s fast path — windows re-enable layers per column, and blending
+deliberately reads the layer *underneath* the winner, so with either active
+nothing below the top layer is dead. A `-d:ppu_probe` instrumentation counted,
+per scanline, how many BGs in the walk sat entirely under fully-opaque coverage:
+
+| title (1200 frames from boot) | scanlines on fast path | BG renders elidable |
+|---|---|---|
+| Metroid Fusion | 0% | 0% |
+| Mega Man Battle Network | 0.3% | 0% |
+| Kirby & the Amazing Mirror | 0.5% | 0% |
+| Golden Sun: The Lost Age | 2.3% | 0% |
+| Superstar Saga | 11.8% | 0% |
+| FireRed | 15.6% | 0% |
+| FF Tactics Advance | 21.4% | 0% |
+| Advance Wars 2 | 31.8% | 0.6% |
+| Emerald (title/intro) | 85.8% | 23.8% |
+| **Emerald at a real save state** | **0%** | **0%** |
+
+Zero in seven of nine titles. The one encouraging number is Emerald's *intro*,
+which is static and unblended; at an actual gameplay save state the same game
+runs windows or blending on 100% of scanlines and the figure is 0%. GBA games
+use blending and windows more or less constantly, so the precondition for
+elision is normally absent.
+
+The deeper reason it does not transfer: the PSG win was **elision**, not
+deferral — many wave steps collapsed into one modulo because the intermediate
+positions were genuinely never observed, so the work was deleted. Every
+composited pixel *is* observed (it goes to the framebuffer), so deferring the
+same pixel work later only adds bookkeeping.
+
+Profile for orientation (Emerald at the save state, `sample`, 5149 samples):
+PPU rendering ~36% (`next_layer` 14%, `render_reg_bg` 12%, `render_sprites` 6%),
+CPU interpreter + bus ~52%, scheduler dispatch ~3%, **entire APU ~1.4%** — the
+lazy catch-up work already took the APU off the table, and there is no second
+subsystem shaped like it. The GBA has no per-cycle loops (so the GB timer's
+bulk-advance trick has no target) and its timers already schedule directly at
+the computed overflow cycle.
+
+The probe did find one small real win, which is committed: the per-scanline
+`layer_palettes` clear ran for all four BGs unconditionally, and 0.5% (MMBN) to
+57% (FireRed) of those clears were for BGs DISPCNT had disabled — never written
+(every renderer returns on that bit) and never read (`compute_layer_walk` omits
+them). Worth +0.18% to +0.75%.

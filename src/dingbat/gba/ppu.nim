@@ -683,8 +683,16 @@ proc scanline*(ppu: PPU) =
   if ppu.dispcnt.forced_blank:
     for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0x7FFF'u16
     return
+  # Only the BGs DISPCNT enables are worth clearing. A disabled BG is never
+  # written (every renderer returns on this same bit) and never read
+  # (compute_layer_walk leaves it out of the walk), so its 240 bytes are
+  # cleared purely to be ignored. Games leave 1-2 BGs off most of the time --
+  # measured across nine titles, 0.5% (Mega Man Battle Network) to 57%
+  # (FireRed) of these clears were for BGs not in the walk at all, with most
+  # titles around half.
   for bg in 0..3:
-    for c in 0..239: ppu.layer_palettes[bg][c] = 0
+    if bit(uint16(ppu.dispcnt), 8 + bg):
+      for c in 0..239: ppu.layer_palettes[bg][c] = 0
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
   ppu.bitmap_direct = false
   ppu.line_sprite_blend = false
