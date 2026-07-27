@@ -740,3 +740,59 @@ The probe did find one small real win, which is committed: the per-scanline
 57% (FireRed) of those clears were for BGs DISPCNT had disabled — never written
 (every renderer returns on that bit) and never read (`compute_layer_walk` omits
 them). Worth +0.18% to +0.75%.
+
+## GBA PPU slow-path compositing: +3% to +26% (2026-07-27)
+
+Follow-up to the negative result above. Having established that the *fast* path
+is rarely taken (0% of scanlines on Emerald at a real save state), the slow path
+— per-column window enables, and `next_layer` called 1-3x per pixel — was the
+real target. Six commits, `src/dingbat/gba/ppu.nim`, no behaviour change.
+
+What the counters found, which redirected the work:
+
+* **`next_layer` was not actually being inlined** despite its `{.inline.}`
+  pragma and the comment claiming it was. `nm` showed a real symbol and
+  `composite` held three `bl` calls to it — so every pixel paid a call, a
+  tuple return through memory, and a `var int` round-tripping to the stack.
+* **Colour math is unreachable for most columns that reach the slow path** —
+  52-100% by title, and 100% on the Emerald save state, where `line_effects`
+  is false on every column of every line. Reaching the slow path does not mean
+  doing slow-path work.
+* **The blend "bottom layer" second walk is nearly free** (1.00-1.14 calls per
+  column), so optimizing it — an obvious-looking target — would have bought
+  approximately nothing.
+
+The shape that won: composite per *window span* rather than per pixel, resolve
+the filtered walk and "can colour math apply at all" once per span, then
+dispatch to one of three specialized inner loops (opaque / alpha / shade), with
+the opaque and shade loops instantiated per walk length.
+
+Measured independently of the agent that wrote it, best-of-5, native:
+Metroid Fusion +25.9%, Superstar Saga +21.9%, Kirby +19.3%, Mega Man Battle
+Network +16.5%, Emerald@save-state +11.7%, Golden Sun TLA +10.5%, FireRed
++8.3%, Advance Wars 2 +7.6%, FF Tactics Advance +5.3%, Emerald intro +3.4%.
+
+Verification: per-frame framebuffer hashes byte-identical over 730 frames on all
+nine titles plus Emerald from the save state; gate 169/137/32; mGBA 6910/7008
+with `results_mgba_suite.md` byte-identical to a *freshly generated* main
+baseline (the committed one is stale — do not diff against it). Plus the agent's
+own randomized differential test, 4000 random register/VRAM/PRAM/OAM
+configurations = 640k scanlines, hash-identical, and mutation-tested to confirm
+the harness actually reaches bitmap modes, the OBJ window and the blend bottom.
+
+Two findings worth keeping:
+
+* **Splitting the alpha loop into its own proc costs 1.2-2.2%**, while splitting
+  out the opaque and shade loops is required (10 instantiations inline cost the
+  blend loop 2-5%). The asymmetry is load-bearing; don't "tidy" it.
+* **`compute_layer_walk` is not a bottleneck.** A cheaper insertion sort
+  measured dead flat (-0.9% .. +0.5%) and was reverted.
+
+Where the next round should go: `render_reg_bg` is now the largest PPU symbol
+(13.5% on Emerald@state) and `render_sprites` the largest on MMBN (12.9%).
+Compositing itself is down to ~6-10% of total runtime with no runtime checks
+left in any of the three loops.
+
+A/B trap that cost me an hour: `rm -f roms/*.sav roms/*.sa1` in zsh aborts the
+WHOLE command when either glob has no match, so the save file survives into the
+second run and four titles report bogus hash mismatches. Use `find -delete`.
