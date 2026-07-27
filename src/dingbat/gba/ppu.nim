@@ -528,6 +528,16 @@ proc bgr16_pack_sat(v: uint64): uint16 {.inline.} =
   if b > 0x1F: b = 0x1F
   uint16(r or (g shl 5) or (b shl 10))
 
+proc bgr16_pack*(v: uint64): uint16 {.inline.} =
+  ## Pack three 5-bit lanes back to BGR555 WITHOUT saturating. Only valid
+  ## where each lane is already known to be <= 0x1F, which is exactly the
+  ## brighten/darken case: with EVY clamped to 16, darken gives
+  ## s - (s*evy)/16 >= 0 and brighten gives s + ((31-s)*evy)/16 <= 31, so
+  ## neither can leave the 5-bit range and the clamp is dead code.
+  uint16((v and 0x1F'u64) or
+         (((v shr 16) and 0x1F'u64) shl 5) or
+         (((v shr 32) and 0x1F'u64) shl 10))
+
 proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 =
   case blend_mode
   of 0: top_u16  # None
@@ -654,7 +664,7 @@ proc composite_span_shade(ppu: PPU; w: SpanWalk; row_base: uint32;
   template shade(c: uint16): uint16 =
     let s = bgr16_spread(c)
     let d = (((if brighten: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
-    if brighten: bgr16_pack_sat(s + d) else: bgr16_pack_sat(s - d)
+    if brighten: bgr16_pack(s + d) else: bgr16_pack(s - d)
   template shade_loop(NN: static int; DIRECT: static bool) =
     for col in lo ..< hi:
       let sp = sprites[col]
@@ -771,8 +781,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     # where the hardware result is the unmodified top layer.
     let s = bgr16_spread(top_u16)
     let d = (((if blend_mode == 2: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
-    if blend_mode == 2:   bgr16_pack_sat(s + d)
-    elif blend_mode == 3: bgr16_pack_sat(s - d)
+    if blend_mode == 2:   bgr16_pack(s + d)
+    elif blend_mode == 3: bgr16_pack(s - d)
     else:                 top_u16
 
   let sel1_obj = bit(bld, 4)
