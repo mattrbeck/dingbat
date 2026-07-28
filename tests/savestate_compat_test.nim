@@ -480,7 +480,7 @@ proc run_rejections() =
 #
 # The corpus cannot cover this: none of the committed test ROMs calls IntrWait,
 # so the shape has to be built by hand. It mirrors hle_intr_wait exactly (see
-# gba/arm/arm.nim), which is what makes the fixture legitimate.
+# gba/hle_bios.nim), which is what makes the fixture legitimate.
 # ---------------------------------------------------------------------------
 
 # Offset of halt_resume_pop, the last byte of the CPU section — the one byte

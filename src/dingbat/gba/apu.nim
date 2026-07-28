@@ -267,7 +267,7 @@ when not defined(test_harness) and not defined(emscripten):
 #   5. SOUNDCNT_X (0x84) READ — its channel-active bits report `enabled`, and no
 #      catch-up ever writes `enabled` (they only touch phase state), so no sync
 #      is needed. Documented at the read.
-#   6. RegisterRamReset's sound phase (SWI 0x01, arm/arm.nim) — the one place
+#   6. RegisterRamReset's sound phase (SWI 0x01, hle_bios.nim) — the one place
 #      outside this file that cleared the etAPUChannel* events. apu_park_steps.
 #   7. The per-frame scheduler rebase — next_step is an ABSOLUTE cycle and has
 #      to move with the events. gba.end_frame; also bounds how stale a deadline

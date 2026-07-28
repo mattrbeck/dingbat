@@ -974,6 +974,7 @@ include gpio
 include interrupts
 include keypad
 include waitloop
+include hle_bios
 include arm/arm
 include arm/lut
 include thumb/thumb
