@@ -763,6 +763,11 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   r.expect_tag(GB_SEC_END)
 
 proc gb_rom_checksum(gb: GB): uint32 =
+  ## The whole ROM file. load_cartridge allocates the buffer at exactly the
+  ## file's length — no padding, no mirroring — so unlike the GBA (see
+  ## gba_rom_checksum) this identity has never depended on an allocation rule
+  ## and has no legacy variants to accept. Keep it that way: if a GB mapper
+  ## ever needs a padded buffer, hash the file length explicitly.
   fnv1a(gb.cartridge.rom)
 
 proc state_payload*(gb: GB): string =
@@ -800,12 +805,19 @@ proc state_bytes*(gb: GB; thumbnail = false): string =
     make_state_bytes(ckGB, gb.gb_rom_checksum(),
                      uint32(gb.cartridge.rom.len), payload)
 
+proc parse_state_image*(gb: GB; data: string; origin = "state data"):
+                       tuple[payload: string; rev: uint32] =
+  ## Header validation for a full state image against THIS cart — the mirror
+  ## of the GBA proc of the same name, so the format test can ask both cores
+  ## the same question instead of assembling a ROM identity itself.
+  parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
+                      uint32(gb.cartridge.rom.len), origin)
+
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
   var image: tuple[payload: string; rev: uint32]
   try:
-    image = parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
-                                uint32(gb.cartridge.rom.len))
+    image = gb.parse_state_image(data)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false

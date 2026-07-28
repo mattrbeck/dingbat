@@ -241,6 +241,19 @@ proc next*(d: var LinkDecoder; msg: var LinkMsg): bool =
   true
 
 # ---------------- ROM checksum ----------------
+#
+# WIRE VALUE. This is what a peer compares in HELLO to decide it is running the
+# same game, so its definition is frozen: change what bytes go into it and a
+# patched client stops pairing with an unpatched one. It is taken over the ROM
+# **file** — `crc32(readFile(rom))` natively, `crc32(rom[0 ..< rom_size])` in
+# the wasm build (identical bytes, see dingbat_wasm.nim).
+#
+# Do not conflate it with the save-state ROM identity (`gba_rom_checksum` in
+# gba/savestate.nim). That one is FNV-1a over the first 1 MB, lives only in
+# state-file headers, and is free to change with a legacy accept-list. This one
+# is not: it has no version negotiation of its own beyond LINKPROTO_VERSION,
+# and no accept-list. If it ever has to move, bump LINKPROTO_VERSION and accept
+# both values for a transition period — deliberately, not as a side effect.
 
 const CRC32_TABLE = block:
   var t: array[256, uint32]

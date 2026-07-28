@@ -236,11 +236,14 @@ proc run_corpus() =
     var ok = false
     if core == ckGBA:
       let emu = new_gba_for(rom)
-      # ROM identity for the parse comes from a state this build writes for the
-      # same ROM, so the test never has to know how the checksum is computed.
-      let (sum, size) = rom_identity(emu.state_bytes())
+      # parse_state_image is the same door load_state_bytes goes through, so
+      # the test never has to know how the ROM checksum is computed — and it
+      # sees the same legacy identities a real load accepts. (Deriving the
+      # identity from a state THIS build writes, as this used to, would fail
+      # against a corpus entry carrying a superseded checksum and silently
+      # skip the revision assertion below.)
       try:
-        got_rev = parse_state_payload(data, ckGBA, sum, size, base).rev
+        got_rev = emu.parse_state_image(data, base).rev
       except CatchableError: discard   # reported by the load below
       ok = emu.load_state_bytes(data)
       # Loading is not enough: a migration that leaves the machine wedged still
@@ -252,9 +255,8 @@ proc run_corpus() =
           ok = false
     else:
       let emu = new_gb_for(rom)
-      let (sum, size) = rom_identity(emu.state_bytes())
       try:
-        got_rev = parse_state_payload(data, ckGB, sum, size, base).rev
+        got_rev = emu.parse_state_image(data, base).rev
       except CatchableError: discard
       ok = emu.load_state_bytes(data)
       if ok:
@@ -309,6 +311,123 @@ proc run_roundtrip() =
     check(emu.ppu.dots_since_frame >= 0 and emu.ppu.dots_since_frame < 456,
           "GB " & rom & " dots_since_frame is ~0 at a frame boundary",
           "got " & $emu.ppu.dots_since_frame)
+
+# ---------------------------------------------------------------------------
+# 3b. ROM identity is a property of the ROM FILE, not of the buffer.
+#
+# The header's rom_checksum is what decides "this state belongs to this game".
+# It used to be `fnv1a(first 1 MB of cartridge.rom)` — the ALLOCATED buffer,
+# which is padded to the next power of two (32 KB floor) and to 4 MB for the
+# 1 MB Classic NES carts. So every cart smaller than 1 MB had its identity
+# partly determined by padding, and 2dfd27e — a pure memory-footprint change
+# that replaced a flat 32 MB open-bus-filled buffer with next_pow2 — silently
+# re-identified all of them. Nobody noticed, because nothing here looked.
+#
+# The checks below are the thing that looks. `a`/`b` pin the identity to the
+# file; `c` proves the state a build with the OLD identity wrote still loads
+# (that is the whole reason gba_legacy_rom_checksums exists) while a genuinely
+# foreign checksum is still refused; `d` proves carts >= 1 MB — i.e. every
+# commercial GBA game, Classic NES included — never had their identity move,
+# so this fix is invisible to them.
+#
+# If someone changes the allocation rule again, `b` goes red on purpose.
+# ---------------------------------------------------------------------------
+
+proc with_checksum(img: string; v: uint32): string =
+  ## A copy of a state image with the header's rom_checksum (offset 16)
+  ## replaced. Nothing else in the header covers it — payload_hash is over the
+  ## payload — so this is exactly the image an older build would have written.
+  result = img
+  for i in 0 .. 3: result[16 + i] = char(uint8(v shr (8 * i)))
+
+proc run_rom_identity() =
+  echo "ROM identity: the ROM file, not the buffer we allocate for it"
+  const rom = GBA_ROMS[0][0]        # inputrec.gba, 56 bytes
+  let file = readFile(ROM_DIR / rom)
+  let n = file.len
+  check(n > 0 and (n and (n - 1)) != 0,
+        "fixture " & rom & " has a non-power-of-two length",
+        "got " & $n & " bytes — pick a ROM that is padded when it is loaded")
+
+  let emu = new_gba_for(rom)
+  for _ in 0 ..< 30: emu.step_frame()
+  check(emu.cartridge.rom.len > n and emu.cartridge.rom_size == n,
+        "fixture is loaded into a padded buffer",
+        "buffer " & $emu.cartridge.rom.len & ", file " & $n)
+
+  # (a) the identity is the hash of the file's own bytes, capped at 1 MB.
+  let (sum, size) = rom_identity(emu.state_bytes())
+  check(sum == fnv1a(toOpenArrayByte(file, 0, min(n, 0x100000) - 1)),
+        "identity is fnv1a over the ROM file (first 1 MB)")
+  check(size == 0x02000000'u32, "rom_size field is still the fixed tag")
+
+  # (b) no byte of the padding may reach the identity. Scribbling on the pad
+  # stands in for the next change to how the buffer is sized or filled: the
+  # state taken before it must still load after it.
+  let taken_before = emu.state_bytes()
+  for i in n ..< emu.cartridge.rom.len: emu.cartridge.rom[i] = 0xA5'u8
+  check(rom_identity(emu.state_bytes()).checksum == sum,
+        "buffer padding is not part of the identity")
+  check(emu.load_state_bytes(taken_before),
+        "a state survives a change to the buffer's size/padding")
+
+  # (c) the two identities older builds computed for this same cart. Both are
+  # written out here as the historical expressions, not fetched from the code
+  # under test, so this fails if the accept-list stops covering them.
+  let fresh = new_gba_for(rom)
+  for _ in 0 ..< 30: fresh.step_frame()
+  let img = fresh.state_bytes()
+  # 2dfd27e .. today: the whole next_pow2 buffer, zero past the file.
+  let legacy_pow2 =
+    fnv1a(toOpenArray(fresh.cartridge.rom, 0,
+                      min(fresh.cartridge.rom.len, 0x100000) - 1))
+  # before 2dfd27e: 32 MB pre-filled with the open-bus address pattern, the
+  # file over the front, [file, next_pow2) re-zeroed (only when the file was
+  # not already a power of two).
+  var old_buf = newSeq[byte](0x100000)
+  for a in 0 ..< old_buf.len:
+    let oob = 0xFFFF'u32 and (uint32(a) shr 1)
+    old_buf[a] = uint8(oob shr (8 * (a and 1)))
+  for i in 0 ..< n: old_buf[i] = uint8(file[i])
+  var pw = 1
+  while pw < n: pw = pw shl 1
+  if pw != n:
+    for i in n ..< pw: old_buf[i] = 0'u8
+  let legacy_openbus = fnv1a(old_buf)
+
+  check(legacy_pow2 != sum and legacy_openbus != sum and
+        legacy_pow2 != legacy_openbus,
+        "the three identities really are three different values",
+        "current " & $sum & ", pow2 " & $legacy_pow2 &
+        ", open-bus " & $legacy_openbus)
+  check(fresh.load_state_bytes(img.with_checksum(legacy_pow2)),
+        "a state written between 2dfd27e and this fix still loads")
+  check(fresh.load_state_bytes(img.with_checksum(legacy_openbus)),
+        "a state written before 2dfd27e still loads")
+  check(not fresh.load_state_bytes(img.with_checksum(legacy_pow2 xor 0x5A5A5A5A'u32)),
+        "an identity belonging to no revision of this cart is still refused")
+
+  # (d) >= 1 MB: the cap means the hashed window is all file either way, so
+  # these carts never moved. 1 MB exactly is the interesting one — it is the
+  # Classic NES size, where the buffer is four mirrored copies.
+  let big_path = getTempDir() / "dingbat_identity_1mb.gba"
+  var big = newString(0x100000)
+  for i in 0 ..< big.len:
+    big[i] = char(uint8((i * 31 + (i shr 7) * 17 + 3) and 0xFF))
+  for i in 0 ..< n: big[i] = file[i]      # keep a plausible cart header
+  writeFile(big_path, big)
+  defer: removeFile(big_path)
+  let bigemu = new_gba("", big_path, run_bios = false, use_hle = true)
+  bigemu.post_init()
+  check(bigemu.cartridge.rom.len == 0x400000 and
+        bigemu.cartridge.rom_size == 0x100000,
+        "1 MB cart is loaded 4x mirrored into a 4 MB buffer",
+        "buffer " & $bigemu.cartridge.rom.len)
+  let big_sum = rom_identity(bigemu.state_bytes()).checksum
+  check(big_sum == fnv1a(toOpenArray(bigemu.cartridge.rom, 0, 0x100000 - 1)),
+        "1 MB cart's identity is unchanged by this fix (old expression agrees)")
+  check(big_sum == fnv1a(toOpenArrayByte(big, 0, 0x100000 - 1)),
+        "1 MB cart's identity is the file")
 
 proc run_rejections() =
   ## The rejection path must stay a clean refusal, never a partial apply: a
@@ -473,6 +592,7 @@ when isMainModule:
     write_corpus()
     quit(0)
   run_roundtrip()
+  run_rom_identity()
   run_rejections()
   run_intr_wait_migration()
   run_corpus()

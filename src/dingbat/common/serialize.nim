@@ -288,12 +288,24 @@ proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int):
 
 proc parse_state_payload*(data: string; core: CoreKind;
                           rom_checksum, rom_size: uint32;
-                          origin = "state data"): tuple[payload: string; rev: uint32] =
+                          origin = "state data";
+                          legacy_checksums: seq[uint32] = @[]):
+                         tuple[payload: string; rev: uint32] =
   ## Validates the header of a full state image and returns the payload along
   ## with the payload revision it is written in; raises StateError with a
   ## human-readable message on any mismatch. The caller passes `rev` down to its
   ## per-subsystem loaders, which migrate older layouts (see the two
   ## savestate.nim files) rather than refusing them.
+  ##
+  ## `legacy_checksums` are ROM identities OLDER builds wrote for *this same
+  ## cart* — a value the identity hash used to produce before it was corrected.
+  ## They are accepted on read and never written, so a state taken by an older
+  ## build keeps loading while everything written from here on carries the
+  ## current identity. The caller derives them from the loaded ROM (see
+  ## gba_legacy_rom_checksums); an empty seq means "this core's identity has
+  ## never moved". Widening acceptance is the whole point: a legacy value is
+  ## still a hash of THIS cart, so a state from a different ROM is refused
+  ## exactly as before.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     raise state_error("not a dingbat save state: " & origin)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
@@ -318,7 +330,8 @@ proc parse_state_payload*(data: string; core: CoreKind;
                       $current_payload_version(core) & ")")
   let file_checksum = r.read_u32()
   let file_rom_size = r.read_u32()
-  if file_checksum != rom_checksum or file_rom_size != rom_size:
+  if file_rom_size != rom_size or
+     (file_checksum != rom_checksum and file_checksum notin legacy_checksums):
     raise state_error("save state belongs to a different ROM")
   let payload_len = int(r.read_u32())
   let payload_hash = r.read_u32()
@@ -353,8 +366,10 @@ proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
     result = (0, 0, @[])
 
 proc read_state_payload*(path: string; core: CoreKind;
-                         rom_checksum, rom_size: uint32):
+                         rom_checksum, rom_size: uint32;
+                         legacy_checksums: seq[uint32] = @[]):
                         tuple[payload: string; rev: uint32] =
   if not fileExists(path):
     raise state_error("no save state found at " & path)
-  parse_state_payload(readFile(path), core, rom_checksum, rom_size, path)
+  parse_state_payload(readFile(path), core, rom_checksum, rom_size, path,
+                      legacy_checksums)
