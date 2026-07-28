@@ -43,8 +43,8 @@ let net = null;      // active session (from modal open to shutdown)
 const netModal = document.getElementById("net-modal");
 const netTitle = document.getElementById("net-title");
 const netStatusDiv = document.getElementById("net-status");
-const netCodeInput = document.getElementById("net-code-input");
-const netJoinGo = document.getElementById("net-join-go");
+const netCodeInput = /** @type {HTMLInputElement} */ (document.getElementById("net-code-input"));
+const netJoinGo = /** @type {HTMLButtonElement} */ (document.getElementById("net-join-go"));
 const netStallBadge = document.getElementById("net-stall");
 const netSpinner = document.getElementById("net-spinner");
 
@@ -581,10 +581,10 @@ const MANUAL_GATHER_TIMEOUT = 3500; // ms cap on waiting for ICE gathering
 
 const netConnectView = document.getElementById("net-connect-view");
 const netManualView = document.getElementById("net-manual-view");
-const manualOut = document.getElementById("net-manual-out");
-const manualIn = document.getElementById("net-manual-in");
+const manualOut = /** @type {HTMLInputElement} */ (document.getElementById("net-manual-out"));
+const manualIn = /** @type {HTMLInputElement} */ (document.getElementById("net-manual-in"));
 const manualCopyBtn = document.getElementById("net-manual-copy");
-const manualConfirm = document.getElementById("net-manual-confirm");
+const manualConfirm = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-confirm"));
 const manualStatusDiv = document.getElementById("net-manual-status");
 
 const manualSetStatus = (msg, isError) => {
@@ -775,7 +775,7 @@ manualCopyBtn?.addEventListener("click", async () => {
 // document-level Escape handler below never sees it while this field has
 // focus (which it always does — the modal focuses it on open).
 manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
-  manualIn.addEventListener(t, (e) => {
+  manualIn.addEventListener(t, (/** @type {KeyboardEvent} */ e) => {
     if (t === "keydown" && e.key === "Enter" && !manualConfirm.disabled) manualConfirmGo();
     if (t === "keydown" && e.key === "Escape") netDismissModal();
     e.stopPropagation();
@@ -1270,7 +1270,7 @@ netJoinGo.addEventListener("click", async () => {
 // Stopping propagation at the field keeps those keystrokes from ever reaching
 // it. keydown also submits on Enter.
 ["keydown", "keypress", "keyup"].forEach((type) =>
-  netCodeInput.addEventListener(type, (e) => {
+  netCodeInput.addEventListener(type, (/** @type {KeyboardEvent} */ e) => {
     if (type === "keydown" && e.key === "Enter") netJoinGo.click();
     // Same Escape carve-out as the manual-code input: propagation stops here,
     // so dismiss directly instead of relying on the document handler.

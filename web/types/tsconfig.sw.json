@@ -1,0 +1,16 @@
+{
+  // Typecheck project for the service worker (its own scope, WebWorker lib).
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "target": "ES2022",
+    "lib": ["ES2022", "WebWorker"],
+    "skipLibCheck": true,
+    "types": []
+  },
+  "files": [
+    "../sw.js"
+  ]
+}

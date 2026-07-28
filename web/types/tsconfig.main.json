@@ -1,0 +1,23 @@
+{
+  // Typecheck project for index.html's script tags (script-tag architecture:
+  // no modules, no build — tsc checks all files as one shared global scope).
+  // `files` mirrors the <script src> order in web/index.html.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "types": []
+  },
+  "files": [
+    "em.d.ts",
+    "globals.d.ts",
+    "../glpresent.js",
+    "../index.js",
+    "../sdputil.js",
+    "../netplay.js"
+  ]
+}

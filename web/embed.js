@@ -6,7 +6,7 @@ const demoMode = params.has("demo");
 
 // --- Integer scaling toggle ---
 
-const canvasEl = document.getElementById("canvas");
+const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
 if (!integerScaling) {
   canvasEl.classList.add("fill");
 }
@@ -89,7 +89,7 @@ const handleRomFile = (file) => {
   let romName = "rom" + ext;
   let reader = new FileReader();
   reader.addEventListener("load", () => {
-    let bytes = new Uint8Array(reader.result);
+    let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
     writeToFS(romName, bytes);
     loadRom(romName, file.name);
   });
@@ -273,9 +273,10 @@ const resetOverlayTimer = () => {
 
 // --- Emscripten Module ---
 
+/** @type {EmscriptenModule} */
 var Module = {
   // SDL renders into this hidden canvas; the visible #canvas is ours (WebGL2).
-  canvas: (() => document.getElementById("sdl-canvas"))(),
+  canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: () => {
     const SAMPLE_RATE = 32768;
     const TARGET_FPS = 59.7275;

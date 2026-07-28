@@ -9,6 +9,7 @@
     "test:manualpair": "node manualpair.test.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.48.0"
+    "playwright": "^1.48.0",
+    "typescript": "5.9.2"
   }
 }

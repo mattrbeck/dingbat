@@ -39,13 +39,13 @@ const installAssets = (bust) =>
     .open(CACHE_NAME)
     .then((cache) => Promise.all(ASSETS.map((u) => fetchAndCache(cache, u, bust))));
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", (/** @type {ExtendableEvent} */ event) => {
   event.waitUntil(installAssets(CACHE_VERSION));
   // Stay in "waiting" until the page confirms via the skipWaiting message,
   // so an update never force-reloads a tab mid-game.
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener("activate", (/** @type {ExtendableEvent} */ event) => {
   // Delete old caches from previous versions
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -57,11 +57,11 @@ self.addEventListener("activate", (event) => {
     )
   );
   // Take control of all open tabs immediately
-  self.clients.claim();
+  /** @type {ServiceWorkerGlobalScope} */ (/** @type {*} */ (self)).clients.claim();
 });
 
-self.addEventListener("message", (event) => {
-  if (event.data?.type === "skipWaiting") self.skipWaiting();
+self.addEventListener("message", (/** @type {ExtendableMessageEvent} */ event) => {
+  if (event.data?.type === "skipWaiting") /** @type {ServiceWorkerGlobalScope} */ (/** @type {*} */ (self)).skipWaiting();
   // Force update: re-download every asset straight from origin (the nonce
   // gives cache keys no CDN edge or HTTP cache has seen) into the LIVE
   // cache, then ack so the page can reload into the fresh copy. Used when
@@ -78,7 +78,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-self.addEventListener("fetch", (event) => {
+self.addEventListener("fetch", (/** @type {FetchEvent} */ event) => {
   // Explicit network probes (the version.txt update check) must bypass the cache
   if (event.request.cache === "no-store") return;
   // Dev builds: CACHE_VERSION never changes, so cache-first would pin the

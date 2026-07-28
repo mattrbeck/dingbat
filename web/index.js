@@ -6,8 +6,8 @@
 // focus traversal intact. keydown only: keyup flows through so a held
 // fast-forward always gets its release.
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Tab" && e.target && e.target.closest &&
-      e.target.closest("#topbar, #menu-dropdown")) {
+  if (e.code === "Tab" && e.target && /** @type {Element} */ (e.target).closest &&
+      /** @type {Element} */ (e.target).closest("#topbar, #menu-dropdown")) {
     e.stopImmediatePropagation();
   }
 }, true);
@@ -692,7 +692,7 @@ const pickFile = (accept, callback) => {
     if (input.files?.length > 0) {
       let file = input.files[0];
       let reader = new FileReader();
-      reader.addEventListener("load", () => { callback(new Uint8Array(reader.result), file.name); done(); });
+      reader.addEventListener("load", () => { callback(new Uint8Array(/** @type {ArrayBuffer} */ (reader.result)), file.name); done(); });
       reader.addEventListener("error", done);
       reader.readAsArrayBuffer(file);
     } else done();
@@ -702,7 +702,7 @@ const pickFile = (accept, callback) => {
 };
 
 // Tab bar: one pane visible at a time
-const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
 const settingsTabBar = document.getElementById("settings-tabs");
 const settingsTabsWrap = document.getElementById("settings-tabs-wrap");
 
@@ -831,8 +831,8 @@ savesModal.addEventListener("click", (e) => {
 
 const cheatsModal = document.getElementById("cheats-modal");
 const cheatsListEl = document.getElementById("cheats-list");
-const cheatNameEl = document.getElementById("cheat-name");
-const cheatCodesEl = document.getElementById("cheat-codes");
+const cheatNameEl = /** @type {HTMLInputElement} */ (document.getElementById("cheat-name"));
+const cheatCodesEl = /** @type {HTMLTextAreaElement} */ (document.getElementById("cheat-codes"));
 const cheatErrorEl = document.getElementById("cheat-error");
 const cheatEmptyEl = document.getElementById("cheats-empty");
 const cheatHelpEl = document.getElementById("cheats-help");
@@ -989,6 +989,8 @@ document.getElementById("cheat-add").addEventListener("click", () => {
 // first tap arms the button (swaps to "Confirm?" and turns red), a second tap
 // within 3.5s runs onConfirm. Returns the <button>; `disarm()` is exposed so a
 // caller can reset a sibling when another button in the same row is armed.
+/** @param {{label: string, confirmLabel?: string, className?: string,
+ *          onConfirm: () => any, onArm?: () => any}} opts */
 const makeConfirmButton = ({
   label,
   confirmLabel = "Confirm?",
@@ -2032,7 +2034,7 @@ const flushSync = (...a) => {
   // flush waiting behind a long pull leaves the debounce armed and re-queues.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (syncCapTimer) { clearTimeout(syncCapTimer); syncCapTimer = null; }
-  return runExclusive(() => flushSyncInner(...a));
+  return runExclusive(() => flushSyncInner());
 };
 const flushSyncInner = async () => {
   if (!syncActive()) return;
@@ -2179,7 +2181,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
 };
 
 // Sign-in / manual "Sync now": push everything local, then pull.
-const runFullSync = async ({ label } = {}) => {
+const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => {
   if (!syncActive()) return;
   // Queue every local file so a first sign-in backs the device up.
   let names = [...(await localSyncFiles()).keys()];
@@ -2568,7 +2570,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // --- Sync UI surfaces -----------------------------------------------------
-const homeSyncBtn = document.getElementById("home-sync");
+const homeSyncBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-sync"));
 
 // The grid's own sync affordance doubles as its progress readout: while a sync
 // is running the "Sync" link becomes a spinner + "Syncing…" and stops being
@@ -2604,8 +2606,8 @@ var gbaRunBios = true;
 // so unlike its siblings it has no wasm setter in applySystemSettings.
 var gbRumble = true;
 
-const gbaRunBiosToggle = document.getElementById("gba-run-bios-toggle");
-const gbRumbleToggle = document.getElementById("gb-rumble-toggle");
+const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
+const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
 
 const applySystemSettings = () => {
   if (typeof Module === "undefined") return;
@@ -2615,10 +2617,10 @@ const applySystemSettings = () => {
 };
 
 const syncSystemSettingsUI = () => {
-  for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
+  for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
     r.checked = r.value === (gbFifo ? "fifo" : "scanline");
   }
-  for (let r of document.querySelectorAll('input[name="gba-bios-mode"]')) {
+  for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
     r.checked = Number(r.value) === gbaBiosMode;
   }
   gbaRunBiosToggle.checked = gbaRunBios;
@@ -2630,7 +2632,7 @@ const saveSystemSettings = () => {
   if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios, gbRumble });
 };
 
-for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
+for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
   r.addEventListener("change", () => {
     if (r.checked) {
       gbFifo = r.value === "fifo";
@@ -2639,7 +2641,7 @@ for (let r of document.querySelectorAll('input[name="gb-renderer"]')) {
   });
 }
 
-for (let r of document.querySelectorAll('input[name="gba-bios-mode"]')) {
+for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
   r.addEventListener("change", () => {
     if (r.checked) {
       gbaBiosMode = Number(r.value);
@@ -3277,9 +3279,9 @@ document.getElementById("load-state").addEventListener("click", async () => {
 // --- Save States modal (9-slot grid with thumbnails) ---
 const statesModal = document.getElementById("states-modal");
 const statesGrid = document.getElementById("states-grid");
-const statesSaveBtn = document.getElementById("states-save");
-const statesLoadBtn = document.getElementById("states-load");
-const statesDeleteBtn = document.getElementById("states-delete");
+const statesSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-save"));
+const statesLoadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-load"));
+const statesDeleteBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-delete"));
 const statesEmpty = document.getElementById("states-empty");
 let selectedSlot = 0;
 let slotHasState = [];
@@ -3294,7 +3296,7 @@ const updateStatesButtons = () => {
 
 const selectSlot = (s) => {
   selectedSlot = s;
-  for (const el of statesGrid.children) {
+  for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (statesGrid.children)) {
     el.classList.toggle("selected", Number(el.dataset.slot) === s);
   }
   updateStatesButtons();
@@ -3319,7 +3321,7 @@ const renderStatesGrid = async () => {
     cell.type = "button";
     cell.className =
       "state-slot" + (has ? "" : " empty") + (s === selectedSlot ? " selected" : "");
-    cell.dataset.slot = s;
+    cell.dataset.slot = /** @type {*} */ (s);
     const thumb =
       meta && meta.thumb
         ? `<img class="slot-thumb" src="${meta.thumb}" alt="">`
@@ -3385,11 +3387,11 @@ statesDeleteBtn.addEventListener("click", async () => {
 // the user pick the moment the bug happened from the rewind history: slider 0
 // is "now" (live state), 1..N are rewind samples (0..N-1, newest first).
 const reportModal = document.getElementById("report-modal");
-const reportTitle = document.getElementById("report-title");
-const reportDesc = document.getElementById("report-desc");
-const reportSlider = document.getElementById("report-slider");
+const reportTitle = /** @type {HTMLInputElement} */ (document.getElementById("report-title"));
+const reportDesc = /** @type {HTMLTextAreaElement} */ (document.getElementById("report-desc"));
+const reportSlider = /** @type {HTMLInputElement} */ (document.getElementById("report-slider"));
 const reportWhen = document.getElementById("report-when");
-const reportPreview = document.getElementById("report-preview");
+const reportPreview = /** @type {HTMLCanvasElement} */ (document.getElementById("report-preview"));
 const reportScrub = document.getElementById("report-scrub");
 const reportScrubHint = document.getElementById("report-scrub-hint");
 let reportWasPaused = false;
@@ -3579,7 +3581,7 @@ document.getElementById("import-state").addEventListener("click", () => {
 var volume = 100;
 var muted = false;
 // Both the top-bar slider (hidden on phones) and the in-menu slider
-const volSliders = Array.from(document.querySelectorAll(".vol-range"));
+const volSliders = Array.from(/** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll(".vol-range")));
 const muteBtn = document.getElementById("mute-btn");
 const menuVolume = document.getElementById("menu-volume");
 
@@ -3589,7 +3591,7 @@ const effectiveGain = () => (muted ? 0 : volume / 100);
 const syncVolumeUI = () => {
   let off = muted || volume === 0;
   for (let s of volSliders) {
-    s.value = volume;
+    s.value = /** @type {*} */ (volume);
     s.style.setProperty("--vol", volume + "%");
     s.classList.toggle("muted", off);
   }
@@ -3655,7 +3657,7 @@ syncVolumeUI();
 // The wasm core keeps a single BGR555->RGBA lookup table used by every present
 // path; _wasm_set_color_correction rebuilds it. Default on, matching desktop.
 var colorCorrect = true;
-const ccToggle = document.getElementById("color-correct-toggle");
+const ccToggle = /** @type {HTMLInputElement} */ (document.getElementById("color-correct-toggle"));
 
 const applyColorCorrect = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_color_correction) {
@@ -3682,7 +3684,7 @@ const loadColorCorrect = async () => {
 // volume/mute. When on, the core time-stretches 2x audio so it keeps its pitch
 // instead of jumping an octave; independent of the rollback-synced 2x state.
 var pitchCorrectFF = false;
-const pcffToggle = document.getElementById("pitch-correct-ff-toggle");
+const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pitch-correct-ff-toggle"));
 
 const applyPitchCorrectFF = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_pitch_correct_ff) {
@@ -3705,7 +3707,7 @@ if (pcffToggle) {
 // applies it to the live core, so this only needs to push on change / init.
 // Persisted in the "audio" IDB record alongside volume/mute/pitchCorrectFF.
 var mp2kHle = false;
-const mp2kHleToggle = document.getElementById("mp2k-hle-toggle");
+const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("mp2k-hle-toggle"));
 
 const applyMp2kHle = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
@@ -3726,7 +3728,7 @@ if (mp2kHleToggle) {
 // of the graph → bit-identical to no filter). Persisted in the "audio" IDB
 // record alongside volume/mute/pitchCorrectFF.
 var audioLowpass = false;
-const lowpassToggle = document.getElementById("audio-lowpass-toggle");
+const lowpassToggle = /** @type {HTMLInputElement} */ (document.getElementById("audio-lowpass-toggle"));
 
 const applyAudioLowpass = () => {
   if (typeof window.updateAudioLowpass === "function") window.updateAudioLowpass();
@@ -3760,15 +3762,15 @@ const filterActive = () => upscaleFilter !== "none";
 // old SDL logical-size scaling) that also keeps screenshots at their prior size.
 const GL_SCALE = 4;
 
-const canvasEl = document.getElementById("canvas");
+const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
 const stageEl = document.getElementById("stage");
-const glowCanvas = document.getElementById("glow-canvas");
+const glowCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("glow-canvas"));
 const glowCtx = glowCanvas.getContext("2d");
-const integerScaleToggle = document.getElementById("integer-scale-toggle");
-const scanlinesToggle = document.getElementById("scanlines-toggle");
-const motionBlurToggle = document.getElementById("motion-blur-toggle");
-const ambientGlowToggle = document.getElementById("ambient-glow-toggle");
-const upscaleFilterSelect = document.getElementById("upscale-filter-select");
+const integerScaleToggle = /** @type {HTMLInputElement} */ (document.getElementById("integer-scale-toggle"));
+const scanlinesToggle = /** @type {HTMLInputElement} */ (document.getElementById("scanlines-toggle"));
+const motionBlurToggle = /** @type {HTMLInputElement} */ (document.getElementById("motion-blur-toggle"));
+const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
+const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
 
 // Native resolution of the running system (GBA 240x160, GB/GBC 160x144)
 const nativeRes = () =>
@@ -3797,7 +3799,7 @@ const updateCanvasScaling = () => {
   // in-flow touch controls leave the stage short. The --game-ar variable is
   // still published for the stylesheet's pre-JS fallback rules.
   if (canvasEl.width > 0 && canvasEl.height > 0) {
-    canvasEl.style.setProperty("--game-ar", canvasEl.width / canvasEl.height);
+    canvasEl.style.setProperty("--game-ar", /** @type {*} */ (canvasEl.width / canvasEl.height));
   }
   const ar =
     canvasEl.width > 0 && canvasEl.height > 0
@@ -3930,10 +3932,10 @@ const drawGame = () => {
 // scanlines) so the modal shows they're not in effect right now.
 const updateSuspendedVideoToggles = () => {
   const sus = filterActive();
-  for (const [rowId, input] of [
+  for (const [rowId, input] of /** @type {[string, HTMLInputElement][]} */ ([
     ["integer-scale-row", integerScaleToggle],
     ["scanlines-row", scanlinesToggle],
-  ]) {
+  ])) {
     document.getElementById(rowId)?.classList.toggle("suspended", sus);
     input.disabled = sus;
   }
@@ -4163,7 +4165,7 @@ document.addEventListener("keydown", (e) => gameKeyHandler(e, true), true);
 document.addEventListener("keyup", (e) => gameKeyHandler(e, false), true);
 
 const kbBindingsDiv = document.getElementById("kb-bindings");
-const kbPreset = document.getElementById("kb-preset");
+const kbPreset = /** @type {HTMLSelectElement} */ (document.getElementById("kb-preset"));
 
 var kbSelection = -1; // which input is selected for rebinding (-1 = none)
 
@@ -4246,7 +4248,7 @@ const loadKeybindingsFromStorage = async () => {
 };
 
 // --- Large on-screen controls (bigger d-pad for touch) ---
-const largeControlsToggle = document.getElementById("large-controls-toggle");
+const largeControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("large-controls-toggle"));
 
 const applyLargeControls = (on) => {
   document.body.classList.toggle("large-controls", on);
@@ -4263,7 +4265,7 @@ const loadLargeControlsFromStorage = async () => {
 };
 
 // --- Opaque controls in landscape (solid instead of see-through buttons) ---
-const opaqueControlsToggle = document.getElementById("opaque-controls-toggle");
+const opaqueControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("opaque-controls-toggle"));
 
 const applyOpaqueControls = (on) => {
   document.body.classList.toggle("opaque-controls", on);
@@ -4282,7 +4284,7 @@ const loadOpaqueControlsFromStorage = async () => {
 // --- Hide touch controls while a game controller is connected (default on) ---
 // pollGamepads maintains body.gamepad-hides-touch from the live connected
 // state; the CSS gate only bites in the touch layout, so desktop is unaffected.
-const hideTouchOnGamepadToggle = document.getElementById("hide-touch-on-gamepad-toggle");
+const hideTouchOnGamepadToggle = /** @type {HTMLInputElement} */ (document.getElementById("hide-touch-on-gamepad-toggle"));
 var hideTouchOnGamepad = true;
 
 const applyHideTouchOnGamepad = (on) => {
@@ -4309,10 +4311,10 @@ const loadHideTouchOnGamepadFromStorage = async () => {
 // joystick is selected.
 let controlStyle = "dpad";
 let joystickMode = "fixed";
-const controlStyleChips = Array.from(
-  document.querySelectorAll("#control-style-picker .choice-chip"));
-const joystickModeChips = Array.from(
-  document.querySelectorAll("#joystick-mode-picker .choice-chip"));
+const controlStyleChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#control-style-picker .choice-chip")));
+const joystickModeChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#joystick-mode-picker .choice-chip")));
 const joystickModeRow = document.getElementById("joystick-mode-row");
 
 const syncChipGroup = (chips, value) => {
@@ -4366,10 +4368,10 @@ const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
 // "emerald" was renamed to "kiwi" (the GBC's original color name). Migrate any
 // value persisted under the old name so it doesn't fall back to Amber.
 const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
-const themeChips = Array.from(document.querySelectorAll("#theme-picker .theme-chip"));
+const themeChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#theme-picker .theme-chip")));
 // Present in every mode now (the boot script keeps it): iOS fills the standalone
 // safe areas from it, and browser tabs tint their chrome with it.
-const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+const themeColorMeta = /** @type {HTMLMetaElement} */ (document.querySelector('meta[name="theme-color"]'));
 
 const applyTheme = (name) => {
   name = migrateTheme(name);
@@ -4785,7 +4787,7 @@ let handleRomFile = (file) => {
   let romName = "rom" + ext;
   let reader = new FileReader();
   reader.addEventListener("load", async () => {
-    let bytes = new Uint8Array(reader.result);
+    let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
     writeToFS(romName, bytes);
     await addRecentRom(file.name, bytes);
     loadRom(romName, file.name);
@@ -4812,7 +4814,7 @@ const handleDroppedFile = (file) => {
     }
     let reader = new FileReader();
     reader.addEventListener("load", () => {
-      let bytes = new Uint8Array(reader.result);
+      let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
       if (ext === ".sav") applyImportedSave(bytes, file.name);
       else applyImportedState(bytes);
     });
@@ -5119,7 +5121,7 @@ let linkImg = [null, null];
 const initLinkCanvases = () => {
   const [w, h] = linkDims();
   for (let p = 0; p < 2; p++) {
-    let c = document.getElementById("link-canvas-" + p);
+    let c = /** @type {HTMLCanvasElement} */ (document.getElementById("link-canvas-" + p));
     c.width = w;
     c.height = h;
     linkCtx[p] = c.getContext("2d");
@@ -5318,7 +5320,7 @@ document.getElementById("home-resume").addEventListener("click", resumeGame);
 // WebGL context without preserveDrawingBuffer, so reading the canvas itself
 // after pausing yields nothing.
 const homePausedCard = document.getElementById("home-paused");
-const homePausedCanvas = document.getElementById("home-paused-canvas");
+const homePausedCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-paused-canvas"));
 const homePausedName = document.getElementById("home-paused-name");
 
 const updatePausedCard = () => {
@@ -5391,7 +5393,7 @@ let pendingShot = false;
 
 const captureCanvas = () => {
   pendingShot = false;
-  document.getElementById("canvas").toBlob((blob) => {
+  /** @type {HTMLCanvasElement} */ (document.getElementById("canvas")).toBlob((blob) => {
     if (!blob) return;
     let a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -5540,12 +5542,13 @@ const updateRumble = (timestamp) => {
   }
 };
 
+/** @type {EmscriptenModule} */
 var Module = {
   // SDL renders (invisibly) to a dedicated hidden canvas so its WebGL context
   // doesn't collide with the WebGL2 context we own on the visible #canvas. A
   // canvas can hold only one context type; game input (_setInput) and audio
   // (Web Audio) are JS-driven, so SDL's canvas is never seen or interacted with.
-  canvas: (() => document.getElementById("sdl-canvas"))(),
+  canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: async () => {
     // iOS Safari kills (or JIT-demotes) tabs under process memory pressure;
     // shrink the rewind ring's cap from 64 MB before any core exists — the

@@ -198,6 +198,26 @@ jobs:
         # exercises no OS surface.
         if: runner.os == 'Linux'
         run: node --test web/tests/*.test.mjs
+      - name: Web JSDoc typecheck (tsc --checkJs)
+        # Types-only gate over the script-tag front-end: tsc checks the REAL
+        # shipped .js files (allowJs+checkJs+noEmit — zero shipped bytes
+        # change; the page still loads the same untouched scripts). One
+        # project per entry point mirrors the HTML's script tags, so a
+        # renamed/removed wasm export or window.* cross-file global fails CI
+        # here instead of dying silently at runtime. gen-emdts --check keeps
+        # the generated wasm-boundary declarations (web/types/em.d.ts) in
+        # lockstep with the {.exportc.} procs in src/dingbat_wasm.nim.
+        # typescript is a pinned devDependency in web/package.json, so npm ci
+        # (retried: it's a network fetch) provides tsc.
+        if: runner.os == 'Linux'
+        working-directory: web
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          npx tsc -p types/tsconfig.main.json
+          npx tsc -p types/tsconfig.embed.json
+          npx tsc -p types/tsconfig.sw.json
+          node types/gen-emdts.mjs --check
       - name: Signaling server room lifecycle (Node)
         # The room-code rendezvous server: a code must be FREED the instant its
         # clients disconnect (e.g. two same-browser tabs that paired locally over
