@@ -22,7 +22,9 @@ type
     etTimer0, etTimer1, etTimer2, etTimer3
     etSerial, etDMA
     # Appended, never inserted: the ordinal of every kind above is part of
-    # the save-state format. Drives the Game Boy Camera's capture countdown.
+    # the save-state format, and tests/savestate_compat_test.nim pins each one
+    # at compile time — a reorder fails the build there, not a user's state.
+    # Drives the Game Boy Camera's capture countdown.
     etCameraDone
 
   Event* = object
