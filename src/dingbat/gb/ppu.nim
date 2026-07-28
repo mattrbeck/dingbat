@@ -78,7 +78,30 @@ proc lcd_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x80) != 0
 const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
 # Turning the LCD back on pushes a frame straight away once this much time has
 # gone by since the last one, so the panel's output rate survives the gap.
+#
+# This threshold is a frontend-pacing rule, not a hardware one, and it is worth
+# being precise about which: with the PPU off there is no LCD refresh at all
+# (the panel just relaxes to white), so hardware has no "frame" to emit and Pan
+# Docs defines none. What hardware does define is what happens on re-enable —
+# the PPU restarts at the top of line 0, so the next drawn frame's VBlank is
+# 144*456 = 65664 dots away — and left alone that stretches the gap between two
+# consecutive presents past one frame period, which a frame-paced frontend sees
+# as a dropped frame forever after. SameBoy solves it the same way and with the
+# same number (Core/memory.c, GB_IO_LCDC: `cycles_since_vblank_callback >
+# 10 * 456` -> GB_VBLANK_TYPE_ARTIFICIAL), which is what makes the two agree
+# frame-for-frame across LCD toggling; see tools/gbfuzz/sameboy_fps.c. mGBA
+# picks the other option and lets the frame run long instead.
 const LCD_ON_FRAME_DOTS* = 10 * 456
+
+when defined(gb_dot_counter):
+  # Diagnostic frame-pacing instrumentation (tools only; compiled out of every
+  # shipping build). gb_total_dots is the panel's dot clock — 4194304 Hz, never
+  # scaled by CGB double speed — so frames-per-emulated-second is
+  # presents / (gb_total_dots / 4194304).
+  var gb_total_dots*: uint64
+  var gb_frame_normal*: uint64    # pushed at LY=144, PPU drew it
+  var gb_frame_lcd_off*: uint64   # pushed by lcd_off_frame while LCD disabled
+  var gb_frame_lcd_on*: uint64    # pushed by the LCDC-enable catch-up
 
 proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ## Push a frame the PPU did not draw: the panel shows white with the PPU
@@ -89,13 +112,15 @@ proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ppu.dots_since_frame = 0
 
 proc lcd_off_frame*(ppu: GbPpu; gb: GB) {.inline.} =
-  ## Drive frame output while the LCD is disabled. The panel keeps refreshing
-  ## at the usual rate with the PPU switched off; a game that turns the LCD off
+  ## Drive frame output while the LCD is disabled. The panel shows white with
+  ## the PPU switched off, but the frontend still needs frames at the usual
+  ## rate to keep running; a game that turns the LCD off
   ## to bulk-load VRAM must not stop producing frames. Without this, step_frame
   ## (which runs until ppu.frame is set) makes no progress for as long as the
   ## LCD is off — the emulator drops those frames and, for a game that idles
   ## with the LCD off, never returns at all.
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
+    when defined(gb_dot_counter): inc gb_frame_lcd_off
     ppu_blank_frame(ppu, gb)
 proc window_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x40
 proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) != 0
@@ -296,11 +321,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   of 0xFF40:
     if (val and 0x80) != 0 and not ppu.lcd_enabled:
       # The PPU restarts at the top of the frame, so the next frame it draws is
-      # a whole frame away. If enough time has already passed since the last
-      # one, hardware pushes a frame now rather than let the gap stretch —
-      # skipping it leaves the emulator one frame ahead of the panel for the
-      # rest of the run, and games toggle the LCD constantly.
+      # 65664 dots away. If enough time has already passed since the last
+      # present, push one now rather than let the gap stretch — skipping it
+      # leaves the emulator one frame ahead of the panel for the rest of the
+      # run, and games toggle the LCD constantly. See LCD_ON_FRAME_DOTS for why
+      # this is a pacing rule rather than a hardware one.
       if ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
+        when defined(gb_dot_counter): inc gb_frame_lcd_on
         ppu_blank_frame(ppu, gb)
       ppu.ly = 0
       ppu.`mode_flag=`(2'u8, gb)

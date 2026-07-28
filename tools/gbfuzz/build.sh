@@ -34,4 +34,18 @@ echo "== dingbat_gb_nav"
 nim c -d:release --path:src --hints:off \
    -o:tools/gbfuzz/dingbat_gb_nav tools/gbfuzz/dingbat_gb_nav.nim
 
+# Frame-pacing probes: presents per second of EMULATED time, for checking that
+# dingbat's frame cadence around LCD off/on transitions matches SameBoy's.
+# The dingbat side needs -d:gb_dot_counter, which is what compiles in the
+# panel dot counter the measurement reads (inert in every other build).
+echo "== sameboy_fps"
+cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
+   tools/gbfuzz/sameboy_fps.c \
+   "$SAMEBOY/build/lib/libsameboy.a" \
+   -lm -o tools/gbfuzz/sameboy_fps
+
+echo "== dingbat_gb_fps"
+nim c -d:release -d:gb_dot_counter --path:src --hints:off \
+   -o:tools/gbfuzz/dingbat_gb_fps tools/gbfuzz/dingbat_gb_fps.nim
+
 echo "all built"

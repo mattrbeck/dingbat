@@ -375,6 +375,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
             ppu.frame = true
+            when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0
             ppu.current_window_line = -1
           else:
@@ -407,6 +408,7 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # Counted on both paths: the panel's refresh clock runs whether or not the
   # PPU is driving it (see ppu_blank_frame).
   ppu.dots_since_frame += int32(cycles)
+  when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
   # ---- Lazy idle span -----------------------------------------------------
   # This is the first iteration of fifo_tick_slow's skip branch, hoisted out
   # of the call so the case it covers costs nothing but a compare. Modes 0, 1

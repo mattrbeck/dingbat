@@ -149,6 +149,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   ppu.read_mode = ppu.mode_flag
   # See the FIFO renderer: the panel's refresh clock runs on both paths.
   ppu.dots_since_frame += int32(cycles)
+  when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
   ppu.cycle_counter += int32(cycles)
   if lcd_enabled(ppu):
     if ppu.mode_flag == 2:       # OAM search
@@ -169,6 +170,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           ppu.`mode_flag=`(1'u8, gb)
           gb.interrupts.vblank_interrupt = true
           ppu.frame = true
+          when defined(gb_dot_counter): inc gb_frame_normal
           ppu.dots_since_frame = 0
         else:
           ppu.`mode_flag=`(2'u8, gb)
