@@ -68,6 +68,21 @@ jobs:
         # ever fails in CI. The flag gates APU/keypad/mmio/savestate only —
         # nothing the compositor touches — so the tests check the same code.
         run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
+      - name: GBA per-line OBJ candidate list (differential fuzz)
+        # render_sprites walks a per-line 128-bit candidate bitmap instead of
+        # all 128 OAM entries. That is a pure speedup and must be invisible,
+        # but its failure mode is a sprite configuration no shipped game
+        # produces — a double-size affine box, a Y that wraps off the top, an
+        # OBJ-window sprite, a sprite dropped by the OBJ cycle budget — so a
+        # ROM sweep is a bad instrument for it. This renders thousands of
+        # randomized OAM tables BOTH ways (candidate list and the reference
+        # full scan, which ships as the rebuild-storm fallback) and asserts
+        # byte-identical sprite_pixels, plus the invalidation paths and a
+        # negative control that proves the comparison can fail. Every check
+        # was confirmed by mutating the implementation. Needs no ROMs.
+        shell: bash
+        # -d:test_harness for the same link reason as the step above.
+        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppuobjlist_test tests/ppuobjlist_test.nim
       - name: Save-state format compatibility
         # Users lose save states to routine updates, and nothing used to notice.
         # This loads a corpus of reference states (tests/states — most of them

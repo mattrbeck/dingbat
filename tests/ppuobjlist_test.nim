@@ -574,7 +574,11 @@ proc test_coverage() =
 
 when isMainModule:
   let heavy = getEnv("OBJLIST_HEAVY") == "1"
-  let tables = if heavy: 20000 else: 1400
+  # 5000 tables x 160 lines is ~3.4 s and ~800k compared scanlines -- cheap
+  # enough for every CI run. OBJLIST_HEAVY=1 raises it to 20000 (~14 s, 3.2M
+  # scanlines), which is what a change to the geometry or invalidation logic
+  # should be run under locally.
+  let tables = if heavy: 20000 else: 5000
   let emu = make_emu()
   # OBJ character data: 32K of OBJ VRAM at 0x10000. Random, then biased so a
   # good share of 4bpp nibbles are index 0 (transparent) and the priority /
