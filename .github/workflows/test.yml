@@ -68,6 +68,24 @@ jobs:
         # ever fails in CI. The flag gates APU/keypad/mmio/savestate only —
         # nothing the compositor touches — so the tests check the same code.
         run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
+      - name: GBA 4bpp BG tile-unpack equivalence
+        # render_reg_bg expands a whole 4bpp tile row with SWAR instead of
+        # shifting out eight nibbles. The transformation is pure and its input
+        # space is small, so this ENUMERATES it rather than trusting a ROM
+        # sweep: every nibble value at every position, every adjacent nibble
+        # pair (the carry test), all 65536 values of each 16-bit half, all 16
+        # palette banks, both flips, and all 36 reachable (x_in_tile, span)
+        # shapes — compared against the scalar loop that is still the shipping
+        # fallback, so the oracle is real code. A second part renders scanlines
+        # three ways (SWAR / scalar / an independent per-pixel model) to cover
+        # the OBJ-VRAM transparent path, 8bpp, mosaic, BG wraparound and all
+        # four screen_size values, with coverage counters asserted non-zero so
+        # it cannot pass vacuously. Every check was confirmed by mutation.
+        # The full 2^32 sweep is opt-in (DINGBAT_BG4_EXHAUSTIVE=1), too slow
+        # for CI. Needs no ROMs. -d:test_harness for the same link reason as
+        # above — and render_reg_bg_scalar only exists under it.
+        shell: bash
+        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppubgunpack_test tests/ppubgunpack_test.nim
       - name: Save-state format compatibility
         # Users lose save states to routine updates, and nothing used to notice.
         # This loads a corpus of reference states (tests/states — most of them

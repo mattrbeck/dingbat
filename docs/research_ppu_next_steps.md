@@ -96,6 +96,19 @@ zero one; `*0x0F` widens that to the bank mask without crossing byte boundaries)
 | ceiling: pixel emission deleted, walk kept | +9.2% | +7.2% | +8.8% | +10.4% | +10.7% | +9.3% |
 | **capture: SWAR prototype** | **+6.4%** | **+5.1%** | **+5.3%** | **+6.3%** | **+7.3%** | **+6.1%** |
 
+> **Re-measured on the shipped implementation (2026-07-28): +4.3% native, not
+> +6.1%.** Best-of-9 interleaved, per-build ROM copies, same five states, same
+> machine — and the baselines reproduce this table's stock numbers to within
+> 0.5%, so the gap is the change, not the setup: Emerald +4.64%, FireRed +3.32%,
+> Kirby +3.46%, Minish Cap +4.58%, Golden Sun +5.59%. The difference from the
+> prototype is that **the shipped version does 4bpp only**. This section also
+> proposed collapsing the 8bpp whole-tile span to one uint64 load/store; that
+> was deliberately left out (8bpp was required to stay untouched), and it is the
+> obvious place to look for the missing ~1.8%. Web re-measured at **+5.2%**
+> (visible Chrome, FireRed, best of 4 interleaved rounds of 7; per-round +2.9%
+> to +6.7% — noisier than native, but every round favoured SWAR). Bundle cost
+> +213 bytes. See `tests/ppubgunpack_test.nim`.
+
 **65% of the pixel-emission ceiling, 40% of the whole component.** That is a far better
 capture ratio than the 2026-07-24 round's experience would predict, because this is a
 structural change (do the work once instead of eight times) rather than a re-tidying of

@@ -143,7 +143,82 @@ proc bgr16_mul*(a: uint16; coeff: int): uint16 =
 proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
 
-proc render_reg_bg*(ppu: PPU; bg: int) =
+# --- 4bpp tile-row unpacking ------------------------------------------------
+#
+# A regular BG's 4bpp span writes `span` palette indices from one 4-byte tile
+# row. `unpack_bg4_span_scalar` is the original per-pixel form and is still the
+# real code path for partial spans (the two line edges); `unpack_bg4_span`
+# adds a SWAR whole-tile case for the aligned 8-pixel span, which is what
+# essentially every span is (measured px_per_span: exactly 8.00 on Emerald,
+# FireRed, Kirby and Minish Cap, 7.80 on Golden Sun).
+#
+# Both are exported because tests/ppubgunpack_test.nim compares them against
+# each other over the whole reachable input space — the scalar proc is the
+# oracle, and it is the shipping fallback rather than a copy of it, so the
+# comparison is against real behaviour.
+#
+# Domain (enforced by the caller, relied on by both): x_in_tile in 0..7,
+# 1 <= span <= 8 - x_in_tile, flip_x_mask is 0 or 7, bank is the palette bank
+# already shifted into the high nibble (0x00, 0x10, ... 0xF0). The span bound
+# is what keeps the nibble index (x_in_tile + k) inside 0..7 — a wider span
+# would shift `row` by more than 28 and read outside the tile row.
+proc unpack_bg4_span_scalar*(dst: ptr UncheckedArray[uint8]; col: int;
+                             row: uint32; x_in_tile, span, flip_x_mask: int;
+                             bank: uint8) {.inline.} =
+  for k in 0 ..< span:
+    let x = (x_in_tile + k) xor flip_x_mask
+    let p = uint8((row shr (uint32(x) * 4)) and 0xF)
+    # Palette index 0 is transparent in every bank, so it must NOT take the
+    # bank offset.
+    dst[col + k] = p or (if p != 0: bank else: 0'u8)
+
+proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
+                      x_in_tile, span, flip_x_mask: int; bank: uint8) {.inline.} =
+  ## Whole-tile SWAR expansion, falling back to the scalar loop otherwise.
+  ##
+  ## The three `((v shl s) or v) and M` steps scatter the eight nibbles of
+  ## `row` into the eight bytes of a uint64, low nibble to low byte. Every step
+  ## is built only from shl / or / and-with-a-constant, so it is OR-linear
+  ## (f(x or y) == f(x) or f(y), f(0) == 0) and carries cannot exist: the whole
+  ## expansion is a permutation of 32 input bits into 32 of the 64 output bits.
+  ## That is what makes the byte lanes independent, and the test leans on it.
+  ##
+  ## Horizontal flip is then a byte reverse, because output byte k holds the
+  ## pixel for x_in_tile k and flipping maps k -> 7 - k.
+  ##
+  ## The bank is OR'd in without touching index 0. `v + 0x0F0F..` cannot carry
+  ## between bytes (each byte is 0x00..0x0F, so the sum is at most 0x1E), and
+  ## masking with 0xF0F0.. leaves 0x10 for every non-zero index and 0x00 for
+  ## every zero one. Multiplying that by the bank NIBBLE (0..15) gives at most
+  ## 0x10 * 15 = 0xF0 per byte, so that cannot carry between bytes either.
+  const little = cpuEndian == littleEndian
+  if little and x_in_tile == 0 and span == 8:
+    var v = uint64(row)
+    v = ((v shl 16) or v) and 0x0000FFFF0000FFFF'u64
+    v = ((v shl 8)  or v) and 0x00FF00FF00FF00FF'u64
+    v = ((v shl 4)  or v) and 0x0F0F0F0F0F0F0F0F'u64
+    if flip_x_mask != 0:
+      # bswap64, written out because Nim has no portable byte-swap intrinsic.
+      # Checked in the generated code: clang does NOT emit `rev` here — it
+      # knows the high nibble of every byte is already zero and folds the
+      # three steps into a cheaper nibble-aware swap, then `csel`s between the
+      # flipped and unflipped values so the branch disappears entirely. wasm
+      # has no byte-swap instruction, so there it stays as shifts and masks.
+      v = ((v and 0x00FF00FF00FF00FF'u64) shl 8) or
+          ((v shr 8) and 0x00FF00FF00FF00FF'u64)
+      v = ((v and 0x0000FFFF0000FFFF'u64) shl 16) or
+          ((v shr 16) and 0x0000FFFF0000FFFF'u64)
+      v = (v shl 32) or (v shr 32)
+    let nz = (v + 0x0F0F0F0F0F0F0F0F'u64) and 0xF0F0F0F0F0F0F0F0'u64
+    v = v or (nz * (uint64(bank) shr 4))
+    # copyMem, not a cast-to-ptr-uint64 store: `col` is only 8-aligned when
+    # BGHOFS is, so this store is frequently unaligned. clang lowers a fixed
+    # 8-byte copy from an addressable local to one unaligned store.
+    copyMem(addr dst[col], addr v, 8)
+  else:
+    unpack_bg4_span_scalar(dst, col, row, x_in_tile, span, flip_x_mask, bank)
+
+proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
   if not bit(uint16(ppu.dispcnt), 8 + bg): return
   let bgcnt  = ppu.bgcnt[bg]
   let bghofs = ppu.bghofs[bg]
@@ -205,22 +280,30 @@ proc render_reg_bg*(ppu: PPU; bg: int) =
       else:
         # A 4bpp tile row is exactly 4 bytes = 8 nibbles, and tile_base is
         # 4-byte aligned (character_base, tile stride and row stride are all
-        # multiples of 4), so pull the whole row as one word and shift each
-        # pixel out. That replaces span byte loads with a single load, and the
-        # branchless bank add keeps the tail loop vectorizable.
+        # multiples of 4), so pull the whole row as one word and expand all
+        # eight nibbles at once (see unpack_bg4_span).
         let row = cast[ptr uint32](addr vram[tile_base])[]
-        for k in 0 ..< span:
-          let x = (x_in_tile + k) xor flip_x_mask
-          let p = uint8((row shr (uint32(x) * 4)) and 0xF)
-          # Palette index 0 is transparent in every bank, so it must NOT take
-          # the bank offset.
-          dst[col + k] = p or (if p != 0: bank else: 0'u8)
+        when swar:
+          unpack_bg4_span(dst, col, row, x_in_tile, span, flip_x_mask, bank)
+        else:
+          unpack_bg4_span_scalar(dst, col, row, x_in_tile, span, flip_x_mask, bank)
     col += span
   if bgcnt.mosaic:
     let h = int(ppu.mosaic.bg_mosiac_h_size) + 1
     if h > 1:
       for col in 0..239:
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
+
+proc render_reg_bg*(ppu: PPU; bg: int) {.inline.} =
+  render_reg_bg_impl(ppu, bg, true)
+
+when defined(test_harness):
+  proc render_reg_bg_scalar*(ppu: PPU; bg: int) =
+    ## The same renderer with the SWAR whole-tile case compiled out, so
+    ## tests/ppubgunpack_test.nim can render a scene both ways and diff the
+    ## line buffers. Only exists under -d:test_harness so shipping builds (and
+    ## the wasm bundle) do not carry a second copy.
+    render_reg_bg_impl(ppu, bg, false)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
   if not bit(uint16(ppu.dispcnt), 8 + bg): return
