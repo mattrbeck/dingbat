@@ -1197,7 +1197,10 @@ const refreshRomsManageList = async () => {
       for (let b of siblings) if (b !== except && b.disarm) b.disarm();
     };
 
-    // Reset = wipe this game's save data, keep the ROM.
+    // Reset  = wipe this game's save data, keep the ROM.
+    // Remove = free this device's ROM bytes, keep the save data and the Drive
+    //          copy; the game becomes a Drive-only tile. Needs a Drive copy to
+    //          come back from, so it is gated hard — see below.
     // Delete = remove the game outright (ROM + save data).
     // When signed in both mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
@@ -1233,6 +1236,57 @@ const refreshRomsManageList = async () => {
       });
     }
     if (saveBtn) siblings.push(saveBtn);
+
+    // Remove = free THIS device's copy of the ROM and leave the game in the
+    // Drive library — the inverse of the grid's download glyph. Three
+    // conditions, all required, because getting this wrong destroys someone's
+    // only copy of a game:
+    //   1. signed in to Drive — otherwise there is nowhere to re-download from
+    //      and this is just a silent delete;
+    //   2. the bytes are actually here — nothing to free otherwise, and a
+    //      Drive-only row already offers Download in the grid instead;
+    //   3. Drive has the ROM — sigs["rom:<name>"] is this device's record of
+    //      having put exactly these bytes on Drive (written on upload AND on
+    //      download), and nothing queued to delete them again.
+    // (3) is what makes the dangerous case unreachable: a game imported a
+    // moment ago whose upload is still sitting in queueUp has no sig, so it
+    // gets no button at all. You cannot evict what exists only here. The sig
+    // can still go stale (wiped app folder, different account), so
+    // removeGameFromDevice re-checks the live Drive listing before deleting.
+    let romOnDrive = syncActive() && !!syncState.sigs[romKey(name)] &&
+      !syncState.queueDel.includes(romKey(name));
+    let freeBtn = null;
+    if (localRoms.has(name) && romOnDrive) {
+      if (isRomLoaded(name)) {
+        // Covers link mode too (isRomLoaded folds linkRomEntry in). Unlike
+        // Delete we don't unload the game for the user: "free some space" is
+        // no reason to close what they're playing.
+        freeBtn = makeDisabledButton(
+          "Remove",
+          "button button-sm roms-manage-btn",
+          "Close this game first to remove it from this device",
+        );
+      } else {
+        freeBtn = makeConfirmButton({
+          label: "Remove",
+          confirmLabel: "Remove from this device?",
+          className: "button button-sm roms-manage-btn",
+          onArm: () => disarmOthers(freeBtn),
+          onConfirm: async () => {
+            if (await removeGameFromDevice(name)) {
+              showToast("ROM removed from this device — save kept, still on Drive");
+            }
+            refreshRomsManageList();
+            refreshHomeRecent();
+            updateStorageInfo();
+          },
+        });
+        freeBtn.title =
+          "Free this device's copy of the ROM. Your save data stays here, the " +
+          "game stays in your Drive library, and one tap re-downloads it.";
+      }
+      siblings.push(freeBtn);
+    }
 
     let allBtn;
     if (linkRunning) {
@@ -1271,6 +1325,7 @@ const refreshRomsManageList = async () => {
     siblings.push(allBtn);
 
     if (saveBtn) actions.appendChild(saveBtn);
+    if (freeBtn) actions.appendChild(freeBtn);
     actions.appendChild(allBtn);
     row.appendChild(actions);
     romsManageList.appendChild(row);
@@ -2006,8 +2061,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         for (let g of pending) {
           if (isRomLoaded(g)) continue; // never yank the game being played
           await deleteSaveData(g);
-          await dbDelete(romKey(g));
-          await dbDelete(artKey(g));
+          await evictLocalRom(g);
           gridDirty = true;
         }
       }
@@ -2114,6 +2168,47 @@ const downloadGame = async (game) => {
   return ok;
 };
 
+// --- "Remove from this device" (the inverse of downloadGame) --------------
+// Frees this device's copy of a game's ROM and nothing else: no tombstone, no
+// Drive delete, and the recents entry stays put, so the game keeps its place
+// in the merged library and simply re-renders as a Drive-only tile that one
+// tap brings back. That is the whole difference from deleteGameEverywhere,
+// which raises a tombstone precisely so every OTHER device drops the game too.
+//
+// Save data is deliberately KEPT. It is kilobytes next to a multi-megabyte
+// ROM, so it isn't what a user reclaiming space came for, and it is the one
+// thing here that can be irreplaceable — a battery save that hasn't reached
+// Drive yet would be gone for good, with no "download it again". Keeping it
+// also matches the MAX_RECENT eviction rule (bumpRecentIndex has always
+// dropped ROM bytes and never saves), and what's left is still wipeable from
+// this same row via Reset. On the way out we queue the leftovers for upload,
+// so the copy that stays behind is also a copy Drive has.
+const removeGameFromDevice = async (game) => {
+  if (!syncActive()) { showToast("Sign in to Google Drive first"); return false; }
+  // Never take the last copy. The button is already gated on this device's
+  // record of the upload (syncState.sigs), but that record can lie: a wiped
+  // app folder, or a different Google account signed in, leaves stale sigs
+  // pointing at files Drive no longer holds. The live listing is the only
+  // authority, so re-check it here, immediately before the bytes go — and if
+  // the ROM genuinely isn't backed up, back it up instead of deleting it.
+  let remote;
+  try {
+    remote = await driveListMap();
+  } catch (e) {
+    console.warn("Drive listing failed, not removing:", e);
+    showToast("Couldn't reach Drive — nothing was removed");
+    return false;
+  }
+  if (!remote.has(romKey(game))) {
+    markGameUpload(game);
+    showToast("Not backed up yet — kept here and queued for Drive");
+    return false;
+  }
+  await evictLocalRom(game);
+  markGameUpload(game); // the ROM is gone, so this queues the saves we kept
+  return true;
+};
+
 // --- Deletion (Manage ROMs) ----------------------------------------------
 // Reset = wipe save data, keep the ROM. Delete = remove the game entirely and
 // tombstone it so every device drops it. Both are local-only when signed out.
@@ -2123,8 +2218,7 @@ const resetGameSaves = async (game) => {
 };
 const deleteGameEverywhere = async (game) => {
   await deleteSaveData(game);
-  await dbDelete(romKey(game));
-  await dbDelete(artKey(game));
+  await evictLocalRom(game);
   await dbPut("recent", (await getRecentMeta()).filter((r) => r.name !== game));
   if (syncActive()) {
     for (let n of ["save:" + game, "save:" + game + "-p2", "rom:" + game]) markDelete(n);
@@ -2539,6 +2633,17 @@ const MAX_RECENT = 20;
 const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
 
+// Drop this device's copy of a game's bytes: the ROM record and its box art,
+// which together are effectively all of a game's footprint. Save data is
+// never touched here — it is the small, irreplaceable half, and the callers
+// that only want space back (the MAX_RECENT eviction below, "Remove from this
+// device") must not take it. Callers that really are deleting the game wipe
+// the saves themselves, alongside this.
+const evictLocalRom = async (name) => {
+  await dbDelete(romKey(name));
+  await dbDelete(artKey(name));
+};
+
 const getRecentMeta = async () => {
   return (await dbGet("recent")) || [];
 };
@@ -2563,10 +2668,7 @@ const bumpRecentIndex = async (name) => {
   // stays in the index and simply becomes a Drive-only tile — the bytes are
   // re-downloadable, so the library stays whole. Signed out there'd be nothing
   // to come back to, so the entry is dropped as before.
-  for (let i = MAX_RECENT; i < list.length; i++) {
-    await dbDelete(romKey(list[i].name));
-    await dbDelete(artKey(list[i].name));
-  }
+  for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);
   if (!syncActive()) list = list.slice(0, MAX_RECENT);
   await dbPut("recent", list);
 };
@@ -2686,8 +2788,7 @@ const updateStorageInfo = async () => {
 const deleteRecent = async (name) => {
   let list = (await getRecentMeta()).filter((r) => r.name !== name);
   await dbPut("recent", list);
-  await dbDelete(romKey(name));
-  await dbDelete(artKey(name));
+  await evictLocalRom(name);
   refreshHomeRecent();
 };
 

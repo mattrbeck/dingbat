@@ -2903,9 +2903,17 @@ body.debug-2p .home-tile-link {
   font-size: 13px;
 }
 
+/* Shrinkable and wrapping, not `flex: 0 0 auto`: arming a confirm button swaps
+   its label for a whole question ("Remove from this device?"), which on a
+   phone is wider than the buttons beside it. Held rigid, the row overflowed
+   and clipped whatever sat to the right — with three actions that meant a
+   half-visible Delete. Now the others drop to the next line instead. */
 .roms-manage-actions {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
