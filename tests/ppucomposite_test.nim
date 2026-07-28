@@ -110,6 +110,11 @@ proc seed_memory(ppu: PPU; transparent_bias: bool) =
   for i in 0 ..< ppu.vram.len: ppu.vram[i] = uint8(nxt())
   for i in 0 ..< ppu.pram.len: ppu.pram[i] = uint8(nxt())
   for i in 0 ..< ppu.oam.len:  ppu.oam[i]  = uint8(nxt())
+  # render_sprites walks a per-line candidate list that is rebuilt when OAM is
+  # reported dirty. Poking the seq behind the bus write paths skips that
+  # report; scanline() force-rebuilds on line 0 so these tests would pass
+  # anyway, but say it explicitly rather than leaning on that.
+  ppu.oam_touched()
   if transparent_bias:
     # Push a lot of tile data to palette index 0 so the layer walk falls
     # through to lower layers, the backdrop, and the blend-bottom search.

@@ -1111,10 +1111,18 @@ proc scanline*(ppu: PPU) =
   if ppu.vcount == 0:
     ppu.skip_render = not ppu.render_dirty
     ppu.render_dirty = false
-    # New frame: the OBJ candidate list gets its rebuild budget back. A frame
-    # that blew it fell back to the straight scan, left obj_list_dirty set, and
-    # so rebuilds again here on line 0.
+    # New frame: the OBJ candidate list gets its rebuild budget back, and is
+    # unconditionally rebuilt once whether or not anything reported an OAM
+    # write. That second part is deliberate belt-and-braces: the list's one
+    # real hazard is a path that mutates OAM without calling oam_touched, and
+    # forcing a rebuild per frame bounds the damage from such a bug to the
+    # remainder of one frame instead of leaving it wrong indefinitely. It is
+    # free in practice -- all five profiled gameplay states already dirty OAM
+    # exactly once per frame, so this rebuild is the one they were doing
+    # anyway, and a title with genuinely static OAM pays one rebuild (about
+    # one line's worth of the old 160-line scan) per frame.
     ppu.obj_list_rebuilds = 0
+    ppu.obj_list_dirty = true
   if ppu.skip_render:
     if ppu.render_dirty:
       ppu.skip_render = false
