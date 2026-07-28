@@ -238,6 +238,13 @@ var cov_wrap_y    = 0     # a line covered by a sprite whose raw Y is > 159
 var cov_wrap_x    = 0     # an on-line sprite whose raw X is > 239
 var cov_candidates = 0    # total candidate bits set
 var cov_lines      = 0    # lines rendered
+var cov_mosaic    = 0     # on-line sprites with the OBJ mosaic bit set
+var cov_shape3    = 0     # on-line attempts at the prohibited shape 3
+var cov_shape_size: array[3, array[4, int]]  # every legal shape x size combo
+var cov_map1d = 0         # tables rendered with 1D OBJ mapping
+var cov_map2d = 0         # ...and with 2D
+var cov_8bpp  = 0         # on-line 256-colour sprites
+var cov_hbfree = 0        # tables with the halved (954) OBJ cycle budget
 
 proc note_coverage(oam: seq[byte]; line: int; r: LineResult) =
   inc cov_lines
@@ -246,13 +253,18 @@ proc note_coverage(oam: seq[byte]; line: int; r: LineResult) =
     if r.pixels[c].window: inc cov_window_px
     if r.pixels[c].blends: inc cov_blend_px
   for s in 0 ..< 128:
-    if not expected_covers(oam, s, line): continue
-    inc cov_candidates
     let o = s * 8
     let attr0 = uint16(oam[o]) or (uint16(oam[o + 1]) shl 8)
     let attr1 = uint16(oam[o + 2]) or (uint16(oam[o + 3]) shl 8)
+    if int(attr0 shr 14) == 3 and (attr0 and 0x0300'u16) != 0x0200'u16:
+      inc cov_shape3
+    if not expected_covers(oam, s, line): continue
+    inc cov_candidates
     if int(attr0 and 0xFF'u16) > 159: inc cov_wrap_y
     if int(attr1 and 0x1FF'u16) > 239: inc cov_wrap_x
+    if (attr0 and 0x1000'u16) != 0: inc cov_mosaic
+    if (attr0 and 0x2000'u16) != 0: inc cov_8bpp
+    inc cov_shape_size[int(attr0 shr 14)][int(attr1 shr 14)]
     if (attr0 and 0x0300'u16) == 0x0300'u16:
       # covered now; would the un-doubled box have covered it?
       let shape = int(attr0 shr 14)
@@ -297,7 +309,10 @@ proc test_differential(emu: GBA; tables: int) =
   for t in 0 ..< tables:
     let class = CLASSES[t mod CLASSES.len]
     fill_oam(ppu.oam, class)
-    ppu.dispcnt = cast[DISPCNT](rand_dispcnt())
+    let dc = rand_dispcnt()
+    ppu.dispcnt = cast[DISPCNT](dc)
+    if (dc and 0x0040'u16) != 0: inc cov_map1d else: inc cov_map2d
+    if (dc and 0x0020'u16) != 0: inc cov_hbfree
     ppu.mosaic = cast[MOSAIC](uint16(nxt() and 0xFFFF))
     ppu.oam_touched()
     ppu.obj_list_rebuilds = 0
@@ -571,6 +586,21 @@ proc test_coverage() =
   check(cov_wrap_y > 1000, "on-line sprites with raw Y > 159: " & $cov_wrap_y)
   check(cov_wrap_x > 1000, "on-line sprites with raw X > 239: " & $cov_wrap_x)
   check(cov_budget > 100, "lines where the OBJ budget ran out: " & $cov_budget)
+  check(cov_mosaic > 1000, "on-line mosaic sprites: " & $cov_mosaic)
+  check(cov_8bpp > 1000, "on-line 256-colour sprites: " & $cov_8bpp)
+  check(cov_shape3 > 100, "prohibited shape-3 entries seen: " & $cov_shape3)
+  check(cov_map1d > 10 and cov_map2d > 10,
+        "both OBJ VRAM mappings used (1D " & $cov_map1d & " / 2D " & $cov_map2d & ")")
+  check(cov_hbfree > 10,
+        "the halved 954-cycle OBJ budget used on " & $cov_hbfree & " tables")
+  var missing = ""
+  for shape in 0 .. 2:
+    for size in 0 .. 3:
+      if cov_shape_size[shape][size] < 100:
+        missing.add(" " & $shape & "/" & $size)
+  check(missing.len == 0,
+        "all 12 shape x size combinations rendered on a line",
+        "under-covered:" & missing)
 
 when isMainModule:
   let heavy = getEnv("OBJLIST_HEAVY") == "1"
