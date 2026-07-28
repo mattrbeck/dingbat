@@ -1,3 +1,17 @@
+// Keyboard-navigation escape hatch: when focus is in the top bar or menu,
+// Tab must keep moving focus. This runs on window in the CAPTURE phase and is
+// registered before em.js executes, so it outranks both the SDL runtime's key
+// grab (which preventDefaults Tab app-wide once a game runs) and the
+// fast-forward shortcut. Stopping propagation leaves the browser's default
+// focus traversal intact. keydown only: keyup flows through so a held
+// fast-forward always gets its release.
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Tab" && e.target && e.target.closest &&
+      e.target.closest("#topbar, #menu-dropdown")) {
+    e.stopImmediatePropagation();
+  }
+}, true);
+
 // --- Service Worker ---
 
 let swRegistration = null;
@@ -20,10 +34,16 @@ if ("serviceWorker" in navigator) {
       });
     });
   });
-  // Reload when a new service worker takes over
+  // Reload when a NEW service worker takes over from an old one (the Update
+  // flow). On the very first visit the install's clients.claim() also fires
+  // controllerchange — reloading then flashes the page mid-boot, aborts the
+  // in-flight em.wasm fetch, and on a slow connection can land after the user
+  // already started a game and kill it. An uncontrolled page simply starts
+  // using the new SW without a reload.
+  const hadController = !!navigator.serviceWorker.controller;
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!refreshing) {
+    if (hadController && !refreshing) {
       refreshing = true;
       location.reload();
     }
@@ -429,7 +449,17 @@ const releaseFocus = (overlay) => {
   if (modalTrapHandler) overlay.removeEventListener("keydown", modalTrapHandler);
   modalTrapHandler = null;
   try {
-    if (modalReturnFocus && modalReturnFocus.focus) modalReturnFocus.focus();
+    // The return target may be gone or display:none by now (a modal opened
+    // from the menu records the menu item, and the dropdown has since been
+    // hidden — focusing it silently fails and keyboard focus falls to body).
+    // Fall back to the menu button so focus stays in the chrome.
+    if (modalReturnFocus && modalReturnFocus.focus) {
+      if (modalReturnFocus.isConnected && modalReturnFocus.offsetParent !== null) {
+        modalReturnFocus.focus();
+      } else {
+        menuBtn.focus();
+      }
+    }
   } catch {}
   modalReturnFocus = null;
 };
@@ -596,12 +626,35 @@ menuBtn.addEventListener("click", (e) => {
   if (!menuDropdown.hidden) updateMenuScrollHint();
 });
 
+// aria-expanded tracks the dropdown wherever it gets closed (many sites set
+// menuDropdown.hidden directly), so a screen reader always hears the truth.
+new MutationObserver(() =>
+  menuBtn.setAttribute("aria-expanded", String(!menuDropdown.hidden))
+).observe(menuDropdown, { attributes: true, attributeFilter: ["hidden"] });
+
 menuDropdown.addEventListener("scroll", updateMenuScrollHint, { passive: true });
 window.addEventListener("resize", updateMenuScrollHint);
 
 document.addEventListener("click", () => {
   menuDropdown.hidden = true;
 });
+
+// Screen-reader names for every settings switch: the visible text lives in a
+// sibling div, not the wrapping <label>, so assistive tech read each one as a
+// bare "checkbox". Link input -> row label (and description) once at boot;
+// this covers every .modal-toggle-row in the static HTML, present and future.
+for (const row of document.querySelectorAll(".modal-toggle-row")) {
+  const label = row.querySelector(".modal-row-label");
+  const input = row.querySelector("input, select");
+  if (!label || !input || input.hasAttribute("aria-label")) continue;
+  if (!label.id) label.id = (input.id || "row" + Math.random().toString(36).slice(2)) + "-label";
+  input.setAttribute("aria-labelledby", label.id);
+  const sub = row.querySelector(".modal-toggle-sub");
+  if (sub) {
+    if (!sub.id) sub.id = label.id + "-sub";
+    input.setAttribute("aria-describedby", sub.id);
+  }
+}
 
 // --- Settings modal (tabbed: Controls / Game Boy / GBA / Video) ---
 
@@ -847,6 +900,7 @@ const renderCheatList = () => {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = c.enabled;
+    cb.setAttribute("aria-label", "Enable " + (c.name || "cheat"));
     cb.addEventListener("change", () => { cheatList[i].enabled = cb.checked; applyCheats(); });
     const info = document.createElement("div");
     info.className = "cheat-row-info";
@@ -2954,7 +3008,9 @@ const refreshHomeRecent = async () => {
 // them; Escape must stay in step or a modal reads as "stuck".
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    // Don't close settings if we're rebinding a key — the capture handler eats it
+    menuDropdown.hidden = true; // the dropdown must not outlive Escape either
+    // Don't close settings if we're rebinding a key — the capture handler
+    // cancels the capture and eats the event before this handler runs
     if (!settingsModal.classList.contains("open") || kbSelection < 0) {
       closeSettingsModal();
     }
@@ -4155,6 +4211,16 @@ const commitBindings = (bindings) => {
 
 const kbKeyHandler = (e) => {
   if (kbSelection < 0) return;
+  if (e.code === "Escape") {
+    // Cancel the capture. Escape must never become a game binding: bound
+    // keys pre-empt shortcuts, so a bound Escape stops closing every modal
+    // app-wide with no visible cause.
+    kbSelection = -1;
+    renderKbBindings();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
   let sdl = JS_TO_SDL[e.code];
   if (sdl === undefined) return;
   e.preventDefault();
@@ -4165,19 +4231,17 @@ const kbKeyHandler = (e) => {
     if (bindings[i] === sdl) bindings[i] = -1;
   }
   bindings[kbSelection] = sdl;
-  // Auto-advance to next input
-  if (kbSelection < INPUT_NAMES.length - 1) {
-    kbSelection++;
-  } else {
-    kbSelection = -1;
-  }
+  // One key per click: ending capture here (no auto-advance) keeps a stray
+  // extra keystroke from silently rebinding the next button in the list.
+  kbSelection = -1;
   commitBindings(bindings);
 };
 
 const loadKeybindingsFromStorage = async () => {
   let stored = await dbGet("keybindings");
   if (stored && stored.length === INPUT_NAMES.length) {
-    applyKeybindings(stored);
+    // Heal profiles saved before Escape became unbindable (see kbKeyHandler)
+    applyKeybindings(stored.map((k) => (k === 27 ? -1 : k)));
   }
 };
 
@@ -4938,6 +5002,9 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "Tab":
       if (!gameLoaded) break; // leave Tab to focus navigation otherwise
+      // (Tab with focus in the top bar / menu never reaches this handler —
+      // the window-capture hook at the top of the file keeps it as focus
+      // traversal so keyboard users can operate the chrome during play.)
       if (e.shiftKey) {
         // Toggle 2x — radio with fast-forward, same as the buttons
         if (linkMode || netActive()) break;

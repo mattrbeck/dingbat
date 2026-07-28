@@ -42,7 +42,7 @@
   /* ---- Text ---- */
   --text: #eaeef6;
   --text-dim: #99a3ba;
-  --text-faint: #616b83;
+  --text-faint: #808aa1;
 
   /* ---- Accent (amber phosphor) ---- */
   --accent: #ffb04d;
@@ -180,7 +180,7 @@
 
   --text: #ececee;
   --text-dim: #9c9ca4;
-  --text-faint: #63636b;
+  --text-faint: #808089;
 
   --topbar-top: #101011;
   --topbar-bottom: #060607;
@@ -242,7 +242,7 @@
 
   --text: #1d2433;
   --text-dim: #4d576d;
-  --text-faint: #6d7689;
+  --text-faint: #646c7e;
 
   --accent: #9c5400;
   --accent-2: #b76a0a;
@@ -308,7 +308,7 @@
 
   --text: #ecebef;
   --text-dim: #a19fac;
-  --text-faint: #696774;
+  --text-faint: #858391;
 
   --accent: #7f6ae7;
   --accent-2: #ab9eeb;
@@ -375,7 +375,7 @@
 
   --text: #efebed;
   --text-dim: #ad9fa4;
-  --text-faint: #74676c;
+  --text-faint: #93858b;
 
   --accent: #e8739a;
   --accent-2: #eca2bb;
@@ -409,7 +409,7 @@
   --home-bg: var(--bg);
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
-  --chrome-ink-dim: #524b45;
+  --chrome-ink-dim: #282522;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -442,7 +442,7 @@
 
   --text: #ebecef;
   --text-dim: #a0a3ac;
-  --text-faint: #686b74;
+  --text-faint: #858892;
 
   --accent: #769be5;
   --accent-2: #a4bbea;
@@ -476,7 +476,7 @@
   --home-bg: var(--bg);
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
-  --chrome-ink-dim: #524b45;
+  --chrome-ink-dim: #413c37;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -508,7 +508,7 @@
 
   --text: #ecefeb;
   --text-dim: #a1ac9f;
-  --text-faint: #697467;
+  --text-faint: #8f9a8d;
 
   --accent: #65db4d;
   --accent-2: #97e189;
@@ -574,7 +574,7 @@
 
   --text: #ededed;
   --text-dim: #a7a6a5;
-  --text-faint: #6f6e6d;
+  --text-faint: #908f8e;
 
   --accent: #9cc954;
   --accent-2: #b1d283;
@@ -649,7 +649,7 @@
 
   --text: #eeebef;
   --text-dim: #a8a0ac;
-  --text-faint: #706874;
+  --text-faint: #8e8592;
 
   --accent: #c36ee7;
   --accent-2: #d5a3eb;
@@ -683,7 +683,7 @@
   --home-bg: var(--bg);
   --frame-line: rgba(0, 0, 0, 0.42);
   --chrome-ink: #fbf7fd;
-  --chrome-ink-dim: #d9d2de;
+  --chrome-ink-dim: #ece9ef;
   --chrome-btn-top: rgba(0, 0, 0, 0.24);
   --chrome-btn-bottom: rgba(0, 0, 0, 0.32);
   --chrome-btn-border: rgba(255, 255, 255, 0.22);
@@ -715,7 +715,7 @@
 
   --text: #efedec;
   --text-dim: #aba4a0;
-  --text-faint: #736c68;
+  --text-faint: #948d88;
 
   --accent: #eb7c33;
   --accent-2: #efa76c;
@@ -749,7 +749,7 @@
   --home-bg: var(--bg);
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
-  --chrome-ink-dim: #524b45;
+  --chrome-ink-dim: #23201e;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -781,7 +781,7 @@
 
   --text: #eeeded;
   --text-dim: #a8a6a4;
-  --text-faint: #706e6c;
+  --text-faint: #918f8d;
 
   --accent: #e0635c;
   --accent-2: #e38f87;
@@ -815,7 +815,7 @@
   --home-bg: var(--bg);
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
-  --chrome-ink-dim: #524b45;
+  --chrome-ink-dim: #46403b;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -2489,6 +2489,13 @@ body.debug-2p .home-tile-link {
 }
 
 .switch input:focus-visible + .switch-track {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* The sliders clear the native outline; give keyboard focus the same ring
+   the switches use or a focused slider is invisible. */
+.vol-range:focus-visible,
+.report-slider:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 

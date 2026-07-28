@@ -250,6 +250,10 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     }),
     URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
+    // index.js watches the menu dropdown's `hidden` attribute at module scope
+    // to mirror it into aria-expanded; inert here (no attribute mutations in
+    // the fake DOM anyway).
+    MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
     FileReader: FakeFileReader,
     requestAnimationFrame: () => 0,
     cancelAnimationFrame() {},

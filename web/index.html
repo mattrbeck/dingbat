@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>dingbat</title>
 
@@ -54,32 +54,32 @@
     <!-- ============================ Top bar ============================ -->
     <header id="topbar">
       <div id="menu-container">
-        <button type="button" class="icon-btn" id="menu-btn" title="Menu" aria-label="Menu">
+        <button type="button" class="icon-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
-        <div id="menu-dropdown" hidden role="menu">
-          <button type="button" class="menu-item" id="main-menu" role="menuitem">
+        <div id="menu-dropdown" hidden>
+          <button type="button" class="menu-item" id="main-menu">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5M6 10v9h5v-6h2v6h5v-9"/></svg>
             <span>Main Menu</span>
           </button>
           <hr class="menu-sep" id="main-menu-sep" />
-          <button type="button" class="menu-item" id="save-state" role="menuitem" title="Quick Save" aria-label="Quick Save">
+          <button type="button" class="menu-item" id="save-state" title="Quick Save" aria-label="Quick Save">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5zM8 5v4h7V5M8 19v-6h8v6"/></svg>
             <span>Quick Save</span>
           </button>
-          <button type="button" class="menu-item" id="load-state" role="menuitem" title="Quick Load" aria-label="Quick Load">
+          <button type="button" class="menu-item" id="load-state" title="Quick Load" aria-label="Quick Load">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5M12 8.5V12l2.5 1.5"/></svg>
             <span>Quick Load</span>
           </button>
-          <button type="button" class="menu-item" id="open-states" role="menuitem">
+          <button type="button" class="menu-item" id="open-states">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>
             <span>Save States</span>
           </button>
-          <button type="button" class="menu-item" id="manage-saves" role="menuitem">
+          <button type="button" class="menu-item" id="manage-saves">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/></svg>
             <span>Manage Saves</span>
           </button>
-          <button type="button" class="menu-item" id="screenshot" role="menuitem">
+          <button type="button" class="menu-item" id="screenshot">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
             <span>Screenshot</span>
           </button>
@@ -88,29 +88,29 @@
             <input type="range" id="menu-vol-slider" class="vol-range" min="0" max="100" step="5" value="100" aria-label="Volume" />
           </div>
           <hr class="menu-sep" id="save-sep" />
-          <button type="button" class="menu-item" id="net-connect" role="menuitem">
+          <button type="button" class="menu-item" id="net-connect">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
             <span>Link Cable</span>
           </button>
-          <button type="button" class="menu-item" id="open-cheats" role="menuitem">
+          <button type="button" class="menu-item" id="open-cheats">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5L12 14.9 7.5 16.8l.9-5L4.8 8.3l5-.7z"/></svg>
             <span>Cheats</span>
           </button>
-          <button type="button" class="menu-item" id="open-settings" role="menuitem">
+          <button type="button" class="menu-item" id="open-settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
             <span>Settings</span>
           </button>
           <hr class="menu-sep" />
-          <button type="button" class="menu-item" id="report-bug" role="menuitem">
+          <button type="button" class="menu-item" id="report-bug">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/></svg>
             <span>Report a Bug</span>
           </button>
           <hr class="menu-sep" />
           <div class="menu-heading">Advanced</div>
-          <button type="button" class="menu-item menu-item-muted" id="force-update" role="menuitem">
+          <button type="button" class="menu-item menu-item-muted" id="force-update">
             <span>Force Update</span>
           </button>
-          <button type="button" class="menu-item menu-item-muted" id="show-log" role="menuitem">
+          <button type="button" class="menu-item menu-item-muted" id="show-log">
             <span>Toggle Log</span>
           </button>
         </div>
@@ -153,7 +153,7 @@
            reveal the wording on tap. -->
       <div id="status" aria-live="polite">
         <button type="button" id="sync-indicator" hidden></button>
-        <span id="fps"></span>
+        <span id="fps" aria-hidden="true"></span>
       </div>
 
       <button type="button" id="update-btn" hidden title="A new version is available">
@@ -198,7 +198,7 @@
            frame, blurred up by CSS behind the screen -->
       <canvas id="glow-canvas" width="24" height="16" hidden aria-hidden="true"></canvas>
 
-      <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+      <canvas id="canvas" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
 
       <!-- SDL still owns a (now invisible) WebGL context for its window/renderer
            init; we point Module.canvas here so #canvas is free for our own
@@ -295,9 +295,9 @@
 
     <!-- =========================== Modals =========================== -->
     <div id="update-modal" class="modal-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-0">
         <button type="button" class="modal-close" id="update-modal-close" aria-label="Close">&times;</button>
-        <h3>Update Available</h3>
+        <h3 id="modal-title-0">Update Available</h3>
         <p>Updating now will erase any unsaved data. Make sure you've saved your game before continuing.</p>
         <div class="modal-actions">
           <button type="button" class="button" id="update-not-now">Not Now</button>
@@ -307,9 +307,9 @@
     </div>
 
     <div id="saves-modal" class="modal-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-1">
         <button type="button" class="modal-close" id="saves-close" aria-label="Close">&times;</button>
-        <h3>Manage Saves</h3>
+        <h3 id="modal-title-1">Manage Saves</h3>
         <div class="modal-subhead no-rule">Save file</div>
         <div class="modal-toggle-row">
           <div>
@@ -351,9 +351,9 @@
     </div>
 
     <div id="states-modal" class="modal-overlay">
-      <div class="modal modal-states">
+      <div class="modal modal-states" role="dialog" aria-modal="true" aria-labelledby="modal-states-title">
         <button type="button" class="modal-close" id="states-close" aria-label="Close">&times;</button>
-        <h3>Save States</h3>
+        <h3 id="modal-states-title">Save States</h3>
         <p id="states-empty" class="modal-hint" hidden>Load a game to use save states.</p>
         <p class="modal-hint">Tap a slot, then Save or Load. Slot 1 is the Quick slot.</p>
         <div id="states-grid" class="states-grid"></div>
@@ -368,9 +368,9 @@
     </div>
 
     <div id="report-modal" class="modal-overlay">
-      <div class="modal modal-report">
+      <div class="modal modal-report" role="dialog" aria-modal="true" aria-labelledby="modal-report-title">
         <button type="button" class="modal-close" id="report-close" aria-label="Close">&times;</button>
-        <h3>Report a Bug</h3>
+        <h3 id="modal-report-title">Report a Bug</h3>
         <p class="modal-hint">Describe what went wrong. You can attach a save state from the moment it happened — scrub the timeline below to find it. Nothing is sent anywhere; this downloads a report file you can share.</p>
         <label class="report-label" for="report-title">Title</label>
         <input type="text" id="report-title" class="cheat-input" placeholder="Short summary" maxlength="120" />
@@ -382,7 +382,7 @@
             <span id="report-when" class="report-when">now</span>
           </div>
           <canvas id="report-preview" class="report-preview" width="120" height="80"></canvas>
-          <input type="range" id="report-slider" class="report-slider" min="0" max="0" step="1" value="0" />
+          <input type="range" id="report-slider" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Rewind timeline" />
           <p id="report-scrub-hint" class="modal-hint report-scrub-hint">Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline.</p>
         </div>
         <div class="states-actions">
@@ -393,9 +393,9 @@
     </div>
 
     <div id="cheats-modal" class="modal-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-2">
         <button type="button" class="modal-close" id="cheats-close" aria-label="Close">&times;</button>
-        <h3>Cheats</h3>
+        <h3 id="modal-title-2">Cheats</h3>
         <p id="cheats-empty" class="modal-hint">No game loaded.</p>
         <p class="modal-hint" id="cheats-help">Game Genie, GameShark and Action Replay codes. Toggle the box to enable a cheat. Codes are saved per game in this browser.</p>
         <div id="cheats-list" class="cheats-list"></div>
@@ -409,9 +409,9 @@
     </div>
 
     <div id="roms-modal" class="modal-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-3">
         <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
-        <h3>Manage ROMs and Saves</h3>
+        <h3 id="modal-title-3">Manage ROMs and Saves</h3>
         <p class="modal-hint">While signed in to Drive, <b>Reset</b> and <b>Delete</b> apply to all your devices. <b>Remove</b> frees this device only — your save data stays here, and the game stays in your Drive library to re-download.</p>
         <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
         <div class="roms-sort-row">
@@ -425,9 +425,9 @@
     </div>
 
     <div id="settings-modal" class="modal-overlay">
-      <div class="modal modal-settings">
+      <div class="modal modal-settings" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
         <button type="button" class="modal-close" id="settings-close" aria-label="Close">&times;</button>
-        <h3>Settings</h3>
+        <h3 id="modal-settings-title">Settings</h3>
         <div id="settings-tabs-wrap">
           <div id="settings-tabs" role="tablist" aria-label="Settings sections">
             <button type="button" class="settings-tab active" data-tab="controls" role="tab" aria-selected="true">Controls</button>
@@ -504,7 +504,7 @@
             <div class="modal-subhead">Keyboard</div>
             <div class="modal-row">
               <span class="modal-row-label">Preset</span>
-              <select id="kb-preset" class="kb-select">
+              <select id="kb-preset" class="kb-select" aria-label="Keyboard preset">
                 <option value="default">Default</option>
                 <option value="homerow">Home-row</option>
                 <option value="custom">Custom</option>
@@ -605,7 +605,7 @@
               <span class="modal-row-label">Upscale filter</span>
               <span class="modal-toggle-sub">GPU pixel-art smoothing (clean-room hq4x / xBR). Suspends integer scaling and scanlines while active.</span>
             </div>
-            <select id="upscale-filter-select" class="kb-select">
+            <select id="upscale-filter-select" class="kb-select" aria-label="Upscale filter">
               <option value="none">None</option>
               <option value="hq4x">hq4x</option>
               <option value="xbr">xBR</option>
@@ -714,7 +714,7 @@
     </div>
 
     <div id="net-modal" class="modal-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="net-title">
         <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
         <h3 id="net-title">Connect link cable</h3>
         <div id="net-connect-view">
@@ -758,8 +758,11 @@
       </div>
     </div>
 
-    <!-- ====================== On-screen gamepad ====================== -->
-    <div id="controls">
+    <!-- ====================== On-screen gamepad ======================
+         aria-hidden: the pads are pointer-driven press-and-hold surfaces a
+         screen reader's tap gesture can't operate; keyboard bindings are the
+         accessible input path. Hiding them beats announcing stray "L R A B". -->
+    <div id="controls" aria-hidden="true">
       <div id="lr">
         <div id="l" class="pad-btn pad-shoulder" data-inputs="8">L</div>
         <div id="r" class="pad-btn pad-shoulder" data-inputs="9">R</div>

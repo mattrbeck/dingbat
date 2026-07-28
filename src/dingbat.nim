@@ -674,6 +674,8 @@ proc process_pending_state() =
   if app.pending_save:
     app.pending_save = false
     discard save_state_slot(0)
+    # An open Save States window is showing slot 1 stale now — refresh it
+    app.save_states.mark_stale()
   if app.pending_load:
     app.pending_load = false
     discard load_state_slot(0)

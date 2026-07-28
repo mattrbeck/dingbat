@@ -37,6 +37,12 @@ proc set_slot*(w: SaveStatesWidget; i: int; used: bool; label: string;
   if i notin 0 ..< NUM_SLOTS: return
   w.slots[i] = StateSlot(used: used, label: label, tex: tex, w: tw, h: th)
 
+proc mark_stale*(w: SaveStatesWidget) =
+  ## Re-run on_open on the next render. Call after a state file changes
+  ## outside the widget (Quick Save writes slot 1 while the window is open,
+  ## which otherwise kept showing "Empty").
+  w.was_open = false
+
 proc dim(): ImVec4 = ImVec4(x: 0.6, y: 0.6, z: 0.6, w: 1.0)
 proc sel_col(): ImVec4 = ImVec4(x: 0.26, y: 0.59, z: 0.98, w: 1.0)
 
@@ -49,7 +55,9 @@ proc render*(w: SaveStatesWidget) =
     w.was_open = true
     if w.on_open != nil: w.on_open()
 
-  igSetNextWindowSize(ImVec2(x: 452, y: 392), cint(ImGui_Cond_FirstUseEver))
+  # Tall enough that all three rows AND the action row fit without scrolling.
+  # (The old 392 default put Save/Load/Delete below the fold.)
+  igSetNextWindowSize(ImVec2(x: 452, y: 580), cint(ImGui_Cond_FirstUseEver))
   if igBegin("Save States", addr w.window, 0):
     if not w.have_rom:
       igTextUnformatted("Load a game to use save states.", nil)
@@ -58,6 +66,12 @@ proc render*(w: SaveStatesWidget) =
       igTextColored(dim(), "Slot 1 is the Quick slot (Quick Save / Quick Load).")
       igSeparator()
 
+      # The slot grid lives in a child region that reserves room for the
+      # action row below, so Save/Load/Delete stay reachable at any window
+      # size — a too-small window scrolls the grid, never the buttons.
+      let footer = igGetFrameHeightWithSpacing() + 10.0'f32
+      discard igBeginChild_Str("##slots", ImVec2(x: 0, y: -footer),
+                               ImGuiChildFlags(0), ImGuiWindowFlags(0))
       const CELL_W = 120.0'f32
       const CELL_H = 80.0'f32
       for i in 0 ..< NUM_SLOTS:
@@ -90,6 +104,7 @@ proc render*(w: SaveStatesWidget) =
         igPopID()
         if i mod 3 != 2:
           igSameLine(0, 10)
+      igEndChild()
 
       igSeparator()
       let sel = w.slots[w.selected]
