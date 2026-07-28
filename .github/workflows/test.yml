@@ -60,7 +60,14 @@ jobs:
         # each was confirmed by mutation to actually fail when the thing it
         # describes is broken. Needs no ROMs.
         shell: bash
-        run: nim c -r -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
+        # -d:test_harness is what keeps nim.cfg from adding the SDL2/OpenGL
+        # link flags. Without it the link line is `-lGL` on Linux and a
+        # hardcoded mingw-cross path to libSDL2.a on Windows, neither of which
+        # exists on a GitHub runner, so the binary never links. It builds fine
+        # on a dev Mac (Homebrew SDL2 is installed), which is why this only
+        # ever fails in CI. The flag gates APU/keypad/mmio/savestate only —
+        # nothing the compositor touches — so the tests check the same code.
+        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status

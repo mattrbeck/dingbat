@@ -25,12 +25,18 @@ task test_build, "Build the test harness":
 task bench_build, "Build the headless benchmark harness":
   exec "nim c -d:test_harness -d:release --path:src -o:dingbat_bench tests/dingbat_bench.nim"
 
+# Every test binary below builds with -d:test_harness. It is not about the
+# harness behaviour these tests don't use — it is what stops nim.cfg from
+# appending the SDL2/OpenGL link flags meant for the GUI app. A headless test
+# that links against them builds only on a machine that happens to have the
+# SDL2/GL dev libraries in the expected place, and fails to link everywhere
+# else (CI included). Leave the flag on when adding a task here.
 task test_timestretch, "Run the WSOLA time-stretch unit test":
-  exec "nim c -r -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"
 
 task test_ppucomposite, "Run the GBA PPU compositor invariant tests":
-  exec "nim c -r -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim"
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim"
 
 task test_cheats, "Run the cheat-engine unit + integration tests":
-  exec "nim c -r -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
-  exec "nim c -r -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"
