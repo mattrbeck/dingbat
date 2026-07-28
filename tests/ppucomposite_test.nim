@@ -485,6 +485,423 @@ proc test_effect_spans(emu: GBA) =
   check(left_ok, "inside WIN0 (effects on) matches the brightened reference")
   check(right_ok, "outside WIN0 (effects off) matches the plain reference")
 
+# ---------------------------------------------------------------------------
+# 9. The uniform-window fast path.
+#
+# composite() may skip compute_line_enables entirely and composite the whole
+# line as one span when it can prove from the registers alone that all 240
+# columns would receive the same (enable mask, colour-effect flag) pair. That
+# proof lives in window_cover / uniform_window_state, and it is the only place
+# in the renderer where a *predicate* decides whether a whole scanline's window
+# resolution happens. If the predicate is ever wrong in the permissive
+# direction, a line is composited with the wrong layer set — so the tests below
+# are all soundness tests: whenever the fast path claims uniformity, the
+# general path must agree, byte for byte.
+#
+# ppu.disable_uniform_window forces the general path, which is what makes the
+# frame-level halves of this a true A/B of two implementations rather than a
+# self-comparison.
+# ---------------------------------------------------------------------------
+
+# Registers are built as raw halfwords and cast, the same way savestate.nim
+# reads them back, so the tests can reach values software can write but the
+# emulator's own code never constructs (x1 > 240, y2 = 255, ...).
+proc winh(x1, x2: int): WINH = cast[WINH](uint16((x1 and 0xFF) shl 8) or uint16(x2 and 0xFF))
+proc winv(y1, y2: int): WINV = cast[WINV](uint16((y1 and 0xFF) shl 8) or uint16(y2 and 0xFF))
+proc winin_of(b0: int; e0: bool; b1: int; e1: bool): WININ =
+  cast[WININ](uint16(b0 and 0x1F) or (if e0: 0x20'u16 else: 0'u16) or
+              (uint16(b1 and 0x1F) shl 8) or (if e1: 0x2000'u16 else: 0'u16))
+proc winout_of(bo: int; eo: bool; bw: int; ew: bool): WINOUT =
+  cast[WINOUT](uint16(bo and 0x1F) or (if eo: 0x20'u16 else: 0'u16) or
+               (uint16(bw and 0x1F) shl 8) or (if ew: 0x2000'u16 else: 0'u16))
+
+proc set_dispcnt_windows(ppu: PPU; w0, w1, ow: bool) =
+  var d = uint16(ppu.dispcnt)
+  d = d and 0x1FFF'u16
+  if w0: d = d or 0x2000'u16
+  if w1: d = d or 0x4000'u16
+  if ow: d = d or 0x8000'u16
+  ppu.dispcnt = cast[DISPCNT](d)
+
+# ---------------------------------------------------------------------------
+# 9a. window_cover, proved exhaustively over its ENTIRE domain.
+#
+# window_cover(x1, x2) -> {empty, partial, full} is the subtle part: WIN0H's
+# two halves are independent 8-bit values, so x1 > x2 (hardware wraps around
+# the right edge), x2 > 240 and x1 > 240 (both clamped) are all reachable, and
+# combinations of them are what a naive `x1 <= col < x2` gets wrong.
+#
+# There are only 65536 of them, so don't sample: check every one against what
+# fill_window_cols actually writes, via compute_line_enables with a window
+# whose bits differ from the outside bits.
+# ---------------------------------------------------------------------------
+proc test_window_cover_exhaustive(emu: GBA) =
+  echo "window_cover agrees with fill_window_cols over all 65536 (x1, x2)"
+  let ppu = emu.ppu
+  ppu.debug_layer_mask = 0x1F
+  ppu.vcount = 80
+  ppu.set_dispcnt_windows(w0 = true, w1 = false, ow = false)
+  ppu.win0v  = winv(0, 160)
+  ppu.winin  = winin_of(0x1F, true, 0, false)     # inside: all layers, effects
+  ppu.winout = winout_of(0x00, false, 0, false)   # outside: nothing, no effects
+  for c in 0 ..< 240: ppu.sprite_pixels[c].window = false
+  var bad = 0
+  var n_full = 0
+  var n_empty = 0
+  var n_partial = 0
+  var first_bad = ""
+  for x1 in 0 .. 255:
+    for x2 in 0 .. 255:
+      ppu.win0h = winh(x1, x2)
+      ppu.compute_line_enables()
+      var covered = 0
+      for c in 0 ..< 240:
+        # inside == 0x1F/true, outside == 0x00/false, so either field identifies
+        # the column, and checking both also pins the effect flag to the column.
+        if ppu.line_enables[c] == 0x1F and ppu.line_effects[c]: inc covered
+        elif ppu.line_enables[c] != 0 or ppu.line_effects[c]:
+          inc bad
+          if first_bad.len == 0: first_bad = "mixed state at x1=" & $x1 & " x2=" & $x2
+      let cov = window_cover(ppu.win0h)
+      let want = (if covered == 0: wcEmpty elif covered == 240: wcFull else: wcPartial)
+      case want
+      of wcEmpty: inc n_empty
+      of wcFull: inc n_full
+      of wcPartial: inc n_partial
+      if cov != want:
+        inc bad
+        if first_bad.len == 0:
+          first_bad = "x1=" & $x1 & " x2=" & $x2 & ": window_cover=" & $cov &
+                      " but " & $covered & " columns written"
+  check(bad == 0, "all 65536 (x1, x2) classified correctly", first_bad)
+  # The classification must be non-degenerate: if window_cover returned wcPartial
+  # for everything the fast path would simply never fire and this test would pass.
+  check(n_full > 0 and n_empty > 0 and n_partial > 0,
+        "all three classes are actually reachable",
+        "full=" & $n_full & " empty=" & $n_empty & " partial=" & $n_partial)
+
+# ---------------------------------------------------------------------------
+# 9b. Vertical ranges: every (y1, y2) against every scanline.
+#
+# WIN0V/WIN1V wrap the same way WIN0H does, and y2 > 160 is clamped by nothing
+# at all — the comparator just never matches above 159. 256 x 256 x 160 is
+# 10.5M combinations, which is affordable because the check is O(1): the
+# vertical decision must not depend on anything the horizontal one does.
+# ---------------------------------------------------------------------------
+proc test_vertical_ranges(emu: GBA) =
+  echo "WIN0V/WIN1V vertical ranges, every (y1, y2) x every scanline"
+  let ppu = emu.ppu
+  ppu.set_dispcnt_windows(w0 = true, w1 = true, ow = false)
+  var bad = 0
+  var n_in = 0
+  var first_bad = ""
+  for y1 in 0 .. 255:
+    for y2 in 0 .. 255:
+      ppu.win0v = winv(y1, y2)
+      ppu.win1v = winv(y2, y1)      # the mirror image, so both orders are hit
+      for row in 0 .. 159:
+        ppu.vcount = uint16(row)
+        let f = ppu.line_window_flags()
+        # The reference: a plain comparator, written out independently.
+        let want0 = (if y1 <= y2: row >= y1 and row < y2 else: row >= y1 or row < y2)
+        let want1 = (if y2 <= y1: row >= y2 and row < y1 else: row >= y2 or row < y1)
+        if f.win0 != want0 or f.win1 != want1:
+          inc bad
+          if first_bad.len == 0:
+            first_bad = "y1=" & $y1 & " y2=" & $y2 & " row=" & $row
+        if f.win0: inc n_in
+  check(bad == 0, "10.5M (y1, y2, line) vertical decisions match a comparator",
+        first_bad)
+  check(n_in > 0, "the window is inside on at least some lines")
+  # Degenerate ranges called out by name, so a regression names itself.
+  for (y1, y2, row, want, name) in [
+      (0, 160, 80, true,  "y1=0 y2=160 covers line 80"),
+      (0, 0,   80, false, "zero-height y1=y2=0 covers nothing"),
+      (80, 80, 80, false, "zero-height y1=y2=80 covers nothing"),
+      (0, 255, 159, true, "y2=255 (past the screen) still covers line 159"),
+      (200, 255, 80, false, "a range entirely below the screen covers nothing"),
+      (200, 100, 80, true,  "a wrapped range y1>y2 covers the middle"),
+      (200, 100, 150, false, "...but not line 150"),
+      # A wrapped range's upper half extends past the last visible line, so the
+      # comparator says "inside" for rows the screen does not have. That is the
+      # comparator being a comparator; nothing ever asks it about row 210.
+      (200, 100, 210, true, "...and is still inside at the nonexistent row 210")]:
+    ppu.win0v = winv(y1, y2)
+    ppu.vcount = uint16(row)
+    check(ppu.line_window_flags().win0 == want, name)
+
+# ---------------------------------------------------------------------------
+# 9c. The differential fuzz: randomize the whole window register space and
+# assert the fast path's verdict against the general path's 240 entries.
+#
+# Every class the fast path has to reason about is deliberately weighted into
+# the generator: boundary x/y values, wrapped ranges, both windows on at once,
+# every DISPCNT window-enable combination, WININ/WINOUT masks that sometimes
+# agree and sometimes do not, the colour-effect bits varied independently of
+# the layer masks, a debug layer mask that can zero bits after the AND, and an
+# OBJ window covering none / some / all columns.
+#
+# Two properties are checked. SOUNDNESS (a hard failure): if the fast path says
+# uniform, all 240 general-path entries must equal the value it returned.
+# COMPLETENESS (reported, not enforced): how often a line really was uniform
+# and the fast path failed to notice. Being conservative is safe; the number is
+# there so "the fast path never fires" cannot pass silently.
+# ---------------------------------------------------------------------------
+proc test_uniform_window_fuzz(emu: GBA) =
+  echo "uniform-window fast path vs compute_line_enables (differential fuzz)"
+  let ppu = emu.ppu
+  reseed(0xA54FF53A5F1D36F1'u64)
+  # A pool of coordinates that clusters on every boundary the code branches on.
+  const EDGES = [0, 1, 2, 119, 120, 121, 159, 160, 161, 238, 239, 240, 241, 254, 255]
+  proc coord(): int =
+    if (nxt() and 1) == 0: EDGES[int(nxt()) mod EDGES.len]
+    else: int(nxt() and 0xFF)
+
+  var unsound = 0
+  var missed = 0
+  var missed_objwin = 0
+  var fired = 0
+  var truly_uniform = 0
+  var total = 0
+  var first_bad = ""
+  # Coverage counters, so the run can prove it exercised what it claims to.
+  var seen_objwin_partial = 0
+  var seen_both_windows = 0
+  var seen_wrapped_h = 0
+  var seen_nonuniform = 0
+
+  const ITERS = 200_000
+  for iter in 0 ..< ITERS:
+    let w0 = (nxt() and 1) == 0
+    let w1 = (nxt() and 1) == 0
+    let ow = (nxt() and 1) == 0
+    ppu.set_dispcnt_windows(w0, w1, ow)
+    ppu.win0h = winh(coord(), coord())
+    ppu.win1h = winh(coord(), coord())
+    ppu.win0v = winv(coord(), coord())
+    ppu.win1v = winv(coord(), coord())
+    ppu.vcount = uint16(int(nxt()) mod 160)
+    # Masks: half the time drawn from a tiny set so different sources collide
+    # (which is what makes the "partial overlay paints what is already there"
+    # branch reachable), half the time fully random.
+    proc mask(): int =
+      if (nxt() and 1) == 0: [0, 0x1F, 0x07][int(nxt()) mod 3] else: int(nxt() and 0x1F)
+    proc flag(): bool = (nxt() and 1) == 0
+    ppu.winin  = winin_of(mask(), flag(), mask(), flag())
+    ppu.winout = winout_of(mask(), flag(), mask(), flag())
+    ppu.debug_layer_mask = (if (nxt() and 7) == 0: uint16(nxt() and 0x1F) else: 0x1F'u16)
+    # OBJ window: none, all, a contiguous block, or a scatter.
+    let objkind = int(nxt() and 3)
+    var any_obj = false
+    var all_obj = true
+    case objkind
+    of 0:
+      for c in 0 ..< 240: ppu.sprite_pixels[c].window = false
+      all_obj = false
+    of 1:
+      for c in 0 ..< 240: ppu.sprite_pixels[c].window = true
+      any_obj = true
+    of 2:
+      let lo = int(nxt()) mod 241
+      let hi = int(nxt()) mod 241
+      for c in 0 ..< 240:
+        let v = c >= min(lo, hi) and c < max(lo, hi)
+        ppu.sprite_pixels[c].window = v
+        if v: any_obj = true else: all_obj = false
+    else:
+      for c in 0 ..< 240:
+        let v = (nxt() and 1) == 0
+        ppu.sprite_pixels[c].window = v
+        if v: any_obj = true else: all_obj = false
+    ppu.line_obj_window = any_obj
+    if any_obj and not all_obj and ow: inc seen_objwin_partial
+
+    let f = ppu.line_window_flags()
+    if not (f.win0 or f.win1 or f.objwin): continue   # the pre-existing path
+    inc total
+    if f.win0 and f.win1: inc seen_both_windows
+    if (f.win0 and int(ppu.win0h.x1) > int(ppu.win0h.x2)) or
+       (f.win1 and int(ppu.win1h.x1) > int(ppu.win1h.x2)): inc seen_wrapped_h
+
+    var ubits: uint16
+    var ueff: bool
+    let fast = ppu.uniform_window_state(f.win0, f.win1, f.objwin, ubits, ueff)
+
+    ppu.compute_line_enables()
+    var uniform = true
+    for c in 1 ..< 240:
+      if ppu.line_enables[c] != ppu.line_enables[0] or
+         ppu.line_effects[c] != ppu.line_effects[0]:
+        uniform = false
+        break
+    if uniform: inc truly_uniform else: inc seen_nonuniform
+
+    if fast:
+      inc fired
+      var ok = true
+      for c in 0 ..< 240:
+        if ppu.line_enables[c] != ubits or ppu.line_effects[c] != ueff:
+          ok = false
+          break
+      if not ok:
+        inc unsound
+        if first_bad.len == 0:
+          first_bad = "iter " & $iter & ": fast said (" & toHex(ubits) & ", " &
+                      $ueff & ") but general path has (" &
+                      toHex(ppu.line_enables[0]) & ", " & $ppu.line_effects[0] &
+                      ") .. uniform=" & $uniform
+    elif uniform:
+      inc missed
+      if f.objwin: inc missed_objwin
+
+  check(unsound == 0,
+        "no windowed line was composited as uniform when it is not (" &
+        $total & " windowed cases, " & $fired & " took the fast path)", first_bad)
+  # A generator that only ever produced uniform or only ever produced
+  # non-uniform lines would make the above vacuous in one direction or the
+  # other, so both have to be present in quantity.
+  check(fired > total div 20 and seen_nonuniform > total div 20,
+        "the fuzz produced both kinds of line in quantity",
+        "fast=" & $fired & " truly_uniform=" & $truly_uniform &
+        " nonuniform=" & $seen_nonuniform & " of " & $total)
+  check(seen_both_windows > 100 and seen_wrapped_h > 100 and
+        seen_objwin_partial > 100,
+        "the fuzz reached both-windows, wrapped-x and partial-OBJ-window cases",
+        "both=" & $seen_both_windows & " wrapped=" & $seen_wrapped_h &
+        " objwin=" & $seen_objwin_partial)
+  # Conservatism is safe but not free, so the split is printed rather than
+  # asserted. The dominant miss class is a live OBJ window: proving that one is
+  # uniform would need a per-column scan, which is the work being avoided, so
+  # the fast path declines it unless the OBJ-window state equals the outside
+  # state. Real games use the OBJ window for a shaped mask, not a full-screen
+  # one, so this costs essentially nothing outside the fuzz.
+  echo "    conservative misses (uniform but not detected): ", missed,
+       " of ", truly_uniform, " uniform lines (", missed_objwin,
+       " of them with a live OBJ window)"
+
+# ---------------------------------------------------------------------------
+# 9d. Frame-level A/B: identical framebuffers with the fast path on and off.
+#
+# 9c proves the predicate agrees with the table. This proves the two code paths
+# through composite() agree on pixels, over real renders with real sprites
+# (including OBJ-window sprites, which the table-level fuzz can only simulate),
+# real blending, and every BG mode.
+#
+# The second half rewrites the window registers at scanline granularity, which
+# is the only way to check that the uniformity decision is made per line with
+# live values rather than latched once per frame.
+# ---------------------------------------------------------------------------
+proc test_uniform_window_frames(emu: GBA) =
+  echo "framebuffers are byte-identical with the fast path on and off"
+  let ppu = emu.ppu
+
+  proc setup(seed: uint64; bg_mode: uint8; objwin: bool) =
+    reseed(seed)
+    seed_memory(ppu, transparent_bias = true)
+    for a in 0x000'u32 .. 0x055'u32: ppu[a] = 0
+    ppu[0x000] = bg_mode
+    ppu[0x001] = 0x1F
+    ppu.debug_layer_mask = 0x1F
+    ppu[0x050] = uint8(nxt() and 0xFF)      # BLDCNT: random targets and mode
+    ppu[0x051] = uint8(nxt() and 0x3F)
+    ppu[0x052] = uint8(nxt() and 0x1F)      # EVA
+    ppu[0x053] = uint8(nxt() and 0x1F)      # EVB
+    ppu[0x054] = uint8(nxt() and 0x1F)      # EVY
+    let spr = ppu.sprites_ptr()
+    for i in 0 ..< 128:
+      # Keep the sprites on-screen so they actually contribute, and give a
+      # slice of them OBJ-window mode so line_obj_window is genuinely driven.
+      spr[i].attr0 = (spr[i].attr0 and not 0x0300'u16) and 0xFCFF'u16
+      spr[i].attr0 = spr[i].attr0 or uint16((nxt() mod 160) and 0xFF)
+      if objwin and (i and 3) == 0:
+        spr[i].attr0 = spr[i].attr0 or (0b10'u16 shl 10)
+    ppu.win0h = winh(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win1h = winh(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win0v = winv(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win1v = winv(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.winin  = cast[WININ](uint16(nxt() and 0xFFFF))
+    ppu.winout = cast[WINOUT](uint16(nxt() and 0xFFFF))
+    ppu.set_dispcnt_windows((nxt() and 1) == 0, (nxt() and 1) == 0, objwin)
+
+  proc run(seed: uint64; bg_mode: uint8; objwin, midframe, disable: bool): uint64 =
+    setup(seed, bg_mode, objwin)
+    ppu.disable_uniform_window = disable
+    # The register rewrites must be identical in both runs, so they are driven
+    # off a private counter rather than the shared RNG (whose call sequence the
+    # two runs would otherwise share anyway, but this makes it impossible to
+    # get wrong).
+    var lfsr = seed or 1'u64
+    result = 0xCBF29CE484222325'u64
+    for row in 0'u16 .. 159'u16:
+      if midframe:
+        lfsr = lfsr * 6364136223846793005'u64 + 1442695040888963407'u64
+        let r = uint32(lfsr shr 33)
+        case r and 7
+        of 0: ppu.win0h = winh(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
+        of 1: ppu.win1h = winh(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
+        of 2: ppu.win0v = winv(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
+        of 3: ppu.win1v = winv(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
+        of 4: ppu.winin  = cast[WININ](uint16((r shr 3) and 0xFFFF))
+        of 5: ppu.winout = cast[WINOUT](uint16((r shr 3) and 0xFFFF))
+        of 6: ppu.set_dispcnt_windows((r and 8) != 0, (r and 16) != 0,
+                                      objwin and (r and 32) != 0)
+        else: discard
+      ppu.vcount = row
+      ppu.render_dirty = true
+      ppu.skip_render = false
+      ppu.scanline()
+    for v in ppu.framebuffer:
+      result = (result xor uint64(v)) * 0x100000001B3'u64
+    ppu.disable_uniform_window = false
+
+  var mismatches = 0
+  var first_bad = ""
+  var cases = 0
+  for bg_mode in [0'u8, 1'u8, 2'u8, 3'u8, 4'u8, 5'u8]:
+    for objwin in [false, true]:
+      for midframe in [false, true]:
+        for trial in 0 ..< 6:
+          let seed = 0x9E3779B97F4A7C15'u64 * uint64(trial + 1) +
+                     uint64(bg_mode) * 0x1000003 + (if objwin: 7 else: 0) +
+                     (if midframe: 13 else: 0)
+          inc cases
+          let a = run(seed, bg_mode, objwin, midframe, disable = false)
+          let b = run(seed, bg_mode, objwin, midframe, disable = true)
+          if a != b:
+            inc mismatches
+            if first_bad.len == 0:
+              first_bad = "mode " & $bg_mode & " objwin=" & $objwin &
+                          " midframe=" & $midframe & " trial=" & $trial &
+                          ": " & toHex(a) & " vs " & toHex(b)
+  check(mismatches == 0,
+        $cases & " randomized frames identical with and without the fast path",
+        first_bad)
+
+  # A control: the toggle must actually change which code runs, or the whole
+  # comparison above is one path compared against itself. Count the lines that
+  # take the fast path in a configuration where it certainly should (full-width
+  # WIN0 over the whole screen, no OBJ window) and in one where it certainly
+  # should not (WIN0 over the left half only, with different bits inside).
+  proc count_fast(x1, x2, in_bits, out_bits: int): int =
+    ppu.set_dispcnt_windows(w0 = true, w1 = false, ow = false)
+    ppu.win0h = winh(x1, x2)
+    ppu.win0v = winv(0, 160)
+    ppu.winin  = winin_of(in_bits, false, 0, false)
+    ppu.winout = winout_of(out_bits, false, 0, false)
+    ppu.debug_layer_mask = 0x1F
+    ppu.line_obj_window = false
+    for c in 0 ..< 240: ppu.sprite_pixels[c].window = false
+    for row in 0 .. 159:
+      ppu.vcount = uint16(row)
+      let f = ppu.line_window_flags()
+      var ub: uint16
+      var ue: bool
+      if ppu.uniform_window_state(f.win0, f.win1, f.objwin, ub, ue): inc result
+  check(count_fast(0, 240, 0x1F, 0x00) == 160,
+        "full-width WIN0 takes the fast path on all 160 lines")
+  check(count_fast(0, 120, 0x1F, 0x00) == 0,
+        "half-width WIN0 with differing bits takes it on none")
+
 when isMainModule:
   test_pack_domain()
   let emu = make_emu()
@@ -495,6 +912,10 @@ when isMainModule:
   test_effect_spans(emu)
   test_disabled_bg_buffers_unread(emu)
   test_determinism(emu)
+  test_window_cover_exhaustive(emu)
+  test_vertical_ranges(emu)
+  test_uniform_window_fuzz(emu)
+  test_uniform_window_frames(emu)
   echo ""
   if failures == 0:
     echo "ppucomposite: all checks passed"

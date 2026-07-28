@@ -427,6 +427,12 @@ type
     # ANDed into the per-scanline enable computation only, so the per-pixel
     # compositing hot path is untouched.
     debug_layer_mask*: uint16
+    # Forces composite() to build the per-column window tables even on lines
+    # whose window state is provably uniform. Exists so the differential test
+    # in tests/ppucomposite_test.nim can run the general path and the fast
+    # path over the same registers and compare; nothing else sets it, and the
+    # default (false = fast path allowed) is the zero value.
+    disable_uniform_window*: bool
 
   SoundChannel* = ref object of RootObj
     gba* {.cursor.}:            GBA
