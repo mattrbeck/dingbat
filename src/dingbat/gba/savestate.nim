@@ -754,9 +754,68 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
 const GBA_STATE_ROM_TAG = 0x02000000'u32
 
 proc gba_rom_checksum(gba: GBA): uint32 =
-  # Hash the first 1 MB to identify the ROM cheaply (every real cart is larger).
-  let n = min(gba.cartridge.rom.len, 0x100000)
+  ## ROM identity: the first 1 MB of the ROM FILE, hashed (cheap, and every
+  ## real cart is larger than the cap so nothing collides on the cap alone).
+  ##
+  ## `rom_size`, NOT `rom.len`. The buffer is padded — up to the next power of
+  ## two, with a 32 KB floor, and out to 4 MB for the 1 MB Classic NES carts
+  ## whose image is mirrored 4x (see cartridge.nim). Hashing `rom.len` folds
+  ## that padding into the cart's identity, so any change to the padding RULE
+  ## silently re-identifies every cart smaller than the cap and refuses its
+  ## existing states as "a different ROM". That is exactly what 2dfd27e did
+  ## when it replaced the flat 32 MB open-bus-filled buffer with next_pow2:
+  ## see gba_legacy_rom_checksums, which is what keeps those states loading.
+  ## Hashing the file bytes makes the identity independent of how we allocate.
+  ##
+  ## This value is NOT on any wire. The peer/ROM check netplay does is a
+  ## different quantity with a similar name: `LinkMsg.rom_crc`, a CRC-32 of the
+  ## ROM file sent in HELLO (common/linkproto.nim). Changing this proc cannot
+  ## reject a peer; changing that one can. Keep them separate.
+  let n = min(gba.cartridge.rom_size, 0x100000)
+  if n <= 0: return fnv1a(toOpenArray(gba.cartridge.rom, 0, -1))
   fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1))
+
+proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
+  ## The identities OLDER builds computed for this same cart, accepted on read
+  ## (never written) so that no user loses a state to the fix above. Both
+  ## variants hashed the same 1 MB window of the ROM *buffer*, so they only
+  ## differ from the current value for carts smaller than 1 MB — every cart
+  ## >= 1 MB, Classic NES included, has an unchanged identity and doesn't even
+  ## reach this code.
+  ##
+  ## Cost is one extra ≤1 MB hash on the load path of a sub-1 MB cart, i.e.
+  ## homebrew and test ROMs; commercial carts return early.
+  let sz = gba.cartridge.rom_size
+  if sz <= 0 or sz >= 0x100000: return @[]
+  let current = gba.gba_rom_checksum()
+
+  proc add_legacy(s: var seq[uint32]; v: uint32) =
+    # A cart whose file length is already a power of two >= 32 KB has no
+    # padding in variant (a), so that variant lands on the current value;
+    # don't list it twice.
+    if v != current and v notin s: s.add(v)
+
+  # (a) 2dfd27e .. the commit that added this: next_pow2 buffer (32 KB floor),
+  #     zero-filled past the file.
+  block:
+    let n = min(gba.cartridge.rom.len, 0x100000)
+    if n > 0: result.add_legacy(fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1)))
+
+  # (b) before 2dfd27e: a flat 32 MB buffer pre-filled with the open-bus
+  #     address pattern, the file written over the front, and [sz, next_pow2)
+  #     re-zeroed — only when sz was not already a power of two, which is why
+  #     the zero run below is empty in that case. Reconstructed by streaming
+  #     rather than rebuilding the buffer; rom_open_bus is the same generator
+  #     bus.nim uses today, so the two revisions cannot drift apart.
+  var pow2 = 1
+  while pow2 < sz: pow2 = pow2 shl 1
+  var h = 0x811C9DC5'u32
+  for a in 0 ..< 0x100000:
+    let b = if a < sz: gba.cartridge.rom[a]
+            elif a < pow2: 0'u8
+            else: rom_open_bus(uint32(a))
+    h = (h xor uint32(b)) * 0x01000193'u32
+  result.add_legacy(h)
 
 proc state_payload*(gba: GBA): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses
@@ -792,12 +851,22 @@ proc state_bytes*(gba: GBA; thumbnail = false): string =
   else:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload)
 
+proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
+                       tuple[payload: string; rev: uint32] =
+  ## Header validation for a full state image against THIS cart, including the
+  ## legacy ROM identities older builds wrote for it. Anything that has to ask
+  ## "does this state belong to this ROM" goes through here (load_state_bytes,
+  ## and the format test) rather than assembling the identity itself — the one
+  ## exception is load_state, which needs the file-not-found path and so passes
+  ## the same two values to read_state_payload.
+  parse_state_payload(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
+                      origin, gba.gba_legacy_rom_checksums())
+
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
   var image: tuple[payload: string; rev: uint32]
   try:
-    image = parse_state_payload(data, ckGBA, gba.gba_rom_checksum(),
-                                GBA_STATE_ROM_TAG)
+    image = gba.parse_state_image(data)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
@@ -834,7 +903,8 @@ proc load_state*(gba: GBA; path: string): bool =
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),
-                               GBA_STATE_ROM_TAG)
+                               GBA_STATE_ROM_TAG,
+                               gba.gba_legacy_rom_checksums())
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false

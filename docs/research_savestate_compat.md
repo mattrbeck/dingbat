@@ -148,7 +148,7 @@ ROM. Two hazards, one handled and one live:
   `next_pow2(file_size)`. `GBA_STATE_ROM_TAG` was pinned to the old
   `0x02000000` constant precisely so the `rom_size` field would keep matching.
   Correct, and commented.
-- **Live, unnoticed.** `gba_rom_checksum` hashes
+- **Was live, now fixed.** `gba_rom_checksum` hashed
   `min(gba.cartridge.rom.len, 0x100000)` bytes — the length of the *allocated
   buffer*, not the file. For any GBA ROM **smaller than 1 MiB** the same commit
   changed both the number of bytes hashed and their content (the old buffer was
@@ -158,8 +158,25 @@ ROM. Two hazards, one handled and one live:
   commercial carts are ≥ 4 MiB, and the exactly-1-MiB Classic NES carts are
   unaffected because their first 1 MiB is unchanged — but it is a real class,
   and it is exactly the kind of change nobody thinks of as a format change.
-  Inferred from reading both revisions of `cartridge.nim`; not reproduced
-  against a real sub-1-MiB cart.
+
+  Reproduced, and fixed. `tests/roms/inputrec.gba` (56 bytes) hits it exactly:
+  built at `origin/main` its identity is `0x0E29A8EB`, built from the file
+  bytes it is `0xE72DC58B`. Pokémon Emerald (16 MiB) is `0x09BB5F7B` either
+  way, as is every cart ≥ 1 MiB, because the 1 MiB cap means the hashed window
+  is all file. The fix hashes `min(rom_size, 1 MiB)` — the file, so the
+  identity no longer depends on how the buffer is allocated — and
+  `gba_legacy_rom_checksums` recomputes the **two** superseded identities (the
+  post-`2dfd27e` `next_pow2` buffer, and the pre-`2dfd27e` 32 MB open-bus one)
+  and passes them to `parse_state_payload` as an accept-list. Old states load,
+  new states are written with the corrected identity, so nothing is lost.
+  The one-way cost is a **downgrade**: a state written after the fix for a
+  sub-1 MiB cart is refused by a build from before it. Section 3b of
+  `tests/savestate_compat_test.nim` pins all of this.
+
+  Note that this is *not* the netplay ROM check. That is a CRC-32 of the ROM
+  file (`linkproto.crc32`, in the HELLO message), computed from `readFile` on
+  native and over `rom[0 ..< rom_size]` in the wasm build; it never used
+  `gba_rom_checksum` and did not move. See §2.6.
 - Related: a cart whose mapper was **unimplemented** and is now implemented
   changes its `mbc_kind_tag`, so its old states are refused with `save state MBC
   type mismatch`. Applies to the seven mappers added in `38f0188`..`4832563`.
@@ -178,7 +195,19 @@ longer load. Inferred from the code; not enumerated against real carts.
 Rollback/netplay never puts a state payload on the wire — `linkproto.nim`
 exchanges inputs and SIO words only, under its own `LINKPROTO_VERSION`. So
 `STATE_VERSION` is not a peer-compatibility axis, and format changes cost
-nothing there. Snapshots stay in-process.
+nothing there. Snapshots stay in-process (`netcore.nim` captures
+`gba.state_payload()`, the raw payload with no header, so it never computes a
+ROM identity at all).
+
+The peer ROM check is a **separate** value that happens to be called a
+checksum: `LinkMsg.rom_crc`, a CRC-32 (`linkproto.crc32`) of the ROM **file**,
+sent in HELLO and compared in `netcore.handle_hello`. Native takes it over
+`readFile(current_rom_path())`; the wasm build takes it over
+`rom[0 ..< rom_size]`, which is the same bytes (`dingbat_wasm.nim`, and the
+comment there says so). The web rollback path has its own third hash,
+`rbHash(romBytes)` in `web/netplay.js`, also over the file. None of the three
+is `gba_rom_checksum`, and the 2026-07-28 ROM-identity fix changed none of
+them — no wire value moved, and no peer pairing changed.
 
 ---
 
