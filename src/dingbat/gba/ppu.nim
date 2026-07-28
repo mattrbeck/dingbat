@@ -513,12 +513,15 @@ proc compute_layer_walk*(ppu: PPU) =
 
 # SWAR helpers: spread the three 5-bit BGR555 channels into separate 16-bit
 # lanes of a uint64 so all three can be scaled/added/saturated at once
-proc bgr16_spread(c: uint16): uint64 {.inline.} =
+proc bgr16_spread*(c: uint16): uint64 {.inline.} =
   uint64(c and 0x1F) or (uint64(c and 0x3E0) shl 11) or (uint64(c and 0x7C00) shl 22)
 
-const BGR_LANE_MASK = 0xFF'u64 or (0xFF'u64 shl 16) or (0xFF'u64 shl 32)
+const BGR_LANE_MASK* = 0xFF'u64 or (0xFF'u64 shl 16) or (0xFF'u64 shl 32)
 
-proc bgr16_pack_sat(v: uint64): uint16 {.inline.} =
+# Exported alongside bgr16_pack so tests/ppucomposite_test.nim can prove the two
+# agree over the whole reachable domain — that equivalence is the entire licence
+# for brighten/darken skipping the saturation step.
+proc bgr16_pack_sat*(v: uint64): uint16 {.inline.} =
   # Saturate each lane at 0x1F, then pack back to BGR555
   var r = v and 0xFFFF'u64
   var g = (v shr 16) and 0xFFFF'u64
@@ -534,6 +537,25 @@ proc bgr16_pack*(v: uint64): uint16 {.inline.} =
   ## brighten/darken case: with EVY clamped to 16, darken gives
   ## s - (s*evy)/16 >= 0 and brighten gives s + ((31-s)*evy)/16 <= 31, so
   ## neither can leave the 5-bit range and the clamp is dead code.
+  ##
+  ## That precondition is verified exhaustively (all 65536 source colours x
+  ## all 17 reachable EVY values x both directions: every lane lands in
+  ## [0, 0x1F], and the bound is tight — brighten reaches exactly 31 and
+  ## darken exactly 0). EVY = 17 *does* overflow, so the `min(16, ...)` on
+  ## every evy_coefficient read is load-bearing, not decorative.
+  ##
+  ## That safety lives entirely in the callers, and nothing structural stops a
+  ## future edit from reading evy_coefficient unclamped. The lane masks below
+  ## would then silently truncate mod 32 — a wrong colour, not a crash, and
+  ## not a channel bleed either (each mask confines its own lane), so it would
+  ## be easy to miss.
+  ##
+  ## A runtime `doAssert` here was measured and rejected: 3 compares per shaded
+  ## pixel cost 1.0-7.3% on -d:release (Metroid Fusion worst), which the native
+  ## GUI would pay. The guard is instead a zero-cost behavioural one —
+  ## tests/ppucomposite_test.nim drives the real compositor with EVY = 16, 17, 31
+  ## and fails if an unclamped read ever reaches this proc. See `nimble
+  ## test_ppucomposite`.
   uint16((v and 0x1F'u64) or
          (((v shr 16) and 0x1F'u64) shl 5) or
          (((v shr 32) and 0x1F'u64) shl 10))

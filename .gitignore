@@ -33,6 +33,7 @@ web/rom.gbc
 /dingbat_test
 /dingbat_cheat_test
 /dingbat_cheat_int_test
+/dingbat_ppucomposite_test
 /dingbat_test_runner
 /dingbat_bench
 /trade_repro

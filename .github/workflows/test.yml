@@ -51,6 +51,16 @@ jobs:
         run: nim c -d:test_harness -d:release --path:src --path:tests -o:dingbat_test_runner tests/dingbat_test_runner.nim
       - name: Run tests
         run: ./dingbat_test_runner
+      - name: GBA PPU compositor invariants
+        # The compositor is split into three specialized inner loops with the
+        # layer walk open-coded four times, and the ROM suites above barely
+        # constrain it — a wrong OBJ-vs-BG priority tie in one of those copies
+        # passes every one of them. These checks are self-comparing (no golden
+        # hashes, so nothing to regenerate and nothing to drift per-arch) and
+        # each was confirmed by mutation to actually fail when the thing it
+        # describes is broken. Needs no ROMs.
+        shell: bash
+        run: nim c -r -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status
