@@ -4,12 +4,20 @@ Investigated 2026-07-27, from a confirmed report: two save states made around
 2026-07-24 were refused with `state load REJECTED (ROM/version mismatch)` while
 a state from another date loaded fine.
 
-**Short answer: yes, updating dingbat throws away save states, and it has done
-so five times in fifteen days.** The specific cause of the 07-24 rejections is
+**Short answer: yes, updating dingbat threw away save states, and it had done so
+five times in fifteen days.** The specific cause of the 07-24 rejections is
 commit `b398a7b` (2026-07-24 17:05), which bumped `STATE_VERSION` 5 → 6 to add
-*one Game Boy PPU field*. The version check is global, so it also refused every
+*one Game Boy PPU field*. The version check was global, so it also refused every
 GBA state in existence — even though the GBA payload is byte-for-byte identical
 across that bump.
+
+> **Status.** §1–§3 describe the format as it was, and are kept because they are
+> the evidence. §5 is the guard that landed first (ordinal pinning + a corpus of
+> reference states in CI). **§6 is the fix**: container v7 splits the version
+> number per core and makes both readers migrate older layouts instead of
+> refusing them. Every state dingbat has ever written now loads again, with two
+> narrow, named exceptions. Recommendations §4.1–§4.3 are done; §4.4 (user-facing
+> messages) and §4.5 (`gba_rom_checksum`) are still open.
 
 ---
 
@@ -299,15 +307,155 @@ Each guard was confirmed to actually fail, by mutation:
 | extra `write_u32`/`read_u32` in `save_bus_state` | both GBA entries FAIL, `state section marker mismatch` |
 | swap `etIME` / `etRtcSecond` | **compile error**: `etIME moved from 7 to 8` |
 
-The corpus starts at v6, so it guards changes from here forward; it cannot
-retroactively protect the v5 states already in the wild. Recovering those needs
-4.2/4.3 — and for GBA specifically, accepting v5 is sufficient on its own, since
-the payload is already identical.
+The corpus started at v6, so on its own it guards changes going forward; it
+could not retroactively protect the v4/v5 states already in the wild. §6 does
+that.
 
 ### The intended workflow when it goes red
 
 The header of the test file spells this out. In short: prefer making the reader
-tolerate the old layout (4.3) and keep the corpus entry green; if the format
-genuinely must break, bump the version, regenerate with `--write-corpus`, and
-say in the commit message that users lose their states. Never delete a corpus
-entry to make the test pass.
+tolerate the old layout (§6) and keep the corpus entry green; if a field
+genuinely cannot be reconstructed, refuse *that case* explicitly and name it.
+Never delete a corpus entry to make the test pass.
+
+---
+
+## 6. The fix: container v7, per-core revisions, migrating readers
+
+Implements §4.2(a) and §4.3.
+
+### 6.1 The header
+
+Byte 13 was `slot`, "reserved for future multi-slot support"; every writer since
+v1 put a literal 0 there (multi-slot ended up in the file *name*). It now holds
+the **payload revision of the core that wrote the file**, and 0 means "pre-v7,
+derive it". Verified free by reading every historical `write_state_header`.
+
+`STATE_VERSION` is now 7 and describes the *header*, not the payloads. Payload
+changes bump `GBA_PAYLOAD_VERSION` or `GB_PAYLOAD_VERSION` instead — one core at
+a time, which is the whole point. Acceptance changed from `!=` (refuse anything
+not exactly equal) to: refuse only containers *newer* than this build, then
+refuse only revisions newer than this core reads.
+
+Pre-v7 files get their revision from a derivation table, reconstructed by walking
+every commit that touched either `savestate.nim` — not just the version bumps,
+which is what makes it trustworthy:
+
+| container | GBA rev | GB rev | what moved |
+|---|---|---|---|
+| 1 | 1 | 1 | format introduced |
+| 2 | 2 | 1 | GBA CPU halt-wake fields |
+| 3 | 3 | 1 | GBA bus ROM trackers + RTC epoch |
+| 4 | 3 | 2 | GB serial section |
+| 5 | 4 | 2 | GBA CPU `halt_resume_pop` |
+| 6 | 4 | 3 | GB PPU `dots_since_frame` |
+
+Every other commit in those windows was checked and changed no bytes. The single
+wrinkle: inside container 4 the GB serial section's 5th byte changed *meaning*
+(`previous_bit` → `clock_history`, `f678d02`) at the same width, so the layout is
+still single-valued. That byte is the shift-clock edge history, 0 in any state
+not taken mid-transfer, and 0 means "clock low" under both readings.
+
+The table is pinned in a compile-time `static:` block in the test — editing
+`legacy_payload_version` fails the build.
+
+### 6.2 The migrations
+
+| migration | what it does | why it is right |
+|---|---|---|
+| GBA 1→2 | `halt_wake=false`, `halt_resume_charge=0`, `halt_resume_addr=0` | rev 1 charged the BIOS return path up front, so nothing is ever deferred in a rev-1 state. 0 is the value, not a guess. |
+| GBA 2→3 | ROM burst trackers start cold (`rom_next_addr=1`, the existing sentinel), `rom_hot=false`; `rtc.deterministic=false`, `epoch=0` | rev ≤ 2 didn't restore the trackers at all, so a load left junk; cold costs a few cycles on one access, exactly what `66a3c42` called "invisible in a one-shot load". Deterministic RTC didn't exist, so off *is* the state. |
+| GBA 3→4 | `halt_resume_pop=false`, **plus** an IntrWait stack-frame retrofit | see below |
+| GB 1→2 | serial section absent → idle | the port was a stub; no transfer could exist. |
+| GB 2→3 | `dots_since_frame=0` | the counter is reset at every frame push, and states are only written at frame boundaries. The test asserts this premise directly (it measures < 456 dots, i.e. under one scanline of a 70224-dot frame). |
+
+**The IntrWait retrofit** is the interesting one, because the v5 bump declared it
+impossible: *"a v4 state saved mid-IntrWait/Halt would resume with a mis-restored
+sp, so old states are refused."* `32dd8bb` made the HLE IntrWait push
+`{r2, lr}` + `{r4, lr}` onto the System stack, hold sp 16 bytes lower for the
+whole wait, and pop all four words on resume — unconditionally, with no flag.
+
+It is possible, because the old build never overwrote `r2`/`r4`/`lr_sys` while
+waiting, so a rev-3 state still holds the *caller's* values in those registers —
+which is precisely what the frame is meant to contain. Writing them where the pop
+expects them, lowering sp, and putting the live registers into the halt-loop
+convention makes the new resume restore the caller's `r2`/`r4`/`lr` and the
+original sp: the same caller-visible outcome the old build produced (its resume
+restored nothing and left them live). The 16 bytes land below the System sp,
+which is dead stack the new build clobbers on every IntrWait anyway.
+
+**Where it is refused instead.** If `intr_wait_active` is set but the CPU is *not*
+halted, the user IRQ handler is mid-flight on that same System stack; lowering sp
+under it would move the base its own pushes already used, and there is nothing to
+reconstruct from. That case raises a `StateError` naming it, and `load_state`'s
+existing backup/restore leaves the running game untouched. Refusing 100% of these
+was the old behaviour; refusing only this sliver is strictly better, and it is
+the one place a silent wrong answer was available and declined.
+
+### 6.3 What is loadable now
+
+| | GBA | GB |
+|---|---|---|
+| container v1 | ✅ (rev 1) | ✅ (rev 1) |
+| container v2 | ✅ (rev 2) | ✅ (rev 1) |
+| container v3 | ✅ (rev 3) | ✅ (rev 1) |
+| container v4 | ✅ (rev 3) | ✅ (rev 2) |
+| container v5 | ✅ (rev 4) | ✅ (rev 2) |
+| container v6 | ✅ (rev 4) | ✅ (rev 3) |
+
+Two deliberate exceptions:
+
+1. **GBA rev ≤ 3 taken mid-IntrWait with the handler running** — refused, §6.2.
+2. **GBA states for carts smaller than 1 MiB, written before `2dfd27e`** —
+   refused as "belongs to a different ROM". This is §2.4, not a payload problem:
+   the identity hash covers `min(rom_buffer_len, 1 MiB)` and the buffer resize
+   changed both the length and the padding for sub-1-MiB carts. Fixing it
+   invalidates those states one more time, so it stays out of this change.
+   Demonstrated: a genuine container-v3 state for the 56-byte `inputrec.gba` is
+   refused, while genuine container-v1/v2/v3 states for a 16 MiB commercial cart
+   load fine — exactly the predicted boundary.
+
+### 6.4 How it was verified
+
+Not "it didn't crash".
+
+**Real user states.** All three of the files that prompted this now load and
+*resume correctly*, confirmed by running 600 frames and looking at the output:
+
+| file | container | path exercised | result |
+|---|---|---|---|
+| `Minish Cap (USA).state` | v4 | GBA rev 3→4 **incl. the IntrWait retrofit** (`intr_wait_active=1`, `halted=1` in the file) | intro cutscene resumes and advances — "A long, long time ago…" → "when the world was on the verge of being swallowed by shadow…" |
+| `Golden Sun - The Lost Age.state` | v5 | GBA rev 4, no migration | resumes to its in-game temple scene |
+| `PokemonFireRed.state` | v5 | GBA rev 4, no migration | resumes to Pallet Town, animating |
+
+**Genuine old-build fixtures, not doctored headers.** For each old format,
+`git archive <commit> | tar -x` into a scratch tree, compile a 20-line generator
+against *that* tree, and run it on a committed test ROM. That produced real
+container v1/v3/v4/v5 files, now in `tests/states/` and loaded by CI. The same
+method against a commercial cart produced container v1/v2/v3 GBA states — those
+load too (they can't be committed, so the corpus documents GBA rev 3/4 only, and
+the test asserts that coverage rather than passing vacuously on an empty set).
+
+**An exact-inverse proof for the IntrWait retrofit.** The corpus can't cover it
+(no committed test ROM calls IntrWait), so the test builds both shapes by hand
+from `hle_intr_wait`'s own definition — never from the migration's code — then
+converts the new shape *down* to the old one and asserts the migration converts
+it back to a **byte-identical payload**, plus the four frame words and sp
+individually. The unreconstructible case is asserted to raise, and the pre-load
+payload asserted to restore.
+
+**Mutation-tested.** Each guard was confirmed to fail when the thing it describes
+is broken:
+
+| mutation | result |
+|---|---|
+| frame retrofit lowers sp by 12 instead of 16 | byte-identity + sp checks FAIL |
+| `legacy_payload_version` off by one for GB | **compile error** |
+| extra `write_u32` in `save_bus_state` | GBA corpus entries FAIL on the section marker |
+| swap `etIME` / `etRtcSecond` | **compile error** |
+
+**Regression.** `--mode=rollback`, `--mode=rollbacknet` and `--mode=speclink` all
+pass — they drive `state_payload`/`apply_state_payload` thousands of times per
+run and assert bit-identical replay, which is the strongest available check that
+the reader/writer still agree. The GB HDMA screenshot guard passes. Corpus,
+round-trip and rejection checks: 60 assertions, all green.

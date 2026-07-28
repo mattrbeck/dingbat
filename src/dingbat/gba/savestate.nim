@@ -49,7 +49,7 @@ proc save_cpu_state(cpu: CPU; w: var Writer) =
   w.write_u32(cpu.halt_resume_addr)
   w.write_bool(cpu.halt_resume_pop)  # v5
 
-proc load_cpu_state(cpu: CPU; r: var Reader) =
+proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_CPU)
   for i in 0 .. 15: cpu.r[i] = r.read_u32()
   cpu.cpsr = cast[PSR](r.read_u32())
@@ -66,10 +66,32 @@ proc load_cpu_state(cpu: CPU; r: var Reader) =
   cpu.intr_wait_active      = r.read_bool()
   cpu.intr_wait_mask        = r.read_u16()
   cpu.intr_wait_resume_addr = r.read_u32()
-  cpu.halt_wake             = r.read_bool()
-  cpu.halt_resume_charge    = cast[int32](r.read_u32())
-  cpu.halt_resume_addr      = r.read_u32()
-  cpu.halt_resume_pop       = r.read_bool()  # v5
+  if rev >= 2:
+    cpu.halt_wake          = r.read_bool()
+    cpu.halt_resume_charge = cast[int32](r.read_u32())
+    cpu.halt_resume_addr   = r.read_u32()
+  else:
+    # rev 1 charged the BIOS's post-wake return path up front, at SWI call
+    # time, so there is never anything deferred in a rev-1 state: 0 is the
+    # value, not a guess. halt_wake is a transient consumed at the next
+    # instruction boundary; false costs the 2-cycle entry discount on at most
+    # one IRQ, and halt_resume_addr is only read when the charge is nonzero.
+    cpu.halt_wake = false
+    cpu.halt_resume_charge = 0
+    cpu.halt_resume_addr = 0
+  if rev >= 4:
+    cpu.halt_resume_pop = r.read_bool()
+  else:
+    # rev <= 3 predates the HLE dispatcher's System-stack frames: its Halt/Stop
+    # never lowered the System sp, so there is nothing for the resume path to
+    # pop. false is exactly right, and it makes the resume leave r2/lr/sp live
+    # — which is precisely what the build that wrote the file did.
+    #
+    # IntrWait is the case that does NOT fall out for free: its resume pops 16
+    # bytes unconditionally, with no flag to switch off. gba_apply_state
+    # retrofits the frame afterwards (see migrate_intr_wait_frame) for the
+    # states where that is provably safe, and refuses the rest.
+    cpu.halt_resume_pop = false
   cpu.count_cycles = 0
   cpu.entered_waitloop = false
 
@@ -93,17 +115,31 @@ proc save_bus_state(bus: Bus; w: var Writer) =
   w.write_bool(bus.rom_hot)
   w.write_bool(bus.dma_active)
 
-proc load_bus_state(bus: Bus; r: var Reader) =
+proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_BUS)
   bus.cycles = int(r.read_i32())
   bus.bios_latch = r.read_u32()
   r.read_bytes(bus.wram_board)
   r.read_bytes(bus.wram_chip)
-  bus.rom_next_addr = r.read_u32()
-  bus.rom_next_addr2 = r.read_u32()
-  bus.rom_free_since = CycleCount(r.read_u64())
-  bus.rom_hot = r.read_bool()
-  bus.dma_active = r.read_bool()
+  if rev >= 3:
+    bus.rom_next_addr = r.read_u32()
+    bus.rom_next_addr2 = r.read_u32()
+    bus.rom_free_since = CycleCount(r.read_u64())
+    bus.rom_hot = r.read_bool()
+    bus.dma_active = r.read_bool()
+  else:
+    # rev <= 2 didn't carry the burst trackers, so a load left whatever the
+    # live machine happened to hold — i.e. nothing meaningful. Start them cold
+    # instead: rom_next_addr = 1 is the sentinel the DMA and UND paths already
+    # use for "no prior access" (it can never match a halfword-aligned
+    # address), so the first ROM access after the load is judged
+    # non-sequential with no prefetch credit. Costs a few cycles once, which
+    # is exactly what 66a3c42 described as "invisible in a one-shot load".
+    bus.rom_next_addr = 1
+    bus.rom_next_addr2 = 1
+    bus.rom_free_since = 0
+    bus.rom_hot = false
+    bus.dma_active = false
   bus.fetch_page = 0xFFFFFFFF'u32  # invalidate the fetch fast path
 
 # ---- Interrupts / MMIO / Keypad ----
@@ -230,7 +266,7 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_bool(rtc.deterministic)
   w.write_u64(uint64(rtc.epoch))
 
-proc load_gpio_state(gpio: GPIO; r: var Reader) =
+proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_GPIO)
   gpio.data = r.read_u8()
   gpio.direction = r.read_u8()
@@ -248,8 +284,16 @@ proc load_gpio_state(gpio: GPIO; r: var Reader) =
   rtc.buffer.value = r.read_u64()
   rtc.irq = r.read_bool()
   rtc.m24 = r.read_bool()
-  rtc.deterministic = r.read_bool()
-  rtc.epoch = int64(r.read_u64())
+  if rev >= 3:
+    rtc.deterministic = r.read_bool()
+    rtc.epoch = int64(r.read_u64())
+  else:
+    # Deterministic RTC arrived with rev 3 and exists only to freeze the clock
+    # across a linked session (enable_deterministic_rtc). A rev <= 2 state was
+    # written by a build that had no such mode, so "off, real local time" is
+    # the state it was in; epoch is ignored while off.
+    rtc.deterministic = false
+    rtc.epoch = 0
 
 # ---- PPU ----
 
@@ -617,10 +661,59 @@ proc gba_state_payload(gba: GBA): string =
   w.write_tag(GBA_SEC_END)
   w.buf
 
-proc gba_apply_state(gba: GBA; payload: string) =
+# ---- rev <= 3 -> 4: retrofit the HLE IntrWait System-stack frames ----------
+#
+# 32dd8bb taught the HLE BIOS to model the real dispatcher's stack footprint.
+# Its IntrWait now pushes {r2, lr} (dispatcher) + {r4, lr} (routine) onto the
+# System stack, keeps sp 16 bytes lower for the whole wait, and pops all four
+# words on resume — UNCONDITIONALLY, with no flag to turn off. A rev <= 3 state
+# parked inside IntrWait has an unshifted sp and no frame in memory, so that
+# resume would pop four words of the game's own stack into r4/r2/lr and hand sp
+# back 16 too high. That is why the v5 bump refused old states outright.
+#
+# It does not have to. The old build never overwrote r2/r4/lr_sys while waiting,
+# so a rev <= 3 state still holds the CALLER's values in those registers — which
+# is exactly what the frame is supposed to contain. Writing them where the pop
+# expects them makes the new resume restore the caller's r2/r4/lr and the
+# original sp: byte for byte the same caller-visible outcome the old build's
+# resume produced (it restored nothing and left them live).
+#
+# The 16 bytes land below the System sp, which is dead stack the new build
+# clobbers on every IntrWait anyway — and putting BIOS residue there is the
+# hardware behaviour 32dd8bb added, not a departure from it.
+#
+# Safe only while the CPU is HALTED in the wait loop. If the state was taken
+# with intr_wait_active but not halted, the user IRQ handler is mid-flight on
+# that same System stack: lowering sp under it would move the base its own
+# pushes already used. There is no way to reconstruct that, so those states are
+# refused (see the check in gba_apply_state) rather than silently mis-resumed.
+proc migrate_intr_wait_frame(gba: GBA) =
+  let cpu = gba.cpu
+  let usp = cpu.sys_sp()
+  # Dispatcher frame {r2, lr} then routine frame {r4, lr = 0x170}, in the
+  # layout check_intr_wait pops: [usp-16] r4, [usp-12] 0x170, [usp-8] r2,
+  # [usp-4] lr.
+  gba.bus.write_word_internal(usp - 4,  cpu.sys_lr())
+  gba.bus.write_word_internal(usp - 8,  cpu.r[2])
+  gba.bus.write_word_internal(usp - 12, 0x170'u32)
+  gba.bus.write_word_internal(usp - 16, cpu.r[4])
+  cpu.set_sys_sp(usp - 16)
+  # ...and put the live registers into the halt loop's convention, which is what
+  # this build would be holding had it entered the wait itself (r4 = 1, r2 = the
+  # last mirror read, lr_sys = 0x34C, the bl-return inside the loop).
+  cpu.r[4] = 1
+  cpu.r[2] = uint32(cpu.read_intr_mirror())
+  cpu.set_sys_lr(0x34C'u32)
+
+proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
   var r = Reader(buf: payload)
-  load_cpu_state(gba.cpu, r)
-  load_bus_state(gba.bus, r)
+  load_cpu_state(gba.cpu, r, rev)
+  if rev < 4 and gba.cpu.intr_wait_active and not gba.cpu.halted:
+    raise newException(StateError,
+      "this save state was taken inside a BIOS IntrWait with the interrupt " &
+      "handler still running, under an older HLE stack model that cannot be " &
+      "reconstructed — it would resume with a corrupted stack pointer")
+  load_bus_state(gba.bus, r, rev)
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r)
   load_irq_state(gba.interrupts, r)
@@ -629,12 +722,15 @@ proc gba_apply_state(gba: GBA; payload: string) =
   load_timer_state(gba.timer, r)
   load_serial_state(gba.serial, r)
   load_dma_state(gba.dma, r)
-  load_gpio_state(gba.bus.gpio, r)
+  load_gpio_state(gba.bus.gpio, r, rev)
   load_ppu_state(gba.ppu, r)
   load_apu_state(gba.apu, r)
   gba.apu_extract_state_events()
   load_storage_state(gba.storage, r)
   r.expect_tag(GBA_SEC_END)
+  # After the payload, so the stack it writes into is the restored WRAM
+  if rev < 4 and gba.cpu.intr_wait_active:
+    gba.migrate_intr_wait_frame()
   # irq_line is derived from IE/IF/IME and not serialized; recompute it so a
   # pending-but-untaken IRQ at the save point isn't lost. Same for the
   # WAITCNT-derived bus timing tables.
@@ -669,8 +765,15 @@ proc state_payload*(gba: GBA): string =
 
 proc apply_state_payload*(gba: GBA; payload: string) =
   ## Apply a raw payload produced by state_payload. Raises StateError on
-  ## corrupt input; no rollback — trusted callers only.
-  gba.gba_apply_state(payload)
+  ## corrupt input; no rollback — trusted callers only. Always this build's
+  ## revision: the rewind ring and rollback snapshots never outlive the process.
+  gba.gba_apply_state(payload, GBA_PAYLOAD_VERSION)
+
+proc apply_state_payload*(gba: GBA; payload: string; rev: uint32) =
+  ## As above, for a payload known to be in an OLDER revision. Exists so the
+  ## format tests can exercise a migration without a whole state image; normal
+  ## load paths get their revision from the header.
+  gba.gba_apply_state(payload, rev)
 
 const GBA_THUMB_W = 120
 const GBA_THUMB_H = GBA_THUMB_W * 160 div 240   # preserve 3:2 → 120x80
@@ -691,20 +794,20 @@ proc state_bytes*(gba: GBA; thumbnail = false): string =
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
-  var payload: string
+  var image: tuple[payload: string; rev: uint32]
   try:
-    payload = parse_state_payload(data, ckGBA, gba.gba_rom_checksum(),
-                                  GBA_STATE_ROM_TAG)
+    image = parse_state_payload(data, ckGBA, gba.gba_rom_checksum(),
+                                GBA_STATE_ROM_TAG)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
   let backup = gba.gba_state_payload()
   try:
-    gba.gba_apply_state(payload)
+    gba.gba_apply_state(image.payload, image.rev)
     true
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
-    gba.gba_apply_state(backup)
+    gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
     false
 
 proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
@@ -728,18 +831,18 @@ proc load_state*(gba: GBA; path: string): bool =
   ## Restore emulator state from path. Must only be called at a frame
   ## boundary. On any validation error the emulator is left untouched; if
   ## applying fails midway the pre-load state is restored.
-  var payload: string
+  var image: tuple[payload: string; rev: uint32]
   try:
-    payload = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),
-                                 GBA_STATE_ROM_TAG)
+    image = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),
+                               GBA_STATE_ROM_TAG)
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
   let backup = gba.gba_state_payload()
   try:
-    gba.gba_apply_state(payload)
+    gba.gba_apply_state(image.payload, image.rev)
     true
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
-    gba.gba_apply_state(backup)
+    gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
     false
