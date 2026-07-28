@@ -42,23 +42,16 @@ when not defined(test_harness):
       userdata:  pointer
 
   const AUDIO_S16LSB  = 0x8010'u16
-  const AUDIO_F32LSB  = 0x8120'u16
-  const SDL_AUDIO_ALLOW_FREQUENCY_CHANGE = cint(1)
 
+  # Legacy (default-device) SDL audio API only — this path never opens a
+  # specific device; the queue calls below pass apu.audio_dev, the legacy
+  # API's implicit device.
   proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
     {.importc: "SDL_OpenAudio", cdecl.}
-  proc sdl_open_audio_device(device: pointer; iscapture: cint;
-      desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec;
-      allowed_changes: cint): SDL_AudioDeviceID
-    {.importc: "SDL_OpenAudioDevice", cdecl.}
   proc sdl_close_audio()
     {.importc: "SDL_CloseAudio", cdecl.}
-  proc sdl_close_audio_device(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_CloseAudioDevice", cdecl.}
   proc sdl_pause_audio(pause_on: cint)
     {.importc: "SDL_PauseAudio", cdecl.}
-  proc sdl_pause_audio_device(dev: SDL_AudioDeviceID; pause_on: cint)
-    {.importc: "SDL_PauseAudioDevice", cdecl.}
   proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
     {.importc: "SDL_QueueAudio", cdecl.}
   proc sdl_get_queued_audio_size(dev: SDL_AudioDeviceID): uint32
@@ -194,7 +187,7 @@ proc set_pitch_correct_ff*(apu: APU; on: bool) =
   ## stretch-path rising edge in get_sample, so this only flips the flag.
   apu.pitch_correct_ff = on
 
-proc ensure_stretch(apu: APU) {.inline.} =
+proc ensure_stretch(apu: APU) {.inline, used.} =  # audio emit paths only, compiled out under test_harness
   ## Lazily allocate + reset the stretcher exactly when the pitch-correct
   ## path first engages (turbo AND pitch_correct_ff), so a fresh turbo
   ## engagement never overlap-adds a stale buffer tail.

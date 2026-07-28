@@ -85,7 +85,7 @@ proc set_pitch_correct_ff*(apu: GbApu; on: bool) =
   ## on the stretch-path rising edge in get_sample.
   apu.pitch_correct_ff = on
 
-proc ensure_stretch(apu: GbApu) {.inline.} =
+proc ensure_stretch(apu: GbApu) {.inline, used.} =  # audio emit paths only, compiled out under test_harness
   if not apu.stretch_engaged:
     if apu.stretch == nil: apu.stretch = new_time_stretch()
     else: apu.stretch.reset()

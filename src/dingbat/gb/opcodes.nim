@@ -1461,7 +1461,6 @@ var UNPREFIXED* = [
   # 0xFB EI (enable interrupts, delayed by one instruction via scheduler)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    let c = cpu
     gb.scheduler.schedule_gb(4, etIME)
     4,
 

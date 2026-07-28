@@ -34,15 +34,23 @@ web/rom.gbc
 /dingbat_cheat_test
 /dingbat_cheat_int_test
 /dingbat_ppucomposite_test
+/dingbat_ppubgunpack_test
+/dingbat_ppuobjlist_test
 /dingbat_savestate_compat_test
 /dingbat_test_runner
 /dingbat_bench
+/dingbat_bench_native
+/dingbat_ts_test
+/dingbat_sdl3
 /trade_repro
 /dingbat_test_base
 /netcore_trade_repro
 /netcore_trade_repro_base
 /rollback_trade_repro
 /trade_repro_common
+
+# Local investigation scratch dirs — never commit
+/scratch-repro/
 
 # Generated SRAM backing for test ROMs (created at runtime, not a fixture)
 tests/roms/*.sav
@@ -92,6 +100,9 @@ __pycache__/
 /*.gba
 /*.zip
 /*.sav
+
+# Runtime save written when the web demo ROM is played locally
+web/*.sav
 
 # Browser perf bench: ROMs/states are supplied locally (see web/bench/README.md)
 web/bench/*.gba

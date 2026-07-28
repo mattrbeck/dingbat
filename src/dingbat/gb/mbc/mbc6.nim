@@ -26,7 +26,6 @@ const
   MBC6_FLASH_LEN    = 0x100000   # 8 Mbit
   MBC6_HIDDEN_LEN   = 0x100      # the extra 256 bytes behind the hidden-region commands
   MBC6_SECTOR_LEN   = 0x20000    # eight 128 KiB sectors
-  MBC6_RAM_LEN      = 0x8000     # eight 4 KiB banks
 
   # What a flash window currently reads back.
   MBC6_READ_ARRAY  = 0'u8

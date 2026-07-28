@@ -15,8 +15,9 @@ when defined(emscripten):
 
 import std/[net, nativesockets, monotimes, times, os]
 when not defined(windows):
+  # `from` import: the listed names come in unqualified, and qualified access
+  # (posix.shutdown below) works for everything else.
   from std/posix import EAGAIN, EWOULDBLOCK, EINTR, SHUT_WR
-  from std/posix as posix import nil
 import netcore
 import gba
 

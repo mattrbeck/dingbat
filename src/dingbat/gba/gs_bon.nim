@@ -204,21 +204,21 @@ const
   GSC_CT       = 0x18   # source samples remaining until sample end
   GSC_FREQ     = 0x20   # playback rate, integer Hz
   GSC_WAVE     = 0x24   # -> WaveData
-  GSC_CUR      = 0x28   # current sample data pointer
+  GSC_CUR {.used.} = 0x28   # current sample data pointer
   GSC_SIZE     = 64
 
   # SoundInfo offsets (stock m4a):
   GSI_REVERB     = 0x05
   GSI_MAX_CHANS  = 0x06
-  GSI_MASTER_VOL = 0x07
+  GSI_MASTER_VOL {.used.} = 0x07
   GSI_DMA_PERIOD = 0x0B
-  GSI_SPV        = 0x10   # pcmSamplesPerVBlank (u16)
+  GSI_SPV {.used.} = 0x10   # pcmSamplesPerVBlank (u16)
   GSI_PCM_RATE   = 0x14
   GSI_DIV_FREQ   = 0x18   # per-Hz step multiplier: step = freq*divFreq (9.23)
 
   GS_START = 0x80'u8
   GS_STOP  = 0x40'u8
-  GS_LOOP  = 0x10'u8
+  GS_LOOP {.used.} = 0x10'u8
   GS_IEC   = 0x04'u8
   GS_ON    = 0xC7'u8
 
@@ -226,7 +226,7 @@ proc new_gs_bon*(gba: GBA): GsBonHle =
   GsBonHle(gba: gba, hook_addr: 0xFFFFFFFF'u32)
 
 proc grd8(g: GsBonHle; a: uint32): uint8  {.inline.} = g.gba.bus.read_byte_internal(a)
-proc grd16(g: GsBonHle; a: uint32): uint16 {.inline.} = g.gba.bus.read_half_internal(a)
+proc grd16(g: GsBonHle; a: uint32): uint16 {.inline, used.} = g.gba.bus.read_half_internal(a)
 proc grd32(g: GsBonHle; a: uint32): uint32 {.inline.} = g.gba.bus.read_word_internal(a)
 
 proc gs_state_loaded*(g: GsBonHle) =

@@ -125,7 +125,9 @@ proc complete_transfer(link: GbLink; m: int) =
   link.run_to(p, link.now(m))
   inc link.transfers
   let slave = link.cores[p]
-  let master_out = master.serial.out_latch
+  # Captured before the exchange below rewrites SB; read only by the
+  # gbLinkTrace hook at the bottom.
+  let master_out {.used.} = master.serial.out_latch
   var slave_out = 0xFF'u8
   var slave_got_irq = false
   # A transfer exchanges bytes only when the peer is a LISTENING external-

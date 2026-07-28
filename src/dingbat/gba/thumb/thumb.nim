@@ -229,7 +229,7 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
 proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   let rs = int(bits_range(instr, 3, 5))
   let rd = int(bits_range(instr, 0, 2))
-  var barrel_carry = cpu.cpsr.carry
+  var barrel_carry {.used.} = cpu.cpsr.carry  # read/written only by the shift ops
   var res: uint32
   when op == 0b0000: res = cpu.set_reg(rd, cpu.r[rd] and cpu.r[rs])
   elif op == 0b0001: res = cpu.set_reg(rd, cpu.r[rd] xor cpu.r[rs])

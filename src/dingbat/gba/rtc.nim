@@ -1,5 +1,4 @@
-# RTC implementation (included by gba.nim)
-import std/times
+# RTC implementation (included by gba.nim; std/times comes from its imports)
 
 # Per-minute IRQ poll interval: one emulated second (16.78 MHz CPU clock).
 # The S-3511A asserts /INT at second 00 of every minute, but this RTC reads a

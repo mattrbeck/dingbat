@@ -1587,7 +1587,7 @@ type ArmAluOp* = enum
 
 proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let rd  = int(bits_range(instr, 16, 19))
-  let rn  = int(bits_range(instr, 12, 15))
+  let rn {.used.} = int(bits_range(instr, 12, 15))  # unread unless `accumulate`
   let rs  = int(bits_range(instr, 8, 11))
   let rm  = int(bits_range(instr, 0, 3))
   let acc = when accumulate: cpu.r[rn] else: 0'u32
@@ -1698,7 +1698,7 @@ proc arm_halfword_data_transfer*[pre, add, immediate, write_back, load: static b
 
 proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quantity,
                                  write_back, load, bit0: static bool](cpu: CPU; instr: uint32) =
-  var carry_out = false
+  var carry_out {.used.} = false  # written only in the `imm_flag` instantiations
   let rn = int(bits_range(instr, 16, 19))
   let rd = int(bits_range(instr, 12, 15))
   let offset =
@@ -1736,9 +1736,9 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
 proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static bool](cpu: CPU; instr: uint32) =
   let rn = int(bits_range(instr, 16, 19))
   var list = bits_range(instr, 0, 15)
-  var saved_mode: uint32 = 0
-  var user_bank = false
   when s_bit:
+    var saved_mode: uint32 = 0
+    var user_bank = false
     # LDM with the S bit and r15 in the list is an exception return: the
     # registers load into the current mode's banks and CPSR is restored from
     # SPSR after pc loads. Every other S-bit form transfers the user bank.
@@ -1752,7 +1752,8 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
     bits_set = 16
     list = 0x8000'u32
   let step       = when add: 4 else: -4
-  let final_addr = uint32(int(address) + bits_set * step)
+  # unread when up-counting without write-back
+  let final_addr {.used.} = uint32(int(address) + bits_set * step)
   when add:
     when pre_address: address += 4
   else:
@@ -1805,14 +1806,14 @@ proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
 
 proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32) =
   let mode     = cast[CpuMode](cpu.cpsr.mode)
-  let has_spsr = mode != modeUSR and mode != modeSYS
+  let has_spsr {.used.} = mode != modeUSR and mode != modeSYS  # unread in some instantiations
   when msr:
     var mask: uint32 = 0
     if bit(instr, 19): mask = mask or 0xFF000000'u32
     if bit(instr, 18): mask = mask or 0x00FF0000'u32
     if bit(instr, 17): mask = mask or 0x0000FF00'u32
     if bit(instr, 16): mask = mask or 0x000000FF'u32
-    var carry_out = false
+    var carry_out {.used.} = false  # written only in the `imm_flag` instantiations
     let value =
       when imm_flag:
         cpu.immediate_offset(bits_range(instr, 0, 11), addr carry_out) and mask
@@ -1860,7 +1861,7 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
     cpu.r[15] += 4
     cpu.idle(1)  # register-specified shift costs one internal cycle
   var barrel_carry = cpu.cpsr.carry
-  let rn = int(bits_range(instr, 16, 19))
+  let rn {.used.} = int(bits_range(instr, 16, 19))  # MOV/MVN instantiations never read rn
   let rd = int(bits_range(instr, 12, 15))
   let operand_2 =
     when imm_flag:

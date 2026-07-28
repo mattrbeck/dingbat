@@ -9,9 +9,6 @@ proc new_channel3*(gb: GB): GbChannel3 =
 proc ch3_frequency_timer(ch: GbChannel3): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 2
 
-proc ch3_period(ch: GbChannel3; gb: GB): CycleCount {.inline.} =
-  CycleCount(ch3_frequency_timer(ch)) shl gb.scheduler.speed
-
 proc ch3_catchup_slow(ch: GbChannel3; gb: GB; observer_period: uint32) =
   let now    = gb.scheduler.cycles
   let ticks  = ch3_frequency_timer(ch)

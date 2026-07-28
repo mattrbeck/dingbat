@@ -103,7 +103,7 @@ const
   SC_VOL_R    = 0x02
   SC_VOL_L    = 0x03
   SC_ATTACK   = 0x04   # ADSR attack rate (added to envelopeVolume per frame)
-  SC_ENV_VOL  = 0x09
+  SC_ENV_VOL {.used.} = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
   SC_COUNT    = 0x18   # count/ct: at note-on (START set) this holds the sample
@@ -128,7 +128,7 @@ const
   SI_SPV          = 0x10   # pcmSamplesPerVBlank
   SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
   SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
-  SI_PCM_BUFFER   = 0x350  # s8 pcmBuffer[PCM_DMA_BUF_SIZE*2] — follows the 12
+  SI_PCM_BUFFER {.used.} = 0x350  # s8 pcmBuffer[PCM_DMA_BUF_SIZE*2] — follows the 12
                            # fixed 64-byte chans slots (0x50 + 12*64), matching
                            # the DMA1SAD every standard driver programs
 
@@ -157,12 +157,12 @@ const
   #   TYPE_SPL (0x40, key split) and TYPE_RHY (0x80, rhythm): instrument-table
   #     lookup flags consumed by the sequencer when picking the sub-instrument;
   #     they can remain set in SoundChannel.type but the mixer ignores them.
-  TYPE_CGB = 0x07'u8
+  TYPE_CGB {.used.} = 0x07'u8
   TYPE_FIX = 0x08'u8
   TYPE_REV = 0x10'u8
   TYPE_CMP = 0x20'u8
-  TYPE_SPL = 0x40'u8
-  TYPE_RHY = 0x80'u8
+  TYPE_SPL {.used.} = 0x40'u8
+  TYPE_RHY {.used.} = 0x80'u8
 
   # status bits (m4a SoundChannel.statusFlags — SOUND_CHANNEL_SF_* in pret
   # pokeemerald constants/m4a_constants.inc):
@@ -180,7 +180,7 @@ const
   #     driver computes AFTER the release/IEC handling each frame.
   #   ENV (0x03): envelope phase (3=attack, 2=decay, 1=sustain, 0=release).
   CH_START = 0x80'u8
-  CH_STOP  = 0x40'u8
+  CH_STOP {.used.} = 0x40'u8
   CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
 
   # m4a compressed-waveform ("GFDPCM"/BDPCM) 4-bit differential LUT: the 16
