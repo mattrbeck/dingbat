@@ -324,12 +324,17 @@ proc render_bitmap*(ppu: PPU) =
           ppu.bg2_direct[col] = ppu.bg2_direct[src]
           ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
 
-# Past this many OBJ-list rebuilds in one frame, the rest of the frame uses
-# the straight 128-entry scan. Measured need is 1.00 rebuild/frame in all five
-# gameplay states; the limit exists purely so a game that rewrites OAM every
-# H-blank degrades to (slightly worse than) the old cost instead of paying 160
-# rebuilds. A rebuild costs roughly two to four line-scans, so 16 of them is
-# ~10% of a frame's scan budget in the pathological case.
+# Past this many OBJ-list rebuilds in one frame, the rest of the frame falls
+# back to the straight 128-entry scan. Real games need 1.00 rebuild/frame; the
+# limit is for a game that rewrites OAM in every H-blank and would otherwise
+# rebuild 160 times.
+#
+# It turns out not to be load-bearing, and that is worth recording rather than
+# assuming: a build forced to rebuild on EVERY scanline measures −1.2% to
+# +1.5% against the old full-scan code across the five gameplay states, i.e. a
+# wash. One rebuild costs about one line-scan, because it walks the same 128
+# entries once and then only ORs bits. So the guard is insurance, not a fix,
+# and 16 is deliberately generous.
 const OBJ_LIST_REBUILD_LIMIT* = 16
 
 type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
@@ -396,13 +401,25 @@ proc rebuild_obj_lines*(ppu: PPU) =
 proc oam_touched*(ppu: PPU) {.inline.} =
   ## Invalidate the per-line OBJ candidate list.
   ##
-  ## MUST be called by every path that mutates ppu.oam. Today that is:
-  ## bus.write_half_internal and bus.write_word_internal (OAM byte writes are
-  ## discarded by hardware, and DMA and the cheat engine both funnel through
-  ## these two), load_ppu_state, and the HLE RegisterRamReset SWI's OAM clear
-  ## phase. Build with -d:objListVerify to have every scanline cross-check the
-  ## list against a full scan, which is what catches a path added later that
-  ## forgets to call this.
+  ## MUST be called by every path that mutates ppu.oam. An audit of the tree
+  ## finds exactly three, plus construction:
+  ##
+  ##  * bus.write_half_internal / write_word_internal. Byte writes to OAM are
+  ##    discarded by hardware (`of 0x7: discard`), so there is no third bus
+  ##    entry, and DMA and the cheat engine both funnel through these two.
+  ##  * load_ppu_state -- which also covers the rewind ring, rollback netplay
+  ##    snapshots and 2P link restores, since apply_state_payload reaches OAM
+  ##    only through it.
+  ##  * the HLE RegisterRamReset SWI's OAM clear phase, which writes the seq
+  ##    directly. No local ROM exercises this one; tests/ppuobjlist_test.nim
+  ##    drives it deliberately.
+  ##
+  ## Test code that seeds ppu.oam by hand has to call this too.
+  ##
+  ## Two backstops for the path someone adds later and forgets: scanline()
+  ## force-rebuilds once per frame, bounding the damage to one frame; and
+  ## -d:objListVerify makes every scanline cross-check the list against a full
+  ## scan, which is how a missed call gets found on a real ROM.
   ppu.obj_list_dirty = true
 
 proc render_sprites_impl(ppu: PPU; force_scan: bool) =
