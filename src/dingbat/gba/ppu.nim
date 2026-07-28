@@ -549,13 +549,97 @@ proc fill_window_cols(ppu: PPU; winh: WINH; bits: uint16; effect: bool) =
       ppu.line_enables[col] = bits
       ppu.line_effects[col] = effect
 
+type WinCover* = enum
+  ## How much of the 240-column line `fill_window_cols` would write.
+  wcEmpty, wcPartial, wcFull
+
+proc window_cover*(winh: WINH): WinCover {.inline.} =
+  ## Reduce a WINH to "none of the line", "all of the line", or "some of it".
+  ##
+  ## This must mirror `fill_window_cols` exactly, including its `min(_, 240)`
+  ## clamps — it is not a model of the hardware, it is a model of the loop
+  ## above. Both x1 and x2 are 8-bit, so either can exceed 240.
+  let x1 = int(winh.x1)
+  let x2 = int(winh.x2)
+  let a  = min(x2, 240)
+  if x1 <= x2:
+    # One run, [x1, a). Empty when the clamp (or x1 == x2) collapses it.
+    if x1 == 0 and a == 240: wcFull
+    elif x1 >= a: wcEmpty
+    else: wcPartial
+  else:
+    # Wrapped: [0, a) plus [b, 240). Full when the two runs meet or overlap,
+    # which includes x1 >= 240 <= x2 (both clamps land on 240, so the low run
+    # already covers everything the high run would have).
+    let b = min(x1, 240)
+    if a >= b: wcFull
+    elif a == 0 and b == 240: wcEmpty
+    else: wcPartial
+
+proc line_window_flags*(ppu: PPU): tuple[win0, win1, objwin: bool] {.inline.} =
+  ## Which of the three window sources can affect the current scanline. win0
+  ## and win1 apply only inside their vertical range (a comparator pair, so
+  ## y1 > y2 wraps around the bottom of the screen exactly like x1 > x2 wraps
+  ## around the right edge); the OBJ window applies only when render_sprites
+  ## actually wrote an OBJ-window pixel on this line.
+  let vc = ppu.vcount
+  result.win0 = ppu.dispcnt.window_0_display and
+                window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
+  result.win1 = ppu.dispcnt.window_1_display and
+                window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2))
+  result.objwin = ppu.dispcnt.obj_window_display and ppu.line_obj_window
+
+proc uniform_window_state*(ppu: PPU; win0_on, win1_on, objwin_on: bool;
+                           ubits: var uint16; ueff: var bool): bool {.inline.} =
+  ## True only when all 240 columns are *provably* going to receive the same
+  ## (enable mask, colour-effect flag) pair from `compute_line_enables`, in
+  ## which case that pair is returned in ubits/ueff. False means "don't know" —
+  ## the caller must build the tables.
+  ##
+  ## It reproduces compute_line_enables' painter's algorithm at whole-line
+  ## granularity: lay down the base (outside, or outside/OBJ-window mixed),
+  ## then overlay win1, then win0. Each overlay either covers the whole line
+  ## (uniform from here on, whatever came before), covers nothing (no change),
+  ## or covers part of it — and a partial overlay preserves uniformity only if
+  ## what it paints is bit-for-bit what is already there.
+  ##
+  ## Called per scanline with live registers, so a mid-frame write to any of
+  ## DISPCNT/WIN0H/WIN1H/WIN0V/WIN1V/WININ/WINOUT is picked up on the next line
+  ## the same way the general path picks it up.
+  let dbg_mask = ppu.debug_layer_mask
+  ubits = uint16(ppu.winout.outside_enable_bits) and dbg_mask
+  ueff  = ppu.winout.outside_color_special_effect
+  # The base is per-pixel wherever the OBJ window is live, so it is uniform
+  # either because no OBJ-window pixel exists on this line, or because the
+  # OBJ-window state happens to equal the outside state.
+  var uni = (not objwin_on) or
+            ((uint16(ppu.winout.obj_window_enable_bits) and dbg_mask) == ubits and
+             ppu.winout.obj_window_color_special_effect == ueff)
+  if win1_on:
+    let bits = uint16(ppu.winin.window_1_enable_bits) and dbg_mask
+    let eff  = ppu.winin.window_1_color_special_effect
+    case window_cover(ppu.win1h)
+    of wcFull:    uni = true; ubits = bits; ueff = eff
+    of wcPartial: uni = uni and bits == ubits and eff == ueff
+    of wcEmpty:   discard
+  if win0_on:
+    let bits = uint16(ppu.winin.window_0_enable_bits) and dbg_mask
+    let eff  = ppu.winin.window_0_color_special_effect
+    case window_cover(ppu.win0h)
+    of wcFull:    uni = true; ubits = bits; ueff = eff
+    of wcPartial: uni = uni and bits == ubits and eff == ueff
+    of wcEmpty:   discard
+  uni
+
 proc compute_line_enables*(ppu: PPU) =
   # Same per-pixel result as checking win0 -> win1 -> obj window -> outside,
   # but computed once per scanline: paint the lowest-priority source first,
   # then overlay win1, then win0.
-  let vc = ppu.vcount
   let dbg_mask = ppu.debug_layer_mask
   let obj_active = ppu.dispcnt.obj_window_display
+  # Shared with composite()'s uniformity test, so the two cannot disagree
+  # about which windows are vertically live on this line.
+  let flags = ppu.line_window_flags()
   let out_bits = uint16(ppu.winout.outside_enable_bits) and dbg_mask
   let out_eff  = ppu.winout.outside_color_special_effect
   let obj_bits = uint16(ppu.winout.obj_window_enable_bits) and dbg_mask
@@ -567,13 +651,11 @@ proc compute_line_enables*(ppu: PPU) =
     else:
       ppu.line_enables[col] = out_bits
       ppu.line_effects[col] = out_eff
-  if ppu.dispcnt.window_1_display and
-     window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2)):
+  if flags.win1:
     ppu.fill_window_cols(ppu.win1h,
                          uint16(ppu.winin.window_1_enable_bits) and dbg_mask,
                          ppu.winin.window_1_color_special_effect)
-  if ppu.dispcnt.window_0_display and
-     window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2)):
+  if flags.win0:
     ppu.fill_window_cols(ppu.win0h,
                          uint16(ppu.winin.window_0_enable_bits) and dbg_mask,
                          ppu.winin.window_0_color_special_effect)
@@ -998,18 +1080,13 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
 
 proc composite*(ppu: PPU; row_base: uint32) =
   ppu.compute_layer_walk()
-  let vc = ppu.vcount
   let dbg_mask = ppu.debug_layer_mask
   # Which window sources actually apply to THIS line? win0/win1 only inside
   # their vertical range, the OBJ window only when a sprite wrote an
   # OBJ-window pixel (tracked in render_sprites, so no per-column scan). When
   # none of them do, every column shares one enable mask and there is no need
   # to build (or read back) the per-column tables at all.
-  let win0_on = ppu.dispcnt.window_0_display and
-                window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
-  let win1_on = ppu.dispcnt.window_1_display and
-                window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2))
-  let objwin_on = ppu.dispcnt.obj_window_display and ppu.line_obj_window
+  let (win0_on, win1_on, objwin_on) = ppu.line_window_flags()
   if not (win0_on or win1_on or objwin_on):
     let any_window = ppu.dispcnt.window_0_display or
                      ppu.dispcnt.window_1_display or
@@ -1022,6 +1099,19 @@ proc composite*(ppu: PPU; row_base: uint32) =
       ppu.composite_span(row_base, 0, 240,
                          uint16(ppu.dispcnt.default_enable_bits) and dbg_mask,
                          true)
+    return
+  # A window is live on this line, but the line can still resolve to a single
+  # enable mask — a full-width WIN0 is the common case, and both Pokemon games
+  # are in it on every line of real gameplay. Deciding that from the registers
+  # skips writing 240 enable entries and 240 effect flags and reading them all
+  # back to rediscover they are identical. The test in ppucomposite_test.nim
+  # fuzzes this decision against compute_line_enables; disable_uniform_window
+  # is how it runs the general path for comparison.
+  var ubits: uint16
+  var ueff:  bool
+  if not ppu.disable_uniform_window and
+     ppu.uniform_window_state(win0_on, win1_on, objwin_on, ubits, ueff):
+    ppu.composite_span(row_base, 0, 240, ubits, ueff)
     return
   ppu.compute_line_enables()
   # Split the line into runs of identical window state and composite each one
