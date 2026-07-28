@@ -448,6 +448,68 @@ proc test_rebuild_guard(emu: GBA) =
         "guard did not engage")
 
 # ---------------------------------------------------------------------------
+# 4b. The two OAM mutation paths that are NOT bus writes.
+#
+# Reading the code turns up two more writers besides write_half_internal and
+# write_word_internal: the HLE RegisterRamReset SWI's OAM clear phase, and
+# save-state load. Neither is reachable from a bus write, and -- measured --
+# NEITHER IS EXERCISED by any of 71 local ROMs booted for 120 frames under the
+# -d:objListVerify cross-check, so nothing else in the tree would notice if
+# their hooks were dropped. Hence these.
+#
+# The assertion in both cases: after the mutation the cached mask must either
+# still be marked dirty, or agree with a fresh rebuild. A missing hook leaves
+# it clean AND stale, which is exactly what fails here.
+# ---------------------------------------------------------------------------
+proc mask_is_consistent(ppu: PPU): bool =
+  if ppu.obj_list_dirty: return true
+  let cached = ppu.obj_line_mask
+  ppu.rebuild_obj_lines()
+  cached == ppu.obj_line_mask
+
+proc test_nonbus_writers(emu: GBA) =
+  echo "OAM writers that are not bus writes"
+  let ppu = emu.ppu
+  # --- HLE RegisterRamReset (SWI 0x01) with the OAM bit set ---
+  fill_oam(ppu.oam, "mixed")
+  ppu.dispcnt = cast[DISPCNT](0x1000'u16)
+  ppu.oam_touched()
+  ppu.obj_list_rebuilds = 0
+  ppu.rebuild_obj_lines()                 # cache a mask of the pre-reset OAM
+  var pre_nonempty = false
+  for line in 0 .. 159:
+    if ppu.obj_line_mask[line][0] != 0 or ppu.obj_line_mask[line][1] != 0:
+      pre_nonempty = true
+  emu.cpu.r[0] = 0x10'u32                 # bit 4 = OAM
+  emu.cpu.hle_swi(0x01'u32)
+  var oam_cleared = true
+  for b in ppu.oam:
+    if b != 0: oam_cleared = false
+  check(oam_cleared and pre_nonempty,
+        "RegisterRamReset(OAM) cleared OAM behind the bus",
+        "the SWI did not run, so the check below is vacuous")
+  check(ppu.mask_is_consistent(),
+        "RegisterRamReset(OAM) invalidated the candidate list",
+        "stale mask survived an OAM clear")
+
+  # --- save-state load ---
+  ppu.obj_list_rebuilds = 0
+  fill_oam(ppu.oam, "mixed")
+  ppu.oam_touched()
+  ppu.rebuild_obj_lines()
+  let state_path = getTempDir() / "dingbat_ppuobjlist.state"
+  let saved = emu.save_state(state_path)  # a state whose OAM is this table
+  check(saved, "save state written")
+  fill_oam(ppu.oam, "affine-double")      # now make the live OAM different
+  ppu.oam_touched()
+  ppu.rebuild_obj_lines()                 # ...and cache a mask matching THAT
+  let loaded = emu.load_state_bytes(readFile(state_path))
+  check(loaded, "save state loaded")
+  check(ppu.mask_is_consistent(),
+        "save-state load invalidated the candidate list",
+        "stale mask survived a state load")
+
+# ---------------------------------------------------------------------------
 # 5. Negative control.
 #
 # Everything above is a comparison, and a comparison that cannot fail proves
@@ -528,6 +590,7 @@ when isMainModule:
   test_budget(emu, tables div 4)
   test_midframe(emu, max(4, tables div 100))
   test_rebuild_guard(emu)
+  test_nonbus_writers(emu)
   test_negative_control(emu)
   test_coverage()
 
