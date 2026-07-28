@@ -68,6 +68,18 @@ jobs:
         # ever fails in CI. The flag gates APU/keypad/mmio/savestate only —
         # nothing the compositor touches — so the tests check the same code.
         run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
+      - name: Save-state format compatibility
+        # Users lose save states to routine updates, and nothing used to notice.
+        # This loads a corpus of reference states (tests/states, taken from the
+        # committed test ROMs) and asserts they still load, so both ways of
+        # invalidating them fail here first: a STATE_VERSION bump (which refuses
+        # every older state, for BOTH cores) and a field added to a subsystem
+        # without one. It also pins every EventType ordinal at COMPILE time —
+        # the scheduler serializes events by ordinal, so a reorder silently
+        # reinterprets every pending event in every existing state.
+        # Needs no downloaded ROMs.
+        shell: bash
+        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_savestate_compat_test tests/savestate_compat_test.nim
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status

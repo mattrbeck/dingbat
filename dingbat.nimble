@@ -37,6 +37,10 @@ task test_timestretch, "Run the WSOLA time-stretch unit test":
 task test_ppucomposite, "Run the GBA PPU compositor invariant tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim"
 
+task test_savestate_compat, "Run the save-state format compatibility guards":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
+
 task test_cheats, "Run the cheat-engine unit + integration tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"

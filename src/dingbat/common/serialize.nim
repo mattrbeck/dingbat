@@ -20,6 +20,10 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
+  # Bumping this REFUSES every state a user already has, for BOTH cores — the
+  # check below is global, so a GB-only change throws away GBA states too (v6
+  # did exactly that). tests/savestate_compat_test.nim loads a corpus of older
+  # states and goes red here on purpose; read its header before bumping.
   STATE_VERSION* = 6'u32  # v6: GB PPU carries the disabled-LCD frame counter,
                           # which sets when the next frame is pushed while the
                           # LCD is off; a v5 state would resume with the wrong
