@@ -257,8 +257,14 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     FS: makeFakeFS(),
     caches: { keys: async () => [], delete: async () => true },
   };
-  sandbox.addEventListener = () => {};
-  sandbox.removeEventListener = () => {};
+  // Window-level listeners are recorded (like document's) so tests can fire
+  // synthetic events — e.g. the one-shot pointerdown that triggers the
+  // gesture-gated Drive token renewal.
+  const winListeners = {};
+  sandbox.addEventListener = (type, fn) => { (winListeners[type] ??= []).push(fn); };
+  sandbox.removeEventListener = (type, fn) => {
+    winListeners[type] = (winListeners[type] || []).filter((f) => f !== fn);
+  };
   // updateCanvasScaling reads stage padding via getComputedStyle; "" keeps
   // parseFloat() NaN-free callers happy enough (NaN paddings are tolerated —
   // the canvas just gets no explicit size in tests) and getPropertyValue("")
@@ -319,7 +325,13 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     set currentOriginalName(v) { currentOriginalName = v; },
     get gdriveToken() { return gdriveToken; },
     set gdriveToken(v) { gdriveToken = v; },
+    get gdriveTokenExp() { return gdriveTokenExp; },
+    set gdriveTokenExp(v) { gdriveTokenExp = v; },
     set gisScriptPromise(v) { gisScriptPromise = v; },
+    driveTokenStale, renewDriveToken, armDriveRenewOnGesture,
+    DRIVE_RENEW_LEAD_MS, DRIVE_RENEW_MAX_FAILS,
+    get driveRenewFails() { return driveRenewFails; },
+    set driveRenewFails(v) { driveRenewFails = v; },
     get linkMode() { return linkMode; },
     set linkMode(v) { linkMode = v; },
     get linkRomEntry() { return linkRomEntry; },
@@ -345,10 +357,17 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     for (const f of docListeners[type] || []) await f(ev);
   };
 
+  // Same, for window-level listeners.
+  const dispatchWin = async (type, ev = {}) => {
+    ev.preventDefault ??= () => {};
+    ev.stopPropagation ??= () => {};
+    for (const f of (winListeners[type] || []).slice()) await f(ev);
+  };
+
   return {
     api, context, idb, fetchCalls, alerts, confirms, toasts,
     document, elements, localStorage, lsMap, sandbox, state,
-    docListeners, dispatchDoc,
+    docListeners, dispatchDoc, winListeners, dispatchWin,
     setFetch: (fn) => { state.fetchImpl = fn; },
     setConfirmResult: (v) => { state.confirmResult = v; },
     runIn: (code) => vm.runInContext(code, context),

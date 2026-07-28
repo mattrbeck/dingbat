@@ -1416,8 +1416,14 @@ const gdriveFetchEmail = async () => {
 };
 
 // Authenticated fetch against the Drive API. On a 401 (token expired), one
-// silent re-grant is attempted and the request replayed; if that fails the
-// user is signed out locally and must sign in again.
+// silent re-grant is attempted and the request replayed.
+//
+// That re-grant only succeeds when this call chain started from a user gesture
+// (the GIS popup needs transient activation). Most 401s arrive on the
+// background poll instead, where it can only fail — so a failure here does NOT
+// sign the user out. It drops the dead token and hands off to the gesture-armed
+// renewal, which retries on the user's next tap; only after DRIVE_RENEW_MAX_FAILS
+// of those does the UI fall back to signed-out.
 const driveFetch = async (url, opts = {}) => {
   const send = () => fetch(url, {
     ...opts,
@@ -1429,6 +1435,7 @@ const driveFetch = async (url, opts = {}) => {
       await gdriveAcquireToken("");
     } catch {
       clearDriveToken();
+      armDriveRenewOnGesture();
       renderGdriveSection();
       throw new Error("Google session expired — sign in again");
     }
@@ -2233,6 +2240,7 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
 const gdriveConnect = async () => {
   await gdriveAcquireToken();
   await gdriveFetchEmail();
+  driveRenewFails = 0; // fresh grant: the silent-renew budget starts over
   syncState.connected = true; // remembered so a reload can re-grant silently
   await saveSyncState();
   refreshSyncUI();
@@ -2251,41 +2259,89 @@ const ensureDriveSignedIn = async () => {
   return syncActive();
 };
 
-// Silent re-grant on boot for a browser that was connected before. Failure is
-// expected and silent (session expired / consent revoked) — the user simply
-// sees the signed-out state.
-const resumeDriveSession = async () => {
-  if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
-  try {
-    await gdriveAcquireToken("");
-    await gdriveFetchEmail();
-    refreshSyncUI();
-    refreshHomeRecent();
-    await pullSync();
-  } catch {
-    // Stay signed out; don't nag on every load.
-  }
-};
+// --- Keeping the session alive -------------------------------------------
+// The GIS token flow hands out ~1h access tokens and NO refresh token, and its
+// re-grant — even the silent prompt:"" one — goes through a popup window, so
+// it needs transient user activation or the popup blocker kills it. That makes
+// renewal a scheduling problem: we must find a user gesture BEFORE the token
+// dies, not react to the 401 afterwards from a background timer (which has no
+// activation and can only fail).
+//
+// So: whenever the token is missing or near expiry, arm a one-shot listener
+// that does the silent re-grant on the very next pointerdown/keydown/touchstart.
+// An emulator user supplies one within seconds. With the Google session and the
+// prior grant still standing, that popup opens and closes with no visible
+// chooser and the session rolls over invisibly.
+//
+// Renewal starts this long before the token actually expires, so there are
+// several poll ticks' worth of chances to catch a gesture while the current
+// token still works.
+const DRIVE_RENEW_LEAD_MS = 10 * 60 * 1000;
+// Consecutive silent-renew rejections before we conclude the grant is really
+// gone (revoked, or the Google session ended) and show the signed-out UI. Each
+// attempt costs a popup, so this is deliberately small.
+const DRIVE_RENEW_MAX_FAILS = 3;
 
-// The GIS token client re-grants through a popup window even for the silent
-// prompt:"" refresh — there is no invisible path for the OAuth token model. So
-// requesting a token needs a user gesture, or the browser's popup blocker kills
-// it and flags the address bar. On load we therefore don't request anything; we
-// arm a one-shot handler that runs the silent re-grant on the first real
-// interaction (which an emulator user supplies within seconds — a keypress or a
-// tap). With the Google session and prior grant still standing that popup opens
-// and closes with no visible chooser, so sync just resumes.
-let driveResumeArmed = false;
-const armDriveResumeOnGesture = () => {
-  if (driveResumeArmed) return;
-  if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
-  driveResumeArmed = true;
+let driveRenewArmed = false;
+let driveRenewFails = 0;
+
+// True when we should be hunting for a gesture to renew on.
+const driveTokenStale = () =>
+  !gdriveToken || gdriveTokenExp - Date.now() < DRIVE_RENEW_LEAD_MS;
+
+const armDriveRenewOnGesture = () => {
+  if (driveRenewArmed) return;
+  if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (driveRenewFails >= DRIVE_RENEW_MAX_FAILS) return;
+  driveRenewArmed = true;
   const events = ["pointerdown", "keydown", "touchstart"];
   const onGesture = () => {
     events.forEach((e) => window.removeEventListener(e, onGesture, true));
-    resumeDriveSession();
+    // Cleared before the attempt so the *next* expiry can arm again — the old
+    // one-shot latch was never reset, which meant a session could be resumed at
+    // most once per page load.
+    driveRenewArmed = false;
+    renewDriveToken();
   };
   events.forEach((e) => window.addEventListener(e, onGesture, true));
+};
+
+// Silent re-grant. Safe to call with a live token (rollover) or none (resume).
+const renewDriveToken = async () => {
+  if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (navigator.onLine === false) { armDriveRenewOnGesture(); return; }
+  const wasSignedOut = !gdriveToken;
+
+  // Loading Google's script is a network call, not a consent decision: a
+  // failure here (offline, blocked) must not count against the fail budget or
+  // an offline session would be signed out for no reason.
+  try { await loadGisScript(); }
+  catch { armDriveRenewOnGesture(); return; }
+
+  try {
+    await gdriveAcquireToken("");
+  } catch {
+    // Popup blocked (no activation after all) or the grant is gone. Try again
+    // on the next gesture until the budget runs out; only then does the user
+    // actually see a signed-out UI and have to click Sign in.
+    if (++driveRenewFails >= DRIVE_RENEW_MAX_FAILS) {
+      clearDriveToken();
+      renderGdriveSection();
+      refreshSyncUI();
+      refreshHomeRecent();
+    } else {
+      armDriveRenewOnGesture();
+    }
+    return;
+  }
+
+  driveRenewFails = 0;
+  if (!wasSignedOut) return; // pure rollover: nothing user-visible changed
+  await gdriveFetchEmail();
+  renderGdriveSection();
+  refreshSyncUI();
+  refreshHomeRecent();
+  await pullSync();
 };
 
 // Boot resume. If the persisted access token is still within its lifetime,
@@ -2316,11 +2372,14 @@ const resumeDriveOnBoot = async () => {
       refreshSyncUI();
       refreshHomeRecent();
       pullSync();
+      // A restored token can be minutes from expiry; start hunting for a
+      // gesture now rather than waiting for the first poll tick.
+      if (driveTokenStale()) armDriveRenewOnGesture();
       return;
     }
     clearDriveToken();
   }
-  armDriveResumeOnGesture();
+  armDriveRenewOnGesture();
 };
 
 // --- Sync triggers --------------------------------------------------------
@@ -2332,6 +2391,12 @@ const resumeDriveOnBoot = async () => {
 // will sync when you reconnect" held until the user made another change or
 // switched tabs.
 const syncPollTick = () => {
+  // Before the syncActive() gate: this is also the heartbeat that notices an
+  // expiring (or already-expired) token and arms the gesture-gated renewal, and
+  // it has to keep running once the token is gone.
+  if (GDRIVE_CLIENT_ID && syncState.connected && driveTokenStale()) {
+    armDriveRenewOnGesture();
+  }
   if (!syncActive()) return;
   if (pendingCount()) flushSync().then(() => pullSync());
   else pullSync();
