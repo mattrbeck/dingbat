@@ -56,6 +56,8 @@ class FakeElement {
     for (const f of this._listeners[type] || []) await f(ev);
   }
   appendChild(c) { this.children.push(c); return c; }
+  // Atomic swap — how the home grid commits a render (see refreshHomeRecent).
+  replaceChildren(...cs) { this.children = cs; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); }
   replaceChild(n, o) {
     const i = this.children.indexOf(o);

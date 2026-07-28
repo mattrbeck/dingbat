@@ -2632,20 +2632,32 @@ let homeArtUrls = [];
 // must not touch (or leak URLs into) the fresh grid.
 let homeRenderGen = 0;
 
+// The grid is rebuilt off-DOM and swapped in with ONE replaceChildren at the
+// very end — never emptied first. #home is the scroll container, so the moment
+// the grid holds no tiles its scrollHeight collapses to the viewport and the
+// browser clamps scrollTop to 0; the tiles coming back a tick later don't
+// bring the scroll offset back. The rebuild awaits dbKeys() between "clear"
+// and "refill", so that collapse was guaranteed to be laid out — clearing
+// early threw the user to the top of their library on every render, most
+// painfully when downloading Drive-only games one after another (each
+// download refreshes twice: busy spinner, then result).
 const refreshHomeRecent = async () => {
   if (!db) return;
   let roms = await getRecentMeta(); // metadata only — no ROM bytes
   let gen = ++homeRenderGen;
-  homeArtUrls.forEach(URL.revokeObjectURL);
-  homeArtUrls = [];
-  homeRecent.innerHTML = "";
+  // Art URLs minted by THIS render — they only become homeArtUrls (the set the
+  // next render revokes) once this render commits. Nothing is minted before
+  // the commit point below, so a superseded render leaves none behind.
+  let artUrls = [];
   if (roms.length === 0) {
     // Keep the section visible (empty state) so Drive sign-in stays reachable,
     // but drop the "Recent"/Manage header since there's nothing to manage yet.
     homeRecentWrap.hidden = false;
     if (homeRecentHead) homeRecentHead.hidden = true;
     storageInfo.textContent = "";
-    homeRecent.appendChild(buildEmptyLibraryCard());
+    homeRecent.replaceChildren(buildEmptyLibraryCard());
+    homeArtUrls.forEach(URL.revokeObjectURL);
+    homeArtUrls = artUrls;
     return;
   }
   if (homeRecentHead) homeRecentHead.hidden = false;
@@ -2658,14 +2670,14 @@ const refreshHomeRecent = async () => {
   // sign-in) rather than masquerading as a stored game whose launch then fails.
   let localRoms = new Set();
   let keys = await dbKeys();
-  // A newer render may have started (and cleared the grid) during that await;
-  // appending our tiles too would double every game. Seen live on first sign-in,
-  // where merge + downloads fire refreshes back-to-back. The art callbacks below
-  // re-check gen the same way.
+  // A newer render may have started during that await; committing ours too
+  // would show a stale grid (and, before the off-DOM rebuild, doubled every
+  // game). The art callbacks below re-check gen the same way.
   if (gen !== homeRenderGen) return;
   for (let k of keys) {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
+  let tiles = [];
   for (let { name: romName } of roms) {
     let system = systemOf(romName);
     let driveOnly = !localRoms.has(romName);
@@ -2691,7 +2703,7 @@ const refreshHomeRecent = async () => {
     getRomArt(romName).then((art) => {
       if (!art || gen !== homeRenderGen) return;
       let url = URL.createObjectURL(art);
-      homeArtUrls.push(url);
+      artUrls.push(url);
       let img = document.createElement("img");
       img.className = "home-tile-art";
       img.src = url;
@@ -2760,8 +2772,14 @@ const refreshHomeRecent = async () => {
     }
     // No remove button here by design: the grid is a library view, and all
     // deletion (Reset / Delete) lives in Manage ROMs and Saves.
-    homeRecent.appendChild(tile);
+    tiles.push(tile);
   }
+  // The one and only DOM commit. Atomic: the grid goes straight from the old
+  // tiles to the new ones with no zero-height moment in between, so an
+  // unchanged tile count leaves scrollTop exactly where the user put it.
+  homeRecent.replaceChildren(...tiles);
+  homeArtUrls.forEach(URL.revokeObjectURL);
+  homeArtUrls = artUrls;
 };
 
 // Close any open modal on Escape. Every modal belongs here (the net modal is
