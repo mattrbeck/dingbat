@@ -20,6 +20,7 @@ proc new_ppu*(gba: GBA): PPU =
   result.pram           = newSeq[byte](0x400)
   result.vram           = newSeq[byte](0x18000)
   result.oam            = newSeq[byte](0x400)
+  result.obj_list_dirty = true  # nothing has built the per-line OBJ list yet
   result.dispcnt        = DISPCNT()
   result.dispstat       = DISPSTAT()
   result.vcount         = 0
@@ -323,11 +324,91 @@ proc render_bitmap*(ppu: PPU) =
           ppu.bg2_direct[col] = ppu.bg2_direct[src]
           ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
 
-proc render_sprites*(ppu: PPU) =
+# Past this many OBJ-list rebuilds in one frame, the rest of the frame uses
+# the straight 128-entry scan. Measured need is 1.00 rebuild/frame in all five
+# gameplay states; the limit exists purely so a game that rewrites OAM every
+# H-blank degrades to (slightly worse than) the old cost instead of paying 160
+# rebuilds. A rebuild costs roughly two to four line-scans, so 16 of them is
+# ~10% of a frame's scan budget in the pathological case.
+const OBJ_LIST_REBUILD_LIMIT* = 16
+
+type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
+
+proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
+  ## Screen-space geometry of one OAM entry, shared by the per-line scan and
+  ## the candidate-list rebuild so the two cannot drift apart.
+  ##
+  ## `x`/`y` are the signed top-left corner. OBJ Y is 8 bits and OBJ X is 9,
+  ## and both are treated as wrapping to negative when they exceed the screen:
+  ## a sprite parked at Y=250 hangs off the top of the display, not the bottom.
+  ## (This is the same signed model mGBA and NanoBoyAdvance use. It differs
+  ## from a true mod-256 wrap only for a 64-pixel-tall double-size sprite at
+  ## Y in 129..159, which hardware would also show wrapped around to the top;
+  ## that is pre-existing behaviour and deliberately left alone here.)
+  ##
+  ## `ow`/`oh` are the texture footprint, `w`/`h` the drawn footprint -- twice
+  ## the texture for a double-size affine sprite, which is why the candidate
+  ## test has to use `h` and not `oh`. The double-size bit (attr0.9) only means
+  ## double-size when the affine bit (attr0.8) is set; with affine clear the
+  ## same bit disables the sprite, which the caller rejects before asking.
+  ##
+  ## Prohibited shape 3 has no footprint at all, so it covers no lines.
+  let shape3 = s.obj_shape == 3
+  var x = int(cast[int16](bits_range(s.attr1, 0, 8)))
+  var y = int(cast[int16](bits_range(s.attr0, 0, 7)))
+  if x > 239: x -= 512
+  if y > 159: y -= 256
+  let ow = if shape3: 0 else: SIZES[s.obj_shape][s.obj_size][0]
+  let oh = if shape3: 0 else: SIZES[s.obj_shape][s.obj_size][1]
+  var w = ow
+  var h = oh
+  if bit(s.attr0, 8) and bit(s.attr0, 9):  # affine + double-size
+    w = w shl 1
+    h = h shl 1
+  (x, y, ow, oh, w, h)
+
+proc rebuild_obj_lines*(ppu: PPU) =
+  ## Rebuild the whole 160-line candidate bitmap from OAM.
+  ##
+  ## An entry is a candidate for line L exactly when render_sprites' own reject
+  ## tests would let it through: not disabled, L within [y, y+h), and not
+  ## entirely off the left edge. Everything downstream of those tests (the OBJ
+  ## cycle charge, prohibited shapes, the bitmap-mode tile floor, pixels) still
+  ## happens in the scan body, so the list changes only *which entries are
+  ## looked at*, never what happens to one that is.
+  zeroMem(addr ppu.obj_line_mask[0][0], sizeof(ppu.obj_line_mask))
+  let sprites = ppu.sprites_ptr()
+  for s_idx in 0 ..< 128:
+    let sprite = sprites[s_idx]
+    if sprite.affine_mode == 0b10: continue  # rot/scale off + double-size = disabled
+    let g = obj_geometry(sprite)
+    if g.x + g.w < 0: continue               # fully off the left edge
+    let lo = max(0, g.y)
+    let hi = min(160, g.y + g.h)             # h = 0 for shape 3, so hi <= lo
+    if lo >= hi: continue
+    let word = s_idx shr 6
+    let mbit = 1'u64 shl uint(s_idx and 63)
+    for line in lo ..< hi:
+      ppu.obj_line_mask[line][word] = ppu.obj_line_mask[line][word] or mbit
+  ppu.obj_list_dirty = false
+  inc ppu.obj_list_rebuilds
+
+proc oam_touched*(ppu: PPU) {.inline.} =
+  ## Invalidate the per-line OBJ candidate list.
+  ##
+  ## MUST be called by every path that mutates ppu.oam. Today that is:
+  ## bus.write_half_internal and bus.write_word_internal (OAM byte writes are
+  ## discarded by hardware, and DMA and the cheat engine both funnel through
+  ## these two), load_ppu_state, and the HLE RegisterRamReset SWI's OAM clear
+  ## phase. Build with -d:objListVerify to have every scanline cross-check the
+  ## list against a full scan, which is what catches a path added later that
+  ## forgets to call this.
+  ppu.obj_list_dirty = true
+
+proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   if not bit(uint16(ppu.dispcnt), 12): return
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
-  let num_sprites = 128  # OAM has 128 sprites
   let bitmap_mode = ppu.dispcnt.bg_mode >= 3
   # Per-scanline OBJ rendering time budget (hardware sprite cycle limit):
   # the OBJ engine has 1210 cycles per line, or 954 when DISPCNT's H-Blank
@@ -341,108 +422,176 @@ proc render_sprites*(ppu: PPU) =
   # PreprocessSpriteLayer): the sprite that exhausts the budget still draws
   # fully, subsequent ones are dropped.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
-  for s_idx in 0 ..< num_sprites:
-    if obj_cycles <= 0: break
-    let sprite = sprites[s_idx]
-    if sprite.affine_mode == 0b10: continue
-    # Prohibited shape 3 draws nothing but still occupies OBJ time below
-    let shape3 = sprite.obj_shape == 3
-    var x_coord = cast[int16](bits_range(sprite.attr1, 0, 8))
-    var y_coord = cast[int16](bits_range(sprite.attr0, 0, 7))
-    if x_coord > 239: x_coord -= 512
-    if y_coord > 159: y_coord -= 256
-    let orig_width  = if shape3: 0 else: SIZES[sprite.obj_shape][sprite.obj_size][0]
-    let orig_height = if shape3: 0 else: SIZES[sprite.obj_shape][sprite.obj_size][1]
-    var width  = orig_width
-    var height = orig_height
-    var center_x = int(x_coord) + width div 2
-    var center_y = int(y_coord) + height div 2
-    var pa, pb, pc, pd: int
-    if bit(sprite.attr0, 8):  # affine
-      let oam_affine_entry = int(bits_range(sprite.attr1, 9, 13))
-      pa = int(sprites[oam_affine_entry * 4    ].aff_param)
-      pb = int(sprites[oam_affine_entry * 4 + 1].aff_param)
-      pc = int(sprites[oam_affine_entry * 4 + 2].aff_param)
-      pd = int(sprites[oam_affine_entry * 4 + 3].aff_param)
-      if bit(sprite.attr0, 9):  # double-size
-        center_x += width shr 1
-        center_y += height shr 1
-        width  = width  shl 1
-        height = height shl 1
-    else:
-      pa = 0x100; pb = 0; pc = 0; pd = 0x100
-    let vc = int(ppu.vcount)
-    if not (int(y_coord) <= vc and vc < int(y_coord) + height): continue
-    # Sprites fully outside the 240px window (raw x in [240, 512-width))
-    # never enter the OBJ pipeline: no pixels and no time charged
-    if int(x_coord) + width < 0: continue
-    # On-line sprite: charge its OBJ rendering time
-    obj_cycles -= (if bit(sprite.attr0, 8): 10 + 2 * width else: width)
-    if shape3: continue
-    # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
-    # below 512 don't render (but the sprite still occupies OBJ time)
-    if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: continue
-    # Mosaic sprites sample from the first pixel of each screen-space block
-    let obj_mosaic = bit(sprite.attr0, 12)
-    let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
-    let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosiac_v_size) + 1) else: vc
-    let iy     = vc_m - center_y
-    let flip_x = bit(sprite.attr1, 12) and not bit(sprite.attr0, 8)
-    let flip_y = bit(sprite.attr1, 13) and not bit(sprite.attr0, 8)
-    let min_x  = max(0, int(x_coord))
-    let max_x  = min(240, int(x_coord) + width)
-    for ix in (-(width div 2)) ..< (width div 2):
-      let col = center_x + ix
-      if col < min_x or col >= max_x: continue
-      let ix_m = if mosaic_h > 1: (col - col mod mosaic_h) - center_x else: ix
-      var tex_x = (pa * ix_m + pb * iy) shr 8
-      var tex_y = (pc * ix_m + pd * iy) shr 8
-      tex_x += orig_width div 2
-      tex_y += orig_height div 2
-      if tex_x < 0 or tex_x >= orig_width or tex_y < 0 or tex_y >= orig_height: continue
-      if flip_x: tex_x = orig_width  - tex_x - 1
-      if flip_y: tex_y = orig_height - tex_y - 1
-      let tile_x = tex_x and 7
-      let tile_y = tex_y and 7
-      var tile_id = int(bits_range(sprite.attr2, 0, 9))
-      var offset = tex_y shr 3
-      if ppu.dispcnt.obj_mapping_1d:
-        offset *= orig_width shr 3
+  let vc = int(ppu.vcount)
+
+  # One copy of the per-entry work, instantiated by both the candidate-list
+  # walk and the straight scan. `break one_sprite` is what used to be
+  # `continue`; the budget check that used to `break` is hoisted into each
+  # loop header so the two shapes stay literally equivalent.
+  template obj_entry(s_idx: int) =
+    block one_sprite:
+      let sprite = sprites[s_idx]
+      if sprite.affine_mode == 0b10: break one_sprite
+      let g = obj_geometry(sprite)
+      let orig_width  = g.ow
+      let orig_height = g.oh
+      let width  = g.w
+      let height = g.h
+      let x_coord = g.x
+      # Re-tested even on the candidate path. The list is only ever allowed to
+      # *narrow* what gets looked at: keeping the rejects here means a stale or
+      # over-inclusive mask can never make a sprite appear where the old code
+      # would not have drawn one.
+      if not (g.y <= vc and vc < g.y + height): break one_sprite
+      # Sprites fully outside the 240px window (raw x in [240, 512-width))
+      # never enter the OBJ pipeline: no pixels and no time charged
+      if x_coord + width < 0: break one_sprite
+      # center_{x,y} is the middle of the *drawn* box: x + w/2 covers both the
+      # plain case and the double-size case (x + ow/2 + ow/2).
+      let center_x = x_coord + (width shr 1)
+      let center_y = g.y + (height shr 1)
+      let affine = bit(sprite.attr0, 8)
+      var pa, pb, pc, pd: int
+      if affine:
+        let oam_affine_entry = int(bits_range(sprite.attr1, 9, 13))
+        pa = int(sprites[oam_affine_entry * 4    ].aff_param)
+        pb = int(sprites[oam_affine_entry * 4 + 1].aff_param)
+        pc = int(sprites[oam_affine_entry * 4 + 2].aff_param)
+        pd = int(sprites[oam_affine_entry * 4 + 3].aff_param)
       else:
-        if bit(sprite.attr0, 13):  # 8bpp
-          offset *= 0x10
+        pa = 0x100; pb = 0; pc = 0; pd = 0x100
+      # On-line sprite: charge its OBJ rendering time
+      obj_cycles -= (if affine: 10 + 2 * width else: width)
+      # Prohibited shape 3 draws nothing but still occupies OBJ time above.
+      # (Unreachable in practice: its height is 0, so the y test above already
+      # rejected it. Kept so the charge/skip order matches the hardware note.)
+      if orig_width == 0: break one_sprite
+      # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
+      # below 512 don't render (but the sprite still occupies OBJ time)
+      if bitmap_mode and int(bits_range(sprite.attr2, 0, 9)) < 512: break one_sprite
+      # Mosaic sprites sample from the first pixel of each screen-space block
+      let obj_mosaic = bit(sprite.attr0, 12)
+      let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
+      let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosiac_v_size) + 1) else: vc
+      let iy     = vc_m - center_y
+      let flip_x = bit(sprite.attr1, 12) and not affine
+      let flip_y = bit(sprite.attr1, 13) and not affine
+      let min_x  = max(0, x_coord)
+      let max_x  = min(240, x_coord + width)
+      for ix in (-(width div 2)) ..< (width div 2):
+        let col = center_x + ix
+        if col < min_x or col >= max_x: continue
+        let ix_m = if mosaic_h > 1: (col - col mod mosaic_h) - center_x else: ix
+        var tex_x = (pa * ix_m + pb * iy) shr 8
+        var tex_y = (pc * ix_m + pd * iy) shr 8
+        tex_x += orig_width div 2
+        tex_y += orig_height div 2
+        if tex_x < 0 or tex_x >= orig_width or tex_y < 0 or tex_y >= orig_height: continue
+        if flip_x: tex_x = orig_width  - tex_x - 1
+        if flip_y: tex_y = orig_height - tex_y - 1
+        let tile_x = tex_x and 7
+        let tile_y = tex_y and 7
+        var tile_id = int(bits_range(sprite.attr2, 0, 9))
+        var offset = tex_y shr 3
+        if ppu.dispcnt.obj_mapping_1d:
+          offset *= orig_width shr 3
         else:
-          offset *= 0x20
-      offset += tex_x shr 3
-      var pal_idx: uint32
-      # OBJ character fetches wrap within the 32K of OBJ VRAM (matches
-      # mGBA's offset mask and NanoBoyAdvance's tile index mask)
-      if bit(sprite.attr0, 13):  # 8bpp
-        # The attr2 character name always counts 32-byte units. In 1D mapping
-        # an odd name starts fetches half a tile in (32 bytes); only 2D
-        # mapping forces the low bit clear (matches mGBA's `align` mask and
-        # NanoBoyAdvance's CalculateTileNumber8BPP)
-        if not ppu.dispcnt.obj_mapping_1d:
-          tile_id = tile_id and not 1
-        pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(offset) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
-      else:
-        tile_id += offset
-        let palettes = ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(tile_y) * 4 + (uint32(tile_x) shr 1)) and 0x7FFF)]
-        pal_idx = uint32((palettes shr (uint32(tile_x and 1) * 4)) and 0xF)
-        if pal_idx > 0:
-          pal_idx += uint32(bits_range(sprite.attr2, 12, 15)) shl 4
-      let obj_mode = int(bits_range(sprite.attr0, 10, 11))
-      let spr_priority = int(bits_range(sprite.attr2, 10, 11))
-      if obj_mode == 0b10:  # object window
-        if pal_idx > 0:
-          ppu.sprite_pixels[col].window = true
-          ppu.line_obj_window = true
-      elif spr_priority < int(ppu.sprite_pixels[col].priority) or ppu.sprite_pixels[col].palette == 0:
-        ppu.sprite_pixels[col].priority = uint16(spr_priority)
-        if pal_idx > 0:
-          ppu.sprite_pixels[col].palette = uint16(pal_idx)
-          ppu.sprite_pixels[col].blends  = obj_mode == 0b01
-          if obj_mode == 0b01: ppu.line_sprite_blend = true
+          if bit(sprite.attr0, 13):  # 8bpp
+            offset *= 0x10
+          else:
+            offset *= 0x20
+        offset += tex_x shr 3
+        var pal_idx: uint32
+        # OBJ character fetches wrap within the 32K of OBJ VRAM (matches
+        # mGBA's offset mask and NanoBoyAdvance's tile index mask)
+        if bit(sprite.attr0, 13):  # 8bpp
+          # The attr2 character name always counts 32-byte units. In 1D mapping
+          # an odd name starts fetches half a tile in (32 bytes); only 2D
+          # mapping forces the low bit clear (matches mGBA's `align` mask and
+          # NanoBoyAdvance's CalculateTileNumber8BPP)
+          if not ppu.dispcnt.obj_mapping_1d:
+            tile_id = tile_id and not 1
+          pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(offset) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
+        else:
+          tile_id += offset
+          let palettes = ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(tile_y) * 4 + (uint32(tile_x) shr 1)) and 0x7FFF)]
+          pal_idx = uint32((palettes shr (uint32(tile_x and 1) * 4)) and 0xF)
+          if pal_idx > 0:
+            pal_idx += uint32(bits_range(sprite.attr2, 12, 15)) shl 4
+        let obj_mode = int(bits_range(sprite.attr0, 10, 11))
+        let spr_priority = int(bits_range(sprite.attr2, 10, 11))
+        if obj_mode == 0b10:  # object window
+          if pal_idx > 0:
+            ppu.sprite_pixels[col].window = true
+            ppu.line_obj_window = true
+        elif spr_priority < int(ppu.sprite_pixels[col].priority) or ppu.sprite_pixels[col].palette == 0:
+          ppu.sprite_pixels[col].priority = uint16(spr_priority)
+          if pal_idx > 0:
+            ppu.sprite_pixels[col].palette = uint16(pal_idx)
+            ppu.sprite_pixels[col].blends  = obj_mode == 0b01
+            if obj_mode == 0b01: ppu.line_sprite_blend = true
+
+  # Use the candidate list unless the caller asked for the reference scan, the
+  # line is outside the bitmap's range, or this frame has already burned its
+  # rebuild budget (in which case the mask is stale and must not be trusted).
+  var use_list = (not force_scan) and vc >= 0 and vc < 160
+  if use_list and ppu.obj_list_dirty:
+    if ppu.obj_list_rebuilds < OBJ_LIST_REBUILD_LIMIT:
+      ppu.rebuild_obj_lines()
+    else:
+      use_list = false
+
+  if use_list:
+    # Set bits in OAM order: word 0 (entries 0-63) before word 1 (64-127), and
+    # low bit first within each. Priority ties break on the lower OAM index, so
+    # the visit order is not an implementation detail.
+    var m = ppu.obj_line_mask[vc][0]
+    while m != 0:
+      if obj_cycles <= 0: return
+      let s_idx = countTrailingZeroBits(m)
+      m = m and (m - 1)
+      obj_entry(s_idx)
+    m = ppu.obj_line_mask[vc][1]
+    while m != 0:
+      if obj_cycles <= 0: return
+      let s_idx = 64 + countTrailingZeroBits(m)
+      m = m and (m - 1)
+      obj_entry(s_idx)
+  else:
+    for s_idx in 0 ..< 128:  # OAM has 128 sprites
+      if obj_cycles <= 0: return
+      obj_entry(s_idx)
+
+when defined(objListVerify):
+  # Self-checking build: every scanline renders the OBJ layer twice, once via
+  # the candidate list and once via the reference 128-entry scan, and aborts on
+  # the first difference. This is the instrument that catches an OAM mutation
+  # path that forgot to call oam_touched -- something no synthetic fuzz can see,
+  # because the fuzz drives OAM through the paths it already knows about. Run
+  # real ROMs under it.
+  var objVerifyLines*: int = 0
+  proc render_sprites*(ppu: PPU; force_scan = false) =
+    let before_pixels = ppu.sprite_pixels
+    let before_window = ppu.line_obj_window
+    let before_blend  = ppu.line_sprite_blend
+    ppu.render_sprites_impl(force_scan)
+    let list_pixels = ppu.sprite_pixels
+    let list_window = ppu.line_obj_window
+    let list_blend  = ppu.line_sprite_blend
+    ppu.sprite_pixels = before_pixels
+    ppu.line_obj_window = before_window
+    ppu.line_sprite_blend = before_blend
+    ppu.render_sprites_impl(true)
+    inc objVerifyLines
+    if list_window != ppu.line_obj_window or list_blend != ppu.line_sprite_blend:
+      quit("objListVerify: line flags differ at vcount " & $ppu.vcount, 3)
+    for c in 0 .. 239:
+      if list_pixels[c] != ppu.sprite_pixels[c]:
+        quit("objListVerify: sprite pixel " & $c & " differs at vcount " &
+             $ppu.vcount & " frame " & $ppu.frame, 3)
+else:
+  proc render_sprites*(ppu: PPU; force_scan = false) {.inline.} =
+    ppu.render_sprites_impl(force_scan)
 
 proc window_contains(v, lo, hi: uint16): bool {.inline.} =
   # Hardware windows are comparators: when the start is past the end the
@@ -962,6 +1111,10 @@ proc scanline*(ppu: PPU) =
   if ppu.vcount == 0:
     ppu.skip_render = not ppu.render_dirty
     ppu.render_dirty = false
+    # New frame: the OBJ candidate list gets its rebuild budget back. A frame
+    # that blew it fell back to the straight scan, left obj_list_dirty set, and
+    # so rebuilds again here on line 0.
+    ppu.obj_list_rebuilds = 0
   if ppu.skip_render:
     if ppu.render_dirty:
       ppu.skip_render = false

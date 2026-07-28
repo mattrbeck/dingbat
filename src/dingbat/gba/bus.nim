@@ -534,6 +534,7 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     write_u16_ptr(bus.gba.ppu.vram, a, value)
   of 0x7:
     bus.gba.ppu.render_dirty = true
+    bus.gba.ppu.oam_touched()
     write_u16_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
@@ -578,6 +579,7 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     write_u32_ptr(bus.gba.ppu.vram, a, value)
   of 0x7:
     bus.gba.ppu.render_dirty = true
+    bus.gba.ppu.oam_touched()
     write_u32_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):

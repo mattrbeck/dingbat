@@ -822,6 +822,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         of 3:
           for i in lo ..< hi: cpu.gba.ppu.vram[i] = 0
         of 4:
+          # The one OAM mutation that does not go through the bus write paths
+          cpu.gba.ppu.oam_touched()
           for i in lo ..< hi: cpu.gba.ppu.oam[i] = 0
         of 2:
           for i in lo ..< hi: cpu.gba.ppu.pram[i] = 0

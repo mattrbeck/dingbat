@@ -414,6 +414,20 @@ type
     line_effects*: array[240, bool]
     line_sprite_blend*: bool  # any semi-transparent sprite pixel on this line
     line_obj_window*: bool    # any OBJ-window sprite pixel on this line
+    # Per-line OBJ candidate list. obj_line_mask[line] is a 128-bit set (two
+    # words, entry N = bit N&63 of word N>>6) of the OAM entries whose screen
+    # bounding box covers that line -- i.e. exactly the entries that survive
+    # render_sprites' vertical/horizontal reject tests. Games leave 0.2-1.7
+    # sprites on a line, so iterating the set bits replaces a 128-entry scan.
+    # Rebuilt lazily: obj_list_dirty is set by every path that can mutate OAM
+    # (see oam_touched) and cleared by rebuild_obj_lines. obj_list_rebuilds
+    # counts rebuilds within the current frame; past OBJ_LIST_REBUILD_LIMIT
+    # the rest of the frame falls back to the straight scan, so a game that
+    # DMAs OAM every H-blank cannot end up slower than the old code. Pure
+    # scratch: derived from OAM alone, so it is not serialized.
+    obj_line_mask*:     array[160, array[2, uint64]]
+    obj_list_dirty*:    bool
+    obj_list_rebuilds*: int
     # Render skipping: render_dirty is set by anything that can change the
     # picture (VRAM/PRAM/OAM writes, PPU register writes, Stop transitions).
     # When a full frame passes with no such change, the framebuffer already
@@ -912,6 +926,7 @@ proc catch_up(bus: Bus) {.inline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
+proc oam_touched*(ppu: PPU) {.inline.}
 proc draw*(ppu: PPU)
 proc scanline*(ppu: PPU)
 proc start_line*(ppu: PPU)
