@@ -362,6 +362,11 @@ proc load_ppu_state(ppu: PPU; r: var Reader) =
   ppu.render_dirty = true
   ppu.skip_render = false
   ppu.frame_static = false
+  # OAM was just replaced wholesale, and the per-line OBJ candidate list is
+  # derived scratch that is deliberately not in the payload (so old states
+  # still load) -- rebuild it before the next scanline reads it.
+  ppu.oam_touched()
+  ppu.obj_list_rebuilds = 0
 
 # ---- APU ----
 

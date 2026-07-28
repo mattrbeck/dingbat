@@ -40,6 +40,8 @@ task test_ppucomposite, "Run the GBA PPU compositor invariant tests":
 task test_ppubgunpack, "Run the 4bpp BG tile-unpack equivalence tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_ppubgunpack_test tests/ppubgunpack_test.nim"
+task test_ppuobjlist, "Run the GBA per-line OBJ candidate list differential fuzz":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppuobjlist_test tests/ppuobjlist_test.nim"
 
 task test_savestate_compat, "Run the save-state format compatibility guards":
   exec "nim c -r -d:test_harness -d:release --path:src " &
