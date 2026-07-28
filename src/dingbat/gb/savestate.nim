@@ -93,12 +93,28 @@ proc save_serial_state(s: GbSerial; w: var Writer) =
   w.write_u8(s.clock_history)
   w.write_bool(s.shifting)
 
-proc load_serial_state(s: GbSerial; r: var Reader) =
+proc load_serial_state(s: GbSerial; r: var Reader; rev: uint32) =
+  if rev < 2:
+    # rev 1 has no serial section at all: the port was a stub then (SB captured
+    # for test output, SC ignored), so no transfer could ever be in flight.
+    # Idle is not a fallback here, it is the only state the writing build could
+    # represent.
+    s.sb = 0
+    s.sc = 0
+    s.out_latch = 0
+    s.bits_remaining = 0
+    s.clock_history = 0
+    s.shifting = false
+    return
   r.expect_tag(GB_SEC_SER)
   s.sb = r.read_u8()
   s.sc = r.read_u8()
   s.out_latch = r.read_u8()
   s.bits_remaining = int(r.read_u8())
+  # rev 2 wrote a bool `previous_bit` in this byte for its first few hours
+  # (0956322 -> f678d02) before it became the clock_history shift register.
+  # Same width, and 0 — the value in any state not taken mid-transfer — means
+  # "clock low" under both readings.
   s.clock_history = r.read_u8()
   s.shifting = r.read_bool()
 
@@ -202,7 +218,7 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   w.write_bool(ppu.ran_bios)
   w.write_seq_u16(ppu.framebuffer)
 
-proc load_ppu_state(ppu: GbPpu; r: var Reader) =
+proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_PPU)
   ppu.lcd_control = r.read_u8()
   ppu.lcd_status = r.read_u8()
@@ -234,7 +250,16 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader) =
   ppu.hdma_dst = r.read_u16()
   ppu.hdma_pos = r.read_u16()
   ppu.hdma_active = r.read_bool()
-  ppu.dots_since_frame = r.read_i32()
+  if rev >= 3:
+    ppu.dots_since_frame = r.read_i32()
+  else:
+    # The panel's refresh clock, reset to 0 at every frame push — both the
+    # normal one at LY=144 and the blank one lcd_off_frame pushes. States are
+    # only ever written at a frame boundary, so this counter is 0 there give or
+    # take the dots left in the instruction that tripped the boundary (tens of
+    # dots against a 70224-dot frame). It is only ever compared against
+    # whole-frame thresholds, so 0 is right to well within a scanline.
+    ppu.dots_since_frame = 0
   ppu.window_trigger = r.read_bool()
   ppu.current_window_line = int(r.read_i32())
   ppu.old_stat_flag = r.read_bool()
@@ -720,18 +745,18 @@ proc gb_state_payload(gb: GB): string =
   w.write_tag(GB_SEC_END)
   w.buf
 
-proc gb_apply_state(gb: GB; payload: string) =
+proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   var r = Reader(buf: payload)
   load_cpu_state(gb.cpu, r)
   load_irq_state(gb.interrupts, r)
   load_timer_state(gb.timer, r)
-  load_serial_state(gb.serial, r)
+  load_serial_state(gb.serial, r, rev)
   load_joypad_state(gb.joypad, r)
   load_mem_state(gb.memory, r)
   gb.cgb_enabled = r.read_bool()
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r)
-  load_ppu_state(gb.ppu, r)
+  load_ppu_state(gb.ppu, r, rev)
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
@@ -747,8 +772,15 @@ proc state_payload*(gb: GB): string =
 
 proc apply_state_payload*(gb: GB; payload: string) =
   ## Apply a raw payload produced by state_payload. Raises StateError on
-  ## corrupt input; no rollback — trusted callers only.
-  gb.gb_apply_state(payload)
+  ## corrupt input; no rollback — trusted callers only. Always this build's
+  ## revision: the rewind ring and rollback snapshots never outlive the process.
+  gb.gb_apply_state(payload, GB_PAYLOAD_VERSION)
+
+proc apply_state_payload*(gb: GB; payload: string; rev: uint32) =
+  ## As above, for a payload known to be in an OLDER revision. Exists so the
+  ## format tests can exercise a migration without a whole state image; normal
+  ## load paths get their revision from the header.
+  gb.gb_apply_state(payload, rev)
 
 const GB_THUMB_W = 120
 const GB_THUMB_H = GB_THUMB_W * 144 div 160   # preserve 10:9 → 120x108
@@ -770,20 +802,20 @@ proc state_bytes*(gb: GB; thumbnail = false): string =
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
-  var payload: string
+  var image: tuple[payload: string; rev: uint32]
   try:
-    payload = parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
-                                  uint32(gb.cartridge.rom.len))
+    image = parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
+                                uint32(gb.cartridge.rom.len))
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
   let backup = gb.gb_state_payload()
   try:
-    gb.gb_apply_state(payload)
+    gb.gb_apply_state(image.payload, image.rev)
     true
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
-    gb.gb_apply_state(backup)
+    gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
     false
 
 proc save_state*(gb: GB; path: string; thumbnail = false): bool =
@@ -807,18 +839,18 @@ proc load_state*(gb: GB; path: string): bool =
   ## Restore emulator state from path. Must only be called at a frame
   ## boundary. On any validation error the emulator is left untouched; if
   ## applying fails midway the pre-load state is restored.
-  var payload: string
+  var image: tuple[payload: string; rev: uint32]
   try:
-    payload = read_state_payload(path, ckGB, gb.gb_rom_checksum(),
-                                 uint32(gb.cartridge.rom.len))
+    image = read_state_payload(path, ckGB, gb.gb_rom_checksum(),
+                               uint32(gb.cartridge.rom.len))
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
     return false
   let backup = gb.gb_state_payload()
   try:
-    gb.gb_apply_state(payload)
+    gb.gb_apply_state(image.payload, image.rev)
     true
   except CatchableError:
     echo "Load state failed: ", getCurrentExceptionMsg()
-    gb.gb_apply_state(backup)
+    gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
     false

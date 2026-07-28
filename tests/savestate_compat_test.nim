@@ -4,38 +4,45 @@
 ## until this file nothing in the tree noticed. The two ways it happens are
 ## both silent at build time:
 ##
-##   1. STATE_VERSION is bumped, and `parse_state_payload` then refuses EVERY
-##      older state — for BOTH cores, even when the change touched only one of
-##      them. That is what invalidated the 2026-07-24 states: b398a7b added one
-##      GB PPU field (v5 -> v6) while the GBA payload stayed byte-identical, so
-##      every GBA state in existence was rejected for a GB reason.
+##   1. The format version is bumped and the reader refuses everything older.
+##      Pre-v7 that was one global counter compared for equality, so a bump for
+##      ONE core threw away the other core's states too — which is exactly what
+##      cost the 2026-07-24 states: b398a7b added one GB PPU field (v5 -> v6)
+##      while the GBA payload stayed byte-identical. v7 split the number
+##      per-core and made the readers migrate instead of refuse.
 ##   2. A field is added to a subsystem, or an EventType is inserted rather
 ##      than appended, WITHOUT a version bump. Nothing rejects those states —
 ##      the reader walks off by a few bytes and either trips a section tag or,
 ##      worse, restores plausible garbage.
 ##
-## The corpus below catches both. `tests/states/*.state` are real state images
-## taken from the committed test ROMs at the format version named in each
-## filename; this test boots the matching ROM and asserts they still load.
+## The corpus catches both. `tests/states/*.state` are REAL state images, most
+## of them written by builds checked out at the commit that shipped that
+## format: `git archive <commit> | tar -x` into a scratch dir, compile a
+## 20-line generator against that tree, run it on a committed test ROM. They
+## are not synthesised by rewriting header bytes, so they prove the migration
+## paths against what those builds actually wrote.
 ##
 ##   - Break the format silently (case 2)  -> the load fails on a section tag,
 ##     a truncation, or an unknown event kind.
-##   - Bump STATE_VERSION (case 1)         -> the load fails with the version
-##     message, which is the point: it makes "this update throws away every
-##     user's save states" a decision someone has to take on purpose.
+##   - Bump a payload revision without a migration (case 1) -> every older
+##     entry for that core fails, which is the point: it makes "this update
+##     throws away every user's save states" a decision someone takes on
+##     purpose.
 ##
 ## When it fails after an INTENTIONAL format change, the options are, in order
 ## of preference:
-##   a. Make the reader version-tolerant (read the old layout, fill the new
-##      field with a sane default) and keep the corpus entry loading. See
-##      docs/research_savestate_compat.md.
-##   b. Bump the version, keep the old corpus entries as documentation of what
-##      is being dropped, and regenerate with `--write-corpus`. Users lose
-##      their states; say so in the commit message.
-## Never "fix" it by deleting the corpus entry.
+##   a. Bump only the changed core's payload revision (GBA_PAYLOAD_VERSION /
+##      GB_PAYLOAD_VERSION) and add the matching `if rev >= N` to its loader,
+##      so the old layout still reads. Every historical change turned out to
+##      cost 5 lines or fewer. See docs/research_savestate_compat.md.
+##   b. If a field genuinely cannot be reconstructed, refuse THAT case
+##      explicitly with a message naming it — never load a machine you know is
+##      subtly wrong.
+## Never "fix" it by deleting a corpus entry.
 ##
 ## Run with: nimble test_savestate_compat
-## Regenerate the corpus: <this binary> --write-corpus
+## Regenerate the current-version corpus: <this binary> --write-corpus
+## (older entries can only come from an old checkout — see above)
 
 import std/[os, strutils, algorithm]
 import dingbat/common/serialize
@@ -117,6 +124,22 @@ static:
   doAssert STATE_HEADER_SIZE == 32
   doAssert STATE_FLAG_THUMBNAIL == 0x0001'u16
   doAssert ord(ckGBA) == 0 and ord(ckGB) == 1
+  # The legacy container -> payload revision table is what lets a pre-v7 file
+  # be read at all; it is derived from history and can never change. Pinning it
+  # here means an edit to legacy_payload_version fails the build rather than
+  # quietly reinterpreting everyone's old states one revision off.
+  const legacy: array[6, (uint32, uint32, uint32)] = [
+    #  container, GBA rev, GB rev
+    (1'u32, 1'u32, 1'u32),
+    (2'u32, 2'u32, 1'u32),
+    (3'u32, 3'u32, 1'u32),
+    (4'u32, 3'u32, 2'u32),
+    (5'u32, 4'u32, 2'u32),
+    (6'u32, 4'u32, 3'u32),
+  ]
+  for (container, gba_rev, gb_rev) in legacy:
+    doAssert legacy_payload_version(ckGBA, container) == gba_rev
+    doAssert legacy_payload_version(ckGB, container) == gb_rev
 
 # ---------------------------------------------------------------------------
 # 3. The corpus.
@@ -168,6 +191,13 @@ proc file_version(data: string): uint32 =
 proc file_core(data: string): uint8 =
   uint8(data[12])
 
+proc rom_identity(data: string): tuple[checksum, size: uint32] =
+  ## The rom_checksum / rom_size pair a state image carries (header offsets
+  ## 16 and 20).
+  var r = Reader(buf: data, pos: 16)
+  result.checksum = r.read_u32()
+  result.size = r.read_u32()
+
 proc run_corpus() =
   echo "corpus: reference states from older builds still load"
   if not dirExists(CORPUS_DIR):
@@ -181,8 +211,9 @@ proc run_corpus() =
     check(false, "corpus is non-empty",
           "no .state files in " & CORPUS_DIR & " — regenerate with --write-corpus")
     return
+  var revs_seen: array[CoreKind, set[uint8]]
   for path in entries:
-    # <rom-with-extension>.v<N>.state
+    # <rom-with-extension>.v<N>.state, N = the CONTAINER version in the header
     let base = path.extractFilename
     let parts = base.split('.')
     if parts.len < 3:
@@ -191,18 +222,62 @@ proc run_corpus() =
     let rom = parts[0 .. ^3].join(".")
     let data = readFile(path)
     let ver = file_version(data)
-    let label = base & " (v" & $ver & ")"
+    let core = if file_core(data) == uint8(ckGBA): ckGBA else: ckGB
+    let want_rev = if ver >= 7: uint32(data[13]) else: legacy_payload_version(core, ver)
+    let label = base & " (container v" & $ver & ", " &
+                (if core == ckGBA: "GBA" else: "GB") & " rev " & $want_rev & ")"
     if not fileExists(ROM_DIR / rom):
       check(false, label, "ROM " & rom & " is missing from " & ROM_DIR)
       continue
-    let ok =
-      if file_core(data) == uint8(ckGBA): new_gba_for(rom).load_state_bytes(data)
-      else: new_gb_for(rom).load_state_bytes(data)
+    revs_seen[core].incl(uint8(want_rev))
+    # The revision the reader derives is the whole basis for the migration it
+    # then applies, so assert it rather than only that the load worked.
+    var got_rev = 0'u32
+    var ok = false
+    if core == ckGBA:
+      let emu = new_gba_for(rom)
+      # ROM identity for the parse comes from a state this build writes for the
+      # same ROM, so the test never has to know how the checksum is computed.
+      let (sum, size) = rom_identity(emu.state_bytes())
+      try:
+        got_rev = parse_state_payload(data, ckGBA, sum, size, base).rev
+      except CatchableError: discard   # reported by the load below
+      ok = emu.load_state_bytes(data)
+      # Loading is not enough: a migration that leaves the machine wedged still
+      # "loads". Run real frames through the restored state.
+      if ok:
+        try:
+          for _ in 0 ..< 60: emu.step_frame()
+        except CatchableError:
+          ok = false
+    else:
+      let emu = new_gb_for(rom)
+      let (sum, size) = rom_identity(emu.state_bytes())
+      try:
+        got_rev = parse_state_payload(data, ckGB, sum, size, base).rev
+      except CatchableError: discard
+      ok = emu.load_state_bytes(data)
+      if ok:
+        try:
+          for _ in 0 ..< 60: emu.step_frame()
+        except CatchableError:
+          ok = false
     check(ok, label,
           (if ok: "" else:
-             "this state no longer loads. If the format change was deliberate, " &
-             "see the header of tests/savestate_compat_test.nim before touching " &
-             "this file."))
+             "this state no longer loads (or wedges after loading). If the " &
+             "format change was deliberate, see the header of " &
+             "tests/savestate_compat_test.nim before touching this file."))
+    if got_rev != 0:
+      check(got_rev == want_rev, label & " revision derivation",
+            "reader said rev " & $got_rev & ", history says " & $want_rev)
+  # A corpus that has quietly lost its old entries passes vacuously, so state
+  # the coverage the migrations are supposed to have.
+  check(revs_seen[ckGBA] >= {3'u8, 4'u8},
+        "corpus covers GBA payload revisions 3 and 4",
+        "GBA revisions present: " & $revs_seen[ckGBA])
+  check(revs_seen[ckGB] >= {1'u8, 2'u8, 3'u8},
+        "corpus covers GB payload revisions 1, 2 and 3",
+        "GB revisions present: " & $revs_seen[ckGB])
 
 proc run_roundtrip() =
   ## The floor the corpus sits on: a state taken by THIS build must load in
@@ -225,6 +300,15 @@ proc run_roundtrip() =
     let (tw, th, px) = parse_state_thumbnail(bytes)
     check(tw > 0 and th > 0 and px.len == tw * th * 2,
           "GB " & rom & " thumbnail trailer")
+    # The GB rev 2 -> 3 migration defaults dots_since_frame to 0. That is only
+    # legitimate because the counter is reset at every frame push — the normal
+    # one at LY=144 and the blank one lcd_off_frame emits — and states are only
+    # ever written at a frame boundary. Assert the premise instead of trusting
+    # it: whatever is left is the tail of the instruction that tripped the
+    # boundary, well inside one scanline of a 70224-dot frame.
+    check(emu.ppu.dots_since_frame >= 0 and emu.ppu.dots_since_frame < 456,
+          "GB " & rom & " dots_since_frame is ~0 at a frame boundary",
+          "got " & $emu.ppu.dots_since_frame)
 
 proc run_rejections() =
   ## The rejection path must stay a clean refusal, never a partial apply: a
@@ -254,6 +338,135 @@ proc run_rejections() =
   check(not emu.load_state_bytes("not a state at all"), "garbage refused")
   check(emu.state_payload() == before, "emulator untouched after every refusal")
 
+# ---------------------------------------------------------------------------
+# 4. The GBA rev 3 -> 4 IntrWait migration, proved rather than eyeballed.
+#
+# This is the only migration that rewrites guest memory, and the only one the
+# v5 bump declared impossible ("v4 mid-halt states would resume with a
+# mis-restored sp, so they are refused"). It IS possible, and the argument is
+# an exact inverse:
+#
+#   rev 4 (what this build writes while parked in IntrWait)
+#     System sp lowered 16, the four frame words in memory,
+#     r4 = 1, r2 = mirror, lr_sys = 0x34C
+#   rev 3 (what the old build wrote in the same situation)
+#     System sp unshifted, no frame in memory,
+#     r4/r2/lr_sys still holding the CALLER's values
+#
+# migrate_intr_wait_frame maps the second onto the first. If it is right, then
+# starting from a rev-4 shape, converting DOWN to the rev-3 shape and letting
+# the migration convert back must reproduce the rev-4 payload byte for byte.
+# That is what this checks — with no reference to what the migration's own code
+# does, so it is not circular.
+#
+# The corpus cannot cover this: none of the committed test ROMs calls IntrWait,
+# so the shape has to be built by hand. It mirrors hle_intr_wait exactly (see
+# gba/arm/arm.nim), which is what makes the fixture legitimate.
+# ---------------------------------------------------------------------------
+
+# Offset of halt_resume_pop, the last byte of the CPU section — the one byte
+# that separates a rev-4 payload from a rev-3 one.
+const CPU_SEC_LEN =
+  1 +           # section tag
+  16 * 4 +      # r0..r15
+  4 + 4 +       # cpsr, spsr
+  6 * 7 * 4 +   # reg_banks
+  6 * 4 +       # spsr_banks
+  4 + 4 +       # pipeline buffer
+  1 + 1 +       # pipeline pos, size
+  1 + 1 +       # halted, stopped
+  1 + 2 + 4 +   # intr_wait active/mask/resume_addr
+  1 + 4 + 4 +   # halt_wake, halt_resume_charge, halt_resume_addr
+  1             # halt_resume_pop
+const HALT_RESUME_POP_OFFSET = CPU_SEC_LEN - 1
+
+proc park_in_intr_wait(emu: GBA; shifted: bool) =
+  ## Put the machine into the shape an HLE IntrWait leaves it in, either the
+  ## current one (`shifted`) or the pre-32dd8bb one. Everything here is copied
+  ## from hle_intr_wait / the old revision of it, not from the migration.
+  let cpu = emu.cpu
+  cpu.cpsr.mode = 0x1F        # System: sys_sp is plain r13
+  cpu.r[13] = 0x03007F00'u32  # somewhere sane in IWRAM
+  cpu.r[2]  = 0xCAFEBABE'u32  # the caller's r2 ...
+  cpu.r[4]  = 0x12345678'u32  # ... r4 ...
+  cpu.r[14] = 0x08001234'u32  # ... and lr
+  cpu.intr_wait_active = true
+  cpu.intr_wait_mask = 1
+  cpu.intr_wait_resume_addr = 0x08000100'u32
+  cpu.halted = true
+  if shifted:
+    let usp = cpu.r[13]
+    emu.bus.write_word_internal(usp - 4,  cpu.r[14])
+    emu.bus.write_word_internal(usp - 8,  cpu.r[2])
+    emu.bus.write_word_internal(usp - 12, 0x170'u32)
+    emu.bus.write_word_internal(usp - 16, cpu.r[4])
+    cpu.r[13] = usp - 16
+    cpu.r[4] = 1
+    cpu.r[2] = uint32(emu.bus.wram_chip[0x7FF8]) or
+               (uint32(emu.bus.wram_chip[0x7FF9]) shl 8)
+    cpu.r[14] = 0x34C'u32
+
+proc run_intr_wait_migration() =
+  echo "GBA rev 3 -> 4: the IntrWait frame retrofit is the exact inverse"
+  # (a) the shape this build produces
+  let a = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: a.step_frame()
+  a.park_in_intr_wait(shifted = true)
+  let rev4 = a.state_payload()
+
+  # (b) the shape the old build produced for the same wait
+  let b = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: b.step_frame()
+  b.park_in_intr_wait(shifted = false)
+  var rev3 = b.state_payload()
+  # A rev-3 payload has no halt_resume_pop byte
+  check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
+  rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+
+  # (c) read the rev-3 payload as rev 3 and compare against (a)
+  let c = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: c.step_frame()
+  var migrated = false
+  try:
+    c.apply_state_payload(rev3, 3)
+    migrated = true
+  except CatchableError:
+    check(false, "rev-3 IntrWait state applies", getCurrentExceptionMsg())
+  if migrated:
+    check(c.state_payload() == rev4,
+          "migrated rev-3 payload is byte-identical to the rev-4 one")
+    check(c.cpu.r[13] == 0x03007F00'u32 - 16, "System sp lowered by the frame")
+    check(c.bus.read_word_internal(0x03007F00'u32 - 8) == 0xCAFEBABE'u32,
+          "caller's r2 is where the resume pops it from")
+    check(c.bus.read_word_internal(0x03007F00'u32 - 16) == 0x12345678'u32,
+          "caller's r4 is where the resume pops it from")
+    check(c.bus.read_word_internal(0x03007F00'u32 - 4) == 0x08001234'u32,
+          "caller's lr is where the resume pops it from")
+
+  # (d) the case that is NOT reconstructible must be refused, not guessed:
+  # intr_wait_active with the CPU running means the user IRQ handler owns the
+  # System stack and there is nothing safe to do to its sp.
+  let d = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: d.step_frame()
+  d.park_in_intr_wait(shifted = false)
+  d.cpu.halted = false
+  var rev3_running = d.state_payload()
+  rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+  let e = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: e.step_frame()
+  let untouched = e.state_payload()
+  var refused = false
+  try:
+    e.apply_state_payload(rev3_running, 3)
+  except StateError:
+    refused = true
+  check(refused, "rev-3 IntrWait state with the handler running is refused")
+
+  # ...and refusing must leave the caller able to recover, which is what
+  # load_state_bytes's backup/restore does. Prove the payload is restorable.
+  e.apply_state_payload(untouched)
+  check(e.state_payload() == untouched, "the pre-load state restores cleanly")
+
 when isMainModule:
   # Run from the repo root: the ROM and corpus paths are relative to it.
   if paramCount() >= 1 and paramStr(1) == "--write-corpus":
@@ -261,6 +474,7 @@ when isMainModule:
     quit(0)
   run_roundtrip()
   run_rejections()
+  run_intr_wait_migration()
   run_corpus()
   echo ""
   if failures > 0:

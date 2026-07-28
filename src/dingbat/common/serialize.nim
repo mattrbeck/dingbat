@@ -20,21 +20,47 @@ type
 
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
-  # Bumping this REFUSES every state a user already has, for BOTH cores — the
-  # check below is global, so a GB-only change throws away GBA states too (v6
-  # did exactly that). tests/savestate_compat_test.nim loads a corpus of older
-  # states and goes red here on purpose; read its header before bumping.
-  STATE_VERSION* = 6'u32  # v6: GB PPU carries the disabled-LCD frame counter,
-                          # which sets when the next frame is pushed while the
-                          # LCD is off; a v5 state would resume with the wrong
-                          # phase (and desync a rollback peer).
-                          # v5: HLE BIOS IntrWait/Halt keep the dispatcher's
-                          # System-stack frame live (sp sits 16/8 bytes lower
-                          # while halted); v4 mid-halt states would resume with
-                          # a mis-restored sp, so they are refused instead.
-                          # (v4: GB serial port state, link cable support)
-  # magic(8) version(4) core(1) slot(1) flags(2) rom_checksum(4)
+
+  # ---- Container version vs payload revision --------------------------------
+  #
+  # STATE_VERSION describes the HEADER, not the payloads. It stopped being a
+  # "something changed somewhere" counter at v7.
+  #
+  # v1..v6 were exactly that counter, and it was a bad design: the reader
+  # demanded equality, so every bump refused every state every user had, for
+  # BOTH cores. All five bumps changed exactly one core's payload and threw the
+  # other core's states away for nothing. v6 is the one that did it to Matt:
+  # a single Game Boy PPU field invalidated every GBA state in existence, while
+  # the GBA payload was byte-for-byte unchanged.
+  #
+  # From v7 the header carries a PER-CORE payload revision in byte 13 (the old
+  # always-zero `slot` field), and each core accepts every revision it knows how
+  # to read — see GBA_PAYLOAD_VERSION / GB_PAYLOAD_VERSION and the migrations in
+  # the two savestate.nim files. A change to one core's payload now bumps only
+  # that core's revision and leaves the other core's states alone.
+  #
+  # So: do NOT bump STATE_VERSION for a payload change. Bump the core's payload
+  # revision and add its migration. STATE_VERSION moves only if this 32-byte
+  # header itself changes shape, which also means older builds stop recognising
+  # the file — a much bigger decision than it looks.
+  STATE_VERSION* = 7'u32
+
+  # Per-core payload revisions. Bump ONE of these when that core's field
+  # sequence changes, and add the matching `if rev >= N` in its loader.
+  #
+  # GBA: 1 initial · 2 CPU halt-wake/deferred-return · 3 bus ROM burst trackers
+  #      + deterministic RTC · 4 CPU halt_resume_pop
+  # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
+  GBA_PAYLOAD_VERSION* = 4'u32
+  GB_PAYLOAD_VERSION*  = 3'u32
+
+  # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)
+  #
+  # Byte 13 held `slot`, "reserved for future multi-slot support", and every
+  # writer since v1 wrote a literal 0 there (multi-slot ended up in the file
+  # NAME, not the header). 0 is therefore free as the "pre-v7, derive it"
+  # marker, and revisions start at 1.
   STATE_HEADER_SIZE* = 32
   # Optional trailer after the payload, flagged in the header's flags field.
   # It lives OUTSIDE the hash-validated payload so the per-subsystem serializers
@@ -155,13 +181,48 @@ proc fnv1a*(data: string): uint32 =
 
 # ==================== State file header ====================
 
+proc current_payload_version*(core: CoreKind): uint32 =
+  ## The revision this build writes for `core`.
+  case core
+  of ckGBA: GBA_PAYLOAD_VERSION
+  of ckGB:  GB_PAYLOAD_VERSION
+
+proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
+  ## Which payload revision a pre-v7 file holds, derived from the old global
+  ## counter. Every container version maps to exactly one layout per core,
+  ## confirmed by walking every commit that touched either savestate.nim:
+  ##
+  ##   container | GBA | GB | what moved
+  ##      1      |  1  | 1  | format introduced
+  ##      2      |  2  | 1  | GBA CPU halt-wake fields
+  ##      3      |  3  | 1  | GBA bus ROM trackers + RTC epoch
+  ##      4      |  3  | 2  | GB serial section
+  ##      5      |  4  | 2  | GBA CPU halt_resume_pop
+  ##      6      |  4  | 3  | GB PPU dots_since_frame
+  ##
+  ## The one wrinkle: inside container 4 the GB serial section's 5th byte
+  ## changed meaning (previous_bit -> clock_history, f678d02) at the same width,
+  ## so the LAYOUT is single-valued but that byte's meaning is not. It is the
+  ## serial shift-clock edge history, idle (0) in any state not taken mid-link
+  ## transfer, and both readings of 0 mean the same thing.
+  case core
+  of ckGBA:
+    if container <= 1: 1'u32
+    elif container == 2: 2'u32
+    elif container <= 4: 3'u32
+    else: 4'u32
+  of ckGB:
+    if container <= 3: 1'u32
+    elif container <= 5: 2'u32
+    else: 3'u32
+
 proc write_state_header(w: var Writer; core: CoreKind;
                         rom_checksum, rom_size: uint32;
                         payload: string; flags: uint16) =
   w.buf.add(STATE_MAGIC)
   w.write_u32(STATE_VERSION)
   w.write_u8(uint8(core))
-  w.write_u8(0'u8)   # slot (reserved for future multi-slot support)
+  w.write_u8(uint8(current_payload_version(core)))
   w.write_u16(flags)
   w.write_u32(rom_checksum)
   w.write_u32(rom_size)
@@ -227,21 +288,34 @@ proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int):
 
 proc parse_state_payload*(data: string; core: CoreKind;
                           rom_checksum, rom_size: uint32;
-                          origin = "state data"): string =
-  ## Validates the header of a full state image and returns the payload;
-  ## raises StateError with a human-readable message on any mismatch.
+                          origin = "state data"): tuple[payload: string; rev: uint32] =
+  ## Validates the header of a full state image and returns the payload along
+  ## with the payload revision it is written in; raises StateError with a
+  ## human-readable message on any mismatch. The caller passes `rev` down to its
+  ## per-subsystem loaders, which migrate older layouts (see the two
+  ## savestate.nim files) rather than refusing them.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     raise state_error("not a dingbat save state: " & origin)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
   let version = r.read_u32()
-  if version != STATE_VERSION:
-    raise state_error("save state format version " & $version &
-                      " not supported (expected " & $STATE_VERSION & ")")
+  if version > STATE_VERSION:
+    # Only refuse the FUTURE. A newer build may have reshaped this 32-byte
+    # header, so nothing past the magic can be trusted.
+    raise state_error("save state was written by a newer version of dingbat " &
+                      "(container " & $version & ", this build reads up to " &
+                      $STATE_VERSION & ")")
   let file_core = r.read_u8()
-  discard r.read_u8()   # slot
-  discard r.read_u16()  # reserved
+  let file_rev = r.read_u8()
+  discard r.read_u16()  # flags (read by parse_state_thumbnail)
   if file_core != uint8(core):
     raise state_error("save state was created by a different core (GBA/GB mismatch)")
+  # Byte 13 was the always-zero `slot` field before v7; 0 means "derive".
+  let rev = if file_rev == 0: legacy_payload_version(core, version)
+            else: uint32(file_rev)
+  if rev > current_payload_version(core):
+    raise state_error("save state payload revision " & $rev &
+                      " is newer than this build reads (" &
+                      $current_payload_version(core) & ")")
   let file_checksum = r.read_u32()
   let file_rom_size = r.read_u32()
   if file_checksum != rom_checksum or file_rom_size != rom_size:
@@ -251,8 +325,9 @@ proc parse_state_payload*(data: string; core: CoreKind;
   # `<`, not `!=`: an optional trailer (e.g. thumbnail) may follow the payload.
   if data.len - STATE_HEADER_SIZE < payload_len:
     raise state_error("save state is truncated or corrupt")
-  result = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
-  if fnv1a(result) != payload_hash:
+  result.payload = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
+  result.rev = rev
+  if fnv1a(result.payload) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
 
 proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
@@ -278,7 +353,8 @@ proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
     result = (0, 0, @[])
 
 proc read_state_payload*(path: string; core: CoreKind;
-                         rom_checksum, rom_size: uint32): string =
+                         rom_checksum, rom_size: uint32):
+                        tuple[payload: string; rev: uint32] =
   if not fileExists(path):
     raise state_error("no save state found at " & path)
   parse_state_payload(readFile(path), core, rom_checksum, rom_size, path)
