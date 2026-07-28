@@ -80,6 +80,16 @@ const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
 # gone by since the last one, so the panel's output rate survives the gap.
 const LCD_ON_FRAME_DOTS* = 10 * 456
 
+when defined(gb_dot_counter):
+  # Diagnostic frame-pacing instrumentation (tools only; compiled out of every
+  # shipping build). gb_total_dots is the panel's dot clock — 4194304 Hz, never
+  # scaled by CGB double speed — so frames-per-emulated-second is
+  # presents / (gb_total_dots / 4194304).
+  var gb_total_dots*: uint64
+  var gb_frame_normal*: uint64    # pushed at LY=144, PPU drew it
+  var gb_frame_lcd_off*: uint64   # pushed by lcd_off_frame while LCD disabled
+  var gb_frame_lcd_on*: uint64    # pushed by the LCDC-enable catch-up
+
 proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ## Push a frame the PPU did not draw: the panel shows white with the PPU
   ## switched off.
@@ -96,6 +106,7 @@ proc lcd_off_frame*(ppu: GbPpu; gb: GB) {.inline.} =
   ## LCD is off — the emulator drops those frames and, for a game that idles
   ## with the LCD off, never returns at all.
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
+    when defined(gb_dot_counter): inc gb_frame_lcd_off
     ppu_blank_frame(ppu, gb)
 proc window_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x40
 proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) != 0
@@ -301,6 +312,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # skipping it leaves the emulator one frame ahead of the panel for the
       # rest of the run, and games toggle the LCD constantly.
       if ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
+        when defined(gb_dot_counter): inc gb_frame_lcd_on
         ppu_blank_frame(ppu, gb)
       ppu.ly = 0
       ppu.`mode_flag=`(2'u8, gb)
