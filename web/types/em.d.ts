@@ -61,6 +61,7 @@ interface EmscriptenModule {
   _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;
   _loop_tick?(): void;
+  _runahead_tick?(n: number): void;
   _wasm_rewind_pop?(): number;
   _wasm_rewind_scrub_generate?(maxSamples: number): number;
   _wasm_rewind_scrub_count?(): number;
