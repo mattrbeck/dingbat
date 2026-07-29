@@ -76,9 +76,10 @@ proc cpu_read_u16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
   result = (hi shl 8) or lo
 
 # ---------------------------------------------------------------------------
-# CB prefix handler forward declaration
+# CB prefix dispatch
 # ---------------------------------------------------------------------------
-# (CB_PREFIXED is declared in cb_opcodes.nim which is included after this file)
+# (CB_PREFIXED is a const built in cb_opcodes.nim, which gb.nim must include
+# BEFORE this file — a const cannot be forward-declared)
 
 # ---------------------------------------------------------------------------
 # Dispatch table

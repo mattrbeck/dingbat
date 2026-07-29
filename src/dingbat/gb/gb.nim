@@ -1111,6 +1111,15 @@ proc mbc_load*(cart: Mbc) =
       mbc6_load_footer(Mbc6(cart), data)
 
 # ==================== INCLUDES ====================
+# Textual includes, not imports: the whole GB core compiles as this one
+# module (a single C translation unit), so the files below share one
+# namespace and the C compiler inlines across them without LTO — see
+# notes/architecture.md. Ordering is mostly freed by the forward
+# declarations interleaved below; the one hard constraint is noted at the
+# CPU group.
+
+# Cartridge mappers: base methods + factory + the flat-ROM window fast path
+# (mbc/mbc), then one file per mapper overriding them
 include mbc/mbc
 include mbc/rom
 include mbc/mbc1
@@ -1124,18 +1133,21 @@ include mbc/mmm01
 include mbc/mbc6
 include mbc/camera
 include mbc/tama5
+# Audio: the four PSG channels, then the mixer
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
 include apu/channel3
 include apu/channel4
 include apu
+# Peripherals: interrupt controller, link port, timer, input
 # Forward declaration needed by serial.nim/ppu.nim (defined in memory.nim)
 proc cgb_native*(gb: GB): bool
 include interrupts
 include serial
 include timer
 include joypad
+# Video: shared PPU base + the two interchangeable renderers
 # Forward declarations needed by ppu.nim (defined in memory.nim included later)
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
@@ -1144,7 +1156,12 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
 include ppu
 include scanline_ppu
 include fifo_ppu
+# Memory bus (mem_read/mem_write dispatch, DMA/HDMA, I/O registers)
 include memory
+# CPU decode/execute. One hard ordering constraint: cb_opcodes before
+# opcodes — the 0xCB handler in opcodes.nim indexes the CB_PREFIXED const
+# (built at compile time in cb_opcodes.nim), and a const cannot be
+# forward-declared.
 # Forward declarations needed by opcodes.nim (defined in cpu.nim included later)
 proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8
 proc `cpu_memory_at_hl=`*(cpu: GbCpu; gb: GB; val: uint8)
@@ -1327,4 +1344,5 @@ method handle_input*(gb: GB; inp: Input; pressed: bool) {.base.} =
 method toggle_sync*(gb: GB) =
   gb.apu.toggle_sync()
 
+# Save-state visitor over every component above (also serves rewind/rollback)
 include savestate

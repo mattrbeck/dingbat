@@ -963,7 +963,21 @@ proc clear_pipeline*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 proc mode_bank*(m: CpuMode): int
 
+# ==================== IMPLEMENTATION INCLUDES ====================
+# Textual includes, not imports: the whole GBA core compiles as this one
+# module (a single C translation unit), so the files below share one
+# namespace and the C compiler inlines across them without LTO — see
+# notes/architecture.md. Cross-include calls are satisfied by the
+# forward-declaration block above, which makes the order below mostly
+# arbitrary; the verified exceptions:
+#   * hle_bios before arm/arm and thumb/thumb — both SWI handlers call
+#     hle_swi, defined in hle_bios.nim with no forward declaration above.
+#   * arm/arm before arm/lut — `const armLut = armLutBuilder()` resolves the
+#     arm_* handler names at compile time; a const cannot be forward-declared.
+
+# CPU fetch pipeline
 include pipeline
+# Cartridge: ROM image, save memory, GPIO-attached RTC
 include cartridge
 include storage
 include storage/sram
@@ -971,8 +985,11 @@ include storage/flash
 include storage/eeprom
 include rtc
 include gpio
+# Interrupt controller + keypad input
 include interrupts
 include keypad
+# CPU decode/execute: idle-loop fast-forward, HLE BIOS, ARM + THUMB cores
+# (ordering constraints above), stepping loop
 include waitloop
 include hle_bios
 include arm/arm
@@ -987,6 +1004,7 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgFifoWrites*: array[2, int]
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
+# Audio: PSG channels 1-4 + the two FIFO (DMA) channels, then the mixer
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2
@@ -994,10 +1012,13 @@ include apu/channel3
 include apu/channel4
 include apu/dma_channels
 include apu
+# Scheduler-driven peripherals: timers, SIO, DMA
 include timer
 include serial
 include dma
+# Memory system: bus decode, waitstates, prefetch, open bus
 include bus
+# Sound-driver HLE shadow mixers (runtime-detected; inert unless enabled)
 include mp2k
 include gs_bon
 
@@ -1016,6 +1037,7 @@ proc tile_idx*(s: Sprite): uint32 = bits_range(s.attr2, 0, 9)
 proc priority*(s: Sprite): uint32 = bits_range(s.attr2, 10, 11)
 proc palette_bank*(s: Sprite): uint32 = bits_range(s.attr2, 12, 15)
 
+# Video, then the I/O register dispatch over everything above
 include ppu
 include mmio
 
@@ -1216,4 +1238,5 @@ proc handle_input*(gba: GBA; input: Input; pressed: bool) =
 method toggle_sync*(gba: GBA) =
   gba.apu.toggle_sync()
 
+# Save-state visitor over every component above (also serves rewind/rollback)
 include savestate
