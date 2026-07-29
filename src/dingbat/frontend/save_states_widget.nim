@@ -138,8 +138,16 @@ proc render*(w: SaveStatesWidget) =
         if has_thumb:
           clicked = igButton("##thumb", ImVec2(x: CELL_W, y: CELL_H))
           var rmin, rmax: ImVec2
-          igGetItemRectMin(addr rmin)
-          igGetItemRectMax(addr rmax)
+          # imguin <= 1.92.4 uses a pOut out-param; later versions return by
+          # value (same drift calc_text_size above absorbs for igCalcTextSize)
+          when compiles(igGetItemRectMin(addr rmin)):
+            igGetItemRectMin(addr rmin)
+            igGetItemRectMax(addr rmax)
+          else:
+            let pmin = igGetItemRectMin()
+            let pmax = igGetItemRectMax()
+            rmin = ImVec2(x: pmin.x, y: pmin.y)
+            rmax = ImVec2(x: pmax.x, y: pmax.y)
           let fit_w = CELL_W - THUMB_INSET * 2
           let fit_h = CELL_H - THUMB_INSET * 2
           let scale = min(fit_w / max(slot.w, 1.0'f32),
