@@ -1138,6 +1138,13 @@ if (resetSaveSlot) {
 const romsModal = document.getElementById("roms-modal");
 const romsManageList = document.getElementById("roms-manage-list");
 const romsManageEmpty = document.getElementById("roms-manage-empty");
+// The intro's Remove sentence — hidden while signed out, when the per-row
+// Remove button it describes doesn't render (see romOnDrive below).
+const romsHintRemove = document.getElementById("roms-hint-remove");
+// Sign-in state the rows were last rendered under, so renderGdriveSection can
+// re-render them only when that state actually flips (a routine repaint must
+// not disarm a row's armed confirm button).
+let romsRowsSignedIn = null;
 
 const openRomsModal = () => {
   menuDropdown.hidden = true;
@@ -1210,6 +1217,10 @@ const romsForManagement = async () => {
 
 const refreshRomsManageList = async () => {
   if (!db) return;
+  romsRowsSignedIn = syncActive();
+  // Keep the intro copy and the rows telling the same story: signed out there
+  // is no Remove button, so the sentence describing it goes too.
+  romsHintRemove.hidden = !syncActive();
   let rows = await romsForManagement();
   // A remote-only entry (on Drive, nothing stored here) has no local save to
   // Reset — it's "just deletable", so those rows show only Delete. Work out
@@ -1253,26 +1264,27 @@ const refreshRomsManageList = async () => {
       for (let b of siblings) if (b !== except && b.disarm) b.disarm();
     };
 
-    // Reset  = wipe this game's save data, keep the ROM.
-    // Remove = free this device's ROM bytes, keep the save data and the Drive
-    //          copy; the game becomes a Drive-only tile. Needs a Drive copy to
-    //          come back from, so it is gated hard — see below.
-    // Delete = remove the game outright (ROM + save data).
+    // Reset save = wipe this game's save data, keep the ROM. ("Reset" alone
+    //              would collide with the top bar's console Reset.)
+    // Remove     = free this device's ROM bytes, keep the save data and the
+    //              Drive copy; the game becomes a Drive-only tile. Needs a
+    //              Drive copy to come back from, so it is gated hard — see below.
+    // Delete     = remove the game outright (ROM + save data).
     // When signed in both mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
-    // Reset only makes sense when there's local save data to wipe. A remote-only
-    // game has none, so it gets Delete alone.
+    // Reset save only makes sense when there's local save data to wipe. A
+    // remote-only game has none, so it gets Delete alone.
     let hasLocalData = localRoms.has(name) || withSaves.has(name);
     let saveBtn = null;
     if (hasLocalData && linkRunning) {
       saveBtn = makeDisabledButton(
-        "Reset",
+        "Reset save",
         "button button-sm roms-manage-btn",
         "Exit link mode to reset this game's save",
       );
     } else if (hasLocalData) {
       saveBtn = makeConfirmButton({
-        label: "Reset",
+        label: "Reset save",
         confirmLabel: "Delete all save data?",
         className: "button button-sm roms-manage-btn",
         onArm: () => disarmOthers(saveBtn),
@@ -1674,6 +1686,14 @@ const gdriveSignOut = () => {
 
 const renderGdriveSection = () => {
   if (!gdriveBody) return;
+  // The manage rows and the intro's Remove sentence are sign-in gated too:
+  // every path that morphs this section between "Sign in with Google" and the
+  // connected view (sign-in, Sign out, token expiry) lands here, so an open
+  // modal re-renders its rows on a real state flip — and only on a flip, so
+  // routine repaints can't disarm an armed confirm button.
+  if (romsModal.classList.contains("open") && romsRowsSignedIn !== syncActive()) {
+    refreshRomsManageList();
+  }
   gdriveBody.innerHTML = "";
 
   if (!GDRIVE_CLIENT_ID) {

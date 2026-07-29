@@ -248,8 +248,8 @@ test("Remove is offered only for a local game Drive already has", async () => {
   app.idb.set("rom:Fresh.gba", { name: "Fresh.gba", data: u8(2) });
 
   await openManageList(app);
-  eq(rowButtons(app, "Backed.gba"), ["Reset", "Remove", "Delete"]);
-  eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete"],
+  eq(rowButtons(app, "Backed.gba"), ["Reset save", "Remove", "Delete"]);
+  eq(rowButtons(app, "Fresh.gba"), ["Reset save", "Delete"],
     "a game whose only copy is still local must not be evictable");
   eq(rowButtons(app, "Cloud.gba"), ["Delete"],
     "a Drive-only row has no local bytes to free");
@@ -264,7 +264,7 @@ test("a Drive delete already queued for the ROM withdraws Remove", async () => {
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"]);
 });
 
 test("signed out, no row offers Remove", async () => {
@@ -276,8 +276,42 @@ test("signed out, no row offers Remove", async () => {
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"],
+  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"],
     "with no Drive to come back from, removing local bytes is just deleting");
+  assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
+    "the intro must not describe a Remove button that isn't there");
+});
+
+test("the intro's Remove sentence shows only while signed in", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
+  signIn(app, { "rom:A.gba": "sig" });
+  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
+
+  await openManageList(app);
+  assert.equal(app.document.getElementById("roms-hint-remove").hidden, false);
+});
+
+test("Sign out while the modal is open withdraws Remove from the rows", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
+  signIn(app, { "rom:A.gba": "sig" });
+  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
+
+  // The modal is open (openManageList renders what openRomsModal would).
+  app.document.getElementById("roms-modal").classList.add("open");
+  await openManageList(app);
+  eq(rowButtons(app, "A.gba"), ["Reset save", "Remove", "Delete"]);
+
+  app.runIn("gdriveSignOut()");
+  await settle();
+  await settle();
+  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"],
+    "the stale Remove button is withdrawn without reopening the modal");
+  assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
+    "and the intro stops describing it");
 });
 
 test("the game currently loaded shows Remove disabled, not armed", async () => {
@@ -319,5 +353,5 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   assert.ok(app.toasts.some((t) => /save kept/i.test(t)),
     "the toast says the save survived: " + app.toasts.join(" | "));
   // The row re-renders without Remove — there is nothing local left to free.
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"]);
 });
