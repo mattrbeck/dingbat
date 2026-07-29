@@ -936,6 +936,11 @@ proc render_imgui() =
         if should_reset and app.cfg.recents.len > 0:
           load_rom(app.cfg.recents[0])
         igSeparator()
+        # Cheats live here, not under Debug: they're a first-class feature (the
+        # web UI agrees) and users look for them next to the other things that
+        # change a running game.
+        discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
+                                   app.emu_kind != ekNone)
         # Network link: opens the Host/Join window (GBA only). No CLI port
         # needed — the user picks a role and address at runtime.
         if igMenuItem_Bool("Link Cable...", nil, app.link_window,
@@ -1013,8 +1018,6 @@ proc render_imgui() =
       # Debug menu
       if igBeginMenu("Debug", true):
         discard igMenuItem_BoolPtr("Overlay", nil, addr app.enable_overlay, true)
-        discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
-                                   app.emu_kind != ekNone)
         igSeparator()
         if app.dbg != nil:
           app.dbg.render_menu_items()

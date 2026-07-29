@@ -81,63 +81,80 @@ proc render*(ed: ConfigEditor) =
 
   if not ed.open: return
 
-  discard igBegin("Settings", addr ed.open, cint(ImGui_WindowFlags_AlwaysAutoResize))
+  # Sized window instead of AlwaysAutoResize: auto-resize re-fit the window on
+  # every tab switch (buttons jumped with it) and can't host the negative-sized
+  # footer child below. Height clamps to the viewport like the Save States
+  # window, so the pinned action row never falls off a small app window.
+  let work_h = igGetMainViewport().WorkSize.y
+  igSetNextWindowPos(ImVec2(x: 60, y: 28), cint(ImGui_Cond_FirstUseEver),
+                     ImVec2(x: 0, y: 0))
+  igSetNextWindowSize(ImVec2(x: 560, y: min(460.0'f32, work_h - 56.0'f32)),
+                      cint(ImGui_Cond_FirstUseEver))
+  if igBegin("Settings", addr ed.open, 0):
+    # Tab content lives in a child that reserves room for the action row, so
+    # Apply/OK stay reachable at any window size — a too-short window scrolls
+    # the tab pane, never the buttons (same pattern as the Save States window).
+    let footer = igGetFrameHeightWithSpacing() + 10.0'f32
+    discard igBeginChild_Str("##settings_tabs", ImVec2(x: 0, y: -footer),
+                             ImGuiChildFlags(0), ImGuiWindowFlags(0))
+    # Tabs ordered by user relevance — the window opens on the first tab, so
+    # input setup greets a new user and the technical BIOS pane comes last.
+    if igBeginTabBar("SettingsTabBar", 0):
+      ed.keybindings.visible = igBeginTabItem("Keybindings", nil, 0)
+      if ed.keybindings.visible:
+        igBeginGroup()
+        ed.keybindings.render()
+        igEndGroup()
+        igEndTabItem()
 
-  if igButton("Apply", ImVec2(x: 0, y: 0)):   ed.do_apply()
-  igSameLine(0, -1)
-  if igButton("Revert", ImVec2(x: 0, y: 0)):  ed.do_reset()
-  igSameLine(0, -1)
-  if igButton("OK", ImVec2(x: 0, y: 0)):
-    ed.do_apply()
-    ed.open = false
-  igSameLine(0, -1)
-  if igButton("Reset to Defaults", ImVec2(x: 0, y: 0)):
-    igOpenPopup_Str("Reset settings?", 0)
+      ed.video.visible = igBeginTabItem("Video", nil, 0)
+      if ed.video.visible:
+        igBeginGroup()
+        ed.video.render()
+        igEndGroup()
+        igEndTabItem()
 
-  if igBeginPopupModal("Reset settings?", nil,
-                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
-    igText("Restore all settings to their defaults?")
-    igText("Your ROMs, saves, recents and BIOS paths are kept.")
+      ed.controller.visible = igBeginTabItem("Controller", nil, 0)
+      if ed.controller.visible:
+        igBeginGroup()
+        ed.controller.render()
+        igEndGroup()
+        igEndTabItem()
+
+      ed.bios.visible = igBeginTabItem("BIOS", nil, 0)
+      if ed.bios.visible:
+        igBeginGroup()
+        ed.bios.render()
+        igEndGroup()
+        igEndTabItem()
+
+      igEndTabBar()
+    igEndChild()
+
     igSeparator()
-    if igButton("Reset", ImVec2(x: 120, y: 0)):
-      ed.do_factory_reset()
-      igCloseCurrentPopup()
+
+    if igButton("Apply", ImVec2(x: 0, y: 0)):   ed.do_apply()
     igSameLine(0, -1)
-    if igButton("Cancel", ImVec2(x: 120, y: 0)):
-      igCloseCurrentPopup()
-    igEndPopup()
+    if igButton("Revert", ImVec2(x: 0, y: 0)):  ed.do_reset()
+    igSameLine(0, -1)
+    if igButton("OK", ImVec2(x: 0, y: 0)):
+      ed.do_apply()
+      ed.open = false
+    igSameLine(0, -1)
+    if igButton("Reset to Defaults", ImVec2(x: 0, y: 0)):
+      igOpenPopup_Str("Reset settings?", 0)
 
-  igSeparator()
-
-  if igBeginTabBar("SettingsTabBar", 0):
-    ed.bios.visible = igBeginTabItem("BIOS", nil, 0)
-    if ed.bios.visible:
-      igBeginGroup()
-      ed.bios.render()
-      igEndGroup()
-      igEndTabItem()
-
-    ed.video.visible = igBeginTabItem("Video", nil, 0)
-    if ed.video.visible:
-      igBeginGroup()
-      ed.video.render()
-      igEndGroup()
-      igEndTabItem()
-
-    ed.keybindings.visible = igBeginTabItem("Keybindings", nil, 0)
-    if ed.keybindings.visible:
-      igBeginGroup()
-      ed.keybindings.render()
-      igEndGroup()
-      igEndTabItem()
-
-    ed.controller.visible = igBeginTabItem("Controller", nil, 0)
-    if ed.controller.visible:
-      igBeginGroup()
-      ed.controller.render()
-      igEndGroup()
-      igEndTabItem()
-
-    igEndTabBar()
+    if igBeginPopupModal("Reset settings?", nil,
+                         cint(ImGui_WindowFlags_AlwaysAutoResize)):
+      igText("Restore all settings to their defaults?")
+      igText("Your ROMs, saves, recents and BIOS paths are kept.")
+      igSeparator()
+      if igButton("Reset", ImVec2(x: 120, y: 0)):
+        ed.do_factory_reset()
+        igCloseCurrentPopup()
+      igSameLine(0, -1)
+      if igButton("Cancel", ImVec2(x: 120, y: 0)):
+        igCloseCurrentPopup()
+      igEndPopup()
 
   igEnd()
