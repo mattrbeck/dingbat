@@ -105,9 +105,10 @@ test("handleRomFile rejects .sav/.state files — no path stores a mismatched-na
 test("handleRomFile stores an accepted ROM under its full original file name", async () => {
   const app = await loadApp();
   app.runIn("Module.ccall = () => {}"); // stub the wasm boot
-  app.api.handleRomFile(fakeFile("Some Game (U).gba", u8(1, 2, 3)));
+  // Byte 3 = 0xEA: an ARM branch at the entry point passes the header check
+  app.api.handleRomFile(fakeFile("Some Game (U).gba", u8(1, 2, 3, 0xea)));
   await settle();
   await settle();
-  eq(app.idb.get("rom:Some Game (U).gba"), { name: "Some Game (U).gba", data: u8(1, 2, 3) });
+  eq(app.idb.get("rom:Some Game (U).gba"), { name: "Some Game (U).gba", data: u8(1, 2, 3, 0xea) });
   eq(app.idb.get("recent").map((r) => r.name), ["Some Game (U).gba"]);
 });

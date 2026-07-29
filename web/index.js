@@ -3042,6 +3042,7 @@ document.addEventListener("keydown", (e) => {
     closeStatesModal();
     closeCheatsModal();
     closeReportModal();
+    closeRomWarnModal();
   }
 });
 
@@ -4760,6 +4761,86 @@ const unzip = async (arrayBuffer) => {
 
 const usable = (e) => !e.name.startsWith("__MACOSX/") && !e.name.endsWith("/");
 
+// --- ROM header sanity check ---
+// A garbage file with a plausible extension used to "play" as a silent black
+// screen and then get enshrined in the Recent library, so sniff the header
+// before accepting a ROM. The cores themselves never validate any of this,
+// and lots of homebrew is raw objcopy output with NO Nintendo logo and an
+// unfixed checksum (this repo's own tests/roms/*.gba are exactly that, some
+// smaller than the 0xC0-byte GBA header) — so the rule is deliberately
+// any-signal-matches, and a failed check only asks, never blocks:
+//   .gba — valid if byte 3 is 0xEA (the cartridge entry point is an ARM
+//          branch instruction — true of every licensed ROM and of raw
+//          objcopy homebrew alike, and the only signal tests/roms/*.gba
+//          carry), OR the Nintendo logo bitmap at 0x004 matches, OR the
+//          header checksum at 0xBD is the complement-sum over 0xA0-0xBC
+//          (per GBATEK).
+//   .gb/.gbc — valid if the Nintendo logo at 0x104 matches (the same bytes
+//          the emulator's own multicart detection keys on, src/dingbat/gb/
+//          mbc/mbc.nim), OR the header checksum at 0x14D matches Pan Docs'
+//          sum over 0x134-0x14C. rgbfix fixes the checksum even on logo-less
+//          homebrew — this repo's tests/roms/*.gb(c) pass via that arm.
+// An 8-byte prefix of each logo is checked — already a 2^64 signal, and it
+// keeps the constants short.
+const GBA_LOGO_PREFIX = [0x24, 0xff, 0xae, 0x51, 0x69, 0x9a, 0xa2, 0x21];
+const GB_LOGO_PREFIX = [0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b];
+const bytesMatchAt = (bytes, offset, ref) =>
+  ref.every((b, i) => bytes[offset + i] === b);
+
+const looksLikeValidRom = (bytes, ext) => {
+  if (ext === ".gba") {
+    if (bytes.length >= 4 && bytes[3] === 0xea) return true; // ARM branch entry
+    if (bytes.length < 0xc0) return false; // no full header to check
+    if (bytesMatchAt(bytes, 0x004, GBA_LOGO_PREFIX)) return true;
+    let sum = 0;
+    for (let i = 0xa0; i <= 0xbc; i++) sum += bytes[i];
+    return bytes[0xbd] === (-(sum + 0x19) & 0xff);
+  }
+  // .gb / .gbc
+  if (bytes.length < 0x150) return false;
+  if (bytesMatchAt(bytes, 0x104, GB_LOGO_PREFIX)) return true;
+  let chk = 0;
+  for (let i = 0x134; i <= 0x14c; i++) chk = (chk - bytes[i] - 1) & 0xff;
+  return bytes[0x14d] === chk;
+};
+
+// Ask before loading a file that failed the sanity check. Resolves true to
+// proceed, false to drop the file (nothing loads, nothing enters the
+// library). Cancel, ×, backdrop and Escape all decline.
+const romWarnModal = document.getElementById("rom-warn-modal");
+let romWarnResolve = null;
+
+const settleRomWarn = (proceed) => {
+  let resolve = romWarnResolve;
+  romWarnResolve = null; // closeRomWarnModal must not double-resolve
+  romWarnModal.classList.remove("open");
+  releaseFocus(romWarnModal);
+  if (resolve) resolve(proceed);
+};
+
+// Called blindly by the global Escape handler; a no-op while not open.
+const closeRomWarnModal = () => {
+  if (romWarnResolve) settleRomWarn(false);
+};
+
+const confirmSuspectRom = (fileName, ext) =>
+  new Promise((resolve) => {
+    let system = ext === ".gba" ? "GBA" : ext === ".gbc" ? "Game Boy Color" : "Game Boy";
+    document.getElementById("rom-warn-text").textContent =
+      `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
+      `corrupt or not a game at all. Load it anyway?`;
+    romWarnResolve = resolve;
+    romWarnModal.classList.add("open");
+    trapFocus(romWarnModal);
+  });
+
+document.getElementById("rom-warn-load").addEventListener("click", () => settleRomWarn(true));
+document.getElementById("rom-warn-cancel").addEventListener("click", closeRomWarnModal);
+document.getElementById("rom-warn-close").addEventListener("click", closeRomWarnModal);
+romWarnModal.addEventListener("click", (e) => {
+  if (e.target === romWarnModal) closeRomWarnModal();
+});
+
 const handleZipFile = async (file) => {
   let zip;
   try {
@@ -4794,7 +4875,10 @@ const handleZipFile = async (file) => {
   }
 
   let innerName = baseName(romEntry.name);
-  let romFile = "rom" + extOf(innerName);
+  let innerExt = extOf(innerName);
+  if (!looksLikeValidRom(romBytes, innerExt) &&
+      !(await confirmSuspectRom(innerName, innerExt))) return;
+  let romFile = "rom" + innerExt;
   writeToFS(romFile, romBytes);
   await addRecentRom(innerName, romBytes, art);
   loadRom(romFile, innerName);
@@ -4811,6 +4895,8 @@ let handleRomFile = (file) => {
   let reader = new FileReader();
   reader.addEventListener("load", async () => {
     let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
+    if (!looksLikeValidRom(bytes, ext) &&
+        !(await confirmSuspectRom(file.name, ext))) return;
     writeToFS(romName, bytes);
     await addRecentRom(file.name, bytes);
     loadRom(romName, file.name);

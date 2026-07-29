@@ -328,6 +328,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     get syncState() { return syncState; },
     set syncState(v) { syncState = v; },
     refreshHomeRecent, handleRomFile, loadRom,
+    looksLikeValidRom, closeRomWarnModal,
     get currentRomName() { return currentRomName; },
     set currentRomName(v) { currentRomName = v; },
     get currentOriginalName() { return currentOriginalName; },
