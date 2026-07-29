@@ -248,8 +248,8 @@ test("Remove is offered only for a local game Drive already has", async () => {
   app.idb.set("rom:Fresh.gba", { name: "Fresh.gba", data: u8(2) });
 
   await openManageList(app);
-  eq(rowButtons(app, "Backed.gba"), ["Reset save", "Remove", "Delete"]);
-  eq(rowButtons(app, "Fresh.gba"), ["Reset save", "Delete"],
+  eq(rowButtons(app, "Backed.gba"), ["Reset", "Remove from device", "Delete"]);
+  eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete"],
     "a game whose only copy is still local must not be evictable");
   eq(rowButtons(app, "Cloud.gba"), ["Delete"],
     "a Drive-only row has no local bytes to free");
@@ -264,7 +264,7 @@ test("a Drive delete already queued for the ROM withdraws Remove", async () => {
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
 });
 
 test("signed out, no row offers Remove", async () => {
@@ -276,7 +276,7 @@ test("signed out, no row offers Remove", async () => {
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"],
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"],
     "with no Drive to come back from, removing local bytes is just deleting");
   assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
     "the intro must not describe a Remove button that isn't there");
@@ -303,12 +303,12 @@ test("Sign out while the modal is open withdraws Remove from the rows", async ()
   // The modal is open (openManageList renders what openRomsModal would).
   app.document.getElementById("roms-modal").classList.add("open");
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset save", "Remove", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Remove from device", "Delete"]);
 
   app.runIn("gdriveSignOut()");
   await settle();
   await settle();
-  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"],
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"],
     "the stale Remove button is withdrawn without reopening the modal");
   assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
     "and the intro stops describing it");
@@ -323,7 +323,7 @@ test("the game currently loaded shows Remove disabled, not armed", async () => {
   app.api.currentOriginalName = "A.gba";
 
   await openManageList(app);
-  const btn = rowButton(app, "A.gba", "Remove");
+  const btn = rowButton(app, "A.gba", "Remove from device");
   assert.ok(btn, "the row still shows the action");
   assert.equal(btn.disabled, true, "but it can't be used on the running game");
 });
@@ -337,7 +337,7 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   seedLocal(app, "A.gba");
 
   await openManageList(app);
-  const btn = rowButton(app, "A.gba", "Remove");
+  const btn = rowButton(app, "A.gba", "Remove from device");
   assert.ok(btn);
 
   await btn.click(); // arm
@@ -353,5 +353,5 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   assert.ok(app.toasts.some((t) => /save kept/i.test(t)),
     "the toast says the save survived: " + app.toasts.join(" | "));
   // The row re-renders without Remove — there is nothing local left to free.
-  eq(rowButtons(app, "A.gba"), ["Reset save", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
 });

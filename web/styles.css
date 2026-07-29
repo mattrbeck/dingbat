@@ -3009,7 +3009,9 @@ body.debug-2p .home-tile-link {
   font-weight: 600;
 }
 
-/* Manage ROMs and Saves modal — one row per stored game, two actions each */
+/* Manage ROMs and Saves modal — one row per game: name on top, its action
+   buttons on a line beneath. One layout for every row, whether it has one
+   button (Drive-only) or three (local + synced). */
 .roms-manage-list {
   display: flex;
   flex-direction: column;
@@ -3037,10 +3039,9 @@ body.debug-2p .home-tile-link {
 
 .roms-manage-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 8px 12px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -3048,7 +3049,6 @@ body.debug-2p .home-tile-link {
 }
 
 .roms-manage-name {
-  flex: 1 1 140px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3056,17 +3056,13 @@ body.debug-2p .home-tile-link {
   font-size: 13px;
 }
 
-/* Shrinkable and wrapping, not `flex: 0 0 auto`: arming a confirm button swaps
-   its label for a whole question ("Remove from this device?"), which on a
-   phone is wider than the buttons beside it. Held rigid, the row overflowed
-   and clipped whatever sat to the right — with three actions that meant a
-   half-visible Delete. Now the others drop to the next line instead. */
+/* Wrapping: arming a confirm button swaps its label for a whole question
+   ("Remove from this device?"), which on a phone can outgrow the line — the
+   buttons after it drop to the next line instead of clipping. */
 .roms-manage-actions {
-  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
 }
 

@@ -1352,27 +1352,26 @@ const refreshRomsManageList = async () => {
       for (let b of siblings) if (b !== except && b.disarm) b.disarm();
     };
 
-    // Reset save = wipe this game's save data, keep the ROM. ("Reset" alone
-    //              would collide with the top bar's console Reset.)
-    // Remove     = free this device's ROM bytes, keep the save data and the
-    //              Drive copy; the game becomes a Drive-only tile. Needs a
-    //              Drive copy to come back from, so it is gated hard — see below.
-    // Delete     = remove the game outright (ROM + save data).
+    // Reset  = wipe this game's save data, keep the ROM.
+    // Remove from device = free this device's ROM bytes, keep the save data
+    //          and the Drive copy; the game becomes a Drive-only tile. Needs a
+    //          Drive copy to come back from, so it is gated hard — see below.
+    // Delete = remove the game outright (ROM + save data).
     // When signed in both mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
-    // Reset save only makes sense when there's local save data to wipe. A
+    // Reset only makes sense when there's local save data to wipe. A
     // remote-only game has none, so it gets Delete alone.
     let hasLocalData = localRoms.has(name) || withSaves.has(name);
     let saveBtn = null;
     if (hasLocalData && linkRunning) {
       saveBtn = makeDisabledButton(
-        "Reset save",
+        "Reset",
         "button button-sm roms-manage-btn",
         "Exit link mode to reset this game's save",
       );
     } else if (hasLocalData) {
       saveBtn = makeConfirmButton({
-        label: "Reset save",
+        label: "Reset",
         confirmLabel: "Delete all save data?",
         className: "button button-sm roms-manage-btn",
         onArm: () => disarmOthers(saveBtn),
@@ -1418,13 +1417,13 @@ const refreshRomsManageList = async () => {
         // Delete we don't unload the game for the user: "free some space" is
         // no reason to close what they're playing.
         freeBtn = makeDisabledButton(
-          "Remove",
+          "Remove from device",
           "button button-sm roms-manage-btn",
           "Close this game first to remove it from this device",
         );
       } else {
         freeBtn = makeConfirmButton({
-          label: "Remove",
+          label: "Remove from device",
           confirmLabel: "Remove from this device?",
           className: "button button-sm roms-manage-btn",
           onArm: () => disarmOthers(freeBtn),
@@ -1809,7 +1808,7 @@ const renderGdriveSection = () => {
   let status = document.createElement("p");
   status.className = "gdrive-status";
   status.textContent =
-    (gdriveEmail ? "Connected as " + gdriveEmail : "Connected to Google Drive") +
+    (gdriveEmail || "Connected to Google Drive") +
     " · " + (n ? n + " change" + (n === 1 ? "" : "s") + " pending"
                : "all changes synced");
   gdriveBody.appendChild(status);
