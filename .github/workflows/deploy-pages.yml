@@ -55,6 +55,43 @@ jobs:
           }
           echo -n "${GITHUB_SHA::7}" > web/version.txt
 
+      - name: Minify web assets
+        # Deploy-only (local dev stays build-free). Runs AFTER the sw.js
+        # version stamp above, and sw.js itself is NEVER minified: index.js's
+        # update checker regex-matches the literal `CACHE_VERSION = "..."`
+        # spacing in the fetched sw.js, so its bytes must stay as-written.
+        #
+        # JS config: --minify-whitespace --minify-syntax ONLY — no
+        # --minify-identifiers. These are classic <script> files sharing one
+        # global scope across files (index.js calls createGlRenderer from
+        # glpresent.js and SDPCodec from sdputil.js; netplay.js calls
+        # window.* hooks index.js defines; em.js reads the global `Module`),
+        # and esbuild minifies each file independently, so renaming any
+        # top-level binding would sever those cross-file references.
+        # Whitespace+syntax keeps every identifier intact (verified: minified
+        # output still declares Module/createGlRenderer/SDPCodec/netConnect
+        # at top level, no IIFE wrapper, no "use strict" injected) while
+        # still removing all comments/whitespace. CSS has no identifier
+        # hazard, so it gets full --minify.
+        #
+        # Filenames are preserved (in-place overwrite): the SW ASSETS list
+        # and the index.html script tags reference them by name.
+        run: |
+          set -eo pipefail
+          .github/scripts/retry.sh 3 npm install --no-save --no-audit --no-fund esbuild@0.28.1
+          for f in index.js netplay.js glpresent.js sdputil.js embed.js; do
+            npx esbuild "web/$f" --minify-whitespace --minify-syntax \
+              --outfile="web/$f" --allow-overwrite
+          done
+          for f in styles.css embed.css; do
+            npx esbuild "web/$f" --minify --outfile="web/$f" --allow-overwrite
+          done
+          # The stamp must have survived (sw.js untouched by the loops above)
+          grep -q "CACHE_VERSION = \"${GITHUB_SHA::7}\"" web/sw.js || {
+            echo "::error::sw.js was altered by minification - update check would break"
+            exit 1
+          }
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

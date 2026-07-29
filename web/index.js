@@ -2853,6 +2853,10 @@ const touchRecent = async (name) => {
 
 // Launch a ROM by name, fetching its bytes from IndexedDB only now.
 const launchRom = async (name) => {
+  // The grid renders before the wasm runtime is up; a tile tapped in that
+  // window waits here (with a "Starting…" toast) instead of crashing in
+  // writeToFS/loadRom below.
+  await ensureRuntimeReady();
   let data = await getRomBytes(name);
   if (!data) {
     showToast("This game's ROM is no longer stored — load the file again");
@@ -4963,6 +4967,7 @@ const handleZipFile = async (file) => {
   if (!looksLikeValidRom(romBytes, innerExt) &&
       !(await confirmSuspectRom(innerName, innerExt))) return;
   let romFile = "rom" + innerExt;
+  await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   writeToFS(romFile, romBytes);
   await addRecentRom(innerName, romBytes, art);
   loadRom(romFile, innerName);
@@ -4981,6 +4986,7 @@ let handleRomFile = (file) => {
     let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
     if (!looksLikeValidRom(bytes, ext) &&
         !(await confirmSuspectRom(file.name, ext))) return;
+    await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
     writeToFS(romName, bytes);
     await addRecentRom(file.name, bytes);
     loadRom(romName, file.name);
@@ -5428,6 +5434,9 @@ const exitLinkMode = async () => {
 };
 
 const launchLinkRom = async (rom) => {
+  // Same runtime gate as launchRom: the 2P button exists on tiles that render
+  // before the wasm runtime is up.
+  await ensureRuntimeReady();
   // Flush whatever was running before
   if (linkMode) {
     await exitLinkMode();
@@ -5735,6 +5744,85 @@ const updateRumble = (timestamp) => {
   }
 };
 
+// --- Early (pre-wasm) boot -------------------------------------------------
+// The home grid reads only IndexedDB metadata, so it must not wait for the
+// wasm (~65% of the payload) to download+compile. initStorage runs at
+// DOMContentLoaded — after every script tag has executed, typically while
+// em.wasm is still in flight — and onRuntimeInitialized awaits storageReady
+// before its wasm-dependent work. The vm test harness (web/tests/helpers.mjs)
+// keeps document.readyState at "loading" and never fires DOMContentLoaded, so
+// tests still drive openDB/migrations/refreshHomeRecent explicitly.
+
+// Resolved once the wasm runtime is initialized. Launch paths touch FS and
+// Module (writeToFS, ccall), so a ROM tile tapped before the runtime exists
+// must wait here instead of crashing. The test harness calls
+// markRuntimeReady() itself — no runtime ever initializes inside the vm.
+let runtimeReady = false;
+let markRuntimeReady = () => {};
+const runtimeReadyPromise = new Promise((resolve) => {
+  markRuntimeReady = () => { runtimeReady = true; resolve(); };
+});
+
+// Queue an FS/Module-touching user action behind runtime init. When the wait
+// is real — a tile tapped during a cold load on a slow connection — say so
+// once, subtly; the queued action proceeds the moment the runtime lands.
+const ensureRuntimeReady = () => {
+  if (runtimeReady) return Promise.resolve();
+  showToast("Starting the emulator…");
+  return runtimeReadyPromise;
+};
+
+const initStorage = async () => {
+  await openDB();
+  // Migrations strictly before anything renders from the records they rewrite.
+  await migrateFromLocalStorage();
+  await migrateRecentFormat();
+  // loadBiosFromStorage is deliberately NOT here: it writes into the
+  // Emscripten FS, which doesn't exist yet. onRuntimeInitialized runs it.
+  // Every load below only reads IndexedDB and sets JS vars / DOM state; their
+  // apply* helpers guard each Module export and no-op without the runtime
+  // (onRuntimeInitialized re-pushes the wasm-side mirrors).
+  await loadKeybindingsFromStorage();
+  await loadLargeControlsFromStorage();
+  await loadOpaqueControlsFromStorage();
+  await loadHideTouchOnGamepadFromStorage();
+  await loadControlStyleFromStorage();
+  await loadAudioSettings();
+  await loadColorCorrect();
+  await loadSystemSettings();
+  await loadVideoSettings();
+  await loadSyncState();
+  await loadRomsSort();
+  refreshSyncUI();
+  startSyncTriggers();
+  // Resume Drive: reuse a still-valid persisted token with no popup (so an
+  // app update / reload keeps the session), else re-grant on the first user
+  // gesture (the token popup is gesture-gated). See resumeDriveOnBoot.
+  resumeDriveOnBoot();
+  refreshHomeRecent();
+};
+
+let storageReadyResolve;
+let storageReadyReject;
+const storageReady = new Promise((resolve, reject) => {
+  storageReadyResolve = resolve;
+  storageReadyReject = reject;
+});
+// onRuntimeInitialized awaits storageReady, so a failed openDB aborts the
+// boot there exactly as it did when these calls lived inline. But if the wasm
+// never arrives, nobody awaits it — don't let the rejection also surface as
+// an unhandled one on top of the real failure.
+storageReady.catch(() => {});
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    initStorage().then(storageReadyResolve, storageReadyReject);
+  }, { once: true });
+} else {
+  // Scripts at the end of <body> always execute before DOMContentLoaded, but
+  // if this file is ever loaded differently (defer/dynamic), boot anyway.
+  initStorage().then(storageReadyResolve, storageReadyReject);
+}
+
 /** @type {EmscriptenModule} */
 var Module = {
   // SDL renders (invisibly) to a dedicated hidden canvas so its WebGL context
@@ -5750,28 +5838,26 @@ var Module = {
     if (IS_IOS && Module._setRewindCapBytes) {
       Module._setRewindCapBytes(16 * 1024 * 1024);
     }
-    await openDB();
-    await migrateFromLocalStorage();
-    await migrateRecentFormat();
+    // Storage boot (openDB, migrations, settings, home grid) started at
+    // DOMContentLoaded so the library rendered without waiting on this
+    // runtime (see initStorage). Everything below reads what it loads, and a
+    // storage failure must keep aborting the boot exactly as it did when the
+    // calls lived inline here.
+    await storageReady;
+    // The FS exists only now — the BIOS/bootrom files can't be written early.
     await loadBiosFromStorage();
-    await loadKeybindingsFromStorage();
-    await loadLargeControlsFromStorage();
-    await loadOpaqueControlsFromStorage();
-    await loadHideTouchOnGamepadFromStorage();
-    await loadControlStyleFromStorage();
-    await loadAudioSettings();
-    await loadColorCorrect();
-    await loadSystemSettings();
-    await loadVideoSettings();
-    await loadSyncState();
-    await loadRomsSort();
-    refreshSyncUI();
-    startSyncTriggers();
-    // Resume Drive: reuse a still-valid persisted token with no popup (so an
-    // app update / reload keeps the session), else re-grant on the first user
-    // gesture (the token popup is gesture-gated). See resumeDriveOnBoot.
-    resumeDriveOnBoot();
-    refreshHomeRecent();
+    // Re-push the wasm-side mirrors of settings loaded while there was no
+    // runtime to receive them (each apply* no-ops without its Module export;
+    // the early loads only set the JS vars + UI).
+    applySystemSettings();
+    applyColorCorrect();
+    applyPitchCorrectFF();
+    applyMp2kHle();
+    applyMotionBlur();
+    // Unblock queued launches (a ROM tile tapped mid-boot) and retire the
+    // home screen's wasm-boot progress strip.
+    markRuntimeReady();
+    document.body.classList.add("runtime-ready");
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;

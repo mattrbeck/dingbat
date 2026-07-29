@@ -17,6 +17,15 @@
          default style) lets iOS reserve the status bar and fill BOTH safe areas
          from the theme-color meta below, which index.js keeps in step with the
          chrome theme — so the strips match the app instead of a static dark bar. -->
+    <!-- Start the em.wasm download NOW, in parallel with the scripts — without
+         this it can't begin until em.js has downloaded and executed (~330 ms
+         into a cold load) even though it's ~65% of the payload. The credentials
+         mode must match em.js's own fetch (fetch(url, {credentials:
+         "same-origin"}) → mode "cors" + same-origin credentials) or the
+         browser refuses to reuse the preload and downloads em.wasm twice;
+         `crossorigin` (anonymous) is that exact pairing. Same bare URL as
+         em.js fetches, so the service worker's cache-first match hits too. -->
+    <link rel="preload" href="em.wasm" as="fetch" crossorigin />
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="shortcut icon" href="favicon.ico" />
@@ -254,6 +263,12 @@
                  drag-and-drop on touch); hidden on desktop. -->
             <button type="button" id="home-load" class="button button-primary">Load a game</button>
           </div>
+
+          <!-- Wasm-boot progress: a thin indeterminate strip shown while the
+               emulator runtime is still downloading/compiling (the home grid
+               now renders before it). CSS delays its fade-in so cached/fast
+               loads never flash it; body.runtime-ready hides it for good. -->
+          <div id="boot-progress" aria-hidden="true"><span></span></div>
 
           <div id="home-recent-wrap" hidden>
             <div class="home-recent-head" id="home-recent-head">

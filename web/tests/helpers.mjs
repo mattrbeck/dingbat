@@ -201,6 +201,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     },
     elementFromPoint: () => null,
     visibilityState: "visible",
+    // Held at "loading" so index.js's early-boot block registers its
+    // DOMContentLoaded listener (which we never fire) instead of kicking off
+    // initStorage — tests drive openDB/migrations/refreshHomeRecent
+    // explicitly, and an auto-boot racing them would be nondeterministic.
+    readyState: "loading",
     body: new FakeElement("body"),
     head: new FakeElement("head"),
     documentElement: new FakeElement("html"),
@@ -355,6 +360,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
 
   // Bring the app's IndexedDB handle up (real openDB against the fake indexedDB).
   await api.openDB();
+
+  // No wasm runtime ever initializes inside the vm, but launch paths
+  // (launchRom / handleRomFile / launchLinkRom) now await it before touching
+  // FS/Module. Mark it ready so those paths run to completion in tests.
+  vm.runInContext("markRuntimeReady()", context);
 
   // Track toast text without touching app code.
   const toastEl = document.getElementById("toast");
