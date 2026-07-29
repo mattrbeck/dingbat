@@ -15,3 +15,17 @@ DirectSound RMS captured per run.
 
 **sweep2**: ok 2354/2354, crashes 0, timeouts 0, probe churn 0; m4a-positive 1033, engaged 1013 (98.1%), foreign-latched 75; music-playing engaged 738, within ±20% 724 (98.1%), median ratio 1.037
 
+## Why span-matched
+
+The `-d:mp2kwav` capture in `src/dingbat/gba/apu.nim` gates the REAL FIFO
+stream on the same predicate as the HLE render (`mp2kWavCapture` only
+accumulates while engaged), so a single run's "HLE RMS vs REAL RMS" compares
+the same audio span. This matters for games whose engine engages late:
+Mother 3's modified m4a holds SoundInfo.ident at ID_NUMBER+10 through a
+~10 s init/intro, and capturing the real FIFO from power-on padded REAL with
+that leading silence — deflating its RMS ~19% and making the HLE read
+"~+23% hot" when the span-matched streams actually agree to within a few
+percent. On Camelot "Bon" driver games the MP2K HLE structurally never
+engages; there the span gate is the gs_bon engagement instead (same
+alignment rationale).
+

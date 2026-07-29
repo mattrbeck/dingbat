@@ -569,9 +569,7 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
         pa = 0x100; pb = 0; pc = 0; pd = 0x100
       # On-line sprite: charge its OBJ rendering time
       obj_cycles -= (if affine: 10 + 2 * width else: width)
-      # Prohibited shape 3 draws nothing but still occupies OBJ time above.
-      # (Unreachable in practice: its height is 0, so the y test above already
-      # rejected it. Kept so the charge/skip order matches the hardware note.)
+      # Prohibited shape 3: unreachable (h=0, rejected above); kept so charge precedes skip as on hardware
       if orig_width == 0: break one_sprite
       # In bitmap modes the lower 16K of OBJ VRAM holds the bitmap, so tiles
       # below 512 don't render (but the sprite still occupies OBJ time)
@@ -882,18 +880,13 @@ proc bgr16_pack*(v: uint64): uint16 {.inline.} =
   ## darken exactly 0). EVY = 17 *does* overflow, so the `min(16, ...)` on
   ## every evy_coefficient read is load-bearing, not decorative.
   ##
-  ## That safety lives entirely in the callers, and nothing structural stops a
-  ## future edit from reading evy_coefficient unclamped. The lane masks below
-  ## would then silently truncate mod 32 — a wrong colour, not a crash, and
-  ## not a channel bleed either (each mask confines its own lane), so it would
-  ## be easy to miss.
-  ##
-  ## A runtime `doAssert` here was measured and rejected: 3 compares per shaded
-  ## pixel cost 1.0-7.3% on -d:release (Metroid Fusion worst), which the native
-  ## GUI would pay. The guard is instead a zero-cost behavioural one —
-  ## tests/ppucomposite_test.nim drives the real compositor with EVY = 16, 17, 31
-  ## and fails if an unclamped read ever reaches this proc. See `nimble
-  ## test_ppucomposite`.
+  ## The safety lives entirely in the callers: an unclamped evy_coefficient
+  ## read would make the lane masks below silently truncate mod 32 — a wrong
+  ## colour, not a crash or a channel bleed. A runtime `doAssert` was measured
+  ## and rejected (3 compares per shaded pixel = 1.0-7.3% on -d:release,
+  ## Metroid Fusion worst); the zero-cost behavioural guard is
+  ## tests/ppucomposite_test.nim driving the real compositor with
+  ## EVY = 16, 17, 31 (`nimble test_ppucomposite`).
   uint16((v and 0x1F'u64) or
          (((v shr 16) and 0x1F'u64) shl 5) or
          (((v shr 32) and 0x1F'u64) shl 10))
@@ -1310,16 +1303,9 @@ proc scanline*(ppu: PPU) =
   if ppu.vcount == 0:
     ppu.skip_render = not ppu.render_dirty
     ppu.render_dirty = false
-    # New frame: the OBJ candidate list gets its rebuild budget back, and is
-    # unconditionally rebuilt once whether or not anything reported an OAM
-    # write. That second part is deliberate belt-and-braces: the list's one
-    # real hazard is a path that mutates OAM without calling oam_touched, and
-    # forcing a rebuild per frame bounds the damage from such a bug to the
-    # remainder of one frame instead of leaving it wrong indefinitely. It is
-    # free in practice -- all five profiled gameplay states already dirty OAM
-    # exactly once per frame, so this rebuild is the one they were doing
-    # anyway, and a title with genuinely static OAM pays one rebuild (about
-    # one line's worth of the old 160-line scan) per frame.
+    # New frame: the OBJ list's rebuild budget comes back, plus one forced
+    # rebuild as the missed-oam_touched backstop (see oam_touched; cost
+    # measurements at OBJ_LIST_REBUILD_LIMIT).
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
   if ppu.skip_render:

@@ -230,59 +230,32 @@ when not defined(test_harness) and not defined(emscripten):
 # ---------------------------------------------------------------------------
 # Lazy waveform catch-up (the four legacy Game Boy PSG channels)
 #
-# Channels 1-4 used to schedule one scheduler event per waveform period, and
-# channel 4 re-armed UNCONDITIONALLY — not even gated on the channel being
-# enabled. At the power-on divisor that is one event every 32 cycles forever:
-# 81% of all scheduler events in Pokemon Emerald, 84% in Mother 3, and the same
-# absolute count in every title because it is fixed by the reset divisor rather
-# than by anything the game does. Worse than the raw dispatch cost, it pinned
-# scheduler.next_event 32 cycles out permanently, which defeats scheduler.tick's
-# fast path, bus.catch_up's fast path, and every skip-ahead the HALT/waitloop
-# subsystem exists to perform.
-#
-# Gating the re-arm on `enabled` measures exactly zero: the m4a sound driver
-# leaves channel 4 genuinely on. There is no parked-silent-channel shortcut
-# here, so each channel now carries a `next_step` deadline and is advanced in
-# closed form when something can observe it — pos = (pos + N) and 7 for a
-# square, (pos + N) mod 32 (plus a bank flip per wrap) for the wave pointer.
-# This is what mGBA (GBAudioRun, src/gb/audio.c — shared with its GBA path) and
-# Gambatte (DutyUnit::updatePos) do. It is phase-exact, so a trigger still
-# inherits the free-running phase the way hardware does (hardware only resets
-# the duty counter on an APU power-off), which PARKING the channels would not.
-#
-# The complete set of observation points, and where each is handled:
-#
-#   1. etAPUSample / get_sample — reads every channel's amplitude. Handled
-#      below, gated on `enabled` because a disabled channel's amplitude is 0
-#      regardless of phase. 549 samples/frame vs ~8800 channel events.
-#   2. etAPUFrameSeq / tick_frame_sequencer — sweep_step rewrites CH1's
-#      frequency (i.e. its period), so every channel must be current first.
-#   3. Any write to 0x60-0x84 or wave RAM 0x90-0x9F — may change the period, the
-#      duty, the wave bank/dimension, or trigger. `[]=` catches the target
-#      channel up BEFORE the write lands, so collapsed cycles always use the
-#      period that was actually in force for them. SOUNDCNT_X (0x84) syncs all
-#      four: its power-off arm rewrites every channel register.
-#   4. Wave RAM READ at 0x90-0x9F — while CH3 is enabled this resolves against
-#      wave_ram_position, not the address (GBATEK), so `[]` syncs CH3 first.
-#   5. SOUNDCNT_X (0x84) READ — its channel-active bits report `enabled`, and no
-#      catch-up ever writes `enabled` (they only touch phase state), so no sync
-#      is needed. Documented at the read.
-#   6. RegisterRamReset's sound phase (SWI 0x01, hle_bios.nim) — the one place
-#      outside this file that cleared the etAPUChannel* events. apu_park_steps.
-#   7. The per-frame scheduler rebase — next_step is an ABSOLUTE cycle and has
-#      to move with the events. gba.end_frame; also bounds how stale a deadline
-#      can get, which keeps CH4's shift loop and the wasm uint32 CycleCount safe.
-#   8. Save states, and therefore rollback + netplay LinkSnapshots (which are
-#      built from state_payload) — savestate.nim converts next_step to and from
-#      an etAPUChannel* event, so the state format is byte-identical to the
-#      pre-catch-up one in both directions and snapshots stay interchangeable.
-#
-# Points the GB core has and the GBA does not: there is no PCM12/PCM34 register
-# pair on the GBA (GBATEK's sound map runs 4000060h-40000A7h and has no
-# equivalent of the CGB's FF76/FF77), and there is no CGB double-speed switch,
-# so scheduler.speed is always 0 here and the deadlines need no rescaling. The
-# DirectSound FIFO channels (dma_channels.nim) are timer/DMA driven and share
-# no state with the PSG.
+# Same design as the GB core: no per-period scheduler events; each channel
+# carries a `next_step` deadline and is advanced in closed form at its
+# observation points. The full rationale, the closed-form math, the
+# mGBA/Gambatte precedent and the numbered observation-point audit live at
+# gb/apu.nim's "Lazy waveform catch-up" header (mGBA's cited GBAudioRun is its
+# GB audio path, shared with its GBA core). GBA-specific deltas only:
+#  * Motivation here: CH4's per-period event was re-armed UNCONDITIONALLY (not
+#    even gated on `enabled`) — one event every 32 cycles forever at the
+#    power-on divisor: 81% of all scheduler events in Pokemon Emerald, 84% in
+#    Mother 3, the same absolute count in every title (fixed by the reset
+#    divisor, not by the game). It also pinned scheduler.next_event 32 cycles
+#    out permanently, defeating scheduler.tick's and bus.catch_up's fast paths
+#    and every HALT/waitloop skip-ahead. Gating the re-arm on `enabled`
+#    measures exactly zero — the m4a driver leaves CH4 genuinely on, so unlike
+#    the GB there is no parked-silent-channel shortcut.
+#  * CH3's closed form adds a bank flip per 32-entry wrap.
+#  * Observation points: the register block is 0x60-0x84 plus wave RAM
+#    0x90-0x9F (`[]`/`[]=` below); SOUNDCNT_X (0x84) writes sync all four
+#    channels, since its power-off arm rewrites every channel register.
+#    get_sample runs 549 samples/frame vs ~8800 channel events here.
+#    RegisterRamReset's sound phase (SWI 0x01, hle_bios.nim) is a GBA-only
+#    point — see apu_park_steps. The per-frame rebase point is gba.end_frame.
+#  * No PCM12/PCM34 register pair exists (GBATEK's sound map runs
+#    4000060h-40000A7h) and no CGB double-speed switch — scheduler.speed is
+#    always 0 here, so the deadlines never need rescaling. The DirectSound
+#    FIFO channels (dma_channels.nim) are timer/DMA driven, no shared PSG state.
 # ---------------------------------------------------------------------------
 
 proc apu_catchup_all*(apu: APU) {.inline.} =
@@ -408,19 +381,11 @@ proc get_sample*(apu: APU) =
                    apu.gba.mp2k.mixer_live and apu.gba.mp2k.unlatch_watch
   when defined(mp2kwav):
     # The game's OWN FIFO output, for A/B calibration against the HLE render.
-    # When the HLE is enabled, capture over EXACTLY the span the HLE captures
-    # (mp2kWavCapture only accumulates while engaged — render_sample below):
-    # gating both streams on the same predicate keeps them sample-aligned, so
-    # a single run's "HLE rms vs REAL rms" compares the same audio span. This
-    # matters for games whose engine engages late: Mother 3's modified m4a
-    # holds SoundInfo.ident at ID_NUMBER+10 through a ~10 s init/intro, and
-    # capturing the real FIFO from power-on padded REAL with that leading
-    # silence — deflating its RMS ~19% and making the HLE read "~+23% hot"
-    # when the span-matched streams actually agree to within a few percent.
-    # With the HLE disabled (e.g. DINGBAT_NOHLE=1 reference runs) there is no
-    # HLE span to match, so capture the whole run as before. On Camelot "Bon"
-    # driver games the MP2K HLE structurally never engages — there the span
-    # gate is the gs_bon engagement instead (same alignment rationale).
+    # Gated on the same predicate as the HLE/gs_bon capture so both streams
+    # cover the same audio span: capturing REAL from power-on deflated its RMS
+    # with leading silence (the Mother 3 story — see "Why span-matched" in
+    # tests/mp2k_sweep_results/SUMMARY.md). With the HLE disabled (e.g.
+    # DINGBAT_NOHLE=1 reference runs) capture the whole run as before.
     if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst or
        mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a

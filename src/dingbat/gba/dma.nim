@@ -5,13 +5,10 @@ const
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   # DAD keeps all 28 bits on every channel. Channels 0-2 cannot drive the
   # gamepak bus as a destination: such writes are DROPPED at transfer time
-  # (see run_channel), NOT redirected to the 27-bit-masked internal address.
-  # Evidence (mGBA suite, hardware-captured expected values): the Memory
-  # sub-suite's testStoreSRAM does DMA0/1/2 pattern writes to 0x0E000000;
-  # a 27-bit mask would land them at VRAM 0x06000000 (BG1 screen base),
-  # yet the DMA sub-suite's "0 Imm/HBl W -SRAM" and "R+0x10" rows later
-  # observe 0x00000000 there via DMA0's genuinely-27-bit SAD (masked reads
-  # DO hit VRAM: the passing "+SRAM" rows read live text-map data).
+  # (see run_channel), NOT redirected to the 27-bit-masked internal address —
+  # a mask would land testStoreSRAM's 0x0E000000 writes in VRAM. The mGBA
+  # suite's Memory/DMA (±SRAM) rows distinguish the two: reads through DMA0's
+  # genuinely-27-bit SAD DO hit VRAM, the dropped writes never appear there.
   DMA_DST_MASK = [0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   DMA_LEN_MASK = [0x3FFF'u16,     0x3FFF'u16,     0x3FFF'u16,     0xFFFF'u16    ]
 

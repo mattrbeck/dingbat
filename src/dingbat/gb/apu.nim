@@ -125,9 +125,9 @@ when not defined(test_harness):
 #      Handled below. ~549/frame at 32768 Hz vs 70k channel events.
 #   2. 0xFF30-0xFF3F wave RAM read AND write while CH3 is enabled -- resolves
 #      against wave_ram_position, not the address. apu_read/apu_write.
-#   3. 0xFF76/0xFF77 PCM12/PCM34 -- expose the raw per-channel digital output.
-#      Stubbed to 0x00 on this branch; the catch-up call is wired up anyway so
-#      the real implementation drops in without a correctness question.
+#   3. 0xFF76/0xFF77 PCM12/PCM34 -- expose the raw per-channel digital output
+#      at cycle resolution, so the catch-up is load-bearing. gb/memory.nim
+#      syncs all four channels before assembling either register.
 #   4. Any 0xFF10-0xFF26 register write -- may change the period, the duty, or
 #      trigger. apu_write catches the target channel up first so collapsed
 #      cycles always use the period that was actually in force for them.
@@ -223,12 +223,11 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
 
 proc get_sample*(apu: GbApu; gb: GB) =
   # Gated on `enabled` because a disabled channel's amplitude is 0 regardless
-  # of phase -- that is the whole win: the three silent channels Alone in the
-  # Dark parks at 0x7FF now cost nothing per sample, and their phase is still
-  # exact because the closed form is evaluated from the stale deadline at the
-  # next thing that CAN see it (a trigger, or the frame-boundary rebase).
-  # NOT gated on channel_mask: that is a debug mute, and skipping the catch-up
-  # would let CH4's shift loop fall behind by more than a frame.
+  # of phase (the header's Alone-in-the-Dark win) -- its steps simply accumulate
+  # until the next thing that CAN see it (a trigger, or the frame-boundary
+  # rebase), and the closed form then replays them exactly. NOT gated on
+  # channel_mask: that is a debug mute, and skipping the catch-up would let
+  # CH4's shift loop fall behind by more than a frame.
   const OBS = uint32(GB_SAMPLE_PERIOD)
   if apu.channel1.enabled: ch1_catchup_at(apu.channel1, gb, OBS)
   if apu.channel2.enabled: ch2_catchup_at(apu.channel2, gb, OBS)

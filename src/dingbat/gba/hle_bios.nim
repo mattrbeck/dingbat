@@ -395,9 +395,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # Real-BIOS SWI dispatch (0x140) switches to System mode and pushes
   # {r2, lr} onto the SYSTEM/USER stack before calling every routine; the
   # routines push their own frames below that. The pops restore everything,
-  # but the words STAY in memory below sp — deterministic residue that games
-  # can observe by reading uninitialized stack (Prince of Tennis 2004's
-  # sound engine reads such a slot and takes a different path without it).
+  # but the words STAY in memory below sp — deterministic residue games read
+  # from uninitialized stack (Prince of Tennis 2004: see hle_intr_wait).
   # Model the dispatcher pair here and the per-routine frames below.
   if swi_num != 0x00:  # SoftReset wipes this RAM anyway
     let usp = cpu.sys_sp()

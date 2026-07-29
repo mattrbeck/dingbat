@@ -69,10 +69,8 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   var seq: bool
   if bus.dma_active:
     # DMA: src and dst streams each keep their own burst; no back-to-back
-    # requirement. LRU pair of trackers handles the interleaving. An access
-    # immediately following another ROM access (e.g. the write of a
-    # ROM-to-ROM transfer right after its read) is also sequential-timed:
-    # the ROM bus is still hot.
+    # requirement. LRU pair of trackers handles the interleaving. (Hot-bus
+    # accesses are also sequential-timed — the `contiguous` branch below.)
     if address == bus.rom_next_addr:
       seq = true
     elif address == bus.rom_next_addr2:
@@ -378,11 +376,10 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u16_ptr(bus.bios, address and 0x3FFF'u32)
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
-      # Page-0 out-of-bounds is unused memory (open bus), not protected BIOS.
+      # Page-0 out-of-bounds -> open bus (see read_byte_internal)
       uint16(bus.read_open_bus_value(address)) or (uint16(bus.read_open_bus_value(address or 1)) shl 8)
     else:
-      # BIOS reads are latched to last successful read
-      # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
+      # BIOS latch (see read_byte_internal)
       let shift = (address and 2) * 8
       uint16(bus.bios_latch shr shift)
   of 0x1: uint16(bus.read_open_bus_value(address)) or (uint16(bus.read_open_bus_value(address or 1)) shl 8)
@@ -420,14 +417,13 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u32_ptr(bus.bios, address and 0x3FFF'u32)
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
-      # Page-0 out-of-bounds is unused memory (open bus), not protected BIOS.
+      # Page-0 out-of-bounds -> open bus (see read_byte_internal)
       let v = bus.read_open_bus_value(address)
       uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
       (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
       (uint32(bus.read_open_bus_value(address or 3)) shl 24)
     else:
-      # BIOS reads are latched to last successful read
-      # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
+      # BIOS latch (see read_byte_internal)
       bus.bios_latch
   of 0x1:
     let v = bus.read_open_bus_value(address)
