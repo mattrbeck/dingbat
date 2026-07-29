@@ -4592,6 +4592,34 @@ const loadControlStyleFromStorage = async () => {
   applyJoystickMode(await dbGet("joystick-mode"));
 };
 
+// --- Run-ahead (latency reduction, opt-in) ---
+// 0 = off (default): the tick loop calls plain loop_tick, the identical
+// path that exists without this feature — zero cost until someone opts in.
+// N > 0 swaps the single-core step for runahead_tick(N) (see the algorithm
+// notes in docs/run-ahead.md). Deliberately not engaged during
+// fast-forward/2x/slow-mo (N+1x the work for no latency benefit) and never
+// in the frame-synced link modes.
+let runaheadFrames = 0;
+const runaheadChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#runahead-picker .choice-chip")));
+
+const applyRunahead = (n) => {
+  runaheadFrames = [0, 1, 2, 3].includes(n) ? n : 0;
+  syncChipGroup(runaheadChips, String(runaheadFrames));
+};
+
+runaheadChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyRunahead(Number(chip.dataset.value));
+    await dbPut("runahead", runaheadFrames);
+  })
+);
+
+const loadRunaheadFromStorage = async () => {
+  const v = await dbGet("runahead");
+  applyRunahead(typeof v === "number" ? v : 0);
+};
+
 // --- Chrome theme (background / buttons / menus color scheme) ---
 // Persisted in localStorage — NOT IndexedDB — so the inline <head> script can
 // apply it synchronously before first paint (no flash of the wrong theme).
@@ -4658,6 +4686,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
+  "runahead",
 ];
 
 const resetAllSettings = async () => {
@@ -4713,6 +4742,9 @@ const resetAllSettings = async () => {
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
+
+  // Run-ahead -> off
+  applyRunahead(0);
 
   // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
   // theme section: the <head> boot script needs a synchronous read)
@@ -6219,6 +6251,7 @@ const initStorage = async () => {
   await loadOpaqueControlsFromStorage();
   await loadHideTouchOnGamepadFromStorage();
   await loadControlStyleFromStorage();
+  await loadRunaheadFromStorage();
   await loadAudioSettings();
   await loadColorCorrect();
   await loadSystemSettings();
@@ -6781,10 +6814,17 @@ var Module = {
         // doubles the samples to match).
         const step = speed2x ? FRAME_TIME / 2 : slowMotion ? FRAME_TIME * 2 : FRAME_TIME;
         const maxFrames = speed2x ? 4 : 2;
+        // Run-ahead engages only at normal speed: at 2x/slow-mo the (N+1)x
+        // per-frame cost buys nothing (latency is dominated by the speed
+        // change itself), and with it off this line picks the identical
+        // loop_tick call that predates the feature — zero cost while off.
+        const useRunahead = runaheadFrames > 0 && !speed2x && !slowMotion &&
+          typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
           applyTurboPulse();
-          Module._loop_tick();
+          if (useRunahead) Module._runahead_tick(runaheadFrames);
+          else Module._loop_tick();
           pushAudio();
           frameCount++;
           accumulator -= step;

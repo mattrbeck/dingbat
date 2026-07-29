@@ -1,9 +1,28 @@
 # Run-ahead: findings & design notes
 
-Status (2026-07-29): **prototyped, not shipped**. Working implementation +
-A/B harness live on branch `worktree-feature-prototypes` (commits 55c9487,
-fc65209). This doc captures what was learned so the feature can be built
-for real later without re-deriving it.
+Status (2026-07-29): implemented behind an **opt-in runtime setting**
+(Settings → Controls → Run-ahead, default Off, chips Off/1/2/3) on branch
+`worktree-feature-prototypes`. This doc captures the algorithm, the
+measurements, and the design decisions.
+
+## Cost of the runtime option (measured)
+
+Off is free by construction: the tick loop's Off path calls the identical
+`loop_tick` that predates the feature (one boolean test per RAF tick in JS
+selects the export). Verified two ways:
+
+- `tools/webbench` interleaved A/B, pristine-main control rebuilt with the
+  same emcc vs the feature branch, best-of-N over Emerald + Kirby:
+  emu/tick/ffsim deltas **0.2–1.6% in the branch's favor** — inside the
+  harness's ~1.3% noise floor. No regression from any prototype change
+  (including the per-sample slow-mo flag test in appendAudioSample).
+- Direct per-call timing: `loop_tick` 2.44 ms vs `runahead_tick(0)` 2.30 ms
+  — the degenerate path is not slower, so routing everything through one
+  export would also be fine if ever preferred.
+
+Toolchain footnote from the same session: the *deployed* em.wasm (built
+Jul 26) measured ~12% slower than a fresh rebuild of identical sources
+with emsdk 4.0.23 — rebuilding is worth a free double-digit win on its own.
 
 ## What it is
 
@@ -92,16 +111,25 @@ n=2 could exceed budget there; needs measurement before shipping a setting.
   the rig measures response latency, not lockstep identity — the right
   metric for this feature.
 
-## If/when this ships for real
+## The shipped setting (web)
 
-- Setting shape: per-game override (games differ in internal lag; wrong N
-  eats real time), default off, 1–2 typical. Finding N for a game: pause,
-  hold a direction, frame-advance until the character reacts, minus one.
-- Interactions to gate: netplay/link (hard off), and a future
-  RetroAchievements hardcore mode treats run-ahead as fine (RA allows it)
-  but rewind/states/cheats not.
+Settings → Controls → Run-ahead: chip group Off/1/2/3, default Off,
+persisted under the `runahead` IndexedDB key, included in SETTINGS_KEYS /
+reset-to-defaults. The tick loop engages `runahead_tick(N)` only in the
+normal-speed single-core branch — never during fast-forward, 2x or slow
+motion (the (N+1)x per-frame cost buys nothing there) and structurally
+never in the link/rollback/net branches. Frame advance and the FF loop
+keep calling `loop_tick`.
+
+## Still open for a full release
+
+- Per-game N override (games differ in internal lag; wrong N eats real
+  time). Finding N for a game: pause, hold a direction, frame-advance
+  until the character reacts, minus one.
+- A future RetroAchievements hardcore mode treats run-ahead as fine (RA
+  allows it) but rewind/states/cheats not.
 - Native frontend could reuse the identical algorithm around its own
   save/load; nothing here is wasm-specific except the framebuffer-retention
   detail (native presents via its own path).
-- Phone perf pass first (see cost table); consider auto-disabling below a
+- Phone perf pass (see cost table); consider auto-disabling below a
   headroom threshold rather than exposing a footgun.

@@ -531,6 +531,18 @@
               <span class="switch-track"></span>
             </label>
           </div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Run-ahead</span>
+              <span class="modal-toggle-sub">Hides the game's own input lag by showing a predicted future frame — most games are built around 1&ndash;2 frames. Costs extra CPU per frame; ignored during fast-forward, 2&times;, slow motion and multiplayer</span>
+            </div>
+            <div id="runahead-picker" class="chip-row" role="radiogroup" aria-label="Run-ahead frames">
+              <button type="button" class="choice-chip selected" data-value="0" role="radio" aria-checked="true">Off</button>
+              <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false">1</button>
+              <button type="button" class="choice-chip" data-value="2" role="radio" aria-checked="false">2</button>
+              <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false">3</button>
+            </div>
+          </div>
           <div id="kb-section">
             <div class="modal-subhead">Keyboard</div>
             <div class="modal-row">
