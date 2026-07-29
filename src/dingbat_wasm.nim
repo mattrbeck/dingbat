@@ -62,6 +62,11 @@ var stateNet: NetCore = nil
 # must reach the live cores) can reference them. Mutually exclusive.
 var stateRollback: RollbackSession = nil
 var stateGbRollback: gbrb.GbRollbackSession = nil
+# 2P local link sessions (see the link-mode block further down). Declared here
+# for the same earlier-proc-reference reason: runahead_tick refuses to run
+# while a link session exists.
+var stateLink: Link = nil
+var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
 # Speculative rollback is opt-in for now (proven bit-identical to the blocking
 # path in the native tests, but the interactive Emerald trade is unverified):
 # JS enables it from a ?speculative=1 URL param before netlink_init/attach.
@@ -535,10 +540,15 @@ var runaheadFrame: seq[uint16] = @[]
 
 proc runahead_tick(n: cint) {.exportc.} =
   ## loop_tick with N frames of run-ahead. n <= 0 behaves exactly like
-  ## loop_tick. Single-core modes only (the linked modes are frame-synced
-  ## with a peer; running ahead would desync them).
+  ## loop_tick. Single-core modes only: the linked modes are frame-synced
+  ## with a peer (running ahead would desync them), 2P link already runs two
+  ## cores per frame (run-ahead would multiply that), and in every linked
+  ## mode stateGba/stateGb may point at a stale single-core session — the
+  ## guards below make a mistimed JS call a no-op instead of stepping it.
   if stateRenderer == nil: return
   if stateNet != nil: return
+  if stateLink != nil or stateGbLink != nil: return
+  if stateRollback != nil or stateGbRollback != nil: return
   inc frameCount
   checkInput()
   case stateKind
@@ -715,8 +725,8 @@ proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
 # at module scope and only ever allocated from JS-invoked procs — this
 # build's main() returns after init and Nim's exit teardown would leave
 # module-init heap globals dangling (see rewindHistory above).
-var stateLink: Link = nil
-var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
+# (stateLink / stateGbLink are declared up top beside stateNet so earlier
+# procs — runahead_tick's link guard — can reference them.)
 var linkRgba: array[2, seq[uint32]]
 
 proc link_exit() {.exportc.} =
