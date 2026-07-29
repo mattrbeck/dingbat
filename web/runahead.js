@@ -31,23 +31,46 @@ const sendRom = (frame) => {
 
 window.addEventListener("message", (e) => {
   if (e.origin !== window.location.origin) return;
-  if (e.data && e.data.type === "db-ready") {
+  const msg = e.data;
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type === "db-ready") {
     ready.add(e.source);
     // A pane that (re)loaded after the ROM was picked catches up here
     if (e.source === leftFrame.contentWindow) sendRom(leftFrame);
     if (e.source === rightFrame.contentWindow) sendRom(rightFrame);
+  } else if (msg.type === "db-key") {
+    // A focused pane forwarded a keystroke (bridge mode intercepts it before
+    // SDL): apply it through the same shared path as this page's keyboard,
+    // so both cores stay on identical input wherever focus lives.
+    applyKey(msg.code, msg.down);
   }
 });
 
-romInput.addEventListener("change", async () => {
-  const file = romInput.files && romInput.files[0];
-  if (!file) return;
-  romBytes = await file.arrayBuffer();
-  romName = file.name;
+const useRom = (bytes, name) => {
+  romBytes = bytes;
+  romName = name;
   sendRom(leftFrame);
   sendRom(rightFrame);
   statusEl.textContent =
     `${romName} loaded in both panes — baseline vs runahead_tick(${raSelect.value}).`;
+};
+
+romInput.addEventListener("change", async () => {
+  const file = romInput.files && romInput.files[0];
+  if (!file) return;
+  useRom(await file.arrayBuffer(), file.name);
+  romInput.blur(); // keys must drive the game now, not the file input
+});
+
+// One-click demo: the repo's own goodboy demo ROM (served next to this page)
+document.getElementById("demo-rom").addEventListener("click", async (e) => {
+  const res = await fetch("goodboy-demo-en.gba");
+  if (!res.ok) {
+    statusEl.textContent = "Couldn't fetch goodboy-demo-en.gba";
+    return;
+  }
+  useRom(await res.arrayBuffer(), "goodboy-demo-en.gba");
+  /** @type {HTMLButtonElement} */ (e.currentTarget).blur();
 });
 
 // Changing N reloads the right pane with the new query param; db-ready
@@ -81,16 +104,23 @@ const updateFlash = () => {
   document.body.classList.toggle("btn-down", held.size > 0);
 };
 
-const onKey = (e, down) => {
-  const id = KEYMAP[e.code];
+// Shared application point for this page's keyboard AND db-key forwards
+// from a focused pane — one path, identical input in both cores.
+const applyKey = (code, down) => {
+  const id = KEYMAP[code];
   if (id === undefined) return;
+  postBoth({ type: "db-input", id, down });
+  if (down) held.add(id); else held.delete(id);
+  updateFlash();
+};
+
+const onKey = (e, down) => {
+  if (KEYMAP[e.code] === undefined) return;
   const t = /** @type {HTMLElement|null} */ (e.target);
   if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "BUTTON")) return;
   e.preventDefault();
   if (down && e.repeat) return;
-  postBoth({ type: "db-input", id, down });
-  if (down) held.add(id); else held.delete(id);
-  updateFlash();
+  applyKey(e.code, down);
 };
 
 document.addEventListener("keydown", (e) => onKey(e, true));

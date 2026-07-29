@@ -54,6 +54,7 @@
   <h1>Run-ahead A/B — same input to both cores</h1>
   <div id="toolbar">
     <input type="file" id="rom-file" accept=".gba,.gb,.gbc" />
+    <button type="button" id="demo-rom">Load demo ROM</button>
     <label>Run-ahead frames:
       <select id="ra-frames">
         <option>1</option>
@@ -69,18 +70,19 @@
   <div id="panes">
     <div class="pane">
       <div class="pane-label"><b>Baseline</b><span>ordinary loop_tick</span></div>
-      <iframe id="left" src="embed.html" title="Baseline core"></iframe>
+      <iframe id="left" src="embed.html?bridge" title="Baseline core"></iframe>
       <div class="flash"></div>
     </div>
     <div class="pane">
       <div class="pane-label"><b>Run-ahead</b><span id="ra-label">runahead_tick(2)</span></div>
-      <iframe id="right" src="embed.html?runahead=2" title="Run-ahead core"></iframe>
+      <iframe id="right" src="embed.html?runahead=2&amp;bridge" title="Run-ahead core"></iframe>
       <div class="flash"></div>
     </div>
   </div>
   <p id="help">
-    Keyboard drives <em>both</em> panes at once (keep focus on this page —
-    don't click inside a pane): arrows = D-pad, <kbd>Z</kbd> A, <kbd>X</kbd> B,
+    Keyboard drives <em>both</em> panes at once, wherever focus is (a focused
+    pane forwards its keys back through the shared path): arrows = D-pad,
+    <kbd>Z</kbd> A, <kbd>X</kbd> B,
     <kbd>Enter</kbd> Start, <kbd>Backspace</kbd> Select, <kbd>A</kbd>/<kbd>S</kbd> L/R.
     The amber bars flash while any game button is held — film the screen in
     slo-mo and count frames from flash to on-screen response in each pane.

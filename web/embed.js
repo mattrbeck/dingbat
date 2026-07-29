@@ -8,11 +8,39 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Tab") e.stopImmediatePropagation();
 }, true);
 
+// Bridge-mode keyboard forwarding. Registered here — before em.js loads —
+// for the same reason as the Tab hatch above: these capture handlers must
+// outrank SDL's window-level key grab so a bridged embed NEVER applies its
+// own keyboard input locally (the parent echoes it back as db-input to every
+// pane instead, keeping the cores' input identical and simultaneous).
+// Key set mirrors BRIDGE_KEYS in web/runahead.js.
+{
+  const p = new URLSearchParams(window.location.search);
+  if (p.has("bridge") && window.parent !== window) {
+    const BRIDGE_CODES = new Set([
+      "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      "KeyZ", "KeyX", "Backspace", "Enter", "KeyA", "KeyS",
+    ]);
+    const forward = (e, down) => {
+      if (!BRIDGE_CODES.has(e.code)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (down && e.repeat) return;
+      window.parent.postMessage(
+        { type: "db-key", code: e.code, down }, window.location.origin);
+    };
+    window.addEventListener("keydown", (e) => forward(e, true), true);
+    window.addEventListener("keyup", (e) => forward(e, false), true);
+  }
+}
+
 // --- Query parameters ---
 
 const params = new URLSearchParams(window.location.search);
 const integerScaling = params.get("integer-scaling") !== "false";
 const demoMode = params.has("demo");
+// (?bridge is handled at the top of this file — it must hook the keyboard
+// in the capture phase before em.js registers SDL's handlers.)
 // Run-ahead latency reduction (see runahead_tick in src/dingbat_wasm.nim):
 // ?runahead=N runs every frame N frames into the future. Used by the
 // web/runahead.html A/B harness; 0/absent = the ordinary loop_tick path.
