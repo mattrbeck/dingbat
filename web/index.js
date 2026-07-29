@@ -3248,27 +3248,34 @@ let toastTimer = null;
 const showToast = (msg) => {
   let t = document.getElementById("toast");
   t.textContent = msg;
+  t.onclick = null; // disarm a lingering action toast's tap handler
   t.classList.remove("has-action");
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
 };
 
-// Toast with a single action button (e.g. "Resume", "Undo"). Lingers longer
-// than a plain toast so there's time to react; any showToast replaces it.
+// Toast with a single action (e.g. "Resume", "Undo"). The ENTIRE toast is
+// the tap target — on phones the labeled button alone is a small, missable
+// pill, and users tap the text anyway. Lingers longer than a plain toast;
+// any later toast replaces it.
 const showActionToast = (msg, label, fn, ms = 8000) => {
   const t = document.getElementById("toast");
-  t.textContent = msg + " ";
+  t.textContent = "";
+  const span = document.createElement("span");
+  span.className = "toast-msg";
+  span.textContent = msg;
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "toast-action";
   btn.textContent = label;
-  btn.addEventListener("click", () => {
+  t.append(span, btn);
+  t.onclick = () => {
+    t.onclick = null;
     t.classList.remove("show", "has-action");
     clearTimeout(toastTimer);
     fn();
-  });
-  t.appendChild(btn);
+  };
   t.classList.add("show", "has-action");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show", "has-action"), ms);
@@ -4869,7 +4876,7 @@ window.addEventListener("load", () =>
   }, 1500)
 );
 
-const loadRom = async (romName, originalName) => {
+const loadRom = async (romName, originalName, opts = {}) => {
   // A clip recorder spanning a ROM switch would splice two games together
   if (typeof stopClipRecording === "function") stopClipRecording();
   // Leaving 2P link mode: flush and persist both players' saves first
@@ -4909,7 +4916,9 @@ const loadRom = async (romName, originalName) => {
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
-  offerAutoResume();      // async: "Resume last session?" toast if one exists
+  // async: "Resume last session?" toast if one exists (the reset button
+  // opts out — it shows its own Undo toast for the state it just discarded)
+  if (!opts.skipResumeOffer) offerAutoResume();
   setTimeout(() => logViewportDiag("romload"), 500);
 };
 
@@ -5217,9 +5226,27 @@ pauseButton.addEventListener("click", () => {
   document.body.classList.toggle("paused", paused);
 });
 
-resetButton.addEventListener("click", () => {
-  if (linkMode && linkRomEntry) launchLinkRom(linkRomEntry);
-  else if (currentRomName) loadRom(currentRomName, currentOriginalName);
+resetButton.addEventListener("click", async () => {
+  if (linkMode && linkRomEntry) {
+    launchLinkRom(linkRomEntry);
+    return;
+  }
+  if (!currentRomName) return;
+  // Reset with a way back: snapshot the state being thrown away and offer
+  // it on a toast, exactly like loading a save state does. The auto-resume
+  // offer is suppressed for this reload — right after a deliberate reset it
+  // is stale noise, and it would race this toast for the shared slot.
+  const undo = captureStateBytes();
+  const name = currentOriginalName;
+  await loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
+  if (undo) {
+    stateUndoBytes = undo; // fresh core: re-arm the buffer loadRom cleared
+    stateUndoName = name;
+    showActionToast("Game reset", "Undo", () => {
+      if (currentOriginalName !== name) return; // switched games since
+      if (applyStateBytes(undo)) showToast("Back to before the reset");
+    });
+  }
 });
 
 // 2x speed and unbounded fast forward are radio-style: fast forward would

@@ -2169,13 +2169,34 @@ body.debug-2p .home-tile-link {
 /* Action toasts ("Resume", "Undo", "Enable tilt") carry one tappable button;
    the base toast is pointer-events: none so it never blocks the game, so the
    interactive variant re-enables hit-testing only while shown. (Class-based
-   rather than :has() — iOS 15.0-15.3 lacks :has support.) */
+   rather than :has() — iOS 15.0-15.3 lacks :has support.)
+   Flex layout, message in its own ellipsizing span: the base toast's
+   nowrap+overflow:hidden clipped the BUTTON clean off on phone widths,
+   leaving an action toast with no visible way to act on it. The button is
+   flex-shrink:0 so it always survives; the text gives way instead. The
+   whole toast is also click-armed in JS — one big tap target. */
 #toast.show.has-action {
   pointer-events: auto;
+  cursor: pointer;
+}
+
+#toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92%, 480px);
+}
+
+.toast-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toast-action {
-  margin-left: 8px;
+  flex-shrink: 0;
   padding: 3px 12px;
   border-radius: 999px;
   border: 1px solid var(--border-2);
@@ -2186,6 +2207,7 @@ body.debug-2p .home-tile-link {
   cursor: pointer;
 }
 
+#toast.has-action:active .toast-action,
 .toast-action:active {
   filter: brightness(1.2);
 }
