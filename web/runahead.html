@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dingbat — run-ahead A/B</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: #141210; color: #e8e2d6;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      padding: 16px;
+    }
+    h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    #toolbar {
+      display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      justify-content: center;
+    }
+    button, select, input[type="file"] {
+      font: inherit; color: inherit; background: #262219; border: 1px solid #4a4335;
+      border-radius: 8px; padding: 6px 12px; cursor: pointer;
+    }
+    #panes {
+      display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+      width: 100%; max-width: 1400px;
+    }
+    .pane { flex: 1 1 480px; max-width: 680px; display: flex; flex-direction: column; gap: 6px; }
+    .pane-label { display: flex; justify-content: space-between; align-items: baseline; }
+    .pane-label b { font-size: 15px; }
+    .pane-label span { opacity: 0.7; font-size: 12px; }
+    iframe {
+      width: 100%; aspect-ratio: 3 / 2; border: 1px solid #4a4335;
+      border-radius: 10px; background: #000;
+    }
+    /* Input flash marker: lights the instant a game button is DOWN, so a
+       high-speed phone video can count frames from flash -> sprite response
+       in each pane independently. */
+    .flash {
+      height: 10px; border-radius: 5px; background: #33301f;
+      transition: none;
+    }
+    body.btn-down .flash { background: #ffb454; box-shadow: 0 0 12px #ffb454; }
+    #help { max-width: 900px; opacity: 0.75; font-size: 13px; }
+    #help kbd {
+      background: #262219; border: 1px solid #4a4335; border-radius: 4px;
+      padding: 0 5px; font-size: 12px;
+    }
+    #status { font-size: 13px; opacity: 0.8; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>Run-ahead A/B — same input to both cores</h1>
+  <div id="toolbar">
+    <input type="file" id="rom-file" accept=".gba,.gb,.gbc" />
+    <label>Run-ahead frames:
+      <select id="ra-frames">
+        <option>1</option>
+        <option selected>2</option>
+        <option>3</option>
+        <option>4</option>
+      </select>
+    </label>
+    <button type="button" id="reset-both">Reset both</button>
+    <button type="button" id="pause-both">Pause both</button>
+  </div>
+  <div id="status">Pick a ROM to load it into both panes.</div>
+  <div id="panes">
+    <div class="pane">
+      <div class="pane-label"><b>Baseline</b><span>ordinary loop_tick</span></div>
+      <iframe id="left" src="embed.html" title="Baseline core"></iframe>
+      <div class="flash"></div>
+    </div>
+    <div class="pane">
+      <div class="pane-label"><b>Run-ahead</b><span id="ra-label">runahead_tick(2)</span></div>
+      <iframe id="right" src="embed.html?runahead=2" title="Run-ahead core"></iframe>
+      <div class="flash"></div>
+    </div>
+  </div>
+  <p id="help">
+    Keyboard drives <em>both</em> panes at once (keep focus on this page —
+    don't click inside a pane): arrows = D-pad, <kbd>Z</kbd> A, <kbd>X</kbd> B,
+    <kbd>Enter</kbd> Start, <kbd>Backspace</kbd> Select, <kbd>A</kbd>/<kbd>S</kbd> L/R.
+    The amber bars flash while any game button is held — film the screen in
+    slo-mo and count frames from flash to on-screen response in each pane.
+    Audio starts muted in both panes; unmute one via its overlay. Changing the
+    frame count reloads the right pane (re-pick the ROM after).
+  </p>
+  <script src="runahead.js"></script>
+</body>
+</html>

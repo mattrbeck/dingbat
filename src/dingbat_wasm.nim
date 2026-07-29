@@ -522,6 +522,71 @@ proc loop_tick() {.exportc.} =
   # No SDL present here anymore: JS uploads gamePtr to WebGL2 and draws once
   # per RAF turn (see drawGame in web/index.js).
 
+# Run-ahead (latency reduction, RetroArch's single-instance method): most
+# GB/GBA games poll input 1-3 frames before the result reaches the screen.
+# Each tick runs one canonical frame (audio kept), snapshots, silently runs N
+# more frames with the same input, PRESENTS that future frame, then restores
+# the snapshot — so the pixels on screen are the ones the game will show N
+# frames from now, and a button press appears to take effect N frames sooner.
+# The future framebuffer must be retained in its own buffer: ppu.framebuffer
+# is serialized, so apply_state_payload would revert the pixels gamePtr
+# points at before JS uploads them.
+var runaheadFrame: seq[uint16] = @[]
+
+proc runahead_tick(n: cint) {.exportc.} =
+  ## loop_tick with N frames of run-ahead. n <= 0 behaves exactly like
+  ## loop_tick. Single-core modes only (the linked modes are frame-synced
+  ## with a peer; running ahead would desync them).
+  if stateRenderer == nil: return
+  if stateNet != nil: return
+  inc frameCount
+  checkInput()
+  case stateKind
+  of ekGBA:
+    if stateTexture == nil: return
+    stateGba.step_frame()  # canonical frame: this one's audio is played
+    if rewindHistory != nil:
+      discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
+    if n <= 0:
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                         GBA_W * GBA_H)
+      return
+    let snap = stateGba.state_payload()
+    audioSuppressed = true  # lookahead frames' audio is thrown away
+    for _ in 0 ..< int(n): stateGba.step_frame()
+    audioSuppressed = false
+    if runaheadFrame.len != GBA_W * GBA_H: runaheadFrame.setLen(GBA_W * GBA_H)
+    copyMem(addr runaheadFrame[0], addr stateGba.ppu.framebuffer[0], GBA_W * GBA_H * 2)
+    try:
+      stateGba.apply_state_payload(snap)
+    except CatchableError:
+      discard  # snapshot came from this same build one call ago; unreachable
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]),
+                       GBA_W * GBA_H)
+  of ekGB:
+    if stateTexture == nil: return
+    stateGb.step_frame()
+    if rewindHistory != nil:
+      discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
+    if n <= 0:
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                         GB_W * GB_H)
+      return
+    let snap = stateGb.state_payload()
+    audioSuppressed = true
+    for _ in 0 ..< int(n): stateGb.step_frame()
+    audioSuppressed = false
+    if runaheadFrame.len != GB_W * GB_H: runaheadFrame.setLen(GB_W * GB_H)
+    copyMem(addr runaheadFrame[0], addr stateGb.ppu.framebuffer[0], GB_W * GB_H * 2)
+    try:
+      stateGb.apply_state_payload(snap)
+    except CatchableError:
+      discard
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]),
+                       GB_W * GB_H)
+  of ekNone:
+    return
+
 proc wasm_rewind_pop(): cint {.exportc.} =
   ## Step rewind history back one snapshot (REWIND_INTERVAL frames) and
   ## present the restored framebuffer. Called between loop_tick invocations

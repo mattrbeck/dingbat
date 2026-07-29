@@ -13,6 +13,10 @@ window.addEventListener("keydown", (e) => {
 const params = new URLSearchParams(window.location.search);
 const integerScaling = params.get("integer-scaling") !== "false";
 const demoMode = params.has("demo");
+// Run-ahead latency reduction (see runahead_tick in src/dingbat_wasm.nim):
+// ?runahead=N runs every frame N frames into the future. Used by the
+// web/runahead.html A/B harness; 0/absent = the ordinary loop_tick path.
+const runaheadFrames = Math.max(0, parseInt(params.get("runahead") || "0", 10) || 0);
 
 // --- Integer scaling toggle ---
 
@@ -135,6 +139,39 @@ document.addEventListener("drop", (e) => {
   dragCounter = 0;
   dropOverlay.classList.remove("visible");
   if (e.dataTransfer.files?.length > 0) handleRomFile(e.dataTransfer.files[0]);
+});
+
+// --- Parent-page bridge (web/runahead.html A/B harness) ---
+// A same-origin parent can drive the embed without it ever having focus:
+// load a ROM, press/release buttons (input ids match the core's Input enum),
+// and reset. Input goes straight to _setInput, bypassing the SDL keyboard
+// path, so two embeds fed the same messages receive identical input.
+window.addEventListener("message", (e) => {
+  if (e.origin !== window.location.origin) return;
+  const msg = e.data;
+  if (!msg || typeof msg !== "object") return;
+  switch (msg.type) {
+    case "db-rom": {
+      const bytes = new Uint8Array(msg.bytes);
+      const ext = msg.name.substring(msg.name.lastIndexOf(".")).toLowerCase();
+      if (![".gba", ".gb", ".gbc"].includes(ext)) return;
+      writeToFS("rom" + ext, bytes);
+      loadRom("rom" + ext, msg.name);
+      break;
+    }
+    case "db-input":
+      if (typeof Module !== "undefined" && Module._setInput) {
+        Module._setInput(msg.id, msg.down ? 1 : 0);
+      }
+      break;
+    case "db-reset":
+      if (currentRomName) loadRom(currentRomName, currentOriginalName);
+      break;
+    case "db-pause":
+      paused = !!msg.paused;
+      updatePauseIcon();
+      break;
+  }
 });
 
 // --- Playback controls ---
@@ -328,6 +365,10 @@ var Module = {
   // SDL renders into this hidden canvas; the visible #canvas is ours (WebGL2).
   canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: () => {
+    // Tell a driving parent (runahead.html) the wasm runtime can take a ROM.
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "db-ready" }, window.location.origin);
+    }
     const SAMPLE_RATE = 32768;
     const TARGET_FPS = 59.7275;
     const FRAME_TIME = 1000.0 / TARGET_FPS;
@@ -446,12 +487,18 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
+      // With ?runahead=N each step presents the frame N frames in the
+      // future (runahead_tick(0) is loop_tick, so one call site serves both).
+      const step = () =>
+        runaheadFrames > 0 && Module._runahead_tick
+          ? Module._runahead_tick(runaheadFrames)
+          : Module._loop_tick();
       if (fastForward) {
         if (audioCtx) playTime = audioCtx.currentTime;
         const budget = 16;
         const start = performance.now();
         while (performance.now() - start < budget) {
-          Module._loop_tick();
+          step();
           pushAudio();
           frameCount++;
         }
@@ -459,7 +506,7 @@ var Module = {
       } else {
         let framesRun = 0;
         while (accumulator >= FRAME_TIME && framesRun < 2) {
-          Module._loop_tick();
+          step();
           pushAudio();
           frameCount++;
           accumulator -= FRAME_TIME;
