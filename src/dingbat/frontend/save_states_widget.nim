@@ -50,18 +50,28 @@ proc sel_col(): ImVec4 = ImVec4(x: 0.26, y: 0.59, z: 0.98, w: 1.0)
 # as a second selection ring around every thumbnail).
 proc thumb_bg(): ImVec4 = ImVec4(x: 0.09, y: 0.10, z: 0.12, w: 1.0)
 
+# imguin's igCalcTextSize tracks a cimgui signature change: older releases
+# fill an out-pointer, current ones return the ImVec2 by value. CI installs
+# the latest imguin while dev machines may hold the older pin, so support
+# both — the two signatures are disjoint, exactly one branch compiles.
+proc calc_text_size(text: string): ImVec2 =
+  when compiles(igCalcTextSize(cstring(text), nil, false, -1.0'f32)):
+    let s = igCalcTextSize(cstring(text), nil, false, -1.0'f32)
+    ImVec2(x: s.x, y: s.y)
+  else:
+    var sz: ImVec2
+    igCalcTextSize(addr sz, cstring(text), nil, false, -1.0'f32)
+    sz
+
 proc fit_caption(text: string; avail: float32): string =
   ## Truncate `text` with a trailing ".." so it renders within `avail` px.
   ## Slot captions are plain ASCII (timestamps), so byte truncation is safe.
-  var sz: ImVec2
-  igCalcTextSize(addr sz, cstring(text), nil, false, -1.0'f32)
-  if sz.x <= avail: return text
+  if calc_text_size(text).x <= avail: return text
   result = text
   while result.len > 1:
     result.setLen(result.len - 1)
     let test = result & ".."
-    igCalcTextSize(addr sz, cstring(test), nil, false, -1.0'f32)
-    if sz.x <= avail: return test
+    if calc_text_size(test).x <= avail: return test
   result = ""
 
 proc render*(w: SaveStatesWidget) =
@@ -161,9 +171,7 @@ proc render*(w: SaveStatesWidget) =
         let avail = cell_x + CELL_W - igGetCursorPosX() - 8.0'f32
         let cap = fit_caption(if slot.label.len > 0: slot.label else: "empty",
                               avail)
-        var cap_sz: ImVec2
-        igCalcTextSize(addr cap_sz, cstring(cap), nil, false, -1.0'f32)
-        igSetCursorPosX(cell_x + CELL_W - cap_sz.x)
+        igSetCursorPosX(cell_x + CELL_W - calc_text_size(cap).x)
         if slot.label.len > 0:
           igTextUnformatted(cstring(cap), nil)
         else:
