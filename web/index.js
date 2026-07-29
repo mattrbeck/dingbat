@@ -3248,9 +3248,37 @@ let toastTimer = null;
 const showToast = (msg) => {
   let t = document.getElementById("toast");
   t.textContent = msg;
+  t.onclick = null; // disarm a lingering action toast's tap handler
+  t.classList.remove("has-action");
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+};
+
+// Toast with a single action (e.g. "Resume", "Undo"). The ENTIRE toast is
+// the tap target — on phones the labeled button alone is a small, missable
+// pill, and users tap the text anyway. Lingers longer than a plain toast;
+// any later toast replaces it.
+const showActionToast = (msg, label, fn, ms = 8000) => {
+  const t = document.getElementById("toast");
+  t.textContent = "";
+  const span = document.createElement("span");
+  span.className = "toast-msg";
+  span.textContent = msg;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "toast-action";
+  btn.textContent = label;
+  t.append(span, btn);
+  t.onclick = () => {
+    t.onclick = null;
+    t.classList.remove("show", "has-action");
+    clearTimeout(toastTimer);
+    fn();
+  };
+  t.classList.add("show", "has-action");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show", "has-action"), ms);
 };
 
 const stateKey = (name) => "state:" + name;
@@ -3372,6 +3400,21 @@ const saveToSlot = async (slot) => {
   }
 };
 
+// Undo buffer for the last state load: the state of the game the moment
+// before the load replaced it. In-memory only — survives until the next
+// load or a ROM switch. Saves the day when F8 lands a fraction after an
+// unintended F5, or a slot tap loads hours-old progress.
+var stateUndoBytes = null;
+var stateUndoName = null;
+
+const undoStateLoad = () => {
+  if (!stateUndoBytes || stateUndoName !== currentOriginalName) return;
+  if (applyStateBytes(stateUndoBytes)) {
+    stateUndoBytes = null;
+    showToast("Back to before the load");
+  }
+};
+
 // Apply a slot's state to the running game. The core validates the image
 // (version, core kind, ROM checksum, payload hash) and leaves itself untouched
 // when it doesn't match — e.g. a state saved for a different ROM.
@@ -3388,9 +3431,56 @@ const loadFromSlot = async (slot) => {
     showToast(slot === 0 ? "No saved state for this game" : "Slot " + (slot + 1) + " is empty");
     return false;
   }
+  const undo = captureStateBytes(); // where the game is NOW, pre-load
   const ok = applyStateBytes(bytes);
-  showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+  if (ok && undo) {
+    stateUndoBytes = undo;
+    stateUndoName = currentOriginalName;
+    showActionToast("State loaded", "Undo", undoStateLoad, 6000);
+  } else {
+    showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+  }
   return ok;
+};
+
+// --- Auto save-state (session resume) ---
+// Captured when the page is hidden or closed, offered back as a one-tap
+// "Resume" when the same game is next launched. Local-only by design: it is
+// a convenience snapshot, not user data — keeping it out of Drive sync
+// avoids an upload every tab switch.
+const autoStateKey = (name) => "stateauto:" + name;
+
+const persistAutoState = () => {
+  if (!currentRomName || !currentOriginalName) return;
+  if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
+  const bytes = captureStateBytes();
+  if (!bytes) return;
+  dbPut(autoStateKey(currentOriginalName), { bytes, ts: Date.now() }).catch(() => {});
+};
+
+const fmtAgo = (ts) => {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return "moments ago";
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  if (h < 48) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
+};
+
+// Offer to restore the auto state for the game that just launched. The state
+// header check inside the core keeps a stale/mismatched snapshot harmless.
+const offerAutoResume = async () => {
+  const name = currentOriginalName;
+  if (!name) return;
+  let auto = null;
+  try {
+    auto = await dbGet(autoStateKey(name));
+  } catch {}
+  if (!auto || !auto.bytes || name !== currentOriginalName) return;
+  showActionToast("Last session saved " + fmtAgo(auto.ts), "Resume", () => {
+    if (currentOriginalName !== name) return; // switched games since
+    showToast(applyStateBytes(auto.bytes) ? "Resumed" : "Couldn't restore the session");
+  });
 };
 
 document.getElementById("save-state").addEventListener("click", async () => {
@@ -4762,7 +4852,7 @@ window.addEventListener("load", () =>
   }, 1500)
 );
 
-const loadRom = async (romName, originalName) => {
+const loadRom = async (romName, originalName, opts = {}) => {
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
   // Leaving online link mode: say BYE to the peer and drop the channel
@@ -4793,8 +4883,12 @@ const loadRom = async (romName, originalName) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
+  stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
+  // async: "Resume last session?" toast if one exists (the reset button
+  // opts out — it shows its own Undo toast for the state it just discarded)
+  if (!opts.skipResumeOffer) offerAutoResume();
   setTimeout(() => logViewportDiag("romload"), 500);
 };
 
@@ -5102,9 +5196,27 @@ pauseButton.addEventListener("click", () => {
   document.body.classList.toggle("paused", paused);
 });
 
-resetButton.addEventListener("click", () => {
-  if (linkMode && linkRomEntry) launchLinkRom(linkRomEntry);
-  else if (currentRomName) loadRom(currentRomName, currentOriginalName);
+resetButton.addEventListener("click", async () => {
+  if (linkMode && linkRomEntry) {
+    launchLinkRom(linkRomEntry);
+    return;
+  }
+  if (!currentRomName) return;
+  // Reset with a way back: snapshot the state being thrown away and offer
+  // it on a toast, exactly like loading a save state does. The auto-resume
+  // offer is suppressed for this reload — right after a deliberate reset it
+  // is stale noise, and it would race this toast for the shared slot.
+  const undo = captureStateBytes();
+  const name = currentOriginalName;
+  await loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
+  if (undo) {
+    stateUndoBytes = undo; // fresh core: re-arm the buffer loadRom cleared
+    stateUndoName = name;
+    showActionToast("Game reset", "Undo", () => {
+      if (currentOriginalName !== name) return; // switched games since
+      if (applyStateBytes(undo)) showToast("Back to before the reset");
+    });
+  }
 });
 
 // 2x speed and unbounded fast forward are radio-style: fast forward would
@@ -6130,7 +6242,14 @@ var Module = {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
+        persistAutoState();
       }
+    });
+
+    // Mobile browsers routinely kill backgrounded tabs without pagehide ever
+    // firing again — capture the resume snapshot the moment we're hidden.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) persistAutoState();
     });
 
     // iOS Safari frequently skips beforeunload entirely; pagehide is the
@@ -6145,6 +6264,7 @@ var Module = {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
+        persistAutoState(); // one-tap resume next launch
       }
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});
