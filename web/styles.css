@@ -4708,6 +4708,29 @@ body.sync-shown #status {
 }
 .cheat-error[hidden] { display: none; }
 
+/* Tie a rejected add to its input: the textarea holding the bad code goes red
+   together with the error line below it. */
+.cheat-textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Legacy entries persisted before adds were validated: the core skips them,
+   so their row says so instead of showing a checkbox that does nothing. */
+.cheat-row-invalid .cheat-row-code {
+  text-decoration: line-through;
+}
+.cheat-badge-invalid {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  border-radius: 999px;
+  color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.16);
+  vertical-align: 1px;
+}
+
 /*
  * ==========================================================
  * Reduced motion

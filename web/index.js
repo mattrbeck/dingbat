@@ -824,10 +824,13 @@ savesModal.addEventListener("click", (e) => {
 });
 
 // --- Cheats modal ---
-// JS owns the cheat list (array of {name, codes, enabled}); the Nim core owns
-// the parsed/applied form. On any edit we serialize to the shared ".cht" text
-// format, push it into the core via load_cheats (which returns parse errors),
-// and persist it per-game in IndexedDB under "cheats:<originalName>".
+// JS owns the cheat list (array of {name, codes, enabled, error}); the Nim
+// core owns the parsed/applied form. On any edit we serialize to the shared
+// ".cht" text format, push it into the core via load_cheats (which returns
+// parse errors), and persist it per-game in IndexedDB under
+// "cheats:<originalName>". Adds are validated up front (a cheat that doesn't
+// parse is rejected, never inserted); `error` is only ever non-empty on
+// entries persisted by older builds, whose rows are badged "Invalid".
 
 const cheatsModal = document.getElementById("cheats-modal");
 const cheatsListEl = document.getElementById("cheats-list");
@@ -860,7 +863,7 @@ const parseCheats = (text) => {
     const line = raw.trim();
     if (!line) continue;
     if (line.length >= 3 && line[0] === "[" && line[2] === "]") {
-      cur = { enabled: line[1] === "x" || line[1] === "X", name: line.slice(3).trim(), codes: "" };
+      cur = { enabled: line[1] === "x" || line[1] === "X", name: line.slice(3).trim(), codes: "", error: "" };
       list.push(cur);
     } else if (cur) {
       cur.codes += (cur.codes ? "\n" : "") + line;
@@ -874,12 +877,30 @@ const pushCheatsToCore = (text) => {
   return Module.ccall("load_cheats", "string", ["string"], [text]) || "";
 };
 
+// Probe-parse one cheat by itself. Core parsing is per-cheat and all-or-nothing
+// within a cheat (any bad line fails that whole cheat, other cheats are
+// unaffected), so parsing the candidate alone gives the same verdict it would
+// get inside the full list. load_cheats REPLACES the core's cheat set, so the
+// caller must re-push the real list afterwards.
+const validateCheat = (c) => {
+  const err = pushCheatsToCore(serializeCheats([c]));
+  // The core prefixes each error with the cheat's name; next to the form (or
+  // row) that named the cheat, the prefix is noise — strip it.
+  const prefix = (c.name || "?") + ": ";
+  return err.startsWith(prefix) ? err.slice(prefix.length) : err;
+};
+
+// The error line under the add form. It only ever describes the add form's
+// current text: it is set when an add is rejected and cleared as soon as the
+// user edits the inputs or an add succeeds.
 const showCheatError = (err) => {
   if (err && err.length) {
     cheatErrorEl.textContent = err;
     cheatErrorEl.hidden = false;
+    cheatCodesEl.setAttribute("aria-invalid", "true");
   } else {
     cheatErrorEl.hidden = true;
+    cheatCodesEl.removeAttribute("aria-invalid");
   }
 };
 
@@ -907,6 +928,18 @@ const renderCheatList = () => {
     const nm = document.createElement("span");
     nm.className = "cheat-row-name";
     nm.textContent = c.name || "Cheat " + (i + 1);
+    if (c.error) {
+      // Entries persisted by older builds could be saved without validation;
+      // the core skips them, so say so instead of showing a dead checkbox.
+      row.classList.add("cheat-row-invalid");
+      cb.checked = false;
+      cb.disabled = true;
+      const bad = document.createElement("span");
+      bad.className = "cheat-badge-invalid";
+      bad.textContent = "Invalid";
+      bad.title = c.error;
+      nm.appendChild(bad);
+    }
     const code = document.createElement("span");
     code.className = "cheat-row-code";
     code.textContent = c.codes.replace(/\n/g, "  ");
@@ -927,12 +960,15 @@ const renderCheatList = () => {
 
 const applyCheats = async () => {
   const text = serializeCheats(cheatList);
-  const err = currentOriginalName ? pushCheatsToCore(text) : "";
   if (currentOriginalName) {
+    // Every entry was validated when it was added (or badged by restoreCheats),
+    // so this can't produce new errors — and any legacy invalid entry is
+    // already marked on its row, not under the add form. The core skips
+    // entries it can't parse.
+    pushCheatsToCore(text);
     if (cheatList.length) await dbPut(CHEATS_KEY(currentOriginalName), text);
     else await dbDelete(CHEATS_KEY(currentOriginalName));
   }
-  showCheatError(err);
   renderCheatList();
 };
 
@@ -944,6 +980,9 @@ const restoreCheats = async () => {
     const text = await dbGet(CHEATS_KEY(currentOriginalName));
     if (typeof text === "string" && text) cheatList = parseCheats(text);
   }
+  // Entries saved by builds that accepted unvalidated adds may not parse;
+  // probe each one so its row can be badged "Invalid".
+  for (const c of cheatList) c.error = validateCheat(c);
   pushCheatsToCore(serializeCheats(cheatList));
   renderCheatList();
 };
@@ -972,11 +1011,27 @@ document.getElementById("cheat-add").addEventListener("click", () => {
   const codes = cheatCodesEl.value.trim();
   if (!codes) { showCheatError("Enter at least one code."); return; }
   const name = cheatNameEl.value.trim() || "Cheat " + (cheatList.length + 1);
-  cheatList.push({ name, codes, enabled: true });
+  const candidate = { name, codes, enabled: true, error: "" };
+  const err = validateCheat(candidate);
+  if (err) {
+    // Reject the add outright: the list stays untouched (re-push its copy —
+    // the probe replaced the core's set) and the user's text stays in the
+    // form so it can be fixed in place.
+    pushCheatsToCore(serializeCheats(cheatList));
+    showCheatError(err);
+    return;
+  }
+  cheatList.push(candidate);
   cheatNameEl.value = "";
   cheatCodesEl.value = "";
+  showCheatError("");
   applyCheats();
 });
+
+// A rejected add's error describes the form's current text; clear it the
+// moment that text changes.
+cheatNameEl.addEventListener("input", () => showCheatError(""));
+cheatCodesEl.addEventListener("input", () => showCheatError(""));
 
 // --- Delete save data (per-ROM), shared by the home "Manage ROMs and Saves"
 // list and the in-game "Reset save file" action ---
