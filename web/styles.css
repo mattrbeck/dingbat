@@ -124,6 +124,11 @@
      dark UI look so amber/black/light are unchanged. */
   --chrome-ink: var(--text);
   --chrome-ink-dim: var(--text-dim);
+  /* Top-bar status text (fps readout): must contrast with the BAR, which on
+     device themes is the light shell, not the dark surface --text-dim is
+     tuned for (it measured 1.0-2.1:1 there). Per-theme overrides below;
+     mid-tone shells (atomic-purple, daiei) carry their max achievable. */
+  --status-ink: var(--chrome-ink-dim);
   --chrome-btn-top: var(--surface-2);
   --chrome-btn-bottom: var(--surface-2-lo);
   --chrome-btn-border: var(--border);
@@ -343,6 +348,7 @@
   --frame-line: rgba(0, 0, 0, 0.42);
   --chrome-ink: #fbf7fd;
   --chrome-ink-dim: #d9d2de;
+  --status-ink: #eeebf0;
   --chrome-btn-top: rgba(0, 0, 0, 0.24);
   --chrome-btn-bottom: rgba(0, 0, 0, 0.32);
   --chrome-btn-border: rgba(255, 255, 255, 0.22);
@@ -410,6 +416,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #282522;
+  --status-ink: #000000;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -477,6 +484,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #413c37;
+  --status-ink: #282522;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -543,6 +551,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #524b45;
+  --status-ink: #4b443f;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -609,6 +618,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #524b45;
+  --status-ink: #46403b;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -684,6 +694,7 @@
   --frame-line: rgba(0, 0, 0, 0.42);
   --chrome-ink: #fbf7fd;
   --chrome-ink-dim: #ece9ef;
+  --status-ink: #ffffff;
   --chrome-btn-top: rgba(0, 0, 0, 0.24);
   --chrome-btn-bottom: rgba(0, 0, 0, 0.32);
   --chrome-btn-border: rgba(255, 255, 255, 0.22);
@@ -750,6 +761,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #23201e;
+  --status-ink: #000000;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -816,6 +828,7 @@
   --frame-line: rgba(0, 0, 0, 0.34);
   --chrome-ink: #211d1a;
   --chrome-ink-dim: #46403b;
+  --status-ink: #2e2a27;
   --chrome-btn-top: rgba(255, 255, 255, 0.30);
   --chrome-btn-bottom: rgba(255, 255, 255, 0.12);
   --chrome-btn-border: rgba(0, 0, 0, 0.16);
@@ -1190,7 +1203,7 @@ body.has-game #save-sep {
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--status-ink);
   min-width: 0;
 }
 
