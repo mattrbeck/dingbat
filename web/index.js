@@ -4591,20 +4591,18 @@ const loadControlStyleFromStorage = async () => {
 // fast-forward/2x (N+1x the work for no latency benefit) and never in the
 // frame-synced link modes.
 let runaheadFrames = 0;
-const runaheadChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
-  document.querySelectorAll("#runahead-picker .choice-chip")));
+const runaheadSelect = /** @type {HTMLSelectElement} */ (
+  document.getElementById("runahead-select"));
 
 const applyRunahead = (n) => {
   runaheadFrames = [0, 1, 2, 3].includes(n) ? n : 0;
-  syncChipGroup(runaheadChips, String(runaheadFrames));
+  runaheadSelect.value = String(runaheadFrames);
 };
 
-runaheadChips.forEach((chip) =>
-  chip.addEventListener("click", async () => {
-    applyRunahead(Number(chip.dataset.value));
-    await dbPut("runahead", runaheadFrames);
-  })
-);
+runaheadSelect.addEventListener("change", async () => {
+  applyRunahead(Number(runaheadSelect.value));
+  await dbPut("runahead", runaheadFrames);
+});
 
 const loadRunaheadFromStorage = async () => {
   const v = await dbGet("runahead");
