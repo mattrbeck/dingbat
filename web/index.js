@@ -22,6 +22,29 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
+// Typing escape hatch: once a core runs, the SDL runtime's key handlers
+// (window, BUBBLE phase — they observably consume after target-phase
+// dispatch) preventDefault page-wide, which silently ate every character
+// typed into a text field (the cheat inputs only accepted paste). This guard
+// also sits at window-bubble, registered before em.js so it runs first
+// there, and stops text-field events from reaching SDL. Bubble, not capture:
+// listeners attached to the fields themselves (the room-code input submits
+// on its own Enter keydown) must still see the event in the target phase.
+// Tab belongs to the hook above; Escape must keep flowing to the
+// close-all-modals handler. No preventDefault anywhere here.
+{
+  const typingGuard = (e) => {
+    if (e.code === "Tab" || e.code === "Escape") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+      e.stopImmediatePropagation();
+    }
+  };
+  for (const type of ["keydown", "keypress", "keyup"]) {
+    window.addEventListener(type, typingGuard, false);
+  }
+}
+
 // --- Service Worker ---
 
 let swRegistration = null;
