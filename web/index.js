@@ -1,14 +1,24 @@
-// Keyboard-navigation escape hatch: when focus is in the top bar or menu,
-// Tab must keep moving focus. This runs on window in the CAPTURE phase and is
-// registered before em.js executes, so it outranks both the SDL runtime's key
-// grab (which preventDefaults Tab app-wide once a game runs) and the
-// fast-forward shortcut. Stopping propagation leaves the browser's default
+// Keyboard-navigation escape hatch: when focus is in the top bar, menu, or an
+// open modal, Tab must keep moving focus. This runs on window in the CAPTURE
+// phase and is registered before em.js executes, so it outranks both the SDL
+// runtime's key grab (which preventDefaults Tab app-wide once a game runs) and
+// the fast-forward shortcut. Stopping propagation leaves the browser's default
 // focus traversal intact. keydown only: keyup flows through so a held
 // fast-forward always gets its release.
+//
+// Modal case: stopping at window capture means the event never reaches the
+// overlay's own Tab-wrap trap either (capture stops downward propagation),
+// so invoke the active trap handler directly to keep focus cycling inside
+// the dialog. (modalTrapHandler is defined further down; events only fire
+// after the whole script has run.)
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Tab" && e.target && /** @type {Element} */ (e.target).closest &&
-      /** @type {Element} */ (e.target).closest("#topbar, #menu-dropdown")) {
+  if (e.code !== "Tab" || !e.target || !(/** @type {Element} */ (e.target).closest)) return;
+  const t = /** @type {Element} */ (e.target);
+  if (t.closest("#topbar, #menu-dropdown")) {
     e.stopImmediatePropagation();
+  } else if (t.closest(".modal-overlay.open")) {
+    e.stopImmediatePropagation();
+    if (modalTrapHandler) modalTrapHandler(e);
   }
 }, true);
 
@@ -3375,6 +3385,7 @@ const statesSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById(
 const statesLoadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-load"));
 const statesDeleteBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-delete"));
 const statesEmpty = document.getElementById("states-empty");
+const statesHint = document.getElementById("states-hint");
 let selectedSlot = 0;
 let slotHasState = [];
 
@@ -3397,6 +3408,8 @@ const selectSlot = (s) => {
 const renderStatesGrid = async () => {
   const name = currentOriginalName;
   statesEmpty.hidden = !!name;
+  // The "Tap a slot…" instructions only make sense when slots are rendered.
+  statesHint.hidden = !name;
   statesGrid.hidden = !name;
   statesGrid.innerHTML = "";
   slotHasState = [];

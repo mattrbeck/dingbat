@@ -2081,13 +2081,18 @@ body.debug-2p .home-tile-link {
 /* --- Toast (brief feedback for save-state actions) --- */
 
 #toast {
-  position: absolute;
+  /* Fixed to the viewport, not absolute in #stage: on phones the stage is
+     only the top portion of the screen (touch controls fill the rest), so an
+     absolute bottom-anchored toast landed mid-viewport — right across the
+     save-state grid when a modal was open. The viewport bottom + safe area
+     is out of the way everywhere. */
+  position: fixed;
   /* Above .modal-overlay (500): toasts fired while a modal is open (Quick
      Save's confirmation, sync notices) must not render dimmed behind the
      overlay's backdrop. */
   z-index: 600;
   left: 50%;
-  bottom: 20px;
+  bottom: calc(20px + var(--safe-b));
   transform: translate(-50%, 8px);
   max-width: min(80%, 420px);
   padding: 8px 16px;
@@ -2152,6 +2157,24 @@ body.debug-2p .home-tile-link {
 
 .button-primary:hover {
   background: linear-gradient(180deg, var(--accent-hi), var(--accent-2));
+}
+
+/* Disabled buttons: shared token-level treatment. pointer-events: none also
+   suppresses the :hover restyle without sprinkling :not(:disabled) guards. */
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* A disabled primary must not glow full-brightness amber (it read as the
+   call-to-action even when inert, e.g. Save States with no game loaded).
+   Drop it to the neutral button surface; opacity above does the rest. */
+.button-primary:disabled {
+  color: var(--text-faint);
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  border-color: var(--border-2);
+  box-shadow: inset 0 1px 0 var(--inset-hi);
 }
 
 .button-ghost {
@@ -2262,7 +2285,12 @@ body.debug-2p .home-tile-link {
 
 .states-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, 1fr), not bare 1fr: a bare 1fr track has an auto minimum, so a
+     slot holding a thumbnail <img> widens its whole column to the image's
+     min-content width while empty columns stay narrow — the 3x3 grid ends up
+     with unequal tiles. Clamping the minimum to 0 keeps every track equal and
+     lets the thumb scale down inside its cell instead. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 18px;
 }
@@ -2272,6 +2300,7 @@ body.debug-2p .home-tile-link {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   padding: 6px;
   background: var(--surface-2);
   border: 2px solid var(--border-2);
@@ -2291,12 +2320,24 @@ body.debug-2p .home-tile-link {
   background: rgba(var(--accent-rgb), 0.14);
 }
 
+/* Keyboard focus must not read as a second selection: selection is the flush
+   amber border above, focus is a thin offset halo in the text color (near-
+   white on dark shells, near-black on light ones — distinct from amber in
+   both), so a focused empty slot and the selected slot stay tellable apart. */
+.state-slot:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
 .state-slot .slot-thumb {
   width: 100%;
+  /* Every tile keeps the same 3:2 geometry whether it holds a GBA (3:2) or
+     GB (10:9) thumbnail or nothing at all; `contain` letterboxes the GB shape
+     inside the tile on the surface-3 backing instead of cropping it. */
   aspect-ratio: 3 / 2;
   border-radius: 3px;
   background: var(--surface-3);
-  object-fit: cover;
+  object-fit: contain;
   image-rendering: pixelated;
   display: block;
 }
