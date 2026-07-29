@@ -684,6 +684,17 @@ proc catch_up(bus: Bus) {.inline.} =
   else:
     bus.catch_up_slow()
 
+# The dma_pending leg of the catch-up condition (identical in all six
+# accessors below): arming an immediate DMA schedules etDMA a few cycles out
+# (DMA_START_DELAY, dma.nim) and the CPU keeps executing until it fires. An
+# accessor's data effect happens the moment it runs, but its cycles normally
+# reach the scheduler only at instruction end — so an access positioned after
+# the burst's start cycle would land BEFORE the burst (which runs inside this
+# catch_up: the etDMA dispatch latches requests, the post-dispatch pump runs
+# them), inverting the CPU-vs-DMA memory order that hardware's bus takeover
+# enforces. Forcing catch-up on every access during the armed window keeps
+# the interleaving cycle-exact; MMIO (page 0x4) already catches up
+# unconditionally for timer/IF exactness.
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)

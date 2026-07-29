@@ -81,6 +81,13 @@ proc set_hblank_flag*(ppu: PPU) =
   ppu.dispstat.hblank = true
 
 proc end_hblank*(ppu: PPU) =
+  # Zero-delay event rather than a direct start_line() call: the event's
+  # target is the current cycle and schedule's tie-break (newest same-cycle
+  # event pops first) makes it the very next dispatch — after this handler
+  # returns and after the post-dispatch DMA pump has granted the vblank /
+  # video-capture requests latched below. The next scanline thus anchors at
+  # the same cycle (+960 from an unchanged clock) but strictly after this
+  # line's deferred DMA work.
   ppu.gba.scheduler.schedule(0, etPPUStartLine)
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
@@ -977,6 +984,8 @@ proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
           if palette != 0:
             color = pram_u16[palette]
             break found
+        # Every enabled BG was transparent here: a sprite below all of them
+        # in priority still beats the backdrop.
         if sprio < 4:
           color = pram_u16[0x100 + spal]
       fb[row_base + uint32(col)] = color

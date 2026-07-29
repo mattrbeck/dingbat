@@ -1,4 +1,20 @@
 # Waitloop detection (included by gba.nim)
+#
+# A waitloop is a short backward Thumb loop that cannot change its own state:
+# every instruction is read-only (no stores, no PC writes, no calls) and no
+# register read inside the loop was written earlier in it — a loop-carried
+# counter like `subs r2, #1` disqualifies, since such loops terminate by
+# themselves and must run at real speed. analyze_loop runs from
+# thumb_conditional_branch on every conditional branch (only Thumb is hooked;
+# ARM idle loops have only been observed in flash-save polling), gated by the
+# branch_dest handshake below so a body is inspected only once its target
+# repeats. A positive verdict sets cpu.entered_waitloop, which cpu.tick
+# consumes at the end of the instruction: instead of scheduler.tick it calls
+# fast_forward_bounded — bound = the APU channels' soonest deadline; that
+# contract is documented at common/scheduler.nim's fast_forward_bounded — so
+# each loop iteration skips ahead one event's worth of idle time.
+# docs/research_waitloop_tracer.md surveys what this static scheme can and
+# cannot catch.
 
 proc build_waitloop_lut*(): seq[WLInstrKind] =
   result = newSeq[WLInstrKind](256)
@@ -96,6 +112,13 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
     none(WLParsed)
 
 proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
+  # Two-sighting gate: branch_dest holds the target of the previous
+  # conditional branch executed (the defer records this one's target
+  # unconditionally, early returns included), so analysis proceeds only when
+  # the same target arrives twice in a row — the signature of a loop
+  # actually spinning. One-off branches cost a single compare, and a body
+  # containing a second conditional branch (alternating targets) is never
+  # analyzed at all.
   defer: cpu.branch_dest = start_addr
   if not cpu.attempt_waitloop_detection: return
   if start_addr != cpu.branch_dest: return

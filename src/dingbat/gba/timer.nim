@@ -87,7 +87,19 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       let was_cascade = tim.tmcnt[num].cascade
       write(tim.tmcnt[num], value, 0)
       if num == 0:
+        # Timer 0 has no timer below it to cascade from: the count-up bit is
+        # unimplemented in TM0CNT_H (GBATEK) — writes don't stick and it
+        # reads back 0. Clearing the stored bit covers both the readback
+        # (`[]` returns tmcnt as stored) and every downstream cascade check.
         tim.tmcnt[0].cascade = false
+      # Transitions below only move anchors and events: the count itself was
+      # snapshotted by update_tm above, and under the free-running prescaler
+      # model (ticks_between) a running timer is fully described by
+      # cycle_enabled plus its scheduled overflow. Cascade mode has neither
+      # (the timer below advances it from its own overflow), so entering it
+      # clears the event; a cold enable anchors TIMER_START_DELAY ahead,
+      # while cascade->prescaler on an already-running timer anchors at the
+      # current cycle.
       if tim.tmcnt[num].enable:
         if not was_enabled:
           tim.tm[num] = tim.tmd[num]

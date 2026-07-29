@@ -1161,6 +1161,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         n_flags * (9 + rn) + n_lit * (20 + rn) + n_tok * (25 + 3 * rn) +
         n_runb * (21 + dh) + dh * int(decomp_len div 2))
   of 0x10:  # BitUnPack
+    # Uncalibrated: only the HLE's own bus accesses are charged — unlike the
+    # sibling copy/decompression SWIs there is no instruction-counted
+    # routine-body model here (the Diff filters, 0x16-0x18, share this gap).
+    # TODO: derive one from the BIOS disassembly like the others.
     var src = cpu.r[0]
     var dst = cpu.r[1]
     let info = cpu.r[2]
