@@ -1151,6 +1151,7 @@ body.running #main-menu-sep {
 #load-state,
 #manage-saves,
 #screenshot,
+#record-clip,
 #save-sep {
   display: none;
 }
@@ -1158,8 +1159,14 @@ body.running #main-menu-sep {
 body.has-game #save-state,
 body.has-game #load-state,
 body.has-game #manage-saves,
-body.has-game #screenshot {
+body.has-game #screenshot,
+body.has-game #record-clip {
   display: flex;
+}
+
+/* Live-recording state: the dot glows red so the menu shows it at a glance */
+#record-clip.recording {
+  color: #ff5a5a;
 }
 
 body.has-game #save-sep {
@@ -2157,6 +2164,30 @@ body.debug-2p .home-tile-link {
 #toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/* Action toasts ("Resume", "Undo", "Enable tilt") carry one tappable button;
+   the base toast is pointer-events: none so it never blocks the game, so the
+   interactive variant re-enables hit-testing only while shown. (Class-based
+   rather than :has() — iOS 15.0-15.3 lacks :has support.) */
+#toast.show.has-action {
+  pointer-events: auto;
+}
+
+.toast-action {
+  margin-left: 8px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--surface-1);
+  color: var(--accent, var(--text));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action:active {
+  filter: brightness(1.2);
 }
 
 /*
@@ -3878,6 +3909,7 @@ body.link-mode #save-state,
 body.link-mode #load-state,
 body.link-mode #manage-saves,
 body.link-mode #screenshot,
+body.link-mode #record-clip,
 body.link-mode #save-sep,
 body.rollback-mode #rewind,
 body.rollback-mode #fast-forward,
@@ -3886,6 +3918,7 @@ body.rollback-mode #save-state,
 body.rollback-mode #load-state,
 body.rollback-mode #manage-saves,
 body.rollback-mode #screenshot,
+body.rollback-mode #record-clip,
 body.rollback-mode #save-sep {
   display: none !important;
 }

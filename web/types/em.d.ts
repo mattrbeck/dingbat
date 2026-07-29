@@ -52,11 +52,14 @@ interface EmscriptenModule {
   _wasm_state_size?(): number;
   _wasm_state_data?(): number;
   _wasm_set_turbo?(on: number): void;
+  _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
   _wasm_load_state?(data: number, len: number): number;
   _benchFrames?(n: number): void;
   _isStopped?(): number;
   _wasm_rumble?(): number;
+  _wasm_set_tilt?(x: number, y: number): void;
+  _wasm_cart_has_tilt?(): number;
   _setInput?(inputId: number, pressed: number): void;
   _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;

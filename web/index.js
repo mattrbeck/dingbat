@@ -3248,9 +3248,30 @@ let toastTimer = null;
 const showToast = (msg) => {
   let t = document.getElementById("toast");
   t.textContent = msg;
+  t.classList.remove("has-action");
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+};
+
+// Toast with a single action button (e.g. "Resume", "Undo"). Lingers longer
+// than a plain toast so there's time to react; any showToast replaces it.
+const showActionToast = (msg, label, fn, ms = 8000) => {
+  const t = document.getElementById("toast");
+  t.textContent = msg + " ";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "toast-action";
+  btn.textContent = label;
+  btn.addEventListener("click", () => {
+    t.classList.remove("show", "has-action");
+    clearTimeout(toastTimer);
+    fn();
+  });
+  t.appendChild(btn);
+  t.classList.add("show", "has-action");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show", "has-action"), ms);
 };
 
 const stateKey = (name) => "state:" + name;
@@ -3372,6 +3393,21 @@ const saveToSlot = async (slot) => {
   }
 };
 
+// Undo buffer for the last state load: the state of the game the moment
+// before the load replaced it. In-memory only — survives until the next
+// load or a ROM switch. Saves the day when F8 lands a fraction after an
+// unintended F5, or a slot tap loads hours-old progress.
+var stateUndoBytes = null;
+var stateUndoName = null;
+
+const undoStateLoad = () => {
+  if (!stateUndoBytes || stateUndoName !== currentOriginalName) return;
+  if (applyStateBytes(stateUndoBytes)) {
+    stateUndoBytes = null;
+    showToast("Back to before the load");
+  }
+};
+
 // Apply a slot's state to the running game. The core validates the image
 // (version, core kind, ROM checksum, payload hash) and leaves itself untouched
 // when it doesn't match — e.g. a state saved for a different ROM.
@@ -3388,9 +3424,56 @@ const loadFromSlot = async (slot) => {
     showToast(slot === 0 ? "No saved state for this game" : "Slot " + (slot + 1) + " is empty");
     return false;
   }
+  const undo = captureStateBytes(); // where the game is NOW, pre-load
   const ok = applyStateBytes(bytes);
-  showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+  if (ok && undo) {
+    stateUndoBytes = undo;
+    stateUndoName = currentOriginalName;
+    showActionToast("State loaded", "Undo", undoStateLoad, 6000);
+  } else {
+    showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+  }
   return ok;
+};
+
+// --- Auto save-state (session resume) ---
+// Captured when the page is hidden or closed, offered back as a one-tap
+// "Resume" when the same game is next launched. Local-only by design: it is
+// a convenience snapshot, not user data — keeping it out of Drive sync
+// avoids an upload every tab switch.
+const autoStateKey = (name) => "stateauto:" + name;
+
+const persistAutoState = () => {
+  if (!currentRomName || !currentOriginalName) return;
+  if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
+  const bytes = captureStateBytes();
+  if (!bytes) return;
+  dbPut(autoStateKey(currentOriginalName), { bytes, ts: Date.now() }).catch(() => {});
+};
+
+const fmtAgo = (ts) => {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return "moments ago";
+  if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60);
+  if (h < 48) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
+};
+
+// Offer to restore the auto state for the game that just launched. The state
+// header check inside the core keeps a stale/mismatched snapshot harmless.
+const offerAutoResume = async () => {
+  const name = currentOriginalName;
+  if (!name) return;
+  let auto = null;
+  try {
+    auto = await dbGet(autoStateKey(name));
+  } catch {}
+  if (!auto || !auto.bytes || name !== currentOriginalName) return;
+  showActionToast("Last session saved " + fmtAgo(auto.ts), "Resume", () => {
+    if (currentOriginalName !== name) return; // switched games since
+    showToast(applyStateBytes(auto.bytes) ? "Resumed" : "Couldn't restore the session");
+  });
 };
 
 document.getElementById("save-state").addEventListener("click", async () => {
@@ -4266,6 +4349,15 @@ const noteLocalButton = (inputId, down) => {
 // single running core normally, core 0 in 2P link mode, or — in online
 // rollback mode — captured into localButtons (the RAF loop feeds the core).
 const routeP1Input = (inputId, down) => {
+  // Tilt cart: the D-pad (keyboard or touch) doubles as a tilt source — the
+  // held directions become the tilt target, smoothed toward in updateTilt so
+  // digital input still gives controllable analog motion. The real D-pad
+  // press goes through too (menus use it; gameplay ignores it).
+  if (tiltActive && inputId <= 3) {
+    kbTiltDirs[inputId] = down;
+    tiltTargetY = (kbTiltDirs[0] ? -TILT_KB_RANGE : 0) + (kbTiltDirs[1] ? TILT_KB_RANGE : 0);
+    tiltTargetX = (kbTiltDirs[2] ? -TILT_KB_RANGE : 0) + (kbTiltDirs[3] ? TILT_KB_RANGE : 0);
+  }
   if (rollbackMode) {
     noteLocalButton(inputId, down);
   } else if (linkMode) {
@@ -4650,8 +4742,23 @@ var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
 var speed2x = false;
+var slowMotion = false;
 var rewindHeld = false;
 var lastRewindPop = 0;
+// Turbo (autofire) holds: [A, B]. While held the tick loop pulses the input
+// 2 frames on / 2 frames off (15 presses/sec) — single-core mode only.
+var turboHeld = [false, false];
+var turboPhase = 0;
+// Tilt cart (MBC7 — Kirby Tilt 'n' Tumble): when the running cart has an
+// accelerometer, keyboard D-pad / gamepad stick / device orientation feed a
+// smoothed tilt vector to wasm_set_tilt each RAF tick.
+var tiltActive = false;
+var tiltTargetX = 0, tiltTargetY = 0;   // where input wants the tilt to be
+var tiltX = 0, tiltY = 0;               // smoothed value actually sent
+var tiltOrientationOn = false;          // device-orientation stream attached
+var tiltNeutralBeta = null;             // first reading = neutral hold angle
+var padTiltLive = false;                // gamepad stick currently owns the target
+var kbTiltDirs = [false, false, false, false]; // held U/D/L/R keys while tilting
 
 // --- Screen Wake Lock ---
 // Keep the device awake while emulation is actively stepping (any mode: single,
@@ -4763,6 +4870,8 @@ window.addEventListener("load", () =>
 );
 
 const loadRom = async (romName, originalName) => {
+  // A clip recorder spanning a ROM switch would splice two games together
+  if (typeof stopClipRecording === "function") stopClipRecording();
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
   // Leaving online link mode: say BYE to the peer and drop the channel
@@ -4777,6 +4886,9 @@ const loadRom = async (romName, originalName) => {
   document.body.classList.remove("paused");
   fastForward = false;
   speed2x = false;  // a fresh core starts with turbo off
+  slowMotion = false; // and the wasm-side sample stretch off (module global)
+  if (typeof Module !== "undefined" && Module._wasm_set_slowmo) Module._wasm_set_slowmo(0);
+  turboHeld = [false, false];
   rewindHeld = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
@@ -4793,8 +4905,11 @@ const loadRom = async (romName, originalName) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
+  detectTiltCart();       // MBC7: enable tilt input routing for this cart
+  stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
+  offerAutoResume();      // async: "Resume last session?" toast if one exists
   setTimeout(() => logViewportDiag("romload"), 500);
 };
 
@@ -5113,6 +5228,7 @@ resetButton.addEventListener("click", () => {
 const setSpeed2x = (on, fromRemote) => {
   speed2x = on;
   speed2xButton.classList.toggle("active", on);
+  if (on && slowMotion) setSlowMotion(false);
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(on ? 1 : 0);
   }
@@ -5127,6 +5243,24 @@ window.applyRemoteSpeed2x = (on) => setSpeed2x(on, true);
 const setFastForward = (on) => {
   fastForward = on;
   fastForwardButton.classList.toggle("active", on);
+  if (on) setSlowMotion(false);
+};
+
+// Slow motion (0.5x): the tick loop doubles the per-frame wall-clock step
+// while the core emits each audio sample twice (octave-down realtime audio —
+// the inverse of 2x's drop-every-other). Radio-exclusive with FF/2x like the
+// other speed modes. Keyboard-only for now (Shift+`), no top-bar button.
+const setSlowMotion = (on) => {
+  if (slowMotion === on) return; // no toast spam from the radio-clear paths
+  slowMotion = on;
+  if (typeof Module !== "undefined" && Module._wasm_set_slowmo) {
+    Module._wasm_set_slowmo(on ? 1 : 0);
+  }
+  if (on) {
+    setFastForward(false);
+    setSpeed2x(false);
+  }
+  showToast(on ? "Slow motion on (0.5x)" : "Slow motion off");
 };
 
 fastForwardButton.addEventListener("click", () => {
@@ -5140,6 +5274,16 @@ speed2xButton.addEventListener("click", () => {
   setSpeed2x(!speed2x);
   if (speed2x) setFastForward(false);
 });
+
+// Frame advance: while paused, run exactly one emulated frame and present it.
+// The frame's audio sliver is discarded (13ms of sound per press is noise).
+// Key-repeat is allowed, so holding "." crawls forward at the OS repeat rate.
+const frameAdvance = () => {
+  if (typeof Module === "undefined" || !Module._loop_tick) return;
+  Module._loop_tick();
+  if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+  drawGame();
+};
 
 // Rewind: hold to step history backward (the tick loop pops snapshots at a
 // fixed cadence while held)
@@ -5186,6 +5330,8 @@ const releaseKbHolds = () => {
     kbRewindHeld = false;
     setRewindHeld(false);
   }
+  setTurboHeld(0, false);
+  setTurboHeld(1, false);
 };
 window.addEventListener("blur", releaseKbHolds);
 
@@ -5205,6 +5351,14 @@ const shortcutKeyHandler = (e, down) => {
         kbRewindHeld = false;
         setRewindHeld(false);
       }
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (e.code === "KeyC" && turboHeld[0]) {
+      setTurboHeld(0, false);
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (e.code === "KeyV" && turboHeld[1]) {
+      setTurboHeld(1, false);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -5250,10 +5404,38 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "Backquote":
       if (!gameLoaded || !speedControlsOk()) break;
+      if (e.shiftKey) {
+        // Shift+` toggles slow motion — the inverse of Shift+Tab's 2x
+        if (!e.repeat) setSlowMotion(!slowMotion);
+        handled = true;
+        break;
+      }
       if (!kbRewindHeld) {
         kbRewindHeld = true;
         setRewindHeld(true);
       }
+      handled = true;
+      break;
+    case "Period":
+      // Frame advance, mGBA-style: first press pauses, further presses (key
+      // repeat included) step one frame each. Single-core only — loop_tick
+      // is a no-op in the linked modes and would desync them anyway.
+      if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
+      if (!paused) {
+        if (!e.repeat) pauseButton.click();
+      } else {
+        frameAdvance();
+      }
+      handled = true;
+      break;
+    case "KeyC": // hold = turbo A (autofire)
+      if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
+      setTurboHeld(0, true);
+      handled = true;
+      break;
+    case "KeyV": // hold = turbo B (autofire)
+      if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
+      setTurboHeld(1, true);
       handled = true;
       break;
     case "KeyF":
@@ -5517,6 +5699,7 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  stopClipRecording(); // don't keep recording a frozen frame from the menu
   paused = true;
   document.body.classList.add("paused");
   document.body.classList.remove("running");
@@ -5643,6 +5826,101 @@ const takeScreenshot = () => {
 
 document.getElementById("screenshot").addEventListener("click", takeScreenshot);
 
+// --- Clip recording ---
+// MediaRecorder over the game canvas (shader output included) plus the
+// master audio gain, saved as a .webm (or .mp4 where that's what the
+// browser records — Safari). Single-core modes only; the linked modes blit
+// to their own canvases and are CSS-hidden from this menu item anyway.
+var clipRecorder = null;
+var clipChunks = [];
+var clipStopTimer = null;
+const recordClipItem = document.getElementById("record-clip");
+const CLIP_MAX_MS = 5 * 60 * 1000; // hard cap; a forgotten recorder stops itself
+
+const clipMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return null;
+  for (const m of ["video/webm;codecs=vp9,opus", "video/webm",
+                   "video/mp4;codecs=avc1.64001F,mp4a.40.2", "video/mp4"]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return null;
+};
+
+const setClipMenuState = (recording) => {
+  recordClipItem.querySelector("span").textContent =
+    recording ? "Stop Recording" : "Record Clip";
+  recordClipItem.classList.toggle("recording", recording);
+};
+
+const stopClipRecording = () => {
+  if (clipRecorder && clipRecorder.state !== "inactive") clipRecorder.stop();
+};
+
+const startClipRecording = () => {
+  if (clipRecorder || !currentRomName) return;
+  const mime = clipMimeType();
+  if (!mime) {
+    showToast("Video recording isn't supported in this browser");
+    return;
+  }
+  let stream;
+  try {
+    stream = canvasEl.captureStream(60);
+  } catch {
+    showToast("Couldn't capture the game canvas");
+    return;
+  }
+  // Audio tap is best-effort: pre-unlock (no gesture yet) records video-only.
+  const audio = typeof window.acquireClipAudio === "function"
+    ? window.acquireClipAudio() : null;
+  if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
+  clipChunks = [];
+  try {
+    clipRecorder = new MediaRecorder(stream, {
+      mimeType: mime,
+      videoBitsPerSecond: 8_000_000, // generous: pixel art + upscalers = cheap
+    });
+  } catch {
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    showToast("Couldn't start the recorder");
+    return;
+  }
+  clipRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size) clipChunks.push(e.data);
+  };
+  clipRecorder.onstop = () => {
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    clearTimeout(clipStopTimer);
+    const blob = new Blob(clipChunks, { type: clipRecorder.mimeType });
+    clipRecorder = null;
+    clipChunks = [];
+    setClipMenuState(false);
+    if (!blob.size) {
+      showToast("The recording came out empty");
+      return;
+    }
+    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}-clip-${stamp}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    showToast("Clip saved");
+  };
+  clipRecorder.start(1000); // flush a chunk per second
+  clipStopTimer = setTimeout(stopClipRecording, CLIP_MAX_MS);
+  setClipMenuState(true);
+  showToast("Recording — pick Stop Recording to finish");
+};
+
+recordClipItem.addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (clipRecorder) stopClipRecording();
+  else startClipRecording();
+});
+
 // --- Fullscreen ---
 
 const fullscreenBtn = document.getElementById("fullscreen-btn");
@@ -5707,6 +5985,20 @@ const pollGamepads = () => {
     if (ay > GP_DEADZONE) want[1] = true;
     if (ax < -GP_DEADZONE) want[2] = true;
     if (ax > GP_DEADZONE) want[3] = true;
+    // Tilt cart: the left stick doubles as the accelerometer (full analog
+    // range). Only claims the tilt target while deflected so the keyboard /
+    // device-orientation sources aren't fought over a centered stick.
+    if (tiltActive) {
+      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
+        padTiltLive = true;
+        tiltTargetX = ax;
+        tiltTargetY = ay;
+      } else if (padTiltLive) {
+        padTiltLive = false;
+        tiltTargetX = 0;
+        tiltTargetY = 0;
+      }
+    }
   }
   document.body.classList.toggle(
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
@@ -5725,6 +6017,96 @@ const pollGamepads = () => {
       gpPrev[i] = want[i];
     }
   }
+};
+
+// --- Turbo (autofire) ---
+// While a turbo key is held, pulse the button 2 frames on / 2 frames off
+// (15 presses/sec — comfortably inside every game's poll rate). Applied per
+// emulated frame from the single-core tick loop, so fast-forward autofires
+// faster in wall-clock terms exactly like a hardware turbo controller would.
+const TURBO_INPUTS = [4, 5]; // Input.A, Input.B
+const applyTurboPulse = () => {
+  if (!turboHeld[0] && !turboHeld[1]) return;
+  turboPhase = (turboPhase + 1) & 3;
+  const on = turboPhase < 2 ? 1 : 0;
+  for (let i = 0; i < 2; i++) {
+    if (turboHeld[i]) Module._setInput(TURBO_INPUTS[i], on);
+  }
+};
+const setTurboHeld = (idx, on) => {
+  if (turboHeld[idx] === on) return;
+  turboHeld[idx] = on;
+  // Releasing mid-pulse must not leave the button stuck down
+  if (!on && typeof Module !== "undefined" && Module._setInput) {
+    Module._setInput(TURBO_INPUTS[idx], 0);
+  }
+};
+
+// --- Tilt cart input (MBC7: Kirby Tilt 'n' Tumble) ---
+// Three sources feed a shared target: gamepad left stick (analog, best),
+// keyboard/touch D-pad (digital, smoothed), and device orientation on
+// mobile. The target is eased toward each RAF tick so digital input rolls
+// the ball rather than teleporting the tilt.
+const TILT_KB_RANGE = 0.65;   // full keyboard deflection (playable, not violent)
+const TILT_SMOOTHING = 0.18;  // per-tick ease factor toward the target
+const TILT_ORIENT_RANGE = 25; // degrees of physical tilt = full deflection
+
+const detectTiltCart = () => {
+  tiltActive =
+    typeof Module !== "undefined" &&
+    !!Module._wasm_cart_has_tilt &&
+    Module._wasm_cart_has_tilt() === 1;
+  tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
+  kbTiltDirs = [false, false, false, false];
+  tiltNeutralBeta = null;
+  if (tiltActive && !maybeOfferOrientationTilt()) {
+    showToast("Tilt cart detected — D-pad or stick tilts the game");
+  }
+};
+
+const updateTilt = () => {
+  if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
+  tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
+  tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
+  Module._wasm_set_tilt(tiltX, tiltY);
+};
+
+const orientationTiltHandler = (e) => {
+  if (!tiltActive || e.beta == null || e.gamma == null) return;
+  // First reading defines the neutral pitch: people play holding the phone
+  // at ~30-50°, not flat on a table. Roll (gamma) is neutral at 0.
+  if (tiltNeutralBeta === null) tiltNeutralBeta = e.beta;
+  const clamp = (v) => Math.max(-1, Math.min(1, v));
+  tiltTargetX = clamp(e.gamma / TILT_ORIENT_RANGE);
+  tiltTargetY = clamp((e.beta - tiltNeutralBeta) / TILT_ORIENT_RANGE);
+};
+
+const enableOrientationTilt = async () => {
+  if (tiltOrientationOn) return;
+  try {
+    // iOS 13+: permission gate (non-standard static, hence the cast), must
+    // be called from a user gesture
+    const doe = /** @type {*} */ (
+      typeof DeviceOrientationEvent !== "undefined" ? DeviceOrientationEvent : null);
+    if (doe && typeof doe.requestPermission === "function") {
+      const res = await doe.requestPermission();
+      if (res !== "granted") return;
+    }
+    window.addEventListener("deviceorientation", orientationTiltHandler);
+    tiltOrientationOn = true;
+    tiltNeutralBeta = null; // re-baseline at the moment of enabling
+    showToast("Device tilt enabled — hold your comfortable angle now");
+  } catch {}
+};
+
+// On touch devices a tilt cart offers real device-tilt via a tappable toast
+// (the permission request needs a user gesture on iOS). Elsewhere (or if
+// dismissed) the D-pad/stick fallbacks just work with no setup.
+const maybeOfferOrientationTilt = () => {
+  if (tiltOrientationOn || typeof DeviceOrientationEvent === "undefined") return false;
+  if (!("ontouchstart" in window) && navigator.maxTouchPoints === 0) return false;
+  showActionToast("Play by tilting your device?", "Enable tilt", enableOrientationTilt);
+  return true;
 };
 
 // --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
@@ -5897,6 +6279,13 @@ var Module = {
     let lowpassNode = null;
     let playTime = 0;
 
+    // Clip recording tap: while a recording runs, the master gain ALSO feeds
+    // a MediaStreamDestination whose audio tracks the MediaRecorder consumes
+    // (see startClipRecording). Held here because gainNode lives in this
+    // closure; routeOutput re-attaches it across lowpass toggles.
+    let clipTapNode = null;
+    let clipTapActive = false;
+
     // Optional analog-output low-pass (~12 kHz), modeling the GBA speaker's
     // cap/analog smoothing. Off by default → gain routes straight to the
     // destination (no filter node in the path). Mirrors the native IIR.
@@ -5915,8 +6304,22 @@ var Module = {
       } else {
         gainNode.connect(audioCtx.destination);
       }
+      if (clipTapActive && clipTapNode) gainNode.connect(clipTapNode);
     };
     window.updateAudioLowpass = () => routeOutput();
+    // Recorder-side hooks (recording code lives at module scope, outside
+    // this closure). Return the tap's MediaStream, or null pre-audio-unlock.
+    window.acquireClipAudio = () => {
+      if (!audioCtx || !gainNode) return null;
+      if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
+      clipTapActive = true;
+      routeOutput();
+      return clipTapNode.stream;
+    };
+    window.releaseClipAudio = () => {
+      clipTapActive = false;
+      if (audioCtx && gainNode) routeOutput();
+    };
     // Audio can only play at realtime rate. When unbounded fast-forward runs the
     // core many frames per rAF, we play the frames that fit within this much
     // queued lead and drop the rest (see the fastForward branch), keeping FF
@@ -6084,9 +6487,10 @@ var Module = {
         return;  // fps display is showing SLEEPING
       }
       const mode = paused ? "paused" : rewindHeld ? "rewind"
-        : fastForward ? "ffw" : speed2x ? "2x" : "normal";
+        : fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
       const expected = mode === "paused" || mode === "rewind" ? 0
-        : mode === "2x" ? 119.5 : mode === "normal" ? 59.7 : null;
+        : mode === "2x" ? 119.5 : mode === "slow" ? 29.9
+        : mode === "normal" ? 59.7 : null;
       const usual = expected !== null &&
         Math.abs(frameCount - expected) <= Math.max(3, expected * 0.05);
       // A mode switch mid-window yields a blended count; don't flash it
@@ -6130,7 +6534,14 @@ var Module = {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
+        persistAutoState();
       }
+    });
+
+    // Mobile browsers routinely kill backgrounded tabs without pagehide ever
+    // firing again — capture the resume snapshot the moment we're hidden.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) persistAutoState();
     });
 
     // iOS Safari frequently skips beforeunload entirely; pagehide is the
@@ -6145,6 +6556,7 @@ var Module = {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
+        persistAutoState(); // one-tap resume next launch
       }
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});
@@ -6226,6 +6638,7 @@ var Module = {
 
     const tick = (timestamp) => {
       pollGamepads();
+      updateTilt(); // MBC7 carts: ease the tilt vector toward its target
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
@@ -6337,11 +6750,13 @@ var Module = {
       } else {
         // Run as many frames as needed to catch up, capped to avoid spiral.
         // At 2x speed each frame consumes half the wall-clock step (the core
-        // decimates audio to match).
-        const step = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
+        // decimates audio to match); slow motion doubles the step (the core
+        // doubles the samples to match).
+        const step = speed2x ? FRAME_TIME / 2 : slowMotion ? FRAME_TIME * 2 : FRAME_TIME;
         const maxFrames = speed2x ? 4 : 2;
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
+          applyTurboPulse();
           Module._loop_tick();
           pushAudio();
           frameCount++;

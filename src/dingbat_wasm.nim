@@ -294,10 +294,19 @@ var audioBuffer: seq[float32] = @[]
 # emulation stays bit-identical between the two linked cores.
 var audioSuppressed = false
 
+# Slow motion (0.5x): JS doubles the per-frame wall-clock step, so the core
+# produces half the samples per second the AudioContext consumes. Emitting
+# each sample twice restores the realtime rate, pitched down an octave — the
+# classic slow-mo sound (the inverse of wasm_set_turbo's drop-every-other).
+var slowmoStretch = false
+
 proc appendAudioSample(left, right: float32) {.exportc.} =
   if audioSuppressed: return
   audioBuffer.add(left)
   audioBuffer.add(right)
+  if slowmoStretch:
+    audioBuffer.add(left)
+    audioBuffer.add(right)
 
 proc getAudioBufferPtr(): pointer {.exportc.} =
   if audioBuffer.len > 0: addr audioBuffer[0] else: nil
@@ -353,6 +362,11 @@ proc wasm_set_turbo(on: cint) {.exportc.} =
     of ekGB:  stateGb.apu.turbo = t
     of ekNone: discard
 
+proc wasm_set_slowmo(on: cint) {.exportc.} =
+  ## Slow motion is single-core only (the linked modes gate it off in JS), so
+  ## unlike turbo there is no rollback-core mirroring to do here.
+  slowmoStretch = on != 0
+
 proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
   ## Local audio preference: when on, 2x speed uses a WSOLA time-stretch so the
   ## sound keeps its pitch instead of jumping an octave. Independent of the
@@ -407,6 +421,19 @@ proc wasm_rumble(): cint {.exportc.} =
   ## this each RAF tick to drive haptics + screen shake.
   if stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gpio_rumble(): 1
+  else: 0
+
+proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
+  ## Tilt-cart accelerometer input, -1.0 .. 1.0 per axis, 0 = level. Routed to
+  ## the GB cartridge (MBC7 — Kirby Tilt 'n' Tumble); a no-op on every other
+  ## mapper, so JS can feed it unconditionally while a tilt cart is detected.
+  if stateKind == ekGB and stateGb != nil:
+    stateGb.cartridge.set_accelerometer(float(x), float(y))
+
+proc wasm_cart_has_tilt(): cint {.exportc.} =
+  ## 1 when the running cart has a tilt sensor (MBC7); lets JS decide whether
+  ## to request DeviceOrientation permission / show tilt UI at ROM load.
+  if stateKind == ekGB and stateGb != nil and stateGb.cartridge of Mbc7: 1
   else: 0
 
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =
