@@ -327,6 +327,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     deleteGameEverywhere, resetGameSaves, queueSaveDataDeletes,
     get syncState() { return syncState; },
     set syncState(v) { syncState = v; },
+    applyImportedState, applyStateBytes, stateRejectMessage, looksLikeStateFile,
     refreshHomeRecent, handleRomFile, loadRom,
     looksLikeValidRom, closeRomWarnModal,
     serializeCheats, parseCheats, validateCheat, applyCheats, restoreCheats,

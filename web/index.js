@@ -3230,6 +3230,22 @@ const captureStateBytes = () => {
   return new Uint8Array(Module.memory.buffer, ptr, len).slice();
 };
 
+// wasm_load_state only reports accept/reject (the specific reason is echoed
+// to the console), so sniff the header magic here to tell "this isn't a
+// dingbat save state at all" apart from "real state image the core rejected"
+// (different game, newer dingbat version, or corruption). Header layout is
+// documented in src/dingbat/common/serialize.nim (STATE_MAGIC = "DGBSTATE").
+const STATE_MAGIC = "DGBSTATE";
+const looksLikeStateFile = (bytes) =>
+  !!bytes && bytes.length >= STATE_MAGIC.length &&
+  [...STATE_MAGIC].every((c, i) => bytes[i] === c.charCodeAt(0));
+
+// Toast copy for a state image the core refused to load.
+const stateRejectMessage = (bytes) =>
+  looksLikeStateFile(bytes)
+    ? "State didn't match this game"
+    : "Not a dingbat save state file";
+
 // Validate + apply a state image; returns true when the core accepted it.
 const applyStateBytes = (bytes) => {
   if (typeof Module === "undefined" || !Module._wasm_load_state) return false;
@@ -3336,7 +3352,7 @@ const loadFromSlot = async (slot) => {
     return false;
   }
   const ok = applyStateBytes(bytes);
-  showToast(ok ? "State loaded" : "State didn't match this game");
+  showToast(ok ? "State loaded" : stateRejectMessage(bytes));
   return ok;
 };
 
@@ -3643,7 +3659,7 @@ document.getElementById("export-state").addEventListener("click", () => {
 // Apply an imported .state image to the running game (not persisted — use Save
 // State to keep it). Shared by the "Import state" button and a dropped .state.
 const applyImportedState = (bytes) => {
-  showToast(applyStateBytes(bytes) ? "State loaded" : "State didn't match this game");
+  showToast(applyStateBytes(bytes) ? "State loaded" : stateRejectMessage(bytes));
 };
 
 document.getElementById("import-state").addEventListener("click", () => {
