@@ -6,7 +6,7 @@ from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
 when defined(test_harness):
   import ../common/test_output
-import lut_macros
+import ../common/lut_macros
 
 # Include register definitions (provides PSR, DISPCNT, etc.)
 include reg

@@ -3,6 +3,7 @@
 
 import std/[bitops, os, strutils, times]
 import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats]
+import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
