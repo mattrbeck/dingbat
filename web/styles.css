@@ -2207,7 +2207,9 @@ body.debug-2p .home-tile-link {
   }
 }
 
-.modal h3 {
+/* Modal titles are <h2> (the page has one <h1>, so h3 titles tripped axe's
+   heading-order); the size below keeps the old h3 look. */
+.modal h2 {
   margin: 0 0 16px;
   font-size: 17px;
   font-weight: 700;
@@ -4692,3 +4694,54 @@ body.sync-shown #status {
   white-space: pre-line;
 }
 .cheat-error[hidden] { display: none; }
+
+/*
+ * ==========================================================
+ * Reduced motion
+ * ==========================================================
+ * Last in the file on purpose: the overrides are same-specificity as the
+ * rules they cancel, so source order is what makes them win. Pure opacity
+ * fades (overlay-in, toast/indicator fades, the update-dot pulse) are kept —
+ * they don't move anything — and so are the sub-0.1s press-feedback
+ * transforms and the gameplay-state opacity fades on the touch controls,
+ * which are functional. The .net-spinner slowdown lives with its component
+ * (~line 4272).
+ */
+@media (prefers-reduced-motion: reduce) {
+  /* Entrance animations (slide/scale): show the settled state immediately.
+     home-in uses "both", so animation:none simply lands on the final frame. */
+  #menu-dropdown,
+  #home-inner,
+  .modal {
+    animation: none;
+  }
+
+  /* MBC5 rumble screen-shake. There is a user toggle for rumble, but a
+     vestibular user shouldn't have to find it — the OS setting wins. */
+  body.rumbling #canvas {
+    animation: none;
+  }
+
+  /* Drive-sync spinner: slowed, not stopped, matching .net-spinner — it
+     still has to communicate "in progress". */
+  .sync-spin {
+    animation-duration: 3s;
+  }
+
+  /* Sliding chrome snaps instead of gliding. The toast keeps its fade but
+     loses the translate glide; the phone-landscape top bar and the joystick
+     snap-home return jump straight to their end positions. */
+  #toast {
+    transition: opacity 0.2s;
+  }
+  #hle-indicator {
+    transition: opacity 0.35s ease;
+  }
+  body.running #topbar,
+  #topbar-handle,
+  #topbar-handle svg,
+  #joystick-base.homing,
+  #joystick-knob.homing {
+    transition: none;
+  }
+}

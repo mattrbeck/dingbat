@@ -168,6 +168,13 @@ body {
   cursor: pointer;
 }
 
+/* Keyboard focus ring — same 3px glow treatment as the main app's sliders
+   (styles.css .vol-range:focus-visible), in the embed's accent color. */
+#vol-track:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.55);
+}
+
 #vol-fill {
   position: absolute;
   top: 0;

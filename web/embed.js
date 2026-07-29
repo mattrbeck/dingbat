@@ -1,3 +1,13 @@
+// Keyboard-navigation escape hatch (same trick as index.js): the SDL runtime
+// preventDefaults keydown app-wide once it initializes, which kills Tab and
+// makes the whole embed keyboard-inoperable. This runs on window in the
+// CAPTURE phase and embed.js executes before em.js, so it outranks SDL's key
+// grab. Stopping propagation leaves the browser's default focus traversal
+// intact. The embed binds nothing to Tab, so it is unconditional here.
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Tab") e.stopImmediatePropagation();
+}, true);
+
 // --- Query parameters ---
 
 const params = new URLSearchParams(window.location.search);
@@ -140,6 +150,8 @@ let overlayTimer = null;
 const updatePauseIcon = () => {
   iconPause.style.display = paused ? "none" : "";
   iconPlay.style.display = paused ? "" : "none";
+  pauseButton.setAttribute("aria-label", paused ? "Play" : "Pause");
+  pauseButton.title = paused ? "Play" : "Pause";
   // Pin the overlay open while paused so the user can see the play button
   overlay.classList.toggle("pinned", paused);
   // When unpausing on mobile, start auto-hide; when pausing, cancel timer
@@ -163,6 +175,7 @@ resetButton.addEventListener("click", () => {
 fastForwardButton.addEventListener("click", () => {
   fastForward = !fastForward;
   fastForwardButton.classList.toggle("active", fastForward);
+  fastForwardButton.setAttribute("aria-pressed", String(fastForward));
 });
 
 // --- Volume slider ---
@@ -180,14 +193,22 @@ const updateVolumeUI = () => {
   volKnob.style.left = pct;
   iconMuted.style.display = volume === 0 ? "" : "none";
   iconVol.style.display = volume === 0 ? "none" : "";
+  // Keep the a11y state in sync for every input path (pointer, keyboard, mute)
+  volTrack.setAttribute("aria-valuenow", String(volume));
+  volIconBtn.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
   if (typeof updateGain === "function") updateGain();
+};
+
+// Single setter shared by the pointer, keyboard and mute paths
+const setVolume = (v) => {
+  volume = Math.round(Math.max(0, Math.min(100, v)));
+  updateVolumeUI();
 };
 
 const setVolumeFromTrack = (clientX) => {
   let rect = volTrack.getBoundingClientRect();
   let ratio = (clientX - rect.left) / rect.width;
-  volume = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
-  updateVolumeUI();
+  setVolume(ratio * 100);
 };
 
 // Click on track to jump
@@ -212,16 +233,45 @@ volTrack.addEventListener("touchmove", (e) => {
   setVolumeFromTrack(e.touches[0].clientX);
 });
 
+// Keyboard support: the track is a role="slider" div (tabindex in embed.html).
+// Window CAPTURE phase, like the Tab hatch at the top of this file: while the
+// slider is focused the arrows must adjust volume, not reach the SDL runtime
+// as game input, and this listener is registered before em.js loads.
+window.addEventListener("keydown", (e) => {
+  if (document.activeElement !== volTrack) return;
+  let v;
+  switch (e.key) {
+    case "ArrowLeft":
+    case "ArrowDown":
+      v = volume - 5;
+      break;
+    case "ArrowRight":
+    case "ArrowUp":
+      v = volume + 5;
+      break;
+    case "Home":
+      v = 0;
+      break;
+    case "End":
+      v = 100;
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  setVolume(v);
+}, true);
+
 // Toggle mute via icon
 let volumeBeforeMute = 50;
 volIconBtn.addEventListener("click", () => {
   if (volume > 0) {
     volumeBeforeMute = volume;
-    volume = 0;
+    setVolume(0);
   } else {
-    volume = volumeBeforeMute;
+    setVolume(volumeBeforeMute);
   }
-  updateVolumeUI();
 });
 
 // Initialize volume UI

@@ -2372,7 +2372,7 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
   closeBtn.setAttribute("aria-label", "Close");
   closeBtn.innerHTML = "&times;";
   modal.appendChild(closeBtn);
-  let h = document.createElement("h3");
+  let h = document.createElement("h2");
   h.textContent = title;
   modal.appendChild(h);
   if (hint) {
@@ -4206,6 +4206,9 @@ const renderKbBindings = () => {
     btn.type = "button";
     btn.className = "kb-btn" + (kbSelection === i ? " active" : "");
     btn.textContent = sdlName(activeBindings[i]);
+    // The visible label ("Z") only names the key; tell screen readers which
+    // action this button rebinds.
+    btn.setAttribute("aria-label", INPUT_NAMES[i] + ": " + sdlName(activeBindings[i]));
     btn.addEventListener("click", () => {
       kbSelection = i;
       renderKbBindings();
