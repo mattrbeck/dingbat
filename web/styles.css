@@ -1146,11 +1146,16 @@ body.running #main-menu-sep {
   display: block;
 }
 
-/* Save actions + screenshot only make sense once a game is loaded */
+/* Save actions, screenshot, Save States and Link Cable only make sense once
+   a game is loaded (every mode — single, 2P link, rollback, net — sets
+   body.has-game, so Link Cable's connected "Disconnect" state stays
+   reachable) */
 #save-state,
 #load-state,
 #manage-saves,
 #screenshot,
+#open-states,
+#net-connect,
 #save-sep {
   display: none;
 }
@@ -1158,7 +1163,9 @@ body.running #main-menu-sep {
 body.has-game #save-state,
 body.has-game #load-state,
 body.has-game #manage-saves,
-body.has-game #screenshot {
+body.has-game #screenshot,
+body.has-game #open-states,
+body.has-game #net-connect {
   display: flex;
 }
 
