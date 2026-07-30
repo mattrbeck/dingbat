@@ -2,7 +2,6 @@ import std/[os, strutils, math]
 import sdl2 except init, quit
 import dingbat/common/input
 import dingbat/common/rewind
-import dingbat/common/timestretch
 import dingbat/common/serialize
 import dingbat/common/scheduler
 import dingbat/gba/gba
@@ -301,33 +300,20 @@ var audioBuffer: seq[float32] = @[]
 var audioSuppressed = false
 
 # Slow motion (0.5x): JS doubles the per-frame wall-clock step, so the core
-# produces half the samples per second the AudioContext consumes. Two ways to
-# fill the gap, mirroring what fast-forward does in reverse:
-#   pitch-correct off -> emit each sample twice (octave-down, classic slow-mo)
-#   pitch-correct on  -> WSOLA time-stretch at a 1:2 hop (pitch preserved)
-# The stretcher is presentation-only, exactly like the APUs' fast-forward
-# WSOLA: never on the 1x path, never serialized.
+# produces half the samples per second the AudioContext consumes. Emitting
+# each sample twice restores the realtime rate, pitched down an octave — the
+# classic slow-mo sound (the inverse of wasm_set_turbo's drop-every-other).
+# (A WSOLA pitch-preserving variant was tried and rejected: it sounded worse
+# than the honest octave drop.)
 var slowmoStretch = false
-var slowmoPitchCorrect = false
-var slowmoTs: TimeStretch = nil
 
 proc appendAudioSample(left, right: float32) {.exportc.} =
   if audioSuppressed: return
-  if slowmoStretch:
-    if slowmoPitchCorrect and slowmoTs != nil:
-      slowmoTs.push(left, right)
-      for _ in 0 ..< 2:                # exactly 2 out per 1 in (HS / (HS/2))
-        let (l, r) = slowmoTs.pull()
-        audioBuffer.add(l)
-        audioBuffer.add(r)
-    else:
-      audioBuffer.add(left)
-      audioBuffer.add(right)
-      audioBuffer.add(left)
-      audioBuffer.add(right)
-    return
   audioBuffer.add(left)
   audioBuffer.add(right)
+  if slowmoStretch:
+    audioBuffer.add(left)
+    audioBuffer.add(right)
 
 proc getAudioBufferPtr(): pointer {.exportc.} =
   if audioBuffer.len > 0: addr audioBuffer[0] else: nil
@@ -386,26 +372,15 @@ proc wasm_set_turbo(on: cint) {.exportc.} =
 proc wasm_set_slowmo(on: cint) {.exportc.} =
   ## Slow motion is single-core only (the linked modes gate it off in JS), so
   ## unlike turbo there is no rollback-core mirroring to do here.
-  let t = on != 0
-  if t and not slowmoStretch and slowmoPitchCorrect:
-    # (Re-)engaging the pitch-correct path: start the stretcher clean, same
-    # rule as the APUs' reset-on-turbo-on (stale buffered audio clicks).
-    if slowmoTs == nil: slowmoTs = new_time_stretch(HS div 2)
-    else: slowmoTs.reset()
-  slowmoStretch = t
+  slowmoStretch = on != 0
 
 proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
   ## Local audio preference: when on, 2x speed uses a WSOLA time-stretch so the
   ## sound keeps its pitch instead of jumping an octave. Independent of the
   ## rollback-synced turbo state — it only changes how the local APU turns the
   ## full-rate stream into the half-count output the pacing expects, so it never
-  ## affects timing or desyncs a link. Mirror onto the live rollback cores too,
-  ## and onto the slow-mo path, which lives in this shim rather than the APUs.
+  ## affects timing or desyncs a link. Mirror onto the live rollback cores too.
   let t = on != 0
-  slowmoPitchCorrect = t
-  if slowmoStretch and slowmoPitchCorrect:
-    if slowmoTs == nil: slowmoTs = new_time_stretch(HS div 2)
-    else: slowmoTs.reset()
   if stateRollback != nil:
     for core in stateRollback.link.cores: core.apu.set_pitch_correct_ff(t)
   elif stateGbRollback != nil:

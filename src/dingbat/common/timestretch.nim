@@ -39,7 +39,6 @@ type
     inL, inR: array[CAP, float32]   ## interleaved-by-array input ring
     writePos: int                    ## total frames pushed (absolute)
     anNominal: int                   ## fixed analysis grid position (absolute)
-    anHop: int                       ## input frames per step (HA = 2:1 compress)
     prevGrab: int                    ## absolute start of the last grabbed segment
     started: bool                    ## has the first segment been placed?
     accL, accR: array[FRAME, float32]## OLA accumulator (frames)
@@ -47,12 +46,8 @@ type
     outHead: int                     ## FIFO read cursor
     win: array[FRAME, float32]       ## precomputed periodic Hann window
 
-proc new_time_stretch*(analysisHop = HA): TimeStretch =
-  ## The output:input ratio is HS:analysisHop. The default (HA = 2*HS) is the
-  ## fast-forward 2:1 compression both APUs use; slow motion passes HS div 2
-  ## for 1:2 stretching (each input second becomes two output seconds, pitch
-  ## preserved). The grid arithmetic is ratio-agnostic — only the hop changes.
-  result = TimeStretch(outL: @[], outR: @[], anHop: max(1, analysisHop))
+proc new_time_stretch*(): TimeStretch =
+  result = TimeStretch(outL: @[], outR: @[])
   # Periodic Hann: w[n] + w[n+HS] == 1 at 50% overlap (unity COLA).
   for n in 0 ..< FRAME:
     result.win[n] = 0.5'f32 - 0.5'f32 * cos(2.0'f32 * PI * float32(n) / float32(FRAME))
@@ -135,7 +130,7 @@ proc produceStep(ts: TimeStretch) =
     ts.accR[n] = 0.0'f32
   ts.prevGrab = grab
   ts.started = true
-  ts.anNominal += ts.anHop    # fixed grid: exactly anHop input per HS output
+  ts.anNominal += HA          # fixed grid: exactly HA input per HS output
 
 proc available*(ts: TimeStretch): int {.inline.} =
   ## Output frames currently ready in the FIFO.
@@ -144,8 +139,7 @@ proc available*(ts: TimeStretch): int {.inline.} =
 proc pull*(ts: TimeStretch): tuple[l, r: float32] {.inline.} =
   ## Emit one output frame. Produces on demand from buffered input; returns
   ## silence (0, 0) only during the brief warm-up before the first segment is
-  ## ready. The caller must pull exactly HS output frames per anHop pushed —
-  ## half as many as it pushes at the default hop, twice as many at HS div 2.
+  ## ready. The caller must pull exactly half as many frames as it pushes.
   while ts.outHead >= ts.outL.len and ts.canProduce():
     ts.produceStep()
   if ts.outHead < ts.outL.len:
