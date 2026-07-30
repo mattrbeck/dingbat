@@ -5737,7 +5737,10 @@ const collapseCaptureSub = () => {
   captureSub.hidden = true;
   captureToggle.setAttribute("aria-expanded", "false");
 };
-captureToggle.addEventListener("click", () => {
+captureToggle.addEventListener("click", (e) => {
+  // The document-level click handler closes the dropdown on any click that
+  // bubbles to it — right for leaf items, wrong for an accordion header.
+  e.stopPropagation();
   captureSub.hidden = !captureSub.hidden;
   captureToggle.setAttribute("aria-expanded", captureSub.hidden ? "false" : "true");
 });
