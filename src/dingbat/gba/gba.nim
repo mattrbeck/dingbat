@@ -184,6 +184,17 @@ type
     direction*:   uint8
     allow_reads*: bool
     rtc*:         RTC
+    # Z-axis gyro (WarioWare: Twisted!, game code RZW*): a serial ADC on the
+    # same pins the RTC uses — the two never coexist, so gyro carts bypass
+    # the RTC state machine entirely (GBATEK "GBA Cart Gyro Sensor").
+    # 16-bit shift register = 4 dummy zeros + 12-bit sample, MSB out on each
+    # falling clock edge. gyro_z is the live frontend input (-1..1, CW
+    # positive); shift state is transient like the tilt latches.
+    gyro_present*: bool
+    gyro_z*:       float
+    gyro_sample*:  uint16
+    gyro_clock*:   bool
+    gyro_out*:     uint8
 
   Bus* = ref object
     gba* {.cursor.}:        GBA
@@ -1055,7 +1066,14 @@ include mmio
 
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
-  let t = find_storage_type(rom_path)
+  var t = find_storage_type(rom_path)
+  when defined(yoshi_eeprom_pin):
+    # Tilt carts really save to EEPROM; the string scan can misread them as
+    # SRAM (which then aliases save bytes under the tilt registers). Behind
+    # a define until the pin-by-game-code policy is decided for real.
+    if gba.cartridge != nil and
+       gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]:
+      t = stEEPROM
   result = case t
     of stEEPROM:                        new_eeprom(gba)
     of stSRAM:                          new_sram()

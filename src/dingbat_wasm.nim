@@ -438,15 +438,22 @@ proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
   ## unconditionally while a tilt cart is detected.
   if stateKind == ekGB and stateGb != nil:
     stateGb.cartridge.set_accelerometer(float(x), float(y))
-  elif stateKind == ekGBA and stateGba != nil and stateGba.bus.tilt_present:
-    stateGba.bus.tilt_in_x = float(x)
-    stateGba.bus.tilt_in_y = float(y)
+  elif stateKind == ekGBA and stateGba != nil:
+    if stateGba.bus.tilt_present:
+      stateGba.bus.tilt_in_x = float(x)
+      stateGba.bus.tilt_in_y = float(y)
+    elif stateGba.bus.gpio.gyro_present:
+      # Gyro carts are rate sensors: x carries the rotation rate (CW
+      # positive, -1..1 = the hard-rotation extremes); y is unused.
+      stateGba.bus.gpio.gyro_z = float(x)
 
 proc wasm_cart_has_tilt(): cint {.exportc.} =
-  ## 1 when the running cart has a tilt sensor (GB MBC7 or a GBA tilt cart);
-  ## lets JS decide whether to request motion permission / show tilt UI.
+  ## Motion-cart kind: 0 = none, 1 = tilt/accelerometer (GB MBC7, GBA Yoshi),
+  ## 2 = gyro rate sensor (WarioWare Twisted). Lets JS pick the input model
+  ## and decide whether to request motion permission at ROM load.
   if stateKind == ekGB and stateGb != nil and stateGb.cartridge of Mbc7: 1
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.tilt_present: 1
+  elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gyro_present: 2
   else: 0
 
 # --- Retroactive clip capture (prototype) ---
@@ -626,6 +633,10 @@ proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   let down = pressed != 0
   if down: clipCurButtons = clipCurButtons or (1'u16 shl inputId)
   else: clipCurButtons = clipCurButtons and not (1'u16 shl inputId)
+  # During a retroactive-capture replay the input LOG owns the core; live
+  # presses only update the mask above, which clip_tick re-applies when the
+  # replay ends — so what the player holds through the capture carries over.
+  if clipReplaying: return
   # While an online link is live, route input through the netcore so a
   # speculative rollback replays the exact press timing (note_input just
   # applies the press when speculation is off, so this is always safe).

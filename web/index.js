@@ -664,7 +664,12 @@ const updateMenuScrollHint = () => {
 menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   menuDropdown.hidden = !menuDropdown.hidden;
-  if (!menuDropdown.hidden) updateMenuScrollHint();
+  if (!menuDropdown.hidden) {
+    // Fresh open starts with the Capture group folded (defined later;
+    // guarded for the pre-parse window)
+    if (typeof collapseCaptureSub === "function") collapseCaptureSub();
+    updateMenuScrollHint();
+  }
 });
 
 // aria-expanded tracks the dropdown wherever it gets closed (many sites set
@@ -4337,8 +4342,16 @@ window.addEventListener("resize", updateCanvasScaling);
     // touch hit-testing follows the scroll while fixed-position paint does
     // not. Log it (visible via Toggle Log on-device), then zero it.
     const vv = window.visualViewport;
-    const phantom = (window.scrollY || 0) ||
-      (vv ? Math.round(vv.offsetTop || vv.pageTop || 0) : 0);
+    // Not phantom: pinch-zoom sets vv.offsetTop legitimately (resetting
+    // would yank the user's pan), and the iOS keyboard scrolls the page
+    // while a field is focused (resetting would fight the caret).
+    const zoomed = vv && vv.scale && vv.scale > 1.01;
+    const typing = document.activeElement &&
+      (document.activeElement.tagName === "INPUT" ||
+       document.activeElement.tagName === "TEXTAREA" ||
+       /** @type {HTMLElement} */ (document.activeElement).isContentEditable);
+    const phantom = !zoomed && !typing && ((window.scrollY || 0) ||
+      (vv ? Math.round(vv.offsetTop || vv.pageTop || 0) : 0));
     if (phantom) {
       log(`rotate-settle: phantom scroll ${window.scrollY}/${vv ? vv.offsetTop : "-"} — resetting`);
       window.scrollTo(0, 0);
@@ -4945,6 +4958,7 @@ var tiltOrientationOn = false;          // device-orientation stream attached
 var tiltNeutralBeta = null;             // first reading = neutral hold angle
 var padTiltLive = false;                // gamepad stick currently owns the target
 var kbTiltDirs = [false, false, false, false]; // held U/D/L/R while tilting
+var tiltKind = 0;                       // 1 = accelerometer cart, 2 = gyro cart
 
 // --- Screen Wake Lock ---
 // Keep the device awake while emulation is actively stepping (any mode: single,
@@ -5558,6 +5572,7 @@ const clipMimeType = () => {
 const finishRetroClip = (save) => {
   clipReplayActive = false;
   document.body.classList.remove("clip-replaying");
+  clipBanner.hidden = true;
   if (clipRecorder && clipRecorder.state !== "inactive") {
     if (save) clipRecorder.stop(); // onstop saves the blob
     else { clipRecorder.ondataavailable = null; clipRecorder.onstop = null;
@@ -5570,6 +5585,14 @@ const abortRetroClip = () => {
   if (!clipReplayActive) return;
   if (typeof Module !== "undefined" && Module._clip_abort) Module._clip_abort();
   finishRetroClip(false);
+};
+
+var clipTotalFrames = 0;
+const clipBanner = document.getElementById("clip-banner");
+const updateClipBanner = (left) => {
+  const pct = clipTotalFrames > 0
+    ? Math.min(100, Math.round(100 * (clipTotalFrames - left) / clipTotalFrames)) : 0;
+  clipBanner.textContent = `Capturing the last ${Math.round(clipTotalFrames / 60)}s… ${pct}%`;
 };
 
 const startRetroClip = () => {
@@ -5617,9 +5640,11 @@ const startRetroClip = () => {
   };
   clipRecorder.start(500);
   clipReplayActive = true;
+  clipTotalFrames = frames;
   document.body.classList.add("clip-replaying");
-  paused = false; // a paused game still replays (and re-pauses via the badge? keep simple: resume)
-  showToast("Replaying the last " + Math.round(frames / 60) + "s for capture…");
+  clipBanner.hidden = false;
+  updateClipBanner(frames);
+  paused = false; // the replay must run even if the game was paused
 };
 
 clipLastItem.addEventListener("click", () => {
@@ -5702,6 +5727,19 @@ recordClipItem.addEventListener("click", () => {
   menuDropdown.hidden = true;
   if (recRecorder) stopClipRecording();
   else startClipRecording();
+});
+
+// Capture accordion: Screenshot / Record Clip / Save Last 10s live under
+// one expandable "Capture" entry so the menu's top level stays short.
+const captureToggle = document.getElementById("capture-toggle");
+const captureSub = document.getElementById("capture-sub");
+const collapseCaptureSub = () => {
+  captureSub.hidden = true;
+  captureToggle.setAttribute("aria-expanded", "false");
+};
+captureToggle.addEventListener("click", () => {
+  captureSub.hidden = !captureSub.hidden;
+  captureToggle.setAttribute("aria-expanded", captureSub.hidden ? "false" : "true");
 });
 
 const frameStepButton = document.getElementById("frame-step");
@@ -5794,6 +5832,10 @@ const releaseKbHolds = () => {
 window.addEventListener("blur", releaseKbHolds);
 
 const shortcutKeyHandler = (e, down) => {
+  // A retroactive-capture replay owns the machine: no state loads, speed
+  // changes or pauses until it finishes (game keys still pass — the wasm
+  // side records them as the post-replay held state).
+  if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
   if (codeLookup[e.code] !== undefined) return; // game bindings always win
   if (e.ctrlKey || e.metaKey || e.altKey) return; // browser/OS chords
 
@@ -6376,13 +6418,14 @@ const TILT_SMOOTHING = 0.18;  // per-tick ease factor toward the target
 const TILT_ORIENT_RANGE = 25; // degrees of physical tilt = full deflection
 
 const detectTiltCart = () => {
-  tiltActive =
-    typeof Module !== "undefined" &&
-    !!Module._wasm_cart_has_tilt &&
-    Module._wasm_cart_has_tilt() === 1;
+  tiltKind =
+    typeof Module !== "undefined" && Module._wasm_cart_has_tilt
+      ? Module._wasm_cart_has_tilt() : 0; // 1 = accelerometer, 2 = gyro rate
+  tiltActive = tiltKind > 0;
   tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
   kbTiltDirs = [false, false, false, false];
   tiltNeutralBeta = null;
+  tiltRecenterBtn.hidden = !(tiltActive && tiltOrientationOn);
   if (tiltActive && !maybeOfferOrientationTilt()) {
     showToast("Tilt cart detected — D-pad or stick tilts the game");
   }
@@ -6418,7 +6461,17 @@ const updateTilt = () => {
 };
 
 const motionJoltHandler = (e) => {
-  if (!tiltActive || !e.acceleration) return;
+  if (!tiltActive) return;
+  if (tiltKind === 2) {
+    // Gyro cart: the sensor measures rotation RATE around the screen
+    // normal. 180 deg/s = the hard-rotation extreme.
+    const rr = e.rotationRate;
+    if (rr && rr.alpha != null) {
+      tiltTargetX = Math.max(-1, Math.min(1, rr.alpha / 180));
+    }
+    return;
+  }
+  if (!e.acceleration) return;
   const ax = e.acceleration.x, ay = e.acceleration.y;
   if (ax == null || ay == null) return;
   // Linear acceleration (gravity excluded), in g. Only spikes matter: below
@@ -6429,7 +6482,8 @@ const motionJoltHandler = (e) => {
 };
 
 const orientationTiltHandler = (e) => {
-  if (!tiltActive || e.beta == null || e.gamma == null) return;
+  if (!tiltActive || tiltKind === 2) return; // gyro carts use rotation RATE
+  if (e.beta == null || e.gamma == null) return;
   // First reading defines the neutral pitch: people play holding the phone
   // at ~30-50°, not flat on a table. Roll (gamma) is neutral at 0.
   if (tiltNeutralBeta === null) tiltNeutralBeta = e.beta;
@@ -6447,7 +6501,10 @@ const enableOrientationTilt = async () => {
       typeof DeviceOrientationEvent !== "undefined" ? DeviceOrientationEvent : null);
     if (doe && typeof doe.requestPermission === "function") {
       const res = await doe.requestPermission();
-      if (res !== "granted") return;
+      if (res !== "granted") {
+        showToast("Motion permission denied — D-pad and stick still tilt");
+        return;
+      }
     }
     // Motion (the jump-flick channel) shares the same iOS permission sheet;
     // request explicitly where the API exists, best-effort elsewhere.
@@ -6460,9 +6517,19 @@ const enableOrientationTilt = async () => {
     window.addEventListener("devicemotion", motionJoltHandler);
     tiltOrientationOn = true;
     tiltNeutralBeta = null; // re-baseline at the moment of enabling
+    tiltRecenterBtn.hidden = false;
     showToast("Device tilt enabled — hold your comfortable angle now");
   } catch {}
 };
+
+// Recenter: whatever angle the phone is at RIGHT NOW becomes neutral —
+// tilt games are unplayable after shifting in a chair without this.
+const tiltRecenterBtn = document.getElementById("tilt-recenter");
+tiltRecenterBtn.addEventListener("click", () => {
+  tiltNeutralBeta = null; // next orientation reading re-baselines
+  tiltJoltX = tiltJoltY = 0;
+  showToast("Tilt recentered");
+});
 
 // On touch devices a tilt cart offers real device-tilt via a tappable toast
 // (the permission request needs a user gesture on iOS). Elsewhere (or if
@@ -7167,6 +7234,7 @@ var Module = {
         while (accumulator >= FRAME_TIME && framesRun < 2) {
           const left = Module._clip_tick();
           if (left < 0) { done = true; break; }
+          if ((left & 15) === 0) updateClipBanner(left);
           pushAudio();
           frameCount++;
           accumulator -= FRAME_TIME;

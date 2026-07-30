@@ -1166,6 +1166,8 @@ body.running #main-menu-sep {
 #slow-motion,
 #clip-last,
 #record-clip,
+#capture-toggle,
+#capture-sub,
 #open-states,
 #net-connect,
 #save-sep {
@@ -1179,6 +1181,7 @@ body.has-game #screenshot,
 body.has-game #slow-motion,
 body.has-game #clip-last,
 body.has-game #record-clip,
+body.has-game #capture-toggle,
 body.has-game #open-states,
 body.has-game #net-connect {
   display: flex;
@@ -3972,6 +3975,8 @@ body.link-mode #frame-step,
 body.link-mode #slow-motion,
 body.link-mode #clip-last,
 body.link-mode #record-clip,
+body.link-mode #capture-toggle,
+body.link-mode #capture-sub,
 body.link-mode #save-state,
 body.link-mode #load-state,
 body.link-mode #manage-saves,
@@ -3983,6 +3988,8 @@ body.rollback-mode #frame-step,
 body.rollback-mode #slow-motion,
 body.rollback-mode #clip-last,
 body.rollback-mode #record-clip,
+body.rollback-mode #capture-toggle,
+body.rollback-mode #capture-sub,
 body.rollback-mode #reset,
 body.rollback-mode #save-state,
 body.rollback-mode #load-state,
@@ -4543,6 +4550,8 @@ body.net-mode #frame-step,
 body.net-mode #slow-motion,
 body.net-mode #clip-last,
 body.net-mode #record-clip,
+body.net-mode #capture-toggle,
+body.net-mode #capture-sub,
 body.net-mode #reset,
 body.net-mode #save-state,
 body.net-mode #load-state,
@@ -4976,4 +4985,62 @@ body.sync-shown #status {
 /* Live-recording state: the dot glows red so the menu shows it at a glance */
 #record-clip.recording {
   color: #ff5a5a;
+}
+
+/* Capture accordion: sub-items indent under the toggle; the chevron points
+   down while expanded. #capture-sub[hidden] wins over the has-game flex. */
+#capture-sub:not([hidden]) {
+  display: block;
+}
+#capture-sub .menu-subitem {
+  padding-left: 34px;
+}
+#capture-toggle .capture-chevron {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+#capture-toggle[aria-expanded="true"] .capture-chevron {
+  transform: rotate(90deg);
+}
+
+/* Retroactive capture in progress: the replay owns the screen — every
+   control goes inert (the wasm side also ignores core input) and the
+   banner is the one live element. */
+body.clip-replaying #playback-controls,
+body.clip-replaying #topbar .icon-btn,
+body.clip-replaying #topbar .menu-wrap,
+body.clip-replaying #controls {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+#clip-banner {
+  position: fixed;
+  z-index: 550;
+  left: 50%;
+  top: calc(var(--bar-h, 52px) + 10px);
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Tilt recenter chip: shown only while device-motion tilt is live */
+#tilt-recenter {
+  position: fixed;
+  z-index: 60;
+  right: calc(10px + var(--safe-r));
+  top: calc(var(--bar-h, 52px) + 10px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }

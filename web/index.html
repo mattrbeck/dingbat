@@ -88,21 +88,28 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/></svg>
             <span>Manage Saves</span>
           </button>
-          <button type="button" class="menu-item" id="screenshot">
+          <button type="button" class="menu-item" id="capture-toggle" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
-            <span>Screenshot</span>
+            <span>Capture</span>
+            <svg class="capture-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
           </button>
+          <div id="capture-sub" hidden>
+            <button type="button" class="menu-item menu-subitem" id="screenshot">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
+              <span>Screenshot</span>
+            </button>
+            <button type="button" class="menu-item menu-subitem" id="record-clip">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
+              <span>Record Clip</span>
+            </button>
+            <button type="button" class="menu-item menu-subitem" id="clip-last">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l-3 2"/><path d="M5 3l-2 2M19 3l2 2"/></svg>
+              <span>Save Last 10s</span>
+            </button>
+          </div>
           <button type="button" class="menu-item" id="slow-motion" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
             <span>Slow Motion</span>
-          </button>
-          <button type="button" class="menu-item" id="clip-last">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l-3 2"/><path d="M5 3l-2 2M19 3l2 2"/></svg>
-            <span>Save Last 10s</span>
-          </button>
-          <button type="button" class="menu-item" id="record-clip">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
-            <span>Record Clip</span>
           </button>
           <div class="menu-volume" id="menu-volume">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
@@ -136,6 +143,12 @@
           </button>
         </div>
       </div>
+
+      <!-- Retroactive-capture status: while Save Last 10s replays, controls
+           are inert and this banner is the only live UI. -->
+      <div id="clip-banner" hidden>Capturing…</div>
+      <!-- Re-baseline the device-motion tilt neutral (tilt carts only) -->
+      <button type="button" id="tilt-recenter" hidden>&#10227; Recenter</button>
 
       <div id="playback-controls">
         <button type="button" class="icon-btn" id="reset" title="Reset" aria-label="Reset">
