@@ -3089,6 +3089,13 @@ body.debug-2p .home-tile-link {
   cursor: default;
 }
 
+/* Inert = looks disabled but stays tappable so mobile (no hover, no tooltip)
+   can surface the reason as a toast (see makeInertButton). */
+.roms-manage-btn.is-inert {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .modal-actions {
   display: flex;
   gap: 9px;

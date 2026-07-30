@@ -249,8 +249,16 @@ test("Remove is offered only for a local game Drive already has", async () => {
 
   await openManageList(app);
   eq(rowButtons(app, "Backed.gba"), ["Reset", "Delete", "Remove from device"]);
-  eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete"],
-    "a game whose only copy is still local must not be evictable");
+  // A game whose only copy is still local must not be evictable — the slot
+  // renders (locality decides the label) but greyed, with the reason on tap.
+  eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete", "Remove from device"]);
+  const inert = rowButton(app, "Fresh.gba", "Remove from device");
+  assert.equal(inert.getAttribute("aria-disabled"), "true");
+  await inert.click();
+  await settle();
+  assert.ok(app.idb.get("rom:Fresh.gba"), "tapping the inert button evicts nothing");
+  assert.ok(app.toasts.some((t) => /backed up/i.test(t)),
+    "the tap explains itself: " + app.toasts.join(" | "));
   eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete", "Sync to device"],
     "a Drive-only row offers the Drive-side Reset and a download instead of Remove");
 });
@@ -278,11 +286,15 @@ test("signed out, a Drive-only residue row offers Delete alone", async () => {
   app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
 
   await openManageList(app);
-  eq(rowButtons(app, "Cloud.gba"), ["Delete"],
-    "no Drive session: nothing to reset remotely, nothing to sync from");
+  // Reset always renders; with no local saves and no Drive session it sits
+  // greyed with "No saves to reset" instead of vanishing.
+  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete"],
+    "no Drive session: nothing to sync from, Reset present but inert");
+  assert.equal(
+    rowButton(app, "Cloud.gba", "Reset").getAttribute("aria-disabled"), "true");
 });
 
-test("a Drive delete already queued for the ROM withdraws Remove", async () => {
+test("a Drive delete already queued for the ROM disarms Remove", async () => {
   const app = await loadApp();
   app.setFetch(makeDrive([]).fetch);
   signIn(app, { "rom:A.gba": "sig" });
@@ -291,7 +303,10 @@ test("a Drive delete already queued for the ROM withdraws Remove", async () => {
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Remove from device"]);
+  assert.equal(
+    rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"),
+    "true", "queued Drive delete means no confirmed copy to come back from");
 });
 
 test("signed out, no row offers Remove", async () => {

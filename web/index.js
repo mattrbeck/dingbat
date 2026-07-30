@@ -1135,6 +1135,20 @@ const makeDisabledButton = (label, className, title) => {
   return btn;
 };
 
+// Like makeDisabledButton, but still tappable: mobile has no hover, so a
+// truly disabled button can't explain itself there. Greyed via .is-inert,
+// the reason doubles as the desktop tooltip and a toast on tap.
+const makeInertButton = (label, className, reason) => {
+  let btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = className + " is-inert";
+  btn.textContent = label;
+  btn.setAttribute("aria-disabled", "true");
+  btn.title = reason;
+  btn.addEventListener("click", () => showToast(reason));
+  return btn;
+};
+
 // Collect the set of ROM identities (original names) that have any save data.
 const romsWithSaveData = async () => {
   let names = new Set();
@@ -1370,20 +1384,30 @@ const refreshRomsManageList = async () => {
     // Delete = remove the game outright (ROM + save data).
     // When signed in these mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
-    // Reset needs something to wipe: local save data, or — signed in — the
-    // game's save/state files on Drive (a Drive-only row has no local data,
-    // but resetGameSaves queues the Drive deletes all the same).
-    let hasLocalData = localRoms.has(name) || withSaves.has(name);
+    // Reset renders on EVERY row — a row whose action set shifts with sync
+    // minutiae reads as a bug — but it only arms when there is something to
+    // wipe: local save data, or (signed in) save/state files recorded in the
+    // last Drive listing. Otherwise it sits greyed with the reason.
     let driveOnly = !localRoms.has(name);
-    let canReset = hasLocalData || (driveOnly && syncActive());
+    let stateKeyOfGame = (k) =>
+      k === "state:" + name || k.startsWith("state:" + name + ":slot");
+    let savesOnDrive = syncActive() && Object.keys(syncState.rmt || {}).some(
+      (k) => k === "save:" + name || k === "save:" + name + "-p2" || stateKeyOfGame(k));
+    let hasSaves = withSaves.has(name) || savesOnDrive;
     let saveBtn = null;
-    if (canReset && linkRunning) {
+    if (hasSaves && linkRunning) {
       saveBtn = makeDisabledButton(
         "Reset",
         "button button-sm roms-manage-btn",
         "Exit link mode to reset this game's save",
       );
-    } else if (canReset) {
+    } else if (!hasSaves) {
+      saveBtn = makeInertButton(
+        "Reset",
+        "button button-sm roms-manage-btn",
+        "No saves to reset",
+      );
+    } else {
       saveBtn = makeConfirmButton({
         label: "Reset",
         confirmLabel: "Delete all save data?",
@@ -1425,7 +1449,18 @@ const refreshRomsManageList = async () => {
     let romOnDrive = syncActive() && !!syncState.sigs[romKey(name)] &&
       !syncState.queueDel.includes(romKey(name));
     let freeBtn = null;
-    if (localRoms.has(name) && romOnDrive) {
+    if (localRoms.has(name) && syncActive() && !romOnDrive) {
+      // Signed in but Drive can't be confirmed to hold this ROM (upload still
+      // queued or failing, imported while signed out, lost sig). Locality
+      // decides the SLOT — a local row always shows Remove — but eligibility
+      // shows as a greyed button with the reason, not a silent absence.
+      freeBtn = makeInertButton(
+        "Remove from device",
+        "button button-sm roms-manage-btn",
+        "Not backed up to Drive yet — removing now would delete your only copy",
+      );
+      siblings.push(freeBtn);
+    } else if (localRoms.has(name) && romOnDrive) {
       if (isRomLoaded(name)) {
         // Covers link mode too (isRomLoaded folds linkRomEntry in). Unlike
         // Delete we don't unload the game for the user: "free some space" is
