@@ -167,7 +167,13 @@ const fullResetReload = async () => {
   location.reload();
 };
 
+// True once an update reload is committed. The Drive token renewal checks
+// this: starting a GIS popup that the imminent reload will orphan only loses
+// the token (see armDriveRenewOnGesture's update-button exemption).
+var appUpdating = false;
+
 const applyUpdate = async () => {
+  appUpdating = true;
   closeUpdateModal();
   // Use the same service worker update flow
   if (swRegistration) {
@@ -251,9 +257,11 @@ const forceUpdate = async () => {
 document.getElementById("force-update").addEventListener("click", async () => {
   document.getElementById("menu-dropdown").hidden = true;
   if (!confirm("This will re-download the app and reload. Continue?")) return;
+  appUpdating = true; // see applyUpdate: no Drive popups once a reload is committed
   try {
     await forceUpdate();
   } catch (e) {
+    appUpdating = false; // no reload happened after all; renewals may resume
     alert("Force update failed: " + e.message);
   }
 });
@@ -2552,8 +2560,18 @@ const armDriveRenewOnGesture = () => {
   if (driveRenewFails >= DRIVE_RENEW_MAX_FAILS) return;
   driveRenewArmed = true;
   const events = ["pointerdown", "keydown", "touchstart"];
-  const onGesture = () => {
-    events.forEach((e) => window.removeEventListener(e, onGesture, true));
+  const onGesture = (e) => {
+    // The update controls must never spend the renewal gesture: applyUpdate
+    // reloads the page moments later, which orphans the GIS popup
+    // mid-negotiation and loses the token it was fetching — the user just
+    // sees Update inexplicably open a Google sign-in window. Stay armed;
+    // the next ordinary gesture (or the post-reload boot resume) pays.
+    // (Duck-typed rather than `instanceof Element`: text nodes lack closest,
+    // and the test harness dispatches bare event objects.)
+    const t = e && e.target;
+    if (t && typeof t.closest === "function" &&
+        t.closest("#update-btn, #update-confirm, #force-update")) return;
+    events.forEach((ev) => window.removeEventListener(ev, onGesture, true));
     // Cleared before the attempt so the *next* expiry can arm again — the old
     // one-shot latch was never reset, which meant a session could be resumed at
     // most once per page load.
@@ -2566,6 +2584,7 @@ const armDriveRenewOnGesture = () => {
 // Silent re-grant. Safe to call with a live token (rollover) or none (resume).
 const renewDriveToken = async () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (appUpdating) return; // reload imminent: a popup now would be orphaned
   if (navigator.onLine === false) { armDriveRenewOnGesture(); return; }
   const wasSignedOut = !gdriveToken;
 

@@ -102,6 +102,28 @@ test("syncPollTick arms a gesture renewal for a near-expiry token", async () => 
   assert.equal(app.api.gdriveToken, "fresh-token");
 });
 
+test("update buttons don't spend the renewal gesture (popup would be orphaned)", async () => {
+  const app = await loadApp();
+  await connected(app);
+  const calls = installFakeGis(app, { grant: true });
+  app.api.gdriveToken = "old-token";
+  app.api.gdriveTokenExp = Date.now() + 60 * 1000;
+  app.setFetch(async () => jsonRes({ files: [] }));
+  app.api.syncPollTick();
+
+  // A tap on the update button is exempt: still armed, no token request.
+  await app.dispatchWin("pointerdown", {
+    target: { closest: (sel) => sel.includes("#update-btn") },
+  });
+  await settle();
+  assert.equal(calls.length, 0, "update tap must not trigger the renewal");
+
+  // The next ordinary tap pays as usual.
+  await app.dispatchWin("pointerdown", { target: { closest: () => null } });
+  await settle();
+  assert.equal(calls.length, 1, "ordinary tap still renews");
+});
+
 test("the gesture renewal re-arms, so a second expiry also renews", async () => {
   const app = await loadApp();
   await connected(app);
