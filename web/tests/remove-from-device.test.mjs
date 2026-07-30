@@ -251,8 +251,35 @@ test("Remove is offered only for a local game Drive already has", async () => {
   eq(rowButtons(app, "Backed.gba"), ["Reset", "Remove from device", "Delete"]);
   eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete"],
     "a game whose only copy is still local must not be evictable");
+  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Sync to device", "Delete"],
+    "a Drive-only row offers the Drive-side Reset and a download instead of Remove");
+});
+
+test("Sync to device pulls a Drive-only game's files onto this device", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:Cloud.gba", "save:Cloud.gba"]).fetch);
+  signIn(app);
+  app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
+
+  await openManageList(app);
+  const btn = rowButton(app, "Cloud.gba", "Sync to device");
+  assert.ok(btn, "Drive-only signed-in row offers Sync to device");
+  await btn.click();
+  await settle();
+  await settle();
+  assert.ok(app.idb.get("rom:Cloud.gba"), "ROM bytes landed in local storage");
+  assert.ok(app.idb.get("save:Cloud.gba"), "save landed too");
+});
+
+test("signed out, a Drive-only residue row offers Delete alone", async () => {
+  const app = await loadApp();
+  app.api.gdriveToken = null;
+  app.api.syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {} };
+  app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
+
+  await openManageList(app);
   eq(rowButtons(app, "Cloud.gba"), ["Delete"],
-    "a Drive-only row has no local bytes to free");
+    "no Drive session: nothing to reset remotely, nothing to sync from");
 });
 
 test("a Drive delete already queued for the ROM withdraws Remove", async () => {
@@ -352,6 +379,7 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   eq(app.idb.get("save:A.gba"), u8(7), "save kept");
   assert.ok(app.toasts.some((t) => /save kept/i.test(t)),
     "the toast says the save survived: " + app.toasts.join(" | "));
-  // The row re-renders without Remove — there is nothing local left to free.
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"]);
+  // The row re-renders without Remove — there is nothing local left to free —
+  // and, being Drive-only now, offers the way back instead.
+  eq(rowButtons(app, "A.gba"), ["Reset", "Sync to device", "Delete"]);
 });

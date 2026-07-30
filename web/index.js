@@ -1364,20 +1364,26 @@ const refreshRomsManageList = async () => {
     // Remove from device = free this device's ROM bytes, keep the save data
     //          and the Drive copy; the game becomes a Drive-only tile. Needs a
     //          Drive copy to come back from, so it is gated hard — see below.
+    // Sync to device = the inverse of Remove: pull a Drive-only game's ROM
+    //          and saves onto this device (same path as the grid's download
+    //          glyph). Drive-only rows only, signed in only.
     // Delete = remove the game outright (ROM + save data).
-    // When signed in both mirror to Drive (Delete also tombstones the game so
+    // When signed in these mirror to Drive (Delete also tombstones the game so
     // every device drops it); signed out they are purely local.
-    // Reset only makes sense when there's local save data to wipe. A
-    // remote-only game has none, so it gets Delete alone.
+    // Reset needs something to wipe: local save data, or — signed in — the
+    // game's save/state files on Drive (a Drive-only row has no local data,
+    // but resetGameSaves queues the Drive deletes all the same).
     let hasLocalData = localRoms.has(name) || withSaves.has(name);
+    let driveOnly = !localRoms.has(name);
+    let canReset = hasLocalData || (driveOnly && syncActive());
     let saveBtn = null;
-    if (hasLocalData && linkRunning) {
+    if (canReset && linkRunning) {
       saveBtn = makeDisabledButton(
         "Reset",
         "button button-sm roms-manage-btn",
         "Exit link mode to reset this game's save",
       );
-    } else if (hasLocalData) {
+    } else if (canReset) {
       saveBtn = makeConfirmButton({
         label: "Reset",
         confirmLabel: "Delete all save data?",
@@ -1451,6 +1457,32 @@ const refreshRomsManageList = async () => {
       siblings.push(freeBtn);
     }
 
+    // Sync to device = downloadGame, the same pull the home grid's download
+    // glyph does. Not a confirm button — it destroys nothing — but clicking
+    // it disarms any armed sibling so a half-armed Delete can't linger.
+    let downBtn = null;
+    if (driveOnly && syncActive()) {
+      downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "button button-sm roms-manage-btn";
+      downBtn.title = "Download this game's ROM and saves from Drive to this device";
+      if (syncDownloading.has(name)) {
+        downBtn.textContent = "Syncing…";
+        downBtn.disabled = true;
+      } else {
+        downBtn.textContent = "Sync to device";
+        downBtn.addEventListener("click", async () => {
+          disarmOthers(null);
+          downBtn.textContent = "Syncing…";
+          downBtn.disabled = true;
+          if (await downloadGame(name)) showToast("Synced to this device");
+          refreshRomsManageList();
+          refreshHomeRecent();
+          updateStorageInfo();
+        });
+      }
+    }
+
     let allBtn;
     if (linkRunning) {
       allBtn = makeDisabledButton(
@@ -1489,6 +1521,7 @@ const refreshRomsManageList = async () => {
 
     if (saveBtn) actions.appendChild(saveBtn);
     if (freeBtn) actions.appendChild(freeBtn);
+    if (downBtn) actions.appendChild(downBtn);
     actions.appendChild(allBtn);
     row.appendChild(actions);
     romsManageList.appendChild(row);
