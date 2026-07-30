@@ -204,6 +204,18 @@ type
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
     gpio*:       GPIO
+    # Tilt sensor (Yoshi's Universal Gravitation / Koro Koro Puzzle): byte
+    # registers memory-mapped at 0x0E008000-0x0E008500 (GBATEK "GBA Cart
+    # Tilt Sensor"), enabled by game code. Latches are transient sensor
+    # samples re-taken every frame by the game — deliberately not serialized
+    # (same convention as MBC7's accel: worst case one stale read after a
+    # state load). tilt_in_* are the live frontend-fed inputs, -1..1.
+    tilt_present*: bool
+    tilt_armed*:   bool
+    tilt_x*:       uint16
+    tilt_y*:       uint16
+    tilt_in_x*:    float
+    tilt_in_y*:    float
     bios_latch*: uint32
     # Instruction-fetch fast path: direct pointer + mask + waitstates for the
     # page PC currently executes from (EWRAM/IWRAM/ROM). The buffers never

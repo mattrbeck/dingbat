@@ -431,16 +431,22 @@ proc wasm_rumble(): cint {.exportc.} =
   else: 0
 
 proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
-  ## Tilt-cart accelerometer input, -1.0 .. 1.0 per axis, 0 = level. Routed to
-  ## the GB cartridge (MBC7 — Kirby Tilt 'n' Tumble); a no-op on every other
-  ## mapper, so JS can feed it unconditionally while a tilt cart is detected.
+  ## Tilt-cart accelerometer input, -1.0 .. 1.0 per axis (transients may
+  ## exceed 1 for flick gestures), 0 = level. Routed to the GB cartridge
+  ## (MBC7 — Kirby Tilt 'n' Tumble) or the GBA tilt window (Yoshi's
+  ## Universal Gravitation); a no-op everywhere else, so JS can feed it
+  ## unconditionally while a tilt cart is detected.
   if stateKind == ekGB and stateGb != nil:
     stateGb.cartridge.set_accelerometer(float(x), float(y))
+  elif stateKind == ekGBA and stateGba != nil and stateGba.bus.tilt_present:
+    stateGba.bus.tilt_in_x = float(x)
+    stateGba.bus.tilt_in_y = float(y)
 
 proc wasm_cart_has_tilt(): cint {.exportc.} =
-  ## 1 when the running cart has a tilt sensor (MBC7); lets JS decide whether
-  ## to request DeviceOrientation permission / show tilt UI at ROM load.
+  ## 1 when the running cart has a tilt sensor (GB MBC7 or a GBA tilt cart);
+  ## lets JS decide whether to request motion permission / show tilt UI.
   if stateKind == ekGB and stateGb != nil and stateGb.cartridge of Mbc7: 1
+  elif stateKind == ekGBA and stateGba != nil and stateGba.bus.tilt_present: 1
   else: 0
 
 # --- Retroactive clip capture (prototype) ---
@@ -577,6 +583,42 @@ proc clip_abort() {.exportc.} =
   clipLiveStash = ""
   clipReplaying = false
   clip_set_buttons(clipCurButtons)
+
+# --- GB Camera webcam source ---
+# The Pocket Camera cart is fully emulated (sensor model, exposure, dither —
+# gb/mbc/camera.nim) but fed a synthetic scene by default. When the user
+# opts in, JS fills this 128x120 luminance buffer from getUserMedia frames
+# and the sensor proc reads it. Allocated from JS-invoked procs only (the
+# module-teardown rule — see rewindHistory above).
+const CAM_SRC_W = 128
+const CAM_SRC_H = 120
+var cameraFrame: seq[uint8] = @[]
+
+proc camera_source_from_buffer(x, y: int): uint8 =
+  if cameraFrame.len == CAM_SRC_W * CAM_SRC_H:
+    cameraFrame[y * CAM_SRC_W + x]
+  else:
+    0x80'u8
+
+proc wasm_cart_has_camera(): cint {.exportc.} =
+  ## 1 when the running GB cart is the Pocket Camera (type 0xFC).
+  if stateKind == ekGB and stateGb != nil and stateGb.cartridge of PocketCamera: 1
+  else: 0
+
+proc wasm_camera_attach(): cint {.exportc.} =
+  ## Point the emulated sensor at the JS-fed buffer (getUserMedia granted).
+  ## Returns the buffer length so JS can bound its writes.
+  if stateKind != ekGB or stateGb == nil: return 0
+  if cameraFrame.len != CAM_SRC_W * CAM_SRC_H:
+    cameraFrame = newSeq[uint8](CAM_SRC_W * CAM_SRC_H)
+    for i in 0 ..< cameraFrame.len: cameraFrame[i] = 0x80
+  stateGb.cartridge.set_camera_source(camera_source_from_buffer)
+  cint(cameraFrame.len)
+
+proc wasm_camera_frame_ptr(): pointer {.exportc.} =
+  ## Destination for JS's 128x120 8-bit luminance frames (row-major, 255 =
+  ## bright). Valid after wasm_camera_attach.
+  if cameraFrame.len > 0: addr cameraFrame[0] else: nil
 
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return

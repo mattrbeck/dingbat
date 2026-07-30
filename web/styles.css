@@ -1165,6 +1165,7 @@ body.running #main-menu-sep {
 #screenshot,
 #slow-motion,
 #clip-last,
+#record-clip,
 #open-states,
 #net-connect,
 #save-sep {
@@ -1177,6 +1178,7 @@ body.has-game #manage-saves,
 body.has-game #screenshot,
 body.has-game #slow-motion,
 body.has-game #clip-last,
+body.has-game #record-clip,
 body.has-game #open-states,
 body.has-game #net-connect {
   display: flex;
@@ -3969,6 +3971,7 @@ body.link-mode #fast-forward,
 body.link-mode #frame-step,
 body.link-mode #slow-motion,
 body.link-mode #clip-last,
+body.link-mode #record-clip,
 body.link-mode #save-state,
 body.link-mode #load-state,
 body.link-mode #manage-saves,
@@ -3979,6 +3982,7 @@ body.rollback-mode #fast-forward,
 body.rollback-mode #frame-step,
 body.rollback-mode #slow-motion,
 body.rollback-mode #clip-last,
+body.rollback-mode #record-clip,
 body.rollback-mode #reset,
 body.rollback-mode #save-state,
 body.rollback-mode #load-state,
@@ -4538,6 +4542,7 @@ body.net-mode #fast-forward,
 body.net-mode #frame-step,
 body.net-mode #slow-motion,
 body.net-mode #clip-last,
+body.net-mode #record-clip,
 body.net-mode #reset,
 body.net-mode #save-state,
 body.net-mode #load-state,
@@ -4966,4 +4971,9 @@ body.sync-shown #status {
   #joystick-knob.homing {
     transition: none;
   }
+}
+
+/* Live-recording state: the dot glows red so the menu shows it at a glance */
+#record-clip.recording {
+  color: #ff5a5a;
 }

@@ -63,6 +63,9 @@ interface EmscriptenModule {
   _clip_begin?(seconds: number): number;
   _clip_tick?(): number;
   _clip_abort?(): void;
+  _wasm_cart_has_camera?(): number;
+  _wasm_camera_attach?(): number;
+  _wasm_camera_frame_ptr?(): number;
   _setInput?(inputId: number, pressed: number): void;
   _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;

@@ -38,3 +38,10 @@ proc title*(cart: Cartridge): string =
   result = newString(12)
   for i in 0 ..< 12:
     result[i] = char(cart.rom[0x0A0 + i])
+
+proc game_code*(cart: Cartridge): string =
+  ## The 4-character game code at header offset 0xAC (e.g. "KYGE"). Used to
+  ## detect cart hardware that cannot be probed at runtime (tilt/gyro).
+  result = newString(4)
+  for i in 0 ..< 4:
+    result[i] = char(cart.rom[0x0AC + i])

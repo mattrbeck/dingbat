@@ -275,10 +275,55 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x1E04, 0x03007FF0'u32)
     write_stub_u32(result.bios, 0x1E08, 0x68736D53'u32)
   result.gpio = new_gpio(gba)
+  # Tilt carts can't be probed at runtime (the game just reads the registers
+  # and believes whatever comes back), so detection is by game code:
+  # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro
+  # Puzzle. Note these carts really save to EEPROM; save-type pinning is a
+  # separate change — the tilt window below is intercepted before storage
+  # regardless of what the save heuristic decided.
+  result.tilt_present = gba.cartridge != nil and
+    gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
 
 proc bus_page(address: uint32): int {.inline.} =
   int(bits_range(address, 24, 27))
+
+# ---- Tilt sensor (0x0E008000-0x0E008500, GBATEK "GBA Cart Tilt Sensor") ----
+# Two-step sampling handshake mirroring MBC7's: write 0x55 to 0x8000 to arm,
+# 0xAA to 0x8100 to latch a 12-bit sample per axis. Reads deliver the sample
+# split low byte / high nibble; X's high read carries an ADC-ready flag in
+# bit 7 (always ready here, like mGBA). Everything else in the window reads
+# 0xFF. Centers/range per GBATEK's example calibration.
+
+const
+  TILT_X_CENTER = 0x392
+  TILT_Y_CENTER = 0x3A0
+  TILT_RANGE    = 0xE0    # counts per 1.0 of frontend input
+
+proc tilt_hit(bus: Bus; address: uint32): bool {.inline.} =
+  bus.tilt_present and (address and 0xFFFF'u32) >= 0x8000'u32
+
+proc tilt_sample(input: float; center: int): uint16 =
+  uint16(max(0, min(0xFFF, center + int(TILT_RANGE.float * input))))
+
+proc tilt_read(bus: Bus; address: uint32): uint8 =
+  case address and 0xFF00'u32
+  of 0x8200'u32: uint8(bus.tilt_x and 0xFF)
+  of 0x8300'u32: uint8(((bus.tilt_x shr 8) and 0xF) or 0x80)  # bit7 = ready
+  of 0x8400'u32: uint8(bus.tilt_y and 0xFF)
+  of 0x8500'u32: uint8((bus.tilt_y shr 8) and 0xF)
+  else: 0xFF'u8
+
+proc tilt_write(bus: Bus; address: uint32; value: uint8) =
+  case address and 0xFF00'u32
+  of 0x8000'u32:
+    if value == 0x55: bus.tilt_armed = true
+  of 0x8100'u32:
+    if value == 0xAA and bus.tilt_armed:
+      bus.tilt_armed = false
+      bus.tilt_x = tilt_sample(bus.tilt_in_x, TILT_X_CENTER)
+      bus.tilt_y = tilt_sample(bus.tilt_in_y, TILT_Y_CENTER)
+  else: discard
 
 # ---- low-level pointer reads ----
 
@@ -362,7 +407,9 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
       bus.gba.storage[address]
     else:
       bus.rom_read8(address)
-  of 0xE, 0xF: bus.gba.storage[address]
+  of 0xE, 0xF:
+    if bus.tilt_hit(address): bus.tilt_read(address)
+    else: bus.gba.storage[address]
   else: raise newException(Exception, "Unmapped bus read: " & hex_str(address))
 
 proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
@@ -401,7 +448,9 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
       uint16(bus.gba.storage[address])
     else:
       bus.rom_read16(address)
-  of 0xE, 0xF: bus.gba.storage.read_half(orig)
+  of 0xE, 0xF:
+    if bus.tilt_hit(address): uint16(bus.tilt_read(orig)) * 0x0101'u16
+    else: bus.gba.storage.read_half(orig)
   else: raise newException(Exception, "Unmapped bus read_half: " & hex_str(address))
 
 proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
@@ -450,7 +499,9 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
       uint32(bus.gba.storage[address])
     else:
       bus.rom_read32(address)
-  of 0xE, 0xF: bus.gba.storage.read_word(orig)
+  of 0xE, 0xF:
+    if bus.tilt_hit(address): uint32(bus.tilt_read(orig)) * 0x01010101'u32
+    else: bus.gba.storage.read_word(orig)
   else: raise newException(Exception, "Unmapped bus read_word: " & hex_str(address))
 
 when defined(linkTrace):
@@ -497,7 +548,9 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
       bus.gpio[address] = value
     elif bus.gba.storage.eeprom_at(address):
       discard bus.gba.storage[address]  # eeprom write check
-  of 0xE, 0xF: bus.gba.storage[address] = value
+  of 0xE, 0xF:
+    if bus.tilt_hit(address): bus.tilt_write(address, value)
+    else: bus.gba.storage[address] = value
   else: log("Unmapped write: " & hex_str(address))
 
 proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
@@ -538,7 +591,8 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    bus.gba.storage[orig] = uint8(value)
+    if bus.tilt_hit(orig): bus.tilt_write(orig, uint8(value))
+    else: bus.gba.storage[orig] = uint8(value)
   else: log("Unmapped write half: " & hex_str(address))
 
 proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
@@ -583,7 +637,8 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    bus.gba.storage[orig] = uint8(value)
+    if bus.tilt_hit(orig): bus.tilt_write(orig, uint8(value))
+    else: bus.gba.storage[orig] = uint8(value)
   else: log("Unmapped write word: " & hex_str(address))
 
 # ---- Instruction-fetch fast path ----

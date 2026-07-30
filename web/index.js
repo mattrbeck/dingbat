@@ -4331,22 +4331,42 @@ window.addEventListener("resize", updateCanvasScaling);
 {
   let settleTimer = null;
   const settleNow = () => {
+    // Phantom scroll is the classic cause of "touch targets sit ABOVE the
+    // painted buttons": iOS sometimes leaves the (position:fixed!) document
+    // scrolled by a few dozen px after a rotation round-trip, and native
+    // touch hit-testing follows the scroll while fixed-position paint does
+    // not. Log it (visible via Toggle Log on-device), then zero it.
+    const vv = window.visualViewport;
+    const phantom = (window.scrollY || 0) ||
+      (vv ? Math.round(vv.offsetTop || vv.pageTop || 0) : 0);
+    if (phantom) {
+      log(`rotate-settle: phantom scroll ${window.scrollY}/${vv ? vv.offsetTop : "-"} — resetting`);
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
     // Publish the MEASURED app height for the standalone body sizing:
     // visualViewport.height has none of 100vh's post-rotation staleness.
     // Skip while it's the on-screen KEYBOARD shrinking the visual viewport
     // (vv well below innerHeight) — the app must not resize under typing.
-    if (window.visualViewport && window.visualViewport.height > 0 &&
-        window.visualViewport.height >= window.innerHeight - 1) {
+    if (vv && vv.height > 0 && vv.height >= window.innerHeight - 1) {
       document.documentElement.style.setProperty(
-        "--app-h", Math.round(window.visualViewport.height) + "px");
+        "--app-h", Math.round(vv.height) + "px");
     }
     updateCanvasScaling();
-    const controlsEl = document.getElementById("controls");
-    if (controlsEl) {
-      void controlsEl.offsetHeight;                 // force reflow
-      controlsEl.style.transform = "translateZ(0)"; // force re-composite
-      requestAnimationFrame(() => { controlsEl.style.transform = ""; });
+    // Nudge the layers WebKit is most likely to have stale after rotation:
+    // the control strip AND the fixed body root (landscape creates/destroys
+    // fixed tiers on both).
+    for (const el of [document.getElementById("controls"), document.body]) {
+      if (!el) continue;
+      void el.offsetHeight;                 // force reflow
+      el.style.transform = "translateZ(0)"; // force re-composite
     }
+    requestAnimationFrame(() => {
+      document.body.style.transform = "";
+      const c = document.getElementById("controls");
+      if (c) c.style.transform = "";
+    });
     if (typeof joystickForceRelease === "function") joystickForceRelease();
   };
   const scheduleSettle = () => {
@@ -5036,8 +5056,9 @@ window.addEventListener("load", () =>
 );
 
 const loadRom = async (romName, originalName, opts = {}) => {
-  // A retroactive capture spanning a ROM switch would splice two games
+  // A capture or recording spanning a ROM switch would splice two games
   if (typeof abortRetroClip === "function") abortRetroClip();
+  if (typeof stopClipRecording === "function") stopClipRecording();
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
   // Leaving online link mode: say BYE to the peer and drop the channel
@@ -5072,7 +5093,8 @@ const loadRom = async (romName, originalName, opts = {}) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
-  detectTiltCart();       // MBC7: enable tilt input routing for this cart
+  detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
+  detectCameraCart();     // Pocket Camera: offer the real webcam
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
@@ -5392,11 +5414,23 @@ const togglePause = () => {
 // keep the click listener (programmatic .click() callers, keyboards) behind
 // a short lockout so a pointer-handled tap can't double-toggle.
 var pausePointerTs = 0;
-pauseButton.addEventListener("pointerup", (e) => {
-  e.preventDefault();
-  pausePointerTs = performance.now();
-  togglePause();
-});
+{
+  let armed = false; // require the press to START on the button: a finger
+                     // dragged across it must not toggle on release
+  pauseButton.addEventListener("pointerdown", (e) => {
+    if (e.button === 0 || e.pointerType !== "mouse") armed = true;
+  });
+  for (const ev of ["pointerleave", "pointercancel"]) {
+    pauseButton.addEventListener(ev, () => { armed = false; });
+  }
+  pauseButton.addEventListener("pointerup", (e) => {
+    if (!armed) return;
+    armed = false;
+    e.preventDefault();
+    pausePointerTs = performance.now();
+    togglePause();
+  });
+}
 pauseButton.addEventListener("click", () => {
   if (performance.now() - pausePointerTs < 350) return;
   togglePause();
@@ -5597,6 +5631,79 @@ clipLastItem.addEventListener("click", () => {
 // repeats at 10/s (the touch analogue of holding "."). Pointer events, not
 // click — iOS won't synthesize click for a second finger while a game
 // button is held, and stepping WHILE holding a button is the whole point.
+// --- Forward clip recording (Record Clip menu item) ---
+// MediaRecorder over the game canvas (shader output included) plus the
+// master-gain audio tap; saves .webm (.mp4 where that's what the browser
+// records — Safari). Single-core modes only (CSS hides the item elsewhere).
+var recRecorder = null;
+var recChunks = [];
+var recStopTimer = null;
+const recordClipItem = document.getElementById("record-clip");
+const REC_MAX_MS = 5 * 60 * 1000; // a forgotten recorder stops itself
+
+const setRecMenuState = (recording) => {
+  recordClipItem.querySelector("span").textContent =
+    recording ? "Stop Recording" : "Record Clip";
+  recordClipItem.classList.toggle("recording", recording);
+};
+
+const stopClipRecording = () => {
+  if (recRecorder && recRecorder.state !== "inactive") recRecorder.stop();
+};
+
+const startClipRecording = () => {
+  if (recRecorder || clipReplayActive || !currentRomName) return;
+  const mime = clipMimeType();
+  if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
+  let stream;
+  try {
+    stream = canvasEl.captureStream(60);
+  } catch {
+    showToast("Couldn't capture the game canvas");
+    return;
+  }
+  const audio = typeof window.acquireClipAudio === "function"
+    ? window.acquireClipAudio() : null;
+  if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
+  recChunks = [];
+  try {
+    recRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+  } catch {
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    showToast("Couldn't start the recorder");
+    return;
+  }
+  recRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recRecorder.onstop = () => {
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    clearTimeout(recStopTimer);
+    const blob = new Blob(recChunks, { type: recRecorder.mimeType });
+    recRecorder = null;
+    recChunks = [];
+    setRecMenuState(false);
+    if (!blob.size) { showToast("The recording came out empty"); return; }
+    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}-clip-${stamp}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    showToast("Clip saved");
+  };
+  recRecorder.start(1000);
+  recStopTimer = setTimeout(stopClipRecording, REC_MAX_MS);
+  setRecMenuState(true);
+  showToast("Recording — pick Stop Recording to finish");
+};
+
+recordClipItem.addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (recRecorder) stopClipRecording();
+  else startClipRecording();
+});
+
 const frameStepButton = document.getElementById("frame-step");
 {
   let holdTimer = null;
@@ -5608,7 +5715,10 @@ const frameStepButton = document.getElementById("frame-step");
     clearInterval(repeatTimer);
     holdTimer = repeatTimer = null;
   };
-  frameStepButton.addEventListener("pointerdown", () => {
+  let armed = false;
+  frameStepButton.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    armed = true;
     stopHold();
     repeated = false;
     holdTimer = setTimeout(() => {
@@ -5617,6 +5727,8 @@ const frameStepButton = document.getElementById("frame-step");
     }, 400);
   });
   frameStepButton.addEventListener("pointerup", (e) => {
+    if (!armed) return; // press began elsewhere (drag-across release)
+    armed = false;
     e.preventDefault();
     stepPointerTs = performance.now();
     const tap = !repeated;
@@ -5624,7 +5736,7 @@ const frameStepButton = document.getElementById("frame-step");
     if (tap) frameAdvance(); // a hold already stepped via the repeater
   });
   for (const ev of ["pointerleave", "pointercancel"]) {
-    frameStepButton.addEventListener(ev, stopHold);
+    frameStepButton.addEventListener(ev, () => { armed = false; stopHold(); });
   }
   // Programmatic .click() (and any browser that skips pointer events)
   frameStepButton.addEventListener("click", () => {
@@ -6027,6 +6139,7 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  stopClipRecording(); // don't keep recording a frozen frame from the menu
   paused = true;
   document.body.classList.add("paused");
   document.body.classList.remove("running");
@@ -6275,15 +6388,44 @@ const detectTiltCart = () => {
   }
 };
 
+// Jolt channel: Kirby's jump is a sharp FLICK of the device, which the game
+// detects as an out-of-range acceleration transient. Orientation alone
+// underreports it, so devicemotion's linear acceleration rides on top, and
+// decays fast so a jolt is a spike rather than a lean.
+var tiltJoltX = 0, tiltJoltY = 0;
+
 const updateTilt = () => {
   if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
-  tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
-  tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
+  if (tiltOrientationOn) {
+    // Real sensor: pass raw. The easing below exists to make DIGITAL inputs
+    // roll instead of teleport — applied to the phone's real motion it
+    // low-passes away exactly the flick transient the jump detector needs.
+    tiltX = tiltTargetX;
+    tiltY = tiltTargetY;
+  } else {
+    tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
+    tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
+  }
+  const clamp3 = (v) => Math.max(-3, Math.min(3, v)); // flicks may exceed 1g;
+  // the MBC7 latch (center 0x81D0, 0x70/g) has headroom to ±3g without wrap
   // Negated at this single send point (all sources agree): on hardware the
   // ball rolls INTO the tilt — marble on a tray — and the phone test showed
   // the raw mapping ran backwards. GBATEK notes the sensor axes mirror
   // between console form factors, so the sign was always empirical.
-  Module._wasm_set_tilt(-tiltX, -tiltY);
+  Module._wasm_set_tilt(clamp3(-(tiltX + tiltJoltX)), clamp3(-(tiltY + tiltJoltY)));
+  tiltJoltX *= 0.55;
+  tiltJoltY *= 0.55;
+};
+
+const motionJoltHandler = (e) => {
+  if (!tiltActive || !e.acceleration) return;
+  const ax = e.acceleration.x, ay = e.acceleration.y;
+  if (ax == null || ay == null) return;
+  // Linear acceleration (gravity excluded), in g. Only spikes matter: below
+  // ~0.4g it's hand tremor and must not disturb the tilt.
+  const gx = ax / 9.81, gy = ay / 9.81;
+  if (Math.abs(gx) > 0.4) tiltJoltX = Math.max(-3, Math.min(3, gx * 1.5));
+  if (Math.abs(gy) > 0.4) tiltJoltY = Math.max(-3, Math.min(3, gy * 1.5));
 };
 
 const orientationTiltHandler = (e) => {
@@ -6307,7 +6449,15 @@ const enableOrientationTilt = async () => {
       const res = await doe.requestPermission();
       if (res !== "granted") return;
     }
+    // Motion (the jump-flick channel) shares the same iOS permission sheet;
+    // request explicitly where the API exists, best-effort elsewhere.
+    const dme = /** @type {*} */ (
+      typeof DeviceMotionEvent !== "undefined" ? DeviceMotionEvent : null);
+    if (dme && typeof dme.requestPermission === "function") {
+      try { await dme.requestPermission(); } catch {}
+    }
     window.addEventListener("deviceorientation", orientationTiltHandler);
+    window.addEventListener("devicemotion", motionJoltHandler);
     tiltOrientationOn = true;
     tiltNeutralBeta = null; // re-baseline at the moment of enabling
     showToast("Device tilt enabled — hold your comfortable angle now");
@@ -6322,6 +6472,81 @@ const maybeOfferOrientationTilt = () => {
   if (!("ontouchstart" in window) && navigator.maxTouchPoints === 0) return false;
   showActionToast("Play by tilting your device?", "Enable tilt", enableOrientationTilt);
   return true;
+};
+
+// --- GB Camera webcam source ---
+// The Pocket Camera cart's sensor is fully emulated; opting in points it at
+// real getUserMedia frames: a hidden <video> is drawn cover-cropped and
+// selfie-mirrored into a 128x120 canvas ~15x/s, converted to luminance, and
+// copied into the wasm-side buffer the sensor proc reads. The emulated
+// exposure/dither pipeline then Game-Boy-ifies it authentically. Requires a
+// secure context (HTTPS), same as tilt.
+var camStream = null;
+var camVideo = null;
+var camTimer = null;
+
+const stopWebcam = () => {
+  clearInterval(camTimer);
+  camTimer = null;
+  if (camStream) for (const t of camStream.getTracks()) t.stop();
+  camStream = null;
+  camVideo = null;
+};
+
+const enableWebcam = async () => {
+  if (camStream || !navigator.mediaDevices?.getUserMedia) return;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
+    });
+  } catch {
+    showToast("Camera permission denied — keeping the synthetic scene");
+    return;
+  }
+  const len = Module._wasm_camera_attach();
+  if (!len) { stopWebcam(); return; }
+  camVideo = document.createElement("video");
+  camVideo.muted = true;
+  camVideo.playsInline = true;
+  camVideo.srcObject = camStream;
+  await camVideo.play().catch(() => {});
+  const W = 128, H = 120;
+  const cnv = document.createElement("canvas");
+  cnv.width = W;
+  cnv.height = H;
+  const ctx = cnv.getContext("2d", { willReadFrequently: true });
+  camTimer = setInterval(() => {
+    if (!camVideo || camVideo.readyState < 2) return;
+    const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+    if (!vw || !vh) return;
+    // cover-crop the source into 128x120, mirrored like a selfie preview
+    const scale = Math.max(W / vw, H / vh);
+    const sw = W / scale, sh = H / scale;
+    const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+    ctx.save();
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, W, H);
+    ctx.restore();
+    const img = ctx.getImageData(0, 0, W, H).data;
+    const ptr = Module._wasm_camera_frame_ptr();
+    if (!ptr) return;
+    // Fresh heap view every copy: memory growth detaches cached buffers
+    const dst = new Uint8Array(Module.memory.buffer, ptr, W * H);
+    for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
+      dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
+    }
+  }, 66);
+  showToast("Camera live — the cart sees what you see");
+};
+
+const detectCameraCart = () => {
+  stopWebcam(); // previous game's stream must not outlive it
+  if (typeof Module === "undefined" || !Module._wasm_cart_has_camera) return;
+  if (Module._wasm_cart_has_camera() !== 1) return;
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  showActionToast("Game Boy Camera cart — use your real camera?",
+    "Enable camera", enableWebcam);
 };
 
 // --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
