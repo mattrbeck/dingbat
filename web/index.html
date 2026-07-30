@@ -92,6 +92,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
             <span>Screenshot</span>
           </button>
+          <button type="button" class="menu-item" id="slow-motion" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
+            <span>Slow Motion</span>
+          </button>
           <div class="menu-volume" id="menu-volume">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
             <input type="range" id="menu-vol-slider" class="vol-range" min="0" max="100" step="5" value="100" aria-label="Volume" />
@@ -135,6 +139,9 @@
         <button type="button" class="icon-btn" id="pause" title="Pause" aria-label="Pause / Resume">
           <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
           <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="frame-step" title="Step one frame" aria-label="Step one frame">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14"/><path d="M11 5l9 7-9 7z" fill="currentColor" stroke="none"/></svg>
         </button>
         <button type="button" class="icon-btn" id="speed-2x-btn" title="2x Speed" aria-label="2x Speed">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12l8-6zM13 6v12l8-6z" fill="currentColor" stroke="none"/></svg>
@@ -544,7 +551,9 @@
               <div class="kb-shortcut"><span>Pause / Resume</span><kbd>Space</kbd></div>
               <div class="kb-shortcut"><span>Fast forward (hold)</span><kbd>Tab</kbd></div>
               <div class="kb-shortcut"><span>2&times; speed</span><kbd>Shift+Tab</kbd></div>
+              <div class="kb-shortcut"><span>Slow motion</span><kbd>Shift+`</kbd></div>
               <div class="kb-shortcut"><span>Rewind (hold)</span><kbd>`</kbd></div>
+              <div class="kb-shortcut"><span>Pause &amp; step one frame</span><kbd>.</kbd></div>
               <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
               <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
               <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>

@@ -1146,14 +1146,15 @@ body.running #main-menu-sep {
   display: block;
 }
 
-/* Save actions, screenshot, Save States and Link Cable only make sense once
-   a game is loaded (every mode — single, 2P link, rollback, net — sets
-   body.has-game, so Link Cable's connected "Disconnect" state stays
-   reachable) */
+/* Save actions, screenshot, Save States, Slow Motion and Link Cable only
+   make sense once a game is loaded (every mode — single, 2P link, rollback,
+   net — sets body.has-game, so Link Cable's connected "Disconnect" state
+   stays reachable) */
 #save-state,
 #load-state,
 #manage-saves,
 #screenshot,
+#slow-motion,
 #open-states,
 #net-connect,
 #save-sep {
@@ -1164,9 +1165,33 @@ body.has-game #save-state,
 body.has-game #load-state,
 body.has-game #manage-saves,
 body.has-game #screenshot,
+body.has-game #slow-motion,
 body.has-game #open-states,
 body.has-game #net-connect {
   display: flex;
+}
+
+/* Slow motion is a MODE the menu toggles — show its live state in place */
+#slow-motion.active {
+  color: var(--accent);
+}
+
+/* Frame step exists only while a running game is paused: 2x and fast-forward
+   are dead controls in that state, so it takes their spot (the paused RAF
+   loop steps nothing; each press runs exactly one frame). Swapped via CSS so
+   every layout — including the narrow-phone segmented bar, which styles
+   #playback-controls .icon-btn generically — picks it up for free. */
+#frame-step {
+  display: none;
+}
+
+body.has-game.running.paused #frame-step {
+  display: flex;
+}
+
+body.has-game.running.paused #speed-2x-btn,
+body.has-game.running.paused #fast-forward {
+  display: none;
 }
 
 body.has-game #save-sep {
@@ -3930,6 +3955,8 @@ body.link-gb .link-pane canvas {
 body.link-mode #rewind,
 body.link-mode #speed-2x-btn,
 body.link-mode #fast-forward,
+body.link-mode #frame-step,
+body.link-mode #slow-motion,
 body.link-mode #save-state,
 body.link-mode #load-state,
 body.link-mode #manage-saves,
@@ -3937,6 +3964,8 @@ body.link-mode #screenshot,
 body.link-mode #save-sep,
 body.rollback-mode #rewind,
 body.rollback-mode #fast-forward,
+body.rollback-mode #frame-step,
+body.rollback-mode #slow-motion,
 body.rollback-mode #reset,
 body.rollback-mode #save-state,
 body.rollback-mode #load-state,
@@ -4493,6 +4522,8 @@ input.net-manual-code:disabled {
 body.net-mode #rewind,
 body.net-mode #speed-2x-btn,
 body.net-mode #fast-forward,
+body.net-mode #frame-step,
+body.net-mode #slow-motion,
 body.net-mode #reset,
 body.net-mode #save-state,
 body.net-mode #load-state,

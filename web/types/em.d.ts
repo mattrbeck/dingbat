@@ -52,6 +52,7 @@ interface EmscriptenModule {
   _wasm_state_size?(): number;
   _wasm_state_data?(): number;
   _wasm_set_turbo?(on: number): void;
+  _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
   _wasm_load_state?(data: number, len: number): number;
   _benchFrames?(n: number): void;

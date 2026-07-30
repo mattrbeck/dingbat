@@ -4858,6 +4858,7 @@ var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
 var speed2x = false;
+var slowMotion = false;
 var rewindHeld = false;
 var lastRewindPop = 0;
 
@@ -4985,6 +4986,10 @@ const loadRom = async (romName, originalName, opts = {}) => {
   document.body.classList.remove("paused");
   fastForward = false;
   speed2x = false;  // a fresh core starts with turbo off
+  slowMotion = false; // and the wasm-side sample stretch off (module global)
+  if (typeof Module !== "undefined" && Module._wasm_set_slowmo) Module._wasm_set_slowmo(0);
+  slowMotionItem.classList.remove("active");
+  slowMotionItem.setAttribute("aria-pressed", "false");
   rewindHeld = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
@@ -5343,6 +5348,7 @@ resetButton.addEventListener("click", async () => {
 const setSpeed2x = (on, fromRemote) => {
   speed2x = on;
   speed2xButton.classList.toggle("active", on);
+  if (on && slowMotion) setSlowMotion(false);
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(on ? 1 : 0);
   }
@@ -5357,7 +5363,35 @@ window.applyRemoteSpeed2x = (on) => setSpeed2x(on, true);
 const setFastForward = (on) => {
   fastForward = on;
   fastForwardButton.classList.toggle("active", on);
+  if (on) setSlowMotion(false);
 };
+
+// Slow motion (0.5x): the tick loop doubles the per-frame wall-clock step
+// while the wasm shim fills the sample gap — doubled samples (octave-down)
+// normally, or a WSOLA 1:2 stretch when pitch-correct fast-forward is on
+// (see wasm_set_slowmo/appendAudioSample). Radio-exclusive with FF/2x.
+// Toggled from the kebab menu item or Shift+`.
+const slowMotionItem = document.getElementById("slow-motion");
+const setSlowMotion = (on) => {
+  if (slowMotion === on) return; // no toast spam from the radio-clear paths
+  slowMotion = on;
+  if (typeof Module !== "undefined" && Module._wasm_set_slowmo) {
+    Module._wasm_set_slowmo(on ? 1 : 0);
+  }
+  slowMotionItem.classList.toggle("active", on);
+  slowMotionItem.setAttribute("aria-pressed", on ? "true" : "false");
+  if (on) {
+    setFastForward(false);
+    setSpeed2x(false);
+  }
+  showToast(on ? "Slow motion on (0.5x)" : "Slow motion off");
+};
+
+slowMotionItem.addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName || !speedControlsOk()) return;
+  setSlowMotion(!slowMotion);
+});
 
 fastForwardButton.addEventListener("click", () => {
   setFastForward(!fastForward);
@@ -5370,6 +5404,40 @@ speed2xButton.addEventListener("click", () => {
   setSpeed2x(!speed2x);
   if (speed2x) setFastForward(false);
 });
+
+// Frame advance: while paused, run exactly one emulated frame and present
+// it. The frame's audio sliver is discarded (13ms of sound per press is
+// noise). Reached from the top-bar step button (which replaces 2x/FFW while
+// paused) and the "." key; key-repeat and press-and-hold both crawl.
+const frameAdvance = () => {
+  if (typeof Module === "undefined" || !Module._loop_tick) return;
+  if (!paused || !currentRomName || !speedControlsOk()) return;
+  Module._loop_tick();
+  if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+  drawGame();
+};
+
+const frameStepButton = document.getElementById("frame-step");
+frameStepButton.addEventListener("click", frameAdvance);
+// Press-and-hold repeats — the touch analogue of holding "." on a keyboard.
+{
+  let holdTimer = null;
+  let repeatTimer = null;
+  const stopHold = () => {
+    clearTimeout(holdTimer);
+    clearInterval(repeatTimer);
+    holdTimer = repeatTimer = null;
+  };
+  frameStepButton.addEventListener("pointerdown", () => {
+    stopHold();
+    holdTimer = setTimeout(() => {
+      repeatTimer = setInterval(frameAdvance, 100);
+    }, 400);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+    frameStepButton.addEventListener(ev, stopHold);
+  }
+}
 
 // Rewind: hold to step history backward (the tick loop pops snapshots at a
 // fixed cadence while held)
@@ -5480,9 +5548,27 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "Backquote":
       if (!gameLoaded || !speedControlsOk()) break;
+      if (e.shiftKey) {
+        // Shift+` toggles slow motion — the inverse of Shift+Tab's 2x
+        if (!e.repeat) setSlowMotion(!slowMotion);
+        handled = true;
+        break;
+      }
       if (!kbRewindHeld) {
         kbRewindHeld = true;
         setRewindHeld(true);
+      }
+      handled = true;
+      break;
+    case "Period":
+      // Frame advance, mGBA-style: first press pauses, further presses (key
+      // repeat included) step one frame each. Single-core only — loop_tick
+      // is a no-op in the linked modes and would desync them anyway.
+      if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
+      if (!paused) {
+        if (!e.repeat) pauseButton.click();
+      } else {
+        frameAdvance();
       }
       handled = true;
       break;
@@ -6315,9 +6401,10 @@ var Module = {
         return;  // fps display is showing SLEEPING
       }
       const mode = paused ? "paused" : rewindHeld ? "rewind"
-        : fastForward ? "ffw" : speed2x ? "2x" : "normal";
+        : fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
       const expected = mode === "paused" || mode === "rewind" ? 0
-        : mode === "2x" ? 119.5 : mode === "normal" ? 59.7 : null;
+        : mode === "2x" ? 119.5 : mode === "slow" ? 29.9
+        : mode === "normal" ? 59.7 : null;
       const usual = expected !== null &&
         Math.abs(frameCount - expected) <= Math.max(3, expected * 0.05);
       // A mode switch mid-window yields a blended count; don't flash it
@@ -6577,13 +6664,13 @@ var Module = {
         // Run as many frames as needed to catch up, capped to avoid spiral.
         // At 2x speed each frame consumes half the wall-clock step (the core
         // decimates audio to match).
-        const step = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
+        const step = speed2x ? FRAME_TIME / 2 : slowMotion ? FRAME_TIME * 2 : FRAME_TIME;
         const maxFrames = speed2x ? 4 : 2;
-        // Run-ahead engages only at normal speed: at 2x the (N+1)x per-frame
-        // cost buys nothing (latency is dominated by the speed change
-        // itself), and with it off this line picks the identical loop_tick
-        // call that predates the feature — zero cost while off.
-        const useRunahead = runaheadFrames > 0 && !speed2x &&
+        // Run-ahead engages only at normal speed: at 2x/slow-mo the (N+1)x
+        // per-frame cost buys nothing (latency is dominated by the speed
+        // change itself), and with it off this line picks the identical
+        // loop_tick call that predates the feature — zero cost while off.
+        const useRunahead = runaheadFrames > 0 && !speed2x && !slowMotion &&
           typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
