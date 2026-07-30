@@ -4315,6 +4315,42 @@ const loadVideoSettings = async () => {
 };
 
 window.addEventListener("resize", updateCanvasScaling);
+
+// --- iOS rotation settle ---
+// Rotating landscape -> portrait on iPhone can leave the touch-control
+// strip's PAINTED pixels out of sync with where WebKit hit-tests them (the
+// targets land above the buttons): the layout tier tears down the landscape
+// position:fixed layers and re-resolves vw/cq/safe-area units, but iOS fires
+// its resize events mid-rotation with stale numbers and may never re-raster
+// the strip's composited layer. Hit-testing here is entirely DOM-based (no
+// cached rects anywhere), so the fix is to force a fresh layout + composite
+// AFTER the rotation settles: coalesced double-rAF plus a 350ms follow-up,
+// re-running canvas scaling, nudging the strip's layer (the reflow read
+// alone is often not enough on iOS), and releasing a mid-rotation joystick
+// hold so no direction sticks.
+{
+  let settleTimer = null;
+  const settleNow = () => {
+    updateCanvasScaling();
+    const controlsEl = document.getElementById("controls");
+    if (controlsEl) {
+      void controlsEl.offsetHeight;                 // force reflow
+      controlsEl.style.transform = "translateZ(0)"; // force re-composite
+      requestAnimationFrame(() => { controlsEl.style.transform = ""; });
+    }
+    if (typeof joystickForceRelease === "function") joystickForceRelease();
+  };
+  const scheduleSettle = () => {
+    requestAnimationFrame(() => requestAnimationFrame(settleNow));
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settleNow, 350); // iOS: last resize lies; re-check
+  };
+  window.addEventListener("orientationchange", scheduleSettle);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleSettle);
+    window.visualViewport.addEventListener("scroll", scheduleSettle);
+  }
+}
 new ResizeObserver(updateCanvasScaling).observe(stageEl);
 
 // WebKit applies the SDL window resize to the canvas attributes a beat AFTER
@@ -4444,6 +4480,15 @@ const noteLocalButton = (inputId, down) => {
 // single running core normally, core 0 in 2P link mode, or — in online
 // rollback mode — captured into localButtons (the RAF loop feeds the core).
 const routeP1Input = (inputId, down) => {
+  // Tilt cart: the D-pad (keyboard or touch) doubles as a tilt source — the
+  // held directions become the tilt target, smoothed toward in updateTilt so
+  // digital input still gives controllable analog motion. The real D-pad
+  // press goes through too (menus use it; gameplay ignores it).
+  if (tiltActive && inputId <= 3) {
+    kbTiltDirs[inputId] = down;
+    tiltTargetY = (kbTiltDirs[0] ? -TILT_KB_RANGE : 0) + (kbTiltDirs[1] ? TILT_KB_RANGE : 0);
+    tiltTargetX = (kbTiltDirs[2] ? -TILT_KB_RANGE : 0) + (kbTiltDirs[3] ? TILT_KB_RANGE : 0);
+  }
   if (rollbackMode) {
     noteLocalButton(inputId, down);
   } else if (linkMode) {
@@ -4861,6 +4906,16 @@ var speed2x = false;
 var slowMotion = false;
 var rewindHeld = false;
 var lastRewindPop = 0;
+// Tilt cart (MBC7 — Kirby Tilt 'n' Tumble): when the running cart has an
+// accelerometer, gamepad stick / keyboard-touch D-pad / device orientation
+// feed a smoothed tilt vector to wasm_set_tilt each RAF tick.
+var tiltActive = false;
+var tiltTargetX = 0, tiltTargetY = 0;   // where input wants the tilt to be
+var tiltX = 0, tiltY = 0;               // smoothed value actually sent
+var tiltOrientationOn = false;          // device-orientation stream attached
+var tiltNeutralBeta = null;             // first reading = neutral hold angle
+var padTiltLive = false;                // gamepad stick currently owns the target
+var kbTiltDirs = [false, false, false, false]; // held U/D/L/R while tilting
 
 // --- Screen Wake Lock ---
 // Keep the device awake while emulation is actively stepping (any mode: single,
@@ -4972,6 +5027,8 @@ window.addEventListener("load", () =>
 );
 
 const loadRom = async (romName, originalName, opts = {}) => {
+  // A retroactive capture spanning a ROM switch would splice two games
+  if (typeof abortRetroClip === "function") abortRetroClip();
   // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
   // Leaving online link mode: say BYE to the peer and drop the channel
@@ -5006,6 +5063,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
+  detectTiltCart();       // MBC7: enable tilt input routing for this cart
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
@@ -5416,6 +5474,99 @@ const frameAdvance = () => {
   if (Module._clearAudioBuffer) Module._clearAudioBuffer();
   drawGame();
 };
+
+// --- Retroactive clip capture ("Save Last 10s") ---
+// The wasm side keeps a rolling window: one state anchor per second plus a
+// 2-byte-per-frame input log (see the clip_* block in dingbat_wasm.nim).
+// clip_begin rewinds the core to the best anchor; the tick loop then steps
+// clip_tick at realtime — a deterministic replay of what the player just
+// did — while a MediaRecorder captures the canvas and the master-gain audio
+// tap. When the log runs out the live state is restored and the file saves.
+var clipReplayActive = false;
+var clipRecorder = null;
+var clipChunks = [];
+const clipLastItem = document.getElementById("clip-last");
+
+const clipMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return null;
+  for (const m of ["video/webm;codecs=vp9,opus", "video/webm",
+                   "video/mp4;codecs=avc1.64001F,mp4a.40.2", "video/mp4"]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return null;
+};
+
+const finishRetroClip = (save) => {
+  clipReplayActive = false;
+  document.body.classList.remove("clip-replaying");
+  if (clipRecorder && clipRecorder.state !== "inactive") {
+    if (save) clipRecorder.stop(); // onstop saves the blob
+    else { clipRecorder.ondataavailable = null; clipRecorder.onstop = null;
+           clipRecorder.stop(); clipChunks = []; clipRecorder = null;
+           if (typeof window.releaseClipAudio === "function") window.releaseClipAudio(); }
+  }
+};
+
+const abortRetroClip = () => {
+  if (!clipReplayActive) return;
+  if (typeof Module !== "undefined" && Module._clip_abort) Module._clip_abort();
+  finishRetroClip(false);
+};
+
+const startRetroClip = () => {
+  if (clipReplayActive || !currentRomName || !speedControlsOk()) return;
+  const mime = clipMimeType();
+  if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
+  const frames = Module._clip_begin ? Module._clip_begin(10) : 0;
+  if (frames <= 0) { showToast("Not enough gameplay history yet"); return; }
+  let stream;
+  try {
+    stream = canvasEl.captureStream(60);
+  } catch {
+    Module._clip_abort();
+    showToast("Couldn't capture the game canvas");
+    return;
+  }
+  const audio = typeof window.acquireClipAudio === "function"
+    ? window.acquireClipAudio() : null;
+  if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
+  clipChunks = [];
+  try {
+    clipRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+  } catch {
+    Module._clip_abort();
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    showToast("Couldn't start the recorder");
+    return;
+  }
+  clipRecorder.ondataavailable = (e) => { if (e.data && e.data.size) clipChunks.push(e.data); };
+  clipRecorder.onstop = () => {
+    if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    const blob = new Blob(clipChunks, { type: clipRecorder.mimeType });
+    clipRecorder = null;
+    clipChunks = [];
+    if (!blob.size) { showToast("The clip came out empty"); return; }
+    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}-last10s-${stamp}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    showToast("Clip saved");
+  };
+  clipRecorder.start(500);
+  clipReplayActive = true;
+  document.body.classList.add("clip-replaying");
+  paused = false; // a paused game still replays (and re-pauses via the badge? keep simple: resume)
+  showToast("Replaying the last " + Math.round(frames / 60) + "s for capture…");
+};
+
+clipLastItem.addEventListener("click", () => {
+  menuDropdown.hidden = true;
+  startRetroClip();
+});
 
 const frameStepButton = document.getElementById("frame-step");
 frameStepButton.addEventListener("click", frameAdvance);
@@ -6023,6 +6174,20 @@ const pollGamepads = () => {
     if (ay > GP_DEADZONE) want[1] = true;
     if (ax < -GP_DEADZONE) want[2] = true;
     if (ax > GP_DEADZONE) want[3] = true;
+    // Tilt cart: the left stick doubles as the accelerometer (full analog
+    // range). Only claims the tilt target while deflected so the keyboard /
+    // device-orientation sources aren't fought over a centered stick.
+    if (tiltActive) {
+      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
+        padTiltLive = true;
+        tiltTargetX = ax;
+        tiltTargetY = ay;
+      } else if (padTiltLive) {
+        padTiltLive = false;
+        tiltTargetX = 0;
+        tiltTargetY = 0;
+      }
+    }
   }
   document.body.classList.toggle(
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
@@ -6041,6 +6206,75 @@ const pollGamepads = () => {
       gpPrev[i] = want[i];
     }
   }
+};
+
+// --- Tilt cart input (MBC7: Kirby Tilt 'n' Tumble) ---
+// Three sources feed a shared target: gamepad left stick (analog, best),
+// keyboard/touch D-pad (digital, smoothed), and the phone's real orientation
+// sensor. The target is eased toward each RAF tick so digital input rolls
+// the ball rather than teleporting the tilt. iOS requires the motion
+// permission be requested from a user gesture, so the offer is an action
+// toast shown at game load — tapping it is the gesture.
+const TILT_KB_RANGE = 0.65;   // full keyboard deflection (playable, not violent)
+const TILT_SMOOTHING = 0.18;  // per-tick ease factor toward the target
+const TILT_ORIENT_RANGE = 25; // degrees of physical tilt = full deflection
+
+const detectTiltCart = () => {
+  tiltActive =
+    typeof Module !== "undefined" &&
+    !!Module._wasm_cart_has_tilt &&
+    Module._wasm_cart_has_tilt() === 1;
+  tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
+  kbTiltDirs = [false, false, false, false];
+  tiltNeutralBeta = null;
+  if (tiltActive && !maybeOfferOrientationTilt()) {
+    showToast("Tilt cart detected — D-pad or stick tilts the game");
+  }
+};
+
+const updateTilt = () => {
+  if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
+  tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
+  tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
+  Module._wasm_set_tilt(tiltX, tiltY);
+};
+
+const orientationTiltHandler = (e) => {
+  if (!tiltActive || e.beta == null || e.gamma == null) return;
+  // First reading defines the neutral pitch: people play holding the phone
+  // at ~30-50°, not flat on a table. Roll (gamma) is neutral at 0.
+  if (tiltNeutralBeta === null) tiltNeutralBeta = e.beta;
+  const clamp = (v) => Math.max(-1, Math.min(1, v));
+  tiltTargetX = clamp(e.gamma / TILT_ORIENT_RANGE);
+  tiltTargetY = clamp((e.beta - tiltNeutralBeta) / TILT_ORIENT_RANGE);
+};
+
+const enableOrientationTilt = async () => {
+  if (tiltOrientationOn) return;
+  try {
+    // iOS 13+: permission gate (non-standard static, hence the cast), must
+    // be called from a user gesture — the action toast's tap provides it
+    const doe = /** @type {*} */ (
+      typeof DeviceOrientationEvent !== "undefined" ? DeviceOrientationEvent : null);
+    if (doe && typeof doe.requestPermission === "function") {
+      const res = await doe.requestPermission();
+      if (res !== "granted") return;
+    }
+    window.addEventListener("deviceorientation", orientationTiltHandler);
+    tiltOrientationOn = true;
+    tiltNeutralBeta = null; // re-baseline at the moment of enabling
+    showToast("Device tilt enabled — hold your comfortable angle now");
+  } catch {}
+};
+
+// On touch devices a tilt cart offers real device-tilt via a tappable toast
+// (the permission request needs a user gesture on iOS). Elsewhere (or if
+// dismissed) the D-pad/stick fallbacks just work with no setup.
+const maybeOfferOrientationTilt = () => {
+  if (tiltOrientationOn || typeof DeviceOrientationEvent === "undefined") return false;
+  if (!("ontouchstart" in window) && navigator.maxTouchPoints === 0) return false;
+  showActionToast("Play by tilting your device?", "Enable tilt", enableOrientationTilt);
+  return true;
 };
 
 // --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
@@ -6217,6 +6451,13 @@ var Module = {
     // Optional analog-output low-pass (~12 kHz), modeling the GBA speaker's
     // cap/analog smoothing. Off by default → gain routes straight to the
     // destination (no filter node in the path). Mirrors the native IIR.
+    // Clip recording tap: while a capture runs, the master gain ALSO feeds a
+    // MediaStreamDestination whose audio tracks the MediaRecorder consumes.
+    // Held here because gainNode lives in this closure; routeOutput
+    // re-attaches it across lowpass toggles.
+    let clipTapNode = null;
+    let clipTapActive = false;
+
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
       try { gainNode.disconnect(); } catch (e) {}
@@ -6232,8 +6473,22 @@ var Module = {
       } else {
         gainNode.connect(audioCtx.destination);
       }
+      if (clipTapActive && clipTapNode) gainNode.connect(clipTapNode);
     };
     window.updateAudioLowpass = () => routeOutput();
+    // Recorder-side hooks (recording code lives at module scope, outside
+    // this closure). Return the tap's MediaStream, or null pre-audio-unlock.
+    window.acquireClipAudio = () => {
+      if (!audioCtx || !gainNode) return null;
+      if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
+      clipTapActive = true;
+      routeOutput();
+      return clipTapNode.stream;
+    };
+    window.releaseClipAudio = () => {
+      clipTapActive = false;
+      if (audioCtx && gainNode) routeOutput();
+    };
     // Audio can only play at realtime rate. When unbounded fast-forward runs the
     // core many frames per rAF, we play the frames that fit within this much
     // queued lead and drop the rest (see the fastForward branch), keeping FF
@@ -6552,6 +6807,7 @@ var Module = {
 
     const tick = (timestamp) => {
       pollGamepads();
+      updateTilt(); // MBC7 carts: ease the tilt vector toward its target
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
@@ -6629,6 +6885,23 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitLinkCanvases();
+      } else if (clipReplayActive) {
+        // Retroactive capture: step the deterministic replay at realtime
+        // (the MediaRecorder captures the canvas + audio as it plays back).
+        // clip_tick presents each frame and returns -1 when the log is
+        // exhausted — the wasm side has already restored the live state.
+        let framesRun = 0;
+        let done = false;
+        while (accumulator >= FRAME_TIME && framesRun < 2) {
+          const left = Module._clip_tick();
+          if (left < 0) { done = true; break; }
+          pushAudio();
+          frameCount++;
+          accumulator -= FRAME_TIME;
+          framesRun++;
+        }
+        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        if (done) finishRetroClip(true);
       } else if (rewindHeld) {
         // Pop ~30 snapshots/s (10 frames each ≈ 5x realtime backward); the
         // pop presents the restored frame itself, and no audio is queued so

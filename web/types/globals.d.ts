@@ -41,6 +41,10 @@ interface Window {
   // audio hooks published from inside Module.onRuntimeInitialized
   updateGain?: () => void;
   updateAudioLowpass?: () => void;
+  // clip-recording audio tap (published from the same closure; consumed by
+  // the module-scope retroactive-capture code)
+  acquireClipAudio?: () => MediaStream | null;
+  releaseClipAudio?: () => void;
   // UMD export mirror (sdputil.js does `root.SDPCodec = ...`)
   SDPCodec?: SDPCodecT;
 }

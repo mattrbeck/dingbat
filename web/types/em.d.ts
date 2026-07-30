@@ -58,6 +58,11 @@ interface EmscriptenModule {
   _benchFrames?(n: number): void;
   _isStopped?(): number;
   _wasm_rumble?(): number;
+  _wasm_set_tilt?(x: number, y: number): void;
+  _wasm_cart_has_tilt?(): number;
+  _clip_begin?(seconds: number): number;
+  _clip_tick?(): number;
+  _clip_abort?(): void;
   _setInput?(inputId: number, pressed: number): void;
   _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;

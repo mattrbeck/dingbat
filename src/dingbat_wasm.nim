@@ -430,10 +430,160 @@ proc wasm_rumble(): cint {.exportc.} =
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gpio_rumble(): 1
   else: 0
 
+proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
+  ## Tilt-cart accelerometer input, -1.0 .. 1.0 per axis, 0 = level. Routed to
+  ## the GB cartridge (MBC7 — Kirby Tilt 'n' Tumble); a no-op on every other
+  ## mapper, so JS can feed it unconditionally while a tilt cart is detected.
+  if stateKind == ekGB and stateGb != nil:
+    stateGb.cartridge.set_accelerometer(float(x), float(y))
+
+proc wasm_cart_has_tilt(): cint {.exportc.} =
+  ## 1 when the running cart has a tilt sensor (MBC7); lets JS decide whether
+  ## to request DeviceOrientation permission / show tilt UI at ROM load.
+  if stateKind == ekGB and stateGb != nil and stateGb.cartridge of Mbc7: 1
+  else: 0
+
+# --- Retroactive clip capture (prototype) ---
+# "Save the last N seconds" without recording video: a rolling ring of state
+# snapshots (one per second) plus a per-frame input log (2 bytes/frame).
+# Deterministic replay from the nearest anchor reconstructs the exact frames
+# the player saw — the same state+inputs determinism rollback netplay relies
+# on. JS drives clip_tick once per RAF at realtime while a MediaRecorder
+# captures the canvas + audio; the live game state is stashed and restored
+# around the replay. Single-core only. Presentation-only, never serialized.
+# (Known divergence: the GBA RTC reads wall clock, so an RTC game's replayed
+# clock can differ by up to the clip length — cosmetic.)
+const CLIP_SNAP_INTERVAL = 60          # anchor snapshot cadence (frames)
+const CLIP_MAX_FRAMES = 12 * 60        # rolling history window (~12 s)
+var clipSnaps: seq[tuple[frame: int, payload: string]] = @[]
+var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
+var clipInputsStart = 0                # absolute frame of clipInputs[0]
+var clipFrameIndex = 0                 # canonical frames since core init
+var clipCurButtons: uint16 = 0         # live mask, mirrored from setInput
+var clipLiveStash = ""                 # live state while a replay runs
+var clipCursor = 0
+var clipEnd = 0
+var clipReplaying = false
+
+proc clip_reset() =
+  clipSnaps.setLen(0)
+  clipInputs.setLen(0)
+  clipInputsStart = 0
+  clipFrameIndex = 0
+  clipCurButtons = 0
+  clipLiveStash = ""
+  clipReplaying = false
+
+proc clip_note_frame() =
+  ## Called once per canonical frame BEFORE it steps: log the held buttons
+  ## and drop history that has aged out of the window.
+  if clipReplaying: return
+  if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
+    let payload = case stateKind
+      of ekGBA: stateGba.state_payload()
+      of ekGB:  stateGb.state_payload()
+      of ekNone: ""
+    if payload.len > 0:
+      clipSnaps.add((clipFrameIndex, payload))
+  clipInputs.add(clipCurButtons)
+  inc clipFrameIndex
+  let oldest = clipFrameIndex - CLIP_MAX_FRAMES
+  while clipSnaps.len > 1 and clipSnaps[1].frame <= oldest:
+    clipSnaps.delete(0)
+  if clipSnaps.len > 0 and clipInputsStart < clipSnaps[0].frame:
+    let drop = clipSnaps[0].frame - clipInputsStart
+    if drop > 0 and drop <= clipInputs.len:
+      clipInputs = clipInputs[drop .. ^1]  # ≤720 u16s, copying is trivial
+      clipInputsStart += drop
+
+proc clip_apply_payload(payload: string): bool =
+  try:
+    case stateKind
+    of ekGBA: stateGba.apply_state_payload(payload)
+    of ekGB:  stateGb.apply_state_payload(payload)
+    of ekNone: return false
+    true
+  except CatchableError:
+    false
+
+proc clip_set_buttons(mask: uint16) =
+  ## Drive the core's absolute input state (idempotent per bit).
+  for i in 0 .. ord(Input.high):
+    let down = (mask and (1'u16 shl i)) != 0
+    case stateKind
+    of ekGBA: stateGba.handle_input(Input(i), down)
+    of ekGB:  stateGb.handle_input(Input(i), down)
+    of ekNone: discard
+
+proc clip_begin(seconds: cint): cint {.exportc.} =
+  ## Arm a replay of roughly the last `seconds`. Stashes the live state and
+  ## rewinds the core to the best anchor. Returns the number of frames the
+  ## replay will run (JS steps them via clip_tick), or 0 if there is no
+  ## usable history / a linked mode is active.
+  if stateNet != nil or stateLink != nil or stateGbLink != nil: return 0
+  if stateRollback != nil or stateGbRollback != nil: return 0
+  if clipReplaying or clipSnaps.len == 0: return 0
+  let want = clipFrameIndex - int(seconds) * 60
+  var pick = 0
+  for i in 0 ..< clipSnaps.len:
+    if clipSnaps[i].frame <= want: pick = i
+    else: break
+  # Prefer covering the full window: if even the oldest anchor is newer than
+  # `want`, use it anyway (short clip beats no clip).
+  let anchor = clipSnaps[pick]
+  clipLiveStash = case stateKind
+    of ekGBA: stateGba.state_payload()
+    of ekGB:  stateGb.state_payload()
+    of ekNone: ""
+  if clipLiveStash.len == 0: return 0
+  if not clip_apply_payload(anchor.payload):
+    clipLiveStash = ""
+    return 0
+  clipCursor = anchor.frame
+  clipEnd = clipFrameIndex
+  clipReplaying = true
+  cint(clipEnd - clipCursor)
+
+proc clip_tick(): cint {.exportc.} =
+  ## Step one replay frame with its logged input; present it. Returns frames
+  ## remaining, or -1 once the replay is done (state already restored).
+  if not clipReplaying: return -1
+  if clipCursor >= clipEnd:
+    discard clip_apply_payload(clipLiveStash)
+    clipLiveStash = ""
+    clipReplaying = false
+    clip_set_buttons(clipCurButtons)   # re-apply what the player holds NOW
+    return -1
+  let idx = clipCursor - clipInputsStart
+  if idx >= 0 and idx < clipInputs.len:
+    clip_set_buttons(clipInputs[idx])
+  case stateKind
+  of ekGBA:
+    stateGba.step_frame()
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                       GBA_W * GBA_H)
+  of ekGB:
+    stateGb.step_frame()
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                       GB_W * GB_H)
+  of ekNone: return -1
+  inc clipCursor
+  cint(clipEnd - clipCursor)
+
+proc clip_abort() {.exportc.} =
+  ## Bail out of a replay (recorder error, ROM switch): restore the live state.
+  if not clipReplaying: return
+  discard clip_apply_payload(clipLiveStash)
+  clipLiveStash = ""
+  clipReplaying = false
+  clip_set_buttons(clipCurButtons)
+
 proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   if inputId < 0 or inputId > ord(Input.high): return
   let inp = Input(inputId)
   let down = pressed != 0
+  if down: clipCurButtons = clipCurButtons or (1'u16 shl inputId)
+  else: clipCurButtons = clipCurButtons and not (1'u16 shl inputId)
   # While an online link is live, route input through the netcore so a
   # speculative rollback replays the exact press timing (note_input just
   # applies the press when speculation is off, so this is always safe).
@@ -488,11 +638,13 @@ proc setRewindCapBytes(n: cint) {.exportc.} =
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
+  if clipReplaying: return    # clip_tick owns the core during a replay
   inc frameCount
   # Drain SDL events BEFORE stepping so anything they carry (keyboard input
   # on the SDL path) lands in the frame about to run rather than the next
   # one. The JS gameKeyHandler path is unaffected — it applies at event time.
   checkInput()
+  clip_note_frame()  # retroactive-capture history (inputs + 1/s anchors)
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
@@ -538,8 +690,10 @@ proc runahead_tick(n: cint) {.exportc.} =
   if stateNet != nil: return
   if stateLink != nil or stateGbLink != nil: return
   if stateRollback != nil or stateGbRollback != nil: return
+  if clipReplaying: return
   inc frameCount
   checkInput()
+  clip_note_frame()  # canonical frames only — lookahead steps are not history
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
@@ -1137,6 +1291,7 @@ proc load_cheats(text: cstring): cstring {.exportc.} =
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session
   link_exit()
+  clip_reset()  # capture history belongs to the previous core
   # Leaving online link mode: drop the protocol core (JS closes the channel)
   stateNet = nil
   netOut.setLen(0)
