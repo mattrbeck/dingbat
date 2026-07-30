@@ -4331,6 +4331,15 @@ window.addEventListener("resize", updateCanvasScaling);
 {
   let settleTimer = null;
   const settleNow = () => {
+    // Publish the MEASURED app height for the standalone body sizing:
+    // visualViewport.height has none of 100vh's post-rotation staleness.
+    // Skip while it's the on-screen KEYBOARD shrinking the visual viewport
+    // (vv well below innerHeight) — the app must not resize under typing.
+    if (window.visualViewport && window.visualViewport.height > 0 &&
+        window.visualViewport.height >= window.innerHeight - 1) {
+      document.documentElement.style.setProperty(
+        "--app-h", Math.round(window.visualViewport.height) + "px");
+    }
     updateCanvasScaling();
     const controlsEl = document.getElementById("controls");
     if (controlsEl) {
@@ -5369,12 +5378,28 @@ document.addEventListener("drop", (e) => {
   if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
-pauseButton.addEventListener("click", () => {
+const togglePause = () => {
   paused = !paused;
   pauseButton.classList.toggle("paused", paused);
   pauseButton.classList.toggle("active", paused);
   pauseButton.title = paused ? "Resume" : "Pause";
   document.body.classList.toggle("paused", paused);
+};
+
+// iOS suppresses the synthesized `click` for a SECOND finger while the first
+// is held on the (preventDefaulted) touch controls — which made Pause dead
+// exactly when someone held A to frame-step. Drive it from pointerup, and
+// keep the click listener (programmatic .click() callers, keyboards) behind
+// a short lockout so a pointer-handled tap can't double-toggle.
+var pausePointerTs = 0;
+pauseButton.addEventListener("pointerup", (e) => {
+  e.preventDefault();
+  pausePointerTs = performance.now();
+  togglePause();
+});
+pauseButton.addEventListener("click", () => {
+  if (performance.now() - pausePointerTs < 350) return;
+  togglePause();
 });
 
 resetButton.addEventListener("click", async () => {
@@ -5568,12 +5593,16 @@ clipLastItem.addEventListener("click", () => {
   startRetroClip();
 });
 
+// Frame-step is fully pointer-driven: tap = one frame, press-and-hold
+// repeats at 10/s (the touch analogue of holding "."). Pointer events, not
+// click — iOS won't synthesize click for a second finger while a game
+// button is held, and stepping WHILE holding a button is the whole point.
 const frameStepButton = document.getElementById("frame-step");
-frameStepButton.addEventListener("click", frameAdvance);
-// Press-and-hold repeats — the touch analogue of holding "." on a keyboard.
 {
   let holdTimer = null;
   let repeatTimer = null;
+  let repeated = false;
+  let stepPointerTs = 0;
   const stopHold = () => {
     clearTimeout(holdTimer);
     clearInterval(repeatTimer);
@@ -5581,13 +5610,27 @@ frameStepButton.addEventListener("click", frameAdvance);
   };
   frameStepButton.addEventListener("pointerdown", () => {
     stopHold();
+    repeated = false;
     holdTimer = setTimeout(() => {
+      repeated = true;
       repeatTimer = setInterval(frameAdvance, 100);
     }, 400);
   });
-  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+  frameStepButton.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    stepPointerTs = performance.now();
+    const tap = !repeated;
+    stopHold();
+    if (tap) frameAdvance(); // a hold already stepped via the repeater
+  });
+  for (const ev of ["pointerleave", "pointercancel"]) {
     frameStepButton.addEventListener(ev, stopHold);
   }
+  // Programmatic .click() (and any browser that skips pointer events)
+  frameStepButton.addEventListener("click", () => {
+    if (performance.now() - stepPointerTs < 350) return;
+    frameAdvance();
+  });
 }
 
 // Rewind: hold to step history backward (the tick loop pops snapshots at a
@@ -6236,7 +6279,11 @@ const updateTilt = () => {
   if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
   tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
   tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
-  Module._wasm_set_tilt(tiltX, tiltY);
+  // Negated at this single send point (all sources agree): on hardware the
+  // ball rolls INTO the tilt — marble on a tray — and the phone test showed
+  // the raw mapping ran backwards. GBATEK notes the sensor axes mirror
+  // between console form factors, so the sign was always empirical.
+  Module._wasm_set_tilt(-tiltX, -tiltY);
 };
 
 const orientationTiltHandler = (e) => {

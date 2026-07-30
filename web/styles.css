@@ -899,7 +899,13 @@ body {
    theme-color meta. Browser tabs keep the inset sizing above. */
 @media (display-mode: standalone) {
   body {
-    height: 100vh;
+    /* --app-h is published by the rotation-settle handler in index.js from
+       visualViewport.height: iOS resolves 100vh from the PRE-rotation
+       orientation for a layout pass after a rotation round-trip, which left
+       the bottom-anchored control strip painted where it no longer
+       hit-tests. The measured value has no such lag; 100vh is only the
+       pre-JS fallback. */
+    height: var(--app-h, 100vh);
   }
   /* Legacy status-bar iPhones (home-button class, e.g. SE 1st gen on iOS 15):
      the standalone webview sits BELOW the opaque 20pt status bar instead of
@@ -913,7 +919,10 @@ body {
   @supports (-webkit-touch-callout: none) {
     @media (orientation: portrait) {
       body {
-        height: calc(100vh - max(0px, 20px - env(safe-area-inset-top, 0px)));
+        /* The 20pt correction is part of the pre-JS FALLBACK only: the
+           measured --app-h is already the true webview height on legacy
+           status-bar devices, so subtracting again would double-correct. */
+        height: var(--app-h, calc(100vh - max(0px, 20px - env(safe-area-inset-top, 0px))));
       }
     }
   }
