@@ -248,10 +248,10 @@ test("Remove is offered only for a local game Drive already has", async () => {
   app.idb.set("rom:Fresh.gba", { name: "Fresh.gba", data: u8(2) });
 
   await openManageList(app);
-  eq(rowButtons(app, "Backed.gba"), ["Reset", "Remove from device", "Delete"]);
+  eq(rowButtons(app, "Backed.gba"), ["Reset", "Delete", "Remove from device"]);
   eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete"],
     "a game whose only copy is still local must not be evictable");
-  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Sync to device", "Delete"],
+  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete", "Sync to device"],
     "a Drive-only row offers the Drive-side Reset and a download instead of Remove");
 });
 
@@ -330,7 +330,7 @@ test("Sign out while the modal is open withdraws Remove from the rows", async ()
   // The modal is open (openManageList renders what openRomsModal would).
   app.document.getElementById("roms-modal").classList.add("open");
   await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Remove from device", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Remove from device"]);
 
   app.runIn("gdriveSignOut()");
   await settle();
@@ -381,5 +381,5 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
     "the toast says the save survived: " + app.toasts.join(" | "));
   // The row re-renders without Remove — there is nothing local left to free —
   // and, being Drive-only now, offers the way back instead.
-  eq(rowButtons(app, "A.gba"), ["Reset", "Sync to device", "Delete"]);
+  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Sync to device"]);
 });

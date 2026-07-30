@@ -1519,10 +1519,12 @@ const refreshRomsManageList = async () => {
     }
     siblings.push(allBtn);
 
+    // Order: the two save-data actions first (Reset, Delete), then the
+    // device-transfer action (Remove from device / Sync to device) last.
     if (saveBtn) actions.appendChild(saveBtn);
+    actions.appendChild(allBtn);
     if (freeBtn) actions.appendChild(freeBtn);
     if (downBtn) actions.appendChild(downBtn);
-    actions.appendChild(allBtn);
     row.appendChild(actions);
     romsManageList.appendChild(row);
   }
