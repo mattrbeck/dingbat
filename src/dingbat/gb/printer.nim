@@ -52,6 +52,7 @@ type
     chk:          uint16      # running sum over cmd/compression/len/payload
     chk_recv:     uint16
     status*:      uint8
+    reply*:       uint8      # status latched at ACK time (see psStatus)
     buffer:       seq[uint8]  # printer RAM: 2bpp tile bands, INIT clears it
     strip:        seq[uint8]  # assembled shade rows (0..3), 160 per pixel row
     print_left:   int         # frames of "printing" remaining
@@ -222,14 +223,25 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
     prn.state = psAck
   of psAck:
     result = 0x81                # device id / alive
-    prn.state = psStatus
-  of psStatus:
+    # Latch the status reply NOW, before the command runs. Hardware (and
+    # SameBoy) shift the status byte out of a register captured during this
+    # ACK transfer and only execute the command afterwards, so a packet
+    # always reports the status as of BEFORE its own command. Executing
+    # first made PRINT ack 0x06 ("printing") where hardware acks 0x08
+    # ("unprocessed data present") — and Game Boy Camera Gold reads that as
+    # "my data was never consumed" and re-PRINTs forever. Verified causally:
+    # forcing exactly this byte inside SameBoy reproduces the loop (885
+    # PRINTs vs 2), and restoring it fixes ours.
     if prn.chk_recv != prn.chk:
       prn.status = prn.status or 0x01
     else:
       prn.status = prn.status and not 0x01'u8
+    prn.reply = prn.status
+    prn.state = psStatus
+  of psStatus:
+    result = prn.reply            # latched at psAck, pre-execution
+    if (prn.status and 0x01) == 0:
       prn.exec_command()
-    result = prn.status
     prn.state = psMagic1
   prn.log_pair(b, result)
 
@@ -249,6 +261,7 @@ proc copy_into*(src, dst: GbPrinter) =
   dst.chk = src.chk
   dst.chk_recv = src.chk_recv
   dst.status = src.status
+  dst.reply = src.reply
   dst.buffer = src.buffer
   dst.strip = src.strip
   dst.print_left = src.print_left

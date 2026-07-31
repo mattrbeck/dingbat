@@ -55,11 +55,17 @@ echo "data + print lifecycle"
 block:
   let prn = new_gb_printer()
   discard prn.send(build_packet(0x01, @[]))
+  # Replies report the status as of BEFORE the packet's own command runs
+  # (hardware latches it during the ACK transfer), so DATA acks the prior
+  # idle status and the NEXT packet sees the 0x08 it produced.
   let d = prn.send(build_packet(0x04, band(0x00, 0x00)))
-  check(d.last == 0x08, "full DATA band -> unprocessed-data status")
-  discard prn.send(build_packet(0x04, @[]))  # conventional flush
+  check(d.last == 0x00, "DATA acks the pre-execution status")
+  check(prn.status == 0x08, "and leaves unprocessed-data set")
+  let f = prn.send(build_packet(0x04, @[]))  # conventional flush
+  check(f.last == 0x08, "the flush packet observes the buffered-data status")
   let p = prn.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40]))
-  check(p.last == 0x06, "PRINT -> printing status")
+  check(p.last == 0x08, "PRINT acks 0x08 (data pending), not its own 0x06")
+  check(prn.status == 0x06, "and starts printing")
   var frames = 0
   while prn.status == 0x06 and frames < 1000:
     prn.tick_frame()
@@ -70,8 +76,10 @@ block:
   check(s1.last == 0x04, "first inquiry observes done")
   let s2 = prn.send(build_packet(0x0F, @[]))
   check(s2.last == 0x04, "done LATCHES (SameBoy): repeat polls still read done")
+  # INIT acks the latched done (pre-execution) and clears it for the next
   let i2 = prn.send(build_packet(0x01, @[]))
-  check(i2.last == 0x00, "a later INIT clears done to idle")
+  check(i2.last == 0x04, "INIT still acks the pre-execution done status")
+  check(prn.status == 0x00, "and INIT clears it")
   check(prn.outbox.len == 1, "sheets=1 emitted a strip")
   check(prn.outbox[0].len == 160 * 16, "one band = 160x16 pixels")
   var all_white = true
@@ -113,7 +121,7 @@ echo "checksum failure"
 block:
   let prn = new_gb_printer()
   let r = prn.send(build_packet(0x04, band(0, 0), corrupt_chk = true))
-  check((r.last and 0x01) != 0, "bad checksum sets status bit 0")
+  check((r.last and 0x01) != 0, "bad checksum reports the error in its own ack")
   let p = prn.send(build_packet(0x02, @[1'u8, 0, 0xE4, 0x40]))
   while prn.status == 0x06: prn.tick_frame()
   discard prn.send(build_packet(0x0F, @[]))
@@ -131,7 +139,7 @@ block:
   comp.add(0x00)
   let prn = new_gb_printer()
   let r = prn.send(build_packet(0x04, comp, compressed = true))
-  check(r.last == 0x08, "compressed DATA accepted")
+  check(r.last == 0x00 and prn.status == 0x08, "compressed DATA accepted")
   discard prn.send(build_packet(0x02, @[1'u8, 0, 0xE4, 0x40]))
   while prn.status == 0x06: prn.tick_frame()
   check(prn.outbox.len == 1 and prn.outbox[0].len == 160 * 16,
