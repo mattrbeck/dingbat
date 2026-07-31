@@ -51,6 +51,7 @@ let swRegistration = null;
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then((reg) => {
+    if (!reg) return; // SW-blocked contexts (test harnesses) resolve undefined
     swRegistration = reg;
     // A new version already installed on a previous visit and is waiting
     if (reg.waiting) showUpdateButton();
