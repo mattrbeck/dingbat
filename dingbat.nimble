@@ -47,6 +47,9 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
 
+task test_printer, "Run the Game Boy Printer protocol unit tests":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_printer_test tests/gb_printer_test.nim"
+
 task test_cheats, "Run the cheat-engine unit + integration tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"

@@ -63,6 +63,12 @@ interface EmscriptenModule {
   _clip_begin?(seconds: number): number;
   _clip_tick?(): number;
   _clip_abort?(): void;
+  _printer_connect?(): number;
+  _printer_disconnect?(): void;
+  _printer_wanted?(): number;
+  _printer_poll?(): number;
+  _printer_take?(): number;
+  _printer_take_ptr?(): number;
   _wasm_cart_has_camera?(): number;
   _wasm_camera_attach?(): number;
   _wasm_camera_frame_ptr?(): number;

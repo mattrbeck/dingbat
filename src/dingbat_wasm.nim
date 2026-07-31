@@ -11,6 +11,7 @@ import dingbat/gba/netcore
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gb/rollback as gbrb
+import dingbat/gb/printer
 import dingbat/common/cheats
 
 const GBA_W = 240
@@ -67,6 +68,10 @@ var stateGbRollback: gbrb.GbRollbackSession = nil
 # while a link session exists.
 var stateLink: Link = nil
 var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
+# Game Boy Printer + its print-intent sniffer (see the printer block further
+# down); hoisted because the clip/runahead procs reference them.
+var statePrinter: GbPrinter = nil
+var stateSniffer: GbPrintSniffer = nil
 # Speculative rollback is opt-in for now (proven bit-identical to the blocking
 # path in the native tests, but the interactive Emerald trade is unverified):
 # JS enables it from a ?speculative=1 URL param before netlink_init/attach.
@@ -555,6 +560,9 @@ proc clip_begin(seconds: cint): cint {.exportc.} =
   clipCursor = anchor.frame
   clipEnd = clipFrameIndex
   clipReplaying = true
+  # A replay re-sends serial bytes the printer already processed live —
+  # mute it (reply 0, mutate nothing) for the duration.
+  if statePrinter != nil: statePrinter.muted = true
   cint(clipEnd - clipCursor)
 
 proc clip_tick(): cint {.exportc.} =
@@ -565,6 +573,7 @@ proc clip_tick(): cint {.exportc.} =
     discard clip_apply_payload(clipLiveStash)
     clipLiveStash = ""
     clipReplaying = false
+    if statePrinter != nil: statePrinter.muted = false
     clip_set_buttons(clipCurButtons)   # re-apply what the player holds NOW
     return -1
   let idx = clipCursor - clipInputsStart
@@ -589,7 +598,51 @@ proc clip_abort() {.exportc.} =
   discard clip_apply_payload(clipLiveStash)
   clipLiveStash = ""
   clipReplaying = false
+  if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
+
+# --- Game Boy Printer ---
+# Solo GB cores get a passive sniffer driver watching for the printer
+# protocol's 0x88 0x33 magic; the moment a game tries to print, JS offers to
+# connect and printer_connect swaps in the real device. Finished strips
+# queue in the printer's outbox; JS pops them as 8-bit grayscale.
+var printerTakeBuf: seq[uint8] = @[]
+
+proc printer_connect(): cint {.exportc.} =
+  if stateKind != ekGB or stateGb == nil: return 0
+  statePrinter = new_gb_printer()
+  stateGb.set_serial_driver(GbPrinterDriver(printer: statePrinter))
+  stateSniffer = nil
+  1
+
+proc printer_disconnect() {.exportc.} =
+  if stateKind == ekGB and stateGb != nil:
+    stateGb.set_serial_driver(GbSerialDriver())
+  statePrinter = nil
+
+proc printer_wanted(): cint {.exportc.} =
+  ## 1 once the running game has sent the printer-packet magic with no
+  ## printer attached (sticky until connect / next ROM).
+  if stateSniffer != nil and stateSniffer.wanted: 1 else: 0
+
+proc printer_poll(): cint {.exportc.} =
+  ## Finished strips waiting in the outbox.
+  if statePrinter != nil: cint(statePrinter.outbox.len) else: 0
+
+proc printer_take(): cint {.exportc.} =
+  ## Pop the oldest finished strip into the retained grayscale buffer
+  ## (160 x h, 255 = white). Returns h, or 0 when the outbox is empty.
+  if statePrinter == nil or statePrinter.outbox.len == 0: return 0
+  let shades = statePrinter.outbox[0]
+  statePrinter.outbox.delete(0)
+  const GRAY = [255'u8, 170, 85, 0]
+  printerTakeBuf.setLen(shades.len)
+  for i in 0 ..< shades.len:
+    printerTakeBuf[i] = GRAY[shades[i] and 3]
+  cint(shades.len div 160)
+
+proc printer_take_ptr(): pointer {.exportc.} =
+  if printerTakeBuf.len > 0: addr printerTakeBuf[0] else: nil
 
 # --- GB Camera webcam source ---
 # The Pocket Camera cart is fully emulated (sensor model, exposure, dither —
@@ -712,6 +765,7 @@ proc loop_tick() {.exportc.} =
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
+    if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
@@ -772,6 +826,7 @@ proc runahead_tick(n: cint) {.exportc.} =
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
+    if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
     if n <= 0:
@@ -779,9 +834,13 @@ proc runahead_tick(n: cint) {.exportc.} =
                          GB_W * GB_H)
       return
     let snap = stateGb.state_payload()
+    # Lookahead frames feed the printer bytes the canonical timeline hasn't
+    # sent yet — snapshot around them so no phantom packet/print survives.
+    let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
     audioSuppressed = true
     for _ in 0 ..< int(n): stateGb.step_frame()
     audioSuppressed = false
+    if prnSnap != nil: copy_into(prnSnap, statePrinter)
     if runaheadFrame.len != GB_W * GB_H: runaheadFrame.setLen(GB_W * GB_H)
     copyMem(addr runaheadFrame[0], addr stateGb.ppu.framebuffer[0], GB_W * GB_H * 2)
     try:
@@ -1345,6 +1404,8 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session
   link_exit()
   clip_reset()  # capture history belongs to the previous core
+  statePrinter = nil  # the printer (and sniffer) belong to the previous core
+  stateSniffer = nil
   # Leaving online link mode: drop the protocol core (JS closes the channel)
   stateNet = nil
   netOut.setLen(0)
@@ -1363,6 +1424,10 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
     stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
     stateGb.post_init()
+    # Print-intent sniffer: replaces the default no-cable driver so JS can
+    # offer the printer the moment a game first sends the packet magic.
+    stateSniffer = GbPrintSniffer()
+    stateGb.set_serial_driver(stateSniffer)
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     rgbaBuffer.setLen(GB_W * GB_H)

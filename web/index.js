@@ -5110,6 +5110,8 @@ const loadRom = async (romName, originalName, opts = {}) => {
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
+  printerConnected = false; // fresh core: the sniffer is re-armed wasm-side
+  printerOffered = false;
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
@@ -6545,6 +6547,63 @@ const maybeOfferOrientationTilt = () => {
   return true;
 };
 
+// --- Game Boy Printer ---
+// Solo GB cores run with a print-intent sniffer attached to the serial
+// port; the first time a game sends the printer-packet magic, offer to
+// connect. Finished strips arrive via the wasm outbox and save as PNGs —
+// hardware-matched timing means the in-game "printing" screens play out.
+var printerConnected = false;
+var printerOffered = false;
+
+const connectPrinter = () => {
+  if (typeof Module !== "undefined" && Module._printer_connect &&
+      Module._printer_connect() === 1) {
+    printerConnected = true;
+    showToast("Printer connected — try printing again in the game");
+  }
+};
+
+const savePrintPng = (h) => {
+  const W = 160;
+  const ptr = Module._printer_take_ptr();
+  if (!ptr || h <= 0) return;
+  const gray = new Uint8Array(Module.memory.buffer, ptr, W * h);
+  const cnv = document.createElement("canvas");
+  cnv.width = W;
+  cnv.height = h;
+  const ctx = cnv.getContext("2d");
+  const img = ctx.createImageData(W, h);
+  for (let i = 0; i < W * h; i++) {
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = gray[i];
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  cnv.toBlob((blob) => {
+    if (!blob) return;
+    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}-print-${stamp}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    showToast("Print saved");
+  }, "image/png");
+};
+
+const pollPrinter = () => {
+  if (typeof Module === "undefined" || !Module._printer_wanted) return;
+  if (!printerConnected && !printerOffered && currentRomName &&
+      Module._printer_wanted() === 1) {
+    printerOffered = true;
+    showActionToast("This game is trying to print — connect the Game Boy Printer?",
+      "Connect", connectPrinter);
+  }
+  if (printerConnected && Module._printer_poll() > 0) {
+    savePrintPng(Module._printer_take());
+  }
+};
+
 // --- GB Camera webcam source ---
 // The Pocket Camera cart's sensor is fully emulated; opting in points it at
 // real getUserMedia frames: a hidden <video> is drawn cover-cropped and
@@ -7213,6 +7272,7 @@ var Module = {
     const tick = (timestamp) => {
       pollGamepads();
       updateTilt(); // MBC7 carts: ease the tilt vector toward its target
+      pollPrinter(); // GB carts: print-intent offer + finished-strip pickup
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
