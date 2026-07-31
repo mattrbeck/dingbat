@@ -5030,8 +5030,11 @@ body.clip-replaying #controls {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Tilt recenter chip: shown only while device-motion tilt is live */
-#tilt-recenter {
+/* Tilt recenter chip: shown only while device-motion tilt is live.
+   #cam-flip shares the slot — tilt carts and camera carts are different
+   cartridges, so the two chips can never appear together. */
+#tilt-recenter,
+#cam-flip {
   position: fixed;
   z-index: 60;
   right: calc(10px + var(--safe-r));

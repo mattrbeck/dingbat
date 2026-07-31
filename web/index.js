@@ -6555,6 +6555,11 @@ const maybeOfferOrientationTilt = () => {
 var camStream = null;
 var camVideo = null;
 var camTimer = null;
+var camFacing = "user";   // phones: facingMode toggled by the flip chip
+var camDeviceIdx = -1;    // desktop: index into camDevices, -1 = default
+var camDevices = [];      // videoinput deviceIds (labels arrive post-grant)
+var camMirror = true;     // selfie-mirror front/desktop cams; not the back one
+const camFlipBtn = document.getElementById("cam-flip");
 
 const stopWebcam = () => {
   clearInterval(camTimer);
@@ -6562,25 +6567,80 @@ const stopWebcam = () => {
   if (camStream) for (const t of camStream.getTracks()) t.stop();
   camStream = null;
   camVideo = null;
+  camFacing = "user";   // a fresh cart starts front-facing again
+  camDeviceIdx = -1;
+  camFlipBtn.hidden = true;
 };
+
+const camConstraints = () => {
+  const size = { width: { ideal: 320 }, height: { ideal: 240 } };
+  if (touchDevice) return { facingMode: camFacing, ...size };
+  if (camDeviceIdx >= 0 && camDevices[camDeviceIdx]) {
+    return { deviceId: { exact: camDevices[camDeviceIdx] }, ...size };
+  }
+  return { facingMode: "user", ...size };
+};
+
+// (Re)open the camera with the current facing/device choice; reused by the
+// flip chip, so it swaps the stream under the running pump.
+const openCamStream = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: camConstraints() });
+  if (camStream) for (const t of camStream.getTracks()) t.stop();
+  camStream = stream;
+  if (!camVideo) {
+    camVideo = document.createElement("video");
+    camVideo.muted = true;
+    camVideo.playsInline = true;
+  }
+  camVideo.srcObject = stream;
+  await camVideo.play().catch(() => {});
+  // Selfie-mirror the front camera (and desktop webcams — they face the
+  // user); the back camera shows the world and must not be flipped.
+  camMirror = touchDevice ? camFacing === "user" : true;
+};
+
+// Flip chip: phones toggle front/back; desktops cycle the device list and
+// name each camera as it's chosen. Shown only when >1 camera exists.
+const switchCamera = async () => {
+  if (!camStream) return;
+  if (touchDevice) {
+    camFacing = camFacing === "user" ? "environment" : "user";
+  } else if (camDevices.length > 1) {
+    camDeviceIdx = (camDeviceIdx + 1) % camDevices.length;
+  }
+  try {
+    await openCamStream();
+    if (!touchDevice) {
+      const track = camStream.getVideoTracks()[0];
+      showToast("Camera: " +
+        (track && track.label ? track.label : "camera " + (camDeviceIdx + 1)));
+    }
+  } catch {
+    showToast("Couldn't switch camera");
+  }
+};
+camFlipBtn.addEventListener("click", switchCamera);
 
 const enableWebcam = async () => {
   if (camStream || !navigator.mediaDevices?.getUserMedia) return;
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
-    });
+    await openCamStream();
   } catch {
     showToast("Camera permission denied — keeping the synthetic scene");
     return;
   }
   const len = Module._wasm_camera_attach();
   if (!len) { stopWebcam(); return; }
-  camVideo = document.createElement("video");
-  camVideo.muted = true;
-  camVideo.playsInline = true;
-  camVideo.srcObject = camStream;
-  await camVideo.play().catch(() => {});
+  // Post-grant, enumerateDevices yields the real camera list (labels
+  // included); two or more video inputs earn the flip chip.
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    camDevices = devs.filter((d) => d.kind === "videoinput").map((d) => d.deviceId);
+    // The default open is (approximately) the first device: seed the cycle
+    // there so the first flip actually reaches a DIFFERENT camera.
+    if (camDeviceIdx < 0) camDeviceIdx = 0;
+    camFlipBtn.hidden = camDevices.length < 2;
+  } catch {}
   const W = 128, H = 120;
   const cnv = document.createElement("canvas");
   cnv.width = W;
@@ -6590,13 +6650,15 @@ const enableWebcam = async () => {
     if (!camVideo || camVideo.readyState < 2) return;
     const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
     if (!vw || !vh) return;
-    // cover-crop the source into 128x120, mirrored like a selfie preview
+    // cover-crop the source into 128x120; mirror only when facing the user
     const scale = Math.max(W / vw, H / vh);
     const sw = W / scale, sh = H / scale;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
     ctx.save();
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
+    if (camMirror) {
+      ctx.translate(W, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, W, H);
     ctx.restore();
     const img = ctx.getImageData(0, 0, W, H).data;
