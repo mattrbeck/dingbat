@@ -104,6 +104,10 @@ also a CI step with a rationale comment in `.github/workflows/test.yml`):
 - `test_savestate_compat` — loads the reference states in `tests/states/`
   and pins EventType ordinals / payload revisions at compile time.
 - `test_cheats` — cheat engine unit + integration tests.
+- `test_rewind` — rewind-ring properties: `snapshot_at(k)` byte-equal to the
+  k-th chain walk at every depth (through eviction and across a pop/push
+  seam), keyframe seeks reproducing the walk, thumbnails evicted in lockstep
+  with their snapshots, `mem_used` covering the side tables. No ROMs.
 
 Not in tasks but in CI: the link-acceptance battery (`linktest`,
 `speclink`, `netlink`, `rollback` modes over `tests/roms/*.gba`) — copy the

@@ -744,6 +744,24 @@ var rewindCapBytes: int = REWIND_CAP_BYTES
 proc setRewindCapBytes(n: cint) {.exportc.} =
   if n > 0: rewindCapBytes = int(n)
 
+# Scrubber thumbnails are captured at push time, while the framebuffer that
+# belongs to the snapshot is still the one on screen. Same 120-wide geometry
+# (and BGR555 layout) as the save-state thumbnail trailer — see gba_thumbnail
+# / gb_thumbnail in the two savestate.nim files.
+const SCRUB_THUMB_W = 120
+const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * GBA_H div GBA_W  # 3:2  -> 120x80
+const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
+
+proc gba_rewind_thumb(g: GBA): RewindThumb =
+  RewindThumb(w: SCRUB_THUMB_W, h: GBA_SCRUB_THUMB_H,
+              pixels: downscale_bgr555(g.ppu.framebuffer, GBA_W, GBA_H,
+                                       SCRUB_THUMB_W, GBA_SCRUB_THUMB_H))
+
+proc gb_rewind_thumb(g: GB): RewindThumb =
+  RewindThumb(w: SCRUB_THUMB_W, h: GB_SCRUB_THUMB_H,
+              pixels: downscale_bgr555(g.ppu.framebuffer, GB_W, GB_H,
+                                       SCRUB_THUMB_W, GB_SCRUB_THUMB_H))
+
 proc loop_tick() {.exportc.} =
   if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
@@ -759,7 +777,9 @@ proc loop_tick() {.exportc.} =
     if stateTexture == nil: return
     stateGba.step_frame()
     if rewindHistory != nil:
-      discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
+      discard rewindHistory.maybe_push(
+        proc(): string = stateGba.state_payload(),
+        proc(): RewindThumb = gba_rewind_thumb(stateGba))
     # gamePtr is refreshed every frame (even static ones) so the WebGL2
     # uploader always has a valid pointer; the blend path decays a lingering
     # ghost into a static picture rather than freezing it in.
@@ -770,7 +790,9 @@ proc loop_tick() {.exportc.} =
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
-      discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
+      discard rewindHistory.maybe_push(
+        proc(): string = stateGb.state_payload(),
+        proc(): RewindThumb = gb_rewind_thumb(stateGb))
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                        GB_W * GB_H)
   of ekNone:
@@ -809,7 +831,9 @@ proc runahead_tick(n: cint) {.exportc.} =
     if stateTexture == nil: return
     stateGba.step_frame()  # canonical frame: this one's audio is played
     if rewindHistory != nil:
-      discard rewindHistory.maybe_push(proc(): string = stateGba.state_payload())
+      discard rewindHistory.maybe_push(
+        proc(): string = stateGba.state_payload(),
+        proc(): RewindThumb = gba_rewind_thumb(stateGba))
     if n <= 0:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                          GBA_W * GBA_H)
@@ -831,7 +855,9 @@ proc runahead_tick(n: cint) {.exportc.} =
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
-      discard rewindHistory.maybe_push(proc(): string = stateGb.state_payload())
+      discard rewindHistory.maybe_push(
+        proc(): string = stateGb.state_payload(),
+        proc(): RewindThumb = gb_rewind_thumb(stateGb))
     if n <= 0:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                          GB_W * GB_H)
@@ -881,15 +907,21 @@ proc wasm_rewind_pop(): cint {.exportc.} =
   1
 
 # --- Rewind scrubber (bug-report timeline) ---
-# Non-destructively render thumbnails of snapshots sampled across the rewind
-# history so the "Report a bug" modal can present a timeline and let the user
-# pick the moment a bug happened. The live core is borrowed as a scratch
-# renderer (each snapshot's payload already carries its framebuffer) and its
-# state is stashed and restored, so neither the ring nor the running game is
-# disturbed. JS must pause the game while scrubbing so the ring stays stable.
+# Hands JS a strip of thumbnails sampled across rewind history so it can
+# present a timeline and let the user pick the moment a bug happened.
+#
+# The strip is COPIED out of the ring, which stored each picture when its
+# snapshot was pushed. It used to be rendered here on demand: apply every
+# sampled snapshot to the live core and downscale the framebuffer it carries.
+# That was O(entire history), not O(samples) — reaching sample 47 meant
+# inflating every delta in front of it. Measured in this browser build on a
+# full 64 MB ring (Advance Wars, 4.6 min of history): opening the report modal
+# went 1379 ms -> 17 ms, and picking the oldest sample 1341 ms -> 38 ms (the
+# keyframes do that half). Nothing is applied to the live core now, so opening
+# the modal no longer disturbs the running game at all.
 
 var scrubThumbs: seq[byte] = @[]   # packed BGR555 thumbnails, one after another
-var scrubIndices: seq[int] = @[]   # ring index (0 = newest) of each sample
+var scrubIds: seq[int] = @[]       # absolute rewind ID of each sample
 var scrubThumbW = 0
 var scrubThumbH = 0
 
@@ -906,39 +938,31 @@ proc apply_payload(payload: string) =
   of ekNone: discard
 
 proc wasm_rewind_scrub_generate(maxSamples: cint): cint {.exportc.} =
-  ## Render up to maxSamples thumbnails sampled evenly across rewind history
-  ## (newest first). Returns the sample count; 0 when there is no history.
+  ## Collect up to maxSamples thumbnails sampled evenly across the stored
+  ## strip (newest first). Returns the sample count; 0 when there is no
+  ## history. O(samples): one small inflate each, nothing walked.
   scrubThumbs = @[]
-  scrubIndices = @[]
+  scrubIds = @[]
   if rewindHistory == nil or stateKind == ekNone: return 0
-  let count = rewindHistory.len
+  let count = rewindHistory.thumb_count
   if count == 0: return 0
-  let (srcW, srcH) = if stateKind == ekGB: (GB_W, GB_H) else: (GBA_W, GBA_H)
-  scrubThumbW = 120
-  scrubThumbH = scrubThumbW * srcH div srcW
-  let maxN = max(1, int(maxSamples))
-  let stride = max(1, (count + maxN - 1) div maxN)
-  let stash = current_payload()
-  var i = 0
-  try:
-    for snap in rewindHistory.snapshots_newest_first():
-      if i mod stride == 0:
-        apply_payload(snap)
-        let fb = case stateKind
-          of ekGBA: stateGba.ppu.framebuffer
-          of ekGB:  stateGb.ppu.framebuffer
-          of ekNone: @[]
-        scrubThumbs.add downscale_bgr555(fb, srcW, srcH, scrubThumbW, scrubThumbH)
-        scrubIndices.add i
-      inc i
-  except CatchableError:
-    discard
-  if stash.len > 0:
-    try: apply_payload(stash)
-    except CatchableError: discard
-  cint(scrubIndices.len)
+  # Spread the samples over the WHOLE strip: n evenly spaced picks, first the
+  # newest and last the oldest. A fixed stride leaves a ragged tail (and never
+  # reaches the oldest thumbnail at all when the count doesn't divide).
+  let n = min(max(1, int(maxSamples)), count)
+  for s in 0 ..< n:
+    let i = if n == 1: 0 else: s * (count - 1) div (n - 1)
+    let t = rewindHistory.thumb_at(i)
+    if t.pixels.len == 0: continue  # (unreachable) never a hole in the strip
+    # Geometry is fixed per core for the life of the ring, so the last one
+    # read is the one that describes every entry in the strip.
+    scrubThumbW = t.w
+    scrubThumbH = t.h
+    scrubThumbs.add t.pixels
+    scrubIds.add rewindHistory.thumb_id(i)
+  cint(scrubIds.len)
 
-proc wasm_rewind_scrub_count(): cint {.exportc.} = cint(scrubIndices.len)
+proc wasm_rewind_scrub_count(): cint {.exportc.} = cint(scrubIds.len)
 proc wasm_rewind_scrub_thumb_w(): cint {.exportc.} = cint(scrubThumbW)
 proc wasm_rewind_scrub_thumb_h(): cint {.exportc.} = cint(scrubThumbH)
 proc wasm_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
@@ -946,18 +970,25 @@ proc wasm_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
 
 proc wasm_rewind_scrub_seconds_ago(sample: cint): cint {.exportc.} =
   ## Approx wall-clock age of a sample, in tenths of a second (snapshots are
-  ## rewindHistory.snapshot_interval frames apart at ~60 fps).
-  if sample < 0 or sample >= scrubIndices.len or rewindHistory == nil: return 0
-  let frames = scrubIndices[sample] * rewindHistory.snapshot_interval
+  ## rewindHistory.snapshot_interval frames apart at ~60 fps). Measured in
+  ## snapshots back from the newest, so a rewind that shortened history moves
+  ## the answer with it.
+  if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
+  let index = rewindHistory.index_of_id(scrubIds[sample])
+  if index < 0: return 0
+  let frames = index * rewindHistory.snapshot_interval
   cint(frames * 10 div 60)
 
 proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
   ## Reconstruct the chosen sample's snapshot, build its full .state image
   ## (header + payload + thumbnail) into the shared stateImage buffer, restore
   ## the live core, and return the size. Read the bytes via wasm_state_data().
-  if sample < 0 or sample >= scrubIndices.len or rewindHistory == nil:
+  if sample < 0 or sample >= scrubIds.len or rewindHistory == nil:
     return 0
-  let snap = rewindHistory.snapshot_at(scrubIndices[sample])
+  # By absolute ID: the strip was captured before the modal opened, and a
+  # positional index would quietly slide onto a different moment if anything
+  # evicted in between.
+  let snap = rewindHistory.snapshot_by_id(scrubIds[sample])
   if snap.len == 0: return 0
   let stash = current_payload()
   stateImage = ""

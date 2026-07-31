@@ -3702,6 +3702,9 @@ statesDeleteBtn.addEventListener("click", async () => {
 // only emulator RAM/registers + a screenshot, never the ROM. A scrubber lets
 // the user pick the moment the bug happened from the rewind history: slider 0
 // is "now" (live state), 1..N are rewind samples (0..N-1, newest first).
+// The samples come straight out of the rewind ring, which captured each
+// thumbnail when its snapshot was pushed — opening this modal copies a strip,
+// it does not re-render history (that used to cost 1.4 s on a full ring).
 const reportModal = document.getElementById("report-modal");
 const reportTitle = /** @type {HTMLInputElement} */ (document.getElementById("report-title"));
 const reportDesc = /** @type {HTMLTextAreaElement} */ (document.getElementById("report-desc"));
@@ -3774,7 +3777,11 @@ reportSlider.addEventListener("input", updateReportPreview);
 const openReportModal = () => {
   menuDropdown.hidden = true;
   reportWasPaused = paused;
-  paused = true; // freeze emulation + the rewind ring while scrubbing
+  // Freeze emulation so the strip on screen stays the ring's contents. A
+  // sample the ring evicts anyway is not dangerous — samples are addressed by
+  // absolute snapshot ID, so an evicted one yields nothing rather than
+  // silently sliding onto a different moment — but it would go blank.
+  paused = true;
   reportSamples = 0;
   reportThumbs = null;
   if (currentOriginalName && Module._wasm_rewind_scrub_generate) {

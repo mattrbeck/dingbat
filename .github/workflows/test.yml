@@ -115,6 +115,20 @@ jobs:
         # Needs no downloaded ROMs.
         shell: bash
         run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_savestate_compat_test tests/savestate_compat_test.nim
+      - name: Rewind ring (IDs, eviction, keyframes, thumbnail strip)
+        # The rewind ring hands the scrubber a state to jump to. Its dangerous
+        # failure is not a crash: it is index/eviction bookkeeping returning a
+        # state from the WRONG MOMENT, which loads perfectly and looks fine.
+        # So this drives a ring to many depths — through eviction at the cap
+        # and across a pop/push seam, where snapshot IDs stop being contiguous
+        # — and asserts byte equality against a plain walk of the delta chain,
+        # which knows nothing about IDs or keyframes. Also covers: keyframe
+        # seeks reproducing the walk exactly, thumbnails evicted in lockstep
+        # with their snapshot (never orphaned, never outliving it), and
+        # mem_used accounting for the side tables so the memory cap stays
+        # honest. Synthetic payloads; needs no ROMs.
+        shell: bash
+        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_rewind_test tests/rewind_test.nim
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status
