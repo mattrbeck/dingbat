@@ -31,11 +31,15 @@ const
   PRN_ROW_BYTES   = 40                    # 160 px at 2bpp
   PRN_MAX_IMAGE   = 160 * 200 div 4      # 8 KiB printer RAM
   PRN_BAND_TILES  = 40                    # DATA bands are 20x2 tiles
-  # Rows-proportional print time, matching real hardware's seconds-per-photo
-  # feel (a full 160x144 print ~= 7 s at 60 fps). GB Camera renders a live
-  # progress display off the status polls, so an instantly-done printer
-  # breaks it; this is the "match hardware" setting.
-  PRN_FRAMES_PER_ROW = 3
+  # Rows-proportional print time. The reference works out to ~7.5 frames per
+  # pixel row (a full 160x144 photo ~= 18 s), which is also what a real
+  # thermal printer feels like; GB Camera animates a progress display off the
+  # status polls for exactly that long.
+  PRN_FRAMES_PER_ROW_NUM = 15
+  PRN_FRAMES_PER_ROW_DEN = 2
+  # Paper-feed jobs print a few blank rows to eject the sheet. They are not
+  # photographs, so they never reach the gallery.
+  PRN_MIN_PHOTO_ROWS = 24
 
 type
   PrnState = enum
@@ -90,7 +94,7 @@ proc render_buffer_to_strip(prn: GbPrinter; palette: uint8) =
         prn.strip.add((palette shr (shade * 2)) and 3)
 
 proc emit_strip(prn: GbPrinter) =
-  if prn.strip.len >= 160:
+  if prn.strip.len div 160 >= PRN_MIN_PHOTO_ROWS:
     prn.outbox.add(prn.strip)
   prn.strip = @[]
 
@@ -150,16 +154,23 @@ proc exec_command(prn: GbPrinter) =
       let printed_rows = prn.strip.len div 160 - rows_before
       prn.buffer.setLen(0)
       prn.feed_after = sheets != 0
-      prn.print_left = max(30, printed_rows * PRN_FRAMES_PER_ROW)
+      prn.print_left = max(30, printed_rows * PRN_FRAMES_PER_ROW_NUM div PRN_FRAMES_PER_ROW_DEN)
       prn.status = 0x06          # printing
   of 0x04:  # DATA: append a band (empty payload = the conventional flush)
-    if prn.payload.len > 0:
-      let chunk = if prn.compressed: rle_decode(prn.payload) else: prn.payload
+    let chunk = if prn.compressed: rle_decode(prn.payload) else: prn.payload
+    # Only a full band counts, matching the reference: a short/zero-length
+    # packet (the conventional flush) is ignored and leaves the status be.
+    if chunk.len == PRN_BAND_TILES * 16:
       if prn.buffer.len + chunk.len <= PRN_MAX_IMAGE:
         prn.buffer.add(chunk)
-      else:
-        prn.status = prn.status or 0x04  # buffer full
-      prn.status = prn.status or 0x08    # unprocessed data present
+      # Overflow drops the band and sets NO bit: bit 2 must only ever mean
+      # "print complete". Synthesizing it here latched a false done that
+      # only an INIT could clear.
+      # ASSIGNMENT, not `or`: this is what clears a latched done from the
+      # previous job. ORing left bit 2 set, so every packet in a second
+      # job's DATA phase reported 0x0C where hardware reports 0x08 — Game
+      # Boy Camera Gold polls that phase and sat on "transferring…" forever.
+      prn.status = 0x08                  # unprocessed data present
   of 0x08:  # BREAK: abort
     prn.print_left = 0
     prn.buffer.setLen(0)
@@ -236,7 +247,9 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
       prn.status = prn.status or 0x01
     else:
       prn.status = prn.status and not 0x01'u8
-    prn.reply = prn.status
+    # INIT's status slot always reads 0x00 on hardware ("games expect INIT
+    # commands to return 0"), whatever was latched before it.
+    prn.reply = if (prn.cmd and 0x0F) == 0x01: 0'u8 else: prn.status
     prn.state = psStatus
   of psStatus:
     result = prn.reply            # latched at psAck, pre-execution
