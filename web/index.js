@@ -5519,6 +5519,19 @@ const setSlowMotion = (on) => {
   showToast(on ? "Slow motion on (0.5x)" : "Slow motion off");
 };
 
+// The three speed flags are radio-exclusive, so they collapse to one value.
+// Momentary speed keys (hold Tab) snapshot it on press and put it back on
+// release, which is what makes a hold an overlay rather than a mode switch.
+const currentSpeedMode = () =>
+  fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
+// Order matters: the setters clear each other, so the wanted one goes last.
+const applySpeedMode = (mode) => {
+  if (mode !== "slow") setSlowMotion(false);
+  setFastForward(mode === "ffw");
+  setSpeed2x(mode === "2x");
+  if (mode === "slow") setSlowMotion(true);
+};
+
 slowMotionItem.addEventListener("click", () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !speedControlsOk()) return;
@@ -5823,11 +5836,21 @@ const speedControlsOk = () => !linkMode && !rollbackMode && !netActive();
 // opening mid-hold) releases them without touching a button-initiated hold.
 var kbFastForward = false;
 var kbRewindHeld = false;
+// The speed that was latched when the fast-forward key went down. Releasing
+// restores it, so Tabbing through a cutscene while parked at 2x (or slow
+// motion) lands back there instead of dumping the player at 1x.
+var kbSpeedBeforeHold = "normal";
+const endKbFastForward = () => {
+  if (!kbFastForward) return;
+  kbFastForward = false;
+  // Something else claimed the speed while the key was down (clicked 2x,
+  // slow motion from the menu — both clear fast-forward): that choice is
+  // newer than the snapshot, so leave it standing.
+  if (!fastForward) return;
+  applySpeedMode(kbSpeedBeforeHold);
+};
 const releaseKbHolds = () => {
-  if (kbFastForward) {
-    kbFastForward = false;
-    setFastForward(false);
-  }
+  endKbFastForward();
   if (kbRewindHeld) {
     kbRewindHeld = false;
     setRewindHeld(false);
@@ -5849,8 +5872,7 @@ const shortcutKeyHandler = (e, down) => {
     if ((e.code === "Tab" && kbFastForward) ||
         (e.code === "Backquote" && kbRewindHeld)) {
       if (e.code === "Tab") {
-        kbFastForward = false;
-        setFastForward(false);
+        endKbFastForward();
       } else {
         kbRewindHeld = false;
         setRewindHeld(false);
@@ -5888,10 +5910,14 @@ const shortcutKeyHandler = (e, down) => {
         }
         handled = true;
       } else {
-        // Hold for unbounded fast-forward
+        // Hold for unbounded fast-forward, restoring the previous speed on
+        // release. Holding the key for the speed you are ALREADY in reads as
+        // "turn this off", so a latched fast-forward restores to 1x — the
+        // same place a second click of the button would leave you.
         if (!speedControlsOk()) break;
         if (!kbFastForward) {
           kbFastForward = true;
+          kbSpeedBeforeHold = fastForward ? "normal" : currentSpeedMode();
           setFastForward(true);
           setSpeed2x(false);
         }
