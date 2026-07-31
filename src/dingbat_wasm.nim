@@ -611,6 +611,16 @@ var printerTakeBuf: seq[uint8] = @[]
 proc printer_connect(): cint {.exportc.} =
   if stateKind != ekGB or stateGb == nil: return 0
   statePrinter = new_gb_printer()
+  # Seed the parser with the bytes the sniffer already consumed (the magic
+  # plus whatever streamed in before the frontend paused): the interrupted
+  # packet then completes against the real printer, so a game paused
+  # mid-first-attempt prints on that very attempt. Replies are discarded —
+  # the game already received the no-cable float for these slots.
+  if stateSniffer != nil and stateSniffer.wanted:
+    discard statePrinter.feed(0x88)
+    discard statePrinter.feed(0x33)
+    for b in stateSniffer.tail:
+      discard statePrinter.feed(b)
   stateGb.set_serial_driver(GbPrinterDriver(printer: statePrinter))
   stateSniffer = nil
   1

@@ -6554,12 +6554,13 @@ const maybeOfferOrientationTilt = () => {
 // hardware-matched timing means the in-game "printing" screens play out.
 var printerConnected = false;
 var printerOffered = false;
+var printerAutoPaused = false;
 
 const connectPrinter = () => {
   if (typeof Module !== "undefined" && Module._printer_connect &&
       Module._printer_connect() === 1) {
     printerConnected = true;
-    showToast("Printer connected — try printing again in the game");
+    showToast("Printer connected");
   }
 };
 
@@ -6595,9 +6596,27 @@ const pollPrinter = () => {
   if (typeof Module === "undefined" || !Module._printer_wanted) return;
   if (!printerConnected && !printerOffered && currentRomName &&
       Module._printer_wanted() === 1) {
+    // Freeze the game while the user decides: from the game's view no time
+    // passes, the interrupted packet's bytes are recorded wasm-side, and a
+    // seeded connect lets this very print attempt succeed on resume.
     printerOffered = true;
+    if (!paused) {
+      printerAutoPaused = true;
+      togglePause();
+    }
     showActionToast("This game is trying to print — connect the Game Boy Printer?",
-      "Connect", connectPrinter);
+      "Connect", connectPrinter, 12_000);
+  }
+  if (printerAutoPaused) {
+    // Resume when the user decides (connect), the offer expires, or they
+    // unpaused by hand; only un-pause what WE paused.
+    const offerLive = document.getElementById("toast").classList.contains("has-action");
+    if (!paused) {
+      printerAutoPaused = false;
+    } else if (printerConnected || !offerLive) {
+      printerAutoPaused = false;
+      togglePause();
+    }
   }
   if (printerConnected && Module._printer_poll() > 0) {
     savePrintPng(Module._printer_take());

@@ -60,10 +60,16 @@ type
   # Passive print-intent detector for the no-cable state: watches outgoing
   # bytes for the packet magic so the frontend can offer to connect a
   # printer at the moment the game first tries to print. Replies exactly
-  # like the base no-cable driver (line floats high).
+  # like the base no-cable driver (line floats high). Once the magic is
+  # seen it records the packet tail: the frontend pauses at the next frame
+  # boundary, but a few bytes have already streamed past — replaying
+  # magic + tail into a freshly connected printer seeds it mid-packet, so
+  # the interrupted transaction completes with a real ack/status and the
+  # game's FIRST print attempt succeeds.
   GbPrintSniffer* = ref object of GbSerialDriver
     saw88:   bool
     wanted*: bool
+    tail*:   seq[uint8]
 
 proc new_gb_printer*(): GbPrinter =
   GbPrinter(payload: @[], buffer: @[], strip: @[], outbox: @[])
@@ -266,7 +272,11 @@ method serial_complete*(drv: GbPrinterDriver; gb: GB) =
 
 method serial_complete*(drv: GbPrintSniffer; gb: GB) =
   let b = gb.serial.out_latch
-  if b == 0x88:
+  if drv.wanted:
+    # Frontend hasn't decided yet; keep the seed replay bounded (a whole
+    # DATA packet at fast-forward pacing fits comfortably)
+    if drv.tail.len < 1024: drv.tail.add(b)
+  elif b == 0x88:
     drv.saw88 = true
   else:
     if drv.saw88 and b == 0x33: drv.wanted = true
