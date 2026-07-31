@@ -1162,6 +1162,7 @@ body.running #main-menu-sep {
 #save-state,
 #load-state,
 #manage-saves,
+#open-prints,
 #screenshot,
 #slow-motion,
 #clip-last,
@@ -1177,6 +1178,7 @@ body.running #main-menu-sep {
 body.has-game #save-state,
 body.has-game #load-state,
 body.has-game #manage-saves,
+body.has-game #open-prints,
 body.has-game #screenshot,
 body.has-game #slow-motion,
 body.has-game #clip-last,
@@ -5046,4 +5048,37 @@ body.clip-replaying #controls {
   color: var(--text);
   font: inherit;
   font-size: 12px;
+}
+
+/* Printed-photos gallery: prints are 160px wide and arbitrarily tall, so
+   the grid sizes by aspect and lets tall strips scroll inside the modal. */
+#prints-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.print-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.print-thumb {
+  width: 100%;
+  image-rendering: pixelated;
+  background: #fff;
+  border-radius: 2px;
+}
+
+.print-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }

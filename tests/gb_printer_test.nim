@@ -64,12 +64,14 @@ block:
   while prn.status == 0x06 and frames < 1000:
     prn.tick_frame()
     inc frames
-  check(prn.status == 0x04, "printing completes to done")
+  check(prn.status == 0x04, "printing completes to the done state")
   check(frames >= 30, "print takes hardware-ish time, took " & $frames)
   let s1 = prn.send(build_packet(0x0F, @[]))
   check(s1.last == 0x04, "first inquiry observes done")
   let s2 = prn.send(build_packet(0x0F, @[]))
-  check(s2.last == 0x00, "second inquiry reads idle again")
+  check(s2.last == 0x04, "done LATCHES (SameBoy): repeat polls still read done")
+  let i2 = prn.send(build_packet(0x01, @[]))
+  check(i2.last == 0x00, "a later INIT clears done to idle")
   check(prn.outbox.len == 1, "sheets=1 emitted a strip")
   check(prn.outbox[0].len == 160 * 16, "one band = 160x16 pixels")
   var all_white = true

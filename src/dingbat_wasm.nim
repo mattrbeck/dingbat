@@ -68,10 +68,9 @@ var stateGbRollback: gbrb.GbRollbackSession = nil
 # while a link session exists.
 var stateLink: Link = nil
 var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
-# Game Boy Printer + its print-intent sniffer (see the printer block further
-# down); hoisted because the clip/runahead procs reference them.
+# Game Boy Printer (see the printer block further down); hoisted because the
+# clip/runahead procs reference it. Always attached on a solo GB core.
 var statePrinter: GbPrinter = nil
-var stateSniffer: GbPrintSniffer = nil
 # Speculative rollback is opt-in for now (proven bit-identical to the blocking
 # path in the native tests, but the interactive Emerald trade is unverified):
 # JS enables it from a ?speculative=1 URL param before netlink_init/attach.
@@ -602,38 +601,32 @@ proc clip_abort() {.exportc.} =
   clip_set_buttons(clipCurButtons)
 
 # --- Game Boy Printer ---
-# Solo GB cores get a passive sniffer driver watching for the printer
-# protocol's 0x88 0x33 magic; the moment a game tries to print, JS offers to
-# connect and printer_connect swaps in the real device. Finished strips
-# queue in the printer's outbox; JS pops them as 8-bit grayscale.
+# Every solo GB core has a printer plugged in from the start (see the note
+# in gb/printer.nim: asking first cannot work, the opening INIT resolves
+# inside one frame). Finished prints queue in the printer's outbox; JS pops
+# them as 8-bit grayscale for the photo gallery.
 var printerTakeBuf: seq[uint8] = @[]
 
-proc printer_connect(): cint {.exportc.} =
-  if stateKind != ekGB or stateGb == nil: return 0
+proc printer_attach() =
+  ## Plug a fresh printer into the running solo GB core.
+  if stateKind != ekGB or stateGb == nil: return
   statePrinter = new_gb_printer()
-  # Seed the parser with the bytes the sniffer already consumed (the magic
-  # plus whatever streamed in before the frontend paused): the interrupted
-  # packet then completes against the real printer, so a game paused
-  # mid-first-attempt prints on that very attempt. Replies are discarded —
-  # the game already received the no-cable float for these slots.
-  if stateSniffer != nil and stateSniffer.wanted:
-    discard statePrinter.feed(0x88)
-    discard statePrinter.feed(0x33)
-    for b in stateSniffer.tail:
-      discard statePrinter.feed(b)
   stateGb.set_serial_driver(GbPrinterDriver(printer: statePrinter))
-  stateSniffer = nil
-  1
+
+var printerLogBuf: seq[uint16] = @[]
+
+proc printer_log_len(): cint {.exportc.} =
+  ## Copy the RX/TX dialogue ring for JS inspection; returns entry count.
+  if statePrinter == nil: return 0
+  printerLogBuf = statePrinter.log
+  cint(printerLogBuf.len)
+
+proc printer_log_ptr(): pointer {.exportc.} =
+  if printerLogBuf.len > 0: addr printerLogBuf[0] else: nil
 
 proc printer_disconnect() {.exportc.} =
-  if stateKind == ekGB and stateGb != nil:
-    stateGb.set_serial_driver(GbSerialDriver())
+  ## Used when another peer takes the port (2P link binds its own driver).
   statePrinter = nil
-
-proc printer_wanted(): cint {.exportc.} =
-  ## 1 once the running game has sent the printer-packet magic with no
-  ## printer attached (sticky until connect / next ROM).
-  if stateSniffer != nil and stateSniffer.wanted: 1 else: 0
 
 proc printer_poll(): cint {.exportc.} =
   ## Finished strips waiting in the outbox.
@@ -1414,8 +1407,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # Leaving 2P link mode for a single-core session
   link_exit()
   clip_reset()  # capture history belongs to the previous core
-  statePrinter = nil  # the printer (and sniffer) belong to the previous core
-  stateSniffer = nil
+  statePrinter = nil  # the printer belongs to the previous core
   # Leaving online link mode: drop the protocol core (JS closes the channel)
   stateNet = nil
   netOut.setLen(0)
@@ -1434,10 +1426,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
     stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
     stateGb.post_init()
-    # Print-intent sniffer: replaces the default no-cable driver so JS can
-    # offer the printer the moment a game first sends the packet magic.
-    stateSniffer = GbPrintSniffer()
-    stateGb.set_serial_driver(stateSniffer)
+    printer_attach()  # a printer is always plugged in on solo GB
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     rgbaBuffer.setLen(GB_W * GB_H)

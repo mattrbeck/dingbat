@@ -84,6 +84,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>
             <span>Save States</span>
           </button>
+          <button type="button" class="menu-item" id="open-prints">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/></svg>
+            <span>Printed Photos</span>
+          </button>
           <button type="button" class="menu-item" id="manage-saves">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/></svg>
             <span>Manage Saves</span>
@@ -462,6 +466,16 @@
         <p id="cheat-format-hint" class="modal-toggle-sub"></p>
         <p id="cheat-error" class="cheat-error" aria-live="polite" hidden></p>
         <button type="button" class="button button-sm" id="cheat-add">Add cheat</button>
+      </div>
+    </div>
+
+    <div id="prints-modal" class="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="prints-title">
+        <button type="button" class="modal-close" id="prints-close" aria-label="Close">&times;</button>
+        <h2 id="prints-title">Printed Photos</h2>
+        <p class="modal-hint">Anything a game prints to the Game Boy Printer lands here.</p>
+        <p id="prints-empty" class="modal-toggle-sub" hidden>Nothing printed yet.</p>
+        <div id="prints-grid"></div>
       </div>
     </div>
 

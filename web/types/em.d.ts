@@ -63,9 +63,9 @@ interface EmscriptenModule {
   _clip_begin?(seconds: number): number;
   _clip_tick?(): number;
   _clip_abort?(): void;
-  _printer_connect?(): number;
+  _printer_log_len?(): number;
+  _printer_log_ptr?(): number;
   _printer_disconnect?(): void;
-  _printer_wanted?(): number;
   _printer_poll?(): number;
   _printer_take?(): number;
   _printer_take_ptr?(): number;

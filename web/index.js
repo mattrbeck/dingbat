@@ -5110,8 +5110,6 @@ const loadRom = async (romName, originalName, opts = {}) => {
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
-  printerConnected = false; // fresh core: the sniffer is re-armed wasm-side
-  printerOffered = false;
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   benchReport("load");
   updateCanvasScaling();
@@ -6552,22 +6550,26 @@ const maybeOfferOrientationTilt = () => {
 // port; the first time a game sends the printer-packet magic, offer to
 // connect. Finished strips arrive via the wasm outbox and save as PNGs —
 // hardware-matched timing means the in-game "printing" screens play out.
-var printerConnected = false;
-var printerOffered = false;
-var printerAutoPaused = false;
+// A printer is always plugged into a solo GB core (see gb/printer.nim):
+// games that never print send no packets, and games that do print just work
+// on the first attempt. Finished prints are stored in the photo gallery and
+// announced with a toast; nothing to connect, nothing to time.
+var printerPhotos = [];       // {ts, w, h, png} newest-first, capped
+const PRINTER_MAX_PHOTOS = 30;
+const PRINTER_PHOTOS_KEY = "prints";
 
-const connectPrinter = () => {
-  if (typeof Module !== "undefined" && Module._printer_connect &&
-      Module._printer_connect() === 1) {
-    printerConnected = true;
-    showToast("Printer connected");
+const loadPrinterPhotos = async () => {
+  try {
+    printerPhotos = (await dbGet(PRINTER_PHOTOS_KEY)) || [];
+  } catch {
+    printerPhotos = [];
   }
 };
 
-const savePrintPng = (h) => {
+const printToPng = (h) => {
   const W = 160;
   const ptr = Module._printer_take_ptr();
-  if (!ptr || h <= 0) return;
+  if (!ptr || h <= 0) return null;
   const gray = new Uint8Array(Module.memory.buffer, ptr, W * h);
   const cnv = document.createElement("canvas");
   cnv.width = W;
@@ -6579,49 +6581,90 @@ const savePrintPng = (h) => {
     img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  cnv.toBlob((blob) => {
-    if (!blob) return;
-    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${base}-print-${stamp}.png`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    showToast("Print saved");
-  }, "image/png");
+  return { w: W, h, png: cnv.toDataURL("image/png") };
+};
+
+const downloadPrint = (photo) => {
+  const a = document.createElement("a");
+  a.href = photo.png;
+  const base = (photo.game || "dingbat").replace(/\.[^.]+$/, "");
+  const stamp = new Date(photo.ts).toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  a.download = `${base}-print-${stamp}.png`;
+  a.click();
+};
+
+const collectPrint = async (h) => {
+  const shot = printToPng(h);
+  if (!shot) return;
+  printerPhotos.unshift({ ...shot, ts: Date.now(), game: currentOriginalName || "" });
+  if (printerPhotos.length > PRINTER_MAX_PHOTOS) printerPhotos.length = PRINTER_MAX_PHOTOS;
+  try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
+  if (!printsModal.classList.contains("open")) {
+    showActionToast("Photo printed", "View", openPrintsModal, 6000);
+  } else {
+    renderPrintsGrid();
+  }
 };
 
 const pollPrinter = () => {
-  if (typeof Module === "undefined" || !Module._printer_wanted) return;
-  if (!printerConnected && !printerOffered && currentRomName &&
-      Module._printer_wanted() === 1) {
-    // Freeze the game while the user decides: from the game's view no time
-    // passes, the interrupted packet's bytes are recorded wasm-side, and a
-    // seeded connect lets this very print attempt succeed on resume.
-    printerOffered = true;
-    if (!paused) {
-      printerAutoPaused = true;
-      togglePause();
-    }
-    showActionToast("This game is trying to print — connect the Game Boy Printer?",
-      "Connect", connectPrinter, 12_000);
-  }
-  if (printerAutoPaused) {
-    // Resume when the user decides (connect), the offer expires, or they
-    // unpaused by hand; only un-pause what WE paused.
-    const offerLive = document.getElementById("toast").classList.contains("has-action");
-    if (!paused) {
-      printerAutoPaused = false;
-    } else if (printerConnected || !offerLive) {
-      printerAutoPaused = false;
-      togglePause();
-    }
-  }
-  if (printerConnected && Module._printer_poll() > 0) {
-    savePrintPng(Module._printer_take());
-  }
+  if (typeof Module === "undefined" || !Module._printer_poll) return;
+  if (Module._printer_poll() > 0) collectPrint(Module._printer_take());
 };
+
+// --- Printed photos gallery ---
+const printsModal = document.getElementById("prints-modal");
+const printsGrid = document.getElementById("prints-grid");
+const printsEmpty = document.getElementById("prints-empty");
+
+const renderPrintsGrid = () => {
+  printsGrid.innerHTML = "";
+  printsEmpty.hidden = printerPhotos.length > 0;
+  printerPhotos.forEach((photo, idx) => {
+    const cell = document.createElement("div");
+    cell.className = "print-cell";
+    const img = document.createElement("img");
+    img.src = photo.png;
+    img.alt = `Printed photo, ${photo.w} by ${photo.h} pixels`;
+    img.className = "print-thumb";
+    const row = document.createElement("div");
+    row.className = "print-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "button button-sm";
+    save.textContent = "Save PNG";
+    save.addEventListener("click", () => downloadPrint(photo));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "button button-sm roms-manage-danger";
+    del.textContent = "Delete";
+    del.addEventListener("click", async () => {
+      printerPhotos.splice(idx, 1);
+      try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
+      renderPrintsGrid();
+    });
+    row.append(save, del);
+    cell.append(img, row);
+    printsGrid.appendChild(cell);
+  });
+};
+
+const openPrintsModal = () => {
+  menuDropdown.hidden = true;
+  printsModal.classList.add("open");
+  trapFocus(printsModal);
+  renderPrintsGrid();
+};
+
+const closePrintsModal = () => {
+  printsModal.classList.remove("open");
+  releaseFocus(printsModal);
+};
+
+document.getElementById("open-prints").addEventListener("click", openPrintsModal);
+document.getElementById("prints-close").addEventListener("click", closePrintsModal);
+printsModal.addEventListener("click", (e) => {
+  if (e.target === printsModal) closePrintsModal();
+});
 
 // --- GB Camera webcam source ---
 // The Pocket Camera cart's sensor is fully emulated; opting in points it at
@@ -6752,9 +6795,23 @@ const enableWebcam = async () => {
 };
 
 const detectCameraCart = () => {
-  stopWebcam(); // previous game's stream must not outlive it
-  if (typeof Module === "undefined" || !Module._wasm_cart_has_camera) return;
-  if (Module._wasm_cart_has_camera() !== 1) return;
+  if (typeof Module === "undefined" || !Module._wasm_cart_has_camera) {
+    stopWebcam();
+    return;
+  }
+  if (Module._wasm_cart_has_camera() !== 1) {
+    stopWebcam(); // a non-camera game must not hold the camera open
+    return;
+  }
+  if (camStream) {
+    // Same session, fresh core (Restart, or loading this cart again): the
+    // new cartridge object has no sensor callback, so the emulated camera
+    // falls back to its synthetic scene — which reads as a corrupted
+    // viewfinder. Keep the stream and re-point the new cart at the live
+    // frame buffer instead of asking for permission all over again.
+    Module._wasm_camera_attach();
+    return;
+  }
   if (!navigator.mediaDevices?.getUserMedia) return;
   showActionToast("Game Boy Camera cart — use your real camera?",
     "Enable camera", enableWebcam);

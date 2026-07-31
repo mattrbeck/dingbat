@@ -1,5 +1,11 @@
 # Game Boy Printer, attached like a link-cable peer (a GbSerialDriver — see
-# serial.nim's device seam). The printer is a pure byte-echo state machine:
+# serial.nim's device seam). Every solo GB session keeps one plugged in:
+# games that never print are unaffected (they send no packets), and games
+# that do print just work on the first attempt. The alternative — detecting
+# print intent and asking first — cannot win: the opening INIT completes in
+# ~8 ms, inside a single frame, so any frontend prompt arrives after the
+# game has already read "no printer" and errored (Game Boy Camera Gold does
+# exactly this). The printer is a pure byte-echo state machine:
 # it emits its reply for slot k while receiving byte k, so feed() computes
 # the reply from the state BEFORE consuming the incoming byte.
 #
@@ -50,26 +56,13 @@ type
     strip:        seq[uint8]  # assembled shade rows (0..3), 160 per pixel row
     print_left:   int         # frames of "printing" remaining
     feed_after:   bool        # this print ends the strip when it completes
-    done_seen:    bool        # 0x04 delivered once -> next inquiry reads 0x00
     outbox*:      seq[seq[uint8]]  # finished strips (shade rows, w=160)
+    log*:         seq[uint16]    # RX<<8|TX ring of the last exchanges
     muted*:       bool        # clip replay: reply 0, mutate nothing
 
   GbPrinterDriver* = ref object of GbSerialDriver
     printer*: GbPrinter
 
-  # Passive print-intent detector for the no-cable state: watches outgoing
-  # bytes for the packet magic so the frontend can offer to connect a
-  # printer at the moment the game first tries to print. Replies exactly
-  # like the base no-cable driver (line floats high). Once the magic is
-  # seen it records the packet tail: the frontend pauses at the next frame
-  # boundary, but a few bytes have already streamed past — replaying
-  # magic + tail into a freshly connected printer seeds it mid-packet, so
-  # the interrupted transaction completes with a real ack/status and the
-  # game's FIRST print attempt succeeds.
-  GbPrintSniffer* = ref object of GbSerialDriver
-    saw88:   bool
-    wanted*: bool
-    tail*:   seq[uint8]
 
 proc new_gb_printer*(): GbPrinter =
   GbPrinter(payload: @[], buffer: @[], strip: @[], outbox: @[])
@@ -107,8 +100,14 @@ proc tick_frame*(prn: GbPrinter) =
   if prn.print_left > 0:
     dec prn.print_left
     if prn.print_left == 0:
-      prn.status = 0x04          # done; cleared after the game observes it
-      prn.done_seen = false
+      # Completion latches "done" (bit 2) and LEAVES it latched: the
+      # reference implementation (SameBoy printer.c) assigns status 4 at
+      # completion and clears it only on a later INIT or DATA — never on a
+      # status read. That distinction matters: three clear-on-read variants
+      # were tried against a real cart and all left Hello Kitty Pocket
+      # Camera re-PRINTing forever, because a second poll reported idle and
+      # the game concluded its print never happened.
+      prn.status = 0x04
       if prn.feed_after:
         prn.emit_strip()
 
@@ -171,6 +170,10 @@ proc exec_command(prn: GbPrinter) =
 
 # ---- the byte engine ------------------------------------------------------
 
+proc log_pair(prn: GbPrinter; rx, tx: uint8) =
+  if prn.log.len >= 512: prn.log.delete(0)
+  prn.log.add((uint16(rx) shl 8) or uint16(tx))
+
 proc feed*(prn: GbPrinter; b: uint8): uint8 =
   ## Consume one byte from the GB, return the printer's reply for this slot.
   case prn.state
@@ -227,11 +230,8 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
       prn.status = prn.status and not 0x01'u8
       prn.exec_command()
     result = prn.status
-    # The game has now observed the completed print; the next packet reads
-    # idle (SameBoy's 0x06 -> 0x04 -> 0x00 sequence).
-    if prn.status == 0x04:
-      prn.status = 0
     prn.state = psMagic1
+  prn.log_pair(b, result)
 
 # ---- runahead snapshot ----------------------------------------------------
 
@@ -253,7 +253,6 @@ proc copy_into*(src, dst: GbPrinter) =
   dst.strip = src.strip
   dst.print_left = src.print_left
   dst.feed_after = src.feed_after
-  dst.done_seen = src.done_seen
   dst.outbox = src.outbox
   dst.muted = src.muted
 
@@ -270,16 +269,3 @@ method serial_complete*(drv: GbPrinterDriver; gb: GB) =
     gb.serial.sb = drv.printer.feed(gb.serial.out_latch)
   serial_finish_transfer(gb.serial, gb)
 
-method serial_complete*(drv: GbPrintSniffer; gb: GB) =
-  let b = gb.serial.out_latch
-  if drv.wanted:
-    # Frontend hasn't decided yet; keep the seed replay bounded (a whole
-    # DATA packet at fast-forward pacing fits comfortably)
-    if drv.tail.len < 1024: drv.tail.add(b)
-  elif b == 0x88:
-    drv.saw88 = true
-  else:
-    if drv.saw88 and b == 0x33: drv.wanted = true
-    drv.saw88 = false
-  # No cable attached: the input line floats high (base behavior)
-  serial_finish_transfer(gb.serial, gb)
