@@ -6594,6 +6594,7 @@ const motionJoltHandler = (e) => {
     return;
   }
   if (!e.acceleration) return;
+  if (tiltSettling()) { tiltJoltX = tiltJoltY = 0; return; } // turning != flick
   const ax = e.acceleration.x, ay = e.acceleration.y;
   if (ax == null || ay == null) return;
   // Linear acceleration (gravity excluded), in g, rotated into screen space
@@ -6629,6 +6630,13 @@ const toScreenFrame = (x, y) => {
 const orientationTiltHandler = (e) => {
   if (!tiltActive || tiltKind === 2) return; // gyro carts use rotation RATE
   if (e.beta == null || e.gamma == null) return;
+  if (tiltSettling()) {
+    // Mid-rotation: hold the game level rather than track a pose the player
+    // is only passing through. tiltNeutral stays null so the first settled
+    // reading is what defines neutral.
+    tiltTargetX = tiltTargetY = 0;
+    return;
+  }
   const [sx, sy] = toScreenFrame(e.gamma, e.beta);
   // First reading after a (re)baseline defines neutral: people play holding
   // the phone at ~30-50°, not flat on a table. Baselining BOTH axes in
@@ -6644,15 +6652,27 @@ const orientationTiltHandler = (e) => {
 // pose the player is holding, so the old neutral is meaningless. Re-baseline
 // once the phone has stopped moving — sampling mid-rotation would capture a
 // pose nobody is holding. Applies to MBC7 and GBA tilt alike (same handler).
+// Turning the phone IS a large linear acceleration, and the jolt channel
+// cannot tell it from the sharp flick that makes Kirby jump — so rotating
+// made him jump. Motion input is therefore frozen at neutral across the
+// rotation and only resumes once the phone has settled, which also stops the
+// wild mid-rotation orientation readings from lurching the tilt.
+const TILT_REBASE_MS = 450;   // when the stale neutral is dropped
+const TILT_SETTLE_MS = 650;   // when motion input starts counting again
 var tiltRebaseTimer = 0;
+var tiltRotateUntil = 0;      // Date.now() before which motion is ignored
+const tiltSettling = () => Date.now() < tiltRotateUntil;
+
 const rebaselineTiltForOrientation = () => {
   if (!tiltOrientationOn) return;
+  tiltRotateUntil = Date.now() + TILT_SETTLE_MS;
+  tiltJoltX = tiltJoltY = 0;      // kill any spike the turn already produced
   clearTimeout(tiltRebaseTimer);
   tiltRebaseTimer = setTimeout(() => {
-    tiltNeutral = null; // next reading re-baselines in the new frame
+    tiltNeutral = null; // next settled reading re-baselines in the new frame
     tiltJoltX = tiltJoltY = 0;
     showToast("Tilt recentered for the new orientation");
-  }, 450);
+  }, TILT_REBASE_MS);
 };
 window.addEventListener("orientationchange", rebaselineTiltForOrientation);
 if (screen.orientation && screen.orientation.addEventListener) {

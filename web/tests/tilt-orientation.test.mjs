@@ -72,6 +72,40 @@ test("a rotated hold angle does not leak in as a constant lean", async () => {
     `holding steady must read as neutral, got ${x},${y}`);
 });
 
+// Turning the phone is a large linear acceleration. The jolt channel exists
+// to turn a sharp flick into Kirby's jump, and it cannot tell the two apart —
+// so rotating the device used to make him jump.
+test("rotating is not mistaken for a flick", async () => {
+  const app = await loadApp();
+  armTilt(app);
+
+  // Control: a genuine flick still registers.
+  app.runIn("tiltJoltX = 0; motionJoltHandler({ acceleration: { x: 20, y: 0 } });");
+  assert.ok(Math.abs(app.runIn("tiltJoltX")) > 0.5,
+    "a real flick must still register, or the jump is dead");
+
+  // The identical spike, while the device is being turned, must not.
+  await app.dispatchWin("orientationchange");
+  app.runIn("tiltJoltX = 0; motionJoltHandler({ acceleration: { x: 20, y: 0 } });");
+  assert.equal(app.runIn("tiltJoltX"), 0,
+    "turning the phone must not read as a flick");
+
+  // Orientation readings are held level meanwhile, so the ball does not lurch.
+  app.runIn("orientationTiltHandler({ alpha: 0, beta: 70, gamma: 60 });");
+  assert.equal(app.runIn("tiltTargetX"), 0, "tilt is held level mid-rotation");
+  assert.equal(app.runIn("tiltTargetY"), 0, "tilt is held level mid-rotation");
+});
+
+test("flicks work again once the rotation has settled", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  await app.dispatchWin("orientationchange");
+  await new Promise((r) => setTimeout(r, 800)); // past the settle window
+  app.runIn("tiltJoltX = 0; motionJoltHandler({ acceleration: { x: 20, y: 0 } });");
+  assert.ok(Math.abs(app.runIn("tiltJoltX")) > 0.5,
+    "suppression must be a window, not a latch");
+});
+
 test("rotating the device re-baselines the neutral pose", async () => {
   const app = await loadApp();
   armTilt(app);
@@ -79,7 +113,7 @@ test("rotating the device re-baselines the neutral pose", async () => {
   assert.notEqual(app.runIn("tiltNeutral"), null, "a neutral was captured");
 
   app.state.screenAngle = 90;
-  app.dispatchWin("orientationchange");
+  await app.dispatchWin("orientationchange");
   // The reset is deliberately deferred so it does not sample mid-rotation.
   await new Promise((r) => setTimeout(r, 600));
   assert.equal(app.runIn("tiltNeutral"), null,
