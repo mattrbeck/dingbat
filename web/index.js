@@ -6593,6 +6593,22 @@ const motionJoltHandler = (e) => {
     }
     return;
   }
+  // Detect the turn from the motion itself, not from orientationchange.
+  // That event fires only once the OS has decided the orientation changed —
+  // by then the turn's acceleration has already been fed to the core and
+  // Kirby has jumped. rotationRate.alpha is rotation about the screen
+  // normal, which is exactly the portrait<->landscape axis and is live
+  // DURING the turn. A 90-degree turn integrates to ~90; a jump flick is a
+  // translation and barely registers, so the integral separates them.
+  const rr = e.rotationRate;
+  const now = Date.now();
+  const dt = tiltSpinAt ? Math.min(0.2, (now - tiltSpinAt) / 1000) : 0;
+  tiltSpinAt = now;
+  if (rr && rr.alpha != null && dt > 0) {
+    tiltSpin = tiltSpin * Math.exp(-dt / TILT_SPIN_HALFLIFE) +
+               Math.abs(rr.alpha) * dt;
+    if (tiltSpin > TILT_SPIN_DEGREES) tiltRotateUntil = now + TILT_SETTLE_MS;
+  }
   if (!e.acceleration) return;
   if (tiltSettling()) { tiltJoltX = tiltJoltY = 0; return; } // turning != flick
   const ax = e.acceleration.x, ay = e.acceleration.y;
@@ -6659,8 +6675,12 @@ const orientationTiltHandler = (e) => {
 // wild mid-rotation orientation readings from lurching the tilt.
 const TILT_REBASE_MS = 450;   // when the stale neutral is dropped
 const TILT_SETTLE_MS = 650;   // when motion input starts counting again
+const TILT_SPIN_DEGREES = 35; // integrated Z rotation that means "turning"
+const TILT_SPIN_HALFLIFE = 0.5; // seconds; keeps the integral from drifting
 var tiltRebaseTimer = 0;
 var tiltRotateUntil = 0;      // Date.now() before which motion is ignored
+var tiltSpin = 0;             // leaky integral of |rotationRate.alpha|, deg
+var tiltSpinAt = 0;           // timestamp of the last motion sample
 const tiltSettling = () => Date.now() < tiltRotateUntil;
 
 const rebaselineTiltForOrientation = () => {

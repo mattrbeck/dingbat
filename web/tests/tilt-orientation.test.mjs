@@ -106,6 +106,40 @@ test("flicks work again once the rotation has settled", async () => {
     "suppression must be a window, not a latch");
 });
 
+// orientationchange fires only once the OS has decided the orientation
+// changed — too late, the turn's acceleration already reached the core and
+// Kirby already jumped. The turn has to be recognised from the motion while
+// it is still happening. Real time is required here: the detector integrates
+// rotation rate over elapsed time, so samples must actually be spaced out.
+const spin = async (app, ms, degPerSec, accelX) => {
+  for (let t = 0; t < ms; t += 20) {
+    await new Promise((r) => setTimeout(r, 20));
+    app.runIn(`motionJoltHandler({ rotationRate: { alpha: ${degPerSec}, beta: 0,` +
+      ` gamma: 0 }, acceleration: { x: ${accelX}, y: 0 } });`);
+  }
+};
+
+test("turning the device suppresses the jolt without orientationchange", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  app.runIn("tiltJoltX = 0;");
+  // ~90 degrees over 0.4s, with a flick-sized acceleration riding along.
+  // orientationchange is never fired — this must stand on its own.
+  await spin(app, 400, 225, 20);
+  assert.equal(app.runIn("tiltJoltX"), 0,
+    "a 90-degree turn must not reach the jump channel");
+});
+
+test("a flick is still a flick: rotation alone is what's rejected", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  app.runIn("tiltJoltX = 0;");
+  // Same acceleration, but the wrist barely rotates about the screen normal.
+  await spin(app, 100, 20, 20);
+  assert.ok(Math.abs(app.runIn("tiltJoltX")) > 0.5,
+    "a translation-dominated flick must still register");
+});
+
 test("rotating the device re-baselines the neutral pose", async () => {
   const app = await loadApp();
   armTilt(app);
