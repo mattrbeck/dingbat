@@ -4956,7 +4956,7 @@ var tiltActive = false;
 var tiltTargetX = 0, tiltTargetY = 0;   // where input wants the tilt to be
 var tiltX = 0, tiltY = 0;               // smoothed value actually sent
 var tiltOrientationOn = false;          // device-orientation stream attached
-var tiltNeutralBeta = null;             // first reading = neutral hold angle
+var tiltNeutral = null;                 // neutral hold pose, in SCREEN space
 var padTiltLive = false;                // gamepad stick currently owns the target
 var kbTiltDirs = [false, false, false, false]; // held U/D/L/R while tilting
 var tiltKind = 0;                       // 1 = accelerometer cart, 2 = gyro cart
@@ -6428,7 +6428,7 @@ const detectTiltCart = () => {
   tiltActive = tiltKind > 0;
   tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
   kbTiltDirs = [false, false, false, false];
-  tiltNeutralBeta = null;
+  tiltNeutral = null;
   tiltRecenterBtn.hidden = !(tiltActive && tiltOrientationOn);
   if (tiltActive && !maybeOfferOrientationTilt()) {
     showToast("Tilt cart detected — D-pad or stick tilts the game");
@@ -6478,23 +6478,68 @@ const motionJoltHandler = (e) => {
   if (!e.acceleration) return;
   const ax = e.acceleration.x, ay = e.acceleration.y;
   if (ax == null || ay == null) return;
-  // Linear acceleration (gravity excluded), in g. Only spikes matter: below
-  // ~0.4g it's hand tremor and must not disturb the tilt.
-  const gx = ax / 9.81, gy = ay / 9.81;
+  // Linear acceleration (gravity excluded), in g, rotated into screen space
+  // like the orientation channel — a flick must stay a flick in landscape.
+  // Only spikes matter: below ~0.4g it's hand tremor and must not disturb
+  // the tilt.
+  const [gx, gy] = toScreenFrame(ax / 9.81, ay / 9.81);
   if (Math.abs(gx) > 0.4) tiltJoltX = Math.max(-3, Math.min(3, gx * 1.5));
   if (Math.abs(gy) > 0.4) tiltJoltY = Math.max(-3, Math.min(3, gy * 1.5));
+};
+
+// beta/gamma (and devicemotion's acceleration) are expressed against the
+// device's NATURAL orientation, not the current one. Rotate them into screen
+// space or landscape play is wrong twice over: the game's left/right axis
+// becomes the phone's pitch, and the comfortable hold angle turns into a
+// large constant lean.
+const screenAngle = () => {
+  const so = screen.orientation;
+  if (so && typeof so.angle === "number") return ((so.angle % 360) + 360) % 360;
+  // Legacy iOS (pre-16.4): window.orientation is the NEGATIVE of the
+  // standard angle, so landscape-left reports +90 where the spec says 270.
+  const w = typeof window.orientation === "number" ? -window.orientation : 0;
+  return ((w % 360) + 360) % 360;
+};
+
+// Device frame -> screen frame: rotate by -angle.
+const toScreenFrame = (x, y) => {
+  const rad = (screenAngle() * Math.PI) / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  return [x * c + y * s, -x * s + y * c];
 };
 
 const orientationTiltHandler = (e) => {
   if (!tiltActive || tiltKind === 2) return; // gyro carts use rotation RATE
   if (e.beta == null || e.gamma == null) return;
-  // First reading defines the neutral pitch: people play holding the phone
-  // at ~30-50°, not flat on a table. Roll (gamma) is neutral at 0.
-  if (tiltNeutralBeta === null) tiltNeutralBeta = e.beta;
+  const [sx, sy] = toScreenFrame(e.gamma, e.beta);
+  // First reading after a (re)baseline defines neutral: people play holding
+  // the phone at ~30-50°, not flat on a table. Baselining BOTH axes in
+  // screen space is what makes every orientation behave the same — in
+  // landscape the hold angle lands on x instead of y.
+  if (tiltNeutral === null) tiltNeutral = { x: sx, y: sy };
   const clamp = (v) => Math.max(-1, Math.min(1, v));
-  tiltTargetX = clamp(e.gamma / TILT_ORIENT_RANGE);
-  tiltTargetY = clamp((e.beta - tiltNeutralBeta) / TILT_ORIENT_RANGE);
+  tiltTargetX = clamp((sx - tiltNeutral.x) / TILT_ORIENT_RANGE);
+  tiltTargetY = clamp((sy - tiltNeutral.y) / TILT_ORIENT_RANGE);
 };
+
+// Rotating the device changes which physical axis is "left/right" AND the
+// pose the player is holding, so the old neutral is meaningless. Re-baseline
+// once the phone has stopped moving — sampling mid-rotation would capture a
+// pose nobody is holding. Applies to MBC7 and GBA tilt alike (same handler).
+var tiltRebaseTimer = 0;
+const rebaselineTiltForOrientation = () => {
+  if (!tiltOrientationOn) return;
+  clearTimeout(tiltRebaseTimer);
+  tiltRebaseTimer = setTimeout(() => {
+    tiltNeutral = null; // next reading re-baselines in the new frame
+    tiltJoltX = tiltJoltY = 0;
+    showToast("Tilt recentered for the new orientation");
+  }, 450);
+};
+window.addEventListener("orientationchange", rebaselineTiltForOrientation);
+if (screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener("change", rebaselineTiltForOrientation);
+}
 
 const enableOrientationTilt = async () => {
   if (tiltOrientationOn) return;
@@ -6520,7 +6565,7 @@ const enableOrientationTilt = async () => {
     window.addEventListener("deviceorientation", orientationTiltHandler);
     window.addEventListener("devicemotion", motionJoltHandler);
     tiltOrientationOn = true;
-    tiltNeutralBeta = null; // re-baseline at the moment of enabling
+    tiltNeutral = null; // re-baseline at the moment of enabling
     tiltRecenterBtn.hidden = false;
     showToast("Device tilt enabled — hold your comfortable angle now");
   } catch {}
@@ -6530,7 +6575,7 @@ const enableOrientationTilt = async () => {
 // tilt games are unplayable after shifting in a chair without this.
 const tiltRecenterBtn = document.getElementById("tilt-recenter");
 tiltRecenterBtn.addEventListener("click", () => {
-  tiltNeutralBeta = null; // next orientation reading re-baselines
+  tiltNeutral = null; // next orientation reading re-baselines
   tiltJoltX = tiltJoltY = 0;
   showToast("Tilt recentered");
 });

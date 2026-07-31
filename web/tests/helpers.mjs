@@ -253,6 +253,21 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
       addListener() {}, removeListener() {},
       dispatchEvent: () => false,
     }),
+    // The tilt code reads screen.orientation.angle to rotate device-frame
+    // motion into screen space, and subscribes to its change event at module
+    // scope. Same rule as matchMedia: a missing stub aborts the whole eval.
+    // `state.screenAngle` lets a test pretend the device is rotated.
+    screen: {
+      get orientation() {
+        return {
+          get angle() { return state.screenAngle || 0; },
+          type: "portrait-primary",
+          addEventListener() {}, removeEventListener() {},
+          dispatchEvent: () => false,
+        };
+      },
+      width: 390, height: 844,
+    },
     URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
     // index.js watches the menu dropdown's `hidden` attribute at module scope
