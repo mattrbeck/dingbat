@@ -1212,11 +1212,14 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   if stateGbRollback != nil:
     let gcore = stateGbRollback.link.cores[rbLocal]
     gcore.cartridge.mbc_save()
-    gcore.set_serial_driver(GbSerialDriver())  # cable unplugged — solo play
     stateGbRollback = nil
     audioSuppressed = false
     stateGb = gcore
     stateKind = ekGB
+    # Back to solo play: the peer's cable is gone, so plug the printer in
+    # (every solo GB core keeps one — see the printer block above). This
+    # replaces the old "unplugged, null driver" binding.
+    printer_attach()
     if stateTexture != nil: destroyTexture(stateTexture)
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
