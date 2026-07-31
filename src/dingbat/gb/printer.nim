@@ -28,7 +28,6 @@
 import gb
 
 const
-  PRN_ROW_BYTES   = 40                    # 160 px at 2bpp
   PRN_MAX_IMAGE   = 160 * 200 div 4      # 8 KiB printer RAM
   PRN_BAND_TILES  = 40                    # DATA bands are 20x2 tiles
   # Rows-proportional print time. The reference works out to ~7.5 frames per
