@@ -549,16 +549,52 @@ const GB_SYNC_BACKSTOP_BYTES* = 32768'u32
 const GB_SAMPLE_RATE*     = 32768
 const GB_SAMPLE_PERIOD*   = GB_CLOCK_SPEED div GB_SAMPLE_RATE
 
+# The share of the output's -1..1 range given to one channel's DAC (get_sample).
+#
+# The mixer adds up to four DAC outputs, each spanning -1..1, so one side of the
+# mix spans -4..4 (Pan Docs, Audio Details: "the analog range of those outputs
+# is 4x that of each channel"). Nothing in the hardware pins that to a host's
+# full scale -- there is an amplifier and a volume knob in between -- so this is
+# a headroom decision, and it is made by the DC blocker downstream.
+#
+# The blocker emits `mix - cap`, where the stored charge tracks the mix's local
+# MEAN. Both terms are independently bounded by the mixer range, so the output
+# can reach twice it. That is not a corner case here: a channel that is switched
+# off but whose DAC is still powered parks at analog +1 (see GB_DAC_LUT), so the
+# mean genuinely does sit near a rail for long stretches, and a waveform
+# excursion to the other rail then spans the full 2x. At 1/4 -- what the mixer
+# used before the DC blocker existed, where a full-scale mix was exactly
+# full-scale output -- that clips. 1/8 makes overflow arithmetically impossible:
+# |mix| <= 1/2 and |cap| <= 1/2, so |out| <= 1.
+#
+# 1/8 is also exactly SameBoy's level (its MAX_CH_AMP is 0xFF0, so its four
+# channels sum to half of int16 range), which means its dumps and ours are
+# directly comparable without renormalising.
+const GB_MIX_SCALE* = 1.0'f32 / 8.0'f32
+
+# NR50 master volume, indexed by the register's 3-bit field, already folded
+# together with GB_MIX_SCALE.
+#
+# Pan Docs, NR50: "A value of 0 is treated as a volume of 1 (very quiet), and a
+# value of 7 is treated as a volume of 8 (no volume reduction). Importantly, the
+# amplifier NEVER MUTES a non-silent input." So the scale is (V+1)/8, not V/7:
+# volume 0 is one eighth of full, and a driver that fades NR50 down to 0 does
+# not reach silence on hardware.
+const GB_MASTER_VOLUME* = block:
+  var t: array[8, float32]
+  for v in 0 .. 7: t[v] = float32(float64(v + 1) / 8.0) * GB_MIX_SCALE
+  t
+
 # Output-stage DC blocker.
 #
 # A Game Boy channel's DAC does not idle at the middle of its range: the 4-bit
-# digital value 0 is one RAIL, not silence. A 12.5%-duty square therefore sits
-# at the bottom of its swing seven eighths of the time, and a channel that is
-# switched off contributes nothing at all instead. So the mixer's output carries
-# a large DC component that moves every time a channel is enabled, disabled, or
-# has its envelope or panning changed. Measured on 60 s of in-game audio, the
-# raw mix sits at -0.85 full scale in Link's Awakening DX and pins against the
-# negative rail for a quarter of all samples.
+# digital value 0 is one RAIL, not silence (see GB_DAC_LUT). A 12.5%-duty square
+# therefore sits at the top of its swing seven eighths of the time, and a
+# channel that is switched off but still has its DAC powered sits there
+# permanently. So the mixer's output carries a large DC component that moves
+# every time a DAC is powered up or down, or panning or master volume changes.
+# Measured on 60 s of in-game audio, the raw mix sits at 0.85 full scale in
+# Link's Awakening DX and pins against a rail for a quarter of all samples.
 #
 # The hardware couples the mixer to the output jack through a capacitor, which
 # removes that offset. Without it every one of those DC shifts reaches the
@@ -573,10 +609,12 @@ const GB_SAMPLE_PERIOD*   = GB_CLOCK_SPEED div GB_SAMPLE_RATE
 # 32768 Hz that is 0.9946383, a 28 Hz corner with a 5.7 ms time constant --
 # below anything the APU can play, so it removes offset and nothing else.
 #
-# Verified against SameBoy on identical 60 s in-game runs: with this filter the
-# count of >6%-full-scale DC steps in Pokemon Crystal drops from 218 to 3, which
-# is exactly what SameBoy's own hardware high-pass produces, and the residual DC
-# is -1.3 against SameBoy's +1.2.
+# Verified against SameBoy on identical 60 s in-game runs (tools/popscan.py, the
+# same threshold on both sides since the two now share an output level): the DC
+# trajectory matches to within a few per cent on every title measured. Pokemon
+# Crystal 16 steps / 5969 per-second total variation / 195 DC rms against
+# SameBoy's 20 / 5934 / 195; Link's Awakening DX 12 / 4859 / 167 against 10 /
+# 4832 / 165; Prehistorik Man 150 / 9620 / 339 against 178 / 9877 / 345.
 const GB_DC_CHARGE* = 0.9946383125'f32
 const GB_FRAME_SEQ_RATE*  = 512
 const GB_FRAME_SEQ_PERIOD* = GB_CLOCK_SPEED div GB_FRAME_SEQ_RATE

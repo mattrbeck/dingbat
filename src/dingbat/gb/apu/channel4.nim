@@ -56,13 +56,12 @@ proc ch4_catchup*(ch: GbChannel4; gb: GB) {.inline.} =
 proc ch4_dac_input*(ch: GbChannel4): uint8 =
   ## Current 4-bit digital output (0-15), pre-DAC — see ch1_dac_input.
   if ch.enabled and ch.dac_enabled:
-    uint8(int(not ch.lfsr and 1'u16) * int(ch.current_volume))
+    uint8(int(not ch.lfsr and 1'u16) * int(ch.current_volume)) and 0x0F
   else: 0'u8
 
 proc ch4_get_amplitude*(ch: GbChannel4): float32 =
-  if ch.enabled and ch.dac_enabled:
-    float32(float64(ch.ch4_dac_input()) / 7.5 - 1.0)
-  else: 0.0'f32
+  ## See ch1_get_amplitude: DAC-gated, and the slope is negative.
+  if ch.dac_enabled: GB_DAC_LUT[ch.ch4_dac_input()] else: 0.0'f32
 
 proc ch4_read*(ch: GbChannel4; idx: int): uint8 =
   case idx

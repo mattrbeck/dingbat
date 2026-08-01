@@ -41,9 +41,8 @@ proc ch3_dac_input*(ch: GbChannel3): uint8 =
   else: 0'u8
 
 proc ch3_get_amplitude*(ch: GbChannel3): float32 =
-  if ch.enabled and ch.dac_enabled:
-    float32(float64(ch.ch3_dac_input()) / 7.5 - 1.0)
-  else: 0.0'f32
+  ## See ch1_get_amplitude: DAC-gated, and the slope is negative.
+  if ch.dac_enabled: GB_DAC_LUT[ch.ch3_dac_input()] else: 0.0'f32
 
 proc ch3_read*(ch: GbChannel3; idx: int): uint8 =
   # 0xFF30-0xFF3F while enabled returns the byte CH3 is currently playing, so

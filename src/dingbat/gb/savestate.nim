@@ -360,9 +360,12 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
   apu.frame_sequencer_stage = int(r.read_u8())
   apu.first_half_of_length_period = r.read_bool()
   apu.left_enable = r.read_bool()
-  apu.left_volume = r.read_u8()
+  # Masked to the register's 3 bits because they index GB_MASTER_VOLUME. The
+  # writer can only ever have stored 0-7; a truncated or hand-edited state
+  # must not turn into an out-of-bounds read.
+  apu.left_volume = r.read_u8() and 0x07
   apu.right_enable = r.read_bool()
-  apu.right_volume = r.read_u8()
+  apu.right_volume = r.read_u8() and 0x07
   apu.nr51 = r.read_u8()
   block:
     let ch = apu.channel1

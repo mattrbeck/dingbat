@@ -42,6 +42,30 @@ const GB_NO_STEP* = high(CycleCount)
   ## not having an etAPUChannel* event queued (which is the state every channel
   ## starts in: the old code only armed the chain on the first trigger).
 
+# The channel DAC's transfer function: digital 0-15 to analog +1..-1.
+#
+# Pan Docs, Audio Details / DACs: "If a DAC is enabled, the digital range $0 to
+# $F is linearly translated to the analog range -1 to 1... Importantly, the
+# slope is NEGATIVE: 'digital 0' maps to 'analog 1', not 'analog -1'."
+#
+# The sign is not cosmetic, and it is not just a question of which way the
+# speaker cone moves first. Only a DISABLED DAC sits at analog 0 (Pan Docs: it
+# "fades to an analog value of 0, which corresponds to digital 7.5"); a channel
+# that is merely switched OFF still feeds digital 0 into its still-enabled DAC,
+# "which an enabled DAC will dutifully convert into analog 1". So the idle level
+# of a live channel is a rail -- and it is the same rail its waveform already
+# touches at every digital-0 step. That is why, on hardware, switching a channel
+# on or off is continuous while switching its DAC on or off pops (Pan Docs,
+# Mixer: "Enabling or disabling a DAC... will cause an audio pop"). Getting the
+# slope backwards inverts that relationship. See chN_get_amplitude.
+#
+# A table rather than the arithmetic: exact at both endpoints, and one L1 load
+# in a path that runs four times per output sample, 32768 times a second.
+const GB_DAC_LUT* = block:
+  var t: array[16, float32]
+  for i in 0 .. 15: t[i] = float32(1.0 - float64(i) / 7.5)
+  t
+
 proc length_step*(ch: GbSoundChannel) =
   if ch.length_enable and ch.length_counter > 0:
     dec ch.length_counter

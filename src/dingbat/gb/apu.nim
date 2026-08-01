@@ -222,12 +222,13 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
 
 proc get_sample*(apu: GbApu; gb: GB) =
-  # Gated on `enabled` because a disabled channel's amplitude is 0 regardless
-  # of phase (the header's Alone-in-the-Dark win) -- its steps simply accumulate
-  # until the next thing that CAN see it (a trigger, or the frame-boundary
-  # rebase), and the closed form then replays them exactly. NOT gated on
-  # channel_mask: that is a debug mute, and skipping the catch-up would let
-  # CH4's shift loop fall behind by more than a frame.
+  # Gated on `enabled` because a disabled channel's amplitude does not depend on
+  # its phase (chN_dac_input is 0 for it whatever the duty counter says, so the
+  # DAC parks at analog +1) -- the header's Alone-in-the-Dark win. Its steps
+  # simply accumulate until the next thing that CAN see it (a trigger, or the
+  # frame-boundary rebase), and the closed form then replays them exactly. NOT
+  # gated on channel_mask: that is a debug mute, and skipping the catch-up would
+  # let CH4's shift loop fall behind by more than a frame.
   const OBS = uint32(GB_SAMPLE_PERIOD)
   if apu.channel1.enabled: ch1_catchup_at(apu.channel1, gb, OBS)
   if apu.channel2.enabled: ch2_catchup_at(apu.channel2, gb, OBS)
@@ -237,24 +238,30 @@ proc get_sample*(apu: GbApu; gb: GB) =
   let c2 = if apu.channel_mask[1]: ch2_get_amplitude(apu.channel2) else: 0.0'f32
   let c3 = if apu.channel_mask[2]: ch3_get_amplitude(apu.channel3) else: 0.0'f32
   let c4 = if apu.channel_mask[3]: ch4_get_amplitude(apu.channel4) else: 0.0'f32
+  # Pan Docs, Audio Details: NR51 selects which of the four analog channel
+  # outputs (each -1..1) the mixer adds into each side, so each side spans -4 to
+  # 4, and NR50 then scales it. GB_MASTER_VOLUME is that (V+1)/8 amplifier gain
+  # -- volume 0 is one eighth, not silence ("Importantly, the amplifier never
+  # mutes a non-silent input") -- with GB_MIX_SCALE already folded in, so one
+  # multiply covers both.
   let mix_left =
-    (float32(apu.left_volume) / 7.0'f32) *
+    GB_MASTER_VOLUME[apu.left_volume] *
     ((if (apu.nr51 and 0x80) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x40) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x20) != 0: c2 else: 0.0'f32) +
-     (if (apu.nr51 and 0x10) != 0: c1 else: 0.0'f32)) / 4.0'f32
+     (if (apu.nr51 and 0x10) != 0: c1 else: 0.0'f32))
   let mix_right =
-    (float32(apu.right_volume) / 7.0'f32) *
+    GB_MASTER_VOLUME[apu.right_volume] *
     ((if (apu.nr51 and 0x08) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x04) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
-     (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32)) / 4.0'f32
+     (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32))
   # Output-stage DC blocker, modelling the coupling capacitor between the mixer
   # and the output jack. See GB_DC_CHARGE for why this is not optional: the raw
-  # DAC mix carries a large DC offset that steps every time a channel is
-  # switched on or off, and each of those steps is an audible click. Applied
-  # here, ahead of the dump hook and every output path, so the oracle sees what
-  # the speaker sees.
+  # DAC mix carries a large DC offset that steps every time a DAC is powered up
+  # or down, and each of those steps is an audible click. Applied here, ahead of
+  # the dump hook and every output path, so the oracle sees what the speaker
+  # sees.
   let sample_left  = mix_left  - apu.dc_cap_left
   let sample_right = mix_right - apu.dc_cap_right
   apu.dc_cap_left  = mix_left  - sample_left  * GB_DC_CHARGE

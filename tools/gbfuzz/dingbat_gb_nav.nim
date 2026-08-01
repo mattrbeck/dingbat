@@ -111,6 +111,14 @@ proc main() =
   emu.post_init()
   let dmg = not emu.cgb_enabled
 
+  # GBFUZZ_CHANNELS=<4 chars, '1' or '0'> — per-channel mute for the audio dump
+  # (CH1 CH2 CH3 CH4), so one channel can be isolated and diffed against the
+  # SameBoy runner's identically-spelled GBFUZZ_CHANNELS. A muted channel is
+  # still emulated; only its contribution to the mix is dropped.
+  let chsel = getEnv("GBFUZZ_CHANNELS")
+  if chsel.len == 4:
+    for i in 0 .. 3: emu.apu.channel_mask[i] = chsel[i] != '0'
+
   if getEnv("GBFUZZ_BOOT_FRAMES") != "":
     var n = 0
     while n < 1000 and emu.memory.bootrom.len > 0:

@@ -810,3 +810,83 @@ left in any of the three loops.
 A/B trap that cost me an hour: `rm -f roms/*.sav roms/*.sa1` in zsh aborts the
 WHOLE command when either glob has no match, so the save file survives into the
 second run and four titles report bogus hash mismatches. Use `find -delete`.
+
+## GB APU: DAC polarity, disabled-channel level, NR50 volume law, headroom (2026-08-01)
+
+Follow-up to the output DC blocker. Three things in the GB mixer were wrong
+against Pan Docs; a fourth was a headroom bug the DC blocker had introduced.
+
+**1. The DAC slope was inverted.** Pan Docs, Audio Details / DACs: "the digital
+range $0 to $F is linearly translated to the analog range -1 to 1... Importantly,
+the slope is NEGATIVE: 'digital 0' maps to 'analog 1', not 'analog -1'."
+`chN_get_amplitude` computed `digital/7.5 - 1`, i.e. the other way up. Measured
+against SameBoy on identical 60 s runs, peak waveform cross-correlation was
+negative on every title (-0.21 to -0.60); it is positive now. Replaced by
+`GB_DAC_LUT` in `apu/abstract_channels.nim`.
+
+**2. A switched-off channel was silent instead of parked at a rail.** Pan Docs,
+Channels: "a disabled channel outputs 0, which an enabled DAC will dutifully
+convert into analog 1"; only a *disabled DAC* "fades to an analog value of 0".
+`chN_get_amplitude` gated on `enabled and dac_enabled` and returned 0 for both
+cases. It now gates on `dac_enabled` alone and reads the LUT, which is 0 for a
+switched-off channel because `chN_dac_input` already returns digital 0 for it.
+This is what makes channel on/off transitions continuous (they are on hardware)
+while DAC on/off still steps (it does on hardware, and Pan Docs tells drivers to
+avoid it). The `enabled` gate on the catch-up in `get_sample` is still correct:
+a switched-off channel's amplitude does not depend on its phase either way.
+
+**3. NR50 was `V/7`, not `(V+1)/8`.** Pan Docs, NR50: "A value of 0 is treated as
+a volume of 1 (very quiet), and a value of 7 is treated as a volume of 8 (no
+volume reduction). Importantly, the amplifier never mutes a non-silent input."
+A driver fading NR50 to 0 went fully silent; on hardware it stops an eighth above
+silence. `GB_MASTER_VOLUME` (folded with `GB_MIX_SCALE`, one multiply).
+
+**4. Headroom: one channel now gets 1/8 of full scale, not 1/4.** The DC blocker
+emits `mix - cap` where the charge tracks the mix's local mean, and both terms
+are bounded by the mixer range independently, so the output can reach 2x it. With
+fix 2 the mean genuinely does sit near a rail for long stretches. At 1/4 that
+clipped: **0.110% of samples in Prehistorik Man and 0.001% in Pokemon Blue hit
+the rail** on 60 s in-game runs. At 1/8 overflow is arithmetically impossible,
+and it lands on exactly SameBoy's level (`MAX_CH_AMP` 0xFF0 -> four channels =
+half of int16), so the two emulators' dumps are now directly comparable without
+renormalising. Output is 6 dB quieter than before; it is still louder than the
+GBA core (GB in-game RMS 1200-3700 vs GBA 860-1600), so the cross-core balance
+improved rather than inverted.
+
+**Result, 60 s in-game per title, dingbat vs SameBoy (CGB-E / DMG-B, hardware
+high-pass on, both playing the real boot ROM from frame 0).** RMS gain ratio went
+from 2.009-2.090 to 1.002-1.049. Polarity from negative to positive. DC
+trajectory (`tools/popscan.py`, threshold scaled per level) now within a few per
+cent of SameBoy's on all five titles.
+
+**Conformance: unchanged, per test.** `--apu` before and after: blargg
+`dmg_sound` 7/12, `cgb_sound` 12/12, SameSuite `apu` 10/70 — and the pass/fail
+list diffs empty, not just the totals. Default suite 182/150/32, unchanged.
+**Perf: no measurable change** (a table lookup replaced a float64 divide).
+Best-of-5 interleaved with `DINGBAT_GB_AUDIO_DUMP` set on *both* sides, which is
+mandatory: with it unset under `-d:test_harness` the mixed sample is unused and
+the whole mixer is dead-code-eliminated, so the A/B measures nothing. Crystal
++1.4%, Shantae +0.6%, Blue +0.4%, all inside the noise floor.
+
+**What is still different from SameBoy, and why it is not a bug list.** With gain
+and polarity normalised, per-channel realigned correlation over 18 s of Crystal
+is CH1 0.974, CH2 0.985, CH3 0.995, CH4 0.43. CH4 is not a broken LFSR: widening
+the lag search on a diverged window recovers 0.67 at a 34 ms offset, i.e. the
+same sequence at a different time. Two independent emulations of a game drift,
+and correlation is brutally sensitive to that — low-passing to 2 kHz barely moves
+the number (0.83 -> 0.86), so it is timing, not spectrum. The one systematic
+spectral difference is aliasing: dingbat has **~34% more energy above 8 kHz**
+because it samples-and-holds the mix at 32768 Hz while SameBoy band-limits each
+channel. Band-limited synthesis is the genuinely more faithful model (the
+hardware output is continuous-time) and is the obvious next piece of work; it is
+also a much larger change with a real per-sample cost.
+
+`GBFUZZ_CHANNELS=<4 chars, '1'/'0'>` now mutes channels in *both*
+`tools/gbfuzz/dingbat_gb_nav` and `tools/gbfuzz/sameboy_runner`, which is what
+makes per-channel isolation against the reference possible.
+
+Two traps for the next person. Pokemon Crystal is **not** run-to-run reproducible
+across a long gap: it is MBC3+RTC and has day/night music, so two dumps taken
+hours apart legitimately differ (same binary back to back is byte-identical).
+And a 60 s Shantae run drifts far enough from SameBoy that the global
+cross-correlation is meaningless either way (0.10); use the first 15 s.

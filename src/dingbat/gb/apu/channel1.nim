@@ -69,15 +69,19 @@ proc sweep_step*(ch: GbChannel1; gb: GB) =
 
 proc ch1_dac_input*(ch: GbChannel1): uint8 =
   ## Current 4-bit digital output (0-15), pre-DAC. This is what the CGB's
-  ## PCM12 register exposes; 0 while the channel is off.
+  ## PCM12 register exposes; 0 while the channel is off. Masked to four bits
+  ## because it indexes GB_DAC_LUT: emulation cannot produce a volume above 15,
+  ## but a hand-edited or truncated save state can, and that must not become an
+  ## out-of-bounds read.
   if ch.enabled and ch.dac_enabled:
-    uint8(int(WAVE_DUTY1[ch.duty][ch.wave_duty_position]) * int(ch.current_volume))
+    uint8(int(WAVE_DUTY1[ch.duty][ch.wave_duty_position]) * int(ch.current_volume)) and 0x0F
   else: 0'u8
 
 proc ch1_get_amplitude*(ch: GbChannel1): float32 =
-  if ch.enabled and ch.dac_enabled:
-    float32(float64(ch.ch1_dac_input()) / 7.5 - 1.0)
-  else: 0.0'f32
+  ## Analog output. Gated on the DAC alone, NOT on `enabled`: a switched-off
+  ## channel feeds digital 0 to a still-powered DAC, which is analog +1, not
+  ## silence. Only a disabled DAC leaves analog 0. See GB_DAC_LUT.
+  if ch.dac_enabled: GB_DAC_LUT[ch.ch1_dac_input()] else: 0.0'f32
 
 proc ch1_read*(ch: GbChannel1; idx: int): uint8 =
   case idx

@@ -258,6 +258,13 @@ int main(int argc, char** argv) {
     unsigned hz = rate && rate[0] ? (unsigned) atoi(rate) : 32768u;
     GB_apu_set_sample_callback(&gb, pcm_cb);
     GB_set_sample_rate(&gb, hz);
+    /* GBFUZZ_CHANNELS=<4 chars, '1' or '0'> — per-channel mute (CH1 CH2 CH3
+     * CH4), matching dingbat_gb_nav's identically-spelled variable, so one
+     * channel can be isolated on both sides and the dumps diffed. */
+    const char* chsel = getenv("GBFUZZ_CHANNELS");
+    if (chsel && strlen(chsel) == 4)
+      for (int i = 0; i < 4; ++i)
+        GB_set_channel_muted(&gb, (GB_channel_t) i, chsel[i] == '0');
     const char* pf = getenv("GBFUZZ_PCM_FRAMES");
     if (pf && pf[0]) {
       int n = atoi(pf);
