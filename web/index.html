@@ -652,22 +652,23 @@
               <span class="switch-track"></span>
             </label>
           </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Touch direction input</span>
-              <span class="modal-toggle-sub">D-pad buttons or an analog-style joystick</span>
-            </div>
-            <div id="control-style-picker" class="chip-row" role="radiogroup" aria-label="Touch direction input">
+          <!-- row-flow: see styles.css. The control moves INTO the text flow
+               (bottom right, last line) instead of standing beside it, so the
+               description gets the full width of the panel. The wrapper <div>
+               these rows used to carry is gone — the float has to be a sibling
+               of the text it flows around, not of a block containing it. -->
+          <div class="modal-toggle-row row-flow">
+            <span class="modal-row-label">Touch direction input</span>
+            <span class="modal-toggle-sub">D-pad buttons or an analog-style joystick</span>
+            <div id="control-style-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Touch direction input">
               <button type="button" class="choice-chip selected" data-value="dpad" role="radio" aria-checked="true">D-pad</button>
               <button type="button" class="choice-chip" data-value="joystick" role="radio" aria-checked="false">Joystick</button>
             </div>
           </div>
-          <div class="modal-toggle-row hidden" id="joystick-mode-row">
-            <div>
-              <span class="modal-row-label">Joystick behavior</span>
-              <span class="modal-toggle-sub">Fixed stays put; floating follows your thumb</span>
-            </div>
-            <div id="joystick-mode-picker" class="chip-row" role="radiogroup" aria-label="Joystick behavior">
+          <div class="modal-toggle-row row-flow hidden" id="joystick-mode-row">
+            <span class="modal-row-label">Joystick behavior</span>
+            <span class="modal-toggle-sub">Fixed stays put; floating follows your thumb</span>
+            <div id="joystick-mode-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Joystick behavior">
               <button type="button" class="choice-chip selected" data-value="fixed" role="radio" aria-checked="true">Fixed</button>
               <button type="button" class="choice-chip" data-value="floating" role="radio" aria-checked="false">Floating</button>
             </div>
@@ -784,12 +785,10 @@
               <span class="switch-track"></span>
             </label>
           </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Upscale filter</span>
-              <span class="modal-toggle-sub">GPU pixel-art smoothing (clean-room hq4x / xBR). Suspends integer scaling and scanlines while active.</span>
-            </div>
-            <select id="upscale-filter-select" class="kb-select" aria-label="Upscale filter">
+          <div class="modal-toggle-row row-flow">
+            <span class="modal-row-label">Upscale filter</span>
+            <span class="modal-toggle-sub">GPU pixel-art smoothing (clean-room hq4x / xBR). Suspends integer scaling and scanlines while active.</span>
+            <select id="upscale-filter-select" class="kb-select row-flow-ctl" aria-label="Upscale filter">
               <option value="none">None</option>
               <option value="hq4x">hq4x</option>
               <option value="xbr">xBR</option>
@@ -886,12 +885,10 @@
             <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
           </div>
           <div class="modal-subhead">Game Boy screen</div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Shade palette</span>
-              <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Colour titles are never affected.</span>
-            </div>
-            <select id="gb-palette-mode" class="kb-select" aria-label="Game Boy shade palette">
+          <div class="modal-toggle-row row-flow">
+            <span class="modal-row-label">Shade palette</span>
+            <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Colour titles are never affected.</span>
+            <select id="gb-palette-mode" class="kb-select row-flow-ctl" aria-label="Game Boy shade palette">
               <option value="default">Game Boy default</option>
               <option value="theme">Match app theme</option>
               <option value="custom">Custom&hellip;</option>
@@ -914,12 +911,10 @@
             </span>
           </div>
           <div class="modal-subhead">Emulation</div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Run-ahead</span>
-              <span class="modal-toggle-sub">Hides the game's own input lag by showing a predicted future frame — most games are built around 1&ndash;2 frames. Costs extra CPU per frame; ignored during fast-forward, 2&times; and multiplayer</span>
-            </div>
-            <select id="runahead-select" class="kb-select" aria-label="Run-ahead frames">
+          <div class="modal-toggle-row row-flow">
+            <span class="modal-row-label">Run-ahead</span>
+            <span class="modal-toggle-sub">Hides the game's own input lag by showing a predicted future frame — most games are built around 1&ndash;2 frames. Costs extra CPU per frame; ignored during fast-forward, 2&times; and multiplayer</span>
+            <select id="runahead-select" class="kb-select row-flow-ctl" aria-label="Run-ahead frames">
               <option value="0">Off</option>
               <option value="1">1 frame</option>
               <option value="2">2 frames</option>
@@ -945,27 +940,21 @@
             <svg class="settings-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
           </button>
           <div id="advanced-sub" hidden>
-            <div class="modal-toggle-row">
-              <div>
-                <span class="modal-row-label">Force update</span>
-                <span class="modal-toggle-sub">Re-download the whole app and reload. Only needed if an update seems stuck.</span>
-              </div>
-              <button type="button" class="button button-sm" id="force-update">Re-download</button>
+            <div class="modal-toggle-row row-flow">
+              <span class="modal-row-label">Force update</span>
+              <span class="modal-toggle-sub">Re-download the whole app and reload. Only needed if an update seems stuck.</span>
+              <button type="button" class="button button-sm row-flow-ctl" id="force-update">Re-download</button>
             </div>
-            <div class="modal-toggle-row">
-              <div>
-                <span class="modal-row-label">Diagnostic log</span>
-                <span class="modal-toggle-sub">The running app's log, plus the build and device string a bug report would carry.</span>
-              </div>
-              <button type="button" class="button button-sm" id="show-log">Show log</button>
+            <div class="modal-toggle-row row-flow">
+              <span class="modal-row-label">Diagnostic log</span>
+              <span class="modal-toggle-sub">The running app's log, plus the build and device string a bug report would carry.</span>
+              <button type="button" class="button button-sm row-flow-ctl" id="show-log">Show log</button>
             </div>
           </div>
-          <div class="settings-reset-row">
-            <div>
-              <span class="modal-row-label">Reset all settings</span>
-              <span class="modal-toggle-sub">Restore controls, audio, video and system options to defaults. Your games and saves are kept.</span>
-            </div>
-            <span id="reset-settings-slot"></span>
+          <div class="settings-reset-row row-flow">
+            <span class="modal-row-label">Reset all settings</span>
+            <span class="modal-toggle-sub">Restore controls, audio, video and system options to defaults. Your games and saves are kept.</span>
+            <span id="reset-settings-slot" class="row-flow-ctl"></span>
           </div>
         </div>
         <p class="settings-version" id="settings-version"></p>

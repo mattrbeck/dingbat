@@ -3375,6 +3375,89 @@ body.debug-2p .home-tile-link {
   background: rgba(var(--accent-rgb), 0.07);
 }
 
+/* --- Settings rows whose control sits IN the text, not beside it ----------
+   The default settings row is a flex pair: description on the left, control
+   on the right. That is right for a switch — 42px wide, and a column of them
+   down the right edge is what makes the list scannable — and wrong for a
+   dropdown, a chip pair or a button, which take 100-155px off EVERY line of
+   the description for the sake of one. "Shade palette" lost a third of its
+   measure to a select that only needed the last line.
+
+   So the wide controls float to the bottom right and the text runs around
+   them:
+
+       Shade palette
+       The four shades a black-and-white Game
+       Boy game is drawn in. Color titles are
+       never affected.     [Game Boy default]
+
+   Mechanically that is a plain right float placed AFTER all the text in
+   source order: a float may not sit higher than the top of the last line box
+   generated before it, so it lands on the final line and that line shortens
+   around it. No shape-outside, no measuring. If the last line's words no
+   longer fit beside it the float simply takes a line of its own, which is the
+   right answer at 320pt and is what happens to Run-ahead there.
+
+   Two consequences worth stating:
+   * The float has to be a SIBLING of the text, so these rows lost the
+     wrapping <div> that used to hold label + description. index.js's
+     aria-labelledby pass reads them with querySelector, so it is unaffected.
+   * The row has to establish a block formatting context or the float hangs
+     down into the next setting.
+
+   Switch rows are deliberately NOT in this set. A 42px switch costs little
+   width, and its vertical alignment with the label is what lets you run an
+   eye down the column; moving nineteen switches to the bottom right to buy
+   half a word per line would be a bad trade twice over.
+
+   :not(.hidden) rather than source order — #joystick-mode-row is shown and
+   hidden by that class, and this rule has the same specificity as the one
+   that hides it. */
+.modal-toggle-row.row-flow:not(.hidden),
+.settings-reset-row.row-flow {
+  display: flow-root;
+}
+
+.row-flow > .modal-row-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* One continuous run of inline text for the float to sit in. As a block it
+   would generate its own line boxes and the float would clear it entirely. */
+.row-flow > .modal-toggle-sub {
+  display: inline;
+  margin-top: 0;
+}
+
+.row-flow > .row-flow-ctl {
+  float: right;
+  /* Nudged down so the control's optical centre lines up with the text line
+     it shares, and given room so a descender never touches it. */
+  margin: 2px 0 0 14px;
+}
+
+/* The floated controls are 29-31px tall, which is fine under a cursor and
+   under the 44pt minimum under a thumb. They are the widest targets in
+   Settings and the easiest to grow, so on a touch device they grow; the
+   float means the extra height costs the row nothing it was not already
+   spending on two lines of description. */
+@media (pointer: coarse) {
+  .row-flow > .row-flow-ctl,
+  .row-flow > .row-flow-ctl > .button {
+    min-height: 44px;
+  }
+
+  /* min-height does not reach a <select>. WebKit draws a default-appearance
+     select as a native popup button with a fixed intrinsic height — it
+     ignores .kb-select's padding and min-height alike, and measures 21px no
+     matter what. An explicit height is the one thing it honours, and Chromium
+     is happy with it too. */
+  .row-flow > select.row-flow-ctl {
+    height: 44px;
+  }
+}
+
 /* Small chip radiogroups (touch input style / joystick behavior) */
 .chip-row {
   display: flex;
