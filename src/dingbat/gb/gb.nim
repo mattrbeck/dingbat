@@ -331,6 +331,12 @@ type
     # each tick entry so STAT reads see the pre-advance mode (mooneye
     # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
     # interrupt and must still observe the old mode).
+    #
+    # Bit 7 (LY_JUST_CHANGED) rides along in the same byte: it is set by an LY
+    # advance and cleared by the next tick's snapshot, i.e. it marks "LY changed
+    # during the M-cycle this read belongs to". Packing it here rather than into
+    # its own field keeps the per-M-cycle cost at the one store the latch
+    # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so

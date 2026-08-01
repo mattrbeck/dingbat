@@ -174,6 +174,11 @@ proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   if (mem.dma_position > 0 and mem.dma_position <= 0xA0) and
      (idx >= 0xFE00 and idx <= 0xFE9F):
     return 0xFF'u8
+  # The CPU's own VRAM window (see cpu_vram_open). Checked here rather than in
+  # ppu_read so that the OAM DMA unit, which drives the bus itself and reaches
+  # VRAM through read_byte, keeps its access.
+  if (idx and 0xE000) == 0x8000 and not cpu_vram_open(gb.ppu, is_write = false):
+    return 0xFF'u8
   read_byte(mem, gb, idx)
 
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
@@ -231,6 +236,12 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   if (mem.dma_position > 0 and mem.dma_position <= 0xA0) and
      (idx >= 0xFE00 and idx <= 0xFE9F):
     return
+  # Dropped rather than deferred, and only for the CPU: the OAM DMA unit writes
+  # OAM through write_byte and must not be locked out of it.
+  if (idx and 0xE000) == 0x8000:
+    if not cpu_vram_open(gb.ppu, is_write = true): return
+  elif idx >= 0xFE00 and idx <= 0xFE9F:
+    if not cpu_oam_open(gb.ppu, is_write = true): return
   write_byte(mem, gb, idx, val)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =

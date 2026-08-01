@@ -59,7 +59,7 @@ This is at line 73: `if (tile_attrs and 0b0010_0000) != 0: col else: 7 - col` �
 
 ## 4. Sprite fetcher rewritten as multi-phase state machine
 
-**`fifo_ppu.nim:168-213`** — The old sprite fetcher walked through the same `FETCHER_ORDER` array with no-op steps. The new one uses `sprite_fetch_phase` (0-6) with specific behaviors per phase.
+**`fifo_ppu.nim:168-213`** — The old sprite fetcher walked through the same `FETCHER_ORDER` array with no-op steps. The new one uses `sprite_fetch_phase` (0-7) with specific behaviors per phase.
 
 **Pandocs reference** — Section "Sprites", which describes a sequential process:
 
@@ -156,13 +156,15 @@ We placed the penalty after phase 0 (after waiting for the fetcher) and before p
 
 ## 9. Same-X sprite optimization
 
-**`fifo_ppu.nim:164-166`** — When the next sprite has the same X coordinate, `sprite_fetch_phase` is set to 3 (tile data fetch) instead of restarting at 0.
+When the next sprite has the same X coordinate, the fetcher does **not** restart at phase 0: it goes to phase 7, which burns 4 dots and then falls into phases 3 and 4, for 6 dots in total.
 
 **Pandocs reference** — Section "Sprites":
 
 > Everything in this section is repeated for every sprite on the current scanline unless it was decided that fetching should be aborted or the X coordinate is 160.
 
-The spec describes the full process being "repeated" per sprite. However, for same-X sprites the BG fetcher is already in position (phases 0-2 achieved alignment for the previous sprite at this X). Skipping back to phase 3 avoids redundant BG fetcher advancement. This is consistent with how real hardware behaves — same-X sprites have lower overhead because the fetcher doesn't need repositioning.
+The spec describes the full process being "repeated" per sprite. For same-X sprites the BG fetcher is already in position (phases 0-2 achieved alignment for the previous sprite at this X), so the *wait* is not repeated — but the object fetch itself is, and that fetch is 6 dots (tile row address, then two data bytes, 2 dots each).
+
+The 6 is measured, not assumed: mooneye `acceptance/ppu/intr_2_mode0_timing_sprites` stacks 1..10 objects at X=0 and its expectations step by exactly 6 dots per extra object (mode 3 ends at 172 + 6N + 2 dots). Phases 3+4 alone charge 2 dots, which is where the extra phase-7 idle comes from. This renderer now matches the whole X=0 group and the X=1 group of that test; the rest of it needs the per-object *alignment* penalty (a function of `(OBJ.x + SCX) mod 8`), which this fetcher does not model at all — every object with X ≤ 8 collapses onto the same trigger point because the shifter starts at `lx = -(SCX and 7)` rather than -8.
 
 ---
 
