@@ -5,7 +5,12 @@ when defined(emscripten):
 else:
   type CycleCount* = uint64
 
-const MAX_EVENTS = 64  # far above the ~15 events ever pending at once
+const MAX_EVENTS* = 64  # far above the ~15 events ever pending at once
+                        # Exported because it is a save-state compatibility
+                        # floor, not just a capacity: load_from refuses a
+                        # state carrying more pending events than this, so
+                        # lowering it rejects existing files. Pinned in
+                        # tests/savestate_compat_test.nim.
 
 type
   EventType* = enum

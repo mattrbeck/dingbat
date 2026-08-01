@@ -112,6 +112,46 @@ static:
   doAssert ord(high(EventType)) == 21,
     "an EventType was appended without pinning its ordinal here"
 
+  # The same rule for every other enum whose ordinal reaches a state file.
+  # These are written as bare ordinals (or as the bit positions of a `set`),
+  # so inserting an enumerator mid-list silently reinterprets saved values —
+  # a Flash chip mid-erase would come back mid-write, an EEPROM read as a
+  # bank select. Append only.
+  doAssert (ord(stEEPROM), ord(stSRAM), ord(stFLASH),
+            ord(stFLASH512), ord(stFLASH1M)) == (0, 1, 2, 3, 4),
+    "StorageType ordinals are save-state format (flash_type, storage tags)"
+  doAssert ord(high(StorageType)) == 4,
+    "a StorageType was appended without pinning it here"
+
+  doAssert (ord(fsReady), ord(fsCmd1), ord(fsCmd2), ord(fsIdentification),
+            ord(fsPrepareWrite), ord(fsPrepareErase), ord(fsSetBank)) ==
+           (0, 1, 2, 3, 4, 5, 6),
+    "FlashStateFlag bit positions are save-state format (set[FlashStateFlag] " &
+    "is cast to a u8)"
+  doAssert ord(high(FlashStateFlag)) == 6,
+    "a FlashStateFlag was appended without pinning it here"
+
+  doAssert (ord(esReady), ord(esRead), ord(esReadIgnore), ord(esWrite),
+            ord(esAddress), ord(esWriteFinalBit), ord(esLockAddress)) ==
+           (0, 1, 2, 3, 4, 5, 6),
+    "EepromStateFlag bit positions are save-state format (set[...] cast to u16)"
+  doAssert ord(high(EepromStateFlag)) == 12,
+    "an EepromStateFlag was appended without pinning it here"
+
+  doAssert (ord(eeprom4k), ord(eeprom64k)) == (0, 1),
+    "EepromSize ordinals are save-state format"
+
+  doAssert (ord(rtcWaiting), ord(rtcCommand), ord(rtcReading), ord(rtcWriting)) ==
+           (0, 1, 2, 3),
+    "RtcState ordinals are save-state format"
+  doAssert ord(high(RtcState)) == 3,
+    "an RtcState was appended without pinning it here"
+
+  # The scheduler refuses a state carrying more pending events than it can
+  # hold, so this constant is a compatibility floor and not just a capacity.
+  doAssert MAX_EVENTS >= 64,
+    "MAX_EVENTS is a save-state floor: lowering it refuses existing states"
+
 # ---------------------------------------------------------------------------
 # 2. Header layout constants.
 #
