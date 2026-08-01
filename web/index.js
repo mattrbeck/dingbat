@@ -725,9 +725,9 @@ const menuBtn = document.getElementById("menu-btn");
 const menuDropdown = document.getElementById("menu-dropdown");
 
 // Show the bottom scrim only while more items sit below the fold, so it never
-// permanently fades the last item (Toggle Log) in windows tall enough that the
-// menu doesn't scroll. Re-checked on open/scroll/resize; scrollHeight reads 0
-// while hidden, so the open-time call does the first real measurement.
+// permanently fades the last item (Report a Bug) in windows tall enough that
+// the menu doesn't scroll. Re-checked on open/scroll/resize; scrollHeight
+// reads 0 while hidden, so the open-time call does the first real measurement.
 const updateMenuScrollHint = () => {
   menuDropdown.classList.toggle(
     "can-scroll-down",
@@ -872,6 +872,9 @@ const openSettingsModal = () => {
   kbSelection = -1;
   kbPreset.value = detectPreset(activeBindings);
   renderKbBindings();
+  // Fresh open starts with Advanced folded (defined below the modal helpers;
+  // guarded for the pre-parse window, as the menu does for Capture)
+  if (typeof collapseAdvanced === "function") collapseAdvanced();
   settingsModal.classList.add("open");
   updateTabsScrollHints();  // first measurable layout: modal was display:none
   document.addEventListener("keydown", kbKeyHandler, true);
@@ -888,13 +891,27 @@ const closeSettingsModal = () => {
 document.getElementById("open-settings").addEventListener("click", openSettingsModal);
 document.getElementById("settings-close").addEventListener("click", closeSettingsModal);
 
-// Troubleshooting actions live in Settings ▸ General now. Each one hands the
-// screen to something else (the log overlay, a reload), so Settings has to
-// step aside first. Registered here, ahead of each button's own handler
-// further down the file, so the close happens before the takeover.
+// Force Update and Toggle Log live in Settings ▸ General ▸ Advanced now. Each
+// one hands the screen to something else (the log overlay, a reload), so
+// Settings has to step aside first. Registered here, ahead of each button's
+// own handler further down the file, so the close happens before the takeover.
 for (const id of ["force-update", "show-log"]) {
   document.getElementById(id).addEventListener("click", closeSettingsModal);
 }
+
+// Advanced is a disclosure, and it refolds on every open of Settings rather
+// than remembering: nobody opens Settings wanting it, so its resting state is
+// the only one worth persisting.
+const advancedToggle = document.getElementById("advanced-toggle");
+const advancedSub = document.getElementById("advanced-sub");
+const collapseAdvanced = () => {
+  advancedSub.hidden = true;
+  advancedToggle.setAttribute("aria-expanded", "false");
+};
+advancedToggle.addEventListener("click", () => {
+  advancedSub.hidden = !advancedSub.hidden;
+  advancedToggle.setAttribute("aria-expanded", advancedSub.hidden ? "false" : "true");
+});
 
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettingsModal();

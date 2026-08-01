@@ -926,29 +926,46 @@
               <option value="3">3 frames</option>
             </select>
           </div>
+          <!-- Force Update and Toggle Log, moved out of the kebab menu. Same
+               element IDs, so every existing handler is untouched.
+
+               Folded, and folded by default on every open, because these are
+               month-scale actions: nobody arrives in Settings wanting them,
+               and the two people a year who do will happily open one group.
+               Same disclosure affordance as the Capture accordion in the
+               menu — chevron on the right, rotating a quarter turn — so it is
+               recognisably the same gesture in both places.
+
+               It sits ABOVE Reset all settings on purpose: reset is the last
+               thing on the tab and should stay the last thing, not get pushed
+               up the page by a group most people never open. -->
+          <button type="button" class="settings-disclosure" id="advanced-toggle"
+                  aria-expanded="false" aria-controls="advanced-sub">
+            Advanced
+            <svg class="settings-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div id="advanced-sub" hidden>
+            <div class="modal-toggle-row">
+              <div>
+                <span class="modal-row-label">Force update</span>
+                <span class="modal-toggle-sub">Re-download the whole app and reload. Only needed if an update seems stuck.</span>
+              </div>
+              <button type="button" class="button button-sm" id="force-update">Re-download</button>
+            </div>
+            <div class="modal-toggle-row">
+              <div>
+                <span class="modal-row-label">Diagnostic log</span>
+                <span class="modal-toggle-sub">The running app's log, plus the build and device string a bug report would carry.</span>
+              </div>
+              <button type="button" class="button button-sm" id="show-log">Show log</button>
+            </div>
+          </div>
           <div class="settings-reset-row">
             <div>
               <span class="modal-row-label">Reset all settings</span>
               <span class="modal-toggle-sub">Restore controls, audio, video and system options to defaults. Your games and saves are kept.</span>
             </div>
             <span id="reset-settings-slot"></span>
-          </div>
-          <!-- Moved out of the kebab menu. Same element IDs, so every existing
-               handler is untouched. -->
-          <div class="modal-subhead">Troubleshooting</div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Force update</span>
-              <span class="modal-toggle-sub">Re-download the whole app and reload. Only needed if an update seems stuck.</span>
-            </div>
-            <button type="button" class="button button-sm" id="force-update">Re-download</button>
-          </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Diagnostic log</span>
-              <span class="modal-toggle-sub">The running app's log, plus the build and device string a bug report would carry.</span>
-            </div>
-            <button type="button" class="button button-sm" id="show-log">Show log</button>
           </div>
         </div>
         <p class="settings-version" id="settings-version"></p>

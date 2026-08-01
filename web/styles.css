@@ -3133,6 +3133,53 @@ body.debug-2p .home-tile-link {
   padding-top: 0;
 }
 
+/* A .modal-subhead that is also a disclosure (Settings ▸ General ▸ Advanced).
+   Every type property is restated rather than inherited: this is a <button>,
+   so the UA sheet would otherwise hand it the form-control font. */
+.settings-disclosure {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 14px 0 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-disclosure:hover {
+  color: var(--text-dim);
+}
+
+/* The Capture accordion's chevron, same glyph and same quarter turn, so the
+   gesture is recognisably one gesture in both places. It cannot literally
+   share .capture-chevron's rules: those inherit their stroke and size from
+   .menu-item svg, and there is no .menu-item here. */
+.settings-chevron {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+
+.settings-disclosure[aria-expanded="true"] .settings-chevron {
+  transform: rotate(90deg);
+}
+
 .settings-note {
   margin-top: 14px;
   padding-top: 10px;
