@@ -285,6 +285,33 @@ proc clone*(prn: GbPrinter): GbPrinter =
   result = new_gb_printer()
   copy_into(prn, result)
 
+# ---- rewind ---------------------------------------------------------------
+
+proc resync*(prn: GbPrinter) =
+  ## Return the link protocol to idle, dropping any half-received packet.
+  ##
+  ## The printer is a peripheral: none of it is in the GB save state, so a
+  ## rewind moves the core back in time and leaves the printer where it was —
+  ## typically part-way through a packet whose remaining bytes the core will
+  ## now never send, which would make the NEXT genuine packet parse as
+  ## garbage. Resetting the state machine is the "unplug and replug it"
+  ## outcome, which is exactly what physically happened from the printer's
+  ## point of view.
+  ##
+  ## Printer RAM, the strip being assembled and the outbox all survive: a
+  ## photo that already came out of the printer is real user output and does
+  ## not un-print. The cost is that rewinding back across a completed print
+  ## and letting the game print again yields the photo twice — the right way
+  ## round, since the alternative loses one.
+  prn.state = psMagic1
+  prn.cmd = 0
+  prn.compressed = false
+  prn.length = 0
+  prn.data_left = 0
+  prn.payload = @[]
+  prn.chk = 0
+  prn.chk_recv = 0
+
 # ---- serial drivers -------------------------------------------------------
 
 method serial_complete*(drv: GbPrinterDriver; gb: GB) =

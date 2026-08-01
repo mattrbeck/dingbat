@@ -71,6 +71,10 @@ var stateGbLink: gblink.GbLink = nil  # GB/GBC 2P link (mutually exclusive)
 # Game Boy Printer (see the printer block further down); hoisted because the
 # clip/runahead procs reference it. Always attached on a solo GB core.
 var statePrinter: GbPrinter = nil
+# Rewind history (see the rewind block further down for what it is and why it
+# starts nil); hoisted because wasm_load_state, defined above that block, has
+# to drop the ring when a loaded state starts a new timeline.
+var rewindHistory: Rewind = nil
 # Speculative rollback is opt-in for now (proven bit-identical to the blocking
 # path in the native tests, but the interactive Emerald trade is unverified):
 # JS enables it from a ?speculative=1 URL param before netlink_init/attach.
@@ -395,10 +399,16 @@ proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
     of ekGB:  stateGb.apu.set_pitch_correct_ff(t)
     of ekNone: discard
 
-proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
+proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
   ## corruption — the reason is echoed to the log) with the core untouched.
+  ##
+  ## Success normally drops the rewind ring (see below). keepRewind != 0 is for
+  ## the one caller that is putting the SAME timeline back — undoing a scrubber
+  ## commit — where the retained snapshots really are this state's own past and
+  ## throwing away minutes of history would make Undo cost more than the thing
+  ## it undoes.
   if data == nil or len <= 0: return 0
   if stateNet != nil: return 0  # loading a state mid-link would desync the pair
   var image = newString(int(len))
@@ -407,6 +417,15 @@ proc wasm_load_state(data: pointer; len: cint): cint {.exportc.} =
     of ekGBA: stateGba.load_state_bytes(image)
     of ekGB:  stateGb.load_state_bytes(image)
     of ekNone: false
+  if ok and keepRewind == 0 and rewindHistory != nil:
+    # A loaded state starts a new timeline; the ring holds the old one. Keeping
+    # both was already wrong for hold-to-rewind (holding it after a load walks
+    # backward into a moment that never preceded the frame on screen), and the
+    # scrubber makes it visible: the strip would show thumbnails from a
+    # different part of the game sitting next to current ones, and offer to
+    # "rewind" to one. Dropping the history is what mGBA and RetroArch do, and
+    # the honest answer — there is no path from here back to there.
+    rewindHistory.clear()
   if ok: 1 else: 0
 
 proc benchFrames(n: cint) {.exportc.} =
@@ -732,7 +751,7 @@ proc checkInput() =
 # (JS drives frames via rAF), and Nim's exit teardown destroys module-init
 # heap globals — a ring created here would dangle by the time JS calls in.
 # initFromEmscripten (invoked from JS, post-main) creates it instead.
-var rewindHistory: Rewind = nil
+# (Declared up top beside statePrinter so wasm_load_state can clear it.)
 
 # Memory cap for rewind rings created from here on (default REWIND_CAP_BYTES,
 # 64 MB). JS lowers this on memory-constrained platforms (iOS Safari, where
@@ -1004,6 +1023,98 @@ proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
     try: apply_payload(stash)
     except CatchableError: discard
   cint(stateImage.len)
+
+# --- Committing to a scrubbed moment --------------------------------------
+# The scrubber's other two questions: "would this cost me my in-game save?"
+# and "make it so".
+
+proc cart_save_bytes(): seq[byte] =
+  ## The cartridge's battery-backed save data and NOTHING else — the bytes
+  ## that reach the .sav file.
+  ##
+  ## Deliberately not the whole storage section of the payload: that section
+  ## also carries controller state (flash bank + command phase, the EEPROM
+  ## shift register and address latch), which differs between two moments
+  ## whenever a save happened to be mid-command, with no user-visible save
+  ## data difference at all. Comparing the section wholesale would raise the
+  ## "this discards your save" prompt on games that merely poll their flash
+  ## chip — the fastest way to teach players to click through it.
+  case stateKind
+  of ekGBA:
+    if stateGba != nil and stateGba.storage != nil: stateGba.storage.memory
+    else: @[]
+  of ekGB:
+    # No battery means no .sav: the RAM is scratch that dies with the console,
+    # so rolling it back costs the player nothing to warn about.
+    if stateGb != nil and stateGb.cartridge != nil and stateGb.cartridge.has_battery:
+      stateGb.cartridge.ram
+    else: @[]
+  of ekNone: @[]
+
+proc wasm_rewind_scrub_save_differs(sample: cint): cint {.exportc.} =
+  ## 1 when committing to `sample` would change the cartridge save data, 0 when
+  ## it would leave it byte-identical (or there is nothing to compare).
+  ##
+  ## Exact, both ways: a full byte comparison of the save region, so it cannot
+  ## miss a changed save, and it cannot invent one either. What it does NOT
+  ## know is the player's intent — a game that scribbles in SRAM without the
+  ## player ever choosing "Save" still reports a difference. That is the safe
+  ## direction, and the claim the UI makes ("would change your in-game save
+  ## data") is literally true in that case.
+  ##
+  ## Per-call stash and restore. Holding a stash across the sheet's lifetime
+  ## would be cheaper, but every early return, ROM switch or exception in
+  ## between becomes a silently corrupted live session; one round trip is
+  ## ~4 ms, which nobody can see.
+  if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
+  let now = cart_save_bytes()
+  if now.len == 0: return 0
+  let snap = rewindHistory.snapshot_by_id(scrubIds[sample])
+  if snap.len == 0: return 0
+  let stash = current_payload()
+  if stash.len == 0: return 0
+  var differs = false
+  try:
+    apply_payload(snap)
+    differs = cart_save_bytes() != now
+  except CatchableError:
+    differs = false
+  try: apply_payload(stash)
+  except CatchableError: discard
+  if differs: 1 else: 0
+
+proc wasm_rewind_commit(sample: cint): cint {.exportc.} =
+  ## Rewind the live core to `sample` and throw the future away: every
+  ## snapshot newer than it leaves the ring, so the strip, hold-to-rewind and
+  ## the next push all agree that this is now the newest moment. Returns 1 on
+  ## success, 0 when the sample is gone or a linked mode owns the core.
+  ##
+  ## JS keeps its own pre-commit state image for the Undo toast. That is a
+  ## safety net over the next few seconds, not a second branch of history —
+  ## nothing here preserves the discarded snapshots.
+  if stateRenderer == nil or rewindHistory == nil: return 0
+  if stateNet != nil or stateLink != nil or stateGbLink != nil: return 0
+  if stateRollback != nil or stateGbRollback != nil: return 0
+  if clipReplaying: return 0
+  if sample < 0 or sample >= scrubIds.len: return 0
+  let snap = rewindHistory.rewind_to_id(scrubIds[sample])
+  if snap.len == 0: return 0
+  try:
+    apply_payload(snap)
+  except CatchableError:
+    return 0
+  # The printer's protocol state is not in the payload, so it is now ahead of
+  # the core it is wired to (see resync's note).
+  if statePrinter != nil: statePrinter.resync()
+  case stateKind
+  of ekGBA:
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                       GBA_W * GBA_H)
+  of ekGB:
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                       GB_W * GB_H)
+  of ekNone: return 0
+  1
 
 # --- 2P local link mode (multiplayer phase 3, web side) ---
 # Two GBA cores running the same ROM, wired by the in-process lockstep link

@@ -2632,6 +2632,145 @@ body.debug-2p .home-tile-link {
   border-color: rgba(255, 80, 80, 0.9);
 }
 
+/* ---- Rewind scrubber ---- */
+/* An ordinary .modal-overlay/.modal, and the box inside it is the Report-a-Bug
+   scrubber's .report-scrub — so everything below is only what a film strip
+   adds to that component. Nothing about the strip's geometry lives in CSS: the
+   canvas sizes itself from its own client rect, which is what lets one drawing
+   path serve a 320pt phone and a desktop panel. */
+
+.modal-rewind {
+  max-width: 460px;
+}
+
+/* .report-preview hardcodes aspect-ratio: 3/2 for the GBA panel. The rewind
+   preview draws whichever core is running, and a GB frame is 10:9, so the
+   ratio has to come from the canvas's own width/height instead of being
+   imposed. Everything else is inherited from .report-preview.
+   Qualified by .modal-rewind on purpose: .report-preview is declared further
+   down this file, so at equal specificity it would win. */
+.modal-rewind .rewind-preview {
+  width: 200px;
+  aspect-ratio: auto;
+  margin-bottom: 10px;
+}
+
+/* The strip's own scroll containment: the drag handler is pointer-based (no
+   native scrolling, so no momentum — the frame under the finger is the point),
+   and these stop a horizontal drag from chaining out to the page behind. */
+.rewind-strip-wrap {
+  position: relative;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  /* Darker than any panel surface: GBA frames are 3:2 and letterbox inside the
+     strip, and the margins have to read as film leader rather than as a pale
+     band framing the pictures. */
+  background: var(--screen-off);
+  overflow: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-y;
+  cursor: ew-resize;
+}
+
+.rewind-strip {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* A hairline the eye can align against, inside a 44px pointer target (the
+   whole strip is draggable, so this only has to be visually findable — but it
+   stays wide enough to grab on its own). `left` is set from JS: the playhead
+   rides the centre while the film can scroll under it, and slides out to the
+   ends when the film has run out of slack (see rwDrawStrip). */
+.rewind-playhead {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 50%;
+  width: 44px;
+  margin-left: -22px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(50% - 1.5px),
+    var(--accent) calc(50% - 1.5px),
+    var(--accent) calc(50% + 1.5px),
+    transparent calc(50% + 1.5px),
+    transparent 100%
+  );
+}
+
+.rewind-playhead::before,
+.rewind-playhead::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 11px;
+  height: 7px;
+  margin-left: -5.5px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.rewind-playhead::before { top: 0; }
+.rewind-playhead::after { bottom: 0; transform: rotate(180deg); }
+
+/* The two ends of the film, under the strip. The selected moment is NOT here —
+   it goes in .report-scrub-head, the slot the bug-report scrubber already uses
+   for exactly that readout. */
+.rewind-scale {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 6px 2px 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+/* The "you can't come back" and "this eats your save" prompts. Same slot, two
+   severities — the save one is the louder of the pair because it is the only
+   one that costs the player something outside this session. */
+.rewind-warn {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+}
+
+.rewind-warn.save-loss {
+  color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.14);
+  border-color: rgba(var(--danger-rgb), 0.45);
+}
+
+/* .states-actions is a right-aligned row; the commit button takes the slack
+   because its label carries the cost ("· discards 2m 14s"). At 320pt that
+   label wraps to two lines rather than being truncated — the duration is the
+   whole point of showing it — so the row is aligned to the block rather than
+   to a single text baseline. */
+.rewind-actions {
+  margin-top: 14px;
+  align-items: stretch;
+}
+
+.rewind-commit {
+  flex: 1;
+  min-height: 44px; /* thumb-sized on a phone, unremarkable on desktop */
+}
+
+.rewind-commit.armed {
+  color: #fff;
+  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
+  border-color: rgba(var(--danger-rgb), 0.6);
+}
+
 /* ---- Report a Bug modal ---- */
 .modal-report {
   max-width: 440px;
@@ -4060,6 +4199,8 @@ body.link-gb .link-pane canvas {
    Exception: in online rollback mode #speed-2x-btn stays visible — its 2x is
    relayed to the peer (RB_SPEED) so both cores fast-forward in lockstep.
    Unbounded #fast-forward has no such sync, so it stays hidden everywhere. */
+body.link-mode #open-rewind-scrub,
+body.rollback-mode #open-rewind-scrub,
 body.link-mode #rewind,
 body.link-mode #speed-2x-btn,
 body.link-mode #fast-forward,
@@ -5255,4 +5396,33 @@ body.clip-replaying #controls {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/*
+ * ==========================================================
+ * Rewind scrubber on a phone
+ * ==========================================================
+ * The modal itself needs no phone variant — it is the same centred panel every
+ * other modal uses, and .modal already handles a 320pt viewport. Only the two
+ * controls that are DRAGGED rather than tapped get bigger, because a 28px
+ * strip and a hairline range thumb are fine with a mouse and not with a thumb.
+ */
+@media (pointer: coarse) {
+  .rewind-strip-wrap {
+    height: 76px;
+  }
+
+  .modal-rewind .report-slider {
+    height: 34px;
+  }
+}
+
+/* Short viewports (a 4"-5" phone, or any phone in landscape): the modal scrolls
+   like every other one, but the preview is the block worth shrinking first —
+   it is the same picture the strip already shows at the playhead, just bigger,
+   so trading its size keeps the confirm row above the fold for longer. */
+@media (max-height: 700px) {
+  .modal-rewind .rewind-preview {
+    width: 140px;
+  }
 }

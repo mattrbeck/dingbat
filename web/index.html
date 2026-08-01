@@ -111,6 +111,10 @@
               <span>Save Last 10s</span>
             </button>
           </div>
+          <button type="button" class="menu-item" id="open-rewind-scrub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v12l-8-6zM11 6v12l-8-6z" fill="currentColor" stroke="none"/><path d="M3 20h18" stroke-width="1.6"/></svg>
+            <span>Rewind to a Moment</span>
+          </button>
           <button type="button" class="menu-item" id="slow-motion" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
             <span>Slow Motion</span>
@@ -461,6 +465,46 @@
             <button type="button" class="button button-sm" id="states-load" disabled>Load</button>
             <button type="button" class="button button-sm button-primary" id="states-save" disabled>Save</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rewind scrubber. An ordinary centred modal, and the scrub box inside
+         it is the Report-a-Bug scrubber's box (.report-scrub / -head / -label /
+         -when / -preview / -slider) rather than a lookalike — it is the same
+         component with a film strip added. The strip is one canvas, not N
+         elements, drawn from thumbnails the rewind ring captured at push
+         time. -->
+    <div id="rewind-modal" class="modal-overlay">
+      <div class="modal modal-rewind" role="dialog" aria-modal="true" aria-labelledby="rewind-modal-title">
+        <button type="button" class="modal-close" id="rewind-scrub-close" aria-label="Close">&times;</button>
+        <h2 id="rewind-modal-title">Rewind</h2>
+        <p class="modal-hint" id="rewind-scrub-hint">Drag the film strip to pick a moment. Everything to the right of the line is discarded.</p>
+        <div class="report-scrub">
+          <div class="report-scrub-head">
+            <span class="report-label">Rewind to</span>
+            <span id="rewind-when" class="report-when" aria-live="polite">now</span>
+          </div>
+          <!-- aria-hidden: both canvases are pictures of the moment named in
+               #rewind-when, and the range input below is the control a screen
+               reader drives. Announcing two unlabelled canvases adds nothing.
+               .rewind-preview only drops .report-preview's hardcoded 3:2 —
+               GB/GBC frames are 10:9 and would otherwise stretch. -->
+          <canvas id="rewind-preview" class="report-preview rewind-preview" width="120" height="80" aria-hidden="true"></canvas>
+          <div class="rewind-strip-wrap" id="rewind-strip-wrap" aria-hidden="true">
+            <canvas id="rewind-strip" class="rewind-strip"></canvas>
+            <div class="rewind-playhead" id="rewind-playhead" aria-hidden="true"></div>
+          </div>
+          <div class="rewind-scale">
+            <span id="rewind-oldest" class="rewind-scale-end">oldest</span>
+            <span class="rewind-scale-end">now</span>
+          </div>
+          <input type="range" id="rewind-slider" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Rewind timeline" />
+        </div>
+        <p id="rewind-warn" class="rewind-warn" role="alert" hidden></p>
+        <div class="states-actions rewind-actions">
+          <button type="button" class="button button-sm" id="rewind-scrub-cancel">Cancel</button>
+          <button type="button" class="button button-sm button-primary rewind-commit" id="rewind-commit">Rewind to this point</button>
         </div>
       </div>
     </div>

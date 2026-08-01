@@ -3389,6 +3389,7 @@ document.addEventListener("keydown", (e) => {
     closeStatesModal();
     closeCheatsModal();
     closeReportModal();
+    closeRewindScrubber();
     closeRomWarnModal();
   }
 });
@@ -3642,13 +3643,17 @@ const stateRejectMessage = (bytes) =>
     : "Not a dingbat save state file";
 
 // Validate + apply a state image; returns true when the core accepted it.
-const applyStateBytes = (bytes) => {
+// keepRewind is for undoing a rewind-scrubber commit and nothing else: that
+// state belongs to the same timeline the ring already holds, so the core keeps
+// its rewind history instead of starting over. Every other load starts a new
+// timeline and drops the ring (see wasm_load_state).
+const applyStateBytes = (bytes, keepRewind = false) => {
   if (typeof Module === "undefined" || !Module._wasm_load_state) return false;
   let ptr = Module._malloc(bytes.length);
   if (!ptr) return false;
   // Build the heap view after _malloc: growth can detach the old buffer
   new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
-  let ok = Module._wasm_load_state(ptr, bytes.length) === 1;
+  let ok = Module._wasm_load_state(ptr, bytes.length, keepRewind ? 1 : 0) === 1;
   Module._free(ptr);
   return ok;
 };
@@ -4104,6 +4109,457 @@ document.getElementById("report-download").addEventListener("click", async () =>
   URL.revokeObjectURL(a.href);
   showToast("Report downloaded");
   closeReportModal();
+});
+
+// --- Rewind scrubber -------------------------------------------------------
+// Hold-to-rewind is fine for a second and useless for a minute; this is the
+// map. Same preview-cheap / reconstruct-once split as the bug-report scrubber
+// above: dragging only ever paints thumbnails the ring captured at push time,
+// and a real emulator state is built exactly once, on commit.
+//
+// Two things separate it from the report scrubber: it is DESTRUCTIVE (the
+// future is gone, hence the two-tap confirm), and it may cost the player their
+// in-game battery save (hence the third tap, when it actually would).
+//
+// It presents as an ordinary modal — same overlay, panel, close button, focus
+// trap and Escape handling as Save States or Report a Bug — and it reuses that
+// scrubber's .report-scrub box outright rather than a private variant of it.
+
+const rewindModal = document.getElementById("rewind-modal");
+const rwStripCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("rewind-strip"));
+// By id, not selector: the test harness's fake DOM resolves getElementById
+// (and a module-scope global that comes back null aborts the whole sandbox,
+// taking every web test with it).
+const rwStripWrap = document.getElementById("rewind-strip-wrap");
+const rwPreview = /** @type {HTMLCanvasElement} */ (document.getElementById("rewind-preview"));
+const rwSlider = /** @type {HTMLInputElement} */ (document.getElementById("rewind-slider"));
+const rwWhen = document.getElementById("rewind-when");
+const rwPlayhead = document.getElementById("rewind-playhead");
+const rwOldest = document.getElementById("rewind-oldest");
+const rwWarn = document.getElementById("rewind-warn");
+const rwCommitBtn = /** @type {HTMLButtonElement} */ (document.getElementById("rewind-commit"));
+const rwHint = document.getElementById("rewind-scrub-hint");
+
+// How many thumbnails to pull out of the ring. Each one is a full BGR555 copy
+// (19 KB on GBA, 26 KB on GB), so this is a real memory number on the phones
+// that run the 16 MB ring; 96 covers a minute and a half at the ring's one
+// thumbnail per second and costs ~2.5 MB transiently.
+const RW_MAX_SAMPLES = 96;
+const RW_GAP = 2;             // px between frames in the strip
+const RW_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
+
+let rwSamples = 0;
+let rwThumbs = null;          // packed BGR555, copied out of wasm at open
+let rwThumbW = 0;
+let rwThumbH = 0;
+let rwStripColor = null;      // offscreen: the whole strip, in colour
+let rwStripDim = null;        // ...and desaturated, for the discarded future
+let rwPitch = 0;              // px per sample along the strip
+let rwIndex = 0;              // playhead position, in samples back from now
+let rwStage = 0;              // 0 pick, 1 confirm discard, 2 confirm save loss
+let rwWasPaused = false;
+let rwUndoBytes = null;
+let rwUndoName = null;
+
+const rwSelected = () => Math.round(rwIndex);
+
+// "2m 14s" / "8.4s". Sub-minute keeps a decimal because at the shallow end a
+// whole second is a big fraction of what is being discarded.
+const rwFmtDuration = (tenths) => {
+  const s = tenths / 10;
+  if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + "s";
+  const m = Math.floor(s / 60);
+  return m + "m " + Math.round(s - m * 60) + "s";
+};
+
+const rwTenthsAt = (sample) =>
+  sample > 0 && Module._wasm_rewind_scrub_seconds_ago
+    ? Module._wasm_rewind_scrub_seconds_ago(sample)
+    : 0;
+
+// Strip geometry. Frames keep their native aspect, but the size is driven by
+// how many should be VISIBLE rather than by the strip's height: a GBA frame is
+// 3:2, so filling a 76px strip makes each one ~110px and a phone shows three —
+// a peephole, and half a minute of history then takes ten swipes to cross.
+//
+// Sizing from the strip's own width instead of a fixed pixel target is what
+// makes one rule serve a 208px strip inside a modal on a 320pt phone and a
+// 400px one on desktop: both show the same amount of history, the phone just
+// shows it smaller. The clamp keeps frames recognisable at the low end and
+// stops them ballooning at the high end.
+const RW_VISIBLE_FRAMES = 5.5;
+const RW_FRAME_W_MIN = 38;
+const RW_FRAME_W_MAX = 72;
+
+const rwFrameSize = (stripW, stripH) => {
+  const maxH = Math.max(8, stripH - 6);
+  let tw = Math.round(
+    Math.min(RW_FRAME_W_MAX, Math.max(RW_FRAME_W_MIN, stripW / RW_VISIBLE_FRAMES))
+  );
+  let th = Math.round((tw * rwThumbH) / rwThumbW);
+  if (th > maxH) {
+    th = maxH;
+    tw = Math.max(12, Math.round((th * rwThumbW) / rwThumbH));
+  }
+  return { tw, th };
+};
+
+// Both strips are built once per open. Painting the discarded future by
+// filtering at draw time would be the obvious approach, but CanvasRenderingContext2D.filter
+// only arrived in Safari 17 and this app still supports iOS 15 — so the
+// desaturated copy is baked here instead, and drawing is two clipped blits.
+const rwBuildStrips = () => {
+  rwStripColor = null;
+  rwStripDim = null;
+  if (!rwThumbs || rwSamples <= 0) return;
+  const wrap = rwStripWrap.getBoundingClientRect();
+  const stripH = Math.max(24, Math.round(wrap.height) - 2);
+  const { tw, th } = rwFrameSize(Math.max(120, Math.round(wrap.width)), stripH);
+  rwPitch = tw + RW_GAP;
+  const total = rwSamples * rwPitch;
+
+  const scratch = document.createElement("canvas");
+  scratch.width = rwThumbW;
+  scratch.height = rwThumbH;
+  const sctx = scratch.getContext("2d");
+
+  rwStripColor = document.createElement("canvas");
+  rwStripColor.width = total;
+  rwStripColor.height = stripH;
+  const cctx = rwStripColor.getContext("2d");
+  const stride = rwThumbW * rwThumbH * 2;
+  const top = Math.round((stripH - th) / 2);
+  for (let s = 0; s < rwSamples; s++) {
+    sctx.putImageData(bgr555ToImageData(rwThumbs, s * stride, rwThumbW, rwThumbH), 0, 0);
+    // Newest on the RIGHT — same direction as the report slider, and the
+    // direction a film strip runs.
+    const x = (rwSamples - 1 - s) * rwPitch + Math.floor(RW_GAP / 2);
+    cctx.drawImage(scratch, 0, 0, rwThumbW, rwThumbH, x, top, tw, th);
+  }
+
+  rwStripDim = document.createElement("canvas");
+  rwStripDim.width = total;
+  rwStripDim.height = stripH;
+  const dctx = rwStripDim.getContext("2d");
+  dctx.drawImage(rwStripColor, 0, 0);
+  const img = dctx.getImageData(0, 0, total, stripH);
+  const px = img.data;
+  for (let i = 0; i < px.length; i += 4) {
+    // Rec.601 luma, then halved: the discarded frames must stay readable as
+    // pictures (you are choosing where to cut, so you need to see what goes)
+    // while never being mistaken for the live side of the playhead.
+    const y = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 9;
+    px[i] = px[i + 1] = px[i + 2] = y;
+  }
+  dctx.putImageData(img, 0, 0);
+};
+
+// Where the cut falls, in strip-bitmap pixels: the TRAILING edge of the
+// selected frame, not its centre. The selected moment is the last one kept, so
+// it belongs entirely on the colour side of the line — a playhead through its
+// middle would show the frame you are keeping as half-discarded.
+const rwCutX = (index) => (rwSamples - index) * rwPitch;
+
+// Where the film sits and where the playhead sits, for the current selection.
+//
+// The playhead rides the middle and the film scrolls under it — until the film
+// runs out of slack at either end, at which point the film stops and the
+// playhead travels the rest of the way. Without that clamp the newest frame
+// can only ever reach the middle, so half the strip is permanently empty at
+// the "now" end — which is where the modal opens, so the control's first
+// impression is of being broken. The cost is that inside those end regions the
+// playhead moves opposite the finger for a few dozen pixels; the film staying
+// put is the stronger cue, and it is what a video timeline does.
+const rwPlacement = (cssW) => {
+  const filmW = rwSamples * rwPitch;
+  const x = rwCutX(rwIndex);
+  if (filmW <= cssW) {
+    const off = (cssW - filmW) / 2; // short film: centred, playhead moves
+    return { off, head: off + x };
+  }
+  const off = Math.min(0, Math.max(cssW - filmW, cssW / 2 - x));
+  return { off, head: x + off };
+};
+
+const rwDrawStrip = () => {
+  const rect = rwStripCanvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(rect.width));
+  const cssH = Math.max(1, Math.round(rect.height));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (rwStripCanvas.width !== cssW * dpr || rwStripCanvas.height !== cssH * dpr) {
+    rwStripCanvas.width = cssW * dpr;
+    rwStripCanvas.height = cssH * dpr;
+  }
+  const ctx = rwStripCanvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  if (!rwStripColor) return;
+  const { off, head } = rwPlacement(cssW);
+  // The cut can legitimately land on the film's outer edge (nothing discarded
+  // at "now"), where the marker's own width would put half of it outside the
+  // clipped wrapper and leave it looking like a border. Nudge it just inside.
+  rwPlayhead.style.left = Math.min(Math.max(head, 2), cssW - 2) + "px";
+  // Past and present in colour up to the playhead; the discarded future
+  // desaturated beyond it. The boundary is the playhead by construction, so
+  // the doomed region grows as the strip is dragged back without anything
+  // having to track how much of it there is.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, head, cssH);
+  ctx.clip();
+  ctx.drawImage(rwStripColor, off, 0);
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(head, 0, cssW - head, cssH);
+  ctx.clip();
+  ctx.drawImage(rwStripDim, off, 0);
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(head, 0, cssW - head, cssH);
+  ctx.restore();
+};
+
+const rwDrawPreview = () => {
+  if (!rwThumbs || rwSamples <= 0) return;
+  const stride = rwThumbW * rwThumbH * 2;
+  rwPreview.width = rwThumbW;
+  rwPreview.height = rwThumbH;
+  rwPreview
+    .getContext("2d")
+    .putImageData(bgr555ToImageData(rwThumbs, rwSelected() * stride, rwThumbW, rwThumbH), 0, 0);
+};
+
+// Stages 1 and 2 are the two confirmations, each stated in terms of what it
+// costs. Any movement of the playhead disarms back to stage 0 — the confirm
+// has to be about the moment the player is looking at.
+const rwRefreshActions = () => {
+  const sel = rwSelected();
+  const cost = rwFmtDuration(rwTenthsAt(sel));
+  rwCommitBtn.classList.toggle("armed", rwStage > 0);
+  rwWarn.classList.toggle("save-loss", rwStage === 2);
+  if (sel === 0) {
+    rwCommitBtn.disabled = true;
+    rwCommitBtn.textContent = "Rewind to this point";
+    rwWarn.hidden = true;
+    return;
+  }
+  rwCommitBtn.disabled = false;
+  if (rwStage === 0) {
+    rwCommitBtn.textContent = "Rewind to this point · discards " + cost;
+    rwWarn.hidden = true;
+  } else if (rwStage === 1) {
+    rwCommitBtn.textContent = "Yes, discard " + cost;
+    rwWarn.hidden = false;
+    rwWarn.textContent =
+      "The last " + cost + " will be thrown away. You will not be able to move forward again.";
+  } else {
+    rwCommitBtn.textContent = "Rewind and lose that save";
+    rwWarn.hidden = false;
+    rwWarn.textContent =
+      "This also rolls your in-game save back to how it was " + cost +
+      " ago. Anything the game has saved to the cartridge since then will be gone.";
+  }
+};
+
+const rwRefresh = () => {
+  const sel = rwSelected();
+  rwWhen.textContent = sel === 0 ? "now" : rwFmtDuration(rwTenthsAt(sel)) + " ago";
+  if (rwSlider.value !== String(rwSamples - 1 - sel)) {
+    rwSlider.value = String(rwSamples - 1 - sel);
+  }
+  rwDrawStrip();
+  rwDrawPreview();
+  rwRefreshActions();
+};
+
+// Every path that moves the playhead goes through here, so disarming the
+// confirm can't be forgotten by one of them.
+const rwSetIndex = (v, snap) => {
+  const clamped = Math.min(Math.max(v, 0), Math.max(0, rwSamples - 1));
+  const next = snap ? Math.round(clamped) : clamped;
+  if (next === rwIndex) return;
+  if (Math.round(next) !== rwSelected()) rwStage = 0;
+  rwIndex = next;
+  rwRefresh();
+};
+
+// Pointer-driven, not a scroll container: native horizontal scrolling on iOS
+// carries momentum, and a scrubber that keeps gliding after the finger lifts
+// selects a frame the player never chose.
+{
+  let dragging = false;
+  let lastX = 0;
+  let travel = 0;
+  rwStripWrap.addEventListener("pointerdown", (e) => {
+    if (rwSamples <= 0) return;
+    e.preventDefault();
+    dragging = true;
+    travel = 0;
+    lastX = e.clientX;
+    rwStripWrap.setPointerCapture(e.pointerId);
+  });
+  rwStripWrap.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    lastX = e.clientX;
+    travel += Math.abs(dx);
+    // Dragging the film to the RIGHT pulls older frames under the playhead,
+    // which is the same gesture as physically winding a reel back.
+    rwSetIndex(rwIndex + dx / rwPitch, false);
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (rwStripWrap.hasPointerCapture?.(e.pointerId)) {
+      rwStripWrap.releasePointerCapture(e.pointerId);
+    }
+    if (travel <= RW_TAP_SLOP && e.type === "pointerup") {
+      // A tap selects the frame that is literally under the finger — resolved
+      // through the same placement the draw used, so it stays correct in the
+      // clamped region where the film is not centred on the playhead.
+      const rect = rwStripWrap.getBoundingClientRect();
+      const { off } = rwPlacement(rect.width);
+      const filmX = e.clientX - rect.left - off;
+      rwSetIndex(rwSamples - 1 - Math.floor(filmX / rwPitch), true);
+    } else {
+      rwSetIndex(rwIndex, true); // settle on a whole frame
+    }
+    rwRefresh();
+  };
+  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+    rwStripWrap.addEventListener(ev, endDrag);
+  }
+}
+
+// The coarse range input is the keyboard and screen-reader path onto the same
+// state; it is not a second source of truth.
+rwSlider.addEventListener("input", () => {
+  rwSetIndex(rwSamples - 1 - Number(rwSlider.value), true);
+});
+
+const openRewindScrubber = () => {
+  menuDropdown.hidden = true;
+  if (!currentOriginalName || !speedControlsOk()) return;
+  if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
+  rwWasPaused = paused;
+  // Freeze the core: the strip on screen must stay the ring's contents while
+  // it is being read, and a running game would push new snapshots (and evict
+  // old ones) out from under the playhead.
+  paused = true;
+  rwSamples = 0;
+  rwThumbs = null;
+  rwStripColor = null;
+  rwStripDim = null;
+  rwIndex = 0;
+  rwStage = 0;
+  rwSamples = Module._wasm_rewind_scrub_generate(RW_MAX_SAMPLES);
+  if (rwSamples > 0) {
+    rwThumbW = Module._wasm_rewind_scrub_thumb_w();
+    rwThumbH = Module._wasm_rewind_scrub_thumb_h();
+    const ptr = Module._wasm_rewind_scrub_thumbs_ptr();
+    const len = rwSamples * rwThumbW * rwThumbH * 2;
+    rwThumbs = new Uint8Array(Module.memory.buffer, ptr, len).slice();
+  }
+  rwSlider.max = String(Math.max(0, rwSamples - 1));
+  rwSlider.value = String(Math.max(0, rwSamples - 1));
+  rwHint.textContent =
+    rwSamples > 1
+      ? "Drag the strip, or the bar for longer jumps. Everything right of the line is discarded."
+      : "No rewind history yet — it builds up as you play. Enable Rewind in Settings if it is off.";
+  rwOldest.textContent = rwSamples > 1 ? rwFmtDuration(rwTenthsAt(rwSamples - 1)) + " ago" : "";
+  rewindModal.classList.add("open");
+  trapFocus(rewindModal);
+  // After .open, so the strip has a laid-out height to size frames against.
+  rwBuildStrips();
+  rwRefresh();
+};
+
+const closeRewindScrubber = () => {
+  // Guard: the global Escape handler calls every closer blindly and this one
+  // has side effects — restoring `paused` from a stale rwWasPaused would
+  // silently unpause a game the user paused later.
+  if (!rewindModal.classList.contains("open")) return;
+  rewindModal.classList.remove("open");
+  releaseFocus(rewindModal);
+  rwThumbs = null;
+  rwStripColor = null;
+  rwStripDim = null;
+  rwStage = 0;
+  paused = rwWasPaused;
+};
+
+const rwUndoCommit = () => {
+  if (!rwUndoBytes || rwUndoName !== currentOriginalName) return;
+  // keepRewind: this is the same timeline the ring still holds — everything in
+  // it really did happen before this state. There is a gap where the committed
+  // window used to be (those snapshots are gone for good), but the frames are
+  // the player's own past, not another save's.
+  if (applyStateBytes(rwUndoBytes, true)) {
+    rwUndoBytes = null;
+    showToast("Back to where you were");
+  }
+};
+
+const rwCommit = () => {
+  const sel = rwSelected();
+  if (sel <= 0) return;
+  const cost = rwFmtDuration(rwTenthsAt(sel));
+  const undo = captureStateBytes(); // where the game is NOW, pre-commit
+  if (Module._wasm_rewind_commit(sel) !== 1) {
+    showToast("That moment is no longer in the rewind history");
+    closeRewindScrubber();
+    return;
+  }
+  closeRewindScrubber();
+  if (undo) {
+    rwUndoBytes = undo;
+    rwUndoName = currentOriginalName;
+    showActionToast("Rewound " + cost, "Undo", rwUndoCommit, 8000);
+  } else {
+    showToast("Rewound " + cost);
+  }
+};
+
+// The commit button IS the confirmation, switching in place rather than
+// stacking a second dialog on top of this one. Stage 2 only ever appears when
+// the rewind really would cost a save — asking every time is how a warning
+// stops being read.
+rwCommitBtn.addEventListener("click", () => {
+  const sel = rwSelected();
+  if (sel <= 0) return;
+  if (rwStage === 0) {
+    rwStage = 1;
+    rwRefreshActions();
+    return;
+  }
+  if (rwStage === 1) {
+    const differs =
+      Module._wasm_rewind_scrub_save_differs &&
+      Module._wasm_rewind_scrub_save_differs(sel) === 1;
+    if (differs) {
+      rwStage = 2;
+      rwRefreshActions();
+      return;
+    }
+  }
+  rwCommit();
+});
+
+document.getElementById("rewind-scrub-close").addEventListener("click", closeRewindScrubber);
+document.getElementById("rewind-scrub-cancel").addEventListener("click", closeRewindScrubber);
+rewindModal.addEventListener("click", (e) => {
+  if (e.target === rewindModal) closeRewindScrubber();
+});
+document.getElementById("open-rewind-scrub").addEventListener("click", openRewindScrubber);
+
+// The strip bitmaps are rasterised for one strip height and one frame size,
+// both of which change across the phone/desktop breakpoint — a rotation with
+// the modal open would otherwise scale a stale bitmap.
+window.addEventListener("resize", () => {
+  if (!rewindModal.classList.contains("open")) return;
+  rwBuildStrips();
+  rwRefresh();
 });
 
 document.getElementById("export-state").addEventListener("click", () => {
@@ -5327,6 +5783,11 @@ const loadRom = async (romName, originalName, opts = {}) => {
   }
   currentRomName = romName;
   currentOriginalName = originalName || romName;
+  // Before `paused` is reset below: a scrubber left open across a ROM switch
+  // would scrub the old game's strip against the new game's core, and closing
+  // it restores the paused state it captured — which must land on the OLD
+  // session's value and then be overwritten, not the other way round.
+  closeRewindScrubber();
   paused = false;
   document.body.classList.remove("paused");
   fastForward = false;
@@ -5354,6 +5815,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
   stateUndoBytes = null;  // undo buffer belongs to the previous game
+  rwUndoBytes = null;     // ...as does the rewind-commit undo
   benchReport("load");
   updateCanvasScaling();
   // async: "Resume last session?" toast if one exists (the reset button
@@ -6049,6 +6511,12 @@ const setRewindHeld = (on) => {
   rewindHeld = on;
   rewindButton.classList.toggle("active", on);
 };
+
+// This button does one thing: hold it, history runs backward. The scrubber is
+// reached from the menu ("Rewind to a Moment"), not from a gesture layered on
+// top of the hold — a press that has to be classified before it can act either
+// delays the rewind or commits to a few seconds of it before the player has
+// said what they wanted.
 rewindButton.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   setRewindHeld(true);

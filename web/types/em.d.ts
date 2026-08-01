@@ -54,7 +54,7 @@ interface EmscriptenModule {
   _wasm_set_turbo?(on: number): void;
   _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
-  _wasm_load_state?(data: number, len: number): number;
+  _wasm_load_state?(data: number, len: number, keepRewind: number): number;
   _benchFrames?(n: number): void;
   _isStopped?(): number;
   _wasm_rumble?(): number;
@@ -85,6 +85,8 @@ interface EmscriptenModule {
   _wasm_rewind_scrub_thumbs_ptr?(): number;
   _wasm_rewind_scrub_seconds_ago?(sample: number): number;
   _wasm_rewind_scrub_state_size?(sample: number): number;
+  _wasm_rewind_scrub_save_differs?(sample: number): number;
+  _wasm_rewind_commit?(sample: number): number;
   _link_exit?(): void;
   _link_init?(rom1_path: number, rom2_path: number): number;
   _link_tick?(): void;

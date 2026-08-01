@@ -336,6 +336,37 @@ proc snapshot_by_id*(rw: Rewind; id: int): string =
   let index = rw.index_of_id(id)
   if index < 0: "" else: rw.snapshot_at(index)
 
+proc rewind_to_id*(rw: Rewind; id: int): string =
+  ## Commit to a moment: return `id`'s payload and DISCARD every snapshot
+  ## newer than it, so the ring's newest becomes `id`. That is what makes the
+  ## scrubber's "you cannot move forward again" true at the ring level too —
+  ## after this, hold-to-rewind continues backward from the chosen moment and
+  ## the next push deltas against it, instead of both still reaching into a
+  ## future the player just threw away.
+  ##
+  ## Empty string (and no mutation) when the ID is no longer retained.
+  ##
+  ## Equivalent to popping until latest_id == id, but without paying for it:
+  ## pop() inflates one delta per step, so committing to the far end of a full
+  ## ring would cost thousands of inflations. The payload comes from
+  ## snapshot_by_id (keyframe-anchored, bounded by key_every) and the deltas in
+  ## between are dropped unread — nothing needs to look at what it discards.
+  let payload = rw.snapshot_by_id(id)
+  if payload.len == 0: return ""
+  # Deltas are keyed by the snapshot they RECONSTRUCT, so everything with an
+  # ID >= the target reconstructs a moment at or after it: `id`'s own delta is
+  # redundant once its payload is `latest`, and the newer ones are the future.
+  while rw.deltas.len > 0 and rw.deltas.peekLast.id >= id:
+    rw.total -= rw.deltas.popLast().packed.len
+  rw.latest = payload
+  rw.latest_id = id
+  rw.drop_stale_sides()
+  # Same re-anchoring as pop(): the discarded snapshots took their keyframe
+  # and thumbnail countdowns with them.
+  rw.key_due = 0
+  rw.thumb_due = 0
+  payload
+
 # --- Thumbnail strip (captured at push time, not rebuilt) ----------------
 # Constant cost per picture, independent of how deep in history it sits —
 # which is the whole point: rendering the strip used to mean walking the

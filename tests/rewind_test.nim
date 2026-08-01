@@ -329,6 +329,88 @@ block:
     if rw.index_of_id(rw.thumb_id(t)) < 0: seam_thumbs = false
   check "no orphaned thumbnails across the seam", seam_thumbs
 
+# --- 8. rewind_to_id: committing to a moment discards the future ----------
+
+proc built(n: int; seed: uint32): Rewind =
+  ## A ring with `n` pushes on it, keyframed densely enough that a commit has
+  ## to get the keyframe-anchored path right rather than falling back to a
+  ## walk from `latest`.
+  result = new_rewind(cap = 64 * 1024 * 1024, interval = 10, key_every = 9)
+  var c = new_core(seed)
+  for _ in 0 ..< n:
+    c.advance()
+    result.push(c.payload(), proc(): RewindThumb = thumb_of(c))
+
+echo "== rewind_to_id (scrubber commit) =="
+block:
+  # The scrubber's commit has to leave the ring exactly as though the player
+  # had held the rewind button all the way to the chosen moment — same
+  # payload, same remaining history, same ID at the head — but without paying
+  # one inflation per step. Popping is the reference.
+  var bad_payload = -1
+  var bad_head = -1
+  var bad_depth = -1
+  var bad_chain = -1
+  for depth in 0 ..< 60:
+    let fast = built(60, 0x0BAD_F00D'u32)
+    let slow = built(60, 0x0BAD_F00D'u32)
+    let target = fast.id_at_index(depth)
+    let got = fast.rewind_to_id(target)
+    # Reference: pop until the head is the target. pop() returns the snapshot
+    # it is leaving, so the payload we want is the one the ring holds after.
+    for _ in 0 ..< depth: discard slow.pop()
+    if got != slow.snapshot_at(0) and bad_payload < 0: bad_payload = depth
+    if fast.newest_id != slow.newest_id and bad_head < 0: bad_head = depth
+    if fast.len != slow.len and bad_depth < 0: bad_depth = depth
+    if toSeq(fast.snapshots_newest_first()) != toSeq(slow.snapshots_newest_first()) and
+       bad_chain < 0: bad_chain = depth
+  check "commit payload matches popping there", bad_payload < 0
+  check "commit leaves the same head ID as popping", bad_head < 0
+  check "commit leaves the same depth as popping", bad_depth < 0
+  check "commit leaves the same chain as popping", bad_chain < 0
+
+block:
+  let rw = built(60, 0x2468_ACE0'u32)
+  let before_len = rw.len
+  let before_id = rw.newest_id
+  check "commit to an unknown ID is empty", rw.rewind_to_id(9999).len == 0
+  check "commit to an unknown ID mutates nothing",
+        rw.len == before_len and rw.newest_id == before_id
+  check "commit to the head is a no-op", rw.rewind_to_id(before_id).len > 0
+  check "commit to the head leaves the ring alone",
+        rw.len == before_len and rw.newest_id == before_id
+
+block:
+  # After a commit the ring must still behave like a ring: the discarded
+  # snapshots' thumbnails and keyframes go with them, the ID/index maps stay
+  # consistent, and pushing again works across the new seam.
+  let rw = built(80, 0x7788_99AA'u32)
+  let target = rw.id_at_index(25)
+  let dropped = toSeq(0 ..< 25).mapIt(rw.id_at_index(it))
+  discard rw.rewind_to_id(target)
+  check "commit drops the future's IDs", dropped.allIt(rw.snapshot_by_id(it).len == 0)
+  var future_thumbs = true
+  for t in 0 ..< rw.thumb_count:
+    if rw.thumb_id(t) > rw.newest_id: future_thumbs = false
+  check "commit drops thumbnails from the discarded future", future_thumbs
+  var orphans = true
+  for t in 0 ..< rw.thumb_count:
+    if rw.index_of_id(rw.thumb_id(t)) < 0: orphans = false
+  check "commit leaves no orphaned thumbnails", orphans
+  verify_all(rw, "after commit")
+  # mem_used must have come down with the dropped deltas, not just the head.
+  let after = rw.mem_breakdown
+  check "commit releases the discarded deltas' bytes",
+        after.deltas + after.latest + after.thumbs + after.keyframes == rw.mem_used
+
+  var c = new_core(0x7788_99AA'u32)
+  for _ in 0 ..< 30:
+    c.advance()
+    rw.push(c.payload(), proc(): RewindThumb = thumb_of(c))
+  check "IDs are not recycled after a commit", rw.newest_id > target
+  check "committed-away IDs stay gone", dropped.allIt(rw.snapshot_by_id(it).len == 0)
+  verify_all(rw, "after commit + resume")
+
 echo ""
 if failures == 0:
   echo "ALL REWIND TESTS PASSED"
