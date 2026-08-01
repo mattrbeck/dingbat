@@ -1280,13 +1280,6 @@ body.has-game #save-sep {
   height: 26px;
 }
 
-/* Splits the strip 2 + 2: the save pair, then the playback pair. Grouping the
-   two save actions together is deliberate — they are a pair and hiding that
-   would cost more than it buys — so the separation that matters is between
-   the pairs, not inside one. */
-.menu-quickrow .quickrow-gap {
-  margin-left: 6px;
-}
 
 .menu-quickrow .menu-item:hover {
   background: var(--surface-3);
@@ -3424,7 +3417,11 @@ body.debug-2p .home-tile-link {
 }
 
 /* One continuous run of inline text for the float to sit in. As a block it
-   would generate its own line boxes and the float would clear it entirely. */
+   would generate its own line boxes and the float would clear it entirely.
+   The control is also placed BEFORE this text in the markup: a float only
+   displaces content that follows it, so a control written after the
+   description can never rise into it and drops onto its own line instead —
+   which is the wasted row this whole treatment exists to remove. */
 .row-flow > .modal-toggle-sub {
   display: inline;
   margin-top: 0;

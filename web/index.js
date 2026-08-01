@@ -8503,11 +8503,6 @@ const initStorage = async () => {
   await loadHideTouchOnGamepadFromStorage();
   await loadControlStyleFromStorage();
   await loadRunaheadFromStorage();
-  // Must run before anything can print: storePrint writes the whole
-  // printerPhotos array back over PRINTER_PHOTOS_KEY, so an array that
-  // was never loaded is a one-element array that destroys every photo
-  // from every previous session.
-  await loadPrinterPhotos();
   await loadAudioSettings();
   await loadColorCorrect();
   await loadSystemSettings();
@@ -8517,7 +8512,8 @@ const initStorage = async () => {
   // empty: the gallery showed "Nothing printed yet" over a full store, and the
   // next print dbPut a one-element array back over every earlier photo. It is
   // load-bearing now for a second reason — the Capture ▸ Printed Photos row
-  // and the new-photo dots are both driven off the photo count.
+  // and the new-photo dots are both driven off the photo count. It has to run
+  // before anything can print, for the same reason it exists at all.
   await loadPrinterPhotos();
   await loadSyncState();
   await loadRomsSort();
