@@ -182,18 +182,26 @@
       <!-- Cartridge-specific top-bar actions. Only ever ONE of these shows:
            no cart is both a tilt cart and a camera cart, so they share a
            single slot. Like #rb-disconnect they carry icon + wording on wide
-           viewports and collapse to the bare icon on phones. -->
-      <!-- Re-baseline the device-motion tilt neutral (tilt carts only) -->
+           viewports and collapse to the bare icon on phones.
+           Each has TWO jobs, swapped by the .needs-enable class: while the
+           sensor it drives is not switched on it is the way IN (the load-time
+           offer toast is easy to miss and impossible to summon back), and once
+           frames are flowing it becomes the ongoing control. Two icons ride in
+           each button because a phone shows nothing but the glyph — the label
+           cannot be the only thing that changes. -->
+      <!-- Tilt carts: turns on device-motion tilt, then re-baselines neutral -->
       <button type="button" class="icon-btn cart-btn" id="tilt-recenter" hidden
               title="Recenter tilt" aria-label="Recenter tilt">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2.5v3.5M12 18v3.5M2.5 12h3.5M18 12h3.5"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>
-        <span class="cart-btn-label">Recenter</span>
+        <svg class="cart-ico-on" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2.5v3.5M12 18v3.5M2.5 12h3.5M18 12h3.5"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>
+        <svg class="cart-ico-enable" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2" transform="rotate(20 12 12)"/><path d="M3 8.5a10 10 0 0 0-1 3M21 8.5a10 10 0 0 1 1 3"/></svg>
+        <span class="cart-btn-label" id="tilt-recenter-label">Recenter</span>
       </button>
-      <!-- Switch between cameras (camera carts, when >1 camera exists) -->
+      <!-- Camera carts: turns on the real webcam, then switches between them -->
       <button type="button" class="icon-btn cart-btn" id="cam-flip" hidden
               title="Switch camera" aria-label="Switch camera">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12a7 7 0 0 1 7-7 7 7 0 0 1 6.06 3.5"/><path d="M18.1 4.9v3.6h-3.6"/><path d="M19 12a7 7 0 0 1-7 7 7 7 0 0 1-6.06-3.5"/><path d="M5.9 19.1v-3.6h3.6"/></svg>
-        <span class="cart-btn-label">Camera</span>
+        <svg class="cart-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12a7 7 0 0 1 7-7 7 7 0 0 1 6.06 3.5"/><path d="M18.1 4.9v3.6h-3.6"/><path d="M19 12a7 7 0 0 1-7 7 7 7 0 0 1-6.06-3.5"/><path d="M5.9 19.1v-3.6h3.6"/></svg>
+        <svg class="cart-ico-enable" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5h3.5L8.5 6h7l2 2.5H21v10H3z"/><circle cx="12" cy="13" r="3.2"/></svg>
+        <span class="cart-btn-label" id="cam-flip-label">Camera</span>
       </button>
 
       <div id="topbar-spacer"></div>

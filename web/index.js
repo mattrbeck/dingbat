@@ -6544,6 +6544,11 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
+  // No cart, no sensor: drop the camera rather than leaving the recording
+  // light on — and the button with it, since "Enable camera" over the home
+  // screen would enable it for nothing.
+  stopWebcam();
+  camNoticeShown = null;
   homePausedCard.hidden = true;
   refreshHomeRecent();
   updateCanvasScaling();
@@ -6704,7 +6709,7 @@ const detectTiltCart = () => {
   tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
   kbTiltDirs = [false, false, false, false];
   tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS;
-  tiltRecenterBtn.hidden = !(tiltActive && tiltOrientationOn);
+  tiltCartBtnUpdate();
   if (tiltActive && !maybeOfferOrientationTilt()) {
     showToast("Tilt cart detected — D-pad or stick tilts the game");
   }
@@ -6876,7 +6881,9 @@ const enableOrientationTilt = async () => {
   if (tiltOrientationOn) return;
   try {
     // iOS 13+: permission gate (non-standard static, hence the cast), must
-    // be called from a user gesture — the action toast's tap provides it
+    // be called from a user gesture — the action toast's tap and the top-bar
+    // button's click both provide it, which is why neither route awaits
+    // anything before reaching this line.
     const doe = /** @type {*} */ (
       typeof DeviceOrientationEvent !== "undefined" ? DeviceOrientationEvent : null);
     if (doe && typeof doe.requestPermission === "function") {
@@ -6897,15 +6904,51 @@ const enableOrientationTilt = async () => {
     window.addEventListener("devicemotion", motionJoltHandler);
     tiltOrientationOn = true;
     tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // re-baseline at the moment of enabling
-    tiltRecenterBtn.hidden = false;
     showToast("Device tilt enabled — hold your comfortable angle now");
-  } catch {}
+  } catch {
+  } finally {
+    // Granted or refused, the button has to re-read the world: on success it
+    // becomes Recenter, on refusal it stays the way back in.
+    tiltCartBtnUpdate();
+  }
+};
+
+// Device tilt is only offered where it could possibly work: a phone or tablet
+// with an orientation sensor. On a desktop the D-pad and stick are the whole
+// story, and an "Enable tilt" button there would be a dead end.
+const tiltCanOrient = () =>
+  typeof DeviceOrientationEvent !== "undefined" &&
+  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+
+// The top-bar cart button, in its two states. Before the orientation listener
+// is attached it is the way IN — a permanent affordance, because the load-time
+// offer toast is easy to miss and there is no way to ask for it again. Once
+// tilt is running it is Recenter, which is what a player actually needs mid-
+// game. "Not yet on" is the real listener state, never a guess: nothing sets
+// tiltOrientationOn but the branch that succeeded in attaching the handlers.
+const tiltCartBtnUpdate = () => {
+  if (!tiltActive) {
+    tiltRecenterBtn.hidden = true;
+    return;
+  }
+  const needsEnable = !tiltOrientationOn;
+  tiltRecenterBtn.classList.toggle("needs-enable", needsEnable);
+  const label = needsEnable ? "Enable tilt" : "Recenter tilt";
+  tiltRecenterBtn.title = label;
+  tiltRecenterBtn.setAttribute("aria-label", label);
+  tiltRecenterLabel.textContent = needsEnable ? "Enable tilt" : "Recenter";
+  tiltRecenterBtn.hidden = needsEnable && !tiltCanOrient();
 };
 
 // Recenter: whatever angle the phone is at RIGHT NOW becomes neutral —
 // tilt games are unplayable after shifting in a chair without this.
 const tiltRecenterBtn = document.getElementById("tilt-recenter");
+const tiltRecenterLabel = document.getElementById("tilt-recenter-label");
 tiltRecenterBtn.addEventListener("click", () => {
+  // Straight off the click with nothing awaited first: iOS grants the motion
+  // permission only from inside a real user gesture, and a single `await`
+  // ahead of requestPermission() is enough to lose it.
+  if (!tiltOrientationOn) { enableOrientationTilt(); return; }
   tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // next orientation reading re-baselines
   tiltJoltX = tiltJoltY = 0;
   showToast("Tilt recentered");
@@ -6913,10 +6956,10 @@ tiltRecenterBtn.addEventListener("click", () => {
 
 // On touch devices a tilt cart offers real device-tilt via a tappable toast
 // (the permission request needs a user gesture on iOS). Elsewhere (or if
-// dismissed) the D-pad/stick fallbacks just work with no setup.
+// dismissed) the D-pad/stick fallbacks just work with no setup. The toast is
+// now only a nudge — the top-bar button above is the durable route in.
 const maybeOfferOrientationTilt = () => {
-  if (tiltOrientationOn || typeof DeviceOrientationEvent === "undefined") return false;
-  if (!("ontouchstart" in window) && navigator.maxTouchPoints === 0) return false;
+  if (tiltOrientationOn || !tiltCanOrient()) return false;
   showActionToast("Play by tilting your device?", "Enable tilt", enableOrientationTilt);
   return true;
 };
@@ -7049,14 +7092,182 @@ printsModal.addEventListener("click", (e) => {
 // copied into the wasm-side buffer the sensor proc reads. The emulated
 // exposure/dither pipeline then Game-Boy-ifies it authentically. Requires a
 // secure context (HTTPS), same as tilt.
+const CAM_W = 128, CAM_H = 120;
 var camStream = null;
 var camVideo = null;
 var camTimer = null;
-var camFacing = "user";   // phones: facingMode toggled by the flip chip
+var camFacing = "user";   // phones: facingMode toggled by the flip button
 var camDeviceIdx = -1;    // desktop: index into camDevices, -1 = default
 var camDevices = [];      // videoinput deviceIds (labels arrive post-grant)
 var camMirror = true;     // selfie-mirror front/desktop cams; not the back one
+var camPending = false;   // a getUserMedia request is in flight
+var camDenied = false;    // the browser refused: NotAllowedError, or the
+                          // Permissions API reporting "denied" outright
+var camMissing = false;   // asked, and there is no camera to open
+var camEnded = false;     // had live frames, and the track died on its own
+var camPermProbed = false;   // the Permissions API has been asked (once)
+var camNoticeShown = null;   // which notice the sensor is currently carrying
 const camFlipBtn = document.getElementById("cam-flip");
+const camFlipLabel = document.getElementById("cam-flip-label");
+
+// "Do we have usable frames right now?" A non-null camStream is not the same
+// thing: iOS ends the tracks whenever the page is backgrounded or another app
+// takes the camera, and an ended track's <video> goes black rather than
+// throwing — so the pump keeps copying black into the sensor. Every decision
+// below keys off live tracks, never off camStream being set.
+const camLive = () =>
+  !!camStream && camStream.getVideoTracks().some((t) => t.readyState === "live");
+
+const camCartLoaded = () =>
+  typeof Module !== "undefined" && !!Module._wasm_cart_has_camera &&
+  Module._wasm_cart_has_camera() === 1;
+
+const camUsable = () => !!navigator.mediaDevices?.getUserMedia;
+
+// The top-bar button has two jobs. Before a stream is attached it is the way
+// IN — a permanent affordance, because the one-shot offer toast is easy to
+// miss and impossible to summon back. Once frames are flowing it becomes the
+// front/back switch, shown only when there is more than one camera to switch
+// between.
+const camCartBtnUpdate = () => {
+  if (!camCartLoaded()) {
+    camFlipBtn.hidden = true;
+    return;
+  }
+  const needsEnable = !camLive();
+  camFlipBtn.classList.toggle("needs-enable", needsEnable);
+  const label = needsEnable ? "Enable camera" : "Switch camera";
+  camFlipBtn.title = label;
+  camFlipBtn.setAttribute("aria-label", label);
+  camFlipLabel.textContent = needsEnable ? "Enable camera" : "Camera";
+  // Nothing to enable without getUserMedia (insecure origin, ancient browser),
+  // and nothing to switch to with a single camera.
+  camFlipBtn.hidden = needsEnable ? !camUsable() : camDevices.length < 2;
+};
+
+// --- What the emulated viewfinder says when there is no camera ---
+// With no sensor attached the cart falls back to camera.nim's synthetic scene
+// (ramp + checkerboard + disc), which players read as a badly corrupted
+// picture — one reported it as exactly that. The sensor is only a 128x120
+// 8-bit grey buffer, so a rendered TEXT frame goes in through the same door
+// real webcam frames do, and the viewfinder can say what is actually wrong.
+//
+// This survives the cart far better than it sounds like it should. The
+// MAC-GBD's 2-D edge enhancement multiplies a black/white boundary by up to
+// 5x before the 4x4 dither matrix quantises it, so large high-contrast type
+// comes out with hard, clean edges — verified in-game against gbcamera.gb,
+// including a five-line sentence. Small type would still turn to mush, which
+// is why each line is auto-fitted to the full 128px width rather than set at
+// a fixed size.
+const CAM_NOTICES = {
+  // Never asked. The button this points at is the thing the player missed.
+  prompt: () => [touchDevice ? "Tap" : "Click", "Enable camera", "in the top bar"],
+  // getUserMedia rejected with NotAllowedError, or the Permissions API said
+  // "denied" before we ever asked.
+  blocked: () => ["Camera is", "currently", "restricted", "by the", "browser."],
+  // Asked and granted, but the hardware isn't there (NotFoundError).
+  missing: () => ["No camera", "found on", "this device"],
+  // Had live frames, then the track ended by itself: iOS backgrounding the
+  // tab, another app taking the camera, a USB webcam unplugged.
+  ended: () => ["Camera", "stopped.", touchDevice ? "Tap" : "Click", "Enable camera"],
+  // No getUserMedia at all — a plain-http origin is the common case.
+  insecure: () => ["Camera needs", "a secure", "connection"],
+};
+
+// Which notice belongs in the viewfinder right now, or null when real frames
+// are flowing. Ordered most-certain first; every branch is a fact we observed
+// rather than an inference.
+const camNoticeFor = () => {
+  if (camLive()) return null;
+  if (!camUsable()) return "insecure";
+  if (camDenied) return "blocked";
+  if (camMissing) return "missing";
+  if (camEnded) return "ended";
+  return "prompt";
+};
+
+// Lay the lines out across the 112 sensor rows the MAC-GBD actually keeps
+// (it discards CAM_SENSOR_EXTRA/2 = 4 rows at each end, so rows 0-3 and
+// 116-119 are never seen), each line scaled down only if it would overflow
+// 128px. White on black: the cart's edge filter keys off boundaries, and the
+// heaviest weight available gives it the most to bite on.
+const camDrawNotice = (ctx, lines) => {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, CAM_W, CAM_H);
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const top = 4, viewH = 112, slot = viewH / lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    let px = Math.min(slot * 0.8, 44);
+    ctx.font = `900 ${px}px sans-serif`;
+    const w = ctx.measureText(lines[i]).width;
+    if (w > CAM_W - 4) {
+      px = (px * (CAM_W - 4)) / w;
+      ctx.font = `900 ${px}px sans-serif`;
+    }
+    ctx.fillText(lines[i], CAM_W / 2, top + slot * (i + 0.5));
+  }
+};
+
+// Push one still frame into the sensor. Nothing repaints it: the cart re-reads
+// the buffer on every capture, so one write holds until the camera starts or
+// the notice changes.
+const camShowNotice = (kind) => {
+  if (camNoticeShown === kind) return;
+  const lines = CAM_NOTICES[kind];
+  if (!lines || typeof Module === "undefined" || !Module._wasm_camera_attach) return;
+  // Attaching also takes the cart off its synthetic scene, which is the point.
+  if (!Module._wasm_camera_attach()) return;
+  const ptr = Module._wasm_camera_frame_ptr();
+  if (!ptr) return;
+  const cnv = document.createElement("canvas");
+  cnv.width = CAM_W;
+  cnv.height = CAM_H;
+  const ctx = cnv.getContext("2d", { willReadFrequently: true });
+  camDrawNotice(ctx, lines());
+  const img = ctx.getImageData(0, 0, CAM_W, CAM_H).data;
+  // Fresh heap view every copy: memory growth detaches cached buffers
+  const dst = new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H);
+  for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
+    dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
+  }
+  camNoticeShown = kind;
+};
+
+// One place that re-reads the world: the button's two states and the
+// viewfinder's notice always agree because they are decided together.
+const camRefresh = () => {
+  camCartBtnUpdate();
+  if (!camCartLoaded()) return;
+  const kind = camNoticeFor();
+  if (kind) camShowNotice(kind);
+  else camNoticeShown = null;   // live frames are overwriting it anyway
+};
+
+// The Permissions API can tell us the camera is blocked WITHOUT prompting, so
+// a player who denied the site months ago gets the honest message instead of
+// "tap Enable camera" followed by an invisible failure. Chromium-only in
+// practice: WebKit rejects the "camera" query outright, which is why a failed
+// probe leaves camDenied alone rather than clearing it — only a real
+// getUserMedia rejection can decide it there.
+const camProbePermission = async () => {
+  if (camPermProbed) return;   // one status object per session, one listener
+  camPermProbed = true;
+  try {
+    const st = await navigator.permissions.query(
+      /** @type {*} */ ({ name: "camera" }));
+    if (st.state === "denied") camDenied = true;
+    else if (st.state === "granted") camDenied = false;
+    // Flipping the site permission in browser settings does not reload the
+    // page; re-decide when it happens so the viewfinder stops lying.
+    st.onchange = () => {
+      camDenied = st.state === "denied";
+      if (!camLive()) camRefresh();
+    };
+    camRefresh();
+  } catch {}
+};
 
 const stopWebcam = () => {
   clearInterval(camTimer);
@@ -7079,7 +7290,7 @@ const camConstraints = () => {
 };
 
 // (Re)open the camera with the current facing/device choice; reused by the
-// flip chip, so it swaps the stream under the running pump.
+// flip button, so it swaps the stream under the running pump.
 const openCamStream = async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ video: camConstraints() });
   if (camStream) for (const t of camStream.getTracks()) t.stop();
@@ -7090,16 +7301,30 @@ const openCamStream = async () => {
     camVideo.playsInline = true;
   }
   camVideo.srcObject = stream;
+  // A track that ends on its own (iOS backgrounding the tab, the OS handing
+  // the camera to another app, a USB webcam unplugged) has to tear the pump
+  // down, or it spends the rest of the session copying black frames into the
+  // sensor. The guard keeps a *deliberate* swap — switchCamera stops the old
+  // tracks after the new stream is live — from tripping it.
+  for (const t of stream.getVideoTracks()) {
+    t.addEventListener("ended", () => {
+      if (camLive()) return;
+      stopWebcam();
+      camEnded = true;
+      camRefresh();
+      showToast("Camera disconnected");
+    });
+  }
   await camVideo.play().catch(() => {});
   // Selfie-mirror the front camera (and desktop webcams — they face the
   // user); the back camera shows the world and must not be flipped.
   camMirror = touchDevice ? camFacing === "user" : true;
 };
 
-// Flip chip: phones toggle front/back; desktops cycle the device list and
-// name each camera as it's chosen. Shown only when >1 camera exists.
+// Flip: phones toggle front/back; desktops cycle the device list and name
+// each camera as it's chosen. Only offered when >1 camera exists.
 const switchCamera = async () => {
-  if (!camStream) return;
+  if (!camLive()) return;
   if (touchDevice) {
     camFacing = camFacing === "user" ? "environment" : "user";
   } else if (camDevices.length > 1) {
@@ -7115,80 +7340,109 @@ const switchCamera = async () => {
   } catch {
     showToast("Couldn't switch camera");
   }
+  camRefresh();
 };
-camFlipBtn.addEventListener("click", switchCamera);
+// One button, two meanings — see camCartBtnUpdate. Both branches run straight
+// off the click, with nothing awaited first, so the getUserMedia call still
+// carries the user gesture iOS requires.
+camFlipBtn.addEventListener("click", () =>
+  camLive() ? switchCamera() : enableWebcam());
 
 const enableWebcam = async () => {
-  if (camStream || !navigator.mediaDevices?.getUserMedia) return;
+  if (camPending || camLive() || !camUsable()) return;
+  // Retrying after the stream died: drop the corpse first, or the second
+  // enable stacks another pump interval on top of the first one.
+  if (camStream) stopWebcam();
+  camPending = true;
   try {
     await openCamStream();
-  } catch {
-    showToast("Camera permission denied — keeping the synthetic scene");
+    camDenied = camMissing = camEnded = false;
+  } catch (e) {
+    // Say which failure it was. NotAllowedError is the browser refusing
+    // (denied, or blocked by permissions policy); NotFoundError means the
+    // constraint matched no device. Anything else is a camera that exists but
+    // would not open — another app holding it, a driver fault — and gets the
+    // same "no camera to show you" treatment rather than a wrong accusation.
+    const name = e && e.name;
+    if (name === "NotAllowedError" || name === "SecurityError") camDenied = true;
+    else camMissing = true;
+    showToast(camDenied
+      ? "Camera blocked by the browser — the viewfinder says so"
+      : "No camera available — the viewfinder says so");
     return;
+  } finally {
+    camPending = false;
+    camRefresh();
   }
   const len = Module._wasm_camera_attach();
-  if (!len) { stopWebcam(); return; }
+  if (!len) { stopWebcam(); camRefresh(); return; }
   // Post-grant, enumerateDevices yields the real camera list (labels
-  // included); two or more video inputs earn the flip chip.
+  // included); two or more video inputs earn the flip button.
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     camDevices = devs.filter((d) => d.kind === "videoinput").map((d) => d.deviceId);
     // The default open is (approximately) the first device: seed the cycle
     // there so the first flip actually reaches a DIFFERENT camera.
     if (camDeviceIdx < 0) camDeviceIdx = 0;
-    camFlipBtn.hidden = camDevices.length < 2;
   } catch {}
-  const W = 128, H = 120;
+  camRefresh();
   const cnv = document.createElement("canvas");
-  cnv.width = W;
-  cnv.height = H;
+  cnv.width = CAM_W;
+  cnv.height = CAM_H;
   const ctx = cnv.getContext("2d", { willReadFrequently: true });
   camTimer = setInterval(() => {
     if (!camVideo || camVideo.readyState < 2) return;
     const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
     if (!vw || !vh) return;
     // cover-crop the source into 128x120; mirror only when facing the user
-    const scale = Math.max(W / vw, H / vh);
-    const sw = W / scale, sh = H / scale;
+    const scale = Math.max(CAM_W / vw, CAM_H / vh);
+    const sw = CAM_W / scale, sh = CAM_H / scale;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
     ctx.save();
     if (camMirror) {
-      ctx.translate(W, 0);
+      ctx.translate(CAM_W, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, W, H);
+    ctx.drawImage(camVideo, sx, sy, sw, sh, 0, 0, CAM_W, CAM_H);
     ctx.restore();
-    const img = ctx.getImageData(0, 0, W, H).data;
+    const img = ctx.getImageData(0, 0, CAM_W, CAM_H).data;
     const ptr = Module._wasm_camera_frame_ptr();
     if (!ptr) return;
     // Fresh heap view every copy: memory growth detaches cached buffers
-    const dst = new Uint8Array(Module.memory.buffer, ptr, W * H);
+    const dst = new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H);
     for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
       dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
     }
   }, 66);
+  camNoticeShown = null;
   showToast("Camera live — the cart sees what you see");
 };
 
 const detectCameraCart = () => {
-  if (typeof Module === "undefined" || !Module._wasm_cart_has_camera) {
-    stopWebcam();
-    return;
-  }
-  if (Module._wasm_cart_has_camera() !== 1) {
+  camNoticeShown = null;   // a fresh cart's sensor carries nothing yet
+  // Both of these describe a moment, not a standing decision — a webcam can
+  // be plugged in between games — so a fresh load is a fresh chance. Only
+  // camDenied survives: that one is the browser's answer, and it holds.
+  camMissing = camEnded = false;
+  if (!camCartLoaded()) {
     stopWebcam(); // a non-camera game must not hold the camera open
+    camCartBtnUpdate();
     return;
   }
-  if (camStream) {
+  if (camLive()) {
     // Same session, fresh core (Restart, or loading this cart again): the
     // new cartridge object has no sensor callback, so the emulated camera
     // falls back to its synthetic scene — which reads as a corrupted
     // viewfinder. Keep the stream and re-point the new cart at the live
     // frame buffer instead of asking for permission all over again.
     Module._wasm_camera_attach();
+    camCartBtnUpdate();
     return;
   }
-  if (!navigator.mediaDevices?.getUserMedia) return;
+  if (camStream) { stopWebcam(); camEnded = true; }  // tracks are dead
+  camRefresh();          // button reads "Enable camera"; viewfinder says why
+  camProbePermission();  // may upgrade "tap Enable" to "blocked", async
+  if (!camUsable()) return;
   showActionToast("Game Boy Camera cart — use your real camera?",
     "Enable camera", enableWebcam);
 };

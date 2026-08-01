@@ -167,7 +167,8 @@ const makeFakeFS = () => {
 
 // Evaluates web/index.js in a fresh vm context and returns handles to the real
 // functions plus the fakes backing it.
-export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = {}) => {
+export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
+                                touch = false, mediaDevices = true } = {}) => {
   const idb = new Map();          // the fake IndexedDB "blobs" store
   const fetchCalls = [];          // every fetch: { url, opts, method }
   const alerts = [];
@@ -245,8 +246,19 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
     // No `serviceWorker` key: index.js guards with `"serviceWorker" in navigator`.
     navigator: {
       platform: "TestPlatform",
-      maxTouchPoints: 0,
+      // `touch` flips the module-scope `touchDevice` const (and the tilt
+      // code's own touch test), which decides whether phone-only affordances
+      // — device-tilt, front/back camera flipping — are offered at all.
+      maxTouchPoints: touch ? 5 : 0,
       userAgent: "node-test",
+      // getUserMedia's mere existence is what the camera code reads as "a
+      // camera is possible here"; `mediaDevices: false` is the insecure-origin
+      // shape, where the API is absent entirely. Nothing here ever resolves —
+      // tests that need a stream drive the state variables directly.
+      ...(mediaDevices
+        ? { mediaDevices: { getUserMedia: () => new Promise(() => {}),
+                            enumerateDevices: async () => [] } }
+        : {}),
       storage: {
         estimate: async () => ({ usage: 12345 }),
         persisted: async () => state.persisted,

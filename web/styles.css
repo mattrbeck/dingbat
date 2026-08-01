@@ -4142,6 +4142,25 @@ body.rollback-mode #save-sep {
   }
 }
 
+/* 320pt phones (SE 1st gen / iPhone 5-class). The block above is tuned for
+   375pt and lands at EXACTLY 320px there — zero slack — so the moment a
+   cartridge button joins the bar the fullscreen control is pushed off the
+   right edge. Cart buttons used to be rare (a tilt cart with motion already
+   enabled, or a second camera); now every camera and tilt cart shows one from
+   the first frame, so this has to fit rather than nearly fit.
+   The 26px comes out of spacing, not tap targets: the icon buttons keep their
+   36px box, and only the fused playback segments give up 2px each. */
+@media (max-width: 360px) {
+  #topbar {
+    gap: 4px;
+    padding-left: calc(6px + var(--safe-l));
+    padding-right: calc(6px + var(--safe-r));
+  }
+  #playback-controls .icon-btn {
+    width: 28px;
+  }
+}
+
 /*
  * ==========================================================
  * Mobile landscape: maximise the screen
@@ -5162,6 +5181,24 @@ body.clip-replaying #controls {
 .cart-btn svg {
   width: 17px;
   height: 17px;
+}
+
+/* Two icons per button, one shown at a time. .needs-enable is the "the sensor
+   this drives is not on yet" state — the label changes with it, but a phone
+   shows no label at all, so the glyph has to carry the difference on its own.
+   Kept as a class swap rather than swapping innerHTML from JS: replacing the
+   markup would drop the <span> the 480px rule keys off, and re-parsing SVG on
+   every state change is more machinery than a class toggle. */
+.cart-btn .cart-ico-enable {
+  display: none;
+}
+
+.cart-btn.needs-enable .cart-ico-on {
+  display: none;
+}
+
+.cart-btn.needs-enable .cart-ico-enable {
+  display: inline-block;
 }
 
 /* Narrow phones: the bar is already at capacity with the segmented playback
