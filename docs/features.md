@@ -177,6 +177,14 @@ percent-of-pixels-matching rather than pass/fail.
 
 ## Remaining work
 
+**Web front-end**
+
+- Audio dropouts under main-thread hitches: diagnosed and measured, fix
+  deferred because the obvious one costs ~18 ms of added audio latency. See
+  [research_web_audio_gaps.md](research_web_audio_gaps.md) — it also records
+  that WebKit shows the fault far more readily than Chrome, so audio pacing
+  should be measured there.
+
 **Game Boy / Game Boy Color**
 
 - Other hardware bugs tested in blargg's test suite
