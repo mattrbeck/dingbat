@@ -459,10 +459,14 @@ type
     channel4*:            GbChannel4
     # Output-stage DC blocker (see GB_DC_CHARGE and get_sample). Charge held on
     # the coupling capacitor, one per stereo side. Deliberately NOT serialized:
-    # it is presentation state, not emulated state, and STATE_VERSION is global
-    # across the GB and GBA cores and compared for equality, so adding a field
-    # here would invalidate every existing save state on both cores. The filter
-    # re-converges within ~6 ms of a state load, which is why that trade is safe.
+    # it is presentation state, not emulated state, and the filter re-converges
+    # within ~6 ms of a state load — inaudible, and a state that restores it
+    # would only be restoring the tail of a filter, not anything about the
+    # machine. (It would no longer be expensive to add: since v7 the container
+    # version describes only the header and each core carries its own payload
+    # revision, so a GB field costs a GB migration and nothing on the GBA side.
+    # It is left out because it does not belong in the file, not because the
+    # format makes it costly.)
     dc_cap_left*:         float32
     dc_cap_right*:        float32
     left_resampler*:      Resampler[float32]
