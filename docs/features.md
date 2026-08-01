@@ -11,22 +11,48 @@ The browser build at [dingbat.gg](https://dingbat.gg) is the default way to play
 - Touch controls, with layouts for phones and tablets in both orientations
 - Gamepad support
 - Save states: nine per-ROM slots with thumbnails, plus Quick Save / Quick Load
-- Rewind and fast forward
+- Auto-save on exit with a "Resume last session" offer, and Undo for both state
+  loads and Reset
+- Rewind, fast forward, 2x, slow motion and frame step. Holding the fast-forward
+  key restores whatever speed was latched before it, rather than dropping to 1x
+- Rewind scrubber: a film-strip modal (menu, or double-tap the rewind button) for
+  travelling further back than a hold. Committing discards the future, says so,
+  warns separately when it would also roll back an in-game save, and offers Undo
+- Run-ahead (opt-in, 1-2 frames) to cut input latency, disabled automatically
+  while linked
+- Save Last 10s: retroactive clip capture, replayed deterministically from state
+  anchors plus a per-frame input log rather than recorded video
 - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
 - Per-ROM save files kept in IndexedDB, with a "Manage ROMs and Saves" modal for
   resetting save data or deleting a game outright
 - Online link play with room codes
-- Google Drive cross-device sync — see below
+- Google Drive cross-device sync, with Sign in offered from the home screen — see below
 - Report a Bug: attach a save state from any point in the rewind timeline, downloaded
   as a self-contained report file. Nothing is transmitted.
 - Desktop keyboard shortcuts: pause, fast forward, rewind, save states, screenshot,
   fullscreen, mute
 - MBC5 rumble — gamepad vibration where supported, screen shake everywhere
+- Sensor carts: MBC7 and GBA tilt and the WarioWare Twisted gyro, driven by the
+  device's motion sensor, a gamepad stick, or the D-pad. Motion is expressed in
+  screen space and re-baselined when the device rotates, so landscape play and
+  recentring behave the same as portrait
+- Game Boy Camera: uses a real webcam, with front/back switching where more than
+  one camera exists. When no camera is available the emulated viewfinder says why
+  (blocked by the browser, none present, not yet enabled) instead of showing the
+  cart's synthetic test pattern
+- Game Boy Printer: always connected, with hardware-matched print timing. Finished
+  prints land in a Printed Photos gallery and save as PNGs
+- Toasts stack rather than replacing one another, wrap on narrow screens, and are
+  individually dismissible
 - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE modes, color
   correction, integer scaling, scanlines, motion blur (interframe blending), and an
   ambient glow backdrop
 - Per-panel color correction: mGBA's AGB model for GBA, the hardware-measured
   "GBC-Color" model for GB/GBC
+- Game Boy shade palette: keep the hardware shades, derive a palette from the app
+  theme, or pick all four colours yourself. Applied in the presenter's shader, so
+  it cannot touch emulation, save states or netplay determinism, and colour (GBC)
+  titles are unaffected
 
 ### Google Drive sync
 
@@ -65,6 +91,8 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 - Pause and frame advance
 - Screenshots
 - Volume and per-channel audio controls
+- A refused save state says why (wrong ROM, written by a newer build, corrupt)
+  rather than failing silently
 - LCD color correction, per panel: AGB and GBC models
 - Scanlines, interframe blending (LCD ghosting), and hq4x / xBR upscaling
 - MBC5 rumble (controller rumble + screen shake)
@@ -73,7 +101,10 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 
 ## Game Boy / Game Boy Color
 
-- Accurate sound emulation
+- Accurate sound emulation, through an output-stage DC blocker modelling the
+  coupling capacitor between the mixer and the jack. Without it the mix carries a
+  large DC offset that steps whenever a channel is switched on or off, and every
+  one of those steps is an audible click
 - Passing blargg's [cpu_instrs](https://github.com/retrio/gb-test-roms/tree/master/cpu_instrs),
   [instr_timing](https://github.com/retrio/gb-test-roms/tree/master/instr_timing), and
   [mem_timing](https://github.com/retrio/gb-test-roms/tree/master/mem_timing) ROMs
@@ -86,14 +117,17 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
   Prehistorik Man that depend on cycle-accurate PPU behavior.
   See [fifo_ppu_changes.md](fifo_ppu_changes.md) and [fifo_ppu_edge_cases.md](fifo_ppu_edge_cases.md).
 - Save files are compatible with other emulators like BGB
-- Cartridge mappers:
+- Cartridge mappers — every mapper the library uses:
   - MBC1, including MBC1M multicarts
   - MBC2, fully supported
   - MBC3, fully supported, including the real-time clock
   - MBC5, including the rumble motor
+  - MBC6, MBC7 (tilt sensor and EEPROM), MMM01, HuC1, HuC3, TAMA5
+  - Pocket Camera, wired to a real webcam in the browser
 - Serial port and link cable — two cores in one process, and online in the browser via
   input-rollback netplay
 - Game Boy Color support, including HDMA, double-speed mode, and palettes
+- Game Boy Printer, with hardware-matched print timing
 
 ## Game Boy Advance
 
@@ -120,6 +154,8 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 - Link cable support, both locally and online
 - Real-time clock support
 - GPIO rumble
+- Sensor cartridges: the tilt sensor (Yoshi's Universal Gravitation, Koro Koro
+  Puzzle) and the WarioWare Twisted gyro
 - Save states
 - Browser / WebAssembly build
 
@@ -149,7 +185,7 @@ percent-of-pixels-matching rather than pass/fail.
 
 - Timing: prefetch occupancy-model rewrite (scoped, see [prefetch-model-rewrite.md](prefetch-model-rewrite.md))
 - Storage: game database for odd cases (Classic NES, ROMs that misreport their save type)
-- Sensor cartridges (tilt, gyro, solar)
+- Solar sensor (Boktai)
 
 **Tooling**
 
