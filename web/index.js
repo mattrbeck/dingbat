@@ -3417,42 +3417,117 @@ document.getElementById("load-save").addEventListener("click", () => {
 // move between web and desktop. All calls happen from event handlers, which
 // run between requestAnimationFrame ticks — i.e. at a frame boundary.
 
-let toastTimer = null;
-const showToast = (msg) => {
-  let t = document.getElementById("toast");
-  t.textContent = msg;
-  t.onclick = null; // disarm a lingering action toast's tap handler
-  t.classList.remove("has-action");
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+// --- Toasts -----------------------------------------------------------------
+// #toast is a STACK, not a single slot. It used to be one element whose text
+// each new message overwrote, which meant a routine toast could silently
+// destroy an offer the user still needed: the Game Boy Camera's "use your
+// real camera?" prompt — the only way to enable the webcam — was wiped by the
+// auto-resume "Last session saved" toast 98 ms later, and Reset's "Undo"
+// collided with the same offer. Toasts now coexist; nothing destroys anything.
+//
+// Newest is PREPENDED, so it renders on top and the container (anchored to the
+// viewport bottom) grows upward. The oldest toast therefore never moves once
+// it is on screen, which matters because these carry tap targets ("Enable
+// camera", "Undo", "Resume") — a pill that jumps out from under a committed
+// thumb is worse than no pill. The cap keeps the stack from creeping up over
+// the game and the touch controls; the oldest retires first.
+const TOAST_MAX = 3;
+const TOAST_FADE_MS = 220; // keep in sync with .toast-item.leaving in styles.css
+const toastHost = document.getElementById("toast");
+// Live toasts, newest first — mirrors toastHost's children. Each entry is a
+// record { el, msg, label, timer, gone } rather than bookkeeping hung off the
+// element as expandos, which the types/ typecheck rejects on HTMLDivElement.
+let toastItems = [];
+
+const dismissToast = (rec) => {
+  if (!rec || rec.gone) return;
+  rec.gone = true;
+  clearTimeout(rec.timer);
+  const i = toastItems.indexOf(rec);
+  if (i >= 0) toastItems.splice(i, 1);
+  rec.el.classList.add("leaving");
+  // Unmount after the fade so the stack's height settles in one step. Guarded
+  // by rec.gone, so removeChild runs exactly once while it is still a child.
+  setTimeout(() => toastHost.removeChild(rec.el), TOAST_FADE_MS);
 };
 
-// Toast with a single action (e.g. "Resume", "Undo"). The ENTIRE toast is
-// the tap target — on phones the labeled button alone is a small, missable
-// pill, and users tap the text anyway. Lingers longer than a plain toast;
-// any later toast replaces it.
-const showActionToast = (msg, label, fn, ms = 8000) => {
-  const t = document.getElementById("toast");
-  t.textContent = "";
+// Auto-dismiss is per toast, not one shared timer: a 2.2 s status message
+// arriving next to an 8 s offer must not shorten (or extend) the offer.
+const armToastTimer = (rec, ms) => {
+  clearTimeout(rec.timer);
+  rec.timer = setTimeout(() => dismissToast(rec), ms);
+};
+
+// `action` is null for a plain toast, or { label, fn } for a tappable one.
+const pushToast = (msg, ms, action) => {
+  msg = String(msg);
+  // Duplicates don't pile up. A repeated plain message just gets its life
+  // extended in place; a repeated offer is replaced outright so the freshest
+  // closure is what the tap runs (the old one may close over a stale game).
+  for (const live of toastItems.slice()) {
+    if (live.msg !== msg) continue;
+    if (!action && !live.label) {
+      armToastTimer(live, ms);
+      return live;
+    }
+    if (action && live.label === action.label) dismissToast(live);
+  }
+
+  const item = document.createElement("div");
+  item.className = "toast-item";
   const span = document.createElement("span");
   span.className = "toast-msg";
   span.textContent = msg;
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "toast-action";
-  btn.textContent = label;
-  t.append(span, btn);
-  t.onclick = () => {
-    t.onclick = null;
-    t.classList.remove("show", "has-action");
-    clearTimeout(toastTimer);
-    fn();
-  };
-  t.classList.add("show", "has-action");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show", "has-action"), ms);
+  item.append(span);
+  const rec = { el: item, msg, label: action ? action.label : null, timer: 0, gone: false };
+
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "×";
+    close.addEventListener("click", (e) => {
+      e.stopPropagation(); // the pill-wide action handler must not also fire
+      dismissToast(rec);
+    });
+    item.append(btn, close);
+    item.classList.add("has-action");
+    // The ENTIRE pill is the tap target — on phones the labeled button alone
+    // is small and missable, and users tap the text anyway.
+    //
+    // fn() runs SYNCHRONOUSLY in this handler, with nothing awaited before it.
+    // Several callers (enableOrientationTilt, enableWebcam) use this tap to
+    // satisfy iOS's user-gesture requirement for
+    // DeviceOrientationEvent.requestPermission() and getUserMedia(); any
+    // await, timer, or re-dispatch here breaks the activation chain and the
+    // permission prompt never appears.
+    const fn = action.fn;
+    item.onclick = () => {
+      item.onclick = null;
+      dismissToast(rec);
+      fn();
+    };
+  }
+
+  // Prepend: newest on top, older ones hold still (see the note above).
+  toastHost.prepend(item);
+  toastItems.unshift(rec);
+  while (toastItems.length > TOAST_MAX) dismissToast(toastItems[toastItems.length - 1]);
+  armToastTimer(rec, ms);
+  return rec;
 };
+
+const showToast = (msg) => pushToast(msg, 2200, null);
+
+// Toast with a single action (e.g. "Resume", "Undo"). Lingers longer than a
+// plain toast, and coexists with anything that arrives afterwards.
+const showActionToast = (msg, label, fn, ms = 8000) =>
+  pushToast(msg, ms, { label, fn });
 
 const stateKey = (name) => "state:" + name;
 

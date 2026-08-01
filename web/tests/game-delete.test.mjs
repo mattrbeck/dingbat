@@ -177,10 +177,16 @@ test("a deleted game offers no Resume, no cheats, and no save states", async () 
   seedGame(app, "A.gba");
   app.api.currentOriginalName = "A.gba";
 
+  // #toast is a stack of .toast-item pills; an "offer" is one carrying a
+  // tappable action, and .leaving ones are already retired (mid-fade).
   const toast = app.document.getElementById("toast");
-  const offer = () => (toast.classList.contains("has-action")
-    ? toast.children.map((c) => c.textContent).join(" ") : null);
-  const clearToast = () => { toast.children = []; toast.classList.remove("has-action"); };
+  const offer = () => {
+    const pill = toast.children.find((c) =>
+      c.classList.contains("has-action") && !c.classList.contains("leaving"));
+    return pill ? pill.children.map((c) => c.textContent).join(" ") : null;
+  };
+  // Retire the whole stack through the app's own path, as its timers would.
+  const clearToast = () => app.runIn("toastItems.slice().forEach(dismissToast)");
 
   // Positive control: with the game's data present, all three fire.
   await app.runIn("offerAutoResume()");

@@ -58,6 +58,8 @@ class FakeElement {
   appendChild(c) { this.children.push(c); return c; }
   // Variadic sibling of appendChild (showActionToast, the prints gallery).
   append(...cs) { for (const c of cs) this.children.push(c); }
+  // Head insertion — how the toast stack mounts its newest pill (pushToast).
+  prepend(...cs) { this.children.unshift(...cs); }
   // Atomic swap — how the home grid commits a render (see refreshHomeRecent).
   replaceChildren(...cs) { this.children = cs; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); }
@@ -84,6 +86,14 @@ class FakeElement {
   }
   set innerHTML(v) { this._innerHTML = v; if (v === "") this.children = []; }
   get innerHTML() { return this._innerHTML; }
+  // className and classList are two views of one set, as in a real DOM. They
+  // used to be unrelated here, so `el.className = "toast-msg"` left
+  // classList.contains("toast-msg") false — invisible until something tried
+  // to find an element by the class another line had just assigned.
+  set className(v) {
+    this.classList._set = new Set(String(v).split(/\s+/).filter(Boolean));
+  }
+  get className() { return [...this.classList._set].join(" "); }
 }
 
 // --- Fake IndexedDB (Map-backed, real async request shape) ------------------
@@ -161,7 +171,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   const idb = new Map();          // the fake IndexedDB "blobs" store
   const fetchCalls = [];          // every fetch: { url, opts, method }
   const alerts = [];
-  const toasts = [];              // via the real showToast -> #toast textContent
+  const toasts = [];              // every message the real app mounted in #toast
   const confirms = [];
 
   const state = {
@@ -306,6 +316,45 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
 
+  // --- Toast observation ----------------------------------------------------
+  // #toast is a STACK container: showToast/showActionToast build one
+  // .toast-item per message and prepend it (web/index.js, pushToast). So the
+  // faithful observation point is "a pill was mounted into the live region" —
+  // exactly the moment its text becomes visible — not the old
+  // #toast.textContent setter, which the stack never touches.
+  //
+  // Wired BEFORE index.js is evaluated so a toast fired during module-scope
+  // eval or early boot is recorded too.
+  const toastEl = document.getElementById("toast");
+  const toastMsgOf = (node) => {
+    const span = (node.children || []).find((c) => c.classList?.contains("toast-msg"));
+    if (!span) {
+      // Loud on purpose. If the toast DOM shape in web/index.js changes and
+      // this silently returned "", every toast assertion in the suite would
+      // start passing/failing against an empty list instead of real behavior.
+      throw new Error(
+        "web/tests/helpers.mjs: a <" + node.tagName + "> was mounted into " +
+        "#toast with no .toast-msg child. The toast DOM shape in " +
+        "web/index.js changed and this harness can no longer see what the " +
+        "app shows. Update toastMsgOf to match before trusting any test " +
+        "that asserts on `toasts`.");
+    }
+    return String(span.textContent);
+  };
+  for (const method of ["prepend", "append", "appendChild"]) {
+    const real = toastEl[method].bind(toastEl);
+    toastEl[method] = (...cs) => {
+      for (const c of cs) toasts.push(toastMsgOf(c));
+      return real(...cs);
+    };
+  }
+  // What is on screen right now, as opposed to `toasts` (the whole history).
+  // .leaving pills are mid-fade and already retired, so they don't count.
+  const liveToasts = () =>
+    toastEl.children
+      .filter((c) => !c.classList.contains("leaving"))
+      .map(toastMsgOf);
+
   const context = vm.createContext(sandbox);
   try {
     vm.runInContext(SOURCE, context, { filename: "web/index.js" });
@@ -383,13 +432,6 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   // FS/Module. Mark it ready so those paths run to completion in tests.
   vm.runInContext("markRuntimeReady()", context);
 
-  // Track toast text without touching app code.
-  const toastEl = document.getElementById("toast");
-  Object.defineProperty(toastEl, "textContent", {
-    set: (v) => toasts.push(String(v)),
-    get: () => toasts[toasts.length - 1] ?? "",
-  });
-
   // Fire every recorded document-level listener of `type` with a stub-filled
   // event, awaiting async handlers (mirrors FakeElement.dispatch).
   const dispatchDoc = async (type, ev = {}) => {
@@ -407,7 +449,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true } = 
   };
 
   return {
-    api, context, idb, fetchCalls, alerts, confirms, toasts,
+    api, context, idb, fetchCalls, alerts, confirms, toasts, liveToasts, toastEl,
     document, elements, localStorage, lsMap, sandbox, state,
     docListeners, dispatchDoc, winListeners, dispatchWin,
     setFetch: (fn) => { state.fetchImpl = fn; },

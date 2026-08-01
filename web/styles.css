@@ -2172,7 +2172,15 @@ body.debug-2p .home-tile-link {
   color: var(--accent);
 }
 
-/* --- Toast (brief feedback for save-state actions) --- */
+/* --- Toasts (save-state feedback, sync notices, camera/tilt offers) ---
+ *
+ * #toast is the STACK CONTAINER, not the pill: each message is its own
+ * .toast-item child, so several coexist and nothing overwrites anything.
+ * (It used to be a single element whose text every new toast overwrote —
+ * which is how the Game Boy Camera's "use your real camera?" offer, the only
+ * route to enabling the webcam, got wiped by the auto-resume toast 98 ms
+ * later.)
+ */
 
 #toast {
   /* Fixed to the viewport, not absolute in #stage: on phones the stage is
@@ -2185,57 +2193,100 @@ body.debug-2p .home-tile-link {
      Save's confirmation, sync notices) must not render dimmed behind the
      overlay's backdrop. */
   z-index: 600;
-  left: 50%;
+  /* Centred by the left/right/margin-auto trick rather than left:50% +
+     translateX: the container now has to WRAP its text, so it needs a real
+     width to wrap inside, and the insets keep it clear of the notch/home
+     indicator in landscape. `margin: 0 auto` centres it inside that band. */
+  left: calc(8px + var(--safe-l));
+  right: calc(8px + var(--safe-r));
   bottom: calc(20px + var(--safe-b));
-  transform: translate(-50%, 8px);
-  max-width: min(80%, 420px);
+  margin: 0 auto;
+  max-width: 480px;
+  display: flex;
+  /* Newest is prepended, so newest renders on top. The container is anchored
+     at the bottom, so the stack grows UPWARD and the older toasts below it
+     never move. That stability is the point: these pills carry tap targets
+     ("Enable camera", "Undo"), and one that slides out from under a committed
+     thumb is worse than no pill at all. */
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  /* The container spans the width, so it must stay transparent to input;
+     only action pills opt back into hit-testing (below). An empty stack has
+     no children and so no height. */
+  pointer-events: none;
+}
+
+.toast-item {
+  max-width: 100%;
   padding: 8px 16px;
-  border-radius: 999px;
+  /* 16px is visually the old 999px pill at single-line height (~33px tall),
+     but a wrapped 2- or 3-line toast keeps sane corners instead of bulging
+     two huge arcs into its own text. */
+  border-radius: 16px;
   background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
   border: 1px solid var(--border-2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 1px 0 var(--inset-hi) inset;
   color: var(--text);
   font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
+  line-height: 1.35;
+  text-align: center;
   pointer-events: none;
+  /* Enter via animation, not a .show class toggled on the next frame: the
+     class dance needed a rAF hop, and one per toast is a race worth not
+     having. `both` holds the final frame. */
+  animation: toast-in 0.2s ease both;
+}
+
+/* Exit: JS adds .leaving, then unmounts after TOAST_FADE_MS (index.js). */
+.toast-item.leaving {
+  opacity: 0;
+  transform: translateY(4px);
   transition: opacity 0.2s, transform 0.2s;
 }
 
-#toast.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* Action toasts ("Resume", "Undo") carry one tappable button; the base
-   toast is pointer-events: none so it never blocks the game, so the
-   interactive variant re-enables hit-testing only while shown. (Class-based
-   rather than :has() — iOS 15.0-15.3 lacks :has support.)
-   Flex layout, message in its own ellipsizing span: the base toast's
-   nowrap+overflow:hidden clipped the BUTTON clean off on phone widths,
-   leaving an action toast with no visible way to act on it. The button is
-   flex-shrink:0 so it always survives; the text gives way instead. The
-   whole toast is also click-armed in JS — one big tap target. */
-#toast.show.has-action {
+/* Motion-free twin, swapped in by the prefers-reduced-motion block at the
+   end of this file. A pure opacity fade moves nothing, so it is kept. */
+@keyframes toast-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Wrap, don't clip. The single-slot toast was nowrap + ellipsis, which on a
+   375pt phone truncated over half the real strings in this app ("This game's
+   ROM is no longer stored — load the file again" and friends). break-word
+   rather than `anywhere` — iOS 15.0-15.3 does not know the `anywhere`
+   value and would silently fall back to no breaking at all. */
+.toast-msg {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Action toasts ("Resume", "Undo") carry one tappable button; the base pill
+   is pointer-events: none so it never blocks the game, so the interactive
+   variant re-enables hit-testing. (Class-based rather than :has() — iOS
+   15.0-15.3 lacks :has support.)
+   Flex layout with the message in its own flexible span: the buttons are
+   flex-shrink:0 so they always survive, and the text wraps instead of
+   shoving them off the pill. The whole pill is also click-armed in JS — one
+   big tap target — with the × opting out via stopPropagation. */
+.toast-item.has-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
   pointer-events: auto;
   cursor: pointer;
 }
 
-#toast.has-action {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(92%, 480px);
-}
-
-.toast-msg {
+.toast-item.has-action .toast-msg {
   flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .toast-action {
@@ -2250,9 +2301,40 @@ body.debug-2p .home-tile-link {
   cursor: pointer;
 }
 
-#toast.has-action:active .toast-action,
+/* Manual dismissal, offered only where a toast is interactive anyway: a
+   plain toast stays pointer-events:none so it can never eat a tap meant for
+   the game. Square so the tap target stays honest at this size. */
+.toast-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  opacity: 0.6;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast-item.has-action:active .toast-action,
 .toast-action:active {
   filter: brightness(1.2);
+}
+
+.toast-close:active {
+  opacity: 1;
+}
+
+/* Keyboard reachability: a thin offset halo in the text colour, matching the
+   save-state slots. */
+.toast-action:focus-visible,
+.toast-close:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 /*
@@ -4976,10 +5058,14 @@ body.sync-shown #status {
     animation-duration: 3s;
   }
 
-  /* Sliding chrome snaps instead of gliding. The toast keeps its fade but
-     loses the translate glide; the phone-landscape top bar and the joystick
-     snap-home return jump straight to their end positions. */
-  #toast {
+  /* Sliding chrome snaps instead of gliding. Toasts keep their fade but lose
+     the translate glide (in and out); the phone-landscape top bar and the
+     joystick snap-home return jump straight to their end positions. */
+  .toast-item {
+    animation-name: toast-fade-in;
+  }
+  .toast-item.leaving {
+    transform: none;
     transition: opacity 0.2s;
   }
   #hle-indicator {

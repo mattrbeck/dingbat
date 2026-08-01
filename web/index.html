@@ -356,7 +356,12 @@
         <span aria-hidden="true">&#8987;</span> waiting for peer
       </div>
 
-      <div id="toast" role="status" aria-live="polite"></div>
+      <!-- A stack, not a slot: showToast/showActionToast append one
+           .toast-item per message so a later toast can never destroy an
+           earlier offer. aria-atomic="false" (role="status" defaults to
+           true) so a new toast announces only itself, not a re-read of
+           every toast still on screen. -->
+      <div id="toast" role="status" aria-live="polite" aria-atomic="false"></div>
     </main>
 
     <!-- =========================== Modals =========================== -->

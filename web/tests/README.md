@@ -18,6 +18,18 @@ API), then harvests the app's top-level functions from the context's shared
 global lexical scope — so tests exercise the actual app code and break when its
 behavior changes.
 
+### Observing toasts
+
+`app.toasts` is every message the app has shown, `app.liveToasts()` only the
+ones currently on screen. Both are read from the real DOM the app builds:
+`#toast` is a stack container and each message is a `.toast-item` child, so the
+harness hooks the container's `prepend`/`append`/`appendChild` and records the
+`.toast-msg` text at the moment a pill is mounted. If a node is mounted with no
+`.toast-msg`, the harness **throws** rather than recording nothing — a silently
+empty `toasts` list would turn every toast assertion in the suite into a no-op.
+Change the toast DOM shape in `web/index.js` and you must update `toastMsgOf`
+in `helpers.mjs` to match.
+
 ## Static typecheck gate (JSDoc + `tsc --checkJs`)
 
 CI also typechecks the front-end as-is — the shipped `.js` files are checked
