@@ -9,7 +9,15 @@ proc new_cartridge*(rom_path: string): Cartridge =
   # check, and reads past the ROM (which are rare) fall back to the open-bus
   # address pattern in bus.nim. The [sz, alloc) gap stays zero (newSeq default),
   # matching the previous non-power-of-two zero-pad behavior.
-  var alloc = 0x8000  # a small floor; every real cart is far larger
+  # The floor only has to keep the header in range (game_code lives at 0xAC)
+  # and give rom_ptr something to point at. It must NOT be set to a "typical"
+  # cart size: rom.len is also the address at which reads start returning the
+  # open-bus pattern, and a mask ROM decodes exactly its own power-of-two
+  # window — so a 1.7 KB test ROM has to float from 2 KB up, not from 32 KB.
+  # (GBATEK: the unused gamepak area reads back Address/2 AND FFFFh; jsmolka
+  # unsafe test 2 checks the first 4 KB past next_pow2(rom size).) No real
+  # cart is anywhere near the floor, so nothing about shipped games changes.
+  var alloc = 0x100
   while alloc < sz: alloc = alloc shl 1
   # Classic NES Series / Famicom Mini carts are exactly 1 MiB and their mask
   # ROM decodes 4 MiB of address space: the image appears mirrored 4x, but not

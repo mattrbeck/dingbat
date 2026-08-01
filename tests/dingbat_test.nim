@@ -14,7 +14,7 @@ type
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet, tmGbLinkTest
+    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -478,6 +478,63 @@ proc netlink_test(rom, bios_path: string; listen_port: int; connect_to: string;
   except NetLinkError as e:
     echo "NETLINK LINKTEST: FAIL — ", e.msg
   verdict
+
+# jsmolka's gba-tests (github.com/jsmolka/gba-tests) share one protocol, in
+# lib/macros.inc: every ROM keeps its verdict in r12, branches to a common
+# `eval` on the FIRST failing check with r12 = that check's number, and then
+# spins forever in `idle: b idle`. `m_test_eval` brackets its own work in
+# stmfd/ldmfd {r0-r12}, so r12 still holds the verdict once the spin is
+# reached: 0 = every check passed, N = check N failed (and nothing after it
+# ran — these ROMs abort on first failure by design).
+#
+# Reading r12 rather than OCR-ing the rendered "Failed test NNN" is deliberate:
+# the on-screen report is itself produced by SWI 6 (Div) plus a mode-4 blit, so
+# scoring off pixels makes every result depend on the BIOS and PPU as well as
+# on the thing under test. r12 is the ROM's own verdict.
+proc jsmolka_test(rom_path, bios_path: string; timeout_frames: int): int =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  # The save/ ROMs check what an *untouched* backup chip reads back (SRAM's
+  # first check wants 0xFF), and every ROM that writes one would otherwise
+  # drop a .sav next to the ROM for the next run to load back as "power-on"
+  # state. Detach the file: new_storage has already applied the power-on fill,
+  # and write_save is a no-op on an empty path.
+  emu.storage.save_path = ""
+
+  # The spin is a one-instruction self-branch, so once it is reached r15 is
+  # constant at every frame boundary. Two frames of a stationary PC is the
+  # done signal; anything still executing (including the m_vsync wait in
+  # `eval`) moves it.
+  var prev_pc = not 0'u32
+  var stable = 0
+  var frames = 0
+  while frames < timeout_frames:
+    try:
+      emu.step_frame()
+    except CatchableError:
+      echo "Emulator exception at frame ", frames, ": ", getCurrentExceptionMsg()
+      return 1
+    inc frames
+    let pc = emu.cpu.r[15]
+    if pc == prev_pc:
+      inc stable
+      if stable >= 2: break
+    else:
+      stable = 0
+      prev_pc = pc
+
+  if stable < 2:
+    echo "TIMEOUT after ", frames, " frames (never reached the idle spin)"
+    return 1
+  let verdict = emu.cpu.r[12]
+  if verdict == 0:
+    echo "All tests passed"
+    return 0
+  echo "Failed test ", verdict
+  return 1
 
 # Rewind verification: run forward taking snapshots exactly like the
 # frontend does, then pop backward and require byte-exact payload
@@ -1087,6 +1144,7 @@ proc main() =
         of "rollback": mode = tmRollback
         of "rollbacknet": mode = tmRollbackNet
         of "gblinktest": mode = tmGbLinkTest
+        of "jsmolka": mode = tmJsmolka
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1158,6 +1216,8 @@ proc main() =
     quit(state_roundtrip(rom_path, bios_path, warmup_frames))
   if mode == tmRewindTest:
     quit(rewind_test(rom_path, bios_path))
+  if mode == tmJsmolka:
+    quit(jsmolka_test(rom_path, bios_path, timeout_frames))
   if mode in {tmLinkTest, tmNormLinkTest, tmNorm32LinkTest}:
     # Second positional arg is core 2's ROM; defaults to running the same
     # ROM on both cores. The normal-mode variants run the same coordinator
@@ -1302,7 +1362,7 @@ proc main() =
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet, tmGbLinkTest:
+     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka:
     discard  # handled (and exited) above
 
   if output.len > 0:

@@ -591,8 +591,18 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    if bus.tilt_hit(orig): bus.tilt_write(orig, uint8(value))
-    else: bus.gba.storage[orig] = uint8(value)
+    # The backup chip is on an 8-bit bus, so a halfword store moves exactly one
+    # byte. STRH drives the halfword onto BOTH halves of the 32-bit data bus,
+    # and the chip latches only the lane its A0 line selects, so the byte that
+    # lands at `orig` is value >> (8 * (orig and 1)): an ODD address stores the
+    # high byte, not the low one. (GBATEK "GBA Cart Backup SRAM/FLASH" — 8-bit
+    # bus; jsmolka save/{sram,flash64,flash128} test 6 asserts both halves.)
+    # Note this is the byte the *device* sees, so it applies to the tilt sensor
+    # sharing the bus as well; every real tilt access is at an even address, so
+    # that arm is unchanged in practice.
+    let b = uint8(value shr (8'u32 * (orig and 1'u32)))
+    if bus.tilt_hit(orig): bus.tilt_write(orig, b)
+    else: bus.gba.storage[orig] = b
   else: log("Unmapped write half: " & hex_str(address))
 
 proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
@@ -637,8 +647,12 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    if bus.tilt_hit(orig): bus.tilt_write(orig, uint8(value))
-    else: bus.gba.storage[orig] = uint8(value)
+    # Same 8-bit-bus lane select as write_half_internal, but STR drives the
+    # word unrotated across all four lanes, so A[1:0] picks the byte:
+    # value >> (8 * (orig and 3)). jsmolka save/* test 8 walks all four.
+    let b = uint8(value shr (8'u32 * (orig and 3'u32)))
+    if bus.tilt_hit(orig): bus.tilt_write(orig, b)
+    else: bus.gba.storage[orig] = b
   else: log("Unmapped write word: " & hex_str(address))
 
 # ---- Instruction-fetch fast path ----

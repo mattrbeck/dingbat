@@ -42,7 +42,11 @@ method `[]=`*(st: Storage; address: uint32; value: uint8) {.base.} =
   quit "Storage.[]= not implemented for " & $st.type
 
 proc write_save*(st: Storage) =
-  if st.dirty:
+  # An empty save_path means "this cartridge has no battery file backing it":
+  # the web build owns persistence itself, and test harnesses detach the path
+  # so a run cannot leave a .sav behind for the next one to load back as
+  # power-on state. Keep the dirty flag set so a later rebind still flushes.
+  if st.dirty and st.save_path.len > 0:
     writeFile(st.save_path, st.memory)
     st.dirty = false
 
