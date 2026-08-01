@@ -17,7 +17,7 @@ type
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-    tmMagenGreen, tmMagenNoRed, tmGambatte
+    tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -1582,6 +1582,9 @@ proc main() =
   var link_contract = lcMulti
   var attach_after = 10
   var force_cgb = false
+  var no_save = false      # --nosave: blank cart RAM and detach the .sav file
+  var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
+  var bb_breakpoint = false  # --bb-breakpoint: LD B,B always ends a run (AGE)
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
   var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
   var list_path = ""       # gambatte mode: batch list file
@@ -1630,6 +1633,7 @@ proc main() =
         of "magen-green": mode = tmMagenGreen
         of "magen-nored": mode = tmMagenNoRed
         of "gambatte": mode = tmGambatte
+        of "microtest": mode = tmMicrotest
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1649,6 +1653,12 @@ proc main() =
         color_mode = true
       of "cgb":
         force_cgb = true
+      of "nosave":
+        no_save = true
+      of "ed-breakpoint":
+        ed_breakpoint = true
+      of "bb-breakpoint":
+        bb_breakpoint = true
       of "model":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1719,7 +1729,7 @@ proc main() =
     quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave]"
     quit(1)
 
   if mode == tmStateRoundtrip:
@@ -1767,6 +1777,8 @@ proc main() =
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
   let test_out = new_test_output()
+  test_out.ed_breakpoint = ed_breakpoint
+  test_out.bb_breakpoint = bb_breakpoint
 
   if is_gba:
     let is_hle = bios_path == "hle" or bios_path == ""
@@ -1813,6 +1825,14 @@ proc main() =
           quit(1)
     emu.test_output = test_out
     emu.post_init()
+    if no_save:
+      # A battery-backed suite ROM (mbc3-tester, rtc3test) otherwise drops a
+      # .sav next to the ROM in the shared cache dir, and the NEXT run loads it
+      # back as power-on state — the run stops being reproducible, and in CI the
+      # actions/cache would carry one run's SRAM into the next. Blank the RAM
+      # (mbc_load already ran inside new_gb) and detach the file.
+      for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
+      emu.cartridge.sav_path = ""
     if mode == tmSram:
       # blargg's SRAM-reporting ROMs (dmg_sound/cgb_sound/oam_bug/...) must run
       # against a blank battery and must not leave one behind: a .sav dropped
@@ -1850,6 +1870,24 @@ proc main() =
       write_ppm(screenshot_path, emu.ppu.framebuffer, GB_WIDTH, GB_HEIGHT, color_mode)
       echo screenshot_path
       quit(0)
+    # GBMicrotest: aappleby's ROMs write their verdict into HRAM and then just
+    # keep running, so there is no completion signal — the harness runs a fixed
+    # number of frames (--timeout) and reads the result out. Per the suite's
+    # howto, $FF80 is the actual value, $FF81 the expected one, and $FF82 the
+    # verdict ($01 pass / $FF fail) — and ONLY $FF82 is reliable, because some
+    # tests leave $FF80 == $FF81 on a failure. So $FF80/$FF81 are reported for
+    # triage but never scored.
+    if mode == tmMicrotest:
+      let actual   = emu.memory.hram[0]   # $FF80
+      let expected = emu.memory.hram[1]   # $FF81
+      let verdict  = emu.memory.hram[2]   # $FF82
+      echo "MICROTEST actual=0x", toHex(actual), " expected=0x", toHex(expected),
+           " verdict=0x", toHex(verdict)
+      if verdict == 0x01'u8:
+        echo "MICROTEST: PASS"
+        quit(0)
+      echo "MICROTEST: FAIL"
+      quit(1)
 
   # Determine result
   var passed = false
@@ -1873,6 +1911,9 @@ proc main() =
     passed = output.contains("ALL DONE")
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
+    quit(1)
+  of tmMicrotest:
+    echo "microtest mode is Game Boy only"
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,

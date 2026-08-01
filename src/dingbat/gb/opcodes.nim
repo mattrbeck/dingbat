@@ -536,6 +536,14 @@ var UNPREFIXED* = [
              cpu.e == 0x42 and cpu.h == 0x42 and cpu.l == 0x42:
           gb.test_output.mooneye_result = 1
           gb.test_output.finished = true
+        elif gb.test_output.bb_breakpoint:
+          # Suites whose howto states LD B,B is executed exactly once, when the
+          # test finishes (AGE), and that failure is "any register values other
+          # than the Fibonacci ones" — no dedicated failure signature to match.
+          # Opt-in, because for blargg it is an ordinary instruction executed
+          # mid-test with arbitrary registers.
+          gb.test_output.mooneye_result = 1
+          gb.test_output.finished = true
     4,
 
   # 0x41 LD B,C
@@ -1368,7 +1376,26 @@ var UNPREFIXED* = [
 
   # 0xED UNUSED
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_inc_pc(cpu)
+    when defined(test_harness):
+      # wilbertpol's fork of the Mooneye suite is built against mooneye-gb as it
+      # stood in 2016, when the magic breakpoint was the undefined opcode 0xED
+      # rather than today's LD B,B. Same verdict convention (Fibonacci
+      # 3/5/8/13/21/34 in BCDEHL on success, anything else on failure), so the
+      # hook mirrors the LD B,B block above — except that 0xED is undefined and
+      # locks up real hardware, so nothing but a test ROM's breakpoint can reach
+      # it and ANY register values may end the run. It stays opt-in
+      # (ed_breakpoint, set by dingbat_test --ed-breakpoint) so no other suite's
+      # scoring can change: blargg's cpu_instrs and friends are scored on the
+      # same builds.
+      if gb.test_output != nil and gb.test_output.ed_breakpoint:
+        if cpu.b == 3 and cpu.c == 5 and cpu.d == 8 and
+           cpu.e == 13 and cpu.h == 21 and cpu.l == 34:
+          gb.test_output.mooneye_result = 0
+        else:
+          gb.test_output.mooneye_result = 1
+        gb.test_output.finished = true
+    4,
 
   # 0xEE XOR A,u8
   proc(cpu: GbCpu; gb: GB): int =
