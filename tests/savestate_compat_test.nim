@@ -45,6 +45,7 @@
 ## (older entries can only come from an old checkout — see above)
 
 import std/[os, strutils, algorithm]
+import tables
 import dingbat/common/serialize
 import dingbat/common/scheduler
 import dingbat/gb/gb
@@ -390,6 +391,27 @@ proc run_rom_identity() =
   var legacy_buf = newSeq[byte](min(legacy_pad, 0x100000))
   for i in 0 ..< min(n, legacy_buf.len): legacy_buf[i] = uint8(file[i])
   let legacy_pow2 = fnv1a(legacy_buf)
+  # Pinned literals. The reconstruction above is independent of the code under
+  # test, but both could still be "corrected" together in one edit — a hand
+  # computed constant is the only thing that cannot move with them. Values
+  # produced from the historical rule (0x8000 floor, zero-filled) outside this
+  # program; see the table in the commit that added them.
+  const pinned = {
+    "inputrec.gba":       0x0E29A8EB'u32,
+    "rumbletest.gba":     0xA80EEEA7'u32,
+    "attachtest.gba":     0x1F8CDD74'u32,
+    "linktest.gba":       0x1F7AB09F'u32,
+    "linkskew.gba":       0xCE5B56E1'u32,
+    "normlinktest.gba":   0xDA35CE65'u32,
+    "norm32linktest.gba": 0xC7241AF7'u32,
+    "speclinkbench.gba":  0xC2EC95B1'u32,
+    "speclinkdep.gba":    0xC0DB6CBD'u32,
+  }.toTable
+  let base = rom.extractFilename
+  if base in pinned:
+    check(legacy_pow2 == pinned[base],
+          "legacy identity for " & base & " matches its pinned value",
+          "got 0x" & toHex(legacy_pow2, 8) & ", pinned 0x" & toHex(pinned[base], 8))
   # before 2dfd27e: 32 MB pre-filled with the open-bus address pattern, the
   # file over the front, [file, next_pow2) re-zeroed (only when the file was
   # not already a power of two).
