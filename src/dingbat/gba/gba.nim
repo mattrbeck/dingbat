@@ -251,6 +251,13 @@ type
     wait32_n*: array[16, int8]
     wait32_s*: array[16, int8]
     prefetch_on*: bool
+    # Per-page bitmap of the prefetch-hand-off stall (rom_access_cycles): bit
+    # `e` is set when a prefetch halfword started `e` cycles ago is in its
+    # final, uninterruptible cycle. Precomputed from wait16_s so the hot data
+    # path needs a shift, not a division. Bit 63 covers e = 63; the buffer is
+    # full (nothing in flight) by e = 8*s <= 72, so only the s = 9 tail needs
+    # the modulo fallback.
+    pf_commit*: array[16, uint64]
     # ROM bus bookkeeping for sequential-access detection and the prefetch
     # buffer: the address that would continue the current burst, and the
     # absolute cycle at which the ROM bus went idle (prefetch credit accrues

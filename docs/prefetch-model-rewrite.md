@@ -3,6 +3,33 @@
 Status: **Phase 0 done; premise revised; Phase 1 blocked on a scope decision** (2026-07-14).
 Prereq baseline: `main` @ a6ec55e — mGBA suite 6898/7218 HLE, 6897 LLE.
 
+> ## UPDATE 2026-08-01 — 14 of the 46 closed, without the occupancy rewrite
+> The CPU-side half of the −1 **is** localizable after all, and needs no new state:
+> it is the **prefetch hand-off** at a CPU data access to the gamepak. The prefetcher
+> has been streaming since `rom_free_since`, so it is `elapsed mod s` cycles into a
+> halfword; a halfword in its **final** cycle is committed and the CPU waits that
+> cycle out, one in an earlier cycle is abandoned for free. `elapsed mod s == s-1`,
+> one line in `rom_access_cycles`. Derived from the suite's own hardware table — the
+> seven `(elapsed, s)` observations behind it are in the commit message for this
+> change. Timing 1974 → **1988**; the 2 `ldr [#0x08000000]` rows and all 12
+> `ldmia [#0x07FFFFF*]` rows pass, no Timing row regresses.
+>
+> Still open: the **32 DMA rows**. The same effect exists there but is not a function
+> of `(elapsed mod s)` at the DMA's first ROM access — `Trivial DMA (16/ROM)` ARM P.S
+> (elapsed 2, s 2) needs the stall while Thumb P.S (elapsed 4, s 2) must not have it,
+> so the CPU rule cannot simply be extended. Applying it to DMA measured 1980 Timing
+> with 8 new DMA-row failures. What blocks it is that dingbat's DMA runs on the
+> *scheduled* event clock while `rom_free_since` is on the CPU's bus clock, and the
+> two are skewed by up to a fetch; the DMA hand-off needs that reconciled first.
+>
+> Also note: the six `HBl W ±SRAM/=*` **DMA-suite** rows that flip with this change are
+> the documented **log-length artifact**, not a timing regression. Those tests DMA out
+> of SRAM, and SRAM *is* the suite's own `savprintf` log (main.c:167); once the log
+> passes 0x8000 its NUL terminator wraps onto SRAM[0], so what the DMA reads depends
+> on how many lines the suite printed — i.e. on how many tests failed. Verified: the
+> bursts are parameter-identical before/after (src 0x0E00000C, len 4), only
+> `SRAM[0]` differs (0x47 'G' vs 0x00) and only after the wrap point moved.
+
 > ## ⚠️ PREMISE CORRECTION (2026-07-14) — read before touching this
 > Phase 0 empirically **inverted this doc's original premise.** An agent built and
 > instrumented real mGBA (5157ce2) and ran the suite: **mGBA FAILS these rows too**, giving

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-31 21:36:06*
+*Generated: 2026-08-01 16:55:30*
 
 ## Game Boy - Blargg
 
@@ -148,14 +148,14 @@
 |------|--------|
 | Memory tests | 👌 |
 | I/O read tests | 👌 |
-| Timing tests | 👀 1974/2020 passed |
+| Timing tests | 👀 1988/2020 passed |
 | Timer count-up tests | 👀 893/936 passed |
 | Timer IRQ tests | 👌 |
 | Shifter tests | 👌 |
 | Carry tests | 👌 |
 | Multiply long tests | 👌 |
 | BIOS math tests | 👌 |
-| DMA tests | 👌 |
+| DMA tests | 👀 1250/1256 passed |
 | SIO register R/W tests | 👌 |
 | SIO timing tests | 👌 |
 | Misc. edge case tests | 👀 1/10 passed |
@@ -219,5 +219,5 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## Summary
 
 - **Total:** 182
-- **Pass:** 150
-- **Fail:** 32
+- **Pass:** 149
+- **Fail:** 33

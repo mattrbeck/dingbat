@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-07-22 17:43:56*
+*Generated: 2026-08-01 16:55:30*
 
 ## Memory tests
 
@@ -10,26 +10,12 @@ All tests passed.
 
 All tests passed.
 
-## Timing tests (1974/2020 passed)
+## Timing tests (1988/2020 passed)
 
-1974/2020 tests passed, 46 failed:
+1988/2020 tests passed, 32 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| ldr r2, [sp] / ldr r2, [#0x08000000] Thumb/ROM P.S | 16 | 17 |
-| ldr r2, [sp] / ldr r2, [#0x08000000] Thumb/ROM PNS | 14 | 15 |
-| ldmia [#0x07FFFFFC]!, {r3-r7} ARM/ROM P.S | 28 | 29 |
-| ldmia [#0x07FFFFFC]!, {r3-r7} ARM/ROM PNS | 26 | 27 |
-| ldmia [#0x07FFFFFC]!, {r3-r7} Thumb/ROM P.S | 26 | 27 |
-| ldmia [#0x07FFFFFC]!, {r3-r7} Thumb/ROM PNS | 24 | 25 |
-| ldmia [#0x07FFFFF8]!, {r3-r7} ARM/ROM P.. | 31 | 32 |
-| ldmia [#0x07FFFFF8]!, {r3-r7} ARM/ROM PN. | 29 | 30 |
-| ldmia [#0x07FFFFF8]!, {r3-r7} Thumb/ROM P.. | 28 | 29 |
-| ldmia [#0x07FFFFF8]!, {r3-r7} Thumb/ROM PN. | 26 | 27 |
-| ldmia [#0x07FFFFF4]!, {r3-r7} ARM/ROM P.S | 22 | 23 |
-| ldmia [#0x07FFFFF4]!, {r3-r7} ARM/ROM PNS | 20 | 21 |
-| ldmia [#0x07FFFFF4]!, {r3-r7} Thumb/ROM P.S | 20 | 21 |
-| ldmia [#0x07FFFFF4]!, {r3-r7} Thumb/ROM PNS | 18 | 19 |
 | Trivial DMA (16/ROM) ARM/ROM P.S | 12 | 13 |
 | Trivial DMA (16/ROM) ARM/ROM PNS | 11 | 12 |
 | Trivial DMA (16/to ROM) ARM/ROM P.. | 14 | 15 |
@@ -133,9 +119,18 @@ All tests passed.
 
 All tests passed.
 
-## DMA tests
+## DMA tests (1250/1256 passed)
 
-All tests passed.
+1250/1256 tests passed, 6 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| 1 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 2 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 3 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
+| 1 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 2 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+| 3 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
 
 ## SIO register R/W tests
 
@@ -151,18 +146,18 @@ All tests passed.
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| DMA Prefetch Break | 0x10002A64 | 0x00000000 |
-| DMA Prefetch Read | 0xDEAD0000 | 0x428A428A |
+| DMA Prefetch Break | 0x10002A64 | 0x10002AA4 |
+| DMA Prefetch Read | 0xDEAD0000 | 0x00000011 |
 | H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x000000C7 |
-| H-blank bit start Flip 2 | 0x000003EC | 0x000003E0 |
+| H-blank bit start Flip 1 | 0x00000085 | 0x000000B5 |
+| H-blank bit start Flip 2 | 0x000003EC | 0x00000400 |
 | H-blank bit start Flip 3 | 0x000000E4 | 0x000000E1 |
-| H-blank bit start Flip 4 | 0x000003EC | 0x00000420 |
-| H-blank bit start Flip 5 | 0x000000E4 | 0x000000C0 |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x000003E0 |
+| H-blank bit start Flip 4 | 0x000003EC | 0x000003E0 |
+| H-blank bit start Flip 5 | 0x000000E4 | 0x000000E0 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x00000420 |
 
 ## Summary
 
 - **Total:** 7008
-- **Pass:** 6910
-- **Fail:** 98
+- **Pass:** 6918
+- **Fail:** 90
