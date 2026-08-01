@@ -6546,7 +6546,7 @@ const detectTiltCart = () => {
   tiltActive = tiltKind > 0;
   tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
   kbTiltDirs = [false, false, false, false];
-  tiltNeutral = null;
+  tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS;
   tiltRecenterBtn.hidden = !(tiltActive && tiltOrientationOn);
   if (tiltActive && !maybeOfferOrientationTilt()) {
     showToast("Tilt cart detected — D-pad or stick tilts the game");
@@ -6562,11 +6562,21 @@ var tiltJoltX = 0, tiltJoltY = 0;
 const updateTilt = () => {
   if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
   if (tiltOrientationOn) {
-    // Real sensor: pass raw. The easing below exists to make DIGITAL inputs
-    // roll instead of teleport — applied to the phone's real motion it
-    // low-passes away exactly the flick transient the jump detector needs.
-    tiltX = tiltTargetX;
-    tiltY = tiltTargetY;
+    if (Date.now() < tiltGlideUntil) {
+      // Glide across a discontinuity WE introduced — a recenter, or the
+      // re-baseline after a rotation. The cart derives acceleration from the
+      // sensor value, so stepping that value instantly is indistinguishable
+      // from a violent flick, and Kirby jumps. Easing over a few hundred ms
+      // keeps the same destination without the transient. Only the step is
+      // smoothed; steady-state motion below still passes raw.
+      tiltX += (tiltTargetX - tiltX) * TILT_GLIDE_RATE;
+      tiltY += (tiltTargetY - tiltY) * TILT_GLIDE_RATE;
+    } else {
+      // Real sensor: pass raw. Easing every sample would low-pass away
+      // exactly the flick transient the jump detector needs.
+      tiltX = tiltTargetX;
+      tiltY = tiltTargetY;
+    }
   } else {
     tiltX += (tiltTargetX - tiltX) * TILT_SMOOTHING;
     tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
@@ -6647,10 +6657,10 @@ const orientationTiltHandler = (e) => {
   if (!tiltActive || tiltKind === 2) return; // gyro carts use rotation RATE
   if (e.beta == null || e.gamma == null) return;
   if (tiltSettling()) {
-    // Mid-rotation: hold the game level rather than track a pose the player
-    // is only passing through. tiltNeutral stays null so the first settled
-    // reading is what defines neutral.
-    tiltTargetX = tiltTargetY = 0;
+    // Mid-rotation: FREEZE at the last value rather than tracking a pose the
+    // player is only passing through. Snapping to level here would be its own
+    // step change, which is exactly what makes the cart read a flick.
+    // tiltNeutral stays null so the first settled reading defines neutral.
     return;
   }
   const [sx, sy] = toScreenFrame(e.gamma, e.beta);
@@ -6675,10 +6685,13 @@ const orientationTiltHandler = (e) => {
 // wild mid-rotation orientation readings from lurching the tilt.
 const TILT_REBASE_MS = 450;   // when the stale neutral is dropped
 const TILT_SETTLE_MS = 650;   // when motion input starts counting again
+const TILT_GLIDE_MS = 380;   // how long a re-baseline takes to settle in
+const TILT_GLIDE_RATE = 0.16; // per-tick ease toward the new value
 const TILT_SPIN_DEGREES = 35; // integrated Z rotation that means "turning"
 const TILT_SPIN_HALFLIFE = 0.5; // seconds; keeps the integral from drifting
 var tiltRebaseTimer = 0;
 var tiltRotateUntil = 0;      // Date.now() before which motion is ignored
+var tiltGlideUntil = 0;       // Date.now() before which the value eases
 var tiltSpin = 0;             // leaky integral of |rotationRate.alpha|, deg
 var tiltSpinAt = 0;           // timestamp of the last motion sample
 const tiltSettling = () => Date.now() < tiltRotateUntil;
@@ -6689,7 +6702,7 @@ const rebaselineTiltForOrientation = () => {
   tiltJoltX = tiltJoltY = 0;      // kill any spike the turn already produced
   clearTimeout(tiltRebaseTimer);
   tiltRebaseTimer = setTimeout(() => {
-    tiltNeutral = null; // next settled reading re-baselines in the new frame
+    tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // next settled reading re-baselines in the new frame
     tiltJoltX = tiltJoltY = 0;
     showToast("Tilt recentered for the new orientation");
   }, TILT_REBASE_MS);
@@ -6723,7 +6736,7 @@ const enableOrientationTilt = async () => {
     window.addEventListener("deviceorientation", orientationTiltHandler);
     window.addEventListener("devicemotion", motionJoltHandler);
     tiltOrientationOn = true;
-    tiltNeutral = null; // re-baseline at the moment of enabling
+    tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // re-baseline at the moment of enabling
     tiltRecenterBtn.hidden = false;
     showToast("Device tilt enabled — hold your comfortable angle now");
   } catch {}
@@ -6733,7 +6746,7 @@ const enableOrientationTilt = async () => {
 // tilt games are unplayable after shifting in a chair without this.
 const tiltRecenterBtn = document.getElementById("tilt-recenter");
 tiltRecenterBtn.addEventListener("click", () => {
-  tiltNeutral = null; // next orientation reading re-baselines
+  tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // next orientation reading re-baselines
   tiltJoltX = tiltJoltY = 0;
   showToast("Tilt recentered");
 });

@@ -106,6 +106,54 @@ test("flicks work again once the rotation has settled", async () => {
     "suppression must be a window, not a latch");
 });
 
+// The cart derives acceleration from the sensor VALUE, so an instantaneous
+// step in that value is indistinguishable from a violent flick — which is
+// what makes Kirby jump. Recentring while the ball is rolling fast is the
+// clearest case: the new neutral is the pose you are already holding, so the
+// target drops from full deflection to zero in a single sample.
+const armModule = (app) => app.runIn(`
+  globalThis.__sent = [];
+  globalThis.Module = { _wasm_set_tilt: (x, y) => { globalThis.__sent.push([x, y]); } };
+`);
+const lastSent = (app) => app.runIn("__sent.length ? __sent[__sent.length - 1][0] : null");
+
+test("recentring eases the value instead of stepping it", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  armModule(app);
+  lean(app, HOLD, 0);        // baseline
+  lean(app, HOLD, 25);       // then lean hard over
+  app.runIn("updateTilt();");
+  const before = lastSent(app);
+  assert.ok(Math.abs(before) > 0.8, `expected a hard lean, got ${before}`);
+
+  app.runIn("tiltRecenterBtn.click();");
+  lean(app, HOLD, 25);       // same pose: the new neutral, so target -> 0
+  app.runIn("updateTilt();");
+  const after = lastSent(app);
+  assert.ok(Math.abs(after - before) < Math.abs(before) * 0.5,
+    `the value must ease, not step: ${before} -> ${after}`);
+
+  // ...but it must still get there.
+  app.runIn("for (let i = 0; i < 90; i++) updateTilt();");
+  assert.ok(Math.abs(lastSent(app)) < 0.05,
+    `should settle at the new neutral, got ${lastSent(app)}`);
+});
+
+test("a turn freezes the tilt rather than snapping it level", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  armModule(app);
+  lean(app, HOLD, 0);
+  lean(app, HOLD, 25);
+  const held = app.runIn("tiltTargetX");
+  await app.dispatchWin("orientationchange");
+  // A wild mid-rotation reading must not move the target at all.
+  app.runIn("orientationTiltHandler({ alpha: 0, beta: 5, gamma: -80 });");
+  assert.equal(app.runIn("tiltTargetX"), held,
+    "mid-rotation readings must be ignored, not zeroed");
+});
+
 // orientationchange fires only once the OS has decided the orientation
 // changed — too late, the turn's acceleration already reached the core and
 // Kirby already jumped. The turn has to be recognised from the motion while
