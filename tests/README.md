@@ -25,16 +25,38 @@ nimble bench_build   # -> ./dingbat_bench
 ```
 
 Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
-`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `screenshot`,
-`stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`, `norm32linktest`,
-`attachtest`, `netlink`, `speclink`, `speclinkbench`, `rollback`,
-`rollbacknet`, `gblinktest`.
+`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `microtest`,
+`screenshot`, `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`,
+`norm32linktest`, `attachtest`, `netlink`, `speclink`, `speclinkbench`,
+`rollback`, `rollbacknet`, `gblinktest`.
 
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--color`, `--cgb`, `--model=<dmg0|mgb|sgb|...>` (mooneye boot-state tables),
-`--bios=<path>`, `--sio=null|loopback`, and for the link modes `--listen`,
-`--connect`, `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
+`--nosave`, `--bb-breakpoint`, `--bios=<path>`,
+`--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
+`--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
 `--attach-after`.
+
+The two GB flags exist because different suites end a run differently, and
+each is opt-in so it cannot change how another suite is scored on the same
+binary:
+
+- `--nosave` blanks cart RAM and detaches the `.sav`. Battery-backed suite
+  ROMs otherwise drop a save next to the ROM **in the shared cache dir**, and
+  the next run loads it back as power-on state — non-reproducible locally, and
+  in CI the `actions/cache` would carry one run's SRAM into the next.
+- `--bb-breakpoint` makes `LD B,B` end the run whatever the registers hold.
+  AGE signals failure as "any register values other than the Fibonacci ones",
+  with no dedicated failure signature — without this a failing AGE ROM never
+  stops and burns its whole timeout. It must stay opt-in: blargg executes
+  `LD B,B` mid-test as an ordinary instruction.
+
+`--mode=microtest` scores GBMicrotest: run `--timeout` frames, then read the
+Game Boy's HRAM — `$FF80` actual, `$FF81` expected, `$FF82` verdict
+(`$01` pass / `$FF` fail). Only `$FF82` is scored, per the suite's howto: some
+of its tests leave `$FF80 == $FF81` on a failure. There is no completion
+signal at all — the ROMs write their result and keep running — so the frame
+count is the exit condition.
 
 Typical single run (mGBA suite, ~1.5 s when waitloop detection is healthy,
 ~70 s when it is broken):
@@ -68,11 +90,10 @@ the repo root right after `nimble test_build`, or it quits with
 "dingbat_test not found".
 
 - Downloads external suites into `$DINGBAT_ROM_CACHE` (default
-  `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0 (Blargg, Mooneye,
-  Mealybug, SameSuite), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA suite
-  ROM from `mattrbeck/mgba-suite-auto`, and `jsmolka/gba-tests` pinned to the
-  commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
-  nothing is built). CI backs this dir with
+  `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0, dmg-acid2 v1.0,
+  cgb-acid2 v1.1, the mGBA suite ROM from `mattrbeck/mgba-suite-auto`, and
+  `jsmolka/gba-tests` pinned to the commit in `JsmolkaRev` (the upstream repo
+  ships assembled `.gba`s, so nothing is built). CI backs this dir with
   `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
   the run; the cache key must be bumped when a URL/version changes.
 - Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
@@ -80,11 +101,61 @@ the repo root right after `nimble test_build`, or it quits with
   dmg_sound/cgb_sound + SameSuite APU; deliberately outside the default run
   and it does NOT rewrite results files).
 
+### Which suites run, and how each one is scored
+
+Every one of these is bundled in the single game-boy-test-roms v7.0 download,
+so adding them cost nothing at fetch time. **Each suite ships its own
+`game-boy-test-roms-howto.md` next to its ROMs, and that file is the authority
+on device, exit condition and verdict** — check it before changing a timeout or
+a `--cgb`/model flag here.
+
+| Suite | Verdict | Notes |
+|---|---|---|
+| Blargg `cpu_instrs`, `mem_timing` | serial text | `tmSerial` |
+| Blargg `instr_timing`, `mem_timing-2`, `oam_bug`, `halt_bug`, `interrupt_time` | `$A000` status + `DEB061` | `tmSram`; `interrupt_time` is CGB-only (`--cgb`), `oam_bug` needs ~21 emulated seconds |
+| Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `tmMooneye`; `manual-only/sprite_priority` is a screenshot |
+| AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
+| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`) |
+| Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
+| mGBA suite, jsmolka gba-tests | GBA; unchanged | see above |
+
+Screenshot notes:
+
+- The reference PNGs already match what `write_ppm` produces (DMG shades
+  `#000000/#555555/#AAAAAA/#FFFFFF`, CGB channels expanded `(X<<3)|(X>>2)`),
+  so no palette work is needed. A screenshot suite comparing at ~0% is a frame
+  count, a device, or a **PNG format** problem, not a color one —
+  `png_reader.nim` covers greyscale (1/2/4/8-bit), greyscale+alpha, RGB, RGBA
+  and indexed, and anything outside that now raises rather than silently
+  decoding to noise.
+- "CGB compatibility mode" references (a CGB booting a non-CGB cart: the AGE
+  `ncm*` images, `mbc3-tester-cgb`, `rtc3test`'s CGB set) use a third palette
+  and are **not** scored — dingbat has no such device mode.
+- `strikethrough` and `bully` are `$80` CGB-capable carts, so they always boot
+  CGB here; their `-dmg` references would need a CGB cart forced into DMG mode,
+  which `--cgb` (force CGB *on*) cannot express.
+
+Not integrated: `rtc3test` and `little-things-gb/tellinglys` both need scripted
+button presses (rtc3test uses A / ↓A / ↓↓A to pick one of three sub-tests) and
+`dingbat_test` has no input scripting — only `dingbat_bench` does, via its
+`"600:START,700:A"` script format. Porting that parser across would unblock
+both, and rtc3test is worth it: dingbat has a real MBC3 RTC. `scribbltests`
+`fairylake`/`winpos` and Mooneye's `logic-analysis/` ship no reference at all.
+
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
-**not** mean everything passed (the baseline carries known failures: Total
-182, Pass 150 as of the current committed `results.md`; all 13 jsmolka rows
-are green in it, so any of them going red *is* a CI failure).
+**not** mean everything passed: the baseline carries a lot of known failures
+(Total 757, Pass 399 as of the current committed `results.md`, most of them
+the PPU-timing suites added on purpose to measure them). All 13 jsmolka rows
+are green in it, so any of them going red *is* a CI failure.
+
+The regression key is the **full** test name — `blargg/oam_bug/1-lcd_sync`,
+not `1-lcd_sync` — matching the row exactly as `results.md` writes it. With
+several forks of the same suite in here (`mem_timing` vs `mem_timing-2`,
+`age` vs `mooneye`) anything shorter collides across suites and
+silently mis-keys the gate. A name absent from the baseline is simply not
+gated, which is why adding suites means regenerating and committing
+`results.md` in the same change.
 
 **Results-file caveat:** `tests/results.md` and `tests/results_mgba_suite.md`
 are committed baselines, and every run **rewrites both in place** (that is

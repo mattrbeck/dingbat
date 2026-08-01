@@ -14,7 +14,8 @@ let RomCacheDir =
 
 type
   TestMode = enum
-    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka
+    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka,
+    tmMicrotest
 
   TestDef = object
     name: string
@@ -28,6 +29,8 @@ type
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
     model: string         # mooneye per-model boot table (--model=...); "" = default
+    no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
+    bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
 
   TestResult = object
     name: string
@@ -172,11 +175,18 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMgbaSuite: "mgba-suite"
     of tmScreenshot: "screenshot"
     of tmJsmolka: "jsmolka"
+    of tmMicrotest: "microtest"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
     if test.color:
       cmd.add(" --color")
+    if test.cgb:
+      cmd.add(" --cgb")
+    if test.model.len > 0:
+      cmd.add(" --model=" & test.model)
+    if test.no_save:
+      cmd.add(" --nosave")
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
@@ -238,11 +248,25 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --cgb")
     if test.model.len > 0:
       cmd.add(" --model=" & test.model)
+    if test.no_save:
+      cmd.add(" --nosave")
+    if test.bb_breakpoint:
+      cmd.add(" --bb-breakpoint")
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
+    var text = output.strip()
+    if test.mode == tmMicrotest:
+      # Keep only the one line that carries the $FF80/$FF81/$FF82 triple: it is
+      # what makes a failing row actionable in results.md, and a verdict of
+      # 0x00 (the ROM never wrote one) reads very differently from 0xFF (the
+      # ROM ran and reported a mismatch).
+      for line in text.splitLines():
+        if line.startsWith("MICROTEST actual"):
+          text = line[len("MICROTEST ") .. ^1]
+          break
     return TestResult(
       name: test.name,
       passed: code == 0,
-      output: output.strip(),
+      output: text,
       timed_out: output.contains("TIMEOUT"),
     )
 
@@ -276,6 +300,44 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         mode: tmSerial,
         timeout: 1800,
       ))
+  # The rest of the bundled Blargg suites. They all report through the newer
+  # framework's SRAM protocol that tmSram already reads ($A000 status byte +
+  # "DEB061" signature + text), so wiring them up is just naming the paths.
+  #
+  # oam_bug wants ~21 emulated seconds per the suite howto (~1260 frames) —
+  # hence the larger timeout. It only costs anything for a ROM that never
+  # reports, since tmSram stops the moment the status byte lands.
+  for (subdir, secs) in [("oam_bug", 21), ("mem_timing-2", 4)]:
+    let singles = repo_dir / subdir / "rom_singles"
+    if not dirExists(singles): continue
+    for rom in find_roms(singles, ".gb"):
+      tests.add(TestDef(
+        name: "blargg/" & subdir & "/" & rom.splitFile().name,
+        rom_path: rom,
+        mode: tmSram,
+        timeout: max(1800, secs * 70),
+      ))
+  let halt_bug = repo_dir / "halt_bug.gb"
+  if fileExists(halt_bug):
+    tests.add(TestDef(
+      name: "blargg/halt_bug",
+      rom_path: halt_bug,
+      mode: tmSram,
+      timeout: 1800,
+    ))
+  # interrupt_time is a CGB-only ROM (the howto records DMG-C failing it with
+  # checksum 7F8F4AAF: "this is a CGB-only rom, so failure was expected"), but
+  # the cart is DMG-flagged — so it needs the CGB boot state forced, exactly
+  # like blargg's cgb_sound.
+  let interrupt_time = repo_dir / "interrupt_time" / "interrupt_time.gb"
+  if fileExists(interrupt_time):
+    tests.add(TestDef(
+      name: "blargg/interrupt_time",
+      rom_path: interrupt_time,
+      mode: tmSram,
+      timeout: 1800,
+      cgb: true,
+    ))
   tests
 
 proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef] =
@@ -324,6 +386,26 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
     ))
   tests
 
+proc mooneye_model_for(base: string): string =
+  ## The boot_regs/boot_div/boot_hwio ROMs each target one specific hardware
+  ## revision, encoded as the filename suffix after the last '-' (e.g.
+  ## boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to the
+  ## harness --model flag so the right boot table is applied. Only boot_* ROMs
+  ## are model-scoped; everything else uses the default boot state. The
+  ## default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
+  ## unmapped so their long-standing passing behavior is untouched.
+  if not base.startsWith("boot_") or '-' notin base:
+    return ""
+  case base.rsplit('-', maxsplit = 1)[1]
+  of "dmg0": "dmg0"
+  of "mgb":  "mgb"
+  of "sgb":  "sgb"
+  of "sgb2": "sgb2"
+  of "S":    "sgb"    # boot_div-S / boot_div2-S / boot_hwio-S
+  of "A":    "agb"    # misc/boot_regs-A / boot_div-A
+  of "cgb0": "cgb0"
+  else: ""
+
 proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   var tests: seq[TestDef]
   let mooneye_dir = roms_dir / "mooneye-test-suite"
@@ -333,13 +415,6 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(mooneye_dir, ".gb"):
     let rel = rom.relativePath(mooneye_dir)
     let name = "mooneye/" & rel.changeFileExt("")
-    # The boot_regs-*/boot_div-*/boot_hwio-* ROMs each target one specific
-    # hardware revision, encoded as the filename suffix after the last '-'
-    # (e.g. boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to
-    # the harness --model flag so the right boot table is applied. Only boot_*
-    # ROMs are model-scoped; everything else uses the default boot state. The
-    # default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
-    # unmapped so their long-standing passing behavior is untouched.
     # manual-only/sprite_priority has no serial pass/fail signal — mooneye
     # ships a reference image instead. Run it as a screenshot comparison
     # against the bundled DMG reference (same convention as mealybug/acid2).
@@ -352,18 +427,7 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         expected_png: rom.parentDir / "sprite_priority-dmg.png",
       ))
       continue
-    var model = ""
-    let base = rom.splitFile().name
-    if base.startsWith("boot_") and '-' in base:
-      case base.rsplit('-', maxsplit = 1)[1]
-      of "dmg0": model = "dmg0"
-      of "mgb":  model = "mgb"
-      of "sgb":  model = "sgb"
-      of "sgb2": model = "sgb2"
-      of "S":    model = "sgb"    # boot_div-S / boot_div2-S / boot_hwio-S
-      of "A":    model = "agb"    # misc/boot_regs-A / boot_div-A
-      of "cgb0": model = "cgb0"
-      else: discard
+    let model = mooneye_model_for(rom.splitFile().name)
     tests.add(TestDef(
       name: name,
       rom_path: rom,
@@ -393,6 +457,185 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
       mode: tmScreenshot,
       timeout: 120,
       expected_png: expected_png,
+    ))
+  tests
+
+proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
+  ## aappleby's GBMicrotest: 500+ tiny DMG timing probes. Per the suite's howto
+  ## each writes its verdict into HRAM — $FF80 actual, $FF81 expected, $FF82
+  ## $01/$FF pass/fail — and then keeps running, so there is no completion
+  ## signal: the harness runs a fixed number of frames and reads $FF82 out (see
+  ## --mode=microtest). "Running the emulation for two frames should be
+  ## sufficient", with one documented exception that needs ~380 ms.
+  ##
+  ## Two frames per ROM is why 500 processes cost about as much as one mGBA
+  ## suite run; the whole suite is ~2 s wall clock.
+  var tests: seq[TestDef]
+  if not dirExists(dir):
+    echo "  Warning: gbmicrotest directory not found"
+    return tests
+  for rom in find_roms(dir, ".gb"):
+    let name = rom.splitFile().name
+    tests.add(TestDef(
+      name: "gbmicrotest/" & name,
+      rom_path: rom,
+      mode: tmMicrotest,
+      # ~380 ms emulated == ~23 frames; 30 leaves headroom without making the
+      # one slow ROM noticeable.
+      timeout: if name == "is_if_set_during_ime0": 30 else: 2,
+      no_save: true,
+    ))
+  tests
+
+proc shot(name, rom, png: string; timeout: int; color = false; cgb = false;
+          no_save = false): TestDef =
+  ## One screenshot-comparison TestDef. The bundled reference PNGs use the same
+  ## palette conventions the harness already renders (DMG shades
+  ## #000000/#555555/#AAAAAA/#FFFFFF, CGB channels expanded (X<<3)|(X>>2)),
+  ## which is why acid2 and mealybug compare cleanly and these need no new
+  ## color work.
+  TestDef(name: name, rom_path: rom, mode: tmScreenshot, timeout: timeout,
+          expected_png: png, color: color, cgb: cgb, no_save: no_save)
+
+proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
+  ## The bundle's small screenshot suites, wired from an explicit table rather
+  ## than by globbing: each one has its own exit condition (from its howto) and
+  ## its own device story, and the reference PNG names encode which device the
+  ## image was captured on. Only DMG and CGB-native references are used — the
+  ## "-ncm"/"CGB compatibility mode" images are a third device (a CGB booting a
+  ## non-CGB cart) with its own palette, which this harness does not model.
+  ##
+  ## Frame counts come from the howtos: half a second (~30 frames) for bully,
+  ## strikethrough and turtle-tests; ~10 frames for most scribbltests but ~270
+  ## for statcount-auto; 40 for mbc3-tester. Where a ROM signals mooneye's
+  ## LD B,B breakpoint (cgb-acid-hell) the run stops there anyway and the frame
+  ## count is only an upper bound.
+  var tests: seq[TestDef]
+  template add_if(name, rom, png: string; timeout: int; color = false;
+                  cgb = false; no_save = false) =
+    if fileExists(rom) and fileExists(png):
+      tests.add(shot(name, rom, png, timeout, color, cgb, no_save))
+
+  # BullyGB (Hacktix) — broad hardware-behavior torture test. The one bundled
+  # reference is a CGB capture (the howto records the author's own DMG-C
+  # failing it with "Bad Echo RAM Reads"); the cart's CGB flag is $80, so it
+  # boots CGB without --cgb.
+  let bully = roms_dir / "bully"
+  add_if("bully/bully", bully / "bully.gb", bully / "bully.png", 120, color = true)
+
+  # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart,
+  # so only the CGB reference is usable: scoring the -dmg one would mean
+  # running a CGB-flagged cart as a DMG, which this harness cannot do (--cgb
+  # only forces CGB *on*).
+  let strike = roms_dir / "strikethrough"
+  add_if("strikethrough/strikethrough-cgb", strike / "strikethrough.gb",
+         strike / "strikethrough-cgb.png", 60, color = true)
+
+  # scribbltests (Hacktix). fairylake and winpos ship no reference image, so
+  # they cannot be scored; statcount has an "-auto" variant that is the one
+  # with a reference. "-cgb-dmg" images are identical on both devices.
+  let scribbl = roms_dir / "scribbltests"
+  add_if("scribbltests/lycscx", scribbl / "lycscx" / "lycscx.gb",
+         scribbl / "lycscx" / "lycscx-cgb-dmg.png", 30)
+  add_if("scribbltests/lycscy", scribbl / "lycscy" / "lycscy.gb",
+         scribbl / "lycscy" / "lycscy-cgb-dmg.png", 30)
+  add_if("scribbltests/palettely", scribbl / "palettely" / "palettely.gb",
+         scribbl / "palettely" / "palettely-dmg.png", 30)
+  add_if("scribbltests/scxly", scribbl / "scxly" / "scxly.gb",
+         scribbl / "scxly" / "scxly-dmg.png", 30)
+  add_if("scribbltests/statcount-auto", scribbl / "statcount" / "statcount-auto.gb",
+         scribbl / "statcount" / "statcount_auto-cgb-dmg.png", 300)
+
+  # turtle-tests (Powerlated) — window Y-trigger behavior.
+  let turtle = roms_dir / "turtle-tests"
+  for name in ["window_y_trigger", "window_y_trigger_wx_offscreen"]:
+    add_if("turtle-tests/" & name, turtle / name / (name & ".gb"),
+           turtle / name / (name & ".png"), 60)
+
+  # cgb-acid-hell (mattcurrie) — CGB PPU torture test, the companion to the
+  # cgb-acid2 already scored above. Finishes on LD B,B.
+  let hell = roms_dir / "cgb-acid-hell"
+  add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
+         hell / "cgb-acid-hell.png", 120, color = true)
+
+  # little-things-gb (pinobatch). Only firstwhite is scoreable here: tellinglys
+  # needs a scripted button press per its howto, and dingbat_test has no input
+  # scripting yet.
+  let little = roms_dir / "little-things-gb"
+  add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
+         little / "firstwhite-dmg-cgb.png", 60)
+
+  # MBC3 bank tester — a mapper test, so it is device-independent; the CGB
+  # reference is a CGB-compatibility-mode capture, which is not modeled, so
+  # only the DMG one is scored. Battery-backed: --nosave keeps a .sav from
+  # leaking into the next run.
+  let mbc3 = roms_dir / "mbc3-tester"
+  add_if("mbc3-tester/mbc3-tester", mbc3 / "mbc3-tester.gb",
+         mbc3 / "mbc3-tester-dmg.png", 60, no_save = true)
+  tests
+
+proc age_device_tokens(base: string): seq[string] =
+  ## Trailing device tokens of an AGE test-rom name. AGE encodes the devices a
+  ## test was verified on as dash-separated suffixes (README, "Test naming"):
+  ## `ei-halt-dmgC-cgbBCE` -> @["dmgC", "cgbBCE"], `ly-ncmE` -> @["ncmE"].
+  ## `ncm` means "CGB in non-CGB mode", a third device this harness does not
+  ## model.
+  let parts = base.split('-')
+  for i in countdown(parts.high, 0):
+    let p = parts[i]
+    if p.len > 3 and (p.startsWith("dmg") or p.startsWith("cgb") or
+                      p.startsWith("ncm")):
+      result.insert(p, 0)
+    else:
+      break
+
+proc build_age_tests(age_dir: string): seq[TestDef] =
+  ## c-sp's own AGE test roms. Two verdicts, both already implemented here:
+  ## most ROMs end on LD B,B with the mooneye Fibonacci registers (tmMooneye),
+  ## and the handful that cannot self-verify ship reference PNGs named
+  ## `<rom>-<device>.png` next to the ROM (tmScreenshot).
+  ##
+  ## Coverage is concentrated on mid-scanline PPU timing (m3-bg-*, stat-mode,
+  ## lcd-align-ly), OAM/VRAM access windows and CGB speed switching.
+  var tests: seq[TestDef]
+  if not dirExists(age_dir):
+    echo "  Warning: age-test-roms directory not found"
+    return tests
+  for rom in find_roms_recursive(age_dir, ".gb"):
+    let rel = rom.relativePath(age_dir).changeFileExt("")
+    let base = rom.splitFile().name
+    # Screenshot ROMs are the ones with `<base>-<device>.png` siblings.
+    var shots: seq[(string, string)]   # (device, png path)
+    for png in find_roms(rom.parentDir, ".png"):
+      let pbase = png.splitFile().name
+      if '-' notin pbase: continue
+      let cut = pbase.rfind('-')
+      if pbase[0 ..< cut] == base:
+        shots.add((pbase[cut + 1 .. ^1], png))
+    if shots.len > 0:
+      for (device, png) in shots:
+        if device.startsWith("ncm"): continue   # device not modeled
+        let cgb = device.startsWith("cgb")
+        tests.add(shot("age/" & rel & "-" & device, rom, png,
+                       timeout = 120, color = cgb, cgb = cgb))
+      continue
+    let devices = age_device_tokens(base)
+    let dmg = devices.anyIt(it.startsWith("dmg"))
+    let cgb = devices.anyIt(it.startsWith("cgb"))
+    if not dmg and not cgb:
+      continue   # ncm-only: CGB in non-CGB mode, which this harness cannot run
+    tests.add(TestDef(
+      name: "age/" & rel,
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: not dmg,   # prefer DMG when the ROM is verified on both
+      # AGE signals failure with "any register values other than the Fibonacci
+      # ones", not with a dedicated failure signature, so LD B,B has to end the
+      # run unconditionally. Without this a failing ROM never stops and burns
+      # the whole 1800-frame timeout — which, with most of this suite red
+      # today, was the single biggest chunk of the runner's wall clock.
+      bb_breakpoint: true,
     ))
   tests
 
@@ -517,10 +760,15 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
       let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
       var detail = ""
       if not r.passed:
-        if r.output.contains("% correct") or r.output.contains("passed") or r.output.contains("timed out"):
+        if r.output.contains("% correct") or r.output.contains("passed") or
+           r.output.contains("timed out") or r.output.contains("verdict=0x"):
           detail = " " & r.output
-      let short_name = if r.name.contains("/"): r.name.split("/", maxsplit = 1)[1] else: r.name
-      lines.add("| " & short_name & " | " & emoji & detail & " |")
+      # The row name is the FULL test name, suite prefix included. It is the
+      # key the regression comparison reads back (load_previous_results), and
+      # with ~20 suites in here — several of them forks of each other, e.g.
+      # blargg/mem_timing vs blargg/mem_timing-2, age vs mooneye —
+      # anything shorter collides across suites and silently mis-keys the gate.
+      lines.add("| " & r.name & " | " & emoji & detail & " |")
       inc total
       if r.passed: inc pass_count else: inc fail_count
     if suite.suite_name == "GBA - mGBA Test Suite":
@@ -537,6 +785,10 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
   lines.join("\n")
 
 proc load_previous_results(path: string): Table[string, bool] =
+  ## The committed baseline, keyed by the full test name exactly as
+  ## generate_results_md writes it. A name that is not in the table (a suite
+  ## added since the baseline was committed) is simply not gated — which is why
+  ## the baseline has to be regenerated and committed whenever suites are added.
   result = initTable[string, bool]()
   if not fileExists(path):
     return
@@ -556,13 +808,12 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
   for test in tests:
     let r = run_test(test, harness)
     let status = if r.passed: "PASS" else: "FAIL"
-    if test.mode == tmScreenshot:
+    if test.mode in {tmScreenshot, tmMicrotest}:
       echo &"  [{status}] {test.name} - {r.output}"
     else:
       echo &"  [{status}] {test.name}"
     results.add(r)
-    let short_name = test.name.split("/")[^1]
-    if previous.hasKey(short_name) and previous[short_name] and not r.passed:
+    if previous.getOrDefault(test.name) and not r.passed:
       regressions.add(test.name)
   SuiteResults(suite_name: name, results: results)
 
@@ -611,8 +862,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
           name: current_suite, passes: passes, total: total,
           tests: current_tests,
         ))
-        let short_name = current_suite
-        if previous.hasKey(short_name) and previous[short_name] and not passed:
+        if previous.getOrDefault("mgba-suite/" & current_suite) and not passed:
           regressions.add("mgba-suite/" & current_suite)
         seen_suites.add(current_suite)
       pending_fail = false
@@ -785,6 +1035,21 @@ proc main() =
   # Mealybug Tearoom tests (screenshot comparison)
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
+
+  # GBMicrotest (HRAM verdict byte)
+  all_suites.add(run_suite("Game Boy - GBMicrotest",
+    build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),
+    harness, previous, regressions))
+
+  # AGE test roms (mooneye-style verdict + screenshot comparison)
+  all_suites.add(run_suite("Game Boy - AGE",
+    build_age_tests(gb_test_roms_dir / "age-test-roms"),
+    harness, previous, regressions))
+
+  # The bundle's small screenshot suites (bully, strikethrough, scribbltests,
+  # turtle-tests, cgb-acid-hell, little-things-gb, mbc3-tester)
+  all_suites.add(run_suite("Game Boy - Screenshot suites",
+    build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
 
   # Write results
   createDir(getCurrentDir() / "tests")

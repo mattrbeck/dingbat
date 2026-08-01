@@ -536,6 +536,14 @@ var UNPREFIXED* = [
              cpu.e == 0x42 and cpu.h == 0x42 and cpu.l == 0x42:
           gb.test_output.mooneye_result = 1
           gb.test_output.finished = true
+        elif gb.test_output.bb_breakpoint:
+          # Suites whose howto states LD B,B is executed exactly once, when the
+          # test finishes (AGE), and that failure is "any register values other
+          # than the Fibonacci ones" — no dedicated failure signature to match.
+          # Opt-in, because for blargg it is an ordinary instruction executed
+          # mid-test with arbitrary registers.
+          gb.test_output.mooneye_result = 1
+          gb.test_output.finished = true
     4,
 
   # 0x41 LD B,C
