@@ -500,6 +500,80 @@ proc run_rom_identity() =
   check(big_sum == fnv1a(toOpenArrayByte(big, 0, 0x100000 - 1)),
         "1 MB cart's identity is the file")
 
+proc run_cart_shapes() =
+  ## Every state in the committed corpus comes from a cart with NO backup chip
+  ## (all four GBA fixtures fall back to SRAM) and, on the GB side, from a
+  ## plain 32 KB ROM cart with no mapper and no cart RAM. That leaves the
+  ## save/load code for GBA Flash and EEPROM, and for all eleven GB mappers,
+  ## never once executed in CI — add a field to HuC3's branch and forget the
+  ## migration and every test still passes.
+  ##
+  ## Committing a state per cart shape is not the answer (they would all be
+  ## this build's revision, so they would prove nothing about migrations, and
+  ## the binaries would rot). What is worth having is that the branches RUN:
+  ## synthesise a cart of each shape, boot it, take a state, put it back. A
+  ## serializer/deserializer pair that disagrees fails here immediately.
+  echo "cart shapes: every storage kind and mapper round-trips a state"
+  let tmp = getTempDir()
+
+  # --- GBA: one ROM per backup type -----------------------------------------
+  # find_storage_type scans the file for a marker string, so appending exactly
+  # one marker selects the chip. Markers are checked in StorageType order, so
+  # each ROM carries only its own.
+  let base = readFile(ROM_DIR / GBA_ROMS[0][0])
+  for (marker, want) in [("SRAM_V", stSRAM), ("EEPROM_V", stEEPROM),
+                         ("FLASH_V", stFLASH), ("FLASH512_V", stFLASH512),
+                         ("FLASH1M_V", stFLASH1M)]:
+    let path = tmp / ("dingbat_shape_" & marker & ".gba")
+    writeFile(path, base & marker & "\0")
+    defer: removeFile(path)
+    let emu = new_gba("", path, run_bios = false, use_hle = true)
+    emu.post_init()
+    # storage_kind_tag is private, so assert on the object shape it encodes:
+    # EEPROM and Flash are distinct ref types, SRAM is the plain base.
+    let shape =
+      if emu.storage of EEPROM: "eeprom"
+      elif emu.storage of Flash: "flash"
+      else: "sram"
+    let want_shape =
+      case want
+      of stEEPROM: "eeprom"
+      of stFLASH, stFLASH512, stFLASH1M: "flash"
+      else: "sram"
+    check(shape == want_shape,
+          "GBA " & marker & " is detected as " & want_shape,
+          "got " & shape)
+    for _ in 0 ..< 30: emu.step_frame()
+    let img = emu.state_bytes()
+    check(emu.load_state_bytes(img),
+          "GBA " & $want & " state round-trips")
+
+  # --- GB: one ROM per mapper ------------------------------------------------
+  # A minimal 32 KB image: the header's cart type picks the mapper and the RAM
+  # size byte gives it cart RAM to serialize. Nothing executes, so the ROM body
+  # does not matter — only that the shapes are constructed and serialized.
+  for (ctype, ramsz, name) in [(0x03'u8, 0x02'u8, "MBC1+RAM+BAT"),
+                               (0x06'u8, 0x00'u8, "MBC2+BAT"),
+                               (0x10'u8, 0x02'u8, "MBC3+TIMER+RAM+BAT"),
+                               (0x1B'u8, 0x03'u8, "MBC5+RAM+BAT"),
+                               (0x22'u8, 0x02'u8, "MBC7"),
+                               (0xFE'u8, 0x02'u8, "HuC3")]:
+    let path = tmp / ("dingbat_shape_gb_" & name & ".gb")
+    var rom = newString(0x8000)
+    for i in 0 ..< rom.len: rom[i] = char(uint8((i * 37 + 11) and 0xFF))
+    rom[0x0147] = char(ctype)
+    rom[0x0148] = '\0'          # 32 KB
+    rom[0x0149] = char(ramsz)
+    writeFile(path, rom)
+    defer:
+      removeFile(path)
+      removeFile(path[0 ..< path.rfind('.')] & ".sav")
+    let emu = new_gb("", path, fifo = false, headless = true, run_bios = false)
+    emu.post_init()
+    for _ in 0 ..< 30: emu.step_frame()
+    let img = emu.state_bytes()
+    check(emu.load_state_bytes(img), "GB " & name & " state round-trips")
+
 proc run_rejections() =
   ## The rejection path must stay a clean refusal, never a partial apply: a
   ## user who loads a state from the wrong ROM keeps playing, they do not get
@@ -664,6 +738,7 @@ when isMainModule:
     quit(0)
   run_roundtrip()
   run_rom_identity()
+  run_cart_shapes()
   run_rejections()
   run_intr_wait_migration()
   run_corpus()
