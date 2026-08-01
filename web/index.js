@@ -8369,6 +8369,11 @@ const initStorage = async () => {
   await loadHideTouchOnGamepadFromStorage();
   await loadControlStyleFromStorage();
   await loadRunaheadFromStorage();
+  // Must run before anything can print: storePrint writes the whole
+  // printerPhotos array back over PRINTER_PHOTOS_KEY, so an array that
+  // was never loaded is a one-element array that destroys every photo
+  // from every previous session.
+  await loadPrinterPhotos();
   await loadAudioSettings();
   await loadColorCorrect();
   await loadSystemSettings();
