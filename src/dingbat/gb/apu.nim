@@ -259,6 +259,14 @@ proc get_sample*(apu: GbApu; gb: GB) =
   let sample_right = mix_right - apu.dc_cap_right
   apu.dc_cap_left  = mix_left  - sample_left  * GB_DC_CHARGE
   apu.dc_cap_right = mix_right - sample_right * GB_DC_CHARGE
+  # Flush the charge to zero once it is far below anything representable in the
+  # output. Through a long silence the input is exactly 0 and the charge decays
+  # geometrically, reaching float32 denormal range after about half a second;
+  # denormal arithmetic is punitively slow on x86 without flush-to-zero, and
+  # this runs 32768 times a second. The cutoff is ~24 orders of magnitude below
+  # one LSB of the 16-bit output, so it cannot change a sample.
+  if abs(apu.dc_cap_left)  < 1e-30'f32: apu.dc_cap_left  = 0.0'f32
+  if abs(apu.dc_cap_right) < 1e-30'f32: apu.dc_cap_right = 0.0'f32
   when not defined(emscripten):
     # Before the output switch on purpose: the test_harness branch below drops
     # the sample, and the oracle needs it.
