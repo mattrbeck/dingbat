@@ -5596,7 +5596,7 @@ const GB_THEME_PALETTES = {
   // whose --accent (the pea-green #9cc954) is deliberately NOT in its ramp —
   // see rule 5. The magenta stays because shade 2 is a small share of flat
   // art, where it lands on exactly the details the artist accented.
-  dmg:             ["#eaf3de", "#b4aca9", "#b32e68", "#262828"],
+  dmg:             ["#eaf3de", "#b4aca9", "#6f6a6d", "#262828"],
   // Orchid accent verbatim; shade 2 is the shell violet darkened.
   "atomic-purple": ["#e7cbf0", "#c36ee7", "#6a3d80", "#120b16"],
   // Burnt-orange accent verbatim; shade 2 is the shell orange darkened.

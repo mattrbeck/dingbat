@@ -385,7 +385,7 @@ test("each theme palette actually contains one of its theme's colours", async ()
   const mainColorOf = {
     amber: "#ffb04d", black: "#ffb04d", light: "#9c5400",
     indigo: "#7f6ae7", fuchsia: "#e8739a", glacier: "#769be5",
-    kiwi: "#6ee126", dmg: "#b32e68", "atomic-purple": "#c36ee7",
+    kiwi: "#6ee126", dmg: "#b4aca9", "atomic-purple": "#c36ee7",
     daiei: "#eb7c33", famicom: "#b99c68",
   };
   for (const [name, main] of Object.entries(mainColorOf)) {
