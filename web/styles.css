@@ -1162,7 +1162,6 @@ body.running #main-menu-sep {
 #save-state,
 #load-state,
 #manage-saves,
-#open-prints,
 #screenshot,
 #slow-motion,
 #clip-last,
@@ -1178,7 +1177,6 @@ body.running #main-menu-sep {
 body.has-game #save-state,
 body.has-game #load-state,
 body.has-game #manage-saves,
-body.has-game #open-prints,
 body.has-game #screenshot,
 body.has-game #slow-motion,
 body.has-game #clip-last,
@@ -1187,6 +1185,14 @@ body.has-game #capture-toggle,
 body.has-game #open-states,
 body.has-game #net-connect {
   display: flex;
+}
+
+/* #open-prints is no longer in this list: it lives inside #capture-sub now,
+   which is already has-game-gated, and its own visibility is the photo count
+   (refreshPrintsMenuItem). .menu-item's display:flex would otherwise beat the
+   UA sheet's [hidden] rule and the row would never actually hide. */
+.menu-item[hidden] {
+  display: none;
 }
 
 /* Slow motion is a MODE the menu toggles — show its live state in place */
@@ -5421,6 +5427,61 @@ body.sync-shown #status {
 }
 #capture-toggle[aria-expanded="true"] .capture-chevron {
   transform: rotate(90deg);
+}
+
+/* --- New-photo indicator -------------------------------------------------
+   One dot repeated at each step of the path to a photo you have not seen:
+   hamburger -> Capture -> Printed Photos. Each one clears when ITS OWN
+   element is used, so the trail shortens as you walk it and the last dot is
+   still lit when you arrive — that is what teaches where the gallery lives.
+   The state machine, including when tapping "View" on the print toast does
+   and does not clear them, is in index.js under "New-photo indicator".
+
+   On the two menu rows the dot rides inline, immediately after the label, so
+   it reads as part of the row rather than as a separate control; Capture's
+   chevron keeps its margin-left:auto and stays pinned right. */
+#capture-toggle.has-new-photo > span::after,
+#open-prints.has-new-photo > span::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 7px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* On the hamburger the dot is a badge in the corner. The ring is not
+   decoration: without it the dot sits directly on the top hamburger bar in
+   several themes and reads as part of the glyph. */
+#menu-btn.has-new-photo::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--chrome-btn-bottom);
+}
+
+/* #menu-container is the positioned ancestor the dropdown is anchored to, so
+   the button needs its own containing block or the badge lands on the menu. */
+#menu-btn {
+  position: relative;
+}
+
+/* The badge points at Capture ▸ Printed Photos. In every state where that
+   path is not on screen — no game, and the link / rollback / net modes that
+   hide #capture-toggle outright — it would point at nothing, so it does not
+   paint. The class stays on: the dot returns intact when the path does. */
+body:not(.has-game) #menu-btn.has-new-photo::after,
+body.link-mode #menu-btn.has-new-photo::after,
+body.rollback-mode #menu-btn.has-new-photo::after,
+body.net-mode #menu-btn.has-new-photo::after {
+  display: none;
 }
 
 /* Retroactive capture in progress: the replay owns the screen — every

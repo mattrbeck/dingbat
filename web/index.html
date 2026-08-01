@@ -117,10 +117,6 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>
             <span>Save States</span>
           </button>
-          <button type="button" class="menu-item" id="open-prints">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/></svg>
-            <span>Printed Photos</span>
-          </button>
           <button type="button" class="menu-item" id="manage-saves">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/></svg>
             <span>Manage Saves</span>
@@ -142,6 +138,17 @@
             <button type="button" class="menu-item menu-subitem" id="clip-last">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l-3 2"/><path d="M5 3l-2 2M19 3l2 2"/></svg>
               <span>Save Last 10s</span>
+            </button>
+            <!-- Printed Photos moved in here from the menu's top level, and
+                 starts hidden: the Game Boy Printer is emulated for every solo
+                 GB cart, but most people will never print anything, and an
+                 always-present row for a gallery that is always empty is the
+                 worst kind of menu weight. refreshPrintsMenuItem() unhides it
+                 the moment the first print lands and re-hides it if the last
+                 one is deleted. -->
+            <button type="button" class="menu-item menu-subitem" id="open-prints" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/></svg>
+              <span>Printed Photos</span>
             </button>
           </div>
           <div class="menu-volume" id="menu-volume">

@@ -7792,6 +7792,74 @@ const loadPrinterPhotos = async () => {
   } catch {
     printerPhotos = [];
   }
+  await loadPhotoDots();
+  refreshPrintsMenuItem();
+};
+
+// --- New-photo indicator ---------------------------------------------------
+// A dot at each step of the path to a photo you have not seen: the hamburger,
+// the Capture row, the Printed Photos row. Each clears when its OWN element is
+// used, so the trail shortens as you walk it.
+//
+// The one conditional bit is what "View" on the print toast does, and it turns
+// on whether the gallery has ever been opened from the menu:
+//
+//   * Never opened from the menu. View shows the photo and changes NOTHING —
+//     all three dots stay lit. The trail is the only way this person is going
+//     to find out that the gallery exists at a fixed address in the menu, and
+//     a toast they will never see again cannot teach them that.
+//   * Opened from the menu before. View clears all three. They already know
+//     where the gallery lives, so the dots have no lesson left to give and
+//     would just be an unread badge over a photo they have already seen.
+//
+// So `everOpenedFromMenu` is set by the menu row and by nothing else — not by
+// the toast, which is exactly the route that does not teach the address.
+const PRINTER_DOTS_KEY = "prints-seen";
+var photoDots = {
+  everOpenedFromMenu: false, // has the gallery ever been opened FROM THE MENU
+  menu: false,               // dot on the hamburger
+  capture: false,            // dot on the Capture row
+  gallery: false,            // dot on the Printed Photos row
+};
+
+const applyPhotoDots = () => {
+  menuBtn.classList.toggle("has-new-photo", photoDots.menu);
+  captureToggle.classList.toggle("has-new-photo", photoDots.capture);
+  printsItem.classList.toggle("has-new-photo", photoDots.gallery);
+};
+
+const savePhotoDots = async () => {
+  try { await dbPut(PRINTER_DOTS_KEY, photoDots); } catch {}
+};
+
+const loadPhotoDots = async () => {
+  try {
+    const rec = await dbGet(PRINTER_DOTS_KEY);
+    if (rec && typeof rec === "object") photoDots = { ...photoDots, ...rec };
+  } catch {}
+  // A dot with nothing behind it is a dead end: if the photos are gone (an
+  // old record, a cleared gallery) the trail goes with them.
+  if (!printerPhotos.length) photoDots.menu = photoDots.capture = photoDots.gallery = false;
+  applyPhotoDots();
+};
+
+// on=true lights the whole trail (a photo arrived); on=false retires it.
+const setPhotoDots = (on) => {
+  photoDots.menu = photoDots.capture = photoDots.gallery = on;
+  applyPhotoDots();
+  savePhotoDots();
+};
+
+const clearPhotoDot = (which) => {
+  if (!photoDots[which]) return;
+  photoDots[which] = false;
+  applyPhotoDots();
+  savePhotoDots();
+};
+
+// The Printed Photos row exists only once there is something behind it.
+const refreshPrintsMenuItem = () => {
+  printsItem.hidden = printerPhotos.length === 0;
 };
 
 const printToPng = (h) => {
@@ -7821,17 +7889,33 @@ const downloadPrint = (photo) => {
   a.click();
 };
 
+// Everything a finished print does once it is pixels: store it, put the menu
+// row up, light the trail, offer the shortcut. Split out of collectPrint so
+// the parts that need no wasm can be driven directly (web/tests).
+const storePrint = async (photo) => {
+  printerPhotos.unshift(photo);
+  if (printerPhotos.length > PRINTER_MAX_PHOTOS) printerPhotos.length = PRINTER_MAX_PHOTOS;
+  try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
+  refreshPrintsMenuItem(); // the first print is what puts the row in the menu
+  if (printsModal.classList.contains("open")) {
+    // The gallery is open and the photo lands in it. Nothing unseen, so
+    // nothing to point at and nothing to offer.
+    renderPrintsGrid();
+    return;
+  }
+  setPhotoDots(true);
+  showActionToast("Photo printed", "View", () => {
+    // See "New-photo indicator" above: the toast only retires the trail for
+    // someone who already knows where the trail leads.
+    if (photoDots.everOpenedFromMenu) setPhotoDots(false);
+    openPrintsModal();
+  }, 6000);
+};
+
 const collectPrint = async (h) => {
   const shot = printToPng(h);
   if (!shot) return;
-  printerPhotos.unshift({ ...shot, ts: Date.now(), game: currentOriginalName || "" });
-  if (printerPhotos.length > PRINTER_MAX_PHOTOS) printerPhotos.length = PRINTER_MAX_PHOTOS;
-  try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
-  if (!printsModal.classList.contains("open")) {
-    showActionToast("Photo printed", "View", openPrintsModal, 6000);
-  } else {
-    renderPrintsGrid();
-  }
+  await storePrint({ ...shot, ts: Date.now(), game: currentOriginalName || "" });
 };
 
 const pollPrinter = () => {
@@ -7843,6 +7927,7 @@ const pollPrinter = () => {
 const printsModal = document.getElementById("prints-modal");
 const printsGrid = document.getElementById("prints-grid");
 const printsEmpty = document.getElementById("prints-empty");
+const printsItem = document.getElementById("open-prints"); // Capture ▸ Printed Photos
 
 const renderPrintsGrid = () => {
   printsGrid.innerHTML = "";
@@ -7868,6 +7953,10 @@ const renderPrintsGrid = () => {
     del.addEventListener("click", async () => {
       printerPhotos.splice(idx, 1);
       try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
+      // Deleting the last photo takes the menu row with it, and any dot still
+      // pointing at that row would then point at nothing.
+      refreshPrintsMenuItem();
+      if (!printerPhotos.length) setPhotoDots(false);
       renderPrintsGrid();
     });
     row.append(save, del);
@@ -7888,7 +7977,27 @@ const closePrintsModal = () => {
   releaseFocus(printsModal);
 };
 
-document.getElementById("open-prints").addEventListener("click", openPrintsModal);
+// The menu row is the ONE route that sets everOpenedFromMenu — it is the only
+// one that teaches where the gallery lives, which is the whole thing the
+// indicator exists to teach.
+printsItem.addEventListener("click", () => {
+  photoDots.everOpenedFromMenu = true;
+  photoDots.gallery = false;
+  applyPhotoDots();
+  savePhotoDots();
+  openPrintsModal();
+});
+
+// Each of the other two dots clears when its own element is used, and only
+// then — opening the menu says nothing about whether you found Capture, and
+// expanding Capture says nothing about whether you opened the gallery.
+menuBtn.addEventListener("click", () => {
+  if (!menuDropdown.hidden) clearPhotoDot("menu");
+});
+captureToggle.addEventListener("click", () => {
+  if (!captureSub.hidden) clearPhotoDot("capture");
+});
+
 document.getElementById("prints-close").addEventListener("click", closePrintsModal);
 printsModal.addEventListener("click", (e) => {
   if (e.target === printsModal) closePrintsModal();
@@ -8387,6 +8496,12 @@ const initStorage = async () => {
   await loadSystemSettings();
   await loadVideoSettings();
   await loadGbPalette();
+  // Was never called at all, which meant printerPhotos started every session
+  // empty: the gallery showed "Nothing printed yet" over a full store, and the
+  // next print dbPut a one-element array back over every earlier photo. It is
+  // load-bearing now for a second reason — the Capture ▸ Printed Photos row
+  // and the new-photo dots are both driven off the photo count.
+  await loadPrinterPhotos();
   await loadSyncState();
   await loadRomsSort();
   refreshSyncUI();
