@@ -264,6 +264,46 @@ proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool 
       sp_px.obj_to_bg == 0 or bg_px.color == 0
   else: false
 
+# Which of the eight fetcher positions the window's re-trigger edge survives
+# on. See window_reactivate; overridable so the sweep that picked it can be
+# re-run against the three m3_wx_*_change ROMs.
+const WIN_REACT_PHASE {.intdefine.} = 5
+
+proc window_reactivate(ppu: GbFifoPpu) =
+  ## WX was re-reached while the window was ALREADY the active fetch source.
+  ##
+  ## The window does not restart here: the window tile position and
+  ## current_window_line both carry on, and the rest of the line is the same
+  ## pixels it would otherwise have been. What the re-trigger edge does is
+  ## inject ONE pixel of colour 0 at the lowest priority in front of whatever
+  ## the BG FIFO is holding, displacing the remainder of the line one pixel to
+  ## the right. mealybug m3_wx_4_change's reference is exactly our old output
+  ## with a single extra colour-0 pixel spliced in at WX-7, which is what
+  ## fixes the position; that it is colour 0 rather than a shade is what lets
+  ## an OBJ-behind-BG sprite show through it, which is what m3_wx_4_change
+  ## _sprites checks (its reference shows the sprite's grey at that pixel, not
+  ## the palette-0 shade).
+  ##
+  ## The edge is swallowed on seven fetcher steps out of eight -- mealybug
+  ## drives WX from LY, so the re-trigger walks one pixel per line, and the
+  ## artifact shows up on one line in eight. The ROM's own comment names the
+  ## surviving step as the window tile-map (nametable) read. WHICH of this
+  ## model's eight fetch_counter positions that read corresponds to is a
+  ## property of this renderer's phase (the discarded first fetch and the
+  ## extra Get-Tile-Data-High push both shift it), not something Pan Docs
+  ## fixes, so it was settled by sweeping all eight against m3_wx_4_change,
+  ## m3_wx_4_change_sprites and m3_wx_5_change: position 5 is the unique best
+  ## on all three at once (229/10/638 mismatching pixels -> 53/4/142).
+  if ppu.fetch_counter != WIN_REACT_PHASE:
+    return
+  # Unshift, not push: the pixel is consumed by the very next dot, so it has to
+  # go in front of the FIFO's head. Depth is 16 and the FIFO never holds more
+  # than 8, so the extra entry cannot collide with the tail.
+  ppu.fifo.head = (ppu.fifo.head - 1) and 15
+  ppu.fifo.data[ppu.fifo.head] =
+    GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+  inc ppu.fifo.size
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -295,10 +335,13 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     # Same conjunction, cheapest and most selective terms first: two plain
     # bool fields reject almost every dot before any register decode or
     # comparison runs. All five terms are side-effect-free reads.
-    if not ppu.fetching_window and ppu.window_trigger and
-       window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-       int(ppu.lx) + 7 >= int(ppu.wx):
-      fifo_reset_bg(ppu, true)
+    if not ppu.fetching_window:
+      if ppu.window_trigger and
+         window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
+         int(ppu.lx) + 7 >= int(ppu.wx):
+        fifo_reset_bg(ppu, true)
+    elif int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
+      window_reactivate(ppu)
 
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
