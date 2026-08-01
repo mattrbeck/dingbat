@@ -1839,7 +1839,7 @@ const gdriveAcquireToken = async (promptMode) => {
       reject(new Error(
         err?.type === "popup_failed_to_open"
           ? "Popup blocked — allow popups for this site and try again"
-          : "Sign-in was cancelled",
+          : "Sign-in was canceled",
       ));
     };
     gdriveTokenClient.requestAccessToken(

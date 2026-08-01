@@ -115,6 +115,6 @@ test("a cancelled sign-in leaves the Sign in link visible and clickable", async 
   assert.equal(signin.hidden, false, "still offered");
   assert.equal(signin.disabled, false, "and re-armed for another try");
   assert.equal(sync.hidden, true);
-  assert.ok(app.toasts.some((t) => /Sign-in was cancelled/.test(t)),
+  assert.ok(app.toasts.some((t) => /Sign-in was canceled/.test(t)),
     "the failure is reported: " + JSON.stringify(app.toasts));
 });
