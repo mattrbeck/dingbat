@@ -362,7 +362,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       # so it still fires on exactly the dot it used to.
       let m = ppu.mode_flag
       if m != 3:
-        let target = if m == 2: 80'i32 else: 456'i32
+        let target =
+          if m == 2: 80'i32
+          elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+          else: 456'i32
         if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
@@ -411,7 +414,15 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           tick_bg_fetcher(ppu, gb)
           tick_shifter(ppu, gb)
       of 0:  # H-Blank
-        if ppu.cycle_counter == 456:
+        # CGB raises the line-144 mode 2 STAT source one M-cycle before the
+        # line ends (see m2_line144). The source is level-triggered off the
+        # dot counter, but nothing else happens on this dot, so the edge
+        # detector has to be run here explicitly; the skip target above stops
+        # the idle jump on it so this dot is actually visited.
+        if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
+           gb.cgb_enabled:
+          ppu_handle_stat_interrupt(ppu, gb)
+        elif ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           ppu.ly += 1
           if int(ppu.ly) == GB_HEIGHT:
@@ -469,7 +480,14 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # An LCD that is off also falls through -- that path re-asserts mode 0 and
   # drives the blank-frame clock every tick.
   if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
-    let target = if m == 2: 80'i32 else: 456'i32
+    # Line 143's mode 0 is the one H-Blank with something to do before dot 456
+    # (the CGB early mode 2 STAT, see m2_line144), so it gets the shorter
+    # target. `ppu.ly == 143` is first because it is false on 153 of every 154
+    # lines, which keeps the added cost of this case to one compare.
+    let target =
+      if m == 2: 80'i32
+      elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+      else: 456'i32
     let next = ppu.cycle_counter + int32(cycles)
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the
