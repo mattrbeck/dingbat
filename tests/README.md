@@ -76,7 +76,12 @@ repeated frame-boundary PC is common and silently truncates the run.
 
 Per-failure lines and a rollup by failure class (state + opcode + which of
 r3/r4/CPSR disagreed, and for CPSR which flags) go to **stderr**; stdout is a
-single `N/10000 passed` line, which is what the runner puts in `results.md`.
+single `FUZZARM: N/10000 passed` line, which is what the runner puts in
+`results.md` (it merges the two streams — unread, stderr is both lost and a
+deadlock once the triage outgrows the pipe buffer — and finds the verdict by
+that marker, never by position, since a block-buffered stdout can flush after
+an unbuffered stderr). On a failure the runner replays the triage into its own
+log.
 `--max-fails=<n>` (default 500) caps the report — each failure costs two
 emulated frames of button-ack.
 
