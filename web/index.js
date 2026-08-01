@@ -506,6 +506,59 @@ const releaseFocus = (overlay) => {
   modalReturnFocus = null;
 };
 
+// --- Give focus back to the game after a pointer-activated chrome control ---
+//
+// Clicking a top-bar control (Pause, Reset, a menu item…) leaves DOM focus
+// sitting on that button. Every keyboard shortcut afterwards is then aimed at
+// the focus ring instead of the emulator — most visibly Tab, which the
+// window-capture hook at the top of this file deliberately keeps as focus
+// traversal while focus is in the chrome, so "click Pause, hold Tab to
+// fast-forward" just walked the top bar. Hand focus back to the game surface
+// instead.
+//
+// POINTER activations only. A keyboard user who tabs to a button and presses
+// Enter/Space gets a click too, and stealing focus there would dump them at the
+// top of the tab order with no visible ring. The two are told apart by
+// `detail`: a real mouse/touch click carries its click count (>= 1), while a
+// keyboard-synthesised click (and el.click()) reports 0.
+const returnFocusToGame = (/** @type {any} */ ctl) => {
+  if (ctl && typeof ctl.blur === "function") ctl.blur();
+  // The canvas carries tabindex="-1": programmatically focusable, never in the
+  // tab order. preventScroll matters — #home is a scroll container and the
+  // default scroll-into-view would jump the library. If the surface isn't
+  // focusable right now (no game loaded, so it's display:none) the blur above
+  // has already done the important half.
+  if (canvasEl && typeof canvasEl.focus === "function") {
+    try { canvasEl.focus({ preventScroll: true }); } catch { try { canvasEl.focus(); } catch {} }
+  }
+};
+
+// Bubble phase on document, so a control's own handler has already run (and,
+// where it opens a modal synchronously, anyModalOpen() below already sees it).
+document.addEventListener("click", (e) => {
+  if (!e || e.detail === 0) return; // keyboard/programmatic activation
+  const t = /** @type {any} */ (e.target);
+  // Duck-typed: the click target is often the button's inner <svg>, and the
+  // test harness dispatches bare event objects.
+  if (!t || typeof t.closest !== "function") return;
+  // Modals and the menu run their own focus management (trapFocus /
+  // releaseFocus); pulling focus to the canvas underneath them would break the
+  // trap and the restore-on-close.
+  if (t.closest(".modal-overlay")) return;
+  // Scoped to the main chrome. Home-screen controls (Load a game, the library
+  // tiles) are a normal document flow where keeping focus is correct.
+  if (!t.closest("#topbar, #topbar-handle")) return;
+  if (anyModalOpen()) return;
+  const ctl = t.closest("button, [href], [tabindex]");
+  // Text fields and range inputs keep focus: typing and arrow-key nudging are
+  // the whole point of them, and the SDL typing escape hatch at the top of this
+  // file depends on the field still being document.activeElement.
+  const tag = ctl && ctl.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+      (ctl && ctl.isContentEditable)) return;
+  returnFocusToGame(ctl);
+});
+
 // --- IndexedDB storage ---
 
 const DB_NAME = "dingbat";

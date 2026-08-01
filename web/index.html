@@ -258,7 +258,10 @@
            frame, blurred up by CSS behind the screen -->
       <canvas id="glow-canvas" width="24" height="16" hidden aria-hidden="true"></canvas>
 
-      <canvas id="canvas" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
+      <!-- tabindex="-1": programmatically focusable (returnFocusToGame parks
+           focus here after a pointer-activated chrome control) but never in the
+           tab order, so keyboard traversal of the chrome is unchanged. -->
+      <canvas id="canvas" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
 
       <!-- SDL still owns a (now invisible) WebGL context for its window/renderer
            init; we point Module.canvas here so #canvas is free for our own

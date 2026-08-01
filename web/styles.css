@@ -1530,6 +1530,14 @@ body.fs #fullscreen-btn .ico-collapse {
   display: none;
 }
 
+/* The canvas is a tabindex="-1" script-focus parking spot (returnFocusToGame),
+   never something the user navigated to, so it must never draw a focus ring.
+   :focus-visible already wouldn't fire for programmatic focus in Chrome/Safari;
+   this covers the engines that ring plain :focus too. */
+#canvas:focus {
+  outline: none;
+}
+
 body.running #canvas {
   display: block;
   border-radius: 4px;
