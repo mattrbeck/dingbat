@@ -54,6 +54,7 @@ interface EmscriptenModule {
   _wasm_set_turbo?(on: number): void;
   _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
+  _wasm_state_error?(): number;
   _wasm_load_state?(data: number, len: number, keepRewind: number): number;
   _benchFrames?(n: number): void;
   _isStopped?(): number;

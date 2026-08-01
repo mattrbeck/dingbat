@@ -399,6 +399,12 @@ proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
     of ekGB:  stateGb.apu.set_pitch_correct_ff(t)
     of ekNone: discard
 
+proc wasm_state_error(): cstring {.exportc.} =
+  ## Why the last wasm_load_state returned 0, verbatim from the core. Empty
+  ## before any failure. JS shows this instead of guessing: a version refusal
+  ## and a wrong-ROM refusal used to render as the same sentence.
+  cstring(last_state_error)
+
 proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
@@ -409,6 +415,7 @@ proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc
   ## commit — where the retained snapshots really are this state's own past and
   ## throwing away minutes of history would make Undo cost more than the thing
   ## it undoes.
+  last_state_error = ""
   if data == nil or len <= 0: return 0
   if stateNet != nil: return 0  # loading a state mid-link would desync the pair
   var image = newString(int(len))

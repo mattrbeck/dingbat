@@ -3636,11 +3636,24 @@ const looksLikeStateFile = (bytes) =>
   !!bytes && bytes.length >= STATE_MAGIC.length &&
   [...STATE_MAGIC].every((c, i) => bytes[i] === c.charCodeAt(0));
 
-// Toast copy for a state image the core refused to load.
-const stateRejectMessage = (bytes) =>
-  looksLikeStateFile(bytes)
-    ? "State didn't match this game"
-    : "Not a dingbat save state file";
+// Toast copy for a state image the core refused to load. The core knows
+// exactly why — wrong ROM, written by a newer build, a corrupt section — and
+// says so in wasm_state_error(); prefer that over guessing. "State didn't
+// match this game" is only correct for one of those, and it sent people
+// looking for the wrong problem when the real answer was a version mismatch.
+const stateRejectMessage = (bytes) => {
+  if (!looksLikeStateFile(bytes)) return "Not a dingbat save state file";
+  let why = "";
+  try {
+    if (typeof Module !== "undefined" && Module._wasm_state_error) {
+      why = Module.UTF8ToString(Module._wasm_state_error()) || "";
+    }
+  } catch {}
+  if (!why) return "State didn't match this game";
+  // The core's messages are written for a person; sentence-case the first
+  // letter and drop a trailing period so it sits in a toast.
+  return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.$/, "");
+};
 
 // Validate + apply a state image; returns true when the core accepted it.
 // keepRewind is for undoing a rewind-scrubber commit and nothing else: that

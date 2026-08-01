@@ -821,14 +821,16 @@ proc load_state_bytes*(gb: GB; data: string): bool =
   try:
     image = gb.parse_state_image(data)
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     return false
   let backup = gb.gb_state_payload()
   try:
     gb.gb_apply_state(image.payload, image.rev)
     true
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
     false
 
@@ -858,13 +860,15 @@ proc load_state*(gb: GB; path: string): bool =
     image = read_state_payload(path, ckGB, gb.gb_rom_checksum(),
                                uint32(gb.cartridge.rom.len))
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     return false
   let backup = gb.gb_state_payload()
   try:
     gb.gb_apply_state(image.payload, image.rev)
     true
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
     false

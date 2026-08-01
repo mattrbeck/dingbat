@@ -889,14 +889,16 @@ proc load_state_bytes*(gba: GBA; data: string): bool =
   try:
     image = gba.parse_state_image(data)
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     return false
   let backup = gba.gba_state_payload()
   try:
     gba.gba_apply_state(image.payload, image.rev)
     true
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
     false
 
@@ -927,13 +929,15 @@ proc load_state*(gba: GBA; path: string): bool =
                                GBA_STATE_ROM_TAG,
                                gba.gba_legacy_rom_checksums())
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     return false
   let backup = gba.gba_state_payload()
   try:
     gba.gba_apply_state(image.payload, image.rev)
     true
   except CatchableError:
-    echo "Load state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
     gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
     false

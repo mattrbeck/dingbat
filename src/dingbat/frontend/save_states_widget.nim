@@ -22,6 +22,10 @@ type
     window*:   bool
     selected*: int
     have_rom*: bool
+    notice*:   string  ## last load failure, shown under the grid.
+                       ## The core says exactly why a state was
+                       ## refused; before this the native app threw
+                       ## that away and the user saw nothing at all.
     slots*:    array[NUM_SLOTS, StateSlot]
     on_open*:   proc() {.closure.}         ## (re)populate slots + textures
     on_save*:   proc(slot: int) {.closure.}
@@ -216,6 +220,10 @@ proc render*(w: SaveStatesWidget) =
       igSameLine(0, GAP)
       if not sel.used: igBeginDisabled(true)
       if igButton("Load", ImVec2(x: BTN_W, y: 0)):
+        w.notice = ""
         if w.on_load != nil: w.on_load(w.selected)
       if not sel.used: igEndDisabled()
+      if w.notice.len > 0:
+        igTextColored(ImVec4(x: 1.0, y: 0.45, z: 0.42, w: 1.0),
+                      cstring(w.notice))
   igEnd()

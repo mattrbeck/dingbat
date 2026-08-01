@@ -1850,7 +1850,14 @@ proc main() =
   # always reached at a frame boundary (right after process_pending_state).
   app.save_states.on_open = proc() = refresh_state_slots()
   app.save_states.on_save = proc(slot: int) = discard save_state_slot(slot)
-  app.save_states.on_load = proc(slot: int) = discard load_state_slot(slot)
+  app.save_states.on_load = proc(slot: int) =
+    # Surface WHY a load was refused. The core distinguishes a wrong ROM
+    # from a newer-build file from a corrupt section; discarding the bool
+    # left the user with a silently unchanged screen.
+    if not load_state_slot(slot):
+      app.save_states.notice =
+        if last_state_error.len > 0: last_state_error
+        else: "Could not load that slot."
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
 
   # Default the Join address to localhost (2 instances on one machine).

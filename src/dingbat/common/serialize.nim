@@ -171,6 +171,19 @@ proc expect_tag*(r: var Reader; tag: uint8) =
 
 # ==================== Hashing ====================
 
+var last_state_error*: string = ""
+  ## Why the most recent state load was refused, in the words parse_state_payload
+  ## already uses ("...belongs to a different ROM", "...written by a newer
+  ## version of dingbat", a corrupt-section message). Every caller of
+  ## load_state_bytes collapses the result to a bool, so without this the user
+  ## is told "State didn't match this game" no matter which of those it was —
+  ## which is actively wrong for a version mismatch and has sent more than one
+  ## person hunting for the wrong problem.
+  ##
+  ## Assigned only from inside procs the frontends call (never at module scope):
+  ## heap globals initialised at module scope dangle in the wasm build once
+  ## main() has returned.
+
 proc fnv1a*(data: openArray[byte]): uint32 =
   result = 0x811C9DC5'u32
   for b in data:
