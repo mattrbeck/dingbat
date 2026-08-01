@@ -768,7 +768,9 @@ proc gb_rom_checksum(gb: GB): uint32 =
   ## gba_rom_checksum) this identity has never depended on an allocation rule
   ## and has no legacy variants to accept. Keep it that way: if a GB mapper
   ## ever needs a padded buffer, hash the file length explicitly.
-  fnv1a(gb.cartridge.rom)
+  ## From the cache taken at load (Mbc.rom_identity), not the live buffer --
+  ## cheats patch that in place. See the GBA side.
+  gb.cartridge.rom_identity
 
 proc state_payload*(gb: GB): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses

@@ -36,6 +36,10 @@ type
   Mbc* = ref object of RootObj
     gb_ref* {.cursor.}: GB   # back-ref to the owning GB; non-owning to avoid a
                              # reference cycle (the GB owns the cartridge)
+    rom_identity*: uint32    # FNV-1a of the ROM as loaded, taken once. The
+                             # save-state identity reads this, not `rom`,
+                             # which cheats patch in place. See
+                             # gb_rom_checksum.
     rom*:          seq[uint8]
     ram*:          seq[uint8]
     sav_path*:     string

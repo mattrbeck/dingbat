@@ -263,4 +263,7 @@ proc load_cartridge*(rom_path: string): Mbc =
   # both decided from the ROM image here, so the map is only well defined once
   # the cartridge object exists.
   mbc_sync_rom_map(cart)
+  # Identity from the bytes as loaded, once. See the GBA side: hashing the
+  # live buffer let a Game Genie code orphan the player's save states.
+  cart.rom_identity = fnv1a(cart.rom)
   result = cart

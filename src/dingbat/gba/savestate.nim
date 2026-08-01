@@ -776,9 +776,11 @@ proc gba_rom_checksum(gba: GBA): uint32 =
   ## different quantity with a similar name: `LinkMsg.rom_crc`, a CRC-32 of the
   ## ROM file sent in HELLO (common/linkproto.nim). Changing this proc cannot
   ## reject a peer; changing that one can. Keep them separate.
-  let n = min(gba.cartridge.rom_size, 0x100000)
-  if n <= 0: return fnv1a(toOpenArray(gba.cartridge.rom, 0, -1))
-  fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1))
+  ## Read from the cache taken at load (Cartridge.rom_identity), never from the
+  ## live buffer: the cheat engine patches `rom` in place, so hashing it here
+  ## meant toggling a ROM-patching code re-identified the cart and refused
+  ## every state for it.
+  gba.cartridge.rom_identity
 
 proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
   ## The identities OLDER builds computed for this same cart, accepted on read

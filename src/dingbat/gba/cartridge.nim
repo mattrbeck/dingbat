@@ -36,6 +36,16 @@ proc new_cartridge*(rom_path: string): Cartridge =
   if sz == 0x100000:
     for i in 1 .. 3:
       copyMem(addr result.rom[i * sz], addr result.rom[0], sz)
+  # Cart identity, taken once, here, from the bytes exactly as they came off
+  # disk. Nothing may recompute it later: the cheat engine patches `rom` in
+  # place, so a hash of the live buffer changes the moment a ROM-patching code
+  # is toggled and every save state for the game stops loading. Same window as
+  # before (the first 1 MB of the FILE), so the value is unchanged for every
+  # cart -- this moves WHEN it is computed, not WHAT from.
+  let idn = min(sz, 0x100000)
+  result.rom_identity =
+    if idn <= 0: fnv1a(toOpenArray(result.rom, 0, -1))
+    else: fnv1a(toOpenArray(result.rom, 0, idn - 1))
 
 proc rom_open_bus*(address: uint32): uint8 {.inline.} =
   ## Value returned when reading past the end of the ROM: the incrementing

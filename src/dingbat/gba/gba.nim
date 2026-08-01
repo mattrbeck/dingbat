@@ -866,6 +866,12 @@ type
     db_delay*:   int
 
   Cartridge* = ref object
+    rom_identity*: uint32  ## FNV-1a of the ROM as it came off disk, taken
+                           ## once at load. The save-state ROM identity
+                           ## reads THIS, never the live `rom` buffer:
+                           ## cheats patch that buffer in place, so hashing
+                           ## it made enabling a Game Genie code orphan the
+                           ## player's save states. See gba_rom_checksum.
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1 (rom.len is always a power of two)
     rom_size*: int         ## bytes actually read from the file, i.e. rom minus
