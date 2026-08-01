@@ -237,18 +237,28 @@ proc get_sample*(apu: GbApu; gb: GB) =
   let c2 = if apu.channel_mask[1]: ch2_get_amplitude(apu.channel2) else: 0.0'f32
   let c3 = if apu.channel_mask[2]: ch3_get_amplitude(apu.channel3) else: 0.0'f32
   let c4 = if apu.channel_mask[3]: ch4_get_amplitude(apu.channel4) else: 0.0'f32
-  let sample_left =
+  let mix_left =
     (float32(apu.left_volume) / 7.0'f32) *
     ((if (apu.nr51 and 0x80) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x40) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x20) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x10) != 0: c1 else: 0.0'f32)) / 4.0'f32
-  let sample_right =
+  let mix_right =
     (float32(apu.right_volume) / 7.0'f32) *
     ((if (apu.nr51 and 0x08) != 0: c4 else: 0.0'f32) +
      (if (apu.nr51 and 0x04) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32)) / 4.0'f32
+  # Output-stage DC blocker, modelling the coupling capacitor between the mixer
+  # and the output jack. See GB_DC_CHARGE for why this is not optional: the raw
+  # DAC mix carries a large DC offset that steps every time a channel is
+  # switched on or off, and each of those steps is an audible click. Applied
+  # here, ahead of the dump hook and every output path, so the oracle sees what
+  # the speaker sees.
+  let sample_left  = mix_left  - apu.dc_cap_left
+  let sample_right = mix_right - apu.dc_cap_right
+  apu.dc_cap_left  = mix_left  - sample_left  * GB_DC_CHARGE
+  apu.dc_cap_right = mix_right - sample_right * GB_DC_CHARGE
   when not defined(emscripten):
     # Before the output switch on purpose: the test_harness branch below drops
     # the sample, and the oracle needs it.

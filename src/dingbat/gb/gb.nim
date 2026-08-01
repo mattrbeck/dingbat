@@ -457,6 +457,14 @@ type
     channel2*:            GbChannel2
     channel3*:            GbChannel3
     channel4*:            GbChannel4
+    # Output-stage DC blocker (see GB_DC_CHARGE and get_sample). Charge held on
+    # the coupling capacitor, one per stereo side. Deliberately NOT serialized:
+    # it is presentation state, not emulated state, and STATE_VERSION is global
+    # across the GB and GBA cores and compared for equality, so adding a field
+    # here would invalidate every existing save state on both cores. The filter
+    # re-converges within ~6 ms of a state load, which is why that trade is safe.
+    dc_cap_left*:         float32
+    dc_cap_right*:        float32
     left_resampler*:      Resampler[float32]
     right_resampler*:     Resampler[float32]
     resample_freq*:       int
@@ -536,6 +544,36 @@ const GB_SYNC_AHEAD_BYTES*    = 4096'u32
 const GB_SYNC_BACKSTOP_BYTES* = 32768'u32
 const GB_SAMPLE_RATE*     = 32768
 const GB_SAMPLE_PERIOD*   = GB_CLOCK_SPEED div GB_SAMPLE_RATE
+
+# Output-stage DC blocker.
+#
+# A Game Boy channel's DAC does not idle at the middle of its range: the 4-bit
+# digital value 0 is one RAIL, not silence. A 12.5%-duty square therefore sits
+# at the bottom of its swing seven eighths of the time, and a channel that is
+# switched off contributes nothing at all instead. So the mixer's output carries
+# a large DC component that moves every time a channel is enabled, disabled, or
+# has its envelope or panning changed. Measured on 60 s of in-game audio, the
+# raw mix sits at -0.85 full scale in Link's Awakening DX and pins against the
+# negative rail for a quarter of all samples.
+#
+# The hardware couples the mixer to the output jack through a capacitor, which
+# removes that offset. Without it every one of those DC shifts reaches the
+# speaker as a step, and a step is what a listener hears as a click. This is the
+# standard one-pole model: the capacitor charges toward the input, and only the
+# difference is passed on.
+#
+#     out = in - cap;   cap = in - out * charge
+#
+# `charge` is per output sample, so it is the per-T-cycle constant raised to the
+# number of T-cycles between samples: 0.999958 ** (GB_CLOCK_SPEED / rate). At
+# 32768 Hz that is 0.9946383, a 28 Hz corner with a 5.7 ms time constant --
+# below anything the APU can play, so it removes offset and nothing else.
+#
+# Verified against SameBoy on identical 60 s in-game runs: with this filter the
+# count of >6%-full-scale DC steps in Pokemon Crystal drops from 218 to 3, which
+# is exactly what SameBoy's own hardware high-pass produces, and the residual DC
+# is -1.3 against SameBoy's +1.2.
+const GB_DC_CHARGE* = 0.9946383125'f32
 const GB_FRAME_SEQ_RATE*  = 512
 const GB_FRAME_SEQ_PERIOD* = GB_CLOCK_SPEED div GB_FRAME_SEQ_RATE
 

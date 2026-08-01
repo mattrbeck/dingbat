@@ -273,7 +273,21 @@ our scheduler's insertion order that no hardware behaviour corresponds to.
 - `GBFUZZ_PCM=<path>` + `GBFUZZ_PCM_FRAMES=<N>` do the same for SameBoy in
   `tools/gbfuzz/sameboy_runner.c`. Sample equality with SameBoy is not achievable
   (it band-limits and models DAC charge); use `--correlate`, gate on envelope
-  Pearson >= 0.7.
+  Pearson >= 0.7. `GBFUZZ_PCM_HIGHPASS=off|accurate|dc` picks whether SameBoy
+  applies its hardware DC blocker; `off` is the like-for-like setting against a
+  dingbat dump, `accurate` is the hardware reference.
+- `tools/popscan.py` measures *pops* rather than differences: it tracks the
+  signal's local mean over a window long enough to average musical content away
+  (default 31 ms, so everything above ~32 Hz cancels) and counts step changes in
+  it. A step in the DC level is what a speaker reproduces as a click, and it is
+  comparable across emulators. Do NOT use a raw sample-delta threshold for this —
+  a Game Boy square wave is full-scale sample-to-sample jumps by nature, so that
+  measures how much music is playing, not how much popping.
+- `tools/gbaudio_at.py <ref> --rom <path>` builds dingbat at an arbitrary git ref
+  in a `git archive` scratch tree (never touching the worktree, index or stash),
+  injecting the `DINGBAT_GB_AUDIO_DUMP` hook when the ref predates it, and dumps
+  PCM. That is what makes "is this audio artefact a regression?" answerable; the
+  dump hook itself only exists from c7fb1a7 onward.
 
 **Measured** (best-of-7, interleaved, `.sav` cleared, per-build ROM copies;
 noise floor from two builds of identical source was −1.24%..+0.59%):
