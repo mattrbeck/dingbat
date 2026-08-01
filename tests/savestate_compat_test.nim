@@ -330,7 +330,9 @@ proc run_roundtrip() =
 # commercial GBA game, Classic NES included — never had their identity move,
 # so this fix is invisible to them.
 #
-# If someone changes the allocation rule again, `b` goes red on purpose.
+# If someone changes the allocation rule again, `c` goes red on purpose: the
+# reconstructed legacy identities live next to the rules that produced them,
+# and a build that derives one from today's buffer instead orphans states.
 # ---------------------------------------------------------------------------
 
 proc with_checksum(img: string; v: uint32): string =
@@ -377,10 +379,17 @@ proc run_rom_identity() =
   let fresh = new_gba_for(rom)
   for _ in 0 ..< 30: fresh.step_frame()
   let img = fresh.state_bytes()
-  # 2dfd27e .. today: the whole next_pow2 buffer, zero past the file.
-  let legacy_pow2 =
-    fnv1a(toOpenArray(fresh.cartridge.rom, 0,
-                      min(fresh.cartridge.rom.len, 0x100000) - 1))
+  # 2dfd27e .. today: the whole next_pow2 buffer, zero past the file, with a
+  # 32 KB floor. Spelled out rather than read off cartridge.rom.len, because
+  # the allocation rule is exactly what may move underneath this test — the
+  # floor is smaller now so that a tiny ROM starts reading the gamepak open-bus
+  # pattern at next_pow2(file) like the mask ROM it models. A historical
+  # identity has to be reconstructed from the rule that produced it.
+  var legacy_pad = 0x8000
+  while legacy_pad < n: legacy_pad = legacy_pad shl 1
+  var legacy_buf = newSeq[byte](min(legacy_pad, 0x100000))
+  for i in 0 ..< min(n, legacy_buf.len): legacy_buf[i] = uint8(file[i])
+  let legacy_pow2 = fnv1a(legacy_buf)
   # before 2dfd27e: 32 MB pre-filled with the open-bus address pattern, the
   # file over the front, [file, next_pow2) re-zeroed (only when the file was
   # not already a power of two).

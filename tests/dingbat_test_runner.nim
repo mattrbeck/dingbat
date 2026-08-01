@@ -14,7 +14,7 @@ let RomCacheDir =
 
 type
   TestMode = enum
-    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot
+    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka
 
   TestDef = object
     name: string
@@ -22,6 +22,9 @@ type
     mode: TestMode
     timeout: int
     expected_png: string  # for screenshot mode
+    expected_hash: string # screenshot mode, alternative to expected_png:
+                          # FNV-1a of the PPM, for ROMs that ship no reference
+                          # image (see build_jsmolka_tests)
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
     model: string         # mooneye per-model boot table (--model=...); "" = default
@@ -168,6 +171,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMgba: "mgba"
     of tmMgbaSuite: "mgba-suite"
     of tmScreenshot: "screenshot"
+    of tmJsmolka: "jsmolka"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
@@ -176,6 +180,20 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
+    if test.expected_hash.len > 0:
+      # No reference image ships with these ROMs, so the gate is a pinned hash
+      # of the rendered frame (see build_jsmolka_tests for where it came from).
+      var h = 0xCBF29CE484222325'u64
+      for c in readFile(tmp_ppm):
+        h = (h xor uint64(uint8(c))) * 0x100000001B3'u64
+      removeFile(tmp_ppm)
+      let got = h.toHex(16)
+      return TestResult(
+        name: test.name,
+        passed: got == test.expected_hash,
+        output: if got == test.expected_hash: "frame hash " & got
+                else: &"frame hash {got}, expected {test.expected_hash}",
+      )
     # Read actual pixels from PPM
     let actual = if test.color: read_ppm_rgb(tmp_ppm) else: read_ppm_greyscale(tmp_ppm)
     removeFile(tmp_ppm)
@@ -410,6 +428,73 @@ proc build_acid2_tests(): seq[TestDef] =
     expected_png: cgb_ref,
     color: true,
   ))
+  tests
+
+# jsmolka/gba-tests. Pinned to a commit so a CI run is reproducible and the
+# ROM cache key below stays meaningful; bump both together.
+const JsmolkaRev = "a6447c5404c8fc2898ddc51f438271f832083b7e"
+
+proc ensure_jsmolka_test_roms(): string =
+  ## Fetch (and cache) the jsmolka gba-tests tree, returning the directory that
+  ## holds arm/, thumb/, ... The upstream repo ships the assembled .gba files,
+  ## so there is nothing to build.
+  let dir = RomCacheDir / "gba-tests-" & JsmolkaRev[0 ..< 7]
+  let inner = dir / "gba-tests-" & JsmolkaRev
+  if fileExists(inner / "arm" / "arm.gba"):
+    return inner
+  if dirExists(dir): removeDir(dir)
+  echo "Downloading jsmolka/gba-tests..."
+  createDir(RomCacheDir)
+  let zipfile = RomCacheDir / "gba-tests.zip"
+  download_file(&"https://github.com/jsmolka/gba-tests/archive/{JsmolkaRev}.zip", zipfile)
+  try:
+    extractAll(zipfile, dir)
+  except ZippyError, IOError, OSError:
+    echo "Failed to extract: ", getCurrentExceptionMsg()
+    if dirExists(dir): removeDir(dir)
+    removeFile(zipfile)
+    quit(1)
+  removeFile(zipfile)
+  inner
+
+proc build_jsmolka_tests(dir: string): seq[TestDef] =
+  ## Two kinds of ROM live in this suite.
+  ##
+  ## The self-checking ones (arm, thumb, memory, bios, save/*, unsafe) report
+  ## through the shared r12 protocol that --mode=jsmolka reads; each is
+  ## all-or-nothing and names the FIRST check it failed, because the ROM stops
+  ## there. Timeouts are generous but the ROMs finish in a handful of frames.
+  ##
+  ## The ppu/ and nes/ ROMs have no self-check at all — they just draw. They
+  ## still make good render regressions, so they are gated on a pinned hash of
+  ## the frame instead. Those hashes are not self-generated goldens: each was
+  ## confirmed byte-identical against BOTH mGBA and NanoBoyAdvance (via
+  ## tools/romfuzz's headless runners) before being written down, so a change
+  ## here means dingbat moved away from two independent implementations.
+  var tests: seq[TestDef]
+  for (group, rom) in [("arm", "arm"), ("thumb", "thumb"), ("memory", "memory"),
+                       ("bios", "bios"), ("save", "none"), ("save", "sram"),
+                       ("save", "flash64"), ("save", "flash128"),
+                       ("unsafe", "unsafe")]:
+    tests.add(TestDef(
+      name: "jsmolka/" & rom,
+      rom_path: dir / group / (rom & ".gba"),
+      mode: tmJsmolka,
+      timeout: 600,
+    ))
+  for (group, rom, hash) in [
+      ("ppu", "hello",   "6D0A0BE051BD8867"),
+      ("ppu", "shades",  "75702E9A20F4A272"),
+      ("ppu", "stripes", "3A6AD0222561C072"),
+      ("nes", "nes",     "20BEB1A765920412")]:
+    tests.add(TestDef(
+      name: "jsmolka/" & rom,
+      rom_path: dir / group / (rom & ".gba"),
+      mode: tmScreenshot,
+      timeout: 120,
+      expected_hash: hash,
+      color: true,
+    ))
   tests
 
 proc generate_results_md(suites: seq[SuiteResults]): string =
@@ -687,6 +772,11 @@ proc main() =
   var mgba_detail: seq[MgbaSuiteDetail]
   let mgba_results = run_mgba_suite(harness, previous, regressions, mgba_detail, bios_path)
   all_suites.add(mgba_results)
+
+  # jsmolka gba-tests (GBA)
+  let jsmolka_tests = build_jsmolka_tests(ensure_jsmolka_test_roms())
+  all_suites.add(run_suite("GBA - jsmolka gba-tests", jsmolka_tests, harness,
+                           previous, regressions))
 
   # Acid2 tests (screenshot comparison)
   let acid2_tests = build_acid2_tests()

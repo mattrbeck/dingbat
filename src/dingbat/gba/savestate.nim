@@ -763,7 +763,7 @@ proc gba_rom_checksum(gba: GBA): uint32 =
   ## real cart is larger than the cap so nothing collides on the cap alone).
   ##
   ## `rom_size`, NOT `rom.len`. The buffer is padded — up to the next power of
-  ## two, with a 32 KB floor, and out to 4 MB for the 1 MB Classic NES carts
+  ## two, with a small floor, and out to 4 MB for the 1 MB Classic NES carts
   ## whose image is mirrored 4x (see cartridge.nim). Hashing `rom.len` folds
   ## that padding into the cart's identity, so any change to the padding RULE
   ## silently re-identifies every cart smaller than the cap and refuses its
@@ -802,9 +802,23 @@ proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
 
   # (a) 2dfd27e .. the commit that added this: next_pow2 buffer (32 KB floor),
   #     zero-filled past the file.
+  #
+  #     Reconstructed from that RULE, not from cartridge.rom.len. The live
+  #     allocation rule has changed again since (the floor is 0x100 now, so
+  #     that reads back the open-bus pattern at the right address for a tiny
+  #     cart), and reading the current buffer length here would have quietly
+  #     re-derived a *different* "legacy" identity and orphaned every state a
+  #     32 KB-floor build wrote for a sub-32 KB ROM. tests/savestate_compat
+  #     catches exactly this.
   block:
-    let n = min(gba.cartridge.rom.len, 0x100000)
-    if n > 0: result.add_legacy(fnv1a(toOpenArray(gba.cartridge.rom, 0, n - 1)))
+    var pad = 0x8000
+    while pad < sz: pad = pad shl 1
+    let n = min(pad, 0x100000)
+    var h = 0x811C9DC5'u32
+    for a in 0 ..< n:
+      let b = if a < sz: gba.cartridge.rom[a] else: 0'u8
+      h = (h xor uint32(b)) * 0x01000193'u32
+    result.add_legacy(h)
 
   # (b) before 2dfd27e: a flat 32 MB buffer pre-filled with the open-bus
   #     address pattern, the file written over the front, and [sz, next_pow2)

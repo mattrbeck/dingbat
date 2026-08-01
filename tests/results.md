@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-22 17:43:56*
+*Generated: 2026-07-31 21:36:06*
 
 ## Game Boy - Blargg
 
@@ -162,6 +162,24 @@
 
 See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
+## GBA - jsmolka gba-tests
+
+| Test | Result |
+|------|--------|
+| arm | 👌 |
+| thumb | 👌 |
+| memory | 👌 |
+| bios | 👌 |
+| none | 👌 |
+| sram | 👌 |
+| flash64 | 👌 |
+| flash128 | 👌 |
+| unsafe | 👌 |
+| hello | 👌 |
+| shades | 👌 |
+| stripes | 👌 |
+| nes | 👌 |
+
 ## Game Boy - Acid2
 
 | Test | Result |
@@ -200,6 +218,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 ## Summary
 
-- **Total:** 169
-- **Pass:** 137
+- **Total:** 182
+- **Pass:** 150
 - **Fail:** 32

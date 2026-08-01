@@ -25,7 +25,7 @@ nimble bench_build   # -> ./dingbat_bench
 ```
 
 Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
-`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `screenshot`,
+`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `screenshot`,
 `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`, `norm32linktest`,
 `attachtest`, `netlink`, `speclink`, `speclinkbench`, `rollback`,
 `rollbacknet`, `gblinktest`.
@@ -43,6 +43,20 @@ Typical single run (mGBA suite, ~1.5 s when waitloop detection is healthy,
 ./dingbat_test /tmp/dingbat-test-roms/mgba-suite.gba --mode=mgba-suite --timeout=36000
 ```
 
+`--mode=jsmolka` scores jsmolka/gba-tests. Every ROM in that suite reports
+through one protocol (`lib/macros.inc`): the verdict lives in `r12`, the ROM
+branches to a common `eval` on the **first** failing check with `r12` = that
+check's number, and then spins in `b idle`. The mode runs until the PC stops
+moving and reads `r12` — "All tests passed" or "Failed test N", matching what
+the ROM prints on screen. It also detaches the battery file, because
+`save/sram.gba`'s first check reads an untouched chip. All-or-nothing per ROM
+by construction: nothing after check N runs.
+
+```
+./dingbat_test /tmp/dingbat-test-roms/gba-tests-a6447c5/gba-tests-<rev>/arm/arm.gba \
+  --mode=jsmolka --timeout=600
+```
+
 Gotcha: piping through `tail`/`head` masks the exit code — a segfault (139)
 looks like success. Check `$?` on the harness itself, or use `set -o pipefail`.
 
@@ -55,8 +69,10 @@ the repo root right after `nimble test_build`, or it quits with
 
 - Downloads external suites into `$DINGBAT_ROM_CACHE` (default
   `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0 (Blargg, Mooneye,
-  Mealybug, SameSuite), dmg-acid2 v1.0, cgb-acid2 v1.1, and the mGBA suite
-  ROM from `mattrbeck/mgba-suite-auto`. CI backs this dir with
+  Mealybug, SameSuite), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA suite
+  ROM from `mattrbeck/mgba-suite-auto`, and `jsmolka/gba-tests` pinned to the
+  commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
+  nothing is built). CI backs this dir with
   `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
   the run; the cache key must be bumped when a URL/version changes.
 - Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
@@ -67,7 +83,8 @@ the repo root right after `nimble test_build`, or it quits with
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed (the baseline carries known failures: Total
-169, Pass 137 as of the current committed `results.md`).
+182, Pass 150 as of the current committed `results.md`; all 13 jsmolka rows
+are green in it, so any of them going red *is* a CI failure).
 
 **Results-file caveat:** `tests/results.md` and `tests/results_mgba_suite.md`
 are committed baselines, and every run **rewrites both in place** (that is

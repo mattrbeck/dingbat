@@ -17,8 +17,8 @@ re-rendered per note, above the hardware's native mix rate. Optional.
 **Cross-device sync.** Your games, saves, and save states sync through Google Drive, so
 you can put a game down on one device and pick it up on another.
 
-**Accuracy.** 6910 of 7008 mGBA test-suite cases, the AGS aging cartridge, blargg,
-mooneye, dmg-acid2, and cgb-acid2 all pass.
+**Accuracy.** 6910 of 7008 mGBA test-suite cases, all of jsmolka's gba-tests, the AGS
+aging cartridge, blargg, mooneye, dmg-acid2, and cgb-acid2 all pass.
 
 **No BIOS file required.** An HLE BIOS is built in, though you can supply a real BIOS
 dump instead.

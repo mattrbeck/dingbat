@@ -1209,7 +1209,7 @@ proc main() =
         attach_after = parseInt(v)
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
     quit(1)
 
   if mode == tmStateRoundtrip:
