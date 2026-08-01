@@ -1257,9 +1257,15 @@ include cpu
 
 # ==================== NEW_GB + POST_INIT ====================
 
-proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false): GB =
+proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
   ## force_cgb runs a DMG-flagged cart in CGB mode (a DMG cart inserted in a
   ## Game Boy Color) — mooneye's misc/ tests assert that hardware's behavior.
+  ## force_dmg is the other direction: run a CGB-flagged cart as a DMG. No
+  ## real console does that, but gambatte's test suite selects the device from
+  ## the *runner* (its `CGB_MODE` load flag), not the cart header, and most of
+  ## its ROMs carry a CGB header while still shipping a `dmg08` expectation —
+  ## so scoring the DMG half of that suite needs it (tests/dingbat_test.nim,
+  ## --mode=gambatte). force_cgb wins if both are set.
   result = GB(
     bootrom_path: bootrom_path,
     rom_path:     rom_path,
@@ -1279,7 +1285,8 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
   # any boot ROM) lets a DMG boot ROM boot a DMG cart as a DMG.
   let cgb_bootrom = bootrom_path.len > 0 and run_bios and
                     fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
-  result.cgb_enabled = cgb_bootrom or result.cgb_flag != cgbNone or force_cgb
+  result.cgb_enabled = force_cgb or
+    ((cgb_bootrom or result.cgb_flag != cgbNone) and not force_dmg)
   # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
   # The test harness may override this (via --model) before post_init to drive
   # the model-specific mooneye boot_regs/boot_div acceptance ROMs.

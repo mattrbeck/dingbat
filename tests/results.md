@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-31 21:36:06*
+*Generated: 2026-08-01 16:35:50*
 
 ## Game Boy - Blargg
 
@@ -216,8 +216,63 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | m3_wx_5_change | 👀 97.2% correct (22402/23040 pixels match) |
 | m3_wx_6_change | 👀 40.1% correct (9241/23040 pixels match) |
 
+## Game Boy - gambatte
+
+| Test | Result |
+|------|--------|
+| bgen | 👀 1/2 passed |
+| bgtiledata | 👀 0/34 passed |
+| bgtilemap | 👀 0/40 passed |
+| cgbpal_m3 | 👀 16/44 passed |
+| display_startstate | 👀 9/14 passed |
+| div | 👌 8/8 passed |
+| dma | 👀 107/229 passed |
+| dmgpalette_during_m3 | 👀 2/17 passed |
+| enable_display | 👀 101/184 passed |
+| halt | 👀 96/158 passed |
+| irq_precedence | 👀 41/64 passed |
+| lcd_offset | 👀 36/62 passed |
+| lcdirq_precedence | 👀 54/62 passed |
+| ly0 | 👀 60/96 passed |
+| lyc0int_m0irq | 👀 3/6 passed |
+| lyc153int_m2irq | 👀 8/16 passed |
+| lycEnable | 👀 160/225 passed |
+| lycint_ly | 👌 6/6 passed |
+| lycint_lycflag | 👀 8/12 passed |
+| lycint_lycirq | 👀 2/4 passed |
+| lycint_m0stat | 👌 6/6 passed |
+| lycm2int | 👀 4/18 passed |
+| lywrite | 👌 8/8 passed |
+| m0enable | 👀 132/167 passed |
+| m0int_m0irq | 👀 2/4 passed |
+| m0int_m0stat | 👀 9/12 passed |
+| m0int_m3stat | 👌 6/6 passed |
+| m1 | 👀 120/170 passed |
+| m2enable | 👀 74/120 passed |
+| m2int_m0irq | 👀 36/72 passed |
+| m2int_m0stat | 👀 3/6 passed |
+| m2int_m2irq | 👀 9/18 passed |
+| m2int_m2stat | 👀 4/8 passed |
+| m2int_m3stat | 👀 21/44 passed |
+| miscmstatirq | 👀 226/279 passed |
+| oam_access | 👀 40/69 passed |
+| oamdma | 👀 223/811 passed |
+| scx_during_m3 | 👀 23/141 passed |
+| scy | 👀 3/67 passed |
+| serial | 👀 48/82 passed |
+| sound | 👀 83/116 passed |
+| speedchange | 👀 76/208 passed |
+| sprites | 👀 252/476 passed |
+| tima | 👀 216/232 passed |
+| undef_ops | 👀 0/20 passed |
+| vram_m3 | 👀 25/50 passed |
+| vramw_m3end | 👀 12/36 passed |
+| window | 👀 253/476 passed |
+
+Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
+
 ## Summary
 
-- **Total:** 182
-- **Pass:** 150
-- **Fail:** 32
+- **Total:** 230
+- **Pass:** 155
+- **Fail:** 75
