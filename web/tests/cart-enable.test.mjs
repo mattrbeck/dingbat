@@ -74,15 +74,48 @@ test("without getUserMedia the page itself is the problem", async () => {
 test("every notice is short lines of real text", async () => {
   const app = await loadApp();
   for (const kind of ["prompt", "blocked", "missing", "ended", "insecure"]) {
-    const lines = app.runIn(`CAM_NOTICES["${kind}"]()`);
-    assert.ok(Array.isArray(lines) && lines.length >= 2 && lines.length <= 5,
-      `${kind}: expected 2-5 lines, got ${JSON.stringify(lines)}`);
-    for (const l of lines) {
-      assert.equal(typeof l, "string");
-      // Anything longer gets auto-shrunk below the size the cart's dither
-      // matrix can hold together.
-      assert.ok(l.length > 0 && l.length <= 14, `${kind}: "${l}" is too long`);
+    // Both pointing-device wordings: "Tap" and "Click" are different lengths.
+    for (const touch of [false, true]) {
+      const lines = app.runIn(`camNoticeLines("${kind}", ${touch})`);
+      assert.ok(Array.isArray(lines) && lines.length >= 2 && lines.length <= 5,
+        `${kind}: expected 2-5 lines, got ${JSON.stringify(lines)}`);
+      for (const l of lines) {
+        assert.equal(typeof l, "string");
+        // Anything longer gets auto-shrunk below the size the cart's dither
+        // matrix can hold together. tools/cammsg.mjs measures this properly
+        // (in a real browser, in px); this is the cheap standing guard.
+        assert.ok(l.length > 0 && l.length <= 14, `${kind}: "${l}" is too long`);
+      }
     }
+  }
+});
+
+// The two notices that name the top-bar button must keep naming the button
+// that exists. Both wordings come from CAM_ENABLE_LABEL via the {label}
+// placeholder, so this fails the moment someone renames one and not the other.
+test("the notices quote the button's real label", async () => {
+  const app = await loadApp();
+  armCameraCart(app);
+  app.runIn("camCartBtnUpdate()");
+  // What the button renders IS the shared constant — not a copy that happens
+  // to match today.
+  const label = camLabel(app).textContent;
+  assert.equal(label, app.runIn("CAM_ENABLE_LABEL"));
+  assert.equal(camBtn(app).title, app.runIn("CAM_ENABLE_LABEL"));
+  for (const kind of ["prompt", "ended"]) {
+    const raw = app.runIn(`CAM_NOTICES["${kind}"]`);
+    assert.ok(raw.includes("{label}"),
+      `${kind} must name the button through {label}, not a literal: ${raw}`);
+    // The placeholder resolves to the button's own wording, both wordings.
+    for (const touch of [false, true]) {
+      assert.ok(app.runIn(`camNoticeLines("${kind}", ${touch})`).includes(label),
+        `${kind} should render the button's actual label`);
+    }
+  }
+  // No notice may spell the label out for itself — that is the drift.
+  for (const kind of ["prompt", "blocked", "missing", "ended", "insecure"]) {
+    assert.ok(!app.runIn(`CAM_NOTICES["${kind}"]`).includes(label),
+      `${kind} hardcodes "${label}" instead of using {label}`);
   }
 });
 

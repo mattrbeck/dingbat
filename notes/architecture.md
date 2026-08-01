@@ -137,7 +137,8 @@ the repo is what ships. `embed.html`+`embed.js` is the minimal 2P pane.
 - `tests/` — harnesses, committed baselines, homebrew ROMs: **`tests/README.md`**.
 - `tools/` — `gbfuzz/` (cross-emulator GB library sweep vs SameBoy/mGBA),
   `romfuzz/` (same for GBA), `webbench/`, `mp2k_*.py`/`pcmdiff.py` (audio HLE
-  comparison).
+  comparison), `cammsg.mjs` (author/fit-check/preview the Game Boy Camera
+  viewfinder notices, using index.js's own layout code).
 - `docs/` — per-topic deep dives (`performance.md`, `multiplayer.md`,
   `building.md`, `research_*.md`, ...).
 - `notes/` — working notes (`todo.md`, `progress.md`, this file).

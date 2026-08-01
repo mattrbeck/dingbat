@@ -7124,6 +7124,12 @@ const camCartLoaded = () =>
 
 const camUsable = () => !!navigator.mediaDevices?.getUserMedia;
 
+// What the top-bar button says when there is no stream yet — and, because two
+// of the viewfinder notices below tell the player to look for that button BY
+// NAME, the one place either wording is written. Rename it here and the
+// emulated viewfinder renames it too; there is no second copy to forget.
+const CAM_ENABLE_LABEL = "Enable camera";
+
 // The top-bar button has two jobs. Before a stream is attached it is the way
 // IN — a permanent affordance, because the one-shot offer toast is easy to
 // miss and impossible to summon back. Once frames are flowing it becomes the
@@ -7136,10 +7142,10 @@ const camCartBtnUpdate = () => {
   }
   const needsEnable = !camLive();
   camFlipBtn.classList.toggle("needs-enable", needsEnable);
-  const label = needsEnable ? "Enable camera" : "Switch camera";
+  const label = needsEnable ? CAM_ENABLE_LABEL : "Switch camera";
   camFlipBtn.title = label;
   camFlipBtn.setAttribute("aria-label", label);
-  camFlipLabel.textContent = needsEnable ? "Enable camera" : "Camera";
+  camFlipLabel.textContent = needsEnable ? CAM_ENABLE_LABEL : "Camera";
   // Nothing to enable without getUserMedia (insecure origin, ancient browser),
   // and nothing to switch to with a single camera.
   camFlipBtn.hidden = needsEnable ? !camUsable() : camDevices.length < 2;
@@ -7159,20 +7165,39 @@ const camCartBtnUpdate = () => {
 // including a five-line sentence. Small type would still turn to mush, which
 // is why each line is auto-fitted to the full 128px width rather than set at
 // a fixed size.
+//
+// Each notice is ONE string: "/" is the line break, and two placeholders keep
+// it honest — {tap} is the verb for the pointing device, {label} is the
+// top-bar button's own label (CAM_ENABLE_LABEL, so the viewfinder cannot go on
+// naming a button that has been renamed). Editing a message is a one-line
+// change; `node tools/cammsg.mjs` renders and fit-checks any candidate before
+// it lands. Keep lines to ~14 characters: past that the fitter shrinks them
+// below the 17.6px floor measured off these five (the smallest type known to
+// survive the cart's dither), and they turn to mush.
 const CAM_NOTICES = {
   // Never asked. The button this points at is the thing the player missed.
-  prompt: () => [touchDevice ? "Tap" : "Click", "Enable camera", "in the top bar"],
+  prompt: "{tap} / {label} / in the top bar",
   // getUserMedia rejected with NotAllowedError, or the Permissions API said
   // "denied" before we ever asked.
-  blocked: () => ["Camera is", "currently", "restricted", "by the", "browser."],
+  blocked: "Camera is / currently / restricted / by the / browser.",
   // Asked and granted, but the hardware isn't there (NotFoundError).
-  missing: () => ["No camera", "found on", "this device"],
+  missing: "No camera / found on / this device",
   // Had live frames, then the track ended by itself: iOS backgrounding the
   // tab, another app taking the camera, a USB webcam unplugged.
-  ended: () => ["Camera", "stopped.", touchDevice ? "Tap" : "Click", "Enable camera"],
+  ended: "Camera / stopped. / {tap} / {label}",
   // No getUserMedia at all — a plain-http origin is the common case.
-  insecure: () => ["Camera needs", "a secure", "connection"],
+  insecure: "Camera needs / a secure / connection",
 };
+
+// A notice's text, split into the lines the viewfinder will draw. `touch`
+// exists so tools/cammsg.mjs can preview the Tap and Click wordings without a
+// touchscreen; the app never passes it.
+const camNoticeLines = (kind, touch = touchDevice) =>
+  (CAM_NOTICES[kind] || "").split("/")
+    .map((s) => s.trim()
+      .replace(/\{tap\}/g, touch ? "Tap" : "Click")
+      .replace(/\{label\}/g, CAM_ENABLE_LABEL))
+    .filter((s) => s !== "");
 
 // Which notice belongs in the viewfinder right now, or null when real frames
 // are flowing. Ordered most-certain first; every branch is a fact we observed
@@ -7191,22 +7216,40 @@ const camNoticeFor = () => {
 // 116-119 are never seen), each line scaled down only if it would overflow
 // 128px. White on black: the cart's edge filter keys off boundaries, and the
 // heaviest weight available gives it the most to bite on.
+const CAM_VIEW_TOP = 4, CAM_VIEW_H = 112;
+
+// The whole of the layout arithmetic, separated from the painting so that
+// tools/cammsg.mjs can report the size a line will actually render at without
+// keeping a second, driftable copy of these numbers. Uses ctx only to measure.
+const camFitLines = (ctx, lines) => {
+  const slot = CAM_VIEW_H / lines.length;
+  return lines.map((text, i) => {
+    let px = Math.min(slot * 0.8, 44);
+    ctx.font = `900 ${px}px sans-serif`;
+    const w = ctx.measureText(text).width;
+    if (w > CAM_W - 4) px = (px * (CAM_W - 4)) / w;
+    return { text, px, y: CAM_VIEW_TOP + slot * (i + 0.5) };
+  });
+};
+
 const camDrawNotice = (ctx, lines) => {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, CAM_W, CAM_H);
   ctx.fillStyle = "#fff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const top = 4, viewH = 112, slot = viewH / lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    let px = Math.min(slot * 0.8, 44);
-    ctx.font = `900 ${px}px sans-serif`;
-    const w = ctx.measureText(lines[i]).width;
-    if (w > CAM_W - 4) {
-      px = (px * (CAM_W - 4)) / w;
-      ctx.font = `900 ${px}px sans-serif`;
-    }
-    ctx.fillText(lines[i], CAM_W / 2, top + slot * (i + 0.5));
+  for (const fit of camFitLines(ctx, lines)) {
+    ctx.font = `900 ${fit.px}px sans-serif`;
+    ctx.fillText(fit.text, CAM_W / 2, fit.y);
+  }
+};
+
+// RGBA canvas pixels -> the 8-bit grey the MAC-GBD sensor hands the cart.
+// Shared by the notice writer and the live webcam pump so a preview rendered
+// by tools/cammsg.mjs is the same bytes the cart will see.
+const camToGrey = (img, dst) => {
+  for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
+    dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
   }
 };
 
@@ -7215,8 +7258,8 @@ const camDrawNotice = (ctx, lines) => {
 // the notice changes.
 const camShowNotice = (kind) => {
   if (camNoticeShown === kind) return;
-  const lines = CAM_NOTICES[kind];
-  if (!lines || typeof Module === "undefined" || !Module._wasm_camera_attach) return;
+  if (!CAM_NOTICES[kind] || typeof Module === "undefined" ||
+      !Module._wasm_camera_attach) return;
   // Attaching also takes the cart off its synthetic scene, which is the point.
   if (!Module._wasm_camera_attach()) return;
   const ptr = Module._wasm_camera_frame_ptr();
@@ -7225,13 +7268,10 @@ const camShowNotice = (kind) => {
   cnv.width = CAM_W;
   cnv.height = CAM_H;
   const ctx = cnv.getContext("2d", { willReadFrequently: true });
-  camDrawNotice(ctx, lines());
+  camDrawNotice(ctx, camNoticeLines(kind));
   const img = ctx.getImageData(0, 0, CAM_W, CAM_H).data;
   // Fresh heap view every copy: memory growth detaches cached buffers
-  const dst = new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H);
-  for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
-    dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
-  }
+  camToGrey(img, new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H));
   camNoticeShown = kind;
 };
 
@@ -7409,10 +7449,7 @@ const enableWebcam = async () => {
     const ptr = Module._wasm_camera_frame_ptr();
     if (!ptr) return;
     // Fresh heap view every copy: memory growth detaches cached buffers
-    const dst = new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H);
-    for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
-      dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
-    }
+    camToGrey(img, new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H));
   }, 66);
   camNoticeShown = null;
   showToast("Camera live — the cart sees what you see");
@@ -7444,7 +7481,7 @@ const detectCameraCart = () => {
   camProbePermission();  // may upgrade "tap Enable" to "blocked", async
   if (!camUsable()) return;
   showActionToast("Game Boy Camera cart — use your real camera?",
-    "Enable camera", enableWebcam);
+    CAM_ENABLE_LABEL, enableWebcam);
 };
 
 // --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
