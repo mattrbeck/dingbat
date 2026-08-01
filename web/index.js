@@ -630,6 +630,27 @@ const migrateRecentFormat = async () => {
   await dbPut("recent", meta);
 };
 
+// Sweep up auto-resume snapshots orphaned by builds whose Delete didn't know
+// about them (they were the one per-game record no destructive path removed).
+// A snapshot whose game is neither stored here nor listed in the library can
+// never be offered — nothing can launch it — so it is dead weight worth a whole
+// save state each. Scoped to "stateauto:" on purpose: it is the only per-game
+// record the app regenerates by itself, so deleting one loses nothing. Records
+// the user authored (cheats) are left alone even when orphaned; they cost bytes
+// and would be missed if a re-import found them gone.
+const sweepOrphanedAutoStates = async () => {
+  let keys = await dbKeys();
+  let known = new Set();
+  for (let k of keys) {
+    if (typeof k === "string" && k.startsWith("rom:")) known.add(k.slice(4));
+  }
+  for (let r of await getRecentMeta()) if (r?.name) known.add(r.name);
+  for (let k of keys) {
+    if (typeof k !== "string" || !k.startsWith("stateauto:")) continue;
+    if (!known.has(k.slice("stateauto:".length))) await dbDelete(k);
+  }
+};
+
 // --- FS / BIOS helpers ---
 
 const writeToFS = (filename, bytes) => {
@@ -1179,16 +1200,62 @@ const isRomLoaded = (name) =>
   (!!currentOriginalName && currentOriginalName === name) ||
   (linkMode && !!linkRomEntry && linkRomEntry.name === name);
 
-// Remove all stored save data for one ROM.
-const deleteSaveData = async (name) => {
-  await dbDelete("save:" + name);
-  await dbDelete("save:" + name + "-p2");
-  // All nine save-state slots and their thumbnail metadata (slot 0 is the
-  // legacy "state:<name>" key).
+// THE inventory of everything this app stores for ONE game. Every destructive
+// path below works from this function and nothing else, so a per-game record
+// added later is deleted by all of them the moment it is listed here — and a
+// record that is NOT listed here is, by construction, a record that survives a
+// delete and haunts the user (that is exactly how the auto-resume snapshot
+// came to outlive its game and keep offering "Resume").
+//
+// The groups exist because the two destructive paths take different subsets:
+//   bytes    ROM image + box art. Bulk, and the ROM is re-downloadable from
+//            Drive, which is what makes "Remove from device" safe at all.
+//   saves    battery saves (P1 + the 2P link partner's) and the nine manual
+//            save-state slots with their thumbnails. Irreplaceable user
+//            progress, and the only group Drive mirrors besides the ROM.
+//   session  the auto-resume snapshot. A full save state, but captured behind
+//            the user's back on every tab switch and re-made next session;
+//            never synced. Disposable by design.
+//   prefs    per-game settings the user typed in — currently the cheat list.
+//            Bytes, never synced, so dropping it can only lose work and can
+//            never free space worth having.
+const perGameKeys = (name) => {
+  let saves = ["save:" + name, "save:" + name + "-p2"];
+  // Slot 0 is the legacy un-suffixed "state:<name>" / "statemeta:<name>" pair.
   for (let s = 0; s < NUM_STATE_SLOTS; s++) {
-    await dbDelete(slotStateKey(name, s));
-    await dbDelete(slotMetaKey(name, s));
+    saves.push(slotStateKey(name, s), slotMetaKey(name, s));
   }
+  return {
+    bytes: [romKey(name), artKey(name)],
+    saves,
+    session: [autoStateKey(name)],
+    prefs: [CHEATS_KEY(name)],
+  };
+};
+
+// Flattened: everything, i.e. what "this game is gone" means on this device.
+const allPerGameKeys = (name) => Object.values(perGameKeys(name)).flat();
+
+const deleteKeys = async (keys) => {
+  for (let k of keys) await dbDelete(k);
+};
+
+// Remove all stored save data for one ROM: both battery saves, all nine
+// save-state slots with their thumbnails, and the auto-resume snapshot. The
+// snapshot has to go with them — it is itself a full save state, so leaving it
+// behind lets a one-tap "Resume" drop the player straight back into the
+// progress they just asked us to wipe.
+const deleteSaveData = async (name) => {
+  let k = perGameKeys(name);
+  await deleteKeys([...k.saves, ...k.session]);
+};
+
+// Remove every trace of one game from THIS device — the ROM, its art, all save
+// data, the resume snapshot, the cheats. Drive is untouched here; the callers
+// decide whether only this device is forgetting the game (a tombstone that
+// arrived from another device) or all of them (deleteGameEverywhere).
+const deleteGameLocalData = async (name) => {
+  await deleteKeys(allPerGameKeys(name));
 };
 
 // Wipe the running game's battery save and reboot it as a fresh cartridge. The
@@ -1198,6 +1265,11 @@ const resetCurrentSaveFile = async () => {
   if (!currentOriginalName) return;
   await dbDelete("save:" + currentOriginalName);
   await dbDelete("save:" + currentOriginalName + "-p2");
+  // The auto-resume snapshot holds the very progress we just erased, and the
+  // reboot below ends in offerAutoResume — without this, "Save reset — starting
+  // fresh" is followed immediately by an offer to un-reset it. Manual slots
+  // still survive on purpose (Export/Import state manages those).
+  await deleteKeys(perGameKeys(currentOriginalName).session);
   // Mirror rule: a local save deletion propagates to Drive (no-op if not synced).
   markDelete("save:" + currentOriginalName);
   markDelete("save:" + currentOriginalName + "-p2");
@@ -2192,14 +2264,11 @@ const markGameUpload = (game) => {
     scheduleFlush();
   });
 };
-// Mirror a local save-data wipe to Drive.
+// Mirror a local save-data wipe to Drive. Only the "saves" group: the resume
+// snapshot deleted alongside it locally was never uploaded (parseDriveFileName
+// rejects "stateauto:"), so there is nothing on Drive to delete.
 const queueSaveDataDeletes = (name) => {
-  markDelete("save:" + name);
-  markDelete("save:" + name + "-p2");
-  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
-    markDelete(slotStateKey(name, s));
-    markDelete(slotMetaKey(name, s));
-  }
+  for (let k of perGameKeys(name).saves) markDelete(k);
 };
 
 // Drive operations run one at a time, but a busy engine must DEFER work, never
@@ -2307,8 +2376,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       } else {
         for (let g of pending) {
           if (isRomLoaded(g)) continue; // never yank the game being played
-          await deleteSaveData(g);
-          await evictLocalRom(g);
+          // Same local wipe Delete performs — a game deleted on another device
+          // must not leave its cheats or resume snapshot behind here either.
+          await deleteGameLocalData(g);
           gridDirty = true;
         }
       }
@@ -2416,11 +2486,13 @@ const downloadGame = async (game) => {
 };
 
 // --- "Remove from this device" (the inverse of downloadGame) --------------
-// Frees this device's copy of a game's ROM and nothing else: no tombstone, no
-// Drive delete, and the recents entry stays put, so the game keeps its place
-// in the merged library and simply re-renders as a Drive-only tile that one
-// tap brings back. That is the whole difference from deleteGameEverywhere,
-// which raises a tombstone precisely so every OTHER device drops the game too.
+// Frees this device's copy of a game's ROM (plus the two things that are only
+// meaningful while those bytes are here: the box art and the auto-resume
+// snapshot). Nothing leaves Drive: no tombstone, no Drive delete, and the
+// recents entry stays put, so the game keeps its place in the merged library
+// and simply re-renders as a Drive-only tile that one tap brings back. That is
+// the whole difference from deleteGameEverywhere, which raises a tombstone
+// precisely so every OTHER device drops the game too.
 //
 // Save data is deliberately KEPT. It is kilobytes next to a multi-megabyte
 // ROM, so it isn't what a user reclaiming space came for, and it is the one
@@ -2451,7 +2523,15 @@ const removeGameFromDevice = async (game) => {
     showToast("Not backed up yet — kept here and queued for Drive");
     return false;
   }
-  await evictLocalRom(game);
+  // bytes + session. The resume snapshot goes with the ROM because it is a
+  // snapshot OF that ROM: with the bytes gone the game can't be launched, so
+  // the only thing it can do here is sit there weighing as much as a save state
+  // until the game is downloaded again — at which point the battery save we
+  // kept resumes the player anyway. Everything irreplaceable (both battery
+  // saves, all nine manual slots, the cheat list) stays; see the group comment
+  // on perGameKeys and the long note above.
+  let keys = perGameKeys(game);
+  await deleteKeys([...keys.bytes, ...keys.session]);
   markGameUpload(game); // the ROM is gone, so this queues the saves we kept
   return true;
 };
@@ -2464,15 +2544,14 @@ const resetGameSaves = async (game) => {
   if (syncActive()) queueSaveDataDeletes(game);
 };
 const deleteGameEverywhere = async (game) => {
-  await deleteSaveData(game);
-  await evictLocalRom(game);
+  await deleteGameLocalData(game);
   await dbPut("recent", (await getRecentMeta()).filter((r) => r.name !== game));
   if (syncActive()) {
-    for (let n of ["save:" + game, "save:" + game + "-p2", "rom:" + game]) markDelete(n);
-    for (let s = 0; s < NUM_STATE_SLOTS; s++) {
-      markDelete(slotStateKey(game, s));
-      markDelete(slotMetaKey(game, s));
-    }
+    // Queue the whole inventory: markDelete drops anything Drive doesn't hold
+    // (parseDriveFileName rejects art:/stateauto:/cheats:), so passing every
+    // key means a per-game record added to perGameKeys later starts mirroring
+    // its deletion the day it starts syncing, with no second list to update.
+    for (let n of allPerGameKeys(game)) markDelete(n);
     syncState.tomb = syncState.tomb.filter((t) => t.name !== game);
     syncState.tomb.push({ name: game, ts: Date.now() });
     await saveSyncState();
@@ -6298,6 +6377,12 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // Drop the FS-side .sav so a later load can't pick up battery data that
   // IndexedDB no longer agrees with.
   try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
+  // The cheat list belongs to the game that just left. Holding it would leave
+  // the Cheats modal listing a game that is closed — or, after the Manage-ROMs
+  // Delete (which unloads first, then deletes), listing a game that no longer
+  // exists. loadRom's restoreCheats refills this for the next game.
+  cheatList = [];
+  renderCheatList();
   paused = true; // keep the orphaned core frozen
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
@@ -6992,6 +7077,9 @@ const initStorage = async () => {
   // gesture (the token popup is gesture-gated). See resumeDriveOnBoot.
   resumeDriveOnBoot();
   refreshHomeRecent();
+  // Deliberately not awaited and last: nothing renders from it, so it must not
+  // sit on the boot path (it costs one extra key listing).
+  sweepOrphanedAutoStates().catch(() => {});
 };
 
 let storageReadyResolve;
