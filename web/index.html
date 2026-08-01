@@ -326,6 +326,10 @@
               <span class="home-recent-label">Recent</span>
               <span class="home-recent-meta">
                 <span id="storage-info"></span>
+                <!-- One slot, two states: signed in shows Sync, signed out
+                     shows Sign in, so reaching Drive never requires opening
+                     Manage ROMs and Saves first. -->
+                <button type="button" class="home-manage-link" id="home-signin" hidden>Sign in</button>
                 <button type="button" class="home-manage-link" id="home-sync" hidden>Sync</button>
                 <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
               </span>

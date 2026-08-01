@@ -2852,11 +2852,23 @@ document.addEventListener("visibilitychange", () => {
 
 // --- Sync UI surfaces -----------------------------------------------------
 const homeSyncBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-sync"));
+// Same slot as Sync, shown in its place while signed out. Without it the only
+// route into Drive from a populated library was Manage ROMs and Saves → Sign in
+// with Google, which nothing on the home screen hinted at.
+const homeSignInBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-signin"));
 
 // The grid's own sync affordance doubles as its progress readout: while a sync
 // is running the "Sync" link becomes a spinner + "Syncing…" and stops being
 // clickable, so activity is visible right where the games are.
 const refreshHomeSyncButton = () => {
+  // Exactly one of the two is ever visible. Signed out is the Sign-in state;
+  // a build with no client ID has no Drive at all, so neither shows.
+  if (homeSignInBtn) {
+    homeSignInBtn.hidden = !GDRIVE_CLIENT_ID || syncActive();
+    // A failed/cancelled sign-in re-enables the control here rather than in the
+    // click handler's tail, so every path back to "signed out" is clickable.
+    if (!homeSignInBtn.hidden) homeSignInBtn.disabled = false;
+  }
   if (!homeSyncBtn) return;
   homeSyncBtn.hidden = !syncActive();
   const busy = syncStatus === "syncing";
@@ -2875,6 +2887,23 @@ const refreshSyncUI = () => {
 if (homeSyncBtn) {
   homeSyncBtn.addEventListener("click", () => runFullSync({ label: "Syncing" }));
 }
+if (homeSignInBtn) {
+  // gdriveConnect() must be reached with the click's transient activation still
+  // live or Google's OAuth popup is blocked ("Sign-in was cancelled"). The body
+  // of an async function runs synchronously up to its first await, so the
+  // assignment above it is free — but nothing may be awaited BEFORE the call.
+  homeSignInBtn.addEventListener("click", async () => {
+    homeSignInBtn.disabled = true;
+    try { await gdriveConnect(); }
+    catch (e) { showToast(e.message); }
+    // gdriveConnect's success path already ran refreshSyncUI (which hides this
+    // button); on failure this is what makes it clickable again.
+    refreshHomeSyncButton();
+  });
+}
+// The markup starts both buttons hidden, and nothing else paints this slot
+// until an auth transition. Signed-out is the boot state, so seed it here.
+refreshHomeSyncButton();
 
 // --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
 // JS mirrors of the wasm-side option vars; they take effect the next time a
