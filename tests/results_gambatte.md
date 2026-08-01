@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-01 16:41:47*
+*Generated: 2026-08-01 16:55:49*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**2632/5005 passed.**
+**2652/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -2383,32 +2383,9 @@ All 6 tests passed.
 | tima/tc00_late_tc01_8_dmg08_cgb04c_outFF [dmg] | got 00, expected FF |
 | tima/tc00_late_tc01_8_dmg08_cgb04c_outFF [cgb] | got 00, expected FF |
 
-## undef_ops (0/20 passed)
+## undef_ops
 
-0/20 tests passed, 20 failed:
-
-| Test | Result |
-|------|--------|
-| undef_ops/undef_op_d3_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_d3_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_db_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_db_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_e3_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_e3_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_e4_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_e4_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_eb_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_eb_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_ec_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_ec_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_ed_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_ed_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_f4_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_f4_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_fc_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_fc_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
-| undef_ops/undef_op_fd_dmg08_cgb04c_out01 [dmg] | got 02, expected 01 |
-| undef_ops/undef_op_fd_dmg08_cgb04c_out01 [cgb] | got 02, expected 01 |
+All 20 tests passed.
 
 ## vram_m3 (25/50 passed)
 

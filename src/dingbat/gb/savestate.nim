@@ -35,8 +35,9 @@ proc save_cpu_state(cpu: GbCpu; w: var Writer) =
   w.write_bool(cpu.ime)
   w.write_bool(cpu.halted)
   w.write_bool(cpu.halt_bug)
+  w.write_bool(cpu.locked)
 
-proc load_cpu_state(cpu: GbCpu; r: var Reader) =
+proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_CPU)
   cpu.af = r.read_u16()
   cpu.bc = r.read_u16()
@@ -47,6 +48,10 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader) =
   cpu.ime = r.read_bool()
   cpu.halted = r.read_bool()
   cpu.halt_bug = r.read_bool()
+  # rev 4 added the undefined-opcode lockup flag. Older states can only have
+  # been written by a build where those opcodes were 4-cycle no-ops, so a
+  # missing field means "not locked".
+  cpu.locked = if rev >= 4: r.read_bool() else: false
   cpu.cached_hl = -1  # per-instruction scratch
 
 # ---- Interrupts / Timer / Joypad ----
@@ -750,7 +755,7 @@ proc gb_state_payload(gb: GB): string =
 
 proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   var r = Reader(buf: payload)
-  load_cpu_state(gb.cpu, r)
+  load_cpu_state(gb.cpu, r, rev)
   load_irq_state(gb.interrupts, r)
   load_timer_state(gb.timer, r)
   load_serial_state(gb.serial, r, rev)

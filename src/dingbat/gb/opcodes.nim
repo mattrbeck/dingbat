@@ -1194,9 +1194,9 @@ var UNPREFIXED* = [
       return 16
     12,
 
-  # 0xD3 UNUSED
+  # 0xD3 UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xD4 CALL NC,u16
   proc(cpu: GbCpu; gb: GB): int =
@@ -1253,9 +1253,9 @@ var UNPREFIXED* = [
       return 16
     12,
 
-  # 0xDB UNUSED
+  # 0xDB UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xDC CALL C,u16
   proc(cpu: GbCpu; gb: GB): int =
@@ -1267,9 +1267,9 @@ var UNPREFIXED* = [
       return 24
     12,
 
-  # 0xDD UNUSED
+  # 0xDD UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xDE SBC A,u8
   proc(cpu: GbCpu; gb: GB): int =
@@ -1304,13 +1304,13 @@ var UNPREFIXED* = [
     mem_write(gb.memory, gb, int(0xFF00'u16 + uint16(cpu.c)), cpu.a)
     8,
 
-  # 0xE3 UNUSED
+  # 0xE3 UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
-  # 0xE4 UNUSED
+  # 0xE4 UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xE5 PUSH HL
   proc(cpu: GbCpu; gb: GB): int =
@@ -1358,17 +1358,17 @@ var UNPREFIXED* = [
     mem_write(gb.memory, gb, int(u16), cpu.a)
     16,
 
-  # 0xEB UNUSED
+  # 0xEB UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
-  # 0xEC UNUSED
+  # 0xEC UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
-  # 0xED UNUSED
+  # 0xED UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xEE XOR A,u8
   proc(cpu: GbCpu; gb: GB): int =
@@ -1409,9 +1409,9 @@ var UNPREFIXED* = [
     cpu.ime = false
     4,
 
-  # 0xF4 UNUSED
+  # 0xF4 UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xF5 PUSH AF
   proc(cpu: GbCpu; gb: GB): int =
@@ -1465,13 +1465,13 @@ var UNPREFIXED* = [
     gb.scheduler.schedule_gb(4, etIME)
     4,
 
-  # 0xFC UNUSED
+  # 0xFC UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
-  # 0xFD UNUSED
+  # 0xFD UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-    cpu_inc_pc(cpu); 4,
+    cpu_lock(cpu); 4,
 
   # 0xFE CP A,u8
   proc(cpu: GbCpu; gb: GB): int =

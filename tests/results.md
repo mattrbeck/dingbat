@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-01 16:41:47*
+*Generated: 2026-08-01 16:55:49*
 
 ## Game Boy - Blargg
 
@@ -286,7 +286,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | speedchange | 👀 76/208 passed |
 | sprites | 👀 252/476 passed |
 | tima | 👀 216/232 passed |
-| undef_ops | 👀 0/20 passed |
+| undef_ops | 👌 20/20 passed |
 | vram_m3 | 👀 25/50 passed |
 | vramw_m3end | 👀 12/36 passed |
 | window | 👀 253/476 passed |
@@ -296,5 +296,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 242
-- **Pass:** 166
-- **Fail:** 76
+- **Pass:** 167
+- **Fail:** 75
