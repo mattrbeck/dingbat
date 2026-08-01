@@ -6512,17 +6512,95 @@ const setRewindHeld = (on) => {
   rewindButton.classList.toggle("active", on);
 };
 
-// This button does one thing: hold it, history runs backward. The scrubber is
-// reached from the menu ("Rewind to a Moment"), not from a gesture layered on
-// top of the hold — a press that has to be classified before it can act either
-// delays the rewind or commits to a few seconds of it before the player has
-// said what they wanted.
-rewindButton.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
-  setRewindHeld(true);
-});
-for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
-  rewindButton.addEventListener(ev, () => setRewindHeld(false));
+// The button's first job is the hold, and the hold is instant: pointerdown
+// rewinds, full stop. Nothing is delayed, buffered or classified first — an
+// earlier design that waited to see whether a second press was coming made
+// every rewind feel late, and lateness is the one thing this control cannot
+// afford.
+//
+// The film strip is layered on top as a DOUBLE TAP, recognised only after the
+// fact so it can never hold the rewind up. Two quick taps: the first rewinds a
+// fraction of a second and that simply stands (nothing is rolled forward
+// again), the second opens the strip. A press held longer than a tap is a
+// deliberate rewind and never counts towards the gesture, so hold, release,
+// hold again behaves exactly as it always did. The menu item stays; this is a
+// shortcut to it, not its only door.
+//
+// Recognised from POINTER events, not `dblclick`. dblclick belongs to the
+// compatibility mouse-event family, and the preventDefault() below — which
+// this button needs so a press does not turn into a text selection or a
+// scroll — is entitled to suppress that family. Measured against this build:
+// WebKit fires neither click nor dblclick on this button, and Chromium fires
+// click but not dblclick. A dblclick handler would have been dead code on
+// every platform. One pointer path covers mouse, touch and pen instead, with
+// no UA guessing and no synthesised second opening to defend against.
+//
+// The platform is already out of the way: `body { touch-action: none }` in
+// styles.css means there is no double-tap-to-zoom to fight and no legacy
+// 300 ms click delay to sit behind, so the windows below are the gesture's
+// own numbers rather than something inherited.
+const RW_TAP_MAX_MS = 250;    // a press longer than this is a hold, never a tap
+const RW_DBLTAP_MS = 300;     // from the first tap's release to the second's press
+const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may differ by
+{
+  // One pointer owns the hold. A second finger arriving while the first is
+  // down is ignored outright: it does not re-arm the hold, it does not count
+  // as a tap, and — the part that used to bite — its release no longer stops a
+  // rewind the other finger is still asking for.
+  let holdId = null;
+  let downTs = 0;
+  let downX = 0;
+  let downY = 0;
+  let tapTs = 0;              // when the previous qualifying tap was released
+  let tapX = 0;
+  let tapY = 0;
+
+  const near = (ax, ay, bx, by, slop) =>
+    Math.abs(ax - bx) <= slop && Math.abs(ay - by) <= slop;
+
+  rewindButton.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    if (holdId !== null) return;
+    holdId = e.pointerId;
+    downTs = performance.now();
+    downX = e.clientX || 0;
+    downY = e.clientY || 0;
+    setRewindHeld(true);      // first statement that matters, and it is not gated
+  });
+
+  // pointerup is the only release that can complete a tap. pointerleave and
+  // pointercancel mean the press went somewhere else (dragged off the button,
+  // stolen by a system gesture) and just end the hold.
+  const endPress = (e) => {
+    if (holdId === null || (e.pointerId !== undefined && e.pointerId !== holdId)) return;
+    holdId = null;
+    setRewindHeld(false);
+    if (e.type !== "pointerup") return;
+    const x = e.clientX || 0;
+    const y = e.clientY || 0;
+    const now = performance.now();
+    // A tap: short, and it ended where it started (a press dragged across the
+    // top bar is a mis-hit, not half a gesture).
+    if (now - downTs > RW_TAP_MAX_MS || !near(x, y, downX, downY, RW_DBLTAP_SLOP)) {
+      tapTs = 0;
+      return;
+    }
+    // Second of a pair? The window is measured from the first tap's release to
+    // this one's PRESS, so a slow-but-deliberate second tap is not penalised
+    // for how long the finger stayed down.
+    if (tapTs && downTs - tapTs <= RW_DBLTAP_MS && near(x, y, tapX, tapY, RW_DBLTAP_SLOP)) {
+      tapTs = 0;              // a third tap starts a fresh pair, not another open
+      openRewindScrubber();
+      return;
+    }
+    tapTs = now;
+    tapX = x;
+    tapY = y;
+  };
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+    rewindButton.addEventListener(ev, endPress);
+  }
 }
 
 // --- Desktop keyboard shortcuts ---

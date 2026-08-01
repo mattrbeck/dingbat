@@ -50,6 +50,10 @@ class FakeElement {
     this._listeners[type] = (this._listeners[type] || []).filter((f) => f !== fn);
   }
   async dispatch(type, ev = {}) {
+    // `type` is not decoration: handlers registered for several event names at
+    // once (the rewind button's pointerup/pointerleave/pointercancel) branch on
+    // it, and a real Event always carries it.
+    ev.type ??= type;
     ev.target ??= this;
     ev.preventDefault ??= () => {};
     ev.stopPropagation ??= () => {};
@@ -447,6 +451,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   // Fire every recorded document-level listener of `type` with a stub-filled
   // event, awaiting async handlers (mirrors FakeElement.dispatch).
   const dispatchDoc = async (type, ev = {}) => {
+    ev.type ??= type;
     ev.preventDefault ??= () => {};
     ev.stopPropagation ??= () => {};
     ev.stopImmediatePropagation ??= () => {};
@@ -455,6 +460,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
 
   // Same, for window-level listeners.
   const dispatchWin = async (type, ev = {}) => {
+    ev.type ??= type;
     ev.preventDefault ??= () => {};
     ev.stopPropagation ??= () => {};
     for (const f of (winListeners[type] || []).slice()) await f(ev);
