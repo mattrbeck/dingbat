@@ -1106,6 +1106,7 @@ proc main() =
   var attach_after = 10
   var force_cgb = false
   var no_save = false      # --nosave: blank cart RAM and detach the .sav file
+  var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
   var bb_breakpoint = false  # --bb-breakpoint: LD B,B always ends a run (AGE)
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
 
@@ -1169,6 +1170,8 @@ proc main() =
         force_cgb = true
       of "nosave":
         no_save = true
+      of "ed-breakpoint":
+        ed_breakpoint = true
       of "bb-breakpoint":
         bb_breakpoint = true
       of "model":
@@ -1260,6 +1263,7 @@ proc main() =
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
   let test_out = new_test_output()
+  test_out.ed_breakpoint = ed_breakpoint
   test_out.bb_breakpoint = bb_breakpoint
 
   if is_gba:

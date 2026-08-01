@@ -32,12 +32,12 @@ Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
 
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--color`, `--cgb`, `--model=<dmg0|mgb|sgb|...>` (mooneye boot-state tables),
-`--nosave`, `--bb-breakpoint`, `--bios=<path>`,
+`--nosave`, `--ed-breakpoint`, `--bb-breakpoint`, `--bios=<path>`,
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
 `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
 `--attach-after`.
 
-The two GB flags exist because different suites end a run differently, and
+The three GB flags exist because different suites end a run differently, and
 each is opt-in so it cannot change how another suite is scored on the same
 binary:
 
@@ -45,6 +45,9 @@ binary:
   ROMs otherwise drop a save next to the ROM **in the shared cache dir**, and
   the next run loads it back as power-on state — non-reproducible locally, and
   in CI the `actions/cache` would carry one run's SRAM into the next.
+- `--ed-breakpoint` makes the undefined opcode `0xED` end the run with the
+  mooneye verdict. That was mooneye-gb's magic breakpoint in 2016, which is
+  what wilbertpol's fork is built against.
 - `--bb-breakpoint` makes `LD B,B` end the run whatever the registers hold.
   AGE signals failure as "any register values other than the Fibonacci ones",
   with no dedicated failure signature — without this a failing AGE ROM never
@@ -114,6 +117,7 @@ a `--cgb`/model flag here.
 | Blargg `cpu_instrs`, `mem_timing` | serial text | `tmSerial` |
 | Blargg `instr_timing`, `mem_timing-2`, `oam_bug`, `halt_bug`, `interrupt_time` | `$A000` status + `DEB061` | `tmSram`; `interrupt_time` is CGB-only (`--cgb`), `oam_bug` needs ~21 emulated seconds |
 | Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `tmMooneye`; `manual-only/sprite_priority` is a screenshot |
+| Mooneye (wilbertpol fork) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/` and `logic-analysis/` have no verdict and are skipped |
 | AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
 | GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`) |
 | Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
@@ -145,14 +149,14 @@ both, and rtc3test is worth it: dingbat has a real MBC3 RTC. `scribbltests`
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed: the baseline carries a lot of known failures
-(Total 757, Pass 399 as of the current committed `results.md`, most of them
+(Total 874, Pass 460 as of the current committed `results.md`, most of them
 the PPU-timing suites added on purpose to measure them). All 13 jsmolka rows
 are green in it, so any of them going red *is* a CI failure.
 
 The regression key is the **full** test name — `blargg/oam_bug/1-lcd_sync`,
 not `1-lcd_sync` — matching the row exactly as `results.md` writes it. With
-several forks of the same suite in here (`mem_timing` vs `mem_timing-2`,
-`age` vs `mooneye`) anything shorter collides across suites and
+several forks of the same suite in here (mooneye vs mooneye-wilbertpol,
+`mem_timing` vs `mem_timing-2`) anything shorter collides across suites and
 silently mis-keys the gate. A name absent from the baseline is simply not
 gated, which is why adding suites means regenerating and committing
 `results.md` in the same change.

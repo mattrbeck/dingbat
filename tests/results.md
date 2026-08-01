@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-01 16:39:11*
+*Generated: 2026-08-01 16:40:37*
 
 ## Game Boy - Blargg
 
@@ -806,8 +806,130 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | little-things-gb/firstwhite | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | 👀 94.4% correct (21760/23040 pixels match) |
 
+## Game Boy - Mooneye (wilbertpol)
+
+| Test | Result |
+|------|--------|
+| mooneye-wilbertpol/acceptance/add_sp_e_timing | 👌 |
+| mooneye-wilbertpol/acceptance/bits/mem_oam | 👌 |
+| mooneye-wilbertpol/acceptance/bits/reg_f | 👌 |
+| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS | 👌 |
+| mooneye-wilbertpol/acceptance/boot_hwio-G | 👌 |
+| mooneye-wilbertpol/acceptance/boot_regs-dmg | 👌 |
+| mooneye-wilbertpol/acceptance/call_cc_timing | 👌 |
+| mooneye-wilbertpol/acceptance/call_cc_timing2 | 👌 |
+| mooneye-wilbertpol/acceptance/call_timing | 👌 |
+| mooneye-wilbertpol/acceptance/call_timing2 | 👌 |
+| mooneye-wilbertpol/acceptance/di_timing-GS | 👌 |
+| mooneye-wilbertpol/acceptance/div_timing | 👌 |
+| mooneye-wilbertpol/acceptance/ei_timing | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_0_timing | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_1_timing | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode3_timing | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_oam_ok_timing | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_timing | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/lcdon_mode_timing | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_01_mode0_2 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode2_3 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode3_0 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly143_144_145 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly143_144_152_153 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode0_1 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode3_0 | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/stat_irq_blocking | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS | 👌 |
+| mooneye-wilbertpol/acceptance/halt_ime0_ei | 👌 |
+| mooneye-wilbertpol/acceptance/halt_ime0_nointr_timing | 👌 |
+| mooneye-wilbertpol/acceptance/halt_ime1_timing | 👌 |
+| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS | 👌 |
+| mooneye-wilbertpol/acceptance/if_ie_registers | 👌 |
+| mooneye-wilbertpol/acceptance/intr_timing | 👌 |
+| mooneye-wilbertpol/acceptance/jp_cc_timing | 👌 |
+| mooneye-wilbertpol/acceptance/jp_timing | 👌 |
+| mooneye-wilbertpol/acceptance/ld_hl_sp_e_timing | 👌 |
+| mooneye-wilbertpol/acceptance/oam_dma_restart | 👌 |
+| mooneye-wilbertpol/acceptance/oam_dma_start | 👌 |
+| mooneye-wilbertpol/acceptance/oam_dma_timing | 👌 |
+| mooneye-wilbertpol/acceptance/pop_timing | 👌 |
+| mooneye-wilbertpol/acceptance/push_timing | 👌 |
+| mooneye-wilbertpol/acceptance/rapid_di_ei | 👌 |
+| mooneye-wilbertpol/acceptance/ret_cc_timing | 👌 |
+| mooneye-wilbertpol/acceptance/ret_timing | 👌 |
+| mooneye-wilbertpol/acceptance/reti_intr_timing | 👌 |
+| mooneye-wilbertpol/acceptance/reti_timing | 👌 |
+| mooneye-wilbertpol/acceptance/rst_timing | 👌 |
+| mooneye-wilbertpol/acceptance/timer/div_write | 👌 |
+| mooneye-wilbertpol/acceptance/timer/rapid_toggle | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim00 | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim00_div_trigger | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim01 | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim01_div_trigger | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim10 | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim10_div_trigger | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim11 | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tim11_div_trigger | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tima_reload | 👌 |
+| mooneye-wilbertpol/acceptance/timer/tima_write_reloading | 👌 |
+| mooneye-wilbertpol/acceptance/timer/timer_if | 👀 |
+| mooneye-wilbertpol/acceptance/timer/tma_write_reloading | 👌 |
+| mooneye-wilbertpol/emulator-only/mbc1_rom_4banks | 👌 |
+| mooneye-wilbertpol/madness/mgb_oam_dma_halt_sprites | 👀 50.0% correct (11517/23040 pixels match) |
+| mooneye-wilbertpol/manual-only/sprite_priority | 👌 |
+| mooneye-wilbertpol/misc/bits/unused_hwio-C | 👌 |
+| mooneye-wilbertpol/misc/boot_hwio-C | 👀 |
+| mooneye-wilbertpol/misc/boot_hwio-S | 👀 |
+| mooneye-wilbertpol/misc/boot_regs-A | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-cgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-mgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb2 | 👌 |
+| mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C | 👀 |
+
 ## Summary
 
-- **Total:** 757
-- **Pass:** 399
-- **Fail:** 358
+- **Total:** 874
+- **Pass:** 460
+- **Fail:** 414

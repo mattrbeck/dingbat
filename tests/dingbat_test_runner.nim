@@ -30,6 +30,7 @@ type
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
+    ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
 
   TestResult = object
@@ -250,6 +251,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --model=" & test.model)
     if test.no_save:
       cmd.add(" --nosave")
+    if test.ed_breakpoint:
+      cmd.add(" --ed-breakpoint")
     if test.bb_breakpoint:
       cmd.add(" --bb-breakpoint")
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
@@ -639,6 +642,54 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
     ))
   tests
 
+proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
+  ## wilbertpol's fork of the Mooneye suite. Same Fibonacci-register verdict as
+  ## Gekkio's, but built against mooneye-gb as it stood in 2016, when the magic
+  ## breakpoint was the undefined opcode 0xED rather than LD B,B — hence
+  ## ed_breakpoint (see the 0xED handler in src/dingbat/gb/opcodes.nim).
+  ##
+  ## Roughly 80% of the content overlaps the Gekkio suite scored above, so the
+  ## rows are namespaced `mooneye-wilbertpol/` and never collide with it.
+  ##
+  ## Not every directory is scoreable: `utils/` holds a dump tool rather than a
+  ## test, and `logic-analysis/` ROMs are meant to be observed on a logic
+  ## analyzer and have no pass/fail signal at all.
+  var tests: seq[TestDef]
+  let dir = roms_dir / "mooneye-test-suite-wilbertpol"
+  if not dirExists(dir):
+    echo "  Warning: mooneye-test-suite-wilbertpol directory not found"
+    return tests
+  for rom in find_roms_recursive(dir, ".gb"):
+    let rel = rom.relativePath(dir)
+    let name = "mooneye-wilbertpol/" & rel.changeFileExt("")
+    if rel.startsWith("utils") or rel.startsWith("logic-analysis"):
+      continue
+    # The two screenshot ROMs: sprite_priority (DMG reference, the same one the
+    # Gekkio suite uses) and madness/mgb_oam_dma_halt_sprites, whose reference
+    # was captured on an MGB.
+    if rel == "manual-only" / "sprite_priority.gb":
+      tests.add(shot(name, rom, rom.parentDir / "sprite_priority-dmg.png", 120))
+      continue
+    if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
+      var t = shot(name, rom, rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png", 120)
+      t.model = "mgb"
+      tests.add(t)
+      continue
+    let base = rom.splitFile().name
+    # Device suffix after the last '-': -C/-A are CGB/AGB tests, -G/-S/-GS are
+    # DMG/SGB. misc/ is the CGB-hardware directory, same convention as Gekkio's.
+    let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
+    tests.add(TestDef(
+      name: name,
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: rel.startsWith("misc") or suffix in ["C", "cgb", "cgb0", "A"],
+      model: mooneye_model_for(base),
+      ed_breakpoint: true,
+    ))
+  tests
+
 proc build_acid2_tests(): seq[TestDef] =
   var tests: seq[TestDef]
   # DMG Acid2
@@ -766,7 +817,7 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
       # The row name is the FULL test name, suite prefix included. It is the
       # key the regression comparison reads back (load_previous_results), and
       # with ~20 suites in here — several of them forks of each other, e.g.
-      # blargg/mem_timing vs blargg/mem_timing-2, age vs mooneye —
+      # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
       # anything shorter collides across suites and silently mis-keys the gate.
       lines.add("| " & r.name & " | " & emoji & detail & " |")
       inc total
@@ -1050,6 +1101,10 @@ proc main() =
   # turtle-tests, cgb-acid-hell, little-things-gb, mbc3-tester)
   all_suites.add(run_suite("Game Boy - Screenshot suites",
     build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
+
+  # Mooneye suite, wilbertpol fork (0xED breakpoint)
+  all_suites.add(run_suite("Game Boy - Mooneye (wilbertpol)",
+    build_wilbertpol_tests(gb_test_roms_dir), harness, previous, regressions))
 
   # Write results
   createDir(getCurrentDir() / "tests")
