@@ -6607,17 +6607,20 @@ const motionJoltHandler = (e) => {
   // That event fires only once the OS has decided the orientation changed —
   // by then the turn's acceleration has already been fed to the core and
   // Kirby has jumped. rotationRate.alpha is rotation about the screen
-  // normal, which is exactly the portrait<->landscape axis and is live
-  // DURING the turn. A 90-degree turn integrates to ~90; a jump flick is a
-  // translation and barely registers, so the integral separates them.
+  // normal, exactly the portrait<->landscape axis, and it is live DURING
+  // the turn.
+  //
+  // Integrate it SIGNED. A turn is ~90 degrees sustained one way; a jump
+  // flick twists the wrist and twists straight back, so it nets near zero
+  // however hard it was thrown. An absolute integral counts both halves of
+  // that flick and trips on it — which is what made jumping feel harder.
   const rr = e.rotationRate;
   const now = Date.now();
   const dt = tiltSpinAt ? Math.min(0.2, (now - tiltSpinAt) / 1000) : 0;
   tiltSpinAt = now;
   if (rr && rr.alpha != null && dt > 0) {
-    tiltSpin = tiltSpin * Math.exp(-dt / TILT_SPIN_HALFLIFE) +
-               Math.abs(rr.alpha) * dt;
-    if (tiltSpin > TILT_SPIN_DEGREES) tiltRotateUntil = now + TILT_SETTLE_MS;
+    tiltSpin = tiltSpin * Math.exp(-dt / TILT_SPIN_HALFLIFE) + rr.alpha * dt;
+    if (Math.abs(tiltSpin) > TILT_SPIN_DEGREES) tiltRotateUntil = now + TILT_SETTLE_MS;
   }
   if (!e.acceleration) return;
   if (tiltSettling()) { tiltJoltX = tiltJoltY = 0; return; } // turning != flick
@@ -6687,7 +6690,7 @@ const TILT_REBASE_MS = 450;   // when the stale neutral is dropped
 const TILT_SETTLE_MS = 650;   // when motion input starts counting again
 const TILT_GLIDE_MS = 380;   // how long a re-baseline takes to settle in
 const TILT_GLIDE_RATE = 0.16; // per-tick ease toward the new value
-const TILT_SPIN_DEGREES = 35; // integrated Z rotation that means "turning"
+const TILT_SPIN_DEGREES = 50; // NET Z rotation that means "turning", degrees
 const TILT_SPIN_HALFLIFE = 0.5; // seconds; keeps the integral from drifting
 var tiltRebaseTimer = 0;
 var tiltRotateUntil = 0;      // Date.now() before which motion is ignored

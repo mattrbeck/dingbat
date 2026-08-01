@@ -178,6 +178,19 @@ test("turning the device suppresses the jolt without orientationchange", async (
     "a 90-degree turn must not reach the jump channel");
 });
 
+// A hard flick twists the wrist and twists straight back. Integrating the
+// rotation as an absolute value counted both halves and tripped the turn
+// detector, which is what made jumping feel harder on a real phone.
+test("a hard flick that twists and returns is not a turn", async () => {
+  const app = await loadApp();
+  armTilt(app);
+  app.runIn("tiltJoltX = 0;");
+  await spin(app, 140, 260, 20);    // twist hard one way...
+  await spin(app, 140, -260, 20);   // ...and straight back
+  assert.ok(Math.abs(app.runIn("tiltJoltX")) > 0.5,
+    "an out-and-back twist must still reach the jump channel");
+});
+
 test("a flick is still a flick: rotation alone is what's rejected", async () => {
   const app = await loadApp();
   armTilt(app);
