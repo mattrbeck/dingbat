@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-01 16:30:15*
+*Generated: 2026-08-01 16:37:01*
 
 ## Game Boy - Blargg
 
@@ -197,6 +197,18 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | dmg-acid2 | 👌 |
 | cgb-acid2 | 👌 |
 
+## Game Boy - MagenTests
+
+| Test | Result |
+|------|--------|
+| hblank_vram_dma | 👀 0.0% correct (0/23040 pixels; white 0 red 0 green 0 blue 23040 other 0; blue = the operation ran while the CPU was halted) |
+| key0_lock_after_boot | 👌 |
+| mbc_oob_sram_mbc1 | 👌 |
+| mbc_oob_sram_mbc3 | 👌 |
+| mbc_oob_sram_mbc5 | 👌 |
+| ppu_disabled_state | 👌 |
+| bg_oam_priority | 👌 |
+
 ## Game Boy - Mealybug Tearoom
 
 | Test | Result |
@@ -228,6 +240,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 ## Summary
 
-- **Total:** 187
-- **Pass:** 155
-- **Fail:** 32
+- **Total:** 194
+- **Pass:** 161
+- **Fail:** 33

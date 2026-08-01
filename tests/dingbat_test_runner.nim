@@ -15,7 +15,7 @@ let RomCacheDir =
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka,
-    tmFuzzArm
+    tmFuzzArm, tmMagenGreen, tmMagenNoRed
 
   TestDef = object
     name: string
@@ -174,6 +174,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmScreenshot: "screenshot"
     of tmJsmolka: "jsmolka"
     of tmFuzzArm: "fuzzarm"
+    of tmMagenGreen: "magen-green"
+    of tmMagenNoRed: "magen-nored"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
@@ -556,6 +558,43 @@ proc build_fuzzarm_tests(paths: seq[string]): seq[TestDef] =
     ))
   tests
 
+# alloncm/MagenTests (MIT). Tagged releases ship the assembled .gbc files, so
+# this pins a release tag rather than a commit. Covers CGB corners nothing else
+# dingbat runs touches: HBlank VRAM DMA (including that it must stop while the
+# CPU is halted), the KEY0 lock after boot, STAT's reported mode while the PPU
+# is off, and MBC1/3/5 out-of-bounds SRAM addressing.
+const MagenRelease = "0.5.0"
+
+proc build_magen_tests(): seq[TestDef] =
+  ## Verdict is the screen colour, per src/common.asm's palette and each
+  ## test's README entry — see the mode comment in dingbat_test.nim for why
+  ## this is NOT a screenshot comparison (the repo ships no 160x144 reference
+  ## image; images/ is upscales, swatches and a photo of real hardware).
+  ##
+  ## oam_internal_priority is deliberately absent: it draws a pattern whose
+  ## only stated criterion is prose ("2 pairs of rectangles connected or
+  ## touching each other"), red is a legitimate colour in it, and the only
+  ## reference is a 318x295 SameBoy window grab. There is nothing to score it
+  ## against that would not just be a golden of dingbat's own output.
+  var tests: seq[TestDef]
+  for rom in ["hblank_vram_dma", "key0_lock_after_boot", "mbc_oob_sram_mbc1",
+              "mbc_oob_sram_mbc3", "mbc_oob_sram_mbc5", "ppu_disabled_state",
+              "bg_oam_priority"]:
+    let path = ensure_rom_download(
+      "https://github.com/alloncm/MagenTests/releases/download/" &
+        MagenRelease & "/" & rom & ".gbc",
+      "magen-" & MagenRelease & "-" & rom & ".gbc")
+    tests.add(TestDef(
+      name: "magen/" & rom,
+      rom_path: path,
+      # bg_oam_priority is the one that draws rather than filling the screen;
+      # its documented result is "... with no red lines".
+      mode: if rom == "bg_oam_priority": tmMagenNoRed else: tmMagenGreen,
+      # Every one of them settles by frame 60; 300 is slack, not a wait.
+      timeout: 300,
+    ))
+  tests
+
 proc generate_results_md(suites: seq[SuiteResults]): string =
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
@@ -615,7 +654,7 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
   for test in tests:
     let r = run_test(test, harness)
     let status = if r.passed: "PASS" else: "FAIL"
-    if test.mode in {tmScreenshot, tmFuzzArm}:
+    if test.mode in {tmScreenshot, tmFuzzArm, tmMagenGreen, tmMagenNoRed}:
       echo &"  [{status}] {test.name} - {r.output}"
     else:
       echo &"  [{status}] {test.name}"
@@ -845,6 +884,10 @@ proc main() =
   # Acid2 tests (screenshot comparison)
   let acid2_tests = build_acid2_tests()
   all_suites.add(run_suite("Game Boy - Acid2", acid2_tests, harness, previous, regressions))
+
+  # MagenTests CGB corners (colour verdict)
+  all_suites.add(run_suite("Game Boy - MagenTests", build_magen_tests(), harness,
+                           previous, regressions))
 
   # Mealybug Tearoom tests (screenshot comparison)
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")

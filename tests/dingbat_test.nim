@@ -15,7 +15,8 @@ type
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm
+    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+    tmMagenGreen, tmMagenNoRed
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -776,6 +777,61 @@ proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): 
        " passed (" & $fails.len & " failed)"
   return 1
 
+# ==================== alloncm/MagenTests ====================
+#
+# CGB test ROMs (MIT) whose verdict is the screen colour, not a reference
+# image. src/common.asm fixes the palette: WHITE $FFFF, RED $001F,
+# GREEN $03E0, BLUE $7C00, and each ROM's README entry says what they mean.
+#
+# Deliberately NOT scored by screenshot comparison: the repo's images/ holds a
+# 641x574 upscale, a 318x295 SameBoy window grab, two 15x17 swatches and a
+# photo of real hardware — nothing that is a 160x144 frame — so there is no
+# bundled reference to diff against, and a self-generated frame hash would be
+# a golden with nothing behind it. Counting the ROM's own documented colours
+# is the ROM's own contract.
+#
+#   magen-green: "the screen should be all green"; red and blue are the two
+#     named failure modes (for hblank_vram_dma: red = the HBlank HDMA never
+#     ran, blue = it ran while the CPU was halted).
+#   magen-nored: bg_oam_priority draws a pattern, and its stated result is
+#     "5 green squares and 3 half green and half blue squares with no red
+#     lines" — so the machine-checkable part is the absence of red. Weaker
+#     than the other six by construction. (For the record, dingbat renders
+#     exactly 416 green and 96 blue pixels, which is 5*8*8 + 3*(8*8/2) and
+#     3*(8*8/2) — i.e. the described geometry to the pixel — but the gate
+#     stays on the documented rule rather than baking those counts in.)
+proc magen_test(rom_path: string; timeout_frames: int;
+                require_all_green: bool): int =
+  const
+    MagenWhite = 0x7FFF'u16
+    MagenRed   = 0x001F'u16
+    MagenGreen = 0x03E0'u16
+    MagenBlue  = 0x7C00'u16
+  let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  for _ in 0 ..< timeout_frames:
+    emu.step_frame()
+  var white, red, green, blue, other = 0
+  for px in emu.ppu.framebuffer:
+    case px and 0x7FFF'u16
+    of MagenWhite: inc white
+    of MagenRed: inc red
+    of MagenGreen: inc green
+    of MagenBlue: inc blue
+    else: inc other
+  let total = emu.ppu.framebuffer.len
+  let good = if require_all_green: green else: total - red
+  let pct = 100.0 * float(good) / float(total)
+  var why = ""
+  if require_all_green and green != total:
+    if blue > 0: why = "; blue = the operation ran while the CPU was halted"
+    elif red > 0: why = "; red = the operation did not run at all"
+  echo pct.formatFloat(ffDecimal, 1) & "% correct (" & $good & "/" & $total &
+       " pixels; white " & $white & " red " & $red & " green " & $green &
+       " blue " & $blue & " other " & $other & why & ")"
+  if good == total: 0 else: 1
+
 # Rewind verification: run forward taking snapshots exactly like the
 # frontend does, then pop backward and require byte-exact payload
 # reconstruction through the XOR-delta chain — both a few steps back and all
@@ -1387,6 +1443,8 @@ proc main() =
         of "gblinktest": mode = tmGbLinkTest
         of "jsmolka": mode = tmJsmolka
         of "fuzzarm": mode = tmFuzzArm
+        of "magen-green": mode = tmMagenGreen
+        of "magen-nored": mode = tmMagenNoRed
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1469,6 +1527,8 @@ proc main() =
     quit(jsmolka_test(rom_path, bios_path, timeout_frames))
   if mode == tmFuzzArm:
     quit(fuzzarm_test(rom_path, bios_path, timeout_frames, max_fails))
+  if mode in {tmMagenGreen, tmMagenNoRed}:
+    quit(magen_test(rom_path, timeout_frames, mode == tmMagenGreen))
   if mode in {tmLinkTest, tmNormLinkTest, tmNorm32LinkTest}:
     # Second positional arg is core 2's ROM; defaults to running the same
     # ROM on both cores. The normal-mode variants run the same coordinator
@@ -1613,7 +1673,8 @@ proc main() =
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm:
+     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+     tmMagenGreen, tmMagenNoRed:
     discard  # handled (and exited) above
 
   if output.len > 0:

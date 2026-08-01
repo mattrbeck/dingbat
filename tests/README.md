@@ -26,6 +26,7 @@ nimble bench_build   # -> ./dingbat_bench
 
 Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
 `serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`,
+`magen-green`, `magen-nored`,
 `screenshot`, `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`,
 `norm32linktest`, `attachtest`, `netlink`, `speclink`, `speclinkbench`,
 `rollback`, `rollbacknet`, `gblinktest`.
@@ -84,6 +85,24 @@ emulated frames of button-ack.
   --mode=fuzzarm --timeout=20000
 ```
 
+`--mode=magen-green` / `--mode=magen-nored` score alloncm/MagenTests (MIT), CGB
+ROMs whose verdict is the **screen colour**, not a reference image:
+`src/common.asm` fixes WHITE `$FFFF`, RED `$001F`, GREEN `$03E0`, BLUE `$7C00`,
+and each test's README entry says what they mean ("the screen should be all
+green"; for `hblank_vram_dma`, red = the HBlank HDMA never ran, blue = it ran
+while the CPU was halted). `magen-green` requires every pixel green;
+`magen-nored` requires zero red pixels, which is `bg_oam_priority`'s stated
+criterion ("... with no red lines") and is the weaker of the two by design.
+Both print a mealybug-style `N% correct (...)` line with the full colour
+histogram, so a failure names its own cause.
+
+This is deliberately **not** run through `--mode=screenshot`: the repo ships no
+160x144 reference frame (`images/` is a 641x574 upscale, a 318x295 SameBoy
+window grab, two 15x17 swatches and a photo of real hardware), and a pinned
+frame hash would be a golden of dingbat's own output with nothing behind it.
+`oam_internal_priority` is not run for the same reason — its only stated
+criterion is prose, and red is a legitimate colour in it.
+
 Gotcha: piping through `tail`/`head` masks the exit code — a segfault (139)
 looks like success. Check `$?` on the harness itself, or use `set -o pipefail`.
 
@@ -104,7 +123,9 @@ the repo root right after `nimble test_build`, or it quits with
   no release tag, so the ROMs come from raw.githubusercontent at that SHA).
   **FuzzARM's tests are randomly generated at build time**, so the committed
   pass/fail baseline is only meaningful for the pinned SHA — bumping it means
-  a different 10 000 tests and a re-baseline, not a regression. CI backs this dir with
+  a different 10 000 tests and a re-baseline, not a regression. Seven
+  `alloncm/MagenTests` `.gbc`s also come down, from the release tag in
+  `MagenRelease`. CI backs this dir with
   `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
   the run; the cache key must be bumped when a URL/version changes.
 - Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
@@ -115,9 +136,10 @@ the repo root right after `nimble test_build`, or it quits with
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed (the baseline carries known failures: Total
-187, Pass 155 as of the current committed `results.md`; all 13 jsmolka rows and
-all 5 FuzzARM rows are green in it, so any of them going red *is* a CI
-failure).
+194, Pass 161 as of the current committed `results.md`; all 13 jsmolka rows,
+all 5 FuzzARM rows and 6 of the 7 MagenTests rows are green in it, so any of
+them going red *is* a CI failure. `magen/hblank_vram_dma` is baselined failing:
+dingbat runs the HBlank VRAM DMA while the CPU is halted).
 
 **Results-file caveat:** `tests/results.md` and `tests/results_mgba_suite.md`
 are committed baselines, and every run **rewrites both in place** (that is
