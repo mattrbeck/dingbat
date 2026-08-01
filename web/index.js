@@ -888,6 +888,14 @@ const closeSettingsModal = () => {
 document.getElementById("open-settings").addEventListener("click", openSettingsModal);
 document.getElementById("settings-close").addEventListener("click", closeSettingsModal);
 
+// Troubleshooting actions live in Settings ▸ General now. Each one hands the
+// screen to something else (the log overlay, a reload), so Settings has to
+// step aside first. Registered here, ahead of each button's own handler
+// further down the file, so the close happens before the takeover.
+for (const id of ["force-update", "show-log"]) {
+  document.getElementById(id).addEventListener("click", closeSettingsModal);
+}
+
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettingsModal();
 });
