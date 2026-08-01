@@ -4118,6 +4118,16 @@ body.rollback-mode #save-sep {
   body.running.topbar-open #topbar-handle svg {
     transform: rotate(180deg);
   }
+  /* No bar on screen to sit under, so the capture banner hugs the top of the
+     full-height stage — and rides down with the bar when the handle pulls it
+     in, the same way the handle itself does. */
+  body.running #clip-banner {
+    top: calc(var(--safe-t) + 10px);
+    transition: top 0.2s ease;
+  }
+  body.running.topbar-open #clip-banner {
+    top: calc(var(--bar-h) + var(--safe-t) + 10px);
+  }
   /* With the bar gone the stage owns the full height */
   body.running #canvas {
     width: min(100%, calc(100dvh * var(--game-ar, 1.5)));
@@ -5016,11 +5026,15 @@ body.clip-replaying #controls {
   opacity: 0.45;
 }
 
+/* Sits just under the top bar. Kept a body-level sibling of #topbar (see
+   index.html) so the landscape bar transform can't capture it. The safe-t
+   term is not optional: the bar is (bar-h + safe-t) tall, so without it the
+   banner drew ON TOP of the bar on notched phones in portrait. */
 #clip-banner {
   position: fixed;
   z-index: 550;
   left: 50%;
-  top: calc(var(--bar-h, 52px) + 10px);
+  top: calc(var(--bar-h, 52px) + var(--safe-t) + 10px);
   transform: translateX(-50%);
   padding: 6px 14px;
   border-radius: 999px;
@@ -5032,22 +5046,51 @@ body.clip-replaying #controls {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Tilt recenter chip: shown only while device-motion tilt is live.
-   #cam-flip shares the slot — tilt carts and camera carts are different
-   cartridges, so the two chips can never appear together. */
-#tilt-recenter,
-#cam-flip {
-  position: fixed;
-  z-index: 60;
-  right: calc(10px + var(--safe-r));
-  top: calc(var(--bar-h, 52px) + 10px);
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border-2);
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
+/* --- Cartridge-specific top-bar actions (#tilt-recenter, #cam-flip) ---
+   Real top-bar buttons rather than chips floating over the stage: they used
+   to be position:fixed children of #topbar, which mobile landscape transforms
+   — so their `top` resolved against the slid-away bar and they landed on the
+   R shoulder button. They are .icon-btn first (chrome look, [hidden], hover
+   and clip-replay inerting all come free) and widen to hold a label, the same
+   icon+wording→icon-only trade #rb-disconnect makes.
+   Only ever ONE is visible: no cartridge is both a tilt cart and a camera
+   cart, so this is a single slot in the bar, not two. */
+.cart-btn {
+  width: auto;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.cart-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* Narrow phones: the bar is already at capacity with the segmented playback
+   cluster, fps, mute and fullscreen — drop the wording and keep the glyph
+   (title/aria-label still carry the meaning). Matches the 480px breakpoint
+   the segmented bar and #rb-disconnect use. */
+@media (max-width: 480px) {
+  .cart-btn {
+    width: var(--sz);
+    padding: 0;
+    gap: 0;
+  }
+  .cart-btn .cart-btn-label {
+    display: none;
+  }
+  /* 320pt-class phones have ~14px to spare once a cart action joins the bar,
+     and the fps/sync readout is the one variable-width item left. Let it
+     shrink (it already has min-width: 0) so a rare pile-up clips a diagnostic
+     rather than shoving the mute button past the right edge. */
+  #status {
+    flex: 0 1 auto;
+    overflow: hidden;
+  }
 }
 
 /* Printed-photos gallery: prints are 160px wide and arbitrarily tall, so
