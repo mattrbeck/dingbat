@@ -12,7 +12,10 @@
 function createGlRenderer(canvasEl, nativeRes, log) {
   let gl = null, prog = null, tex = null, lost = false;
   let uColorCorrect, uPanelGbc, uScanlines, uTexHeight, uTexSize, uFilter;
+  let uDmgRemap, uDmgPal;
   let lastW = 0, lastH = 0;
+  // Scratch for the vec3[4] palette upload — 12 floats, reused every draw.
+  const dmgPalBuf = new Float32Array(12);
 
   const VERT = `#version 300 es
 out vec2 v_uv;
@@ -45,10 +48,26 @@ uniform bool u_scanlines;
 uniform float u_tex_height;     // native rows (for scanline pitch)
 uniform vec2 u_tex_size;        // native texel dimensions (w, h)
 uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
+// --- Game Boy shade palette (monochrome DMG titles only) ---
+// A DMG game's framebuffer holds ONLY the four BGR555 values the core writes
+// for shades 0..3 (src/dingbat/gb/gb.nim DMG_COLORS), so recolouring the
+// screen is an exact 4-way substitution here in the presenter — the core never
+// sees it, which is what keeps save states, rewind and netplay byte-identical.
+// Off (u_dmg_remap false) unless the caller passes a palette AND the running
+// game is monochrome; a pixel that is not one of the four falls through
+// untouched, so a mis-gated colour title would still render correctly.
+uniform bool u_dmg_remap;
+uniform vec3 u_dmg_pal[4];      // sRGB 0..1, shade 0 (lightest) -> 3
 
 ivec2 g_max;
 vec3 fetchRGB(ivec2 p) {
-  uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r;
+  uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu;
+  if (u_dmg_remap) {
+    if (packed == 0x6BDFu) return u_dmg_pal[0];
+    if (packed == 0x3ABFu) return u_dmg_pal[1];
+    if (packed == 0x35BDu) return u_dmg_pal[2];
+    if (packed == 0x2CEFu) return u_dmg_pal[3];
+  }
   return vec3(float(packed & 31u),
               float((packed >> 5) & 31u),
               float((packed >> 10) & 31u)) / 31.0;
@@ -110,7 +129,11 @@ void main() {
   vec3 c = upscale();
   float outGamma = 2.2;
   vec3 rgb;
-  if (u_color_correct) {
+  // A chosen palette is already in display space: the LCD colour model would
+  // shift the exact hex the user (or the theme) asked for, so it is bypassed.
+  // Default shades keep the panel model, so nothing changes when the palette
+  // feature is off.
+  if (u_color_correct && !u_dmg_remap) {
     if (u_panel_gbc) {
       vec3 lin = pow(c, vec3(2.2)) * 0.94;
       rgb = pow(clamp(vec3(
@@ -166,6 +189,9 @@ void main() {
     uTexHeight = gl.getUniformLocation(prog, "u_tex_height");
     uTexSize = gl.getUniformLocation(prog, "u_tex_size");
     uFilter = gl.getUniformLocation(prog, "u_filter");
+    uDmgRemap = gl.getUniformLocation(prog, "u_dmg_remap");
+    // Array uniforms are addressed by their first element.
+    uDmgPal = gl.getUniformLocation(prog, "u_dmg_pal[0]");
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     // Integer textures must use NEAREST filtering.
@@ -229,6 +255,19 @@ void main() {
       gl.uniform1f(uTexHeight, h);
       gl.uniform2f(uTexSize, w, h);
       gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
+      // opts.dmgPalette: four "#rrggbb" strings (shade 0 -> 3) or null/absent.
+      const pal = opts.dmgPalette;
+      const remap = !!(pal && pal.length === 4);
+      gl.uniform1i(uDmgRemap, remap ? 1 : 0);
+      if (remap) {
+        for (let i = 0; i < 4; i++) {
+          const n = parseInt(String(pal[i]).replace("#", ""), 16) || 0;
+          dmgPalBuf[i * 3] = ((n >> 16) & 255) / 255;
+          dmgPalBuf[i * 3 + 1] = ((n >> 8) & 255) / 255;
+          dmgPalBuf[i * 3 + 2] = (n & 255) / 255;
+        }
+        gl.uniform3fv(uDmgPal, dmgPalBuf);
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
   };

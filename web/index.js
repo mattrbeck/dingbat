@@ -4929,10 +4929,45 @@ var presentDirty = true;
 var presentSkip = false;
 var presentSkips = 0;
 
+// True while the running game is a MONOCHROME Game Boy title. Only those have
+// a four-shade screen to recolour: a Game Boy Color game draws from its own
+// full-colour palettes and must come out exactly as the game intended, so the
+// shade palette is gated on this and not merely on "the GB core is running".
+// detectMonoPanel (loadRom) sets it; see there for how it is decided.
+var gbMonoPanel = false;
+
+// Decide it exactly the way the core does (new_gb in src/dingbat/gb/gb.nim):
+// the screen is colour if the cartridge header's CGB flag is set (0x80
+// CGB-enhanced, 0xC0 CGB-only) OR a CGB boot ROM is installed, because that
+// boot ROM colourises monochrome carts itself and the result is no longer a
+// four-shade image. GBA never applies.
+//
+// Reading the header here rather than exporting a flag from wasm is what keeps
+// this whole feature inside the presentation layer: no Nim, no new core export,
+// nothing that could touch emulated state. The shader is belt-and-braces on top
+// — it substitutes only exact DMG shade values, so even a wrong answer here
+// could not repaint a colour game's artwork.
+const detectMonoPanel = (romFile) => {
+  gbMonoPanel = false;
+  if (extOf(romFile) === ".gba") return;
+  try {
+    const rom = FS.readFile(romFile);
+    if (!rom || rom.length < 0x150) return;
+    if ((rom[0x143] & 0x80) !== 0) return;      // CGB-enhanced or CGB-only
+  } catch (e) { return; }
+  try {
+    // Matches the core's own test: present and larger than the 0x100-byte
+    // DMG boot ROM (i.e. a real CGB boot ROM).
+    if (FS.readFile("bootrom.bin").length > 0x100) return;
+  } catch (e) { /* no boot ROM installed — monochrome stays monochrome */ }
+  gbMonoPanel = true;
+};
+
 const drawGame = () => {
   if (!currentRomName || linkMode || rollbackMode) return;
   glRenderer.draw({
     colorCorrect,
+    dmgPalette: gbMonoPanel ? gbPaletteColors() : null,
     panelGbc: Module._wasm_panel_gbc
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
@@ -5484,6 +5519,188 @@ const loadRunaheadFromStorage = async () => {
   applyRunahead(typeof v === "number" ? v : 0);
 };
 
+// --- Game Boy shade palette ---------------------------------------------
+// Recolours the four shades of a MONOCHROME Game Boy game. Purely a
+// presentation setting: the substitution happens in the WebGL presenter's
+// fragment shader (web/glpresent.js), never in the core, so the emulated
+// framebuffer, save states, rewind and netplay are bit-for-bit unaffected by
+// it. See GB_HW_SHADES below for why an exact substitution is possible.
+//
+// Three sources of shades are mutually exclusive, so they are ONE setting with
+// a mode rather than two toggles that could contradict each other:
+//   "default" — the shades the core itself produces (LCD colour model applied)
+//   "theme"   — derived from the current app theme (GB_THEME_PALETTES)
+//   "custom"  — four colours the user picked
+// Its own Reset restores all of that (mode + the four custom colours) without
+// touching any other preference — "Reset all settings" is a separate path.
+
+// The four BGR555 values the GB core writes for DMG shades 0..3 — the literal
+// contents of DMG_COLORS in src/dingbat/gb/gb.nim, expanded 5->8 bits. A
+// monochrome game's framebuffer contains ONLY these four values (the DMG has
+// no other colours to draw with), which is what makes recolouring an exact
+// 4-way substitution in the shader instead of a fuzzy image filter. They are
+// also the starting point for a custom palette, so "Custom" opens on what the
+// user was already looking at.
+// NOTE: these are the RAW hardware values; in "default" mode they additionally
+// go through the CGB panel colour model, so the custom seed is very slightly
+// more saturated than the default screen until the user edits it.
+const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
+
+// One four-shade ramp per app theme, lightest (shade 0) to darkest (shade 3).
+//
+// The rules these follow, in order:
+//  1. The theme's own main colour appears VERBATIM as one of the four — not a
+//     tint of it. It is shade 1 everywhere except `light` (shade 2, because a
+//     light theme's ink has to be the dark end) and `famicom` (shade 1 is the
+//     Famicom gold chrome, its identity colour).
+//  2. Themes that own several distinct colours spend them instead of inventing
+//     tints: `dmg` uses the pea-green LCD, the magenta A/B buttons and the
+//     near-black d-pad; `famicom` uses the cream faceplate, the gold chrome,
+//     the garnet button ring and the charcoal buttons.
+//  3. Everything else fills the remaining steps with tints/shades of the main
+//     colour, ending on the theme's own --bg so the darkest shade belongs to
+//     the same world as the chrome around the screen.
+//  4. Every ramp is monotonically darkening with no two steps closer than
+//     ~1.5:1 contrast — a collapsed pair is what makes a game unreadable.
+const GB_THEME_PALETTES = {
+  // Amber phosphor on near-black: pale amber, the accent itself, a deep amber
+  // and an almost-black ember.
+  amber:           ["#fff0d6", "#ffb04d", "#8f5312", "#1a1206"],
+  // Same amber ink, but the darkest shade is the theme's true #000 (OLED).
+  black:           ["#fff0d6", "#ffb04d", "#7a4a0f", "#000000"],
+  // The one light theme: paper white -> gold -> the burnt-amber accent ->
+  // the theme's own text ink.
+  light:           ["#f3f4f8", "#d88a1f", "#9c5400", "#1d2433"],
+  // Blue-violet accent verbatim, then a darkened shell purple, then --bg.
+  indigo:          ["#cdc7f0", "#7f6ae7", "#55497f", "#0d0b17"],
+  // Dusty rose accent verbatim; the shell rose is too close in luminance to
+  // sit next to it, so shade 2 is a darkened version of it.
+  fuchsia:         ["#f0ccd8", "#e8739a", "#7e4560", "#170a0f"],
+  // Periwinkle accent verbatim; shade 2 is the shell grey-blue darkened.
+  glacier:         ["#ccd9f0", "#769be5", "#3c4a6b", "#0b0e16"],
+  // The bright kiwi shell green verbatim. It is so luminous that shade 0 has
+  // to be a very pale green for the two to separate at all.
+  kiwi:            ["#effbea", "#6ee126", "#2d7a1f", "#0c170b"],
+  // Four DISTINCT DMG colours: pale LCD, the pea-green screen accent, the
+  // magenta A/B buttons, the near-black d-pad.
+  dmg:             ["#eaf3de", "#9cc954", "#b32e68", "#262828"],
+  // Orchid accent verbatim; shade 2 is the shell violet darkened.
+  "atomic-purple": ["#e7cbf0", "#c36ee7", "#6a3d80", "#120b16"],
+  // Burnt-orange accent verbatim; shade 2 is the shell orange darkened.
+  daiei:           ["#f2d2b0", "#eb7c33", "#8c3d18", "#160f0b"],
+  // Four DISTINCT Famicom colours: cream faceplate, gold chrome, the garnet
+  // A/B ring, the charcoal buttons. (The --accent #e0635c is the ring red
+  // lightened; the ring itself is used because it keeps the ramp separated.)
+  famicom:         ["#e6d9bf", "#b99c68", "#b44148", "#25272b"],
+};
+
+var gbPaletteMode = "default";              // "default" | "theme" | "custom"
+var gbPaletteCustom = GB_HW_SHADES.slice(); // the four user-picked colours
+
+const gbPaletteSelect = /** @type {HTMLSelectElement} */ (document.getElementById("gb-palette-mode"));
+const gbPaletteCustomRow = document.getElementById("gb-palette-custom-row");
+const gbPalettePreview = document.getElementById("gb-palette-preview");
+const gbPaletteResetBtn = document.getElementById("gb-palette-reset");
+const gbPaletteInputs = [0, 1, 2, 3].map((i) =>
+  /** @type {HTMLInputElement} */ (document.getElementById("gb-palette-shade-" + i)));
+
+// The theme the palette derives from. Read off the root element rather than
+// out of localStorage: <html data-theme> is what applyTheme actually put in
+// force (and what the pre-paint boot script set), so this can never disagree
+// with the chrome on screen — including on the paths that change the theme
+// without writing it back, like Reset all settings.
+const currentThemeName = () => {
+  const n = document.documentElement.getAttribute("data-theme") || "amber";
+  return GB_THEME_PALETTES[n] ? n : "amber";
+};
+
+// The four shades in force right now, or null for "leave the core's own
+// colours alone" — which is both the "default" mode and every non-monochrome
+// game, whatever the mode says.
+const gbPaletteColors = () => {
+  if (gbPaletteMode === "theme") return GB_THEME_PALETTES[currentThemeName()];
+  if (gbPaletteMode === "custom") return gbPaletteCustom;
+  return null;
+};
+
+const syncGbPaletteUI = () => {
+  if (gbPaletteSelect) gbPaletteSelect.value = gbPaletteMode;
+  if (gbPaletteCustomRow) gbPaletteCustomRow.hidden = gbPaletteMode !== "custom";
+  for (let i = 0; i < 4; i++) {
+    if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
+  }
+  // The preview is the only place "theme" mode shows its colours, and it is
+  // also what tells a user on a colour game that nothing is being recoloured.
+  if (gbPalettePreview) {
+    const shades = gbPaletteColors() || GB_HW_SHADES;
+    gbPalettePreview.replaceChildren(...shades.map((c) => {
+      const chip = document.createElement("span");
+      chip.className = "gb-shade-chip";
+      chip.style.setProperty("background", c);
+      chip.title = c;
+      return chip;
+    }));
+  }
+};
+
+const applyGbPalette = () => {
+  syncGbPaletteUI();
+  // Shader uniform: repaint even if emulation is paused / stepped no frame.
+  presentDirty = true;
+  if (typeof drawGame === "function") drawGame();
+};
+
+const saveGbPalette = () => {
+  if (db) dbPut("gb-palette", { mode: gbPaletteMode, custom: gbPaletteCustom.slice() });
+};
+
+const HEX6 = /^#[0-9a-f]{6}$/i;
+
+const loadGbPalette = async () => {
+  const v = await dbGet("gb-palette");
+  if (v && typeof v === "object") {
+    if (v.mode === "theme" || v.mode === "custom" || v.mode === "default") {
+      gbPaletteMode = v.mode;
+    }
+    if (Array.isArray(v.custom) && v.custom.length === 4 &&
+        v.custom.every((c) => typeof c === "string" && HEX6.test(c))) {
+      gbPaletteCustom = v.custom.map((c) => c.toLowerCase());
+    }
+  }
+  applyGbPalette();
+};
+
+// Reset THIS setting only. Deliberately its own button rather than a corner of
+// "Reset all settings": undoing a palette experiment should not cost you your
+// keybindings.
+const resetGbPalette = () => {
+  gbPaletteMode = "default";
+  gbPaletteCustom = GB_HW_SHADES.slice();
+  applyGbPalette();
+  saveGbPalette();
+};
+
+if (gbPaletteSelect) {
+  gbPaletteSelect.addEventListener("change", () => {
+    const v = gbPaletteSelect.value;
+    gbPaletteMode = (v === "theme" || v === "custom") ? v : "default";
+    applyGbPalette();
+    saveGbPalette();
+  });
+}
+
+gbPaletteInputs.forEach((input, i) => {
+  if (!input) return;
+  input.addEventListener("input", () => {
+    if (!HEX6.test(input.value)) return;
+    gbPaletteCustom[i] = input.value.toLowerCase();
+    applyGbPalette();
+    saveGbPalette();
+  });
+});
+
+if (gbPaletteResetBtn) gbPaletteResetBtn.addEventListener("click", resetGbPalette);
+
 // --- Chrome theme (background / buttons / menus color scheme) ---
 // Persisted in localStorage — NOT IndexedDB — so the inline <head> script can
 // apply it synchronously before first paint (no flash of the wrong theme).
@@ -5520,6 +5737,9 @@ const applyTheme = (name) => {
       (cs.getPropertyValue("--bg").trim() ||
        cs.getPropertyValue("--topbar-top").trim());
   }
+  // "Match the app theme" is derived, not stored — a theme switch has to
+  // re-derive it and repaint the screen.
+  applyGbPalette();
 };
 
 themeChips.forEach((chip) =>
@@ -5550,7 +5770,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead",
+  "runahead", "gb-palette",
 ];
 
 const resetAllSettings = async () => {
@@ -5609,6 +5829,13 @@ const resetAllSettings = async () => {
 
   // Run-ahead -> off
   applyRunahead(0);
+
+  // Game Boy shade palette -> default shades, custom colours back to hardware.
+  // (The dbDelete above already removed the record; this restores the live
+  // state, exactly as its own Reset button would.)
+  gbPaletteMode = "default";
+  gbPaletteCustom = GB_HW_SHADES.slice();
+  applyGbPalette();
 
   // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
   // theme section: the <head> boot script needs a synchronous read)
@@ -5814,6 +6041,8 @@ const loadRom = async (romName, originalName, opts = {}) => {
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
+  detectMonoPanel(romName); // DMG (4-shade) vs colour screen — palette gate
+  applyGbPalette();       // fresh core: push the shade palette (or drop it)
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   rwUndoBytes = null;     // ...as does the rewind-commit undo
   benchReport("load");
@@ -8118,6 +8347,7 @@ const initStorage = async () => {
   await loadColorCorrect();
   await loadSystemSettings();
   await loadVideoSettings();
+  await loadGbPalette();
   await loadSyncState();
   await loadRomsSort();
   refreshSyncUI();

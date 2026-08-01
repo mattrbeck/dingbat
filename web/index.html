@@ -855,6 +855,34 @@
             <button type="button" class="theme-chip" data-theme-name="daiei" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Daiei</button>
             <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
           </div>
+          <div class="modal-subhead">Game Boy screen</div>
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Shade palette</span>
+              <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Colour titles are never affected.</span>
+            </div>
+            <select id="gb-palette-mode" class="kb-select" aria-label="Game Boy shade palette">
+              <option value="default">Game Boy default</option>
+              <option value="theme">Match app theme</option>
+              <option value="custom">Custom&hellip;</option>
+            </select>
+          </div>
+          <div class="gb-palette-row">
+            <span class="gb-palette-label">In use</span>
+            <span id="gb-palette-preview" class="gb-palette-preview" aria-hidden="true"></span>
+            <button type="button" class="button button-sm gb-palette-reset" id="gb-palette-reset"
+                    title="Put the Game Boy shades back to their defaults — no other setting changes"
+                    aria-label="Reset the Game Boy shade palette">Reset</button>
+          </div>
+          <div class="gb-palette-row" id="gb-palette-custom-row" hidden>
+            <span class="gb-palette-label">Pick</span>
+            <span class="gb-palette-pickers">
+              <input type="color" id="gb-palette-shade-0" class="gb-shade-input" aria-label="Shade 1 (lightest)" />
+              <input type="color" id="gb-palette-shade-1" class="gb-shade-input" aria-label="Shade 2" />
+              <input type="color" id="gb-palette-shade-2" class="gb-shade-input" aria-label="Shade 3" />
+              <input type="color" id="gb-palette-shade-3" class="gb-shade-input" aria-label="Shade 4 (darkest)" />
+            </span>
+          </div>
           <div class="modal-subhead">Emulation</div>
           <div class="modal-toggle-row">
             <div>

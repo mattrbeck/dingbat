@@ -25,7 +25,7 @@ const GLOBAL_KEYS = [
   "recent", "roms_sort", "gdrive_sync", "prints", "bios:gba", "bios:gbc",
   "system", "audio", "colorCorrect", "video", "keybindings", "large-controls",
   "opaque-controls", "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead",
+  "runahead", "gb-palette",
 ];
 
 // Every IndexedDB key web/index.js writes FOR one game. Spelled out here rather

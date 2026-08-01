@@ -438,6 +438,16 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     set linkMode(v) { linkMode = v; },
     get linkRomEntry() { return linkRomEntry; },
     set linkRomEntry(v) { linkRomEntry = v; },
+    GB_HW_SHADES, GB_THEME_PALETTES, THEME_NAMES, SETTINGS_KEYS,
+    gbPaletteColors, loadGbPalette, resetGbPalette, resetAllSettings,
+    detectMonoPanel, applyTheme, currentThemeName,
+    get gbPaletteMode() { return gbPaletteMode; },
+    set gbPaletteMode(v) { gbPaletteMode = v; },
+    get gbPaletteCustom() { return gbPaletteCustom; },
+    set gbPaletteCustom(v) { gbPaletteCustom = v; },
+    get gbMonoPanel() { return gbMonoPanel; },
+    set gbMonoPanel(v) { gbMonoPanel = v; },
+    get runaheadFrames() { return runaheadFrames; },
   })`, context);
 
   // Bring the app's IndexedDB handle up (real openDB against the fake indexedDB).
