@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-31 21:36:06*
+*Generated: 2026-08-01 16:30:15*
 
 ## Game Boy - Blargg
 
@@ -180,6 +180,16 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | stripes | 👌 |
 | nes | 👌 |
 
+## GBA - FuzzARM
+
+| Test | Result |
+|------|--------|
+| ARM_DataProcessing | 👌 |
+| ARM_Any | 👌 |
+| THUMB_DataProcessing | 👌 |
+| THUMB_Any | 👌 |
+| FuzzARM | 👌 |
+
 ## Game Boy - Acid2
 
 | Test | Result |
@@ -218,6 +228,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 ## Summary
 
-- **Total:** 182
-- **Pass:** 150
+- **Total:** 187
+- **Pass:** 155
 - **Fail:** 32

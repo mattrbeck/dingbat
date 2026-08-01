@@ -25,12 +25,13 @@ nimble bench_build   # -> ./dingbat_bench
 ```
 
 Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
-`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `screenshot`,
-`stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`, `norm32linktest`,
-`attachtest`, `netlink`, `speclink`, `speclinkbench`, `rollback`,
-`rollbacknet`, `gblinktest`.
+`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`,
+`screenshot`, `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`,
+`norm32linktest`, `attachtest`, `netlink`, `speclink`, `speclinkbench`,
+`rollback`, `rollbacknet`, `gblinktest`.
 
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
+`--max-fails=<n>` (fuzzarm),
 `--color`, `--cgb`, `--model=<dmg0|mgb|sgb|...>` (mooneye boot-state tables),
 `--bios=<path>`, `--sio=null|loopback`, and for the link modes `--listen`,
 `--connect`, `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
@@ -57,6 +58,32 @@ by construction: nothing after check N runs.
   --mode=jsmolka --timeout=600
 ```
 
+`--mode=fuzzarm` scores DenSinH/FuzzARM (GPL-3.0), five prebuilt ROMs of
+10 000 **randomly generated** ARM/Thumb tests each — data processing with every
+shift type and shift amount, multiplies, load/stores — run from arbitrary
+starting CPSR flags. Unlike jsmolka's hand-written checks this ROM does not
+stop at the first failure: it reports one, waits for a button, and continues.
+The mode drives that gate (holding A for one frame, releasing it the next) so
+**every** failing test is reported, and reads each verdict out of the ROM's own
+structured 16-word dump at `0x02000000` — state (ARM/Thumb), the opcode +
+shift text, the inputs, and got-vs-expected `r3` (the shifted operand), `r4`
+(the result) and CPSR. No BIOS, no PPU and no pinned frame hash sit between the
+CPU and the score. "Done" is the ROM's `b .` self-branch, located by scanning
+the image for its unique `0xEAFFFFFE`; do **not** substitute "PC unchanged for
+two frames" (the jsmolka mode's signal) — this ROM never waits on vblank, so a
+repeated frame-boundary PC is common and silently truncates the run.
+
+Per-failure lines and a rollup by failure class (state + opcode + which of
+r3/r4/CPSR disagreed, and for CPSR which flags) go to **stderr**; stdout is a
+single `N/10000 passed` line, which is what the runner puts in `results.md`.
+`--max-fails=<n>` (default 500) caps the report — each failure costs two
+emulated frames of button-ack.
+
+```
+./dingbat_test /tmp/dingbat-test-roms/fuzzarm-a675329-ARM_Any.gba \
+  --mode=fuzzarm --timeout=20000
+```
+
 Gotcha: piping through `tail`/`head` masks the exit code — a segfault (139)
 looks like success. Check `$?` on the harness itself, or use `set -o pipefail`.
 
@@ -70,9 +97,14 @@ the repo root right after `nimble test_build`, or it quits with
 - Downloads external suites into `$DINGBAT_ROM_CACHE` (default
   `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0 (Blargg, Mooneye,
   Mealybug, SameSuite), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA suite
-  ROM from `mattrbeck/mgba-suite-auto`, and `jsmolka/gba-tests` pinned to the
+  ROM from `mattrbeck/mgba-suite-auto`, `jsmolka/gba-tests` pinned to the
   commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
-  nothing is built). CI backs this dir with
+  nothing is built), and the five `DenSinH/FuzzARM` ROMs pinned to the commit
+  in `FuzzArmRev` (`a675329cd57da48e3e406216ba2d79dd7e09ee20`; that repo has
+  no release tag, so the ROMs come from raw.githubusercontent at that SHA).
+  **FuzzARM's tests are randomly generated at build time**, so the committed
+  pass/fail baseline is only meaningful for the pinned SHA — bumping it means
+  a different 10 000 tests and a re-baseline, not a regression. CI backs this dir with
   `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
   the run; the cache key must be bumped when a URL/version changes.
 - Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
@@ -83,8 +115,9 @@ the repo root right after `nimble test_build`, or it quits with
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed (the baseline carries known failures: Total
-182, Pass 150 as of the current committed `results.md`; all 13 jsmolka rows
-are green in it, so any of them going red *is* a CI failure).
+187, Pass 155 as of the current committed `results.md`; all 13 jsmolka rows and
+all 5 FuzzARM rows are green in it, so any of them going red *is* a CI
+failure).
 
 **Results-file caveat:** `tests/results.md` and `tests/results_mgba_suite.md`
 are committed baselines, and every run **rewrites both in place** (that is

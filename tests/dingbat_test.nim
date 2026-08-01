@@ -8,13 +8,14 @@ import dingbat/gba/netlink
 import dingbat/common/test_output
 import dingbat/common/rewind
 import dingbat/common/input
+import std/algorithm  # FuzzARM failure-class rollup
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka
+    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -534,6 +535,245 @@ proc jsmolka_test(rom_path, bios_path: string; timeout_frames: int): int =
     echo "All tests passed"
     return 0
   echo "Failed test ", verdict
+  return 1
+
+# ==================== DenSinH/FuzzARM ====================
+#
+# FuzzARM ships five prebuilt ROMs, each 10000 randomly generated ARM/Thumb
+# instruction tests (data processing with every shift type, multiplies,
+# load/stores). The ROM's own reporting is threefold: a mode-4 render of the
+# failing instruction, a structured 16-word dump at the base of eWRAM, and a
+# "press any button to continue" gate. This mode drives the third and reads
+# the second, so the verdict never depends on the PPU, the BIOS or a pinned
+# frame hash — and, crucially, it can report *every* failing test rather than
+# just the first, which is the whole point of a randomized suite.
+#
+# The protocol (asm/run_tests.asm upstream):
+#   * on a mismatch the ROM writes 16 words to 0x02000000 and then spins in
+#     `wait_until_keys_up` / `wait_until_key_down`, reading KEYINPUT;
+#   * pressing any button other than L/R resumes at the next test;
+#   * when the last test is done it draws "End of testing" and falls into a
+#     one-instruction self-branch in main.asm.
+# KEYINPUT is the ONLY input register the ROM ever touches (upstream README:
+# "I do not use any SWIs/DMAs/Timers/IRQs/Weird IO registers (Only DISPCNT and
+# KEYINPUT)"), so `keyinput_reads` moving across a frame is an exact "a failure
+# report is on screen right now" signal — no address table, no disassembly.
+#
+# eWRAM layout, 16 words at 0x02000000 (upstream README + the store sequence in
+# _test_error). Words 10 and 14 are never stored; they are the documented
+# "0000 0000" padding.
+#   0      'AAAA' / 'TTTT'   ARM or Thumb state
+#   1-3    opcode text, 12 ASCII chars ("tst lsl     ", "smull       ", ...)
+#   4-6    initial r0, r1, r2      7   initial CPSR
+#   8-9    got r3, r4              11  got CPSR
+#   12-13  expected r3, r4         15  expected CPSR
+# r3 is the shifted operand and r4 the result, so which of the three differs
+# already separates a barrel-shifter bug from an ALU bug from a flag bug.
+type
+  FuzzArmFail = object
+    state: char           # 'A' (ARM) or 'T' (Thumb)
+    opcode: string        # e.g. "tst lsl", "smull", "strh/ldrsh"
+    r0, r1, r2, cpsr_in: uint32
+    got_r3, got_r4, got_cpsr: uint32
+    exp_r3, exp_r4, exp_cpsr: uint32
+
+proc fa_hex(v: uint32): string = v.toHex(8)
+
+proc fa_word(b: seq[byte]; off: int): uint32 =
+  uint32(b[off]) or (uint32(b[off + 1]) shl 8) or
+  (uint32(b[off + 2]) shl 16) or (uint32(b[off + 3]) shl 24)
+
+proc fuzzarm_done_addr(rom_path: string): uint32 =
+  ## Address of `mainloop: b mainloop` (main.asm) — the one-instruction self
+  ## branch the ROM falls into after "End of testing". Encoded 0xEAFFFFFE and,
+  ## in all five prebuilt ROMs, the only word in the image with that value (the
+  ## generated test table is random data, so a collision is ~1e-5 likely; the
+  ## uniqueness check below is what keeps this honest anyway).
+  ##
+  ## Do NOT score "finished" as "PC unchanged across two frame boundaries" the
+  ## way the jsmolka mode does. This ROM never waits on vblank, so a frame
+  ## boundary lands at an arbitrary point in a tight drawing loop, and two
+  ## consecutive boundaries landing on the same instruction is common — it
+  ## silently truncated whole runs (ARM_Any scored 10000/10000 while executing
+  ## only a few hundred tests). Returns 0 if the marker is not unique.
+  let data =
+    try: readFile(rom_path)
+    except CatchableError: return 0
+  var found = 0'u32
+  var hits = 0
+  var off = 0
+  while off + 4 <= data.len:
+    if uint32(uint8(data[off])) == 0xFE'u32 and uint32(uint8(data[off + 1])) == 0xFF'u32 and
+       uint32(uint8(data[off + 2])) == 0xFF'u32 and uint32(uint8(data[off + 3])) == 0xEA'u32:
+      inc hits
+      found = 0x08000000'u32 + uint32(off)
+    off += 4
+  if hits == 1: found else: 0
+
+proc fuzzarm_test_count(rom_path: string): int =
+  ## Recover how many tests the ROM was generated with, straight out of the
+  ## image. `run_tests` opens with `stmdb sp!, {r0-r12, lr}` (0xE92D5FFF),
+  ## then the four-instruction `set_word r11, MEM_ROM + tests` macro, then
+  ## `ldmia r11!, {r12}` — so ORing those four rotated immediates gives the
+  ## address of the count word the ROM itself reads. Returns 0 if the pattern
+  ## is gone (a regenerated ROM whose layout moved); only the printed total
+  ## depends on it, never the verdict.
+  let data =
+    try: readFile(rom_path)
+    except CatchableError: return 0
+  proc word(off: int): uint32 =
+    uint32(uint8(data[off])) or (uint32(uint8(data[off + 1])) shl 8) or
+    (uint32(uint8(data[off + 2])) shl 16) or (uint32(uint8(data[off + 3])) shl 24)
+  var off = 0
+  while off + 24 <= data.len:
+    if word(off) == 0xE92D5FFF'u32:
+      var addr_val = 0'u32
+      for k in 1 .. 4:
+        let w = word(off + 4 * k)
+        let imm = w and 0xFF'u32
+        let rot = (w shr 8) and 0xF'u32
+        addr_val = addr_val or (if rot == 0: imm
+                                else: (imm shr (2 * rot)) or (imm shl (32 - 2 * rot)))
+      let rel = int(addr_val) - 0x08000000
+      if rel >= 0 and rel + 4 <= data.len:
+        return int(word(rel))
+      return 0
+    off += 4
+  0
+
+proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): int =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  emu.storage.save_path = ""   # never drop a .sav next to a downloaded ROM
+
+  let total = fuzzarm_test_count(rom_path)
+  let done_addr = fuzzarm_done_addr(rom_path)
+  if done_addr == 0:
+    stderr.writeLine("  warning: no unique `b .` end marker in " & rom_path &
+                     "; falling back to a stalled-PC heuristic")
+  var fails: seq[FuzzArmFail]
+  # Ack state machine. 0 = watching for a failure report; 1 = A is held for
+  # this frame so the ROM leaves wait_until_key_down. Two frames per failure:
+  # the held frame runs on until the *next* failure parks in wait_until_keys_up,
+  # and the frame after (A released) clears that gate and re-reads KEYINPUT.
+  var acking = false
+  keyinput_reads = 0
+  var prev_reads = 0
+  var prev_pc = not 0'u32
+  var stable = 0
+  var frames = 0
+  var capped = false
+  var finished = false
+
+  while frames < timeout_frames:
+    try:
+      emu.step_frame()
+    except CatchableError:
+      stderr.writeLine("Emulator exception at frame " & $frames & ": " &
+                       getCurrentExceptionMsg())
+      return 1
+    inc frames
+    let delta = keyinput_reads - prev_reads
+    prev_reads = keyinput_reads
+    if acking:
+      emu.handle_input(A, false)
+      acking = false
+      continue
+    if delta > 0:
+      let w = emu.bus.wram_board
+      var op = ""
+      for i in 4 ..< 16:
+        op.add(char(w[i]))
+      fails.add(FuzzArmFail(
+        state: char(w[0]),
+        opcode: op.strip(),
+        r0: fa_word(w, 16), r1: fa_word(w, 20), r2: fa_word(w, 24),
+        cpsr_in: fa_word(w, 28),
+        got_r3: fa_word(w, 32), got_r4: fa_word(w, 36), got_cpsr: fa_word(w, 44),
+        exp_r3: fa_word(w, 48), exp_r4: fa_word(w, 52), exp_cpsr: fa_word(w, 60)))
+      let f = fails[^1]
+      stderr.writeLine("  fail " & $fails.len & "  " &
+        (if f.state == 'T': "THUMB " else: "ARM   ") & f.opcode &
+        "  in r0=" & fa_hex(f.r0) & " r1=" & fa_hex(f.r1) & " r2=" & fa_hex(f.r2) &
+        " cpsr=" & fa_hex(f.cpsr_in) &
+        "  got r3=" & fa_hex(f.got_r3) & " r4=" & fa_hex(f.got_r4) &
+        " cpsr=" & fa_hex(f.got_cpsr) &
+        "  exp r3=" & fa_hex(f.exp_r3) & " r4=" & fa_hex(f.exp_r4) &
+        " cpsr=" & fa_hex(f.exp_cpsr))
+      if fails.len >= max_fails:
+        capped = true
+        break
+      emu.handle_input(A, true)
+      acking = true
+      stable = 0
+      prev_pc = not 0'u32
+      continue
+    # Nothing waiting on input: either still testing, or parked on the
+    # one-instruction self-branch after "End of testing". r15 leads the
+    # executing instruction by the pipeline depth, so accept the marker
+    # address plus one prefetch's worth.
+    let pc = emu.cpu.r[15]
+    if done_addr != 0:
+      if pc >= done_addr and pc <= done_addr + 8:
+        finished = true
+        break
+    elif pc == prev_pc:
+      # Fallback only (marker not unique): demand a long stall, because a
+      # single repeated frame-boundary PC means nothing in this ROM.
+      inc stable
+      if stable >= 60:
+        finished = true
+        break
+    else:
+      stable = 0
+      prev_pc = pc
+
+  # Triage rollup, grouped by state + opcode + which of r3/r4/CPSR disagreed
+  # (and for CPSR, which flags). Stderr, not stdout: the runner captures only
+  # stdout, so results.md stays a one-liner while a CI log keeps the detail.
+  if fails.len > 0:
+    var groups: seq[(string, int)]
+    for f in fails:
+      var tag = ""
+      if f.got_r3 != f.exp_r3: tag.add(" r3")
+      if f.got_r4 != f.exp_r4: tag.add(" r4")
+      if f.got_cpsr != f.exp_cpsr:
+        tag.add(" cpsr:")
+        let diff = f.got_cpsr xor f.exp_cpsr
+        for (bit, name) in [(31, "N"), (30, "Z"), (29, "C"), (28, "V")]:
+          if (diff and (1'u32 shl bit)) != 0: tag.add(name)
+      let key = (if f.state == 'T': "THUMB " else: "ARM   ") & f.opcode & "  [" &
+                tag.strip() & "]"
+      var found = false
+      for i in 0 ..< groups.len:
+        if groups[i][0] == key:
+          groups[i][1] += 1
+          found = true
+          break
+      if not found: groups.add((key, 1))
+    groups.sort(proc (a, b: (string, int)): int = cmp(b[1], a[1]))
+    stderr.writeLine("  --- FuzzARM failure classes (" & $fails.len & " failures, " &
+                     $groups.len & " classes) ---")
+    for (key, n) in groups:
+      stderr.writeLine("  " & align($n, 6) & "  " & key)
+
+  let total_str = if total > 0: $total else: "?"
+  if capped:
+    echo "<=" & (if total > 0: $(total - fails.len) else: "?") & "/" & total_str &
+         " passed (stopped after " & $fails.len & " failures)"
+    return 1
+  if not finished:
+    echo "timed out after " & $frames & " frames (" & $fails.len &
+         " failures so far)"
+    return 1
+  if fails.len == 0:
+    echo total_str & "/" & total_str & " passed"
+    return 0
+  echo (if total > 0: $(total - fails.len) else: "?") & "/" & total_str &
+       " passed (" & $fails.len & " failed)"
   return 1
 
 # Rewind verification: run forward taking snapshots exactly like the
@@ -1106,6 +1346,7 @@ proc main() =
   var attach_after = 10
   var force_cgb = false
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
+  var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1145,6 +1386,7 @@ proc main() =
         of "rollbacknet": mode = tmRollbackNet
         of "gblinktest": mode = tmGbLinkTest
         of "jsmolka": mode = tmJsmolka
+        of "fuzzarm": mode = tmFuzzArm
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1207,9 +1449,16 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         attach_after = parseInt(v)
+      of "max-fails":
+        # fuzzarm mode: stop after this many reported failures. Each one costs
+        # two emulated frames of button-ack, so an emulator that fails most of
+        # the 10000 tests would otherwise take minutes.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        max_fails = parseInt(v)
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>]"
     quit(1)
 
   if mode == tmStateRoundtrip:
@@ -1218,6 +1467,8 @@ proc main() =
     quit(rewind_test(rom_path, bios_path))
   if mode == tmJsmolka:
     quit(jsmolka_test(rom_path, bios_path, timeout_frames))
+  if mode == tmFuzzArm:
+    quit(fuzzarm_test(rom_path, bios_path, timeout_frames, max_fails))
   if mode in {tmLinkTest, tmNormLinkTest, tmNorm32LinkTest}:
     # Second positional arg is core 2's ROM; defaults to running the same
     # ROM on both cores. The normal-mode variants run the same coordinator
@@ -1362,7 +1613,7 @@ proc main() =
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka:
+     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm:
     discard  # handled (and exited) above
 
   if output.len > 0:

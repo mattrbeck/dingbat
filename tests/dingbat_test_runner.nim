@@ -14,7 +14,8 @@ let RomCacheDir =
 
 type
   TestMode = enum
-    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka
+    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka,
+    tmFuzzArm
 
   TestDef = object
     name: string
@@ -172,6 +173,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMgbaSuite: "mgba-suite"
     of tmScreenshot: "screenshot"
     of tmJsmolka: "jsmolka"
+    of tmFuzzArm: "fuzzarm"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
@@ -239,11 +241,20 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     if test.model.len > 0:
       cmd.add(" --model=" & test.model)
     let (output, code) = execCmdEx(cmd, options = {poUsePath})
+    var text = output.strip()
+    if test.mode == tmFuzzArm:
+      # fuzzarm keeps its per-failure triage on stderr (which execCmdEx does
+      # not capture here, so it lands in the runner's own log) and prints one
+      # summary line on stdout. Other lines can precede it — the storage layer
+      # warns "Backup type could not be identified" for these ROMs — so keep
+      # only the last, or results.md gets a multi-line table cell.
+      for line in text.splitLines():
+        if line.strip().len > 0: text = line.strip()
     return TestResult(
       name: test.name,
       passed: code == 0,
-      output: output.strip(),
-      timed_out: output.contains("TIMEOUT"),
+      output: text,
+      timed_out: output.contains("TIMEOUT") or text.contains("timed out"),
     )
 
 proc build_blargg_tests(repo_dir: string): seq[TestDef] =
@@ -497,6 +508,54 @@ proc build_jsmolka_tests(dir: string): seq[TestDef] =
     ))
   tests
 
+# DenSinH/FuzzARM (GPL-3.0). Five prebuilt ROMs are committed to the repo's
+# master branch; there is no release tag, so the download is pinned to a commit
+# the same way jsmolka is. Bump this SHA and the ROM cache key in
+# .github/workflows/test.yml together.
+#
+# The ROMs are *randomly generated at build time*: the instruction mix, the
+# operands and therefore the expected values are all specific to this SHA. A
+# new SHA means a different 10000 tests, so the committed pass/fail baseline in
+# tests/results.md is only meaningful for this pin. Re-baseline on a bump.
+const FuzzArmRev = "a675329cd57da48e3e406216ba2d79dd7e09ee20"
+
+const FuzzArmRoms = ["ARM_DataProcessing", "ARM_Any",
+                     "THUMB_DataProcessing", "THUMB_Any", "FuzzARM"]
+
+proc ensure_fuzzarm_test_roms(): seq[string] =
+  ## Fetch (and cache) the five prebuilt FuzzARM ROMs at the pinned commit.
+  ## They live at the repo root, not in a release archive, so each is pulled
+  ## individually from raw.githubusercontent.com — no zip, nothing to build.
+  ## The short SHA is in the cached filename so a bump can't reuse stale ROMs.
+  var paths: seq[string]
+  for rom in FuzzArmRoms:
+    paths.add(ensure_rom_download(
+      "https://raw.githubusercontent.com/DenSinH/FuzzARM/" & FuzzArmRev &
+        "/" & rom & ".gba",
+      "fuzzarm-" & FuzzArmRev[0 ..< 7] & "-" & rom & ".gba"))
+  paths
+
+proc build_fuzzarm_tests(paths: seq[string]): seq[TestDef] =
+  ## Each ROM is 10000 randomized instruction tests. --mode=fuzzarm drives the
+  ## ROM's own "press a button to continue" gate so it reports EVERY failing
+  ## test, not just the first, and reads the verdict out of the structured
+  ## 16-word dump the ROM leaves at the base of eWRAM — so no BIOS, no PPU and
+  ## no pinned frame hash sits between the CPU and the score. The per-failure
+  ## detail (instruction, shift, operands, got vs expected r3/r4/CPSR) and a
+  ## rollup by failure class go to stderr; stdout is the one-line tally that
+  ## lands in results.md.
+  var tests: seq[TestDef]
+  for i, rom in FuzzArmRoms:
+    tests.add(TestDef(
+      name: "fuzzarm/" & rom,
+      rom_path: paths[i],
+      mode: tmFuzzArm,
+      # Generous: a clean pass is ~40 frames, and each reported failure costs
+      # two more (one to hold the button, one to release it).
+      timeout: 20000,
+    ))
+  tests
+
 proc generate_results_md(suites: seq[SuiteResults]): string =
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
@@ -556,7 +615,7 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
   for test in tests:
     let r = run_test(test, harness)
     let status = if r.passed: "PASS" else: "FAIL"
-    if test.mode == tmScreenshot:
+    if test.mode in {tmScreenshot, tmFuzzArm}:
       echo &"  [{status}] {test.name} - {r.output}"
     else:
       echo &"  [{status}] {test.name}"
@@ -776,6 +835,11 @@ proc main() =
   # jsmolka gba-tests (GBA)
   let jsmolka_tests = build_jsmolka_tests(ensure_jsmolka_test_roms())
   all_suites.add(run_suite("GBA - jsmolka gba-tests", jsmolka_tests, harness,
+                           previous, regressions))
+
+  # DenSinH/FuzzARM randomized ARM/Thumb tests (GBA)
+  let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())
+  all_suites.add(run_suite("GBA - FuzzARM", fuzzarm_tests, harness,
                            previous, regressions))
 
   # Acid2 tests (screenshot comparison)
