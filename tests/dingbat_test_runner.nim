@@ -35,6 +35,9 @@ type
     passed: bool
     output: string
     timed_out: bool
+    always_detail: bool  # keep `output` in results.md even when the row passes
+                         # (aggregated rows carry their pass COUNT there, and
+                         # the count is what the regression gate compares)
 
   SuiteResults = object
     suite_name: string
@@ -614,7 +617,9 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     for r in suite.results:
       let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
       var detail = ""
-      if not r.passed:
+      if r.always_detail:
+        detail = " " & r.output
+      elif not r.passed:
         if r.output.contains("% correct") or r.output.contains("passed") or r.output.contains("timed out"):
           detail = " " & r.output
       let short_name = if r.name.contains("/"): r.name.split("/", maxsplit = 1)[1] else: r.name
@@ -624,6 +629,10 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
       lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
+    elif suite.suite_name == "Game Boy - gambatte":
+      lines.add("")
+      lines.add("Each row is one gambatte subdirectory. See " &
+        "[detailed results](results_gambatte.md) for individual test outcomes.")
     lines.add("")
 
   lines.add("## Summary")
@@ -646,6 +655,29 @@ proc load_previous_results(path: string): Table[string, bool] =
         let name = parts[1]
         let passed = parts[2].contains("\xF0\x9F\x91\x8C")
         result[name] = passed
+
+proc load_previous_counts(path: string): Table[string, int] =
+  ## Pass COUNTS from a committed results.md, for the rows that report
+  ## "<passes>/<total> passed" (the aggregated suites). A row that goes from
+  ## 1974/2020 to 1970/2020 is a regression even though its pass/fail bit
+  ## never changed, so the aggregated suites gate on this rather than on
+  ## load_previous_results' boolean.
+  result = initTable[string, int]()
+  if not fileExists(path):
+    return
+  for line in readFile(path).splitLines():
+    if not line.startsWith("| ") or line.startsWith("| Test") or line.startsWith("|---"):
+      continue
+    let parts = line.split("|").mapIt(it.strip())
+    if parts.len < 3: continue
+    let words = parts[2].splitWhitespace()
+    for i, w in words:
+      if w == "passed" and i > 0 and '/' in words[i - 1]:
+        let halves = words[i - 1].split('/')
+        try:
+          result[parts[1]] = parseInt(halves[0])
+        except ValueError: discard
+        break
 
 proc run_suite(name: string; tests: seq[TestDef]; harness: string;
                previous: Table[string, bool]; regressions: var seq[string]): SuiteResults =
@@ -787,6 +819,242 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
     lines.add("")
   lines.join("\n")
 
+# ==================== gambatte ====================
+#
+# sinamas' gambatte suite, shipped inside the same game-boy-test-roms bundle as
+# Blargg/Mooneye/Mealybug/SameSuite — 3,524 ROMs, no extra download. The rules
+# for turning a filename into a test are the bundle's own
+# gambatte/game-boy-test-roms-howto.md; --mode=gambatte in dingbat_test.nim
+# carries the long-form explanation and does the scoring. In brief:
+#
+#   * `dmg08` in the name = a DMG test, `cgb04c` = a CGB test. Most ROMs carry
+#     both and are two rows here.
+#   * `_out<hex>` is the expected value, per device, rendered on screen as hex
+#     glyphs. `_outaudio0/1` is an audio test (see below). An `x` in front of a
+#     tag disables it.
+#   * a <rom>_dmg08.png / _cgb04c.png / _dmg08_cgb04c.png next to the ROM makes
+#     it a full-frame screenshot test instead.
+#
+# NOT scored: the 220 `_outaudio0/1` rows. Gambatte decides them by asking
+# whether all 35,112 samples of the final frame are identical — that is a
+# 2 MHz sample stream, one sample per two clocks, and several of those ROMs
+# turn on a difference lasting a handful of clocks (ch1_duty0_pos6_to_pos7_*).
+# dingbat's APU emits at 32,768 Hz, 64x coarser, so a faithful verdict is not
+# available from the sample path as it stands and a coarse one would be
+# scored noise. Also not scored: gambatte's AGB column, which its own runner
+# marks "FIXME: Actual AGB results" and gives the CGB expectations.
+#
+# Reporting is per-subdirectory (`| oamdma | 800/884 passed |`), like the mGBA
+# suite: 5,005 individual rows would drown results.md. The per-test detail
+# goes to tests/results_gambatte.md.
+
+type
+  GambatteRow = object
+    dev: string        # "dmg" | "cgb"
+    kind: string       # "hex" | "png"
+    expected: string   # hex string, or the reference PNG's path
+    rom: string
+    group: string      # top-level directory under gambatte/
+    name: string       # display name, unique per row
+
+  GambatteGroup = object
+    name: string
+    passes: int
+    total: int
+    failures: seq[(string, string)]  # (row name, detail)
+
+proc gambatte_hex_prefix(tail: string): string =
+  ## The leading run of hex digits, which is exactly what gambatte's runner
+  ## reads: it walks the filename tail glyph by glyph and stops at the first
+  ## character that is not 0-9/A-F (the '.' of the extension, or the '_' that
+  ## starts the other device's tag).
+  for c in tail:
+    if c in {'0'..'9', 'a'..'f', 'A'..'F'}: result.add(c)
+    else: break
+
+proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
+  var rows: seq[GambatteRow]
+  var roms: seq[string]
+  for path in walkDirRec(gambatte_dir):
+    if path.endsWith(".gb") or path.endsWith(".gbc"):
+      roms.add(path)
+  roms.sort(cmp[string])
+  for rom in roms:
+    let rel = rom.relativePath(gambatte_dir)
+    let group = if DirSep in rel: rel.split(DirSep)[0] else: "(root)"
+    let fname = rom.extractFilename
+    let stem = fname.changeFileExt("")
+    # Device markers, in gambatte's own precedence order.
+    var dmg_marker, cgb_marker = ""
+    if "dmg08_cgb04c_out" in stem:
+      dmg_marker = "dmg08_cgb04c_out"
+      cgb_marker = "dmg08_cgb04c_out"
+    elif "dmg08_out" in stem:
+      dmg_marker = "dmg08_out"
+      if "cgb04c_out" in stem: cgb_marker = "cgb04c_out"
+    elif "_out" in stem:
+      cgb_marker = "_out"
+    for (dev, marker) in [("dmg", dmg_marker), ("cgb", cgb_marker)]:
+      if marker.len == 0: continue
+      let tail = fname[fname.find(marker) + marker.len .. ^1]
+      if tail.startsWith("audio0") or tail.startsWith("audio1"):
+        continue  # audio verdict is out of reach, see the header comment
+      let expected = gambatte_hex_prefix(tail)
+      if expected.len == 0: continue
+      rows.add(GambatteRow(
+        dev: dev, kind: "hex", expected: expected.toUpperAscii(), rom: rom,
+        group: group, name: rel.changeFileExt("") & " [" & dev & "]",
+      ))
+    # Reference-image rows. A shared _dmg08_cgb04c.png scores both devices.
+    let base = rom.changeFileExt("")
+    let both = base & "_dmg08_cgb04c.png"
+    var png_for: seq[(string, string)]
+    if fileExists(both):
+      png_for = @[("dmg", both), ("cgb", both)]
+    else:
+      if fileExists(base & "_dmg08.png"): png_for.add(("dmg", base & "_dmg08.png"))
+      if fileExists(base & "_cgb04c.png"): png_for.add(("cgb", base & "_cgb04c.png"))
+    for (dev, png) in png_for:
+      rows.add(GambatteRow(
+        dev: dev, kind: "png", expected: png, rom: rom, group: group,
+        name: rel.changeFileExt("") & " [" & dev & ", png]",
+      ))
+  rows
+
+proc run_gambatte_suite(harness: string; previous: Table[string, bool];
+                        previous_counts: Table[string, int];
+                        regressions: var seq[string];
+                        groups: var seq[GambatteGroup];
+                        gb_test_roms_dir: string): SuiteResults =
+  echo "\n=== Game Boy - gambatte ==="
+  let gambatte_dir = gb_test_roms_dir / "gambatte"
+  if not dirExists(gambatte_dir):
+    echo "  Warning: gambatte directory not found in game-boy-test-roms"
+    return SuiteResults(suite_name: "Game Boy - gambatte")
+  let rows = build_gambatte_rows(gambatte_dir)
+  if rows.len == 0:
+    echo "  Warning: gambatte directory held no scorable ROMs"
+    return SuiteResults(suite_name: "Game Boy - gambatte")
+
+  # One process per ROM would cost more than the emulation: each row is 15
+  # frames (a few ms), and there are thousands of them. Batch them into one
+  # --mode=gambatte process per core instead, round-robin so the shards stay
+  # balanced (the suite's cost per ROM is far from uniform). Rows are
+  # independent — each builds a fresh GB — so the split cannot change a
+  # verdict; `tests/README.md` records how that was verified.
+  let work_dir = getTempDir() / "dingbat-gambatte"
+  removeDir(work_dir)
+  createDir(work_dir)
+  defer: removeDir(work_dir)
+  let shards = max(1, min(countProcessors(), 16))
+  var shard_rows = newSeq[seq[int]](shards)
+  for i in 0 ..< rows.len: shard_rows[i mod shards].add(i)
+  var cmds: seq[string]
+  var out_paths: seq[string]
+  for s in 0 ..< shards:
+    let list_path = work_dir / &"list{s}.tsv"
+    let out_path = work_dir / &"out{s}.txt"
+    var lines: seq[string]
+    for i in shard_rows[s]:
+      lines.add(rows[i].dev & "\t" & rows[i].kind & "\t" & rows[i].expected &
+                "\t" & rows[i].rom)
+    writeFile(list_path, lines.join("\n") & "\n")
+    cmds.add(&"{harness.quoteShell} --mode=gambatte --list={list_path.quoteShell}" &
+             &" > {out_path.quoteShell} 2>&1")
+    out_paths.add(out_path)
+  discard execProcesses(cmds, options = {poUsePath, poEvalCommand}, n = shards)
+
+  var passed = newSeq[bool](rows.len)
+  var detail = newSeq[string](rows.len)
+  var seen = newSeq[bool](rows.len)
+  for s in 0 ..< shards:
+    if not fileExists(out_paths[s]): continue
+    for line in readFile(out_paths[s]).splitLines():
+      if not line.startsWith("GAM "): continue
+      let parts = line.split(' ', maxsplit = 3)
+      if parts.len < 3: continue
+      var local: int
+      try: local = parseInt(parts[1])
+      except ValueError: continue
+      if local < 0 or local >= shard_rows[s].len: continue
+      let g = shard_rows[s][local]
+      seen[g] = true
+      passed[g] = parts[2] == "PASS"
+      detail[g] = if parts.len > 3: parts[3].strip() else: ""
+  for i in 0 ..< rows.len:
+    if not seen[i]:
+      detail[i] = "harness produced no verdict (crash or timeout in its shard)"
+
+  var order: seq[string]
+  var by_group = initTable[string, GambatteGroup]()
+  for i, row in rows:
+    if row.group notin by_group:
+      order.add(row.group)
+      by_group[row.group] = GambatteGroup(name: row.group)
+    by_group.withValue(row.group, g):
+      inc g.total
+      if passed[i]: inc g.passes
+      else: g.failures.add((row.name, detail[i]))
+
+  var results: seq[TestResult]
+  var total_pass, total_all = 0
+  for name in order:
+    let g = by_group[name]
+    groups.add(g)
+    total_pass += g.passes
+    total_all += g.total
+    let all_pass = g.passes == g.total
+    let short_name = "gambatte/" & name
+    echo &"  [{(if all_pass: \"PASS\" else: \"FAIL\")}] {short_name} - {g.passes}/{g.total} passed"
+    results.add(TestResult(
+      name: short_name,
+      passed: all_pass,
+      output: &"{g.passes}/{g.total} passed",
+      always_detail: true,
+    ))
+    # Regression on either bit: a group that used to be all-green going red, or
+    # a group whose pass COUNT dropped.
+    if previous.hasKey(name) and previous[name] and not all_pass:
+      regressions.add(short_name)
+    elif previous_counts.hasKey(name) and g.passes < previous_counts[name]:
+      regressions.add(&"{short_name} ({previous_counts[name]} -> {g.passes} passing)")
+  echo &"  gambatte total: {total_pass}/{total_all} passed"
+  SuiteResults(suite_name: "Game Boy - gambatte", results: results)
+
+proc generate_gambatte_detail_md(groups: seq[GambatteGroup]): string =
+  var lines: seq[string]
+  lines.add("# gambatte Test Suite - Detailed Results")
+  lines.add("")
+  lines.add("*Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "*")
+  lines.add("")
+  lines.add("Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the")
+  lines.add("device the filename asks for; `[.., png]` rows are scored against the")
+  lines.add("reference image next to the ROM, the rest against the hex value the")
+  lines.add("ROM draws on screen. See tests/README.md for the mechanism.")
+  lines.add("")
+  var total_pass, total_all = 0
+  for g in groups:
+    total_pass += g.passes
+    total_all += g.total
+  lines.add(&"**{total_pass}/{total_all} passed.**")
+  lines.add("")
+  for g in groups:
+    let status = if g.passes == g.total: "" else: &" ({g.passes}/{g.total} passed)"
+    lines.add("## " & g.name & status)
+    lines.add("")
+    if g.failures.len == 0:
+      lines.add(&"All {g.total} tests passed.")
+      lines.add("")
+    else:
+      lines.add(&"{g.passes}/{g.total} tests passed, {g.failures.len} failed:")
+      lines.add("")
+      lines.add("| Test | Result |")
+      lines.add("|------|--------|")
+      for (name, det) in g.failures:
+        lines.add("| " & name & " | " & det & " |")
+      lines.add("")
+  lines.join("\n")
+
 proc main() =
   let harness_name = when defined(windows): "dingbat_test.exe" else: "dingbat_test"
   let harness = getCurrentDir() / harness_name
@@ -851,6 +1119,7 @@ proc main() =
 
   let results_path = getCurrentDir() / "tests" / "results.md"
   let previous = load_previous_results(results_path)
+  let previous_counts = load_previous_counts(results_path)
 
   var all_suites: seq[SuiteResults]
   var regressions: seq[string]
@@ -893,13 +1162,24 @@ proc main() =
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
 
+  # gambatte (aggregated per subdirectory; detail in results_gambatte.md)
+  var gambatte_groups: seq[GambatteGroup]
+  all_suites.add(run_gambatte_suite(harness, previous, previous_counts,
+                                    regressions, gambatte_groups,
+                                    gb_test_roms_dir))
+
   # Write results
   createDir(getCurrentDir() / "tests")
   writeFile(results_path, generate_results_md(all_suites))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
   writeFile(mgba_detail_path, generate_mgba_detail_md(mgba_detail))
+  let gambatte_detail_path = getCurrentDir() / "tests" / "results_gambatte.md"
+  if gambatte_groups.len > 0:
+    writeFile(gambatte_detail_path, generate_gambatte_detail_md(gambatte_groups))
   echo &"\nResults written to {results_path}"
   echo &"mGBA detail written to {mgba_detail_path}"
+  if gambatte_groups.len > 0:
+    echo &"gambatte detail written to {gambatte_detail_path}"
 
   # Summary
   var total = 0

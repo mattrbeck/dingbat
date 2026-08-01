@@ -1,4 +1,5 @@
-import std/[os, strutils, parseopt, net, nativesockets, monotimes, times]
+import std/[os, strutils, parseopt, net, nativesockets, monotimes, times, tables]
+import png_reader
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gba/gba
@@ -16,7 +17,7 @@ type
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-    tmMagenGreen, tmMagenNoRed
+    tmMagenGreen, tmMagenNoRed, tmGambatte
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -1385,6 +1386,186 @@ proc rollback_net_test(rom, bios_path: string): int =
   echo "ROLLBACKNET: FAIL"
   1
 
+# ==================== gambatte suite (batched) ====================
+#
+# sinamas' gambatte test ROMs, as redistributed in the c-sp/game-boy-test-roms
+# bundle. The scoring rules below are the bundle's own
+# `gambatte/game-boy-test-roms-howto.md`, cross-read against gambatte-core's
+# test/testrunner.cpp (read for its *rules*; no code or data was copied — see
+# GambatteGlyphs).
+#
+#   * Exit condition: every ROM runs exactly 15 LCD frames (1,053,360 clocks,
+#     ~252 ms emulated) from the post-boot state, then the frame is read. Not
+#     "run until something happens".
+#   * The DEVICE is in the filename: `dmg08` = run as a DMG, `cgb04c` = run as
+#     a CGB. Most ROMs carry both tags and are two separate tests. Nearly all
+#     of them ship a CGB cart header even for their DMG half, so the DMG run
+#     needs new_gb's force_dmg.
+#   * The EXPECTED VALUE is in the filename too, as `_out<hex>` (1..20 hex
+#     digits), and may differ per device
+#     (`lycstatwirq_..._dmg08_out2_cgb04c_out0.gbc`). The ROM renders that hex
+#     string as 8x8 glyphs along the top-left row of the screen, one glyph per
+#     digit; scoring compares those tiles. An `x` in front of a tag
+#     (`_xout0`, `_xdmg08`) means "not a test" and is skipped, exactly as
+#     testrunner.cpp's substring search skips it.
+#   * Some ROMs instead ship a reference PNG next to them, named
+#     <rom>_dmg08.png / <rom>_cgb04c.png / <rom>_dmg08_cgb04c.png, and are
+#     scored on the whole 160x144 frame.
+#
+# This mode is BATCHED: it takes a list file and runs every entry in one
+# process. There are ~5,000 scored runs and each only emulates 15 frames, so
+# one fork/exec per ROM would cost more than the emulation.
+
+# Hex-digit glyph bitmaps: 8 rows of 8 pixels, one byte per row, bit 7 =
+# leftmost column, 1 = black, 0 = white.
+#
+# PROVENANCE: harvested from the test ROMs' own rendered output, not copied
+# from gambatte-core. gambatte-core is GPL-2.0 and this tree is MIT, so its
+# table is not ours to vendor; the shapes below were read off dingbat's
+# framebuffer with `--mode=gambatte --dump-tiles` over ROMs whose filenames
+# name the digits they display, one ROM per digit, and cross-checked by the
+# whole suite decoding to sensible values. Regenerate the same way if a future
+# bundle changes the font.
+const GambatteGlyphs: array[16, array[8, uint8]] = [
+  [0x00'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7F'u8],  # 0
+  [0x00'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8],  # 1
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8],  # 2
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x3F'u8, 0x01'u8, 0x01'u8, 0x7F'u8],  # 3
+  [0x00'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x01'u8],  # 4
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7E'u8, 0x01'u8, 0x01'u8, 0x7E'u8],  # 5
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x7F'u8],  # 6
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x02'u8, 0x04'u8, 0x08'u8, 0x10'u8, 0x10'u8],  # 7
+  [0x00'u8, 0x3E'u8, 0x41'u8, 0x41'u8, 0x3E'u8, 0x41'u8, 0x41'u8, 0x3E'u8],  # 8
+  [0x00'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x7F'u8],  # 9
+  [0x00'u8, 0x08'u8, 0x22'u8, 0x41'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x41'u8],  # A
+  [0x00'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x7E'u8],  # B
+  [0x00'u8, 0x3E'u8, 0x41'u8, 0x40'u8, 0x40'u8, 0x40'u8, 0x41'u8, 0x3E'u8],  # C
+  [0x00'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7E'u8],  # D
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8],  # E
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x40'u8],  # F
+]
+
+const GambatteFrames* = 15
+
+proc gambatte_pixel(c: uint16; cgb: bool): uint32 =
+  ## One framebuffer pixel as the 24-bit RGB gambatte's runner compares,
+  ## masked to 0xF8F8F8 — the top 5 bits per channel, which is all the runner
+  ## ever looks at (and exactly the precision a BGR555 framebuffer carries).
+  ##
+  ## CGB: gambatte's documented colour-correction formulae, applied to the raw
+  ## 5-bit palette entry. White (31,31,31) lands on 0xF8F8F8 and only on
+  ## 0xF8F8F8, so glyph matching stays exact.
+  ##
+  ## DMG: gambatte drives the panel with plain #000000/#555555/#AAAAAA/#FFFFFF
+  ## shades; dingbat's DMG palette is the green LCD, so map shade -> grey the
+  ## same way the mealybug/acid2 screenshot path does.
+  if cgb:
+    let r = int(c and 0x1F)
+    let g = int((c shr 5) and 0x1F)
+    let b = int((c shr 10) and 0x1F)
+    let rr = uint32((r * 13 + g * 2 + b) shr 1)
+    let gg = uint32((g * 3 + b) shl 1)
+    let bb = uint32((r * 3 + g * 2 + b * 11) shr 1)
+    ((rr shl 16) or (gg shl 8) or bb) and 0xF8F8F8'u32
+  else:
+    let s = uint32(bgr555_to_grey(c))
+    ((s shl 16) or (s shl 8) or s) and 0xF8F8F8'u32
+
+proc gambatte_tile(fb: seq[uint16]; col: int; cgb: bool): array[8, uint8] =
+  ## The 8x8 tile at glyph column `col` of the screen's top row, as a
+  ## bit-per-pixel mask (bit 7 = leftmost, 1 = black). A tile holding anything
+  ## other than pure black and pure white comes back as all-ones, which no
+  ## glyph can equal (every glyph's row 0 is blank).
+  for y in 0 ..< 8:
+    var bits = 0'u8
+    for x in 0 ..< 8:
+      let p = gambatte_pixel(fb[y * GB_WIDTH + col * 8 + x], cgb)
+      if p == 0'u32: bits = bits or (0x80'u8 shr x)
+      elif p != 0xF8F8F8'u32:
+        return [0xFF'u8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+    result[y] = bits
+
+proc gambatte_digit(t: array[8, uint8]): char =
+  for i in 0 ..< 16:
+    if GambatteGlyphs[i] == t:
+      return "0123456789ABCDEF"[i]
+  '?'
+
+proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
+  result = new_gb("", rom, fifo = true, headless = true, run_bios = false,
+                  force_cgb = cgb, force_dmg = not cgb)
+  result.test_output = new_test_output()
+  result.post_init()
+  # These ROMs are read-only fixtures in a shared cache directory. A battery
+  # file dropped next to one becomes the next run's power-on state (and the
+  # next *agent's*), so detach it before a single frame runs.
+  result.cartridge.sav_path = ""
+  for _ in 0 ..< frames: result.step_frame()
+
+proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
+  ## Scores a whole list of gambatte tests in one process. Each line is
+  ## tab-separated: `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`, where
+  ## `expected` is the hex string for `hex` and the reference PNG's path for
+  ## `png`. One `GAM <index> <PASS|FAIL> <detail>` line comes back per input
+  ## line, in order, so the caller can match results positionally.
+  var entries: seq[(string, string, string, string)]
+  for line in lines(list_path):
+    if line.len == 0: continue
+    let f = line.split('\t')
+    if f.len != 4:
+      echo "GAMBATTE: malformed list line: ", line
+      return 1
+    entries.add((f[0], f[1], f[2], f[3]))
+
+  var png_cache = initTable[string, PngImage]()
+  var passes = 0
+  for idx, (dev, kind, expected, rom) in entries:
+    let cgb = dev == "cgb"
+    var ok = false
+    var detail = ""
+    try:
+      let emu = gambatte_run(rom, cgb, frames)
+      let fb = emu.ppu.framebuffer
+      if dump_tiles > 0:
+        var rows: seq[string]
+        for col in 0 ..< dump_tiles:
+          let t = gambatte_tile(fb, col, cgb)
+          var s = ""
+          for b in t: s.add(toHex(b, 2))
+          rows.add(s)
+        echo "TILES ", idx, " ", rom.extractFilename, " ", rows.join(" ")
+      case kind
+      of "hex":
+        var got = ""
+        for col in 0 ..< expected.len:
+          got.add(gambatte_digit(gambatte_tile(fb, col, cgb)))
+        ok = got == expected.toUpperAscii()
+        detail = if ok: got else: "got " & got & ", expected " & expected.toUpperAscii()
+      of "png":
+        if not png_cache.hasKey(expected):
+          png_cache[expected] = read_png(expected)
+        let img = png_cache[expected]
+        if img.width != GB_WIDTH or img.height != GB_HEIGHT or img.channels != 3:
+          detail = "bad reference image " & expected
+        else:
+          var diff = 0
+          for i in 0 ..< GB_WIDTH * GB_HEIGHT:
+            let want = ((uint32(img.pixels[i * 3]) shl 16) or
+                        (uint32(img.pixels[i * 3 + 1]) shl 8) or
+                         uint32(img.pixels[i * 3 + 2])) and 0xF8F8F8'u32
+            if gambatte_pixel(fb[i], cgb) != want: inc diff
+          ok = diff == 0
+          detail = if ok: "png match"
+                   else: $diff & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ"
+      else:
+        detail = "unknown kind " & kind
+    except CatchableError:
+      detail = "exception: " & getCurrentExceptionMsg()
+    if ok: inc passes
+    echo "GAM ", idx, " ", (if ok: "PASS" else: "FAIL"), " ", detail
+  echo "GAMBATTE-DONE ", passes, "/", entries.len
+  0
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -1403,6 +1584,9 @@ proc main() =
   var force_cgb = false
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
   var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
+  var list_path = ""       # gambatte mode: batch list file
+  var gambatte_frames = GambatteFrames
+  var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1445,6 +1629,7 @@ proc main() =
         of "fuzzarm": mode = tmFuzzArm
         of "magen-green": mode = tmMagenGreen
         of "magen-nored": mode = tmMagenNoRed
+        of "gambatte": mode = tmGambatte
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1514,6 +1699,24 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         max_fails = parseInt(v)
+      of "list":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        list_path = v
+      of "gambatte-frames":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        gambatte_frames = parseInt(v)
+      of "dump-tiles":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        dump_tiles = parseInt(v)
+
+  if mode == tmGambatte:
+    if list_path.len == 0:
+      echo "gambatte mode wants --list=<file> (see gambatte_batch)"
+      quit(1)
+    quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>]"
@@ -1674,7 +1877,7 @@ proc main() =
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
      tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-     tmMagenGreen, tmMagenNoRed:
+     tmMagenGreen, tmMagenNoRed, tmGambatte:
     discard  # handled (and exited) above
 
   if output.len > 0:

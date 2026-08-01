@@ -27,6 +27,7 @@ nimble bench_build   # -> ./dingbat_bench
 Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
 `serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`,
 `magen-green`, `magen-nored`,
+`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `gambatte`,
 `screenshot`, `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`,
 `norm32linktest`, `attachtest`, `netlink`, `speclink`, `speclinkbench`,
 `rollback`, `rollbacknet`, `gblinktest`.
@@ -103,6 +104,13 @@ frame hash would be a golden of dingbat's own output with nothing behind it.
 `oam_internal_priority` is not run for the same reason — its only stated
 criterion is prose, and red is a legitimate colour in it.
 
+`--mode=gambatte` is the odd one out: it is **batched**, taking a list of tests
+rather than a ROM (see the gambatte section below).
+
+```
+./dingbat_test --mode=gambatte --list=/tmp/gam.tsv [--gambatte-frames=15] [--dump-tiles=N]
+```
+
 Gotcha: piping through `tail`/`head` masks the exit code — a segfault (139)
 looks like success. Check `$?` on the harness itself, or use `set -o pipefail`.
 
@@ -117,6 +125,8 @@ the repo root right after `nimble test_build`, or it quits with
   `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0 (Blargg, Mooneye,
   Mealybug, SameSuite), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA suite
   ROM from `mattrbeck/mgba-suite-auto`, `jsmolka/gba-tests` pinned to the
+  Mealybug, SameSuite, gambatte), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA suite
+  ROM from `mattrbeck/mgba-suite-auto`, and `jsmolka/gba-tests` pinned to the
   commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
   nothing is built), and the five `DenSinH/FuzzARM` ROMs pinned to the commit
   in `FuzzArmRev` (`a675329cd57da48e3e406216ba2d79dd7e09ee20`; that repo has
@@ -140,15 +150,82 @@ tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 all 5 FuzzARM rows and 6 of the 7 MagenTests rows are green in it, so any of
 them going red *is* a CI failure. `magen/hblank_vram_dma` is baselined failing:
 dingbat runs the HBlank VRAM DMA while the CPU is halted).
+230, Pass 155 as of the current committed `results.md` — 48 of those rows are
+aggregated gambatte subdirectories, 2,632/5,005 individual tests passing; all
+13 jsmolka rows are green in it, so any of them going red *is* a CI failure).
 
-**Results-file caveat:** `tests/results.md` and `tests/results_mgba_suite.md`
-are committed baselines, and every run **rewrites both in place** (that is
-also where the regression comparison reads from). After a local run,
-`git checkout -- tests/results.md tests/results_mgba_suite.md` unless you are
+**Results-file caveat:** `tests/results.md`, `tests/results_mgba_suite.md` and
+`tests/results_gambatte.md` are committed baselines, and every run **rewrites
+all three in place** (that is also where the regression comparison reads
+from). After a local run, `git checkout -- tests/results.md
+tests/results_mgba_suite.md tests/results_gambatte.md` unless you are
 intentionally updating the baseline.
 
 `tests/golden/` holds per-row mGBA-suite captures (passing *and* failing
 rows) for diff-based timing work — see `tests/golden/README.md`.
+
+## The gambatte suite
+
+3,524 ROMs inside the same game-boy-test-roms bundle as Blargg/Mooneye/
+Mealybug/SameSuite (no extra download, no cache-key bump), expanding to
+**5,005 scored rows**. Default-on in the runner. Verdict mechanism, per the
+bundle's own `gambatte/game-boy-test-roms-howto.md` and gambatte-core's
+`test/testrunner.cpp`:
+
+- **Fixed exit condition.** Every ROM runs exactly **15 LCD frames**
+  (1,053,360 clocks, ~252 ms emulated) from the post-boot state, then the
+  frame is read. Not "run until something happens". The suite is insensitive
+  to the exact count — 14, 16 and 30 frames all score identically — because
+  every ROM has settled and holds its result.
+- **The device is in the filename.** `dmg08` = run as a DMG, `cgb04c` = run as
+  a CGB; most ROMs carry both tags and are two rows. Nearly all of them ship a
+  CGB cart header even for their DMG half, which is why `new_gb` grew
+  `force_dmg` (gambatte selects the device from its loader flag, not the
+  header).
+- **The expected value is in the filename too**, as `_out<hex>` (1 to 20 hex
+  digits), and can differ per device
+  (`..._dmg08_out2_cgb04c_out0.gbc`). The ROM draws that hex string as 8×8
+  glyphs along the top-left row of the screen; scoring compares those tiles
+  against the glyph table in `dingbat_test.nim`. An `x` in front of a tag
+  (`_xout0`, `_xdmg08`) means "not a test" and is skipped.
+- **Some ROMs ship a reference PNG** instead, named `<rom>_dmg08.png` /
+  `_cgb04c.png` / `_dmg08_cgb04c.png`, scored on the whole 160×144 frame.
+  Colours are compared the way gambatte compares them: masked to 0xF8F8F8
+  (the top 5 bits per channel — exactly what a BGR555 framebuffer carries),
+  with gambatte's CGB colour-correction formulae applied on the CGB side and
+  the plain `#000000/#555555/#AAAAAA/#FFFFFF` shades on the DMG side.
+
+**Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
+its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
+`--dump-tiles=N` prints the raw top-row tiles, and running it over a few
+hundred ROMs whose filenames name the digits they display resolves all 16
+shapes by majority vote. Regenerate that way if a future bundle changes the
+font (only 4 rows out of 5,005 currently decode to an unrecognised glyph).
+
+**Not scored:** the 220 `_outaudio0/1` rows and gambatte's AGB column. Gambatte
+decides an audio row by asking whether all 35,112 samples of the final frame
+are identical — a 2 MHz stream, one sample per two clocks — and several of
+those ROMs turn on a difference lasting a handful of clocks. dingbat's APU
+emits at 32,768 Hz, 64× coarser, so a faithful verdict is not available from
+the sample path as it stands. gambatte's own runner marks the AGB column
+"FIXME: Actual AGB results" and feeds it the CGB expectations.
+
+**Batching.** One `dingbat_test` process per ROM would cost more than the
+emulation (each row is 15 frames, a few ms). The runner shards the rows
+round-robin across `countProcessors()` processes, each running one
+`--mode=gambatte --list=...` batch in-process with a fresh `GB` per row. The
+whole suite is ~34 s in one process, ~7 s sharded, and adds ~7 s to the full
+runner (8 s → 15 s here). Independence was verified two ways: a shuffled list
+reproduces every verdict *and every detail string* exactly, and the sharded
+run's totals match the single-process run's.
+
+**Reporting.** 5,005 rows would drown `results.md`, so it carries one row per
+gambatte subdirectory (`| oamdma | 👀 223/811 passed |`) and the per-test
+detail goes to `tests/results_gambatte.md`. Those aggregated rows gate on the
+pass **count**, not just the pass/fail bit — `load_previous_counts` parses
+`N/M passed` back out of the committed `results.md`, so 223 → 222 is a
+regression even though the row was already red. (`always_detail` on
+`TestResult` is what keeps the count in the file for rows that pass.)
 
 ## `dingbat_bench` — headless benchmark
 
