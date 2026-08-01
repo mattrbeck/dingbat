@@ -27,6 +27,55 @@ const contrast = (a, b) => {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 };
 
+// --- CIEDE2000, for the "a ramp must not vibrate" test ----------------------
+// Contrast alone cannot see the failure it is paired with here: two shades can
+// darken correctly, be far apart in luminance, and still be a different HUE —
+// and a game that dithers them against each other pixel by pixel then shimmers
+// instead of blending. Perceptual difference is what notices that.
+const toLab = (hex) => {
+  const [R, G, B] = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  // D65 white point.
+  let x = (0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047;
+  let y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  let z = (0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883;
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  [x, y, z] = [f(x), f(y), f(z)];
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+};
+const deltaE2000 = (c1, c2) => {
+  const [L1, a1, b1] = toLab(c1), [L2, a2, b2] = toLab(c2);
+  const rad = Math.PI / 180, deg = 180 / Math.PI;
+  const Cb = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7)));
+  const A1 = (1 + G) * a1, A2 = (1 + G) * a2;
+  const Cp1 = Math.hypot(A1, b1), Cp2 = Math.hypot(A2, b2);
+  const hue = (a, b) => { const x = Math.atan2(b, a) * deg; return x < 0 ? x + 360 : x; };
+  const h1 = Cp1 === 0 ? 0 : hue(A1, b1), h2 = Cp2 === 0 ? 0 : hue(A2, b2);
+  const dL = L2 - L1, dC = Cp2 - Cp1;
+  let dh = 0;
+  if (Cp1 * Cp2 !== 0) {
+    dh = h2 - h1;
+    if (dh > 180) dh -= 360; else if (dh < -180) dh += 360;
+  }
+  const dH = 2 * Math.sqrt(Cp1 * Cp2) * Math.sin((dh / 2) * rad);
+  const Lb = (L1 + L2) / 2, Cbp = (Cp1 + Cp2) / 2;
+  let hb;
+  if (Cp1 * Cp2 === 0) hb = h1 + h2;
+  else if (Math.abs(h1 - h2) <= 180) hb = (h1 + h2) / 2;
+  else hb = h1 + h2 < 360 ? (h1 + h2 + 360) / 2 : (h1 + h2 - 360) / 2;
+  const T = 1 - 0.17 * Math.cos((hb - 30) * rad) + 0.24 * Math.cos(2 * hb * rad)
+    + 0.32 * Math.cos((3 * hb + 6) * rad) - 0.20 * Math.cos((4 * hb - 63) * rad);
+  const Sl = 1 + (0.015 * (Lb - 50) ** 2) / Math.sqrt(20 + (Lb - 50) ** 2);
+  const Sc = 1 + 0.045 * Cbp, Sh = 1 + 0.015 * Cbp * T;
+  const Rt = -2 * Math.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7))
+    * Math.sin(60 * Math.exp(-(((hb - 275) / 25) ** 2)) * rad);
+  return Math.sqrt((dL / Sl) ** 2 + (dC / Sc) ** 2 + (dH / Sh) ** 2
+    + Rt * (dC / Sc) * (dH / Sh));
+};
+
 // A cartridge header just real enough for detectMonoPanel: only byte 0x143
 // (the CGB flag) is read, but the length check needs a full header.
 const cart = (cgbFlag) => {
@@ -297,15 +346,46 @@ test("every theme palette is a usable four-shade ramp", async () => {
   }
 });
 
+test("no two adjacent shades are too far apart to dither together", async () => {
+  // The other half of "a usable ramp", and the half the contrast floor above
+  // cannot see. Games render half-tones by alternating two adjacent shades
+  // pixel by pixel: a busy frame is mostly shades 1 and 2 mixed at 50%. That
+  // only works if the pair reads as one intermediate tone. Two shades that
+  // step down in luminance correctly but sit in different HUES do not blend —
+  // they shimmer, and the screen reads as a fault rather than as a palette.
+  //
+  // The ceiling is drawn just above the widest step any shipped ramp takes
+  // (`light`, 40.1 dE from its burnt amber to its navy ink, which is fine
+  // because it is the 2->3 step and `light` is not a dithering-heavy look).
+  // The ramp this caught was dmg's original pea-green -> magenta at 74 dE,
+  // nearly double the worst of the other ten and unmistakable on screen.
+  const MAX_ADJACENT_DE = 45;
+  const h = await loadApp();
+  for (const [name, pal] of Object.entries(h.api.GB_THEME_PALETTES)) {
+    for (let i = 1; i < 4; i++) {
+      const d = deltaE2000(pal[i - 1], pal[i]);
+      assert.ok(d <= MAX_ADJACENT_DE,
+        `${name}: shades ${i - 1}/${i} are ${d.toFixed(1)} dE2000 apart — too ` +
+        `far to dither against each other (ceiling ${MAX_ADJACENT_DE})`);
+    }
+  }
+});
+
 test("each theme palette actually contains one of its theme's colours", async () => {
   // The rule these were built to: the theme's main colour appears verbatim,
   // not as a tint. Spot-checked against web/styles.css tokens so a future
   // theme tweak that orphans its palette shows up here.
+  //
+  // dmg is pinned to its magenta A/B buttons (--btn-ab-top) rather than to its
+  // --accent, because it is the one theme whose accent is deliberately absent:
+  // the pea-green LCD colour cannot sit next to the magenta without the pair
+  // vibrating when a game dithers them (see the adjacent-dE test). Its ramp is
+  // still four of the console's own colours, just not that one.
   const h = await loadApp();
   const mainColorOf = {
     amber: "#ffb04d", black: "#ffb04d", light: "#9c5400",
     indigo: "#7f6ae7", fuchsia: "#e8739a", glacier: "#769be5",
-    kiwi: "#6ee126", dmg: "#9cc954", "atomic-purple": "#c36ee7",
+    kiwi: "#6ee126", dmg: "#b32e68", "atomic-purple": "#c36ee7",
     daiei: "#eb7c33", famicom: "#b99c68",
   };
   for (const [name, main] of Object.entries(mainColorOf)) {

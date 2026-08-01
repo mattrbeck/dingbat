@@ -5551,17 +5551,27 @@ const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
 // The rules these follow, in order:
 //  1. The theme's own main colour appears VERBATIM as one of the four — not a
 //     tint of it. It is shade 1 everywhere except `light` (shade 2, because a
-//     light theme's ink has to be the dark end) and `famicom` (shade 1 is the
-//     Famicom gold chrome, its identity colour).
+//     light theme's ink has to be the dark end), `famicom` (shade 1 is the
+//     Famicom gold chrome, its identity colour) and `dmg` (see rule 5).
 //  2. Themes that own several distinct colours spend them instead of inventing
-//     tints: `dmg` uses the pea-green LCD, the magenta A/B buttons and the
-//     near-black d-pad; `famicom` uses the cream faceplate, the gold chrome,
-//     the garnet button ring and the charcoal buttons.
+//     tints: `dmg` uses the LCD paper, the shell grey, the magenta A/B buttons
+//     and the near-black d-pad; `famicom` uses the cream faceplate, the gold
+//     chrome, the garnet button ring and the charcoal buttons.
 //  3. Everything else fills the remaining steps with tints/shades of the main
 //     colour, ending on the theme's own --bg so the darkest shade belongs to
 //     the same world as the chrome around the screen.
 //  4. Every ramp is monotonically darkening with no two steps closer than
 //     ~1.5:1 contrast — a collapsed pair is what makes a game unreadable.
+//  5. …and no two ADJACENT steps more than ~45 CIEDE2000 apart. Monotonic
+//     luminance is not enough: two shades can darken correctly and still be so
+//     far apart in hue that dithering one against the other vibrates instead
+//     of blending. Games spend most of a busy frame alternating shades 1 and 2
+//     at the pixel level, so that pair in particular has to be near in hue.
+//     This is what cost `dmg` its pea-green: green at shade 1 against magenta
+//     at shade 2 measured 74 dE — twice the worst of any other ramp — and on
+//     dithered art (Prehistorik Man's rock face is ~73% those two shades) it
+//     read as a broken display. The shell grey costs the ramp nothing and
+//     brings the pair down to 36, inside the band the other ten occupy.
 const GB_THEME_PALETTES = {
   // Amber phosphor on near-black: pale amber, the accent itself, a deep amber
   // and an almost-black ember.
@@ -5581,9 +5591,12 @@ const GB_THEME_PALETTES = {
   // The bright kiwi shell green verbatim. It is so luminous that shade 0 has
   // to be a very pale green for the two to separate at all.
   kiwi:            ["#effbea", "#6ee126", "#2d7a1f", "#0c170b"],
-  // Four DISTINCT DMG colours: pale LCD, the pea-green screen accent, the
-  // magenta A/B buttons, the near-black d-pad.
-  dmg:             ["#eaf3de", "#9cc954", "#b32e68", "#262828"],
+  // Four DISTINCT DMG colours: the pale LCD, the shell grey the console is
+  // moulded in, the magenta A/B buttons, the near-black d-pad. The one theme
+  // whose --accent (the pea-green #9cc954) is deliberately NOT in its ramp —
+  // see rule 5. The magenta stays because shade 2 is a small share of flat
+  // art, where it lands on exactly the details the artist accented.
+  dmg:             ["#eaf3de", "#b4aca9", "#b32e68", "#262828"],
   // Orchid accent verbatim; shade 2 is the shell violet darkened.
   "atomic-purple": ["#e7cbf0", "#c36ee7", "#6a3d80", "#120b16"],
   // Burnt-orange accent verbatim; shade 2 is the shell orange darkened.
