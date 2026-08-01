@@ -1225,31 +1225,27 @@ body.has-game #save-sep {
 }
 
 /* --- Quick-action row ---------------------------------------------------
-   Quick Save / Quick Load / Rewind / Slow Motion as one strip of four
-   labelled tiles instead of four full-width rows (four 36px rows -> one 55px
-   strip).
+   Quick Save / Quick Load / Rewind / Slow Motion as one strip of four icon
+   tiles instead of four full-width rows (four 36px rows -> one 48px strip).
 
-   Layout is the iOS tab bar's: icon over a short caption, in a tile wide
-   enough for the caption to sit on ONE line. That is the whole design. An
-   earlier round shipped this row as four bare icons and it read as a divider
-   rather than as controls, and the three save/time-shaped glyphs were
-   indistinguishable — so here the words carry the meaning, the icon only has
-   to agree with them, and every tile has its own resting surface so the strip
-   reads as four buttons.
+   WHY THESE FOUR ARE ALLOWED TO GO UNLABELLED, when the earlier bare-icon row
+   was rejected: every one of them is consequence-free. A quick save is fine to
+   overwrite. A quick load offers an Undo (loadFromSlot's action toast). Rewind
+   opens a modal you can close without committing. Slow motion toggles off as
+   easily as on. The rejected row mixed destructive and non-destructive actions
+   in one undifferentiated strip; this one cannot cost you anything, so the
+   worst outcome of a misread glyph is one tap you undo. Nothing in the rest of
+   the menu qualifies, which is why the pattern stops here.
 
-   Captions on one line is what costs the width: the dropdown is 210px today,
-   which leaves 46px per tile — nowhere near enough for "Quick Save" at any
-   readable size. So the row widens the dropdown while a game is loaded, which
-   is also the only state the row exists in. Measured on WebKit at 320pt the
-   longest caption ("Slow Motion", 10.5px) wants 61px, so the tiles have to be
-   ~70px, so the dropdown has to be ~304px. The menu is anchored to the LEFT
-   edge of the top bar, so that still clears the right edge of a 320pt phone;
-   the calc() caps it for anything narrower. Without the widening this row is
-   the rejected icon-only row again — that is the trade, stated plainly. */
-body.has-game #menu-dropdown {
-  min-width: min(312px, calc(100vw - 16px));
-}
+   title and aria-label are now the ONLY textual affordance on these tiles.
+   They are load-bearing — a hover tooltip on desktop, the accessible name
+   everywhere — so they must never be dropped as "duplicated by the caption".
 
+   No captions means no width pressure: the dropdown is back to its plain
+   210px, which at 6px padding leaves 198px of content, minus 18px of gaps =
+   45px per tile against a 48px tile height. Both axes clear the 44pt tap
+   minimum, so the has-game widening the captioned version needed (304px) is
+   gone entirely. */
 .menu-quickrow {
   display: flex;
   gap: 4px;
@@ -1259,39 +1255,23 @@ body.has-game #menu-dropdown {
 .menu-quickrow .menu-item {
   flex: 1 1 0;
   min-width: 0;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 5px;
-  /* 55px tall x ~64px wide: comfortably over the 44pt tap minimum in both
-     axes, which matters more here than in a full-width row — shrinking a
-     198px-wide target to a 64px one is the row's real cost, and Quick Load
-     overwrites live play. (The mis-tap itself is already recoverable: see
-     loadFromSlot's "Undo" action toast in index.js.) */
-  padding: 9px 2px 8px;
-  text-align: center;
-  /* iOS tab-bar caption size. Small, but it is a caption under a 20px glyph,
-     not body text, and it is what buys every label its own line. */
-  font-size: 10.5px;
-  line-height: 1.15;
+  /* 48 x 45px: over the 44pt tap minimum in both axes, which matters more
+     here than in a full-width row — shrinking a 198px-wide target to a 45px
+     one is the row's real cost. */
+  padding: 10px 2px;
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
 
+/* 26px, not the menu's usual 18px: with the caption gone the glyph is the
+   whole control, and it gets the space the caption used to take. Stroke stays
+   at the menu's 1.7 rather than scaling with it — a heavier stroke at this
+   size closes up the film strip's sprocket holes and the turtle's shell. */
 .menu-quickrow .menu-item svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* One line, always. A wrapped caption would stack "Quick" over "Save" and
-   over "Load", which puts the same word at the top of two adjacent tiles —
-   the exact ambiguity this row is trying to avoid. If it ever does not fit,
-   ellipsis makes that visible instead of silently reflowing. */
-.menu-quickrow .menu-item span {
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  width: 26px;
+  height: 26px;
 }
 
 /* Splits the strip 2 + 2: the save pair, then the playback pair. Grouping the
@@ -1299,7 +1279,7 @@ body.has-game #menu-dropdown {
    would cost more than it buys — so the separation that matters is between
    the pairs, not inside one. */
 .menu-quickrow .quickrow-gap {
-  margin-left: 7px;
+  margin-left: 6px;
 }
 
 .menu-quickrow .menu-item:hover {
@@ -1307,8 +1287,8 @@ body.has-game #menu-dropdown {
   border-color: var(--border-2);
 }
 
-/* Slow Motion is a toggle; #slow-motion.active already accents the label, but
-   in a tile the surface has to carry the on-state too or it is easy to miss. */
+/* Slow Motion is a toggle, and with no caption the surface and the glyph are
+   the only places the on-state can show at all. */
 .menu-quickrow #slow-motion.active {
   background: rgba(var(--accent-rgb), 0.14);
   border-color: rgba(var(--accent-rgb), 0.45);

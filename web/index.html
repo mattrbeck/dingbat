@@ -68,37 +68,44 @@
         </button>
         <div id="menu-dropdown" hidden>
           <!-- Quick actions: the four things reached for mid-game, as a strip
-               of four labelled tiles instead of four full-width rows.
+               of four icon tiles instead of four full-width rows.
 
-               Every tile keeps its visible caption. Option F put four bare
-               icons here and it read as a divider, not as controls, so each
-               tile has its own resting surface and border, and the words are
-               the primary channel — the icon only has to not contradict them.
-               The strip forces the dropdown wider (see .menu-quickrow in
-               styles.css); at the old 210px the captions do not fit and this
-               becomes option F again.
+               These four go without captions because not one of them can cost
+               you anything. A quick save is fine to overwrite. A quick load
+               offers an Undo. Rewind opens a modal you can close. Slow motion
+               toggles off as easily as on. The earlier bare-icon row (option
+               F) mixed destructive and non-destructive actions, which is what
+               made an unreadable glyph expensive there and cheap here — the
+               worst case is one tap you take back. Nothing else in this menu
+               passes that test, so nothing else loses its label.
 
-               Quick Load's glyph changed: it used to be a clock with a
-               circular arrow, near-identical to Slow Motion's clock at 20px.
-               It is now the same floppy as Quick Save with an arrow reading
-               out of it, so the one repeated shape in the row is the
-               deliberate Save/Load pair rather than an accident. -->
+               title and aria-label are now the ONLY text on these buttons.
+               Do not drop them: they are the desktop tooltip and the
+               accessible name, and there is nothing else left to read.
+
+               Glyphs, and why:
+               * Save / Load are a deliberate pair — the same floppy, with an
+                 arrow reading out of the second one.
+               * Rewind is a film strip because the modal it opens literally
+                 IS a film strip you drag, so the icon previews the
+                 destination. A triple back arrow was the alternative and it
+                 was rejected for colliding with #rewind in the top bar, which
+                 is the OTHER rewind (hold to scrub backwards live).
+               * Slow Motion is a turtle. It used to be a clock, which at this
+                 size is a near-twin of any other round glyph and says
+                 "time" rather than "slower". -->
           <div class="menu-quickrow" role="group" aria-label="Quick actions">
             <button type="button" class="menu-item" id="save-state" title="Quick Save" aria-label="Quick Save">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5zM8 5v4h7V5M8 19v-6h8v6"/></svg>
-              <span>Quick Save</span>
             </button>
             <button type="button" class="menu-item" id="load-state" title="Quick Load" aria-label="Quick Load">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5z"/><path d="M12 17v-7M9 12.5l3-3 3 3"/></svg>
-              <span>Quick Load</span>
             </button>
             <button type="button" class="menu-item quickrow-gap" id="open-rewind-scrub" title="Rewind to a Moment" aria-label="Rewind to a Moment">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v12l-8-6zM11 6v12l-8-6z" fill="currentColor" stroke="none"/><path d="M3 20h18" stroke-width="1.6"/></svg>
-              <span>Rewind&hellip;</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.6" width="19" height="14.8" rx="1.6"/><path d="M2.5 8.6h19M2.5 15.4h19M7.3 4.6v4M12 4.6v4M16.8 4.6v4M7.3 15.4v4M12 15.4v4M16.8 15.4v4"/></svg>
             </button>
             <button type="button" class="menu-item" id="slow-motion" title="Slow Motion" aria-label="Slow Motion" aria-pressed="false">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
-              <span>Slow Motion</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 15.6a6.8 5.8 0 0 1 13.6 0"/><path d="M5.2 15.6h13.6M9.7 10.3v5.3M14.3 10.3v5.3"/><path d="M18.8 12.9c1.6.1 2.6 1 2.6 2 0 .8-.6 1.4-1.4 1.4"/><path d="M8.3 15.6v2.6M15.7 15.6v2.6M5.2 15l-2.6.9"/></svg>
             </button>
           </div>
           <button type="button" class="menu-item" id="main-menu">
