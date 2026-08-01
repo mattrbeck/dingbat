@@ -488,6 +488,12 @@ type
     dma_position*:         int
     requested_oam_dma*:    bool
     next_dma_counter*:     uint8
+    # Derived from dma_position, maintained by mem_dma_tick: true for exactly
+    # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit
+    # owns a bus. Every CPU read and write tests it, so it is one bool load
+    # instead of the pair of range compares that used to sit on that path; it
+    # is a cache of existing state, not new state (see gb_recompute_dma_derived).
+    dma_busy*:             bool
     requested_speed_switch*: bool
     current_speed*:        uint8
 

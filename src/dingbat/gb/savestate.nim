@@ -174,6 +174,9 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   mem.requested_speed_switch = r.read_bool()
   mem.current_speed = r.read_u8()
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
+  # Derived caches, not payload: re-deriving them costs nothing and keeps the
+  # section byte-for-byte what it was, so no payload-revision bump.
+  mem.dma_busy = mem.dma_position > 0 and mem.dma_position <= 0xA0
 
 # ---- PPU (renderer-agnostic base state only, see file comment) ----
 

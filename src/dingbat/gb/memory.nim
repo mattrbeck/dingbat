@@ -169,11 +169,15 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8
 
+proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
+  ## Cold path: a CPU read issued while the OAM DMA unit is running. Kept out
+  ## of line so the common case is a predictable not-taken branch over a call.
+  if idx >= 0xFE00 and idx <= 0xFE9F: return 0xFF'u8
+  read_byte(mem, gb, idx)
+
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   mem_tick_components(mem, gb, 4)
-  if (mem.dma_position > 0 and mem.dma_position <= 0xA0) and
-     (idx >= 0xFE00 and idx <= 0xFE9F):
-    return 0xFF'u8
+  if mem.dma_busy: return mem_read_busy(mem, gb, idx)
   read_byte(mem, gb, idx)
 
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
@@ -226,10 +230,15 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)
   else: discard
 
+proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
+  ## Cold path counterpart of mem_read_busy.
+  if idx >= 0xFE00 and idx <= 0xFE9F: return
+  write_byte(mem, gb, idx, val)
+
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   mem_tick_components(mem, gb, 4)
-  if (mem.dma_position > 0 and mem.dma_position <= 0xA0) and
-     (idx >= 0xFE00 and idx <= 0xFE9F):
+  if mem.dma_busy:
+    mem_write_busy(mem, gb, idx, val)
     return
   write_byte(mem, gb, idx, val)
 
@@ -256,6 +265,7 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.current_dma_source = uint16(mem.dma) shl 8
         mem.dma_position       = 0
         mem.internal_dma_timer = 0
+        mem.dma_busy           = false
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
@@ -268,6 +278,9 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
             0xFE00 + mem.dma_position,
             read_byte(mem, gb, src))
         inc mem.dma_position
+        # dma_position is now >= 1, so this is exactly the old
+        # `dma_position > 0 and dma_position <= 0xA0` predicate.
+        mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
 proc stop_instr*(mem: GbMemory; gb: GB) =
