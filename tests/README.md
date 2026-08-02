@@ -70,6 +70,44 @@ Typical single run (mGBA suite, ~1.5 s when waitloop detection is healthy,
 ./dingbat_test /tmp/dingbat-test-roms/mgba-suite.gba --mode=mgba-suite --timeout=36000
 ```
 
+`DINGBAT_NO_WAITLOOP=1` turns idle-loop fast-forward off here as it does in
+`dingbat_bench`. The fast-forward SNAPS `scheduler.cycles` to the next pending
+event, so any suite row that measures a *spin loop* (the Misc "H-blank bit
+start" flips poll DISPSTAT and time the gaps with TM0) reads back the skip's
+sampling resolution, not the emulator's timing. Set it before concluding a row
+is a timing bug.
+
+### Reading mGBA-suite rows: the columns are swapped
+
+`doResult()` in the suite's sources takes `(preface, testName, value, expected)`
+but every caller passes `(…, expected[j], measured[j])`. So in
+`Foo: Got 0xAAA vs 0xBBB: FAIL` — and in the Actual/Expected columns of
+`results_mgba_suite.md`, which are parsed from it — **"Got" is the ROM's
+hardcoded hardware constant and "vs" is what dingbat measured.** Reading them
+the natural way inverts every conclusion.
+
+### The pinned suite ROM has two known-stale rows
+
+`dingbat_test_runner` pins `mattrbeck/mgba-suite-auto` **v1.0**, which predates
+two upstream fixture fixes and is built with a modern devkitARM. Both make rows
+fail that no emulator can pass:
+
+- `mgba-emu/suite@8c97f2c9` changed `dmaPrefetch`'s source array from `u32 a[8]`
+  to `vu32 a[8]`. Without `volatile` a modern gcc dead-store-eliminates the
+  initializer (its address only escapes into a volatile store), so the DMA
+  moves stack garbage and "DMA Prefetch Read" can never equal `0xDEAD0000`.
+- `mgba-emu/suite@a58437f3` re-measured the "H-blank bit start" constants for
+  modern gcc codegen: `{0x4D1, 0x85, 0x3EC, 0xE4, 0x3EC, 0xE4, 0x3F5}` became
+  `{0x4D0, 0x87, 0x3EC, 0xE5, 0x3EB, 0xE3, 0x3F3}`. v1.0 carries the old
+  constants with new codegen.
+
+Before treating a Misc row as an emulator bug, rebuild the suite (devkitARM is
+enough: `make` in a checkout of the fork with those two commits applied) and
+score against that. Against a corrected build dingbat is 9/10 on Misc; the
+remaining "DMA Prefetch Break" is a ROM-code-layout-dependent loop iteration
+count and is not comparable across builds at all. Bumping the pinned release is
+the real fix.
+
 `--mode=jsmolka` scores jsmolka/gba-tests. Every ROM in that suite reports
 through one protocol (`lib/macros.inc`): the verdict lives in `r12`, the ROM
 branches to a common `eval` on the **first** failing check with `r12` = that
