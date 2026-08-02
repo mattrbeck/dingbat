@@ -386,6 +386,9 @@ type
     bg_pixels_pushed*:    bool
     scx_penalty_remaining*: int
     m3_delay*:            int   # only read when M3_PIPE_DELAY > 0, see fifo_ppu
+    # The shifter still owes the tail of a line whose mode 0 flag is already
+    # up. Always false at M3_PIPE_DELAY = 0. See fetcher_retired.
+    m3_draining*:         bool
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

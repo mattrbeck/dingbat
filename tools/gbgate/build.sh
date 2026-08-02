@@ -22,7 +22,19 @@ build_one() {
   git -C "$REPO" archive "$ref" -o "$WORK/$slot.tar"
   tar -x -f "$WORK/$slot.tar" -C "$dir"
   rm -f "$WORK/$slot.tar"
-  ( cd "$dir" && TMPDIR="$WORK/tmp$slot" nimble bench_build ) >"$WORK/build-$slot.log" 2>&1
+  # `nim c` directly, NOT `nimble bench_build`: nimble reads the package's file
+  # list through `git ls-files`, and the tree above was extracted from a git
+  # archive, so it is not a repository and nimble aborts before it compiles
+  # anything. Keep this line in step with dingbat.nimble's bench_build task
+  # (-d:test_harness is a LINK flag first — see tests/README.md).
+  # GBGATE_FLAGS_A / GBGATE_FLAGS_B add per-slot compile flags, so one side can
+  # carry a `-d:` knob the other does not (e.g. -d:M3_PIPE_DELAY=3) without
+  # needing a commit for every value swept.
+  local extra
+  eval "extra=\${GBGATE_FLAGS_$slot:-}"
+  ( cd "$dir" && TMPDIR="$WORK/tmp$slot" \
+      nim c -d:test_harness -d:release --path:src $extra \
+        -o:dingbat_bench tests/dingbat_bench.nim ) >"$WORK/build-$slot.log" 2>&1
   if [ ! -x "$dir/dingbat_bench" ]; then
     echo "build $slot ($ref) FAILED, see $WORK/build-$slot.log" >&2
     exit 1

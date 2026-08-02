@@ -42,6 +42,8 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.sprite_fetch_phase = 0
   ppu.bg_pixels_pushed = false
   ppu.scx_penalty_remaining = 0
+  ppu.m3_delay = 0
+  ppu.m3_draining = false
   ppu.tile_num = 0
   ppu.tile_attrs = 0
   ppu.tile_data_low = 0
@@ -284,13 +286,40 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 
 # Idle dots injected at the head of mode 3, moving the whole fetch/shift
 # pipeline later against the CPU clock. 0 -- the shipping value -- compiles the
-# whole thing out; it exists so the mode-3 phase measurement in the KNOWN
-# RESIDUAL note below can be re-run (`-d:M3_PIPE_DELAY=n`, then score
-# gambatte/bgtiledata and gambatte/bgtilemap) rather than taken on trust.
+# pipeline half of it out.
 #
-# It is a MEASURING instrument, not a candidate fix: it defers the mode 0 flag
-# by the same n, which is what puts ~40 mooneye/GBMicrotest hblank-timing rows
-# red at any n > 0. See the note for what a shippable version has to do.
+# It USED to be a measuring instrument only, because it also deferred the mode
+# 0 flag by the same n and that put ~40 mooneye/GBMicrotest hblank-timing rows
+# red at any n > 0. It no longer does: the flag and the pipeline are separate
+# now (fetcher_retired / m3_draining below), so this knob moves the pixels
+# without moving a single mode boundary. Measured over n = 0..8 on 2026-08-02,
+# blargg 23/28, mooneye 112/115, mooneye-wilbertpol 79/117, GBMicrotest
+# 347/513, magen 6/7 and mGBA 6967/7008 do not move at ANY n. That is the
+# structural blocker gone, and it is what this commit is for.
+#
+# It still ships at 0, because turning it up is not yet a net win. What the
+# sweep says the phase itself costs, per value (gambatte total, then the rows
+# that move):
+#
+#   n  gambatte  results.md  notable
+#   0  3253      615 pass    (main)
+#   1  3247      615         age/m3-bg-lcdc-ds PASSES; window -7
+#   2  3250      615         bgtilemap 0->4, bgtiledata 0->1, m0enable +2
+#   3  3253      614         as n=2 plus scx_during_m3 +3, scy +5, sprites -2;
+#                            m3_scy_change 51.4->83.5, m3_bgp_change
+#                            74.8->84.2, m3_window_timing 92.1->95.7;
+#                            costs m3_scx_low_3_bits (the only row that goes
+#                            from green to a percentage)
+#   4  3250      614         indistinguishable from 3 on hardware grounds
+#   5+ 3228      614         m3_wx_4/5_change collapse (WIN_REACT_PHASE moves
+#                            with the phase; re-swept, 5 is still its best)
+#
+# n = 3 is where the gambatte total is exactly level with main and the mealybug
+# percentages are well up, and it is the value the bgtiledata/bgtilemap
+# staircase measurement asks for -- but it trades one green row for those, and
+# the two families it is aimed at still cannot pass while the double-speed
+# alignment (below) is unfixed. Not worth a real regression for a partial win,
+# so: structure now, phase when the rest of the fetch model is ready.
 const M3_PIPE_DELAY {.intdefine.} = 0
 
 proc window_reactivate(ppu: GbFifoPpu) =
@@ -374,6 +403,61 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
          int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
       window_reactivate(ppu)
 
+proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
+  ## Has the BG fetcher run out of work for this line? That -- not the last
+  ## pixel leaving the shifter -- is what ends mode 3 and hands VRAM back to
+  ## the CPU. At M3_PIPE_DELAY = 0 the two coincide and this is exactly the
+  ## `lx >= GB_WIDTH` test it replaces.
+  ##
+  ## The object terms are what make this a fetcher question rather than an lx
+  ## one: an object overlapping the last columns (X in 160..167 is partly on
+  ## screen, so it is a real fetch) still has to be read out of VRAM, and mode
+  ## 3 has to stretch to cover it exactly as it does for an object anywhere
+  ## else on the line. They are only asked once the shifter is inside the last
+  ## M3_PIPE_DELAY pixels, so they cost nothing on the other 152.
+  when M3_PIPE_DELAY == 0:
+    # Nothing below can be reached with a zero lead, and this is the mode 3
+    # loop's condition -- spell the degenerate case out rather than trust the
+    # optimiser to fold three branches back into the one compare it replaces.
+    ppu.lx >= GB_WIDTH
+  else:
+    if ppu.lx < GB_WIDTH - M3_PIPE_DELAY: return false
+    if ppu.lx >= GB_WIDTH: return true
+    not ppu.fetching_sprite and
+      (ppu.sprites.len == 0 or int(ppu.lx) + 8 < int(ppu.sprites[0].x))
+
+proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB; drained = false) {.inline.} =
+  ## One dot of the fetch/shift pipeline, wherever in the line it falls --
+  ## mode 3, or the tail of the line that runs on into H-Blank.
+  ##
+  ## `drained` says the fetcher has already retired, which is the whole
+  ## content of the mode 0 flag: from here the shifter runs on what is already
+  ## in the FIFO and the fetcher does NOT touch VRAM again. Letting it keep
+  ## fetching instead is not a detail -- it re-reads SCX and the LCDC selects
+  ## for a tile the CPU is now free to move under it, and mealybug
+  ## m3_scx_low_3_bits (which rewrites SCX the moment H-Blank starts) sees the
+  ## difference immediately. The fetcher is only woken again if the FIFO turns
+  ## out not to cover the rest of the line, which the line-end rule makes rare
+  ## but does not forbid.
+  when M3_PIPE_DELAY > 0:
+    if ppu.m3_delay > 0:
+      dec ppu.m3_delay
+      return
+    if drained and ppu.fifo.size > 0:
+      tick_shifter(ppu, gb)
+      return
+  when defined(gb_m3_trace):
+    if int(ppu.ly) == GB_TRACE_LY:
+      echo "DOT ", ppu.cycle_counter, " stage=",
+           FETCHER_ORDER[ppu.fetch_counter], " lx=", ppu.lx,
+           " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
+           " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
+           " tn=", toHex(ppu.tile_num, 2), " mode=", ppu.mode_flag
+  if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
+  else:
+    tick_bg_fetcher(ppu, gb)
+    tick_shifter(ppu, gb)
+
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
   ## out of fifo_tick so the idle case (below) inlines into the caller; the
@@ -397,12 +481,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if m == 2: 80'i32
           elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
           else: 456'i32
-        if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
+        if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153) and
+           (M3_PIPE_DELAY == 0 or not ppu.m3_draining):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
           remaining -= skip
           continue
-      elif ppu.lx < GB_WIDTH:
+      elif not fetcher_retired(ppu):
         # Mode 3 is the one mode with genuine per-dot work, so it cannot be
         # collapsed the way the skip above collapses the other three — but it
         # does not need the mode re-decoded on every one of its ~26,000 dots a
@@ -431,16 +516,34 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # go red, and m3_wx_4/5_change collapse (the re-trigger phase moves
         # with lx). So the offset is real but the crude fix is not shippable.
         #
-        # A shippable version has to decouple the two: keep the mode 0
-        # transition on its present dot budget (172 + SCX&7 + object
-        # penalties, which mooneye pins and hblank_ly_scx_timing-GS now
-        # checks) while starting the fetch/shift pipeline 8 dots later. That
-        # means mode 3's last 8 pixels are produced after the flag has already
-        # read 0 -- which now also has to answer to the CPU VRAM/OAM locks --
-        # so it is a restructure of this loop, not a constant. Nobody should
-        # attempt it without the 2613-title byte-identical library sweep
-        # (tools/gbfuzz) as the gate: it moves every mid-scanline write in
-        # every GB game by 8 dots.
+        # ---- That decoupling is DONE, 2026-08-02 -------------------------
+        # The flag and the pipeline are no longer the same event. Mode 3 now
+        # ends when the FETCHER retires (fetcher_retired), which is
+        # M3_PIPE_DELAY pixels before the shifter finishes the line; those last
+        # pixels come out during H-Blank, off the FIFO, with the fetcher
+        # already parked (m3_draining). Mode 3's length is arithmetically
+        # unchanged -- the head delay and the early flag are the same n and
+        # cancel -- which is why blargg, mooneye, mooneye-wilbertpol,
+        # GBMicrotest, MagenTests and the mGBA suite are byte-for-byte
+        # identical at every n from 0 to 8, where the old coupled version put
+        # ~40 rows red at any n > 0.
+        #
+        # Two deliberate choices inside it:
+        #  * The CPU VRAM/OAM locks keep reading the LIVE mode, so they open
+        #    with the flag, at the dot they always did. The pixels still being
+        #    shifted out after that point never touch VRAM again -- that is
+        #    exactly what "the fetcher retired" means, and it is enforced
+        #    (fifo_pipeline_dot's `drained`) rather than assumed. Letting the
+        #    fetcher run on into H-Blank instead re-reads SCX and the LCDC
+        #    selects for a tile the CPU is now free to move, which mealybug
+        #    m3_scx_low_3_bits catches within one line.
+        #  * An object overlapping the last columns (X 160..167) is a real
+        #    fetch, so it holds mode 3 open exactly as an object anywhere else
+        #    does; the flag waits for it. Without that term the object penalty
+        #    would silently vanish for the right-hand edge of the screen.
+        #
+        # What is NOT done is the phase itself: M3_PIPE_DELAY still ships at 0.
+        # See its declaration for the per-value cost table and why.
         #
         # ---- The constant is 3-4 dots for the FETCHER, not 8 -------------
         # Re-measured 2026-08-02 against gambatte/bgtiledata (0/34) and
@@ -487,24 +590,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         #    the fetch phase is short even though mooneye's mode-3 LENGTH
         #    penalty passes, which is the same flag-vs-pipeline decoupling
         #    again, seen from the other end.
-        while remaining > 0 and ppu.lx < GB_WIDTH:
-          when M3_PIPE_DELAY > 0:
-            if ppu.m3_delay > 0:
-              dec ppu.m3_delay
-              ppu.cycle_counter += 1
-              dec remaining
-              continue
-          when defined(gb_m3_trace):
-            if int(ppu.ly) == GB_TRACE_LY:
-              echo "DOT ", ppu.cycle_counter, " stage=",
-                   FETCHER_ORDER[ppu.fetch_counter], " lx=", ppu.lx,
-                   " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
-                   " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
-                   " tn=", toHex(ppu.tile_num, 2)
-          if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
-          else:
-            tick_bg_fetcher(ppu, gb)
-            tick_shifter(ppu, gb)
+        while remaining > 0 and not fetcher_retired(ppu):
+          fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
           dec remaining
         continue
@@ -524,20 +611,29 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
       of 3:  # Drawing
-        # Mode 3 ends the dot AFTER the 160th pixel is shifted out (lx reaches
-        # GB_WIDTH), not on the same dot. Deferring the mode 0 transition by one
-        # dot makes mode 3 the hardware-correct 172 dots for SCX=0 (was 171)
-        # without changing any rendered pixel.
-        if ppu.lx >= GB_WIDTH:
+        # Mode 3 ends the dot AFTER the fetcher retires, not on the same dot.
+        # Deferring the mode 0 transition by one dot makes mode 3 the
+        # hardware-correct 172 dots for SCX=0 (was 171) without changing any
+        # rendered pixel. At M3_PIPE_DELAY > 0 the shifter is still M3_PIPE_
+        # DELAY pixels from the end of the line here; they come out during
+        # H-Blank (see m3_draining).
+        if fetcher_retired(ppu):
+          # Armed before the flag, not after: `mode_flag=` runs an HBlank HDMA
+          # block inline and that block ticks the PPU, and those nested ticks
+          # are real dots that have to drain the pipeline like any other.
+          when M3_PIPE_DELAY > 0:
+            ppu.m3_draining = ppu.lx < GB_WIDTH
           ppu.`mode_flag=`(0'u8, gb)
-        elif M3_PIPE_DELAY > 0 and ppu.m3_delay > 0:
-          dec ppu.m3_delay
-        elif ppu.fetching_sprite:
-          tick_sprite_fetcher(ppu, gb)
         else:
-          tick_bg_fetcher(ppu, gb)
-          tick_shifter(ppu, gb)
+          fifo_pipeline_dot(ppu, gb)
       of 0:  # H-Blank
+        # The tail of the line: the mode 0 flag went up when the FETCHER
+        # retired, and the shifter is still M3_PIPE_DELAY pixels behind it.
+        # Those pixels are emitted here, in the first dots of H-Blank.
+        when M3_PIPE_DELAY > 0:
+          if ppu.m3_draining:
+            fifo_pipeline_dot(ppu, gb, drained = true)
+            if ppu.lx >= GB_WIDTH: ppu.m3_draining = false
         # CGB raises the line-144 mode 2 STAT source one M-cycle before the
         # line ends (see m2_line144). The source is level-triggered off the
         # dot counter, but nothing else happens on this dot, so the edge
@@ -575,6 +671,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
+    # An LCD switched off mid-line drops the tail with everything else; the
+    # flag has to go with it or the idle-span fast path stays disabled for the
+    # rest of the run (see fifo_tick).
+    ppu.m3_draining = false
     lcd_off_frame(ppu, gb)
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
@@ -619,7 +719,11 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the
     # next entry, where cycle_counter == target fails `cycle_counter < target`.
-    if next <= target and (m != 1 or ppu.ly != 153):
+    # `M3_PIPE_DELAY == 0 or` is a compile-time short circuit, not a runtime
+    # test: with no lead there is never a tail to protect, and this guard is on
+    # the single hottest path in the PPU (see the comment above).
+    if next <= target and (m != 1 or ppu.ly != 153) and
+       (M3_PIPE_DELAY == 0 or not ppu.m3_draining):
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)
