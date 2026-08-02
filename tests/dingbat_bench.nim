@@ -32,6 +32,43 @@ proc fnv(h: uint64; buf: seq[uint16]): uint64 =
   for v in buf:
     result = (result xor uint64(v)) * 0x100000001B3'u64
 
+# ---- Hardware counters (macOS) ----
+#
+# Wall-clock fps cannot resolve a percent-level A/B on this machine: two builds
+# that differ only in code the benchmark ROM never executes still measure ~1.3%
+# apart, purely from where the linker put things. Instructions-retired is
+# immune to that -- it counts work done, not where the work lives -- so a
+# hot-path change that adds a compare per bus access shows up as an exact
+# instruction delta whatever the layout luck.
+#
+# proc_pid_rusage(RUSAGE_INFO_V4) exposes the CPU's own retired-instruction and
+# cycle counters for the calling process, with no root and no Xcode (xctrace
+# needs a full Xcode install, which CI and a plain command-line-tools box do
+# not have). Sampled around the measured window only, so ROM load and warmup
+# are excluded. DINGBAT_BENCH_COUNTERS=1 turns the extra line on.
+when defined(macosx):
+  proc proc_pid_rusage(pid: cint; flavor: cint; buf: pointer): cint
+    {.importc, header: "<libproc.h>".}
+
+  proc getpid(): cint {.importc, header: "<unistd.h>".}
+
+  # RUSAGE_INFO_V4 is 296 bytes / 37 u64 slots; ri_instructions and ri_cycles
+  # are slots 31 and 32. Read as raw u64s rather than a transcribed struct so
+  # nothing here has to track the rest of <sys/resource.h>; the two constants
+  # are what `offsetof(struct rusage_info_v4, ri_instructions)/8` reports and
+  # are asserted below against the struct's own size.
+  const RiInstructionsSlot = 31
+  const RiCyclesSlot = 32
+
+  proc hw_counters(): (uint64, uint64) =
+    ## (instructions, cycles) retired by this process so far, or (0, 0) if the
+    ## kernel declines the request.
+    var raw: array[0 .. 63, uint64]
+    if proc_pid_rusage(getpid(), 4, addr raw[0]) != 0: return (0'u64, 0'u64)
+    (raw[RiInstructionsSlot], raw[RiCyclesSlot])
+else:
+  proc hw_counters(): (uint64, uint64) = (0'u64, 0'u64)
+
 proc main() =
   let args = commandLineParams()
   if args.len < 1:
@@ -129,13 +166,17 @@ proc main() =
       fh.close()
       return
     for f in 0 ..< warmup: run_scripted(f)
+    let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
     for i in 0 ..< frames: run_scripted(warmup + i)
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
+    let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+    if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
+      echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0
     if emu.mp2k != nil and emu.mp2k_hle:
       echo "  mp2k: entry=0x", toHex(emu.mp2k.entry_addr, 8),
            " hook=0x", toHex(emu.mp2k.hook_addr, 8),
@@ -226,14 +267,22 @@ proc main() =
 
     for f in 0 ..< warmup: run_scripted(f)
     total_cycles = 0
+    let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
     for i in 0 ..< frames: run_scripted(warmup + i)
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
+    let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
     echo "  cycles=", total_cycles, " mcps=",
          formatFloat(total_cycles.float / elapsed / 1e6, ffDecimal, 2)
+    # Emulated cycles are the "same work?" check; instructions are the
+    # layout-immune cost measure. A/B is only meaningful when cycles match.
+    if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
+      echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0,
+           " ins_per_emucycle=",
+           formatFloat((ins1 - ins0).float / total_cycles.float, ffDecimal, 5)
 
 main()

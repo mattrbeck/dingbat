@@ -243,7 +243,37 @@ proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   # No collision, so this is an ordinary CPU read and still owes the PPU's lock.
   mem_read_open(mem, gb, idx)
 
-proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
+# mem_read/mem_write are reached from ~160 generated opcode bodies, and clang's
+# inline-cost heuristic puts them right on its threshold: adding or removing a
+# single compare on their hot path flips the decision for a large, arbitrary
+# subset of those call sites. Measured on this tree, that cliff is worth ~0.9%
+# of all retired instructions -- more than twice the cost of everything the OAM
+# DMA model and the PPU's CPU lock put on this path combined (0.37% + 0.35%,
+# measured additively with the decision pinned). Left to the heuristic it is a
+# coin flip re-tossed by every future edit here, which is exactly how a hot-path
+# change comes to measure as a 1-2% "regression" that has nothing to do with the
+# work it added.
+#
+# So the decision is made here instead of being inherited. always_inline rather
+# than a bare `inline` hint because the hint is what the heuristic is already
+# free to ignore; the cost is +568 bytes of __text, and both a DMG and a CGB
+# title retire ~0.9% fewer instructions (see docs/gb_oam_dma_cost.md).
+# Scoped to clang deliberately, and it is the weaker-looking guard that is the
+# careful one. GCC treats a failed always_inline as a hard ERROR rather than a
+# dropped hint, so the attribute on a proc with ~160 call sites is a build that
+# either works or does not exist -- and the gcc/mingw side of this (Linux and
+# Windows CI) cannot be compiled here to find out. Those targets keep a plain
+# `inline`, which is the same hint they effectively have today and cannot fail
+# to build. macOS, iOS and the emscripten web build are all clang, so the
+# measured win lands where the shipping builds are; if the wasm toolchain is
+# not detected as clang it simply falls back with nothing lost.
+when defined(clang):
+  {.pragma: hot_bus_inline,
+    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+else:
+  {.pragma: hot_bus_inline, inline.}
+
+proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   mem_tick_components(mem, gb, 4)
   # A running DMA owns the bus, so it is decided first and it decides
   # everything: a CPU access it collides with never reaches memory at all, and
@@ -347,7 +377,7 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   # No collision, so this is an ordinary CPU write and still owes both locks.
   mem_write_open(mem, gb, idx, val)
 
-proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
+proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   mem_tick_components(mem, gb, 4)
   # Same ordering as mem_read: the bus owner decides first.
   if mem.dma_busy:
