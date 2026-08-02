@@ -85,19 +85,18 @@ proc irq*(cpu: CPU) =
     cpu.cpsr.irq_disable = true
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
-    # Exception-entry overhead beyond the pipeline refill (calibrated against
-    # the mGBA suite Timer IRQ tests). An IRQ that wakes the CPU out of halt
-    # vectors 2 cycles faster: there is no in-flight instruction to complete
-    # (calibrated against the mGBA suite Timer count-up tests under the
-    # official BIOS, where the IntrWait resume phase must be exact modulo
-    # the free-running timer prescaler)
-    if not cpu.halt_wake:
-      # If the preceding instruction was an exception return, its pipeline
-      # refill overlaps the IRQ vector fetch on hardware: one of the two refill
-      # fetches is shared, so a back-to-back re-entry is 1 cycle cheaper. This
-      # is what makes the count-up test's overflow->IRQ->return->IRQ chain
-      # accumulate the correct frozen timer value.
-      cpu.gba.bus.add_cycles(if cpu.last_instr_exc_return: 1 else: 2)
+    # Exception-entry overhead beyond the pipeline refill. The ARM7TDMI data
+    # sheet costs an exception entry at 2S+1N and the matching return (a
+    # data-processing write to r15 with the S bit) at 2S+1N, so the pair costs
+    # six cycles on top of the handler body; the two refills the pipeline model
+    # already charges account for four of them. How the remaining two split
+    # between entry and return is what the mGBA suite pins, and it is not even:
+    # the handler's first instruction runs FOUR cycles after the interrupted
+    # instruction's boundary (Timer IRQ tests; three fails 21 of the 90 rows),
+    # which leaves one cycle - not two - for the return (see
+    # exception_return_restore). Unconditional: this is the vector sequence
+    # itself, so it does not vary with what the CPU was doing beforehand.
+    cpu.gba.bus.add_cycles(2)
 
 proc und*(cpu: CPU) =
   # ARM7TDMI Undefined Instruction trap: LR_und holds the address of the
@@ -423,7 +422,6 @@ proc tick*(cpu: CPU) =
         cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
         cpu.set_sys_sp(usp)
   if not cpu.halted:
-    cpu.instr_exc_return = false
     # EXPLORATORY: audio-HLE mixer hooks (MP2K's runtime-learned SoundMainRAM
     # entry, its bounded learning probe, and the Camelot "Bon" entry). All
     # three fire at most once per frame but sat on the per-instruction path,
@@ -481,7 +479,6 @@ proc tick*(cpu: CPU) =
     # scheduler.tick so a DMA fired at this instruction's boundary arms the
     # latch for the NEXT instruction.
     cpu.gba.bus.dma_open_bus_armed = false
-    cpu.last_instr_exc_return = cpu.instr_exc_return
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
     when defined(pcprofile):
