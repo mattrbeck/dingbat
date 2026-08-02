@@ -205,8 +205,15 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ppu.fetching_sprite =
     ppu.sprites.len > 0 and ppu.sprites[0].x == s.x
   if ppu.fetching_sprite:
-    # Skip BG fetcher advancement for same-X sprite; jump to tile data fetch
-    ppu.sprite_fetch_phase = 3
+    # A second object at the same X does not re-run the BG-fetcher wait (the
+    # fetcher is already parked), but it still pays its own full object fetch.
+    # That fetch is 6 dots -- 2 to put the tile row address on the bus and 2 for
+    # each of the two data bytes -- so the same-X repeat costs 6, not the 2 that
+    # phases 3+4 alone would charge. mooneye
+    # acceptance/ppu/intr_2_mode0_timing_sprites measures 1..10 objects stacked
+    # at X=0 and its expectations step by exactly 6 dots per extra object.
+    ppu.fetch_counter_sprite = 0
+    ppu.sprite_fetch_phase = 7
 
 proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   ## Multi-phase sprite fetch state machine.
@@ -252,6 +259,12 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
     dec ppu.scx_penalty_remaining
     if ppu.scx_penalty_remaining <= 0:
       ppu.sprite_fetch_phase = 1
+  of 7:
+    # Same-X repeat: the 4 dots that phases 3+4 do not cover (see
+    # sprite_fetch_merge).
+    inc ppu.fetch_counter_sprite
+    if ppu.fetch_counter_sprite >= 4:
+      ppu.sprite_fetch_phase = 3
   else:
     ppu.fetching_sprite = false
 
@@ -263,6 +276,52 @@ proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool 
     else:
       sp_px.obj_to_bg == 0 or bg_px.color == 0
   else: false
+
+# Which of the eight fetcher positions the window's re-trigger edge survives
+# on. See window_reactivate; overridable so the sweep that picked it can be
+# re-run against the three m3_wx_*_change ROMs.
+const WIN_REACT_PHASE {.intdefine.} = 5
+
+proc window_reactivate(ppu: GbFifoPpu) =
+  ## WX was re-reached while the window was ALREADY the active fetch source.
+  ##
+  ## The window does not restart here: the window tile position and
+  ## current_window_line both carry on, and the rest of the line is the same
+  ## pixels it would otherwise have been. What the re-trigger edge does is
+  ## inject ONE pixel of colour 0 at the lowest priority in front of whatever
+  ## the BG FIFO is holding, displacing the remainder of the line one pixel to
+  ## the right. mealybug m3_wx_4_change's reference is exactly our old output
+  ## with a single extra colour-0 pixel spliced in at WX-7, which is what
+  ## fixes the position; that it is colour 0 rather than a shade is what lets
+  ## an OBJ-behind-BG sprite show through it, which is what m3_wx_4_change
+  ## _sprites checks (its reference shows the sprite's grey at that pixel, not
+  ## the palette-0 shade).
+  ##
+  ## The edge is swallowed on seven fetcher steps out of eight -- mealybug
+  ## drives WX from LY, so the re-trigger walks one pixel per line, and the
+  ## artifact shows up on one line in eight. The ROM's own comment names the
+  ## surviving step as the window tile-map (nametable) read. WHICH of this
+  ## model's eight fetch_counter positions that read corresponds to is a
+  ## property of this renderer's phase (the discarded first fetch and the
+  ## extra Get-Tile-Data-High push both shift it), not something Pan Docs
+  ## fixes, so it was settled by sweeping all eight against m3_wx_4_change,
+  ## m3_wx_4_change_sprites and m3_wx_5_change: position 5 is the unique best
+  ## on all three at once (229/10/638 mismatching pixels -> 53/4/142).
+  ##
+  ## That fetcher-position test is the CALLER's FIRST term rather than this
+  ## proc's, because it is by far the most selective one -- true on one dot in
+  ## eight, against a field the fetcher wrote on this same dot. Leading with it
+  ## keeps seven eighths of the dots of an active window off the WX comparison
+  ## altogether, which is what makes the whole rule free on a window-heavy
+  ## screen (dmg-acid2 measured +1.3% with the WX compare leading, +0.2% --
+  ## the noise floor -- with the position test leading).
+  # Unshift, not push: the pixel is consumed by the very next dot, so it has to
+  # go in front of the FIFO's head. Depth is 16 and the FIFO never holds more
+  # than 8, so the extra entry cannot collide with the tail.
+  ppu.fifo.head = (ppu.fifo.head - 1) and 15
+  ppu.fifo.data[ppu.fifo.head] =
+    GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+  inc ppu.fifo.size
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
@@ -295,10 +354,14 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     # Same conjunction, cheapest and most selective terms first: two plain
     # bool fields reject almost every dot before any register decode or
     # comparison runs. All five terms are side-effect-free reads.
-    if not ppu.fetching_window and ppu.window_trigger and
-       window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-       int(ppu.lx) + 7 >= int(ppu.wx):
-      fifo_reset_bg(ppu, true)
+    if not ppu.fetching_window:
+      if ppu.window_trigger and
+         window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
+         int(ppu.lx) + 7 >= int(ppu.wx):
+        fifo_reset_bg(ppu, true)
+    elif ppu.fetch_counter == WIN_REACT_PHASE and
+         int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
+      window_reactivate(ppu)
 
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
@@ -319,7 +382,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       # so it still fires on exactly the dot it used to.
       let m = ppu.mode_flag
       if m != 3:
-        let target = if m == 2: 80'i32 else: 456'i32
+        let target =
+          if m == 2: 80'i32
+          elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+          else: 456'i32
         if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
@@ -368,9 +434,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           tick_bg_fetcher(ppu, gb)
           tick_shifter(ppu, gb)
       of 0:  # H-Blank
-        if ppu.cycle_counter == 456:
+        # CGB raises the line-144 mode 2 STAT source one M-cycle before the
+        # line ends (see m2_line144). The source is level-triggered off the
+        # dot counter, but nothing else happens on this dot, so the edge
+        # detector has to be run here explicitly; the skip target above stops
+        # the idle jump on it so this dot is actually visited.
+        if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
+           gb.cgb_enabled:
+          ppu_handle_stat_interrupt(ppu, gb)
+        elif ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           ppu.ly += 1
+          ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
           if int(ppu.ly) == GB_HEIGHT:
             ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
@@ -383,7 +458,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       of 1:  # V-Blank
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
-          if ppu.ly != 0: ppu.ly += 1
+          if ppu.ly != 0:
+            ppu.ly += 1
+            ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
           ppu_handle_stat_interrupt(ppu, gb)
           if ppu.ly == 0:
             ppu.`mode_flag=`(2'u8, gb)
@@ -426,7 +503,14 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # An LCD that is off also falls through -- that path re-asserts mode 0 and
   # drives the blank-frame clock every tick.
   if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
-    let target = if m == 2: 80'i32 else: 456'i32
+    # Line 143's mode 0 is the one H-Blank with something to do before dot 456
+    # (the CGB early mode 2 STAT, see m2_line144), so it gets the shorter
+    # target. `ppu.ly == 143` is first because it is false on 153 of every 154
+    # lines, which keeps the added cost of this case to one compare.
+    let target =
+      if m == 2: 80'i32
+      elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+      else: 456'i32
     let next = ppu.cycle_counter + int32(cycles)
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the

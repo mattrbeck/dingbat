@@ -205,6 +205,21 @@ proc dma_drive_of*(gb: GB; idx: int): uint8 {.inline.} =
   of 0xC000..0xFDFF: (if console_is_cgb(gb): DriveIsolated else: DriveSource)
   else:              DriveTristate
 
+proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
+  ## A CPU read that actually reaches the bus, with the PPU's own lock applied.
+  ##
+  ## Only the CPU comes through here: mem_read/mem_write are the CPU's entry
+  ## points, while the OAM DMA unit and HDMA drive the bus themselves and go
+  ## straight to read_byte/write_byte. That is the whole of the CPU-vs-DMA
+  ## distinction, and it is why this lives here rather than in ppu_read — the
+  ## DMA unit reaches VRAM through read_byte and must keep its access.
+  ##
+  ## OAM has no counterpart here because its read lock sits inside ppu_read,
+  ## where cpu_oam_open's read/write asymmetry is already handled.
+  if (idx and 0xE000) == 0x8000 and not cpu_vram_open(gb.ppu, is_write = false):
+    return 0xFF'u8
+  read_byte(mem, gb, idx)
+
 proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   ## Cold path: a CPU read issued while the OAM DMA unit is running. Kept out
   ## of line so the common case is a predictable not-taken branch over a call.
@@ -225,12 +240,19 @@ proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
     if mem.dma_drive == DriveZero:
       ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, 0'u8)
     return mem.dma_latch
-  read_byte(mem, gb, idx)
+  # No collision, so this is an ordinary CPU read and still owes the PPU's lock.
+  mem_read_open(mem, gb, idx)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   mem_tick_components(mem, gb, 4)
+  # A running DMA owns the bus, so it is decided first and it decides
+  # everything: a CPU access it collides with never reaches memory at all, and
+  # one it does not collide with is an ordinary CPU access (mem_read_busy falls
+  # through to the same mem_read_open). The old three-term OAM predicate
+  # this replaced is subsumed by mem_read_busy, which answers 0xFF for the whole
+  # OAM page rather than just 0xFE00-0xFE9F.
   if mem.dma_busy: return mem_read_busy(mem, gb, idx)
-  read_byte(mem, gb, idx)
+  mem_read_open(mem, gb, idx)
 
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.dma         = source
@@ -282,6 +304,19 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)
   else: discard
 
+proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
+  ## Counterpart of mem_read_open: a CPU write that reaches the bus. Dropped
+  ## rather than deferred when the window is shut, and only for the CPU — the
+  ## OAM DMA unit writes OAM through write_byte and must not be locked out of
+  ## it. Both locks are here, unlike the read side, because ppu_write has no
+  ## OAM lock of its own (a write samples the latched mode, a read the live one
+  ## — see cpu_oam_open).
+  if (idx and 0xE000) == 0x8000:
+    if not cpu_vram_open(gb.ppu, is_write = true): return
+  elif idx >= 0xFE00 and idx <= 0xFE9F:
+    if not cpu_oam_open(gb.ppu, is_write = true): return
+  write_byte(mem, gb, idx, val)
+
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   ## Cold path counterpart of mem_read_busy — the same collision seen from the
   ## other side. A CPU write onto the bus the DMA owns never reaches its
@@ -309,14 +344,16 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
       mem.dma_latch = driven
       ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, driven)
     return
-  write_byte(mem, gb, idx, val)
+  # No collision, so this is an ordinary CPU write and still owes both locks.
+  mem_write_open(mem, gb, idx, val)
 
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   mem_tick_components(mem, gb, 4)
+  # Same ordering as mem_read: the bus owner decides first.
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
     return
-  write_byte(mem, gb, idx, val)
+  mem_write_open(mem, gb, idx, val)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
   # The address bus is 16 bits: a word access at $FFFF reaches $0000 for its
