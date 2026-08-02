@@ -23,6 +23,18 @@ type
   # specific hardware revision) can be driven by the test harness via --model.
   # Sources: mooneye-test-suite acceptance/misc boot_regs-*.s / boot_div-*.s
   # asserts, and Pan Docs "Power-Up Sequence".
+  # The three buses an OAM DMA can own, and that a CPU access can collide with.
+  # Pan Docs "OAM DMA bus conflicts" states the separation for the CGB
+  # ("the cartridge and WRAM are on separate buses"), and the memory map plus
+  # the PPU's dedicated video bus (Pan Docs "Accessing VRAM and OAM") give the
+  # third. On DMG, WRAM hangs off the same external bus as the cartridge, which
+  # is why the DMG advice degenerates to "the CPU can access only HRAM".
+  GbDmaBus* = enum
+    dbNone      # OAM / unusable / IO / HRAM / IE — never conflicts
+    dbExternal  # cartridge ROM $0000-$7FFF and cartridge SRAM $A000-$BFFF
+    dbVideo     # VRAM $8000-$9FFF
+    dbWram      # WRAM + echo $C000-$FDFF (CGB only; DMG folds it into dbExternal)
+
   GbBootModel* = enum
     bmDmg0       # original DMG (no serial number)
     bmDmgABC     # DMG rev A/B/C  (dingbat default DMG)
@@ -493,6 +505,21 @@ type
     dma_position*:         int
     requested_oam_dma*:    bool
     next_dma_counter*:     uint8
+    # Derived from dma_position, maintained by mem_dma_tick: true for exactly
+    # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit
+    # owns a bus. Every CPU read and write tests it, so it is one bool load
+    # instead of the pair of range compares that used to sit on that path; it
+    # is a cache of existing state, not new state (see gb_recompute_dma_derived).
+    dma_busy*:             bool
+    # Which bus the running OAM DMA owns (a GbDmaBus ordinal), the byte it last
+    # put on that bus, and what the source memory does to the data lines when
+    # the CPU writes over them (a Drive* constant). All three are derived: the
+    # bus and drive class from current_dma_source, the latch from the source
+    # memory at dma_position-1.
+    dma_bus*:              uint8
+    dma_latch*:            uint8
+    dma_drive*:            uint8
+    dma_openbus*:          bool
     requested_speed_switch*: bool
     current_speed*:        uint8
 

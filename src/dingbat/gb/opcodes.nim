@@ -1376,7 +1376,6 @@ var UNPREFIXED* = [
 
   # 0xED UNDEFINED — locks the CPU up (Pan Docs); see cpu_lock
   proc(cpu: GbCpu; gb: GB): int =
-<<<<<<< HEAD
     cpu_inc_pc(cpu)
     when defined(test_harness):
       # wilbertpol's fork of the Mooneye suite is built against mooneye-gb as it
