@@ -307,8 +307,14 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ## fixes, so it was settled by sweeping all eight against m3_wx_4_change,
   ## m3_wx_4_change_sprites and m3_wx_5_change: position 5 is the unique best
   ## on all three at once (229/10/638 mismatching pixels -> 53/4/142).
-  if ppu.fetch_counter != WIN_REACT_PHASE:
-    return
+  ##
+  ## That fetcher-position test is the CALLER's FIRST term rather than this
+  ## proc's, because it is by far the most selective one -- true on one dot in
+  ## eight, against a field the fetcher wrote on this same dot. Leading with it
+  ## keeps seven eighths of the dots of an active window off the WX comparison
+  ## altogether, which is what makes the whole rule free on a window-heavy
+  ## screen (dmg-acid2 measured +1.3% with the WX compare leading, +0.2% --
+  ## the noise floor -- with the position test leading).
   # Unshift, not push: the pixel is consumed by the very next dot, so it has to
   # go in front of the FIFO's head. Depth is 16 and the FIFO never holds more
   # than 8, so the extra entry cannot collide with the tail.
@@ -353,7 +359,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
          window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
          int(ppu.lx) + 7 >= int(ppu.wx):
         fifo_reset_bg(ppu, true)
-    elif int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
+    elif ppu.fetch_counter == WIN_REACT_PHASE and
+         int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
       window_reactivate(ppu)
 
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
