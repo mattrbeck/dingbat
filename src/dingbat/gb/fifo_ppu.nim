@@ -22,6 +22,10 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
   )
+  when STAT_MODE_HOLD:
+    result.stat_mode      = base.stat_mode
+    result.stat_prev_mode = base.stat_prev_mode
+    result.stat_lag_cc    = base.stat_lag_cc
 
 method reset_render_scratch*(ppu: GbFifoPpu) =
   ## Clear the FIFO/fetcher scratch to its clean pre-line state so a state
@@ -690,6 +694,7 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # from two M-cycles ago).
   let m = ppu.lcd_status and 3'u8
   ppu.read_mode = m
+  when STAT_MODE_HOLD: ppu_latch_stat_mode(ppu, m)
   # Counted on both paths: the panel's refresh clock runs whether or not the
   # PPU is driving it (see ppu_blank_frame).
   ppu.dots_since_frame += int32(cycles)

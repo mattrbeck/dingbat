@@ -7,6 +7,10 @@ import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
+# Declared here rather than next to its write-up in gb/ppu.nim only because
+# the GbPpu fields it gates are in the type block below. See ppu.nim.
+const STAT_MODE_HOLD* {.booldefine.} = false
+
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
 
@@ -355,6 +359,15 @@ type
     # its own field keeps the per-M-cycle cost at the one store the latch
     # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
+    when STAT_MODE_HOLD:
+      # Scratch for the STAT_MODE_HOLD experiment (ppu.nim): one more M-cycle
+      # of lag on STAT's mode bits than `read_mode` carries. Gone entirely
+      # from the shipping build, so GbPpu's layout is untouched by the knob
+      # existing. `stat_lag_cc` is the cycle_counter value at which
+      # `stat_prev_mode` is still the latched value, or STAT_LAG_NONE.
+      stat_mode*:          uint8
+      stat_prev_mode*:     uint8
+      stat_lag_cc*:        int32
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off

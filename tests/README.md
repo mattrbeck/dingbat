@@ -383,6 +383,26 @@ scales with double speed, and the difference between the two is the whole
 normal-vs-double-speed write alignment. Both are declared, with the staircase
 measurement and the cost of turning them up, in `src/dingbat/gb/fifo_ppu.nim`.
 
+**Debugging a STAT-timing row.** The `m2int_*`, `m0int_*`, `lycm2int`,
+`m2enable` and `halt` families all have the same shape: a STAT interrupt as
+the anchor, a run of NOPs in the handler, one `LD A,(FF00+C)` on STAT or IF,
+and a sibling ROM whose NOP count differs by one. So a *family* brackets the
+boundary to the M-cycle, and the useful question is never "what did this row
+print" but "which M-cycle did the read land in, and what was the mode then".
+`-d:gb_stat_read_trace` answers both: it prints `ly`/`cycle_counter` plus the
+latched and live modes at every `$FF41` read, and one line per STAT interrupt
+raised. Note `cycle_counter` is the dot being *entered*, so a read printed at
+`cc=85` belongs to the tick that just covered dots 81..84 — reads happen after
+`mem_read` has already ticked the M-cycle. Pair it with the ROM itself: these
+are hand-written, the vector at `$0048` is a `JP`, and the handler is a run of
+`$00`s ending in `F2` — `d.find(b'\xf2', 0x1000) - 0x1000` is the NOP count,
+which is the whole difference between the siblings.
+
+The two open constants that shape those rows are `STAT_MODE_HOLD` (how far
+STAT's mode bits lag the internal mode) and `CGB_BOOT_PHASE` (which decides
+whether the CGB's dot grid lands on the CPU's M-cycle grid the same way the
+DMG's does), both in `src/dingbat/gb/ppu.nim`.
+
 **Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
 its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
 `--dump-tiles=N` prints the raw top-row tiles, and running it over a few

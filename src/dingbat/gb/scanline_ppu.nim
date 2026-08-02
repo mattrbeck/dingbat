@@ -147,6 +147,13 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # Snapshot the mode as observed by a CPU read that samples during this M-cycle
   # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag
+  when STAT_MODE_HOLD:
+    # This renderer restarts cycle_counter at every mode boundary, so the
+    # per-line dot the STAT latch keys off is not available here; it keeps the
+    # unlagged value. It is the non-default fast path and is not scored
+    # against the STAT-timing suites.
+    ppu.stat_mode = ppu.read_mode
+    ppu.stat_lag_cc = STAT_LAG_NONE
   # See the FIFO renderer: the panel's refresh clock runs on both paths.
   ppu.dots_since_frame += int32(cycles)
   when defined(gb_dot_counter): gb_total_dots += uint64(cycles)

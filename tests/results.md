@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-02 09:39:23*
+*Generated: 2026-08-02 13:40:47*
 
 ## Game Boy - Blargg
 
@@ -960,12 +960,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 9/14 passed |
 | gambatte/div | 👌 8/8 passed |
-| gambatte/dma | 👀 108/229 passed |
+| gambatte/dma | 👀 112/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
 | gambatte/enable_display | 👀 131/184 passed |
-| gambatte/halt | 👀 110/158 passed |
+| gambatte/halt | 👀 124/158 passed |
 | gambatte/irq_precedence | 👀 41/64 passed |
-| gambatte/lcd_offset | 👀 36/62 passed |
+| gambatte/lcd_offset | 👀 40/62 passed |
 | gambatte/lcdirq_precedence | 👀 54/62 passed |
 | gambatte/ly0 | 👀 62/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
@@ -977,31 +977,31 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | 👌 6/6 passed |
 | gambatte/lycm2int | 👀 4/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
-| gambatte/m0enable | 👀 143/167 passed |
+| gambatte/m0enable | 👀 149/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
-| gambatte/m0int_m0stat | 👀 9/12 passed |
+| gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
 | gambatte/m1 | 👀 116/170 passed |
 | gambatte/m2enable | 👀 74/120 passed |
-| gambatte/m2int_m0irq | 👀 38/72 passed |
+| gambatte/m2int_m0irq | 👀 40/72 passed |
 | gambatte/m2int_m0stat | 👀 3/6 passed |
 | gambatte/m2int_m2irq | 👀 9/18 passed |
 | gambatte/m2int_m2stat | 👀 4/8 passed |
-| gambatte/m2int_m3stat | 👀 24/44 passed |
+| gambatte/m2int_m3stat | 👀 27/44 passed |
 | gambatte/miscmstatirq | 👀 226/279 passed |
-| gambatte/oam_access | 👀 49/69 passed |
+| gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 680/811 passed |
 | gambatte/scx_during_m3 | 👀 23/141 passed |
 | gambatte/scy | 👀 3/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 83/116 passed |
-| gambatte/speedchange | 👀 111/208 passed |
-| gambatte/sprites | 👀 257/476 passed |
+| gambatte/speedchange | 👀 106/208 passed |
+| gambatte/sprites | 👀 263/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
-| gambatte/vram_m3 | 👀 32/50 passed |
+| gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 258/476 passed |
+| gambatte/window | 👀 268/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 

@@ -1,5 +1,67 @@
 # GB PPU shared base (included by gb.nim)
 
+# `stat_lag_cc` holds no pending mode change. Above every legal cycle_counter
+# (0..456) so the "has the tick reached it" test is a single compare.
+const STAT_LAG_NONE* = high(int32)
+
+# Dots the re-enabled PPU is already into line 0 by the time the LCDC write
+# retires. See the LCDC-enable path in ppu_write for the derivation; it is
+# overridable because both ROMs that pin it read STAT, so the sweep has to be
+# re-run whenever the STAT read model moves (see STAT_MODE_HOLD).
+const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
+
+# Dots past the start of VBlank at which the CGB boot ROM hands off. See
+# skip_boot for the derivation; overridable so the sweep can be re-run.
+const CGB_BOOT_PHASE* {.intdefine.} = 161
+
+# ---- Sweep knob: one more M-cycle of lag on STAT's mode bits ----------------
+#
+# `STAT_MODE_HOLD` itself is declared at the top of gb.nim, because the GbPpu
+# fields it gates live in that file's type block; it ships OFF, and the latch,
+# its scratch fields and the branch that reads them all compile out with it.
+# What it is, why it is here, and why it is not on:
+#
+# The gambatte m2int_* families bracket each mode boundary with pairs of ROMs
+# whose STAT read moves by exactly one M-cycle, all anchored on the mode-2 STAT
+# interrupt: m2int_m2stat_{1,2} at the 2->3 edge, m2int_m3stat plus its
+# scx/{0,2,3,5} sweep at the 3->0 edge, m2int_m0stat_{1,2} at 0->2, and
+# m2int_m0irq_{1,2} on the interrupt itself. Writing the STAT value a read
+# returns as "the internal mode in effect during dot (last dot of the read's
+# M-cycle) - L", and letting the whole STAT interrupt line sit D M-cycles
+# earlier than dingbat puts it, every one of those ROMs is satisfied by exactly
+# one equation:
+#
+#     4*D + L = 4        (dingbat today is D = 0, L = 3 -- one dot short)
+#
+# The scx sweep is what makes it an equation rather than an inequality: at
+# SCX&7 = 3 the mode-0 edge lands on the last dot of an M-cycle, which pins the
+# sum from below, and the 2->3 edge pins it from above. Two integer solutions
+# fit:
+#
+#   (a) D = 0, L = 4 -- the mode bits are a copy of the internal mode taken one
+#       M-cycle ago, and the interrupt line is already right. THIS KNOB.
+#   (b) D = 1, L = 0 -- the mode bits are not delayed at all beyond the CPU
+#       latching the bus on the last T-cycle of its read, and the STAT
+#       interrupt line leads dingbat's mode flag by one M-cycle.
+#
+# (a) is what this knob implements, and on its own it takes the m2int_* groups
+# from 24/44+4/8+3/6 to 36/44+8/8+6/6. It is nonetheless WRONG, and mooneye
+# says so: acceptance/ppu/intr_2_mode3_timing and intr_2_mode0_timing are
+# anchored on the same mode-2 interrupt and land their STAT read on the same
+# dot as gambatte's m2int_m2stat_1 (traced: both at cycle_counter 85, both
+# dispatched from cycle_counter 1), and they want the OTHER answer. Under (b)
+# both suites are satisfied at once -- the gambatte read moves an M-cycle
+# earlier with the interrupt and sees the old mode, mooneye's later reads see
+# the new one -- so (b) is the model, and (a) only looks right because the two
+# differ by a single dot at the 2->3 edge.
+#
+# (b) is not implemented here because it means giving the STAT interrupt line
+# its own copy of the mode, asserted 4 dots before the flag, without moving the
+# flag itself (the CPU's VRAM/OAM lock edges hang off the flag and are pinned
+# by lcdon_timing-GS / intr_2_oam_ok_timing) and without moving LY or the
+# vblank interrupt (hblank_ly_scx_timing-GS and vblank_stat_intr-GS measure
+# STAT against both). That is a restructure, not a constant.
+
 proc new_ppu_base(cgb: bool): GbPpu =
   result = GbPpu(
     lcd_control:  0x00,
@@ -7,6 +69,7 @@ proc new_ppu_base(cgb: bool): GbPpu =
     first_line:   true,
     current_window_line: 0,
   )
+  when STAT_MODE_HOLD: result.stat_lag_cc = STAT_LAG_NONE
   result.vram[0] = newSeq[uint8](0x2000)
   result.vram[1] = newSeq[uint8](0x2000)
   result.sprite_table = newSeq[uint8](0xA0)
@@ -54,7 +117,19 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
     # reads LY=0x90); the sub-frame phase is calibrated against gambatte
     # display_startstate/stat_*, div/ and serial/ tests.
-    const phase = 160  # gambatte display_startstate/stat_1+stat_2 (159..162)
+    # 159..162 is the window gambatte display_startstate/stat_1+stat_2 leaves
+    # open; 161 is the only member of it with the right sub-M-cycle phase.
+    # The CPU and the PPU are driven from one clock and every instruction is a
+    # whole number of M-cycles, so the offset between the PPU's dot grid and
+    # the CPU's M-cycle grid is a fixed property of the machine, identical on
+    # DMG and CGB — the boot ROM's handoff only says WHERE in the frame the
+    # handoff lands, not where inside an M-cycle. On DMG that offset comes out
+    # of the LCDC-enable seed of 5 (mooneye lcdon_timing-GS /
+    # hblank_ly_scx_timing-GS): the line ends 457-5 = 452 dots later, a whole
+    # number of M-cycles. Matching it here means 457 - phase ≡ 0 (mod 4), i.e.
+    # phase ≡ 1 (mod 4). At 160 every CGB row of the gambatte m2int_* families
+    # missed its DMG twin by exactly one M-cycle while the DMG rows passed.
+    const phase = CGB_BOOT_PHASE
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
@@ -193,6 +268,33 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
+when STAT_MODE_HOLD:
+  proc ppu_latch_stat_mode*(ppu: GbPpu; m: uint8) {.inline.} =
+    ## Model (a) of STAT_MODE_HOLD: the mode bits a CPU read sees are the
+    ## internal mode in effect during the LAST DOT OF THE PREVIOUS TICK,
+    ## before whatever transition that dot applied.
+    ##
+    ## `read_mode`, which is what the shipping build returns, is one dot newer
+    ## than that -- it is the mode after the previous tick's last dot,
+    ## transitions included. The two therefore differ on exactly one tick per
+    ## boundary, and only for boundaries that land on an M-cycle grid line:
+    ## mode 2->3 always, mode 3->0 when SCX&7 leaves it there.
+    ##
+    ## Recording the dot of the change rather than running a countdown is what
+    ## keeps this off the per-dot path: this runs once per tick and only ever
+    ## compares.
+    if ppu.stat_lag_cc <= ppu.cycle_counter:
+      ppu.stat_mode = if ppu.stat_lag_cc == ppu.cycle_counter: ppu.stat_prev_mode
+                      else: m
+      ppu.stat_lag_cc = STAT_LAG_NONE
+    else:
+      ppu.stat_mode = m
+
+proc stat_read_mode*(ppu: GbPpu): uint8 {.inline.} =
+  ## The mode bits a CPU read of STAT returns.
+  when STAT_MODE_HOLD: ppu.stat_mode and 3'u8
+  else:                ppu.read_mode and 3'u8
+
 # The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT* = 452'i32
@@ -239,6 +341,9 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     (ppu.mode_flag == 0     and ppu.hblank_interrupt_enabled) or
     (ppu.mode_flag == 1     and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
+    when defined(gb_stat_read_trace):
+      echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " mode=", ppu.mode_flag
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
 
@@ -266,6 +371,12 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
+  when STAT_MODE_HOLD:
+    if mode != prev_mode:
+      # The transition applies from the NEXT dot, so the tick that begins
+      # there is the last one whose STAT read still reports the old mode.
+      ppu.stat_prev_mode = prev_mode
+      ppu.stat_lag_cc    = ppu.cycle_counter + 1
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
   ppu_handle_stat_interrupt(ppu, gb)
   # The HBlank DMA step must run AFTER lcd_status reflects mode 0: the block
@@ -354,9 +465,16 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:
+    when defined(gb_stat_read_trace):
+      # Diagnostic only (tools; compiled out of every shipping build). What
+      # the m2int_* derivation in STAT_MODE_HOLD was traced with.
+      echo "STATRD ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " rm=", ppu.read_mode and 3'u8, " live=", ppu.lcd_status and 3'u8
     # The mode bits (0-1) lag one read M-cycle behind the internal mode: use the
     # snapshot taken at the start of this read's PPU tick (see GbPpu.read_mode).
-    let rm = ppu.read_mode and 3'u8
+    # STAT_MODE_HOLD is the open question about whether that lag is one dot
+    # short; it ships off, and stat_read_mode is then exactly `read_mode`.
+    let rm = stat_read_mode(ppu)
     var live = (ppu.lcd_status and 0b1111_1100'u8) or rm
     # The LY=LYC comparator does not follow LY instantaneously: the M-cycle in
     # which LY advances reads back with the coincidence bit CLEAR whatever LYC
@@ -439,7 +557,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # line 0 ends 2 T-cycles off the grid and the next line lands back on it),
       # rounded into this renderer's whole-dot counter. No rendered pixel moves:
       # mode 3 is still driven to 160 pixels by the shifter, not by this counter.
-      ppu.cycle_counter = 5
+      ppu.cycle_counter = LCD_ON_HEAD_START
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
     when defined(gb_m3_trace):
