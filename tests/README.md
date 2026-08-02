@@ -34,12 +34,13 @@ Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--max-fails=<n>` (fuzzarm),
 `--color`, `--cgb`, `--model=<dmg0|mgb|sgb|...>` (mooneye boot-state tables),
-`--nosave`, `--ed-breakpoint`, `--bb-breakpoint`, `--bios=<path>`,
+`--nosave`, `--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`,
+`--bios=<path>`,
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
 `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
 `--attach-after`.
 
-The three GB flags exist because different suites end a run differently, and
+These four GB flags exist because different suites end a run differently, and
 each is opt-in so it cannot change how another suite is scored on the same
 binary:
 
@@ -50,6 +51,12 @@ binary:
 - `--ed-breakpoint` makes the undefined opcode `0xED` end the run with the
   mooneye verdict. That was mooneye-gb's magic breakpoint in 2016, which is
   what wilbertpol's fork is built against.
+- `--screen-check` adds one assertion about the panel to a run that is
+  otherwise scored without looking at it: within 240 frames of the verdict the
+  framebuffer must go 10 frames unchanged, and it must not be a single flat
+  colour. It is deliberately *not* a glyph check — see "blargg's on-screen text
+  is NOT an oracle" below for why one would be wrong. The runner turns it on
+  for the eleven `blargg/cpu_instrs` rows.
 - `--bb-breakpoint` makes `LD B,B` end the run whatever the registers hold.
   AGE signals failure as "any register values other than the Fibonacci ones",
   with no dedicated failure signature — without this a failing AGE ROM never
@@ -229,6 +236,49 @@ a `--cgb`/model flag here.
 | MagenTests | screen colour | `--mode=magen-green` / `--mode=magen-nored`, see above |
 | gambatte | glyph OCR of the on-screen result | batched via `--mode=gambatte --list=`; aggregated one row per subdirectory, see below |
 | mGBA suite, jsmolka gba-tests, FuzzARM | GBA; unchanged | see above |
+
+#### blargg's on-screen text is NOT an oracle — score these on serial only
+
+Blargg's suites are scored by their serial output, and it is tempting to add a
+screenshot check on top ("the ROM prints the same string to both, so the screen
+must say Passed too"). **It does not, and hardware agrees.** Measured
+2026-08-02 against SameBoy (CGB-E, real CGB boot ROM, `tools/gbfuzz`
+`sameboy_runner` plus an execution-callback probe):
+
+- Blargg's runtime switches the CGB to **double speed** during init
+  (`init_crc` calls `set_double_speed` and never switches back), so everything
+  the console prints afterwards is printed at double speed.
+- The console's "wait for VBlank" is a **bounded** poll — `ld bc,$FB1E` /
+  `inc bc` / `ldh a,($44)` / `cp $90`, 1250 iterations of 14 M-cycles. At
+  single speed that budget is 70 000 T-cycles, marginally more than one
+  70 224-dot frame, so it effectively always succeeds. At double speed the same
+  1250 iterations are only **35 000 dots — half a frame** — so it times out
+  whenever the print is entered in the wrong half, and the console then blits
+  its 20-byte row straight into the tile map with the LCD on, straddling
+  mode 3.
+- Those writes are then correctly refused (Pan Docs: VRAM is not CPU-accessible
+  in mode 3). **SameBoy loses them too**: on `06-ld r,r` it drops 28 of the
+  160 blitted cells, on `03-op sp,hl` it drops 32 including the `P`, `a` and
+  `s` of "Passed" — that ROM's result line never reaches the screen on SameBoy
+  at all, at any frame count.
+- *Which* cells are lost is decided by the sub-scanline phase of the console
+  blit, so it differs between any two emulators that are not bit-identical in
+  timing. A screen check would therefore fail on correct emulation, and it can
+  be "fixed" by any constant that nudges the phase — which is exactly the trap.
+
+There is consequently **no honest in-repo oracle for the blargg screen**: a
+captured golden would be a golden of our own behaviour, and comparing the glyph
+area to the serial text asserts something hardware does not do. What the runner
+does assert is the weaker thing that *is* true regardless of the race: the
+panel settles and is not blank (`--screen-check`, above).
+
+The real gate for this class of bug is cross-emulator: `tools/gbfuzz` for the
+full library, `tools/gbgate` for a two-build framebuffer diff, and for blargg
+specifically, `sameboy_runner <rom> <bootdir> <prefix> "" 1200` against
+`dingbat_test --mode=screenshot --timeout=1200 --bios=<cgb_boot.bin>`. At the
+current `SPEED_SWITCH_STALL_T` dingbat's frame is pixel-identical to SameBoy's
+on all eleven `cpu_instrs` ROMs; that comparison is what caught the stall being
+eight times short, and it is the check to re-run after any GB timing change.
 
 Screenshot notes:
 

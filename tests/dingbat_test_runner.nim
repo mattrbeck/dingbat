@@ -32,6 +32,10 @@ type
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
+    screen_check: bool    # after the verdict, require the panel to have settled
+                          # and to show more than one shade. Deliberately NOT a
+                          # glyph check — see tests/README.md, "blargg's
+                          # on-screen text is NOT an oracle".
 
   TestResult = object
     name: string
@@ -261,6 +265,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --ed-breakpoint")
     if test.bb_breakpoint:
       cmd.add(" --bb-breakpoint")
+    if test.screen_check:
+      cmd.add(" --screen-check")
     # fuzzarm writes its per-failure triage to stderr and one summary line to
     # stdout. execCmdEx only ever reads the child's stdout pipe, so stderr must
     # be merged in: unread, it is both lost and a deadlock waiting to happen
@@ -312,6 +318,12 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         rom_path: rom,
         mode: tmSerial,
         timeout: 1800,
+        # These eleven are the runner's only GB rows that run a whole ROM to a
+        # verdict with nothing looking at the screen at all, which is how a PPU
+        # change that blanked or wedged the panel could once merge green. The
+        # check is weak on purpose; the reason it cannot assert the text is in
+        # tests/README.md.
+        screen_check: true,
       ))
   let instr_timing = repo_dir / "instr_timing" / "instr_timing.gb"
   if fileExists(instr_timing):

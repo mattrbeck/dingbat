@@ -453,22 +453,52 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
-const SPEED_SWITCH_STALL_T* = 8200
-  ## Pan Docs, "FF4D — KEY1: Prepare speed switch": "The CPU stops for 2050
-  ## M-cycles (= 8200 T-cycles) after the `stop` instruction is executed."
-  ## T-cycles of the 4.194304 MHz base clock, i.e. real time (~2 ms) — the CPU
-  ## clock is what is stopped, so it cannot be the unit of its own stall.
+const SPEED_SWITCH_STALL_T* = 65540
+  ## How long the CPU clock is stopped by a KEY1 speed switch, in T-cycles of
+  ## the 4.194304 MHz base clock, i.e. real time (~15.6 ms) — the CPU clock is
+  ## what is stopped, so it cannot be the unit of its own stall.
   ##
-  ## Open question, deliberately NOT resolved here: gambatte's three LY rows
-  ## across the switch (speedchange_ly44_m3_ly, speedchange_ly97_ly,
-  ## dma/hdma_late_m3speedchange_ly) all want the PPU to advance exactly 143
-  ## scanlines (~65 200 T-cycles) over the STOP, from three different starting
-  ## LYs — eight times what this constant allows, and not a frame reset (the
-  ## offset is the same from every starting line). Sweeping the constant does
-  ## NOT produce a clean optimum (gambatte total 2682 at 8200, 2692 near
-  ## 65 664, 2691 at 131 072, jagged in between), so the extra rows would be a
-  ## fitted number, not a measured one. Pan Docs' figure stands until someone
-  ## times the stall on hardware.
+  ## 65540 = 2^16 + 4. It is a ripple-counter length, not a fitted number, and
+  ## three independent sources land on it:
+  ##
+  ##   * SameBoy times the switch with `speed_switch_halt_countdown = 0x20008`
+  ##     (Core/sm83_cpu.c, `stop`). Its cycle unit is half a dot in both speed
+  ##     modes (`GB_advance_cycles` doubles only in single speed, and one
+  ##     M-cycle is always 4 units), so 0x20008 = 131080 units = 65540 dots.
+  ##   * gambatte's three LY rows across the switch (speedchange_ly44_m3_ly,
+  ##     speedchange_ly97_ly, dma/hdma_late_m3speedchange_ly) all want the PPU
+  ##     to advance exactly 143 scanlines from three different starting LYs.
+  ##     143 * 456 = 65208, and 65540 dots is 143.7 lines — the same line, and
+  ##     the same answer from every starting line, which is what says this is a
+  ##     fixed stall and not a frame reset.
+  ##   * Running the eleven blargg cpu_instrs ROMs against SameBoy through the
+  ##     real CGB boot ROM (`sameboy_runner` vs `--mode=screenshot`, frame
+  ##     1200, both playing the boot ROM). Blargg's console races the PPU after
+  ##     the switch — see the section in tests/README.md — which makes the
+  ##     frame a high-resolution probe of exactly this constant. Swept:
+  ##
+  ##         8200 -> 8/11    32768 -> 6/11   65208 -> 8/11   65536 -> 11/11
+  ##        65540 -> 11/11  65544 -> 11/11   65664 -> 8/11   66000 -> 11/11
+  ##       131072 -> 8/11
+  ##
+  ##     i.e. the eleven-of-eleven region sits around 2^16, and 0x20008's 65540
+  ##     is inside it. The probe is noisy by nature (65664 dips), so it is a
+  ##     confirmation of the SameBoy constant, not the source of it.
+  ##
+  ## Pan Docs' "FF4D — KEY1" says 2050 M-cycles (8200 T-cycles), which is what
+  ## this constant used to be. That figure is eight times short of what all
+  ## three sources above measure, and it is the outlier; the earlier note here
+  ## kept it because sweeping the constant against gambatte alone produced no
+  ## clean optimum (2682 at 8200, 2692 near 65 664, jagged in between).
+  ##
+  ## What the change costs and buys, on the gambatte suite: total 3248 -> 3253,
+  ## made of speedchange 108 -> 111 (including speedchange_ly44_m3_ly and
+  ## speedchange_ly97_ly, two of the three rows the old note named), dma
+  ## 105 -> 108 (three hdma_late_m3speedchange_ly rows), and oamdma 681 -> 680
+  ## (oamdma_late_speedchange_stat_1, also a speed-switch row). Everything that
+  ## moved is in the speed-switch family. The churn inside speedchange is
+  ## sub-M-cycle alignment: SameBoy additionally models a 6-cycle switch
+  ## countdown and a PPU re-alignment freeze, which this does not.
 
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   ## mem_tick_components for the speed-switch stall, where the CPU clock is

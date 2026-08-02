@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-01 18:13:57*
+*Generated: 2026-08-02 09:39:23*
 
 ## Game Boy - Blargg
 
@@ -960,7 +960,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 9/14 passed |
 | gambatte/div | 👌 8/8 passed |
-| gambatte/dma | 👀 105/229 passed |
+| gambatte/dma | 👀 108/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
 | gambatte/enable_display | 👀 131/184 passed |
 | gambatte/halt | 👀 110/158 passed |
@@ -990,12 +990,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m3stat | 👀 24/44 passed |
 | gambatte/miscmstatirq | 👀 226/279 passed |
 | gambatte/oam_access | 👀 49/69 passed |
-| gambatte/oamdma | 👀 681/811 passed |
+| gambatte/oamdma | 👀 680/811 passed |
 | gambatte/scx_during_m3 | 👀 23/141 passed |
 | gambatte/scy | 👀 3/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 83/116 passed |
-| gambatte/speedchange | 👀 108/208 passed |
+| gambatte/speedchange | 👀 111/208 passed |
 | gambatte/sprites | 👀 257/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |

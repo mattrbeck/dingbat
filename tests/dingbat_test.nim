@@ -1590,6 +1590,7 @@ proc main() =
   var attach_after = 10
   var force_cgb = false
   var no_save = false      # --nosave: blank cart RAM and detach the .sav file
+  var screen_check = false # --screen-check: panel settled + not blank (see below)
   var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
   var bb_breakpoint = false  # --bb-breakpoint: LD B,B always ends a run (AGE)
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
@@ -1662,6 +1663,8 @@ proc main() =
         force_cgb = true
       of "nosave":
         no_save = true
+      of "screen-check":
+        screen_check = true
       of "ed-breakpoint":
         ed_breakpoint = true
       of "bb-breakpoint":
@@ -1736,7 +1739,7 @@ proc main() =
     quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check]"
     quit(1)
 
   if mode == tmStateRoundtrip:
@@ -1879,6 +1882,55 @@ proc main() =
             text.add(char(b))
           test_out.sram_text = text
           test_out.finished = true
+    # --screen-check: the weakest assertion about the GB screen that is still
+    # true no matter how the ROM's own console races the PPU.
+    #
+    # It deliberately does NOT compare glyphs. blargg's console is not an
+    # oracle for what is on screen — it blits its text rows with the LCD on and
+    # only a bounded VBlank wait in front of them, and at CGB double speed
+    # (which its runtime switches into during init and never leaves) that wait
+    # is half a frame and routinely times out. The cells that then land in
+    # mode 3 are correctly refused, on hardware as here: SameBoy drops 28 of
+    # 160 cells on 06-ld r,r and loses "Pas" out of "Passed" on 03-op sp,hl.
+    # Which cells are lost is decided by sub-scanline phase, so any glyph
+    # assertion would fail on correct emulation. The full measurement is in
+    # tests/README.md, "blargg's on-screen text is NOT an oracle".
+    #
+    # What is still true is that the panel must SETTLE and must show something:
+    # a run that ends with a framebuffer still changing frame to frame, or with
+    # one flat colour, is broken however the console's writes landed. That is
+    # what this checks — a screen wedged mid-transfer, a blanked LCD, a
+    # renderer that never reaches a steady state.
+    if screen_check:
+      # The serial verdict arrives before the console has finished drawing it,
+      # so give the panel a bounded settling budget rather than sampling
+      # immediately: 10 identical frames in a row, within 240 frames.
+      var prev = emu.ppu.framebuffer
+      var run = 0
+      var stable = false
+      for _ in 0 ..< 240:
+        emu.step_frame()
+        if emu.ppu.framebuffer == prev: inc run else: run = 0
+        prev = emu.ppu.framebuffer
+        if run >= 10:
+          stable = true
+          break
+      var shades = 0
+      var seen: seq[uint16]
+      for px in emu.ppu.framebuffer:
+        if px notin seen:
+          seen.add(px)
+          inc shades
+          if shades > 1: break
+      if not stable:
+        echo "SCREENCHECK: FAIL (framebuffer never settled within 240 frames of the verdict)"
+        quit(1)
+      if shades < 2:
+        echo "SCREENCHECK: FAIL (framebuffer is one flat colour)"
+        quit(1)
+      # Silent on success: this line would otherwise land in every cpu_instrs
+      # row's output column in results.md.
+
     # Screenshot mode: write framebuffer as PPM after running
     if mode == tmScreenshot and screenshot_path.len > 0:
       write_ppm(screenshot_path, emu.ppu.framebuffer, GB_WIDTH, GB_HEIGHT, color_mode)
