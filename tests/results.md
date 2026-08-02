@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-01 16:55:49*
+*Generated: 2026-08-01 17:14:22*
 
 ## Game Boy - Blargg
 
@@ -248,7 +248,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | cgbpal_m3 | 👀 16/44 passed |
 | display_startstate | 👀 9/14 passed |
 | div | 👌 8/8 passed |
-| dma | 👀 107/229 passed |
+| dma | 👀 106/229 passed |
 | dmgpalette_during_m3 | 👀 2/17 passed |
 | enable_display | 👀 101/184 passed |
 | halt | 👀 96/158 passed |
@@ -283,7 +283,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | scy | 👀 3/67 passed |
 | serial | 👀 48/82 passed |
 | sound | 👀 83/116 passed |
-| speedchange | 👀 76/208 passed |
+| speedchange | 👀 107/208 passed |
 | sprites | 👀 252/476 passed |
 | tima | 👀 216/232 passed |
 | undef_ops | 👌 20/20 passed |

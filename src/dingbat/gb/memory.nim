@@ -270,12 +270,70 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         inc mem.dma_position
       inc mem.internal_dma_timer
 
+const SPEED_SWITCH_STALL_T* = 8200
+  ## Pan Docs, "FF4D — KEY1: Prepare speed switch": "The CPU stops for 2050
+  ## M-cycles (= 8200 T-cycles) after the `stop` instruction is executed."
+  ## T-cycles of the 4.194304 MHz base clock, i.e. real time (~2 ms) — the CPU
+  ## clock is what is stopped, so it cannot be the unit of its own stall.
+  ##
+  ## Open question, deliberately NOT resolved here: gambatte's three LY rows
+  ## across the switch (speedchange_ly44_m3_ly, speedchange_ly97_ly,
+  ## dma/hdma_late_m3speedchange_ly) all want the PPU to advance exactly 143
+  ## scanlines (~65 200 T-cycles) over the STOP, from three different starting
+  ## LYs — eight times what this constant allows, and not a frame reset (the
+  ## offset is the same from every starting line). Sweeping the constant does
+  ## NOT produce a clean optimum (gambatte total 2682 at 8200, 2692 near
+  ## 65 664, 2691 at 131 072, jagged in between), so the extra rows would be a
+  ## fitted number, not a measured one. Pan Docs' figure stands until someone
+  ## times the stall on hardware.
+
+proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
+  ## mem_tick_components for the speed-switch stall, where the CPU clock is
+  ## off. Pan Docs splits the machine into exactly the two domains this needs:
+  ## the CPU, "Timer and Divider Registers", the Serial Port and OAM DMA all
+  ## run at the CPU clock (they are the things that go twice as fast in double
+  ## speed), while the LCD controller, HDMA and the sound timings keep running
+  ## at the same real-time rate either way. The stall stops the first group —
+  ## "`DIV` does not tick" is Pan Docs stating that outright — and leaves the
+  ## second running, which is what makes the PPU keep drawing (differently per
+  ## mode, hence gambatte's speedchange/*_m3_* family) while the CPU is out.
+  ##
+  ## So: no timer_tick (which also drives the serial shift clock) and no
+  ## mem_dma_tick; the scheduler and the PPU advance as usual.
+  gb.scheduler.tick(cycles)
+  let ppu_cycles = cycles shr mem.current_speed
+  if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
+  else: gb.ppu.tick(gb, ppu_cycles)
+
 proc stop_instr*(mem: GbMemory; gb: GB) =
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
+    # Pan Docs' STOP chart: entering STOP resets DIV. Go through the FF04
+    # write path rather than zeroing tdiv, so the divider's consumers see the
+    # reset the way they see any other one — the APU frame sequencer steps
+    # early if its tap was high, a shifting serial byte sees its tap fall, and
+    # a TIMA edge is checked. Done BEFORE the speed change so those taps are
+    # read at the speed the write happened at; `speed_mode=` below then
+    # rescales the re-aimed frame-sequencer event along with everything else.
+    timer_write(gb.timer, gb, 0xFF04, 0)
     let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
     # The APU channels' next_step deadlines live outside the scheduler's event
     # array, so rescale them the same way `speed_mode=` rescales events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.`speed_mode=`(mem.current_speed)
+    # The stall. 8200 T-cycles of real time is `8200 shl current_speed` cycles
+    # of the (new) CPU clock, which is the domain the scheduler counts in;
+    # mem_tick_stalled shifts it back down for the PPU.
+    #
+    # The DIV-APU frame sequencer is the one scheduler event that is NOT
+    # real-time: it models a falling edge of the divider's own tap, and the
+    # divider is frozen. Lift it over the stall and re-aim it from the (reset,
+    # still zero) divider afterwards, which is exactly Pan Docs' "`DIV` does
+    # not tick, so *some* audio events are not processed".
+    gb.scheduler.clear(etAPUFrameSeq)
+    mem_tick_stalled(mem, gb, SPEED_SWITCH_STALL_T shl mem.current_speed)
+    gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+    # The stall is not part of the STOP opcode's own 4 T-cycles: charge it to
+    # the instruction so mem_tick_extra does not try to make it up again.
+    mem.cycle_tick_count += SPEED_SWITCH_STALL_T shl mem.current_speed
