@@ -142,35 +142,6 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
-# The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
-# See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
-const M2_144_EARLY_DOT* = 452'i32
-
-proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
-  ## Is the mode 2 (OAM) STAT source asserted by the *start of vblank*?
-  ##
-  ## Besides mode 2 itself, the OAM STAT source goes high once more per frame,
-  ## when the PPU enters vblank on line 144 (mooneye vblank_stat_intr). The two
-  ## hardware families disagree on exactly when:
-  ##
-  ##   * DMG/MGB/SGB (vblank_stat_intr-GS): together with the vblank interrupt.
-  ##   * CGB/AGB/AGS (misc/ppu/vblank_stat_intr-C): one M-cycle earlier.
-  ##
-  ## Both ROMs time the interrupt by resetting DIV a fixed number of NOPs into
-  ## line 143 and reading it back in the handler. The vblank rounds bracket the
-  ## DIV tick at 54/55 NOPs on every model; the STAT rounds bracket it at the
-  ## same 54/55 on -GS but at 53/54 on -C, which places the CGB STAT exactly one
-  ## M-cycle (4 dots) ahead of the vblank interrupt. So on CGB the source is
-  ## already high for the last M-cycle of line 143, while the PPU is still in
-  ## mode 0.
-  if ppu.ly == 144:
-    ppu.mode_flag == 1
-  elif ppu.ly == 143:
-    gb.cgb_enabled and ppu.mode_flag == 0 and
-      ppu.cycle_counter >= M2_144_EARLY_DOT
-  else:
-    false
-
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
   # bit freezes at its last value and no STAT interrupt fires (mooneye
@@ -181,10 +152,10 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   let stat_flag =
     (ppu.coincidence_flag   and ppu.coincidence_interrupt_enabled) or
     (ppu.mode_flag == 2     and ppu.oam_interrupt_enabled) or
-    # The OAM (mode 2) STAT source also asserts at the start of vblank
-    # (line 144) — simultaneously with the vblank interrupt on DMG, one
-    # M-cycle earlier on CGB. See m2_line144.
-    (ppu.oam_interrupt_enabled and ppu.m2_line144(gb)) or
+    # The OAM (mode 2) STAT interrupt also triggers at the start of vblank
+    # (line 144), simultaneously with the vblank interrupt on DMG (mooneye
+    # vblank_stat_intr).
+    (ppu.ly == 144 and ppu.mode_flag == 1 and ppu.oam_interrupt_enabled) or
     (ppu.mode_flag == 0     and ppu.hblank_interrupt_enabled) or
     (ppu.mode_flag == 1     and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
