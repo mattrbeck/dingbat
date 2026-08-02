@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-07-31 21:36:06*
+*Generated: 2026-08-01 18:04:59*
 
 ## Game Boy - Blargg
 
@@ -68,15 +68,15 @@
 | acceptance/oam_dma_start | 👌 |
 | acceptance/oam_dma_timing | 👌 |
 | acceptance/pop_timing | 👌 |
-| acceptance/ppu/hblank_ly_scx_timing-GS | 👀 |
+| acceptance/ppu/hblank_ly_scx_timing-GS | 👌 |
 | acceptance/ppu/intr_1_2_timing-GS | 👌 |
 | acceptance/ppu/intr_2_0_timing | 👌 |
 | acceptance/ppu/intr_2_mode0_timing | 👌 |
 | acceptance/ppu/intr_2_mode0_timing_sprites | 👀 |
 | acceptance/ppu/intr_2_mode3_timing | 👌 |
 | acceptance/ppu/intr_2_oam_ok_timing | 👌 |
-| acceptance/ppu/lcdon_timing-GS | 👀 |
-| acceptance/ppu/lcdon_write_timing-GS | 👀 |
+| acceptance/ppu/lcdon_timing-GS | 👌 |
+| acceptance/ppu/lcdon_write_timing-GS | 👌 |
 | acceptance/ppu/stat_irq_blocking | 👌 |
 | acceptance/ppu/stat_lyc_onoff | 👌 |
 | acceptance/ppu/vblank_stat_intr-GS | 👌 |
@@ -138,7 +138,7 @@
 | misc/boot_hwio-C | 👌 |
 | misc/boot_regs-A | 👌 |
 | misc/boot_regs-cgb | 👌 |
-| misc/ppu/vblank_stat_intr-C | 👀 |
+| misc/ppu/vblank_stat_intr-C | 👌 |
 | utils/bootrom_dumper | 👀 |
 | utils/dump_boot_hwio | 👌 |
 
@@ -192,32 +192,32 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | Test | Result |
 |------|--------|
 | m2_win_en_toggle | 👌 |
-| m3_bgp_change | 👀 65.4% correct (15076/23040 pixels match) |
-| m3_bgp_change_sprites | 👀 66.1% correct (15224/23040 pixels match) |
+| m3_bgp_change | 👀 74.8% correct (17236/23040 pixels match) |
+| m3_bgp_change_sprites | 👀 75.9% correct (17476/23040 pixels match) |
 | m3_lcdc_bg_en_change | 👀 84.3% correct (19422/23040 pixels match) |
-| m3_lcdc_bg_map_change | 👀 91.4% correct (21056/23040 pixels match) |
-| m3_lcdc_obj_en_change | 👀 98.9% correct (22788/23040 pixels match) |
-| m3_lcdc_obj_en_change_variant | 👀 93.8% correct (21600/23040 pixels match) |
-| m3_lcdc_obj_size_change | 👀 99.3% correct (22890/23040 pixels match) |
+| m3_lcdc_bg_map_change | 👀 97.5% correct (22464/23040 pixels match) |
+| m3_lcdc_obj_en_change | 👀 99.0% correct (22818/23040 pixels match) |
+| m3_lcdc_obj_en_change_variant | 👀 94.7% correct (21822/23040 pixels match) |
+| m3_lcdc_obj_size_change | 👀 99.6% correct (22950/23040 pixels match) |
 | m3_lcdc_obj_size_change_scx | 👀 99.2% correct (22850/23040 pixels match) |
-| m3_lcdc_tile_sel_change | 👀 92.8% correct (21380/23040 pixels match) |
+| m3_lcdc_tile_sel_change | 👀 93.3% correct (21504/23040 pixels match) |
 | m3_lcdc_tile_sel_win_change | 👀 89.8% correct (20680/23040 pixels match) |
-| m3_lcdc_win_en_change_multiple | 👀 63.9% correct (14724/23040 pixels match) |
+| m3_lcdc_win_en_change_multiple | 👀 61.5% correct (14166/23040 pixels match) |
 | m3_lcdc_win_en_change_multiple_wx | 👀 73.6% correct (16963/23040 pixels match) |
-| m3_lcdc_win_map_change | 👀 91.7% correct (21134/23040 pixels match) |
-| m3_obp0_change | 👀 98.8% correct (22760/23040 pixels match) |
-| m3_scx_high_5_bits | 👀 98.5% correct (22698/23040 pixels match) |
+| m3_lcdc_win_map_change | 👀 92.3% correct (21262/23040 pixels match) |
+| m3_obp0_change | 👀 99.0% correct (22802/23040 pixels match) |
+| m3_scx_high_5_bits | 👀 99.6% correct (22956/23040 pixels match) |
 | m3_scx_low_3_bits | 👌 |
-| m3_scy_change | 👀 50.2% correct (11574/23040 pixels match) |
-| m3_window_timing | 👀 88.6% correct (20421/23040 pixels match) |
-| m3_window_timing_wx_0 | 👀 89.3% correct (20579/23040 pixels match) |
-| m3_wx_4_change | 👀 99.0% correct (22811/23040 pixels match) |
-| m3_wx_4_change_sprites | 👀 100.0% correct (23030/23040 pixels match) |
-| m3_wx_5_change | 👀 97.2% correct (22402/23040 pixels match) |
-| m3_wx_6_change | 👀 40.1% correct (9241/23040 pixels match) |
+| m3_scy_change | 👀 51.4% correct (11854/23040 pixels match) |
+| m3_window_timing | 👀 92.1% correct (21222/23040 pixels match) |
+| m3_window_timing_wx_0 | 👀 92.4% correct (21280/23040 pixels match) |
+| m3_wx_4_change | 👀 99.9% correct (23027/23040 pixels match) |
+| m3_wx_4_change_sprites | 👀 100.0% correct (23038/23040 pixels match) |
+| m3_wx_5_change | 👀 99.9% correct (23006/23040 pixels match) |
+| m3_wx_6_change | 👀 40.1% correct (9231/23040 pixels match) |
 
 ## Summary
 
 - **Total:** 182
-- **Pass:** 150
-- **Fail:** 32
+- **Pass:** 154
+- **Fail:** 28
