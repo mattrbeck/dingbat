@@ -169,42 +169,6 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8
 
-proc console_is_cgb*(gb: GB): bool {.inline.} =
-  ## The *console*, not the mode. Bus topology is a property of the machine, so
-  ## this reads boot_model (which names the hardware) rather than cgb_enabled
-  ## (which the boot-ROM handoff clears for a DMG cart in compatibility mode).
-  gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}
-
-proc dma_bus_of*(gb: GB; idx: int): uint8 {.inline.} =
-  ## Which bus serves a 16-bit address. See GbDmaBus. WRAM folds into the
-  ## external bus on DMG, which is the whole of the DMG/CGB difference.
-  case idx
-  of 0x0000..0x7FFF, 0xA000..0xBFFF: uint8(dbExternal)
-  of 0x8000..0x9FFF:                 uint8(dbVideo)
-  of 0xC000..0xFDFF:
-    if console_is_cgb(gb): uint8(dbWram) else: uint8(dbExternal)
-  else:                              uint8(dbNone)
-
-const
-  # What lands in OAM when the CPU collides with the DMA on its bus, which is
-  # decided by what the DMA's *source* does to the data lines in that M-cycle.
-  # See mem_write_busy for the derivation.
-  DriveTristate* = 0'u8   # cartridge: /WR tells it this is a write, it lets go
-                          #            of the lines, so OAM gets the CPU's byte
-  DriveSource*   = 1'u8   # DMG WRAM: keeps driving its read data alongside the
-                          #           CPU, so the two wire-AND
-  DriveZero*     = 2'u8   # CGB video bus: separately arbitrated, the DMA loses
-                          #                the cycle entirely and stores $00
-  DriveIsolated* = 3'u8   # CGB WRAM bus: also arbitrated, but the DMA's own
-                          #               read still completes — OAM is correct
-                          #               and only the CPU's access is lost
-
-proc dma_drive_of*(gb: GB; idx: int): uint8 {.inline.} =
-  case idx
-  of 0x8000..0x9FFF: (if console_is_cgb(gb): DriveZero else: DriveTristate)
-  of 0xC000..0xFDFF: (if console_is_cgb(gb): DriveIsolated else: DriveSource)
-  else:              DriveTristate
-
 proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
   ## A CPU read that actually reaches the bus, with the PPU's own lock applied.
   ##
@@ -223,34 +187,17 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
 proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   ## Cold path: a CPU read issued while the OAM DMA unit is running. Kept out
   ## of line so the common case is a predictable not-taken branch over a call.
-  ##
-  ## The DMA unit holds one bus for the whole transfer. A CPU read that lands
-  ## on that same bus never reaches memory: the bus is already carrying the
-  ## byte the DMA is moving into OAM this M-cycle, and that is what the CPU
-  ## latches. Reads on any other bus — and on none at all (IO, HRAM, IE) — are
-  ## untouched, which is exactly the CGB carve-out Pan Docs describes and why a
-  ## cartridge-sourced DMA leaves the video bus alone.
-  ##
-  ## The whole OAM page reads $FF while the unit owns OAM, not just $FE00-$FE9F.
-  if idx >= 0xFE00 and idx <= 0xFEFF: return 0xFF'u8
-  if dma_bus_of(gb, idx) == mem.dma_bus:
-    # On the CGB video bus the CPU takes the cycle outright: it still gets the
-    # byte, but the DMA is left with nothing to store and OAM takes a $00. That
-    # costs the transfer a byte even though the CPU only *read*.
-    if mem.dma_drive == DriveZero:
-      ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, 0'u8)
-    return mem.dma_latch
-  # No collision, so this is an ordinary CPU read and still owes the PPU's lock.
+  if idx >= 0xFE00 and idx <= 0xFE9F: return 0xFF'u8
+  # No collision model here, so this is an ordinary CPU read and still owes
+  # the PPU's lock.
   mem_read_open(mem, gb, idx)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   mem_tick_components(mem, gb, 4)
-  # A running DMA owns the bus, so it is decided first and it decides
-  # everything: a CPU access it collides with never reaches memory at all, and
-  # one it does not collide with is an ordinary CPU access (mem_read_busy falls
-  # through to the same mem_read_open). The old three-term OAM predicate
-  # this replaced is subsumed by mem_read_busy, which answers 0xFF for the whole
-  # OAM page rather than just 0xFE00-0xFE9F.
+  # A running DMA is decided first. dma_busy is exactly the old
+  # `dma_position > 0 and dma_position <= 0xA0` predicate, cached; the
+  # OAM-range half of the old three-term test now lives in mem_read_busy,
+  # off the hot path. Same answer, one bool load instead of two compares.
   if mem.dma_busy: return mem_read_busy(mem, gb, idx)
   mem_read_open(mem, gb, idx)
 
@@ -318,33 +265,10 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
   write_byte(mem, gb, idx, val)
 
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
-  ## Cold path counterpart of mem_read_busy — the same collision seen from the
-  ## other side. A CPU write onto the bus the DMA owns never reaches its
-  ## destination; instead the CPU is one of the drivers of the data lines the
-  ## DMA is latching, so it lands in OAM at this M-cycle's position.
-  ##
-  ## What arrives there is whatever the drivers agree on, which is why the
-  ## source region matters and not just the bus:
-  ##   * cartridge source — the cart sees /WR and stops driving, so OAM gets
-  ##     the CPU's byte unmodified;
-  ##   * WRAM source — WRAM keeps driving its read data alongside the CPU, and
-  ##     the two wire-AND;
-  ##   * video source — the same tri-state story on DMG, but on CGB the video
-  ##     bus is separately arbitrated and the DMA latches $00.
-  if idx >= 0xFE00 and idx <= 0xFEFF: return
-  if dma_bus_of(gb, idx) == mem.dma_bus:
-    # dma_busy is only true for dma_position in 1 .. 0xA0, so position-1 is
-    # always the OAM slot the unit filled at the top of this M-cycle.
-    if mem.dma_drive != DriveIsolated:
-      let driven =
-        case mem.dma_drive
-        of DriveSource: val and mem.dma_latch
-        of DriveZero:   0'u8
-        else:           val
-      mem.dma_latch = driven
-      ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, driven)
-    return
-  # No collision, so this is an ordinary CPU write and still owes both locks.
+  ## Cold path counterpart of mem_read_busy.
+  if idx >= 0xFE00 and idx <= 0xFE9F: return
+  # No collision model here, so this is an ordinary CPU write and still owes
+  # both locks.
   mem_write_open(mem, gb, idx, val)
 
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
@@ -356,16 +280,11 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   mem_write_open(mem, gb, idx, val)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
-  # The address bus is 16 bits: a word access at $FFFF reaches $0000 for its
-  # second byte, it does not run off the end of the map. (gambatte
-  # oamdma/oamdma_src*_busypopFFFF and busypush0001, whose stack straddles the
-  # wrap; before the mask the high byte went to $10000 and was discarded.)
-  uint16(mem_read(mem, gb, idx)) or
-    (uint16(mem_read(mem, gb, (idx + 1) and 0xFFFF)) shl 8)
+  uint16(mem_read(mem, gb, idx)) or (uint16(mem_read(mem, gb, idx + 1)) shl 8)
 
 proc mem_write_word*(mem: GbMemory; gb: GB; idx: int; val: uint16) =
-  mem_write(mem, gb, (idx + 1) and 0xFFFF, uint8(val shr 8))
-  mem_write(mem, gb, idx,                  uint8(val and 0xFF))
+  mem_write(mem, gb, idx + 1, uint8(val shr 8))
+  mem_write(mem, gb, idx,     uint8(val and 0xFF))
 
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   # Idle exit. This runs for every 4 T-cycles of every memory access, and an
@@ -384,39 +303,17 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.dma_position       = 0
         mem.internal_dma_timer = 0
         mem.dma_busy           = false
-        # The bus is fixed for the whole transfer, so classify the source once
-        # here instead of per access.
-        let raw_src = int(mem.current_dma_source)
-        if raw_src >= 0xE000 and console_is_cgb(gb):
-          # The echo is a DMG-family behaviour of this unit. On CGB a source at
-          # or above $E000 is driven onto the external bus, where neither the
-          # cartridge nor WRAM answers, so every byte transferred is open bus.
-          mem.dma_bus     = uint8(dbExternal)
-          mem.dma_drive   = DriveTristate
-          mem.dma_openbus = true
-        else:
-          # Sources at or above $E000 fetch through the echo, so they are WRAM
-          # sources (mooneye oam_dma/sources-GS).
-          var bus_src = raw_src
-          if bus_src >= 0xE000: bus_src = bus_src and not 0x2000
-          mem.dma_bus     = dma_bus_of(gb, bus_src)
-          mem.dma_drive   = dma_drive_of(gb, bus_src)
-          mem.dma_openbus = false
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
-          # The OAM DMA unit drives the external bus directly: on DMG, sources
-          # at or above 0xE000 read WRAM (the echo extends over 0xE000-0xFFFF,
-          # so 0xFE00/0xFF00 sources fetch 0xDE00/0xDF00 — mooneye sources-GS).
-          # The latch is the byte now on the DMA's bus for this M-cycle: what a
-          # colliding CPU read observes in place of its own address.
-          if mem.dma_openbus:
-            mem.dma_latch = 0xFF'u8
-          else:
-            var src = int(mem.current_dma_source) + mem.dma_position
-            if src >= 0xE000: src = src and not 0x2000
-            mem.dma_latch = read_byte(mem, gb, src)
-          write_byte(mem, gb, 0xFE00 + mem.dma_position, mem.dma_latch)
+          # The OAM DMA unit drives the external bus directly: sources at or
+          # above 0xE000 read WRAM (the echo extends over 0xE000-0xFFFF, so
+          # 0xFE00/0xFF00 sources fetch 0xDE00/0xDF00 — mooneye sources-GS).
+          var src = int(mem.current_dma_source) + mem.dma_position
+          if src >= 0xE000: src = src and not 0x2000
+          write_byte(mem, gb,
+            0xFE00 + mem.dma_position,
+            read_byte(mem, gb, src))
         inc mem.dma_position
         # dma_position is now >= 1, so this is exactly the old
         # `dma_position > 0 and dma_position <= 0xA0` predicate.
