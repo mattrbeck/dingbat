@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-08-01 17:02:40*
+*Generated: 2026-08-01 17:04:52*
 
 ## Memory tests
 
@@ -49,55 +49,9 @@ All tests passed.
 | Short DMA (32/ROM to ROM) ARM/ROM P.S | 137 | 138 |
 | Short DMA (32/ROM to ROM) ARM/ROM PNS | 136 | 137 |
 
-## Timer count-up tests (893/936 passed)
+## Timer count-up tests
 
-893/936 tests passed, 43 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| 0b, 0x0040 1xv 1d 2i | FFDD | FFDC |
-| 0b, 0x0040 1xv 2d 2i | FFDD | FFDC |
-| 0b, 0x0040 1xv 4d 2i | FFDD | FFDC |
-| 0b, 0x0040 1xs 1d 4i | 0000000C | 0000000D |
-| 0b, 0x0040 1xv 1d 4i | FFDD | FFDE |
-| 0b, 0x0040 16xv 1d 4i | FFDD | FFDE |
-| 0b, 0x0040 1xs 2d 4i | 0000000C | 0000000D |
-| 0b, 0x0040 1xv 2d 4i | FFDD | FFDE |
-| 0b, 0x0040 16xv 2d 4i | FFDD | FFDE |
-| 0b, 0x0040 1xs 4d 4i | 0000000C | 0000000D |
-| 0b, 0x0040 1xv 4d 4i | FFDD | FFDE |
-| 0b, 0x0040 16xv 4d 4i | FFDD | FFDE |
-| 0b, 0x0080 1xv 1d 2i | FFDD | FFDC |
-| 0b, 0x0080 1xv 2d 2i | FFDD | FFDC |
-| 0b, 0x0080 1xv 4d 2i | FFDD | FFDC |
-| 0b, 0x0080 1xs 1d 4i | 00000014 | 00000015 |
-| 0b, 0x0080 1xv 1d 4i | FFDD | FFDE |
-| 0b, 0x0080 1xs 2d 4i | 00000014 | 00000015 |
-| 0b, 0x0080 1xv 2d 4i | FFDD | FFDE |
-| 0b, 0x0080 1xs 4d 4i | 00000014 | 00000015 |
-| 0b, 0x0080 1xv 4d 4i | FFDD | FFDE |
-| 0b, 0x0800 1xv 1d 2i | F85D | F85C |
-| 0b, 0x0800 1xv 2d 2i | F85D | F85C |
-| 0b, 0x0800 1xv 4d 2i | F85D | F85C |
-| 0b, 0x0800 1xs 1d 4i | 000003D4 | 000003D5 |
-| 0b, 0x0800 1xv 1d 4i | F85D | F85E |
-| 0b, 0x0800 1xs 2d 4i | 000003D4 | 000003D5 |
-| 0b, 0x0800 1xv 2d 4i | F85D | F85E |
-| 0b, 0x0800 1xs 4d 4i | 000003D4 | 000003D5 |
-| 0b, 0x0800 1xv 4d 4i | F85D | F85E |
-| 0b, 0x8000 1xv 1d 2i | 805D | 805C |
-| 0b, 0x8000 1xv 2d 2i | 805D | 805C |
-| 0b, 0x8000 1xv 4d 2i | 805D | 805C |
-| 0b, 0x8000 1xs 1d 4i | 00003FD4 | 00003FD5 |
-| 0b, 0x8000 1xv 1d 4i | 805D | 805E |
-| 0b, 0x8000 1xs 2d 4i | 00003FD4 | 00003FD5 |
-| 0b, 0x8000 1xv 2d 4i | 805D | 805E |
-| 0b, 0x8000 1xs 4d 4i | 00003FD4 | 00003FD5 |
-| 0b, 0x8000 1xv 4d 4i | 805D | 805E |
-| 8b, 0x0011 16xs 4d 4i | 00002DD0 | 00002DE0 |
-| 8b, 0x0013 16xs 4d 4i | 00003360 | 00003370 |
-| 10b, 0x0011 16xs 2d 4i | 0000BBC0 | 0000BBD0 |
-| 10b, 0x0012 16xs 1d 1i | 000031B0 | 000031A0 |
+All tests passed.
 
 ## Timer IRQ tests
 
@@ -119,18 +73,9 @@ All tests passed.
 
 All tests passed.
 
-## DMA tests (1250/1256 passed)
+## DMA tests
 
-1250/1256 tests passed, 6 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| 1 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 2 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 3 HBl W -SRAM/=IWRAM 3 | 00000000 | 47474747 |
-| 1 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 2 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
-| 3 HBl W -SRAM/=EWRAM 3 | 00000000 | 47474747 |
+All tests passed.
 
 ## SIO register R/W tests
 
@@ -149,15 +94,15 @@ All tests passed.
 | DMA Prefetch Break | 0x10002A64 | 0x10002AA4 |
 | DMA Prefetch Read | 0xDEAD0000 | 0x00000011 |
 | H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x000000B5 |
-| H-blank bit start Flip 2 | 0x000003EC | 0x00000400 |
+| H-blank bit start Flip 1 | 0x00000085 | 0x000000D0 |
+| H-blank bit start Flip 2 | 0x000003EC | 0x000003E0 |
 | H-blank bit start Flip 3 | 0x000000E4 | 0x000000E1 |
-| H-blank bit start Flip 4 | 0x000003EC | 0x000003E0 |
+| H-blank bit start Flip 4 | 0x000003EC | 0x00000400 |
 | H-blank bit start Flip 5 | 0x000000E4 | 0x000000E0 |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x00000420 |
+| H-blank bit start Flip 6 | 0x000003F5 | 0x000003E0 |
 
 ## Summary
 
 - **Total:** 7008
-- **Pass:** 6918
-- **Fail:** 90
+- **Pass:** 6967
+- **Fail:** 41
