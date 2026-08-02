@@ -1260,6 +1260,13 @@ proc main() =
     let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
+    # Same knob as dingbat_bench: idle-loop fast-forward SNAPS scheduler.cycles
+    # to the next pending event, so a spin loop's exit cycle depends on which
+    # events happen to be queued. Turning it off is how you tell a real timing
+    # error apart from fast-forward sampling resolution (e.g. the mGBA suite's
+    # "H-blank bit start" flips, which spin on DISPSTAT and time the gaps).
+    if getEnv("DINGBAT_NO_WAITLOOP") == "1":
+      emu.cpu.attempt_waitloop_detection = false
     if sio_driver == "loopback":
       emu.set_sio_driver(LoopbackSioDriver())
     for frame in 0 ..< timeout_frames:

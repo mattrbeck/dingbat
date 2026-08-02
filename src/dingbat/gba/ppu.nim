@@ -62,14 +62,26 @@ proc bitmap*(ppu: PPU): bool =
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
+# The H-blank *signal* — DISPSTAT bit 1 and the interrupt bit 4 enables — is
+# not asserted when drawing ends at dot 240 (cycle 960). GBATEK: "Although the
+# drawing time is only 960 cycles (240*4), the H-Blank flag is '0' for a total
+# of 1006 cycles", i.e. the flag rises 46 cycles into the 272-cycle gap and is
+# high for the remaining 226.
+const HBLANK_FLAG_DELAY = 46
+
+# Cycles from the H-blank signal to the CPU recognizing the IRQ. Peripherals do
+# not share one path to the interrupt controller: the timers' is IRQ_SYNC_DELAY
+# (3, pinned by the mGBA suite Timer IRQ tests); the video controller's is
+# longer. Pinned by the mGBA suite's "H-blank bit start / Flip 1", which times
+# the H-blank IRQ's halt-wake against the end of the same scanline — the only
+# row that measures this edge, and it holds dingbat's halt-wake path fixed
+# (Timer count-up and SIO timing pin that independently). Flip 1 admits
+# recognition at 1010..1014; 1012 is the middle of that plateau.
+const HBLANK_IRQ_SYNC_DELAY = 6
+
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
-  # DISPSTAT hblank flag sets 44 cycles into the h-blank gap (flag high for
-  # 228 of the 1232-cycle scanline; mGBA suite "H-blank bit start")
-  ppu.gba.scheduler.schedule(44, etPPUSetHBlankFlag)
-  if ppu.dispstat.hblank_irq_enable:
-    ppu.gba.interrupts.reg_if.hblank = true
-    ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+  ppu.gba.scheduler.schedule(HBLANK_FLAG_DELAY, etPPUSetHBlankFlag)
   if ppu.vcount < 160:
     ppu.scanline()
     for bg_num in 0..1:
@@ -79,6 +91,14 @@ proc start_hblank*(ppu: PPU) =
 
 proc set_hblank_flag*(ppu: PPU) =
   ppu.dispstat.hblank = true
+  # Flag and IRQ are the same signal (bit 4 enables an interrupt on the bit-1
+  # condition), so they are raised together — as vblank/vcounter already are in
+  # end_hblank. Previously the IRQ fired at 960 while the flag waited until
+  # 1004, which gave H-blank handlers a 272-cycle window instead of hardware's
+  # 226 and put the mGBA suite's Flip 1 48 cycles out.
+  if ppu.dispstat.hblank_irq_enable:
+    ppu.gba.interrupts.reg_if.hblank = true
+    ppu.gba.interrupts.schedule_interrupt_check(HBLANK_IRQ_SYNC_DELAY)
 
 proc end_hblank*(ppu: PPU) =
   # Zero-delay event rather than a direct start_line() call: the event's
