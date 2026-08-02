@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-01 18:13:57*
+*Generated: 2026-08-01 21:17:29*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3248/5005 passed.**
+**2682/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -23,40 +23,40 @@ ROM draws on screen. See tests/README.md for the mechanism.
 
 | Test | Result |
 |------|--------|
-| bgtiledata/bgtiledata_spx08_1 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_1 [cgb, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_2 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_2 [cgb, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_3 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_3 [cgb, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_4 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_4 [cgb, png] | 1400/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_1 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_1 [cgb, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_2 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_2 [cgb, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_3 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_3 [cgb, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_4 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_4 [cgb, png] | 2424/23040 pixels differ |
 | bgtiledata/bgtiledata_spx08_ds_3 [cgb, png] | 1280/23040 pixels differ |
 | bgtiledata/bgtiledata_spx08_ds_4 [cgb, png] | 2304/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_1 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_1 [cgb, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_2 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_3 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_3 [cgb, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_4 [dmg, png] | 1400/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_1 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_1 [cgb, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_2 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_3 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_3 [cgb, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_4 [dmg, png] | 2424/23040 pixels differ |
 | bgtiledata/bgtiledata_spx09_ds_1 [cgb, png] | 1272/23040 pixels differ |
 | bgtiledata/bgtiledata_spx09_ds_2 [cgb, png] | 256/23040 pixels differ |
 | bgtiledata/bgtiledata_spx09_ds_3 [cgb, png] | 1272/23040 pixels differ |
 | bgtiledata/bgtiledata_spx09_ds_4 [cgb, png] | 2304/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_1 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_1 [cgb, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_2 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_2 [cgb, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_3 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_3 [cgb, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_4 [dmg, png] | 1400/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_4 [cgb, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_1 [dmg, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_2 [dmg, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_2 [cgb, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_3 [dmg, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_4 [dmg, png] | 1272/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_4 [cgb, png] | 1272/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_1 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_1 [cgb, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_2 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_2 [cgb, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_3 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_3 [cgb, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_4 [dmg, png] | 2424/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_4 [cgb, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_1 [dmg, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_2 [dmg, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_2 [cgb, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_3 [dmg, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_4 [dmg, png] | 2296/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_4 [cgb, png] | 2296/23040 pixels differ |
 
 ## bgtilemap (0/40 passed)
 
@@ -64,46 +64,46 @@ ROM draws on screen. See tests/README.md for the mechanism.
 
 | Test | Result |
 |------|--------|
-| bgtilemap/bgtilemap_spx08_1 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_1 [cgb, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_2 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_2 [cgb, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_3 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_3 [cgb, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_4 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_4 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_1 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_1 [cgb, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_2 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_2 [cgb, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_3 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_3 [cgb, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_4 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_4 [cgb, png] | 1400/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_1 [cgb, png] | 1272/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_2 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_3 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_4 [cgb, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_1 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_1 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_2 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_2 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_3 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_3 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_4 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_4 [cgb, png] | 1144/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_1 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_1 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_2 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_2 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_3 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_3 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_4 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_4 [cgb, png] | 1272/23040 pixels differ |
 | bgtilemap/bgtilemap_spx09_ds_1 [cgb, png] | 1272/23040 pixels differ |
 | bgtilemap/bgtilemap_spx09_ds_2 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx09_ds_3 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx09_ds_4 [cgb, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_1 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_1 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_2 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_2 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_3 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_4 [dmg, png] | 1272/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_1 [dmg, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_1 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_2 [dmg, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_2 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_3 [dmg, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_3 [cgb, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_4 [dmg, png] | 1144/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0B_4 [cgb, png] | 1144/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_1 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_1 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_2 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_2 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_3 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_4 [dmg, png] | 1400/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_1 [dmg, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_1 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_2 [dmg, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_2 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_3 [dmg, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_3 [cgb, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_4 [dmg, png] | 1272/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0B_4 [cgb, png] | 1272/23040 pixels differ |
 
 ## cgbpal_m3 (16/44 passed)
 
@@ -156,9 +156,9 @@ ROM draws on screen. See tests/README.md for the mechanism.
 
 All 8 tests passed.
 
-## dma (105/229 passed)
+## dma (106/229 passed)
 
-105/229 tests passed, 124 failed:
+106/229 tests passed, 123 failed:
 
 | Test | Result |
 |------|--------|
@@ -196,12 +196,10 @@ All 8 tests passed.
 | dma/hdma_disable_display_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_ei_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_destl_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_late_disable_ds_1_cgb04c_out0 [cgb] | got 7, expected 0 |
-| dma/hdma_late_disable_ds_2_cgb04c_out1 [cgb] | got 7, expected 1 |
+| dma/hdma_late_disable_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_disable_scx2_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_disable_scx3_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 7, expected 0 |
-| dma/hdma_late_disable_scx5_ds_2_cgb04c_out1 [cgb] | got 7, expected 1 |
+| dma/hdma_late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_6_cgb04c_out03 [cgb] | got 02, expected 03 |
@@ -244,11 +242,11 @@ All 8 tests passed.
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx1_ds_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx2_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx2_ds_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_1_cgb04c_outF3 [cgb] | got F4, expected F3 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_2_cgb04c_outF4 [cgb] | got F5, expected F4 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_1_cgb04c_outF3 [cgb] | got F5, expected F3 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_2_cgb04c_outF4 [cgb] | got F6, expected F4 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7 [cgb] | got F6, expected F7 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_5_cgb04c_outF8 [cgb] | got F5, expected F8 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_6_cgb04c_outF9 [cgb] | got F6, expected F9 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_5_cgb04c_outF8 [cgb] | got F6, expected F8 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_6_cgb04c_outF9 [cgb] | got F7, expected F9 |
 | dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_late_wrambank_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_m0halt_late_m3unhalt_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
@@ -265,27 +263,28 @@ All 8 tests passed.
 | dma/hdma_start_scx3_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_start_scx5_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_start_scx5_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01 [cgb] | got 00, expected 01 |
+| dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01 [cgb] | got FE, expected 01 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 84, expected 00 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got 85, expected 02 |
 | dma/hdma_transition_ei_halt_late_unhalt_scx1_1_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 01, expected 00 |
-| dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got FF, expected 02 |
+| dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got 00, expected 02 |
 | dma/hdma_transition_halt_late_unhalt_scx1_1_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_oamdma_1_cgb04c_out509E529C [cgb] | got 50515253, expected 509E529C |
-| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got DF, expected 67 |
+| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got 50, expected 67 |
 | dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80 [cgb] | got FF, expected 80 |
 | dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81 [cgb] | got FF, expected 81 |
 | dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_speedchange_hdmalen7f_hdma5_scx1_cgb04c_outFF [cgb] | got 6B, expected FF |
-| dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00 [cgb] | got FF, expected 00 |
+| dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
-| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 6B, expected 71 |
+| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got A0, expected 71 |
 | dma/hdma_vs_m0int_pc_scx1_1_cgb04c_out1033 [cgb] | got 1032, expected 1033 |
 | dma/hdma_vs_m0int_pc_scx1_2_cgb04c_out1033 [cgb] | got 1032, expected 1033 |
-| dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |
+| dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 01, expected 02 |
+| dma/late_gdma_pc_7ffe_2_cgb04c_out00 [cgb] | got 01, expected 00 |
 
 ## dmgpalette_during_m3 (2/17 passed)
 
@@ -293,85 +292,115 @@ All 8 tests passed.
 
 | Test | Result |
 |------|--------|
-| dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 573/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 1723/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 2296/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 2296/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 2296/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 1005/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 2155/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 3160/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 3160/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 3160/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 589/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 871/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 1292/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1284/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 1729/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 2150/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 2142/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 860/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 1436/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 2010/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 2296/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 1004/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 2156/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 2874/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 3160/23040 pixels differ |
 
-## enable_display (131/184 passed)
+## enable_display (101/184 passed)
 
-131/184 tests passed, 53 failed:
+101/184 tests passed, 83 failed:
 
 | Test | Result |
 |------|--------|
-| enable_display/enable_display_ly0_oambusy_read_ds_1_cgb04c_out0 [cgb] | got 7, expected 0 |
+| enable_display/enable_display_ly0_oambusy_read_2_dmg08_cgb04c_out7 [dmg] | got 0, expected 7 |
+| enable_display/enable_display_ly0_oambusy_read_2_dmg08_cgb04c_out7 [cgb] | got 0, expected 7 |
+| enable_display/enable_display_ly0_oambusy_read_ds_2_cgb04c_out7 [cgb] | got 0, expected 7 |
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| enable_display/enable_display_ly0_wemaster_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| enable_display/enable_display_ly0_wemaster_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| enable_display/frame0_m0irq_count_scx2_1_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
-| enable_display/frame0_m0irq_count_scx2_1_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame0_m0irq_count_scx3_1_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
-| enable_display/frame0_m0irq_count_scx3_1_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame0_ly_count_2_dmg08_cgb04c_out9A [dmg] | got 01, expected 9A |
+| enable_display/frame0_ly_count_2_dmg08_cgb04c_out9A [cgb] | got 01, expected 9A |
+| enable_display/frame0_ly_count_ds_2_cgb04c_out9A [cgb] | got 01, expected 9A |
+| enable_display/frame0_m0irq_count_scx2_2_dmg08_cgb04c_out90 [dmg] | got 01, expected 90 |
+| enable_display/frame0_m0irq_count_scx2_2_dmg08_cgb04c_out90 [cgb] | got 01, expected 90 |
+| enable_display/frame0_m0irq_count_scx2_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame0_m0irq_count_scx3_ds_2_cgb04c_out90 [cgb] | got 01, expected 90 |
+| enable_display/frame0_m1stat_2_dmg08_cgb04c_out81 [dmg] | got 80, expected 81 |
+| enable_display/frame0_m1stat_2_dmg08_cgb04c_out81 [cgb] | got 80, expected 81 |
+| enable_display/frame0_m1stat_ds_2_cgb04c_out81 [cgb] | got 80, expected 81 |
 | enable_display/frame0_m2irq_count_1_dmg08_cgb04c_out98 [dmg] | got 01, expected 98 |
 | enable_display/frame0_m2irq_count_1_dmg08_cgb04c_out98 [cgb] | got 01, expected 98 |
-| enable_display/frame0_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 90, expected 91 |
-| enable_display/frame0_m2irq_count_2_dmg08_cgb04c_out91 [cgb] | got 90, expected 91 |
+| enable_display/frame0_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 02, expected 91 |
+| enable_display/frame0_m2irq_count_2_dmg08_cgb04c_out91 [cgb] | got 02, expected 91 |
 | enable_display/frame0_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 01, expected 98 |
-| enable_display/frame0_m2irq_count_ds_2_cgb04c_out91 [cgb] | got 90, expected 91 |
-| enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
-| enable_display/frame0_m3stat_count_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame0_m2irq_count_ds_2_cgb04c_out91 [cgb] | got 02, expected 91 |
+| enable_display/frame0_m2stat_count_1_dmg08_cgb04c_out91 [dmg] | got 01, expected 91 |
+| enable_display/frame0_m2stat_count_1_dmg08_cgb04c_out91 [cgb] | got 01, expected 91 |
+| enable_display/frame0_m2stat_count_2_dmg08_cgb04c_out90 [dmg] | got 01, expected 90 |
+| enable_display/frame0_m2stat_count_2_dmg08_cgb04c_out90 [cgb] | got 01, expected 90 |
+| enable_display/frame0_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 01, expected 90 |
+| enable_display/frame0_m3stat_count_2_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
+| enable_display/frame0_m3stat_count_2_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame0_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_ly_count_1_dmg08_cgb04c_out99 [dmg] | got 98, expected 99 |
+| enable_display/frame1_ly_count_1_dmg08_cgb04c_out99 [cgb] | got 98, expected 99 |
 | enable_display/frame1_ly_count_2_dmg08_cgb04c_out9A [dmg] | got 00, expected 9A |
 | enable_display/frame1_ly_count_2_dmg08_cgb04c_out9A [cgb] | got 00, expected 9A |
-| enable_display/frame1_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_m0irq_count_scx3_1_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
-| enable_display/frame1_m0irq_count_scx3_1_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_m2irq_count_1_dmg08_cgb04c_out98 [dmg] | got 00, expected 98 |
-| enable_display/frame1_m2irq_count_1_dmg08_cgb04c_out98 [cgb] | got 00, expected 98 |
-| enable_display/frame1_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 90, expected 91 |
-| enable_display/frame1_m2irq_count_2_dmg08_cgb04c_out91 [cgb] | got 90, expected 91 |
-| enable_display/frame1_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 00, expected 98 |
-| enable_display/frame1_m2irq_count_ds_2_cgb04c_out91 [cgb] | got 90, expected 91 |
+| enable_display/frame1_ly_count_ds_1_cgb04c_out99 [cgb] | got 98, expected 99 |
+| enable_display/frame1_ly_count_ds_2_cgb04c_out9A [cgb] | got 00, expected 9A |
+| enable_display/frame1_m0irq_count_scx2_2_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
+| enable_display/frame1_m0irq_count_scx2_2_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m0irq_count_scx2_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m0irq_count_scx3_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m1stat_2_dmg08_cgb04c_out81 [dmg] | got 80, expected 81 |
+| enable_display/frame1_m1stat_2_dmg08_cgb04c_out81 [cgb] | got 80, expected 81 |
+| enable_display/frame1_m1stat_ds_2_cgb04c_out81 [cgb] | got 80, expected 81 |
+| enable_display/frame1_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 00, expected 91 |
+| enable_display/frame1_m2irq_count_2_dmg08_cgb04c_out91 [cgb] | got 00, expected 91 |
+| enable_display/frame1_m2irq_count_ds_2_cgb04c_out91 [cgb] | got 00, expected 91 |
 | enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91 [dmg] | got 00, expected 91 |
 | enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91 [cgb] | got 00, expected 91 |
-| enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
-| enable_display/frame2_m0irq_count_scx3_1_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
-| enable_display/frame2_m0irq_count_scx3_1_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m2stat_count_2_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
+| enable_display/frame1_m2stat_count_2_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 00, expected 91 |
+| enable_display/frame1_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m3stat_count_2_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
+| enable_display/frame1_m3stat_count_2_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame1_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
+| enable_display/frame2_m0irq_count_scx2_2_dmg08_cgb04c_out90 [dmg] | got 00, expected 90 |
+| enable_display/frame2_m0irq_count_scx2_2_dmg08_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/ly0_late_cgbpr_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpw_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 | enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
+| enable_display/ly0_late_oamw_2_dmg08_cgb04c_out55 [dmg] | got AA, expected 55 |
+| enable_display/ly0_late_oamw_2_dmg08_cgb04c_out55 [cgb] | got AA, expected 55 |
+| enable_display/ly0_late_oamw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 | enable_display/ly0_late_scx7_m3stat_scx0_2_dmg08_out87_cgb04c_out84 [cgb] | got 87, expected 84 |
+| enable_display/ly0_late_scx7_m3stat_scx0_3_dmg08_cgb04c_out84 [dmg] | got 87, expected 84 |
+| enable_display/ly0_late_scx7_m3stat_scx0_3_dmg08_cgb04c_out84 [cgb] | got 87, expected 84 |
 | enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84 [dmg] | got 87, expected 84 |
 | enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84 [cgb] | got 87, expected 84 |
-| enable_display/ly0_late_vramr_2_dmg08_outFF_cgb04c_out55 [cgb] | got FF, expected 55 |
-| enable_display/ly0_late_vramr_ds_1_cgb04c_out55 [cgb] | got FF, expected 55 |
-| enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA [cgb] | got 55, expected AA |
-| enable_display/ly0_m0irq_scx0_1_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| enable_display/ly0_m0irq_scx0_1_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| enable_display/ly0_m0irq_scx0_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
+| enable_display/ly0_late_scx7_m3stat_scx3_2_dmg08_cgb04c_out84 [dmg] | got 87, expected 84 |
+| enable_display/ly0_late_scx7_m3stat_scx3_2_dmg08_cgb04c_out84 [cgb] | got 87, expected 84 |
+| enable_display/ly0_late_vramr_2_dmg08_outFF_cgb04c_out55 [dmg] | got 55, expected FF |
+| enable_display/ly0_late_vramr_3_dmg08_cgb04c_outFF [dmg] | got 55, expected FF |
+| enable_display/ly0_late_vramr_3_dmg08_cgb04c_outFF [cgb] | got 55, expected FF |
+| enable_display/ly0_late_vramr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
+| enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA [dmg] | got AA, expected 55 |
+| enable_display/ly0_late_vramw_3_dmg08_cgb04c_out55 [dmg] | got AA, expected 55 |
+| enable_display/ly0_late_vramw_3_dmg08_cgb04c_out55 [cgb] | got AA, expected 55 |
+| enable_display/ly0_m0irq_scx0_2_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
+| enable_display/ly0_m0irq_scx0_2_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
+| enable_display/ly0_m0irq_scx0_ds_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | enable_display/ly1_late_cgbpw_2_cgb04c_out55 [cgb] | got AA, expected 55 |
+| enable_display/nextstat_2_dmg08_cgb04c_out87 [dmg] | got 84, expected 87 |
+| enable_display/nextstat_2_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
 
-## halt (110/158 passed)
+## halt (96/158 passed)
 
-110/158 tests passed, 48 failed:
+96/158 tests passed, 62 failed:
 
 | Test | Result |
 |------|--------|
@@ -379,22 +408,30 @@ All 8 tests passed.
 | halt/ifandie_ei_halt_m2int_m0stat_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/ifandie_ei_halt_sra_dmg08_cgb04c_out0A [dmg] | got 09, expected 0A |
 | halt/ifandie_ei_halt_sra_dmg08_cgb04c_out0A [cgb] | got 09, expected 0A |
+| halt/late_m0int_halt_m0stat_scx2_1b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx2_1b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0int_halt_m0stat_scx2_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx2_2b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
+| halt/late_m0int_halt_m0stat_scx2_3b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx2_3b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0int_halt_m0stat_scx2_4b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx2_4b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_1b_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0int_halt_m0stat_scx3_1c_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_1c_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0int_halt_m0stat_scx3_3c_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_3c_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_4b_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0int_halt_m0stat_scx3_4c_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_4c_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/late_m0irq_halt_dec_scx2_1_dmg08_cgb04c_out7 [dmg] | got 6, expected 7 |
 | halt/late_m0irq_halt_dec_scx2_1_dmg08_cgb04c_out7 [cgb] | got 6, expected 7 |
 | halt/late_m0irq_halt_dec_scx3_1_dmg08_cgb04c_out7 [dmg] | got 6, expected 7 |
 | halt/late_m0irq_halt_dec_scx3_1_dmg08_cgb04c_out7 [cgb] | got 6, expected 7 |
+| halt/late_m0irq_halt_m0stat_scx2_1b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0irq_halt_m0stat_scx2_1b_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/late_m0irq_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0irq_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
@@ -406,19 +443,25 @@ All 8 tests passed.
 | halt/late_m0irq_halt_m0stat_scx3_4a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0irq_halt_m0stat_scx3_4a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/lycirq_m2stat_2_dmg08_out2_cgb04c_out3 [cgb] | got 2, expected 3 |
+| halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0int_m0stat_scx2_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0int_m0stat_scx2_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0int_m0stat_scx3_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/m0int_m0stat_scx3_3_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0int_m0stat_scx3_3_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0int_m0stat_scx3_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0int_m0stat_scx4_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/m0int_m0stat_scx5_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0int_m0stat_scx5_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/m0irq_m0stat_scx2_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx2_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx2_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx3_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/m0irq_m0stat_scx3_3_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx3_3_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx3_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx4_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+| halt/m0irq_m0stat_scx5_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/m0irq_m0stat_scx5_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | halt/m1int_ly_2_dmg08_out90_cgb04c_out91 [cgb] | got 90, expected 91 |
 | halt/noime_ifandie_m2int_m0stat_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
@@ -435,10 +478,10 @@ All 8 tests passed.
 | irq_precedence/late_hdma_vs_ei_scx2_1_cgb04c_out102F [cgb] | got 1234, expected 102F |
 | irq_precedence/late_hdma_vs_ie_scx1_1_cgb04c_out102E [cgb] | got 1234, expected 102E |
 | irq_precedence/late_hdma_vs_ie_scx2_1_cgb04c_out102F [cgb] | got 1234, expected 102F |
-| irq_precedence/late_hdma_vs_tima_scx1_2_cgb04c_out11E9 [cgb] | got 1134, expected 11E9 |
-| irq_precedence/late_hdma_vs_tima_scx1_halt_1_cgb04c_out1234 [cgb] | got 1134, expected 1234 |
-| irq_precedence/late_hdma_vs_tima_scx2_2_cgb04c_out11E9 [cgb] | got 1234, expected 11E9 |
-| irq_precedence/late_hdma_vs_tima_scx2_halt_2_cgb04c_out11C9 [cgb] | got 1134, expected 11C9 |
+| irq_precedence/late_hdma_vs_tima_scx1_1_cgb04c_out1234 [cgb] | got 1134, expected 1234 |
+| irq_precedence/late_hdma_vs_tima_scx1_halt_1_cgb04c_out1234 [cgb] | got 11C9, expected 1234 |
+| irq_precedence/late_hdma_vs_tima_scx2_2_cgb04c_out11E9 [cgb] | got 1134, expected 11E9 |
+| irq_precedence/late_hdma_vs_tima_scx2_halt_1_cgb04c_out1234 [cgb] | got 1134, expected 1234 |
 | irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | irq_precedence/late_m0irq_retrigger_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
@@ -502,15 +545,14 @@ All 8 tests passed.
 | lcdirq_precedence/m1irq_lcdstat50_lyc8f_dmg08_cgb04c_out3 [dmg] | got 1, expected 3 |
 | lcdirq_precedence/m1irq_lcdstat50_lyc8f_dmg08_cgb04c_out3 [cgb] | got 1, expected 3 |
 
-## ly0 (62/96 passed)
+## ly0 (60/96 passed)
 
-62/96 tests passed, 34 failed:
+60/96 tests passed, 36 failed:
 
 | Test | Result |
 |------|--------|
 | ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0 [dmg] | got C1, expected C0 |
 | ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0 [cgb] | got C1, expected C0 |
-| ly0/lycint152_ly153_3_dmg08_cgb04c_out00 [dmg] | got 99, expected 00 |
 | ly0/lycint152_ly153_ds_4_cgb04c_out99 [cgb] | got 00, expected 99 |
 | ly0/lycint152_lyc0flag_2_dmg08_cgb04c_outC5 [dmg] | got C1, expected C5 |
 | ly0/lycint152_lyc0flag_2_dmg08_cgb04c_outC5 [cgb] | got C1, expected C5 |
@@ -525,8 +567,11 @@ All 8 tests passed.
 | ly0/lycint152_lyc0irq_late_retrigger_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | ly0/lycint152_lyc0irq_late_retrigger_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | ly0/lycint152_lyc0irq_late_retrigger_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
+| ly0/lycint152_lyc153flag_1_dmg08_cgb04c_outC1 [dmg] | got C5, expected C1 |
+| ly0/lycint152_lyc153flag_1_dmg08_cgb04c_outC1 [cgb] | got C5, expected C1 |
 | ly0/lycint152_lyc153flag_3_dmg08_cgb04c_outC1 [dmg] | got C5, expected C1 |
 | ly0/lycint152_lyc153flag_3_dmg08_cgb04c_outC1 [cgb] | got C5, expected C1 |
+| ly0/lycint152_lyc153flag_ds_1_cgb04c_outC1 [cgb] | got C5, expected C1 |
 | ly0/lycint152_lyc153flag_ds_4_cgb04c_outC1 [cgb] | got C5, expected C1 |
 | ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | ly0/lycint152_lyc153irq_1_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
@@ -568,9 +613,9 @@ All 8 tests passed.
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_ds_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## lycEnable (161/225 passed)
+## lycEnable (160/225 passed)
 
-161/225 tests passed, 64 failed:
+160/225 tests passed, 65 failed:
 
 | Test | Result |
 |------|--------|
@@ -612,13 +657,13 @@ All 8 tests passed.
 | lycEnable/lyc0_ff45_disable_ds_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc0_ff45_enable_weirdpoint_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_ff45_enable_weirdpoint_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc0_ff45_enable_weirdpoint_2_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc0_m1disable_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_enable_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
+| lycEnable/lyc153_late_ff41_enable_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -626,6 +671,7 @@ All 8 tests passed.
 | lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_3_dmg08_outE0_cgb04c_outE2 [dmg] | got E2, expected E0 |
+| lycEnable/lyc153_late_ff45_enable_4_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_ds_3_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_ds_5_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -643,12 +689,15 @@ All 8 tests passed.
 
 All 6 tests passed.
 
-## lycint_lycflag (11/12 passed)
+## lycint_lycflag (8/12 passed)
 
-11/12 tests passed, 1 failed:
+8/12 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
+| lycint_lycflag/lycint_lycflag_1_dmg08_cgb04c_out0 [dmg] | got 4, expected 0 |
+| lycint_lycflag/lycint_lycflag_1_dmg08_cgb04c_out0 [cgb] | got 4, expected 0 |
+| lycint_lycflag/lycint_lycflag_ds_1_cgb04c_out0 [cgb] | got 4, expected 0 |
 | lycint_lycflag/lycint_lycflag_ds_3_cgb04c_out4 [cgb] | got 0, expected 4 |
 
 ## lycint_lycirq (2/4 passed)
@@ -689,20 +738,25 @@ All 6 tests passed.
 
 All 8 tests passed.
 
-## m0enable (143/167 passed)
+## m0enable (132/167 passed)
 
-143/167 tests passed, 24 failed:
+132/167 tests passed, 35 failed:
 
 | Test | Result |
 |------|--------|
 | m0enable/disable_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
+| m0enable/disable_scx1_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx1_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| m0enable/disable_scx2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| m0enable/disable_scx3_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx3_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m0enable/disable_scx3_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx4_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m0enable/disable_scx5_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| m0enable/disable_scx7_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx7_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m0enable/disable_scx7_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -711,14 +765,20 @@ All 8 tests passed.
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m0enable/lycdisable_ff41_scx1_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx1_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m0enable/lycdisable_ff41_scx2_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx2_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m0enable/lycdisable_ff41_scx3_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx3_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx3_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m0enable/lycdisable_ff45_3_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
+| m0enable/lycdisable_ff45_scx1_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m0enable/lycdisable_ff45_scx2_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
+| m0enable/lycdisable_ff45_scx3_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 
 ## m0int_m0irq (2/4 passed)
 
@@ -735,7 +795,7 @@ All 8 tests passed.
 
 | Test | Result |
 |------|--------|
-| m0int_m0stat/m0int_m0stat_scx2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
+| m0int_m0stat/m0int_m0stat_scx3_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m0int_m0stat/m0int_m0stat_scx3_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0int_m0stat/m0int_m0stat_scx5_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 
@@ -743,9 +803,9 @@ All 8 tests passed.
 
 All 6 tests passed.
 
-## m1 (116/170 passed)
+## m1 (120/170 passed)
 
-116/170 tests passed, 54 failed:
+120/170 tests passed, 50 failed:
 
 | Test | Result |
 |------|--------|
@@ -756,11 +816,9 @@ All 6 tests passed.
 | m1/ly143_late_m2enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/ly143_late_m2enable_ds_lcdoffset1_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m0enable_lycdisable_3_dmg08_out3_cgb04c_out1 [dmg] | got 1, expected 3 |
-| m1/lyc143_late_m2enable_lycdisable_1_dmg08_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_3_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/lyc143_late_m2enable_lycdisable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lycint143_m1irq_1_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | m1/lycint143_m1irq_1_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
@@ -798,10 +856,8 @@ All 6 tests passed.
 | m1/m1irq_m2enable_lyc_3_dmg08_cgb04c_out3 [dmg] | got 1, expected 3 |
 | m1/m1irq_m2enable_lyc_3_dmg08_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/m1irq_m2enable_lyc_ds_2_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/m2m1irq_ifw_1_dmg08_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
 | m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
-| m1/m2m1irq_ifw_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/m2m1irq_ifw_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
 
 ## m2enable (74/120 passed)
@@ -857,9 +913,9 @@ All 6 tests passed.
 | m2enable/lyc1_m2irq_late_lyc255_ds_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/m2_late_m1disable_ly0_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 
-## m2int_m0irq (38/72 passed)
+## m2int_m0irq (36/72 passed)
 
-38/72 tests passed, 34 failed:
+36/72 tests passed, 36 failed:
 
 | Test | Result |
 |------|--------|
@@ -868,9 +924,11 @@ All 6 tests passed.
 | m2int_m0irq/m2int_m0irq_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m2int_m0irq/m2int_m0irq_scx2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| m2int_m0irq/m2int_m0irq_scx2_di_1_dmg08_cgb04c_out0 [dmg] | got 8, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_di_1_dmg08_cgb04c_out0 [cgb] | got 8, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_ei_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_ei_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| m2int_m0irq/m2int_m0irq_scx2_ie_1_dmg08_cgb04c_out0 [dmg] | got 8, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_ie_1_dmg08_cgb04c_out0 [cgb] | got 8, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_reti_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx2_reti_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
@@ -935,9 +993,9 @@ All 6 tests passed.
 | m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2 [cgb] | got 3, expected 2 |
 | m2int_m2stat/m2int_scx4_m2stat_ds_1_cgb04c_out2 [cgb] | got 3, expected 2 |
 
-## m2int_m3stat (24/44 passed)
+## m2int_m3stat (21/44 passed)
 
-24/44 tests passed, 20 failed:
+21/44 tests passed, 23 failed:
 
 | Test | Result |
 |------|--------|
@@ -951,11 +1009,14 @@ All 6 tests passed.
 | m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx1_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| m2int_m3stat/scx/m2int_scx2_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx2_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx2_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| m2int_m3stat/scx/m2int_scx3_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx3_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx3_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx4_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| m2int_m3stat/scx/m2int_scx5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx5_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/m2int_scx6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1022,36 +1083,45 @@ All 6 tests passed.
 | miscmstatirq/m2statwirq_trigger_df_ff_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | miscmstatirq/m2statwirq_trigger_df_ff_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## oam_access (49/69 passed)
+## oam_access (40/69 passed)
 
-49/69 tests passed, 20 failed:
+40/69 tests passed, 29 failed:
 
 | Test | Result |
 |------|--------|
 | oam_access/10spritesprline_postread_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oam_access/10spritesprline_postread_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oam_access/midwrite_1_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| oam_access/midwrite_1_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/midwrite_2_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oam_access/midwrite_3_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| oam_access/midwrite_3_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/postread_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oam_access/postread_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oam_access/postread_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oam_access/postread_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oam_access/postread_scx2_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oam_access/postread_scx3_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oam_access/postread_scx3_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oam_access/postread_scx5_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oam_access/postread_scx5_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oam_access/postread_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oam_access/postwrite_1_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oam_access/postwrite_1_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/postwrite_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/postwrite_scx1_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oam_access/preread_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oam_access/preread_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oam_access/preread_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oam_access/prewrite_2_dmg08_out1_cgb04c_out0 [dmg] | got 0, expected 1 |
+| oam_access/preread_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oam_access/prewrite_2_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oam_access/prewrite_3_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| oam_access/prewrite_3_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oam_access/prewrite_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (681/811 passed)
+## oamdma (223/811 passed)
 
-681/811 tests passed, 130 failed:
+223/811 tests passed, 588 failed:
 
 | Test | Result |
 |------|--------|
@@ -1078,113 +1148,571 @@ All 6 tests passed.
 | oamdma/late_sp39y_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | oamdma/late_sp39y_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp39y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oamdma/oamdma_busydelay_1_dmg08_cgb04c_out5 [dmg] | got 9, expected 5 |
+| oamdma/oamdma_busydelay_1_dmg08_cgb04c_out5 [cgb] | got 9, expected 5 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oamdma/oamdma_src0000_busycallAFFF_dmg08_cgb04c_outFF8F [dmg] | got 0304, expected FF8F |
+| oamdma/oamdma_src0000_busycallAFFF_dmg08_cgb04c_outFF8F [cgb] | got 0304, expected FF8F |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
+| oamdma/oamdma_src0000_busypop7FFF_dmg08_cgb04c_out657665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src0000_busypop7FFF_dmg08_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src0000_busypop9FFF_2_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src0000_busypop9FFF_2_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src0000_busypop9FFF_dmg08_cgb04c_out65765576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src0000_busypop9FFF_dmg08_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src0000_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 6576FFAA, expected 65766576 |
+| oamdma/oamdma_src0000_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 6576FFAA, expected 657665AA |
+| oamdma/oamdma_src0000_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_src0000_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src0000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 657600AA, expected 65766576 |
 | oamdma/oamdma_src0000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
+| oamdma/oamdma_src0000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 65765500, expected 65766576 |
 | oamdma/oamdma_src0000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
+| oamdma/oamdma_src0000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [dmg] | got 657600FF, expected 657665FF |
 | oamdma/oamdma_src0000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [cgb] | got 657600FF, expected 657655FF |
+| oamdma/oamdma_src0000_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src0000_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src0000_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src0000_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src0000_busypopFFFF_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src0000_busypopFFFF_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src0000_busypush0001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_src0000_busypush0001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_src0000_busypush8001_dmg08_cgb04c_out65AA1255 [dmg] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_src0000_busypush8001_dmg08_cgb04c_out65AA1255 [cgb] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_src0000_busypushA001_2_dmg08_cgb04c_out5576AAFF [dmg] | got 6576AAFF, expected 5576AAFF |
+| oamdma/oamdma_src0000_busypushA001_2_dmg08_cgb04c_out5576AAFF [cgb] | got 6576AAFF, expected 5576AAFF |
+| oamdma/oamdma_src0000_busypushA001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_src0000_busypushA001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_src0000_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [dmg] | got 6576FF55, expected 55AAFF34 |
+| oamdma/oamdma_src0000_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [cgb] | got 6576FF55, expected 65AAFF55 |
+| oamdma/oamdma_src0000_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [dmg] | got 6576AA55, expected 55AA1234 |
+| oamdma/oamdma_src0000_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 6576AA55, expected 65AA1255 |
+| oamdma/oamdma_src0000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 65761255, expected 55AA1234 |
 | oamdma/oamdma_src0000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
+| oamdma/oamdma_src0000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 6576AA34, expected 55AA1234 |
 | oamdma/oamdma_src0000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
+| oamdma/oamdma_src0000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [dmg] | got 65761298, expected 65AA1298 |
 | oamdma/oamdma_src0000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
 | oamdma/oamdma_src0000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_src0000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_src7F00_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
-| oamdma/oamdma_src7F00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
+| oamdma/oamdma_src0000_busyread0000_1_dmg08_cgb04c_out4 [dmg] | got 1, expected 4 |
+| oamdma/oamdma_src0000_busyread0000_1_dmg08_cgb04c_out4 [cgb] | got 1, expected 4 |
+| oamdma/oamdma_src0000_busyread0000_2_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyread0000_2_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyread0000_4_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyread0000_4_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyread0000_ds_1_cgb04c_out4 [cgb] | got 1, expected 4 |
+| oamdma/oamdma_src0000_busyread0000_ds_2_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyreadA000_1_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyreadA000_1_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyreadC000_1_dmg08_out5_cgb04c_out1 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src0000_busyrst0002_dmg08_cgb04c_outFF8DFA9E [dmg] | got 7687FA9E, expected FF8DFA9E |
+| oamdma/oamdma_src0000_busyrst0002_dmg08_cgb04c_outFF8DFA9E [cgb] | got 7687FA9E, expected FF8DFA9E |
+| oamdma/oamdma_src0000_rombankchange_1_dmg08_cgb04c_out4 [dmg] | got 0, expected 4 |
+| oamdma/oamdma_src0000_rombankchange_1_dmg08_cgb04c_out4 [cgb] | got 0, expected 4 |
+| oamdma/oamdma_src0000_srambankchange_1_dmg08_cgb04c_out4 [dmg] | got 0, expected 4 |
+| oamdma/oamdma_src0000_srambankchange_1_dmg08_cgb04c_out4 [cgb] | got 0, expected 4 |
+| oamdma/oamdma_src7F00_busypop7FFF_dmg08_cgb04c_out657665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src7F00_busypop7FFF_dmg08_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src7F00_busypop9FFF_2_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src7F00_busypop9FFF_2_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src7F00_busypop9FFF_dmg08_cgb04c_out65765576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src7F00_busypop9FFF_dmg08_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src7F00_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 6576FF00, expected 65766576 |
+| oamdma/oamdma_src7F00_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 6576FF00, expected 657665AA |
+| oamdma/oamdma_src7F00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_src7F00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65765500, expected 657665AA |
+| oamdma/oamdma_src7F00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 65765500, expected 65766576 |
 | oamdma/oamdma_src7F00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
+| oamdma/oamdma_src7F00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 657600AA, expected 65766576 |
 | oamdma/oamdma_src7F00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_src7F00_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [cgb] | got 65AAFF34, expected 65AAFF55 |
-| oamdma/oamdma_src7F00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
+| oamdma/oamdma_src7F00_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_src7F00_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src7F00_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src7F00_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src7F00_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src7F00_busypopFFFF_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src7F00_busypopFFFF_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_src7F00_busypush0001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_src7F00_busypush0001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_src7F00_busypush8001_dmg08_cgb04c_out65AA1255 [dmg] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_src7F00_busypush8001_dmg08_cgb04c_out65AA1255 [cgb] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_src7F00_busypushA001_2_dmg08_cgb04c_out5576AAFF [dmg] | got 6576AAFF, expected 5576AAFF |
+| oamdma/oamdma_src7F00_busypushA001_2_dmg08_cgb04c_out5576AAFF [cgb] | got 6576AAFF, expected 5576AAFF |
+| oamdma/oamdma_src7F00_busypushA001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_src7F00_busypushA001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_src7F00_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [dmg] | got 6576FF34, expected 55AAFF34 |
+| oamdma/oamdma_src7F00_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [cgb] | got 6576FF34, expected 65AAFF55 |
+| oamdma/oamdma_src7F00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [dmg] | got 6576AA34, expected 55AA1234 |
+| oamdma/oamdma_src7F00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 6576AA34, expected 65AA1255 |
+| oamdma/oamdma_src7F00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 6576AA34, expected 55AA1234 |
 | oamdma/oamdma_src7F00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
+| oamdma/oamdma_src7F00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 65761255, expected 55AA1234 |
 | oamdma/oamdma_src7F00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
+| oamdma/oamdma_src7F00_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [dmg] | got 6576AA98, expected 65AA1298 |
 | oamdma/oamdma_src7F00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_src7F00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
+| oamdma/oamdma_src8000_busypop7FFF_dmg08_out65765576_cgb04c_out65005576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src8000_busypop7FFF_dmg08_out65765576_cgb04c_out65005576 [cgb] | got 657655AA, expected 65005576 |
+| oamdma/oamdma_src8000_busypop9FFF_2_dmg08_out657665FF_cgb04c_out007665FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_src8000_busypop9FFF_2_dmg08_out657665FF_cgb04c_out007665FF [cgb] | got 657655FF, expected 007665FF |
+| oamdma/oamdma_src8000_busypop9FFF_dmg08_out657665AA_cgb04c_out007665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src8000_busypop9FFF_dmg08_out657665AA_cgb04c_out007665AA [cgb] | got 657655AA, expected 007665AA |
+| oamdma/oamdma_src8000_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src8000_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src8000_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src8000_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src8000_busypopFFFF_dmg08_cgb04c_out657655AA [dmg] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_src8000_busypopFFFF_dmg08_cgb04c_out657655AA [cgb] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_src8000_busypush0001_dmg08_cgb04c_out6576AA34 [dmg] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_src8000_busypush0001_dmg08_cgb04c_out6576AA34 [cgb] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_src8000_busypush8001_dmg08_out55761234_cgb04c_out00761234 [dmg] | got 65761255, expected 55761234 |
+| oamdma/oamdma_src8000_busypush8001_dmg08_out55761234_cgb04c_out00761234 [cgb] | got 65761255, expected 00761234 |
+| oamdma/oamdma_src8000_busypushA001_2_dmg08_out65AA12FF_cgb04c_out650012FF [dmg] | got 6576AAFF, expected 65AA12FF |
+| oamdma/oamdma_src8000_busypushA001_2_dmg08_out65AA12FF_cgb04c_out650012FF [cgb] | got 6576AAFF, expected 650012FF |
+| oamdma/oamdma_src8000_busypushA001_dmg08_out65AA1255_cgb04c_out65001255 [dmg] | got 6576AA55, expected 65AA1255 |
+| oamdma/oamdma_src8000_busypushA001_dmg08_out65AA1255_cgb04c_out65001255 [cgb] | got 6576AA55, expected 65001255 |
 | oamdma/oamdma_src8000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_src8000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oamdma/oamdma_src8000_busyread8000_1_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src8000_busyread8000_1_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src8000_busywrite8000_dmg08_cgb04c_out0 [dmg] | got 4, expected 0 |
+| oamdma/oamdma_src8000_busywrite8000_dmg08_cgb04c_out0 [cgb] | got 4, expected 0 |
+| oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_src8000_srcchange0000_busyread0000_1_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_src8000_srcchange0000_busyread0000_1_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_src9F00_busypop7FFF_dmg08_out65765576_cgb04c_out65005576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_src9F00_busypop7FFF_dmg08_out65765576_cgb04c_out65005576 [cgb] | got 657655AA, expected 65005576 |
+| oamdma/oamdma_src9F00_busypop9FFF_2_dmg08_out657665FF_cgb04c_out007665FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_src9F00_busypop9FFF_2_dmg08_out657665FF_cgb04c_out007665FF [cgb] | got 657655FF, expected 007665FF |
+| oamdma/oamdma_src9F00_busypop9FFF_dmg08_out657665AA_cgb04c_out007665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_src9F00_busypop9FFF_dmg08_out657665AA_cgb04c_out007665AA [cgb] | got 657655AA, expected 007665AA |
+| oamdma/oamdma_src9F00_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src9F00_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_src9F00_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src9F00_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_src9F00_busypopFFFF_dmg08_cgb04c_out657655AA [dmg] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_src9F00_busypopFFFF_dmg08_cgb04c_out657655AA [cgb] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_src9F00_busypush0001_dmg08_cgb04c_out6576AA34 [dmg] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_src9F00_busypush0001_dmg08_cgb04c_out6576AA34 [cgb] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_src9F00_busypush8001_dmg08_out55761234_cgb04c_out00761234 [dmg] | got 65761255, expected 55761234 |
+| oamdma/oamdma_src9F00_busypush8001_dmg08_out55761234_cgb04c_out00761234 [cgb] | got 65761255, expected 00761234 |
+| oamdma/oamdma_src9F00_busypushA001_2_dmg08_out65AA12FF_cgb04c_out650012FF [dmg] | got 6576AAFF, expected 65AA12FF |
+| oamdma/oamdma_src9F00_busypushA001_2_dmg08_out65AA12FF_cgb04c_out650012FF [cgb] | got 6576AAFF, expected 650012FF |
+| oamdma/oamdma_src9F00_busypushA001_dmg08_out65AA1255_cgb04c_out65001255 [dmg] | got 6576AA55, expected 65AA1255 |
+| oamdma/oamdma_src9F00_busypushA001_dmg08_out65AA1255_cgb04c_out65001255 [cgb] | got 6576AA55, expected 65001255 |
 | oamdma/oamdma_src9F00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_src9F00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
+| oamdma/oamdma_srcA000_busypop7FFF_dmg08_cgb04c_out657665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcA000_busypop7FFF_dmg08_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcA000_busypop9FFF_dmg08_cgb04c_out65765576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcA000_busypop9FFF_dmg08_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcA000_busypopBFFF_2_dmg08_outFFFFFFFF_cgb04c_outFFFFFFAA [dmg] | got FFFFFFAA, expected FFFFFFFF |
+| oamdma/oamdma_srcA000_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcA000_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcA000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 657600AA, expected 65766576 |
 | oamdma/oamdma_srcA000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
+| oamdma/oamdma_srcA000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 65765500, expected 65766576 |
 | oamdma/oamdma_srcA000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
+| oamdma/oamdma_srcA000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [dmg] | got 657600FF, expected 657665FF |
 | oamdma/oamdma_srcA000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [cgb] | got 657600FF, expected 657655FF |
+| oamdma/oamdma_srcA000_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcA000_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcA000_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcA000_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcA000_busypopFFFF_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcA000_busypopFFFF_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcA000_busypush0001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_srcA000_busypush0001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_srcA000_busypush8001_dmg08_cgb04c_out65AA1255 [dmg] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_srcA000_busypush8001_dmg08_cgb04c_out65AA1255 [cgb] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_srcA000_busypushA001_2_dmg08_cgb04c_out55FFAAFF [dmg] | got FFFFAAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcA000_busypushA001_2_dmg08_cgb04c_out55FFAAFF [cgb] | got FFFFAAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcA000_busypushA001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_srcA000_busypushA001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_srcA000_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [dmg] | got FFFFFF55, expected 55AAFF34 |
+| oamdma/oamdma_srcA000_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [cgb] | got FFFFFF55, expected FFAAFF55 |
+| oamdma/oamdma_srcA000_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [dmg] | got 6576AA55, expected 55AA1234 |
+| oamdma/oamdma_srcA000_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 6576AA55, expected 65AA1255 |
+| oamdma/oamdma_srcA000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 65761255, expected 55AA1234 |
 | oamdma/oamdma_srcA000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
+| oamdma/oamdma_srcA000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 6576AA34, expected 55AA1234 |
 | oamdma/oamdma_srcA000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
+| oamdma/oamdma_srcA000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [dmg] | got 65761298, expected 65AA1298 |
 | oamdma/oamdma_srcA000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
 | oamdma/oamdma_srcA000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_srcA000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
+| oamdma/oamdma_srcA000_busyread0000_1_dmg08_cgb04c_out5 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_srcA000_busyread0000_1_dmg08_cgb04c_out5 [cgb] | got 1, expected 5 |
+| oamdma/oamdma_srcA000_busyreadC000_1_dmg08_out5_cgb04c_out1 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_srcA000_busywrite4000_dmg08_cgb04c_out2 [dmg] | got 4, expected 2 |
+| oamdma/oamdma_srcA000_busywrite4000_dmg08_cgb04c_out2 [cgb] | got 4, expected 2 |
+| oamdma/oamdma_srcA000_srambankchange_1_dmg08_cgb04c_out4 [dmg] | got 0, expected 4 |
+| oamdma/oamdma_srcA000_srambankchange_1_dmg08_cgb04c_out4 [cgb] | got 0, expected 4 |
+| oamdma/oamdma_srcBF00_busypop7FFF_dmg08_cgb04c_out657665AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcBF00_busypop7FFF_dmg08_cgb04c_out657665AA [cgb] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcBF00_busypop9FFF_dmg08_cgb04c_out65765576 [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcBF00_busypop9FFF_dmg08_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcBF00_busypopBFFF_2_dmg08_outFFFFFFFF_cgb04c_outFFFFFFAA [dmg] | got FFFFFF00, expected FFFFFFFF |
 | oamdma/oamdma_srcBF00_busypopBFFF_2_dmg08_outFFFFFFFF_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcBF00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
+| oamdma/oamdma_srcBF00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcBF00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65765500, expected 657665AA |
+| oamdma/oamdma_srcBF00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 65765500, expected 65766576 |
 | oamdma/oamdma_srcBF00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
+| oamdma/oamdma_srcBF00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [dmg] | got 657600AA, expected 65766576 |
 | oamdma/oamdma_srcBF00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_srcBF00_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcBF00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
+| oamdma/oamdma_srcBF00_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcBF00_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcBF00_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcBF00_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcBF00_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcBF00_busypopFFFF_dmg08_cgb04c_out65765576 [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcBF00_busypopFFFF_dmg08_cgb04c_out65765576 [cgb] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcBF00_busypush0001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_srcBF00_busypush0001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AAFF, expected 5576AA34 |
+| oamdma/oamdma_srcBF00_busypush8001_dmg08_cgb04c_out65AA1255 [dmg] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_srcBF00_busypush8001_dmg08_cgb04c_out65AA1255 [cgb] | got 65761255, expected 65AA1255 |
+| oamdma/oamdma_srcBF00_busypushA001_2_dmg08_cgb04c_out55FFAAFF [dmg] | got FFFFAAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcBF00_busypushA001_2_dmg08_cgb04c_out55FFAAFF [cgb] | got FFFFAAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcBF00_busypushA001_dmg08_cgb04c_out5576AA34 [dmg] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_srcBF00_busypushA001_dmg08_cgb04c_out5576AA34 [cgb] | got 6576AA55, expected 5576AA34 |
+| oamdma/oamdma_srcBF00_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [dmg] | got FFFFFF34, expected 55AAFF34 |
+| oamdma/oamdma_srcBF00_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [cgb] | got FFFFFF34, expected FFAAFF55 |
+| oamdma/oamdma_srcBF00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [dmg] | got 6576AA34, expected 55AA1234 |
+| oamdma/oamdma_srcBF00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 6576AA34, expected 65AA1255 |
+| oamdma/oamdma_srcBF00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 6576AA34, expected 55AA1234 |
 | oamdma/oamdma_srcBF00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
+| oamdma/oamdma_srcBF00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [dmg] | got 65761255, expected 55AA1234 |
 | oamdma/oamdma_srcBF00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
+| oamdma/oamdma_srcBF00_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [dmg] | got 6576AA98, expected 65AA1298 |
 | oamdma/oamdma_srcBF00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_srcBF00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
+| oamdma/oamdma_srcC000_busypop7FFF_dmg08_out657665AA_cgb04c_out657655AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcC000_busypop9FFF_2_dmg08_out65765576_cgb04c_out657655FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcC000_busypop9FFF_dmg08_out65765576_cgb04c_out657655AA [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcC000_busypopBFFF_2_dmg08_out65766576_cgb04c_out6576FF76 [dmg] | got 6576FFAA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopBFFF_2_dmg08_out65766576_cgb04c_out6576FF76 [cgb] | got 6576FFAA, expected 6576FF76 |
+| oamdma/oamdma_srcC000_busypopBFFF_dmg08_out65766576_cgb04c_out65765576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopBFFF_dmg08_out65766576_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcC000_busypopDFFF_dmg08_cgb04c_out65766576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopDFFF_dmg08_cgb04c_out65766576 [cgb] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopEFFF_dmg08_cgb04c_out65766576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopEFFF_dmg08_cgb04c_out65766576 [cgb] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcC000_busypopFDFF_dmg08_cgb04c_out657665FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcC000_busypopFDFF_dmg08_cgb04c_out657665FF [cgb] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcC000_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcC000_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcC000_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcC000_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcC000_busypopFFFF_dmg08_out65765576_cgb04c_out657655AA [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcC000_busypopFFFF_dmg08_out65765576_cgb04c_out657655AA [cgb] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_srcC000_busypush0001_dmg08_out4576AA34_cgb04c_out6576AA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcC000_busypush0001_dmg08_out4576AA34_cgb04c_out6576AA34 [cgb] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_srcC000_busypush8001_dmg08_out65221255_cgb04c_out65761255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcC000_busypushA001_2_dmg08_out4576AAFF_cgb04c_out6576AAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcC000_busypushA001_dmg08_out4576AA34_cgb04c_out6576AA55 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcC000_busypushC001_2_dmg08_out4522FF34_cgb04c_out6576FF34 [dmg] | got 6576FF55, expected 4522FF34 |
+| oamdma/oamdma_srcC000_busypushC001_2_dmg08_out4522FF34_cgb04c_out6576FF34 [cgb] | got 6576FF55, expected 6576FF34 |
+| oamdma/oamdma_srcC000_busypushC001_dmg08_out45221234_cgb04c_out6576AA34 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcC000_busypushC001_dmg08_out45221234_cgb04c_out6576AA34 [cgb] | got 6576AA55, expected 6576AA34 |
+| oamdma/oamdma_srcC000_busypushE001_dmg08_out45221234_cgb04c_out65761234 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcC000_busypushE001_dmg08_out45221234_cgb04c_out65761234 [cgb] | got 6576AA55, expected 65761234 |
+| oamdma/oamdma_srcC000_busypushF001_dmg08_out45221234_cgb04c_out65761234 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcC000_busypushF001_dmg08_out45221234_cgb04c_out65761234 [cgb] | got 6576AA55, expected 65761234 |
+| oamdma/oamdma_srcC000_busypushFE01_dmg08_out65221298_cgb04c_out65761298 [dmg] | got 6576AA98, expected 65221298 |
+| oamdma/oamdma_srcC000_busypushFE01_dmg08_out65221298_cgb04c_out65761298 [cgb] | got 6576AA98, expected 65761298 |
 | oamdma/oamdma_srcC000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_srcC000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
+| oamdma/oamdma_srcC000_busyreadA000_1_dmg08_out5_cgb04c_out1 [dmg] | got 1, expected 5 |
+| oamdma/oamdma_srcC000_srambankchange_1_dmg08_out4_cgb04c_out0 [dmg] | got 0, expected 4 |
+| oamdma/oamdma_srcDF00_busypop7FFF_dmg08_out657665AA_cgb04c_out657655AA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcDF00_busypop9FFF_2_dmg08_out65765576_cgb04c_out657655FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcDF00_busypop9FFF_dmg08_out65765576_cgb04c_out657655AA [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcDF00_busypopBFFF_2_dmg08_out65766576_cgb04c_out6576FF76 [dmg] | got 6576FFAA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopBFFF_2_dmg08_out65766576_cgb04c_out6576FF76 [cgb] | got 6576FFAA, expected 6576FF76 |
+| oamdma/oamdma_srcDF00_busypopBFFF_dmg08_out65766576_cgb04c_out65765576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopBFFF_dmg08_out65766576_cgb04c_out65765576 [cgb] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcDF00_busypopDFFF_dmg08_cgb04c_out65766576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopDFFF_dmg08_cgb04c_out65766576 [cgb] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopEFFF_dmg08_cgb04c_out65766576 [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopEFFF_dmg08_cgb04c_out65766576 [cgb] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcDF00_busypopFDFF_dmg08_cgb04c_out657665FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcDF00_busypopFDFF_dmg08_cgb04c_out657665FF [cgb] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcDF00_busypopFE9F_dmg08_cgb04c_out6576FFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcDF00_busypopFE9F_dmg08_cgb04c_out6576FFFF [cgb] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcDF00_busypopFEFF_dmg08_cgb04c_out6576FFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcDF00_busypopFEFF_dmg08_cgb04c_out6576FFEF [cgb] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcDF00_busypopFFFF_dmg08_out65765576_cgb04c_out657655AA [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcDF00_busypopFFFF_dmg08_out65765576_cgb04c_out657655AA [cgb] | got 657655FF, expected 657655AA |
+| oamdma/oamdma_srcDF00_busypush0001_dmg08_out4576AA34_cgb04c_out6576AA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcDF00_busypush0001_dmg08_out4576AA34_cgb04c_out6576AA34 [cgb] | got 6576AAFF, expected 6576AA34 |
+| oamdma/oamdma_srcDF00_busypush8001_dmg08_out65221255_cgb04c_out65761255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcDF00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out6576AAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcDF00_busypushA001_dmg08_out4576AA34_cgb04c_out6576AA55 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcDF00_busypushC001_2_dmg08_out4522FF34_cgb04c_out6576FF34 [dmg] | got 6576FF55, expected 4522FF34 |
+| oamdma/oamdma_srcDF00_busypushC001_2_dmg08_out4522FF34_cgb04c_out6576FF34 [cgb] | got 6576FF55, expected 6576FF34 |
+| oamdma/oamdma_srcDF00_busypushC001_dmg08_out45221234_cgb04c_out6576AA34 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcDF00_busypushC001_dmg08_out45221234_cgb04c_out6576AA34 [cgb] | got 6576AA55, expected 6576AA34 |
+| oamdma/oamdma_srcDF00_busypushE001_dmg08_out45221234_cgb04c_out65761234 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcDF00_busypushE001_dmg08_out45221234_cgb04c_out65761234 [cgb] | got 6576AA55, expected 65761234 |
+| oamdma/oamdma_srcDF00_busypushF001_dmg08_out45221234_cgb04c_out65761234 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcDF00_busypushF001_dmg08_out45221234_cgb04c_out65761234 [cgb] | got 6576AA55, expected 65761234 |
+| oamdma/oamdma_srcDF00_busypushFE01_dmg08_out65221298_cgb04c_out65761298 [dmg] | got 6576AA98, expected 65221298 |
+| oamdma/oamdma_srcDF00_busypushFE01_dmg08_out65221298_cgb04c_out65761298 [cgb] | got 6576AA98, expected 65761298 |
 | oamdma/oamdma_srcDF00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
 | oamdma/oamdma_srcDF00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_srcE000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcE000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcE000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
-| oamdma/oamdma_srcE000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcE000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcE000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcE000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcE000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
-| oamdma/oamdma_srcEF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcEF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcEF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
-| oamdma/oamdma_srcEF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcEF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcEF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcEF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcEF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
-| oamdma/oamdma_srcF000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcF000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcF000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcF000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcF000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcF000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcF000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcF000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcF000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcF000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
-| oamdma/oamdma_srcFE00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFE00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFE00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcFE00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcFE00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcFE00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcFE00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcFE00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcFE00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcFE00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
-| oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank [dmg] | got 1, expected 0 |
+| oamdma/oamdma_srcE000_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcE000_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcE000_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcE000_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcE000_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcE000_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655AA, expected FFFF55FF |
+| oamdma/oamdma_srcE000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 6576FFAA, expected 65766576 |
+| oamdma/oamdma_srcE000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcE000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcE000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcE000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 657600AA, expected 65766576 |
+| oamdma/oamdma_srcE000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 657600AA, expected FFFF55AA |
+| oamdma/oamdma_srcE000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcE000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 65765500, expected FFFF55AA |
+| oamdma/oamdma_srcE000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [dmg] | got 657600FF, expected 657665FF |
+| oamdma/oamdma_srcE000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got 657600FF, expected FFFF55FF |
+| oamdma/oamdma_srcE000_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcE000_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [cgb] | got 6576FF00, expected FFFFFFFF |
+| oamdma/oamdma_srcE000_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcE000_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [cgb] | got 657600EF, expected FFFFFFEF |
+| oamdma/oamdma_srcE000_busypopFF7F_dmg08_out6576FFAA_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcE000_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcE000_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcE000_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcE000_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AAFF, expected 55FFAA34 |
+| oamdma/oamdma_srcE000_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcE000_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [cgb] | got 65761255, expected FFAA1255 |
+| oamdma/oamdma_srcE000_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcE000_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [cgb] | got 6576AAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcE000_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcE000_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AA55, expected 55FFAA34 |
+| oamdma/oamdma_srcE000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [dmg] | got 6576FF55, expected 4522FF34 |
+| oamdma/oamdma_srcE000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got 6576FF55, expected FFAAFF55 |
+| oamdma/oamdma_srcE000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcE000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got 6576AA55, expected FFAA1255 |
+| oamdma/oamdma_srcE000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 65761255, expected 45221234 |
+| oamdma/oamdma_srcE000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 65761255, expected FFFFAA55 |
+| oamdma/oamdma_srcE000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcE000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 6576AA34, expected FFFFAA55 |
+| oamdma/oamdma_srcE000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [dmg] | got 65761298, expected 65221298 |
+| oamdma/oamdma_srcE000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got 65761298, expected FFFFAAFF |
+| oamdma/oamdma_srcE000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got 65768700, expected FFFFFF34 |
+| oamdma/oamdma_srcE000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got 657600DF, expected FFFF12DF |
+| oamdma/oamdma_srcE000_busypushFF81_dmg08_out6576FF55_cgb04c_outFFFFFF55 [cgb] | got 6576FF55, expected FFFFFF55 |
+| oamdma/oamdma_srcE000_readFE00_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| oamdma/oamdma_srcEF00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcEF00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcEF00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcEF00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcEF00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcEF00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655AA, expected FFFF55FF |
+| oamdma/oamdma_srcEF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 6576FFAA, expected 65766576 |
+| oamdma/oamdma_srcEF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcEF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 65766576 |
+| oamdma/oamdma_srcEF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcEF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 657600AA, expected 65766576 |
+| oamdma/oamdma_srcEF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 657600AA, expected FFFF55AA |
+| oamdma/oamdma_srcEF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcEF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 65765500, expected FFFF55AA |
+| oamdma/oamdma_srcEF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [dmg] | got 657600FF, expected 657665FF |
+| oamdma/oamdma_srcEF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got 657600FF, expected FFFF55FF |
+| oamdma/oamdma_srcEF00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcEF00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [cgb] | got 6576FF00, expected FFFFFFFF |
+| oamdma/oamdma_srcEF00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcEF00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [cgb] | got 657600EF, expected FFFFFFEF |
+| oamdma/oamdma_srcEF00_busypopFF7F_dmg08_out6576FFAA_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcEF00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcEF00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcEF00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcEF00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AAFF, expected 55FFAA34 |
+| oamdma/oamdma_srcEF00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcEF00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [cgb] | got 65761255, expected FFAA1255 |
+| oamdma/oamdma_srcEF00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcEF00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [cgb] | got 6576AAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcEF00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcEF00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AA55, expected 55FFAA34 |
+| oamdma/oamdma_srcEF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [dmg] | got 6576FF55, expected 4522FF34 |
+| oamdma/oamdma_srcEF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got 6576FF55, expected FFAAFF55 |
+| oamdma/oamdma_srcEF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [dmg] | got 6576AA55, expected 45221234 |
+| oamdma/oamdma_srcEF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got 6576AA55, expected FFAA1255 |
+| oamdma/oamdma_srcEF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 65761255, expected 45221234 |
+| oamdma/oamdma_srcEF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 65761255, expected FFFFAA55 |
+| oamdma/oamdma_srcEF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcEF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 6576AA34, expected FFFFAA55 |
+| oamdma/oamdma_srcEF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [dmg] | got 65761298, expected 65221298 |
+| oamdma/oamdma_srcEF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got 65761298, expected FFFFAAFF |
+| oamdma/oamdma_srcEF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got 65768700, expected FFFFFF34 |
+| oamdma/oamdma_srcEF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got 657600DF, expected FFFF12DF |
+| oamdma/oamdma_srcEF00_busypushFF81_dmg08_out6576FF55_cgb04c_outFFFFFF55 [cgb] | got 6576FF55, expected FFFFFF55 |
+| oamdma/oamdma_srcF000_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcF000_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcF000_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcF000_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcF000_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcF000_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655AA, expected FFFF55FF |
+| oamdma/oamdma_srcF000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 6576FF00, expected 65766576 |
+| oamdma/oamdma_srcF000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 6576FF00, expected FFFFFFAA |
+| oamdma/oamdma_srcF000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcF000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 65765500, expected FFFFFFAA |
+| oamdma/oamdma_srcF000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcF000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 65765500, expected FFFF55AA |
+| oamdma/oamdma_srcF000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 657600AA, expected 65766576 |
+| oamdma/oamdma_srcF000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 657600AA, expected FFFF55AA |
+| oamdma/oamdma_srcF000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcF000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcF000_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcF000_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [cgb] | got 6576FF00, expected FFFFFFFF |
+| oamdma/oamdma_srcF000_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcF000_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [cgb] | got 657600EF, expected FFFFFFEF |
+| oamdma/oamdma_srcF000_busypopFF7F_dmg08_out6576FFAA_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcF000_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcF000_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcF000_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcF000_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AAFF, expected 55FFAA34 |
+| oamdma/oamdma_srcF000_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcF000_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [cgb] | got 65761255, expected FFAA1255 |
+| oamdma/oamdma_srcF000_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcF000_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [cgb] | got 6576AAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcF000_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcF000_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AA55, expected 55FFAA34 |
+| oamdma/oamdma_srcF000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [dmg] | got 6576FF34, expected 4522FF34 |
+| oamdma/oamdma_srcF000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got 6576FF34, expected FFAAFF55 |
+| oamdma/oamdma_srcF000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcF000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got 6576AA34, expected FFAA1255 |
+| oamdma/oamdma_srcF000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcF000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 6576AA34, expected FFFFAA55 |
+| oamdma/oamdma_srcF000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 65761255, expected 45221234 |
+| oamdma/oamdma_srcF000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 65761255, expected FFFFAA55 |
+| oamdma/oamdma_srcF000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [dmg] | got 6576AA98, expected 65221298 |
+| oamdma/oamdma_srcF000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got 6576AA98, expected FFFFAAFF |
+| oamdma/oamdma_srcF000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got 65768700, expected FFFFFF34 |
+| oamdma/oamdma_srcF000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got 657600DF, expected FFFF12DF |
+| oamdma/oamdma_srcF000_busypushFF81_dmg08_out6576FF55_cgb04c_outFFFFFF55 [cgb] | got 6576FF55, expected FFFFFF55 |
+| oamdma/oamdma_srcF000_busyread0000_1_dmg08_out9_cgb04c_out0 [dmg] | got 3, expected 9 |
+| oamdma/oamdma_srcF000_busyread0000_1_dmg08_out9_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcF000_busyreadA000_dmg08_out6_cgb04c_out0 [dmg] | got 3, expected 6 |
+| oamdma/oamdma_srcF000_busyreadA000_dmg08_out6_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcF000_busyreadC000_dmg08_out6_cgb_xoutblank [dmg] | got 3, expected 6 |
+| oamdma/oamdma_srcFD00_readFE00_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| oamdma/oamdma_srcFE00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcFE00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcFE00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcFE00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFE00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcFE00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655AA, expected FFFF55FF |
+| oamdma/oamdma_srcFE00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 6576FF00, expected 65766576 |
+| oamdma/oamdma_srcFE00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 6576FF00, expected FFFFFFAA |
+| oamdma/oamdma_srcFE00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcFE00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 65765500, expected FFFFFFAA |
+| oamdma/oamdma_srcFE00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcFE00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 65765500, expected FFFF55AA |
+| oamdma/oamdma_srcFE00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 657600AA, expected 65766576 |
+| oamdma/oamdma_srcFE00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 657600AA, expected FFFF55AA |
+| oamdma/oamdma_srcFE00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcFE00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFE00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcFE00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [cgb] | got 6576FF00, expected FFFFFFFF |
+| oamdma/oamdma_srcFE00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcFE00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [cgb] | got 657600EF, expected FFFFFFEF |
+| oamdma/oamdma_srcFE00_busypopFF7F_dmg08_out6576FFAA_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcFE00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcFE00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFE00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcFE00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AAFF, expected 55FFAA34 |
+| oamdma/oamdma_srcFE00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcFE00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [cgb] | got 65761255, expected FFAA1255 |
+| oamdma/oamdma_srcFE00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcFE00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [cgb] | got 6576AAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcFE00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcFE00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AA55, expected 55FFAA34 |
+| oamdma/oamdma_srcFE00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [dmg] | got 6576FF34, expected 4522FF34 |
+| oamdma/oamdma_srcFE00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got 6576FF34, expected FFAAFF55 |
+| oamdma/oamdma_srcFE00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcFE00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got 6576AA34, expected FFAA1255 |
+| oamdma/oamdma_srcFE00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcFE00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 6576AA34, expected FFFFAA55 |
+| oamdma/oamdma_srcFE00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 65761255, expected 45221234 |
+| oamdma/oamdma_srcFE00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 65761255, expected FFFFAA55 |
+| oamdma/oamdma_srcFE00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [dmg] | got 6576AA98, expected 65221298 |
+| oamdma/oamdma_srcFE00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got 6576AA98, expected FFFFAAFF |
+| oamdma/oamdma_srcFE00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got 65768700, expected FFFFFF34 |
+| oamdma/oamdma_srcFE00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got 657600DF, expected FFFF12DF |
+| oamdma/oamdma_srcFE00_busypushFF81_dmg08_out6576FF55_cgb04c_outFFFFFF55 [cgb] | got 6576FF55, expected FFFFFF55 |
+| oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank [dmg] | got 3, expected 0 |
 | oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| oamdma/oamdma_srcFF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcFF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcFF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcFF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcFF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcFF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcFF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcFF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
+| oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oamdma/oamdma_srcFF00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [dmg] | got 657655AA, expected 657665AA |
+| oamdma/oamdma_srcFF00_busypop7FFF_dmg08_out657665AA_cgb04c_outFFFFFFAA [cgb] | got 657655AA, expected FFFFFFAA |
+| oamdma/oamdma_srcFF00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcFF00_busypop9FFF_2_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFF00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655AA, expected 65765576 |
+| oamdma/oamdma_srcFF00_busypop9FFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655AA, expected FFFF55FF |
+| oamdma/oamdma_srcFF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 6576FF00, expected 65766576 |
+| oamdma/oamdma_srcFF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 6576FF00, expected FFFFFFAA |
+| oamdma/oamdma_srcFF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcFF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got 65765500, expected FFFFFFAA |
+| oamdma/oamdma_srcFF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 65765500, expected 65766576 |
+| oamdma/oamdma_srcFF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 65765500, expected FFFF55AA |
+| oamdma/oamdma_srcFF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [dmg] | got 657600AA, expected 65766576 |
+| oamdma/oamdma_srcFF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got 657600AA, expected FFFF55AA |
+| oamdma/oamdma_srcFF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 657665FF |
+| oamdma/oamdma_srcFF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFF00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [dmg] | got 6576FF00, expected 6576FFFF |
+| oamdma/oamdma_srcFF00_busypopFE9F_dmg08_out6576FFFF_cgb04c_outFFFFFFFF [cgb] | got 6576FF00, expected FFFFFFFF |
+| oamdma/oamdma_srcFF00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [dmg] | got 657600EF, expected 6576FFEF |
+| oamdma/oamdma_srcFF00_busypopFEFF_dmg08_out6576FFEF_cgb04c_outFFFFFFEF [cgb] | got 657600EF, expected FFFFFFEF |
+| oamdma/oamdma_srcFF00_busypopFF7F_dmg08_out6576FFAA_cgb04c_outFFFFFFAA [cgb] | got 6576FFAA, expected FFFFFFAA |
+| oamdma/oamdma_srcFF00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [dmg] | got 657655FF, expected 65765576 |
+| oamdma/oamdma_srcFF00_busypopFFFF_dmg08_out65765576_cgb04c_outFFFF55FF [cgb] | got 657655FF, expected FFFF55FF |
+| oamdma/oamdma_srcFF00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AAFF, expected 4576AA34 |
+| oamdma/oamdma_srcFF00_busypush0001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AAFF, expected 55FFAA34 |
+| oamdma/oamdma_srcFF00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [dmg] | got 65761255, expected 65221255 |
+| oamdma/oamdma_srcFF00_busypush8001_dmg08_out65221255_cgb04c_outFFAA1255 [cgb] | got 65761255, expected FFAA1255 |
+| oamdma/oamdma_srcFF00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [dmg] | got 6576AAFF, expected 4576AAFF |
+| oamdma/oamdma_srcFF00_busypushA001_2_dmg08_out4576AAFF_cgb04c_out55FFAAFF [cgb] | got 6576AAFF, expected 55FFAAFF |
+| oamdma/oamdma_srcFF00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [dmg] | got 6576AA55, expected 4576AA34 |
+| oamdma/oamdma_srcFF00_busypushA001_dmg08_out4576AA34_cgb04c_out55FFAA34 [cgb] | got 6576AA55, expected 55FFAA34 |
+| oamdma/oamdma_srcFF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [dmg] | got 6576FF34, expected 4522FF34 |
+| oamdma/oamdma_srcFF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got 6576FF34, expected FFAAFF55 |
+| oamdma/oamdma_srcFF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcFF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got 6576AA34, expected FFAA1255 |
+| oamdma/oamdma_srcFF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 6576AA34, expected 45221234 |
+| oamdma/oamdma_srcFF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 6576AA34, expected FFFFAA55 |
+| oamdma/oamdma_srcFF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [dmg] | got 65761255, expected 45221234 |
+| oamdma/oamdma_srcFF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got 65761255, expected FFFFAA55 |
+| oamdma/oamdma_srcFF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [dmg] | got 6576AA98, expected 65221298 |
+| oamdma/oamdma_srcFF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got 6576AA98, expected FFFFAAFF |
+| oamdma/oamdma_srcFF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got 65768700, expected FFFFFF34 |
+| oamdma/oamdma_srcFF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got 657600DF, expected FFFF12DF |
+| oamdma/oamdma_srcFF00_busypushFF81_dmg08_out6576FF55_cgb04c_outFFFFFF55 [cgb] | got 6576FF55, expected FFFFFF55 |
+| oamdma/oamdma_srcFF00_busyread0000_dmg08_out1_cgb04c_out0 [dmg] | got 3, expected 1 |
+| oamdma/oamdma_srcFF00_busyread0000_dmg08_out1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcFF00_busyreadA000_dmg08_out1_cgb04c_out0 [dmg] | got 3, expected 1 |
+| oamdma/oamdma_srcFF00_busyreadA000_dmg08_out1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_srcFF00_busyreadC000_dmg08_out1_cgb_xoutblank [dmg] | got 3, expected 1 |
+| oamdma/oamdma_srcFF00_readFE00_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oamdma/oamdma_srcFF00_readFE45_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [dmg] | got A0, expected 81 |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [cgb] | got A0, expected 81 |
-| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [dmg] | got 2B, expected 81 |
-| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [cgb] | got 2B, expected 81 |
+| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [dmg] | got A0, expected 81 |
+| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [cgb] | got A0, expected 81 |
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
-| oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
+| oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
 ## scx_during_m3 (23/141 passed)
 
@@ -1317,25 +1845,25 @@ All 6 tests passed.
 
 | Test | Result |
 |------|--------|
-| scy/scx3/scy_during_m3_1 [dmg, png] | 51/23040 pixels differ |
+| scy/scx3/scy_during_m3_1 [dmg, png] | 429/23040 pixels differ |
 | scy/scx3/scy_during_m3_1 [cgb, png] | 429/23040 pixels differ |
 | scy/scx3/scy_during_m3_2 [dmg, png] | 1723/23040 pixels differ |
 | scy/scx3/scy_during_m3_2 [cgb, png] | 1723/23040 pixels differ |
-| scy/scx3/scy_during_m3_3 [dmg, png] | 136/23040 pixels differ |
+| scy/scx3/scy_during_m3_3 [dmg, png] | 1144/23040 pixels differ |
 | scy/scx3/scy_during_m3_3 [cgb, png] | 1144/23040 pixels differ |
 | scy/scx3/scy_during_m3_4 [dmg, png] | 2152/23040 pixels differ |
 | scy/scx3/scy_during_m3_4 [cgb, png] | 2152/23040 pixels differ |
-| scy/scx3/scy_during_m3_5 [dmg, png] | 136/23040 pixels differ |
+| scy/scx3/scy_during_m3_5 [dmg, png] | 1144/23040 pixels differ |
 | scy/scx3/scy_during_m3_5 [cgb, png] | 1144/23040 pixels differ |
 | scy/scx3/scy_during_m3_6 [dmg, png] | 2152/23040 pixels differ |
 | scy/scx3/scy_during_m3_6 [cgb, png] | 2152/23040 pixels differ |
 | scy/scy_during_m3_2 [dmg, png] | 2152/23040 pixels differ |
 | scy/scy_during_m3_2 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_3 [dmg, png] | 136/23040 pixels differ |
+| scy/scy_during_m3_3 [dmg, png] | 1144/23040 pixels differ |
 | scy/scy_during_m3_3 [cgb, png] | 1144/23040 pixels differ |
 | scy/scy_during_m3_4 [dmg, png] | 2152/23040 pixels differ |
 | scy/scy_during_m3_4 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_5 [dmg, png] | 136/23040 pixels differ |
+| scy/scy_during_m3_5 [dmg, png] | 1144/23040 pixels differ |
 | scy/scy_during_m3_5 [cgb, png] | 1144/23040 pixels differ |
 | scy/scy_during_m3_6 [dmg, png] | 2152/23040 pixels differ |
 | scy/scy_during_m3_6 [cgb, png] | 2152/23040 pixels differ |
@@ -1345,42 +1873,42 @@ All 6 tests passed.
 | scy/scy_during_m3_ds_5 [cgb, png] | 136/23040 pixels differ |
 | scy/scy_during_m3_ds_6 [cgb, png] | 1144/23040 pixels differ |
 | scy/scy_during_m3_ds_7 [cgb, png] | 1008/23040 pixels differ |
-| scy/scy_during_m3_spx08_1 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx08_1 [cgb, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx08_2 [dmg, png] | 488/23040 pixels differ |
-| scy/scy_during_m3_spx08_2 [cgb, png] | 488/23040 pixels differ |
-| scy/scy_during_m3_spx08_3 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx08_3 [cgb, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx08_4 [cgb, png] | 488/23040 pixels differ |
+| scy/scy_during_m3_spx08_1 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx08_1 [cgb, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx08_2 [dmg, png] | 1512/23040 pixels differ |
+| scy/scy_during_m3_spx08_2 [cgb, png] | 1512/23040 pixels differ |
+| scy/scy_during_m3_spx08_3 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx08_3 [cgb, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx08_4 [cgb, png] | 1512/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_1 [cgb, png] | 1128/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_2 [cgb, png] | 1016/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_3 [cgb, png] | 384/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_4 [cgb, png] | 1280/23040 pixels differ |
-| scy/scy_during_m3_spx09_1 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx09_1 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx09_2 [dmg, png] | 488/23040 pixels differ |
-| scy/scy_during_m3_spx09_2 [cgb, png] | 248/23040 pixels differ |
-| scy/scy_during_m3_spx09_3 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx09_3 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx09_4 [cgb, png] | 248/23040 pixels differ |
+| scy/scy_during_m3_spx09_1 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx09_1 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx09_2 [dmg, png] | 1512/23040 pixels differ |
+| scy/scy_during_m3_spx09_2 [cgb, png] | 1272/23040 pixels differ |
+| scy/scy_during_m3_spx09_3 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx09_3 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx09_4 [cgb, png] | 1272/23040 pixels differ |
 | scy/scy_during_m3_spx09_ds_1 [cgb, png] | 1128/23040 pixels differ |
 | scy/scy_during_m3_spx09_ds_2 [cgb, png] | 1016/23040 pixels differ |
 | scy/scy_during_m3_spx09_ds_3 [cgb, png] | 384/23040 pixels differ |
 | scy/scy_during_m3_spx09_ds_4 [cgb, png] | 1280/23040 pixels differ |
-| scy/scy_during_m3_spx0A_1 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx0A_1 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0A_2 [dmg, png] | 488/23040 pixels differ |
-| scy/scy_during_m3_spx0A_2 [cgb, png] | 248/23040 pixels differ |
-| scy/scy_during_m3_spx0A_3 [dmg, png] | 2168/23040 pixels differ |
-| scy/scy_during_m3_spx0A_3 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0A_4 [cgb, png] | 248/23040 pixels differ |
-| scy/scy_during_m3_spx0B_1 [dmg, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0B_1 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0B_2 [dmg, png] | 248/23040 pixels differ |
-| scy/scy_during_m3_spx0B_2 [cgb, png] | 248/23040 pixels differ |
-| scy/scy_during_m3_spx0B_3 [dmg, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0B_3 [cgb, png] | 2152/23040 pixels differ |
-| scy/scy_during_m3_spx0B_4 [cgb, png] | 248/23040 pixels differ |
+| scy/scy_during_m3_spx0A_1 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx0A_1 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0A_2 [dmg, png] | 1512/23040 pixels differ |
+| scy/scy_during_m3_spx0A_2 [cgb, png] | 1272/23040 pixels differ |
+| scy/scy_during_m3_spx0A_3 [dmg, png] | 2184/23040 pixels differ |
+| scy/scy_during_m3_spx0A_3 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0A_4 [cgb, png] | 1272/23040 pixels differ |
+| scy/scy_during_m3_spx0B_1 [dmg, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0B_1 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0B_2 [dmg, png] | 1272/23040 pixels differ |
+| scy/scy_during_m3_spx0B_2 [cgb, png] | 1272/23040 pixels differ |
+| scy/scy_during_m3_spx0B_3 [dmg, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0B_3 [cgb, png] | 2168/23040 pixels differ |
+| scy/scy_during_m3_spx0B_4 [cgb, png] | 1272/23040 pixels differ |
 
 ## serial (48/82 passed)
 
@@ -1463,9 +1991,9 @@ All 6 tests passed.
 | sound/ch4_late_div_write_nr52_1a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 | sound/ch4_late_div_write_nr52_2a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 
-## speedchange (108/208 passed)
+## speedchange (107/208 passed)
 
-108/208 tests passed, 100 failed:
+107/208 tests passed, 101 failed:
 
 | Test | Result |
 |------|--------|
@@ -1476,10 +2004,11 @@ All 6 tests passed.
 | speedchange/speedchange2_ch2_nr52_ds_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange2_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange2_frame1_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| speedchange/speedchange2_lcdoff2_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_lcdoff2_m2int_m3stat_scx4_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| speedchange/speedchange2_lcdoff_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| speedchange/speedchange2_lcdoff_nopx2_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| speedchange/speedchange2_lcdoff_nopx2_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_ly44_m3_ly_1_cgb04c_out25 [cgb] | got 68, expected 25 |
 | speedchange/speedchange2_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange2_ly44_m3_m3stat_scx3_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
@@ -1490,9 +2019,9 @@ All 6 tests passed.
 | speedchange/speedchange2_ly44_m3_stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange2_ly44_m3_stat_4_cgb04c_outC2 [cgb] | got C0, expected C2 |
 | speedchange/speedchange2_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| speedchange/speedchange2_nop_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| speedchange/speedchange2_nop_lcdoff_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_nop_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| speedchange/speedchange2_nop_lcdoff_nopx2_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| speedchange/speedchange2_nop_lcdoff_nopx2_m2int_m3stat_scx3_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange2_nop_ly44_m3_m3stat_scx3_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange2_nop_ly44_m3_nop_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
@@ -1570,16 +2099,18 @@ All 6 tests passed.
 | speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
 
-## sprites (257/476 passed)
+## sprites (252/476 passed)
 
-257/476 tests passed, 219 failed:
+252/476 tests passed, 224 failed:
 
 | Test | Result |
 |------|--------|
+| sprites/10spritesPrLine_10xposA6_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
+| sprites/10spritesPrLine_10xposA6_m0irq_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sprites/10spritesPrLine_10xposA7_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| sprites/10spritesPrLine_10xposA7_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/10spritesPrLine_10xposA7_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| sprites/10spritesPrLine_10xposA7_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/10spritesPrLine_1xpos0_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | sprites/10spritesPrLine_1xpos0_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/10spritesPrLine_1xposA8_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
@@ -1611,6 +2142,8 @@ All 6 tests passed.
 | sprites/1spritesPrLine_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/1spritesPrLine_offset7_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/1spritesPrLine_offset7_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/1spritesPrLine_scx1_offset7_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| sprites/1spritesPrLine_scx1_offset7_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/1spritesPrLine_xpos01_scx4_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/1spritesPrLine_xpos01_scx4_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/1spritesPrLine_xpos07_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
@@ -1718,7 +2251,7 @@ All 6 tests passed.
 | sprites/space/2overlap6_offset4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/2overlap7_offset4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/2overlap8_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/2overlap8_offset4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/space/2overlap8_offset4_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/3overlap1_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/3overlap1_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/3overlap1_scx7_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -1773,11 +2306,12 @@ All 6 tests passed.
 | sprites/space/3overlap8_scx1_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/3overlap8_scx2_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/3overlap8_scx3_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/3overlap8_scx4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap8_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap8_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap8_scx7_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/space/3overlap8_scx4_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| sprites/space/3overlap8_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| sprites/space/3overlap8_scx6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| sprites/space/3overlap8_scx7_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/9pos8_wx08_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| sprites/space/9pos8_wx08_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/9pos8_wx09_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/9pos8_wx0A_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/9pos8_wx0B_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1823,9 +2357,9 @@ All 6 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (32/50 passed)
+## vram_m3 (25/50 passed)
 
-32/50 tests passed, 18 failed:
+25/50 tests passed, 25 failed:
 
 | Test | Result |
 |------|--------|
@@ -1834,34 +2368,61 @@ All 20 tests passed.
 | vram_m3/postread_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vram_m3/postread_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | vram_m3/postread_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/postread_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vram_m3/postread_scx2_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/postread_scx3_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vram_m3/postread_scx3_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/postread_scx5_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vram_m3/postread_scx5_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | vram_m3/postread_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| vram_m3/preread_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_ds_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_lcdoffset2_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/prewrite_ds_1_cgb04c_out1 [cgb] | got 0, expected 1 |
-| vram_m3/prewrite_lcdoffset2_1_cgb04c_out1 [cgb] | got 0, expected 1 |
-| vram_m3/vramw_m3start_1_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
-| vram_m3/vramw_m3start_1_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
+| vram_m3/preread_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| vram_m3/preread_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| vram_m3/preread_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/preread_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/preread_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/preread_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/preread_lcdoffset2_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| vram_m3/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vram_m3/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vram_m3/prewrite_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vram_m3/prewrite_lcdoffset2_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vram_m3/vramw_m3start_2_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| vram_m3/vramw_m3start_2_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## vramw_m3end (32/36 passed)
+## vramw_m3end (12/36 passed)
 
-32/36 tests passed, 4 failed:
+12/36 tests passed, 24 failed:
 
 | Test | Result |
 |------|--------|
-| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [dmg] | got 7, expected 0 |
-| vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| vramw_m3end/vramw_m3end_scx5_ds_2_cgb04c_out7 [cgb] | got 0, expected 7 |
+| vramw_m3end/vramw_m3end_1_dmg08_cgb04c_out7 [dmg] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_1_dmg08_cgb04c_out7 [cgb] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_2_dmg08_cgb04c_out7 [dmg] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_2_dmg08_cgb04c_out7 [cgb] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_3_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_3_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_4_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_4_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_ds_1_cgb04c_out7 [cgb] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_ds_2_cgb04c_out7 [cgb] | got 1, expected 7 |
+| vramw_m3end/vramw_m3end_ds_3_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_ds_4_cgb04c_out0 [cgb] | got 1, expected 0 |
+| vramw_m3end/vramw_m3end_scx3_1_dmg08_cgb04c_out7 [dmg] | got 3, expected 7 |
+| vramw_m3end/vramw_m3end_scx3_1_dmg08_cgb04c_out7 [cgb] | got 3, expected 7 |
+| vramw_m3end/vramw_m3end_scx3_2_dmg08_cgb04c_out7 [dmg] | got 3, expected 7 |
+| vramw_m3end/vramw_m3end_scx3_2_dmg08_cgb04c_out7 [cgb] | got 3, expected 7 |
+| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| vramw_m3end/vramw_m3end_scx3_4_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| vramw_m3end/vramw_m3end_scx3_4_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| vramw_m3end/vramw_m3end_scx5_ds_1_cgb04c_out7 [cgb] | got 5, expected 7 |
+| vramw_m3end/vramw_m3end_scx5_ds_2_cgb04c_out7 [cgb] | got 5, expected 7 |
+| vramw_m3end/vramw_m3end_scx5_ds_3_cgb04c_out0 [cgb] | got 5, expected 0 |
 | vramw_m3end/vramw_m3end_scx5_ds_4_cgb04c_out0 [cgb] | got 5, expected 0 |
 
-## window (258/476 passed)
+## window (253/476 passed)
 
-258/476 tests passed, 218 failed:
+253/476 tests passed, 223 failed:
 
 | Test | Result |
 |------|--------|
@@ -1913,8 +2474,9 @@ All 20 tests passed.
 | window/arg/late_wy_FFto2_ly2_scx3_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_scx3_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_scx3_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/arg/late_wy_FFto2_ly2_scx5_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_scx5_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/arg/late_wy_FFto2_ly2_scx5_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_scx5_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_wx00_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_wx00_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1962,9 +2524,10 @@ All 20 tests passed.
 | window/late_disable_scx5_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_scx5_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_scx5_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_spx10_wx0f_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_wx0f_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_wx0f_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/late_disable_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_wx0f_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_enable_afterVblank_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_enable_afterVblank_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1973,6 +2536,7 @@ All 20 tests passed.
 | window/late_enable_afterVblank_ds_lcdoffset1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_enable_ly0_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_reenable_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_reenable_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
@@ -1985,17 +2549,18 @@ All 20 tests passed.
 | window/late_reenable_scx5_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_reenable_wx0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_reenable_wx0f_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_reenable_wx0f_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_scx_late_disable_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/late_scx_late_disable_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_scx_late_disable_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_wx_ff_07_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_ff_07_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_ff_07_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_wx_ff_0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_ff_0f_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_ff_0f_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_wx_scx2_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_scx2_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -2006,13 +2571,14 @@ All 20 tests passed.
 | window/late_wx_scx5_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_wx03_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_wx03_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_wx0f_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_wx_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_wx0f_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wy_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/m2int_wx00_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx00_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx03_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx03_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -2035,33 +2601,33 @@ All 20 tests passed.
 | window/m2int_wx07_scx5_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx07_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx0C_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/m2int_wx17_wxA5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx17_wxA5_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx57_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_firstline_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_firstline_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/m2int_wxA6_m0irq2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA6_m0irq2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
 | window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
-| window/m2int_wxA6_scx2_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx2_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx2_m3stat_3_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx3_m3stat_3_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_scx5_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
+| window/m2int_wxA6_vrambusyread_1_dmg08_cgb04c_out0 [dmg] | got 5, expected 0 |
+| window/m2int_wxA6_vrambusyread_1_dmg08_cgb04c_out0 [cgb] | got 5, expected 0 |
 | window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
 | window/m2int_wxDefault_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/on_screen/weon_wx18_weoff_weon_wx80 [dmg, png] | 8380/23040 pixels differ |
