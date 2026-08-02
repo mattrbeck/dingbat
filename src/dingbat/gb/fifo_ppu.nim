@@ -282,6 +282,17 @@ proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool 
 # re-run against the three m3_wx_*_change ROMs.
 const WIN_REACT_PHASE {.intdefine.} = 5
 
+# Idle dots injected at the head of mode 3, moving the whole fetch/shift
+# pipeline later against the CPU clock. 0 -- the shipping value -- compiles the
+# whole thing out; it exists so the mode-3 phase measurement in the KNOWN
+# RESIDUAL note below can be re-run (`-d:M3_PIPE_DELAY=n`, then score
+# gambatte/bgtiledata and gambatte/bgtilemap) rather than taken on trust.
+#
+# It is a MEASURING instrument, not a candidate fix: it defers the mode 0 flag
+# by the same n, which is what puts ~40 mooneye/GBMicrotest hblank-timing rows
+# red at any n > 0. See the note for what a shippable version has to do.
+const M3_PIPE_DELAY {.intdefine.} = 0
+
 proc window_reactivate(ppu: GbFifoPpu) =
   ## WX was re-reached while the window was ALREADY the active fetch source.
   ##
@@ -430,7 +441,66 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # attempt it without the 2613-title byte-identical library sweep
         # (tools/gbfuzz) as the gate: it moves every mid-scanline write in
         # every GB game by 8 dots.
+        #
+        # ---- The constant is 3-4 dots for the FETCHER, not 8 -------------
+        # Re-measured 2026-08-02 against gambatte/bgtiledata (0/34) and
+        # gambatte/bgtilemap (0/40), which are a far sharper instrument than
+        # mealybug: each family is four ROMs whose only difference is that the
+        # mid-line LCDC write moves one M-cycle, and each ships a reference
+        # PNG, so the boundary they draw IS the staircase
+        # `first affected tile = 8*ceil((write_dot - c)/8)`. Solving it for c
+        # (`-d:gb_m3_trace` gives the write dot; `DINGBAT_GAM_DUMP` the frame):
+        #
+        #                        this renderer      DMG/CGB hardware
+        #   LCDC.3, tile map        lx + 88            lx + 89 .. 92
+        #   LCDC.4, tile data low   lx + 90            lx + 93 .. 96
+        #   LCDC.4, tile data high  lx + 92            (low + 2, confirmed by
+        #                                              the mixed-shade tiles
+        #                                              the _ds_ ROMs draw)
+        #
+        # Both families are ONE bug: the map read and the data read are 2 dots
+        # apart here and 2 dots apart on hardware, so the relative phase inside
+        # a fetch is already right and only the fetch's phase against the CPU
+        # is wrong. Confirming that, M3_PIPE_DELAY (below) makes rows 16..143
+        # of every single-speed ROM in both families pixel-exact at N=3 and at
+        # N=4 -- 1400 mismatching pixels -> 240 -- and at no other N. 3 and 4
+        # are indistinguishable here because a single-speed CPU can only place
+        # the write on a 4-dot grid.
+        #
+        # Note this is 3-4, not the 8 measured off mealybug above, and it is
+        # the same lever. Whoever lands the restructure should re-derive the
+        # constant from these two families rather than from mealybug, and
+        # should expect BGP (applied at the shifter, not the fetcher) to want
+        # its own value -- "one constant for every register" is what the
+        # mealybug reading assumed, and this measurement does not support it.
+        #
+        # Two further bugs hide behind this one and only become visible once
+        # the phase is corrected; neither is fixed here:
+        #  * The _ds_ (CGB double-speed) rows want N in {1,2} where the
+        #    single-speed rows want {3,4}, i.e. a CPU-write-to-PPU alignment
+        #    that differs by 2 dots between normal and double speed. No single
+        #    pipeline phase can pass both, so the 14 _ds_ rows of these two
+        #    families need that fixed as well.
+        #  * Lines carrying an object still mismatch at the best N: for one
+        #    object at screen x=0 this pipeline's fetch phase shifts by 6 dots
+        #    where the references need 11-13. The object penalty's effect on
+        #    the fetch phase is short even though mooneye's mode-3 LENGTH
+        #    penalty passes, which is the same flag-vs-pipeline decoupling
+        #    again, seen from the other end.
         while remaining > 0 and ppu.lx < GB_WIDTH:
+          when M3_PIPE_DELAY > 0:
+            if ppu.m3_delay > 0:
+              dec ppu.m3_delay
+              ppu.cycle_counter += 1
+              dec remaining
+              continue
+          when defined(gb_m3_trace):
+            if int(ppu.ly) == GB_TRACE_LY:
+              echo "DOT ", ppu.cycle_counter, " stage=",
+                   FETCHER_ORDER[ppu.fetch_counter], " lx=", ppu.lx,
+                   " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
+                   " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
+                   " tn=", toHex(ppu.tile_num, 2)
           if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
           else:
             tick_bg_fetcher(ppu, gb)
@@ -449,6 +519,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.wx <= 7 and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           ppu.lx = 0
+          ppu.m3_delay = M3_PIPE_DELAY
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
@@ -459,6 +530,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # without changing any rendered pixel.
         if ppu.lx >= GB_WIDTH:
           ppu.`mode_flag=`(0'u8, gb)
+        elif M3_PIPE_DELAY > 0 and ppu.m3_delay > 0:
+          dec ppu.m3_delay
         elif ppu.fetching_sprite:
           tick_sprite_fetcher(ppu, gb)
         else:

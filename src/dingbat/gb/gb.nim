@@ -385,6 +385,7 @@ type
     sprite_fetch_phase*:  int
     bg_pixels_pushed*:    bool
     scx_penalty_remaining*: int
+    m3_delay*:            int   # only read when M3_PIPE_DELAY > 0, see fifo_ppu
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

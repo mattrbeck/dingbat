@@ -106,6 +106,15 @@ when defined(gb_dot_counter):
   var gb_frame_lcd_off*: uint64   # pushed by lcd_off_frame while LCD disabled
   var gb_frame_lcd_on*: uint64    # pushed by the LCDC-enable catch-up
 
+when defined(gb_m3_trace):
+  # Diagnostic mode-3 trace (tools only; compiled out of every shipping build).
+  # `-d:gb_m3_trace -d:GB_TRACE_LY=n` prints one line per mode-3 dot of line n
+  # plus every LCDC write that lands inside that line's mode 3, which is what
+  # turns a mid-scanline-write reference image into a solvable equation: the
+  # write's dot on one side, the fetcher step that consumed it on the other.
+  # See the KNOWN RESIDUAL note in fifo_ppu.nim for the measurement it produced.
+  const GB_TRACE_LY* {.intdefine.} = 20
+
 proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ## Push a frame the PPU did not draw: the panel shows white with the PPU
   ## switched off.
@@ -433,6 +442,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.cycle_counter = 5
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
+    when defined(gb_m3_trace):
+      if int(ppu.ly) == GB_TRACE_LY and (ppu.lcd_status and 3) == 3:
+        let fp = if ppu of GbFifoPpu: $GbFifoPpu(ppu).fetch_counter &
+                    " lx=" & $GbFifoPpu(ppu).lx & " fx=" & $GbFifoPpu(ppu).fetcher_x
+                 else: "?"
+        echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " old=",
+             toHex(ppu.lcd_control, 2), " new=", toHex(val, 2), " fc=", fp
     ppu.lcd_control = val
     ppu_handle_stat_interrupt(ppu, gb)
   of 0xFF41:
