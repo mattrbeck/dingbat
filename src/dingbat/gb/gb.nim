@@ -210,6 +210,11 @@ type
     ime*:        bool
     halted*:     bool
     halt_bug*:   bool
+    # Set by the eleven undefined opcodes (see opcodes.nim). Distinct from
+    # `halted`: nothing short of a reset clears it, not even an interrupt.
+    # `locked` always implies `halted`, so the fetch/dispatch path never has
+    # to test it.
+    locked*:     bool
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----
@@ -1251,6 +1256,7 @@ proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8
 proc `cpu_memory_at_hl=`*(cpu: GbCpu; gb: GB; val: uint8)
 proc cpu_inc_pc*(cpu: GbCpu)
 proc cpu_halt*(cpu: GbCpu; gb: GB)
+proc cpu_lock*(cpu: GbCpu)
 include cb_opcodes
 include opcodes
 include cpu

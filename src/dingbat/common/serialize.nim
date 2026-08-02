@@ -51,8 +51,9 @@ const
   # GBA: 1 initial · 2 CPU halt-wake/deferred-return · 3 bus ROM burst trackers
   #      + deterministic RTC · 4 CPU halt_resume_pop
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
+  #      · 4 CPU undefined-opcode lockup flag
   GBA_PAYLOAD_VERSION* = 4'u32
-  GB_PAYLOAD_VERSION*  = 3'u32
+  GB_PAYLOAD_VERSION*  = 4'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4)

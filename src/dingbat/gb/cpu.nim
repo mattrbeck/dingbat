@@ -1,7 +1,8 @@
 # GB SM83 CPU (included by gb.nim)
 
 proc new_gb_cpu*(): GbCpu =
-  GbCpu(pc: 0, sp: 0, ime: false, halted: false, halt_bug: false, cached_hl: -1)
+  GbCpu(pc: 0, sp: 0, ime: false, halted: false, halt_bug: false,
+        locked: false, cached_hl: -1)
 
 proc skip_boot*(cpu: GbCpu; gb: GB) =
   # CPU registers at PC=0x100, per hardware model (mooneye boot_regs-* /
@@ -57,6 +58,24 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
   else:
     cpu.halted = true
 
+proc cpu_lock*(cpu: GbCpu) =
+  ## Enter the SM83's undefined-opcode lockup (opcodes.nim). Pan Docs, "CPU
+  ## Instruction Set": the eleven unused opcodes "lock up the CPU" — the
+  ## instruction decoder never reaches a state that fetches again, and no
+  ## interrupt gets the CPU out of it; only a reset does.
+  ##
+  ## Modelled as `halted` plus a sticky `locked`. `halted` is what stops the
+  ## fetch/dispatch and keeps the machine ticking 4 T-cycles at a time, so the
+  ## PPU, timer, DMA and the scheduler go on running exactly as they do in
+  ## HALT (which is what makes the frame the gambatte undef_ops ROMs read back
+  ## a real frame, and what keeps a locked ROM from spinning the host).
+  ## `locked` is only ever tested on that halted path, so the running CPU pays
+  ## nothing for it; it is what stops handle_interrupts from clearing `halted`
+  ## again. Nothing clears it — a fresh GB (reset / load ROM) starts with a
+  ## fresh GbCpu.
+  cpu.halted = true
+  cpu.locked = true
+
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
   if interrupt_ready(gb.interrupts):
     cpu.halted = false
@@ -77,15 +96,21 @@ when defined(gbfuzz_trace):
   var gbfuzz_trace_hook*: proc(pc: uint16; opcode: uint8) {.closure.}
 
 proc tick*(cpu: GbCpu; gb: GB) =
-  let cycles_taken =
-    if cpu.halted:
-      4
-    else:
-      when defined(gbfuzz_trace):
-        if gbfuzz_trace_hook != nil:
-          gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
-      let opcode = mem_read(gb.memory, gb, int(cpu.pc))
-      UNPREFIXED[opcode](cpu, gb)
+  # The halted case is split out rather than folded into a `cycles_taken`
+  # expression so the `locked` test costs the *running* CPU nothing: the
+  # `cpu.halted` branch was already here, and `locked` is only reachable
+  # behind it (cpu_lock sets both).
+  if cpu.halted:
+    cpu.cached_hl = -1
+    mem_tick_extra(gb.memory, gb, 4)
+    if not cpu.locked:
+      handle_interrupts(cpu, gb)
+    return
+  when defined(gbfuzz_trace):
+    if gbfuzz_trace_hook != nil:
+      gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
+  let opcode = mem_read(gb.memory, gb, int(cpu.pc))
+  let cycles_taken = UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
   mem_tick_extra(gb.memory, gb, cycles_taken)
   handle_interrupts(cpu, gb)
