@@ -497,7 +497,8 @@ type
     # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit
     # owns a bus. Every CPU read and write tests it, so it is one bool load
     # instead of the pair of range compares that used to sit on that path; it
-    # is a cache of existing state, not new state (see gb_recompute_dma_derived).
+    # is a cache of existing state, not new state, so it is not serialized:
+    # load_mem_state re-derives it from dma_position.
     dma_busy*:             bool
     requested_speed_switch*: bool
     current_speed*:        uint8
