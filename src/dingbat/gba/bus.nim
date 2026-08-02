@@ -39,6 +39,14 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait32_n[page] = sram
     bus.wait32_s[page] = sram
   bus.prefetch_on = w.gamepack_prefetch_buffer
+  # Prefetch hand-off lookup (see rom_access_cycles): bit e set iff a halfword
+  # started e cycles ago is in its last cycle and the buffer is not yet full.
+  for page in 0x8 .. 0xD:
+    let s = int(bus.wait16_s[page])
+    var m = 0'u64
+    for e in 0 ..< min(64, 8 * s):
+      if e mod s == s - 1: m = m or (1'u64 shl e)
+    bus.pf_commit[page] = m
 
 proc bus_now(bus: Bus): CycleCount {.inline.} =
   bus.sched.cycles + CycleCount(bus.cycles)
@@ -120,6 +128,32 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   else:
     cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
     new_free_since = now + CycleCount(cost)
+  if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
+     bus.fetch_page - 0x8 <= 5:
+    # Prefetch hand-off. A CPU *data* access to the gamepak takes the ROM bus
+    # away from the prefetcher, which has been streaming halfwords since
+    # rom_free_since (so it is `elapsed mod s` cycles into the halfword it is
+    # currently fetching). A halfword still in its address/wait phase is
+    # abandoned for free, but one already in its final cycle has its data
+    # committed on the bus and cannot be recalled — the CPU waits that one
+    # cycle out. Once the buffer is full (8 halfwords, 8*s cycles) nothing is
+    # in flight at all. Only fires while the CPU executes from the gamepak:
+    # the prefetcher does not run otherwise. This is the whole of the
+    # mGBA-suite Timing "ROM" prefetch-column shortfall for LDR/LDM (see the
+    # commit message for the per-row derivation); DMA hand-off is a separate,
+    # still-open case.
+    # `elapsed` is 0 when the waitloop fast-forward has pushed rom_free_since
+    # past `now` (same unsigned-wrap guard as the prefetch-hit branch above).
+    let elapsed = if now > bus.rom_free_since: int(now - bus.rom_free_since)
+                  else: 0
+    let commit =
+      if elapsed < 64: ((bus.pf_commit[page] shr elapsed) and 1'u64) != 0
+      else:
+        let s = int(bus.wait16_s[page])
+        elapsed < 8 * s and elapsed mod s == s - 1
+    if commit:
+      cost += 1
+      new_free_since += 1
   bus.rom_next_addr = address + (if is32: 4'u32 else: 2'u32)
   bus.rom_free_since = new_free_since
   cost

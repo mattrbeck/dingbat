@@ -23,6 +23,18 @@ type
   # specific hardware revision) can be driven by the test harness via --model.
   # Sources: mooneye-test-suite acceptance/misc boot_regs-*.s / boot_div-*.s
   # asserts, and Pan Docs "Power-Up Sequence".
+  # The three buses an OAM DMA can own, and that a CPU access can collide with.
+  # Pan Docs "OAM DMA bus conflicts" states the separation for the CGB
+  # ("the cartridge and WRAM are on separate buses"), and the memory map plus
+  # the PPU's dedicated video bus (Pan Docs "Accessing VRAM and OAM") give the
+  # third. On DMG, WRAM hangs off the same external bus as the cartridge, which
+  # is why the DMG advice degenerates to "the CPU can access only HRAM".
+  GbDmaBus* = enum
+    dbNone      # OAM / unusable / IO / HRAM / IE — never conflicts
+    dbExternal  # cartridge ROM $0000-$7FFF and cartridge SRAM $A000-$BFFF
+    dbVideo     # VRAM $8000-$9FFF
+    dbWram      # WRAM + echo $C000-$FDFF (CGB only; DMG folds it into dbExternal)
+
   GbBootModel* = enum
     bmDmg0       # original DMG (no serial number)
     bmDmgABC     # DMG rev A/B/C  (dingbat default DMG)
@@ -210,6 +222,11 @@ type
     ime*:        bool
     halted*:     bool
     halt_bug*:   bool
+    # Set by the eleven undefined opcodes (see opcodes.nim). Distinct from
+    # `halted`: nothing short of a reset clears it, not even an interrupt.
+    # `locked` always implies `halted`, so the fetch/dispatch path never has
+    # to test it.
+    locked*:     bool
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----
@@ -331,6 +348,12 @@ type
     # each tick entry so STAT reads see the pre-advance mode (mooneye
     # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
     # interrupt and must still observe the old mode).
+    #
+    # Bit 7 (LY_JUST_CHANGED) rides along in the same byte: it is set by an LY
+    # advance and cleared by the next tick's snapshot, i.e. it marks "LY changed
+    # during the M-cycle this read belongs to". Packing it here rather than into
+    # its own field keeps the per-M-cycle cost at the one store the latch
+    # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
@@ -488,6 +511,21 @@ type
     dma_position*:         int
     requested_oam_dma*:    bool
     next_dma_counter*:     uint8
+    # Derived from dma_position, maintained by mem_dma_tick: true for exactly
+    # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit
+    # owns a bus. Every CPU read and write tests it, so it is one bool load
+    # instead of the pair of range compares that used to sit on that path; it
+    # is a cache of existing state, not new state (see gb_recompute_dma_derived).
+    dma_busy*:             bool
+    # Which bus the running OAM DMA owns (a GbDmaBus ordinal), the byte it last
+    # put on that bus, and what the source memory does to the data lines when
+    # the CPU writes over them (a Drive* constant). All three are derived: the
+    # bus and drive class from current_dma_source, the latch from the source
+    # memory at dma_position-1.
+    dma_bus*:              uint8
+    dma_latch*:            uint8
+    dma_drive*:            uint8
+    dma_openbus*:          bool
     requested_speed_switch*: bool
     current_speed*:        uint8
 
@@ -1251,15 +1289,22 @@ proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8
 proc `cpu_memory_at_hl=`*(cpu: GbCpu; gb: GB; val: uint8)
 proc cpu_inc_pc*(cpu: GbCpu)
 proc cpu_halt*(cpu: GbCpu; gb: GB)
+proc cpu_lock*(cpu: GbCpu)
 include cb_opcodes
 include opcodes
 include cpu
 
 # ==================== NEW_GB + POST_INIT ====================
 
-proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false): GB =
+proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
   ## force_cgb runs a DMG-flagged cart in CGB mode (a DMG cart inserted in a
   ## Game Boy Color) — mooneye's misc/ tests assert that hardware's behavior.
+  ## force_dmg is the other direction: run a CGB-flagged cart as a DMG. No
+  ## real console does that, but gambatte's test suite selects the device from
+  ## the *runner* (its `CGB_MODE` load flag), not the cart header, and most of
+  ## its ROMs carry a CGB header while still shipping a `dmg08` expectation —
+  ## so scoring the DMG half of that suite needs it (tests/dingbat_test.nim,
+  ## --mode=gambatte). force_cgb wins if both are set.
   result = GB(
     bootrom_path: bootrom_path,
     rom_path:     rom_path,
@@ -1279,7 +1324,8 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
   # any boot ROM) lets a DMG boot ROM boot a DMG cart as a DMG.
   let cgb_bootrom = bootrom_path.len > 0 and run_bios and
                     fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
-  result.cgb_enabled = cgb_bootrom or result.cgb_flag != cgbNone or force_cgb
+  result.cgb_enabled = force_cgb or
+    ((cgb_bootrom or result.cgb_flag != cgbNone) and not force_dmg)
   # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
   # The test harness may override this (via --model) before post_init to drive
   # the model-specific mooneye boot_regs/boot_div acceptance ROMs.

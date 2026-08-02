@@ -14,7 +14,8 @@ let RomCacheDir =
 
 type
   TestMode = enum
-    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka
+    tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka,
+    tmFuzzArm, tmMagenGreen, tmMagenNoRed, tmMicrotest
 
   TestDef = object
     name: string
@@ -28,12 +29,22 @@ type
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
     model: string         # mooneye per-model boot table (--model=...); "" = default
+    no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
+    ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
+    bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
+    screen_check: bool    # after the verdict, require the panel to have settled
+                          # and to show more than one shade. Deliberately NOT a
+                          # glyph check — see tests/README.md, "blargg's
+                          # on-screen text is NOT an oracle".
 
   TestResult = object
     name: string
     passed: bool
     output: string
     timed_out: bool
+    always_detail: bool  # keep `output` in results.md even when the row passes
+                         # (aggregated rows carry their pass COUNT there, and
+                         # the count is what the regression gate compares)
 
   SuiteResults = object
     suite_name: string
@@ -172,11 +183,21 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMgbaSuite: "mgba-suite"
     of tmScreenshot: "screenshot"
     of tmJsmolka: "jsmolka"
+    of tmFuzzArm: "fuzzarm"
+    of tmMagenGreen: "magen-green"
+    of tmMagenNoRed: "magen-nored"
+    of tmMicrotest: "microtest"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
     if test.color:
       cmd.add(" --color")
+    if test.cgb:
+      cmd.add(" --cgb")
+    if test.model.len > 0:
+      cmd.add(" --model=" & test.model)
+    if test.no_save:
+      cmd.add(" --nosave")
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
@@ -238,12 +259,52 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --cgb")
     if test.model.len > 0:
       cmd.add(" --model=" & test.model)
-    let (output, code) = execCmdEx(cmd, options = {poUsePath})
+    if test.no_save:
+      cmd.add(" --nosave")
+    if test.ed_breakpoint:
+      cmd.add(" --ed-breakpoint")
+    if test.bb_breakpoint:
+      cmd.add(" --bb-breakpoint")
+    if test.screen_check:
+      cmd.add(" --screen-check")
+    # fuzzarm writes its per-failure triage to stderr and one summary line to
+    # stdout. execCmdEx only ever reads the child's stdout pipe, so stderr must
+    # be merged in: unread, it is both lost and a deadlock waiting to happen
+    # once the triage outgrows the pipe buffer (500 failures is ~100 KB).
+    let opts = if test.mode == tmFuzzArm: {poUsePath, poStdErrToStdOut}
+               else: {poUsePath}
+    let (output, code) = execCmdEx(cmd, options = opts)
+    var text = output.strip()
+    if test.mode == tmFuzzArm:
+      # Keep only the "FUZZARM: " verdict for results.md — the triage would
+      # otherwise become a multi-line table cell. Match on the marker, not on
+      # position: the two streams interleave unpredictably once merged. Echo
+      # everything else when the ROM failed, so what broke lands in the
+      # runner's log where a CI failure can actually be read.
+      const Marker = "FUZZARM: "
+      var verdict = ""
+      for line in text.splitLines():
+        let s = line.strip()
+        if s.startsWith(Marker): verdict = s[Marker.len .. ^1]
+      if code != 0:
+        for line in text.splitLines():
+          let s = line.strip()
+          if s.len > 0 and not s.startsWith(Marker): echo line
+      if verdict.len > 0: text = verdict
+    if test.mode == tmMicrotest:
+      # Keep only the one line that carries the $FF80/$FF81/$FF82 triple: it is
+      # what makes a failing row actionable in results.md, and a verdict of
+      # 0x00 (the ROM never wrote one) reads very differently from 0xFF (the
+      # ROM ran and reported a mismatch).
+      for line in text.splitLines():
+        if line.startsWith("MICROTEST actual"):
+          text = line[len("MICROTEST ") .. ^1]
+          break
     return TestResult(
       name: test.name,
       passed: code == 0,
-      output: output.strip(),
-      timed_out: output.contains("TIMEOUT"),
+      output: text,
+      timed_out: output.contains("TIMEOUT") or text.contains("timed out"),
     )
 
 proc build_blargg_tests(repo_dir: string): seq[TestDef] =
@@ -257,6 +318,12 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         rom_path: rom,
         mode: tmSerial,
         timeout: 1800,
+        # These eleven are the runner's only GB rows that run a whole ROM to a
+        # verdict with nothing looking at the screen at all, which is how a PPU
+        # change that blanked or wedged the panel could once merge green. The
+        # check is weak on purpose; the reason it cannot assert the text is in
+        # tests/README.md.
+        screen_check: true,
       ))
   let instr_timing = repo_dir / "instr_timing" / "instr_timing.gb"
   if fileExists(instr_timing):
@@ -276,6 +343,44 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         mode: tmSerial,
         timeout: 1800,
       ))
+  # The rest of the bundled Blargg suites. They all report through the newer
+  # framework's SRAM protocol that tmSram already reads ($A000 status byte +
+  # "DEB061" signature + text), so wiring them up is just naming the paths.
+  #
+  # oam_bug wants ~21 emulated seconds per the suite howto (~1260 frames) —
+  # hence the larger timeout. It only costs anything for a ROM that never
+  # reports, since tmSram stops the moment the status byte lands.
+  for (subdir, secs) in [("oam_bug", 21), ("mem_timing-2", 4)]:
+    let singles = repo_dir / subdir / "rom_singles"
+    if not dirExists(singles): continue
+    for rom in find_roms(singles, ".gb"):
+      tests.add(TestDef(
+        name: "blargg/" & subdir & "/" & rom.splitFile().name,
+        rom_path: rom,
+        mode: tmSram,
+        timeout: max(1800, secs * 70),
+      ))
+  let halt_bug = repo_dir / "halt_bug.gb"
+  if fileExists(halt_bug):
+    tests.add(TestDef(
+      name: "blargg/halt_bug",
+      rom_path: halt_bug,
+      mode: tmSram,
+      timeout: 1800,
+    ))
+  # interrupt_time is a CGB-only ROM (the howto records DMG-C failing it with
+  # checksum 7F8F4AAF: "this is a CGB-only rom, so failure was expected"), but
+  # the cart is DMG-flagged — so it needs the CGB boot state forced, exactly
+  # like blargg's cgb_sound.
+  let interrupt_time = repo_dir / "interrupt_time" / "interrupt_time.gb"
+  if fileExists(interrupt_time):
+    tests.add(TestDef(
+      name: "blargg/interrupt_time",
+      rom_path: interrupt_time,
+      mode: tmSram,
+      timeout: 1800,
+      cgb: true,
+    ))
   tests
 
 proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef] =
@@ -324,6 +429,26 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
     ))
   tests
 
+proc mooneye_model_for(base: string): string =
+  ## The boot_regs/boot_div/boot_hwio ROMs each target one specific hardware
+  ## revision, encoded as the filename suffix after the last '-' (e.g.
+  ## boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to the
+  ## harness --model flag so the right boot table is applied. Only boot_* ROMs
+  ## are model-scoped; everything else uses the default boot state. The
+  ## default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
+  ## unmapped so their long-standing passing behavior is untouched.
+  if not base.startsWith("boot_") or '-' notin base:
+    return ""
+  case base.rsplit('-', maxsplit = 1)[1]
+  of "dmg0": "dmg0"
+  of "mgb":  "mgb"
+  of "sgb":  "sgb"
+  of "sgb2": "sgb2"
+  of "S":    "sgb"    # boot_div-S / boot_div2-S / boot_hwio-S
+  of "A":    "agb"    # misc/boot_regs-A / boot_div-A
+  of "cgb0": "cgb0"
+  else: ""
+
 proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   var tests: seq[TestDef]
   let mooneye_dir = roms_dir / "mooneye-test-suite"
@@ -333,13 +458,6 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(mooneye_dir, ".gb"):
     let rel = rom.relativePath(mooneye_dir)
     let name = "mooneye/" & rel.changeFileExt("")
-    # The boot_regs-*/boot_div-*/boot_hwio-* ROMs each target one specific
-    # hardware revision, encoded as the filename suffix after the last '-'
-    # (e.g. boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to
-    # the harness --model flag so the right boot table is applied. Only boot_*
-    # ROMs are model-scoped; everything else uses the default boot state. The
-    # default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
-    # unmapped so their long-standing passing behavior is untouched.
     # manual-only/sprite_priority has no serial pass/fail signal — mooneye
     # ships a reference image instead. Run it as a screenshot comparison
     # against the bundled DMG reference (same convention as mealybug/acid2).
@@ -352,18 +470,7 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         expected_png: rom.parentDir / "sprite_priority-dmg.png",
       ))
       continue
-    var model = ""
-    let base = rom.splitFile().name
-    if base.startsWith("boot_") and '-' in base:
-      case base.rsplit('-', maxsplit = 1)[1]
-      of "dmg0": model = "dmg0"
-      of "mgb":  model = "mgb"
-      of "sgb":  model = "sgb"
-      of "sgb2": model = "sgb2"
-      of "S":    model = "sgb"    # boot_div-S / boot_div2-S / boot_hwio-S
-      of "A":    model = "agb"    # misc/boot_regs-A / boot_div-A
-      of "cgb0": model = "cgb0"
-      else: discard
+    let model = mooneye_model_for(rom.splitFile().name)
     tests.add(TestDef(
       name: name,
       rom_path: rom,
@@ -393,6 +500,233 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
       mode: tmScreenshot,
       timeout: 120,
       expected_png: expected_png,
+    ))
+  tests
+
+proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
+  ## aappleby's GBMicrotest: 500+ tiny DMG timing probes. Per the suite's howto
+  ## each writes its verdict into HRAM — $FF80 actual, $FF81 expected, $FF82
+  ## $01/$FF pass/fail — and then keeps running, so there is no completion
+  ## signal: the harness runs a fixed number of frames and reads $FF82 out (see
+  ## --mode=microtest). "Running the emulation for two frames should be
+  ## sufficient", with one documented exception that needs ~380 ms.
+  ##
+  ## Two frames per ROM is why 500 processes cost about as much as one mGBA
+  ## suite run; the whole suite is ~2 s wall clock.
+  var tests: seq[TestDef]
+  if not dirExists(dir):
+    echo "  Warning: gbmicrotest directory not found"
+    return tests
+  for rom in find_roms(dir, ".gb"):
+    let name = rom.splitFile().name
+    tests.add(TestDef(
+      name: "gbmicrotest/" & name,
+      rom_path: rom,
+      mode: tmMicrotest,
+      # ~380 ms emulated == ~23 frames; 30 leaves headroom without making the
+      # one slow ROM noticeable.
+      timeout: if name == "is_if_set_during_ime0": 30 else: 2,
+      no_save: true,
+    ))
+  tests
+
+proc shot(name, rom, png: string; timeout: int; color = false; cgb = false;
+          no_save = false): TestDef =
+  ## One screenshot-comparison TestDef. The bundled reference PNGs use the same
+  ## palette conventions the harness already renders (DMG shades
+  ## #000000/#555555/#AAAAAA/#FFFFFF, CGB channels expanded (X<<3)|(X>>2)),
+  ## which is why acid2 and mealybug compare cleanly and these need no new
+  ## color work.
+  TestDef(name: name, rom_path: rom, mode: tmScreenshot, timeout: timeout,
+          expected_png: png, color: color, cgb: cgb, no_save: no_save)
+
+proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
+  ## The bundle's small screenshot suites, wired from an explicit table rather
+  ## than by globbing: each one has its own exit condition (from its howto) and
+  ## its own device story, and the reference PNG names encode which device the
+  ## image was captured on. Only DMG and CGB-native references are used — the
+  ## "-ncm"/"CGB compatibility mode" images are a third device (a CGB booting a
+  ## non-CGB cart) with its own palette, which this harness does not model.
+  ##
+  ## Frame counts come from the howtos: half a second (~30 frames) for bully,
+  ## strikethrough and turtle-tests; ~10 frames for most scribbltests but ~270
+  ## for statcount-auto; 40 for mbc3-tester. Where a ROM signals mooneye's
+  ## LD B,B breakpoint (cgb-acid-hell) the run stops there anyway and the frame
+  ## count is only an upper bound.
+  var tests: seq[TestDef]
+  template add_if(name, rom, png: string; timeout: int; color = false;
+                  cgb = false; no_save = false) =
+    if fileExists(rom) and fileExists(png):
+      tests.add(shot(name, rom, png, timeout, color, cgb, no_save))
+
+  # BullyGB (Hacktix) — broad hardware-behavior torture test. The one bundled
+  # reference is a CGB capture (the howto records the author's own DMG-C
+  # failing it with "Bad Echo RAM Reads"); the cart's CGB flag is $80, so it
+  # boots CGB without --cgb.
+  let bully = roms_dir / "bully"
+  add_if("bully/bully", bully / "bully.gb", bully / "bully.png", 120, color = true)
+
+  # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart,
+  # so only the CGB reference is usable: scoring the -dmg one would mean
+  # running a CGB-flagged cart as a DMG, which this harness cannot do (--cgb
+  # only forces CGB *on*).
+  let strike = roms_dir / "strikethrough"
+  add_if("strikethrough/strikethrough-cgb", strike / "strikethrough.gb",
+         strike / "strikethrough-cgb.png", 60, color = true)
+
+  # scribbltests (Hacktix). fairylake and winpos ship no reference image, so
+  # they cannot be scored; statcount has an "-auto" variant that is the one
+  # with a reference. "-cgb-dmg" images are identical on both devices.
+  let scribbl = roms_dir / "scribbltests"
+  add_if("scribbltests/lycscx", scribbl / "lycscx" / "lycscx.gb",
+         scribbl / "lycscx" / "lycscx-cgb-dmg.png", 30)
+  add_if("scribbltests/lycscy", scribbl / "lycscy" / "lycscy.gb",
+         scribbl / "lycscy" / "lycscy-cgb-dmg.png", 30)
+  add_if("scribbltests/palettely", scribbl / "palettely" / "palettely.gb",
+         scribbl / "palettely" / "palettely-dmg.png", 30)
+  add_if("scribbltests/scxly", scribbl / "scxly" / "scxly.gb",
+         scribbl / "scxly" / "scxly-dmg.png", 30)
+  add_if("scribbltests/statcount-auto", scribbl / "statcount" / "statcount-auto.gb",
+         scribbl / "statcount" / "statcount_auto-cgb-dmg.png", 300)
+
+  # turtle-tests (Powerlated) — window Y-trigger behavior.
+  let turtle = roms_dir / "turtle-tests"
+  for name in ["window_y_trigger", "window_y_trigger_wx_offscreen"]:
+    add_if("turtle-tests/" & name, turtle / name / (name & ".gb"),
+           turtle / name / (name & ".png"), 60)
+
+  # cgb-acid-hell (mattcurrie) — CGB PPU torture test, the companion to the
+  # cgb-acid2 already scored above. Finishes on LD B,B.
+  let hell = roms_dir / "cgb-acid-hell"
+  add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
+         hell / "cgb-acid-hell.png", 120, color = true)
+
+  # little-things-gb (pinobatch). Only firstwhite is scoreable here: tellinglys
+  # needs a scripted button press per its howto, and dingbat_test has no input
+  # scripting yet.
+  let little = roms_dir / "little-things-gb"
+  add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
+         little / "firstwhite-dmg-cgb.png", 60)
+
+  # MBC3 bank tester — a mapper test, so it is device-independent; the CGB
+  # reference is a CGB-compatibility-mode capture, which is not modeled, so
+  # only the DMG one is scored. Battery-backed: --nosave keeps a .sav from
+  # leaking into the next run.
+  let mbc3 = roms_dir / "mbc3-tester"
+  add_if("mbc3-tester/mbc3-tester", mbc3 / "mbc3-tester.gb",
+         mbc3 / "mbc3-tester-dmg.png", 60, no_save = true)
+  tests
+
+proc age_device_tokens(base: string): seq[string] =
+  ## Trailing device tokens of an AGE test-rom name. AGE encodes the devices a
+  ## test was verified on as dash-separated suffixes (README, "Test naming"):
+  ## `ei-halt-dmgC-cgbBCE` -> @["dmgC", "cgbBCE"], `ly-ncmE` -> @["ncmE"].
+  ## `ncm` means "CGB in non-CGB mode", a third device this harness does not
+  ## model.
+  let parts = base.split('-')
+  for i in countdown(parts.high, 0):
+    let p = parts[i]
+    if p.len > 3 and (p.startsWith("dmg") or p.startsWith("cgb") or
+                      p.startsWith("ncm")):
+      result.insert(p, 0)
+    else:
+      break
+
+proc build_age_tests(age_dir: string): seq[TestDef] =
+  ## c-sp's own AGE test roms. Two verdicts, both already implemented here:
+  ## most ROMs end on LD B,B with the mooneye Fibonacci registers (tmMooneye),
+  ## and the handful that cannot self-verify ship reference PNGs named
+  ## `<rom>-<device>.png` next to the ROM (tmScreenshot).
+  ##
+  ## Coverage is concentrated on mid-scanline PPU timing (m3-bg-*, stat-mode,
+  ## lcd-align-ly), OAM/VRAM access windows and CGB speed switching.
+  var tests: seq[TestDef]
+  if not dirExists(age_dir):
+    echo "  Warning: age-test-roms directory not found"
+    return tests
+  for rom in find_roms_recursive(age_dir, ".gb"):
+    let rel = rom.relativePath(age_dir).changeFileExt("")
+    let base = rom.splitFile().name
+    # Screenshot ROMs are the ones with `<base>-<device>.png` siblings.
+    var shots: seq[(string, string)]   # (device, png path)
+    for png in find_roms(rom.parentDir, ".png"):
+      let pbase = png.splitFile().name
+      if '-' notin pbase: continue
+      let cut = pbase.rfind('-')
+      if pbase[0 ..< cut] == base:
+        shots.add((pbase[cut + 1 .. ^1], png))
+    if shots.len > 0:
+      for (device, png) in shots:
+        if device.startsWith("ncm"): continue   # device not modeled
+        let cgb = device.startsWith("cgb")
+        tests.add(shot("age/" & rel & "-" & device, rom, png,
+                       timeout = 120, color = cgb, cgb = cgb))
+      continue
+    let devices = age_device_tokens(base)
+    let dmg = devices.anyIt(it.startsWith("dmg"))
+    let cgb = devices.anyIt(it.startsWith("cgb"))
+    if not dmg and not cgb:
+      continue   # ncm-only: CGB in non-CGB mode, which this harness cannot run
+    tests.add(TestDef(
+      name: "age/" & rel,
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: not dmg,   # prefer DMG when the ROM is verified on both
+      # AGE signals failure with "any register values other than the Fibonacci
+      # ones", not with a dedicated failure signature, so LD B,B has to end the
+      # run unconditionally. Without this a failing ROM never stops and burns
+      # the whole 1800-frame timeout — which, with most of this suite red
+      # today, was the single biggest chunk of the runner's wall clock.
+      bb_breakpoint: true,
+    ))
+  tests
+
+proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
+  ## wilbertpol's fork of the Mooneye suite. Same Fibonacci-register verdict as
+  ## Gekkio's, but built against mooneye-gb as it stood in 2016, when the magic
+  ## breakpoint was the undefined opcode 0xED rather than LD B,B — hence
+  ## ed_breakpoint (see the 0xED handler in src/dingbat/gb/opcodes.nim).
+  ##
+  ## Roughly 80% of the content overlaps the Gekkio suite scored above, so the
+  ## rows are namespaced `mooneye-wilbertpol/` and never collide with it.
+  ##
+  ## Not every directory is scoreable: `utils/` holds a dump tool rather than a
+  ## test, and `logic-analysis/` ROMs are meant to be observed on a logic
+  ## analyzer and have no pass/fail signal at all.
+  var tests: seq[TestDef]
+  let dir = roms_dir / "mooneye-test-suite-wilbertpol"
+  if not dirExists(dir):
+    echo "  Warning: mooneye-test-suite-wilbertpol directory not found"
+    return tests
+  for rom in find_roms_recursive(dir, ".gb"):
+    let rel = rom.relativePath(dir)
+    let name = "mooneye-wilbertpol/" & rel.changeFileExt("")
+    if rel.startsWith("utils") or rel.startsWith("logic-analysis"):
+      continue
+    # The two screenshot ROMs: sprite_priority (DMG reference, the same one the
+    # Gekkio suite uses) and madness/mgb_oam_dma_halt_sprites, whose reference
+    # was captured on an MGB.
+    if rel == "manual-only" / "sprite_priority.gb":
+      tests.add(shot(name, rom, rom.parentDir / "sprite_priority-dmg.png", 120))
+      continue
+    if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
+      var t = shot(name, rom, rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png", 120)
+      t.model = "mgb"
+      tests.add(t)
+      continue
+    let base = rom.splitFile().name
+    # Device suffix after the last '-': -C/-A are CGB/AGB tests, -G/-S/-GS are
+    # DMG/SGB. misc/ is the CGB-hardware directory, same convention as Gekkio's.
+    let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
+    tests.add(TestDef(
+      name: name,
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: rel.startsWith("misc") or suffix in ["C", "cgb", "cgb0", "A"],
+      model: mooneye_model_for(base),
+      ed_breakpoint: true,
     ))
   tests
 
@@ -497,6 +831,91 @@ proc build_jsmolka_tests(dir: string): seq[TestDef] =
     ))
   tests
 
+# DenSinH/FuzzARM (GPL-3.0). Five prebuilt ROMs are committed to the repo's
+# master branch; there is no release tag, so the download is pinned to a commit
+# the same way jsmolka is. Bump this SHA and the ROM cache key in
+# .github/workflows/test.yml together.
+#
+# The ROMs are *randomly generated at build time*: the instruction mix, the
+# operands and therefore the expected values are all specific to this SHA. A
+# new SHA means a different 10000 tests, so the committed pass/fail baseline in
+# tests/results.md is only meaningful for this pin. Re-baseline on a bump.
+const FuzzArmRev = "a675329cd57da48e3e406216ba2d79dd7e09ee20"
+
+const FuzzArmRoms = ["ARM_DataProcessing", "ARM_Any",
+                     "THUMB_DataProcessing", "THUMB_Any", "FuzzARM"]
+
+proc ensure_fuzzarm_test_roms(): seq[string] =
+  ## Fetch (and cache) the five prebuilt FuzzARM ROMs at the pinned commit.
+  ## They live at the repo root, not in a release archive, so each is pulled
+  ## individually from raw.githubusercontent.com — no zip, nothing to build.
+  ## The short SHA is in the cached filename so a bump can't reuse stale ROMs.
+  var paths: seq[string]
+  for rom in FuzzArmRoms:
+    paths.add(ensure_rom_download(
+      "https://raw.githubusercontent.com/DenSinH/FuzzARM/" & FuzzArmRev &
+        "/" & rom & ".gba",
+      "fuzzarm-" & FuzzArmRev[0 ..< 7] & "-" & rom & ".gba"))
+  paths
+
+proc build_fuzzarm_tests(paths: seq[string]): seq[TestDef] =
+  ## Each ROM is 10000 randomized instruction tests. --mode=fuzzarm drives the
+  ## ROM's own "press a button to continue" gate so it reports EVERY failing
+  ## test, not just the first, and reads the verdict out of the structured
+  ## 16-word dump the ROM leaves at the base of eWRAM — so no BIOS, no PPU and
+  ## no pinned frame hash sits between the CPU and the score. The per-failure
+  ## detail (instruction, shift, operands, got vs expected r3/r4/CPSR) and a
+  ## rollup by failure class go to stderr; stdout is the one-line tally that
+  ## lands in results.md.
+  var tests: seq[TestDef]
+  for i, rom in FuzzArmRoms:
+    tests.add(TestDef(
+      name: "fuzzarm/" & rom,
+      rom_path: paths[i],
+      mode: tmFuzzArm,
+      # Generous: a clean pass is ~40 frames, and each reported failure costs
+      # two more (one to hold the button, one to release it).
+      timeout: 20000,
+    ))
+  tests
+
+# alloncm/MagenTests (MIT). Tagged releases ship the assembled .gbc files, so
+# this pins a release tag rather than a commit. Covers CGB corners nothing else
+# dingbat runs touches: HBlank VRAM DMA (including that it must stop while the
+# CPU is halted), the KEY0 lock after boot, STAT's reported mode while the PPU
+# is off, and MBC1/3/5 out-of-bounds SRAM addressing.
+const MagenRelease = "0.5.0"
+
+proc build_magen_tests(): seq[TestDef] =
+  ## Verdict is the screen colour, per src/common.asm's palette and each
+  ## test's README entry — see the mode comment in dingbat_test.nim for why
+  ## this is NOT a screenshot comparison (the repo ships no 160x144 reference
+  ## image; images/ is upscales, swatches and a photo of real hardware).
+  ##
+  ## oam_internal_priority is deliberately absent: it draws a pattern whose
+  ## only stated criterion is prose ("2 pairs of rectangles connected or
+  ## touching each other"), red is a legitimate colour in it, and the only
+  ## reference is a 318x295 SameBoy window grab. There is nothing to score it
+  ## against that would not just be a golden of dingbat's own output.
+  var tests: seq[TestDef]
+  for rom in ["hblank_vram_dma", "key0_lock_after_boot", "mbc_oob_sram_mbc1",
+              "mbc_oob_sram_mbc3", "mbc_oob_sram_mbc5", "ppu_disabled_state",
+              "bg_oam_priority"]:
+    let path = ensure_rom_download(
+      "https://github.com/alloncm/MagenTests/releases/download/" &
+        MagenRelease & "/" & rom & ".gbc",
+      "magen-" & MagenRelease & "-" & rom & ".gbc")
+    tests.add(TestDef(
+      name: "magen/" & rom,
+      rom_path: path,
+      # bg_oam_priority is the one that draws rather than filling the screen;
+      # its documented result is "... with no red lines".
+      mode: if rom == "bg_oam_priority": tmMagenNoRed else: tmMagenGreen,
+      # Every one of them settles by frame 60; 300 is slack, not a wait.
+      timeout: 300,
+    ))
+  tests
+
 proc generate_results_md(suites: seq[SuiteResults]): string =
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
@@ -516,16 +935,27 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     for r in suite.results:
       let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
       var detail = ""
-      if not r.passed:
-        if r.output.contains("% correct") or r.output.contains("passed") or r.output.contains("timed out"):
+      if r.always_detail:
+        detail = " " & r.output
+      elif not r.passed:
+        if r.output.contains("% correct") or r.output.contains("passed") or
+           r.output.contains("timed out") or r.output.contains("verdict=0x"):
           detail = " " & r.output
-      let short_name = if r.name.contains("/"): r.name.split("/", maxsplit = 1)[1] else: r.name
-      lines.add("| " & short_name & " | " & emoji & detail & " |")
+      # The row name is the FULL test name, suite prefix included. It is the
+      # key the regression comparison reads back (load_previous_results), and
+      # with ~20 suites in here — several of them forks of each other, e.g.
+      # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
+      # anything shorter collides across suites and silently mis-keys the gate.
+      lines.add("| " & r.name & " | " & emoji & detail & " |")
       inc total
       if r.passed: inc pass_count else: inc fail_count
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
       lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
+    elif suite.suite_name == "Game Boy - gambatte":
+      lines.add("")
+      lines.add("Each row is one gambatte subdirectory. See " &
+        "[detailed results](results_gambatte.md) for individual test outcomes.")
     lines.add("")
 
   lines.add("## Summary")
@@ -537,6 +967,10 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
   lines.join("\n")
 
 proc load_previous_results(path: string): Table[string, bool] =
+  ## The committed baseline, keyed by the full test name exactly as
+  ## generate_results_md writes it. A name that is not in the table (a suite
+  ## added since the baseline was committed) is simply not gated — which is why
+  ## the baseline has to be regenerated and committed whenever suites are added.
   result = initTable[string, bool]()
   if not fileExists(path):
     return
@@ -549,6 +983,29 @@ proc load_previous_results(path: string): Table[string, bool] =
         let passed = parts[2].contains("\xF0\x9F\x91\x8C")
         result[name] = passed
 
+proc load_previous_counts(path: string): Table[string, int] =
+  ## Pass COUNTS from a committed results.md, for the rows that report
+  ## "<passes>/<total> passed" (the aggregated suites). A row that goes from
+  ## 1974/2020 to 1970/2020 is a regression even though its pass/fail bit
+  ## never changed, so the aggregated suites gate on this rather than on
+  ## load_previous_results' boolean.
+  result = initTable[string, int]()
+  if not fileExists(path):
+    return
+  for line in readFile(path).splitLines():
+    if not line.startsWith("| ") or line.startsWith("| Test") or line.startsWith("|---"):
+      continue
+    let parts = line.split("|").mapIt(it.strip())
+    if parts.len < 3: continue
+    let words = parts[2].splitWhitespace()
+    for i, w in words:
+      if w == "passed" and i > 0 and '/' in words[i - 1]:
+        let halves = words[i - 1].split('/')
+        try:
+          result[parts[1]] = parseInt(halves[0])
+        except ValueError: discard
+        break
+
 proc run_suite(name: string; tests: seq[TestDef]; harness: string;
                previous: Table[string, bool]; regressions: var seq[string]): SuiteResults =
   echo &"\n=== {name} ==="
@@ -556,13 +1013,12 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
   for test in tests:
     let r = run_test(test, harness)
     let status = if r.passed: "PASS" else: "FAIL"
-    if test.mode == tmScreenshot:
+    if test.mode in {tmScreenshot, tmFuzzArm, tmMagenGreen, tmMagenNoRed, tmMicrotest}:
       echo &"  [{status}] {test.name} - {r.output}"
     else:
       echo &"  [{status}] {test.name}"
     results.add(r)
-    let short_name = test.name.split("/")[^1]
-    if previous.hasKey(short_name) and previous[short_name] and not r.passed:
+    if previous.getOrDefault(test.name) and not r.passed:
       regressions.add(test.name)
   SuiteResults(suite_name: name, results: results)
 
@@ -611,8 +1067,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
           name: current_suite, passes: passes, total: total,
           tests: current_tests,
         ))
-        let short_name = current_suite
-        if previous.hasKey(short_name) and previous[short_name] and not passed:
+        if previous.getOrDefault("mgba-suite/" & current_suite) and not passed:
           regressions.add("mgba-suite/" & current_suite)
         seen_suites.add(current_suite)
       pending_fail = false
@@ -689,6 +1144,245 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
     lines.add("")
   lines.join("\n")
 
+# ==================== gambatte ====================
+#
+# sinamas' gambatte suite, shipped inside the same game-boy-test-roms bundle as
+# Blargg/Mooneye/Mealybug/SameSuite — 3,524 ROMs, no extra download. The rules
+# for turning a filename into a test are the bundle's own
+# gambatte/game-boy-test-roms-howto.md; --mode=gambatte in dingbat_test.nim
+# carries the long-form explanation and does the scoring. In brief:
+#
+#   * `dmg08` in the name = a DMG test, `cgb04c` = a CGB test. Most ROMs carry
+#     both and are two rows here.
+#   * `_out<hex>` is the expected value, per device, rendered on screen as hex
+#     glyphs. `_outaudio0/1` is an audio test (see below). An `x` in front of a
+#     tag disables it.
+#   * a <rom>_dmg08.png / _cgb04c.png / _dmg08_cgb04c.png next to the ROM makes
+#     it a full-frame screenshot test instead.
+#
+# NOT scored: the 220 `_outaudio0/1` rows. Gambatte decides them by asking
+# whether all 35,112 samples of the final frame are identical — that is a
+# 2 MHz sample stream, one sample per two clocks, and several of those ROMs
+# turn on a difference lasting a handful of clocks (ch1_duty0_pos6_to_pos7_*).
+# dingbat's APU emits at 32,768 Hz, 64x coarser, so a faithful verdict is not
+# available from the sample path as it stands and a coarse one would be
+# scored noise. Also not scored: gambatte's AGB column, which its own runner
+# marks "FIXME: Actual AGB results" and gives the CGB expectations.
+#
+# Reporting is per-subdirectory (`| oamdma | 800/884 passed |`), like the mGBA
+# suite: 5,005 individual rows would drown results.md. The per-test detail
+# goes to tests/results_gambatte.md.
+
+type
+  GambatteRow = object
+    dev: string        # "dmg" | "cgb"
+    kind: string       # "hex" | "png"
+    expected: string   # hex string, or the reference PNG's path
+    rom: string
+    group: string      # top-level directory under gambatte/
+    name: string       # display name, unique per row
+
+  GambatteGroup = object
+    name: string
+    passes: int
+    total: int
+    failures: seq[(string, string)]  # (row name, detail)
+
+proc gambatte_hex_prefix(tail: string): string =
+  ## The leading run of hex digits, which is exactly what gambatte's runner
+  ## reads: it walks the filename tail glyph by glyph and stops at the first
+  ## character that is not 0-9/A-F (the '.' of the extension, or the '_' that
+  ## starts the other device's tag).
+  for c in tail:
+    if c in {'0'..'9', 'a'..'f', 'A'..'F'}: result.add(c)
+    else: break
+
+proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
+  var rows: seq[GambatteRow]
+  var roms: seq[string]
+  for path in walkDirRec(gambatte_dir):
+    if path.endsWith(".gb") or path.endsWith(".gbc"):
+      roms.add(path)
+  roms.sort(cmp[string])
+  for rom in roms:
+    let rel = rom.relativePath(gambatte_dir)
+    let group = if DirSep in rel: rel.split(DirSep)[0] else: "(root)"
+    let fname = rom.extractFilename
+    let stem = fname.changeFileExt("")
+    # Device markers, in gambatte's own precedence order.
+    var dmg_marker, cgb_marker = ""
+    if "dmg08_cgb04c_out" in stem:
+      dmg_marker = "dmg08_cgb04c_out"
+      cgb_marker = "dmg08_cgb04c_out"
+    elif "dmg08_out" in stem:
+      dmg_marker = "dmg08_out"
+      if "cgb04c_out" in stem: cgb_marker = "cgb04c_out"
+    elif "_out" in stem:
+      cgb_marker = "_out"
+    for (dev, marker) in [("dmg", dmg_marker), ("cgb", cgb_marker)]:
+      if marker.len == 0: continue
+      let tail = fname[fname.find(marker) + marker.len .. ^1]
+      if tail.startsWith("audio0") or tail.startsWith("audio1"):
+        continue  # audio verdict is out of reach, see the header comment
+      let expected = gambatte_hex_prefix(tail)
+      if expected.len == 0: continue
+      rows.add(GambatteRow(
+        dev: dev, kind: "hex", expected: expected.toUpperAscii(), rom: rom,
+        group: group, name: rel.changeFileExt("") & " [" & dev & "]",
+      ))
+    # Reference-image rows. A shared _dmg08_cgb04c.png scores both devices.
+    let base = rom.changeFileExt("")
+    let both = base & "_dmg08_cgb04c.png"
+    var png_for: seq[(string, string)]
+    if fileExists(both):
+      png_for = @[("dmg", both), ("cgb", both)]
+    else:
+      if fileExists(base & "_dmg08.png"): png_for.add(("dmg", base & "_dmg08.png"))
+      if fileExists(base & "_cgb04c.png"): png_for.add(("cgb", base & "_cgb04c.png"))
+    for (dev, png) in png_for:
+      rows.add(GambatteRow(
+        dev: dev, kind: "png", expected: png, rom: rom, group: group,
+        name: rel.changeFileExt("") & " [" & dev & ", png]",
+      ))
+  rows
+
+proc run_gambatte_suite(harness: string; previous: Table[string, bool];
+                        previous_counts: Table[string, int];
+                        regressions: var seq[string];
+                        groups: var seq[GambatteGroup];
+                        gb_test_roms_dir: string): SuiteResults =
+  echo "\n=== Game Boy - gambatte ==="
+  let gambatte_dir = gb_test_roms_dir / "gambatte"
+  if not dirExists(gambatte_dir):
+    echo "  Warning: gambatte directory not found in game-boy-test-roms"
+    return SuiteResults(suite_name: "Game Boy - gambatte")
+  let rows = build_gambatte_rows(gambatte_dir)
+  if rows.len == 0:
+    echo "  Warning: gambatte directory held no scorable ROMs"
+    return SuiteResults(suite_name: "Game Boy - gambatte")
+
+  # One process per ROM would cost more than the emulation: each row is 15
+  # frames (a few ms), and there are thousands of them. Batch them into one
+  # --mode=gambatte process per core instead, round-robin so the shards stay
+  # balanced (the suite's cost per ROM is far from uniform). Rows are
+  # independent — each builds a fresh GB — so the split cannot change a
+  # verdict; `tests/README.md` records how that was verified.
+  let work_dir = getTempDir() / "dingbat-gambatte"
+  removeDir(work_dir)
+  createDir(work_dir)
+  defer: removeDir(work_dir)
+  let shards = max(1, min(countProcessors(), 16))
+  var shard_rows = newSeq[seq[int]](shards)
+  for i in 0 ..< rows.len: shard_rows[i mod shards].add(i)
+  var cmds: seq[string]
+  var out_paths: seq[string]
+  for s in 0 ..< shards:
+    let list_path = work_dir / &"list{s}.tsv"
+    let out_path = work_dir / &"out{s}.txt"
+    var lines: seq[string]
+    for i in shard_rows[s]:
+      lines.add(rows[i].dev & "\t" & rows[i].kind & "\t" & rows[i].expected &
+                "\t" & rows[i].rom)
+    writeFile(list_path, lines.join("\n") & "\n")
+    cmds.add(&"{harness.quoteShell} --mode=gambatte --list={list_path.quoteShell}" &
+             &" > {out_path.quoteShell} 2>&1")
+    out_paths.add(out_path)
+  discard execProcesses(cmds, options = {poUsePath, poEvalCommand}, n = shards)
+
+  var passed = newSeq[bool](rows.len)
+  var detail = newSeq[string](rows.len)
+  var seen = newSeq[bool](rows.len)
+  for s in 0 ..< shards:
+    if not fileExists(out_paths[s]): continue
+    for line in readFile(out_paths[s]).splitLines():
+      if not line.startsWith("GAM "): continue
+      let parts = line.split(' ', maxsplit = 3)
+      if parts.len < 3: continue
+      var local: int
+      try: local = parseInt(parts[1])
+      except ValueError: continue
+      if local < 0 or local >= shard_rows[s].len: continue
+      let g = shard_rows[s][local]
+      seen[g] = true
+      passed[g] = parts[2] == "PASS"
+      detail[g] = if parts.len > 3: parts[3].strip() else: ""
+  for i in 0 ..< rows.len:
+    if not seen[i]:
+      detail[i] = "harness produced no verdict (crash or timeout in its shard)"
+
+  var order: seq[string]
+  var by_group = initTable[string, GambatteGroup]()
+  for i, row in rows:
+    if row.group notin by_group:
+      order.add(row.group)
+      by_group[row.group] = GambatteGroup(name: row.group)
+    by_group.withValue(row.group, g):
+      inc g.total
+      if passed[i]: inc g.passes
+      else: g.failures.add((row.name, detail[i]))
+
+  var results: seq[TestResult]
+  var total_pass, total_all = 0
+  for name in order:
+    let g = by_group[name]
+    groups.add(g)
+    total_pass += g.passes
+    total_all += g.total
+    let all_pass = g.passes == g.total
+    let short_name = "gambatte/" & name
+    echo &"  [{(if all_pass: \"PASS\" else: \"FAIL\")}] {short_name} - {g.passes}/{g.total} passed"
+    results.add(TestResult(
+      name: short_name,
+      passed: all_pass,
+      output: &"{g.passes}/{g.total} passed",
+      always_detail: true,
+    ))
+    # Regression on either bit: a group that used to be all-green going red, or
+    # a group whose pass COUNT dropped. Key on `short_name`, the FULL row name:
+    # that is what generate_results_md writes and what load_previous_results /
+    # load_previous_counts read back. Keying on the bare group name here reads
+    # an empty table and silently ungates all 48 rows.
+    if previous.hasKey(short_name) and previous[short_name] and not all_pass:
+      regressions.add(short_name)
+    elif previous_counts.hasKey(short_name) and g.passes < previous_counts[short_name]:
+      regressions.add(&"{short_name} ({previous_counts[short_name]} -> {g.passes} passing)")
+  echo &"  gambatte total: {total_pass}/{total_all} passed"
+  SuiteResults(suite_name: "Game Boy - gambatte", results: results)
+
+proc generate_gambatte_detail_md(groups: seq[GambatteGroup]): string =
+  var lines: seq[string]
+  lines.add("# gambatte Test Suite - Detailed Results")
+  lines.add("")
+  lines.add("*Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "*")
+  lines.add("")
+  lines.add("Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the")
+  lines.add("device the filename asks for; `[.., png]` rows are scored against the")
+  lines.add("reference image next to the ROM, the rest against the hex value the")
+  lines.add("ROM draws on screen. See tests/README.md for the mechanism.")
+  lines.add("")
+  var total_pass, total_all = 0
+  for g in groups:
+    total_pass += g.passes
+    total_all += g.total
+  lines.add(&"**{total_pass}/{total_all} passed.**")
+  lines.add("")
+  for g in groups:
+    let status = if g.passes == g.total: "" else: &" ({g.passes}/{g.total} passed)"
+    lines.add("## " & g.name & status)
+    lines.add("")
+    if g.failures.len == 0:
+      lines.add(&"All {g.total} tests passed.")
+      lines.add("")
+    else:
+      lines.add(&"{g.passes}/{g.total} tests passed, {g.failures.len} failed:")
+      lines.add("")
+      lines.add("| Test | Result |")
+      lines.add("|------|--------|")
+      for (name, det) in g.failures:
+        lines.add("| " & name & " | " & det & " |")
+      lines.add("")
+  lines.join("\n")
+
 proc main() =
   let harness_name = when defined(windows): "dingbat_test.exe" else: "dingbat_test"
   let harness = getCurrentDir() / harness_name
@@ -753,6 +1447,7 @@ proc main() =
 
   let results_path = getCurrentDir() / "tests" / "results.md"
   let previous = load_previous_results(results_path)
+  let previous_counts = load_previous_counts(results_path)
 
   var all_suites: seq[SuiteResults]
   var regressions: seq[string]
@@ -778,21 +1473,60 @@ proc main() =
   all_suites.add(run_suite("GBA - jsmolka gba-tests", jsmolka_tests, harness,
                            previous, regressions))
 
+  # DenSinH/FuzzARM randomized ARM/Thumb tests (GBA)
+  let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())
+  all_suites.add(run_suite("GBA - FuzzARM", fuzzarm_tests, harness,
+                           previous, regressions))
+
   # Acid2 tests (screenshot comparison)
   let acid2_tests = build_acid2_tests()
   all_suites.add(run_suite("Game Boy - Acid2", acid2_tests, harness, previous, regressions))
 
+  # MagenTests CGB corners (colour verdict)
+  all_suites.add(run_suite("Game Boy - MagenTests", build_magen_tests(), harness,
+                           previous, regressions))
+
   # Mealybug Tearoom tests (screenshot comparison)
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
+
+  # GBMicrotest (HRAM verdict byte)
+  all_suites.add(run_suite("Game Boy - GBMicrotest",
+    build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),
+    harness, previous, regressions))
+
+  # AGE test roms (mooneye-style verdict + screenshot comparison)
+  all_suites.add(run_suite("Game Boy - AGE",
+    build_age_tests(gb_test_roms_dir / "age-test-roms"),
+    harness, previous, regressions))
+
+  # The bundle's small screenshot suites (bully, strikethrough, scribbltests,
+  # turtle-tests, cgb-acid-hell, little-things-gb, mbc3-tester)
+  all_suites.add(run_suite("Game Boy - Screenshot suites",
+    build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
+
+  # Mooneye suite, wilbertpol fork (0xED breakpoint)
+  all_suites.add(run_suite("Game Boy - Mooneye (wilbertpol)",
+    build_wilbertpol_tests(gb_test_roms_dir), harness, previous, regressions))
+
+  # gambatte (aggregated per subdirectory; detail in results_gambatte.md)
+  var gambatte_groups: seq[GambatteGroup]
+  all_suites.add(run_gambatte_suite(harness, previous, previous_counts,
+                                    regressions, gambatte_groups,
+                                    gb_test_roms_dir))
 
   # Write results
   createDir(getCurrentDir() / "tests")
   writeFile(results_path, generate_results_md(all_suites))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
   writeFile(mgba_detail_path, generate_mgba_detail_md(mgba_detail))
+  let gambatte_detail_path = getCurrentDir() / "tests" / "results_gambatte.md"
+  if gambatte_groups.len > 0:
+    writeFile(gambatte_detail_path, generate_gambatte_detail_md(gambatte_groups))
   echo &"\nResults written to {results_path}"
   echo &"mGBA detail written to {mgba_detail_path}"
+  if gambatte_groups.len > 0:
+    echo &"gambatte detail written to {gambatte_detail_path}"
 
   # Summary
   var total = 0

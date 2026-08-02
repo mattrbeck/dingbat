@@ -72,6 +72,9 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
     ppu.first_line = false
 
+# Bit 7 of GbPpu.read_mode: LY advanced during the M-cycle a read belongs to.
+const LY_JUST_CHANGED* = 0x80'u8
+
 # ---- LCDC helpers ----
 proc lcd_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x80) != 0
 
@@ -131,6 +134,45 @@ proc sprite_height*(ppu: GbPpu): int {.inline.} =
 proc sprite_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x02) != 0
 proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 
+# ---- CPU access windows for VRAM and OAM ----
+#
+# The PPU takes VRAM away from the CPU for the whole of mode 3 and OAM for
+# modes 2 and 3; a blocked read returns 0xFF and a blocked write is dropped.
+# WHEN each edge lands, to the M-cycle, is what mooneye
+# acceptance/ppu/lcdon_timing-GS and lcdon_write_timing-GS pin, and the three
+# edges do not all line up with the STAT mode bits:
+#
+#   * The locks CLOSE on the live mode -- OAM one M-cycle before STAT reads
+#     back mode 2 at the top of a line, VRAM one M-cycle before STAT reads back
+#     mode 3 -- because it is the STAT mode bits that are late, not the locks.
+#   * They OPEN with the STAT bits (the `read_mode` latch), one M-cycle after
+#     mode 3 really ends.
+#   * A write commits one M-cycle earlier in its own M-cycle than a read
+#     samples, so writes see the latched mode where reads see the live one.
+#     That is what makes an OAM write land on the last M-cycle of mode 2 (the
+#     one M-cycle where the latch still says 2 but the live mode is already 3)
+#     while an OAM read in the same M-cycle is refused.
+#   * On the first line after the LCD is switched on the PPU's dot grid sits
+#     2 T-cycles off the CPU's M-cycle grid (see the LCDC-enable write), so
+#     every edge on that line rounds to the same M-cycle as the STAT bits do.
+#     One line, one flag: `first_line` selects the latched mode for both.
+proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+  if not lcd_enabled(ppu): return true
+  if (ppu.read_mode and 3'u8) == 3: return false
+  if is_write or ppu.first_line: return true
+  (ppu.lcd_status and 3'u8) != 3
+
+proc cpu_oam_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+  if not lcd_enabled(ppu): return true
+  let lag = ppu.read_mode and 3'u8
+  if lag == 3: return false
+  # The first line's OAM scan does not lock OAM at all (it is also the mode
+  # that STAT reports as 0 -- see ppu_read 0xFF41).
+  if ppu.first_line: return true
+  let live = ppu.lcd_status and 3'u8
+  if is_write: lag != 2 or live != 2
+  else:        lag != 2 and live != 2 and live != 3
+
 # ---- STAT helpers ----
 proc coincidence_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x40) != 0
 proc oam_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x20) != 0
@@ -142,6 +184,35 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
+# The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
+# See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
+const M2_144_EARLY_DOT* = 452'i32
+
+proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
+  ## Is the mode 2 (OAM) STAT source asserted by the *start of vblank*?
+  ##
+  ## Besides mode 2 itself, the OAM STAT source goes high once more per frame,
+  ## when the PPU enters vblank on line 144 (mooneye vblank_stat_intr). The two
+  ## hardware families disagree on exactly when:
+  ##
+  ##   * DMG/MGB/SGB (vblank_stat_intr-GS): together with the vblank interrupt.
+  ##   * CGB/AGB/AGS (misc/ppu/vblank_stat_intr-C): one M-cycle earlier.
+  ##
+  ## Both ROMs time the interrupt by resetting DIV a fixed number of NOPs into
+  ## line 143 and reading it back in the handler. The vblank rounds bracket the
+  ## DIV tick at 54/55 NOPs on every model; the STAT rounds bracket it at the
+  ## same 54/55 on -GS but at 53/54 on -C, which places the CGB STAT exactly one
+  ## M-cycle (4 dots) ahead of the vblank interrupt. So on CGB the source is
+  ## already high for the last M-cycle of line 143, while the PPU is still in
+  ## mode 0.
+  if ppu.ly == 144:
+    ppu.mode_flag == 1
+  elif ppu.ly == 143:
+    gb.cgb_enabled and ppu.mode_flag == 0 and
+      ppu.cycle_counter >= M2_144_EARLY_DOT
+  else:
+    false
+
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
   # bit freezes at its last value and no STAT interrupt fires (mooneye
@@ -152,10 +223,10 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   let stat_flag =
     (ppu.coincidence_flag   and ppu.coincidence_interrupt_enabled) or
     (ppu.mode_flag == 2     and ppu.oam_interrupt_enabled) or
-    # The OAM (mode 2) STAT interrupt also triggers at the start of vblank
-    # (line 144), simultaneously with the vblank interrupt on DMG (mooneye
-    # vblank_stat_intr).
-    (ppu.ly == 144 and ppu.mode_flag == 1 and ppu.oam_interrupt_enabled) or
+    # The OAM (mode 2) STAT source also asserts at the start of vblank
+    # (line 144) — simultaneously with the vblank interrupt on DMG, one
+    # M-cycle earlier on CGB. See m2_line144.
+    (ppu.oam_interrupt_enabled and ppu.m2_line144(gb)) or
     (ppu.mode_flag == 0     and ppu.hblank_interrupt_enabled) or
     (ppu.mode_flag == 1     and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
@@ -268,21 +339,26 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0x8000..0x9FFF: ppu.vram[ppu.vram_bank][idx - 0x8000]
   of 0xFE00..0xFE9F:
     # OAM is inaccessible to the CPU during OAM scan (mode 2) and drawing
-    # (mode 3): reads return 0xFF. Uses the read-latched mode so the accessible
-    # window lines up one M-cycle late, matching STAT reads (mooneye
-    # intr_2_oam_ok_timing). first_line mode 2 reads back as mode 0, and OAM is
-    # accessible during it.
-    if lcd_enabled(ppu) and not (ppu.first_line and ppu.read_mode == 2) and
-       (ppu.read_mode == 2 or ppu.read_mode == 3):
-      0xFF'u8
-    else:
-      ppu.sprite_table[idx - 0xFE00]
+    # (mode 3): reads return 0xFF. See cpu_oam_open for where the two edges sit
+    # (mooneye intr_2_oam_ok_timing, lcdon_timing-GS).
+    if cpu_oam_open(ppu, is_write = false): ppu.sprite_table[idx - 0xFE00]
+    else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:
     # The mode bits (0-1) lag one read M-cycle behind the internal mode: use the
     # snapshot taken at the start of this read's PPU tick (see GbPpu.read_mode).
-    let live = (ppu.lcd_status and 0b1111_1100'u8) or ppu.read_mode
-    if ppu.first_line and ppu.read_mode == 2:
+    let rm = ppu.read_mode and 3'u8
+    var live = (ppu.lcd_status and 0b1111_1100'u8) or rm
+    # The LY=LYC comparator does not follow LY instantaneously: the M-cycle in
+    # which LY advances reads back with the coincidence bit CLEAR whatever LYC
+    # holds, and the comparison re-appears one M-cycle later. mooneye
+    # acceptance/ppu/lcdon_timing-GS pins both halves of that -- at the M-cycle
+    # of the line 0->1 advance it wants bit 2 clear for LYC=1 (a comparison that
+    # has just become true) *and* for LYC=0 (one that has just become false), so
+    # this is a suppression window, not a one-M-cycle-stale copy of the bit.
+    if (ppu.read_mode and LY_JUST_CHANGED) != 0:
+      live = live and not 0b0000_0100'u8
+    if ppu.first_line and rm == 2:
       live and 0b1111_1100'u8
     else:
       live
@@ -330,6 +406,31 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         when defined(gb_dot_counter): inc gb_frame_lcd_on
         ppu_blank_frame(ppu, gb)
       ppu.ly = 0
+      # The re-enabled PPU is already part-way into its first line by the time
+      # the LCDC write retires -- it does not start at dot 0 there. This seed is
+      # the whole of that head start, and because every line is a multiple of
+      # 4 dots long it is also the PPU's dot phase against the CPU's M-cycle
+      # grid for the rest of the run. Two tests pin it, and between them there
+      # is exactly one answer:
+      #
+      #  * mooneye acceptance/ppu/lcdon_timing-GS reads LY and STAT at known
+      #    M-cycle offsets from the write and pins all three of line 0's
+      #    boundaries (mode 2->3, mode 3->0, and LY 0->1); the line-1 and line-2
+      #    boundaries it also samples are a plain 456 dots apart, so only line 0
+      #    is special. Those three fix the head start to 5..8 dots.
+      #  * mooneye acceptance/ppu/hblank_ly_scx_timing-GS then fixes it mod 4.
+      #    It measures the gap from the mode-0 STAT interrupt to the LY advance
+      #    with SCX&7 = 0..7, which walks the mode-3 end across one M-cycle a
+      #    dot at a time, and the gap has to shorten between SCX&7 = 0 and 1 --
+      #    i.e. the M-cycle boundary sits immediately after the SCX&7 = 0 end
+      #    dot, not three dots later. That is a head start of 1 mod 4.
+      #
+      # 5 is the only value satisfying both. Physically it is the 2-T-cycle
+      # skew mooneye's own notes describe (the PPU restarts mid-M-cycle, so
+      # line 0 ends 2 T-cycles off the grid and the next line lands back on it),
+      # rounded into this renderer's whole-dot counter. No rendered pixel moves:
+      # mode 3 is still driven to 160 pixels by the shifter, not by this counter.
+      ppu.cycle_counter = 5
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
     ppu.lcd_control = val

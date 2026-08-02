@@ -1,5 +1,8 @@
 ## Minimal PNG reader for test comparison.
-## Supports greyscale (1/2/4/8-bit) and indexed color (PLTE), non-interlaced only.
+## Supports greyscale (1/2/4/8-bit), greyscale+alpha, truecolor RGB and RGBA
+## (8-bit), and indexed color (PLTE); non-interlaced only. Alpha is dropped —
+## every reference image in the test suites is fully opaque, and the harness
+## compares opaque framebuffers.
 ## Requires the 'zippy' nimble package for zlib decompression.
 
 import std/streams
@@ -86,43 +89,56 @@ proc read_png*(path: string): PngImage =
   var prev_row = newSeq[uint8](stride)
   var curr_row = newSeq[uint8](stride)
 
-  if color_type == 2:
-    # Truecolor RGB (8-bit only) — filters operate 3 bytes per pixel
-    doAssert bit_depth == 8, "RGB PNG: only 8-bit supported"
-    result.channels = 3
-    result.pixels = newSeq[uint8](width * height * 3)
-    let rgb_stride = width * 3
-    let rgb_row_bytes = rgb_stride + 1
-    var prev = newSeq[uint8](rgb_stride)
-    var curr = newSeq[uint8](rgb_stride)
+  if color_type in [0'u8, 2, 4, 6] and bit_depth == 8:
+    # 8-bit sample formats: greyscale (0), truecolor (2), greyscale+alpha (4),
+    # RGBA (6). One unfilter loop covers all four — the only thing that changes
+    # is `bpp`, the byte distance the sub/paeth filters look back. The reference
+    # images in the bundled suites are a mix of all of these (mealybug ships
+    # RGB, the scribbltests/turtle-tests/little-things images ship RGBA), and a
+    # format that falls through to the wrong branch does not error, it silently
+    # compares as ~0% match.
+    let bpp = case color_type
+      of 0: 1
+      of 2: 3
+      of 4: 2
+      else: 4
+    let keep = if color_type in [0'u8, 4]: 1 else: 3   # drop the alpha channel
+    result.channels = keep
+    result.pixels = newSeq[uint8](width * height * keep)
+    let row_stride = width * bpp
+    let full_row_bytes = row_stride + 1
+    var prev = newSeq[uint8](row_stride)
+    var curr = newSeq[uint8](row_stride)
 
     for y in 0 ..< height:
-      let offset = y * rgb_row_bytes
+      let offset = y * full_row_bytes
       let filter_type = uint8(raw[offset])
-      for i in 0 ..< rgb_stride:
+      for i in 0 ..< row_stride:
         curr[i] = uint8(raw[offset + 1 + i])
 
       case filter_type
       of 0: discard
       of 1:
-        for i in 3 ..< rgb_stride:
-          curr[i] = uint8((int(curr[i]) + int(curr[i - 3])) and 0xFF)
+        for i in bpp ..< row_stride:
+          curr[i] = uint8((int(curr[i]) + int(curr[i - bpp])) and 0xFF)
       of 2:
-        for i in 0 ..< rgb_stride:
+        for i in 0 ..< row_stride:
           curr[i] = uint8((int(curr[i]) + int(prev[i])) and 0xFF)
       of 3:
-        for i in 0 ..< rgb_stride:
-          let a = if i >= 3: int(curr[i - 3]) else: 0
+        for i in 0 ..< row_stride:
+          let a = if i >= bpp: int(curr[i - bpp]) else: 0
           curr[i] = uint8((int(curr[i]) + (a + int(prev[i])) div 2) and 0xFF)
       of 4:
-        for i in 0 ..< rgb_stride:
-          let a = if i >= 3: int(curr[i - 3]) else: 0
-          let c = if i >= 3: int(prev[i - 3]) else: 0
+        for i in 0 ..< row_stride:
+          let a = if i >= bpp: int(curr[i - bpp]) else: 0
+          let c = if i >= bpp: int(prev[i - bpp]) else: 0
           curr[i] = uint8((int(curr[i]) + paeth_predictor(a, int(prev[i]), c)) and 0xFF)
       else: discard
 
-      for i in 0 ..< rgb_stride:
-        result.pixels[y * rgb_stride + i] = curr[i]
+      for x in 0 ..< width:
+        for c in 0 ..< keep:
+          result.pixels[(y * width + x) * keep + c] = curr[x * bpp + c]
+      for i in 0 ..< row_stride:
         prev[i] = curr[i]
   elif color_type == 3:
     # Indexed color — expand palette to RGB
@@ -168,7 +184,9 @@ proc read_png*(path: string): PngImage =
       for i in 0 ..< stride:
         prev_row[i] = curr_row[i]
   else:
-    # Greyscale
+    # Sub-byte greyscale (1/2/4-bit)
+    doAssert color_type == 0,
+      "unsupported PNG color type " & $color_type & " at bit depth " & $bit_depth
     result.channels = 1
     result.pixels = newSeq[uint8](width * height)
 

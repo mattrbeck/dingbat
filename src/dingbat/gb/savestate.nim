@@ -35,8 +35,9 @@ proc save_cpu_state(cpu: GbCpu; w: var Writer) =
   w.write_bool(cpu.ime)
   w.write_bool(cpu.halted)
   w.write_bool(cpu.halt_bug)
+  w.write_bool(cpu.locked)
 
-proc load_cpu_state(cpu: GbCpu; r: var Reader) =
+proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_CPU)
   cpu.af = r.read_u16()
   cpu.bc = r.read_u16()
@@ -47,6 +48,10 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader) =
   cpu.ime = r.read_bool()
   cpu.halted = r.read_bool()
   cpu.halt_bug = r.read_bool()
+  # rev 4 added the undefined-opcode lockup flag. Older states can only have
+  # been written by a build where those opcodes were 4-cycle no-ops, so a
+  # missing field means "not locked".
+  cpu.locked = if rev >= 4: r.read_bool() else: false
   cpu.cached_hl = -1  # per-instruction scratch
 
 # ---- Interrupts / Timer / Joypad ----
@@ -174,6 +179,11 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   mem.requested_speed_switch = r.read_bool()
   mem.current_speed = r.read_u8()
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
+  # Derived caches, not payload: re-deriving them costs nothing and keeps the
+  # section byte-for-byte what it was, so no payload-revision bump.
+  mem.dma_busy = mem.dma_position > 0 and mem.dma_position <= 0xA0
+  # dma_bus / dma_drive / dma_latch are re-derived once the cartridge and PPU
+  # sections have landed, in gb_apply_state.
 
 # ---- PPU (renderer-agnostic base state only, see file comment) ----
 
@@ -750,7 +760,7 @@ proc gb_state_payload(gb: GB): string =
 
 proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   var r = Reader(buf: payload)
-  load_cpu_state(gb.cpu, r)
+  load_cpu_state(gb.cpu, r, rev)
   load_irq_state(gb.interrupts, r)
   load_timer_state(gb.timer, r)
   load_serial_state(gb.serial, r, rev)
@@ -764,6 +774,32 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
   r.expect_tag(GB_SEC_END)
+  # Derived OAM-DMA bus state. Neither field is serialized: both are functions
+  # of state that already is (current_dma_source, dma_position, and the source
+  # memory), so re-deriving them here keeps the payload byte-for-byte what it
+  # was before bus conflicts existed. Must run after the MBC/PPU sections, or
+  # the latch would be read out of a half-restored cartridge.
+  let mem = gb.memory
+  if mem.dma_busy:
+    var src = int(mem.current_dma_source)
+    if src >= 0xE000: src = src and not 0x2000
+    if int(mem.current_dma_source) >= 0xE000 and console_is_cgb(gb):
+      mem.dma_bus = uint8(dbExternal)
+      mem.dma_drive = DriveTristate
+      mem.dma_openbus = true
+      mem.dma_latch = 0xFF'u8
+    else:
+      mem.dma_bus = dma_bus_of(gb, src)
+      mem.dma_drive = dma_drive_of(gb, src)
+      mem.dma_openbus = false
+      var latch_src = int(mem.current_dma_source) + mem.dma_position - 1
+      if latch_src >= 0xE000: latch_src = latch_src and not 0x2000
+      mem.dma_latch = read_byte(mem, gb, latch_src)
+  else:
+    mem.dma_bus = uint8(dbNone)
+    mem.dma_drive = DriveTristate
+    mem.dma_openbus = false
+    mem.dma_latch = 0
 
 proc gb_rom_checksum(gb: GB): uint32 =
   ## The whole ROM file. load_cartridge allocates the buffer at exactly the

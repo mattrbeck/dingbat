@@ -1,4 +1,5 @@
-import std/[os, strutils, parseopt, net, nativesockets, monotimes, times]
+import std/[os, strutils, parseopt, net, nativesockets, monotimes, times, tables]
+import png_reader
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gba/gba
@@ -8,13 +9,15 @@ import dingbat/gba/netlink
 import dingbat/common/test_output
 import dingbat/common/rewind
 import dingbat/common/input
+import std/algorithm  # FuzzARM failure-class rollup
 
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka
+    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+    tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -535,6 +538,307 @@ proc jsmolka_test(rom_path, bios_path: string; timeout_frames: int): int =
     return 0
   echo "Failed test ", verdict
   return 1
+
+# ==================== DenSinH/FuzzARM ====================
+#
+# FuzzARM ships five prebuilt ROMs, each 10000 randomly generated ARM/Thumb
+# instruction tests (data processing with every shift type, multiplies,
+# load/stores). The ROM's own reporting is threefold: a mode-4 render of the
+# failing instruction, a structured 16-word dump at the base of eWRAM, and a
+# "press any button to continue" gate. This mode drives the third and reads
+# the second, so the verdict never depends on the PPU, the BIOS or a pinned
+# frame hash — and, crucially, it can report *every* failing test rather than
+# just the first, which is the whole point of a randomized suite.
+#
+# The protocol (asm/run_tests.asm upstream):
+#   * on a mismatch the ROM writes 16 words to 0x02000000 and then spins in
+#     `wait_until_keys_up` / `wait_until_key_down`, reading KEYINPUT;
+#   * pressing any button other than L/R resumes at the next test;
+#   * when the last test is done it draws "End of testing" and falls into a
+#     one-instruction self-branch in main.asm.
+# KEYINPUT is the ONLY input register the ROM ever touches (upstream README:
+# "I do not use any SWIs/DMAs/Timers/IRQs/Weird IO registers (Only DISPCNT and
+# KEYINPUT)"), so `keyinput_reads` moving across a frame is an exact "a failure
+# report is on screen right now" signal — no address table, no disassembly.
+#
+# eWRAM layout, 16 words at 0x02000000 (upstream README + the store sequence in
+# _test_error). Words 10 and 14 are never stored; they are the documented
+# "0000 0000" padding.
+#   0      'AAAA' / 'TTTT'   ARM or Thumb state
+#   1-3    opcode text, 12 ASCII chars ("tst lsl     ", "smull       ", ...)
+#   4-6    initial r0, r1, r2      7   initial CPSR
+#   8-9    got r3, r4              11  got CPSR
+#   12-13  expected r3, r4         15  expected CPSR
+# r3 is the shifted operand and r4 the result, so which of the three differs
+# already separates a barrel-shifter bug from an ALU bug from a flag bug.
+type
+  FuzzArmFail = object
+    state: char           # 'A' (ARM) or 'T' (Thumb)
+    opcode: string        # e.g. "tst lsl", "smull", "strh/ldrsh"
+    r0, r1, r2, cpsr_in: uint32
+    got_r3, got_r4, got_cpsr: uint32
+    exp_r3, exp_r4, exp_cpsr: uint32
+
+proc fa_hex(v: uint32): string = v.toHex(8)
+
+proc fa_word(b: seq[byte]; off: int): uint32 =
+  uint32(b[off]) or (uint32(b[off + 1]) shl 8) or
+  (uint32(b[off + 2]) shl 16) or (uint32(b[off + 3]) shl 24)
+
+proc fuzzarm_done_addr(rom_path: string): uint32 =
+  ## Address of `mainloop: b mainloop` (main.asm) — the one-instruction self
+  ## branch the ROM falls into after "End of testing". Encoded 0xEAFFFFFE and,
+  ## in all five prebuilt ROMs, the only word in the image with that value (the
+  ## generated test table is random data, so a collision is ~1e-5 likely; the
+  ## uniqueness check below is what keeps this honest anyway).
+  ##
+  ## Do NOT score "finished" as "PC unchanged across two frame boundaries" the
+  ## way the jsmolka mode does. This ROM never waits on vblank, so a frame
+  ## boundary lands at an arbitrary point in a tight drawing loop, and two
+  ## consecutive boundaries landing on the same instruction is common — it
+  ## silently truncated whole runs (ARM_Any scored 10000/10000 while executing
+  ## only a few hundred tests). Returns 0 if the marker is not unique.
+  let data =
+    try: readFile(rom_path)
+    except CatchableError: return 0
+  var found = 0'u32
+  var hits = 0
+  var off = 0
+  while off + 4 <= data.len:
+    if uint32(uint8(data[off])) == 0xFE'u32 and uint32(uint8(data[off + 1])) == 0xFF'u32 and
+       uint32(uint8(data[off + 2])) == 0xFF'u32 and uint32(uint8(data[off + 3])) == 0xEA'u32:
+      inc hits
+      found = 0x08000000'u32 + uint32(off)
+    off += 4
+  if hits == 1: found else: 0
+
+proc fuzzarm_test_count(rom_path: string): int =
+  ## Recover how many tests the ROM was generated with, straight out of the
+  ## image. `run_tests` opens with `stmdb sp!, {r0-r12, lr}` (0xE92D5FFF),
+  ## then the four-instruction `set_word r11, MEM_ROM + tests` macro, then
+  ## `ldmia r11!, {r12}` — so ORing those four rotated immediates gives the
+  ## address of the count word the ROM itself reads. Returns 0 if the pattern
+  ## is gone (a regenerated ROM whose layout moved); only the printed total
+  ## depends on it, never the verdict.
+  let data =
+    try: readFile(rom_path)
+    except CatchableError: return 0
+  proc word(off: int): uint32 =
+    uint32(uint8(data[off])) or (uint32(uint8(data[off + 1])) shl 8) or
+    (uint32(uint8(data[off + 2])) shl 16) or (uint32(uint8(data[off + 3])) shl 24)
+  var off = 0
+  while off + 24 <= data.len:
+    if word(off) == 0xE92D5FFF'u32:
+      var addr_val = 0'u32
+      for k in 1 .. 4:
+        let w = word(off + 4 * k)
+        let imm = w and 0xFF'u32
+        let rot = (w shr 8) and 0xF'u32
+        addr_val = addr_val or (if rot == 0: imm
+                                else: (imm shr (2 * rot)) or (imm shl (32 - 2 * rot)))
+      let rel = int(addr_val) - 0x08000000
+      if rel >= 0 and rel + 4 <= data.len:
+        return int(word(rel))
+      return 0
+    off += 4
+  0
+
+proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): int =
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  emu.storage.save_path = ""   # never drop a .sav next to a downloaded ROM
+
+  let total = fuzzarm_test_count(rom_path)
+  let done_addr = fuzzarm_done_addr(rom_path)
+  if done_addr == 0:
+    stderr.writeLine("  warning: no unique `b .` end marker in " & rom_path &
+                     "; falling back to a stalled-PC heuristic")
+  var fails: seq[FuzzArmFail]
+  # Ack state machine. 0 = watching for a failure report; 1 = A is held for
+  # this frame so the ROM leaves wait_until_key_down. Two frames per failure:
+  # the held frame runs on until the *next* failure parks in wait_until_keys_up,
+  # and the frame after (A released) clears that gate and re-reads KEYINPUT.
+  var acking = false
+  keyinput_reads = 0
+  var prev_reads = 0
+  var prev_pc = not 0'u32
+  var stable = 0
+  var frames = 0
+  var capped = false
+  var finished = false
+
+  while frames < timeout_frames:
+    try:
+      emu.step_frame()
+    except CatchableError:
+      stderr.writeLine("Emulator exception at frame " & $frames & ": " &
+                       getCurrentExceptionMsg())
+      return 1
+    inc frames
+    let delta = keyinput_reads - prev_reads
+    prev_reads = keyinput_reads
+    if acking:
+      emu.handle_input(A, false)
+      acking = false
+      continue
+    if delta > 0:
+      let w = emu.bus.wram_board
+      var op = ""
+      for i in 4 ..< 16:
+        op.add(char(w[i]))
+      fails.add(FuzzArmFail(
+        state: char(w[0]),
+        opcode: op.strip(),
+        r0: fa_word(w, 16), r1: fa_word(w, 20), r2: fa_word(w, 24),
+        cpsr_in: fa_word(w, 28),
+        got_r3: fa_word(w, 32), got_r4: fa_word(w, 36), got_cpsr: fa_word(w, 44),
+        exp_r3: fa_word(w, 48), exp_r4: fa_word(w, 52), exp_cpsr: fa_word(w, 60)))
+      let f = fails[^1]
+      stderr.writeLine("  fail " & $fails.len & "  " &
+        (if f.state == 'T': "THUMB " else: "ARM   ") & f.opcode &
+        "  in r0=" & fa_hex(f.r0) & " r1=" & fa_hex(f.r1) & " r2=" & fa_hex(f.r2) &
+        " cpsr=" & fa_hex(f.cpsr_in) &
+        "  got r3=" & fa_hex(f.got_r3) & " r4=" & fa_hex(f.got_r4) &
+        " cpsr=" & fa_hex(f.got_cpsr) &
+        "  exp r3=" & fa_hex(f.exp_r3) & " r4=" & fa_hex(f.exp_r4) &
+        " cpsr=" & fa_hex(f.exp_cpsr))
+      if fails.len >= max_fails:
+        capped = true
+        break
+      emu.handle_input(A, true)
+      acking = true
+      stable = 0
+      prev_pc = not 0'u32
+      continue
+    # Nothing waiting on input: either still testing, or parked on the
+    # one-instruction self-branch after "End of testing". r15 leads the
+    # executing instruction by the pipeline depth, so accept the marker
+    # address plus one prefetch's worth.
+    let pc = emu.cpu.r[15]
+    if done_addr != 0:
+      if pc >= done_addr and pc <= done_addr + 8:
+        finished = true
+        break
+    elif pc == prev_pc:
+      # Fallback only (marker not unique): demand a long stall, because a
+      # single repeated frame-boundary PC means nothing in this ROM.
+      inc stable
+      if stable >= 60:
+        finished = true
+        break
+    else:
+      stable = 0
+      prev_pc = pc
+
+  # Triage rollup, grouped by state + opcode + which of r3/r4/CPSR disagreed
+  # (and for CPSR, which flags). Stderr, not stdout, so the one-line verdict on
+  # stdout stays the last line: the runner keeps only that for results.md and
+  # replays the rest into its own log when a ROM fails.
+  if fails.len > 0:
+    var groups: seq[(string, int)]
+    for f in fails:
+      var tag = ""
+      if f.got_r3 != f.exp_r3: tag.add(" r3")
+      if f.got_r4 != f.exp_r4: tag.add(" r4")
+      if f.got_cpsr != f.exp_cpsr:
+        tag.add(" cpsr:")
+        let diff = f.got_cpsr xor f.exp_cpsr
+        for (bit, name) in [(31, "N"), (30, "Z"), (29, "C"), (28, "V")]:
+          if (diff and (1'u32 shl bit)) != 0: tag.add(name)
+      let key = (if f.state == 'T': "THUMB " else: "ARM   ") & f.opcode & "  [" &
+                tag.strip() & "]"
+      var found = false
+      for i in 0 ..< groups.len:
+        if groups[i][0] == key:
+          groups[i][1] += 1
+          found = true
+          break
+      if not found: groups.add((key, 1))
+    groups.sort(proc (a, b: (string, int)): int = cmp(b[1], a[1]))
+    stderr.writeLine("  --- FuzzARM failure classes (" & $fails.len & " failures, " &
+                     $groups.len & " classes) ---")
+    for (key, n) in groups:
+      stderr.writeLine("  " & align($n, 6) & "  " & key)
+
+  # The verdict line carries a "FUZZARM: " marker so the runner can find it by
+  # content. Do NOT let it identify the summary as "the last line" instead:
+  # stdout is block-buffered when piped and stderr is not, so the storage
+  # layer's early "Backup type could not be identified" can be flushed *after*
+  # the whole triage once both streams are merged.
+  let total_str = if total > 0: $total else: "?"
+  let passed_str = if total > 0: $(total - fails.len) else: "?"
+  if capped:
+    echo "FUZZARM: <=" & passed_str & "/" & total_str &
+         " passed (stopped after " & $fails.len & " failures)"
+    return 1
+  if not finished:
+    echo "FUZZARM: timed out after " & $frames & " frames (" & $fails.len &
+         " failures so far)"
+    return 1
+  if fails.len == 0:
+    echo "FUZZARM: " & total_str & "/" & total_str & " passed"
+    return 0
+  echo "FUZZARM: " & passed_str & "/" & total_str &
+       " passed (" & $fails.len & " failed)"
+  return 1
+
+# ==================== alloncm/MagenTests ====================
+#
+# CGB test ROMs (MIT) whose verdict is the screen colour, not a reference
+# image. src/common.asm fixes the palette: WHITE $FFFF, RED $001F,
+# GREEN $03E0, BLUE $7C00, and each ROM's README entry says what they mean.
+#
+# Deliberately NOT scored by screenshot comparison: the repo's images/ holds a
+# 641x574 upscale, a 318x295 SameBoy window grab, two 15x17 swatches and a
+# photo of real hardware — nothing that is a 160x144 frame — so there is no
+# bundled reference to diff against, and a self-generated frame hash would be
+# a golden with nothing behind it. Counting the ROM's own documented colours
+# is the ROM's own contract.
+#
+#   magen-green: "the screen should be all green"; red and blue are the two
+#     named failure modes (for hblank_vram_dma: red = the HBlank HDMA never
+#     ran, blue = it ran while the CPU was halted).
+#   magen-nored: bg_oam_priority draws a pattern, and its stated result is
+#     "5 green squares and 3 half green and half blue squares with no red
+#     lines" — so the machine-checkable part is the absence of red. Weaker
+#     than the other six by construction. (For the record, dingbat renders
+#     exactly 416 green and 96 blue pixels, which is 5*8*8 + 3*(8*8/2) and
+#     3*(8*8/2) — i.e. the described geometry to the pixel — but the gate
+#     stays on the documented rule rather than baking those counts in.)
+proc magen_test(rom_path: string; timeout_frames: int;
+                require_all_green: bool): int =
+  const
+    MagenWhite = 0x7FFF'u16
+    MagenRed   = 0x001F'u16
+    MagenGreen = 0x03E0'u16
+    MagenBlue  = 0x7C00'u16
+  let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  for _ in 0 ..< timeout_frames:
+    emu.step_frame()
+  var white, red, green, blue, other = 0
+  for px in emu.ppu.framebuffer:
+    case px and 0x7FFF'u16
+    of MagenWhite: inc white
+    of MagenRed: inc red
+    of MagenGreen: inc green
+    of MagenBlue: inc blue
+    else: inc other
+  let total = emu.ppu.framebuffer.len
+  let good = if require_all_green: green else: total - red
+  let pct = 100.0 * float(good) / float(total)
+  var why = ""
+  if require_all_green and green != total:
+    if blue > 0: why = "; blue = the operation ran while the CPU was halted"
+    elif red > 0: why = "; red = the operation did not run at all"
+  echo pct.formatFloat(ffDecimal, 1) & "% correct (" & $good & "/" & $total &
+       " pixels; white " & $white & " red " & $red & " green " & $green &
+       " blue " & $blue & " other " & $other & why & ")"
+  if good == total: 0 else: 1
 
 # Rewind verification: run forward taking snapshots exactly like the
 # frontend does, then pop backward and require byte-exact payload
@@ -1089,6 +1393,186 @@ proc rollback_net_test(rom, bios_path: string): int =
   echo "ROLLBACKNET: FAIL"
   1
 
+# ==================== gambatte suite (batched) ====================
+#
+# sinamas' gambatte test ROMs, as redistributed in the c-sp/game-boy-test-roms
+# bundle. The scoring rules below are the bundle's own
+# `gambatte/game-boy-test-roms-howto.md`, cross-read against gambatte-core's
+# test/testrunner.cpp (read for its *rules*; no code or data was copied — see
+# GambatteGlyphs).
+#
+#   * Exit condition: every ROM runs exactly 15 LCD frames (1,053,360 clocks,
+#     ~252 ms emulated) from the post-boot state, then the frame is read. Not
+#     "run until something happens".
+#   * The DEVICE is in the filename: `dmg08` = run as a DMG, `cgb04c` = run as
+#     a CGB. Most ROMs carry both tags and are two separate tests. Nearly all
+#     of them ship a CGB cart header even for their DMG half, so the DMG run
+#     needs new_gb's force_dmg.
+#   * The EXPECTED VALUE is in the filename too, as `_out<hex>` (1..20 hex
+#     digits), and may differ per device
+#     (`lycstatwirq_..._dmg08_out2_cgb04c_out0.gbc`). The ROM renders that hex
+#     string as 8x8 glyphs along the top-left row of the screen, one glyph per
+#     digit; scoring compares those tiles. An `x` in front of a tag
+#     (`_xout0`, `_xdmg08`) means "not a test" and is skipped, exactly as
+#     testrunner.cpp's substring search skips it.
+#   * Some ROMs instead ship a reference PNG next to them, named
+#     <rom>_dmg08.png / <rom>_cgb04c.png / <rom>_dmg08_cgb04c.png, and are
+#     scored on the whole 160x144 frame.
+#
+# This mode is BATCHED: it takes a list file and runs every entry in one
+# process. There are ~5,000 scored runs and each only emulates 15 frames, so
+# one fork/exec per ROM would cost more than the emulation.
+
+# Hex-digit glyph bitmaps: 8 rows of 8 pixels, one byte per row, bit 7 =
+# leftmost column, 1 = black, 0 = white.
+#
+# PROVENANCE: harvested from the test ROMs' own rendered output, not copied
+# from gambatte-core. gambatte-core is GPL-2.0 and this tree is MIT, so its
+# table is not ours to vendor; the shapes below were read off dingbat's
+# framebuffer with `--mode=gambatte --dump-tiles` over ROMs whose filenames
+# name the digits they display, one ROM per digit, and cross-checked by the
+# whole suite decoding to sensible values. Regenerate the same way if a future
+# bundle changes the font.
+const GambatteGlyphs: array[16, array[8, uint8]] = [
+  [0x00'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7F'u8],  # 0
+  [0x00'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8],  # 1
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8],  # 2
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x3F'u8, 0x01'u8, 0x01'u8, 0x7F'u8],  # 3
+  [0x00'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x01'u8],  # 4
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7E'u8, 0x01'u8, 0x01'u8, 0x7E'u8],  # 5
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x7F'u8],  # 6
+  [0x00'u8, 0x7F'u8, 0x01'u8, 0x02'u8, 0x04'u8, 0x08'u8, 0x10'u8, 0x10'u8],  # 7
+  [0x00'u8, 0x3E'u8, 0x41'u8, 0x41'u8, 0x3E'u8, 0x41'u8, 0x41'u8, 0x3E'u8],  # 8
+  [0x00'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x7F'u8, 0x01'u8, 0x01'u8, 0x7F'u8],  # 9
+  [0x00'u8, 0x08'u8, 0x22'u8, 0x41'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x41'u8],  # A
+  [0x00'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x7E'u8],  # B
+  [0x00'u8, 0x3E'u8, 0x41'u8, 0x40'u8, 0x40'u8, 0x40'u8, 0x41'u8, 0x3E'u8],  # C
+  [0x00'u8, 0x7E'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7E'u8],  # D
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8],  # E
+  [0x00'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x7F'u8, 0x40'u8, 0x40'u8, 0x40'u8],  # F
+]
+
+const GambatteFrames* = 15
+
+proc gambatte_pixel(c: uint16; cgb: bool): uint32 =
+  ## One framebuffer pixel as the 24-bit RGB gambatte's runner compares,
+  ## masked to 0xF8F8F8 — the top 5 bits per channel, which is all the runner
+  ## ever looks at (and exactly the precision a BGR555 framebuffer carries).
+  ##
+  ## CGB: gambatte's documented colour-correction formulae, applied to the raw
+  ## 5-bit palette entry. White (31,31,31) lands on 0xF8F8F8 and only on
+  ## 0xF8F8F8, so glyph matching stays exact.
+  ##
+  ## DMG: gambatte drives the panel with plain #000000/#555555/#AAAAAA/#FFFFFF
+  ## shades; dingbat's DMG palette is the green LCD, so map shade -> grey the
+  ## same way the mealybug/acid2 screenshot path does.
+  if cgb:
+    let r = int(c and 0x1F)
+    let g = int((c shr 5) and 0x1F)
+    let b = int((c shr 10) and 0x1F)
+    let rr = uint32((r * 13 + g * 2 + b) shr 1)
+    let gg = uint32((g * 3 + b) shl 1)
+    let bb = uint32((r * 3 + g * 2 + b * 11) shr 1)
+    ((rr shl 16) or (gg shl 8) or bb) and 0xF8F8F8'u32
+  else:
+    let s = uint32(bgr555_to_grey(c))
+    ((s shl 16) or (s shl 8) or s) and 0xF8F8F8'u32
+
+proc gambatte_tile(fb: seq[uint16]; col: int; cgb: bool): array[8, uint8] =
+  ## The 8x8 tile at glyph column `col` of the screen's top row, as a
+  ## bit-per-pixel mask (bit 7 = leftmost, 1 = black). A tile holding anything
+  ## other than pure black and pure white comes back as all-ones, which no
+  ## glyph can equal (every glyph's row 0 is blank).
+  for y in 0 ..< 8:
+    var bits = 0'u8
+    for x in 0 ..< 8:
+      let p = gambatte_pixel(fb[y * GB_WIDTH + col * 8 + x], cgb)
+      if p == 0'u32: bits = bits or (0x80'u8 shr x)
+      elif p != 0xF8F8F8'u32:
+        return [0xFF'u8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+    result[y] = bits
+
+proc gambatte_digit(t: array[8, uint8]): char =
+  for i in 0 ..< 16:
+    if GambatteGlyphs[i] == t:
+      return "0123456789ABCDEF"[i]
+  '?'
+
+proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
+  result = new_gb("", rom, fifo = true, headless = true, run_bios = false,
+                  force_cgb = cgb, force_dmg = not cgb)
+  result.test_output = new_test_output()
+  result.post_init()
+  # These ROMs are read-only fixtures in a shared cache directory. A battery
+  # file dropped next to one becomes the next run's power-on state (and the
+  # next *agent's*), so detach it before a single frame runs.
+  result.cartridge.sav_path = ""
+  for _ in 0 ..< frames: result.step_frame()
+
+proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
+  ## Scores a whole list of gambatte tests in one process. Each line is
+  ## tab-separated: `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`, where
+  ## `expected` is the hex string for `hex` and the reference PNG's path for
+  ## `png`. One `GAM <index> <PASS|FAIL> <detail>` line comes back per input
+  ## line, in order, so the caller can match results positionally.
+  var entries: seq[(string, string, string, string)]
+  for line in lines(list_path):
+    if line.len == 0: continue
+    let f = line.split('\t')
+    if f.len != 4:
+      echo "GAMBATTE: malformed list line: ", line
+      return 1
+    entries.add((f[0], f[1], f[2], f[3]))
+
+  var png_cache = initTable[string, PngImage]()
+  var passes = 0
+  for idx, (dev, kind, expected, rom) in entries:
+    let cgb = dev == "cgb"
+    var ok = false
+    var detail = ""
+    try:
+      let emu = gambatte_run(rom, cgb, frames)
+      let fb = emu.ppu.framebuffer
+      if dump_tiles > 0:
+        var rows: seq[string]
+        for col in 0 ..< dump_tiles:
+          let t = gambatte_tile(fb, col, cgb)
+          var s = ""
+          for b in t: s.add(toHex(b, 2))
+          rows.add(s)
+        echo "TILES ", idx, " ", rom.extractFilename, " ", rows.join(" ")
+      case kind
+      of "hex":
+        var got = ""
+        for col in 0 ..< expected.len:
+          got.add(gambatte_digit(gambatte_tile(fb, col, cgb)))
+        ok = got == expected.toUpperAscii()
+        detail = if ok: got else: "got " & got & ", expected " & expected.toUpperAscii()
+      of "png":
+        if not png_cache.hasKey(expected):
+          png_cache[expected] = read_png(expected)
+        let img = png_cache[expected]
+        if img.width != GB_WIDTH or img.height != GB_HEIGHT or img.channels != 3:
+          detail = "bad reference image " & expected
+        else:
+          var diff = 0
+          for i in 0 ..< GB_WIDTH * GB_HEIGHT:
+            let want = ((uint32(img.pixels[i * 3]) shl 16) or
+                        (uint32(img.pixels[i * 3 + 1]) shl 8) or
+                         uint32(img.pixels[i * 3 + 2])) and 0xF8F8F8'u32
+            if gambatte_pixel(fb[i], cgb) != want: inc diff
+          ok = diff == 0
+          detail = if ok: "png match"
+                   else: $diff & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ"
+      else:
+        detail = "unknown kind " & kind
+    except CatchableError:
+      detail = "exception: " & getCurrentExceptionMsg()
+    if ok: inc passes
+    echo "GAM ", idx, " ", (if ok: "PASS" else: "FAIL"), " ", detail
+  echo "GAMBATTE-DONE ", passes, "/", entries.len
+  0
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -1105,7 +1589,15 @@ proc main() =
   var link_contract = lcMulti
   var attach_after = 10
   var force_cgb = false
+  var no_save = false      # --nosave: blank cart RAM and detach the .sav file
+  var screen_check = false # --screen-check: panel settled + not blank (see below)
+  var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
+  var bb_breakpoint = false  # --bb-breakpoint: LD B,B always ends a run (AGE)
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
+  var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
+  var list_path = ""       # gambatte mode: batch list file
+  var gambatte_frames = GambatteFrames
+  var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1145,6 +1637,11 @@ proc main() =
         of "rollbacknet": mode = tmRollbackNet
         of "gblinktest": mode = tmGbLinkTest
         of "jsmolka": mode = tmJsmolka
+        of "fuzzarm": mode = tmFuzzArm
+        of "magen-green": mode = tmMagenGreen
+        of "magen-nored": mode = tmMagenNoRed
+        of "gambatte": mode = tmGambatte
+        of "microtest": mode = tmMicrotest
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1164,6 +1661,14 @@ proc main() =
         color_mode = true
       of "cgb":
         force_cgb = true
+      of "nosave":
+        no_save = true
+      of "screen-check":
+        screen_check = true
+      of "ed-breakpoint":
+        ed_breakpoint = true
+      of "bb-breakpoint":
+        bb_breakpoint = true
       of "model":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1207,9 +1712,34 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         attach_after = parseInt(v)
+      of "max-fails":
+        # fuzzarm mode: stop after this many reported failures. Each one costs
+        # two emulated frames of button-ack, so an emulator that fails most of
+        # the 10000 tests would otherwise take minutes.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        max_fails = parseInt(v)
+      of "list":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        list_path = v
+      of "gambatte-frames":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        gambatte_frames = parseInt(v)
+      of "dump-tiles":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        dump_tiles = parseInt(v)
+
+  if mode == tmGambatte:
+    if list_path.len == 0:
+      echo "gambatte mode wants --list=<file> (see gambatte_batch)"
+      quit(1)
+    quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check]"
     quit(1)
 
   if mode == tmStateRoundtrip:
@@ -1218,6 +1748,10 @@ proc main() =
     quit(rewind_test(rom_path, bios_path))
   if mode == tmJsmolka:
     quit(jsmolka_test(rom_path, bios_path, timeout_frames))
+  if mode == tmFuzzArm:
+    quit(fuzzarm_test(rom_path, bios_path, timeout_frames, max_fails))
+  if mode in {tmMagenGreen, tmMagenNoRed}:
+    quit(magen_test(rom_path, timeout_frames, mode == tmMagenGreen))
   if mode in {tmLinkTest, tmNormLinkTest, tmNorm32LinkTest}:
     # Second positional arg is core 2's ROM; defaults to running the same
     # ROM on both cores. The normal-mode variants run the same coordinator
@@ -1253,6 +1787,8 @@ proc main() =
   let ext = rom_path.splitFile().ext.toLowerAscii()
   let is_gba = ext in [".gba", ".bin"]
   let test_out = new_test_output()
+  test_out.ed_breakpoint = ed_breakpoint
+  test_out.bb_breakpoint = bb_breakpoint
 
   if is_gba:
     let is_hle = bios_path == "hle" or bios_path == ""
@@ -1260,6 +1796,13 @@ proc main() =
     let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
+    # Same knob as dingbat_bench: idle-loop fast-forward SNAPS scheduler.cycles
+    # to the next pending event, so a spin loop's exit cycle depends on which
+    # events happen to be queued. Turning it off is how you tell a real timing
+    # error apart from fast-forward sampling resolution (e.g. the mGBA suite's
+    # "H-blank bit start" flips, which spin on DISPSTAT and time the gaps).
+    if getEnv("DINGBAT_NO_WAITLOOP") == "1":
+      emu.cpu.attempt_waitloop_detection = false
     if sio_driver == "loopback":
       emu.set_sio_driver(LoopbackSioDriver())
     for frame in 0 ..< timeout_frames:
@@ -1299,6 +1842,14 @@ proc main() =
           quit(1)
     emu.test_output = test_out
     emu.post_init()
+    if no_save:
+      # A battery-backed suite ROM (mbc3-tester, rtc3test) otherwise drops a
+      # .sav next to the ROM in the shared cache dir, and the NEXT run loads it
+      # back as power-on state — the run stops being reproducible, and in CI the
+      # actions/cache would carry one run's SRAM into the next. Blank the RAM
+      # (mbc_load already ran inside new_gb) and detach the file.
+      for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
+      emu.cartridge.sav_path = ""
     if mode == tmSram:
       # blargg's SRAM-reporting ROMs (dmg_sound/cgb_sound/oam_bug/...) must run
       # against a blank battery and must not leave one behind: a .sav dropped
@@ -1331,11 +1882,78 @@ proc main() =
             text.add(char(b))
           test_out.sram_text = text
           test_out.finished = true
+    # --screen-check: the weakest assertion about the GB screen that is still
+    # true no matter how the ROM's own console races the PPU.
+    #
+    # It deliberately does NOT compare glyphs. blargg's console is not an
+    # oracle for what is on screen — it blits its text rows with the LCD on and
+    # only a bounded VBlank wait in front of them, and at CGB double speed
+    # (which its runtime switches into during init and never leaves) that wait
+    # is half a frame and routinely times out. The cells that then land in
+    # mode 3 are correctly refused, on hardware as here: SameBoy drops 28 of
+    # 160 cells on 06-ld r,r and loses "Pas" out of "Passed" on 03-op sp,hl.
+    # Which cells are lost is decided by sub-scanline phase, so any glyph
+    # assertion would fail on correct emulation. The full measurement is in
+    # tests/README.md, "blargg's on-screen text is NOT an oracle".
+    #
+    # What is still true is that the panel must SETTLE and must show something:
+    # a run that ends with a framebuffer still changing frame to frame, or with
+    # one flat colour, is broken however the console's writes landed. That is
+    # what this checks — a screen wedged mid-transfer, a blanked LCD, a
+    # renderer that never reaches a steady state.
+    if screen_check:
+      # The serial verdict arrives before the console has finished drawing it,
+      # so give the panel a bounded settling budget rather than sampling
+      # immediately: 10 identical frames in a row, within 240 frames.
+      var prev = emu.ppu.framebuffer
+      var run = 0
+      var stable = false
+      for _ in 0 ..< 240:
+        emu.step_frame()
+        if emu.ppu.framebuffer == prev: inc run else: run = 0
+        prev = emu.ppu.framebuffer
+        if run >= 10:
+          stable = true
+          break
+      var shades = 0
+      var seen: seq[uint16]
+      for px in emu.ppu.framebuffer:
+        if px notin seen:
+          seen.add(px)
+          inc shades
+          if shades > 1: break
+      if not stable:
+        echo "SCREENCHECK: FAIL (framebuffer never settled within 240 frames of the verdict)"
+        quit(1)
+      if shades < 2:
+        echo "SCREENCHECK: FAIL (framebuffer is one flat colour)"
+        quit(1)
+      # Silent on success: this line would otherwise land in every cpu_instrs
+      # row's output column in results.md.
+
     # Screenshot mode: write framebuffer as PPM after running
     if mode == tmScreenshot and screenshot_path.len > 0:
       write_ppm(screenshot_path, emu.ppu.framebuffer, GB_WIDTH, GB_HEIGHT, color_mode)
       echo screenshot_path
       quit(0)
+    # GBMicrotest: aappleby's ROMs write their verdict into HRAM and then just
+    # keep running, so there is no completion signal — the harness runs a fixed
+    # number of frames (--timeout) and reads the result out. Per the suite's
+    # howto, $FF80 is the actual value, $FF81 the expected one, and $FF82 the
+    # verdict ($01 pass / $FF fail) — and ONLY $FF82 is reliable, because some
+    # tests leave $FF80 == $FF81 on a failure. So $FF80/$FF81 are reported for
+    # triage but never scored.
+    if mode == tmMicrotest:
+      let actual   = emu.memory.hram[0]   # $FF80
+      let expected = emu.memory.hram[1]   # $FF81
+      let verdict  = emu.memory.hram[2]   # $FF82
+      echo "MICROTEST actual=0x", toHex(actual), " expected=0x", toHex(expected),
+           " verdict=0x", toHex(verdict)
+      if verdict == 0x01'u8:
+        echo "MICROTEST: PASS"
+        quit(0)
+      echo "MICROTEST: FAIL"
+      quit(1)
 
   # Determine result
   var passed = false
@@ -1360,9 +1978,13 @@ proc main() =
   of tmScreenshot:
     echo "Screenshot mode requires --screenshot path"
     quit(1)
+  of tmMicrotest:
+    echo "microtest mode is Game Boy only"
+    quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka:
+     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+     tmMagenGreen, tmMagenNoRed, tmGambatte:
     discard  # handled (and exited) above
 
   if output.len > 0:

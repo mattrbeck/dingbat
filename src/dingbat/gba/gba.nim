@@ -251,6 +251,13 @@ type
     wait32_n*: array[16, int8]
     wait32_s*: array[16, int8]
     prefetch_on*: bool
+    # Per-page bitmap of the prefetch-hand-off stall (rom_access_cycles): bit
+    # `e` is set when a prefetch halfword started `e` cycles ago is in its
+    # final, uninterruptible cycle. Precomputed from wait16_s so the hot data
+    # path needs a shift, not a division. Bit 63 covers e = 63; the buffer is
+    # full (nothing in flight) by e = 8*s <= 72, so only the s = 9 tail needs
+    # the modulo fallback.
+    pf_commit*: array[16, uint64]
     # ROM bus bookkeeping for sequential-access detection and the prefetch
     # buffer: the address that would continue the current burst, and the
     # absolute cycle at which the ROM bus went idle (prefetch credit accrues
@@ -318,21 +325,11 @@ type
     # check_interrupts; sampled at instruction boundaries so events fired
     # mid-instruction can't redirect PC while an instruction executes
     irq_line*:    bool
-    # Set when an interrupt wakes the CPU out of halt; the next IRQ taken
-    # skips the exception-entry overhead (hardware vectors 2 cycles faster
-    # out of halt than out of running execution). Consumed/cleared at the
-    # first instruction boundary after the wake.
+    # Set when an interrupt wakes the CPU out of halt. Cleared at the first
+    # instruction boundary after the wake. The vector sequence costs the same
+    # out of halt as out of running execution (see cpu.irq), so nothing reads
+    # this any more; it stays because it is part of the serialized CPU state.
     halt_wake*:   bool
-    # Tracks whether the instruction that just completed was an exception
-    # return (subs pc, lr / ldmfd {..., pc}^ — a CPSR-restoring PC write). An
-    # IRQ recognized at the very next boundary overlaps one of the return's two
-    # pipeline-refill fetches with the IRQ vector fetch, so back-to-back
-    # exception re-entries vector 1 cycle faster than an IRQ interrupting a
-    # straight-line instruction stream. This makes the mGBA count-up test's
-    # repeated overflow->IRQ->return->IRQ chain accumulate the correct frozen
-    # timer value (each extra re-entry was otherwise 1 cycle too slow).
-    instr_exc_return*:      bool
-    last_instr_exc_return*: bool
     count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
