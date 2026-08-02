@@ -20,6 +20,45 @@ proc new_gb_memory*(gb: GB): GbMemory =
     result.bootrom = newSeq[uint8](raw.len)
     for i in 0 ..< raw.len: result.bootrom[i] = uint8(raw[i])
 
+proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
+  ## Apply the half of a CPU write that belongs on the M-cycle boundary rather
+  ## than at the write's own commit point (see GbMemory.write_deferred).
+  ##
+  ## Which half that is follows from what the reorder in mem_write is FOR. The
+  ## byte moved to the top of its M-cycle to put it in phase with the mode-3
+  ## pixel pipeline, which is the one part of the PPU that was running an
+  ## M-cycle ahead of the CPU. The interrupt machinery -- IF, and the STAT
+  ## interrupt line that LCDC/STAT/LYC drive -- was already in phase, and a
+  ## write's effect on it therefore has to stay exactly where it was:
+  ##
+  ## Two things qualify; ppu_write_machinery has the classification and the ROMs
+  ## that settle each case.
+  ##
+  ##   * The whole store, for the two registers that gate a PPU event -- STAT's
+  ##     source enables and FF55. See ppu_write_machinery.
+  ##   * Just the STAT-line edge, for LCDC: the pipeline reads six of its bits,
+  ##     so that byte has to move; only its effect on the mode machinery is
+  ##     held back (gambatte m2enable/*_late_*, gbmicrotest lyc1_write_timing_*).
+  ##
+  ## The IF register was tried here too and does NOT belong: deferring an IF
+  ## store to the boundary costs gambatte 18 rows (miscmstatirq, lycEnable,
+  ## m0enable, m1) to buy one back (gbmicrotest oam_int_if_edge_d), so the CPU's
+  ## IF store really does land ahead of the flags the PPU raises in the same
+  ## M-cycle. IF is the one register here the PPU *writes* rather than reads,
+  ## which is why it does not follow the rule above.
+  ##
+  ## Nothing here is live across an instruction boundary: every CPU write
+  ## consumes it in the same M-cycle, and the few write_byte callers that are
+  ## not a CPU M-cycle at all call this themselves. One flag rather than a per
+  ## consumer test so the write path pays for it once.
+  mem.write_deferred = false
+  if mem.deferred_reg != 0:
+    let reg = int(mem.deferred_reg)
+    let v   = mem.deferred_val
+    mem.deferred_reg = 0
+    ppu_write_machinery(gb.ppu, gb, reg, v)
+  ppu_flush_stat_write(gb.ppu, gb)
+
 proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.bootrom = @[]
   # Initial APU/PPU register state after boot ROM (mooneye boot_hwio-*).
@@ -76,21 +115,77 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     gb.joypad.button_keys = true
     gb.joypad.direction_keys = true
   mem.write_byte(gb, 0xFFFF, 0x00)
+  # None of the writes above is a CPU M-cycle, so nothing consumes what they
+  # leave deferred; apply it here instead (see mem_flush_deferred).
+  mem_flush_deferred(mem, gb)
 
-proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.} =
+# mem_read/mem_write -- and the two halves of the M-cycle tick they are built
+# from -- are reached from ~160 generated opcode bodies, and clang's
+# inline-cost heuristic puts them right on its threshold: adding or removing a
+# single compare on their hot path flips the decision for a large, arbitrary
+# subset of those call sites. Measured on this tree, that cliff is worth ~0.9%
+# of all retired instructions -- more than twice the cost of everything the OAM
+# DMA model and the PPU's CPU lock put on this path combined (0.37% + 0.35%,
+# measured additively with the decision pinned). Left to the heuristic it is a
+# coin flip re-tossed by every future edit here, which is exactly how a hot-path
+# change comes to measure as a 1-2% "regression" that has nothing to do with the
+# work it added.
+#
+# So the decision is made here instead of being inherited. always_inline rather
+# than a bare `inline` hint because the hint is what the heuristic is already
+# free to ignore; the cost is +568 bytes of __text, and both a DMG and a CGB
+# title retire ~0.9% fewer instructions (see docs/gb_oam_dma_cost.md).
+# Scoped to clang deliberately, and it is the weaker-looking guard that is the
+# careful one. GCC treats a failed always_inline as a hard ERROR rather than a
+# dropped hint, so the attribute on a proc with ~160 call sites is a build that
+# either works or does not exist -- and the gcc/mingw side of this (Linux and
+# Windows CI) cannot be compiled here to find out. Those targets keep a plain
+# `inline`, which is the same hint they effectively have today and cannot fail
+# to build. macOS, iOS and the emscripten web build are all clang, so the
+# measured win lands where the shipping builds are; if the wasm toolchain is
+# not detected as clang it simply falls back with nothing lost.
+when defined(clang):
+  {.pragma: hot_bus_inline,
+    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+else:
+  {.pragma: hot_bus_inline, inline.}
+
+proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.} =
+  ## Everything an M-cycle advances EXCEPT the PPU: the scheduler, the timer
+  ## (which also clocks the serial shifter) and the OAM DMA unit.
+  ##
+  ## Split out of mem_tick_components because a CPU *write* has to be applied
+  ## between this half and the PPU half -- see mem_write. The OAM DMA unit is
+  ## in this half rather than the PPU's because `dma_busy` decides which of the
+  ## two write paths runs, so it has to be settled before the write.
   if from_cpu: mem.cycle_tick_count += cycles
   gb.scheduler.tick(cycles)
-  let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.current_speed
-  # Direct call for the shipping renderer; the scanline one still goes through
-  # the method table (see GB.fifo_ppu).
-  if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
-  else: gb.ppu.tick(gb, ppu_cycles)
   timer_tick(gb.timer, gb, cycles)
   # Hoisted out of mem_dma_tick so an idle OAM DMA costs a flag test rather
   # than a call. The same guard still lives inside mem_dma_tick for any other
   # caller; neither flag can be set from inside its loop.
   if mem.requested_oam_dma or mem.dma_position <= 0xA0:
     mem_dma_tick(mem, gb, cycles)
+
+proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.} =
+  ## The PPU half of an M-cycle. Dots, not CPU cycles: half as many of them per
+  ## M-cycle in double speed, which is why the shift lives here.
+  let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.current_speed
+  # Direct call for the shipping renderer; the scanline one still goes through
+  # the method table (see GB.fifo_ppu).
+  if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
+  else: gb.ppu.tick(gb, ppu_cycles)
+
+proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.} =
+  ## Both halves, in the order every caller but mem_write wants them.
+  ##
+  ## The halves carry hot_bus_inline for the same reason mem_read/mem_write do,
+  ## and it is not a nicety: this used to be one body inlined into the bus path,
+  ## and splitting it left `mem_tick_bus` out of line behind clang's cost
+  ## heuristic -- a call on all ~30M bus accesses of a frame-limited run, worth
+  ## +0.9% of retired instructions on both a DMG and a CGB title.
+  mem_tick_bus(mem, gb, cycles, from_cpu)
+  mem_tick_ppu(mem, gb, cycles, ignore_speed)
 
 proc mem_reset_cycle_count*(mem: GbMemory) =
   mem.cycle_tick_count = 0
@@ -243,36 +338,6 @@ proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   # No collision, so this is an ordinary CPU read and still owes the PPU's lock.
   mem_read_open(mem, gb, idx)
 
-# mem_read/mem_write are reached from ~160 generated opcode bodies, and clang's
-# inline-cost heuristic puts them right on its threshold: adding or removing a
-# single compare on their hot path flips the decision for a large, arbitrary
-# subset of those call sites. Measured on this tree, that cliff is worth ~0.9%
-# of all retired instructions -- more than twice the cost of everything the OAM
-# DMA model and the PPU's CPU lock put on this path combined (0.37% + 0.35%,
-# measured additively with the decision pinned). Left to the heuristic it is a
-# coin flip re-tossed by every future edit here, which is exactly how a hot-path
-# change comes to measure as a 1-2% "regression" that has nothing to do with the
-# work it added.
-#
-# So the decision is made here instead of being inherited. always_inline rather
-# than a bare `inline` hint because the hint is what the heuristic is already
-# free to ignore; the cost is +568 bytes of __text, and both a DMG and a CGB
-# title retire ~0.9% fewer instructions (see docs/gb_oam_dma_cost.md).
-# Scoped to clang deliberately, and it is the weaker-looking guard that is the
-# careful one. GCC treats a failed always_inline as a hard ERROR rather than a
-# dropped hint, so the attribute on a proc with ~160 call sites is a build that
-# either works or does not exist -- and the gcc/mingw side of this (Linux and
-# Windows CI) cannot be compiled here to find out. Those targets keep a plain
-# `inline`, which is the same hint they effectively have today and cannot fail
-# to build. macOS, iOS and the emscripten web build are all clang, so the
-# measured win lands where the shipping builds are; if the wasm toolchain is
-# not detected as clang it simply falls back with nothing lost.
-when defined(clang):
-  {.pragma: hot_bus_inline,
-    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
-else:
-  {.pragma: hot_bus_inline, inline.}
-
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   mem_tick_components(mem, gb, 4)
   # A running DMA owns the bus, so it is decided first and it decides
@@ -344,7 +409,8 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
   if (idx and 0xE000) == 0x8000:
     if not cpu_vram_open(gb.ppu, is_write = true): return
   elif idx >= 0xFE00 and idx <= 0xFE9F:
-    if not cpu_oam_open(gb.ppu, is_write = true): return
+    if not cpu_oam_open(gb.ppu, is_write = true,
+                        mcycle_dots = int32(4 shr mem.current_speed)): return
   write_byte(mem, gb, idx, val)
 
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
@@ -378,12 +444,33 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   mem_write_open(mem, gb, idx, val)
 
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
-  mem_tick_components(mem, gb, 4)
+  ## A CPU write commits at the START of its M-cycle, so the byte is applied
+  ## BEFORE that M-cycle's PPU dots, not after them.
+  ##
+  ## The lock and the data are one event on hardware. dingbat decides the
+  ## VRAM/OAM lock on the mode at the start of the M-cycle (see cpu_vram_open),
+  ## so the byte has to land at the start of the M-cycle too; running the dots
+  ## first put the data one M-cycle behind its own lock, and that skew is the
+  ## whole of the mode-3 fetch-phase error the pipeline used to be moved to
+  ## compensate for (M3_PIPE_MCYCLES in fifo_ppu).
+  ##
+  ## Reads are NOT reordered: a read has no data to commit, and its own
+  ## sample point is already modelled by the read_mode latch.
+  #
+  # The bus half runs first regardless, because the bus owner decides
+  # everything: mem.dma_busy selects which of the two write paths runs, and
+  # mem_write_busy reads the DMA position this M-cycle just filled.
+  mem_tick_bus(mem, gb, 4)
   # Same ordering as mem_read: the bus owner decides first.
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
-    return
-  mem_write_open(mem, gb, idx, val)
+  else:
+    mem_write_open(mem, gb, idx, val)
+  mem_tick_ppu(mem, gb, 4)
+  # Whatever of this write belongs on the M-cycle boundary rather than at the
+  # byte's own commit point -- an IF store, a STAT interrupt-line edge. One
+  # flag covers both, so the write path pays a single test for it.
+  if mem.write_deferred: mem_flush_deferred(mem, gb)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
   # The address bus is 16 bits: a word access at $FFFF reaches $0000 for its

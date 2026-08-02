@@ -73,6 +73,8 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
     sprite_addr += 4
 
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
+  when defined(gb_m3_trace):
+    echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
   ppu.smooth_scroll_sampled = true
   if ppu.fetching_window:
     ppu.lx = int32(-max(0, 7 - int(ppu.wx)))
@@ -168,6 +170,14 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       if not ppu.dropped_first_fetch:
         ppu.dropped_first_fetch = true
         ppu.fetch_counter = 0
+        # The fine scroll is the FETCHER's, not the shifter's: the throw-away
+        # first fetch IS the mechanism that implements the SCX & 7 discard, so
+        # SCX is latched when that fetch completes rather than several dots
+        # later when the shifter first finds a pixel to look at. mealybug
+        # m3_scx_low_3_bits brackets the latch with two SCX writes one M-cycle
+        # apart -- one has to reach it and the other must not -- and only the
+        # fetcher-side point sits between them.
+        if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
       elif try_push_bg_pixels(ppu, gb):
         ppu.bg_pixels_pushed = true
 
@@ -292,22 +302,29 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 # the whole fetch/shift pipeline later against the CPU clock without moving a
 # single mode boundary (fetcher_retired below keeps the flag where it was).
 #
+# **This ships at 0 and is now a diagnostic, not a fix.** The M-cycle the
+# measurement below found was real, but it was never the pipeline's to pay: it
+# was the CPU write landing an M-cycle late. mem_write now commits a write's
+# byte at the START of its M-cycle, which is where its own VRAM/OAM lock is
+# already decided, and the residual this constant existed to absorb is gone.
+# Turning it up now double-counts the same M-cycle. What follows is the
+# derivation, kept because it is the instrument for re-deriving the fetch phase.
+#
 # ---- Why an M-cycle and not a dot count -----------------------------------
-# A CPU write reaches the bus once per M-cycle, and dingbat runs the M-cycle's
-# worth of PPU dots BEFORE handing the byte to write_byte -- so a write commits
-# at the END of its M-cycle here. The VRAM/OAM locks already disagree with that:
-# a write is admitted on the LATCHED mode (`read_mode`, the mode at the START of
-# the M-cycle) where a read is admitted on the live one, which is mooneye
-# lcdon_write_timing-GS saying the write commits one M-cycle before a read in
-# the same M-cycle samples. The lock and the data are one event on hardware, so
-# the data has to commit at the start of the M-cycle too: the pipeline is one
-# M-cycle behind what this renderer assumes.
+# A CPU write reaches the bus once per M-cycle, and dingbat USED TO run the
+# M-cycle's worth of PPU dots BEFORE handing the byte to write_byte -- so a
+# write committed at the END of its M-cycle. The VRAM/OAM locks disagreed with
+# that: a write was admitted on the LATCHED mode (`read_mode`, the mode at the
+# START of the M-cycle) where a read is admitted on the live one. The lock and
+# the data are one event on hardware, so the data has to commit at the start of
+# the M-cycle too, and the pipeline was one M-cycle behind what this renderer
+# assumes purely because the write was.
 #
 # One M-cycle is 4 dots at normal speed and 2 in double speed (Pan Docs,
 # "Dots": "4 dots per Normal Speed M-cycle, and 2 per Double Speed M-cycle"),
-# which is why this is latched per line from `current_speed` rather than being
-# a constant. That factor of two is the whole double-speed bug -- see the
-# staircase measurement below.
+# which is why the lead below is latched per line from `current_speed` rather
+# than being a constant. That factor of two is what identified the quantity --
+# see the staircase measurement.
 #
 # ---- The measurement ------------------------------------------------------
 # gambatte/bgtiledata (34 rows) and gambatte/bgtilemap (40 rows) are four ROMs
@@ -335,33 +352,25 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 # per-value table was taken with the double-speed rows still broken, so the
 # numbers in it do not survive this change; re-sweep rather than trusting it.)
 #
-# ---- Why it nevertheless ships at 0 ---------------------------------------
+# ---- Why moving the PIPELINE was the wrong half of it ---------------------
 # The lead is injected as idle dots at the HEAD of mode 3 and paid back by
 # retiring the fetcher `m3_lead` pixels early at the tail, so mode 3's length is
 # unchanged. That accounting is exact everywhere except the last `m3_lead`
 # pixels of a line, where a sprite or window fetch can still stall the shifter:
 # the flag then wants to go up mid-fetch, and neither "retire before the fetch"
 # nor "retire after it" is that dot. Measured at 1 (2026-08-02, full runner):
+# gambatte 3253 -> 3256 and thirteen mealybug/age rows up, but mealybug
+# m3_scx_low_3_bits 100% -> 98.6% (a green row) and gambatte sprites 257 -> 255,
+# window 258 -> 256, enable_display 131 -> 128, m0enable 143 -> 142 -- every one
+# of them a WX=166 / OBJ X=166 / SCX-at-H-Blank row, i.e. the tail accounting.
 #
-#   gambatte  3253 -> 3256   mooneye/GBMicrotest/blargg/mGBA/magen unchanged
-#   results.md  615 -> 615   (age/m3-bg-lcdc-ds-cgbBCE goes GREEN)
-#   mealybug  m3_scy_change        51.4% -> 83.5%   m3_bgp_change  74.8 -> 87.3
-#             m3_bgp_change_sprites 75.9% -> 89.1%  m3_window_timing 92.1 -> 96.9
-#             m3_lcdc_obj_en_change_variant 94.7 -> 97.6, +8 more rows up
-#   age       m3-bg-lcdc-cgbBCE    88.9% -> 98.9%   m3-bg-lcdc-dmgC 83.3 -> 94.4
-#   COSTS     mealybug m3_scx_low_3_bits 100% -> 98.6% (a green row),
-#             m3_lcdc_bg_map_change 97.5 -> 97.3, m3_lcdc_obj_size_change
-#             99.6 -> 99.5; gambatte sprites 257 -> 255 and window 258 -> 256
-#             (the runner gates on those two counts, so it exits 1), plus
-#             enable_display 131 -> 128 and m0enable 143 -> 142.
-#
-# Every one of those costs is a WX=166 / OBJ X=166 / SCX-at-H-Blank row, i.e.
-# the tail accounting and not the M-cycle constant, and the project does not
-# take a partial win that turns a green row red. Landing this properly means
-# committing the write itself at the start of its M-cycle (defer the PPU tick
-# inside mem_write) so the pipeline is never moved and there is no tail to
-# account for; that is a bus-layer change, not a PPU one. Until then this is
-# one flag: `-d:M3_PIPE_MCYCLES=1`.
+# Moving the WRITE instead (mem_write) buys the same thirteen rows with none of
+# that tail: the pipeline never moves, so there is nothing to account for.
+# Same tree, same day: gambatte 3253 -> 3311, sprites 257 -> 260, window
+# 258 -> 262, m0enable 143 -> 147, enable_display unmoved, and
+# m3_scx_low_3_bits stays green (its own latch moved to the fetcher, see
+# fifo_sample_smooth_scroll's caller). That is why this constant is 0 and the
+# fix is a bus-layer one.
 const M3_PIPE_MCYCLES {.intdefine.} = 0
 const M3_PIPE_DELAY {.intdefine.} = 0
 # Compiles the pipeline-lead machinery out entirely when both terms are off,

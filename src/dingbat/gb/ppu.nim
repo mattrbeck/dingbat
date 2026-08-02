@@ -231,31 +231,79 @@ proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 #     mode 3 -- because it is the STAT mode bits that are late, not the locks.
 #   * They OPEN with the STAT bits (the `read_mode` latch), one M-cycle after
 #     mode 3 really ends.
-#   * A write commits one M-cycle earlier in its own M-cycle than a read
-#     samples, so writes see the latched mode where reads see the live one.
-#     That is what makes an OAM write land on the last M-cycle of mode 2 (the
-#     one M-cycle where the latch still says 2 but the live mode is already 3)
-#     while an OAM read in the same M-cycle is refused.
+#   * A write and a read in the same M-cycle are NOT asked at the same point.
+#     A write's byte is applied before that M-cycle's PPU dots (mem_write), so
+#     it asks with the mode at the START of the M-cycle -- the live mode as of
+#     the call. A read is answered after the dots, so it asks with both the
+#     latched mode (`read_mode`, again the mode at the start) and the live one,
+#     and any lock closed at either end refuses it. That is what makes an OAM
+#     write land on the last M-cycle of mode 2 while an OAM read in the same
+#     M-cycle is refused.
+#
+#     The one thing a write still cannot answer from the start of its M-cycle
+#     is whether mode 2 ENDS inside it, and mooneye lcdon_write_timing-GS says
+#     that M-cycle's OAM write lands. Mode 2 always ends at dot 80, so the
+#     M-cycle's own dot span answers it -- see cpu_oam_open.
 #   * On the first line after the LCD is switched on the PPU's dot grid sits
 #     2 T-cycles off the CPU's M-cycle grid (see the LCDC-enable write), so
 #     every edge on that line rounds to the same M-cycle as the STAT bits do.
 #     One line, one flag: `first_line` selects the latched mode for both.
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
   if not lcd_enabled(ppu): return true
+  if is_write:
+    # A write is applied BEFORE its M-cycle's dots (see mem_write), so the live
+    # mode here already IS the mode at the start of that M-cycle -- the same
+    # value read_mode carries once the dots have run. Byte for byte the rule
+    # this used to spell as `read_mode != 3`, evaluated at the write's own
+    # commit point instead of one M-cycle after it.
+    return (ppu.lcd_status and 3'u8) != 3
   if (ppu.read_mode and 3'u8) == 3: return false
-  if is_write or ppu.first_line: return true
+  if ppu.first_line: return true
   (ppu.lcd_status and 3'u8) != 3
 
-proc cpu_oam_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+const OAM_WRITE_M2_TAIL {.intdefine.} = 1
+  ## Whether an OAM write is still admitted on the M-cycle mode 2 ends in.
+  ##
+  ## Pan Docs says OAM belongs to the PPU for the whole of modes 2 and 3, which
+  ## is what 0 spells; the exception is a measured one and it is not optional.
+  ## Turning it off costs mooneye acceptance/ppu/lcdon_write_timing-GS outright
+  ## and takes GBMicrotest 349 -> 347 (oam_write_l1_c and two others), so the
+  ## last M-cycle of mode 2 really does still take an OAM write.
+
+proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0): bool {.inline.} =
   if not lcd_enabled(ppu): return true
+  let live = ppu.lcd_status and 3'u8
+  if is_write:
+    # Same sample point as the VRAM write above: the live mode here is the mode
+    # at the start of the write's own M-cycle.
+    if live == 3: return false
+    # The first line's OAM scan does not lock OAM at all (it is also the mode
+    # that STAT reports as 0 -- see ppu_read 0xFF41).
+    if ppu.first_line: return true
+    when OAM_WRITE_M2_TAIL != 0:
+      if live == 2:
+        # The one place a write still outlives the mode it starts in, and the
+        # only thing in either lock that the start of an M-cycle cannot answer
+        # on its own. The OAM scan releases the bus at dot 80 while the CPU's
+        # write strobe is still to come, so the write lands; mode 2 ALWAYS ends
+        # at dot 80, so "does this M-cycle span dot 80" is the same question,
+        # and it is what the old post-tick rule was reading off the mode when
+        # it asked `live != 2` after the dots had run. mcycle_dots is 4, or 2 in
+        # double speed -- the caller has the speed, this does not.
+        #
+        # Exact for the FIFO renderer, whose dot counter runs 1..80 across mode
+        # 2 and stops at 80 on the M-cycle that ends it. The scanline renderer
+        # subtracts 80 on that same M-cycle instead, so it can answer one
+        # M-cycle early at the boundary; it is the opt-in fast path (GB.fifo)
+        # and does not model this edge at dot resolution anyway.
+        return ppu.cycle_counter + mcycle_dots > 80
+      return true
+    else:
+      return live != 2
   let lag = ppu.read_mode and 3'u8
   if lag == 3: return false
-  # The first line's OAM scan does not lock OAM at all (it is also the mode
-  # that STAT reports as 0 -- see ppu_read 0xFF41).
   if ppu.first_line: return true
-  let live = ppu.lcd_status and 3'u8
-  if is_write: lag != 2 or live != 2
-  else:        lag != 2 and live != 2 and live != 3
+  lag != 2 and live != 2 and live != 3
 
 # ---- STAT helpers ----
 proc coincidence_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x40) != 0
@@ -347,6 +395,16 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
 
+proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
+  ## Take the STAT interrupt edge a CPU write to LCDC/STAT/LYC left pending.
+  ## mem_write calls this on the M-cycle boundary that follows the write; the
+  ## handful of write_byte callers that are not a CPU M-cycle at all (the
+  ## post-boot register table, the cheat engine's RAM pokes) call it directly
+  ## so nothing can carry a pending edge into an unrelated M-cycle.
+  if ppu.stat_write_pending:
+    ppu.stat_write_pending = false
+    ppu_handle_stat_interrupt(ppu, gb)
+
 proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; block_number: int) =
   for byte in 0 ..< 0x10:
     let offset = 0x10 * block_number + byte
@@ -423,6 +481,54 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
       for bn in 0 .. int(ppu.hdma5):
         ppu_copy_hdma_block(ppu, gb, bn)
     ppu.hdma_active = false
+
+# ---- Which half of a CPU write moves, and which does not --------------------
+#
+# mem_write commits a write's byte at the top of its M-cycle because the mode-3
+# pixel pipeline was running an M-cycle ahead of the CPU. That compensation is
+# only correct for what the PIPELINE reads; everything else in the PPU was
+# already in phase and must keep the commit point it had. Three cases, each
+# settled by the ROMs that isolate it rather than by the rule:
+#
+#   * Pipeline registers -- SCX, SCY, WX, WY, the palettes, VBK, VRAM and OAM.
+#     The byte moves. That is the whole point (gambatte bgtiledata/bgtilemap,
+#     mealybug m3_*).
+#   * Registers that GATE a PPU event -- STAT's source-enable bits and FF55.
+#     The whole store waits for the M-cycle boundary, so a mode edge inside
+#     those dots is still gated by the value the CPU has not replaced yet.
+#     gambatte m0enable/disable_* (16 ROMs sweeping SCX across the mode 3->0
+#     edge) and dma/hdma_late_disable_* exist to time exactly this; committing
+#     early lets the CPU suppress an interrupt, or a HBlank block, that hardware
+#     still delivers. With the store held back, every STAT-write family --
+#     m0enable, m1, m2enable -- is byte-for-byte what it was before the reorder.
+#   * Registers the PPU itself updates or compares against -- LYC and IF. The
+#     byte moves, and the ROMs say so: ly_lyc_write-GS times an LYC write
+#     against the LY advance, and gbmicrotest vblank_int_if_c / vblank2_int_if_c
+#     / lyc1_int_if_edge_c time an IF clear against the flag the PPU raises.
+#     Both want the CPU's store to win inside its own M-cycle.
+#
+# LCDC straddles the first and second cases -- the pipeline reads six of its
+# bits and the mode machinery reads bit 7 -- so its byte moves and only its
+# effect on the STAT line is held back (stat_write_pending).
+proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+  case idx
+  of 0xFF41:
+    ppu.lcd_status = (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
+    ppu_handle_stat_interrupt(ppu, gb)
+  of 0xFF55:
+    ppu_start_hdma(ppu, gb, val)
+  else: discard
+
+proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+  ## Park one of the two above until the M-cycle boundary (mem_flush_deferred).
+  ## The slot is drained first: the bus path can only fill it once per M-cycle,
+  ## but the write_byte callers that are not an M-cycle at all (the post-boot
+  ## register table, cheat pokes) can, and none of them may lose a store.
+  if gb.memory.deferred_reg != 0:
+    ppu_write_machinery(ppu, gb, int(gb.memory.deferred_reg), gb.memory.deferred_val)
+  gb.memory.deferred_reg = uint16(idx)
+  gb.memory.deferred_val = val
+  gb.memory.write_deferred = true
 
 # Sprite helpers
 proc sprite_on_line*(s: GbSprite; line: uint8; sprite_height: int): bool =
@@ -557,7 +663,16 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # line 0 ends 2 T-cycles off the grid and the next line lands back on it),
       # rounded into this renderer's whole-dot counter. No rendered pixel moves:
       # mode 3 is still driven to 160 pixels by the shifter, not by this counter.
-      ppu.cycle_counter = LCD_ON_HEAD_START
+      #
+      # Both of those ROMs measure the head start from an M-cycle BOUNDARY, and
+      # this is the one write whose effect is a restart of the PPU's own clock:
+      # the counter has to read 5 once this M-cycle's dots have run, not when
+      # the byte lands at the top of it (mem_write applies CPU writes before the
+      # dots). Backing the M-cycle out is what keeps the constant the one those
+      # two ROMs pin at BOTH speeds -- an M-cycle is 2 dots in double speed, and
+      # seeding 5 flat there restarts the PPU one double-speed M-cycle late
+      # (gambatte enable_display/frame0_m2stat_count_ds_*, m2enable/disable_ds_*).
+      ppu.cycle_counter = int32(int(LCD_ON_HEAD_START) - (4 shr gb.memory.current_speed))
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
     when defined(gb_m3_trace):
@@ -568,16 +683,32 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " old=",
              toHex(ppu.lcd_control, 2), " new=", toHex(val, 2), " fc=", fp
     ppu.lcd_control = val
-    ppu_handle_stat_interrupt(ppu, gb)
-  of 0xFF41:
-    ppu.lcd_status = (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
-    ppu_handle_stat_interrupt(ppu, gb)
+    # Deferred to the end of this M-cycle -- see GbPpu.stat_write_pending and
+    # the consume in mem_write. The LCD-enable branch above is NOT deferred:
+    # that one restarts the mode machinery itself rather than feeding it.
+    ppu.stat_write_pending = true
+    gb.memory.write_deferred = true
+  of 0xFF41: ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF42: ppu.scy = val
-  of 0xFF43: ppu.scx = val
+  of 0xFF43:
+    when defined(gb_m3_trace):
+      # Same instrument as the LCDC line above, for the scroll register: which
+      # dot of which line an SCX write lands on is what pins the fine-scroll
+      # latch against it (see fifo_sample_smooth_scroll's caller).
+      echo "SCX ly=", ppu.ly, " dot=", ppu.cycle_counter,
+           " mode=", (ppu.lcd_status and 3), " old=", ppu.scx, " new=", val
+    ppu.scx = val
   of 0xFF44: discard  # read-only
   of 0xFF45:
+    # NOT deferred, unlike STAT and FF55 next door: LYC is the LY comparator's
+    # other input, and mooneye-wilbertpol acceptance/gpu/ly_lyc_write-GS times an
+    # LYC write against the LY advance and wants the new value to win inside its
+    # own M-cycle. That row is RED on main and green with the byte committed at
+    # the top of the M-cycle; deferring it puts it back to red and takes
+    # gambatte lycEnable 166 -> 163. Only the STAT edge is held back.
     ppu.lyc = val
-    ppu_handle_stat_interrupt(ppu, gb)
+    ppu.stat_write_pending = true
+    gb.memory.write_deferred = true
   of 0xFF46: discard  # handled by memory DMA
   of 0xFF47: ppu_update_palette(ppu.bgp,  val)
   of 0xFF48: ppu_update_palette(ppu.obp0, val)
@@ -595,7 +726,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   of 0xFF54:
     if gb.cgb_native: ppu.hdma4 = val
   of 0xFF55:
-    if gb.cgb_native: ppu_start_hdma(ppu, gb, val)
+    if gb.cgb_native: ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF68:
     if gb.cgb_enabled:
       ppu.palette_index  = val and 0x3F

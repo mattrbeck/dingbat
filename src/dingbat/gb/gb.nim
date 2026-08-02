@@ -344,6 +344,14 @@ type
     window_trigger*:     bool
     current_window_line*: int
     old_stat_flag*:      bool
+    # A CPU write to LCDC/STAT/LYC changed one of the STAT interrupt line's
+    # inputs and the line has not been re-evaluated yet. The byte itself lands
+    # at the top of its M-cycle (mem_write), because that is where the pixel
+    # pipeline has to see it; the interrupt line is part of the mode machinery,
+    # which was never out of phase with the CPU, so its edge is still taken at
+    # the M-cycle boundary. Never set across an instruction boundary -- mem_write
+    # consumes it in the same M-cycle -- so it is not serialized.
+    stat_write_pending*: bool
     first_line*:         bool
     cycle_counter*:      int32
     # STAT mode bits as observed by a CPU read. A read M-cycle samples the bus
@@ -523,6 +531,21 @@ type
     hram*:                 array[0x7F, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
+    # A CPU write this M-cycle has left something for the M-cycle boundary to
+    # do (an IF store, a STAT interrupt-line edge). mem_write applies the byte
+    # BEFORE the M-cycle's PPU dots, because that is the phase the pixel
+    # pipeline needs; the interrupt machinery was never out of phase with the
+    # CPU, so the half of a write that feeds IT stays on the boundary. One flag
+    # for both so the write path pays a single test. See mem_flush_deferred.
+    write_deferred*:       bool
+    # The register write that flag stands for, when it is a whole store and not
+    # just a STAT edge: FF41 or FF55, the two that GATE a PPU event (see
+    # ppu_write_machinery). 0 = none. One slot is enough -- the CPU
+    # writes one byte per M-cycle -- and it is drained before a second one can
+    # be recorded, so the non-M-cycle callers cannot lose one either. Never live
+    # across an instruction boundary, so it is not serialized.
+    deferred_reg*:         uint16
+    deferred_val*:         uint8
     ff72*, ff73*, ff74*, ff75*: uint8
     dma*:                  uint8
     current_dma_source*:   uint16
@@ -1471,6 +1494,9 @@ proc apply_cheats*(gb: GB) =
           write_byte(mem, gb, int((a + i) and 0xFFFF), uint8(v shr (i * 8))),
     )
   gb.cheats.apply_ram(gb.cheat_hooks)
+  # A poke into IF or LCDC/STAT/LYC leaves something deferred and is not a CPU
+  # M-cycle, so nothing else would apply it (see mem_flush_deferred).
+  mem_flush_deferred(gb.memory, gb)
 
 proc refresh_cheat_rom_patches*(gb: GB) =
   ## Apply (or re-apply) Game Genie ROM edits. Call at load and whenever the

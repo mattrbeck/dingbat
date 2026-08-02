@@ -374,14 +374,32 @@ bundle's own `gambatte/game-boy-test-roms-howto.md` and gambatte-core's
 comparison's own colour space, and diff that against the bundled reference.
 For the mid-scanline-write families (`bgtiledata`, `bgtilemap`,
 `scx_during_m3`, `scy`) pair it with `-d:gb_m3_trace -d:GB_TRACE_LY=<n>`,
-which prints one line per mode-3 dot of line `n` plus the LCDC writes landing
-inside it: the reference tells you which pixel the write reached, the trace
-tells you which fetcher step consumed it, and the two together give the
-pipeline's phase against the CPU. `-d:M3_PIPE_DELAY=<n>` then sweeps that phase
-in dots and `-d:M3_PIPE_MCYCLES=<n>` in CPU M-cycles — which is the one that
-scales with double speed, and the difference between the two is the whole
-normal-vs-double-speed write alignment. Both are declared, with the staircase
-measurement and the cost of turning them up, in `src/dingbat/gb/fifo_ppu.nim`.
+which prints one line per mode-3 dot of line `n`, the LCDC and SCX writes
+landing inside it, and the dot the fine-scroll latch fires on: the reference
+tells you which pixel a write reached, the trace tells you which fetcher step
+consumed it, and the two together give the pipeline's phase against the CPU.
+`-d:M3_PIPE_DELAY=<n>` then sweeps that phase in dots and
+`-d:M3_PIPE_MCYCLES=<n>` in CPU M-cycles — which is the one that scales with
+double speed. Both are declared, with the staircase measurement, in
+`src/dingbat/gb/fifo_ppu.nim`, and **both ship at 0 and should stay there**:
+the M-cycle that staircase found belonged to the CPU write, not to the
+pipeline, and `mem_write` now commits a write's byte at the start of its
+M-cycle (where the write's own VRAM/OAM lock is already decided) instead of
+after that M-cycle's dots. Turning `M3_PIPE_MCYCLES` up now counts the same
+M-cycle twice.
+
+**Only what the pipeline reads moves.** The compensation above is wrong for
+every other consumer inside the PPU, because only the pipeline was out of
+phase. `ppu_write_machinery` in `ppu.nim` carries the three-way split and the
+ROMs that settle each case: pipeline registers move; STAT's source enables and
+`FF55` wait for the M-cycle boundary, because they *gate* a PPU event and
+committing them early lets the CPU suppress an interrupt (gambatte
+`m0enable/disable_*`) or a HBlank block (`dma/hdma_late_disable_*`) that
+hardware still delivers; LYC and IF move, because the PPU updates their
+counterpart rather than reading them (`ly_lyc_write-GS`, gbmicrotest
+`vblank_int_if_c`). Getting that boundary wrong is worth 6 `m0enable` rows and
+2 `dma` rows and is invisible on a run that only checks the total, so re-check
+those two families after any change to `mem_write`'s shape.
 
 **Debugging a STAT-timing row.** The `m2int_*`, `m0int_*`, `lycm2int`,
 `m2enable` and `halt` families all have the same shape: a STAT interrupt as

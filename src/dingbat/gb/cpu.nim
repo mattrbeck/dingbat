@@ -76,19 +76,32 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
+proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
+  ## The taken half of handle_interrupts: push PC, vector, charge the 5 M-cycles.
+  ##
+  ## Split out, and forced out of line, because of what the OTHER half costs.
+  ## handle_interrupts runs after every instruction — tens of millions of calls
+  ## a second — and all but a handful of them fall straight out of
+  ## `interrupt_ready`. Two `mem_write`s inlined into the same body (mem_write
+  ## carries always_inline; see memory.nim) is enough register pressure to give
+  ## the whole proc a real prologue, and that prologue is then paid on every one
+  ## of those non-taken returns. Measured: +0.8% of ALL retired instructions on
+  ## both a DMG and a CGB title, from a path that does nothing. Keeping the hot
+  ## half a leaf is worth ~1% against `main` on both.
+  cpu.ime = false
+  cpu.sp = cpu.sp - 1
+  mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
+  let interrupt = highest_priority(gb.interrupts)
+  cpu.sp = cpu.sp - 1
+  mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
+  cpu.pc = interrupt
+  clear_interrupt(gb.interrupts, interrupt)
+  mem_tick_extra(gb.memory, gb, 20)
+
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
   if interrupt_ready(gb.interrupts):
     cpu.halted = false
-    if cpu.ime:
-      cpu.ime = false
-      cpu.sp = cpu.sp - 1
-      mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
-      let interrupt = highest_priority(gb.interrupts)
-      cpu.sp = cpu.sp - 1
-      mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
-      cpu.pc = interrupt
-      clear_interrupt(gb.interrupts, interrupt)
-      mem_tick_extra(gb.memory, gb, 20)
+    if cpu.ime: dispatch_interrupt(cpu, gb)
 
 when defined(gbfuzz_trace):
   # Instruction trace for cross-emulator divergence hunting (tools/gbfuzz).
