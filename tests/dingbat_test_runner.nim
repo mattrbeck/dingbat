@@ -1021,7 +1021,10 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   var cmd = &"{harness.quoteShell} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
   if bios_path.len > 0:
     cmd.add(&" --bios={bios_path.quoteShell}")
-  let (output, code) = execCmdEx(cmd, options = {poUsePath})
+  # The exit code is not the verdict here: the suite ROM reports per-section
+  # pass counts on stdout and the harness exits 0 either way, so scoring reads
+  # the output.
+  let (output, _) = execCmdEx(cmd, options = {poUsePath})
   var results: seq[TestResult]
   var current_suite = ""
   var current_tests: seq[MgbaTestDetail]
