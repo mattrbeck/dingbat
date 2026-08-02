@@ -385,10 +385,12 @@ type
     sprite_fetch_phase*:  int
     bg_pixels_pushed*:    bool
     scx_penalty_remaining*: int
-    m3_delay*:            int   # only read when M3_PIPE_DELAY > 0, see fifo_ppu
-    # The shifter still owes the tail of a line whose mode 0 flag is already
-    # up. Always false at M3_PIPE_DELAY = 0. See fetcher_retired.
-    m3_draining*:         bool
+    m3_delay*:            int   # idle dots left at the head of mode 3
+    # How far the pipeline lags the CPU's view of the PPU registers on THIS
+    # line, in dots. Latched at the mode 2 -> 3 edge because the CPU M-cycle it
+    # is derived from is 4 dots at normal speed and 2 in double speed. See
+    # M3_PIPE_MCYCLES in fifo_ppu.
+    m3_lead*:             int32
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

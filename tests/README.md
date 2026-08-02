@@ -377,8 +377,11 @@ For the mid-scanline-write families (`bgtiledata`, `bgtilemap`,
 which prints one line per mode-3 dot of line `n` plus the LCDC writes landing
 inside it: the reference tells you which pixel the write reached, the trace
 tells you which fetcher step consumed it, and the two together give the
-pipeline's phase against the CPU. `-d:M3_PIPE_DELAY=<n>` then sweeps that
-phase. See the KNOWN RESIDUAL note in `src/dingbat/gb/fifo_ppu.nim`.
+pipeline's phase against the CPU. `-d:M3_PIPE_DELAY=<n>` then sweeps that phase
+in dots and `-d:M3_PIPE_MCYCLES=<n>` in CPU M-cycles — which is the one that
+scales with double speed, and the difference between the two is the whole
+normal-vs-double-speed write alignment. Both are declared, with the staircase
+measurement and the cost of turning them up, in `src/dingbat/gb/fifo_ppu.nim`.
 
 **Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
 its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
