@@ -177,6 +177,8 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   # Derived caches, not payload: re-deriving them costs nothing and keeps the
   # section byte-for-byte what it was, so no payload-revision bump.
   mem.dma_busy = mem.dma_position > 0 and mem.dma_position <= 0xA0
+  # dma_bus / dma_drive / dma_latch are re-derived once the cartridge and PPU
+  # sections have landed, in gb_apply_state.
 
 # ---- PPU (renderer-agnostic base state only, see file comment) ----
 
@@ -767,6 +769,32 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
   r.expect_tag(GB_SEC_END)
+  # Derived OAM-DMA bus state. Neither field is serialized: both are functions
+  # of state that already is (current_dma_source, dma_position, and the source
+  # memory), so re-deriving them here keeps the payload byte-for-byte what it
+  # was before bus conflicts existed. Must run after the MBC/PPU sections, or
+  # the latch would be read out of a half-restored cartridge.
+  let mem = gb.memory
+  if mem.dma_busy:
+    var src = int(mem.current_dma_source)
+    if src >= 0xE000: src = src and not 0x2000
+    if int(mem.current_dma_source) >= 0xE000 and console_is_cgb(gb):
+      mem.dma_bus = uint8(dbExternal)
+      mem.dma_drive = DriveTristate
+      mem.dma_openbus = true
+      mem.dma_latch = 0xFF'u8
+    else:
+      mem.dma_bus = dma_bus_of(gb, src)
+      mem.dma_drive = dma_drive_of(gb, src)
+      mem.dma_openbus = false
+      var latch_src = int(mem.current_dma_source) + mem.dma_position - 1
+      if latch_src >= 0xE000: latch_src = latch_src and not 0x2000
+      mem.dma_latch = read_byte(mem, gb, latch_src)
+  else:
+    mem.dma_bus = uint8(dbNone)
+    mem.dma_drive = DriveTristate
+    mem.dma_openbus = false
+    mem.dma_latch = 0
 
 proc gb_rom_checksum(gb: GB): uint32 =
   ## The whole ROM file. load_cartridge allocates the buffer at exactly the
