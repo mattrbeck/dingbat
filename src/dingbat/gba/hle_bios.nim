@@ -220,9 +220,12 @@ const SWI_HLE_BASE = 48
 # The part of a Halt/Stop SWI the real BIOS executes AFTER the wake IRQ has
 # been serviced: bx lr (3) + pop {r2, lr} (4) + mov (1) + msr (1) +
 # ldm {fp} (3) + msr SPSR (1) + pop {fp, ip, lr} (5) + movs pc, lr with an
-# IWRAM/BIOS-width refill (3). Deferring it keeps post-wake measurements
-# (mGBA suite SIO timing tests) aligned with the real-BIOS execution order.
-const HALT_RETURN_COST = 21
+# IWRAM/BIOS-width refill (3) = 21, less the one cycle the IRQ exception
+# return no longer charges (cpu.irq / exception_return_restore moved it to the
+# vector side). This is a deferral, not a cost: the SWI's total is unchanged,
+# only how much of it lands after the wake, which is what post-wake
+# measurements see (mGBA suite SIO timing tests).
+const HALT_RETURN_COST = 20
 
 # --- Real-BIOS routine-body cost models -------------------------------------
 #
