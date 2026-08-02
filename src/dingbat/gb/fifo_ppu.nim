@@ -205,15 +205,8 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ppu.fetching_sprite =
     ppu.sprites.len > 0 and ppu.sprites[0].x == s.x
   if ppu.fetching_sprite:
-    # A second object at the same X does not re-run the BG-fetcher wait (the
-    # fetcher is already parked), but it still pays its own full object fetch.
-    # That fetch is 6 dots -- 2 to put the tile row address on the bus and 2 for
-    # each of the two data bytes -- so the same-X repeat costs 6, not the 2 that
-    # phases 3+4 alone would charge. mooneye
-    # acceptance/ppu/intr_2_mode0_timing_sprites measures 1..10 objects stacked
-    # at X=0 and its expectations step by exactly 6 dots per extra object.
-    ppu.fetch_counter_sprite = 0
-    ppu.sprite_fetch_phase = 7
+    # Skip BG fetcher advancement for same-X sprite; jump to tile data fetch
+    ppu.sprite_fetch_phase = 3
 
 proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   ## Multi-phase sprite fetch state machine.
@@ -259,12 +252,6 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
     dec ppu.scx_penalty_remaining
     if ppu.scx_penalty_remaining <= 0:
       ppu.sprite_fetch_phase = 1
-  of 7:
-    # Same-X repeat: the 4 dots that phases 3+4 do not cover (see
-    # sprite_fetch_merge).
-    inc ppu.fetch_counter_sprite
-    if ppu.fetch_counter_sprite >= 4:
-      ppu.sprite_fetch_phase = 3
   else:
     ppu.fetching_sprite = false
 
@@ -438,7 +425,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         elif ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           ppu.ly += 1
-          ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
           if int(ppu.ly) == GB_HEIGHT:
             ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
@@ -451,9 +437,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       of 1:  # V-Blank
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
-          if ppu.ly != 0:
-            ppu.ly += 1
-            ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
+          if ppu.ly != 0: ppu.ly += 1
           ppu_handle_stat_interrupt(ppu, gb)
           if ppu.ly == 0:
             ppu.`mode_flag=`(2'u8, gb)

@@ -169,28 +169,11 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFFFF:         irq_read(gb.interrupts, idx)
   else: 0xFF'u8
 
-proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
-  ## A CPU read that actually reaches the bus, with the PPU's own lock applied.
-  ##
-  ## Only the CPU comes through here: mem_read/mem_write are the CPU's entry
-  ## points, while the OAM DMA unit and HDMA drive the bus themselves and go
-  ## straight to read_byte/write_byte. That is the whole of the CPU-vs-DMA
-  ## distinction, and it is why this lives here rather than in ppu_read — the
-  ## DMA unit reaches VRAM through read_byte and must keep its access.
-  ##
-  ## OAM has no counterpart here because its read lock sits inside ppu_read,
-  ## where cpu_oam_open's read/write asymmetry is already handled.
-  if (idx and 0xE000) == 0x8000 and not cpu_vram_open(gb.ppu, is_write = false):
-    return 0xFF'u8
-  read_byte(mem, gb, idx)
-
 proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   ## Cold path: a CPU read issued while the OAM DMA unit is running. Kept out
   ## of line so the common case is a predictable not-taken branch over a call.
   if idx >= 0xFE00 and idx <= 0xFE9F: return 0xFF'u8
-  # No collision model here, so this is an ordinary CPU read and still owes
-  # the PPU's lock.
-  mem_read_open(mem, gb, idx)
+  read_byte(mem, gb, idx)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   mem_tick_components(mem, gb, 4)
@@ -199,7 +182,7 @@ proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 =
   # OAM-range half of the old three-term test now lives in mem_read_busy,
   # off the hot path. Same answer, one bool load instead of two compares.
   if mem.dma_busy: return mem_read_busy(mem, gb, idx)
-  mem_read_open(mem, gb, idx)
+  read_byte(mem, gb, idx)
 
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.dma         = source
@@ -251,33 +234,18 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)
   else: discard
 
-proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
-  ## Counterpart of mem_read_open: a CPU write that reaches the bus. Dropped
-  ## rather than deferred when the window is shut, and only for the CPU — the
-  ## OAM DMA unit writes OAM through write_byte and must not be locked out of
-  ## it. Both locks are here, unlike the read side, because ppu_write has no
-  ## OAM lock of its own (a write samples the latched mode, a read the live one
-  ## — see cpu_oam_open).
-  if (idx and 0xE000) == 0x8000:
-    if not cpu_vram_open(gb.ppu, is_write = true): return
-  elif idx >= 0xFE00 and idx <= 0xFE9F:
-    if not cpu_oam_open(gb.ppu, is_write = true): return
-  write_byte(mem, gb, idx, val)
-
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   ## Cold path counterpart of mem_read_busy.
   if idx >= 0xFE00 and idx <= 0xFE9F: return
-  # No collision model here, so this is an ordinary CPU write and still owes
-  # both locks.
-  mem_write_open(mem, gb, idx, val)
+  write_byte(mem, gb, idx, val)
 
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   mem_tick_components(mem, gb, 4)
-  # Same ordering as mem_read: the bus owner decides first.
+  # Same ordering as mem_read: the running DMA is decided first.
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
     return
-  mem_write_open(mem, gb, idx, val)
+  write_byte(mem, gb, idx, val)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
   uint16(mem_read(mem, gb, idx)) or (uint16(mem_read(mem, gb, idx + 1)) shl 8)
