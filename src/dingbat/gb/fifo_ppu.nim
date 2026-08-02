@@ -399,37 +399,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # `lx >= GB_WIDTH` test does, and that is the loop condition. Same
         # actions on the same dots as the generic path below, which still
         # handles the dot that ends mode 3.
-        #
-        # KNOWN RESIDUAL, measured 2026-08-01 and deliberately not fixed here.
-        # This pipeline runs 8 dots AHEAD of hardware relative to the CPU
-        # clock. Trace a mealybug ROM's register writes against lx and the
-        # picture is unambiguous: a write landing at line dot D changes the
-        # pixel at lx = D - 92, where hardware changes the pixel at D - 100.
-        # It is one constant, not a per-register effect -- BGP, LCDC.3/.4/.6,
-        # SCY and WX all land 8 dots early by the same amount.
-        #
-        # Injecting exactly 8 idle dots at the head of mode 3 (a throwaway
-        # `m3_delay` counter decremented here, mode 0 still driven by lx) was
-        # measured against the whole suite and buys a lot:
-        #   m3_bgp_change          74.8% -> 97.8%   m3_scy_change   51.4 -> 90.4
-        #   m3_bgp_change_sprites  75.9% -> 95.0%   m3_bg_en_change 84.3 -> 94.7
-        #   m3_lcdc_win_map_change 92.3% -> 97.2%   m3_tile_sel_win 89.8 -> 94.7
-        # and costs four rows that pass today, because deferring the pixels
-        # that way also defers the mode 0 flag by 8 dots: intr_2_0_timing,
-        # intr_2_mode0_timing, intr_2_oam_ok_timing and m3_scx_low_3_bits all
-        # go red, and m3_wx_4/5_change collapse (the re-trigger phase moves
-        # with lx). So the offset is real but the crude fix is not shippable.
-        #
-        # A shippable version has to decouple the two: keep the mode 0
-        # transition on its present dot budget (172 + SCX&7 + object
-        # penalties, which mooneye pins and hblank_ly_scx_timing-GS now
-        # checks) while starting the fetch/shift pipeline 8 dots later. That
-        # means mode 3's last 8 pixels are produced after the flag has already
-        # read 0 -- which now also has to answer to the CPU VRAM/OAM locks --
-        # so it is a restructure of this loop, not a constant. Nobody should
-        # attempt it without the 2613-title byte-identical library sweep
-        # (tools/gbfuzz) as the gate: it moves every mid-scanline write in
-        # every GB game by 8 dots.
         while remaining > 0 and ppu.lx < GB_WIDTH:
           if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
           else:
