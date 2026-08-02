@@ -1533,6 +1533,23 @@ proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
     try:
       let emu = gambatte_run(rom, cgb, frames)
       let fb = emu.ppu.framebuffer
+      # DINGBAT_GAM_DUMP=<dir> writes each scored frame as a PPM, in the same
+      # colour space the comparison uses. A png row's verdict is one integer
+      # ("1400/23040 pixels differ") and the reference is a PNG, so without
+      # this there is no way to see WHERE a family disagrees -- which for the
+      # mid-scanline-write families is the entire signal.
+      let dump_dir = getEnv("DINGBAT_GAM_DUMP")
+      if dump_dir.len > 0:
+        var f = open(dump_dir / ($idx & "_" & dev & "_" &
+                                 rom.extractFilename.changeFileExt("") & ".ppm"),
+                     fmWrite)
+        f.write("P6\n" & $GB_WIDTH & " " & $GB_HEIGHT & "\n255\n")
+        for i in 0 ..< GB_WIDTH * GB_HEIGHT:
+          let p = gambatte_pixel(fb[i], cgb)
+          f.write(char((p shr 16) and 0xFF))
+          f.write(char((p shr 8) and 0xFF))
+          f.write(char(p and 0xFF))
+        f.close()
       if dump_tiles > 0:
         var rows: seq[string]
         for col in 0 ..< dump_tiles:

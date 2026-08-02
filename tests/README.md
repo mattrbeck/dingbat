@@ -369,6 +369,17 @@ bundle's own `gambatte/game-boy-test-roms-howto.md` and gambatte-core's
   with gambatte's CGB colour-correction formulae applied on the CGB side and
   the plain `#000000/#555555/#AAAAAA/#FFFFFF` shades on the DMG side.
 
+**Debugging a `png` row.** Its verdict is a single integer, so set
+`DINGBAT_GAM_DUMP=<dir>` to also write every scored frame as a PPM in the
+comparison's own colour space, and diff that against the bundled reference.
+For the mid-scanline-write families (`bgtiledata`, `bgtilemap`,
+`scx_during_m3`, `scy`) pair it with `-d:gb_m3_trace -d:GB_TRACE_LY=<n>`,
+which prints one line per mode-3 dot of line `n` plus the LCDC writes landing
+inside it: the reference tells you which pixel the write reached, the trace
+tells you which fetcher step consumed it, and the two together give the
+pipeline's phase against the CPU. `-d:M3_PIPE_DELAY=<n>` then sweeps that
+phase. See the KNOWN RESIDUAL note in `src/dingbat/gb/fifo_ppu.nim`.
+
 **Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
 its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
 `--dump-tiles=N` prints the raw top-row tiles, and running it over a few
