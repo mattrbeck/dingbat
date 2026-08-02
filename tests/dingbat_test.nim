@@ -734,8 +734,9 @@ proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): 
       prev_pc = pc
 
   # Triage rollup, grouped by state + opcode + which of r3/r4/CPSR disagreed
-  # (and for CPSR, which flags). Stderr, not stdout: the runner captures only
-  # stdout, so results.md stays a one-liner while a CI log keeps the detail.
+  # (and for CPSR, which flags). Stderr, not stdout, so the one-line verdict on
+  # stdout stays the last line: the runner keeps only that for results.md and
+  # replays the rest into its own log when a ROM fails.
   if fails.len > 0:
     var groups: seq[(string, int)]
     for f in fails:
@@ -762,19 +763,25 @@ proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): 
     for (key, n) in groups:
       stderr.writeLine("  " & align($n, 6) & "  " & key)
 
+  # The verdict line carries a "FUZZARM: " marker so the runner can find it by
+  # content. Do NOT let it identify the summary as "the last line" instead:
+  # stdout is block-buffered when piped and stderr is not, so the storage
+  # layer's early "Backup type could not be identified" can be flushed *after*
+  # the whole triage once both streams are merged.
   let total_str = if total > 0: $total else: "?"
+  let passed_str = if total > 0: $(total - fails.len) else: "?"
   if capped:
-    echo "<=" & (if total > 0: $(total - fails.len) else: "?") & "/" & total_str &
+    echo "FUZZARM: <=" & passed_str & "/" & total_str &
          " passed (stopped after " & $fails.len & " failures)"
     return 1
   if not finished:
-    echo "timed out after " & $frames & " frames (" & $fails.len &
+    echo "FUZZARM: timed out after " & $frames & " frames (" & $fails.len &
          " failures so far)"
     return 1
   if fails.len == 0:
-    echo total_str & "/" & total_str & " passed"
+    echo "FUZZARM: " & total_str & "/" & total_str & " passed"
     return 0
-  echo (if total > 0: $(total - fails.len) else: "?") & "/" & total_str &
+  echo "FUZZARM: " & passed_str & "/" & total_str &
        " passed (" & $fails.len & " failed)"
   return 1
 

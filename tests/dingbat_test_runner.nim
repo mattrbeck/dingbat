@@ -261,16 +261,30 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --ed-breakpoint")
     if test.bb_breakpoint:
       cmd.add(" --bb-breakpoint")
-    let (output, code) = execCmdEx(cmd, options = {poUsePath})
+    # fuzzarm writes its per-failure triage to stderr and one summary line to
+    # stdout. execCmdEx only ever reads the child's stdout pipe, so stderr must
+    # be merged in: unread, it is both lost and a deadlock waiting to happen
+    # once the triage outgrows the pipe buffer (500 failures is ~100 KB).
+    let opts = if test.mode == tmFuzzArm: {poUsePath, poStdErrToStdOut}
+               else: {poUsePath}
+    let (output, code) = execCmdEx(cmd, options = opts)
     var text = output.strip()
     if test.mode == tmFuzzArm:
-      # fuzzarm keeps its per-failure triage on stderr (which execCmdEx does
-      # not capture here, so it lands in the runner's own log) and prints one
-      # summary line on stdout. Other lines can precede it — the storage layer
-      # warns "Backup type could not be identified" for these ROMs — so keep
-      # only the last, or results.md gets a multi-line table cell.
+      # Keep only the "FUZZARM: " verdict for results.md — the triage would
+      # otherwise become a multi-line table cell. Match on the marker, not on
+      # position: the two streams interleave unpredictably once merged. Echo
+      # everything else when the ROM failed, so what broke lands in the
+      # runner's log where a CI failure can actually be read.
+      const Marker = "FUZZARM: "
+      var verdict = ""
       for line in text.splitLines():
-        if line.strip().len > 0: text = line.strip()
+        let s = line.strip()
+        if s.startsWith(Marker): verdict = s[Marker.len .. ^1]
+      if code != 0:
+        for line in text.splitLines():
+          let s = line.strip()
+          if s.len > 0 and not s.startsWith(Marker): echo line
+      if verdict.len > 0: text = verdict
     if test.mode == tmMicrotest:
       # Keep only the one line that carries the $FF80/$FF81/$FF82 triple: it is
       # what makes a failing row actionable in results.md, and a verdict of
