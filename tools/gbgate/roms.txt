@@ -1,0 +1,35 @@
+# Real GB/GBC ROMs found on this machine (2026-08-01). One absolute path per
+# line. Deliberately excludes .claude/ worktrees, dingbat's own test-ROM cache,
+# SameBoy, dbwebperf and the mgba-ref-src cinema corpus — those are test ROMs
+# and build artifacts, not games.
+#
+# Commercial / released titles
+/Users/matt/Documents/emu/gb/Kirby - Tilt 'n' Tumble (USA).gbc
+/Users/matt/Documents/emu/gb/Legend of Zelda - Link's Awakening.gb
+/Users/matt/Documents/emu/gb/Legend of Zelda - Link's Awakening.gbc
+/Users/matt/Documents/emu/gb/Legend of Zelda, The - Link's Awakening (USA, Europe).gb
+/Users/matt/Documents/emu/gb/Legend of Zelda, The - Link's Awakening DX (U) (V1.2) [C][!].gbc
+/Users/matt/Documents/emu/gb/PokemonBlue.gb
+/Users/matt/Documents/emu/gb/PokemonCrystal.gbc
+/Users/matt/Documents/emu/gb/PokemonSilver.gbc
+/Users/matt/Documents/emu/gb/Prehistorik Man (USA, Europe).gb
+/Users/matt/Documents/emu/gb/Shantae (USA).gbc
+/Users/matt/Downloads/Game Boy Camera Gold (USA) (SGB Enhanced).gb
+/Users/matt/Downloads/Prehistorik Man (USA, Europe).gb
+/Users/matt/Downloads/Super Mario Land (World) (Rev 1).gb
+# Demo / homebrew
+/Users/matt/Documents/emu/gb/pocket.gb
+# Test ROMs that happen to live outside the excluded caches. Not games, but
+# they are real GB code and cost nothing to include.
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/01-special.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/02-interrupts.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/03-op sp,hl.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/04-op r,imm.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/05-op rp.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/06-ld r,r.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/07-jr,jp,call,ret,rst.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/08-misc instrs.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/09-op r,r.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/10-bit ops.gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/11-op a,(hl).gb
+/Users/matt/Documents/emu/gba/tests/GBA/EMU/GameBoy/ROMS/HelloWorld.gb
