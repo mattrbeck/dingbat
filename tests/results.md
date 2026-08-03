@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-02 15:19:14*
+*Generated: 2026-08-02 21:44:54*
 
 ## Game Boy - Blargg
 
@@ -291,59 +291,59 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/hblank_int_l1 | 👌 |
 | gbmicrotest/hblank_int_l2 | 👌 |
 | gbmicrotest/hblank_int_scx0 | 👌 |
-| gbmicrotest/hblank_int_scx0_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx0_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx0_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
+| gbmicrotest/hblank_int_scx0_if_a | 👌 |
+| gbmicrotest/hblank_int_scx0_if_b | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx0_if_c | 👌 |
 | gbmicrotest/hblank_int_scx0_if_d | 👌 |
 | gbmicrotest/hblank_int_scx1 | 👀 actual=0x2E expected=0x2D verdict=0xFF |
-| gbmicrotest/hblank_int_scx1_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx1_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx1_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
-| gbmicrotest/hblank_int_scx1_if_d | 👌 |
-| gbmicrotest/hblank_int_scx1_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx1_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx1_if_a | 👌 |
+| gbmicrotest/hblank_int_scx1_if_b | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx1_if_c | 👌 |
+| gbmicrotest/hblank_int_scx1_if_d | 👀 actual=0xE2 expected=0x00 verdict=0xFF |
+| gbmicrotest/hblank_int_scx1_nops_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx1_nops_b | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx2 | 👀 actual=0x2E expected=0x2D verdict=0xFF |
-| gbmicrotest/hblank_int_scx2_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx2_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx2_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
-| gbmicrotest/hblank_int_scx2_if_d | 👌 |
-| gbmicrotest/hblank_int_scx2_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx2_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx2_if_a | 👌 |
+| gbmicrotest/hblank_int_scx2_if_b | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx2_if_c | 👌 |
+| gbmicrotest/hblank_int_scx2_if_d | 👀 actual=0xE2 expected=0x00 verdict=0xFF |
+| gbmicrotest/hblank_int_scx2_nops_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx2_nops_b | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx3 | 👌 |
-| gbmicrotest/hblank_int_scx3_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx3_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx3_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
+| gbmicrotest/hblank_int_scx3_if_a | 👌 |
+| gbmicrotest/hblank_int_scx3_if_b | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx3_if_c | 👌 |
 | gbmicrotest/hblank_int_scx3_if_d | 👌 |
 | gbmicrotest/hblank_int_scx3_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx3_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx3_nops_b | 👌 |
 | gbmicrotest/hblank_int_scx4 | 👌 |
-| gbmicrotest/hblank_int_scx4_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx4_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx4_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
+| gbmicrotest/hblank_int_scx4_if_a | 👌 |
+| gbmicrotest/hblank_int_scx4_if_b | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx4_if_c | 👌 |
 | gbmicrotest/hblank_int_scx4_if_d | 👌 |
 | gbmicrotest/hblank_int_scx4_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx4_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx4_nops_b | 👌 |
 | gbmicrotest/hblank_int_scx5 | 👀 actual=0x2F expected=0x2E verdict=0xFF |
-| gbmicrotest/hblank_int_scx5_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx5_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx5_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
-| gbmicrotest/hblank_int_scx5_if_d | 👌 |
-| gbmicrotest/hblank_int_scx5_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx5_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx5_if_a | 👌 |
+| gbmicrotest/hblank_int_scx5_if_b | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx5_if_c | 👌 |
+| gbmicrotest/hblank_int_scx5_if_d | 👀 actual=0xE2 expected=0x00 verdict=0xFF |
+| gbmicrotest/hblank_int_scx5_nops_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx5_nops_b | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx6 | 👀 actual=0x2F expected=0x2E verdict=0xFF |
-| gbmicrotest/hblank_int_scx6_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx6_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx6_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
-| gbmicrotest/hblank_int_scx6_if_d | 👌 |
-| gbmicrotest/hblank_int_scx6_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx6_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx6_if_a | 👌 |
+| gbmicrotest/hblank_int_scx6_if_b | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx6_if_c | 👌 |
+| gbmicrotest/hblank_int_scx6_if_d | 👀 actual=0xE2 expected=0x00 verdict=0xFF |
+| gbmicrotest/hblank_int_scx6_nops_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/hblank_int_scx6_nops_b | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx7 | 👌 |
-| gbmicrotest/hblank_int_scx7_if_a | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/hblank_int_scx7_if_b | 👀 actual=0x00 expected=0xE0 verdict=0xFF |
-| gbmicrotest/hblank_int_scx7_if_c | 👀 actual=0x00 expected=0xE2 verdict=0xFF |
+| gbmicrotest/hblank_int_scx7_if_a | 👌 |
+| gbmicrotest/hblank_int_scx7_if_b | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx7_if_c | 👌 |
 | gbmicrotest/hblank_int_scx7_if_d | 👌 |
 | gbmicrotest/hblank_int_scx7_nops_a | 👌 |
-| gbmicrotest/hblank_int_scx7_nops_b | 👀 actual=0x00 expected=0x01 verdict=0xFF |
+| gbmicrotest/hblank_int_scx7_nops_b | 👌 |
 | gbmicrotest/hblank_scx2_if_a | 👌 |
 | gbmicrotest/hblank_scx3_if_a | 👌 |
 | gbmicrotest/hblank_scx3_if_b | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
@@ -426,7 +426,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_stat1_a | 👌 |
 | gbmicrotest/lcdon_to_stat1_b | 👌 |
 | gbmicrotest/lcdon_to_stat1_c | 👀 actual=0x81 expected=0x85 verdict=0xFF |
-| gbmicrotest/lcdon_to_stat1_d | 👀 actual=0x85 expected=0x84 verdict=0xFF |
+| gbmicrotest/lcdon_to_stat1_d | 👌 |
 | gbmicrotest/lcdon_to_stat1_e | 👌 |
 | gbmicrotest/lcdon_to_stat2_a | 👌 |
 | gbmicrotest/lcdon_to_stat2_b | 👌 |
@@ -453,7 +453,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_153_lyc0_stat_timing_c | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_d | 👀 actual=0xC1 expected=0xC5 verdict=0xFF |
 | gbmicrotest/line_153_lyc0_stat_timing_e | 👀 actual=0xC1 expected=0xC5 verdict=0xFF |
-| gbmicrotest/line_153_lyc0_stat_timing_f | 👀 actual=0xC5 expected=0xC4 verdict=0xFF |
+| gbmicrotest/line_153_lyc0_stat_timing_f | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_g | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_h | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_i | 👌 |
@@ -466,14 +466,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_153_lyc153_stat_timing_b | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_c | 👀 actual=0xC5 expected=0xC1 verdict=0xFF |
 | gbmicrotest/line_153_lyc153_stat_timing_d | 👀 actual=0xC5 expected=0xC1 verdict=0xFF |
-| gbmicrotest/line_153_lyc153_stat_timing_e | 👀 actual=0xC1 expected=0xC0 verdict=0xFF |
+| gbmicrotest/line_153_lyc153_stat_timing_e | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_f | 👌 |
 | gbmicrotest/line_153_lyc_a | 👌 |
 | gbmicrotest/line_153_lyc_b | 👌 |
 | gbmicrotest/line_153_lyc_c | 👀 actual=0x85 expected=0x81 verdict=0xFF |
 | gbmicrotest/line_153_lyc_int_a | 👌 |
 | gbmicrotest/line_153_lyc_int_b | 👌 |
-| gbmicrotest/line_65_ly | 👀 actual=0x41 expected=0x40 verdict=0xFF |
+| gbmicrotest/line_65_ly | 👌 |
 | gbmicrotest/ly_while_lcd_off | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/lyc1_int_halt_a | 👌 |
 | gbmicrotest/lyc1_int_halt_b | 👌 |
@@ -538,22 +538,22 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/poweron_joy_000 | 👌 |
 | gbmicrotest/poweron_lcdc_000 | 👌 |
 | gbmicrotest/poweron_ly_000 | 👌 |
-| gbmicrotest/poweron_ly_119 | 👀 actual=0x01 expected=0x00 verdict=0xFF |
+| gbmicrotest/poweron_ly_119 | 👌 |
 | gbmicrotest/poweron_ly_120 | 👌 |
-| gbmicrotest/poweron_ly_233 | 👀 actual=0x02 expected=0x01 verdict=0xFF |
+| gbmicrotest/poweron_ly_233 | 👌 |
 | gbmicrotest/poweron_ly_234 | 👌 |
 | gbmicrotest/poweron_lyc_000 | 👌 |
 | gbmicrotest/poweron_oam_000 | 👌 |
 | gbmicrotest/poweron_oam_005 | 👌 |
-| gbmicrotest/poweron_oam_006 | 👀 actual=0x00 expected=0xFF verdict=0xFF |
-| gbmicrotest/poweron_oam_069 | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_oam_006 | 👌 |
+| gbmicrotest/poweron_oam_069 | 👌 |
 | gbmicrotest/poweron_oam_070 | 👌 |
-| gbmicrotest/poweron_oam_119 | 👀 actual=0xFF expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_oam_119 | 👌 |
 | gbmicrotest/poweron_oam_120 | 👌 |
 | gbmicrotest/poweron_oam_121 | 👌 |
-| gbmicrotest/poweron_oam_183 | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_oam_183 | 👌 |
 | gbmicrotest/poweron_oam_184 | 👌 |
-| gbmicrotest/poweron_oam_233 | 👀 actual=0xFF expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_oam_233 | 👌 |
 | gbmicrotest/poweron_oam_234 | 👌 |
 | gbmicrotest/poweron_oam_235 | 👌 |
 | gbmicrotest/poweron_obp0_000 | 👌 |
@@ -562,34 +562,34 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/poweron_sc_000 | 👌 |
 | gbmicrotest/poweron_scx_000 | 👌 |
 | gbmicrotest/poweron_scy_000 | 👌 |
-| gbmicrotest/poweron_stat_000 | 👀 actual=0x84 expected=0x85 verdict=0xFF |
-| gbmicrotest/poweron_stat_005 | 👀 actual=0x84 expected=0x85 verdict=0xFF |
+| gbmicrotest/poweron_stat_000 | 👌 |
+| gbmicrotest/poweron_stat_005 | 👌 |
 | gbmicrotest/poweron_stat_006 | 👌 |
-| gbmicrotest/poweron_stat_007 | 👀 actual=0x84 expected=0x86 verdict=0xFF |
-| gbmicrotest/poweron_stat_026 | 👀 actual=0x87 expected=0x86 verdict=0xFF |
+| gbmicrotest/poweron_stat_007 | 👌 |
+| gbmicrotest/poweron_stat_026 | 👌 |
 | gbmicrotest/poweron_stat_027 | 👌 |
-| gbmicrotest/poweron_stat_069 | 👀 actual=0x84 expected=0x87 verdict=0xFF |
+| gbmicrotest/poweron_stat_069 | 👌 |
 | gbmicrotest/poweron_stat_070 | 👌 |
-| gbmicrotest/poweron_stat_119 | 👀 actual=0x82 expected=0x84 verdict=0xFF |
-| gbmicrotest/poweron_stat_120 | 👀 actual=0x82 expected=0x80 verdict=0xFF |
+| gbmicrotest/poweron_stat_119 | 👌 |
+| gbmicrotest/poweron_stat_120 | 👌 |
 | gbmicrotest/poweron_stat_121 | 👌 |
-| gbmicrotest/poweron_stat_140 | 👀 actual=0x83 expected=0x82 verdict=0xFF |
+| gbmicrotest/poweron_stat_140 | 👌 |
 | gbmicrotest/poweron_stat_141 | 👌 |
-| gbmicrotest/poweron_stat_183 | 👀 actual=0x80 expected=0x83 verdict=0xFF |
+| gbmicrotest/poweron_stat_183 | 👌 |
 | gbmicrotest/poweron_stat_184 | 👌 |
-| gbmicrotest/poweron_stat_234 | 👀 actual=0x82 expected=0x80 verdict=0xFF |
+| gbmicrotest/poweron_stat_234 | 👌 |
 | gbmicrotest/poweron_stat_235 | 👌 |
 | gbmicrotest/poweron_tac_000 | 👌 |
 | gbmicrotest/poweron_tima_000 | 👌 |
 | gbmicrotest/poweron_tma_000 | 👌 |
 | gbmicrotest/poweron_vram_000 | 👌 |
-| gbmicrotest/poweron_vram_025 | 👀 actual=0xFF expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_vram_025 | 👌 |
 | gbmicrotest/poweron_vram_026 | 👌 |
-| gbmicrotest/poweron_vram_069 | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_vram_069 | 👌 |
 | gbmicrotest/poweron_vram_070 | 👌 |
-| gbmicrotest/poweron_vram_139 | 👀 actual=0xFF expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_vram_139 | 👌 |
 | gbmicrotest/poweron_vram_140 | 👌 |
-| gbmicrotest/poweron_vram_183 | 👀 actual=0x00 expected=0xFF verdict=0xFF |
+| gbmicrotest/poweron_vram_183 | 👌 |
 | gbmicrotest/poweron_vram_184 | 👌 |
 | gbmicrotest/poweron_wx_000 | 👌 |
 | gbmicrotest/poweron_wy_000 | 👌 |
@@ -634,20 +634,20 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/sprite_0_b | 👌 |
 | gbmicrotest/sprite_1_a | 👌 |
 | gbmicrotest/sprite_1_b | 👌 |
-| gbmicrotest/stat_write_glitch_l0_a | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l0_b | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
+| gbmicrotest/stat_write_glitch_l0_a | 👌 |
+| gbmicrotest/stat_write_glitch_l0_b | 👌 |
 | gbmicrotest/stat_write_glitch_l0_c | 👌 |
 | gbmicrotest/stat_write_glitch_l143_a | 👌 |
-| gbmicrotest/stat_write_glitch_l143_b | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l143_c | 👀 actual=0xE1 expected=0xE2 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l143_d | 👀 actual=0xE1 expected=0xE3 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l154_a | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l154_b | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
+| gbmicrotest/stat_write_glitch_l143_b | 👌 |
+| gbmicrotest/stat_write_glitch_l143_c | 👀 actual=0xE3 expected=0xE2 verdict=0xFF |
+| gbmicrotest/stat_write_glitch_l143_d | 👌 |
+| gbmicrotest/stat_write_glitch_l154_a | 👌 |
+| gbmicrotest/stat_write_glitch_l154_b | 👌 |
 | gbmicrotest/stat_write_glitch_l154_c | 👌 |
 | gbmicrotest/stat_write_glitch_l154_d | 👀 actual=0xE1 expected=0xE0 verdict=0xFF |
 | gbmicrotest/stat_write_glitch_l1_a | 👌 |
-| gbmicrotest/stat_write_glitch_l1_b | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
-| gbmicrotest/stat_write_glitch_l1_c | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
+| gbmicrotest/stat_write_glitch_l1_b | 👌 |
+| gbmicrotest/stat_write_glitch_l1_c | 👌 |
 | gbmicrotest/stat_write_glitch_l1_d | 👌 |
 | gbmicrotest/temp | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/timer_div_phase_c | 👌 |
@@ -873,8 +873,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/intr_2_timing | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/lcdon_mode_timing | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_01_mode0_2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_mode2_3 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_mode3_0 | 👌 |
@@ -958,37 +958,37 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/bgtiledata | 👀 1/34 passed |
 | gambatte/bgtilemap | 👀 4/40 passed |
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
-| gambatte/display_startstate | 👀 9/14 passed |
+| gambatte/display_startstate | 👀 10/14 passed |
 | gambatte/div | 👌 8/8 passed |
 | gambatte/dma | 👀 112/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
-| gambatte/enable_display | 👀 131/184 passed |
+| gambatte/enable_display | 👀 132/184 passed |
 | gambatte/halt | 👀 124/158 passed |
 | gambatte/irq_precedence | 👀 41/64 passed |
 | gambatte/lcd_offset | 👀 40/62 passed |
 | gambatte/lcdirq_precedence | 👀 54/62 passed |
-| gambatte/ly0 | 👀 65/96 passed |
+| gambatte/ly0 | 👀 66/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
 | gambatte/lyc153int_m2irq | 👀 11/16 passed |
-| gambatte/lycEnable | 👀 166/225 passed |
+| gambatte/lycEnable | 👀 170/225 passed |
 | gambatte/lycint_ly | 👌 6/6 passed |
 | gambatte/lycint_lycflag | 👀 11/12 passed |
 | gambatte/lycint_lycirq | 👀 2/4 passed |
 | gambatte/lycint_m0stat | 👌 6/6 passed |
 | gambatte/lycm2int | 👀 4/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
-| gambatte/m0enable | 👀 149/167 passed |
+| gambatte/m0enable | 👀 150/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
-| gambatte/m1 | 👀 119/170 passed |
+| gambatte/m1 | 👀 122/170 passed |
 | gambatte/m2enable | 👀 74/120 passed |
 | gambatte/m2int_m0irq | 👀 45/72 passed |
 | gambatte/m2int_m0stat | 👀 3/6 passed |
 | gambatte/m2int_m2irq | 👀 12/18 passed |
 | gambatte/m2int_m2stat | 👀 4/8 passed |
 | gambatte/m2int_m3stat | 👀 27/44 passed |
-| gambatte/miscmstatirq | 👀 227/279 passed |
+| gambatte/miscmstatirq | 👀 245/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 680/811 passed |
 | gambatte/scx_during_m3 | 👀 30/141 passed |
@@ -1008,5 +1008,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 934
-- **Pass:** 619
-- **Fail:** 315
+- **Pass:** 665
+- **Fail:** 269

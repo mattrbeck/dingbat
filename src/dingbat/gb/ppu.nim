@@ -14,6 +14,10 @@ const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
 # skip_boot for the derivation; overridable so the sweep can be re-run.
 const CGB_BOOT_PHASE* {.intdefine.} = 161
 
+# Dot of line 153 at which the DMG/MGB boot ROM hands off. See skip_boot for the
+# derivation; overridable so the sweep can be re-run.
+const DMG_BOOT_PHASE* {.intdefine.} = 397
+
 # ---- Sweep knob: one more M-cycle of lag on STAT's mode bits ----------------
 #
 # `STAT_MODE_HOLD` itself is declared at the top of gb.nim, because the GbPpu
@@ -132,6 +136,46 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     const phase = CGB_BOOT_PHASE
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
+    ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    ppu.first_line = false
+  elif gb.boot_model in {bmDmgABC, bmMgb}:
+    # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
+    # PC = $0100): DMG/MGB hand off with STAT = $85 and LY = $00. Mode 1 with
+    # LY reading 0 happens exactly once per frame — on line 153, where LY snaps
+    # back to 0 four dots in — so the handoff is inside VBlank's last line, not
+    # at the top of line 0, and the LCD has been on since the boot logo (so no
+    # first_line quirk). $85's bit 2 is the LYC=LY that seeds from LYC = 0.
+    #
+    # WHICH dot of line 153 is a property of the boot ROM's length, and it is
+    # calibrated the same way the two phases above are — by the ROMs that read
+    # the PPU a known number of M-cycles after $0100. Two GBMicrotest families
+    # are exactly that instrument, and between them the answer is one dot wide:
+    #
+    #  * poweron_* — 45 ROMs that pad with N NOPs and then read STAT / LY / OAM
+    #    / VRAM. One seed has to satisfy all of them at once: line 0's first
+    #    mode-2 M-cycle lands 7 NOPs in (poweron_stat_007 = $86), the line 0->1
+    #    advance 114 M-cycles later (poweron_ly_119/_120), and the OAM and VRAM
+    #    locks bracket both of mode 3's edges (poweron_oam_069/_070,
+    #    poweron_vram_025/_026). They resolve the seed to the M-cycle: 397..400.
+    #  * mooneye acceptance/ppu/hblank_ly_scx_timing-GS closes it mod 4. The
+    #    PPU's dot grid sits at a fixed offset against the CPU's M-cycle grid
+    #    (one clock drives both), and that ROM is what fixes the offset — it is
+    #    also what fixes LCD_ON_HEAD_START at 1 mod 4. 397 is the member of the
+    #    window that carries it, so the seed and the LCD-enable seed describe
+    #    the same machine rather than two.
+    #
+    # The GBMicrotest hblank_int_scx0..7 family measures the same thing at DOT
+    # resolution (sweeping SCX walks the mode 3 -> 0 edge across an M-cycle a
+    # dot at a time) and asks for 399 instead: 12 of its rows want the PPU two
+    # dots later against the CPU than 397 puts it. That is not this constant's
+    # to give. Seeding 399 does buy those 12 and costs hblank_ly_scx_timing-GS
+    # itself, its wilbertpol twin, four intr_2_mode0_scx*_timing_nops rows and
+    # 28 gambatte rows (halt, m0enable, oam_access, vram_m3, window) — the same
+    # single-dot residual STAT_MODE_HOLD is about, moved onto the boot seed.
+    # Where the two families disagree, the phase that reproduces both suites'
+    # steady-state timing wins over the one that reproduces this ROM's.
+    ppu.ly = 0             # line 153, past the LY snapback
+    ppu.cycle_counter = int32(DMG_BOOT_PHASE)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
     ppu.first_line = false
   elif gb.boot_model == bmDmg0:
@@ -395,6 +439,52 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
 
+proc ppu_stat_write_glitch*(ppu: GbPpu; gb: GB) =
+  ## The DMG STAT-write bug. Pan Docs, "Spurious STAT interrupts": "A hardware
+  ## quirk in the monochrome Game Boy makes the LCD interrupt sometimes trigger
+  ## when writing to STAT (including writing $00) during OAM scan, HBlank,
+  ## VBlank, or LY=LYC. It behaves as if $FF were written for one M-cycle, and
+  ## then the written value were written the next M-cycle. Because the GBC in
+  ## DMG mode does not have this quirk, two games that depend on this quirk
+  ## (Ocean's Road Rash and Vic Tokai's Xerd no Densetsu) will not run on a
+  ## GBC." The hardware decides, not the cartridge, so the caller gates this on
+  ## cgb_enabled and not cgb_native.
+  ##
+  ## $FF in the enable bits selects every source at once, so the quirk does not
+  ## invent a condition — it un-masks whichever one the PPU is already in, and
+  ## the STAT line goes high for that one M-cycle. An edge out of it is an
+  ## interrupt; holding old_stat_flag high for the rest of the M-cycle is the
+  ## other half of the same statement (a source that comes up inside the window
+  ## finds the line already high, so it is not a second edge).
+  ##
+  ## WHERE the window sits is what GBMicrotest's stat_write_glitch_l* rows
+  ## measure, and they put it at the write's own commit point rather than at the
+  ## M-cycle boundary the store lands on: l1_a and l143_a write on the M-cycle
+  ## the mode 3 -> 0 edge falls inside, and hardware stays silent, so the mask
+  ## was already gone before mode 0 arrived. That is where every other CPU write
+  ## commits (mem_write), and it is also exactly Pan Docs' "one M-cycle, and
+  ## then the written value the next": the $FF is the write's data on the bus,
+  ## and the deferred store (ppu_defer_machinery_write) is the M-cycle behind it.
+  ##
+  ## The OAM source is deliberately not in the set. Pan Docs lists OAM scan, but
+  ## three of these ROMs write one M-cycle into mode 2 (l0_c, l1_d, l154_c, all
+  ## at dot 1 of a line with LY != LYC) and hardware stays silent, while the
+  ## siblings one M-cycle earlier — whose M-cycle starts in the previous line's
+  ## mode 0 — fire. The OAM source is not a level over mode 2 on hardware: it is
+  ## a pulse at the top of a line, which is why it also asserts entering vblank
+  ## on line 144, where there is no mode 2 at all (see m2_line144, mooneye
+  ## vblank_stat_intr-GS/-C). dingbat models it as a level because the enable
+  ## path only ever sees its rising edge; this is the one instrument that samples
+  ## the source mid-mode, and it says the pulse is over by dot 1.
+  if not ppu.lcd_enabled: return
+  if ppu.old_stat_flag: return
+  if ppu.ly == ppu.lyc or ppu.mode_flag == 0 or ppu.mode_flag == 1:
+    when defined(gb_stat_read_trace):
+      echo "STATGLITCH ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " mode=", ppu.mode_flag
+    gb.interrupts.lcd_stat_interrupt = true
+    ppu.old_stat_flag = true
+
 proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
   ## Take the STAT interrupt edge a CPU write to LCDC/STAT/LYC left pending.
   ## mem_write calls this on the M-cycle boundary that follows the write; the
@@ -591,7 +681,20 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     # this is a suppression window, not a one-M-cycle-stale copy of the bit.
     if (ppu.read_mode and LY_JUST_CHANGED) != 0:
       live = live and not 0b0000_0100'u8
-    if ppu.first_line and rm == 2:
+    # Leaving vblank, DMG's two mode bits do not move together: bit 0 drops as
+    # mode 1 ends and bit 1 only comes up an M-cycle later, so the M-cycle the
+    # 1 -> 2 transition falls inside reads back as mode 0. Nothing else in the
+    # frame shows it -- every other line enters mode 2 out of mode 0, where the
+    # bits are already 00 -- and it is the same shape as the `first_line` rule
+    # above, which is mode 2 read as 0 for a whole line after an LCD enable.
+    #
+    # Three ROMs from two suites pin it, and they also pin it to DMG:
+    # gbmicrotest poweron_stat_006 (STAT read on exactly that M-cycle, $84 not
+    # $85) and mooneye-wilbertpol ly00_mode0_2-GS and ly00_mode1_0-GS. Its
+    # CGB sibling ly00_mode1_2-C wants the plain lagged value, which is why the
+    # hardware test is here rather than in `live` unconditionally.
+    if (ppu.first_line and rm == 2) or
+       (rm == 1 and not gb.cgb_enabled and (ppu.lcd_status and 3'u8) == 2):
       live and 0b1111_1100'u8
     else:
       live
@@ -688,7 +791,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # that one restarts the mode machinery itself rather than feeding it.
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
-  of 0xFF41: ppu_defer_machinery_write(ppu, gb, idx, val)
+  of 0xFF41:
+    # DMG only, and paid for by one predictable branch on a register write that
+    # is already doing more than this. See ppu_stat_write_glitch: the $FF phase
+    # of the write acts here, at the write's commit point, and only the real
+    # value waits for the M-cycle boundary.
+    if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
+    ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF42: ppu.scy = val
   of 0xFF43:
     when defined(gb_m3_trace):
