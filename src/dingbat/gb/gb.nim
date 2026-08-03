@@ -18,6 +18,88 @@ const STAT_READ_LAG* {.intdefine.} = 3
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
 const STAT_READ_HOLD* = STAT_READ_LAG != 3
 
+# ---- The 2 dots at the mode 3 -> 0 edge, and the three ways to spend them ---
+#
+# Dots the first and second line after an LCD enable are short of a normal 456.
+# Here for the same reason as the pair above: the field they need is in the type
+# block. Both ship at 0, which compiles the field and every branch out.
+#
+# They exist because three unrelated families of ROMs want the mode 3 -> 0 edge
+# TWO DOTS earlier than this tree puts it, and each of the three constants that
+# could give it to them is refused by a fourth family. Measured 2026-08-03, one
+# full runner per cell, from 5edfe2d (934 / 672, gambatte 3534, GBMicrotest 400,
+# mooneye 112, wilbertpol 82):
+#
+#   route                            buys                       loses
+#   M3_END_EARLY=2 (fifo_ppu.nim)    GBMicrotest +20            mooneye -1,
+#     mode 3 is 2 dots shorter,      (hblank_int_scx*, the      wilbertpol -4,
+#     every line, every SCX          sprite*_b and win*_b rows) gambatte -150
+#   LCD_ON_HEAD_START=7 (ppu.nim)    GBMicrotest +9,            enable_display -10,
+#     the PPU is 2 dots further      gambatte sprites +15       scx_during_m3 -3,
+#     into line 0 at the enable                                 age -1, mealybug -1
+#   LCD_ON_LINE0_TRIM=2              GBMicrotest +21,           enable_display -7,
+#     line 0 after an enable is      gambatte +10 net           scx_during_m3 -3,
+#     454 dots, so line 1 lands 2                               dma -1, age -1,
+#     dots earlier and line 0's                                 mealybug -1
+#     own edges do not move
+#   LCD_ON_LINE0_TRIM=2 plus         GBMicrotest +20 net        gbmicrotest
+#     LCD_ON_LINE1_TRIM=-2           (+23: hblank_int_scx*,     win{0_scx3,5,6}_a,
+#     line 0 ends 2 dots early and   ppu_sprite0_scx*_b,        age/ly/ly-cgbE,
+#     line 1 gives them back, so     sprite4_4..7_b, sprite_1_b, gambatte
+#     the skew is confined to the    win{1,2,8..15}_b)          enable_display -1
+#     first two lines                gambatte +13 net           (frame0_ly_count_ds_1)
+#                                    (sprites 374 -> 388)
+#
+# That last row is much the closest anything has come: mooneye 112, wilbertpol
+# 82, Blargg, Mealybug, mGBA, scx_during_m3, dma and every other gambatte
+# subdirectory are untouched, and it is +33 rows for -5. It is NOT shipped, for
+# one reason: nothing derives it. A line is 456 dots and hardware has no
+# mechanism that makes one 454 and the next 458; the shape was reached by
+# noticing which ROMs disagree and splitting the difference, which is the fit
+# this project has declined four times before. If a mechanism turns up -- the
+# obvious candidate is the sub-M-cycle phase mooneye's notes describe at
+# LCD_ON_HEAD_START, which this would be the whole-dot rounding of -- this is
+# the setting to re-measure first.
+#
+# Which family a ROM belongs to is decided by ONE thing -- which line after the
+# LCD enable it measures -- and the three answers do not agree:
+#
+#   * GBMicrotest int_hblank_{nops,incs,halt}_scx0..7 switch the LCD off and on
+#     and take the very next H-Blank, so they time LINE 0 against the enable
+#     write. All eight pass here and all eight break at M3_END_EARLY=2.
+#   * GBMicrotest hblank_int_scx0..7 do the same thing, then burn 114 NOPs -- one
+#     whole line -- before enabling the STAT source, so they time LINE 1. Four of
+#     the eight fail here, and only 2 dots fixes them (see M3_END_EARLY's table).
+#   * GBMicrotest hblank_int_scx*_if_* / _nops_* never touch the LCD; they run
+#     from the boot hand-off. They want the same 2 dots, which is the same thing
+#     DMG_BOOT_PHASE = 399 buys (see skip_boot) and the same thing it is refused
+#     for. Note that they are NOT reachable from these two trims, and that is
+#     load-bearing: the HLE hand-off writes LCDC = $91 through write_byte
+#     (memory.nim's skip_boot), so the LCD-enable branch fires there too, and
+#     ppu.skip_boot has to clear the window it opens exactly as it already
+#     clears `first_line`. Without that reset a trim silently retimes the first
+#     two lines after the BOOT hand-off as well, which reads as these rows going
+#     green for the wrong reason -- it is a DMG_BOOT_PHASE change wearing the
+#     LCD-on constant's clothes.
+#   * gambatte enable_display (frame0/frame1/frame2 m0irq_count_scx2*,
+#     ly0_late_scx7_m3stat_scx*) and the scx_during_m3 reference PNGs also enable
+#     the LCD and then measure later lines and later frames, and they say the
+#     phase is already right.
+#
+# So line 0 says 0, line 1 says -2, the steady state says -2, and later frames
+# say 0. No single constant of any of these three shapes can be all four, and
+# the pairs that each row brackets are one M-cycle wide, so nothing here is a
+# rounding artefact of the measurement. The 2 dots are real and their carrier is
+# still unidentified; what is now excluded is that they live in mode 3's length
+# as a function of SCX & 7.
+#
+# Both trims are wired into the FIFO renderer only (`gb_line_end` in ppu.nim,
+# used by fifo_ppu's line-end and idle-skip). The scanline renderer is not the
+# shipping default and none of the ROMs above are scored against it.
+const LCD_ON_LINE0_TRIM* {.intdefine.} = 0'i32
+const LCD_ON_LINE1_TRIM* {.intdefine.} = 0'i32
+const LCD_ON_TRIM_ANY* = LCD_ON_LINE0_TRIM != 0 or LCD_ON_LINE1_TRIM != 0
+
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
 
@@ -360,6 +442,8 @@ type
     # consumes it in the same M-cycle -- so it is not serialized.
     stat_write_pending*: bool
     first_line*:         bool
+    when LCD_ON_TRIM_ANY:
+      lcdon_lines*:      uint8   # lines left in the LCD-on trim window
     cycle_counter*:      int32
     # STAT mode bits as observed by a CPU read. A read M-cycle samples the bus
     # value at the START of the cycle, but the emulator ticks the PPU forward by

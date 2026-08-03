@@ -80,15 +80,23 @@ const DMG_BOOT_PHASE* {.intdefine.} = 397
 #     cross between 2 and 3. L = 3 is kept because it is the best gambatte cell
 #     and the only one that regresses nothing.
 #
-# Where the m2int_* dot actually lives is still open, and this is the shape of
-# the answer: the GBMicrotest hblank_int_scx0..7 family splits by SCX & 3 rather
-# than by anything an M-cycle wide. Under D = 1 the SCX & 3 in {1,2} rows go
-# green and the {0,3} rows go red, and at D = 0 exactly the other way -- so what
-# those ROMs want is the mode 3 -> 0 edge moved by ONE OR TWO DOTS for half the
-# SCX values and left alone for the other half. That is a mode-3 LENGTH residual
-# per SCX & 7, not a property of the STAT register or of its interrupt line, and
-# it is the same single dot the m2int_* families and DMG_BOOT_PHASE = 399 are
-# all asking for. Nothing in this file can give it.
+# Where the m2int_* dot actually lives is still open. The GBMicrotest
+# hblank_int_scx0..7 family splits by SCX & 3 rather than by anything an M-cycle
+# wide, and this note used to read that as "a mode-3 LENGTH residual per
+# SCX & 7". **That reading is wrong and it was measured out on 2026-08-03.**
+# Each of the eight ROMs writes one SCX and nothing else differs between them,
+# so one sweep of a uniform dot offset reads out all eight windows at once (a
+# per-residue table cannot carry more, which is the tell). They come out as one
+# single 4-dot window shifted by one dot per residue, and the unique
+# constant-offset
+# model fitting all of them is a UNIFORM two dots (L = 170 + SCX&7, not
+# 172 + SCX&7 with a per-residue correction). The SCX & 3 "split" is what a
+# uniform 2-dot error looks like when eight lengths one dot apart are sampled by
+# a ROM that counts `INC A`s, i.e. on a 4-dot grid. The table is at
+# M3_END_EARLY in fifo_ppu.nim, with what a uniform -2 costs; the same 2 dots
+# reached through the LCD-on path and through the boot phase, and what refuses
+# each route, are at LCD_ON_LINE0_TRIM in gb.nim. Nothing in this file can give
+# them, and neither can mode 3's length.
 #
 # Both knobs stay, at the values that reproduce this tree, so the next attempt
 # is a build flag rather than a restructure. They compile out entirely at those
@@ -126,6 +134,15 @@ when STAT_IRQ_SPLIT:
 else:
   template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 = ppu.ly
+
+when not LCD_ON_TRIM_ANY:
+  template gb_line_end*(ppu: GbPpu): int32 = 456'i32
+else:
+  template gb_line_end*(ppu: GbPpu): int32 =
+    (case ppu.lcdon_lines
+     of 2'u8: 456'i32 - LCD_ON_LINE0_TRIM
+     of 1'u8: 456'i32 - LCD_ON_LINE1_TRIM
+     else: 456'i32)
 
 proc new_ppu_base(cgb: bool): GbPpu =
   result = GbPpu(
@@ -201,6 +218,7 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
       ppu.irq_mode = 1
       ppu.irq_ly = ppu.ly
     ppu.first_line = false
+    when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 0
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
     # PC = $0100): DMG/MGB hand off with STAT = $85 and LY = $00. Mode 1 with
@@ -247,6 +265,7 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
       ppu.irq_mode = 1
       ppu.irq_ly = ppu.ly
     ppu.first_line = false
+    when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 0
   elif gb.boot_model == bmDmg0:
     # The DMG0 boot ROM hands off at a different LCD phase than DMG-ABC
     # (which uses the ly=0/cc=0 default above): mooneye boot_hwio-dmg0 reads
@@ -262,6 +281,7 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
       ppu.irq_mode = 1
       ppu.irq_ly = ppu.ly
     ppu.first_line = false
+    when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 0
 
 # Bit 7 of GbPpu.read_mode: LY advanced during the M-cycle a read belongs to.
 const LY_JUST_CHANGED* = 0x80'u8
@@ -926,6 +946,20 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       #    i.e. the M-cycle boundary sits immediately after the SCX&7 = 0 end
       #    dot, not three dots later. That is a head start of 1 mod 4.
       #
+      # That second bullet does NOT bracket this constant, and a re-measurement
+      # on 2026-08-03 says so: a full runner at `-d:LCD_ON_HEAD_START=7` leaves
+      # mooneye at 112/115 and mooneye-wilbertpol at 82/117, both row for row
+      # unchanged, so neither hblank_ly_scx_timing-GS nor lcdon_timing-GS can
+      # tell 5 from 7. What actually refuses 7 is gambatte: enable_display
+      # 133 -> 123 (the ly0_late_scx7_m3stat_scx{1,3}_1 and frame{1,2}_m0irq_
+      # count_scx2_1 rows swap with their _2 siblings, i.e. it is exactly one
+      # M-cycle too far) and the scx_during_m3 reference PNGs 34 -> 31. 7 is
+      # otherwise attractive -- it is what all eight GBMicrotest
+      # hblank_int_scx0..7 rows ask for, +9 GBMicrotest and +7 gambatte net --
+      # so read the table at LCD_ON_LINE0_TRIM in gb.nim before re-deriving it:
+      # those 2 dots are wanted by three families and refused by a fourth
+      # whichever of the three constants carries them.
+      #
       # 5 is the only value satisfying both. Physically it is the 2-T-cycle
       # skew mooneye's own notes describe (the PPU restarts mid-M-cycle, so
       # line 0 ends 2 T-cycles off the grid and the next line lands back on it),
@@ -949,6 +983,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         ppu.stat_hold_until = 0  # the counter it was expressed in is gone
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
+      when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 2
     when defined(gb_m3_trace):
       if int(ppu.ly) == GB_TRACE_LY and (ppu.lcd_status and 3) == 3:
         let fp = if ppu of GbFifoPpu: $GbFifoPpu(ppu).fetch_counter &

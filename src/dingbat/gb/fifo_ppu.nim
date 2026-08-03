@@ -417,11 +417,63 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 # fix is a bus-layer one.
 const M3_PIPE_MCYCLES {.intdefine.} = 0
 const M3_PIPE_DELAY {.intdefine.} = 0
-# Compiles the pipeline-lead machinery out entirely when both terms are off,
-# which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0` control build for
-# an A/B wants; every guard below is a compile-time short circuit at that
-# setting, not a runtime test.
-const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0
+
+# Dots the mode 3 -> 0 edge comes early WITHOUT the pipeline moving with it: the
+# fetcher retires this many pixels before the end of the line and the tail is
+# burst on that dot, but nothing is injected at the head, so mode 3 gets SHORTER
+# by exactly this many dots and every pixel is where it was. That is the one
+# knob that expresses "mode 3's length is wrong" as opposed to "the pipeline's
+# phase is wrong", which is why it is separate from the two above.
+#
+# **It ships at 0 and the measurement below is why it must.** GBMicrotest's
+# hblank_int_scx0..7 splits by SCX & 3, which reads like a per-residue length
+# error; it is not. The eight ROMs are byte-identical apart from the SCX they
+# write, so each one exercises exactly one residue and a sweep of THIS constant
+# reads out all eight windows at once -- a per-residue table would carry no
+# extra information, which is the first thing that should have been suspicious
+# about the per-residue reading. Sweeping -4..+4 (2026-08-03):
+#
+#   SCX&7          0      1      2      3      4      5      6      7
+#   dingbat's L   172    173    174    175    176    177    178    179
+#   accepts       -3..0  <=-1   <=-2   any    -3..0  <=-1   <=-2   -2..+1
+#   i.e. L in    169-172 169-172 169-172  --  173-176 173-176 173-176 177-180
+#
+# (SCX&7 = 3's ROM writes verdict $01 unconditionally -- it is a dud and
+# constrains nothing. The rest resolve to 4 dots because the ROM counts `INC A`s,
+# one M-cycle each: the family can never do better than an M-cycle.) Solving
+# `c + (SCX&7)` against those seven windows leaves exactly one c, and it is not
+# 172: c = 170. A UNIFORM two dots, no residue-dependent term anywhere -- and
+# directly confirmed, since a uniform -2 passes all eight while -1 and -3 each
+# leave four failing. The SCX & 3 "split" is what a uniform 2-dot error looks
+# like when a monotone ramp of eight lengths one dot apart is sampled on a 4-dot
+# grid, and nothing about the fine-scroll discard is inconsistent per residue.
+#
+# What refuses the 2 dots is everything else that pins the same edge. Full
+# runner, one build, uniform -2 (2026-08-03):
+#
+#   GBMicrotest      400 -> 420   (hblank_int_scx{1,2,5,6} and their _if_d and
+#                                  _nops_a/b siblings, ppu_sprite0_scx{1,2,5,6}_b,
+#                                  sprite4_4..7_b, win{1,2,8..15}_b)
+#   ... minus        int_hblank_{nops,incs,halt}_scx{1,2,5,6} (12 rows, green
+#                    at 0), win{0_scx3,5,6}_a
+#   mooneye          112 -> 111   acceptance/ppu/hblank_ly_scx_timing-GS
+#   mooneye-wilbert   82 -> 78    hblank_ly_scx_timing-GS + four
+#                                 intr_2_mode0_scx{1,2,5,6}_timing_nops
+#   gambatte        3534 -> 3384  (sprites -87, window -21, halt -18, m0enable
+#                                  -11, m2int_m0irq -5, m2int_m3stat -4, ...)
+#
+# Note which rows those are: the four wilbertpol rows and the twelve GBMicrotest
+# rows that go red are the SAME residues {1,2,5,6} that go green, measuring the
+# same edge from the other side. The mode 3 length this file computes is right;
+# the residual is somewhere else. See LCD_ON_LINE0_TRIM in gb.nim for the other
+# two routes to the same 2 dots and what refuses each of them.
+const M3_END_EARLY {.intdefine.} = 0
+# Compiles the pipeline-lead machinery out entirely when all three terms are
+# off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
+# -d:M3_END_EARLY=0` control build for an A/B wants; every guard below is a
+# compile-time short circuit at that setting, not a runtime test.
+const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
+                         M3_END_EARLY != 0
 
 proc window_reactivate(ppu: GbFifoPpu) =
   ## WX was re-reached while the window was ALREADY the active fetch source.
@@ -608,7 +660,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   when not STAT_IRQ_SPLIT:
     if m == 2: 80'i32
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
-    else: 456'i32
+    else: gb_line_end(ppu)
   else:
     # Every boundary is two stops in a STAT_IRQ_LEAD build, `lead` dots apart:
     # the interrupt line's copy of the mode turns over first, the mode flag
@@ -617,7 +669,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
     # it returned before the loop body ran), so it is still the next thing to
     # do. At normal speed the lead's dot and M2_144_EARLY_DOT coincide; in
     # double speed they do not, hence three candidates rather than two.
-    let boundary = if m == 2: 80'i32 else: 456'i32
+    let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
     result = boundary
     let irq_dot = boundary - stat_irq_lead(gb)
     if irq_dot >= ppu.cycle_counter: result = irq_dot
@@ -782,8 +834,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # 4 dots at normal speed and 2 in double speed, and a ROM can switch
             # speed between two lines. `current_speed` is 0 or 1.
             ppu.m3_lead = int32(M3_PIPE_MCYCLES * (4 shr gb.memory.current_speed) +
-                                M3_PIPE_DELAY)
-            ppu.m3_delay = int(ppu.m3_lead)
+                                M3_PIPE_DELAY + M3_END_EARLY)
+            # Only the PIPE terms are paid back at the head. M3_END_EARLY's
+            # share is not, which is the whole difference between "the pipeline
+            # runs late" and "mode 3 is short".
+            ppu.m3_delay = int(ppu.m3_lead) - M3_END_EARLY
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
@@ -831,10 +886,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
            gb.cgb_enabled:
           ppu_handle_stat_interrupt(ppu, gb)
         when STAT_IRQ_SPLIT:
-          if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
-        if ppu.cycle_counter == 456:
+          if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
+        if ppu.cycle_counter == gb_line_end(ppu):
+          when STAT_READ_HOLD: ppu.stat_hold_until -= ppu.cycle_counter
+          when LCD_ON_TRIM_ANY:
+            if ppu.lcdon_lines > 0: dec ppu.lcdon_lines
           ppu.cycle_counter = 0
-          when STAT_READ_HOLD: ppu.stat_hold_until -= 456
           ppu.ly += 1
           # The irq domain got here a lead ago; this is its catch-up for the
           # unsplit build and for anything that stepped over that dot.
