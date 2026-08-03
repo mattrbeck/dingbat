@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-02 21:44:54*
+*Generated: 2026-08-02 22:26:29*
 
 ## Game Boy - Blargg
 
@@ -228,26 +228,26 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 |------|--------|
 | mealybug/m2_win_en_toggle | 👌 |
 | mealybug/m3_bgp_change | 👀 87.3% correct (20113/23040 pixels match) |
-| mealybug/m3_bgp_change_sprites | 👀 89.1% correct (20529/23040 pixels match) |
-| mealybug/m3_lcdc_bg_en_change | 👀 86.4% correct (19912/23040 pixels match) |
-| mealybug/m3_lcdc_bg_map_change | 👀 97.3% correct (22408/23040 pixels match) |
-| mealybug/m3_lcdc_obj_en_change | 👀 99.5% correct (22926/23040 pixels match) |
-| mealybug/m3_lcdc_obj_en_change_variant | 👀 97.3% correct (22426/23040 pixels match) |
-| mealybug/m3_lcdc_obj_size_change | 👀 99.5% correct (22930/23040 pixels match) |
-| mealybug/m3_lcdc_obj_size_change_scx | 👀 99.5% correct (22930/23040 pixels match) |
-| mealybug/m3_lcdc_tile_sel_change | 👀 95.1% correct (21904/23040 pixels match) |
-| mealybug/m3_lcdc_tile_sel_win_change | 👀 89.8% correct (20680/23040 pixels match) |
+| mealybug/m3_bgp_change_sprites | 👀 90.5% correct (20846/23040 pixels match) |
+| mealybug/m3_lcdc_bg_en_change | 👀 88.3% correct (20335/23040 pixels match) |
+| mealybug/m3_lcdc_bg_map_change | 👀 98.1% correct (22592/23040 pixels match) |
+| mealybug/m3_lcdc_obj_en_change | 👀 99.5% correct (22920/23040 pixels match) |
+| mealybug/m3_lcdc_obj_en_change_variant | 👀 97.4% correct (22444/23040 pixels match) |
+| mealybug/m3_lcdc_obj_size_change | 👀 99.8% correct (22986/23040 pixels match) |
+| mealybug/m3_lcdc_obj_size_change_scx | 👀 99.6% correct (22950/23040 pixels match) |
+| mealybug/m3_lcdc_tile_sel_change | 👀 95.2% correct (21938/23040 pixels match) |
+| mealybug/m3_lcdc_tile_sel_win_change | 👀 92.9% correct (21406/23040 pixels match) |
 | mealybug/m3_lcdc_win_en_change_multiple | 👀 61.5% correct (14166/23040 pixels match) |
 | mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 74.0% correct (17050/23040 pixels match) |
-| mealybug/m3_lcdc_win_map_change | 👀 92.6% correct (21334/23040 pixels match) |
-| mealybug/m3_obp0_change | 👀 99.4% correct (22912/23040 pixels match) |
-| mealybug/m3_scx_high_5_bits | 👀 99.6% correct (22956/23040 pixels match) |
+| mealybug/m3_lcdc_win_map_change | 👀 92.8% correct (21390/23040 pixels match) |
+| mealybug/m3_obp0_change | 👀 99.5% correct (22916/23040 pixels match) |
+| mealybug/m3_scx_high_5_bits | 👀 99.7% correct (22975/23040 pixels match) |
 | mealybug/m3_scx_low_3_bits | 👌 |
-| mealybug/m3_scy_change | 👀 83.5% correct (19239/23040 pixels match) |
+| mealybug/m3_scy_change | 👀 92.6% correct (21340/23040 pixels match) |
 | mealybug/m3_window_timing | 👀 96.9% correct (22321/23040 pixels match) |
 | mealybug/m3_window_timing_wx_0 | 👀 94.9% correct (21854/23040 pixels match) |
 | mealybug/m3_wx_4_change | 👀 99.9% correct (23027/23040 pixels match) |
-| mealybug/m3_wx_4_change_sprites | 👀 100.0% correct (23038/23040 pixels match) |
+| mealybug/m3_wx_4_change_sprites | 👀 100.0% correct (23029/23040 pixels match) |
 | mealybug/m3_wx_5_change | 👀 99.9% correct (23006/23040 pixels match) |
 | mealybug/m3_wx_6_change | 👀 40.1% correct (9231/23040 pixels match) |
 
@@ -614,11 +614,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/ppu_spritex_vs_scx | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/ppu_win_vs_wx | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/ppu_wx_early | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/sprite4_0_a | 👀 actual=0x80 expected=0x83 verdict=0xFF |
+| gbmicrotest/sprite4_0_a | 👌 |
 | gbmicrotest/sprite4_0_b | 👌 |
-| gbmicrotest/sprite4_1_a | 👀 actual=0x80 expected=0x83 verdict=0xFF |
+| gbmicrotest/sprite4_1_a | 👌 |
 | gbmicrotest/sprite4_1_b | 👌 |
-| gbmicrotest/sprite4_2_a | 👀 actual=0x80 expected=0x83 verdict=0xFF |
+| gbmicrotest/sprite4_2_a | 👌 |
 | gbmicrotest/sprite4_2_b | 👌 |
 | gbmicrotest/sprite4_3_a | 👌 |
 | gbmicrotest/sprite4_3_b | 👌 |
@@ -631,9 +631,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/sprite4_7_a | 👌 |
 | gbmicrotest/sprite4_7_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/sprite_0_a | 👌 |
-| gbmicrotest/sprite_0_b | 👌 |
+| gbmicrotest/sprite_0_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/sprite_1_a | 👌 |
-| gbmicrotest/sprite_1_b | 👌 |
+| gbmicrotest/sprite_1_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/stat_write_glitch_l0_a | 👌 |
 | gbmicrotest/stat_write_glitch_l0_b | 👌 |
 | gbmicrotest/stat_write_glitch_l0_c | 👌 |
@@ -955,7 +955,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | Test | Result |
 |------|--------|
 | gambatte/bgen | 👀 1/2 passed |
-| gambatte/bgtiledata | 👀 1/34 passed |
+| gambatte/bgtiledata | 👀 2/34 passed |
 | gambatte/bgtilemap | 👀 4/40 passed |
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 10/14 passed |
@@ -977,7 +977,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | 👌 6/6 passed |
 | gambatte/lycm2int | 👀 4/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
-| gambatte/m0enable | 👀 150/167 passed |
+| gambatte/m0enable | 👀 149/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
@@ -991,12 +991,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/miscmstatirq | 👀 245/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 680/811 passed |
-| gambatte/scx_during_m3 | 👀 30/141 passed |
-| gambatte/scy | 👀 6/67 passed |
+| gambatte/scx_during_m3 | 👀 31/141 passed |
+| gambatte/scy | 👀 9/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 83/116 passed |
 | gambatte/speedchange | 👀 106/208 passed |
-| gambatte/sprites | 👀 266/476 passed |
+| gambatte/sprites | 👀 374/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
@@ -1008,5 +1008,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 934
-- **Pass:** 665
-- **Fail:** 269
+- **Pass:** 666
+- **Fail:** 268

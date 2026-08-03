@@ -378,6 +378,13 @@ which prints one line per mode-3 dot of line `n`, the LCDC and SCX writes
 landing inside it, and the dot the fine-scroll latch fires on: the reference
 tells you which pixel a write reached, the trace tells you which fetcher step
 consumed it, and the two together give the pipeline's phase against the CPU.
+For the OBJ families (`sprites`, and the `_sprites` mealybug rows) the useful
+instrument is `-d:gb_m3_len`, which prints one line per drawn scanline: the
+inputs Pan Docs' "Mode 3 length" section says decide the duration next to the
+measured duration. `tools/gbppu/` scores that against the rules, scores one
+gambatte subdirectory in seconds, and reads a mealybug reference as a per-line
+dot count; see `tools/gbppu/README.md`.
+
 `-d:M3_PIPE_DELAY=<n>` then sweeps that phase in dots and
 `-d:M3_PIPE_MCYCLES=<n>` in CPU M-cycles — which is the one that scales with
 double speed. Both are declared, with the staircase measurement, in

@@ -36,16 +36,15 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo)
   fifo_clear(ppu.fifo_sprite)
   ppu.fetch_counter = 0
-  ppu.fetch_counter_sprite = 0
   ppu.fetcher_x = 0
   ppu.lx = 0
   ppu.smooth_scroll_sampled = false
   ppu.dropped_first_fetch = false
   ppu.fetching_window = false
   ppu.fetching_sprite = false
-  ppu.sprite_fetch_phase = 0
   ppu.bg_pixels_pushed = false
-  ppu.scx_penalty_remaining = 0
+  ppu.obj_penalty = 0
+  ppu.obj_tile_fx = -1
   ppu.m3_delay = 0
   ppu.tile_num = 0
   ppu.tile_attrs = 0
@@ -89,13 +88,17 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   ppu.fetch_counter = 0
   ppu.fetching_window = fetching_window
   ppu.bg_pixels_pushed = false
+  # Whatever tile an object last paid the BG-fetch wait for is gone: this
+  # restarts the fetch, so the next object is looking at a tile no object has
+  # considered. fetcher_x restarting at 0 would otherwise alias the BG's first
+  # tile onto the window's.
+  ppu.obj_tile_fx = -1
   if fetching_window: inc ppu.current_window_line
 
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
-  ppu.fetch_counter_sprite = 0
   ppu.fetching_sprite = false
-  ppu.sprite_fetch_phase = 0
+  ppu.obj_penalty = 0
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -193,6 +196,67 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # it replaces without the signed-remainder correction.
   ppu.fetch_counter = ppu.fetch_counter and 7
 
+# ---- The OBJ penalty ------------------------------------------------------
+#
+# Pan Docs, Rendering / "OBJ penalty algorithm", on the object that is about to
+# be drawn ("The Pixel" is its leftmost pixel, transparent or not):
+#
+#   1. Determine the tile (background or window) that The Pixel is within.
+#   2. If that tile has NOT been considered by a previous OBJ yet:
+#      1. Count how many of that tile's pixels are strictly to the right of
+#         The Pixel.
+#      2. Subtract 2.
+#      3. Incur this many dots of penalty, or zero if negative (from waiting
+#         for the BG fetch to finish).
+#   3. Incur a flat, 6-dot penalty (from fetching the OBJ's tile).
+#
+# Both halves fall straight out of this renderer's own state:
+#
+#   * The BG FIFO holds exactly the not-yet-emitted pixels of the tile being
+#     displayed, so at the trigger dot it holds The Pixel plus everything
+#     strictly to its right. Step 2 is therefore `fifo.size - 1 - 2`, floored
+#     at 0, with no register decode at all -- it is right through a mid-line
+#     SCX change and through the window, both of which change which tile The
+#     Pixel is in without changing what the FIFO holds.
+#   * "That tile has not been considered yet" is `fetcher_x` (the fetcher's
+#     tile counter) differing from the one the last wait was charged against.
+#     fetcher_x only advances on a push, and a push cannot happen while an
+#     object has the shifter stopped, so every object landing in one displayed
+#     tile sees the same value.
+#
+# An object at OAM X 0..7 hangs off the left edge, so The Pixel is in the tile
+# BEFORE the first on-screen one and the trigger dot is not its own dot; see the
+# `lag` term at the trigger for how that is recovered. Pan Docs' X=0 exception
+# ("always incurs an 11-dot penalty, regardless of SCX") then needs no special
+# case: such an object triggers on the first dot the BG FIFO is non-empty, where
+# the FIFO is a full 8 whatever SCX is, and 6 + (8-1-2) is 11. The older
+# `pixel_fifo.md` rule -- lengthen by SCX&7 for an object at X=0 -- used to be
+# spelled out as its own fetch phase; it is gone, because it double-counts that
+# same dot budget.
+#
+# ---- Why these two numbers and not others ---------------------------------
+# Both terms were swept independently against the whole of gambatte/sprites
+# (476 rows), writing the penalty as `FETCH + max(0, fifo.size - SUB)`:
+#
+#   SUB        1     2     3     4     5
+#   FETCH=4   306   256   254   256   254
+#   FETCH=5   267   304   254   250   252
+#   FETCH=6   263   269  [391]  266   262
+#   FETCH=7   251   251   254   312   267
+#   FETCH=8   250   251   251   254   286
+#
+# (6, 3) -- Pan Docs' flat 6 and its "minus 2" -- is the unique optimum and it
+# is not close: the 9-diagonal (FETCH + 8 - SUB = 11, i.e. everything that gets
+# the X=0 case right and the rest wrong) tops out at 312. The shipping value of
+# the pre-existing OBJ model was a flat 8 with no wait at all, which is that
+# table's bottom-right corner.
+#
+# What this does NOT model is the object fetch being CANCELLED mid-flight by
+# clearing LCDC.1, which Pan Docs describes and gambatte's
+# sprites/sprite_late_disable_* rows measure.
+const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
+const OBJ_WAIT_SUB {.intdefine.} = 3'i32
+
 proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ## Read sprite tile data and merge into the sprite FIFO.
   let s = ppu.sprites[0]
@@ -220,68 +284,49 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ppu.fetching_sprite =
     ppu.sprites.len > 0 and ppu.sprites[0].x == s.x
   if ppu.fetching_sprite:
-    # A second object at the same X does not re-run the BG-fetcher wait (the
-    # fetcher is already parked), but it still pays its own full object fetch.
-    # That fetch is 6 dots -- 2 to put the tile row address on the bus and 2 for
-    # each of the two data bytes -- so the same-X repeat costs 6, not the 2 that
-    # phases 3+4 alone would charge. mooneye
-    # acceptance/ppu/intr_2_mode0_timing_sprites measures 1..10 objects stacked
-    # at X=0 and its expectations step by exactly 6 dots per extra object.
-    ppu.fetch_counter_sprite = 0
-    ppu.sprite_fetch_phase = 7
+    # A second object at the same X is in the same BG tile by construction, so
+    # it never re-pays the wait (Pan Docs' "if that tile has not been considered
+    # by a previous OBJ yet"). What it does pay is another whole object fetch:
+    # 6 dots -- 2 to put the tile row address on the bus and 2 for each of the
+    # two data bytes. mooneye acceptance/ppu/intr_2_mode0_timing_sprites stacks
+    # 1..10 objects at X=0 and its expectations step by exactly 6 dots per
+    # extra object.
+    ppu.obj_penalty = OBJ_FETCH_DOTS
 
 proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
-  ## Multi-phase sprite fetch state machine.
-  ## Phase 0: Advance BG fetcher until it reaches fsPushPixel or BG FIFO non-empty.
-  ## Phase 1: One extra BG fetcher advance (1 cycle).
-  ## Phase 2: Second extra BG fetcher advance + 2 idle cycles (3 cycles total).
-  ## Phase 3: Lower sprite tile address (1 cycle).
-  ## Phase 4: Upper sprite tile address + actual data fetch (0 extra cycles, instant).
-  ## Phase 5: Exit penalty (1 cycle).
-  case ppu.sprite_fetch_phase
-  of 0:
-    tick_bg_fetcher(ppu, gb)
-    if FETCHER_ORDER[ppu.fetch_counter] == fsPushPixel or ppu.fifo.size > 0:
-      # SCX penalty: when sprite is at X=0 and SCX & 7 > 0, burn extra cycles
-      let scx_low = int(ppu.scx and 7)
-      if ppu.sprites.len > 0 and ppu.sprites[0].x == 0 and scx_low > 0:
-        ppu.scx_penalty_remaining = scx_low
-        ppu.sprite_fetch_phase = 6
-      else:
-        ppu.sprite_fetch_phase = 1
-  of 1:
-    tick_bg_fetcher(ppu, gb)
-    ppu.sprite_fetch_phase = 2
-    ppu.fetch_counter_sprite = 0  # reuse as sub-counter for phase 2
-  of 2:
-    if ppu.fetch_counter_sprite == 0:
-      tick_bg_fetcher(ppu, gb)
-    inc ppu.fetch_counter_sprite
-    if ppu.fetch_counter_sprite >= 3:
-      ppu.sprite_fetch_phase = 3
-  of 3:
-    ppu.sprite_fetch_phase = 4
-  of 4:
+  ## One dot of an object fetch. The shifter is stopped for the whole of it, so
+  ## the only thing that varies is how many dots it lasts -- see the trigger in
+  ## tick_shifter for where that count comes from.
+  #
+  # The BG fetcher runs for the WAIT and is stopped for the object's own fetch.
+  # That split is the two halves of the penalty read literally: the wait exists
+  # because a BG fetch is in flight and has to finish, and the six dots after it
+  # are the object's own VRAM reads, which the BG fetcher cannot overlap because
+  # there is one address bus. Neither half can reach the BG FIFO -- the shifter
+  # is stopped, so the FIFO cannot empty and try_push_bg_pixels cannot fire --
+  # which is also what keeps fetcher_x (the tile identity the wait is charged
+  # against) still for the duration; the fetcher parks on fsPushPixel instead and
+  # re-locks to the FIFO on the next tile boundary, so mode 3's length is exactly
+  # the penalty above with nothing added.
+  #
+  # Running it for the object's fetch as well is a real alternative and it was
+  # measured, not assumed. It costs no dots either (the same park absorbs it),
+  # but it advances the BG fetcher 6 steps further, which moves every later BG
+  # VRAM read on the line -- and the mealybug references say that is wrong:
+  # m3_scy_change 92.6% -> 78.3%, m3_lcdc_tile_sel_win_change 92.9% -> 91.4%,
+  # m3_bgp_change_sprites 90.5% -> 89.1%, with eight more m3_* rows down and
+  # none up. It buys 15 gambatte sprites/space rows (374 -> 389), all of them
+  # `_2` rows one M-cycle from their boundary, i.e. inside the STAT-read model's
+  # own known error (see STAT_MODE_HOLD in ppu.nim). Stopping the fetcher
+  # entirely, the third option, costs a resync dot per object and breaks the
+  # mode 3 length outright (172 + 11N becomes 172 + 11N + 1).
+  if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
+  dec ppu.obj_penalty
+  if ppu.obj_penalty <= 0:
+    # The tile row lands on the last dot of the fetch. LCDC.2 and the OBP
+    # registers are read here, so this is the dot the gambatte late_sizechange
+    # family brackets.
     sprite_fetch_merge(ppu, gb)
-    if ppu.fetching_sprite:
-      discard  # restarted at phase 0 by sprite_fetch_merge
-    else:
-      ppu.sprite_fetch_phase = 5
-  of 5:
-    ppu.fetching_sprite = false
-  of 6:
-    # SCX penalty phase: burn cycles for sprites at X=0 when SCX & 7 > 0
-    dec ppu.scx_penalty_remaining
-    if ppu.scx_penalty_remaining <= 0:
-      ppu.sprite_fetch_phase = 1
-  of 7:
-    # Same-X repeat: the 4 dots that phases 3+4 do not cover (see
-    # sprite_fetch_merge).
-    inc ppu.fetch_counter_sprite
-    if ppu.fetch_counter_sprite >= 4:
-      ppu.sprite_fetch_phase = 3
-  else:
-    ppu.fetching_sprite = false
 
 proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool =
   if sprite_enabled(ppu) and sp_px.color > 0:
@@ -427,8 +472,28 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     if sprite_enabled(ppu) and ppu.sprites.len > 0 and
        int(ppu.lx) + 8 >= int(ppu.sprites[0].x):
       ppu.fetching_sprite = true
-      ppu.sprite_fetch_phase = 0
-      ppu.fetch_counter_sprite = 0
+      # Where The Pixel sits in the BG tile it belongs to. `lx` is the pixel the
+      # shifter was about to emit and `8 - fifo.size` is its index inside the
+      # tile the FIFO is holding; The Pixel is `lag` pixels to the LEFT of it,
+      # which is zero for any object that starts on screen (the trigger is the
+      # dot lx reaches it) and 1..8 for one hanging off the left edge, whose
+      # first pixel was never a dot of its own. That is the whole difference
+      # between the two, and it is why an object at OAM X 1..7 is charged
+      # against the tile BEFORE the first one -- including X = 0, which is what
+      # leaves the leftmost on-screen tile unconsidered for the next object
+      # (gambatte sprites/10spritesPrLine_1xpos0 measures exactly that against
+      # 10spritesPrLine: same ten objects, same mode 3).
+      let lag = ppu.lx + 8 - int32(ppu.sprites[0].x)
+      let idx = 8 - int32(ppu.fifo.size) - lag
+      let tile = int32(ppu.fetcher_x) + (if idx < 0: -1'i32 else: 0'i32)
+      # THIS dot is the first of the penalty -- the shifter has already decided
+      # not to emit a pixel on it -- so the countdown is one short of the total.
+      # See the OBJ penalty block above for where the two terms come from.
+      var pen = OBJ_FETCH_DOTS - 1
+      if ppu.obj_tile_fx != tile:
+        ppu.obj_tile_fx = tile
+        pen += max(0'i32, (7 - (idx and 7)) - (OBJ_WAIT_SUB - 1))
+      ppu.obj_penalty = pen
       return
     let bg_px = fifo_shift(ppu.fifo)
     let has_sprite = ppu.fifo_sprite.size > 0
@@ -598,13 +663,25 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         #
         #  * BGP is applied at the shifter, not the fetcher, so it need not
         #    share the fetcher's phase; the mealybug m3_bgp_* percentages are
-        #    the instrument for that one.
-        #  * Lines carrying an object still mismatch: for one object at screen
-        #    x=0 this pipeline's fetch phase shifts by 6 dots where the
-        #    references need 11-13. The object penalty's effect on the fetch
-        #    phase is short even though mooneye's mode-3 LENGTH penalty passes,
-        #    which is the same flag-vs-pipeline decoupling again, seen from the
-        #    other end.
+        #    the instrument for that one. m3_bgp_change carries no objects at
+        #    all and still wants its whole frame ~3 pixels to the left, so that
+        #    residual is the palette write's own and nothing else's.
+        #  * Lines carrying an object used to mismatch because this renderer
+        #    charged a FLAT 8 dots for one; it now charges what Pan Docs'
+        #    "OBJ penalty algorithm" says (see the OBJ penalty block above).
+        #    What is left of that is the BG fetcher's own phase: hardware
+        #    finishes a tile fetch six dots before that tile's first pixel and
+        #    idles for the last two, where this fetcher idles for the FIRST
+        #    two of the eight and finishes on the pixel itself. The two agree
+        #    on the 8-dot cadence and on every VRAM read's dot, so nothing on
+        #    an object-free line can see the difference -- but it is why the
+        #    object wait has to be read off the FIFO's occupancy rather than
+        #    off `fetch_counter`, and why an object whose wait is short leaves
+        #    the fetcher one dot out of step (gbmicrotest sprite4_4..7_b:
+        #    mode 3 comes out 201 where four objects at tile offset 4 want
+        #    200). Re-phasing the fetcher would move every BG VRAM read by
+        #    2-3 dots and re-open bgtiledata/bgtilemap/scx_during_m3, so it is
+        #    a change of its own, not a tweak to this one.
         while remaining > 0 and not fetcher_retired(ppu):
           fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
@@ -631,6 +708,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
+          when defined(gb_m3_len):
+            if gb_m3_len_lines > 0:
+              var xs = ""
+              for s in ppu.sprites: xs.add($int(s.x) & ",")
+              echo "M3IN ly=", ppu.ly, " scx=", int(ppu.scx), " wx=", int(ppu.wx),
+                   " wy=", int(ppu.wy), " lcdc=", toHex(ppu.lcd_control, 2),
+                   " objx=", xs
       of 3:  # Drawing
         # Mode 3 ends the dot AFTER the fetcher retires, not on the same dot.
         # Deferring the mode 0 transition by one dot makes mode 3 the
@@ -651,6 +735,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             while ppu.lx < GB_WIDTH and guard < 64:
               fifo_pipeline_dot(ppu, gb)
               inc guard
+          when defined(gb_m3_len):
+            if gb_m3_len_lines > 0:
+              dec gb_m3_len_lines
+              echo "M3LEN ly=", ppu.ly, " len=", ppu.cycle_counter - 80
           ppu.`mode_flag=`(0'u8, gb)
         else:
           fifo_pipeline_dot(ppu, gb)

@@ -234,6 +234,15 @@ when defined(gb_m3_trace):
   # See the KNOWN RESIDUAL note in fifo_ppu.nim for the measurement it produced.
   const GB_TRACE_LY* {.intdefine.} = 20
 
+when defined(gb_m3_len):
+  # Diagnostic mode-3 LENGTH trace (tools only; compiled out of every shipping
+  # build). One line per drawn scanline: the measured mode 3 duration in dots
+  # next to the inputs Pan Docs' "Mode 3 length" section says decide it (SCX,
+  # WX/WY, and the OBJ X list in fetch order). Scoring the two against each
+  # other offline is what turns the gambatte sprites m3stat rows -- which only
+  # bracket the end of mode 3 to one M-cycle -- into a per-object dot count.
+  var gb_m3_len_lines*: int = 1_000_000
+
 proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ## Push a frame the PPU did not draw: the panel shows white with the PPU
   ## switched off.

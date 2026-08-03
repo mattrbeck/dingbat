@@ -396,16 +396,18 @@ type
     fifo*:                GbPixelFifo
     fifo_sprite*:         GbPixelFifo
     fetch_counter*:       int
-    fetch_counter_sprite*: int
     fetcher_x*:           int
     lx*:                  int32
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
     fetching_window*:     bool
     fetching_sprite*:     bool
-    sprite_fetch_phase*:  int
     bg_pixels_pushed*:    bool
-    scx_penalty_remaining*: int
+    # Dots left in the object fetch the shifter is stalled on, and which BG
+    # tile last paid the "wait for the BG fetch" half of an object's penalty.
+    # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
+    obj_penalty*:         int32
+    obj_tile_fx*:         int32
     m3_delay*:            int   # idle dots left at the head of mode 3
     # How far the pipeline lags the CPU's view of the PPU registers on THIS
     # line, in dots. Latched at the mode 2 -> 3 edge because the CPU M-cycle it
