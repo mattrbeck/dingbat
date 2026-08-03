@@ -32,12 +32,13 @@ const STAT_READ_HOLD* = STAT_READ_LAG != 3
 # *delta* and nothing else -- which makes it invariant to whatever constant
 # offset dingbat's dot grid carries against anyone else's.
 #
-# **All six ship at 0, which compiles the mechanism and both of its fields out,
-# and the reason is a measurement.** The CGB PPU really does take these writes
-# late -- gambatte's video.cpp carries exactly these six numbers and SameBoy's
-# DMG display loop carries the matching extra step -- but every one of them is
-# refused by this tree today. Whole gambatte suite per setting, one build each,
-# baseline 3561/5005 (2026-08-03):
+# **All seven ship at 0, which compiles the mechanism and both of its fields
+# out, and the reason is a measurement.** The CGB PPU really does take these
+# writes late -- the mealybug PPU document states a 2-T-cycle CGB delay for SCY
+# outright, and Pan Docs' "Mid-frame behavior" carries the same split -- but
+# every one of them is refused by this tree today. Whole gambatte suite per
+# setting, one build each, baseline 3561/5005 (2026-08-03; 3563 from the
+# DMG-compatibility-mode commit onward, which moved no row in this table):
 #
 #   setting                                     total   what moved
 #   (all 0, the control)                         3561   nothing; row for row main
@@ -45,33 +46,80 @@ const STAT_READ_HOLD* = STAT_READ_LAG != 3
 #   CGB_WY_LATENCY=1                             3561   nothing at all
 #   CGB_WY_LATCH_LATENCY=2                       3561   nothing at all
 #   CGB_WY_LATCH_LATENCY=4                       3560   window -1
-#   CGB_SCROLL_LATENCY=1                         3560   scy -1
-#   CGB_SCROLL_LATENCY=2                         3551   scy -6, scx_during_m3 -3,
+#   CGB_SCY+SCX_LATENCY=1                        3560   scy -1
+#   CGB_SCY+SCX_LATENCY=2                        3551   scy -6, scx_during_m3 -3,
 #                                                       sprites -1, enable_display +1 -1
-#   CGB_SCROLL_LATENCY=2, CAP=1                  3559   enable_display +1 -1,
+#   CGB_SCY+SCX_LATENCY=2, CAP=1                 3559   enable_display +1 -1,
 #                                                       scx_during_m3 -1, scy -1
 #   CGB_LCDC_LATENCY=1                           3557   window -3, bgtiledata -1
 #   CGB_LCDC_LATENCY=2 (tdsel 1)                 3553   window -5, sprites -2,
 #                                                       bgtiledata -1
-#   all six at gambatte's values, CAP=1          3553   window -5, scy -1,
+#   all of them at the documented values, CAP=1  3553   window -5, scy -1,
 #                                                       scx_during_m3 -1,
 #                                                       bgtiledata -1, e_d +1 -1
-#   a UNIFORM 4 on all six (the phase model)     3539   window -9+1, scy -6,
+#   a UNIFORM 4 on all seven (the phase model)   3539   window -9+1, scy -6,
 #                                                       sprites -4+1, scx_during_m3 -4
 #
-# Every moved row is a `[cgb]` row -- the DMG side is untouched, as it must be --
-# and Mealybug and GBMicrotest cannot arbitrate at all, because both are scored
-# against DMG references only in this tree. gambatte is the whole instrument.
+# Every moved row is a `[cgb]` row -- the DMG side is untouched, as it must be.
+#
+# ---- The second instrument, and what it says -------------------------------
+#
+# gambatte was the whole instrument when the table above was taken, because
+# Mealybug was scored against its DMG references only. It is not any more: the
+# suite's `_cgb_c` references are wired up as 27 rows of their own, and they
+# are mid-mode-3 register writes read as a picture rather than as a glyph.
+# Scored as matching bytes over all 27 (mbscore.py, device cgb; DMG total is
+# 510167 and does not move for any setting here, as it must not):
+#
+#   setting                     CGB total   the rows that moved
+#   (all 0, the control)          1794023   --
+#   SCY=1, SCX=1                  1803199   m3_scy_change      82.0 -> 95.9
+#                                           m3_scy_change2    100.0 -> 99.6
+#                                           m3_scx_high_5_bits         -> 99.9
+#                                           ..._change2                -> 99.9
+#   SCY=1, SCX=0                  1803344   m3_scy_change      82.0 -> 95.9
+#                                           m3_scy_change2    100.0 -> 99.6
+#   SCY=2, SCX=0                  1795140   m3_scy_change      82.0 -> 84.6
+#                                           m3_scy_change2    100.0 -> 99.0
+#   SCY=3, SCX=0 / SCY=2,SCX=2    worse still on both rows
+#
+# That is why SCROLL is now two constants. Pan Docs documents the two registers
+# differently -- "Mid-frame behavior" gives SCY a per-model sample point and
+# says the SCX split (high 5 bits per tile fetch, low 3 latched at line start)
+# with no model qualifier at all -- and the split is visible here: SCX at 1
+# costs two rows that are otherwise pixel-perfect, SCY at 1 does not touch
+# them.
 #
 # ---- Why each value is refused, family by family ---------------------------
-#  * SCROLL. The one clean, DMG-neutral, per-device row in the tree that a
-#    scroll latency fixes is enable_display/ly0_late_scx7_m3stat_scx0_274, whose
+#  * SCY. Two instruments, and they bracket it to DIFFERENT sides of the same
+#    dot. The mealybug CGB references put it at 1: m3_scy_change goes 82.0% ->
+#    95.9%, which is 3300 pixels and by far the largest single accuracy move
+#    available in this file. But the documented value is TWO T-cycles (the
+#    mealybug PPU document, "SCY $FF42": "On CGB and AGB devices, writes appear
+#    to take effect 2 T-cycles later"), and at 2 the same row only reaches
+#    84.6%. A measured 1 against a documented 2 is not a value to ship, it is a
+#    one-dot residual somewhere else in the CGB pipeline being absorbed into
+#    this constant -- which is exactly the signature front-line item 1 predicts,
+#    since moving the mode 3 start by a dot moves every register's sample point
+#    together and would turn a documented 2 into a measured 1. Settle that
+#    first; this row is then the check on it, not the knob.
+#    Two smaller refusals point the same way. m3_scy_change's own sibling
+#    m3_scy_change2 -- a CGB-only ROM, same register, a different write phase --
+#    goes the other way at any setting. And gambatte loses exactly one row,
+#    scy/scy_during_m3_spx08_ds_4, a DOUBLE SPEED row: at 2 dots per M-cycle a
+#    1-dot latency lands on the cap boundary, so this is the CGB CPU-to-PPU
+#    phase axis reading a register latency, which is the confusion
+#    CGB_LATENCY_CAP exists to prevent and cannot at this width.
+#  * SCX. The one clean, DMG-neutral, per-device row in the tree that a scroll
+#    latency fixes is enable_display/ly0_late_scx7_m3stat_scx0_274, whose
 #    DMG sibling expects $87 and whose CGB row expects $84; at 2 dots dingbat
 #    gets both right. The SAME family's _scx3_17 row expects $87 on BOTH devices
 #    and 2 dots takes it to $84. One register, one latency, and the family
 #    brackets it above 1 and below 2 -- i.e. it does not bracket it, and the
 #    residual deciding one of the two rows is elsewhere. Its _scx1 rows are
-#    already red on both devices, which is where that residual shows.
+#    already red on both devices, which is where that residual shows. The
+#    mealybug CGB rows agree with 0: both m3_scx_* rows are pixel-perfect there
+#    and any nonzero value breaks them.
 #  * LCDC. All five window rows it costs are late_disable / late_reenable rows.
 #    Those are the family SameBoy gives a CGB-ONLY fetcher-abort path (a window
 #    disable part way through the fetch aborts it), which moves them the other
@@ -87,7 +135,8 @@ const STAT_READ_HOLD* = STAT_READ_LAG != 3
 #    the 42 dual-expectation window ROMs.
 const CGB_WX_LATENCY*         {.intdefine.} = 0
 const CGB_WY_LATENCY*         {.intdefine.} = 0
-const CGB_SCROLL_LATENCY*     {.intdefine.} = 0
+const CGB_SCY_LATENCY*        {.intdefine.} = 0
+const CGB_SCX_LATENCY*        {.intdefine.} = 0
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
@@ -103,7 +152,8 @@ const CGB_LATENCY_CAP*        {.intdefine.} = 1
   ## scored against them.
 const CGB_LCDC_LATENCY_ANY* = CGB_LCDC_LATENCY != 0 or CGB_LCDC_TDSEL_LATENCY != 0
 const CGB_WY_LATENCY_ANY*   = CGB_WY_LATENCY != 0 or CGB_WY_LATCH_LATENCY != 0
-const CGB_WRITE_LATENCY_ANY* = CGB_WX_LATENCY != 0 or CGB_SCROLL_LATENCY != 0 or
+const CGB_WRITE_LATENCY_ANY* = CGB_WX_LATENCY != 0 or CGB_SCY_LATENCY != 0 or
+                               CGB_SCX_LATENCY != 0 or
                                CGB_LCDC_LATENCY_ANY or CGB_WY_LATENCY_ANY
 
 # ---- The 2 dots at the mode 3 -> 0 edge, and the three ways to spend them ---
@@ -784,7 +834,89 @@ type
   GB* = ref object of EmuObj
     bootrom_path*:   string
     rom_path*:       string
+    # The two model axes, and they are NOT the same question.
+    #
+    # `cgb_enabled` is the CONSOLE: a CGB (or AGB) is in front of you. It
+    # decides timing and the hardware quirks that belong to the SoC — the DMG
+    # STAT-write glitch, the OAM bus release inside mode 2, the serial tap, the
+    # line-144 STAT lead. None of those care what cartridge is inserted.
+    #
+    # `cgb_native` is the MODE: the CGB's own graphics and register set are in
+    # use. A DMG cart on CGB hardware runs in DMG-compatibility mode — the boot
+    # ROM sets KEY0 at handoff — where KEY1/HDMA/SVBK/VBK/BCPD/OCPD/PCM12/PCM34
+    # read as unmapped (mooneye misc/bits/unused_hwio-C), BG map attributes and
+    # the OBJ attribute's palette/bank nibble are not decoded, LCDC.0 is DMG's
+    # "BG on/off" rather than the CGB's master priority, objects are ordered by
+    # X again, and every pixel goes through BGP/OBP before it indexes palette 0.
+    # The boot ROM itself always runs native, which is how it writes the
+    # compatibility palettes it is about to hand over.
+    #
+    # A DMG-compatibility CGB is therefore CGB timing with a DMG picture, and
+    # collapsing either axis onto the other gets one half of that wrong. This is
+    # a cached derivation of `cgb_enabled and (cgb_flag != cgbNone or the boot
+    # ROM is still mapped)` and not a proc because it is read per pixel; keep it
+    # in step via `gb_sync_cgb_native` at every point those three inputs move.
+    #
+    # ---- What hardware splits by model and this tree still does NOT --------
+    #
+    # Audited 2026-08-03 against Pan Docs, the mealybug PPU document and the
+    # per-model expectations mooneye/AGE/gambatte carry in their own filenames.
+    # Everything below is documented behaviour that dingbat currently emulates
+    # identically on both consoles. Ordered by how measurable it is here.
+    #
+    # Measurable today, unfixed:
+    #  * LCDC.1 mid-mode-3. On DMG, clearing OBJ enable part way through an
+    #    object fetch CANCELS it, so mode 3 does not lengthen; on CGB the fetch
+    #    runs regardless and the bit is only consulted when the pixel is popped
+    #    (Pan Docs, Pixel FIFO -> Mode 3 Operation -> Sprites: "this condition
+    #    is ignored on CGB"). dingbat models neither the cancel nor the split;
+    #    see OBJ_FETCH_DOTS in fifo_ppu.nim. gambatte's 56 DMG-only
+    #    sprites/late_disable_* rows and mealybug m3_lcdc_obj_en_change on both
+    #    devices are the instrument.
+    #  * LCDC.4 mid-fetch (the TILE_SEL glitch). CGB-only: changing the tile
+    #    data select on a bitplane-read dot substitutes stale data rather than
+    #    doing the read. mealybug m3_lcdc_tile_sel_change is 95.5% on the CGB
+    #    side and m3_lcdc_tile_sel_change2 is a CGB-only ROM for exactly this.
+    #  * LCDC.5 clear resets the window's Y condition on CGB, so WY must be met
+    #    again in the same frame; on DMG the latch persists (Pan Docs, Window
+    #    behavior -> Window rendering criteria). ppu_latch_wy has no such reset.
+    #  * WX = 166 is a monochrome-only bug (the window spans the screen offset
+    #    by one line), and the DMG-only WX+1 late trigger with it. Both are in
+    #    the window family this tree scores 295/476 on.
+    #  * $FEA0-$FEFF. read_byte answers 0x00 for every model. That is right for
+    #    DMG only: a CGB has real RAM there with a revision-specific address
+    #    fold, and CGB-E and AGB answer the high nibble of the low address byte
+    #    twice (Pan Docs, Memory Map -> FEA0-FEFF range).
+    #  * OAM DMA source above $DFFF folds down into $C000-$DFFF on DMG and
+    #    fills OAM with $FF on CGB (mooneye acceptance/oam_dma/sources-GS,
+    #    "fail: CGB/AGB/AGS").
+    #  * OPRI ($FF6C) is not implemented at all. It only matters for a cart
+    #    that writes it while the boot ROM is mapped, which no test ROM here
+    #    does, but the register reads as unmapped rather than as itself.
+    #  * The APU has no model branch anywhere, and three are documented: wave
+    #    RAM is only accessible on the dot CH3 reads it on monochrome consoles
+    #    (elsewhere the CPU gets the byte CH3 is on), retriggering CH3 corrupts
+    #    wave RAM on monochrome only, and NRx1 length timers stay writable with
+    #    the APU off on monochrome only (Pan Docs, Audio Registers, all three).
+    #
+    # Not measurable by anything this tree runs:
+    #  * HALT entry/wake granularity (2 T-cycles on DMG, 4 on CGB, plus a CGB
+    #    termination M-cycle) — mooneye halt_ime1_timing2-GS is "fail: CGB".
+    #  * DI's delay on CGB. mooneye acceptance/di_timing-GS asserts one
+    #    outright; Pan Docs describes DI as immediate with no model note. Left
+    #    alone deliberately: the sources disagree and nothing here can arbitrate.
+    #  * The joypad line-switch settling delay (DMG/MGB only) and contact
+    #    bounce, neither of which dingbat models on any device.
+    #  * The IR port ($FF56) — CGB-only hardware, unimplemented.
+    #  * STOP outside a speed switch: a DMG keeps drawing a black line, a CGB
+    #    blanks unless it is in mode 3.
+    #
+    # Deliberately out of scope: everything that splits CGB revisions rather
+    # than consoles (SCY bitplane caching from CGB-D, the LY=153 and OAM-read
+    # boundaries, the $FEA0 fold, half the APU). dingbat models ONE CGB, and
+    # the references it is scored against are CPU CGB C.
     cgb_enabled*:    bool
+    cgb_native*:     bool
     fifo*:           bool
     headless*:       bool
     run_bios*:       bool
@@ -821,6 +953,32 @@ const FETCHER_ORDER*: array[8, FetchStage] = [
 
 # DMG default colors (BGR555)
 const DMG_COLORS*: array[4, uint16] = [0x6BDF'u16, 0x3ABF'u16, 0x35BD'u16, 0x2CEF'u16]
+
+# The CGB's DMG-compatibility palettes, shade 0 (lightest) to shade 3.
+#
+# A DMG cart on CGB hardware still produces a 2-bit shade per pixel; what the
+# CGB adds is that BGP/OBP0/OBP1 then index a real colour palette, which the
+# boot ROM loads before handoff. Which one it loads depends on the cart header:
+# Nintendo-published titles get a themed palette picked by the header checksum,
+# and everything else — every homebrew and every test ROM — gets the fallback
+# below. That fallback is what the bundled test suites specify as "LCD shades
+# for CGB compatibility mode" (game-boy-test-roms' mealybug howto, and the same
+# six colours appear in the AGE `ncm*` and mbc3-tester-cgb references):
+#
+#   background  #000000  #0063C6  #7BFF31  #FFFFFF   (shade 3 -> 0)
+#   objects     #000000  #943939  #FF8484  #FFFFFF
+#
+# converted to BGR555 by the inverse of the (X shl 3) or (X shr 2) expansion
+# those same suites specify, which is exact for all six.
+#
+# Only the fallback is here. Reproducing the per-title table would mean lifting
+# Nintendo's boot ROM data, and it buys nothing measurable: it changes the
+# colours of thirty-odd licensed monochrome carts and nothing else — not one
+# test ROM, since none of them carry a Nintendo licensee code.
+const CGB_COMPAT_BG_COLORS*:  array[4, uint16] =
+  [0x7FFF'u16, 0x1BEF'u16, 0x6180'u16, 0x0000'u16]
+const CGB_COMPAT_OBJ_COLORS*: array[4, uint16] =
+  [0x7FFF'u16, 0x421F'u16, 0x1CF2'u16, 0x0000'u16]
 
 const GB_WIDTH*  = 160
 const GB_HEIGHT* = 144
@@ -1514,8 +1672,12 @@ include apu/channel3
 include apu/channel4
 include apu
 # Peripherals: interrupt controller, link port, timer, input
-# Forward declaration needed by serial.nim/ppu.nim (defined in memory.nim)
-proc cgb_native*(gb: GB): bool
+proc gb_sync_cgb_native*(gb: GB) {.inline.} =
+  ## Recompute GB.cgb_native. Three inputs: the console, the cart header, and
+  ## whether the boot ROM is still mapped — so this belongs after construction,
+  ## after the FF50 unmap, and after a state load.
+  gb.cgb_native = gb.cgb_enabled and
+    (gb.cgb_flag != cgbNone or (gb.memory != nil and gb.memory.bootrom.len > 0))
 include interrupts
 include serial
 include timer
@@ -1656,6 +1818,8 @@ proc post_init*(gb: GB) =
   gb.timer  = new_gb_timer()
   gb.serial = new_gb_serial()
   gb.memory = new_gb_memory(gb)
+  # Needs the memory: whether the boot ROM is mapped is one of its three inputs.
+  gb_sync_cgb_native(gb)
   gb.cpu    = new_gb_cpu()
   gb.scheduler.dispatch = gb_dispatch(gb)
   gb.cartridge.gb_ref = gb

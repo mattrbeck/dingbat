@@ -219,6 +219,19 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
       ppu.irq_ly = ppu.ly
     ppu.first_line = false
     when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 0
+    if not gb.cgb_native:
+      # DMG cart on CGB hardware. The last thing the real boot ROM does before
+      # it hands over is fill palette 0 through BCPD/OCPD, because from the
+      # instant it sets KEY0 those ports are gone and the cart can never write
+      # a colour again — everything it draws indexes these entries via
+      # BGP/OBP0/OBP1. Skipping the boot ROM has to leave the same thing
+      # behind; without it a compatibility cart renders through an all-zero
+      # palette, i.e. a black screen (which is what the three gambatte
+      # m2int_m3stat/nobg/*_cgb04c rows were reading as an unknown glyph).
+      for i in 0 ..< 4:
+        cast[ptr uint16](addr ppu.pram[i * 2])[]      = CGB_COMPAT_BG_COLORS[i]
+        cast[ptr uint16](addr ppu.obj_pram[i * 2])[]  = CGB_COMPAT_OBJ_COLORS[i]
+        cast[ptr uint16](addr ppu.obj_pram[8 + i * 2])[] = CGB_COMPAT_OBJ_COLORS[i]
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
     # PC = $0100): DMG/MGB hand off with STAT = $85 and LY = $00. Mode 1 with
@@ -621,8 +634,12 @@ proc ppu_stat_write_glitch*(ppu: GbPpu; gb: GB) =
   ## then the written value were written the next M-cycle. Because the GBC in
   ## DMG mode does not have this quirk, two games that depend on this quirk
   ## (Ocean's Road Rash and Vic Tokai's Xerd no Densetsu) will not run on a
-  ## GBC." The hardware decides, not the cartridge, so the caller gates this on
-  ## cgb_enabled and not cgb_native.
+  ## GBC." The hardware decides, not the cartridge — "the GBC in DMG mode does
+  ## not have this quirk" is the whole sentence — so the caller gates this on
+  ## `not cgb_enabled` (the console) and NOT on cgb_native (the mode). Those two
+  ## were the same variable until DMG-compatibility mode became a thing dingbat
+  ## could be in, and a DMG cart booted through a real CGB boot ROM used to end
+  ## up here.
   ##
   ## $FF in the enable bits selects every source at once, so the quirk does not
   ## invent a condition — it un-masks whichever one the PPU is already in, and
@@ -1119,7 +1136,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
     ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF42:
-    when CGB_SCROLL_LATENCY != 0:
+    when CGB_SCY_LATENCY != 0:
       if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
       else:              ppu_store_scy(ppu, gb, val)
     else:
@@ -1131,7 +1148,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # latch against it (see fifo_sample_smooth_scroll's caller).
       echo "SCX ly=", ppu.ly, " dot=", ppu.cycle_counter,
            " mode=", (ppu.lcd_status and 3), " old=", ppu.scx, " new=", val
-    when CGB_SCROLL_LATENCY != 0:
+    when CGB_SCX_LATENCY != 0:
       if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
       else:              ppu_store_scx(ppu, gb, val)
     else:
@@ -1174,7 +1191,12 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     else:
       ppu_store_wx(ppu, gb, val)
   of 0xFF4F:
-    if gb.cgb_enabled: ppu.vram_bank = val and 0x1
+    # The register, not the console: VBK goes with the rest of the CGB set when
+    # the boot ROM sets KEY0, so a DMG-compatibility cart is stuck on bank 0 and
+    # the attribute plane the fetcher reads stays all zeroes. The READ above is
+    # deliberately still on cgb_enabled -- it answers 0xFE either way once the
+    # bank is pinned, which is what mooneye misc/bits/unused_hwio-C reads back.
+    if gb.cgb_native: ppu.vram_bank = val and 0x1
   of 0xFF51:
     if gb.cgb_native: ppu.hdma1 = val
   of 0xFF52:

@@ -45,7 +45,7 @@ the difference says which way the model has to move.
 
 ## Sweeping the CGB write latencies
 
-    tools/gbppu/cgbsweep.sh scx2 /tmp/g_base.txt -d:CGB_SCROLL_LATENCY=2
+    tools/gbppu/cgbsweep.sh scy2 /tmp/g_base.txt -d:CGB_SCY_LATENCY=2
 
 One build and one whole-suite score per setting of the `CGB_*_LATENCY`
 constants (see `CGB_WX_LATENCY` in `gb/gb.nim`), printing only the
@@ -112,13 +112,18 @@ lag (see `STAT_MODE_HOLD` in `src/dingbat/gb/ppu.nim`) and not the OBJ penalty.
 
 ## Mealybug as a dot ruler
 
-    python3 tools/gbppu/mbscore.py [./dingbat_test]     # per-row %, same
-                                                        # comparison as the runner
+    python3 tools/gbppu/mbscore.py [./dingbat_test] [dmg|cgb]   # per-row %,
+                                             # same comparison as the runner
     python3 tools/gbppu/mbshift.py m3_scy_change        # per-line best shift
     python3 tools/gbppu/mbperx.py m3_scy_change ./dt_m3len
 
 A mid-mode-3 write lands at a pixel column, so a wrong penalty is a horizontal
-shift of that line. `mbshift.py` reports the shift that best aligns each line;
+shift of that line. `mbscore.py`'s second argument picks the device: `cgb` runs
+the same DMG carts on CGB hardware against the suite's own `_cgb_c` references,
+which is DMG-compatibility mode and the tree's only mid-mode-3 CGB oracle
+outside gambatte — it is what brackets the `CGB_*_LATENCY` constants from a
+second direction (see the sweep table at `CGB_SCY_LATENCY` in `gb/gb.nim`).
+`mbshift.py` reports the shift that best aligns each line;
 `mbperx.py` puts the line's OBJ list next to it, which matters because the
 `m3_*` ROMs sweep the object's OAM X down the screen — one reference frame is a
 staircase over X. Caveat: BGP/OBP are applied at the shifter and their write

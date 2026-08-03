@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-03 11:39:29*
+*Generated: 2026-08-03 12:03:19*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3561/5005 passed.**
+**3563/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -833,18 +833,16 @@ All 6 tests passed.
 | m2int_m2stat/m2int_m2stat_ds_1_cgb04c_out2 [cgb] | got 3, expected 2 |
 | m2int_m2stat/m2int_scx4_m2stat_ds_1_cgb04c_out2 [cgb] | got 3, expected 2 |
 
-## m2int_m3stat (27/44 passed)
+## m2int_m3stat (29/44 passed)
 
-27/44 tests passed, 17 failed:
+29/44 tests passed, 15 failed:
 
 | Test | Result |
 |------|--------|
 | m2int_m3stat/m2int_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/m2int_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/m2int_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| m2int_m3stat/nobg/m2int_nobg_m3stat_1_cgb04c_out3 [cgb] | got ?, expected 3 |
-| m2int_m3stat/nobg/m2int_nobg_m3stat_2_cgb04c_out0 [cgb] | got ?, expected 0 |
-| m2int_m3stat/nobg/m2int_nobg_scx7_m3stat_1_cgb04c_out3 [cgb] | got ?, expected 3 |
+| m2int_m3stat/nobg/m2int_nobg_m3stat_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | m2int_m3stat/scx/late_scx4_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |

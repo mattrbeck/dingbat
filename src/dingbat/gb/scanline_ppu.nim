@@ -34,8 +34,8 @@ proc scanline_get_sprites*(ppu: GbScanlinePpu; gb: GB): seq[GbSprite] =
       oam_idx:    uint8(sprite_addr),
     )
     if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
-      if not gb.cgb_enabled:
-        # DMG: sort by X (ascending), so first in array = lowest X = drawn last (on top)
+      if not gb.cgb_native:
+        # DMG (and DMG-compatibility mode): sort by X (ascending), so first in array = lowest X = drawn last (on top)
         var idx = 0
         while idx < result.len and s.x >= result[idx].x:
           inc idx
@@ -65,19 +65,19 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                        int(cast[int8](raw_tile))
                      else: int(raw_tile)
       let tile_ptr = tile_data_tbl + 16 * tile_num
-      let bank_num = if gb.cgb_enabled: int((ppu.vram[1][tn_addr] and 0b0000_1000) shr 3) else: 0
-      let y_row = if gb.cgb_enabled and (ppu.vram[1][tn_addr] and 0b0100_0000) != 0:
+      let bank_num = if gb.cgb_native: int((ppu.vram[1][tn_addr] and 0b0000_1000) shr 3) else: 0
+      let y_row = if gb.cgb_native and (ppu.vram[1][tn_addr] and 0b0100_0000) != 0:
                     7 - tile_row_win else: tile_row_win
       let b1 = ppu.vram[bank_num][tile_ptr + y_row * 2]
       let b2 = ppu.vram[bank_num][tile_ptr + y_row * 2 + 1]
       let col_x = x + 7 - int(ppu.wx)
-      let shift = if gb.cgb_enabled and (ppu.vram[1][tn_addr] and 0b0010_0000) != 0:
+      let shift = if gb.cgb_native and (ppu.vram[1][tn_addr] and 0b0010_0000) != 0:
                     col_x and 7 else: 7 - (col_x and 7)
       let lsb = (b1 shr shift) and 0x1
       let msb = (b2 shr shift) and 0x1
       let color = uint8((msb shl 1) or lsb)
       ppu.scanline_color_vals[x] = (color, (ppu.vram[1][tn_addr] and 0x80) != 0)
-      if gb.cgb_enabled:
+      if gb.cgb_native:
         let pal_idx = int(ppu.vram[1][tn_addr] and 0b111) * 4 * 2 + int(color) * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
           cast[ptr uint16](unsafeAddr ppu.pram[pal_idx])[]
@@ -86,7 +86,7 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
           cast[ptr uint16](unsafeAddr ppu.pram[pal_idx])[]
 
-    elif bg_display(ppu) or gb.cgb_enabled:
+    elif bg_display(ppu) or gb.cgb_native:
       let tn_addr = bg_map +
                     (((x + int(ppu.scx)) shr 3) and 0x1F) +
                     ((((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF)
@@ -95,19 +95,19 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                        int(cast[int8](raw_tile))
                      else: int(raw_tile)
       let tile_ptr = tile_data_tbl + 16 * tile_num
-      let bank_num = if gb.cgb_enabled: int((ppu.vram[1][tn_addr] and 0b0000_1000) shr 3) else: 0
-      let y_row = if gb.cgb_enabled and (ppu.vram[1][tn_addr] and 0b0100_0000) != 0:
+      let bank_num = if gb.cgb_native: int((ppu.vram[1][tn_addr] and 0b0000_1000) shr 3) else: 0
+      let y_row = if gb.cgb_native and (ppu.vram[1][tn_addr] and 0b0100_0000) != 0:
                     7 - tile_row else: tile_row
       let b1 = ppu.vram[bank_num][tile_ptr + y_row * 2]
       let b2 = ppu.vram[bank_num][tile_ptr + y_row * 2 + 1]
       let col_x = x + int(ppu.scx)
-      let shift = if gb.cgb_enabled and (ppu.vram[1][tn_addr] and 0b0010_0000) != 0:
+      let shift = if gb.cgb_native and (ppu.vram[1][tn_addr] and 0b0010_0000) != 0:
                     col_x and 7 else: 7 - (col_x and 7)
       let lsb = (b1 shr shift) and 0x1
       let msb = (b2 shr shift) and 0x1
       let color = uint8((msb shl 1) or lsb)
       ppu.scanline_color_vals[x] = (color, (ppu.vram[1][tn_addr] and 0x80) != 0)
-      if gb.cgb_enabled:
+      if gb.cgb_native:
         let pal_idx = int(ppu.vram[1][tn_addr] and 0b111) * 4 * 2 + int(color) * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
           cast[ptr uint16](unsafeAddr ppu.pram[pal_idx])[]
@@ -121,7 +121,7 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
   if sprite_enabled(ppu):
     for s in scanline_get_sprites(ppu, gb):
       let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
-      let bank = if gb.cgb_enabled: int(sprite_bank_num(s)) else: 0
+      let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
       for col in 0 ..< 8:
         let x = col + int(s.x) - 8
         if x < 0 or x >= GB_WIDTH: continue
@@ -130,7 +130,7 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
         let msb = (ppu.vram[bank][b_hi] shr shift) and 0x1
         let color = uint8((msb shl 1) or lsb)
         if color > 0:
-          if gb.cgb_enabled:
+          if gb.cgb_native:
             if not bg_display(ppu) or ppu.scanline_color_vals[x].color == 0 or
                (not ppu.scanline_color_vals[x].priority and sprite_priority(s) == 0):
               let pal_idx = int(sprite_cgb_palette(s)) * 4 * 2 + int(color) * 2

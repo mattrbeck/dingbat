@@ -8,7 +8,7 @@ set -e
 cd "$(dirname "$0")/../.."
 TAG=$1; shift
 BASE=$1; shift
-DEF="-d:CGB_WX_LATENCY=0 -d:CGB_WY_LATENCY=0 -d:CGB_SCROLL_LATENCY=0 \
+DEF="-d:CGB_WX_LATENCY=0 -d:CGB_WY_LATENCY=0 -d:CGB_SCY_LATENCY=0 -d:CGB_SCX_LATENCY=0 \
      -d:CGB_LCDC_LATENCY=0 -d:CGB_LCDC_TDSEL_LATENCY=0 -d:CGB_WY_LATCH_LATENCY=0"
 mkdir -p /tmp/nc_wl/$TAG
 nim c -d:test_harness -d:release --path:src --nimcache:/tmp/nc_wl/$TAG \

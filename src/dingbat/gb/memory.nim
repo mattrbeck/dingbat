@@ -1,12 +1,5 @@
 # GB Memory bus (included by gb.nim)
 
-proc cgb_native*(gb: GB): bool =
-  ## True when the CGB-only half of the IO map is exposed. A DMG cart on CGB
-  ## hardware runs in DMG-compatibility mode where KEY1/HDMA/SVBK/BCPD/OCPD/
-  ## FF74 read as unmapped (mooneye misc/bits/unused_hwio-C); the boot ROM
-  ## itself always runs native (it switches modes at handoff via KEY0).
-  gb.cgb_enabled and (gb.cgb_flag != cgbNone or gb.memory.bootrom.len > 0)
-
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
   # DMG-family models, 0x00 on CGB (Pan Docs power-up sequence).
@@ -278,9 +271,9 @@ when CGB_WRITE_LATENCY_ANY:
       run(CGB_LCDC_TDSEL_LATENCY); ppu_store_lcdc_tdsel(gb.ppu, gb, val)
       run(CGB_LCDC_LATENCY);       ppu_store_lcdc(gb.ppu, gb, val)
     of 0xFF42:
-      run(CGB_SCROLL_LATENCY); ppu_store_scy(gb.ppu, gb, val)
+      run(CGB_SCY_LATENCY); ppu_store_scy(gb.ppu, gb, val)
     of 0xFF43:
-      run(CGB_SCROLL_LATENCY); ppu_store_scx(gb.ppu, gb, val)
+      run(CGB_SCX_LATENCY); ppu_store_scx(gb.ppu, gb, val)
     of 0xFF4A:
       run(CGB_WY_LATENCY)
       ppu_store_wy(gb.ppu, gb, val)
@@ -464,7 +457,15 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   # a DMG boot ROM mapped forever and the cartridge never started.
   if idx == 0xFF50 and (val and 1) != 0:
     mem.bootrom = @[]
-    gb.cgb_enabled = gb.cgb_flag != cgbNone
+    # Handoff. A DMG cart drops out of CGB mode here (the real boot ROM does it
+    # a few instructions earlier, via KEY0) — but it does NOT stop being a CGB.
+    # This used to clear cgb_enabled, which handed a DMG-compatibility CGB the
+    # DMG's timing and the DMG's STAT-write glitch as well as its picture.
+    gb_sync_cgb_native(gb)
+    # VBK goes with the rest of the CGB register set, so bank 1 is frozen at
+    # whatever the boot ROM left in it (nothing) and the map attributes the
+    # fetcher reads out of it are all zero from here on.
+    if not gb.cgb_native: gb.ppu.vram_bank = 0
   case idx
   of 0x0000..0x7FFF:
     mbc_write(gb.cartridge, idx, val)

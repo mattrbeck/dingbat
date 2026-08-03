@@ -776,6 +776,11 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   load_joypad_state(gb.joypad, r)
   load_mem_state(gb.memory, r)
   gb.cgb_enabled = r.read_bool()
+  # Derived, not serialized — it is a function of the console, the cart header
+  # and whether the boot ROM is still mapped, and load_mem_state has just
+  # restored the last of those. Keeping it out of the payload is what makes
+  # this change invisible to the committed state corpus.
+  gb_sync_cgb_native(gb)
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r)
   load_ppu_state(gb.ppu, r, rev)

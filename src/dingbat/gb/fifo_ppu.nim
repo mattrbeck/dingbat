@@ -130,7 +130,12 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
   if ppu.fifo.size == 0:
-    let bg_en = bg_display(ppu) or gb.cgb_enabled
+    # LCDC.0 is the one bit whose MEANING changes with the mode: "BG and window
+    # enable" in DMG and DMG-compatibility mode, "BG and window master
+    # priority" in CGB mode, where the layer is drawn either way (Pan Docs,
+    # LCDC.0). gambatte's m2int_m3stat/nobg/*_cgb04c rows are a DMG cart on a
+    # CGB with LCDC.0 clear, so they read the compatibility meaning.
+    let bg_en = bg_display(ppu) or gb.cgb_native
     inc ppu.fetcher_x
     # The FIFO is empty here, so where head/tail happen to sit in the ring is
     # not observable (nothing reads an empty BG FIFO, and only the sprite FIFO
@@ -176,6 +181,11 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
                 (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
         (m, o)
     ppu.tile_num   = ppu.vram[0][map + offset]
+    # Unconditional, and it has to stay that way -- this is the mode 3 dot
+    # loop, and one more branch here measured +0.8% of retired instructions on
+    # Pokemon Crystal. What keeps the attribute plane at zero outside CGB mode
+    # is that VBK is not in the register map there, so nothing can ever write
+    # bank 1 (see FF4F in ppu_write_machinery).
     ppu.tile_attrs = ppu.vram[1][map + offset]
     ppu.bg_pixels_pushed = false
     inc ppu.fetch_counter
@@ -289,7 +299,7 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   let s = ppu.sprites[0]
   ppu.sprites.delete(0)
   let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
-  let bank = if gb.cgb_enabled: int(sprite_bank_num(s)) else: 0
+  let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
   # Pad OAM FIFO to at least 8 pixels with transparent lowest-priority pixels
   while ppu.fifo_sprite.size < 8:
     fifo_push(ppu.fifo_sprite, GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0))
@@ -298,14 +308,14 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     let lsb = (ppu.vram[bank][b_lo] shr shift) and 0x1
     let msb = (ppu.vram[bank][b_hi] shr shift) and 0x1
     let color = uint8((msb shl 1) or lsb)
-    let palette = if gb.cgb_enabled: sprite_cgb_palette(s) else: sprite_dmg_palette(s)
+    let palette = if gb.cgb_native: sprite_cgb_palette(s) else: sprite_dmg_palette(s)
     let px = GbPixel(color: color, palette: palette, oam_idx: s.oam_idx, obj_to_bg: sprite_priority(s))
     let fifo_col = col + int(s.x) - 8 - int(ppu.lx)
     if fifo_col >= 0:
       if fifo_col >= ppu.fifo_sprite.size:
         fifo_push(ppu.fifo_sprite, px)
       elif (px.color != 0 and fifo_get(ppu.fifo_sprite, fifo_col).color == 0) or
-           (gb.cgb_enabled and px.oam_idx <= fifo_get(ppu.fifo_sprite, fifo_col).oam_idx and px.color != 0):
+           (gb.cgb_native and px.oam_idx <= fifo_get(ppu.fifo_sprite, fifo_col).oam_idx and px.color != 0):
         fifo_set(ppu.fifo_sprite, fifo_col, px)
   # Check if next sprite shares the same X coordinate
   ppu.fetching_sprite =
@@ -357,7 +367,7 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
 
 proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool =
   if sprite_enabled(ppu) and sp_px.color > 0:
-    if gb.cgb_enabled:
+    if gb.cgb_native:
       not bg_display(ppu) or bg_px.color == 0 or
         (bg_px.obj_to_bg == 0 and sp_px.obj_to_bg == 0)
     else:
@@ -642,7 +652,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         if use_sprite: (sp_px, addr ppu.obj_pram[0])
         else:          (bg_px, addr ppu.pram[0])
       let final_color =
-        if gb.cgb_enabled: int(px.color)
+        if gb.cgb_native: int(px.color)
         else:
           let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
                   else: ppu.bgp

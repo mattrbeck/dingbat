@@ -247,40 +247,50 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     # Read actual pixels from PPM
     let actual = if test.color: read_ppm_rgb(tmp_ppm) else: read_ppm_greyscale(tmp_ppm)
     removeFile(tmp_ppm)
-
     proc score_against(png_path: string): tuple[matched, total: int, err: string] =
       ## Pixels matching `png_path`, or a non-empty `err` if it is unusable.
       ##
       ## `--color` sets the *capture* format, but the reference decides the
       ## comparison. Reference sets really do mix PNG formats within one suite —
       ## daid's three legitimate `ppu_scanline_bgp` outcomes are two truecolour
-      ## images and one indexed, and mealybug's unused CGB set mixes indexed
-      ## with 1-bit greyscale, because a frame that came out black-and-white was
-      ## saved as such. So whichever side has three channels is collapsed to the
-      ## other's one via the R channel; every reference here stores greys as
-      ## R=G=B, so nothing is lost. Without the second branch a colour capture
-      ## against a greyscale reference fails as an opaque "size mismatch"
-      ## rather than as a comparison.
+      ## images and one indexed, and mealybug's `_cgb_c` set mixes indexed with
+      ## 1-bit greyscale, because a frame that came out black-and-white was
+      ## saved as such. So both sides are brought to a common channel count
+      ## before any comparison runs; every reference here stores greys as
+      ## R=G=B, so nothing is lost.
+      ##
+      ## Note which side moves in the colour-vs-greyscale case: the REFERENCE
+      ## is widened to RGB, rather than the capture being narrowed to its R
+      ## channel. That keeps all three channels under test, so a frame that is
+      ## actually coloured is a real mismatch instead of passing on R alone.
+      ## Without this branch at all, a colour capture against a greyscale
+      ## reference fails as an opaque "size mismatch", which the results writer
+      ## drops as an unrecognised detail string — a silently blank row, and a
+      ## blank row reads as a pass at a glance. Seven of mealybug's `_cgb_c`
+      ## references are 1-bit greyscale and hit exactly this.
       var expected = read_png(png_path)
-      var act = actual
       if not test.color and expected.channels == 3:
         # Greyscale capture vs RGB reference (e.g. mooneye's
-        # sprite_priority-dmg.png stores grey shades as R=G=B truecolor).
+        # sprite_priority-dmg.png stores grey shades as R=G=B truecolor):
+        # collapse the reference to one byte per pixel via the R channel.
         var grey = newSeq[uint8](expected.pixels.len div 3)
         for i in 0 ..< grey.len:
           grey[i] = expected.pixels[i * 3]
         expected.pixels = grey
         expected.channels = 1
       elif test.color and expected.channels == 1:
-        # RGB capture vs greyscale reference — collapse the capture instead.
-        var grey = newSeq[uint8](act.len div 3)
-        for i in 0 ..< grey.len:
-          grey[i] = act[i * 3]
-        act = grey
-      if act.len != expected.pixels.len:
-        return (0, 0, &"size mismatch: {act.len} vs {expected.pixels.len}")
+        # RGB capture vs greyscale reference: widen the reference to R=G=B.
+        var rgb = newSeq[uint8](expected.pixels.len * 3)
+        for i in 0 ..< expected.pixels.len:
+          rgb[i * 3] = expected.pixels[i]
+          rgb[i * 3 + 1] = expected.pixels[i]
+          rgb[i * 3 + 2] = expected.pixels[i]
+        expected.pixels = rgb
+        expected.channels = 3
+      if actual.len != expected.pixels.len:
+        return (0, 0, &"size mismatch: {actual.len} vs {expected.pixels.len}")
       let bytes_per_pixel = if expected.channels == 3: 3 else: 1
-      let total_pixels = act.len div bytes_per_pixel
+      let total_pixels = actual.len div bytes_per_pixel
       var diff_count = 0
       if test.grey_tolerance > 0:
         # The shootout's own criterion (util.py `compareImage`): convert both
@@ -293,7 +303,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
                  114 * int(p[base + 2])) div 1000
         for px in 0 ..< total_pixels:
           let base = px * bytes_per_pixel
-          if abs(luma(act, base, bytes_per_pixel) -
+          if abs(luma(actual, base, bytes_per_pixel) -
                  luma(expected.pixels, base, bytes_per_pixel)) > test.grey_tolerance:
             inc diff_count
       else:
@@ -302,7 +312,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
           let base = px * bytes_per_pixel
           var differs = false
           for c in 0 ..< bytes_per_pixel:
-            if act[base + c] != expected.pixels[base + c]:
+            if actual[base + c] != expected.pixels[base + c]:
               differs = true
               break
           if differs:
@@ -602,30 +612,22 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   tests
 
 proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
-  ## Mealybug Tearoom, DMG only — and the bundle's `_cgb_c` (27 images) and
-  ## `_cgb_d` (20) references are deliberately NOT a second set of rows.
+  ## Both devices. Every one of these ROMs is a DMG cart, and the suite ships a
+  ## `_dmg_blob.png` for what it draws on a DMG and a `_cgb_c.png` for what the
+  ## same cart draws on a CPU CGB C — which is DMG-compatibility mode: CGB
+  ## timing driving a DMG picture through the boot ROM's fallback palette. The
+  ## two reference sets do NOT cover the same ROMs (the seven `*2.gb` variants
+  ## are CGB-only, `m3_wx_4/5/6_change` are DMG-only), which is the suite
+  ## telling you where it thinks the models diverge.
   ##
-  ## They look like the obvious free win: they are already inside the
-  ## game-boy-test-roms download, they outnumber the DMG references, and adding
-  ## them would seem to be the only way to arbitrate a CGB-side mid-scanline
-  ## question. They are not native-CGB captures. Every mealybug cart is
-  ## DMG-flagged (header $143 = $00), so a CGB running one is in **CGB
-  ## compatibility mode**, and the suite's own howto spells out the palette that
-  ## device uses: background #000000/#0063C6/#7BFF31/#FFFFFF, objects
-  ## #000000/#943939/#FF8484/#FFFFFF. Measured 2026-08-03, all 47 CGB reference
-  ## images across BOTH revisions contain those six colours and nothing else —
-  ## not one native-CGB colour anywhere in the set.
+  ## The CGB half is the only mid-mode-3 CGB oracle in the tree apart from
+  ## gambatte. Its author's own note is the reason it is worth having: "These
+  ## tests examine very specific PPU behaviour/timings, so produce different
+  ## results on a DMG compared to a CGB." A change that moves the fetcher can
+  ## now be read on both devices instead of one.
   ##
-  ## CGB compatibility mode is a third device this harness does not model (the
-  ## same reason the AGE `ncm*` images and `mbc3-tester-cgb` are skipped), so
-  ## scoring these would add 27 rows that are permanently red and measure a
-  ## machine that does not exist in this tree. Wiring them up anyway scores 0-48
-  ## percent per row, and the reason is not PPU timing at all: forced to CGB, a
-  ## DMG-flagged cart renders an entirely black panel here, because nothing
-  ## installs the compatibility palettes the CGB boot ROM would have written.
-  ##
-  ## dingbat's CGB PPU is not unmeasured, incidentally — gambatte's `cgb04c`
-  ## rows are native-CGB and there are thousands of them.
+  ## `_cgb_d.png` (CPU CGB D) is deliberately not wired: the D revision caches
+  ## the bitplane row differently again, and dingbat models one CGB.
   var tests: seq[TestDef]
   let ppu_dir = mealybug_dir / "ppu"
   if not dirExists(ppu_dir):
@@ -633,16 +635,27 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
     return tests
   for rom in find_roms(ppu_dir, ".gb"):
     let test_name = rom.splitFile().name
-    let expected_png = ppu_dir / test_name & "_dmg_blob.png"
-    if not fileExists(expected_png):
-      continue  # Skip ROMs without DMG expected images
-    tests.add(TestDef(
-      name: "mealybug/" & test_name,
-      rom_path: rom,
-      mode: tmScreenshot,
-      timeout: 120,
-      expected_png: expected_png,
-    ))
+    let dmg_png = ppu_dir / test_name & "_dmg_blob.png"
+    if fileExists(dmg_png):
+      tests.add(TestDef(
+        name: "mealybug/" & test_name,
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 120,
+        expected_png: dmg_png,
+      ))
+    let cgb_png = ppu_dir / test_name & "_cgb_c.png"
+    if fileExists(cgb_png):
+      tests.add(TestDef(
+        name: "mealybug-cgb/" & test_name,
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 120,
+        expected_png: cgb_png,
+        color: true,
+        cgb: true,
+        no_save: true,
+      ))
   tests
 
 proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
@@ -996,19 +1009,22 @@ proc build_shootout_tests(): seq[TestDef] =
   # --- daid's tests ------------------------------------------------------
   # STOP-instruction and speed-switch behaviour, plus a mid-scanline BGP probe.
   #
-  # Only the rows whose device dingbat models are wired up. The shootout also
-  # runs `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` "on GBC",
-  # but all three carts are DMG-flagged ($143 = $00), so that is a CGB in
-  # **compatibility mode** — the same third device the mealybug `_cgb_*` images
-  # capture and that this harness does not model (see build_mealybug_tests).
-  # `ppu_scanline_bgp.gbc.png` is visibly one of those: its only colours are
-  # #0063C6/#7BFF31/#FFFFFF, straight out of the compat background palette.
+  # Only the rows worth gating on are wired up. The shootout also runs
+  # `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` "on GBC", but
+  # all three carts are DMG-flagged ($143 = $00), so that is a CGB in
+  # **compatibility mode** — the same device the mealybug `_cgb_c` references
+  # capture. That device IS modelled here (see `cgb_native` in gb.nim, and
+  # build_mealybug_tests, which scores 27 rows against it), so these three are
+  # skipped as redundant rather than as unmodellable: mealybug covers the same
+  # machine far more precisely. `ppu_scanline_bgp.gbc.png` is visibly a compat
+  # capture — its only colours are #0063C6/#7BFF31/#FFFFFF, straight out of the
+  # compat background palette.
   #
   # `stop_instr` "(GBC)" is the trap worth naming, because it would have gone
-  # in GREEN. Its reference is an all-black frame, and a DMG-flagged cart forced
-  # to CGB renders an all-black frame here whatever it does — nothing installs
-  # the compatibility palettes — so the row passes without STOP being emulated
-  # at all. A gate that cannot fail is worse than no gate.
+  # in GREEN for the wrong reason. Its reference is an all-black frame, which is
+  # also what a blanked panel produces however STOP got there, so the row cannot
+  # distinguish a correct implementation from several wrong ones. A gate that
+  # cannot fail is worse than no gate.
   #
   # `rom_and_ram.gb` is skipped for a different reason: it ships no reference
   # image at all (the shootout classes it INFO, not pass/fail).
