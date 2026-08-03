@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt]
+import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt, sha1]
 import zippy/ziparchives
 import png_reader
 
@@ -155,14 +155,23 @@ proc read_ppm_rgb(path: string): seq[uint8] =
     inc pos
   pixels
 
-proc ensure_rom_download(url, filename: string): string =
-  ## Download a single ROM file if not already cached.
+proc ensure_rom_download(url, filename: string; expect_sha = ""): string =
+  ## Download a single ROM file if not already cached. When expect_sha is given
+  ## the cached file's SHA-1 is checked against it and a mismatch is reported —
+  ## for a URL that tracks "latest" this is what keeps a new upstream build from
+  ## silently re-baselining a whole suite while looking like an emulator change.
   let path = RomCacheDir / filename
-  if fileExists(path):
-    return path
-  echo &"Downloading {filename}..."
-  createDir(RomCacheDir)
-  download_file(url, path)
+  if not fileExists(path):
+    echo &"Downloading {filename}..."
+    createDir(RomCacheDir)
+    download_file(url, path)
+  if expect_sha.len > 0:
+    let got = toLowerAscii($secureHashFile(path))
+    if got != expect_sha:
+      echo &"  !! {filename} is not the build these results were baselined on"
+      echo &"     expected sha1 {expect_sha}"
+      echo &"     got             {got}"
+      echo "     scoring it anyway; rebaseline and update the constant if this is intended"
   path
 
 proc ensure_png_download(url, filename: string): string =
@@ -1027,26 +1036,29 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     detail: var seq[MgbaSuiteDetail];
                     bios_path: string = ""): SuiteResults =
   echo &"\n=== GBA - mGBA Test Suite ==="
-  # The pinned release. v1.0 predates two upstream fixture fixes and is built
-  # with a modern devkitARM, so eight of its ten Misc rows are unpassable by
-  # ANY emulator — see "The pinned suite ROM has two known-stale rows" in
-  # tests/README.md. mattrbeck/mgba-suite-auto's master already carries both
-  # fixes (mgba-emu/suite@8c97f2c9 vu32 dmaPrefetch, @a58437f3 re-measured
-  # H-blank constants) plus four newer upstream tests.
+  # The suite ROM tracks mattrbeck/mgba-suite-auto's LATEST release rather than
+  # a pinned tag, at the maintainer's request. That URL is a moving target, so
+  # the sha1 below is what tests/results_mgba_suite.md was baselined against
+  # and a mismatch is reported loudly — otherwise a new upstream release would
+  # silently re-baseline the whole section and look like an emulator change.
+  # It is a warning, not a failure: the runner still scores the ROM it got.
   #
-  # TO SWITCH once a v1.1 release exists on that repo: change MgbaSuiteRelease
-  # to "v1.1" and bump `suite1.0` to `suite1.1` in the rom-cache `key:` in
-  # .github/workflows/test.yml (that key is exact-match, so a stale key would
-  # serve the OLD ROM from cache and the change would look like a no-op).
-  # Rebaselining tests/results.md and tests/results_mgba_suite.md is part of
-  # the same commit: the row COUNT changes (DMA 1256 -> 1244 as
-  # mgba-emu/suite@2a8eca1 de-flaked two DMA0 wrap-around tests, Misc 10 -> 12
-  # as @fbe6156/@aac98dc add "DMA count latching"), and section totals move.
-  const MgbaSuiteRelease = "v1.0"
+  # When it does move, rebaselining is part of the same commit as the bump
+  # here, and the row COUNT can change as well as the scores (going from v1.0
+  # to this build, DMA went 1256 -> 1244 as two DMA0 wrap-around tests were
+  # de-flaked, and Misc 10 -> 12 as "DMA count latching" was added). Also bump
+  # `suite<n>` in the rom-cache `key:` in .github/workflows/test.yml — that key
+  # is exact-match, so a stale key serves the OLD ROM from cache and the change
+  # looks like a no-op.
+  #
+  # Note the Misc "H-blank bit start" rows are calibrated against the compiler
+  # that built the ROM: they compare measurements against constants upstream
+  # re-measured for one specific codegen, so a rebuild with a different
+  # toolchain can make them unpassable for any emulator. See tests/README.md.
+  const MgbaSuiteSha1 = "00480cf1d95de6236ddcbf7026fc6e11c384528a"
   let rom_path = ensure_rom_download(
-    "https://github.com/mattrbeck/mgba-suite-auto/releases/download/" &
-      MgbaSuiteRelease & "/suite.gba",
-    "mgba-suite.gba")
+    "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
+    "mgba-suite.gba", MgbaSuiteSha1)
   var cmd = &"{harness.quoteShell} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
   if bios_path.len > 0:
     cmd.add(&" --bios={bios_path.quoteShell}")

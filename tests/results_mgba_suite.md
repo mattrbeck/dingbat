@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-08-03 07:44:53*
+*Generated: 2026-08-03 11:03:07*
 
 ## Memory tests
 
@@ -49,9 +49,13 @@ All tests passed.
 | Short DMA (32/ROM to ROM) ARM/ROM P.S | 137 | 138 |
 | Short DMA (32/ROM to ROM) ARM/ROM PNS | 136 | 137 |
 
-## Timer count-up tests
+## Timer count-up tests (935/936 passed)
 
-All tests passed.
+935/936 tests passed, 1 failed:
+
+| Test | Actual | Expected |
+|------|--------|----------|
+| 0b, 0x000C 1xv 1d 4i | FFFE | FFFF |
 
 ## Timer IRQ tests
 
@@ -85,24 +89,23 @@ All tests passed.
 
 All tests passed.
 
-## Misc. edge case tests (1/10 passed)
+## Misc. edge case tests (4/12 passed)
 
-1/10 tests passed, 9 failed:
+4/12 tests passed, 8 failed:
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| DMA Prefetch Break | 0x10002A64 | 0x10002AA4 |
-| DMA Prefetch Read | 0xDEAD0000 | 0x00000011 |
-| H-blank bit start Hblank | 0x000004D1 | 0x000004D0 |
-| H-blank bit start Flip 1 | 0x00000085 | 0x0000009F |
-| H-blank bit start Flip 2 | 0x000003EC | 0x000003D3 |
-| H-blank bit start Flip 3 | 0x000000E4 | 0x000000EE |
-| H-blank bit start Flip 4 | 0x000003EC | 0x000003E3 |
-| H-blank bit start Flip 5 | 0x000000E4 | 0x000000FD |
-| H-blank bit start Flip 6 | 0x000003F5 | 0x000003E0 |
+| DMA Prefetch Break | 0x10002A94 | 0x10002478 |
+| H-blank bit start Hblank | 0x000004D0 | 0x000004D3 |
+| H-blank bit start Flip 1 | 0x00000087 | 0x00000092 |
+| H-blank bit start Flip 2 | 0x000003EC | 0x000003DD |
+| H-blank bit start Flip 3 | 0x000000E5 | 0x000000E4 |
+| H-blank bit start Flip 4 | 0x000003EB | 0x000003EC |
+| H-blank bit start Flip 5 | 0x000000E3 | 0x000000F4 |
+| H-blank bit start Flip 6 | 0x000003F3 | 0x000003E0 |
 
 ## Summary
 
-- **Total:** 7008
-- **Pass:** 6967
+- **Total:** 6998
+- **Pass:** 6957
 - **Fail:** 41
