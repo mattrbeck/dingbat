@@ -18,6 +18,94 @@ const STAT_READ_LAG* {.intdefine.} = 3
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
 const STAT_READ_HOLD* = STAT_READ_LAG != 3
 
+# ---- CGB per-register PPU write latency -------------------------------------
+#
+# How many dots into its own M-cycle a CPU write to a pipeline register lands
+# on CGB, over and above where DMG puts it. Here rather than next to their
+# write-up in memory.nim only because the GbMemory fields they gate are in the
+# type block below; the mechanism, what it is not, and the sources cross-checked
+# are all at mem_tick_ppu_latched.
+#
+# DMG is the zero of this scale, not the origin: dingbat commits a write's byte
+# at the top of its M-cycle (see mem_write) and every DMG family that brackets
+# one of these already agrees with that, so what is modelled here is the CGB
+# *delta* and nothing else -- which makes it invariant to whatever constant
+# offset dingbat's dot grid carries against anyone else's.
+#
+# **All six ship at 0, which compiles the mechanism and both of its fields out,
+# and the reason is a measurement.** The CGB PPU really does take these writes
+# late -- gambatte's video.cpp carries exactly these six numbers and SameBoy's
+# DMG display loop carries the matching extra step -- but every one of them is
+# refused by this tree today. Whole gambatte suite per setting, one build each,
+# baseline 3561/5005 (2026-08-03):
+#
+#   setting                                     total   what moved
+#   (all 0, the control)                         3561   nothing; row for row main
+#   CGB_WX_LATENCY=1                             3560   window -1
+#   CGB_WY_LATENCY=1                             3561   nothing at all
+#   CGB_WY_LATCH_LATENCY=2                       3561   nothing at all
+#   CGB_WY_LATCH_LATENCY=4                       3560   window -1
+#   CGB_SCROLL_LATENCY=1                         3560   scy -1
+#   CGB_SCROLL_LATENCY=2                         3551   scy -6, scx_during_m3 -3,
+#                                                       sprites -1, enable_display +1 -1
+#   CGB_SCROLL_LATENCY=2, CAP=1                  3559   enable_display +1 -1,
+#                                                       scx_during_m3 -1, scy -1
+#   CGB_LCDC_LATENCY=1                           3557   window -3, bgtiledata -1
+#   CGB_LCDC_LATENCY=2 (tdsel 1)                 3553   window -5, sprites -2,
+#                                                       bgtiledata -1
+#   all six at gambatte's values, CAP=1          3553   window -5, scy -1,
+#                                                       scx_during_m3 -1,
+#                                                       bgtiledata -1, e_d +1 -1
+#   a UNIFORM 4 on all six (the phase model)     3539   window -9+1, scy -6,
+#                                                       sprites -4+1, scx_during_m3 -4
+#
+# Every moved row is a `[cgb]` row -- the DMG side is untouched, as it must be --
+# and Mealybug and GBMicrotest cannot arbitrate at all, because both are scored
+# against DMG references only in this tree. gambatte is the whole instrument.
+#
+# ---- Why each value is refused, family by family ---------------------------
+#  * SCROLL. The one clean, DMG-neutral, per-device row in the tree that a
+#    scroll latency fixes is enable_display/ly0_late_scx7_m3stat_scx0_274, whose
+#    DMG sibling expects $87 and whose CGB row expects $84; at 2 dots dingbat
+#    gets both right. The SAME family's _scx3_17 row expects $87 on BOTH devices
+#    and 2 dots takes it to $84. One register, one latency, and the family
+#    brackets it above 1 and below 2 -- i.e. it does not bracket it, and the
+#    residual deciding one of the two rows is elsewhere. Its _scx1 rows are
+#    already red on both devices, which is where that residual shows.
+#  * LCDC. All five window rows it costs are late_disable / late_reenable rows.
+#    Those are the family SameBoy gives a CGB-ONLY fetcher-abort path (a window
+#    disable part way through the fetch aborts it), which moves them the other
+#    way; the +2 dots is not separable from the abort here, and adding it alone
+#    is strictly worse. Implement the abort first, then re-run this table.
+#  * WX / WY / the WY latch. Traced with -d:gb_win_trace, the window/arg
+#    late_wy_* rows this was expected to buy are not decided by the latch dot at
+#    all: in late_wy_FFto2_ly2_3 the WY write lands on dot 93 of line 2 and the
+#    window starts on dot 92 on BOTH devices -- the write is already past the
+#    sample. What differs is coarser, one whole FRAME: dingbat's CGB run reaches
+#    the ROM's vblank setup a frame before its DMG run does. Until that is
+#    understood no register latency can show up in this family, which is most of
+#    the 42 dual-expectation window ROMs.
+const CGB_WX_LATENCY*         {.intdefine.} = 0
+const CGB_WY_LATENCY*         {.intdefine.} = 0
+const CGB_SCROLL_LATENCY*     {.intdefine.} = 0
+const CGB_LCDC_LATENCY*       {.intdefine.} = 0
+const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
+const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const CGB_LATENCY_CAP*        {.intdefine.} = 1
+  ## Dots at the end of the M-cycle no latency may reach into. Inert while the
+  ## six above are 0. Only DOUBLE SPEED can tell 0 from 1 -- its M-cycle is two
+  ## dots long, so a 2-dot latency either lands on the boundary (0) or one dot
+  ## short of it (1) -- and it is worth 8 rows: at CGB_SCROLL_LATENCY=2 the
+  ## uncapped form is 3551 and the capped one 3559, the whole difference being
+  ## `_ds_` rows in scy/scx_during_m3/sprites. Those rows are the CGB
+  ## CPU-to-PPU phase axis (see the lcd_offset note at mem_tick_ppu_latched),
+  ## not this one, so the cap is what keeps a register latency from being
+  ## scored against them.
+const CGB_LCDC_LATENCY_ANY* = CGB_LCDC_LATENCY != 0 or CGB_LCDC_TDSEL_LATENCY != 0
+const CGB_WY_LATENCY_ANY*   = CGB_WY_LATENCY != 0 or CGB_WY_LATCH_LATENCY != 0
+const CGB_WRITE_LATENCY_ANY* = CGB_WX_LATENCY != 0 or CGB_SCROLL_LATENCY != 0 or
+                               CGB_LCDC_LATENCY_ANY or CGB_WY_LATENCY_ANY
+
 # ---- The 2 dots at the mode 3 -> 0 edge, and the three ways to spend them ---
 #
 # Dots the first and second line after an LCD enable are short of a normal 456.
@@ -660,6 +748,13 @@ type
     # across an instruction boundary, so it is not serialized.
     deferred_reg*:         uint16
     deferred_val*:         uint8
+    when CGB_WRITE_LATENCY_ANY:
+      # The other direction: a CGB pipeline-register store that lands PART WAY
+      # THROUGH this M-cycle's PPU dots rather than at either end of them. Same
+      # one-slot, drained-before-refilled discipline as the pair above, and for
+      # the same reason. 0 = none. See mem_tick_ppu_latched.
+      pipe_reg*:           uint16
+      pipe_val*:           uint8
     ff72*, ff73*, ff74*, ff75*: uint8
     dma*:                  uint8
     current_dma_source*:   uint16

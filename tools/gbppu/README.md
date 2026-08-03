@@ -30,6 +30,31 @@ subdirectory plus a per-row file. Scoring one family with `gamscore.sh` says
 whether a change worked; this says what *else* it moved, which for a
 mid-scanline change is the question that actually decides it.
 
+## A family's flip point, per device
+
+    python3 tools/gbppu/famflip.py /tmp/g_base.txt 'window/late_disable*'
+
+Collapses a `gamall.sh` row file into one line per family per device: the
+expected sequence over the family's `_1/_2/_3…` steps, what this build
+produced, and where they differ. A step is one CPU M-cycle, so the step the
+EXPECTED value flips on is the measurement and the step dingbat's flips on is
+the error — in M-cycles, with the DMG and CGB rows side by side. That side-by
+side is the point: a family whose two devices flip on different steps is one
+of the ~42 `window` ROMs with genuinely per-model behaviour, and the sign of
+the difference says which way the model has to move.
+
+## Sweeping the CGB write latencies
+
+    tools/gbppu/cgbsweep.sh scx2 /tmp/g_base.txt -d:CGB_SCROLL_LATENCY=2
+
+One build and one whole-suite score per setting of the `CGB_*_LATENCY`
+constants (see `CGB_WX_LATENCY` in `gb/gb.nim`), printing only the
+subdirectories that moved against a baseline row file. Every constant is
+forced to 0 first, so the flags on the command line are the whole setting and
+`tools/gbppu/cgbsweep.sh zero <baseline>` is the control — it must reproduce
+the baseline row for row, which is what says the mechanism is free when it is
+off. ~40 s per cell.
+
 ## GBMicrotest without a runner pass
 
     tools/gbppu/mtscore.sh win
@@ -46,8 +71,16 @@ the fetch-phase note in `fifo_ppu.nim`), so score both before concluding.
     DT=./dt_win python3 tools/gbppu/windot.py 'window/arg/late_wy_FFto2_ly2_*'
 
 `-d:gb_win_trace` prints every WY/WX/LCDC write with the line and the dot
-inside it, plus each window start and each mode 3 end. `windot.py` puts that
-next to the filename's expected value per device. A gambatte window family is
+inside it, plus each window start (`WINSTART`), each per-frame WY latch
+(`WYLATCH`, the `LY == WY` level at the top of a line) and each mode 3 end.
+`windot.py` puts that next to the filename's expected value per device.
+Running one ROM under both devices and diffing the trace is how a window row
+that differs per model gets attributed: if the write dot and the window-start
+dot are the same on both, whatever decides the row is NOT in this file. (That
+is the case for `window/arg/late_wy_FFto2_ly2_3`, where both devices write WY
+on dot 93 of line 2 and start the window on dot 92 — the two runs diverge a
+whole frame earlier, in how long the ROM's vblank wait takes.)
+A gambatte window family is
 one ROM with one write moved by one M-cycle, so seeing the dot turns the family
 into an equation for the dot the PPU samples that register on — that is how
 `83 + WX + (SCX and 7)` fell out of the `late_wy_*` families and placed the

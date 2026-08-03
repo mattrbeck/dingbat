@@ -52,6 +52,15 @@ proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
   ## not a CPU M-cycle at all call this themselves. One flag rather than a per
   ## consumer test so the write path pays for it once.
   mem.write_deferred = false
+  when CGB_WRITE_LATENCY_ANY:
+    # A parked pipeline store the M-cycle's dots never got to (a post-boot
+    # register write, a cheat poke -- neither is an M-cycle). mem_write's own
+    # tail has already consumed the slot by the time it reaches here.
+    if mem.pipe_reg != 0:
+      let preg = int(mem.pipe_reg)
+      let pval = mem.pipe_val
+      mem.pipe_reg = 0
+      ppu_apply_pipeline_write(gb.ppu, gb, preg, pval)
   if mem.deferred_reg != 0:
     let reg = int(mem.deferred_reg)
     let v   = mem.deferred_val
@@ -186,6 +195,101 @@ proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; i
   ## +0.9% of retired instructions on both a DMG and a CGB title.
   mem_tick_bus(mem, gb, cycles, from_cpu)
   mem_tick_ppu(mem, gb, cycles, ignore_speed)
+
+when CGB_WRITE_LATENCY_ANY:
+  # ---- CGB per-register write latency ---------------------------------------
+  #
+  # A CPU write to a pipeline register does not reach the CGB PPU on the same
+  # dot it reaches the DMG one. dingbat commits a write's byte at the top of its
+  # M-cycle (mem_write) and every DMG family that brackets one of these agrees
+  # with that; on CGB each register is its OWN number of dots later, and the
+  # M-cycle's dots are therefore run in pieces with the store dropped in between
+  # them. **Every one of those numbers ships at 0 -- the measured table saying
+  # why, and what has to be understood before they can be turned up, is at
+  # CGB_WX_LATENCY in gb.nim.** This is the mechanism and the derivation; the
+  # sweep that reads out any setting of it in ~40 s is tools/gbppu/cgbsweep.sh,
+  # and tools/gbppu/famflip.py turns a family into its flip point per device.
+  #
+  # ---- Why per-register, and not one phase offset ---------------------------
+  # The tempting model is a single CPU-to-PPU phase difference between the two
+  # models. Two gambatte families with the IDENTICAL shape refuse it outright.
+  # window/late_disable_{0,1,2} expects out0,out3,out3 on DMG and out0,out0,out3
+  # on CGB -- the flip is one M-cycle LATER on CGB -- while
+  # window/late_disable_early_scx03_wx12_{1,2,3} expects out0,out0,out3 on DMG
+  # and out0,out3,out3 on CGB, one M-cycle EARLIER. One offset cannot move two
+  # families of the same shape in opposite directions; independent per-register
+  # latencies can, and the second family writes SCX and WX in the line where the
+  # first writes only LCDC. A uniform offset was also measured rather than
+  # argued: a flat 4 dots on all six takes gambatte 3561 -> 3539.
+  #
+  # Pan Docs does not document any of this -- it describes mode 3's length and
+  # the window's 6-dot penalty with no DMG/CGB distinction at all -- so the
+  # cross-checks here are gambatte's LCD::wxChange/wyChange/scxChange/scyChange/
+  # lcdcChange (libgambatte/src/video.cpp), whose `+ ppu_.cgb()` and
+  # `+ 2 * ppu_.cgb()` terms are the same six numbers, and SameBoy, whose DMG
+  # display loop carries one extra PPU step the CGB one does not
+  # (Core/display.c, the LCD-enable path) -- i.e. its DMG PPU also samples
+  # earlier. Neither was transcribed, and neither is treated as an oracle: the
+  # table in gb.nim is what each constant is scored against, and it is what
+  # holds all six at 0.
+  #
+  # ---- What this is NOT ------------------------------------------------------
+  # These are sub-M-cycle deltas. They only look like whole M-cycles because
+  # they land on the CPU's 4-dot write grid, and the one genuine full-M-cycle
+  # term is CGB_WY_LATCH_LATENCY. Nothing here is the `_ds_` axis: CGB's
+  # CPU-to-PPU phase really is variable across 0..3 dots through a KEY1 speed
+  # switch (which is what gambatte's CGB-only lcd_offset family enumerates), and
+  # that is a different quantity from a register's own latency. The double-speed
+  # M-cycle is only 2 dots long, so CGB_LATENCY_CAP is what stops a 2-dot
+  # latency from being spent as a whole double-speed M-cycle and scored against
+  # those rows.
+  #
+  # Two further model-specific window behaviours live next to this one and are
+  # deliberately NOT here, because each is its own mechanism rather than a
+  # latency: SameBoy's CGB-only fetcher-abort on a late window disable (which is
+  # what the late_disable families want, and which an LCDC latency alone makes
+  # worse), and mode 3 starting on dot 84 rather than 83 on CGB with the pixel
+  # pipeline compensating by one dot (gambatte ppu.cpp) -- that one moves the
+  # sample point for EVERY register at once and in the opposite direction, so it
+  # has to land before these constants can be swept honestly.
+  proc mem_tick_ppu_latched(mem: GbMemory; gb: GB) {.noinline.} =
+    ## This M-cycle's PPU dots, with a parked pipeline store landing part way
+    ## through them. Cold: one CPU write in some hundreds reaches here.
+    let reg = int(mem.pipe_reg)
+    let val = mem.pipe_val
+    mem.pipe_reg = 0
+    # 4 dots per normal-speed M-cycle, 2 per double-speed one (Pan Docs,
+    # "Dots"). A latency past the end of the M-cycle saturates at `cap`; the
+    # dots past that point belong to the next write's M-cycle, which is a
+    # different quantity (see CGB_LATENCY_CAP).
+    let mdots = 4 shr mem.current_speed
+    let cap = mdots - CGB_LATENCY_CAP
+    var done = 0
+    template run(upto: int) =
+      let n = min(upto, cap) - done
+      if n > 0:
+        mem_tick_ppu(mem, gb, n, ignore_speed = true)
+        done += n
+    template rest() =
+      let n = mdots - done
+      if n > 0: mem_tick_ppu(mem, gb, n, ignore_speed = true)
+    case reg
+    of 0xFF40:
+      run(CGB_LCDC_TDSEL_LATENCY); ppu_store_lcdc_tdsel(gb.ppu, gb, val)
+      run(CGB_LCDC_LATENCY);       ppu_store_lcdc(gb.ppu, gb, val)
+    of 0xFF42:
+      run(CGB_SCROLL_LATENCY); ppu_store_scy(gb.ppu, gb, val)
+    of 0xFF43:
+      run(CGB_SCROLL_LATENCY); ppu_store_scx(gb.ppu, gb, val)
+    of 0xFF4A:
+      run(CGB_WY_LATENCY)
+      ppu_store_wy(gb.ppu, gb, val)
+      run(CGB_WY_LATCH_LATENCY - int(mem.current_speed))
+      ppu_latch_wy(gb.ppu, gb, val)
+    of 0xFF4B:
+      run(CGB_WX_LATENCY); ppu_store_wx(gb.ppu, gb, val)
+    else: discard
+    rest()
 
 proc mem_reset_cycle_count*(mem: GbMemory) =
   mem.cycle_tick_count = 0
@@ -443,6 +547,19 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   # No collision, so this is an ordinary CPU write and still owes both locks.
   mem_write_open(mem, gb, idx, val)
 
+proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
+  ## The end of a CPU write that left something for the M-cycle to finish: a
+  ## CGB pipeline store that lands part way through the dots, and then whatever
+  ## belongs on the boundary after them. Off the hot path behind the single
+  ## `write_deferred` test mem_write already paid for, so an ordinary write
+  ## costs no more than it did before either of them existed.
+  when CGB_WRITE_LATENCY_ANY:
+    if mem.pipe_reg != 0: mem_tick_ppu_latched(mem, gb)
+    else:                 mem_tick_ppu(mem, gb, 4)
+  else:
+    mem_tick_ppu(mem, gb, 4)
+  mem_flush_deferred(mem, gb)
+
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   ## A CPU write commits at the START of its M-cycle, so the byte is applied
   ## BEFORE that M-cycle's PPU dots, not after them.
@@ -466,11 +583,12 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     mem_write_busy(mem, gb, idx, val)
   else:
     mem_write_open(mem, gb, idx, val)
-  mem_tick_ppu(mem, gb, 4)
-  # Whatever of this write belongs on the M-cycle boundary rather than at the
-  # byte's own commit point -- an IF store, a STAT interrupt-line edge. One
-  # flag covers both, so the write path pays a single test for it.
-  if mem.write_deferred: mem_flush_deferred(mem, gb)
+  # Whatever of this write does not land where the byte did -- a CGB pipeline
+  # store a dot or two into these dots, an IF store or a STAT interrupt-line
+  # edge on the boundary after them. One flag covers all of it, so the write
+  # path pays a single test and the dots stay inlined on the common side of it.
+  if mem.write_deferred: mem_write_tail(mem, gb)
+  else:                  mem_tick_ppu(mem, gb, 4)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
   # The address bus is 16 bits: a word access at $FFFF reaches $0000 for its

@@ -720,6 +720,8 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # the end of line 153 and gets no window, the other writes it at dot 1 of
   # line 0 and gets one, so a WY of 0 is already latched by dot 1 of line 0.
   elif mode == 2 and ppu.ly == ppu.wy:
+    when defined(gb_win_trace):
+      echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
   when STAT_READ_HOLD:
@@ -828,6 +830,84 @@ proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   gb.memory.deferred_reg = uint16(idx)
   gb.memory.deferred_val = val
   gb.memory.write_deferred = true
+
+# ---- The pipeline registers' stores, split out so a CGB write can land late --
+#
+# Each of these is the whole of what a write to that register does to the pixel
+# pipeline, and nothing else: no STAT edge, no LCD-enable restart, nothing the
+# interrupt machinery reads. That is what makes them safe to move by a dot or
+# two on their own (see mem_tick_ppu_latched); the parts that do NOT move stay
+# in ppu_write where they always were.
+proc ppu_store_scy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ppu.scy = val
+
+proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ppu.scx = val
+
+proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ppu.wx = val
+  if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+
+proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ppu.wy = val
+
+proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ## The other half of the level comparator described at `mode_flag=`: a write
+  ## that makes WY equal the line being drawn latches the window for the rest
+  ## of the frame, wherever in the line it lands. Whether it is in time for
+  ## THIS line is not decided here -- the window's own WX equality (see
+  ## tick_shifter) reads the latch on its own dot and a write past that dot
+  ## simply misses it, which is what gambatte's arg/late_wy_* families
+  ## measure. V-Blank is excluded because the latch is cleared entering it and
+  ## a match on lines 144..153 would carry into the next frame.
+  ##
+  ## Split from ppu_store_wy because the two need not happen on the same dot:
+  ## the CGB PPU takes the register and this latch at different latencies (see
+  ## CGB_WY_LATENCY / CGB_WY_LATCH_LATENCY, both 0 today). `ppu.ly` is read here
+  ## rather than passed in for exactly that reason -- the latch samples the line
+  ## it lands on, not the one the byte was written on.
+  if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
+    ppu.window_trigger = true
+    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+
+proc ppu_store_lcdc_tdsel*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ## LCDC.4 alone: gambatte's lcdcChange lands the tile-data-select bit one dot
+  ## ahead of the other six on CGB, and this is the store that expresses it.
+  ## Unreachable while CGB_LCDC_TDSEL_LATENCY is 0, which is where it ships.
+  ppu.lcd_control = (ppu.lcd_control and not 0x10'u8) or (val and 0x10'u8)
+
+proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  ppu.lcd_control = val
+  if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+
+when CGB_WRITE_LATENCY_ANY:
+  proc ppu_apply_pipeline_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+    ## Every stage of a parked store at once, for the callers that have no dots
+    ## left to spread them over.
+    case idx
+    of 0xFF40: ppu_store_lcdc(ppu, gb, val)
+    of 0xFF42: ppu_store_scy(ppu, gb, val)
+    of 0xFF43: ppu_store_scx(ppu, gb, val)
+    of 0xFF4A:
+      ppu_store_wy(ppu, gb, val)
+      ppu_latch_wy(ppu, gb, val)
+    of 0xFF4B: ppu_store_wx(ppu, gb, val)
+    else: discard
+
+  proc ppu_park_pipeline_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+    ## Park a CGB pipeline-register store for mem_write to apply part way
+    ## through this M-cycle's PPU dots. Same drain-before-refill discipline as
+    ## ppu_defer_machinery_write, and for the same reason: the bus path fills
+    ## the slot once per M-cycle, but the write_byte callers that are not an
+    ## M-cycle at all (the post-boot register table, cheat pokes) can fill it
+    ## twice, and none of them may lose a store. Those callers have no dots for
+    ## the latency to run in either, so mem_flush_deferred -- which each of them
+    ## already calls -- applies whatever is left in the slot outright.
+    if gb.memory.pipe_reg != 0:
+      ppu_apply_pipeline_write(ppu, gb, int(gb.memory.pipe_reg), gb.memory.pipe_val)
+    gb.memory.pipe_reg = uint16(idx)
+    gb.memory.pipe_val = val
+    gb.memory.write_deferred = true
 
 # Sprite helpers
 proc sprite_on_line*(s: GbSprite; line: uint8; sprite_height: int): bool =
@@ -1016,8 +1096,16 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when defined(gb_win_trace):
       echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
-    ppu.lcd_control = val
-    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    # Only the six bits the pixel pipeline reads are late on CGB; the enable
+    # bit is not, because the branch above has already restarted the mode
+    # machinery off it and the store has to agree with that on the same dot.
+    when CGB_LCDC_LATENCY_ANY:
+      if gb.cgb_enabled and ((ppu.lcd_control xor val) and 0x80'u8) == 0:
+        ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:
+        ppu_store_lcdc(ppu, gb, val)
+    else:
+      ppu_store_lcdc(ppu, gb, val)
     # Deferred to the end of this M-cycle -- see GbPpu.stat_write_pending and
     # the consume in mem_write. The LCD-enable branch above is NOT deferred:
     # that one restarts the mode machinery itself rather than feeding it.
@@ -1030,7 +1118,12 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # value waits for the M-cycle boundary.
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
     ppu_defer_machinery_write(ppu, gb, idx, val)
-  of 0xFF42: ppu.scy = val
+  of 0xFF42:
+    when CGB_SCROLL_LATENCY != 0:
+      if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:              ppu_store_scy(ppu, gb, val)
+    else:
+      ppu_store_scy(ppu, gb, val)
   of 0xFF43:
     when defined(gb_m3_trace):
       # Same instrument as the LCDC line above, for the scroll register: which
@@ -1038,7 +1131,11 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # latch against it (see fifo_sample_smooth_scroll's caller).
       echo "SCX ly=", ppu.ly, " dot=", ppu.cycle_counter,
            " mode=", (ppu.lcd_status and 3), " old=", ppu.scx, " new=", val
-    ppu.scx = val
+    when CGB_SCROLL_LATENCY != 0:
+      if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:              ppu_store_scx(ppu, gb, val)
+    else:
+      ppu_store_scx(ppu, gb, val)
   of 0xFF44: discard  # read-only
   of 0xFF45:
     # NOT deferred, unlike STAT and FF55 next door: LYC is the LY comparator's
@@ -1058,24 +1155,24 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when defined(gb_win_trace):
       echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wy, " new=", val
-    ppu.wy = val
-    # The other half of the level comparator described at `mode_flag=`: a write
-    # that makes WY equal the line being drawn latches the window for the rest
-    # of the frame, wherever in the line it lands. Whether it is in time for
-    # THIS line is not decided here -- the window's own WX equality (see
-    # tick_shifter) reads the latch on its own dot and a write past that dot
-    # simply misses it, which is what gambatte's arg/late_wy_* families
-    # measure. V-Blank is excluded because the latch is cleared entering it and
-    # a match on lines 144..153 would carry into the next frame.
-    if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
-      ppu.window_trigger = true
-      if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    when CGB_WY_LATENCY_ANY:
+      if gb.cgb_enabled:
+        ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:
+        ppu_store_wy(ppu, gb, val)
+        ppu_latch_wy(ppu, gb, val)
+    else:
+      ppu_store_wy(ppu, gb, val)
+      ppu_latch_wy(ppu, gb, val)
   of 0xFF4B:
     when defined(gb_win_trace):
       echo "WX ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wx, " new=", val
-    ppu.wx = val
-    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    when CGB_WX_LATENCY != 0:
+      if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:              ppu_store_wx(ppu, gb, val)
+    else:
+      ppu_store_wx(ppu, gb, val)
   of 0xFF4F:
     if gb.cgb_enabled: ppu.vram_bank = val and 0x1
   of 0xFF51:
