@@ -113,3 +113,11 @@ web/bench/*.state
 web/bench/*.sav
 dingbat_bench_d
 dingbat_bench_orig
+
+# Ad-hoc sweep binaries: building one harness per value of an intdefine is the
+# standard way to measure a constant here (see tools/gbppu/cgbsweep.sh), and
+# `git add -A` will happily commit two dozen 400 KB binaries if they are not
+# ignored. That has happened once.
+/dt_*
+/dtr_*
+web/*.gba
