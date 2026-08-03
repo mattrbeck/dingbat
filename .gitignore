@@ -93,6 +93,9 @@ dingbat_bench_hle
 tools/romfuzz/dingbat_nav
 tools/romfuzz/mgba_runner
 tools/romfuzz/nba_runner
+# built by tools/gbdiff/build.sh against a docboy checkout outside this repo
+tools/gbdiff/docboy_gb_runner_dmg
+tools/gbdiff/docboy_gb_runner_cgb
 __pycache__/
 
 # never commit ROM sweep artifacts (reports may reference ROM provenance; ROMs are copyrighted)

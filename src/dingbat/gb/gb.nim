@@ -18,6 +18,42 @@ const STAT_READ_LAG* {.intdefine.} = 3
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
 const STAT_READ_HOLD* = STAT_READ_LAG != 3
 
+# Fixed setup cost of a CGB general-purpose VRAM DMA, in CPU M-cycles, charged
+# once per transfer on top of the 8 M-cycles per $10 bytes Pan Docs specifies
+# for the blocks themselves (see ppu_start_hdma).
+#
+# **It ships at 0, and the point of the knob is to record that no value works.**
+#
+# gambatte's gdma_cycles_* family says dingbat is short here. Each pair differs
+# by a single inserted NOP ahead of `LDH A,($41)` -- cmp -l of
+# gdma_cycles_long_1 against _2 is a one-byte $00 insertion -- so the two
+# members read STAT one M-cycle apart, and their expected values, 3 then 0, put
+# the mode 3 -> 0 edge between them. dingbat answers 3 to BOTH members of all
+# nine pairs, i.e. it reaches the read short of where the hardware is.
+#
+# A fixed setup cost is the obvious explanation and it is WRONG.
+# tools/gbdiff/gdma_sweep.sh rebuilds at each setting and reads out all nine
+# pairs; the whole family is 18 rows, and every setting leaves some of them
+# failing:
+#
+#     0  9/18   every `_2` member short
+#     1  9/18   unchanged -- one M-cycle does not reach any flip point
+#     2  13/18  best, and still contradictory: long_scx{2,3,5}_2 are STILL
+#                short, while 2xshort_ds_1 and 2xshort_scx5_ds_1 have already
+#                gone PAST their edge and now answer 0 where 3 is wanted
+#     3  12/18  the `_1` members break widely
+#     4+ 9/18   every `_1` member past its edge
+#
+# There is no value where every pair sits on the right side of its own flip
+# point, and at the best one the residual tracks SCX: long_scx2_2, long_scx3_2
+# and long_scx5_2 want more than plain long_2 does. A constant cannot depend on
+# SCX, so the missing time is not setup -- it is something about where the
+# transfer leaves the PPU relative to the mode 3 -> 0 edge, and SCX moves that
+# edge. Settling it needs a model, not a number, so nothing is charged until
+# there is one. Turning this up to 2 would buy 4 net rows by breaking 2 that
+# pass today; that is fitting, not measuring.
+const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
+
 # ---- CGB per-register PPU write latency -------------------------------------
 #
 # How many dots into its own M-cycle a CPU write to a pipeline register lands

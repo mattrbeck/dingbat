@@ -798,6 +798,11 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     if not ppu.hdma_active:
       for bn in 0 .. int(ppu.hdma5):
         ppu_copy_hdma_block(ppu, gb, bn)
+      # GDMA is short of the hardware by some amount here, and SHIPS AT ZERO
+      # because no constant is that amount. See GDMA_SETUP_MCYCLES in gb.nim
+      # for the measurement that rejected every setting of it.
+      when GDMA_SETUP_MCYCLES != 0:
+        mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
     ppu.hdma_active = false
 
 # ---- Which half of a CPU write moves, and which does not --------------------
@@ -1013,10 +1018,14 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFF4A: ppu.wy
   of 0xFF4B: ppu.wx
   of 0xFF4F: (if gb.cgb_enabled: 0xFE'u8 or ppu.vram_bank else: 0xFF'u8)
-  of 0xFF51: (if gb.cgb_native: ppu.hdma1 else: 0xFF'u8)
-  of 0xFF52: (if gb.cgb_native: ppu.hdma2 else: 0xFF'u8)
-  of 0xFF53: (if gb.cgb_native: ppu.hdma3 else: 0xFF'u8)
-  of 0xFF54: (if gb.cgb_native: ppu.hdma4 else: 0xFF'u8)
+  # HDMA1-4 are write-only ("VRAM DMA source (high, low) [write-only]",
+  # "VRAM DMA destination (high, low) [write-only]" -- Pan Docs, CGB
+  # Registers). Pan Docs does not say what a read returns; gambatte's
+  # ff51_bits/ff52_bits/ff53_bits/ff54_bits pin it, all four expecting FF on
+  # cgb04c, i.e. not one bit of any of the four is readable. The written
+  # values are still kept, because ppu_start_hdma builds the transfer
+  # addresses out of them -- they are simply not visible to the CPU.
+  of 0xFF51..0xFF54: 0xFF'u8
   of 0xFF55: (if gb.cgb_native: ppu.hdma5 else: 0xFF'u8)
   of 0xFF68:
     if gb.cgb_enabled:
