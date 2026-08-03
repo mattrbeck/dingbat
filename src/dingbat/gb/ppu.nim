@@ -171,8 +171,12 @@ proc new_ppu_base(cgb: bool): GbPpu =
     cast[ptr uint16](addr result.obj_pram[10])[] = DMG_COLORS[1]
     cast[ptr uint16](addr result.obj_pram[12])[] = DMG_COLORS[2]
     cast[ptr uint16](addr result.obj_pram[14])[] = DMG_COLORS[3]
-  result.hdma1 = 0xFF; result.hdma2 = 0xFF; result.hdma3 = 0xFF
-  result.hdma4 = 0xFF; result.hdma5 = 0xFF
+  # HDMA1-5 all read back as $FF (1-4 are write-only, 5's bit 7 says "no
+  # transfer active"), and the address counters hold the $FF the four registers
+  # would have been written with.
+  result.hdma5    = 0xFF
+  result.hdma_src = 0xFFF0'u16
+  result.hdma_dst = 0xFFF0'u16
   result.ran_bios = cgb
 
 method reset_render_scratch*(ppu: GbPpu) {.base.} =
@@ -692,24 +696,50 @@ proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
     ppu.stat_write_pending = false
     ppu_handle_stat_interrupt(ppu, gb)
 
-proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; block_number: int) =
+proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB): bool =
+  ## One $10-byte block, from wherever the address counters currently stand.
+  ## Returns false if the transfer cannot go on, i.e. the destination counter
+  ## overflowed off the top of the address space.
+  #
+  # "Only bits 12-4 are respected; others are ignored" and "the upper 3 bits are
+  # ignored (destination is always in VRAM)" -- Pan Docs, FF53-FF54. That is a
+  # mask on the address the counter DRIVES, not on the counter: the counter is
+  # a full 16 bits, and gambatte's dma_dst_wrap pair is what separates the two.
+  # Both of its ROMs put the destination at $9FF0 and copy two blocks, and they
+  # differ only in a bit of HDMA3 that the VRAM address cannot see ($DF vs $FF).
+  # The $DF one wraps its second block round to $8000; the $FF one, whose
+  # counter would step off $FFF0, does not transfer it at all -- "if the
+  # transfer's destination address overflows, the transfer stops prematurely".
+  # (What that leaves in the registers is stated as uninvestigated there; this
+  # simply stops, so FF55 reads back as inactive with the length it reached.)
+  #
+  # Both ends are resolved once, before the loop: the block is 16 aligned bytes,
+  # and nothing it does -- a read anywhere, a write inside VRAM -- can reach the
+  # counters. (Re-reading them per byte is also what the per-byte cost of a
+  # heavy HDMA title is made of; this is ~0.15% of Pokemon Crystal.)
+  let src_base = int(ppu.hdma_src)
+  let dst_base = 0x8000 or int(ppu.hdma_dst and 0x1FF0'u16)
   for byte in 0 ..< 0x10:
-    let offset = 0x10 * block_number + byte
-    let src = int(ppu.hdma_src) + offset
-    let dst = int(ppu.hdma_dst) + offset
-    gb.memory.write_byte(gb, dst, gb.memory.read_byte(gb, src))
+    gb.memory.write_byte(gb, dst_base + byte,
+                         gb.memory.read_byte(gb, src_base + byte))
     mem_tick_components(gb.memory, gb, 2, from_cpu = false, ignore_speed = true)
+  # The source is the one that wraps rather than stops (dma/dma_src_wrap copies
+  # its second block from $0000 after the first read $FFF0).
+  ppu.hdma_src = ppu.hdma_src + 0x10
+  let dst_overflow = ppu.hdma_dst == 0xFFF0'u16
+  ppu.hdma_dst = ppu.hdma_dst + 0x10
   ppu.hdma5 = ppu.hdma5 - 1
+  not dst_overflow
 
 proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
   # The block copy ticks the PPU, which can drive another mode change; without
   # this guard a nested transition back into mode 0 re-enters the copy and
   # recurses until the stack overflows.
   if ppu.hdma_copying: return
-  ppu.hdma_copying = true
-  ppu_copy_hdma_block(ppu, gb, int(ppu.hdma_pos))
-  ppu.hdma_pos += 1
-  if ppu.hdma5 == 0xFF: ppu.hdma_active = false
+  ppu.hdma_copying   = true
+  ppu.hdma_block_due = false
+  let may_continue = ppu_copy_hdma_block(ppu, gb)
+  if ppu.hdma5 == 0xFF or not may_continue: ppu.hdma_active = false
   ppu.hdma_copying = false
 
 when STAT_IRQ_SPLIT:
@@ -768,8 +798,23 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # level-triggered step ran a block per tick and never terminated (Kirby
   # Tilt 'n' Tumble crashed the process this way); with the LCD off there are
   # no HBlank periods for an armed transfer to advance on.
+  #
+  # The block is owed to this HBlank, but it is the CPU's bus it takes it on:
+  # "Upon halting the CPU (using the halt instruction), the transfer will also
+  # be halted and will be resumed only when the CPU resumes execution" (Pan
+  # Docs, FF55, citing MagenTests' hblank_vram_dma -- the ROM this tree scores).
+  # So while the CPU is halted the block only becomes DUE, and cpu.tick hands it
+  # the bus at the moment the halt ends -- if the machine is still in the HBlank
+  # that owed it. Leave mode 0 with the CPU still halted and that line's block is
+  # simply not transferred (gambatte dma/hdma_m3halt_m1unhalt_hdma5 halts across
+  # the rest of a frame and finds the length untouched). That "still in mode 0"
+  # is tested where the debt is PAID rather than cleared here on the way out,
+  # which is the same rule -- every mode 0 entered in the meantime would have
+  # re-armed the flag anyway -- and keeps this line, which every mode change in
+  # the machine runs through, exactly the shape it was.
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
-    ppu_step_hdma(ppu, gb)
+    if gb.cpu.halted: ppu.hdma_block_due = true
+    else:             ppu_step_hdma(ppu, gb)
 
 proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
   palette[0] = val and 0x3
@@ -781,28 +826,36 @@ proc ppu_palette_from_array*(palette: array[4, uint8]): uint8 =
   palette[0] or (palette[1] shl 2) or (palette[2] shl 4) or (palette[3] shl 6)
 
 proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
-  ppu.hdma_src = (uint16(ppu.hdma1) shl 8 or uint16(ppu.hdma2)) and 0xFFF0'u16
-  ppu.hdma_dst = 0x8000'u16 + ((uint16(ppu.hdma3) shl 8 or uint16(ppu.hdma4)) and 0x1FF0'u16)
-  ppu.hdma5    = val and 0x7F
+  ## A write to FF55. The length register takes the low 7 bits either way -- it
+  ## is one register, and the write lands in it whether it starts a transfer or
+  ## stops one (same-suite dma/hdma_lcd_off writes $00 to stop a transfer with
+  ## three blocks left and reads back $80, not $82). The address counters are
+  ## NOT reloaded from anywhere: they are already where the last transfer, or
+  ## the last write to FF51-FF54, left them.
+  ppu.hdma5 = val and 0x7F
   if (val and 0x80) != 0:
     ppu.hdma_active = true
-    ppu.hdma_pos    = 0
     # Arming an HBlank transfer while the PPU is *already* in HBlank starts it
     # right away — the edge into mode 0 has passed, so waiting for the next one
     # would lose a block per transfer. With the LCD off the mode reads 0
     # forever, which is why an armed transfer still makes exactly this much
-    # progress and no more.
+    # progress and no more (same-suite dma/hdma_lcd_off: one block copied, the
+    # length down by one, and nothing after that).
     if ppu.mode_flag == 0 or not ppu.lcd_enabled:
       ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
-      for bn in 0 .. int(ppu.hdma5):
-        ppu_copy_hdma_block(ppu, gb, bn)
+      for _ in 0 .. int(ppu.hdma5):
+        if not ppu_copy_hdma_block(ppu, gb): break
       # GDMA is short of the hardware by some amount here, and SHIPS AT ZERO
       # because no constant is that amount. See GDMA_SETUP_MCYCLES in gb.nim
       # for the measurement that rejected every setting of it.
       when GDMA_SETUP_MCYCLES != 0:
         mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
+    else:
+      # Terminating an armed HBlank transfer: the block this HBlank owed it is
+      # owed no longer.
+      ppu.hdma_block_due = false
     ppu.hdma_active = false
 
 # ---- Which half of a CPU write moves, and which does not --------------------
@@ -1022,11 +1075,19 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   # "VRAM DMA destination (high, low) [write-only]" -- Pan Docs, CGB
   # Registers). Pan Docs does not say what a read returns; gambatte's
   # ff51_bits/ff52_bits/ff53_bits/ff54_bits pin it, all four expecting FF on
-  # cgb04c, i.e. not one bit of any of the four is readable. The written
-  # values are still kept, because ppu_start_hdma builds the transfer
-  # addresses out of them -- they are simply not visible to the CPU.
+  # cgb04c, i.e. not one bit of any of the four is readable. What was written
+  # is still *kept* — it is the transfer's address counter — just not visible.
   of 0xFF51..0xFF54: 0xFF'u8
-  of 0xFF55: (if gb.cgb_native: ppu.hdma5 else: 0xFF'u8)
+  # "Reading Bit 7 of FF55 can be used to confirm if the DMA transfer is active
+  # (1=Not Active, 0=Active). This works under any circumstances - after
+  # completion of General Purpose, or HBlank Transfer, and after manually
+  # terminating a HBlank Transfer" -- Pan Docs, FF55. The low 7 bits are the
+  # length register, which a completed transfer has left at $7F (it wrapped
+  # past 0), so a finished transfer still reads the documented $FF.
+  of 0xFF55:
+    if gb.cgb_native:
+      (ppu.hdma5 and 0x7F) or (if ppu.hdma_active: 0x00'u8 else: 0x80'u8)
+    else: 0xFF'u8
   of 0xFF68:
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.auto_increment: 0x80'u8 else: 0'u8) or ppu.palette_index
@@ -1206,14 +1267,22 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # deliberately still on cgb_enabled -- it answers 0xFE either way once the
     # bank is pinned, which is what mooneye misc/bits/unused_hwio-C reads back.
     if gb.cgb_native: ppu.vram_bank = val and 0x1
+  # Each of these edits one byte of the live address counter (see GbPpu's HDMA
+  # fields). The four lower bits of both addresses "will be ignored and treated
+  # as 0" (Pan Docs, FF51-FF54); the destination's upper bits are dropped where
+  # the counter is turned into an address, not here -- see ppu_copy_hdma_block.
   of 0xFF51:
-    if gb.cgb_native: ppu.hdma1 = val
+    if gb.cgb_native:
+      ppu.hdma_src = (uint16(val) shl 8) or (ppu.hdma_src and 0x00F0'u16)
   of 0xFF52:
-    if gb.cgb_native: ppu.hdma2 = val
+    if gb.cgb_native:
+      ppu.hdma_src = (ppu.hdma_src and 0xFF00'u16) or uint16(val and 0xF0)
   of 0xFF53:
-    if gb.cgb_native: ppu.hdma3 = val
+    if gb.cgb_native:
+      ppu.hdma_dst = (uint16(val) shl 8) or (ppu.hdma_dst and 0x00F0'u16)
   of 0xFF54:
-    if gb.cgb_native: ppu.hdma4 = val
+    if gb.cgb_native:
+      ppu.hdma_dst = (ppu.hdma_dst and 0xFF00'u16) or uint16(val and 0xF0)
   of 0xFF55:
     if gb.cgb_native: ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF68:

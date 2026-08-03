@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-03 13:36:23*
+*Generated: 2026-08-03 14:30:23*
 
 ## Game Boy - Blargg
 
@@ -214,7 +214,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 | Test | Result |
 |------|--------|
-| magen/hblank_vram_dma | 👀 0.0% correct (0/23040 pixels; white 0 red 0 green 0 blue 23040 other 0; blue = the operation ran while the CPU was halted) |
+| magen/hblank_vram_dma | 👌 |
 | magen/key0_lock_after_boot | 👌 |
 | magen/mbc_oob_sram_mbc1 | 👌 |
 | magen/mbc_oob_sram_mbc3 | 👌 |
@@ -859,10 +859,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 | Test | Result |
 |------|--------|
-| same-suite/dma/gbc_dma_cont | 👀 |
+| same-suite/dma/gbc_dma_cont | 👌 |
 | same-suite/dma/gdma_addr_mask | 👌 |
-| same-suite/dma/hdma_lcd_off | 👀 |
-| same-suite/dma/hdma_mode0 | 👀 |
+| same-suite/dma/hdma_lcd_off | 👌 |
+| same-suite/dma/hdma_mode0 | 👌 |
 | same-suite/ppu/blocking_bgpi_increase | 👌 |
 | same-suite/interrupt/ei_delay_halt | 👀 |
 
@@ -1014,7 +1014,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 10/14 passed |
 | gambatte/div | 👌 8/8 passed |
-| gambatte/dma | 👀 116/229 passed |
+| gambatte/dma | 👀 120/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
 | gambatte/enable_display | 👀 135/184 passed |
 | gambatte/halt | 👀 124/158 passed |
@@ -1062,5 +1062,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 978
-- **Pass:** 681
-- **Fail:** 297
+- **Pass:** 685
+- **Fail:** 293

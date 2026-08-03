@@ -116,8 +116,26 @@ proc tick*(cpu: GbCpu; gb: GB) =
   if cpu.halted:
     cpu.cached_hl = -1
     mem_tick_extra(gb.memory, gb, 4)
-    if not cpu.locked:
-      handle_interrupts(cpu, gb)
+    # handle_interrupts, opened up. The halt ends on IF & IE whether or not IME
+    # lets an interrupt be taken, and that is the exact M-cycle the question
+    # below has to be asked on -- asking it on every halted M-cycle instead
+    # costs a real 0.3% of a title that spends its main loop halted.
+    if not cpu.locked and interrupt_ready(gb.interrupts):
+      # A HBlank VRAM DMA block that came due while the CPU was halted (see the
+      # mode-0 edge in `mode_flag=`) is transferred the moment the CPU is back
+      # on the bus, which is this one. The DMA takes the bus before the CPU's
+      # own next cycle, so it goes ahead of the dispatch below.
+      #
+      # Only if the HBlank that owed it is still running, though -- the debt is
+      # to a mode 0, not to the transfer. Waking outside one drops it, and the
+      # next mode 0 arms the flag again.
+      if gb.ppu.hdma_block_due:
+        if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+          ppu_step_hdma(gb.ppu, gb)
+        else:
+          gb.ppu.hdma_block_due = false
+      cpu.halted = false
+      if cpu.ime: dispatch_interrupt(cpu, gb)
     return
   when defined(gbfuzz_trace):
     if gbfuzz_trace_hook != nil:

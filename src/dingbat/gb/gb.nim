@@ -596,13 +596,23 @@ type
     # VRAM (2 banks)
     vram*:          array[2, seq[uint8]]
     sprite_table*:  seq[uint8]         # OAM 160 bytes
-    # HDMA
-    hdma1*, hdma2*, hdma3*, hdma4*, hdma5*: uint8
-    hdma_src*:      uint16
-    hdma_dst*:      uint16
-    hdma_pos*:      uint16
+    # HDMA. HDMA1-4 are not registers the transfer merely reads at its start:
+    # they ARE the transfer's address counters, which is why a second transfer
+    # started without rewriting them continues where the first one stopped
+    # (same-suite dma/gbc_dma_cont) and why a write to one of them part way
+    # through moves the remaining blocks. So the source/destination pair below
+    # is the whole of HDMA1-4 -- a write to any of the four edits one byte of
+    # it, and each copied block advances it.
+    hdma5*:         uint8
+    hdma_src*:      uint16  # HDMA1:HDMA2, low nibble always 0
+    hdma_dst*:      uint16  # HDMA3:HDMA4, masked into VRAM only where it is used
     hdma_active*:   bool
     hdma_copying*:  bool   # re-entrancy guard; see ppu_step_hdma
+    # A block this HBlank owes an armed transfer, which only a halted CPU can
+    # leave unpaid (see the mode-0 edge in `mode_flag=`). Cleared on the way out
+    # of mode 0, so it is never set at a frame boundary — where every state,
+    # rewind snapshot and rollback snapshot is captured — and is not serialized.
+    hdma_block_due*: bool
     # window state
     window_trigger*:     bool
     current_window_line*: int

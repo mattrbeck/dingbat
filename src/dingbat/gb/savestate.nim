@@ -210,14 +210,18 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   w.write_bytes(ppu.vram[0])
   w.write_bytes(ppu.vram[1])
   w.write_bytes(ppu.sprite_table)
-  w.write_u8(ppu.hdma1)
-  w.write_u8(ppu.hdma2)
-  w.write_u8(ppu.hdma3)
-  w.write_u8(ppu.hdma4)
+  # HDMA1-4, in the byte order this section has always had. They are no longer
+  # separate fields — the source/destination counters ARE those four registers
+  # (see GbPpu) — so they are taken apart here rather than stored twice, which
+  # keeps the field sequence, and the payload revision, exactly what it was.
+  w.write_u8(uint8(ppu.hdma_src shr 8))
+  w.write_u8(uint8(ppu.hdma_src and 0xF0))
+  w.write_u8(uint8(ppu.hdma_dst shr 8))
+  w.write_u8(uint8(ppu.hdma_dst and 0xF0))
   w.write_u8(ppu.hdma5)
   w.write_u16(ppu.hdma_src)
   w.write_u16(ppu.hdma_dst)
-  w.write_u16(ppu.hdma_pos)
+  w.write_u16(0)   # was hdma_pos: the block index the counters now carry
   w.write_bool(ppu.hdma_active)
   w.write_i32(ppu.dots_since_frame)
   w.write_bool(ppu.window_trigger)
@@ -251,15 +255,28 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   r.read_bytes(ppu.vram[0])
   r.read_bytes(ppu.vram[1])
   r.read_bytes(ppu.sprite_table)
-  ppu.hdma1 = r.read_u8()
-  ppu.hdma2 = r.read_u8()
-  ppu.hdma3 = r.read_u8()
-  ppu.hdma4 = r.read_u8()
+  let hdma1 = r.read_u8()
+  let hdma2 = r.read_u8()
+  let hdma3 = r.read_u8()
+  let hdma4 = r.read_u8()
   ppu.hdma5 = r.read_u8()
   ppu.hdma_src = r.read_u16()
   ppu.hdma_dst = r.read_u16()
-  ppu.hdma_pos = r.read_u16()
+  let hdma_pos = r.read_u16()
   ppu.hdma_active = r.read_bool()
+  # Rebuild the address counters. A state written before they existed holds the
+  # transfer's START address plus a separate block index, and holds the four
+  # register bytes the CPU last wrote — which is what a transfer started after
+  # the load would have been built from. Both halves of that are reproduced
+  # here, so such a state resumes where it left off rather than at the start.
+  # For anything this build wrote the block index is 0 and the four bytes are
+  # the counters themselves, making all of it a no-op.
+  if ppu.hdma_active:
+    ppu.hdma_src = ppu.hdma_src + hdma_pos * 0x10
+    ppu.hdma_dst = ppu.hdma_dst + hdma_pos * 0x10
+  else:
+    ppu.hdma_src = (uint16(hdma1) shl 8) or uint16(hdma2 and 0xF0)
+    ppu.hdma_dst = (uint16(hdma3) shl 8) or uint16(hdma4 and 0xF0)
   if rev >= 3:
     ppu.dots_since_frame = r.read_i32()
   else:
