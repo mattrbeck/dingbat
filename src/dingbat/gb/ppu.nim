@@ -341,7 +341,13 @@ when defined(gb_m3_trace):
   # turns a mid-scanline-write reference image into a solvable equation: the
   # write's dot on one side, the fetcher step that consumed it on the other.
   # See the KNOWN RESIDUAL note in fifo_ppu.nim for the measurement it produced.
+  #
+  # `-d:GB_TRACE_LY=-1` traces EVERY drawn line instead of one. A mealybug m3_*
+  # ROM sweeps its object's OAM X down the screen, so what its reference frame
+  # brackets is one measurement per 8-line band and not one line -- reading it
+  # needs all 144 of them in one run.
   const GB_TRACE_LY* {.intdefine.} = 20
+  template gb_traced*(ly: untyped): bool = GB_TRACE_LY < 0 or int(ly) == GB_TRACE_LY
 
 when defined(gb_m3_len):
   # Diagnostic mode-3 LENGTH trace (tools only; compiled out of every shipping
@@ -1174,7 +1180,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.first_line = true
       when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 2
     when defined(gb_m3_trace):
-      if int(ppu.ly) == GB_TRACE_LY and (ppu.lcd_status and 3) == 3:
+      if gb_traced(ppu.ly) and (ppu.lcd_status and 3) == 3:
         let fp = if ppu of GbFifoPpu: $GbFifoPpu(ppu).fetch_counter &
                     " lx=" & $GbFifoPpu(ppu).lx & " fx=" & $GbFifoPpu(ppu).fetcher_x
                  else: "?"
@@ -1206,6 +1212,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
     ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF42:
+    when defined(gb_m3_trace):
+      # The SCY half of the same instrument as the SCX line below. mealybug
+      # m3_scy_change writes this register every 2 M-cycles across mode 3, so
+      # the dot each write lands on is what the three per-fetch SCY reads (the
+      # tile-map row, then one per bitplane) have to be read against.
+      echo "SCY ly=", ppu.ly, " dot=", ppu.cycle_counter,
+           " mode=", (ppu.lcd_status and 3), " old=", ppu.scy, " new=", val
     when CGB_SCY_LATENCY != 0:
       if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
       else:              ppu_store_scy(ppu, gb, val)

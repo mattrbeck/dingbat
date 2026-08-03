@@ -356,6 +356,51 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # own known error (see STAT_MODE_HOLD in ppu.nim). Stopping the fetcher
   # entirely, the third option, costs a resync dot per object and breaks the
   # mode 3 length outright (172 + 11N becomes 172 + 11N + 1).
+  #
+  # ---- KNOWN RESIDUAL: this line is a dot ruler and it reads short ----------
+  #
+  # The `wait` dots this runs the BG fetcher for are measurable, and measured
+  # 2026-08-03 they should not be run at all. mealybug m3_scy_change is the
+  # instrument, and the reason it can see this at all is that its OAM table is
+  # `Y = 16 + 8k, X = k`, k = 0..17 -- one object per 8-line band with its X
+  # marching down the screen, so the frame is 18 separate measurements of what
+  # an object does to the fetch phase. (m3_scy_change2's header states the
+  # design outright: "Sprites are positioned to cause the write to occur on
+  # different T-cycles of the background tile fetch".) The ROM writes SCY every
+  # 2 M-cycles across mode 3, so decoding which write each of a fetch's three
+  # SCY reads saw gives the phase between the CPU and this fetcher to 2 dots.
+  #
+  # Take dingbat's own read dots (`-d:gb_m3_trace -d:GB_TRACE_LY=-1`), shift
+  # them by delta, and score the prediction against the reference; delta < 0
+  # means hardware read LATER than this tree does. Per band, against the DMG
+  # blob, best delta and its matching pixels out of 1280:
+  #
+  #   objX     0     1     2     3     4    5,6,7   8..12 as 0..4, 13,14,15 as 5,6,7
+  #   wait     5     4     3     2     1      0
+  #   delta   ??    -4    -3    -2    -1      0
+  #   match  1225  1279  1279  1279  1280   1280
+  #
+  # A wait of 0 is the only case this tree gets exactly right, and every other
+  # band wants hardware's post-object fetch grid `wait` dots behind ours --
+  # which is this line, and only this line, since it is the only thing that
+  # advances the fetcher during a penalty. (The X=0 column is the exception at
+  # both ends: it is Pan Docs' flat-11 case and no delta fits it, so something
+  # else is wrong there too.)
+  #
+  # It is NOT as simple as deleting the call. Doing exactly that (whole penalty
+  # frozen, trigger dot still stepping) is delta = -(wait-1), one dot short of
+  # what the table wants -- the same "resync dot" the third option above hit --
+  # and it measures: mealybug DMG 510167 -> 511803 and eight m3_* CGB rows up,
+  # but m3_scy_change 82.0 -> 80.1, mealybug CGB 1794023 -> 1793882 and gambatte
+  # 3567 -> 3542. So the residual is real, its direction is settled, and its
+  # exact rule is not: a fetcher re-phase moves every BG VRAM read on every line
+  # carrying an object and needs bgtiledata/bgtilemap/scx_during_m3/sprites
+  # re-derived with it, which is a change of its own.
+  #
+  # Everything that depends on this: it is the ruler under both mealybug SCY
+  # ROMs, so it is what CGB_SCY_LATENCY in gb.nim is being measured through --
+  # in the five bands where the wait is 0 that constant comes out at exactly the
+  # documented 2, and in the bands where it is not, at 0/1. Fix this first.
   if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
   dec ppu.obj_penalty
   if ppu.obj_penalty <= 0:
@@ -585,6 +630,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         ppu.obj_tile_fx = tile
         pen += max(0'i32, (7 - (idx and 7)) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
+      when defined(gb_m3_trace):
+        if gb_traced(ppu.ly):
+          echo "OBJTRIG ly=", ppu.ly, " dot=", ppu.cycle_counter,
+               " x=", ppu.sprites[0].x, " lx=", ppu.lx, " fifo=", ppu.fifo.size,
+               " lag=", lag, " idx=", idx, " tile=", tile, " pen=", pen
       return
     # ---- The window's own trigger -----------------------------------------
     #
@@ -722,7 +772,7 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
       dec ppu.m3_delay
       return
   when defined(gb_m3_trace):
-    if int(ppu.ly) == GB_TRACE_LY:
+    if gb_traced(ppu.ly):
       echo "DOT ", ppu.cycle_counter, " stage=",
            FETCHER_ORDER[ppu.fetch_counter], " lx=", ppu.lx,
            " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),

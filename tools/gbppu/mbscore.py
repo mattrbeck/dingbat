@@ -10,12 +10,17 @@ suite's own `_cgb_c.png` references, which is CGB DMG-compatibility mode: CGB
 timing, a DMG picture, and the boot ROM's fallback compatibility palette. Seven
 of the ROMs (the `*2.gb` variants) ship a CGB reference and no DMG one, so the
 two devices do not cover the same row set.
+
+`$MBROOT` overrides the suite directory (as `$GAMROOT` does for gamlist.py), so
+a session with a private `$DINGBAT_ROM_CACHE` scores its own copy -- see the
+parallel-agent hazard in tests/README.md.
 """
-import glob, os, subprocess, sys, zlib, struct
+import glob, os, subprocess, sys, tempfile, zlib, struct
 
 H = (sys.argv[1] if len(sys.argv) > 1 else "./dingbat_test")
 DEV = (sys.argv[2] if len(sys.argv) > 2 else "dmg").lower()
-D = "/tmp/dingbat-test-roms/game-boy-test-roms/mealybug-tearoom-tests/ppu"
+D = os.environ.get("MBROOT",
+    "/tmp/dingbat-test-roms/game-boy-test-roms/mealybug-tearoom-tests/ppu")
 
 def _png_planes(path):
     """(w, h, bitdepth, colourtype, PLTE, unfiltered rows) for a PNG."""
@@ -112,7 +117,7 @@ def main():
         suffix = "_cgb_c" if DEV == "cgb" else "_dmg_blob"
         png = os.path.join(D, n + suffix + ".png")
         if not os.path.exists(png): continue
-        ppm = "/tmp/mb_%s_%s.ppm" % (n, DEV)
+        ppm = os.path.join(tempfile.gettempdir(), "mb_%s_%s.ppm" % (n, DEV))
         argv = [H, rom, "--mode=screenshot", "--timeout=120",
                 "--screenshot=" + ppm, "--nosave"]
         if DEV == "cgb": argv += ["--cgb", "--color"]

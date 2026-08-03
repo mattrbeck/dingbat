@@ -105,19 +105,47 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # suite's `_cgb_c` references are wired up as 27 rows of their own, and they
 # are mid-mode-3 register writes read as a picture rather than as a glyph.
 # Scored as matching bytes over all 27 (mbscore.py, device cgb; DMG total is
-# 510167 and does not move for any setting here, as it must not):
+# 510167 and does not move for any setting here, as it must not).
 #
-#   setting                     CGB total   the rows that moved
-#   (all 0, the control)          1794023   --
-#   SCY=1, SCX=1                  1803199   m3_scy_change      82.0 -> 95.9
-#                                           m3_scy_change2    100.0 -> 99.6
-#                                           m3_scx_high_5_bits         -> 99.9
-#                                           ..._change2                -> 99.9
-#   SCY=1, SCX=0                  1803344   m3_scy_change      82.0 -> 95.9
-#                                           m3_scy_change2    100.0 -> 99.6
-#   SCY=2, SCX=0                  1795140   m3_scy_change      82.0 -> 84.6
-#                                           m3_scy_change2    100.0 -> 99.0
-#   SCY=3, SCX=0 / SCY=2,SCX=2    worse still on both rows
+# ---- Every knob against both instruments, one build per cell ---------------
+#
+# Re-taken 2026-08-03 with each constant swept ALONE (cgbsweep.sh forces the
+# other six to 0, so the flag on the line is the whole setting), to answer one
+# question: is the SCY shortfall below systematic across the register file --
+# which is what a single global absorber such as a late mode 3 start would look
+# like -- or is it SCY's alone? Baselines: gambatte 3567/5005, mealybug CGB
+# 1794023.
+#
+#   setting                    gambatte   mealybug CGB   what moved
+#   all 0 (the control)          3567        1794023     row for row main
+#   CGB_SCY_LATENCY=1            3566        1803344     scy -1; m3_scy_change
+#                                                        82.0 -> 95.9
+#   CGB_SCY_LATENCY=2            3566        1795140     scy -1; m3_scy_change
+#                                                        82.0 -> 84.6,
+#                                                        m3_scy_change2 -> 99.0
+#   CGB_SCY_LATENCY=3            3566        1791068     scy -1
+#   CGB_SCX_LATENCY=1            3567        1793878     nothing
+#   CGB_SCX_LATENCY=2            3566        1792812     enable_display +1 -1,
+#                                                        scx_during_m3 -1
+#   CGB_WX_LATENCY=1             3566        1794023     window -1
+#   CGB_WX_LATENCY=2             3566        1794047     window -1
+#   CGB_WY_LATENCY=1 / =2        3567        1794023     nothing at all
+#   CGB_WY_LATCH_LATENCY=2/3/4   3567        1794023     nothing at all
+#   CGB_LCDC_LATENCY=1           3564        1792077     window -3
+#   CGB_LCDC_LATENCY=2           3563        1789728     window -4
+#   CGB_LCDC_TDSEL_LATENCY=1     3563        1789555     window -3, bgtiledata -1
+#   CGB_LCDC_TDSEL_LATENCY=2     3562        1784962     window -4, bgtiledata -1
+#
+# **The shortfall is not systematic: SCY is the only register in the file whose
+# instruments move at all.** Nothing here is one dot short of its documented
+# value in the way a global absorber would make all seven -- LCDC and SCX are
+# refused monotonically all the way down to 0, and WY and the WY latch have no
+# instrument in this tree at any value. That is not proof against a global
+# absorber (a one-dot move is invisible to a family that cannot see any dot at
+# all), but it removes the reason to look for one first: whatever is eating the
+# SCY dot has to be something SCY's own ROMs can see, and the DMG side can see
+# it too -- m3_scy_change is 92.6% on DMG, where none of these constants exists.
+# See the SCY bullet below for where it went.
 #
 # That is why SCROLL is now two constants. Pan Docs documents the two registers
 # differently -- "Mid-frame behavior" gives SCY a per-model sample point and
@@ -127,25 +155,70 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # them.
 #
 # ---- Why each value is refused, family by family ---------------------------
-#  * SCY. Two instruments, and they bracket it to DIFFERENT sides of the same
-#    dot. The mealybug CGB references put it at 1: m3_scy_change goes 82.0% ->
-#    95.9%, which is 3300 pixels and by far the largest single accuracy move
-#    available in this file. But the documented value is TWO T-cycles (the
-#    mealybug PPU document, "SCY $FF42": "On CGB and AGB devices, writes appear
-#    to take effect 2 T-cycles later"), and at 2 the same row only reaches
-#    84.6%. A measured 1 against a documented 2 is not a value to ship, it is a
-#    one-dot residual somewhere else in the CGB pipeline being absorbed into
-#    this constant -- which is exactly the signature front-line item 1 predicts,
-#    since moving the mode 3 start by a dot moves every register's sample point
-#    together and would turn a documented 2 into a measured 1. Settle that
-#    first; this row is then the check on it, not the knob.
-#    Two smaller refusals point the same way. m3_scy_change's own sibling
-#    m3_scy_change2 -- a CGB-only ROM, same register, a different write phase --
-#    goes the other way at any setting. And gambatte loses exactly one row,
-#    scy/scy_during_m3_spx08_ds_4, a DOUBLE SPEED row: at 2 dots per M-cycle a
-#    1-dot latency lands on the cap boundary, so this is the CGB CPU-to-PPU
-#    phase axis reading a register latency, which is the confusion
-#    CGB_LATENCY_CAP exists to prevent and cannot at this width.
+#  * SCY. **The documented 2 is right, the whole-frame score's preference for 1
+#    is an artefact, and the value still ships at 0.** All three of those are
+#    measurements; here is the one that decides them.
+#
+#    m3_scy_change is not one measurement, it is eighteen. Its OAM table is
+#    `Y = 16 + 8k, X = k` for k = 0..17, so each 8-line band of the frame
+#    carries exactly one object and that object's X advances down the screen --
+#    and the object is not scenery, it is the RULER. Its sibling says so in its
+#    own header: "Sprites are positioned to cause the write to occur on
+#    different T-cycles of the background tile fetch, showing when the change to
+#    the bit takes effect." The OBJ penalty is what sets the phase between the
+#    ROM's write burst (one SCY write every 2 M-cycles, values 0,1,2,3,4,3,2,1)
+#    and the BG fetcher's three SCY reads, and Pan Docs' penalty for an object
+#    at X is `6 + max(0, 5 - X)` dots -- so the wait term the bands sweep is
+#    5,4,3,2,1,0,0,0 for X = 0..7 and again for X = 8..15.
+#
+#    Scored per band instead of per frame (differing columns out of 8 lines x
+#    160; tools/gbppu is the kit, and `-d:gb_m3_trace -d:GB_TRACE_LY=-1` plus
+#    the glyph table from the ROM with its 24 writes NOPped out is what turns
+#    the picture back into "which write did each of the three reads see"):
+#
+#      band  objX  OBJ wait   L=0    L=1    L=2
+#       5     5       0       626     16      0
+#       6     6       0       626     16      0
+#       7     7       0       614     16      0
+#      14    14       0       617     33      0
+#      15    15       0       608     31      0
+#       3     3       2        16     16    621
+#       4     4       1        18     18    609
+#      11    11       2        48     48    585
+#      12    12       1        53     53    575
+#
+#    Read the two halves separately. In every band whose object has NO wait
+#    term, the CGB reference is PIXEL-EXACT at 2 and wrong at 1 -- and those are
+#    exactly the bands where this tree's own phase is provably right, because
+#    the DMG reference is pixel-exact there at 0. In every band with a wait
+#    term, 0 and 1 score identically and 2 collapses -- and those are exactly
+#    the bands where the DMG reference says this tree is ALREADY wrong with no
+#    CGB constant involved at all (bands 3, 4, 11, 12 are ~960/1280 matching
+#    against the DMG blob at any setting).
+#
+#    So the missing dot is not in this constant and not in the CGB pipeline: it
+#    is the BG fetcher's phase across an OBJ fetch, which is device-independent,
+#    is a function of the object's X, and is the very thing this ROM measures
+#    with. Sweeping the reference against dingbat's own traced read dots puts
+#    hardware's post-object fetch grid `wait` dots behind this tree's, i.e.
+#    dingbat advances the BG fetcher during the penalty's wait dots where the
+#    references say it stands still. That is written up, with the table and with
+#    what the naive fix costs, at tick_sprite_fetcher in fifo_ppu.nim.
+#
+#    Which leaves the shipping value. 2 is the correct number and it is still
+#    not shipped, because with the fetcher phase unfixed it costs more than it
+#    buys: gambatte 3567 -> 3566 and mealybug m3_scy_change2 100.0 -> 99.0, both
+#    of them rows whose own ruler is the same OBJ phase (m3_scy_change2 puts a
+#    SECOND object mid-line, at X=13, which is fetched mid-BG-fetch -- our tile
+#    1 comes out as reads at 101/103/110 rather than a clean 8-dot cadence, and
+#    that irregular tile is precisely where its refusal of 2 lives). Ship the
+#    fetcher phase first, then set this to 2 and re-run the band table; the
+#    prediction it makes is that every band goes to 0, not just the five.
+#    The third refusal is unrelated to all of this and stands: gambatte loses
+#    scy/scy_during_m3_spx08_ds_4, a DOUBLE SPEED row, at any nonzero value. At
+#    2 dots per M-cycle a 1-dot latency lands on the cap boundary, so that row
+#    is the CGB CPU-to-PPU phase axis reading a register latency, which is the
+#    confusion CGB_LATENCY_CAP exists to prevent and cannot at this width.
 #  * SCX. The one clean, DMG-neutral, per-device row in the tree that a scroll
 #    latency fixes is enable_display/ly0_late_scx7_m3stat_scx0_274, whose
 #    DMG sibling expects $87 and whose CGB row expects $84; at 2 dots dingbat
@@ -961,6 +1034,22 @@ type
     # than consoles (SCY bitplane caching from CGB-D, the LY=153 and OAM-read
     # boundaries, the $FEA0 fold, half the APU). dingbat models ONE CGB, and
     # the references it is scored against are CPU CGB C.
+    #
+    # The SCY entry in that list is the one that keeps being re-opened, so:
+    # reading SCY LIVE at each of a tile fetch's three VRAM reads -- the map
+    # row, then again per bitplane -- is not an omission here, it is the
+    # specified behaviour of every device this tree models. Pan Docs,
+    # "Mid-frame behavior": "The scroll registers are re-read on each tile
+    # fetch" and "All models before the CGB-D read the Y coordinate once for
+    # each bitplane (so a very precisely timed SCY write allows 'desyncing'
+    # them), but CGB-D and later use the same Y coordinate for both no matter
+    # what." Caching them into one per-fetch latch would be the CGB-D
+    # behaviour, i.e. wrong for CPU CGB C and wrong for DMG. It is also
+    # confirmed rather than merely documented: decoded per tile, the mealybug
+    # m3_scy_change DMG reference has the map fetch and the low bitplane on one
+    # write and the high bitplane on the NEXT one wherever a write lands
+    # between them, and fifo_ppu's live reads reproduce that band exactly (see
+    # the SCY bullet at CGB_SCY_LATENCY).
     cgb_enabled*:    bool
     cgb_native*:     bool
     fifo*:           bool

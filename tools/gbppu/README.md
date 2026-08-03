@@ -55,6 +55,38 @@ forced to 0 first, so the flags on the command line are the whole setting and
 the baseline row for row, which is what says the mechanism is free when it is
 off. ~40 s per cell.
 
+Score the mealybug CGB rows for the same build in the same loop — the two
+instruments disagree about SCY, and only reading both says why:
+
+    MBROOT=$DINGBAT_ROM_CACHE/game-boy-test-roms/mealybug-tearoom-tests/ppu \
+      python3 tools/gbppu/mbscore.py ./dingbat_test cgb
+
+## Reading an m3_* frame as eighteen measurements, not one
+
+A mealybug `m3_*` ROM's OAM table is `Y = 16 + 8k, X = k`, so each 8-line band
+of the reference carries one object whose X advances down the screen — and the
+object is the RULER, not scenery (`m3_scy_change2.asm`: "Sprites are positioned
+to cause the write to occur on different T-cycles of the background tile
+fetch"). A whole-frame percentage averages eighteen different measurements of
+the fetch phase together, which is exactly how a wrong constant gets fitted.
+Score per band instead, and read the bands whose object has no OBJ wait term
+first — those are the ones where the ruler is clean.
+
+The decode that makes a band quantitative needs no oracle but the ROM:
+
+1. Copy the ROM with its mid-mode-3 register writes NOPped out and screenshot
+   it. That frame is the tile map at the register's power-on value, i.e. a
+   glyph table indexed by (tile, row).
+2. `-d:gb_m3_trace -d:GB_TRACE_LY=-1` prints, for every line, the dot each
+   write landed on and the dot of each of the fetcher's three VRAM reads
+   (`OBJTRIG` adds the object trigger and its penalty terms).
+3. Predict the frame from those two, shift the read dots by delta, and score
+   against the reference. The delta that fits is the phase error in dots, per
+   band, with a resolution of 2 dots (the spacing of the fetcher's reads).
+
+That is how the OBJ-fetch phase residual at `tick_sprite_fetcher` was measured
+and how `CGB_SCY_LATENCY` was separated from it.
+
 ## GBMicrotest without a runner pass
 
     tools/gbppu/mtscore.sh win
