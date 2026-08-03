@@ -1,5 +1,9 @@
 # GB FIFO PPU renderer (included by gb.nim)
 
+# `lx` runs -7..160, so this is unreachable: with win_lx parked here the
+# shifter's per-dot compare against it is simply never true.
+const WIN_LX_OFF = -128'i32
+
 proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
   let base = new_ppu_base(gb.cgb_enabled)
   result = GbFifoPpu(
@@ -17,6 +21,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     hdma_pos: base.hdma_pos, hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
     current_window_line: -1,
+    win_lx: WIN_LX_OFF,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -25,6 +30,17 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
   when STAT_IRQ_SPLIT:
     result.irq_mode = base.irq_mode
     result.irq_ly   = base.irq_ly
+
+proc fifo_arm_window*(ppu: GbFifoPpu) =
+  ## Re-derive the one `lx` the shifter has to watch for on this line. Called
+  ## from every write that can move one of the four inputs (LCDC, WX, the WY
+  ## latch) and from fifo_reset_bg, which is where the fourth (fetching_window)
+  ## moves. Nothing here is on a per-dot path.
+  ppu.win_lx =
+    if not window_enabled(ppu): WIN_LX_OFF
+    elif ppu.fetching_window:   int32(ppu.wx) - 8
+    elif ppu.window_trigger:    int32(ppu.wx) - 7
+    else:                       WIN_LX_OFF
 
 method reset_render_scratch*(ppu: GbFifoPpu) =
   ## Clear the FIFO/fetcher scratch to its clean pre-line state so a state
@@ -41,6 +57,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.dropped_first_fetch = false
   ppu.fetching_window = false
   ppu.fetching_sprite = false
+  ppu.win_lx = WIN_LX_OFF
   ppu.bg_pixels_pushed = false
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
@@ -81,7 +98,17 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 
+# `-d:gb_win_trace` is the instrument the window model below was derived with:
+# one line per WY/WX/LCDC write (line, dot within the line, mode, old and new
+# value), one per window start and one per mode 3 end. A gambatte window family
+# differs only in which M-cycle its write lands on, so printing that dot next to
+# the filename's expected value turns the family into an equation for the dot
+# the PPU samples that register on. Compiled out of every shipping build.
 proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
+  when defined(gb_win_trace):
+    if fetching_window:
+      echo "WINSTART ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+           " wx=", ppu.wx, " scx=", ppu.scx
   fifo_clear(ppu.fifo)
   ppu.fetcher_x = 0
   ppu.fetch_counter = 0
@@ -93,6 +120,7 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   # tile onto the window's.
   ppu.obj_tile_fx = -1
   if fetching_window: inc ppu.current_window_line
+  fifo_arm_window(ppu)
 
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
@@ -501,19 +529,22 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ## m3_wx_4_change_sprites and m3_wx_5_change: position 5 is the unique best
   ## on all three at once (229/10/638 mismatching pixels -> 53/4/142).
   ##
-  ## That fetcher-position test is the CALLER's FIRST term rather than this
-  ## proc's, because it is by far the most selective one -- true on one dot in
-  ## eight, against a field the fetcher wrote on this same dot. Leading with it
-  ## keeps seven eighths of the dots of an active window off the WX comparison
-  ## altogether, which is what makes the whole rule free on a window-heavy
-  ## screen (dmg-acid2 measured +1.3% with the WX compare leading, +0.2% --
-  ## the noise floor -- with the position test leading).
-  # Unshift, not push: the pixel is consumed by the very next dot, so it has to
-  # go in front of the FIFO's head. Depth is 16 and the FIFO never holds more
-  # than 8, so the extra entry cannot collide with the tail.
-  ppu.fifo.head = (ppu.fifo.head - 1) and 15
+  ## The caller reaches this through the same cached `lx == win_lx` compare the
+  ## window START uses (GbFifoPpu.win_lx), so neither rule costs the shifter a
+  ## register decode on a dot it cannot fire on; the fetcher-position test is
+  ## inside that branch, where it runs a handful of times a line.
+  # Inserted BEHIND the head, not in front of it: the caller runs before this
+  # dot's pixel leaves the shifter, and the pixel being displaced is the NEXT
+  # one. Unshifting and then swapping the two front entries is that insert --
+  # the head keeps the pixel this dot emits and the colour-0 entry lands one
+  # place back, which is where an unshift at the end of the previous dot put
+  # it. Depth is 16 and the FIFO never holds more than 8, so the extra entry
+  # cannot collide with the tail.
+  let h = (ppu.fifo.head - 1) and 15
+  ppu.fifo.data[h] = ppu.fifo.data[ppu.fifo.head]
   ppu.fifo.data[ppu.fifo.head] =
     GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+  ppu.fifo.head = h
   inc ppu.fifo.size
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
@@ -546,6 +577,62 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         pen += max(0'i32, (7 - (idx and 7)) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
       return
+    # ---- The window's own trigger -----------------------------------------
+    #
+    # Pan Docs, "Window": the window is drawn from the pixel whose X coordinate
+    # is WX - 7, on any line at or after the one where the WY condition
+    # triggered, while LCDC.5 is set. Three things about this test are load
+    # bearing and each is settled by a gambatte family that brackets it:
+    #
+    #  * It is an EQUALITY on the pixel about to be emitted, not `lx + 7 >= wx`.
+    #    A `>=` cannot be un-satisfied, so anything that arms the window LATE --
+    #    a WY write that lands mid-line, LCDC.5 going back up -- starts it at
+    #    whatever pixel the shifter had reached, which hardware does not do.
+    #    window/arg/late_wy_FFto2_ly2_1..3 write WY = LY at three consecutive
+    #    M-cycles of the line and want the window on the first two and NOT on
+    #    the third, and the dot that separates them moves with WX and with
+    #    SCX & 7 -- i.e. it is this comparison's own dot, not a fixed one.
+    #    (Measured DMG, the write dot the family brackets: WX 0 -> 83,
+    #    WX 7 -> 90, WX 15 -> 98, and +1 per SCX & 7. That is
+    #    `83 + WX + (SCX and 7)`, which is exactly the dot this line runs on.)
+    #
+    #  * It is asked BEFORE the pixel is emitted, not after `inc lx`. Same dot's
+    #    worth of registers either way -- a CPU write commits at the top of its
+    #    M-cycle, so both see it -- but the pre-emit form is the one that can
+    #    fire at the FIRST pixel of a line, which is what a window at WX = 7
+    #    (screen x = 0) needs. Post-emit, lx never takes the value 0 with
+    #    SCX & 7 = 0 and WX = 7 could only be served by the mode-2 special case
+    #    below, which starts the line as a window line and charges nothing for
+    #    it (gambatte m2int_wx07_m3stat_1/2 measure that charge).
+    #
+    # The whole conjunction is precomputed into `win_lx` (see GbFifoPpu), so
+    # what is left on the per-dot path is one compare, shared with the
+    # re-trigger rule below it. That matters: this is the mode 3 dot loop, and
+    # a SECOND per-dot branch here -- the shape this started as, with the two
+    # rules on either side of the emit -- measured +1.7% of retired
+    # instructions on blargg 01-special and +0.9% on Pokemon Blue.
+    #
+    #  * The restart resumes at fetcher step 1, not 0. Pan Docs counts the
+    #    window's cost as 6 dots from the fetch restart; this renderer idles for
+    #    the FIRST two steps of its eight where hardware idles for the last two
+    #    (see the fetch-phase note in fifo_tick_slow), so a restart from step 0
+    #    puts the window's first pixel one dot later than hardware does.
+    #    gbmicrotest win0_a/_b .. win15_a/_b bracket that end-of-mode-3 dot per
+    #    WX and want the 5 dots this gives; taking it from step 0 instead costs
+    #    win10_scx3_b and win7_b (and buys 8 gambatte rows, all of them
+    #    double-speed sprites/space rows -- the trade is documented in the
+    #    commit rather than split, because the two suites disagree by exactly
+    #    the one dot the fetch phase is out).
+    if ppu.lx == ppu.win_lx:
+      if not ppu.fetching_window:
+        fifo_reset_bg(ppu, true)
+        ppu.fetch_counter = 1
+        return
+      elif ppu.fetch_counter == WIN_REACT_PHASE and window_enabled(ppu):
+        # The re-trigger edge, injected in front of the pixel this dot is about
+        # to emit rather than behind the one it just emitted -- the same
+        # displacement, one dot earlier, so it can share the compare above.
+        window_reactivate(ppu)
     let bg_px = fifo_shift(ppu.fifo)
     let has_sprite = ppu.fifo_sprite.size > 0
     let sp_px = if has_sprite: fifo_shift(ppu.fifo_sprite) else: GbPixel()
@@ -564,17 +651,6 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
     inc ppu.lx
-    # Same conjunction, cheapest and most selective terms first: two plain
-    # bool fields reject almost every dot before any register decode or
-    # comparison runs. All five terms are side-effect-free reads.
-    if not ppu.fetching_window:
-      if ppu.window_trigger and
-         window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-         int(ppu.lx) + 7 >= int(ppu.wx):
-        fifo_reset_bg(ppu, true)
-    elif ppu.fetch_counter == WIN_REACT_PHASE and
-         int(ppu.lx) + 7 == int(ppu.wx) and window_enabled(ppu):
-      window_reactivate(ppu)
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## Has the BG fetcher run out of work for this line? That -- not the last
@@ -592,6 +668,11 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ##     VRAM read (gambatte sprites/10spritesPrLine_10xposA6/A7_*);
   ##   * a window that has not started yet: WX up to 166 still reaches lx 159,
   ##     and starting it restarts the BG fetch (gambatte window/m2int_wxA6_*).
+  ##     There is deliberately no `ly >= wy` term next to `window_trigger`
+  ##     here or at the trigger itself: the latch IS the WY condition (Pan
+  ##     Docs' "at any point in the frame"), and re-testing the register
+  ##     against LY makes a WY moved out of range mid-frame retract a window
+  ##     hardware keeps drawing (gambatte window/arg/late_wy_1toFF_*).
   ##
   ## Both are tested as `x <= 167` / `wx <= 166` rather than "does it trigger on
   ## THIS dot" because the shifter still has the rest of the lead to walk
@@ -618,7 +699,7 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
     if ppu.fetching_sprite: return false
     if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
     if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-       int(ppu.ly) >= int(ppu.wy) and int(ppu.wx) <= GB_WIDTH + 6: return false
+       int(ppu.wx) <= GB_WIDTH + 6: return false
     true
 
 proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
@@ -707,7 +788,7 @@ when STAT_IRQ_SPLIT:
     if ppu.fetching_sprite: return false
     if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
     if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-       int(ppu.ly) >= int(ppu.wy) and int(ppu.wx) <= GB_WIDTH + 6: return false
+       int(ppu.wx) <= GB_WIDTH + 6: return false
     true
 
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
@@ -823,10 +904,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if ppu.cycle_counter == 80 - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
         if ppu.cycle_counter == 80:
           ppu.`mode_flag=`(3'u8, gb)
-          if ppu.ly == ppu.wy: ppu.window_trigger = true
+          # WX below 7 puts the window's first pixel LEFT of the screen, where
+          # the shifter's equality above can never reach it (lx starts at
+          # -(SCX and 7), which is 0..-7, and WX - 7 is -7..-1). Pan Docs calls
+          # WX < 7 unreliable on hardware; what this renderer does with it is
+          # start the line as a window line, with the window's own fine scroll
+          # (see fifo_sample_smooth_scroll) and no restart to pay for --
+          # gambatte m2int_wx00_m3stat_1/2 and gbmicrotest win0_scx3_a/_b pin
+          # that. WX = 7 is NOT in here: that one is a perfectly ordinary
+          # window start at screen x = 0 and pays the ordinary restart.
           fifo_reset_bg(ppu,
-            window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-            ppu.wx <= 7 and ppu.window_trigger)
+            window_enabled(ppu) and
+            ppu.wx < 7 and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           ppu.lx = 0
           when M3_PIPE_LEAD_ANY:
@@ -856,6 +945,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # rendered pixel. With a nonzero lead the shifter is still `m3_lead`
         # pixels from the end of the line here; the burst below finishes them.
         if fetcher_retired(ppu):
+          when defined(gb_win_trace):
+            echo "M3END ly=", ppu.ly, " dot=", ppu.cycle_counter, " len=", ppu.cycle_counter-80
           when M3_PIPE_LEAD_ANY:
             # The tail of the line, emitted on THIS dot rather than spread over
             # the first dots of H-Blank. "The fetcher retired" means every VRAM

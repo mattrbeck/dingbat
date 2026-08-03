@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-02 23:18:49*
+*Generated: 2026-08-03 07:44:53*
 
 ## Game Boy - Blargg
 
@@ -236,10 +236,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_lcdc_obj_size_change | 👀 99.8% correct (22986/23040 pixels match) |
 | mealybug/m3_lcdc_obj_size_change_scx | 👀 99.6% correct (22950/23040 pixels match) |
 | mealybug/m3_lcdc_tile_sel_change | 👀 95.2% correct (21938/23040 pixels match) |
-| mealybug/m3_lcdc_tile_sel_win_change | 👀 92.9% correct (21406/23040 pixels match) |
+| mealybug/m3_lcdc_tile_sel_win_change | 👀 96.1% correct (22136/23040 pixels match) |
 | mealybug/m3_lcdc_win_en_change_multiple | 👀 61.5% correct (14166/23040 pixels match) |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 74.0% correct (17050/23040 pixels match) |
-| mealybug/m3_lcdc_win_map_change | 👀 92.8% correct (21390/23040 pixels match) |
+| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 79.1% correct (18216/23040 pixels match) |
+| mealybug/m3_lcdc_win_map_change | 👀 98.7% correct (22746/23040 pixels match) |
 | mealybug/m3_obp0_change | 👀 99.5% correct (22916/23040 pixels match) |
 | mealybug/m3_scx_high_5_bits | 👀 99.7% correct (22975/23040 pixels match) |
 | mealybug/m3_scx_low_3_bits | 👌 |
@@ -762,8 +762,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win5_b | 👌 |
 | gbmicrotest/win6_a | 👌 |
 | gbmicrotest/win6_b | 👌 |
-| gbmicrotest/win7_a | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win7_b | 👌 |
+| gbmicrotest/win7_a | 👌 |
+| gbmicrotest/win7_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win8_a | 👌 |
 | gbmicrotest/win8_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win9_a | 👌 |
@@ -823,7 +823,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | scribbltests/scxly | 👌 |
 | scribbltests/statcount-auto | 👌 |
 | turtle-tests/window_y_trigger | 👌 |
-| turtle-tests/window_y_trigger_wx_offscreen | 👀 96.0% correct (22125/23040 pixels match) |
+| turtle-tests/window_y_trigger_wx_offscreen | 👌 |
 | cgb-acid-hell/cgb-acid-hell | 👀 100.0% correct (23038/23040 pixels match) |
 | little-things-gb/firstwhite | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | 👀 94.4% correct (21760/23040 pixels match) |
@@ -962,7 +962,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/div | 👌 8/8 passed |
 | gambatte/dma | 👀 112/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
-| gambatte/enable_display | 👀 133/184 passed |
+| gambatte/enable_display | 👀 135/184 passed |
 | gambatte/halt | 👀 124/158 passed |
 | gambatte/irq_precedence | 👀 41/64 passed |
 | gambatte/lcd_offset | 👀 40/62 passed |
@@ -977,7 +977,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | 👌 6/6 passed |
 | gambatte/lycm2int | 👀 8/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
-| gambatte/m0enable | 👀 149/167 passed |
+| gambatte/m0enable | 👀 151/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
@@ -1001,12 +1001,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 272/476 passed |
+| gambatte/window | 👀 295/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 934
-- **Pass:** 672
-- **Fail:** 262
+- **Pass:** 673
+- **Fail:** 261

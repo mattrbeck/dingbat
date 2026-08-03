@@ -356,6 +356,14 @@ proc lcd_off_frame*(ppu: GbPpu; gb: GB) {.inline.} =
     ppu_blank_frame(ppu, gb)
 proc window_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x40
 proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) != 0
+
+# The one `lx` either window rule can fire on is cached on GbFifoPpu (see
+# GbFifoPpu.win_lx) so the shifter can test for it with a single compare per
+# mode 3 dot. Every register write below that feeds it re-derives it; this is
+# the forward declaration, the body is in fifo_ppu.nim, which gb.nim includes
+# after this file.
+proc fifo_arm_window*(ppu: GbFifoPpu)
+
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
 proc bg_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x08
 proc sprite_height*(ppu: GbPpu): int {.inline.} =
@@ -700,6 +708,20 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
+  # The WY condition, half of it: Pan Docs says the window is drawn once
+  # "WY == LY at any point in the frame", so the comparator is a level and the
+  # latch it feeds is per frame -- cleared entering V-Blank above, set here at
+  # the top of every visible line. The other half is the WY write itself (see
+  # ppu_write $FF4A): those two are the ONLY events that can make LY == WY
+  # newly true, so between them they are the whole level, at no per-dot cost.
+  #
+  # Testing it here rather than at the mode 2 -> 3 edge is what
+  # gambatte window/arg/late_wy_1 vs late_wy_2 measure: one writes WY = $FF at
+  # the end of line 153 and gets no window, the other writes it at dot 1 of
+  # line 0 and gets one, so a WY of 0 is already latched by dot 1 of line 0.
+  elif mode == 2 and ppu.ly == ppu.wy:
+    ppu.window_trigger = true
+    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
   when STAT_READ_HOLD:
     if mode != prev_mode:
       # The change applies from the NEXT dot, so a read sampling this dot or
@@ -991,7 +1013,11 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
                  else: "?"
         echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " old=",
              toHex(ppu.lcd_control, 2), " new=", toHex(val, 2), " fc=", fp
+    when defined(gb_win_trace):
+      echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
+           (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
     ppu.lcd_control = val
+    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
     # Deferred to the end of this M-cycle -- see GbPpu.stat_write_pending and
     # the consume in mem_write. The LCD-enable branch above is NOT deferred:
     # that one restarts the mode machinery itself rather than feeding it.
@@ -1028,8 +1054,28 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
   of 0xFF47: ppu_update_palette(ppu.bgp,  val)
   of 0xFF48: ppu_update_palette(ppu.obp0, val)
   of 0xFF49: ppu_update_palette(ppu.obp1, val)
-  of 0xFF4A: ppu.wy = val
-  of 0xFF4B: ppu.wx = val
+  of 0xFF4A:
+    when defined(gb_win_trace):
+      echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
+           (ppu.lcd_status and 3), " old=", ppu.wy, " new=", val
+    ppu.wy = val
+    # The other half of the level comparator described at `mode_flag=`: a write
+    # that makes WY equal the line being drawn latches the window for the rest
+    # of the frame, wherever in the line it lands. Whether it is in time for
+    # THIS line is not decided here -- the window's own WX equality (see
+    # tick_shifter) reads the latch on its own dot and a write past that dot
+    # simply misses it, which is what gambatte's arg/late_wy_* families
+    # measure. V-Blank is excluded because the latch is cleared entering it and
+    # a match on lines 144..153 would carry into the next frame.
+    if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
+      ppu.window_trigger = true
+      if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+  of 0xFF4B:
+    when defined(gb_win_trace):
+      echo "WX ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
+           (ppu.lcd_status and 3), " old=", ppu.wx, " new=", val
+    ppu.wx = val
+    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
   of 0xFF4F:
     if gb.cgb_enabled: ppu.vram_bank = val and 0x1
   of 0xFF51:

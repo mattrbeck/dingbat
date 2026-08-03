@@ -498,6 +498,18 @@ type
     fetch_counter*:       int
     fetcher_x*:           int
     lx*:                  int32
+    # The one `lx` on this line either window rule can fire on -- the start
+    # (WX - 7) while the window is not running, the re-trigger edge (WX - 8,
+    # which is the same dot one pixel earlier in the shifter) while it is -- or
+    # WIN_LX_OFF when neither can. Derived state, kept by fifo_arm_window from
+    # the four inputs that decide it (LCDC.5, WX, the WY latch,
+    # fetching_window), none of which moves outside a register write or a fetch
+    # restart. It exists so the shifter spends ONE compare per mode 3 dot on
+    # the window instead of two conjunctions: measured on blargg 01-special,
+    # the second per-dot branch alone is +1.7% of retired instructions.
+    # Next to `lx` on purpose -- the two are compared on every mode 3 dot, and
+    # putting it after the bool block instead measured +0.6% on its own.
+    win_lx*:              int32
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
     fetching_window*:     bool

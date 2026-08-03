@@ -19,6 +19,40 @@ takes, mirroring `build_gambatte_rows` in `tests/dingbat_test_runner.nim`
 verdicts land in `/tmp/gamout.txt`. This does **not** touch
 `tests/results*.md`, so it is safe to run while iterating.
 
+## Scoring the whole gambatte suite (~6 s)
+
+    tools/gbppu/gamall.sh /tmp/g_before      # on main
+    tools/gbppu/gamall.sh /tmp/g_after       # with the change
+    diff <(cut -f1,2 /tmp/g_before.txt) <(cut -f1,2 /tmp/g_after.txt)
+
+Sharded across processes like the runner does, one pass count per
+subdirectory plus a per-row file. Scoring one family with `gamscore.sh` says
+whether a change worked; this says what *else* it moved, which for a
+mid-scanline change is the question that actually decides it.
+
+## GBMicrotest without a runner pass
+
+    tools/gbppu/mtscore.sh win
+
+The `win0_a/_b` .. `win15_b` pairs bracket the end of mode 3 per WX, so they
+are the mode-3-length half of a window change where gambatte's families are
+the register-sampling half. The two disagree by about one dot at present (see
+the fetch-phase note in `fifo_ppu.nim`), so score both before concluding.
+
+## Which dot a window family's write lands on
+
+    nim c -d:test_harness -d:release -d:gb_win_trace --path:src \
+      -o:dt_win tests/dingbat_test.nim
+    DT=./dt_win python3 tools/gbppu/windot.py 'window/arg/late_wy_FFto2_ly2_*'
+
+`-d:gb_win_trace` prints every WY/WX/LCDC write with the line and the dot
+inside it, plus each window start and each mode 3 end. `windot.py` puts that
+next to the filename's expected value per device. A gambatte window family is
+one ROM with one write moved by one M-cycle, so seeing the dot turns the family
+into an equation for the dot the PPU samples that register on — that is how
+`83 + WX + (SCX and 7)` fell out of the `late_wy_*` families and placed the
+window-start equality.
+
 ## Mode-3 length against Pan Docs
 
     nim c -d:test_harness -d:release -d:gb_m3_len --path:src \
@@ -58,6 +92,32 @@ staircase over X. Caveat: BGP/OBP are applied at the shifter and their write
 phase carries its own residual (`m3_bgp_change` has no objects at all and is
 87.3%), so read the LCDC/SCY rows, not the palette ones, when measuring the
 fetcher.
+
+## Retired instructions, not fps
+
+    tools/gbgate/build.sh <ref-A> <ref-B> /tmp/gb_ab
+    tools/gbppu/counters.sh /tmp/gb_ab <rom.gb>
+
+Wraps `DINGBAT_BENCH_COUNTERS=1` around both slots of a `tools/gbgate` build
+pair. `docs/gb_oam_dma_cost.md` is the authority: fps has a ~1.3% layout noise
+floor and cannot resolve a change to this path, `cycles=` must match between
+the arms or they did different work, and per-function sizes should be diffed
+before believing a result. The mode 3 dot loop is tight enough that ONE extra
+branch in `tick_shifter` is +1.7% — check any window/fetcher change here.
+
+**Check the build's exit code.** `nim c` failing leaves the previous binary in
+place, and a stale slot B reports the previous revision's numbers, which look
+like a real result.
+
+## Sweeping WIN_REACT_PHASE
+
+    tools/gbppu/reactsweep.sh
+
+Rebuilds `-d:WIN_REACT_PHASE=0..7` and scores the mealybug rows that see the
+window's re-trigger edge, which is how that constant was pinned. Re-run it if
+the shifter's window rules move dots: the fetcher does not advance one step per
+dot (it parks on `fsPushPixel`), so a phase is not portable between two points
+in the dot even when the two look one step apart.
 
 ## blargg canary
 
