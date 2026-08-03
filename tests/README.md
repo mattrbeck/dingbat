@@ -243,7 +243,10 @@ the repo root right after `nimble test_build`, or it quits with
   the commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
   nothing is built), and the five `DenSinH/FuzzARM` ROMs pinned to the commit
   in `FuzzArmRev` (`a675329cd57da48e3e406216ba2d79dd7e09ee20`; that repo has
-  no release tag, so the ROMs come from raw.githubusercontent at that SHA).
+  no release tag, so the ROMs come from raw.githubusercontent at that SHA),
+  and ~30 individual files from `gbdev/GBEmulatorShootout`'s committed
+  `testroms/` tree at `ShootoutRev` (rtc3test, CasualPokePlayer, daid — see
+  "The gbdev shootout's own ROMs" below).
   **FuzzARM's tests are randomly generated at build time**, so the committed
   pass/fail baseline is only meaningful for the pinned SHA — bumping it means
   a different 10 000 tests and a re-baseline, not a regression. Seven
@@ -273,6 +276,8 @@ a `--cgb`/model flag here.
 | AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
 | GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`) |
 | Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
+| SameSuite `dma`, `ppu`, `interrupt` | `LD B,B` + Fibonacci regs | `tmMooneye`, all `--cgb`; `sgb/` needs an SGB device, `apu/` stays behind `--apu` |
+| rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | downloaded from the gbdev shootout, scored with **its** tolerance — see below |
 | MagenTests | screen colour | `--mode=magen-green` / `--mode=magen-nored`, see above |
 | gambatte | glyph OCR of the on-screen result | batched via `--mode=gambatte --list=`; aggregated one row per subdirectory, see below |
 | mGBA suite, jsmolka gba-tests, FuzzARM | GBA; unchanged | see above |
@@ -330,23 +335,76 @@ Screenshot notes:
   and indexed, and anything outside that now raises rather than silently
   decoding to noise.
 - "CGB compatibility mode" references (a CGB booting a non-CGB cart: the AGE
-  `ncm*` images, `mbc3-tester-cgb`, `rtc3test`'s CGB set) use a third palette
-  and are **not** scored — dingbat has no such device mode.
+  `ncm*` images, `mbc3-tester-cgb`) use a third palette and are **not** scored —
+  dingbat has no such device mode. The palette is fixed and documented in
+  mealybug's own howto: background `#000000/#0063C6/#7BFF31/#FFFFFF`, objects
+  `#000000/#943939/#FF8484/#FFFFFF`, which makes such an image identifiable on
+  sight.
+
+  **Mealybug's `_cgb_c` / `_cgb_d` references are exactly this**, which is the
+  single most tempting mistake in this directory: 47 unused reference images
+  sitting in a bundle we already download, apparently the only way to arbitrate
+  a CGB-side mid-scanline question, and only DMG wired up. Every mealybug cart
+  is DMG-flagged (`$143 = $00`), so those captures are a CGB in compatibility
+  mode, and measured 2026-08-03 **all 47 images across both revisions contain
+  only the six compat colours above and not one native-CGB colour**. Scoring
+  them adds 27 permanently-red rows about a device this tree does not model:
+  a DMG-flagged cart forced to CGB here renders an entirely black panel,
+  because nothing installs the compatibility palettes the CGB boot ROM writes,
+  so the rows score 0-48% for a reason that has nothing to do with the PPU.
+  The same trap kills three of daid's rows — see `build_shootout_tests`, where
+  one of them would have gone in **green** while asserting nothing.
+
+  dingbat's CGB PPU is not unmeasured: gambatte's `cgb04c` rows are native-CGB
+  and there are thousands of them.
 - `strikethrough` and `bully` are `$80` CGB-capable carts, so they always boot
   CGB here; their `-dmg` references would need a CGB cart forced into DMG mode,
   which `--cgb` (force CGB *on*) cannot express.
 
-Not integrated: `rtc3test` and `little-things-gb/tellinglys` both need scripted
-button presses (rtc3test uses A / ↓A / ↓↓A to pick one of three sub-tests) and
+Not integrated: `little-things-gb/tellinglys` needs a scripted button press and
 `dingbat_test` has no input scripting — only `dingbat_bench` does, via its
-`"600:START,700:A"` script format. Porting that parser across would unblock
-both, and rtc3test is worth it: dingbat has a real MBC3 RTC. `scribbltests`
-`fairylake`/`winpos` and Mooneye's `logic-analysis/` ship no reference at all.
+`"600:START,700:A"` script format. `scribbltests` `fairylake`/`winpos` and
+Mooneye's `logic-analysis/` ship no reference at all.
+
+**`rtc3test` no longer needs that parser.** Upstream it is one ROM with a
+three-way menu picked by A / ↓A / ↓↓A, which is why it was listed here as
+blocked on input scripting. The gbdev shootout ships three separate 32 KB
+builds with the menu resolved at build time, so the runner takes those instead
+and the input problem disappears. That is real MBC3 RTC coverage, on native-CGB
+references, and nothing else in the runner exercises the RTC.
+
+### The gbdev shootout's own ROMs, and its tolerance
+
+`build_shootout_tests` fetches four suites that exist nowhere else as a
+distributable artifact — `ax6/rtc3test` (the split builds above),
+CasualPokePlayer's MBC3 tests and daid's STOP/speed-switch tests — file by file
+from `raw.githubusercontent` at the commit in `ShootoutRev`, the way FuzzARM is
+fetched. That is ~30 files under a megabyte, against a 32 MB `testroms/`
+archive; the cache key in `.github/workflows/test.yml` carries the SHA.
+
+**These references are scored with the shootout's tolerance, not exact
+equality**, and that is a real difference in kind from every other screenshot
+suite here. gbdev's `util.py: compareImage` converts both frames to 8-bit luma
+and passes while every pixel is within 50. It has to: its images are screen
+captures of a running emulator, not framebuffer dumps, so they carry that
+emulator's CGB colour correction. rtc3test's green is `#009100`, and the raw
+5-to-8-bit expansion `(X<<3)|(X>>2)` cannot produce it at all — it emits
+`#00CE00`. Exact matching would fail a correct frame, so `grey_tolerance` on
+`TestDef` implements the suite's own rule and `rtc3test-2` passes at 100%.
+Everything else in the tree stays exact, because everything else ships raw
+dumps. Note the consequence when reading `results.md`: a shootout row's
+percentage is *not* comparable to a mealybug or gambatte row's.
+
+Skipped from the shootout, each for a stated reason in the code: `acid/which.gb`
+and `daid/rom_and_ram.gb` ship no reference at all (the shootout itself scores
+them INFO, not pass/fail); `cpp/sgb-ext-test` and SameSuite's `sgb/` pair need
+an SGB device; and the three daid rows whose "GBC" half is really CGB
+compatibility mode, discussed above.
 
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed: the baseline carries a lot of known failures
-(Total 934, Pass 476 as of the current committed `results.md`, most of them the
+(Total 951, Pass 678 as of the current committed `results.md`, most of them the
 PPU-timing suites added on purpose to measure them). 48 of those rows are
 aggregated gambatte subdirectories, standing for 2,632/5,005 individual tests
 passing — and those 48 gate on the pass COUNT, not just the pass/fail bit. All 13 jsmolka rows, all 5 FuzzARM rows
@@ -367,6 +425,16 @@ gated, which is why adding suites means regenerating and committing
 at once in different worktrees therefore delete each other's shard output, and
 the victim scores every not-yet-flushed row 0 ("harness produced no verdict").
 Run with a private `TMPDIR` if anything else may be running the suite.
+
+`$DINGBAT_ROM_CACHE` is the same hazard one level up, and it is quieter because
+it does not fail — it re-baselines. The runner reuses any already-present file
+by name, so a session that drops a *different* build at a cached path silently
+changes what every later run scores. Observed 2026-08-03: `mgba-suite.gba` was
+replaced mid-session with the rebuilt master candidate, which moved "Misc. edge
+case tests" from 1/10 to 4/12 — a row-count change, in a GBA suite, in a commit
+that touched only GB code. Set a private `DINGBAT_ROM_CACHE` before generating
+a baseline you intend to commit, and check `git diff tests/results.md` for rows
+your change has no business touching.
 
 **Results-file caveat:** `tests/results.md`, `tests/results_mgba_suite.md` and
 `tests/results_gambatte.md` are committed baselines, and every run **rewrites

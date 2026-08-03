@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-03 11:03:07*
+*Generated: 2026-08-03 11:39:29*
 
 ## Game Boy - Blargg
 
@@ -828,6 +828,33 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | little-things-gb/firstwhite | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | 👀 94.4% correct (21760/23040 pixels match) |
 
+## Game Boy - SameSuite
+
+| Test | Result |
+|------|--------|
+| same-suite/dma/gbc_dma_cont | 👀 |
+| same-suite/dma/gdma_addr_mask | 👌 |
+| same-suite/dma/hdma_lcd_off | 👀 |
+| same-suite/dma/hdma_mode0 | 👀 |
+| same-suite/ppu/blocking_bgpi_increase | 👌 |
+| same-suite/interrupt/ei_delay_halt | 👀 |
+
+## Game Boy - Shootout ROMs
+
+| Test | Result |
+|------|--------|
+| rtc3test/rtc3test-1 | 👀 97.5% correct (22459/23040 pixels match) |
+| rtc3test/rtc3test-2 | 👌 |
+| rtc3test/rtc3test-3 | 👀 98.0% correct (22571/23040 pixels match) |
+| cpp/rtc-invalid-banks-test | 👀 91.7% correct (21120/23040 pixels match) |
+| cpp/latch-rtc-test | 👀 90.1% correct (20770/23040 pixels match) |
+| cpp/ramg-mbc3-test | 👌 |
+| daid/ppu_scanline_bgp-dmg | 👀 78.0% correct (17968/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
+| daid/stop_instr-dmg | 👀 1.4% correct (333/23040 pixels match) |
+| daid/speed_switch_timing_div | 👌 |
+| daid/speed_switch_timing_ly | 👀 98.5% correct (22697/23040 pixels match) |
+| daid/speed_switch_timing_stat | 👀 98.5% correct (22698/23040 pixels match) |
+
 ## Game Boy - Mooneye (wilbertpol)
 
 | Test | Result |
@@ -1007,6 +1034,6 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 
 ## Summary
 
-- **Total:** 934
-- **Pass:** 672
-- **Fail:** 262
+- **Total:** 951
+- **Pass:** 677
+- **Fail:** 274

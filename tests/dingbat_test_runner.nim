@@ -23,9 +23,29 @@ type
     mode: TestMode
     timeout: int
     expected_png: string  # for screenshot mode
+    alt_pngs: seq[string] # screenshot mode: additional references that are
+                          # ALSO a pass. Hardware itself is non-deterministic
+                          # for a few tests (daid's ppu_scanline_bgp ships
+                          # three legitimate DMG outcomes), so the verdict is
+                          # "matches any listed reference", not "matches one".
     expected_hash: string # screenshot mode, alternative to expected_png:
                           # FNV-1a of the PPM, for ROMs that ship no reference
                           # image (see build_jsmolka_tests)
+    grey_tolerance: int   # screenshot mode. 0 (the default) = every pixel must
+                          # match the reference exactly, which is right for
+                          # every suite that ships raw framebuffer dumps.
+                          # Above 0, the comparison instead converts both sides
+                          # to luma and allows that much difference per pixel —
+                          # the gbdev shootout's own `compareImage` rule, and
+                          # the only honest way to score ITS reference images,
+                          # which are screen captures of a running emulator
+                          # rather than framebuffer dumps and so carry that
+                          # emulator's CGB colour correction. Measured: their
+                          # green is #009100, which the raw 5-to-8-bit
+                          # expansion `(X<<3)|(X>>2)` cannot even produce (it
+                          # emits #00CE00 for that channel value). Exact
+                          # matching would mark a correct frame wrong, so the
+                          # suite's own tolerance is the mechanism to copy.
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
     model: string         # mooneye per-model boot table (--model=...); "" = default
@@ -227,40 +247,98 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     # Read actual pixels from PPM
     let actual = if test.color: read_ppm_rgb(tmp_ppm) else: read_ppm_greyscale(tmp_ppm)
     removeFile(tmp_ppm)
-    # Read expected pixels from PNG
-    var expected = read_png(test.expected_png)
-    if not test.color and expected.channels == 3:
-      # Greyscale comparison against an RGB reference (e.g. mooneye's
-      # sprite_priority-dmg.png stores grey shades as R=G=B truecolor):
-      # collapse to one byte per pixel via the R channel.
-      var grey = newSeq[uint8](expected.pixels.len div 3)
-      for i in 0 ..< grey.len:
-        grey[i] = expected.pixels[i * 3]
-      expected.pixels = grey
-      expected.channels = 1
-    # Compare
-    if actual.len != expected.pixels.len:
-      return TestResult(name: test.name, passed: false,
-        output: &"size mismatch: {actual.len} vs {expected.pixels.len}")
-    # Count differing pixels (for RGB, compare 3 bytes at a time)
-    let bytes_per_pixel = if test.color: 3 else: 1
-    let total_pixels = actual.len div bytes_per_pixel
-    var diff_count = 0
-    for px in 0 ..< total_pixels:
-      let base = px * bytes_per_pixel
-      var differs = false
-      for c in 0 ..< bytes_per_pixel:
-        if actual[base + c] != expected.pixels[base + c]:
-          differs = true
-          break
-      if differs:
-        inc diff_count
-    let pct = 100.0 * float(total_pixels - diff_count) / float(total_pixels)
-    let passed = diff_count == 0
+
+    proc score_against(png_path: string): tuple[matched, total: int, err: string] =
+      ## Pixels matching `png_path`, or a non-empty `err` if it is unusable.
+      ##
+      ## `--color` sets the *capture* format, but the reference decides the
+      ## comparison. Reference sets really do mix PNG formats within one suite —
+      ## daid's three legitimate `ppu_scanline_bgp` outcomes are two truecolour
+      ## images and one indexed, and mealybug's unused CGB set mixes indexed
+      ## with 1-bit greyscale, because a frame that came out black-and-white was
+      ## saved as such. So whichever side has three channels is collapsed to the
+      ## other's one via the R channel; every reference here stores greys as
+      ## R=G=B, so nothing is lost. Without the second branch a colour capture
+      ## against a greyscale reference fails as an opaque "size mismatch"
+      ## rather than as a comparison.
+      var expected = read_png(png_path)
+      var act = actual
+      if not test.color and expected.channels == 3:
+        # Greyscale capture vs RGB reference (e.g. mooneye's
+        # sprite_priority-dmg.png stores grey shades as R=G=B truecolor).
+        var grey = newSeq[uint8](expected.pixels.len div 3)
+        for i in 0 ..< grey.len:
+          grey[i] = expected.pixels[i * 3]
+        expected.pixels = grey
+        expected.channels = 1
+      elif test.color and expected.channels == 1:
+        # RGB capture vs greyscale reference — collapse the capture instead.
+        var grey = newSeq[uint8](act.len div 3)
+        for i in 0 ..< grey.len:
+          grey[i] = act[i * 3]
+        act = grey
+      if act.len != expected.pixels.len:
+        return (0, 0, &"size mismatch: {act.len} vs {expected.pixels.len}")
+      let bytes_per_pixel = if expected.channels == 3: 3 else: 1
+      let total_pixels = act.len div bytes_per_pixel
+      var diff_count = 0
+      if test.grey_tolerance > 0:
+        # The shootout's own criterion (util.py `compareImage`): convert both
+        # frames to 8-bit luma and accept while every pixel is within a
+        # tolerance. See `grey_tolerance` on TestDef for why these references
+        # need it.
+        proc luma(p: openArray[uint8]; base, n: int): int =
+          if n == 1: int(p[base])
+          else: (299 * int(p[base]) + 587 * int(p[base + 1]) +
+                 114 * int(p[base + 2])) div 1000
+        for px in 0 ..< total_pixels:
+          let base = px * bytes_per_pixel
+          if abs(luma(act, base, bytes_per_pixel) -
+                 luma(expected.pixels, base, bytes_per_pixel)) > test.grey_tolerance:
+            inc diff_count
+      else:
+        # Count differing pixels (for RGB, compare 3 bytes at a time)
+        for px in 0 ..< total_pixels:
+          let base = px * bytes_per_pixel
+          var differs = false
+          for c in 0 ..< bytes_per_pixel:
+            if act[base + c] != expected.pixels[base + c]:
+              differs = true
+              break
+          if differs:
+            inc diff_count
+      (total_pixels - diff_count, total_pixels, "")
+
+    # A row passes if the frame matches ANY of its references; when none match,
+    # report the closest one, since that is the reference worth diffing against.
+    var best_matched = -1
+    var best_total = 0
+    var best_name = ""
+    var last_err = ""
+    for png_path in @[test.expected_png] & test.alt_pngs:
+      let (matched, total, err) = score_against(png_path)
+      if err.len > 0:
+        last_err = err
+        continue
+      if matched == total:
+        best_matched = matched
+        best_total = total
+        best_name = png_path
+        break
+      if matched > best_matched:
+        best_matched = matched
+        best_total = total
+        best_name = png_path
+    if best_matched < 0:
+      return TestResult(name: test.name, passed: false, output: last_err)
+    let pct = 100.0 * float(best_matched) / float(best_total)
+    let passed = best_matched == best_total
+    # Only name the reference when there was a choice to make.
+    let which = if test.alt_pngs.len > 0: " vs " & best_name.extractFilename else: ""
     return TestResult(
       name: test.name,
       passed: passed,
-      output: &"{pct:.1f}% correct ({total_pixels - diff_count}/{total_pixels} pixels match)",
+      output: &"{pct:.1f}% correct ({best_matched}/{best_total} pixels match){which}",
     )
   else:
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
@@ -438,6 +516,37 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
     ))
   tests
 
+proc build_samesuite_core_tests(samesuite_dir: string): seq[TestDef] =
+  ## SameSuite's non-APU groups: `dma` (4), `ppu` (1) and `interrupt` (1).
+  ## They come down in the same game-boy-test-roms bundle as the APU half and
+  ## use the same mooneye LD B,B + Fibonacci verdict, so they cost nothing to
+  ## fetch and nothing to interpret — they were simply never wired up, because
+  ## `build_samesuite_apu_tests` globs only `apu/`.
+  ##
+  ## Unlike the APU half these are NOT sample-accurate audio tests, so they
+  ## belong in the default run rather than behind --apu. All of them are CGB
+  ## (GBC HDMA/GDMA, CGB palette-index blocking, CGB interrupt timing).
+  ##
+  ## `sgb/` is skipped: those two ROMs test the Super Game Boy packet protocol
+  ## and the shootout runs them on an SGB device. dingbat has no SGB model, and
+  ## running them as a CGB scores a different machine — the same reason the AGE
+  ## `ncm*` (CGB-in-non-CGB-mode) images are skipped.
+  var tests: seq[TestDef]
+  for group in ["dma", "ppu", "interrupt"]:
+    let dir = samesuite_dir / group
+    if not dirExists(dir):
+      echo "  Warning: same-suite ", group, " directory not found"
+      continue
+    for rom in find_roms_recursive(dir, ".gb"):
+      tests.add(TestDef(
+        name: "same-suite/" & group & "/" & rom.splitFile().name,
+        rom_path: rom,
+        mode: tmMooneye,
+        timeout: 1800,
+        cgb: true,
+      ))
+  tests
+
 proc mooneye_model_for(base: string): string =
   ## The boot_regs/boot_div/boot_hwio ROMs each target one specific hardware
   ## revision, encoded as the filename suffix after the last '-' (e.g.
@@ -493,6 +602,30 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   tests
 
 proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
+  ## Mealybug Tearoom, DMG only — and the bundle's `_cgb_c` (27 images) and
+  ## `_cgb_d` (20) references are deliberately NOT a second set of rows.
+  ##
+  ## They look like the obvious free win: they are already inside the
+  ## game-boy-test-roms download, they outnumber the DMG references, and adding
+  ## them would seem to be the only way to arbitrate a CGB-side mid-scanline
+  ## question. They are not native-CGB captures. Every mealybug cart is
+  ## DMG-flagged (header $143 = $00), so a CGB running one is in **CGB
+  ## compatibility mode**, and the suite's own howto spells out the palette that
+  ## device uses: background #000000/#0063C6/#7BFF31/#FFFFFF, objects
+  ## #000000/#943939/#FF8484/#FFFFFF. Measured 2026-08-03, all 47 CGB reference
+  ## images across BOTH revisions contain those six colours and nothing else —
+  ## not one native-CGB colour anywhere in the set.
+  ##
+  ## CGB compatibility mode is a third device this harness does not model (the
+  ## same reason the AGE `ncm*` images and `mbc3-tester-cgb` are skipped), so
+  ## scoring these would add 27 rows that are permanently red and measure a
+  ## machine that does not exist in this tree. Wiring them up anyway scores 0-48
+  ## percent per row, and the reason is not PPU timing at all: forced to CGB, a
+  ## DMG-flagged cart renders an entirely black panel here, because nothing
+  ## installs the compatibility palettes the CGB boot ROM would have written.
+  ##
+  ## dingbat's CGB PPU is not unmeasured, incidentally — gambatte's `cgb04c`
+  ## rows are native-CGB and there are thousands of them.
   var tests: seq[TestDef]
   let ppu_dir = mealybug_dir / "ppu"
   if not dirExists(ppu_dir):
@@ -773,8 +906,160 @@ proc build_acid2_tests(): seq[TestDef] =
   ))
   tests
 
+# gbdev/GBEmulatorShootout. Pinned to a commit so a CI run is reproducible and
+# the ROM cache key in .github/workflows/test.yml stays meaningful; bump both
+# together.
+const ShootoutRev = "38b926bdbc26993d1b4c43e97979ecc66287bf02"
+
+const ShootoutTolerance = 50
+  ## The per-pixel luma tolerance gbdev's own runner uses for these reference
+  ## images (`util.py: compareImage`, "if color > 50: return False"). Scoring
+  ## its images by any tighter rule than the one it publishes them under would
+  ## measure our colour conversion rather than the emulator; see
+  ## `grey_tolerance` on TestDef.
+
+proc ensure_shootout_file(rel: string): string =
+  ## One file out of gbdev/GBEmulatorShootout's committed `testroms/` tree,
+  ## pinned to ShootoutRev.
+  ##
+  ## Four of the shootout's suites exist nowhere else as a distributable
+  ## artifact — daid's and CasualPokePlayer's ROMs are only ever published in
+  ## that repo, `which.gb` likewise, and its rtc3test ROMs are custom builds
+  ## (see build_shootout_tests). So they are fetched file-by-file from
+  ## raw.githubusercontent at a fixed commit, exactly as FuzzARM is: ~30 small
+  ## files totalling under a megabyte, which is far cheaper than the repo's
+  ## 32 MB `testroms/` archive and pins the reference images just as tightly.
+  let dir = RomCacheDir / ("shootout-" & ShootoutRev[0 ..< 7])
+  let path = dir / rel
+  if fileExists(path):
+    return path
+  createDir(path.parentDir)
+  download_file("https://raw.githubusercontent.com/gbdev/GBEmulatorShootout/" &
+                ShootoutRev & "/testroms/" & rel, path)
+  path
+
+proc build_shootout_tests(): seq[TestDef] =
+  ## The suites the gbdev shootout runs that are not in any bundle we already
+  ## download. Every one is scored the way the shootout scores everything: the
+  ## frame after a fixed run, against a committed reference image.
+  ##
+  ## Frame counts are the shootout's own `runtime=` seconds x 60, which is what
+  ## its `Test` objects feed each emulator.
+  var tests: seq[TestDef]
+  echo "Downloading shootout test ROMs..."
+
+  # --- ax6/rtc3test (MBC3 RTC) -------------------------------------------
+  # rtc3test upstream is ONE ROM with a three-way menu picked by button input
+  # (A / down-A / down-down-A), which is why it was previously listed as
+  # unscoreable here: dingbat_test has no input scripting. The shootout ships
+  # three separate 32 KB builds, one per sub-test, with the menu resolved at
+  # build time — so the input problem simply does not arise and no parser needs
+  # porting from dingbat_bench. This is real MBC3 RTC coverage, which dingbat
+  # implements and nothing else in the runner exercises.
+  #
+  # The shootout runs all three as CGB, and these carts are CGB-capable
+  # ($143 = $80) so they boot CGB from the header anyway — `cgb` here is
+  # belt-and-braces. Their references are genuinely native-CGB captures (they
+  # contain #009100, which is not in the CGB-compatibility palette), so unlike
+  # mealybug's CGB set these really do measure dingbat's CGB.
+  for (n, secs) in [(1, 9.5), (2, 7.5), (3, 20.0)]:
+    tests.add(TestDef(
+      name: &"rtc3test/rtc3test-{n}",
+      rom_path: ensure_shootout_file(&"ax6/rtc3test-{n}.gb"),
+      mode: tmScreenshot,
+      grey_tolerance: ShootoutTolerance,
+      timeout: int(secs * 60),
+      expected_png: ensure_shootout_file(&"ax6/rtc3test-{n}.png"),
+      cgb: true,
+      color: true,
+      # Battery-backed RTC cart: without this it drops a .sav into the shared
+      # cache dir and the next run starts from the previous run's clock.
+      no_save: true,
+    ))
+
+  # --- CasualPokePlayer's MBC3 tests -------------------------------------
+  # More MBC3 corners: invalid RTC bank numbers, the single-write latch, and
+  # the width of the RAM-enable register. DMG, half a second each.
+  # `sgb-ext-test` is skipped — it is an SGB packet-protocol test and the
+  # shootout runs it on an SGB, which dingbat does not model.
+  for name in ["rtc-invalid-banks-test", "latch-rtc-test", "ramg-mbc3-test"]:
+    tests.add(TestDef(
+      name: "cpp/" & name,
+      rom_path: ensure_shootout_file("cpp/" & name & ".gb"),
+      mode: tmScreenshot,
+      grey_tolerance: ShootoutTolerance,
+      timeout: 30,
+      expected_png: ensure_shootout_file("cpp/" & name & ".png"),
+      no_save: true,
+    ))
+
+  # --- daid's tests ------------------------------------------------------
+  # STOP-instruction and speed-switch behaviour, plus a mid-scanline BGP probe.
+  #
+  # Only the rows whose device dingbat models are wired up. The shootout also
+  # runs `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` "on GBC",
+  # but all three carts are DMG-flagged ($143 = $00), so that is a CGB in
+  # **compatibility mode** — the same third device the mealybug `_cgb_*` images
+  # capture and that this harness does not model (see build_mealybug_tests).
+  # `ppu_scanline_bgp.gbc.png` is visibly one of those: its only colours are
+  # #0063C6/#7BFF31/#FFFFFF, straight out of the compat background palette.
+  #
+  # `stop_instr` "(GBC)" is the trap worth naming, because it would have gone
+  # in GREEN. Its reference is an all-black frame, and a DMG-flagged cart forced
+  # to CGB renders an all-black frame here whatever it does — nothing installs
+  # the compatibility palettes — so the row passes without STOP being emulated
+  # at all. A gate that cannot fail is worse than no gate.
+  #
+  # `rom_and_ram.gb` is skipped for a different reason: it ships no reference
+  # image at all (the shootout classes it INFO, not pass/fail).
+  #
+  # Mid-scanline BGP writes have three legitimate DMG outcomes (old palette,
+  # new palette, or their OR — which one you get is per-console), so the
+  # shootout accepts any of the three images and so does this row.
+  tests.add(TestDef(
+    name: "daid/ppu_scanline_bgp-dmg",
+    rom_path: ensure_shootout_file("daid/ppu_scanline_bgp.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: 30,
+    expected_png: ensure_shootout_file("daid/ppu_scanline_bgp_0.dmg.png"),
+    alt_pngs: @[ensure_shootout_file("daid/ppu_scanline_bgp_1.dmg.png"),
+                ensure_shootout_file("daid/ppu_scanline_bgp_2.dmg.png")],
+  ))
+  # STOP blanks the DMG panel, because the PPU stops with it.
+  tests.add(TestDef(
+    name: "daid/stop_instr-dmg",
+    rom_path: ensure_shootout_file("daid/stop_instr.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: 30,
+    expected_png: ensure_shootout_file("daid/stop_instr.dmg.png"),
+  ))
+  # The speed-switch trio: a STOP-driven double-speed switch must reset DIV,
+  # and must land LY and STAT where hardware does. These three ARE native CGB
+  # carts ($143 = $C0), so unlike the rest of daid's set they measure the
+  # machine dingbat actually implements.
+  for which in ["div", "ly", "stat"]:
+    tests.add(TestDef(
+      name: "daid/speed_switch_timing_" & which,
+      rom_path: ensure_shootout_file("daid/speed_switch_timing_" & which & ".gbc"),
+      mode: tmScreenshot,
+      grey_tolerance: ShootoutTolerance,
+      timeout: 30,
+      expected_png: ensure_shootout_file(
+        "daid/speed_switch_timing_" & which & ".png"),
+      color: true,
+      cgb: true,
+    ))
+
+  # `acid/which.gb` is deliberately absent. The shootout lists it twice (DMG
+  # and CGB) but ships no reference image for it, so its own `Test` scores it
+  # INFO rather than PASS/FAIL — it exists to be eyeballed in the results table,
+  # and there is nothing here to gate on.
+  tests
+
 # jsmolka/gba-tests. Pinned to a commit so a CI run is reproducible and the
-# ROM cache key below stays meaningful; bump both together.
+# ROM cache key stays meaningful; bump both together.
 const JsmolkaRev = "a6447c5404c8fc2898ddc51f438271f832083b7e"
 
 proc ensure_jsmolka_test_roms(): string =
@@ -1533,6 +1818,17 @@ proc main() =
   # turtle-tests, cgb-acid-hell, little-things-gb, mbc3-tester)
   all_suites.add(run_suite("Game Boy - Screenshot suites",
     build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
+
+  # SameSuite dma/ppu/interrupt (mooneye-style verdict). The apu/ half of the
+  # same suite stays behind --apu; these do not need the audio path at all.
+  all_suites.add(run_suite("Game Boy - SameSuite",
+    build_samesuite_core_tests(gb_test_roms_dir / "same-suite"),
+    harness, previous, regressions))
+
+  # The gbdev shootout's own ROMs: rtc3test, CasualPokePlayer's MBC3 tests and
+  # daid's STOP/speed-switch tests (screenshot comparison)
+  all_suites.add(run_suite("Game Boy - Shootout ROMs",
+    build_shootout_tests(), harness, previous, regressions))
 
   # Mooneye suite, wilbertpol fork (0xED breakpoint)
   all_suites.add(run_suite("Game Boy - Mooneye (wilbertpol)",

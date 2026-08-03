@@ -31,7 +31,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/rom-cache
+<<<<<<< HEAD
+          key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suite1.0-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0-shootout38b926b
+=======
           key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suiteda67466e-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0
+>>>>>>> main
       - name: Install dependencies
         # The tests need only zippy. Installing the full dep tree pulls the
         # GUI-only packages, and imguin's install persistently dies with
