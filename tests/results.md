@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-02 22:26:29*
+*Generated: 2026-08-02 23:18:49*
 
 ## Game Boy - Blargg
 
@@ -380,9 +380,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/int_lyc_halt | 👌 |
 | gbmicrotest/int_lyc_incs | 👌 |
 | gbmicrotest/int_lyc_nops | 👌 |
-| gbmicrotest/int_oam_halt | 👀 actual=0x23 expected=0x94 verdict=0xFF |
-| gbmicrotest/int_oam_incs | 👀 actual=0x91 expected=0x6F verdict=0xFF |
-| gbmicrotest/int_oam_nops | 👀 actual=0x23 expected=0x93 verdict=0xFF |
+| gbmicrotest/int_oam_halt | 👌 |
+| gbmicrotest/int_oam_incs | 👀 actual=0x70 expected=0x6F verdict=0xFF |
+| gbmicrotest/int_oam_nops | 👀 actual=0x94 expected=0x93 verdict=0xFF |
 | gbmicrotest/int_timer_halt | 👌 |
 | gbmicrotest/int_timer_halt_div_a | 👌 |
 | gbmicrotest/int_timer_halt_div_b | 👌 |
@@ -401,7 +401,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_halt_to_vblank_int_b | 👌 |
 | gbmicrotest/lcdon_nops_to_vblank_int_a | 👌 |
 | gbmicrotest/lcdon_nops_to_vblank_int_b | 👌 |
-| gbmicrotest/lcdon_to_if_oam_a | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/lcdon_to_if_oam_a | 👌 |
 | gbmicrotest/lcdon_to_if_oam_b | 👌 |
 | gbmicrotest/lcdon_to_ly1_a | 👌 |
 | gbmicrotest/lcdon_to_ly1_b | 👌 |
@@ -412,9 +412,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_lyc1_int | 👌 |
 | gbmicrotest/lcdon_to_lyc2_int | 👌 |
 | gbmicrotest/lcdon_to_lyc3_int | 👌 |
-| gbmicrotest/lcdon_to_oam_int_l0 | 👀 actual=0x91 expected=0x6F verdict=0xFF |
-| gbmicrotest/lcdon_to_oam_int_l1 | 👀 actual=0x00 expected=0x64 verdict=0xFF |
-| gbmicrotest/lcdon_to_oam_int_l2 | 👀 actual=0x00 expected=0x64 verdict=0xFF |
+| gbmicrotest/lcdon_to_oam_int_l0 | 👀 actual=0x70 expected=0x6F verdict=0xFF |
+| gbmicrotest/lcdon_to_oam_int_l1 | 👀 actual=0x65 expected=0x64 verdict=0xFF |
+| gbmicrotest/lcdon_to_oam_int_l2 | 👀 actual=0x65 expected=0x64 verdict=0xFF |
 | gbmicrotest/lcdon_to_oam_unlock_a | 👌 |
 | gbmicrotest/lcdon_to_oam_unlock_b | 👌 |
 | gbmicrotest/lcdon_to_oam_unlock_c | 👌 |
@@ -495,17 +495,17 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/mbc1_rom_banks | 👌 |
 | gbmicrotest/minimal | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/mode2_stat_int_to_oam_unlock | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/oam_int_halt_a | 👀 actual=0x00 expected=0x01 verdict=0xFF |
-| gbmicrotest/oam_int_halt_b | 👀 actual=0x00 expected=0x02 verdict=0xFF |
+| gbmicrotest/oam_int_halt_a | 👌 |
+| gbmicrotest/oam_int_halt_b | 👌 |
 | gbmicrotest/oam_int_if_edge_a | 👌 |
 | gbmicrotest/oam_int_if_edge_b | 👌 |
 | gbmicrotest/oam_int_if_edge_c | 👌 |
 | gbmicrotest/oam_int_if_edge_d | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
 | gbmicrotest/oam_int_if_level_c | 👌 |
-| gbmicrotest/oam_int_if_level_d | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
-| gbmicrotest/oam_int_inc_sled | 👀 actual=0x00 expected=0x64 verdict=0xFF |
-| gbmicrotest/oam_int_nops_a | 👀 actual=0x00 expected=0x01 verdict=0xFF |
-| gbmicrotest/oam_int_nops_b | 👀 actual=0x00 expected=0x02 verdict=0xFF |
+| gbmicrotest/oam_int_if_level_d | 👌 |
+| gbmicrotest/oam_int_inc_sled | 👀 actual=0x65 expected=0x64 verdict=0xFF |
+| gbmicrotest/oam_int_nops_a | 👀 actual=0x02 expected=0x01 verdict=0xFF |
+| gbmicrotest/oam_int_nops_b | 👌 |
 | gbmicrotest/oam_read_l0_a | 👌 |
 | gbmicrotest/oam_read_l0_b | 👌 |
 | gbmicrotest/oam_read_l0_c | 👌 |
@@ -962,7 +962,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/div | 👌 8/8 passed |
 | gambatte/dma | 👀 112/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 2/17 passed |
-| gambatte/enable_display | 👀 132/184 passed |
+| gambatte/enable_display | 👀 133/184 passed |
 | gambatte/halt | 👀 124/158 passed |
 | gambatte/irq_precedence | 👀 41/64 passed |
 | gambatte/lcd_offset | 👀 40/62 passed |
@@ -970,28 +970,28 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/ly0 | 👀 66/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
 | gambatte/lyc153int_m2irq | 👀 11/16 passed |
-| gambatte/lycEnable | 👀 170/225 passed |
+| gambatte/lycEnable | 👀 172/225 passed |
 | gambatte/lycint_ly | 👌 6/6 passed |
 | gambatte/lycint_lycflag | 👀 11/12 passed |
 | gambatte/lycint_lycirq | 👀 2/4 passed |
 | gambatte/lycint_m0stat | 👌 6/6 passed |
-| gambatte/lycm2int | 👀 4/18 passed |
+| gambatte/lycm2int | 👀 8/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
 | gambatte/m0enable | 👀 149/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
 | gambatte/m1 | 👀 122/170 passed |
-| gambatte/m2enable | 👀 74/120 passed |
+| gambatte/m2enable | 👀 93/120 passed |
 | gambatte/m2int_m0irq | 👀 45/72 passed |
 | gambatte/m2int_m0stat | 👀 3/6 passed |
 | gambatte/m2int_m2irq | 👀 12/18 passed |
 | gambatte/m2int_m2stat | 👀 4/8 passed |
 | gambatte/m2int_m3stat | 👀 27/44 passed |
-| gambatte/miscmstatirq | 👀 245/279 passed |
+| gambatte/miscmstatirq | 👀 260/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 680/811 passed |
-| gambatte/scx_during_m3 | 👀 31/141 passed |
+| gambatte/scx_during_m3 | 👀 34/141 passed |
 | gambatte/scy | 👀 9/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 83/116 passed |
@@ -1008,5 +1008,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 934
-- **Pass:** 666
-- **Fail:** 268
+- **Pass:** 672
+- **Fail:** 262

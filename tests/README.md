@@ -423,10 +423,23 @@ are hand-written, the vector at `$0048` is a `JP`, and the handler is a run of
 `$00`s ending in `F2` — `d.find(b'\xf2', 0x1000) - 0x1000` is the NOP count,
 which is the whole difference between the siblings.
 
-The two open constants that shape those rows are `STAT_MODE_HOLD` (how far
-STAT's mode bits lag the internal mode) and `CGB_BOOT_PHASE` (which decides
-whether the CGB's dot grid lands on the CPU's M-cycle grid the same way the
-DMG's does), both in `src/dingbat/gb/ppu.nim`.
+The constants that shape those rows are all in `src/dingbat/gb/ppu.nim`, and
+all are `intdefine`s, so re-deriving any of them is a build flag rather than an
+edit:
+
+- `STAT_READ_LAG` (L) — how far back from the last dot of the reading M-cycle
+  STAT's mode bits are sampled — and `STAT_IRQ_LEAD` (D) — how far the STAT
+  interrupt line's copy of the mode and LY runs *ahead* of the ones the CPU
+  reads. The `m2int_*` families ask for `4D + L = 4`; the write-up above them
+  carries the measured 2x5 grid for that pair and why every cell of it,
+  including both solutions of that equation, is worse than the shipping
+  `(0, 3)`. **Read the table before re-running the experiment.**
+- `LCD_ON_HEAD_START`, `CGB_BOOT_PHASE`, `DMG_BOOT_PHASE` — where each boot
+  path leaves the PPU's dot grid against the CPU's M-cycle grid. Every one of
+  them is pinned by ROMs that read STAT, so all three want re-sweeping whenever
+  the STAT read model moves. One command each:
+  `nim c -d:test_harness -d:release --path:src -d:<CONST>=<n> -o:dingbat_test
+  tests/dingbat_test.nim && ./dingbat_test_runner`.
 
 **Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
 its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:

@@ -147,13 +147,14 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # Snapshot the mode as observed by a CPU read that samples during this M-cycle
   # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag
-  when STAT_MODE_HOLD:
-    # This renderer restarts cycle_counter at every mode boundary, so the
-    # per-line dot the STAT latch keys off is not available here; it keeps the
-    # unlagged value. It is the non-default fast path and is not scored
-    # against the STAT-timing suites.
-    ppu.stat_mode = ppu.read_mode
-    ppu.stat_lag_cc = STAT_LAG_NONE
+  # This renderer restarts cycle_counter at every mode boundary and advances a
+  # whole M-cycle at a time, so neither the per-line dot the STAT read hold
+  # keys off nor the sub-M-cycle lead the interrupt line wants exists here: it
+  # runs both domains together, which is what the mode flag alone gives. It is
+  # the opt-in fast path (GB.fifo) and is not scored against the STAT-timing
+  # suites; `mode_flag=` keeps irq_mode in step for it, and the assignments
+  # below keep irq_ly in step.
+  when STAT_READ_HOLD: ppu.stat_hold_until = 0
   # See the FIFO renderer: the panel's refresh clock runs on both paths.
   ppu.dots_since_frame += int32(cycles)
   when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
@@ -173,6 +174,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
       if ppu.cycle_counter >= 204:
         ppu.cycle_counter -= 204
         ppu.ly += 1
+        when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
         if int(ppu.ly) == GB_HEIGHT:
           ppu.`mode_flag=`(1'u8, gb)
           gb.interrupts.vblank_interrupt = true
@@ -185,12 +187,16 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
       if ppu.cycle_counter >= 456:
         ppu.cycle_counter -= 456
         if ppu.ly != 0: ppu.ly += 1
+        when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
         ppu_handle_stat_interrupt(ppu, gb)
         if ppu.ly == 0:
           ppu.`mode_flag=`(2'u8, gb)
-      if ppu.ly == 153 and ppu.cycle_counter > 4: ppu.ly = 0
+      if ppu.ly == 153 and ppu.cycle_counter > 4:
+        ppu.ly = 0
+        when STAT_IRQ_SPLIT: ppu.irq_ly = 0
   else:
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
+    when STAT_IRQ_SPLIT: ppu.irq_ly = 0
     lcd_off_frame(ppu, gb)

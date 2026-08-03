@@ -7,9 +7,16 @@ import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
-# Declared here rather than next to its write-up in gb/ppu.nim only because
-# the GbPpu fields it gates are in the type block below. See ppu.nim.
-const STAT_MODE_HOLD* {.booldefine.} = false
+# The two open axes of the STAT model, declared here rather than next to their
+# write-up in gb/ppu.nim only because the GbPpu fields they gate are in the type
+# block below. Both ship at the value that needs no field and no branch, so the
+# shipping build is exactly the tree without them. See ppu.nim for what they
+# mean, the equation that motivated them, and the measured table that rejected
+# every setting but this one.
+const STAT_IRQ_LEAD* {.intdefine.} = 0
+const STAT_READ_LAG* {.intdefine.} = 3
+const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
+const STAT_READ_HOLD* = STAT_READ_LAG != 3
 
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
@@ -367,15 +374,24 @@ type
     # its own field keeps the per-M-cycle cost at the one store the latch
     # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
-    when STAT_MODE_HOLD:
-      # Scratch for the STAT_MODE_HOLD experiment (ppu.nim): one more M-cycle
-      # of lag on STAT's mode bits than `read_mode` carries. Gone entirely
-      # from the shipping build, so GbPpu's layout is untouched by the knob
-      # existing. `stat_lag_cc` is the cycle_counter value at which
-      # `stat_prev_mode` is still the latched value, or STAT_LAG_NONE.
-      stat_mode*:          uint8
-      stat_prev_mode*:     uint8
-      stat_lag_cc*:        int32
+    # ---- Sweep scratch: the STAT model's two open axes ---------------------
+    # Both groups are gone from the shipping build -- the knobs that gate them
+    # ship at the values that need neither, so GbPpu's layout is untouched by
+    # their existing. See the write-up at STAT_IRQ_LEAD in ppu.nim, which is
+    # also where the measurements that rejected both live.
+    when STAT_IRQ_SPLIT:
+      # The mode and LY the STAT interrupt SOURCES compare against, as opposed
+      # to the ones the CPU reads back out of lcd_status/LY. Not serialized:
+      # re-derived from the flag domain on load (load_ppu_state), which is
+      # exact at the VBlank a state is captured at.
+      irq_mode*:         uint8
+      irq_ly*:           uint8
+    when STAT_READ_HOLD:
+      # How long a mode change stays invisible to a STAT read: the dot up to
+      # which `stat_hold_mode` is still what a read returns, or 0 for none.
+      # Rebased by the line wrap rather than maintained per tick.
+      stat_hold_until*:  int32
+      stat_hold_mode*:   uint8
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off

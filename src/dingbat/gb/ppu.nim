@@ -1,13 +1,9 @@
 # GB PPU shared base (included by gb.nim)
 
-# `stat_lag_cc` holds no pending mode change. Above every legal cycle_counter
-# (0..456) so the "has the tick reached it" test is a single compare.
-const STAT_LAG_NONE* = high(int32)
-
 # Dots the re-enabled PPU is already into line 0 by the time the LCDC write
 # retires. See the LCDC-enable path in ppu_write for the derivation; it is
 # overridable because both ROMs that pin it read STAT, so the sweep has to be
-# re-run whenever the STAT read model moves (see STAT_MODE_HOLD).
+# re-run whenever the STAT read model moves (see STAT_READ_LAG).
 const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
 
 # Dots past the start of VBlank at which the CGB boot ROM hands off. See
@@ -18,12 +14,7 @@ const CGB_BOOT_PHASE* {.intdefine.} = 161
 # derivation; overridable so the sweep can be re-run.
 const DMG_BOOT_PHASE* {.intdefine.} = 397
 
-# ---- Sweep knob: one more M-cycle of lag on STAT's mode bits ----------------
-#
-# `STAT_MODE_HOLD` itself is declared at the top of gb.nim, because the GbPpu
-# fields it gates live in that file's type block; it ships OFF, and the latch,
-# its scratch fields and the branch that reads them all compile out with it.
-# What it is, why it is here, and why it is not on:
+# ---- Where STAT's mode bits are sampled, and where its interrupt line sits --
 #
 # The gambatte m2int_* families bracket each mode boundary with pairs of ROMs
 # whose STAT read moves by exactly one M-cycle, all anchored on the mode-2 STAT
@@ -32,39 +23,109 @@ const DMG_BOOT_PHASE* {.intdefine.} = 397
 # m2int_m0irq_{1,2} on the interrupt itself. Writing the STAT value a read
 # returns as "the internal mode in effect during dot (last dot of the read's
 # M-cycle) - L", and letting the whole STAT interrupt line sit D M-cycles
-# earlier than dingbat puts it, every one of those ROMs is satisfied by exactly
+# earlier than the mode flag, every one of those ROMs is satisfied by exactly
 # one equation:
 #
-#     4*D + L = 4        (dingbat today is D = 0, L = 3 -- one dot short)
+#     4*D + L = 4
 #
 # The scx sweep is what makes it an equation rather than an inequality: at
 # SCX&7 = 3 the mode-0 edge lands on the last dot of an M-cycle, which pins the
 # sum from below, and the 2->3 edge pins it from above. Two integer solutions
-# fit:
+# fit, and they are NOT interchangeable:
 #
 #   (a) D = 0, L = 4 -- the mode bits are a copy of the internal mode taken one
-#       M-cycle ago, and the interrupt line is already right. THIS KNOB.
-#   (b) D = 1, L = 0 -- the mode bits are not delayed at all beyond the CPU
-#       latching the bus on the last T-cycle of its read, and the STAT
-#       interrupt line leads dingbat's mode flag by one M-cycle.
+#       M-cycle ago, and the interrupt line is already right.
+#   (b) D = 1, L = 0 -- the mode bits are the live mode as of the last dot of
+#       the read's own M-cycle, and the STAT interrupt line leads the mode flag
+#       by one M-cycle.
 #
-# (a) is what this knob implements, and on its own it takes the m2int_* groups
-# from 24/44+4/8+3/6 to 36/44+8/8+6/6. It is nonetheless WRONG, and mooneye
-# says so: acceptance/ppu/intr_2_mode3_timing and intr_2_mode0_timing are
-# anchored on the same mode-2 interrupt and land their STAT read on the same
-# dot as gambatte's m2int_m2stat_1 (traced: both at cycle_counter 85, both
-# dispatched from cycle_counter 1), and they want the OTHER answer. Under (b)
-# both suites are satisfied at once -- the gambatte read moves an M-cycle
-# earlier with the interrupt and sees the old mode, mooneye's later reads see
-# the new one -- so (b) is the model, and (a) only looks right because the two
-# differ by a single dot at the 2->3 edge.
+# BOTH ARE WRONG. Measured 2026-08-02, full runner, one build per cell, as
+# `gambatte mooneye microtest` (of 5005 / 115 / 513), at the shipping
+# STAT_M2_PULSE and from e86cb34 -- so the absolute gambatte column is 112 rows
+# below today's (cb2aaa6's object penalty landed after), but every cell of it
+# was taken against the same tree and the comparison holds:
 #
-# (b) is not implemented here because it means giving the STAT interrupt line
-# its own copy of the mode, asserted 4 dots before the flag, without moving the
-# flag itself (the CPU's VRAM/OAM lock edges hang off the flag and are pinned
-# by lcdon_timing-GS / intr_2_oam_ok_timing) and without moving LY or the
-# vblank interrupt (hblank_ly_scx_timing-GS and vblank_stat_intr-GS measure
-# STAT against both). That is a restructure, not a constant.
+#   D \ L        0                1                2                3 (ship)        4
+#   0     3393 111 412     3414 111 410     3400 111 409     3422 112 399    3347 108 374
+#   1     3238 108 369     3246 108 367     3254 108 366     3251 109 356    3261 105 331
+#
+# Read that table before spending a day on this again. Three things in it:
+#
+#   * The whole D = 1 ROW is a loss, at every L: -184 gambatte rows and -4
+#     mooneye acceptance rows at (1, 0), and no cell of it beats 3261/105.
+#     GBMicrotest says why in one line. Its int_hblank_nops_scx0..7,
+#     int_lyc_nops, int_vblank1_nops and lyc1_int_nops_b rows count how many
+#     NOPs of a sled retire before the interrupt lands -- no STAT read is
+#     involved at all -- and every one of them goes from dingbat's exact
+#     hardware value to exactly one M-cycle early. So do the mooneye rows (b)
+#     loses: hblank_ly_scx_timing-GS, intr_1_2_timing-GS, intr_2_0_timing and
+#     six intr_2_mode0_scx*_timing_nops, which time a STAT interrupt against LY,
+#     against another interrupt, or against a NOP count -- against anything that
+#     is not a STAT read. The STAT interrupt line does not lead the mode flag,
+#     and that is the one thing (b) needs.
+#   * D and L are not independent for the ROMs that motivated them, so buying
+#     the m2int_* dot with D is not an alternative to buying it with L -- it is
+#     the same purchase. Those ROMs read STAT from inside a STAT handler, so
+#     moving the interrupt moves the read with it and the sampled dot is
+#     (today's last dot) - 4D - L: every cell on the 4D + L = 4 diagonal samples
+#     the SAME dot. What differs is everything else in the handler, and D moves
+#     all of that by a whole M-cycle where L moves none of it. That is why (b)
+#     costs 184 gambatte rows for the same dot (a) costs 75 for -- and with the
+#     OAM source modelled as a pulse (below), (b) does not even collect: its
+#     m2int_m3stat goes 27 -> 21 and m2int_m0irq 45 -> 34, the wrong way, while
+#     (a) still takes them 27 -> 35 and 3 -> 5.
+#   * L alone is a real trade, not a window. gambatte and mooneye-wilbertpol
+#     want L = 3; GBMicrotest wants L <= 2 (its win*_b and ppu_sprite0_scx*_b
+#     rows against wilbertpol's intr_2_mode0_scx*_timing_nops), and the two
+#     cross between 2 and 3. L = 3 is kept because it is the best gambatte cell
+#     and the only one that regresses nothing.
+#
+# Where the m2int_* dot actually lives is still open, and this is the shape of
+# the answer: the GBMicrotest hblank_int_scx0..7 family splits by SCX & 3 rather
+# than by anything an M-cycle wide. Under D = 1 the SCX & 3 in {1,2} rows go
+# green and the {0,3} rows go red, and at D = 0 exactly the other way -- so what
+# those ROMs want is the mode 3 -> 0 edge moved by ONE OR TWO DOTS for half the
+# SCX values and left alone for the other half. That is a mode-3 LENGTH residual
+# per SCX & 7, not a property of the STAT register or of its interrupt line, and
+# it is the same single dot the m2int_* families and DMG_BOOT_PHASE = 399 are
+# all asking for. Nothing in this file can give it.
+#
+# Both knobs stay, at the values that reproduce this tree, so the next attempt
+# is a build flag rather than a restructure. They compile out entirely at those
+# values -- no fields, no branches, no per-tick store -- so an experiment cannot
+# cost the shipping build anything. `-d:STAT_READ_LAG=4` is model (a);
+# `-d:STAT_IRQ_LEAD=1 -d:STAT_READ_LAG=0` is model (b).
+# Both constants are declared at the top of gb.nim (the GbPpu fields they gate
+# are in that file's type block), and both are `intdefine`s:
+#
+#   STAT_IRQ_LEAD   D, in CPU M-cycles: how far the STAT interrupt line's copy
+#                   of the mode and of LY runs ahead of the ones the CPU reads
+#                   back. One M-cycle is 4 dots at normal speed and 2 in double
+#                   speed (Pan Docs, "Dots"), so it is scaled per use rather
+#                   than baked into a dot count -- the gambatte *_ds_* rows are
+#                   what catch it if it is not.
+#   STAT_READ_LAG   L, in dots back from the last dot of the reading M-cycle.
+#
+# with STAT_IRQ_SPLIT / STAT_READ_HOLD the derived "does this cost anything"
+# bits. At L = 3 the sampled dot is the first of the M-cycle, which the tick
+# already latches into `read_mode` for the CPU's VRAM/OAM locks, so the hold
+# is not needed either.
+
+when STAT_IRQ_SPLIT:
+  # The STAT interrupt line is a level-triggered OR of the enabled sources
+  # feeding one rising-edge detector (Pan Docs, "STAT interrupt" -- that is what
+  # makes STAT blocking work), so the sources are free to be a distinct signal
+  # from the bits the CPU reads back. These are that signal. What stays behind
+  # with the flag, because a ROM pins it there: the mode FLAG and the VRAM/OAM
+  # lock edges hanging off it (mooneye lcdon_timing-GS, intr_2_oam_ok_timing),
+  # LY and the coincidence BIT (gambatte lycint_lycflag), and the vblank
+  # interrupt with the DMG OAM pulse measured to coincide with it (mooneye
+  # vblank_stat_intr-GS).
+  template irq_mode_of(ppu: GbPpu): uint8 = ppu.irq_mode
+  template irq_ly_of(ppu: GbPpu): uint8 = ppu.irq_ly
+else:
+  template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
+  template irq_ly_of(ppu: GbPpu): uint8 = ppu.ly
 
 proc new_ppu_base(cgb: bool): GbPpu =
   result = GbPpu(
@@ -73,7 +134,6 @@ proc new_ppu_base(cgb: bool): GbPpu =
     first_line:   true,
     current_window_line: 0,
   )
-  when STAT_MODE_HOLD: result.stat_lag_cc = STAT_LAG_NONE
   result.vram[0] = newSeq[uint8](0x2000)
   result.vram[1] = newSeq[uint8](0x2000)
   result.sprite_table = newSeq[uint8](0xA0)
@@ -137,6 +197,9 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    when STAT_IRQ_SPLIT:
+      ppu.irq_mode = 1
+      ppu.irq_ly = ppu.ly
     ppu.first_line = false
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
@@ -171,12 +234,18 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     # to give. Seeding 399 does buy those 12 and costs hblank_ly_scx_timing-GS
     # itself, its wilbertpol twin, four intr_2_mode0_scx*_timing_nops rows and
     # 28 gambatte rows (halt, m0enable, oam_access, vram_m3, window) — the same
-    # single-dot residual STAT_MODE_HOLD is about, moved onto the boot seed.
+    # single-dot residual the STAT_READ_LAG write-up is about, moved onto the
+    # boot seed. Neither of that write-up's two candidate models absorbs it
+    # either: the whole (D, L) grid was swept against this seed at 397 and at
+    # 399 and no cell buys those 12 rows without spending more elsewhere.
     # Where the two families disagree, the phase that reproduces both suites'
     # steady-state timing wins over the one that reproduces this ROM's.
     ppu.ly = 0             # line 153, past the LY snapback
     ppu.cycle_counter = int32(DMG_BOOT_PHASE)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    when STAT_IRQ_SPLIT:
+      ppu.irq_mode = 1
+      ppu.irq_ly = ppu.ly
     ppu.first_line = false
   elif gb.boot_model == bmDmg0:
     # The DMG0 boot ROM hands off at a different LCD phase than DMG-ABC
@@ -189,6 +258,9 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    when STAT_IRQ_SPLIT:
+      ppu.irq_mode = 1
+      ppu.irq_ly = ppu.ly
     ppu.first_line = false
 
 # Bit 7 of GbPpu.read_mode: LY advanced during the M-cycle a read belongs to.
@@ -369,36 +441,94 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
-when STAT_MODE_HOLD:
-  proc ppu_latch_stat_mode*(ppu: GbPpu; m: uint8) {.inline.} =
-    ## Model (a) of STAT_MODE_HOLD: the mode bits a CPU read sees are the
-    ## internal mode in effect during the LAST DOT OF THE PREVIOUS TICK,
-    ## before whatever transition that dot applied.
-    ##
-    ## `read_mode`, which is what the shipping build returns, is one dot newer
-    ## than that -- it is the mode after the previous tick's last dot,
-    ## transitions included. The two therefore differ on exactly one tick per
-    ## boundary, and only for boundaries that land on an M-cycle grid line:
-    ## mode 2->3 always, mode 3->0 when SCX&7 leaves it there.
-    ##
-    ## Recording the dot of the change rather than running a countdown is what
-    ## keeps this off the per-dot path: this runs once per tick and only ever
-    ## compares.
-    if ppu.stat_lag_cc <= ppu.cycle_counter:
-      ppu.stat_mode = if ppu.stat_lag_cc == ppu.cycle_counter: ppu.stat_prev_mode
-                      else: m
-      ppu.stat_lag_cc = STAT_LAG_NONE
-    else:
-      ppu.stat_mode = m
+proc stat_irq_lead*(gb: GB): int32 {.inline.} =
+  ## How far ahead of the mode flag the STAT interrupt line runs, in dots.
+  ## STAT_IRQ_LEAD is in CPU M-cycles, and one M-cycle is 4 dots at normal
+  ## speed and 2 in double speed (Pan Docs, "Dots").
+  when STAT_IRQ_SPLIT: int32(STAT_IRQ_LEAD) * int32(4 shr gb.memory.current_speed)
+  else: 0'i32
 
 proc stat_read_mode*(ppu: GbPpu): uint8 {.inline.} =
-  ## The mode bits a CPU read of STAT returns.
-  when STAT_MODE_HOLD: ppu.stat_mode and 3'u8
-  else:                ppu.read_mode and 3'u8
+  ## The mode bits a CPU read of STAT returns: the mode in effect during the
+  ## dot STAT_READ_LAG back from the last dot of the reading M-cycle.
+  ##
+  ## At the shipping L = 3 that dot is the first of the M-cycle, which is what
+  ## the tick already latched into `read_mode` for the CPU's VRAM/OAM locks.
+  ## Any other L needs the hold: a mode change stays visible to a read while
+  ## `cycle_counter <= stat_hold_until`, where mode_flag= set that to the
+  ## change's own dot + 1 + L (the change applies from the NEXT dot, and a read
+  ## samples L dots back from where its M-cycle leaves the counter). Nothing
+  ## per-tick maintains it -- the line wrap rebases it and 0 means "no hold".
+  when STAT_READ_HOLD:
+    if ppu.cycle_counter <= ppu.stat_hold_until: ppu.stat_hold_mode
+    else: ppu.lcd_status and 3'u8
+  else:
+    ppu.read_mode and 3'u8
 
 # The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT* = 452'i32
+
+# ---- The OAM (mode 2) STAT source is a pulse, not a level -------------------
+#
+# It goes high for the first four dots of a line and low again for the rest of
+# mode 2, rather than tracking "the mode flag reads 2" across all 80. Two
+# independent things say so before any ROM is run:
+#
+#   * the same source asserts once more per frame entering vblank on line 144,
+#     where there is no mode 2 at all and none is coming (m2_line144, mooneye
+#     vblank_stat_intr-GS/-C) -- it is tied to a line starting, not to a mode;
+#   * GBMicrotest's stat_write_glitch_l{0_c,1_d,154_c} un-mask every STAT source
+#     one M-cycle into mode 2 (the DMG write quirk, ppu_stat_write_glitch) and
+#     hardware stays silent, while their siblings an M-cycle earlier fire.
+#
+# The level model only ever saw this source's RISING edge, so it was never
+# contradicted: the difference is entirely in what happens when a ROM enables
+# the source, or samples the line, PART-WAY THROUGH mode 2. gambatte's m2enable
+# and miscmstatirq families do exactly that, several hundred times.
+const STAT_M2_PULSE* {.intdefine.} = 3
+  ## Last dot of a line on which the OAM STAT source is still high. -1 restores
+  ## the old level-over-mode-2 model; -2 makes the pulse one CPU M-cycle rather
+  ## than a fixed count of dots (see the table below for why it is not that).
+  ##
+  ## Width swept 2026-08-02 against the full runner (gambatte rows of 5005 /
+  ## mooneye of 115 / GBMicrotest of 513), from e86cb34 -- so the gambatte
+  ## column is 112 rows below today's, cb2aaa6's object penalty having landed
+  ## between, but every cell is against the same tree:
+  ##
+  ##   width  gambatte  mooneye  micro
+  ##     -1     3378      112     393   level, the old model
+  ##      0     3414      112     399
+  ##      1     3420      112     399
+  ##      2     3420      112     399
+  ##      3     3422      112     399   <- ships
+  ##      4     3422      112     399   indistinguishable: nothing samples dot 4
+  ##      5     3413      112     396
+  ##      7     3410      112     396
+  ##     -2     3421      112     399   one M-cycle, scaled by double speed
+  ##
+  ## +44 gambatte rows and +6 GBMicrotest at width 3 (3490 -> 3534 and
+  ## 394 -> 400 on the tree this ships in), no row anywhere going the other way:
+  ## m2enable 74 -> 93, miscmstatirq 245 -> 260, lycm2int 4 -> 8, lycEnable,
+  ## scx_during_m3, enable_display, and GBMicrotest's oam_int_* / int_oam_* /
+  ## lcdon_to_if_oam_a. The rest of the oam_int_* family stops being wrong by a
+  ## whole line (0x00 vs 0x64) and becomes wrong by one M-cycle (0x65 vs 0x64),
+  ## which is a different bug and not this one.
+  ##
+  ## DOTS, not an M-cycle. The -2 row above is the same pulse expressed as one
+  ## CPU M-cycle, so 2 dots in double speed instead of 4, and it is one gambatte
+  ## row worse -- three m2enable `_ds_` rows go red and two `_ds_lcdoffset1_`
+  ## rows go green. That is thin evidence on its own, but it points the way the
+  ## hardware argument does: this pulse is generated by the OAM scan starting,
+  ## and the PPU's dot clock does not change with the CPU's speed (Pan Docs,
+  ## "Dots"), so a PPU-side pulse is a fixed number of dots. The M-cycle-scaled
+  ## spelling is kept reachable as -2 because those five rows are the only
+  ## direct measurement of it.
+proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
+  when STAT_M2_PULSE == -1: ppu.irq_mode_of == 2
+  elif STAT_M2_PULSE == -2:
+    ppu.irq_mode_of == 2 and ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
+  else: ppu.irq_mode_of == 2 and ppu.cycle_counter <= int32(STAT_M2_PULSE)
 
 proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## Is the mode 2 (OAM) STAT source asserted by the *start of vblank*?
@@ -417,6 +547,11 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## M-cycle (4 dots) ahead of the vblank interrupt. So on CGB the source is
   ## already high for the last M-cycle of line 143, while the PPU is still in
   ## mode 0.
+  ##
+  ## Asked in the FLAG domain, deliberately, even though the CGB half of it is
+  ## numerically the same dot the general STAT_IRQ_LEAD reaches: this pulse is
+  ## pinned to the vblank interrupt, which does not lead, and on DMG it is
+  ## measured to coincide with it exactly.
   if ppu.ly == 144:
     ppu.mode_flag == 1
   elif ppu.ly == 143:
@@ -431,16 +566,18 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # stat_lyc_onoff — LYC writes while off must not change the retained bit).
   if not ppu.lcd_enabled:
     return
+  # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
+  # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc
   let stat_flag =
-    (ppu.coincidence_flag   and ppu.coincidence_interrupt_enabled) or
-    (ppu.mode_flag == 2     and ppu.oam_interrupt_enabled) or
+    (ppu.irq_ly_of == ppu.lyc and ppu.coincidence_interrupt_enabled) or
+    (ppu.m2_source(gb)        and ppu.oam_interrupt_enabled) or
     # The OAM (mode 2) STAT source also asserts at the start of vblank
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
     # M-cycle earlier on CGB. See m2_line144.
     (ppu.oam_interrupt_enabled and ppu.m2_line144(gb)) or
-    (ppu.mode_flag == 0     and ppu.hblank_interrupt_enabled) or
-    (ppu.mode_flag == 1     and ppu.vblank_stat_enabled)
+    (ppu.irq_mode_of == 0     and ppu.hblank_interrupt_enabled) or
+    (ppu.irq_mode_of == 1     and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
     when defined(gb_stat_read_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
@@ -479,12 +616,18 @@ proc ppu_stat_write_glitch*(ppu: GbPpu; gb: GB) =
   ## three of these ROMs write one M-cycle into mode 2 (l0_c, l1_d, l154_c, all
   ## at dot 1 of a line with LY != LYC) and hardware stays silent, while the
   ## siblings one M-cycle earlier — whose M-cycle starts in the previous line's
-  ## mode 0 — fire. The OAM source is not a level over mode 2 on hardware: it is
-  ## a pulse at the top of a line, which is why it also asserts entering vblank
-  ## on line 144, where there is no mode 2 at all (see m2_line144, mooneye
-  ## vblank_stat_intr-GS/-C). dingbat models it as a level because the enable
-  ## path only ever sees its rising edge; this is the one instrument that samples
-  ## the source mid-mode, and it says the pulse is over by dot 1.
+  ## mode 0 — fire.
+  ##
+  ## That reading was right about the shape and the source IS a pulse now (see
+  ## m2_source), but the pulse is four dots wide, not one, so it is still high
+  ## at dot 1 and putting it back in this set does not work: measured
+  ## 2026-08-02, `m2_source(gb)` added here costs gambatte 3422 -> 3411 (all of
+  ## it m2enable) and GBMicrotest 399 -> 395, i.e. these three rows are bought
+  ## and eleven others sold. Narrowing the pulse to one dot to make the two
+  ## agree costs the same 8 m2enable rows from the other side (3414/399). So
+  ## the two instruments genuinely disagree about the width at their own sample
+  ## points, this stays an exception, and the m2_source sweep is where to
+  ## re-open it.
   if not ppu.lcd_enabled: return
   if ppu.old_stat_flag: return
   if ppu.ly == ppu.lyc or ppu.mode_flag == 0 or ppu.mode_flag == 1:
@@ -524,17 +667,32 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
   if ppu.hdma5 == 0xFF: ppu.hdma_active = false
   ppu.hdma_copying = false
 
+when STAT_IRQ_SPLIT:
+  proc ppu_set_irq_mode*(ppu: GbPpu; gb: GB; mode: uint8) {.inline.} =
+    ## Move the STAT interrupt line's copy of the mode, STAT_IRQ_LEAD M-cycles
+    ## before the flag follows. Only the sources move; nothing the CPU reads
+    ## back does.
+    if ppu.irq_mode != mode:
+      ppu.irq_mode = mode
+      ppu_handle_stat_interrupt(ppu, gb)
+
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
-  when STAT_MODE_HOLD:
+  when STAT_READ_HOLD:
     if mode != prev_mode:
-      # The transition applies from the NEXT dot, so the tick that begins
-      # there is the last one whose STAT read still reports the old mode.
-      ppu.stat_prev_mode = prev_mode
-      ppu.stat_lag_cc    = ppu.cycle_counter + 1
+      # The change applies from the NEXT dot, so a read sampling this dot or
+      # earlier still reports the old mode. See stat_read_mode.
+      ppu.stat_hold_mode  = prev_mode
+      ppu.stat_hold_until = ppu.cycle_counter + 1 + STAT_READ_LAG
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
+  when STAT_IRQ_SPLIT:
+    # The irq domain should already be here (it led by STAT_IRQ_LEAD); this is
+    # the catch-up for the paths that do not lead it at all -- the LCD-off
+    # tick, a speed switch that stepped over the lead's dot -- and a no-op
+    # otherwise.
+    ppu.irq_mode = mode
   ppu_handle_stat_interrupt(ppu, gb)
   # The HBlank DMA step must run AFTER lcd_status reflects mode 0: the block
   # copy ticks the PPU (mem_tick_components in ppu_copy_hdma_block), and a
@@ -675,10 +833,8 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
       # the m2int_* derivation in STAT_MODE_HOLD was traced with.
       echo "STATRD ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " rm=", ppu.read_mode and 3'u8, " live=", ppu.lcd_status and 3'u8
-    # The mode bits (0-1) lag one read M-cycle behind the internal mode: use the
-    # snapshot taken at the start of this read's PPU tick (see GbPpu.read_mode).
-    # STAT_MODE_HOLD is the open question about whether that lag is one dot
-    # short; it ships off, and stat_read_mode is then exactly `read_mode`.
+    # The mode bits (0-1) are sampled at the last dot of this read's own
+    # M-cycle -- see stat_read_mode, and STAT_READ_LAG for what pins that dot.
     let rm = stat_read_mode(ppu)
     var live = (ppu.lcd_status and 0b1111_1100'u8) or rm
     # The LY=LYC comparator does not follow LY instantaneously: the M-cycle in
@@ -785,6 +941,12 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # seeding 5 flat there restarts the PPU one double-speed M-cycle late
       # (gambatte enable_display/frame0_m2stat_count_ds_*, m2enable/disable_ds_*).
       ppu.cycle_counter = int32(int(LCD_ON_HEAD_START) - (4 shr gb.memory.current_speed))
+      when STAT_IRQ_SPLIT:
+        # The irq domain restarts with the flag domain: the lead is a lead over
+        # the PPU's own schedule, and here the schedule itself is what restarts.
+        ppu.irq_ly = 0
+      when STAT_READ_HOLD:
+        ppu.stat_hold_until = 0  # the counter it was expressed in is gone
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
     when defined(gb_m3_trace):

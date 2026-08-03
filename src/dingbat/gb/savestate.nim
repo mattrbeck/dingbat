@@ -278,6 +278,15 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   ppu.ran_bios = r.read_bool()
   r.read_seq_u16_into(ppu.framebuffer)
   ppu.frame = false
+  # Derived, not payload (so no revision bump), and only present at all in a
+  # STAT-sweep build: the interrupt line's copy of the mode and of LY leads its
+  # readable counterpart by under an M-cycle, and a state is captured at VBlank,
+  # which is not inside one -- so re-deriving is exact there and self-corrects
+  # at the next boundary anywhere else.
+  when STAT_IRQ_SPLIT:
+    ppu.irq_mode = ppu.lcd_status and 3'u8
+    ppu.irq_ly = ppu.ly
+  when STAT_READ_HOLD: ppu.stat_hold_until = 0
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.
   ppu.reset_render_scratch()

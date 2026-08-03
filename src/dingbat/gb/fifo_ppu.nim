@@ -22,10 +22,9 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
   )
-  when STAT_MODE_HOLD:
-    result.stat_mode      = base.stat_mode
-    result.stat_prev_mode = base.stat_prev_mode
-    result.stat_lag_cc    = base.stat_lag_cc
+  when STAT_IRQ_SPLIT:
+    result.irq_mode = base.irq_mode
+    result.irq_ly   = base.irq_ly
 
 method reset_render_scratch*(ppu: GbFifoPpu) =
   ## Clear the FIFO/fetcher scratch to its clean pre-line state so a state
@@ -592,6 +591,73 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
     tick_bg_fetcher(ppu, gb)
     tick_shifter(ppu, gb)
 
+template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
+  ## The next dot of this line an idle mode (0, 1 or 2) has something to do on.
+  ##
+  ## This is on the hottest path in the PPU -- fifo_tick's lazy idle span asks
+  ## it once per M-cycle of every memory access -- so the shipping build gets
+  ## the plain three-way choice and nothing else. Mode 2 ends at dot 80 and
+  ## every other idle mode runs to the end of the line, except line 143's mode
+  ## 0, which has the CGB early mode-2 pulse to visit first (M2_144_EARLY_DOT,
+  ## see m2_line144). `ppu.ly == 143` leads that test because it is false on 153
+  ## of every 154 lines, which keeps its cost to one compare.
+  ## A template, not a proc: `inline` is advice and this one is asked ~17,500
+  ## times a frame from a body that is itself inlined into the bus path. Left
+  ## as a proc it measured +1.0% of retired instructions on both a DMG and a
+  ## CGB title -- the whole cost of a call, for three compares.
+  when not STAT_IRQ_SPLIT:
+    if m == 2: 80'i32
+    elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+    else: 456'i32
+  else:
+    # Every boundary is two stops in a STAT_IRQ_LEAD build, `lead` dots apart:
+    # the interrupt line's copy of the mode turns over first, the mode flag
+    # after it. The comparisons are `>=`, not `>`: a stop the counter is
+    # already sitting on has not been *processed* yet (the skip that landed on
+    # it returned before the loop body ran), so it is still the next thing to
+    # do. At normal speed the lead's dot and M2_144_EARLY_DOT coincide; in
+    # double speed they do not, hence three candidates rather than two.
+    let boundary = if m == 2: 80'i32 else: 456'i32
+    result = boundary
+    let irq_dot = boundary - stat_irq_lead(gb)
+    if irq_dot >= ppu.cycle_counter: result = irq_dot
+    if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
+       M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < result:
+      result = M2_144_EARLY_DOT
+
+when STAT_IRQ_SPLIT:
+  proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
+    ## The STAT interrupt line's own line boundary, STAT_IRQ_LEAD M-cycles
+    ## before the flag domain's below. Mirrors it exactly, on irq_ly /
+    ## irq_mode: LY advances, line 144 enters vblank, line 0 enters mode 2.
+    ## What it must NOT do is anything the CPU reads back, or the vblank
+    ## interrupt -- see the write-up at STAT_IRQ_LEAD.
+    if ppu.irq_mode == 1:
+      # Inside vblank LY only advances while it is nonzero: line 153 has
+      # already snapped it back to 0 (below), and that 0 is line 0's.
+      if ppu.irq_ly != 0: ppu.irq_ly += 1
+      if ppu.irq_ly == 0: ppu.irq_mode = 2
+    else:
+      ppu.irq_ly += 1
+      ppu.irq_mode = if int(ppu.irq_ly) == GB_HEIGHT: 1'u8 else: 2'u8
+    ppu_handle_stat_interrupt(ppu, gb)
+
+  proc fifo_irq_m0_ready(ppu: GbFifoPpu; lead: int32): bool {.inline.} =
+    ## Will the fetcher have retired `lead` dots from now? That is when the
+    ## STAT interrupt line's mode 0 rises, ahead of the flag's.
+    ##
+    ## The shifter takes one pixel per dot through the tail of a line, so "lx
+    ## is within `lead` of the end" IS the lookahead -- except where an object
+    ## or a not-yet-started window still owes the fetcher work, which holds
+    ## mode 3 open past that point exactly as fetcher_retired describes.
+    if ppu.lx < int32(GB_WIDTH) - lead: return false
+    if ppu.lx >= GB_WIDTH: return true
+    if ppu.fetching_sprite: return false
+    if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
+    if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
+       int(ppu.ly) >= int(ppu.wy) and int(ppu.wx) <= GB_WIDTH + 6: return false
+    true
+
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
   ## out of fifo_tick so the idle case (below) inlines into the caller; the
@@ -599,6 +665,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## on both paths before this runs.
   if lcd_enabled(ppu):
     var remaining = cycles
+    when STAT_IRQ_SPLIT:
+      # Dots the STAT interrupt line runs ahead of the mode flag. Read once: a
+      # speed switch cannot land inside a tick, and `mode_flag=` re-syncs the
+      # irq domain anyway if one ever stepped over a lead dot.
+      let lead = stat_irq_lead(gb)
     while remaining > 0:
       # Modes 0, 1 and 2 do nothing at all until the dot counter reaches a
       # single trigger value — mode 3 is the only one that has per-dot work.
@@ -611,10 +682,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       # so it still fires on exactly the dot it used to.
       let m = ppu.mode_flag
       if m != 3:
-        let target =
-          if m == 2: 80'i32
-          elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
-          else: 456'i32
+        let target = fifo_skip_target(ppu, gb, m)
         if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
@@ -683,6 +751,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         #    2-3 dots and re-open bgtiledata/bgtilemap/scx_during_m3, so it is
         #    a change of its own, not a tweak to this one.
         while remaining > 0 and not fetcher_retired(ppu):
+          when STAT_IRQ_SPLIT:
+            # The mode-0 STAT source rises `lead` dots before the flag does.
+            # The flag's dot is the one this loop exits on, so asking at the
+            # TOP of a dot puts this exactly `lead` dots ahead of it.
+            if ppu.irq_mode == 3 and ppu.lx >= int32(GB_WIDTH) - lead and
+               fifo_irq_m0_ready(ppu, lead):
+              ppu_set_irq_mode(ppu, gb, 0'u8)
           fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
           dec remaining
@@ -690,6 +765,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       dec remaining
       case m
       of 2:  # OAM search
+        when STAT_IRQ_SPLIT:
+          # Mode 2 ends for the interrupt line a lead before it ends for the
+          # mode bits. Nothing else about the boundary moves.
+          if ppu.cycle_counter == 80 - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
         if ppu.cycle_counter == 80:
           ppu.`mode_flag=`(3'u8, gb)
           if ppu.ly == ppu.wy: ppu.window_trigger = true
@@ -751,9 +830,15 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
            gb.cgb_enabled:
           ppu_handle_stat_interrupt(ppu, gb)
-        elif ppu.cycle_counter == 456:
+        when STAT_IRQ_SPLIT:
+          if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
+        if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
+          when STAT_READ_HOLD: ppu.stat_hold_until -= 456
           ppu.ly += 1
+          # The irq domain got here a lead ago; this is its catch-up for the
+          # unsplit build and for anything that stepped over that dot.
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
           ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
           if int(ppu.ly) == GB_HEIGHT:
             ppu.`mode_flag=`(1'u8, gb)
@@ -765,21 +850,38 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           else:
             ppu.`mode_flag=`(2'u8, gb)
       of 1:  # V-Blank
+        when STAT_IRQ_SPLIT:
+          if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
+          when STAT_READ_HOLD: ppu.stat_hold_until -= 456
           if ppu.ly != 0:
             ppu.ly += 1
             ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
           ppu_handle_stat_interrupt(ppu, gb)
           if ppu.ly == 0:
             ppu.`mode_flag=`(2'u8, gb)
-        if ppu.ly == 153 and ppu.cycle_counter > 4: ppu.ly = 0
+        when STAT_IRQ_SPLIT:
+          # LY 153 snaps back to 0 partway through the line, and the LYC=0
+          # source sees it a lead ahead of the readable LY -- one edge, two
+          # clocks. The source is what gambatte lyc0int_* and lyc153int_* time;
+          # the flag half below is what a STAT/LY read sees.
+          if ppu.ly == 153 and ppu.irq_ly == 153 and
+             ppu.cycle_counter > 4 - lead:
+            ppu.irq_ly = 0
+            ppu_handle_stat_interrupt(ppu, gb)
+        if ppu.ly == 153 and ppu.cycle_counter > 4:
+          ppu.ly = 0
+          when STAT_IRQ_SPLIT: ppu.irq_ly = 0
       else: discard
       ppu.cycle_counter += 1
   else:
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
+    when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+    when STAT_READ_HOLD: ppu.stat_hold_until = 0
     lcd_off_frame(ppu, gb)
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
@@ -791,7 +893,6 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # from two M-cycles ago).
   let m = ppu.lcd_status and 3'u8
   ppu.read_mode = m
-  when STAT_MODE_HOLD: ppu_latch_stat_mode(ppu, m)
   # Counted on both paths: the panel's refresh clock runs whether or not the
   # PPU is driving it (see ppu_blank_frame).
   ppu.dots_since_frame += int32(cycles)
@@ -813,14 +914,7 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # An LCD that is off also falls through -- that path re-asserts mode 0 and
   # drives the blank-frame clock every tick.
   if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
-    # Line 143's mode 0 is the one H-Blank with something to do before dot 456
-    # (the CGB early mode 2 STAT, see m2_line144), so it gets the shorter
-    # target. `ppu.ly == 143` is first because it is false on 153 of every 154
-    # lines, which keeps the added cost of this case to one compare.
-    let target =
-      if m == 2: 80'i32
-      elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
-      else: 456'i32
+    let target = fifo_skip_target(ppu, gb, m)
     let next = ppu.cycle_counter + int32(cycles)
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the
