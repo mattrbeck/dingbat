@@ -135,6 +135,13 @@ type
     dst*:       array[4, uint32]
     dmacnt_l*:  array[4, uint16]
     dmacnt_h*:  array[4, DMACNT]
+    # Internal word count, copied from dmacnt_l when the channel is enabled
+    # and reloaded from it at every repeat (GBATEK "DMA Transfer Channels":
+    # the internal registers are loaded on enable, and repeat reloads the
+    # count). A write to DMACNT_L after the enable write therefore does NOT
+    # shorten or lengthen the burst already armed — it takes effect from the
+    # next repeat. mGBA suite Misc "DMA count latching" is the fixture.
+    count*:     array[4, uint16]
     # Latch per channel: https://github.com/mgba-emu/mgba/issues/2105
     latch*:     array[4, uint32]
     # Priority arbitration: bitmask of channels with a latched transfer

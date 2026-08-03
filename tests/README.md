@@ -84,14 +84,31 @@ start" flips poll DISPSTAT and time the gaps with TM0) reads back the skip's
 sampling resolution, not the emulator's timing. Set it before concluding a row
 is a timing bug.
 
-### Reading mGBA-suite rows: the columns are swapped
+### Reading mGBA-suite rows: the columns are swapped in ONE section
 
-`doResult()` in the suite's sources takes `(preface, testName, value, expected)`
-but every caller passes `(…, expected[j], measured[j])`. So in
-`Foo: Got 0xAAA vs 0xBBB: FAIL` — and in the Actual/Expected columns of
-`results_mgba_suite.md`, which are parsed from it — **"Got" is the ROM's
-hardcoded hardware constant and "vs" is what dingbat measured.** Reading them
-the natural way inverts every conclusion.
+Every section prints its failures through a local `doResult()`, and they do
+**not** agree on argument order. Checked against the suite sources
+(`mattrbeck/mgba-suite-auto`, one `doResult` per `src/*.c`):
+
+- **`src/misc-edge.c` is swapped.** Its signature is
+  `(preface, testName, value, expected)`, and its caller — the only one in the
+  suite that does this — passes `(activeTest->expected[j], currentTest[j])`.
+  So for the **Misc** section, and only there, `Got 0xAAA vs 0xBBB` means
+  **"Got" is the ROM's hardcoded hardware constant and "vs" is what dingbat
+  measured.**
+- **Everywhere else the natural reading is correct.** `timing.c` takes
+  `(preface, testName, value, calibration, expected)` and prints
+  `Got (value - calibration) vs expected`; `memory.c`, `dma.c`, `bios-math.c`,
+  `carry.c` and the rest all pass `(measured, expected)`. So in the **Timing**
+  section — the one where this matters most, since its rows are cycle counts a
+  cycle or two apart — **"Got" is dingbat's measurement and "vs" is the
+  hardware constant.** `timing.c` has had that order since `6d3651f`; it was
+  never swapped.
+
+The same asymmetry reaches the Actual/Expected columns of
+`results_mgba_suite.md`, which are parsed from these lines. Get it backwards in
+Timing and every "we are one cycle short" becomes "we are one cycle long",
+which points any fix in the opposite direction.
 
 ### The pinned suite ROM has two known-stale rows
 
@@ -108,12 +125,35 @@ fail that no emulator can pass:
   `{0x4D0, 0x87, 0x3EC, 0xE5, 0x3EB, 0xE3, 0x3F3}`. v1.0 carries the old
   constants with new codegen.
 
-Before treating a Misc row as an emulator bug, rebuild the suite (devkitARM is
-enough: `make` in a checkout of the fork with those two commits applied) and
-score against that. Against a corrected build dingbat is 9/10 on Misc; the
-remaining "DMA Prefetch Break" is a ROM-code-layout-dependent loop iteration
-count and is not comparable across builds at all. Bumping the pinned release is
-the real fix.
+Both fixes are already on `mattrbeck/mgba-suite-auto`'s **master**, which is
+well ahead of the v1.0 tag: it also carries `mgba-emu/suite@2a8eca1` (de-flakes
+two DMA0 wrap-around tests, DMA 1256 -> 1244 rows) and `@fbe6156`/`@aac98dc`
+(adds a "DMA count latching" test, Misc 10 -> 12 rows). So rebuilding is just
+`make` in a clean checkout of that master with devkitARM on PATH — no
+cherry-picking. Do **not** build in the user's own checkout; copy it first.
+
+Against that build dingbat is **11/12** on Misc. The one remaining row, "DMA
+Prefetch Break", expects `0x10000000 + 4 * iterations` where the iteration
+count is decided by where gcc happened to put the loop — it is not comparable
+across builds at all, and no emulator can be scored on it. Bumping the pinned
+release is the real fix; `MgbaSuiteRelease` in `dingbat_test_runner.nim` and
+the `suite1.0` cache key in `.github/workflows/test.yml` are the two places
+that move together. A built candidate plus the exact `gh release create` line
+and the rebaseline checklist live in `~/Documents/mgba-suite-v1.1/` (built
+2026-08-03 from that repo's master at `7bf16de`; sha256 `ea505b4c…`). Nothing
+has been published.
+
+**Score Misc with `DINGBAT_NO_WAITLOOP=1`, or six of its rows are meaningless.**
+The 11/12 above is a no-waitloop run. With the default fast-forward the
+corrected build scores 5/12: the six "H-blank bit start" flips spin on DISPSTAT
+and time the gaps with TM0, so the skip's granularity *is* the number they
+report, and dingbat reads them 20-26 cycles long. That is the fast-forward's
+sampling resolution, not a PPU bug — the same rows pass exactly with the skip
+off. `-d:gbaskipcap=<n>` bounds the skip by a constant instead of by the PSG's
+next deadline (see `cpu.tick`); `n = 15` recovers two of the six. Turning that
+into a real fix means bounding the skip by the **loop's own period** — a spin
+loop cannot observe a change before its next poll — which `analyze_loop`
+currently does not measure. That is unstarted work, not a knob to turn.
 
 `--mode=jsmolka` scores jsmolka/gba-tests. Every ROM in that suite reports
 through one protocol (`lib/macros.inc`): the verdict lives in `r12`, the ROM

@@ -25,6 +25,7 @@ proc new_dma*(gba: GBA): DMA =
     result.dmasad[i]  = 0
     result.dmadad[i]  = 0
     result.dmacnt_l[i] = 0
+    result.count[i]    = 0
     result.dmacnt_h[i] = DMACNT()
     result.src[i]     = 0
     result.dst[i]     = 0
@@ -76,6 +77,7 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
       let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
       dma.src[channel] = dma.dmasad[channel] and align
       dma.dst[channel] = dma.dmadad[channel] and align
+      dma.count[channel] = dma.dmacnt_l[channel]
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
         # Hardware starts an immediate DMA ~3 cycles after the enable write;
         # the CPU keeps executing until then (mGBA suite "Trivial DMA").
@@ -122,7 +124,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   let source_control = int(dma.dmacnt_h[channel].source_control)
   let dest_control   = int(dma.dmacnt_h[channel].dest_control)
   var word_size      = 2 shl int(dma.dmacnt_h[channel].xfer_type)  # 2 or 4
-  var len            = int(dma.dmacnt_l[channel])
+  var len            = int(dma.count[channel])
   if len == 0:
     len = int(DMA_LEN_MASK[channel]) + 1
   var dest_ctrl      = dest_control
@@ -226,6 +228,10 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   if not dma.dmacnt_h[channel].repeat or start_timing == 0:  # not (repeat && not Immediate)
     dma.dmacnt_h[channel].enable = false
+  else:
+    # Repeat: the internal count is reloaded from the user register, so a
+    # DMACNT_L write made during the previous burst's lifetime lands here.
+    dma.count[channel] = dma.dmacnt_l[channel]
 
   if dma.dmacnt_h[channel].irq_enable:
     dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)

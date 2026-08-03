@@ -1,5 +1,96 @@
 # Prefetch-model rewrite: occupancy model to close the 46 Timing fails
 
+> ## UPDATE 2026-08-03 — the remaining 32 DMA rows are **provably** out of reach of any `elapsed mod s` rule
+>
+> The previous update left the 32 DMA rows open with "not a function of
+> `(elapsed mod s)`, needs the two clocks reconciled first". Instrumenting every
+> prefetch-enabled DMA in the Timing section (`rom_access_cycles`, logging
+> `now`/`rom_free_since`/`s`/`seq`/`cost` per ROM access, correlated with the
+> suite's own PASS/FAIL lines) turns that into a closed question. **No rule of the
+> form "stall iff `(elapsed + k) mod s == r`" can satisfy the 32 rows, for any `k`
+> and any per-`s` residue `r`.** The reconciliation work is therefore not a
+> prerequisite for the fix — it is not the fix at all.
+>
+> ### The eight observations
+>
+> All 32 failures are `dingbat = hardware − 1` (see the sign note below — Timing's
+> `Got` column is dingbat, `vs` is hardware; the *Misc* section is the swapped one).
+> Every family reduces to the same eight distinct `(s, elapsed)` points at the DMA's
+> first ROM access, where `elapsed = now − rom_free_since`:
+>
+> | s | elapsed | stall needed? | rows |
+> |---|---|---|---|
+> | 3 | 0 | no  | `*/from ROM` + `*/ROM to ROM`, ARM `P..`/`PN.` |
+> | 3 | 1 | **yes** | `*/to ROM`, ARM `P..`/`PN.` |
+> | 3 | 3 | no  | `*/from ROM` + `*/ROM to ROM`, Thumb `P..`/`PN.` |
+> | 3 | 4 | **yes** | `*/to ROM`, Thumb `P..`/`PN.` |
+> | 2 | 2 | **yes** | `*/from ROM` + `*/ROM to ROM`, ARM `P.S`/`PNS` |
+> | 2 | 3 | no  | `*/to ROM`, ARM `P.S`/`PNS` |
+> | 2 | 4 | no  | `*/from ROM`, Thumb `P.S`/`PNS` |
+> | 2 | 5 | no  | `*/to ROM`, Thumb `P.S`/`PNS` |
+>
+> (`to ROM` sits one cycle later than `from ROM` at the same `s` because the DMA
+> reads IWRAM first — 1 cycle — and only then touches the ROM bus.)
+>
+> ### Why that table is unsatisfiable
+>
+> Look only at `s = 2`. `elapsed = 2` **must** stall and `elapsed = 4` **must not**.
+> For any offset `k`, `2 + k ≡ 4 + k (mod 2)`. A predicate that reads only
+> `(elapsed + k) mod s` therefore returns the same answer for both, whatever `k` and
+> whatever residue is chosen. The shipping CPU rule (`mod s == s−1`), the rule
+> re-anchored to the DMA's grant cycle instead of its first access, and the rule
+> re-anchored to the end of the CPU's in-flight access are all instances of this
+> form, so all three are excluded — no sweeping required.
+>
+> The only functions that separate `(2,2)` from `(2,4)` also read the buffer
+> occupancy `elapsed div s` (1 vs 2). But occupancy does **not** separate the `s = 3`
+> pairs — `(3,0)` no-stall and `(3,1)` stall are both occupancy 0, `(3,3)` no-stall
+> and `(3,4)` stall are both occupancy 1. So any rule that fits all eight must switch
+> *which variable it reads* on `s`: "stall iff phase == 1, or (occupancy == 1 and
+> phase == 0)". Eight constraints, and that expression has enough freedom to hit them
+> exactly — it is a fit, with no mechanism behind it, and it is not landed here.
+>
+> ### What this says about the real defect
+>
+> A non-periodic requirement in a variable that is periodic by construction means the
+> variable is wrong, not the rule. `rom_free_since` is *derived* — "the cycle the last
+> ROM access ended" — and it is being asked to stand in for the prefetch unit's actual
+> position. Those coincide only while the CPU is the sole master. The measurements
+> show the two drifting apart by an amount that depends on the preceding instruction
+> stream: at the DMA grant, `rom_free_since − scheduler.cycles` is **+2** for the ARM
+> variants (the CPU has committed a ROM access that ends *after* the event fires) and
+> **−1 or −2** for the Thumb ones. That is the same skew the previous update named,
+> now quantified: a 3-to-4-cycle relative swing between two runs of the same test.
+>
+> Closing this needs the prefetcher to become a real unit with its own position and
+> occupancy — advanced explicitly, halted by whichever master holds the bus, and
+> surviving a burst rather than being reconstructed from a timestamp. That is the
+> occupancy model this document was originally written to propose. It is the
+> **only** remaining path; the cheap ones are now eliminated rather than untried.
+>
+> ### Measured, and rejected
+>
+> Three candidate models, each scored on the full suite (baseline 6967, Timing 1988):
+>
+> | model | Timing | total | verdict |
+> |---|---|---|---|
+> | CPU hand-off rule extended to the DMA's first ROM access | 1980 | 6959 | reproduces the earlier −8; excluded by the proof above |
+> | DMA start waits out the CPU's in-flight ROM access (`rom_free_since > now`) — i.e. "reconcile the clocks by charging the skew" | **1836** | 6815 | decisively wrong: those cycles are not spent on hardware |
+> | prefetch buffer survives the burst (park occupancy + the stream address across the DMA, restore on hand-back) | 1988 | 6966 | no effect on Timing at all, and costs a Timer-count row — the missing cycle is not on the CPU's resume path |
+>
+> The middle row is the useful one: it rules out the reading of "reconcile the two
+> clocks" that means *charge the difference*. Whatever the occupancy model does with
+> the skew, it must not add cycles at the grant.
+>
+> ### mGBA is not an oracle for these rows
+>
+> Worth restating because it closes off the obvious shortcut: the Phase 0 finding
+> below still holds — mGBA scores **1552/2020** on Timing and fails these rows *further*
+> from hardware than dingbat does. There is no reference implementation to diff
+> against here; the suite's `expected` table is the only oracle, and it gives eight
+> points. Any additional constraint has to come from a purpose-built ROM that sweeps
+> the phase, run on hardware.
+
 Status: **Phase 0 done; premise revised; Phase 1 blocked on a scope decision** (2026-07-14).
 Prereq baseline: `main` @ a6ec55e — mGBA suite 6898/7218 HLE, 6897 LLE.
 

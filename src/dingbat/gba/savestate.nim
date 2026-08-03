@@ -230,8 +230,9 @@ proc save_dma_state(dma: DMA; w: var Writer) =
     w.write_u16(dma.dmacnt_l[i])
     w.write_u16(cast[uint16](dma.dmacnt_h[i]))
     w.write_u32(dma.latch[i])
+    w.write_u16(dma.count[i])  # v5
 
-proc load_dma_state(dma: DMA; r: var Reader) =
+proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_DMA)
   for i in 0 .. 3:
     dma.dmasad[i] = r.read_u32()
@@ -241,6 +242,13 @@ proc load_dma_state(dma: DMA; r: var Reader) =
     dma.dmacnt_l[i] = r.read_u16()
     dma.dmacnt_h[i] = cast[DMACNT](r.read_u16())
     dma.latch[i] = r.read_u32()
+    # Pre-v5 states have no latched count, so reconstruct it as the user
+    # register — which IS what those builds ran on, so the state loads into
+    # exactly the machine that wrote it. The two values diverge only for a
+    # channel armed on a hardware trigger whose DMACNT_L was rewritten before
+    # its first burst; a repeat channel reloads the count after every burst,
+    # so between bursts the two always agree.
+    dma.count[i] = if rev >= 5: r.read_u16() else: dma.dmacnt_l[i]
   # Arbitration state is always idle at frame boundaries (where states are
   # taken), so it is not serialized — just reset it
   dma.pending = 0
@@ -726,7 +734,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
   load_keypad_state(gba.keypad, r)
   load_timer_state(gba.timer, r)
   load_serial_state(gba.serial, r)
-  load_dma_state(gba.dma, r)
+  load_dma_state(gba.dma, r, rev)
   load_gpio_state(gba.bus.gpio, r, rev)
   load_ppu_state(gba.ppu, r)
   load_apu_state(gba.apu, r)

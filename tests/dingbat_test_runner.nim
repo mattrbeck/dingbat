@@ -1027,8 +1027,25 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     detail: var seq[MgbaSuiteDetail];
                     bios_path: string = ""): SuiteResults =
   echo &"\n=== GBA - mGBA Test Suite ==="
+  # The pinned release. v1.0 predates two upstream fixture fixes and is built
+  # with a modern devkitARM, so eight of its ten Misc rows are unpassable by
+  # ANY emulator — see "The pinned suite ROM has two known-stale rows" in
+  # tests/README.md. mattrbeck/mgba-suite-auto's master already carries both
+  # fixes (mgba-emu/suite@8c97f2c9 vu32 dmaPrefetch, @a58437f3 re-measured
+  # H-blank constants) plus four newer upstream tests.
+  #
+  # TO SWITCH once a v1.1 release exists on that repo: change MgbaSuiteRelease
+  # to "v1.1" and bump `suite1.0` to `suite1.1` in the rom-cache `key:` in
+  # .github/workflows/test.yml (that key is exact-match, so a stale key would
+  # serve the OLD ROM from cache and the change would look like a no-op).
+  # Rebaselining tests/results.md and tests/results_mgba_suite.md is part of
+  # the same commit: the row COUNT changes (DMA 1256 -> 1244 as
+  # mgba-emu/suite@2a8eca1 de-flaked two DMA0 wrap-around tests, Misc 10 -> 12
+  # as @fbe6156/@aac98dc add "DMA count latching"), and section totals move.
+  const MgbaSuiteRelease = "v1.0"
   let rom_path = ensure_rom_download(
-    "https://github.com/mattrbeck/mgba-suite-auto/releases/download/v1.0/suite.gba",
+    "https://github.com/mattrbeck/mgba-suite-auto/releases/download/" &
+      MgbaSuiteRelease & "/suite.gba",
     "mgba-suite.gba")
   var cmd = &"{harness.quoteShell} {rom_path.quoteShell} --mode=mgba-suite --timeout=36000"
   if bios_path.len > 0:

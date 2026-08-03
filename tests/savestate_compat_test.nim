@@ -644,6 +644,35 @@ const CPU_SEC_LEN =
   1             # halt_resume_pop
 const HALT_RESUME_POP_OFFSET = CPU_SEC_LEN - 1
 
+# The DMA section (tag GBA_SEC_DMA, four channels) gained a u16 `count` per
+# channel at rev 5. Its offset is not a constant — the bus and scheduler
+# sections ahead of it are variable-length — so it is located by its tag and
+# confirmed by the section that follows it (GBA_SEC_GPIO lands exactly one
+# section-length later). Anything other than a unique hit is reported rather
+# than guessed at.
+const
+  DMA_TAG      = 0xC9'u8
+  GPIO_TAG     = 0xCA'u8
+  DMA_CH_LEN   = 4 + 4 + 4 + 4 + 2 + 2 + 4 + 2  # sad dad src dst cnt_l cnt_h latch count
+  DMA_SEC_LEN  = 1 + 4 * DMA_CH_LEN
+  DMA_COUNT_AT = DMA_CH_LEN - 2                 # `count` is last in a channel
+
+proc strip_dma_count(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-5 DMA layout by
+  ## dropping each channel's `count`. Returns false if the section could not
+  ## be located unambiguously.
+  var found = -1
+  for i in 0 .. payload.len - DMA_SEC_LEN - 1:
+    if payload[i] == char(DMA_TAG) and payload[i + DMA_SEC_LEN] == char(GPIO_TAG):
+      if found >= 0: return false  # ambiguous
+      found = i
+  if found < 0: return false
+  # Delete from the last channel backwards so earlier offsets stay valid.
+  for ch in countdown(3, 0):
+    let at = found + 1 + ch * DMA_CH_LEN + DMA_COUNT_AT
+    payload.delete(at .. at + 1)
+  true
+
 proc park_in_intr_wait(emu: GBA; shifted: bool) =
   ## Put the machine into the shape an HLE IntrWait leaves it in, either the
   ## current one (`shifted`) or the pre-32dd8bb one. Everything here is copied
@@ -683,9 +712,12 @@ proc run_intr_wait_migration() =
   for _ in 0 ..< 30: b.step_frame()
   b.park_in_intr_wait(shifted = false)
   var rev3 = b.state_payload()
-  # A rev-3 payload has no halt_resume_pop byte
+  # A rev-3 payload has no halt_resume_pop byte (rev 4) and no per-channel DMA
+  # `count` (rev 5). Both have to come back out to get the rev-3 field
+  # sequence; every later revision that adds a field belongs here too.
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+  check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
 
   # (c) read the rev-3 payload as rev 3 and compare against (a)
   let c = new_gba_for(GBA_ROMS[0][0])
@@ -716,6 +748,7 @@ proc run_intr_wait_migration() =
   d.cpu.halted = false
   var rev3_running = d.state_payload()
   rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+  check(strip_dma_count(rev3_running), "rev-5 DMA count fields located and removed (running)")
   let e = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: e.step_frame()
   let untouched = e.state_payload()
