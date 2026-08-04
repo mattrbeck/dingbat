@@ -1509,12 +1509,30 @@ proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
   result.cartridge.sav_path = ""
   for _ in 0 ..< frames: result.step_frame()
 
-proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
+proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
   ## Scores a whole list of gambatte tests in one process. Each line is
   ## tab-separated: `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`, where
   ## `expected` is the hex string for `hex` and the reference PNG's path for
   ## `png`. One `GAM <index> <PASS|FAIL> <detail>` line comes back per input
   ## line, in order, so the caller can match results positionally.
+  ##
+  ## The verdicts go to `--out=<file>` when one is given, and to stdout
+  ## otherwise. The file is not a convenience: the runner launches one shard
+  ## per core and waits for them all, so a shard writing thousands of verdicts
+  ## into an inherited stdout PIPE would block forever once the pipe buffer
+  ## filled, with nobody draining it. Shell redirection cannot stand in for
+  ## this — Nim's poEvalCommand runs through /bin/sh on POSIX but goes straight
+  ## to CreateProcessW on Windows, where `> out.txt 2>&1` is not redirection at
+  ## all, just three more argv entries this parser silently absorbs. That is
+  ## exactly the hang that timed the Windows CI job out at 6h, every push.
+  var out_file: File
+  let to_file = out_path.len > 0
+  if to_file and not out_file.open(out_path, fmWrite):
+    echo "GAMBATTE: cannot open --out file ", out_path
+    return 1
+  defer:
+    if to_file: out_file.close()
+
   var entries: seq[(string, string, string, string)]
   for line in lines(list_path):
     if line.len == 0: continue
@@ -1586,8 +1604,10 @@ proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
     except CatchableError:
       detail = "exception: " & getCurrentExceptionMsg()
     if ok: inc passes
-    echo "GAM ", idx, " ", (if ok: "PASS" else: "FAIL"), " ", detail
-  echo "GAMBATTE-DONE ", passes, "/", entries.len
+    let verdict = "GAM " & $idx & " " & (if ok: "PASS" else: "FAIL") & " " & detail
+    if to_file: out_file.writeLine(verdict) else: echo verdict
+  let done = "GAMBATTE-DONE " & $passes & "/" & $entries.len
+  if to_file: out_file.writeLine(done) else: echo done
   0
 
 proc main() =
@@ -1613,6 +1633,7 @@ proc main() =
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
   var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
   var list_path = ""       # gambatte mode: batch list file
+  var out_path = ""        # gambatte mode: verdict file (see gambatte_batch)
   var gambatte_frames = GambatteFrames
   var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
 
@@ -1740,6 +1761,10 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         list_path = v
+      of "out":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        out_path = v
       of "gambatte-frames":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1753,7 +1778,7 @@ proc main() =
     if list_path.len == 0:
       echo "gambatte mode wants --list=<file> (see gambatte_batch)"
       quit(1)
-    quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
+    quit(gambatte_batch(list_path, out_path, gambatte_frames, dump_tiles))
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check]"

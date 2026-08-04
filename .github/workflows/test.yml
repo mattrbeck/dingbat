@@ -9,6 +9,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The default is GitHub's 6h ceiling, which is not a timeout so much as a
+    # way to burn a runner for a working day before anyone is told. A green
+    # Windows job is ~15 min and Linux ~3, so an hour is pure headroom: if a
+    # step wedges, this reports it while the cause is still the last thing
+    # anyone touched. (A gambatte shard deadlocking on an undrained stdout pipe
+    # cost six hours a push before it was caught — see run_gambatte_suite.)
+    timeout-minutes: 60
     env:
       # Stable, cache-backed location for the downloaded test ROMs (read by
       # tests/dingbat_test_runner.nim). Keeps them across runs so a single flaky

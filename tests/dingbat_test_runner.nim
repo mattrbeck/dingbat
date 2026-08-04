@@ -1604,8 +1604,31 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
   let shards = max(1, min(countProcessors(), 16))
   var shard_rows = newSeq[seq[int]](shards)
   for i in 0 ..< rows.len: shard_rows[i mod shards].add(i)
-  var cmds: seq[string]
+  # Spawn the shards directly — no shell, no command string, no redirection.
+  # All three of those were fine on POSIX and broken on Windows:
+  #
+  #   * poEvalCommand is NOT a shell there. On POSIX Nim execs `/bin/sh -c`,
+  #     but on Windows it hands the string to CreateProcessW, so `> out.txt
+  #     2>&1` never redirects — it arrives as three extra argv entries, which
+  #     dingbat_test's parser silently absorbs as positionals.
+  #   * With no redirection the verdicts went to an inherited PIPE (dropping
+  #     poParentStreams, as this did, is what makes osproc create one), and
+  #     execProcesses never drains it. Every shard blocked on a full pipe
+  #     buffer a few hundred verdicts in and stayed blocked; the parent sat in
+  #     waitForExit behind them. That is the 6h Windows CI timeout, on every
+  #     push since gambatte was wired up — and it is the deadlock osproc's own
+  #     waitForExit docs warn about.
+  #   * So the verdicts go to a file the CHILD opens (--out), and the children
+  #     inherit our streams (poParentStreams) rather than owning a pipe nobody
+  #     reads. Nothing can fill and nothing can deadlock. Anything a shard
+  #     prints outside its verdict file — a crash traceback, a malformed-list
+  #     complaint — now lands in the runner's log instead of a temp file that
+  #     was only ever grepped for "GAM ".
+  #
+  # cmds.len == shards, so starting them all at once is the same concurrency
+  # execProcesses(n = shards) gave.
   var out_paths: seq[string]
+  var procs: seq[Process]
   for s in 0 ..< shards:
     let list_path = work_dir / &"list{s}.tsv"
     let out_path = work_dir / &"out{s}.txt"
@@ -1614,10 +1637,14 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
       lines.add(rows[i].dev & "\t" & rows[i].kind & "\t" & rows[i].expected &
                 "\t" & rows[i].rom)
     writeFile(list_path, lines.join("\n") & "\n")
-    cmds.add(&"{harness.quoteShell} --mode=gambatte --list={list_path.quoteShell}" &
-             &" > {out_path.quoteShell} 2>&1")
+    procs.add(startProcess(harness, args = @["--mode=gambatte",
+                                             "--list=" & list_path,
+                                             "--out=" & out_path],
+                           options = {poUsePath, poParentStreams}))
     out_paths.add(out_path)
-  discard execProcesses(cmds, options = {poUsePath, poEvalCommand}, n = shards)
+  for p in procs:
+    discard p.waitForExit()
+    p.close()
 
   var passed = newSeq[bool](rows.len)
   var detail = newSeq[string](rows.len)
