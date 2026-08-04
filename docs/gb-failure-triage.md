@@ -598,3 +598,42 @@ python3 tools/gbppu/famflip.py /tmp/g_base.txt '*' # per-family flip points
 All three of `TMPDIR`, `DINGBAT_ROM_CACHE` and the nimcache are shared across
 worktrees and have produced wrong results here; `tests/results*.md` are committed
 baselines that every runner pass rewrites in place.
+
+## Free rows waiting on a republished mGBA suite ROM
+
+Not a dingbat bug, and worth ~7 rows for no emulator work.
+
+`tests/dingbat_test_runner.nim` fetches the suite from
+`mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba`. Against the build
+that URL currently serves (sha1 `00480cf1`, guarded by `MgbaSuiteSha1`), the
+Misc. edge-case section scores **4/12**.
+
+Six of the eight failures are the `H-blank bit start` rows, and they are **not a
+timing error on our side**. Those rows compare a runtime measurement against
+constants upstream re-measured for one specific compiler, so they are calibrated
+to the toolchain that built the ROM. Reading them correctly — `src/misc-edge.c`
+is the one file whose `doResult` inverts its arguments, so there "Got" is the
+ROM's constant and "vs" is ours — the published build carries the same constants
+as a local build of the same source, yet dingbat measures different values from
+the two ROMs (Hblank `0x4D0` vs `0x4D3`, Flip 1 `0x87` vs `0x92`, Flip 3 `0xE5`
+vs `0xE4`). Same emulator, same timing, different ROM code.
+
+A local rebuild of the same `mattrbeck/mgba-suite-auto` master with the devkitARM
+at `/opt/devkitpro` scores Misc **11/12**. That candidate ROM, its sha256 and a
+`gh release create` line are at `~/Documents/mgba-suite-v1.1/`. Republishing from
+that toolchain would take Misc 4/12 -> 11/12.
+
+Two things to know before doing it:
+
+* **Score Misc with `DINGBAT_NO_WAITLOOP=1`.** Under the default idle-loop
+  fast-forward the corrected ROM scores 5/12, because the six H-blank rows time a
+  DISPSTAT spin loop with TM0 and the skip's granularity becomes their answer.
+  `-d:gbaskipcap=15` recovers two of six; bounding the skip by the loop's own
+  period is the real fix and `analyze_loop` does not currently measure it.
+* **Update `MgbaSuiteSha1` and the CI rom-cache key in the same commit.** That key
+  is exact-match, so a stale one serves the old ROM from cache and makes the
+  release look like a no-op.
+
+The remaining Misc failure either way is `DMA Prefetch Break`, whose expected
+value is `0x10000000 + 4*iterations` and is therefore not comparable across
+builds by construction.
