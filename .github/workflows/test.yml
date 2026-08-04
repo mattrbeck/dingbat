@@ -58,10 +58,18 @@ jobs:
             sleep 10
           done
           exit 1
-      - name: Build test harness
-        run: nim c -d:test_harness -d:release --path:src -o:dingbat_test tests/dingbat_test.nim
-      - name: Build test runner
-        run: nim c -d:test_harness -d:release --path:src --path:tests -o:dingbat_test_runner tests/dingbat_test_runner.nim
+      - name: Build test binaries (all seven, in parallel)
+        # The harness, the runner, and the five standalone unit tests are seven
+        # independent `nim c` runs over the same tree. They used to be seven
+        # sequential steps — ~145s of a ~250s Windows job spent with three of
+        # the four cores idle, because Nim's semantic pass is single-threaded
+        # per invocation. Building them together cuts that roughly in half
+        # (measured 52s -> 26s on 8 cores); the steps below now only RUN what
+        # this produced, so a failure still points at one named target.
+        # Rationale for the nimcache and parallelBuild choices, and for
+        # -d:test_harness, lives in the script.
+        shell: bash
+        run: .github/scripts/build-tests.sh
       - name: Run tests
         # Blargg / Mooneye / mGBA suite / Acid2 / Mealybug / jsmolka gba-tests /
         # gambatte. gambatte is 5,005 scored runs out of the SAME cached bundle
@@ -80,14 +88,11 @@ jobs:
         # each was confirmed by mutation to actually fail when the thing it
         # describes is broken. Needs no ROMs.
         shell: bash
-        # -d:test_harness is what keeps nim.cfg from adding the SDL2/OpenGL
-        # link flags. Without it the link line is `-lGL` on Linux and a
-        # hardcoded mingw-cross path to libSDL2.a on Windows, neither of which
-        # exists on a GitHub runner, so the binary never links. It builds fine
-        # on a dev Mac (Homebrew SDL2 is installed), which is why this only
-        # ever fails in CI. The flag gates APU/keypad/mmio/savestate only —
-        # nothing the compositor touches — so the tests check the same code.
-        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppucomposite_test tests/ppucomposite_test.nim
+        # Built by the parallel build step above (which is also where the
+        # -d:test_harness link rationale lives). That flag gates
+        # APU/keypad/mmio/savestate only — nothing the compositor touches — so
+        # this checks the same code the GUI build ships.
+        run: ./dingbat_ppucomposite_test
       - name: GBA 4bpp BG tile-unpack equivalence
         # render_reg_bg expands a whole 4bpp tile row with SWAR instead of
         # shifting out eight nibbles. The transformation is pure and its input
@@ -102,10 +107,10 @@ jobs:
         # four screen_size values, with coverage counters asserted non-zero so
         # it cannot pass vacuously. Every check was confirmed by mutation.
         # The full 2^32 sweep is opt-in (DINGBAT_BG4_EXHAUSTIVE=1), too slow
-        # for CI. Needs no ROMs. -d:test_harness for the same link reason as
-        # above — and render_reg_bg_scalar only exists under it.
+        # for CI. Needs no ROMs. Built above under -d:test_harness, which is
+        # also the only build render_reg_bg_scalar exists in.
         shell: bash
-        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppubgunpack_test tests/ppubgunpack_test.nim
+        run: ./dingbat_ppubgunpack_test
       - name: GBA per-line OBJ candidate list (differential fuzz)
         # render_sprites walks a per-line 128-bit candidate bitmap instead of
         # all 128 OAM entries. That is a pure speedup and must be invisible,
@@ -119,8 +124,7 @@ jobs:
         # negative control that proves the comparison can fail. Every check
         # was confirmed by mutating the implementation. Needs no ROMs.
         shell: bash
-        # -d:test_harness for the same link reason as the step above.
-        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_ppuobjlist_test tests/ppuobjlist_test.nim
+        run: ./dingbat_ppuobjlist_test
       - name: Save-state format compatibility
         # Users lose save states to routine updates, and nothing used to notice.
         # This loads a corpus of reference states (tests/states — most of them
@@ -134,7 +138,7 @@ jobs:
         # every pending event in every existing state.
         # Needs no downloaded ROMs.
         shell: bash
-        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_savestate_compat_test tests/savestate_compat_test.nim
+        run: ./dingbat_savestate_compat_test
       - name: Rewind ring (IDs, eviction, keyframes, thumbnail strip)
         # The rewind ring hands the scrubber a state to jump to. Its dangerous
         # failure is not a crash: it is index/eviction bookkeeping returning a
@@ -148,7 +152,7 @@ jobs:
         # mem_used accounting for the side tables so the memory cap stays
         # honest. Synthetic payloads; needs no ROMs.
         shell: bash
-        run: nim c -r -d:test_harness -d:release --path:src -o:dingbat_rewind_test tests/rewind_test.nim
+        run: ./dingbat_rewind_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status
