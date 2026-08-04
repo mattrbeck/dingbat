@@ -57,7 +57,6 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.fetching_window = false
   ppu.fetching_sprite = false
   ppu.win_lx = WIN_LX_OFF
-  ppu.bg_pixels_pushed = false
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.m3_delay = 0
@@ -112,7 +111,6 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   ppu.fetcher_x = 0
   ppu.fetch_counter = 0
   ppu.fetching_window = fetching_window
-  ppu.bg_pixels_pushed = false
   # Whatever tile an object last paid the BG-fetch wait for is gone: this
   # restarts the fetch, so the next object is looking at a tile no object has
   # considered. fetcher_x restarting at 0 would otherwise alias the BG's first
@@ -186,7 +184,6 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # is that VBK is not in the register map there, so nothing can ever write
     # bank 1 (see FF4F in ppu_write_machinery).
     ppu.tile_attrs = ppu.vram[1][map + offset]
-    ppu.bg_pixels_pushed = false
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
@@ -218,11 +215,19 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         # fetcher-side point sits between them.
         if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
       elif try_push_bg_pixels(ppu, gb):
-        ppu.bg_pixels_pushed = true
+        # The push landed on the dot the tile data arrived, so step 4 has
+        # already been served and the next fetch starts on the NEXT dot -- Pan
+        # Docs' fetcher goes back to step 1 the moment a push succeeds, and the
+        # 172-dot line only adds up if the line's first push is that immediate
+        # (6 dots of throw-away fetch + 6 of the real one + 160 pixels).
+        # Falling through the Sleep/Push steps instead -- which is what this did
+        # until 2026-08-03 -- leaves every later fetch on the line reading VRAM
+        # two dots late, which is the phase the OBJ penalty is measured against.
+        # See the fetch-phase note at tick_sprite_fetcher.
+        ppu.fetch_counter = 0
 
   of fsPushPixel:
-    if ppu.bg_pixels_pushed or try_push_bg_pixels(ppu, gb):
-      ppu.bg_pixels_pushed = false
+    if try_push_bg_pixels(ppu, gb):
       inc ppu.fetch_counter
 
   of fsSleep:
@@ -262,13 +267,16 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 #
 # An object at OAM X 0..7 hangs off the left edge, so The Pixel is in the tile
 # BEFORE the first on-screen one and the trigger dot is not its own dot; see the
-# `lag` term at the trigger for how that is recovered. Pan Docs' X=0 exception
-# ("always incurs an 11-dot penalty, regardless of SCX") then needs no special
-# case: such an object triggers on the first dot the BG FIFO is non-empty, where
-# the FIFO is a full 8 whatever SCX is, and 6 + (8-1-2) is 11. The older
-# `pixel_fifo.md` rule -- lengthen by SCX&7 for an object at X=0 -- used to be
-# spelled out as its own fetch phase; it is gone, because it double-counts that
-# same dot budget.
+# `lag` term at the trigger for how that is recovered.
+#
+# Pan Docs' X=0 exception -- "always incurs an 11-dot penalty, regardless of
+# SCX" -- IS a special case and is spelled out as one below. It used to be
+# claimed here that it fell out for free (an X=0 object triggers on the first
+# dot the BG FIFO is non-empty, where the FIFO is a full 8), and that is only
+# true at SCX & 7 = 0: the FIFO is full there, but The Pixel sits at index
+# SCX & 7 of the tile before the first on-screen one, so the derived wait is
+# 5 - (SCX & 7) and the derived penalty ramps 11, 10, 9, 8, 7, 6, 6, 6 over the
+# eight residues. Hardware does not: see the table at the trigger.
 #
 # ---- Why these two numbers and not others ---------------------------------
 # Both terms were swept independently against the whole of gambatte/sprites
@@ -286,6 +294,25 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 # the X=0 case right and the rest wrong) tops out at 312. The shipping value of
 # the pre-existing OBJ model was a flat 8 with no wait at all, which is that
 # table's bottom-right corner.
+#
+# ---- The whole table, from hardware ---------------------------------------
+# GBMicrotest's `ppu_spritex_vs_scx.gb` is 306 assertions -- one object at OAM
+# X 0..16 crossed with SCX 0..8, two per cell bracketing the end of mode 3 to
+# one M-cycle -- and it never writes $FF82, so the runner cannot score it. Its
+# expectations are the table, though, and `tools/gbppu/objtab.py` reads them
+# back out of this tree as dots by differencing against the same build's
+# no-object line, which cancels whatever constant offset the mode 3 edge
+# carries. Hardware, penalty in dots (X >= 1 is period 8 in X; X = 0 is not):
+#
+#   X \ SCX&7   0   1   2   3   4   5   6   7
+#      0       11  11  11  11  11  11  11  11
+#      1       10   9   8   7   6   6   6  11
+#      2        9   8   7   6   6   6  11  10
+#      ...      (each row the one above rotated right)
+#
+# i.e. `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and a flat 11 for X = 0,
+# which is Pan Docs' algorithm plus Pan Docs' X = 0 exception and nothing else.
+# All 153 cells match this file as of 2026-08-03 (79 of them did not before).
 #
 # What this does NOT model is the object fetch being CANCELLED mid-flight by
 # clearing LCDC.1, which Pan Docs describes and gambatte's
@@ -345,62 +372,51 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # re-locks to the FIFO on the next tile boundary, so mode 3's length is exactly
   # the penalty above with nothing added.
   #
-  # Running it for the object's fetch as well is a real alternative and it was
-  # measured, not assumed. It costs no dots either (the same park absorbs it),
-  # but it advances the BG fetcher 6 steps further, which moves every later BG
-  # VRAM read on the line -- and the mealybug references say that is wrong:
-  # m3_scy_change 92.6% -> 78.3%, m3_lcdc_tile_sel_win_change 92.9% -> 91.4%,
-  # m3_bgp_change_sprites 90.5% -> 89.1%, with eight more m3_* rows down and
-  # none up. It buys 15 gambatte sprites/space rows (374 -> 389), all of them
-  # `_2` rows one M-cycle from their boundary, i.e. inside the STAT-read model's
-  # own known error (see STAT_MODE_HOLD in ppu.nim). Stopping the fetcher
-  # entirely, the third option, costs a resync dot per object and breaks the
-  # mode 3 length outright (172 + 11N becomes 172 + 11N + 1).
+  # ---- This line was accused of the object families' residual. It is clear ---
   #
-  # ---- KNOWN RESIDUAL: this line is a dot ruler and it reads short ----------
+  # Until 2026-08-03 there was a KNOWN RESIDUAL note here saying these wait dots
+  # should not be run at all: mealybug m3_scy_change's eighteen per-object bands
+  # were pixel-exact wherever the wait term was 0 and ~960/1280 wherever it was
+  # not, on DMG as well as CGB, and the only thing that moves the fetcher during
+  # a penalty is this line. The reading was wrong, and the way it was settled is
+  # worth keeping because a whole-frame percentage cannot do it.
   #
-  # The `wait` dots this runs the BG fetcher for are measurable, and measured
-  # 2026-08-03 they should not be run at all. mealybug m3_scy_change is the
-  # instrument, and the reason it can see this at all is that its OAM table is
-  # `Y = 16 + 8k, X = k`, k = 0..17 -- one object per 8-line band with its X
-  # marching down the screen, so the frame is 18 separate measurements of what
-  # an object does to the fetch phase. (m3_scy_change2's header states the
-  # design outright: "Sprites are positioned to cause the write to occur on
-  # different T-cycles of the background tile fetch".) The ROM writes SCY every
-  # 2 M-cycles across mode 3, so decoding which write each of a fetch's three
-  # SCY reads saw gives the phase between the CPU and this fetcher to 2 dots.
+  # GBMicrotest's ppu_spritex_vs_scx.gb is the instrument. It is 153 cells of
+  # "how many dots does one object at OAM X cost at this SCX", asserted against
+  # hardware, and `tools/gbppu/objtab.py` reads them back out of this tree as
+  # dots -- differenced against the same build's no-object line, so the constant
+  # offset the mode 3 edge carries cancels and only the penalty is compared.
+  # 79 of the 153 were wrong, and the shape was `+1 dot wherever
+  # (X + SCX) mod 8 >= 4`: a STALL. The fetcher was coming out of the penalty
+  # too late to have the next tile ready, and the shifter spent a dot waiting.
   #
-  # Take dingbat's own read dots (`-d:gb_m3_trace -d:GB_TRACE_LY=-1`), shift
-  # them by delta, and score the prediction against the reference; delta < 0
-  # means hardware read LATER than this tree does. Per band, against the DMG
-  # blob, best delta and its matching pixels out of 1280:
+  # That is the opposite sign to what the picture wanted -- the bands wanted the
+  # fetcher frozen harder, the dots wanted it frozen less -- and the reason is
+  # that both were reading a third thing: the fetch cycle's own phase. A push
+  # taken at Get-Tile-Data-High used to fall through the Sleep/Push steps it had
+  # already served, which put the two idle dots at the HEAD of the next cycle
+  # where hardware has them at the tail, and left every VRAM read two dots late.
+  # Those two dots were exactly cancelling a real two-dot lead of the pipeline
+  # over the CPU's register view. Fix the push (see tick_bg_fetcher), charge the
+  # lead where it belongs (M3_PIPE_DELAY = 2), and the object families come right
+  # WITHOUT this line changing: objtab.py goes 79 -> 0 mismatched cells,
+  # m3_scy_change 92.6% -> 98.3% DMG and 81.4% -> 97.2% CGB, and its four broken
+  # bands (X = 3, 4, 11, 12) go from ~960/1280 to 1261-1279.
   #
-  #   objX     0     1     2     3     4    5,6,7   8..12 as 0..4, 13,14,15 as 5,6,7
-  #   wait     5     4     3     2     1      0
-  #   delta   ??    -4    -3    -2    -1      0
-  #   match  1225  1279  1279  1279  1280   1280
+  # Re-measured on the fixed phase, the four candidate rules for this line are
+  # indistinguishable -- all four give objtab.py 0/153, and on the scored suites
+  # (gambatte / mealybug DMG pixels / mealybug CGB pixels):
   #
-  # A wait of 0 is the only case this tree gets exactly right, and every other
-  # band wants hardware's post-object fetch grid `wait` dots behind ours --
-  # which is this line, and only this line, since it is the only thing that
-  # advances the fetcher during a penalty. (The X=0 column is the exception at
-  # both ends: it is Pan Docs' flat-11 case and no delta fits it, so something
-  # else is wrong there too.)
+  #   run for the wait dots (this)   3614  517987  1814452
+  #   run for the whole penalty      3614  518293  1815437
+  #   freeze completely              3615  517786  1813590
+  #   step 4 only                    3615  517541  1813120
   #
-  # It is NOT as simple as deleting the call. Doing exactly that (whole penalty
-  # frozen, trigger dot still stepping) is delta = -(wait-1), one dot short of
-  # what the table wants -- the same "resync dot" the third option above hit --
-  # and it measures: mealybug DMG 510167 -> 511803 and eight m3_* CGB rows up,
-  # but m3_scy_change 82.0 -> 80.1, mealybug CGB 1794023 -> 1793882 and gambatte
-  # 3567 -> 3542. So the residual is real, its direction is settled, and its
-  # exact rule is not: a fetcher re-phase moves every BG VRAM read on every line
-  # carrying an object and needs bgtiledata/bgtilemap/scx_during_m3/sprites
-  # re-derived with it, which is a change of its own.
-  #
-  # Everything that depends on this: it is the ruler under both mealybug SCY
-  # ROMs, so it is what CGB_SCY_LATENCY in gb.nim is being measured through --
-  # in the five bands where the wait is 0 that constant comes out at exactly the
-  # documented 2, and in the bands where it is not, at 0/1. Fix this first.
+  # A quarter of a percent apart on 23,040-pixel frames and one row apart on
+  # 5,005. Nothing in the tree separates them any more, so the one written down
+  # is the one Pan Docs writes down, and "run for the whole penalty" stays out
+  # because it puts the BG fetch and the object fetch on the address bus at the
+  # same time whatever it scores.
   if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
   dec ppu.obj_penalty
   if ppu.obj_penalty <= 0:
@@ -421,7 +437,7 @@ proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool 
 # Which of the eight fetcher positions the window's re-trigger edge survives
 # on. See window_reactivate; overridable so the sweep that picked it can be
 # re-run against the three m3_wx_*_change ROMs.
-const WIN_REACT_PHASE {.intdefine.} = 5
+const WIN_REACT_PHASE {.intdefine.} = 7
 
 # How far the mode-3 pixel pipeline lags the CPU's view of the PPU registers,
 # in CPU **M-cycles**. Injected as idle dots at the head of mode 3, which moves
@@ -473,10 +489,59 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 # residual dot term below is 0.
 #
 # M3_PIPE_DELAY is what is left of that sweep: an ADDITIONAL, speed-independent
-# lead in dots, kept as the instrument for re-deriving the fetch phase. It ships
-# at 0 because the M-cycle term above is the whole measured offset. (Its old
-# per-value table was taken with the double-speed rows still broken, so the
-# numbers in it do not survive this change; re-sweep rather than trusting it.)
+# lead in dots. **It ships at 2 as of 2026-08-03**, where it used to ship at 0
+# on the reasoning that the M-cycle term above was the whole measured offset.
+# It was not: the other two dots were being absorbed by the BG fetcher's step 4
+# sitting at the head of its cycle instead of the tail (see the early push in
+# tick_bg_fetcher), which put every VRAM read two dots late and hid a pipeline
+# that was two dots early. Fix the fetcher and the two dots have nowhere to go.
+#
+# What pins it to 2 rather than to whatever scores best: it is exactly the two
+# dots the fetcher's padding moved, and the row that reads it back is one with
+# no objects on it at all -- mealybug m3_bgp_change is BGP written across mode 3
+# and applied at the SHIFTER, so it sees the pipeline's phase against the CPU
+# and nothing else: 87.3% -> 93.5% DMG, 90.6% -> 96.1% CGB, on the lead alone.
+# m3_window_timing (96.9% -> 98.7%) agrees. Swept 0..4 on the fixed fetcher:
+#
+#   lead     0      1      2      3      4
+#   gambatte 3576   3591   3587   3560   3550
+#   mb DMG   504845 512369 516637 517664 515428
+#   mb CGB   1803036 1800695 1801757 1802795 1789657
+#
+# 1 and 3 each buy something (gambatte at 1, mealybug DMG at 3) and neither is
+# the derived number; 2 is, and it is the one that makes GBMicrotest's
+# ppu_spritex_vs_scx table come out 153/153.
+#
+# The tail accounting below is still approximate, and it is what the change
+# costs: gambatte scx_during_m3 34 -> 31 and bgtilemap 4 -> 2, five rows whose
+# mid-line write lands in the two pixels the burst decides early. Moving the
+# WRITE instead of the pipeline is the fix for those and it is a bus-layer
+# change; it is not this one.
+#
+# ---- What turning the lead machinery on costs -----------------------------
+# A nonzero lead compiles in a per-line head delay and turns fetcher_retired
+# from one compare into five, on the mode 3 dot loop -- ~25,000 dots a frame,
+# inside a proc that mem_read and mem_write are in turn inlined into. Done
+# naively it measured **+5.51%** of retired instructions on Pokemon Crystal
+# (tools/gbppu/counters.sh, 2400 frames), most of it not the branches at all but
+# 52 generated opcode bodies crossing clang's inline threshold in one direction
+# or the other -- the cliff docs/gb_oam_dma_cost.md describes.
+#
+# Three changes take it to **+1.03%**, and each is marked at its site:
+#   * fetcher_retired's early-out folds the lead to an immediate whenever the
+#     M-cycle term is off, instead of loading `m3_lead`;
+#   * the head delay is spent in ONE step above the dot loop rather than tested
+#     inside it (see `m3_delay` in fifo_tick_slow's mode 3 branch);
+#   * the tail burst is a {.noinline.} proc, so fifo_tick_slow's mode 3 case
+#     does not carry a second copy of the whole pipeline.
+# fifo_tick and mem_tick_components come out byte-identical in size across the
+# pair, and fifo_tick_slow grows 1992 -> 2352 bytes rather than 1992 -> 3324.
+#
+# Against main -- the lead plus everything else in this change -- that lands at
+# +1.22% on Pokemon Crystal, +1.49% on Zelda DX and +1.16% on Pokemon Blue.
+# There is nothing left to spend it on: an object-free line pays exactly one
+# extra compare per dot (fetcher_retired's early-out, against an immediate) and
+# one skip per line, and lines with objects pay nothing on top of that.
 #
 # ---- Why moving the PIPELINE was the wrong half of it ---------------------
 # The lead is injected as idle dots at the HEAD of mode 3 and paid back by
@@ -498,7 +563,7 @@ const WIN_REACT_PHASE {.intdefine.} = 5
 # fifo_sample_smooth_scroll's caller). That is why this constant is 0 and the
 # fix is a bus-layer one.
 const M3_PIPE_MCYCLES {.intdefine.} = 0
-const M3_PIPE_DELAY {.intdefine.} = 0
+const M3_PIPE_DELAY {.intdefine.} = 2
 
 # Dots the mode 3 -> 0 edge comes early WITHOUT the pipeline moving with it: the
 # fetcher retires this many pixels before the end of the line and the tail is
@@ -628,7 +693,17 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       var pen = OBJ_FETCH_DOTS - 1
       if ppu.obj_tile_fx != tile:
         ppu.obj_tile_fx = tile
-        pen += max(0'i32, (7 - (idx and 7)) - (OBJ_WAIT_SUB - 1))
+        # Pan Docs' exception, and the only place in the algorithm that reads the
+        # object's X rather than the FIFO: "an object with an OAM X of 0 always
+        # incurs an 11-dot penalty, regardless of SCX". Charging it as index 0 of
+        # its tile is that sentence -- 6 + (7 - 0) - 2 = 11 -- where the derived
+        # index would be SCX & 7 and would ramp the penalty down to 6 across the
+        # residues. GBMicrotest ppu_spritex_vs_scx asserts the flat 11 for all
+        # eight of them (see the table at OBJ_FETCH_DOTS); it is also the one row
+        # of that table which is not periodic in X, so it cannot be anything but
+        # a special case.
+        let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
+        pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
       when defined(gb_m3_trace):
         if gb_traced(ppu.ly):
@@ -671,21 +746,21 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     # rules on either side of the emit -- measured +1.7% of retired
     # instructions on blargg 01-special and +0.9% on Pokemon Blue.
     #
-    #  * The restart resumes at fetcher step 1, not 0. Pan Docs counts the
-    #    window's cost as 6 dots from the fetch restart; this renderer idles for
-    #    the FIRST two steps of its eight where hardware idles for the last two
-    #    (see the fetch-phase note in fifo_tick_slow), so a restart from step 0
-    #    puts the window's first pixel one dot later than hardware does.
-    #    gbmicrotest win0_a/_b .. win15_a/_b bracket that end-of-mode-3 dot per
-    #    WX and want the 5 dots this gives; taking it from step 0 instead costs
-    #    win10_scx3_b and win7_b (and buys 8 gambatte rows, all of them
-    #    double-speed sprites/space rows -- the trade is documented in the
-    #    commit rather than split, because the two suites disagree by exactly
-    #    the one dot the fetch phase is out).
+    #  * The restart resumes at fetcher step 1 -- fetch_counter 0, the first of
+    #    the two dots that step lasts. Pan Docs counts the window's cost as 6
+    #    dots from the fetch restart, and from counter 0 that is exactly what it
+    #    is: the three reads land on counters 1, 3 and 5 and counter 5 takes the
+    #    push, six dots in. It used to start from counter 1 instead, one dot
+    #    short, because until 2026-08-03 this renderer idled for the FIRST two
+    #    steps of its eight where hardware idles for the last two and the
+    #    off-by-one cancelled; that padding now sits where hardware has it (see
+    #    the early push in tick_bg_fetcher) and the compensation has to go.
+    #    Measured on the fixed fetcher, counter 0 against 1: gambatte 3587 ->
+    #    3609 (window +22) and mealybug DMG +361 pixels, against one GBMicrotest
+    #    row (win10_scx3_b, which is one M-cycle from its boundary).
     if ppu.lx == ppu.win_lx:
       if not ppu.fetching_window:
         fifo_reset_bg(ppu, true)
-        ppu.fetch_counter = 1
         return
       elif ppu.fetch_counter == WIN_REACT_PHASE and window_enabled(ppu):
         # The re-trigger edge, injected in front of the pixel this dot is about
@@ -753,7 +828,15 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
     # optimiser to fold three branches back into the one compare it replaces.
     ppu.lx >= GB_WIDTH
   else:
-    if ppu.lx < int32(GB_WIDTH) - ppu.m3_lead: return false
+    # The lead is only speed-dependent through its M-cycle term; with that term
+    # off it is a compile-time constant, and this test is on the mode 3 dot loop
+    # (it runs for every one of a line's ~170 dots), so spell the constant case
+    # out rather than load the field: the field form loads and subtracts where
+    # this one folds to an immediate.
+    when M3_PIPE_MCYCLES == 0:
+      if ppu.lx < int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY): return false
+    else:
+      if ppu.lx < int32(GB_WIDTH) - ppu.m3_lead: return false
     if ppu.lx >= GB_WIDTH: return true
     if ppu.fetching_sprite: return false
     if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
@@ -762,15 +845,15 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
     true
 
 proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
-  ## One dot of the fetch/shift pipeline. The first `m3_lead` calls of a line
-  ## are the pipeline's lag behind the CPU's register view and do nothing at
-  ## all; the tail those dots push past the end of the line is emitted in one
-  ## burst when the fetcher retires (see the mode 3 case in fifo_tick_slow), so
-  ## the fetcher never runs during H-Blank.
-  when M3_PIPE_LEAD_ANY:
-    if ppu.m3_delay > 0:
-      dec ppu.m3_delay
-      return
+  ## One dot of the fetch/shift pipeline. The first `m3_lead` dots of a line do
+  ## not reach here at all -- the caller skips them in one step, see `m3_delay`
+  ## in fifo_tick_slow's mode 3 branch -- and the tail they push past the end of
+  ## the line is emitted in one burst when the fetcher retires, so the fetcher
+  ## never runs during H-Blank.
+  ##
+  ## The skip is the caller's and not a test here because this is the mode 3 dot
+  ## loop, where a branch taken twice a line and not taken the other ~170 times
+  ## is still ~25,000 branches a frame.
   when defined(gb_m3_trace):
     if gb_traced(ppu.ly):
       echo "DOT ", ppu.cycle_counter, " stage=",
@@ -850,6 +933,22 @@ when STAT_IRQ_SPLIT:
        int(ppu.wx) <= GB_WIDTH + 6: return false
     true
 
+when M3_PIPE_LEAD_ANY:
+  proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The last `m3_lead` pixels of a line, emitted on the retire dot rather
+    ## than spread over the first dots of H-Blank. See the caller.
+    ##
+    ## `noinline` on purpose. It runs 144 times a frame where the dot loop it
+    ## sits in runs ~25,000, and inlining it puts a SECOND copy of
+    ## fifo_pipeline_dot inside fifo_tick_slow's mode 3 case -- enough to push
+    ## mem_read/mem_write past clang's inline threshold in a large arbitrary
+    ## subset of the generated opcode bodies. See the M3_PIPE_DELAY note above
+    ## for what the three mitigations cost together.
+    var guard = 0
+    while ppu.lx < GB_WIDTH and guard < 64:
+      fifo_pipeline_dot(ppu, gb)
+      inc guard
+
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is NOT a pure idle skip. Split
   ## out of fifo_tick so the idle case (below) inlines into the caller; the
@@ -915,33 +1014,36 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         #    would silently vanish for the right-hand edge of the screen.
         #
         # ---- Where the fetch phase now stands ----------------------------
-        # Measured 2026-08-02 against gambatte/bgtiledata and bgtilemap (the
-        # staircase in M3_PIPE_MCYCLES' comment). With the M-cycle lead in,
-        # rows 16..143 of every ROM in both families -- single speed AND double
-        # speed -- are pixel-exact with no extra dot term. The two remaining
-        # known gaps in this model, neither addressed here:
+        # The two bullets that used to stand here have both been resolved, and
+        # in the same change (2026-08-03), because they were the same error:
         #
-        #  * BGP is applied at the shifter, not the fetcher, so it need not
-        #    share the fetcher's phase; the mealybug m3_bgp_* percentages are
-        #    the instrument for that one. m3_bgp_change carries no objects at
-        #    all and still wants its whole frame ~3 pixels to the left, so that
-        #    residual is the palette write's own and nothing else's.
-        #  * Lines carrying an object used to mismatch because this renderer
-        #    charged a FLAT 8 dots for one; it now charges what Pan Docs'
-        #    "OBJ penalty algorithm" says (see the OBJ penalty block above).
-        #    What is left of that is the BG fetcher's own phase: hardware
-        #    finishes a tile fetch six dots before that tile's first pixel and
-        #    idles for the last two, where this fetcher idles for the FIRST
-        #    two of the eight and finishes on the pixel itself. The two agree
-        #    on the 8-dot cadence and on every VRAM read's dot, so nothing on
-        #    an object-free line can see the difference -- but it is why the
-        #    object wait has to be read off the FIFO's occupancy rather than
-        #    off `fetch_counter`, and why an object whose wait is short leaves
-        #    the fetcher one dot out of step (gbmicrotest sprite4_4..7_b:
-        #    mode 3 comes out 201 where four objects at tile offset 4 want
-        #    200). Re-phasing the fetcher would move every BG VRAM read by
-        #    2-3 dots and re-open bgtiledata/bgtilemap/scx_during_m3, so it is
-        #    a change of its own, not a tweak to this one.
+        #  * "The fetcher idles for the FIRST two of its eight steps where
+        #    hardware idles for the last two, but the two agree on every VRAM
+        #    read's dot so nothing on an object-free line can see it." The
+        #    second half was wrong. They do NOT agree: a push taken at
+        #    Get-Tile-Data-High used to fall through the two idle steps it had
+        #    already served, which put every later read on the line two dots
+        #    late. It now restarts the fetch on the push, as Pan Docs' step 4
+        #    -> step 1 does. See tick_bg_fetcher.
+        #  * "m3_bgp_change carries no objects at all and still wants its whole
+        #    frame ~3 pixels to the left, so that residual is the palette
+        #    write's own." It is not the palette write's: it is the pipeline's,
+        #    it is 2 dots, and the fetcher's misplaced idle was cancelling it.
+        #    M3_PIPE_DELAY carries it and the row goes 87.3% -> 93.5%.
+        #
+        # What is left of the object families is in the OBJ penalty block above:
+        # GBMicrotest's ppu_spritex_vs_scx table is 153/153 and the wait-dot rule
+        # is untouched.
+        when M3_PIPE_LEAD_ANY:
+          # The pipeline's head delay, spent in one step rather than as a test
+          # inside the loop below. Nothing else in the PPU happens on these
+          # dots, so they collapse exactly the way an idle mode's do.
+          if ppu.m3_delay > 0:
+            let skip = min(remaining, int(ppu.m3_delay))
+            ppu.m3_delay -= skip
+            ppu.cycle_counter += int32(skip)
+            remaining -= skip
+            continue
         while remaining > 0 and not fetcher_retired(ppu):
           when STAT_IRQ_SPLIT:
             # The mode-0 STAT source rises `lead` dots before the flag does.
@@ -1015,17 +1117,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # dot and sees the difference in the last pixels of every line.
             # Bursting them costs no dots (the lead was already paid at the head
             # of mode 3) and keeps the fetcher out of H-Blank entirely.
-            var guard = 0
-            while ppu.lx < GB_WIDTH and guard < 64:
-              fifo_pipeline_dot(ppu, gb)
-              inc guard
+            fifo_burst_tail(ppu, gb)
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
               dec gb_m3_len_lines
               echo "M3LEN ly=", ppu.ly, " len=", ppu.cycle_counter - 80
           ppu.`mode_flag=`(0'u8, gb)
         else:
-          fifo_pipeline_dot(ppu, gb)
+          when M3_PIPE_LEAD_ANY:
+            if ppu.m3_delay > 0: dec ppu.m3_delay
+            else: fifo_pipeline_dot(ppu, gb)
+          else:
+            fifo_pipeline_dot(ppu, gb)
       of 0:  # H-Blank
         # CGB raises the line-144 mode 2 STAT source one M-cycle before the
         # line ends (see m2_line144). The source is level-triggered off the

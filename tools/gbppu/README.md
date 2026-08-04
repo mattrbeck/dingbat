@@ -87,6 +87,29 @@ The decode that makes a band quantitative needs no oracle but the ROM:
 That is how the OBJ-fetch phase residual at `tick_sprite_fetcher` was measured
 and how `CGB_SCY_LATENCY` was separated from it.
 
+## The OBJ penalty table, in dots, against hardware
+
+    nim c -d:test_harness -d:release -d:gb_m3_len --path:src \
+      -o:dt_m3len tests/dingbat_test.nim
+    python3 tools/gbppu/objtab.py ./dt_m3len
+
+`ppu_spritex_vs_scx.gb` is 153 cells of "how many dots does one object at OAM X
+cost at this SCX", two assertions each, and the runner cannot score it: it never
+writes `$FF82`, it stops at the first failing assertion, and it reports by
+storing `$55`/`$FF` into VRAM `$8000` in a loop — so on screen it is eighteen
+black lines and says nothing about WHICH cell failed. `objtab.py` gets the whole
+table out instead, by patching a sibling ROM's OAM/SCX prologue and reading
+line 0's mode-3 length out of `-d:gb_m3_len`. It differences against the same
+build's no-object line, so the constant offset the mode-3 edge carries cancels
+and only the per-object cost is compared — which matters, because that offset is
+real and separate (GBMicrotest's `ppu_sprite0_scx*` rows have NO object in OAM
+at all — `load_sprite 0 0 0 0 0` puts it at Y = 0, off the top — and they put
+this tree's mode-0 STAT flag 3 dots late on their own).
+
+Exit status is nonzero if any cell disagrees. This is the instrument that
+settled the OBJ fetch phase; a whole-frame mealybug percentage cannot, because
+it averages eighteen different measurements together.
+
 ## GBMicrotest without a runner pass
 
     tools/gbppu/mtscore.sh win
@@ -187,7 +210,10 @@ Rebuilds `-d:WIN_REACT_PHASE=0..7` and scores the mealybug rows that see the
 window's re-trigger edge, which is how that constant was pinned. Re-run it if
 the shifter's window rules move dots: the fetcher does not advance one step per
 dot (it parks on `fsPushPixel`), so a phase is not portable between two points
-in the dot even when the two look one step apart.
+in the dot even when the two look one step apart. Re-run it if the FETCHER's
+phase moves too — moving the post-push idle from the head of the cycle to the
+tail (2026-08-03) took the answer from 5 to 7, and at 7 all three ROMs are
+pixel-exact where 5 never got any of them there.
 
 ## blargg canary
 

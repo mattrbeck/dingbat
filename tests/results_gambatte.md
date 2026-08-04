@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-03 14:30:23*
+*Generated: 2026-08-03 17:39:37*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3571/5005 passed.**
+**3614/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -15,7 +15,7 @@ ROM draws on screen. See tests/README.md for the mechanism.
 
 | Test | Result |
 |------|--------|
-| bgen/bgoff_bgon_sprite_below_window [cgb, png] | 40/23040 pixels differ |
+| bgen/bgoff_bgon_sprite_below_window [cgb, png] | 2/23040 pixels differ |
 
 ## bgtiledata (2/34 passed)
 
@@ -23,42 +23,42 @@ ROM draws on screen. See tests/README.md for the mechanism.
 
 | Test | Result |
 |------|--------|
-| bgtiledata/bgtiledata_spx08_1 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_1 [cgb, png] | 16/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_2 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_2 [cgb, png] | 16/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_3 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_3 [cgb, png] | 16/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_4 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_4 [cgb, png] | 16/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_ds_3 [cgb, png] | 120/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_1 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_1 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_2 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_3 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_3 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_4 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_ds_1 [cgb, png] | 120/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_ds_3 [cgb, png] | 120/23040 pixels differ |
-| bgtiledata/bgtiledata_spx09_ds_4 [cgb, png] | 240/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_1 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_1 [cgb, png] | 8/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_2 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_2 [cgb, png] | 8/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_3 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_3 [cgb, png] | 8/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_4 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_4 [cgb, png] | 8/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_1 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_2 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_2 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_3 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_4 [dmg, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0B_4 [cgb, png] | 128/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_1 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_1 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_2 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_2 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_3 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_3 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_4 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_4 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx08_ds_3 [cgb, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_1 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_1 [cgb, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_2 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_3 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_3 [cgb, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_4 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_ds_1 [cgb, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_ds_3 [cgb, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx09_ds_4 [cgb, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_1 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_1 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_2 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_2 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_3 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_3 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_4 [dmg, png] | 16/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0A_4 [cgb, png] | 136/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_1 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_2 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_2 [cgb, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_3 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_4 [dmg, png] | 8/23040 pixels differ |
+| bgtiledata/bgtiledata_spx0B_4 [cgb, png] | 8/23040 pixels differ |
 
-## bgtilemap (4/40 passed)
+## bgtilemap (2/40 passed)
 
-4/40 tests passed, 36 failed:
+2/40 tests passed, 38 failed:
 
 | Test | Result |
 |------|--------|
@@ -71,25 +71,27 @@ ROM draws on screen. See tests/README.md for the mechanism.
 | bgtilemap/bgtilemap_spx08_4 [dmg, png] | 8/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_4 [cgb, png] | 8/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_1 [cgb, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_ds_2 [cgb, png] | 128/23040 pixels differ |
+| bgtilemap/bgtilemap_spx08_ds_3 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx08_ds_4 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_1 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_1 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_2 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_2 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_3 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_3 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_4 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_4 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_ds_1 [cgb, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_ds_4 [cgb, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_1 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_1 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_2 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_2 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_3 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_4 [dmg, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_1 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_1 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_2 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_2 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_3 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_3 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_4 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_4 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_ds_1 [cgb, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx09_ds_4 [cgb, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_1 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_1 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_2 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_2 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_3 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 136/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_4 [dmg, png] | 8/23040 pixels differ |
+| bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 136/23040 pixels differ |
 | bgtilemap/bgtilemap_spx0B_1 [dmg, png] | 8/23040 pixels differ |
 | bgtilemap/bgtilemap_spx0B_1 [cgb, png] | 8/23040 pixels differ |
 | bgtilemap/bgtilemap_spx0B_2 [dmg, png] | 8/23040 pixels differ |
@@ -272,20 +274,20 @@ All 8 tests passed.
 | Test | Result |
 |------|--------|
 | dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 429/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 715/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 1144/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 1144/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 1144/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 289/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 576/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 157/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 153/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 148/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 140/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 441/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 437/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 712/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 572/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 572/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 858/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 1144/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 288/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 288/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 290/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
 
 ## enable_display (135/184 passed)
 
@@ -623,9 +625,9 @@ All 6 tests passed.
 
 All 8 tests passed.
 
-## m0enable (151/167 passed)
+## m0enable (153/167 passed)
 
-151/167 tests passed, 16 failed:
+153/167 tests passed, 14 failed:
 
 | Test | Result |
 |------|--------|
@@ -634,8 +636,6 @@ All 8 tests passed.
 | m0enable/disable_scx3_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx4_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/disable_scx7_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -1035,9 +1035,9 @@ All 6 tests passed.
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
 
-## scx_during_m3 (34/141 passed)
+## scx_during_m3 (31/141 passed)
 
-34/141 tests passed, 107 failed:
+31/141 tests passed, 110 failed:
 
 | Test | Result |
 |------|--------|
@@ -1047,28 +1047,30 @@ All 6 tests passed.
 | scx_during_m3/scx2_scx1_during_m3_1 [cgb, png] | 14104/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_2 [dmg, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_2 [cgb, png] | 16/23040 pixels differ |
+| scx_during_m3/scx_0060c0/scx_during_m3_3 [dmg, png] | 1152/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_4 [dmg, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_4 [cgb, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_6 [dmg, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_6 [cgb, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_ds_2 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_0060c0/scx_during_m3_ds_3 [cgb, png] | 8/23040 pixels differ |
+| scx_during_m3/scx_0060c0/scx_during_m3_ds_3 [cgb, png] | 1160/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_ds_6 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_0060c0/scx_during_m3_ds_7 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_1 [dmg, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_2 [dmg, png] | 1643/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_2 [cgb, png] | 1643/23040 pixels differ |
+| scx_during_m3/scx_0063c0/scx_during_m3_3 [dmg, png] | 1152/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_4 [dmg, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_4 [cgb, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_6 [dmg, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_6 [cgb, png] | 16/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_2 [cgb, png] | 8874/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_3 [cgb, png] | 8/23040 pixels differ |
+| scx_during_m3/scx_0063c0/scx_during_m3_ds_2 [cgb, png] | 494/23040 pixels differ |
+| scx_during_m3/scx_0063c0/scx_during_m3_ds_3 [cgb, png] | 1160/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_ds_6 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_ds_7 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 9879/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 9455/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_3 [cgb, png] | 9879/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_4 [dmg, png] | 22320/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_4 [cgb, png] | 22320/23040 pixels differ |
@@ -1076,8 +1078,8 @@ All 6 tests passed.
 | scx_during_m3/scx_0360c0/scx_during_m3_5 [cgb, png] | 21168/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_6 [dmg, png] | 21168/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_6 [cgb, png] | 21168/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 8645/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 9879/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 8/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 9455/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_4 [cgb, png] | 22320/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_5 [cgb, png] | 22320/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_6 [cgb, png] | 22320/23040 pixels differ |
@@ -1087,7 +1089,7 @@ All 6 tests passed.
 | scx_during_m3/scx_0363c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_2 [dmg, png] | 1589/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_2 [cgb, png] | 1589/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_3 [dmg, png] | 1584/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_3 [dmg, png] | 2304/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_3 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_4 [dmg, png] | 2744/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_4 [cgb, png] | 2744/23040 pixels differ |
@@ -1097,7 +1099,7 @@ All 6 tests passed.
 | scx_during_m3/scx_0363c0/scx_during_m3_6 [cgb, png] | 3896/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_2 [cgb, png] | 437/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_3 [cgb, png] | 1584/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_ds_3 [cgb, png] | 2304/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_6 [cgb, png] | 1592/23040 pixels differ |
@@ -1107,7 +1109,7 @@ All 6 tests passed.
 | scx_during_m3/scx_0367c0/scx_during_m3_1 [cgb, png] | 1008/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_2 [dmg, png] | 2161/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_2 [cgb, png] | 2161/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12309/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12028/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_3 [cgb, png] | 12309/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_4 [dmg, png] | 2744/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_4 [cgb, png] | 2744/23040 pixels differ |
@@ -1116,8 +1118,8 @@ All 6 tests passed.
 | scx_during_m3/scx_0367c0/scx_during_m3_6 [dmg, png] | 3896/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_6 [cgb, png] | 3896/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_1 [cgb, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 12096/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12309/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 1009/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12028/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_6 [cgb, png] | 1592/23040 pixels differ |
@@ -1134,17 +1136,18 @@ All 6 tests passed.
 | scx_during_m3/scx_0761c0/scx_during_m3_6 [dmg, png] | 21744/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_6 [cgb, png] | 21744/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_1 [cgb, png] | 144/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 17282/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 152/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 16996/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 16992/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 17033/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_6 [cgb, png] | 22896/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_7 [cgb, png] | 21744/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_8 [cgb, png] | 21744/23040 pixels differ |
-| scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 16/23040 pixels differ |
+| scx_during_m3/scx_attrib_during_m3_spx1_ds [cgb, png] | 64/23040 pixels differ |
+| scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 80/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx1 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2 [cgb, png] | 16/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 16/23040 pixels differ |
+| scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 80/23040 pixels differ |
 | scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | scx_during_m3/scx_m3_extend_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1158,60 +1161,60 @@ All 6 tests passed.
 | scy/scx3/scy_during_m3_1 [dmg, png] | 3/23040 pixels differ |
 | scy/scx3/scy_during_m3_1 [cgb, png] | 3/23040 pixels differ |
 | scy/scx3/scy_during_m3_2 [dmg, png] | 5/23040 pixels differ |
-| scy/scx3/scy_during_m3_2 [cgb, png] | 1013/23040 pixels differ |
-| scy/scx3/scy_during_m3_3 [dmg, png] | 8/23040 pixels differ |
+| scy/scx3/scy_during_m3_2 [cgb, png] | 5/23040 pixels differ |
+| scy/scx3/scy_during_m3_3 [dmg, png] | 728/23040 pixels differ |
 | scy/scx3/scy_during_m3_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scx3/scy_during_m3_4 [dmg, png] | 8/23040 pixels differ |
-| scy/scx3/scy_during_m3_4 [cgb, png] | 1016/23040 pixels differ |
+| scy/scx3/scy_during_m3_4 [cgb, png] | 8/23040 pixels differ |
 | scy/scx3/scy_during_m3_5 [dmg, png] | 8/23040 pixels differ |
 | scy/scx3/scy_during_m3_5 [cgb, png] | 8/23040 pixels differ |
 | scy/scx3/scy_during_m3_6 [dmg, png] | 8/23040 pixels differ |
-| scy/scx3/scy_during_m3_6 [cgb, png] | 1016/23040 pixels differ |
+| scy/scx3/scy_during_m3_6 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_2 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_2 [cgb, png] | 1016/23040 pixels differ |
-| scy/scy_during_m3_3 [dmg, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_2 [cgb, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_3 [dmg, png] | 1160/23040 pixels differ |
 | scy/scy_during_m3_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_4 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_4 [cgb, png] | 1016/23040 pixels differ |
+| scy/scy_during_m3_4 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_5 [dmg, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_5 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_6 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_6 [cgb, png] | 1016/23040 pixels differ |
+| scy/scy_during_m3_6 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_ds_2 [cgb, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_ds_3 [cgb, png] | 1152/23040 pixels differ |
 | scy/scy_during_m3_ds_5 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_ds_6 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_1 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx08_1 [cgb, png] | 904/23040 pixels differ |
-| scy/scy_during_m3_spx08_2 [dmg, png] | 120/23040 pixels differ |
+| scy/scy_during_m3_spx08_1 [cgb, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_spx08_2 [dmg, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_2 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_3 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx08_3 [cgb, png] | 904/23040 pixels differ |
+| scy/scy_during_m3_spx08_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_4 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_1 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx08_ds_2 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx09_1 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx09_1 [cgb, png] | 904/23040 pixels differ |
-| scy/scy_during_m3_spx09_2 [dmg, png] | 232/23040 pixels differ |
+| scy/scy_during_m3_spx09_1 [cgb, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_spx09_2 [dmg, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx09_2 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx09_3 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx09_3 [cgb, png] | 904/23040 pixels differ |
+| scy/scy_during_m3_spx09_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx09_4 [cgb, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx09_ds_1 [cgb, png] | 232/23040 pixels differ |
+| scy/scy_during_m3_spx09_ds_1 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx09_ds_2 [cgb, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx09_ds_4 [cgb, png] | 112/23040 pixels differ |
 | scy/scy_during_m3_spx0A_1 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx0A_1 [cgb, png] | 904/23040 pixels differ |
-| scy/scy_during_m3_spx0A_2 [dmg, png] | 232/23040 pixels differ |
+| scy/scy_during_m3_spx0A_1 [cgb, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_spx0A_2 [dmg, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0A_2 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0A_3 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx0A_3 [cgb, png] | 904/23040 pixels differ |
+| scy/scy_during_m3_spx0A_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0A_4 [cgb, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx0B_1 [dmg, png] | 120/23040 pixels differ |
-| scy/scy_during_m3_spx0B_1 [cgb, png] | 904/23040 pixels differ |
+| scy/scy_during_m3_spx0B_1 [dmg, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_spx0B_1 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0B_2 [dmg, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0B_2 [cgb, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_spx0B_3 [dmg, png] | 120/23040 pixels differ |
-| scy/scy_during_m3_spx0B_3 [cgb, png] | 904/23040 pixels differ |
+| scy/scy_during_m3_spx0B_3 [dmg, png] | 8/23040 pixels differ |
+| scy/scy_during_m3_spx0B_3 [cgb, png] | 8/23040 pixels differ |
 | scy/scy_during_m3_spx0B_4 [cgb, png] | 8/23040 pixels differ |
 
 ## serial (48/82 passed)
@@ -1404,9 +1407,9 @@ All 6 tests passed.
 | speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
 
-## sprites (374/476 passed)
+## sprites (393/476 passed)
 
-374/476 tests passed, 102 failed:
+393/476 tests passed, 83 failed:
 
 | Test | Result |
 |------|--------|
@@ -1420,6 +1423,7 @@ All 6 tests passed.
 | sprites/10spritesPrLine_1xposA8_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/10spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/10spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/10spritesprline_2xposa7overlap8_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/1spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/1spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/1spritesPrLine_offset7_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
@@ -1473,36 +1477,16 @@ All 6 tests passed.
 | sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/mix_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/mix_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/10spritesPrLine_nr1space4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/10spritesPrLine_scx4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/10spritesPrLine_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx0_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/10spritesPrLine_wx1_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/space/10spritesPrLine_wx3_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx4_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/2overlap2_offset4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/2overlap4_offset4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap1_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap2_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap3_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap3_scx7_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap4_scx4_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap5_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap5_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap5_scx7_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap7_scx7_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/3overlap8_scx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/space/9pos8_wx08_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx08_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx09_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx0A_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx0B_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx0C_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx0D_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/9pos8_wx0E_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/sprite_late_disable_spx18_1_dmg08_out0 [dmg] | got 3, expected 0 |
+| sprites/sprite_late_disable_spx19_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_disable_spx1B_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_enable_spx18_2_dmg08_out0 [dmg] | got 3, expected 0 |
@@ -1573,32 +1557,35 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (295/476 passed)
+## window (322/476 passed)
 
-295/476 tests passed, 181 failed:
+322/476 tests passed, 154 failed:
 
 | Test | Result |
 |------|--------|
 | window/arg/late_enable_afterVblank_4_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_scx_late_wy_FFto4_ly4_wx00_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_scx_late_wy_FFto4_ly4_wx00_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wx_late_wy_FFto2_ly2_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/arg/late_wx_late_wy_FFto2_ly2_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to1_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_10to1_ly1_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_10to1_ly1_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_1toFF_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2toFF_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly0_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto0_ly0_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly0_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
@@ -1608,7 +1595,9 @@ All 20 tests passed.
 | window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx2_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -1618,50 +1607,33 @@ All 20 tests passed.
 | window/arg/late_wy_FFto2_ly2_scx5_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx5_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx5_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_wy_FFto2_ly2_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/arg/late_wy_FFto2_ly2_wx00_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/arg/late_wy_FFto2_ly2_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx00_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_wx00_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx00_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_wx0f_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx0f_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_disable_0_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx00_wx10_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx00_wx12_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_disable_early_scx03_wx0f_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx03_wx10_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_disable_early_scx03_wx10_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx03_wx12_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/late_disable_late_scx00_wx0f_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_late_scx00_wx10_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx0f_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx0f_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx10_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx10_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx10_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx11_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx11_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx11_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx12_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx12_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx10_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx11_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx2_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_scx2_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_scx2_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_scx3_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_disable_scx3_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_scx3_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_disable_scx3_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx5_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx5_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_spx10_wx0f_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_disable_wx0f_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_disable_wx0f_0_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_wx0f_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
@@ -1669,39 +1641,22 @@ All 20 tests passed.
 | window/late_enable_afterVblank_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_reenable_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/late_enable_ly0_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_reenable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_reenable_scx3_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_scx3_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_reenable_wx0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_wx0f_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_scx_late_disable_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_scx_late_disable_0_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_wx_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_wx_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_ff_07_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_ff_07_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_ff_0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_ff_0f_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_scx2_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_scx2_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_scx3_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_scx3_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_scx5_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wx_wx03_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_wx03_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_wx0f_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_wx_wx0f_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_ds_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -1719,28 +1674,30 @@ All 20 tests passed.
 | window/m2int_wx07_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx07_scx2_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx07_scx2_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wx07_scx3_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx07_scx3_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx07_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx0C_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wx57_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| window/m2int_wxA6_firstline_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
-| window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/m2int_wxA6_firstline_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/m2int_wxA6_m0irq2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
+| window/m2int_wxA6_m0irq2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
+| window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| window/m2int_wxA6_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
-| window/m2int_wxA6_scx2_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
+| window/m2int_wxA6_scx2_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx2_m3stat_3_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx3_m3stat_3_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_scx5_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA6_scx5_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_scx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
-| window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
+| window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
 | window/on_screen/weon_wx18_weoff_weon_wx80 [dmg, png] | 8420/23040 pixels differ |
 | window/on_screen/weon_wx18_weoff_weon_wx80 [cgb, png] | 8420/23040 pixels differ |
 | window/on_screen/wx17_weoff_wxA5_weon [dmg, png] | 6784/23040 pixels differ |

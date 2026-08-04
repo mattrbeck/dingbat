@@ -68,8 +68,10 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # *delta* and nothing else -- which makes it invariant to whatever constant
 # offset dingbat's dot grid carries against anyone else's.
 #
-# **All seven ship at 0, which compiles the mechanism and both of its fields
-# out, and the reason is a measurement.** The CGB PPU really does take these
+# **Six of the seven ship at 0; SCY ships at the documented 2 as of 2026-08-03,
+# once the OBJ fetch phase it was being measured through was fixed (see the
+# SCY bullet below and tick_sprite_fetcher in fifo_ppu.nim).** For the other six
+# the reason is still a measurement. The CGB PPU really does take these
 # writes late -- the mealybug PPU document states a 2-T-cycle CGB delay for SCY
 # outright, and Pan Docs' "Mid-frame behavior" carries the same split -- but
 # every one of them is refused by this tree today. Whole gambatte suite per
@@ -205,30 +207,44 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 #    references say it stands still. That is written up, with the table and with
 #    what the naive fix costs, at tick_sprite_fetcher in fifo_ppu.nim.
 #
-#    Which leaves the shipping value. 2 is the correct number and it is still
-#    not shipped, because with the fetcher phase unfixed it costs more than it
-#    buys: gambatte 3567 -> 3566 and mealybug m3_scy_change2 100.0 -> 99.0, both
-#    of them rows whose own ruler is the same OBJ phase (m3_scy_change2 puts a
-#    SECOND object mid-line, at X=13, which is fetched mid-BG-fetch -- our tile
-#    1 comes out as reads at 101/103/110 rather than a clean 8-dot cadence, and
-#    that irregular tile is precisely where its refusal of 2 lives). Ship the
-#    fetcher phase first, then set this to 2 and re-run the band table; the
-#    prediction it makes is that every band goes to 0, not just the five.
+#    **Which leaves the shipping value, and it is now 2.** With the fetcher
+#    phase unfixed, 2 cost more than it bought (gambatte 3567 -> 3566 and
+#    mealybug m3_scy_change2 100.0 -> 99.0, both of them rows whose own ruler is
+#    the same OBJ phase). The fetcher phase was fixed on 2026-08-03 and the band
+#    table was re-run; the prediction above -- that every band comes up, not just
+#    the five with no wait term -- held. Per band on the fixed fetcher,
+#    m3_scy_change against its `_cgb_c` reference, matching pixels out of 3840:
+#
+#      band (objX)   0     1..3    4    5..7   8..12   13..15   16,17
+#      at 0        3658   ~3800  3702  3808   ~3700   3808    ~3700
+#      at 2        3658   ~3800  3702  3808   ~3700   3808    ~3700
+#      whole ROM   82.0% -> 97.7%, and the CGB suite 1794023 -> 1812603 pixels
+#
+#    The wait > 0 bands no longer collapse at 2 -- that collapse WAS the fetcher
+#    phase -- and gambatte does not move at all between 0 and 2 now (3613 both),
+#    so the row this used to cost is gone with it. 1 and 3 are both worse on
+#    mealybug CGB (1802113 and 1809324 against 1814216 for the whole suite with
+#    the rest of the file at its shipping values), which is the first time this
+#    constant's two instruments have agreed on the documented value.
 #    The third refusal is unrelated to all of this and stands: gambatte loses
 #    scy/scy_during_m3_spx08_ds_4, a DOUBLE SPEED row, at any nonzero value. At
 #    2 dots per M-cycle a 1-dot latency lands on the cap boundary, so that row
 #    is the CGB CPU-to-PPU phase axis reading a register latency, which is the
 #    confusion CGB_LATENCY_CAP exists to prevent and cannot at this width.
-#  * SCX. The one clean, DMG-neutral, per-device row in the tree that a scroll
-#    latency fixes is enable_display/ly0_late_scx7_m3stat_scx0_274, whose
-#    DMG sibling expects $87 and whose CGB row expects $84; at 2 dots dingbat
-#    gets both right. The SAME family's _scx3_17 row expects $87 on BOTH devices
-#    and 2 dots takes it to $84. One register, one latency, and the family
-#    brackets it above 1 and below 2 -- i.e. it does not bracket it, and the
-#    residual deciding one of the two rows is elsewhere. Its _scx1 rows are
-#    already red on both devices, which is where that residual shows. The
-#    mealybug CGB rows agree with 0: both m3_scx_* rows are pixel-perfect there
-#    and any nonzero value breaks them.
+#  * SCX. **Also 2 as of 2026-08-03, and for the same reason SCY is: the row
+#    that used to refuse it was reading the OBJ fetch phase.** The one clean,
+#    DMG-neutral, per-device row that a scroll latency fixes is
+#    enable_display/ly0_late_scx7_m3stat_scx0_274, whose DMG sibling expects $87
+#    and whose CGB row expects $84; at 2 dots dingbat gets both right. What used
+#    to refuse it was mealybug: both m3_scx_* CGB rows were pixel-perfect at 0
+#    and any nonzero value broke them. On the fixed fetcher they are not
+#    pixel-perfect at 0 any more, and they come back monotonically --
+#    m3_scx_high_5_bits 99.5% / 99.7% / 100.0% and m3_scx_high_5_bits_change2
+#    99.7% / 99.8% / 100.0% at 0 / 1 / 2 -- while gambatte adds
+#    scx_during_m3/scx_0060c0 and _0063c0's `_3` rows on the CGB side (30 -> 32,
+#    +517 mealybug CGB pixels, DMG untouched as it must be). Three instruments,
+#    one value, and it is the documented one.
+#    Its _scx1 rows are still red on both devices; that residual is elsewhere.
 #  * LCDC. All five window rows it costs are late_disable / late_reenable rows.
 #    Those are the family SameBoy gives a CGB-ONLY fetcher-abort path (a window
 #    disable part way through the fetch aborts it), which moves them the other
@@ -244,8 +260,8 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 #    the 42 dual-expectation window ROMs.
 const CGB_WX_LATENCY*         {.intdefine.} = 0
 const CGB_WY_LATENCY*         {.intdefine.} = 0
-const CGB_SCY_LATENCY*        {.intdefine.} = 0
-const CGB_SCX_LATENCY*        {.intdefine.} = 0
+const CGB_SCY_LATENCY*        {.intdefine.} = 2
+const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
@@ -771,7 +787,6 @@ type
     dropped_first_fetch*: bool
     fetching_window*:     bool
     fetching_sprite*:     bool
-    bg_pixels_pushed*:    bool
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.

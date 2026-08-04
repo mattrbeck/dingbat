@@ -25,19 +25,23 @@ Each of the first four steps takes 2 cycles. We model this with a `fsSleep` befo
 
 ## 2. Extra push attempt during Get Tile Data High
 
-**`fifo_ppu.nim:125-126`** — After reading the high byte and past the first-fetch discard, calls `try_push_bg_pixels`. If successful, sets `bg_pixels_pushed = true`.
-
-**`fifo_ppu.nim:128-131`** — `fsPushPixel` checks `bg_pixels_pushed` first. If the extra push already succeeded, it advances `fetch_counter` without re-pushing.
-
-**`fifo_ppu.nim:102`** — `bg_pixels_pushed` reset to `false` at `fsGetTile` (start of each fetch cycle).
-
-**`fifo_ppu.nim:59`** — Also reset in `fifo_reset_bg`.
+After reading the high byte and past the first-fetch discard, `tick_bg_fetcher`
+calls `try_push_bg_pixels`.
 
 **Pandocs reference** — Section "Get Tile Data High":
 
 > This also pushes a row of background/window pixels to the FIFO. This extra push is not part of the 8 steps, meaning there's 3 total chances to push pixels to the background FIFO every time the complete fetcher steps are performed.
 
-The 3 chances are: (1) the extra push during Get Tile Data High, (2) the Sleep step that follows (a cycle where the Push could theoretically fire), and (3) the Push step itself. Once any push succeeds (FIFO was empty), the `bg_pixels_pushed` flag prevents a duplicate push. Without this flag, the Push step would wait for the FIFO to drain and then push the same tile data a second time, doubling every tile and skipping every other column.
+**Superseded 2026-08-03.** This used to set a `bg_pixels_pushed` flag that
+`fsPushPixel` consumed, so the fetcher walked out the Sleep and Push steps it
+had already served before starting the next tile. That is what a *duplicate*
+push has to be prevented from doing, but it is not what hardware does with the
+dots: Pan Docs' fetcher goes back to step 1 the moment a push succeeds, and the
+172-dot line only adds up that way (6 dots of throw-away fetch + 6 of the real
+one + 160 pixels). The extra push now sets `fetch_counter = 0` outright, which
+prevents the duplicate by construction and puts the cycle's two idle dots at the
+tail where hardware has them. The flag is gone. See the fetch-phase note at
+`tick_sprite_fetcher` for what the old placement cost and how it was measured.
 
 ---
 
