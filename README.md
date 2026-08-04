@@ -30,12 +30,21 @@ PPU for games like Prehistorik Man.
 ## Downloads
 
 The browser version above is the recommended way to play. Tagged releases also publish
-prebuilt macOS (`.dmg`) and Windows (`.exe`) binaries on the
+prebuilt Linux (`.tar.gz`), macOS (`.dmg`) and Windows (`.exe`) binaries on the
 [Releases](../../releases) page.
+
+For a build of any individual commit, open its run under
+[Actions → Build](../../actions/workflows/build.yml) and download from that run's
+**Artifacts** section — the same three platforms are built on every push and pull
+request.
 
 Those binaries are **unsigned**, so the OS warns on first launch — on macOS, open
 **System Settings → Privacy & Security** and click **Open Anyway**; on Windows, click
 **More info → Run anyway**. Once only.
+
+The Linux build needs SDL2 present at runtime (`apt install libsdl2-2.0-0`, or
+`dnf install SDL2`); macOS and Windows link it statically and need nothing installed.
+It is built against glibc 2.34, so it runs on Ubuntu 22.04+, Debian 12+ and Fedora 35+.
 
 ## Documentation
 

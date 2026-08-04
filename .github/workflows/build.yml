@@ -1,0 +1,21 @@
+name: Build
+
+# Desktop binaries for all three platforms on every push and PR, downloadable
+# from the run's Artifacts section. Previously only Windows was built here and
+# macOS existed solely inside the tag-triggered Release workflow, so there was
+# no way to get a macOS or Linux build of an arbitrary commit — and the Linux
+# desktop target was not built anywhere at all, which is how it stayed broken
+# (see the SDL2 include path in nim.cfg).
+#
+# Artifacts are retained for the repository's default period and are not
+# releases: they are unsigned, and the .dmg reports version 0.0.0 unless built
+# from a tag.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  artifacts:
+    uses: ./.github/workflows/build-artifacts.yml

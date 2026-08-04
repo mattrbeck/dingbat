@@ -38,6 +38,18 @@ nimble build -d:release
 
 This places the binary at `./dingbat`.
 
+On Linux install the development packages first (`apt install libsdl2-dev
+libgl1-mesa-dev`, or `dnf install SDL2-devel mesa-libGL-devel`). `nim.cfg` adds
+`-I/usr/include/SDL2` for the imgui SDL2 backend, which is where both Debian and Fedora
+put those headers; if your distro differs, that is the line to change. SDL2 is loaded
+dynamically here, so the runtime package must be installed to *run* the binary — macOS
+and Windows link it statically instead.
+
+> **Dependency gotcha.** `nimble install --depsOnly` currently fails inside the checkout
+> with "Couldnt find a solution for the packages" on nimble 0.22. Install them one at a
+> time from another directory instead — `cd /tmp && nimble install -y sdl2 imguin yaml
+> stb_image zippy` — which is what CI does.
+
 ## Windows (cross-compiled)
 
 Windows binaries are cross-compiled with mingw-w64 inside a Docker container — no Windows

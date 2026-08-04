@@ -1,0 +1,131 @@
+name: Build artifacts
+
+# The three desktop builds, defined once and called by BOTH the per-push Build
+# workflow and by Release on a tag. It is a reusable workflow rather than a
+# copy in each because the two would drift, and a tag is the worst possible
+# moment to discover that the copy which only runs on tags went stale — that is
+# exactly how the Windows build ended up specified twice before this.
+#
+# Every job uploads a downloadable artifact, so any commit's binaries can be
+# pulled from its run page, not just tagged releases.
+on:
+  workflow_call:
+
+jobs:
+  linux:
+    # ubuntu-22.04, NOT ubuntu-latest, deliberately: a glibc-linked binary runs
+    # only on the glibc it was built against or newer. 22.04 gives a GLIBC_2.34
+    # floor (Ubuntu 22.04+, Debian 12+, Fedora 35+); building on 24.04 would
+    # raise it to 2.39 and lock out every currently-supported LTS for nothing.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+      - name: Install SDL2 and OpenGL headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libgl1-mesa-dev
+      - name: Install dependencies
+        # Installed one at a time from OUTSIDE the checkout, the same way the
+        # test workflow does it: inside the checkout nimble resolves the whole
+        # project graph, and `nimble install --depsOnly` there currently fails
+        # outright with "Couldnt find a solution for the packages" (nimble
+        # 0.22's resolver). Each is a network fetch, so each is retried.
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          for p in sdl2 imguin yaml stb_image zippy; do
+            "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
+          done
+      - name: Build
+        run: nim c -d:release -o:dingbat src/dingbat.nim
+      - name: Package
+        # Tarred rather than uploaded bare: upload-artifact zips its input, and
+        # the zip GitHub serves back does not carry the executable bit, so a
+        # bare binary arrives mode 644 and will not run until the user chmods
+        # it. The tar inside the zip preserves the mode.
+        run: |
+          mkdir -p dist/linux
+          cp dingbat dist/linux/dingbat
+          tar -C dist/linux -czf dingbat-linux-x64.tar.gz dingbat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-linux-x64
+          path: dingbat-linux-x64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    # Native build with -d:macdist, which statically links SDL2 so the .app has
+    # no Homebrew dependency, then bundled into a .app inside a .dmg.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      # Every fetch below is retried: losing a release build to a transient 5xx
+      # means re-running the whole thing by hand.
+      - name: Install SDL2
+        run: .github/scripts/retry.sh 3 brew install sdl2
+      - name: Install Nim
+        run: |
+          set -eo pipefail
+          .github/scripts/retry.sh 3 bash -c \
+            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        # See the Linux job: --depsOnly is not usable, so install one by one
+        # from outside the checkout.
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          for p in sdl2 imguin yaml stb_image zippy; do
+            "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
+          done
+      - name: Build (self-contained)
+        run: nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
+      - name: Verify no Homebrew dependency
+        # The whole point of -d:macdist. If SDL2 slipped back to a dynamic link
+        # the .dmg would work perfectly on this runner and fail on every
+        # machine without Homebrew, so fail here instead.
+        run: |
+          if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL2'; then
+            echo "::error::binary still links a non-system dylib — not self-contained"
+            otool -L dingbat_dist; exit 1
+          fi
+      - name: Bundle .app + .dmg
+        # Tag builds carry the tag as the bundle version; branch builds are not
+        # releases and get 0.0.0 rather than a fake version number.
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0"
+          fi
+          ci/make-macos-app.sh dingbat_dist "$VERSION" dist/macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-macos
+          path: dist/macos/dingbat-macos.dmg
+          if-no-files-found: error
+
+  windows:
+    # Cross-compiled from Linux with mingw-w64 (static SDL2, single .exe), so
+    # this needs no Windows runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build cross-compile image
+        # Pulls the nim base image and apt/SDL2 over the network on every run
+        # (no layer cache on the runner), so a transient registry/mirror hiccup
+        # would otherwise be a red build.
+        run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
+      - name: Build dingbat.exe
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            dingbat-win-cross ./docker/windows-cross/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-windows-x64
+          path: dist/windows/dingbat.exe
+          if-no-files-found: error

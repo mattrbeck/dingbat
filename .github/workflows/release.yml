@@ -1,8 +1,13 @@
 name: Release
 
-# Build macOS (.dmg) and Windows (.exe) artifacts on a version tag and publish
-# them to the GitHub Releases page. Binaries are UNSIGNED — see README for the
-# one-time "open anyway" steps users take on first launch.
+# Build Linux, macOS and Windows artifacts on a version tag and publish them to
+# the GitHub Releases page. The builds themselves live in build-artifacts.yml,
+# which the per-push Build workflow also calls — so what ships in a release is
+# byte-for-byte the same recipe that has been exercised on every commit, rather
+# than a second copy that only ever runs on tags.
+#
+# Binaries are UNSIGNED — see README for the one-time "open anyway" steps users
+# take on first launch.
 on:
   push:
     tags: ["v*"]
@@ -12,65 +17,12 @@ permissions:
   contents: write
 
 jobs:
-  # Windows: reuse the existing mingw cross-build (static SDL2, single .exe),
-  # which runs on a Linux runner via Docker.
-  windows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build cross-compile image
-        run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
-      - name: Build dingbat.exe
-        run: |
-          docker run --rm -v "$PWD":/src -w /src \
-            dingbat-win-cross ./docker/windows-cross/build.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dingbat-windows
-          path: dist/windows/dingbat.exe
-          if-no-files-found: error
-
-  # macOS: native build with -d:macdist (statically links SDL2 so the .app has
-  # no Homebrew dependency), bundled into a .app + .dmg.
-  macos:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      # Every fetch below is retried: a release runs once per tag, and losing
-      # one to a transient 5xx means re-running the whole workflow by hand.
-      - name: Install SDL2
-        run: .github/scripts/retry.sh 3 brew install sdl2
-      - name: Install Nim
-        run: |
-          set -eo pipefail
-          .github/scripts/retry.sh 3 bash -c \
-            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
-               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
-          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-      - name: Build (self-contained)
-        run: |
-          set -e
-          .github/scripts/retry.sh 3 nimble install -y --depsOnly
-          nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
-      - name: Verify no Homebrew dependency
-        run: |
-          if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL2'; then
-            echo "::error::binary still links a non-system dylib — not self-contained"
-            otool -L dingbat_dist; exit 1
-          fi
-      - name: Bundle .app + .dmg
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ci/make-macos-app.sh dingbat_dist "${VERSION:-0.0.0}" dist/macos
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dingbat-macos
-          path: dist/macos/dingbat-macos.dmg
-          if-no-files-found: error
+  build:
+    uses: ./.github/workflows/build-artifacts.yml
 
   # Collect the artifacts, checksum them, and publish a Release.
   release:
-    needs: [windows, macos]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -78,9 +30,11 @@ jobs:
           path: artifacts
       - name: Stage + checksum
         run: |
+          set -e
           mkdir -p release
-          cp artifacts/dingbat-windows/dingbat.exe release/dingbat-windows-x64.exe
-          cp artifacts/dingbat-macos/dingbat-macos.dmg release/dingbat-macos.dmg
+          cp artifacts/dingbat-linux-x64/dingbat-linux-x64.tar.gz release/
+          cp artifacts/dingbat-macos/dingbat-macos.dmg           release/dingbat-macos.dmg
+          cp artifacts/dingbat-windows-x64/dingbat.exe           release/dingbat-windows-x64.exe
           cd release && shasum -a 256 * > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
