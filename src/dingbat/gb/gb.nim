@@ -792,7 +792,14 @@ type
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
     obj_penalty*:         int32
     obj_tile_fx*:         int32
-    m3_delay*:            int   # idle dots left at the head of mode 3
+    # Idle dots left at the head of mode 3 (the pipeline's lead over the CPU's
+    # register view; see M3_PIPE_DELAY in fifo_ppu). A byte, not an int, and
+    # for one reason: the mode 3 branch of fifo_tick_slow's dot loop asks
+    # "is the head spent?" once per M-cycle of mode 3 -- ~6,200 times a frame
+    # -- and a byte answers it in `ldrb`+`cbz` where a signed int needs
+    # `ldr`+`cmp`+`b.le`. The value is 0..12 by construction (M3_PIPE_MCYCLES
+    # * 4 + M3_PIPE_DELAY).
+    m3_delay*:            uint8
     # How far the pipeline lags the CPU's view of the PPU registers on THIS
     # line, in dots. Latched at the mode 2 -> 3 edge because the CPU M-cycle it
     # is derived from is 4 dots at normal speed and 2 in double speed. See

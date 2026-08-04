@@ -34,6 +34,17 @@ Retired instructions reproduce to **0.002%** run to run, against 1.3% for fps.
 `cycles=` (emulated cycles) is the control: an A/B is only meaningful when both
 arms report the same emulated cycle count, i.e. both did the same work.
 
+**That 0.002% is an idle-machine number and it does not degrade gracefully.**
+`ri_instructions` counts kernel work charged to the process as well as the
+process's own, so a contended run reads HIGH: measured 2026-08-03 during the
+mode 3 lead work, five runs of one binary on one ROM spread **0.49%** at load
+average ~100, and the spread correlates with each run's own fps -- the slower
+the run, the more instructions it reports. That is larger than most things worth
+measuring on this path, and single-shot numbers taken under it are worse than
+useless because they are *systematically* wrong rather than noisy. Take the
+**minimum of four or more runs** per arm and check the minima agree to ~0.01%
+before believing a delta. `uptime` first.
+
 ## The measurement trap: an inline-cost cliff
 
 The first factorial run produced impossible numbers -- a build with *both*
@@ -113,4 +124,12 @@ core rewrite, for a third of a percent.
 3. Diff per-function sizes between the two binaries before believing any
    result. If more than the functions you edited changed size, you measured an
    inlining decision, not your change.
-4. `uptime` before trusting even the counter numbers for wall-clock claims.
+4. `uptime` before trusting even the counter numbers, for wall-clock claims
+   **and for the counters** — see the load-average paragraph above. Take the
+   minimum of four or more runs per arm; one run is not a measurement.
+5. Build both arms **the same way**. Two builds of identical source in
+   different directories differ by up to **0.25%** of retired instructions
+   here: the nimcache path reaches the generated C, and the `_uNNNN` symbol
+   renumbering goes with it. Two `tools/gbgate/build.sh` slots, or two trees
+   built by the same script, are comparable; a number carried over from an
+   arm somebody else built is not.

@@ -59,7 +59,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.win_lx = WIN_LX_OFF
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
-  ppu.m3_delay = 0
+  ppu.m3_delay = 0'u8
   ppu.tile_num = 0
   ppu.tile_attrs = 0
   ppu.tile_data_low = 0
@@ -527,21 +527,51 @@ const WIN_REACT_PHASE {.intdefine.} = 7
 # 52 generated opcode bodies crossing clang's inline threshold in one direction
 # or the other -- the cliff docs/gb_oam_dma_cost.md describes.
 #
-# Three changes take it to **+1.03%**, and each is marked at its site:
+# It shipped at +0.83% / +0.72% (Link's Awakening DMG / Pokemon Crystal, against
+# the same tree built with `-d:M3_PIPE_DELAY=0`, which compiles the whole
+# mechanism out). Four changes on 2026-08-03 take it to **+0.22% / +0.12%**, and
+# each is marked at its site:
 #   * fetcher_retired's early-out folds the lead to an immediate whenever the
-#     M-cycle term is off, instead of loading `m3_lead`;
+#     M-cycle term is off, instead of loading `m3_lead`. Splitting its other
+#     four terms out of line was measured too, and is worse -- see there;
 #   * the head delay is spent in ONE step above the dot loop rather than tested
-#     inside it (see `m3_delay` in fifo_tick_slow's mode 3 branch);
-#   * the tail burst is a {.noinline.} proc, so fifo_tick_slow's mode 3 case
-#     does not carry a second copy of the whole pipeline.
-# fifo_tick and mem_tick_components come out byte-identical in size across the
-# pair, and fifo_tick_slow grows 1992 -> 2352 bytes rather than 1992 -> 3324.
+#     inside it, behind a byte test and with no `continue` behind it (the four
+#     spellings that were measured are tabulated at the site);
+#   * the tail burst is {.inline.} -- it was {.noinline.} for the cliff above,
+#     and with the mode 3 branch settled it no longer needs to be. Worth
+#     -0.11%, see fifo_burst_tail;
+#   * `m3_delay` is a uint8, so that once-per-mode-3-M-cycle test is
+#     `ldrb`+`cbz` rather than `ldr`+`cmp`+`b.le`. Worth -0.08%.
+# fifo_tick and mem_tick_components stay byte-identical in size across the pair,
+# and the whole-binary per-function size diff against 151b952 has three rows:
+# fifo_burst_tail (gone, inlined), fifo_tick_slow (-36) and sprite_fetch_merge
+# (-24, the field-offset shift). Nothing in the opcode bodies moved, which is
+# the check that matters -- if more than the functions you edited change size,
+# you measured an inlining decision (docs/gb_oam_dma_cost.md).
 #
-# Against main -- the lead plus everything else in this change -- that lands at
-# +1.22% on Pokemon Crystal, +1.49% on Zelda DX and +1.16% on Pokemon Blue.
-# There is nothing left to spend it on: an object-free line pays exactly one
-# extra compare per dot (fetcher_retired's early-out, against an immediate) and
-# one skip per line, and lines with objects pay nothing on top of that.
+# What is left is a floor rather than slack, and the arithmetic says so: the
+# +0.22% that remains on DMG is ~0.19% of byte test (one `ldrb` and one `cbz`
+# per mode 3 M-cycle, ~6,200 a frame) and essentially nothing else. An
+# object-free line otherwise pays one compare per dot -- fetcher_retired's
+# early-out, against an immediate, which clang folds into the dot loop's own
+# `lx` test so it is not even a second branch -- and a two-dot burst per line;
+# lines with objects pay nothing on top. The reason the byte test cannot be
+# deleted is at its site.
+#
+# Two notes for whoever measures this next, both of which cost this change a
+# wrong answer before they were understood:
+#
+#  * `ri_instructions` from proc_pid_rusage includes kernel work charged to the
+#    process, so a run on a loaded machine reads HIGH -- 0.5% high at load
+#    average 100, correlated with the run's own fps, which is bigger than every
+#    number in this block. docs/gb_oam_dma_cost.md's "reproduces to 0.002%"
+#    holds on an idle machine and not otherwise. Take the MINIMUM of four or
+#    more runs per arm and check the minima agree to ~0.01%.
+#  * Two builds of the SAME source in different directories differ by up to
+#    0.25% of retired instructions (nimcache path length reaches the generated
+#    C, and `_uNNNN` renumbering with it). Both arms of an A/B have to be built
+#    the same way -- two gbgate slots, or two `bslot`-style trees -- and a
+#    number carried over from a differently-built arm is not comparable.
 #
 # ---- Why moving the PIPELINE was the wrong half of it ---------------------
 # The lead is injected as idle dots at the HEAD of mode 3 and paid back by
@@ -822,6 +852,15 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## gambatte to 3263 and the rest of the suite from 615 to 594 passing
   ## (vramw_m3end -4, and mooneye/GBMicrotest hblank rows with it). The
   ## remaining WX=166 rows are worth less than that.
+  ##
+  ## Splitting the four terms below into a `{.noinline.}` tail behind the first
+  ## compare -- the shape that would make this one instruction on the dot loop
+  ## -- was measured on 2026-08-03 and is NOT worth it. The whole conjunction
+  ## costs about +0.04% of retired instructions over the degenerate
+  ## `lx >= GB_WIDTH` form, and hoisting it out of line costs MORE than it
+  ## saves, because clang already folds the first compare into the dot loop's
+  ## own `lx` test (`cmp w8, #0x9d` / `b.gt`, one branch for both questions) and
+  ## the split takes that away. Leave it inline.
   when not M3_PIPE_LEAD_ANY:
     # Nothing below can be reached with a zero lead, and this is the mode 3
     # loop's condition -- spell the degenerate case out rather than trust the
@@ -934,16 +973,21 @@ when STAT_IRQ_SPLIT:
     true
 
 when M3_PIPE_LEAD_ANY:
-  proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.inline.} =
     ## The last `m3_lead` pixels of a line, emitted on the retire dot rather
     ## than spread over the first dots of H-Blank. See the caller.
     ##
-    ## `noinline` on purpose. It runs 144 times a frame where the dot loop it
-    ## sits in runs ~25,000, and inlining it puts a SECOND copy of
-    ## fifo_pipeline_dot inside fifo_tick_slow's mode 3 case -- enough to push
-    ## mem_read/mem_write past clang's inline threshold in a large arbitrary
-    ## subset of the generated opcode bodies. See the M3_PIPE_DELAY note above
-    ## for what the three mitigations cost together.
+    ## This shipped `{.noinline.}` when the lead was first turned on, because
+    ## inlining it put a SECOND copy of fifo_pipeline_dot inside
+    ## fifo_tick_slow's mode 3 case and that was enough to push
+    ## mem_read/mem_write over clang's inline threshold in an arbitrary subset
+    ## of the generated opcode bodies -- the cliff docs/gb_oam_dma_cost.md
+    ## describes. Re-measured 2026-08-03 with the mode 3 branch settled, that
+    ## is no longer true: inlining costs fifo_tick_slow +172 bytes, changes the
+    ## size of NOTHING else in the binary (the whole-binary per-function size
+    ## diff has exactly two rows), and is worth -0.04% of retired instructions,
+    ## because the call and its argument setup were the larger half of what a
+    ## two-dot burst costs. Re-run that size diff before changing it back.
     var guard = 0
     while ppu.lx < GB_WIDTH and guard < 64:
       fifo_pipeline_dot(ppu, gb)
@@ -1038,12 +1082,31 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # The pipeline's head delay, spent in one step rather than as a test
           # inside the loop below. Nothing else in the PPU happens on these
           # dots, so they collapse exactly the way an idle mode's do.
-          if ppu.m3_delay > 0:
+          #
+          # What is NOT here, deliberately, is the `continue` this shipped with:
+          # falling into the dot loop below is the same sequence of actions --
+          # the loop's own `remaining > 0` exits when the head ate the whole
+          # tick, and fetcher_retired cannot have changed across dots on which
+          # nothing ran -- and it saves the outer loop a back edge. Measured
+          # against the same build with the head removed outright (Link's
+          # Awakening DMG, retired instructions, minimum of four runs):
+          #
+          #   this                                       +0.162%
+          #   with the `continue` (as shipped 151b952)    +0.187%
+          #   a {.noinline.} call instead of the `min`    +0.255%
+          #   a two-dot `while` loop                      +0.318%
+          #
+          # The floor is the `if ppu.m3_delay != 0` alone -- ~0.19%, one `ldrb`
+          # and one `cbz` per mode 3 M-cycle, ~6,200 a frame -- so this spelling
+          # is at it and the other three are not. Deleting the test needs the
+          # head dots to be spendable where mode 3 begins, and they are not: a
+          # double-speed M-cycle is two dots and the mode 2 -> 3 transition is
+          # one of them, so a lead of 2 always leaves a dot for the next tick.
+          if ppu.m3_delay != 0:
             let skip = min(remaining, int(ppu.m3_delay))
-            ppu.m3_delay -= skip
+            ppu.m3_delay -= uint8(skip)
             ppu.cycle_counter += int32(skip)
             remaining -= skip
-            continue
         while remaining > 0 and not fetcher_retired(ppu):
           when STAT_IRQ_SPLIT:
             # The mode-0 STAT source rises `lead` dots before the flag does.
@@ -1088,7 +1151,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # Only the PIPE terms are paid back at the head. M3_END_EARLY's
             # share is not, which is the whole difference between "the pipeline
             # runs late" and "mode 3 is short".
-            ppu.m3_delay = int(ppu.m3_lead) - M3_END_EARLY
+            ppu.m3_delay = uint8(int(ppu.m3_lead) - M3_END_EARLY)
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
@@ -1125,7 +1188,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.`mode_flag=`(0'u8, gb)
         else:
           when M3_PIPE_LEAD_ANY:
-            if ppu.m3_delay > 0: dec ppu.m3_delay
+            if ppu.m3_delay != 0: dec ppu.m3_delay
             else: fifo_pipeline_dot(ppu, gb)
           else:
             fifo_pipeline_dot(ppu, gb)
