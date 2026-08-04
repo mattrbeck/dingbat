@@ -513,10 +513,28 @@ const WIN_REACT_PHASE {.intdefine.} = 7
 # ppu_spritex_vs_scx table come out 153/153.
 #
 # The tail accounting below is still approximate, and it is what the change
-# costs: gambatte scx_during_m3 34 -> 31 and bgtilemap 4 -> 2, five rows whose
-# mid-line write lands in the two pixels the burst decides early. Moving the
-# WRITE instead of the pipeline is the fix for those and it is a bus-layer
-# change; it is not this one.
+# costs -- but **the cost is smaller than this note used to claim, and the
+# "bus-layer change" it pointed at has already landed.** Re-measured 2026-08-03,
+# one build per cell, whole gambatte suite:
+#
+#   M3_PIPE_DELAY   2 (ship)   0
+#   total             3618     3596
+#   window             322      303
+#   scy                  9        3
+#   sprites            393      397
+#   bgtilemap            2        4
+#   bgtiledata           2        1
+#   m0enable           153      151
+#
+# So 2 is worth **+22 net**: it buys window +19, scy +6, bgtiledata +1 and
+# m0enable +2, and it costs bgtilemap 4 -> 2 and sprites 397 -> 393. The
+# "scx_during_m3 34 -> 31" half of the old claim does NOT reproduce -- that
+# family scores 31/141 at BOTH settings and does not move by a single row, so
+# it was never this constant's to pay. The write-side half of the fix (mem_write
+# committing a write's byte at the START of its M-cycle) is already in the tree,
+# which is why there is no bus-layer move left to make here; what remains is the
+# six bgtilemap/sprites rows whose mid-line write lands in the two pixels the
+# tail burst decides early.
 #
 # ---- What turning the lead machinery on costs -----------------------------
 # A nonzero lead compiles in a per-line head delay and turns fetcher_retired

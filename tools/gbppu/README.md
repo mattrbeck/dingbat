@@ -161,9 +161,28 @@ The gambatte `*_m3stat_{1,2}` pairs differ by exactly one NOP, so they bracket
 the end of mode 3 to one M-cycle — but the verdict also goes through the STAT
 read model. Pair `-d:gb_m3_len` with `-d:gb_stat_read_trace` to get the read's
 `cycle_counter` next to the line's mode-3 length; the row then says which dot
-the boundary has to fall on, independent of how STAT reports it. That
-separation is what showed the residual `sprites` failures to be the STAT-read
-lag (see `STAT_MODE_HOLD` in `src/dingbat/gb/ppu.nim`) and not the OBJ penalty.
+the boundary has to fall on, independent of how STAT reports it.
+
+**This paragraph used to end by saying that separation showed the residual
+`sprites` failures to be the STAT-read lag rather than the OBJ penalty. That
+claim is FALSE and was measured out on 2026-08-03.** One build per cell, whole
+suite: `sprites` scores **393 at `STAT_READ_LAG=3` (shipping), 354 at 2 and 245
+at 4** — a strict local maximum, pinned hard from both sides, so no value of L
+recovers any of its 83 failing rows. `vram_m3` (35) and `oam_access` (52) do not
+move by a single row at any L either.
+
+The OBJ penalty is not the cause either, and that half was checked the same day:
+in `sprites/NspritesPrLine_m3stat` every object sits at `(X + SCX) mod 8 == 0`,
+`-d:gb_m3_len` gives `len = 172 + 11N` exactly (Pan Docs' `6 + max(0, 5 - 0)`),
+and the two alternatives that move the family's per-N pass set — `OBJ_WAIT_SUB=2`
+and `OBJ_FETCH_DOTS=7`, which produce byte-identical tables — are refused by
+hardware: `objtab.py` against `ppu_spritex_vs_scx` is 0/153 shipping and 99/153
+at `OBJ_WAIT_SUB=4`.
+
+With both excluded, what is left is a **constant sub-M-cycle error in the
+mode 3 → 0 edge as the CPU reads it back**, which is a third independent witness
+for the same 2 dots that `M3_END_EARLY`, `LCD_ON_HEAD_START` and
+`LCD_ON_LINE0_TRIM` are each refused for. See `docs/gb-failure-triage.md`.
 
 ## Mealybug as a dot ruler
 

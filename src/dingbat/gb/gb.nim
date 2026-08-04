@@ -245,19 +245,52 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 #    +517 mealybug CGB pixels, DMG untouched as it must be). Three instruments,
 #    one value, and it is the documented one.
 #    Its _scx1 rows are still red on both devices; that residual is elsewhere.
-#  * LCDC. All five window rows it costs are late_disable / late_reenable rows.
+#  * LCDC. All the window rows it costs are late_disable / late_reenable rows.
 #    Those are the family SameBoy gives a CGB-ONLY fetcher-abort path (a window
 #    disable part way through the fetch aborts it), which moves them the other
 #    way; the +2 dots is not separable from the abort here, and adding it alone
 #    is strictly worse. Implement the abort first, then re-run this table.
-#  * WX / WY / the WY latch. Traced with -d:gb_win_trace, the window/arg
-#    late_wy_* rows this was expected to buy are not decided by the latch dot at
-#    all: in late_wy_FFto2_ly2_3 the WY write lands on dot 93 of line 2 and the
-#    window starts on dot 92 on BOTH devices -- the write is already past the
-#    sample. What differs is coarser, one whole FRAME: dingbat's CGB run reaches
-#    the ROM's vblank setup a frame before its DMG run does. Until that is
-#    understood no register latency can show up in this family, which is most of
-#    the 42 dual-expectation window ROMs.
+#
+#    Re-measured 2026-08-03 (baseline 3618 with the HDMA source fix in):
+#    CGB_LCDC_LATENCY=1 scores **3616, +3 / -5**. Every loss is a
+#    `late_disable*` row and the gains are `late_reenable_scx3_2` plus two
+#    `bgtilemap_spx08_ds` rows -- i.e. the latency shifts the WHOLE late_disable
+#    family by one step rather than changing where inside it the answer flips,
+#    which is the signature of a missing mechanism rather than a wrong constant,
+#    and is the strongest evidence yet that the abort is the missing piece.
+#    Ceiling if the abort lands is roughly ten gambatte rows plus two mealybug
+#    rows -- and those two mealybug rows are wrong on BOTH devices, so the abort
+#    is not purely a CGB behaviour and modelling it as CGB-only will not collect
+#    all of it.
+#  * WX / WY / the WY latch. **The "one whole FRAME" reading that used to be
+#    here was WRONG, and it was measured out on 2026-08-03.** It said the
+#    window/arg late_wy_* rows are not decided by the latch dot at all, because
+#    the WY write and the window start land on the same dots on both devices,
+#    and that dingbat's CGB run therefore reaches the ROM's vblank setup a frame
+#    before its DMG run. The first half is true and the conclusion does not
+#    follow from it: the split is in the ROMs' OWN EXPECTED VALUES.
+#
+#    Collapse the family with tools/gbppu/famflip.py and read the two devices
+#    side by side. Of the 14 late_wy families scored on both devices, **13 have
+#    different expectations per device**, and every one of the 13 is the same
+#    one-M-cycle shift in the same direction:
+#
+#      late_wy_FFto2_ly2   dmg exp=3,3,0   cgb exp=3,0,0
+#      late_wy_1toFF       dmg exp=0,0,3   cgb exp=0,3,3
+#      ... and 11 more, including every FFto{0,1,2}_ly{0,2} and both 10to{0,1}
+#
+#    So HARDWARE differs by one M-cycle here and there is no frame-level mystery
+#    to explain first. dingbat answers the SAME value on both devices in 11 of
+#    the 14 -- it models no device difference at all -- which is the actual
+#    defect and is worth ~26 rows.
+#
+#    Note the SIGN before reaching for a latency: the CGB expectation flips one
+#    step EARLIER than the DMG one, so CGB samples WY sooner, not later. Every
+#    constant in this block is a positive delay, which moves CGB the wrong way --
+#    that, not the absence of an instrument, is why "WY / WY latch: nothing at
+#    all" appears against every setting in the sweep table above. A negative
+#    latency is not expressible here and the mechanism is probably not a write
+#    latency at all.
 const CGB_WX_LATENCY*         {.intdefine.} = 0
 const CGB_WY_LATENCY*         {.intdefine.} = 0
 const CGB_SCY_LATENCY*        {.intdefine.} = 2

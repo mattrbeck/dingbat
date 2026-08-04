@@ -110,11 +110,17 @@ The same asymmetry reaches the Actual/Expected columns of
 Timing and every "we are one cycle short" becomes "we are one cycle long",
 which points any fix in the opposite direction.
 
-### The pinned suite ROM has two known-stale rows
+### The suite ROM's known-unpassable rows
 
-`dingbat_test_runner` pins `mattrbeck/mgba-suite-auto` **v1.0**, which predates
-two upstream fixture fixes and is built with a modern devkitARM. Both make rows
-fail that no emulator can pass:
+**The release bump described below has already happened.** `dingbat_test_runner`
+no longer pins v1.0: it fetches `mattrbeck/mgba-suite-auto`'s
+`releases/latest` and guards it with `MgbaSuiteSha1`, so a new upstream release
+is reported loudly rather than silently re-baselining (see the comment above
+that constant). The ROM in the cache is the post-fix build — Misc is 12 rows,
+not 10, and it carries the re-measured "H-blank bit start" constants. What
+follows is kept because it still explains *which* rows can never pass and why.
+
+The two upstream fixture fixes, both now present:
 
 - `mgba-emu/suite@8c97f2c9` changed `dmaPrefetch`'s source array from `u32 a[8]`
   to `vu32 a[8]`. Without `volatile` a modern gcc dead-store-eliminates the
@@ -125,31 +131,28 @@ fail that no emulator can pass:
   `{0x4D0, 0x87, 0x3EC, 0xE5, 0x3EB, 0xE3, 0x3F3}`. v1.0 carries the old
   constants with new codegen.
 
-Both fixes are already on `mattrbeck/mgba-suite-auto`'s **master**, which is
-well ahead of the v1.0 tag: it also carries `mgba-emu/suite@2a8eca1` (de-flakes
-two DMA0 wrap-around tests, DMA 1256 -> 1244 rows) and `@fbe6156`/`@aac98dc`
-(adds a "DMA count latching" test, Misc 10 -> 12 rows). So rebuilding is just
-`make` in a clean checkout of that master with devkitARM on PATH — no
-cherry-picking. Do **not** build in the user's own checkout; copy it first.
+The shipped ROM also carries `mgba-emu/suite@2a8eca1` (de-flakes two DMA0
+wrap-around tests, DMA 1256 -> 1244 rows) and `@fbe6156`/`@aac98dc` (adds a
+"DMA count latching" test, Misc 10 -> 12 rows). "DMA Prefetch Break" remains
+unpassable by anyone: it expects `0x10000000 + 4 * iterations` where the
+iteration count is decided by where gcc happened to put the loop, so it is not
+comparable across builds at all.
 
-Against that build dingbat is **11/12** on Misc. The one remaining row, "DMA
-Prefetch Break", expects `0x10000000 + 4 * iterations` where the iteration
-count is decided by where gcc happened to put the loop — it is not comparable
-across builds at all, and no emulator can be scored on it. Bumping the pinned
-release is the real fix; `MgbaSuiteRelease` in `dingbat_test_runner.nim` and
-the `suite1.0` cache key in `.github/workflows/test.yml` are the two places
-that move together. A built candidate plus the exact `gh release create` line
-and the rebaseline checklist live in `~/Documents/mgba-suite-v1.1/` (built
-2026-08-03 from that repo's master at `7bf16de`; sha256 `ea505b4c…`). Nothing
-has been published.
-
-**Score Misc with `DINGBAT_NO_WAITLOOP=1`, or six of its rows are meaningless.**
-The 11/12 above is a no-waitloop run. With the default fast-forward the
-corrected build scores 5/12: the six "H-blank bit start" flips spin on DISPSTAT
-and time the gaps with TM0, so the skip's granularity *is* the number they
-report, and dingbat reads them 20-26 cycles long. That is the fast-forward's
-sampling resolution, not a PPU bug — the same rows pass exactly with the skip
-off. `-d:gbaskipcap=<n>` bounds the skip by a constant instead of by the PSG's
+**Score Misc with `DINGBAT_NO_WAITLOOP=1` — but it is worth one row, not six.**
+Measured 2026-08-03 on `151b952` against the ROM the runner actually fetches:
+default fast-forward **4/12**, `DINGBAT_NO_WAITLOOP=1` **5/12** (only "Flip 5"
+recovers). An earlier note in this file claimed 11/12 for a no-waitloop run;
+that figure was taken against an unpublished local candidate build and **does
+not reproduce against the published ROM** — do not use it as a target. The
+mechanism below is real, but it accounts for **one** row, not six. The six
+"H-blank bit start" flips spin on DISPSTAT and time the gaps with TM0, so the
+skip's granularity does contaminate what they report — and turning the skip off
+recovers exactly one of them. The other six rows' residuals, measured with the
+skip off, are `+3, -7, +1, -2, +8, -10` cycles: **non-uniform in sign**, which a
+sampling-resolution artefact cannot be. So the remainder is real DISPSTAT /
+H-blank timing error and is still unattributed. Do not write these off as "just
+the waitloop".
+`-d:gbaskipcap=<n>` bounds the skip by a constant instead of by the PSG's
 next deadline (see `cpu.tick`); `n = 15` recovers two of the six. Turning that
 into a real fix means bounding the skip by the **loop's own period** — a spin
 loop cannot observe a change before its next poll — which `analyze_loop`

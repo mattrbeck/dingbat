@@ -725,9 +725,19 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB): bool =
   # heavy HDMA title is made of; this is ~0.15% of Pokemon Crystal.)
   let src_base = int(ppu.hdma_src)
   let dst_base = 0x8000 or int(ppu.hdma_dst and 0x1FF0'u16)
+  # Pan Docs, FF51-FF52: the source is "$0000-$7FF0 or $A000-$DFF0" -- the
+  # cartridge and WRAM, and nothing else. A block outside that range does not
+  # read at all; the transfer moves the open bus, $FF. gambatte's dma_hiram_read
+  # / dma_oam_read / dma_vram_read point the source at $FF80, $FE00 and $9000
+  # and assert the destination does NOT match the source, and its companion
+  # dma_hiram_read_result subtracts $FE from the byte that landed and prints 1 --
+  # so the byte is $FF, measured rather than chosen. Decided once per block, not
+  # per byte: HDMA2 masks the low nibble away, so a block is 16 aligned bytes and
+  # cannot straddle a region boundary.
+  let src_legal = src_base < 0x8000 or (src_base >= 0xA000 and src_base < 0xE000)
   for byte in 0 ..< 0x10:
     gb.memory.write_byte(gb, dst_base + byte,
-                         gb.memory.read_byte(gb, src_base + byte))
+      if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8)
     mem_tick_components(gb.memory, gb, 2, from_cpu = false, ignore_speed = true)
   # The source is the one that wraps rather than stops (dma/dma_src_wrap copies
   # its second block from $0000 after the first read $FFF0).

@@ -24,10 +24,11 @@ jobs:
         # a download URL/version in dingbat_test_runner.nim changes — that misses
         # the cache and forces a clean re-download of the whole set.
         #
-        # Pending: `suite1.0` -> `suite1.1` the moment MgbaSuiteRelease in
-        # dingbat_test_runner.nim moves. The two must change in the same
-        # commit; leaving this key behind would serve the old suite.gba from
-        # cache and make the release bump look like it did nothing.
+        # The `suite<sha>` segment tracks MgbaSuiteSha1 in
+        # dingbat_test_runner.nim, which fetches `releases/latest` rather than a
+        # pinned tag. The two must change in the same commit; leaving this key
+        # behind would serve the old suite.gba from cache and make an upstream
+        # release look like it did nothing.
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/rom-cache
