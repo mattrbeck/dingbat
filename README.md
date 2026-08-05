@@ -36,9 +36,15 @@ push:
 
 | Platform | Download |
 |---|---|
-| Linux x64 | [`dingbat-linux-x64.tar.gz`](../../releases/latest/download/dingbat-linux-x64.tar.gz) |
-| macOS (Apple Silicon) | [`dingbat-macos.dmg`](../../releases/latest/download/dingbat-macos.dmg) |
-| Windows x64 | [`dingbat-windows-x64.exe`](../../releases/latest/download/dingbat-windows-x64.exe) |
+| Linux x64 | [`dingbat-linux-x64.tar.gz`](../../releases/download/latest/dingbat-linux-x64.tar.gz) |
+| macOS (Apple Silicon) | [`dingbat-macos.dmg`](../../releases/download/latest/dingbat-macos.dmg) |
+| Windows x64 | [`dingbat-windows-x64.exe`](../../releases/download/latest/dingbat-windows-x64.exe) |
+
+<!-- These are /releases/download/latest/<file> (the `latest` TAG), not
+     /releases/latest/download/<file> (the latest non-prerelease RELEASE).
+     The rolling build is deliberately a prerelease, so the second form 404s
+     until a v* tag is cut. The two URLs differ only in word order. -->
+
 
 Those are development builds and change without notice; verify them against
 `SHA256SUMS.txt` on the release if you care to. Tagged `v*` releases, when cut, publish

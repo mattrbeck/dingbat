@@ -56,7 +56,10 @@ jobs:
           name: Latest build (main)
           prerelease: true
           # Same asset names every time, so a bookmark or script pointing at
-          # /releases/latest/download/<name> keeps working across rebuilds.
+          # /releases/download/latest/<name> keeps working across rebuilds.
+          # Note that form — the `latest` TAG. The similar-looking
+          # /releases/latest/download/<name> means "the latest non-prerelease
+          # release" and 404s while this prerelease is the only one.
           files: release/*
           body: |
             Automatically rebuilt from `main` on every push — these are
