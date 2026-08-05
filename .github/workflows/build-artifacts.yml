@@ -63,8 +63,50 @@ jobs:
       - uses: actions/checkout@v4
       # Every fetch below is retried: losing a release build to a transient 5xx
       # means re-running the whole thing by hand.
-      - name: Install SDL2
-        run: .github/scripts/retry.sh 3 brew install sdl2
+      - name: Cache the static SDL2 build
+        id: sdl2-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl2-prefix
+          # Keyed on the pinned version below — bump both together.
+          key: sdl2-static-${{ runner.os }}-${{ runner.arch }}-2.32.10
+      - name: Build SDL2 (static, from source)
+        # NOT `brew install sdl2`. Homebrew's sdl2 formula no longer exists:
+        # the name now resolves to sdl2-compat, a shim that implements SDL2 on
+        # top of SDL3 and ships dylibs only — no libSDL2.a. -d:macdist links
+        # /opt/homebrew/lib/libSDL2.a explicitly, so on a current runner it
+        # cannot link at all.
+        #
+        # This is NOT a regression from wiring macOS into per-push CI: the
+        # release workflow used the same brew install and would have failed
+        # identically on its next tag, silently, at the worst moment. It only
+        # ever worked on machines holding an older real-SDL2 install.
+        #
+        # Building the genuine SDL2 from a pinned release is now the only way
+        # to get a real static library, and it removes the dependency on what
+        # Homebrew happens to call things this month. Installed into
+        # /opt/homebrew because that is where nim.cfg already looks, for both
+        # the static macdist link and the ordinary dynamic dev build.
+        if: steps.sdl2-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          VER=2.32.10
+          .github/scripts/retry.sh 3 curl -fsSL -o sdl2.tar.gz \
+            "https://github.com/libsdl-org/SDL/releases/download/release-$VER/SDL2-$VER.tar.gz"
+          tar xzf "sdl2.tar.gz"
+          cmake -S "SDL2-$VER" -B sdl2-build \
+            -DCMAKE_INSTALL_PREFIX="$HOME/sdl2-prefix" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF -DSDL_TEST=OFF
+          cmake --build sdl2-build --parallel
+          cmake --install sdl2-build
+      - name: Install SDL2 where nim.cfg looks
+        run: |
+          set -e
+          cp -R "$HOME/sdl2-prefix/lib/." /opt/homebrew/lib/
+          cp -R "$HOME/sdl2-prefix/include/." /opt/homebrew/include/
+          test -f /opt/homebrew/lib/libSDL2.a
+          test -f /opt/homebrew/include/SDL2/SDL.h
       - name: Install Nim
         run: |
           set -eo pipefail
