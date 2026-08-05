@@ -29,14 +29,24 @@ PPU for games like Prehistorik Man.
 
 ## Downloads
 
-The browser version above is the recommended way to play. Tagged releases also publish
-prebuilt Linux (`.tar.gz`), macOS (`.dmg`) and Windows (`.exe`) binaries on the
-[Releases](../../releases) page.
+The browser version above is the recommended way to play. For the desktop app, the
+[**Latest build**](../../releases/tag/latest) release always carries current Linux
+(`.tar.gz`), macOS (`.dmg`) and Windows (`.exe`) binaries, rebuilt from `main` on every
+push:
 
-For a build of any individual commit, open its run under
+| Platform | Download |
+|---|---|
+| Linux x64 | [`dingbat-linux-x64.tar.gz`](../../releases/latest/download/dingbat-linux-x64.tar.gz) |
+| macOS (Apple Silicon) | [`dingbat-macos.dmg`](../../releases/latest/download/dingbat-macos.dmg) |
+| Windows x64 | [`dingbat-windows-x64.exe`](../../releases/latest/download/dingbat-windows-x64.exe) |
+
+Those are development builds and change without notice; verify them against
+`SHA256SUMS.txt` on the release if you care to. Tagged `v*` releases, when cut, publish
+the same three files on the [Releases](../../releases) page.
+
+For a build of one specific commit, open its run under
 [Actions → Build](../../actions/workflows/build.yml) and download from that run's
-**Artifacts** section — the same three platforms are built on every push and pull
-request.
+**Artifacts** section.
 
 Those binaries are **unsigned**, so the OS warns on first launch — on macOS, open
 **System Settings → Privacy & Security** and click **Open Anyway**; on Windows, click
