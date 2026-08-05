@@ -12,7 +12,7 @@ name: Build
 # from a tag.
 on:
   push:
-    branches: [main, worktree-ci-windows-gambatte-hang]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

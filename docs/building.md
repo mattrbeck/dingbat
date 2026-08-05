@@ -69,13 +69,26 @@ dynamic API override still works: set `SDL_DYNAMIC_API=C:\path\to\SDL2.dll`.
 
 ## CI
 
-Four workflows in `.github/workflows/`:
+Five workflows in `.github/workflows/`:
 
 | Workflow | Does |
 |---|---|
 | `test.yml` | mGBA suite, GB acceptance ROMs, link/rollback acceptance, networked TCP link, web storage + service-worker tests, headless-Chromium render and WebRTC pairing tests |
 | `deploy-pages.yml` | Builds the wasm target and deploys `web/` to GitHub Pages on push to main |
-| `build-windows.yml` | The Docker mingw cross-build, uploaded as an artifact |
-| `release.yml` | On `v*` tags: Windows `.exe` + macOS `.app`/`.dmg`, checksummed and published |
+| `build-artifacts.yml` | The three desktop builds. Not triggered directly — `workflow_call` only |
+| `build.yml` | Calls `build-artifacts.yml` on every push and PR, so any commit's binaries are downloadable from its run |
+| `release.yml` | On `v*` tags: calls the same `build-artifacts.yml`, then checksums and publishes the three files |
+
+The builds live in `build-artifacts.yml` so the per-push and release paths cannot
+drift — a release ships the same recipe that has been running on every commit.
+
+Linux builds on `ubuntu-22.04` on purpose: a glibc-linked binary runs only on its
+build glibc or newer, and 22.04's `GLIBC_2.34` floor covers Ubuntu 22.04+, Debian 12+
+and Fedora 35+.
+
+The macOS job builds SDL2 **from source** rather than from Homebrew. The `sdl2`
+formula no longer exists — the name resolves to `sdl2-compat`, a shim over SDL3 that
+ships no `libSDL2.a`, so `-d:macdist` cannot link against it. The pinned source build
+is cached between runs.
 
 Release binaries are unsigned.
