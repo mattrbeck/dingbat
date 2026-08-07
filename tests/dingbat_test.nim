@@ -1509,12 +1509,30 @@ proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
   result.cartridge.sav_path = ""
   for _ in 0 ..< frames: result.step_frame()
 
-proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
+proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
   ## Scores a whole list of gambatte tests in one process. Each line is
   ## tab-separated: `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`, where
   ## `expected` is the hex string for `hex` and the reference PNG's path for
   ## `png`. One `GAM <index> <PASS|FAIL> <detail>` line comes back per input
   ## line, in order, so the caller can match results positionally.
+  ##
+  ## The verdicts go to `--out=<file>` when one is given, and to stdout
+  ## otherwise. The file is not a convenience: the runner launches one shard
+  ## per core and waits for them all, so a shard writing thousands of verdicts
+  ## into an inherited stdout PIPE would block forever once the pipe buffer
+  ## filled, with nobody draining it. Shell redirection cannot stand in for
+  ## this — Nim's poEvalCommand runs through /bin/sh on POSIX but goes straight
+  ## to CreateProcessW on Windows, where `> out.txt 2>&1` is not redirection at
+  ## all, just three more argv entries this parser silently absorbs. That is
+  ## exactly the hang that timed the Windows CI job out at 6h, every push.
+  var out_file: File
+  let to_file = out_path.len > 0
+  if to_file and not out_file.open(out_path, fmWrite):
+    echo "GAMBATTE: cannot open --out file ", out_path
+    return 1
+  defer:
+    if to_file: out_file.close()
+
   var entries: seq[(string, string, string, string)]
   for line in lines(list_path):
     if line.len == 0: continue
@@ -1586,8 +1604,90 @@ proc gambatte_batch(list_path: string; frames, dump_tiles: int): int =
     except CatchableError:
       detail = "exception: " & getCurrentExceptionMsg()
     if ok: inc passes
-    echo "GAM ", idx, " ", (if ok: "PASS" else: "FAIL"), " ", detail
-  echo "GAMBATTE-DONE ", passes, "/", entries.len
+    let verdict = "GAM " & $idx & " " & (if ok: "PASS" else: "FAIL") & " " & detail
+    if to_file: out_file.writeLine(verdict) else: echo verdict
+  let done = "GAMBATTE-DONE " & $passes & "/" & $entries.len
+  if to_file: out_file.writeLine(done) else: echo done
+  0
+
+# ==================== GBMicrotest (batched) ====================
+#
+# 513 ROMs that each run for TWO frames. The emulation is nothing — ~33 ms of
+# emulated time, well under a millisecond of work — so a process per ROM makes
+# the fork/exec and the ROM load the entire cost: 513 of them took 11.2 s of
+# the runner's 31 s, about 22 ms each, and process spawn is dearer still on
+# Windows. Same shape as the gambatte suite, and the same fix: one process per
+# core over a list, which put 5,005 gambatte runs inside 1 s.
+#
+# Batching is safe for exactly these ROMs. They are `no_save` (blanked cart RAM
+# and a detached .sav, so no two entries can race a battery file), they write
+# no files, and each gets a freshly constructed GB — so nothing carries from
+# one list entry to the next, and the split cannot change a verdict.
+
+proc microtest_run(rom: string; frames: int): GB =
+  ## One GBMicrotest ROM, built and stepped exactly as the single-ROM path does
+  ## (`--mode=microtest` with `--nosave`, which is how the runner invokes it).
+  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result.test_output = new_test_output()
+  result.post_init()
+  # `--nosave` in the single-ROM path: blank the RAM mbc_load just filled and
+  # detach the battery, so a .sav never lands beside a shared-cache fixture.
+  for i in 0 ..< result.cartridge.ram.len: result.cartridge.ram[i] = 0
+  result.cartridge.sav_path = ""
+  for _ in 0 ..< frames:
+    if result.test_output.finished: break
+    result.step_frame()
+
+proc microtest_batch(list_path, out_path: string): int =
+  ## Scores a whole list of GBMicrotest ROMs in one process. Each line is
+  ## `<frames>\t<rom path>`. One
+  ## `MT <index> <PASS|FAIL> actual=0x.. expected=0x.. verdict=0x..` line comes
+  ## back per input line, in order, so the caller can match positionally.
+  ##
+  ## Only $FF82 is scored. $FF80/$FF81 are reported for triage but never
+  ## compared, because some of these ROMs leave actual == expected on a
+  ## failure — the same rule the single-ROM path documents.
+  ##
+  ## `--out` for the same reason gambatte_batch has one: the runner does not
+  ## drain these children's pipes, so verdicts must not go to an inherited
+  ## stdout. See gambatte_batch.
+  var out_file: File
+  let to_file = out_path.len > 0
+  if to_file and not out_file.open(out_path, fmWrite):
+    echo "MICROTEST: cannot open --out file ", out_path
+    return 1
+  defer:
+    if to_file: out_file.close()
+
+  var entries: seq[(int, string)]
+  for line in lines(list_path):
+    if line.len == 0: continue
+    let f = line.split('\t')
+    if f.len != 2:
+      echo "MICROTEST: malformed list line: ", line
+      return 1
+    var frames: int
+    try: frames = parseInt(f[0])
+    except ValueError:
+      echo "MICROTEST: bad frame count: ", line
+      return 1
+    entries.add((frames, f[1]))
+
+  for idx, (frames, rom) in entries:
+    var ok = false
+    var detail = ""
+    try:
+      let emu = microtest_run(rom, frames)
+      let actual   = emu.memory.hram[0]   # $FF80
+      let expected = emu.memory.hram[1]   # $FF81
+      let verdict  = emu.memory.hram[2]   # $FF82
+      ok = verdict == 0x01'u8
+      detail = "actual=0x" & toHex(actual) & " expected=0x" & toHex(expected) &
+               " verdict=0x" & toHex(verdict)
+    except CatchableError:
+      detail = "exception: " & getCurrentExceptionMsg()
+    let line = "MT " & $idx & " " & (if ok: "PASS" else: "FAIL") & " " & detail
+    if to_file: out_file.writeLine(line) else: echo line
   0
 
 proc main() =
@@ -1613,6 +1713,7 @@ proc main() =
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
   var max_fails = 500      # fuzzarm mode: cap on reported failures per ROM
   var list_path = ""       # gambatte mode: batch list file
+  var out_path = ""        # gambatte mode: verdict file (see gambatte_batch)
   var gambatte_frames = GambatteFrames
   var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
 
@@ -1740,6 +1841,10 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         list_path = v
+      of "out":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        out_path = v
       of "gambatte-frames":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1753,7 +1858,12 @@ proc main() =
     if list_path.len == 0:
       echo "gambatte mode wants --list=<file> (see gambatte_batch)"
       quit(1)
-    quit(gambatte_batch(list_path, gambatte_frames, dump_tiles))
+    quit(gambatte_batch(list_path, out_path, gambatte_frames, dump_tiles))
+
+  # microtest takes EITHER one ROM (the original path, still used by hand) or
+  # --list for the batched sweep the runner drives.
+  if mode == tmMicrotest and list_path.len > 0:
+    quit(microtest_batch(list_path, out_path))
 
   if rom_path.len == 0:
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check]"
