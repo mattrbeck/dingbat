@@ -33,9 +33,15 @@ proc save_cpu_state(cpu: GbCpu; w: var Writer) =
   w.write_u16(cpu.pc)
   w.write_u16(cpu.sp)
   w.write_bool(cpu.ime)
-  w.write_bool(cpu.halted)
+  # STOP mode (stop_instr) sets `halted` and `locked` together, but `stopped`
+  # itself is not in this payload — writing the two raw would load back a CPU
+  # that is halted AND locked with nothing left to unlock it. Both are written
+  # as the states they mean without it, so a state captured inside STOP mode
+  # loads as a running CPU at the instruction after the STOP, which is where
+  # the joypad wake would have put it anyway.
+  w.write_bool(cpu.halted and not cpu.stopped)
   w.write_bool(cpu.halt_bug)
-  w.write_bool(cpu.locked)
+  w.write_bool(cpu.locked and not cpu.stopped)
 
 proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_CPU)

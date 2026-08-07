@@ -659,13 +659,13 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
-const SPEED_SWITCH_STALL_T* = 65540
+const SPEED_SWITCH_STALL_T* = 65548
   ## How long the CPU clock is stopped by a KEY1 speed switch, in T-cycles of
   ## the 4.194304 MHz base clock, i.e. real time (~15.6 ms) — the CPU clock is
   ## what is stopped, so it cannot be the unit of its own stall.
   ##
-  ## 65540 = 2^16 + 4. It is a ripple-counter length, not a fitted number, and
-  ## three independent sources land on it:
+  ## 65548 = 2^16 + 12. The nearby 65540 = 2^16 + 4 is a ripple-counter length,
+  ## not a fitted number, and three independent sources land on it:
   ##
   ##   * SameBoy times the switch with `speed_switch_halt_countdown = 0x20008`
   ##     (Core/sm83_cpu.c, `stop`). Its cycle unit is half a dot in both speed
@@ -705,6 +705,31 @@ const SPEED_SWITCH_STALL_T* = 65540
   ## moved is in the speed-switch family. The churn inside speedchange is
   ## sub-M-cycle alignment: SameBoy additionally models a 6-cycle switch
   ## countdown and a PPU re-alignment freeze, which this does not.
+  ##
+  ## The eight dots between 65540 and 65548 are that missing countdown, and
+  ## daid's speed_switch_timing_ly.gbc / _stat.gbc measure them directly. Both
+  ## write 128 (resp. 64) back-to-back `ld a,[rLY]` / `ld a,[rSTAT]` reads into
+  ## WRAM starting the instruction after the STOP, which samples the PPU every
+  ## 8 dots of real time and pins where in a line — and in a frame — the CPU
+  ## comes back. At 65540 every transition in both buffers lands exactly one
+  ## sample late; the value that puts all of them where the hardware has them
+  ## is 65548, and the window is only two dots wide:
+  ##
+  ##       65540..65543  ly and stat both a sample early
+  ##       65544..65547  stat lands, ly still a sample early
+  ##       65548..65549  both correct  <-
+  ##       65550..65551  stat a sample late
+  ##       65552+        ly a sample late as well
+  ##
+  ## (The observable is really the total PPU advance across the STOP, 65550
+  ## dots: the stall plus the opcode's own 4 CPU cycles, which are 2 dots at
+  ## the post-switch double speed. Splitting it differently between the two
+  ## would move this constant by the same amount the other way.)
+  ##
+  ## It is worth 8 gambatte rows as well — speedchange 106 -> 112 and oamdma
+  ## 680 -> 681, nothing else moving, no row lost — which is what says this is
+  ## the countdown and not a fit to one ROM. daid's speed_switch_timing_div.gbc
+  ## passes on both values; DIV is reset either way, so it cannot see this.
 
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   ## mem_tick_components for the speed-switch stall, where the CPU clock is
@@ -724,7 +749,108 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
 
-proc stop_instr*(mem: GbMemory; gb: GB) =
+proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
+  ## One step of the emulator while the CPU is in STOP mode (see stop_instr).
+  ##
+  ## STOP is "VERY low power standby mode" (Pan Docs, "Using the STOP
+  ## Instruction"): the clock the whole machine runs on is stopped, not just
+  ## the CPU's. Nothing ticks here — not the scheduler, not the PPU, not the
+  ## timer, not the APU — which is the difference between this and the
+  ## speed-switch stall above, where only the CPU-clock domain is out.
+  ##
+  ## What is left is pure frontend pacing. `step_frame` runs cpu.tick until the
+  ## PPU sets `frame`, and a frozen PPU never will; without this the emulator
+  ## would stop presenting and hang the moment a ROM executed STOP. The panel
+  ## keeps whatever stop_panel left in the framebuffer, and that image is
+  ## re-presented once per frame's worth of real time.
+  let ppu = gb.ppu
+  ppu.dots_since_frame += int32(4 shr mem.current_speed)
+  if ppu.dots_since_frame >= DOTS_PER_FRAME:
+    ppu.dots_since_frame = 0
+    ppu.frame = true
+
+proc stop_panel(mem: GbMemory; gb: GB) =
+  ## What the screen shows for as long as the machine is in STOP mode. Pan Docs
+  ## ("Using the STOP Instruction") describes exactly three cases, and daid's
+  ## stop_instr.gb / stop_instr_gbc_mode3.gb are a reference frame for each:
+  ##
+  ##  * DMG: the PPU is stopped with the rest of the machine, so the panel is
+  ##    driven with nothing and blanks — white, the same thing the frontend
+  ##    sees with the LCD switched off. (Pan Docs also warns that a real DMG
+  ##    left with its LCD enabled across a STOP draws "a horizontal black line
+  ##    on the screen and very likely damag[es] the hardware"; that is the
+  ##    panel's analogue behaviour on the way down, not something a frame
+  ##    buffer can represent, and daid's DMG reference frame is plain white.)
+  ##  * CGB with the LCD on: "leaving the LCD enabled when invoking STOP will
+  ##    result in a black screen".
+  ##  * CGB, "[e]xcept if the LCD is in Mode 3, where it will keep drawing the
+  ##    current screen" — the panel holds the image it already has, so the
+  ##    framebuffer is left alone.
+  ##
+  ## The mode is sampled here, on the STOP fetch, which is the M-cycle the ROM
+  ## aimed at: stop_instr_gbc_mode3.gb polls STAT until it reads mode 3 and
+  ## executes STOP immediately after.
+  let ppu = gb.ppu
+  if not ppu.lcd_enabled or not gb.cgb_enabled:
+    ppu_blank_frame(ppu, gb)
+  elif ppu.mode_flag != 3:
+    for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = 0'u16
+    ppu.frame = true
+    ppu.dots_since_frame = 0
+
+proc stop_instr*(mem: GbMemory; gb: GB): bool =
+  ## STOP ($10). Returns whether the byte after the opcode is consumed — STOP's
+  ## length is not fixed, and that is the point of most of what follows.
+  ##
+  ## Pan Docs' "The bizarre case of the Game Boy STOP instruction, before even
+  ## considering timing" (Reducing_Power_Consumption, the flow chart in
+  ## imgs/stop_diagram.svg, credited to Lior Halphon) is the whole spec of this
+  ## opcode. It is a decision tree over three things sampled at the fetch —
+  ## whether a button is held on a line SELECTED in P1, whether a KEY1 speed
+  ## switch is pending, and whether an interrupt is pending (IE & IF != 0) —
+  ## with IME asked once below that. Transcribed leaf by leaf:
+  ##
+  ##   button held ─ IRQ pending → 1 byte, mode unchanged, DIV not reset
+  ##               └ no IRQ      → 2 bytes, HALT mode,     DIV not reset
+  ##   no button ─ no switch ─ IRQ pending → 1 byte,  STOP mode, DIV reset
+  ##             │            └ no IRQ     → 2 bytes, STOP mode, DIV reset
+  ##             └ switch ─ no IRQ      → 2 bytes, HALT mode, DIV reset, speed changes
+  ##                      └ IRQ pending → 1 byte, mode unchanged, DIV reset,
+  ##                                      speed changes  (see the IME note below)
+  ##
+  ## Two things fall out of that tree that are worth naming, because they are
+  ## the reason it exists:
+  ##
+  ##  * a held button beats everything, including a requested speed switch.
+  ##    That is why every speed-switching ROM writes $30 to P1 first (daid's
+  ##    speed_switch_timing_*.gbc do exactly that, `ld a, P1F_GET_NONE`), and
+  ##    why it is checked before KEY1 here rather than after.
+  ##  * the switch leaves are HALT mode, not a special state: the hardware
+  ##    performs the switch by halting with a countdown, so a pending interrupt
+  ##    ends that halt at once — which is why the IRQ-pending switch leaf has
+  ##    no stall and the CPU simply carries on at the new speed.
+  ##
+  ## The chart's last question, IME on the switch-with-IRQ-pending leaf, splits
+  ## into the leaf above and "the CPU glitches non-deterministically, oops!".
+  ## Nothing deterministic can be emulated for the glitch side, so both sides
+  ## take the defined leaf; no test ROM in this tree reaches either.
+  ##
+  ## Not modelled, and unmeasured here: whether the skipped byte is actually
+  ## READ (it would matter only for a bus conflict), and whether leaving STOP
+  ## mode costs the oscillator a restart delay.
+  let button_held = joypad_lines(gb.joypad) != 0x0F'u8
+  let irq_pending = interrupt_ready(gb.interrupts)
+  # `true` = 2-byte STOP. Every leaf agrees: the second byte is consumed
+  # exactly when no interrupt is pending.
+  result = not irq_pending
+
+  if button_held:
+    # Left branch: no DIV reset, no speed switch, no STOP mode. Either a plain
+    # HALT (which an interrupt would have ended anyway, hence only here) or a
+    # one-byte nothing, letting the byte after $10 execute as an opcode.
+    if not irq_pending: gb.cpu.halted = true
+    return
+
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
     # Pan Docs' STOP chart: entering STOP resets DIV. Go through the FF04
@@ -741,18 +867,40 @@ proc stop_instr*(mem: GbMemory; gb: GB) =
     # array, so rescale them the same way `speed_mode=` rescales events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.`speed_mode=`(mem.current_speed)
-    # The stall. 8200 T-cycles of real time is `8200 shl current_speed` cycles
-    # of the (new) CPU clock, which is the domain the scheduler counts in;
-    # mem_tick_stalled shifts it back down for the PPU.
+    # The stall — the HALT mode the chart's switch leaf names, with its
+    # countdown. `SPEED_SWITCH_STALL_T` T-cycles of real time is
+    # `SPEED_SWITCH_STALL_T shl current_speed` cycles of the (new) CPU clock,
+    # which is the domain the scheduler counts in; mem_tick_stalled shifts it
+    # back down for the PPU.
+    #
+    # It is skipped when an interrupt is already pending, because that halt is
+    # an ordinary one: IE & IF != 0 means it never starts. That is the chart's
+    # "1 byte, mode doesn't change, DIV is reset, CPU speed changes" leaf — the
+    # switch still happens, it just costs nothing.
     #
     # The DIV-APU frame sequencer is the one scheduler event that is NOT
     # real-time: it models a falling edge of the divider's own tap, and the
     # divider is frozen. Lift it over the stall and re-aim it from the (reset,
     # still zero) divider afterwards, which is exactly Pan Docs' "`DIV` does
     # not tick, so *some* audio events are not processed".
-    gb.scheduler.clear(etAPUFrameSeq)
-    mem_tick_stalled(mem, gb, SPEED_SWITCH_STALL_T shl mem.current_speed)
-    gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
-    # The stall is not part of the STOP opcode's own 4 T-cycles: charge it to
-    # the instruction so mem_tick_extra does not try to make it up again.
-    mem.cycle_tick_count += SPEED_SWITCH_STALL_T shl mem.current_speed
+    if not irq_pending:
+      gb.scheduler.clear(etAPUFrameSeq)
+      mem_tick_stalled(mem, gb, SPEED_SWITCH_STALL_T shl mem.current_speed)
+      gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+      # The stall is not part of the STOP opcode's own 4 T-cycles: charge it to
+      # the instruction so mem_tick_extra does not try to make it up again.
+      mem.cycle_tick_count += SPEED_SWITCH_STALL_T shl mem.current_speed
+    return
+
+  # No button, no speed switch: the two STOP-mode leaves. DIV is reset on both.
+  # Same FF04 write path as the switch above, and for the same reason.
+  timer_write(gb.timer, gb, 0xFF04, 0)
+  # STOP mode. `halted` and `locked` are exactly cpu_lock's pair — the first
+  # stops the fetch/dispatch, the second says no interrupt ends this — and
+  # `stopped` on top of them says the rest of the machine is stopped too, and
+  # that a P10-P13 line going low DOES end it. See cpu.nim's tick for why this
+  # rides on `locked` rather than standing on its own.
+  gb.cpu.halted  = true
+  gb.cpu.locked  = true
+  gb.cpu.stopped = true
+  stop_panel(mem, gb)

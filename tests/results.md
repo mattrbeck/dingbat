@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-03 19:10:40*
+*Generated: 2026-08-07 14:06:22*
 
 ## Game Boy - Blargg
 
@@ -877,10 +877,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | cpp/latch-rtc-test | 👀 90.1% correct (20770/23040 pixels match) |
 | cpp/ramg-mbc3-test | 👌 |
 | daid/ppu_scanline_bgp-dmg | 👀 73.2% correct (16860/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
-| daid/stop_instr-dmg | 👀 1.4% correct (333/23040 pixels match) |
+| daid/stop_instr-dmg | 👌 |
 | daid/speed_switch_timing_div | 👌 |
-| daid/speed_switch_timing_ly | 👀 98.5% correct (22697/23040 pixels match) |
-| daid/speed_switch_timing_stat | 👀 98.5% correct (22698/23040 pixels match) |
+| daid/speed_switch_timing_ly | 👌 |
+| daid/speed_switch_timing_stat | 👌 |
 
 ## Game Boy - Mooneye (wilbertpol)
 
@@ -1044,12 +1044,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m3stat | 👀 29/44 passed |
 | gambatte/miscmstatirq | 👀 260/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
-| gambatte/oamdma | 👀 680/811 passed |
+| gambatte/oamdma | 👀 681/811 passed |
 | gambatte/scx_during_m3 | 👀 31/141 passed |
 | gambatte/scy | 👀 9/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 83/116 passed |
-| gambatte/speedchange | 👀 106/208 passed |
+| gambatte/speedchange | 👀 112/208 passed |
 | gambatte/sprites | 👀 393/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
@@ -1062,5 +1062,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 978
-- **Pass:** 691
-- **Fail:** 287
+- **Pass:** 694
+- **Fail:** 284

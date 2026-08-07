@@ -186,11 +186,12 @@ var UNPREFIXED* = [
     cpu.fz = false; cpu.fn = false; cpu.fh = false
     4,
 
-  # 0x10 STOP
+  # 0x10 STOP — one or two bytes; stop_instr decides which (Pan Docs' STOP
+  # chart). The second increment is skipped on the leaves where the byte after
+  # $10 is left to execute as an opcode of its own.
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    cpu_inc_pc(cpu)
-    stop_instr(gb.memory, gb)
+    if stop_instr(gb.memory, gb): cpu_inc_pc(cpu)
     4,
 
   # 0x11 LD DE,u16

@@ -616,6 +616,19 @@ type
     # `locked` always implies `halted`, so the fetch/dispatch path never has
     # to test it.
     locked*:     bool
+    # Set by STOP when it enters STOP mode (see stop_instr in memory.nim), on
+    # top of `halted` and `locked`. What it adds to those two is that the rest
+    # of the machine is stopped as well, and that this halt IS exitable: a
+    # joypad line going low clears all three.
+    #
+    # NOT serialized. savestate.nim writes `halted` and `locked` as the states
+    # they mean without it, so a state captured inside STOP mode loads as a
+    # running CPU at the instruction after the STOP. Carrying it properly would
+    # be a GB CPU payload revision, and the value of one is close to zero: no
+    # licensed ROM uses STOP for anything but a speed switch (Pan Docs, "Using
+    # the STOP Instruction"), and a speed switch never survives an instruction
+    # boundary, let alone a state boundary.
+    stopped*:    bool
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----
