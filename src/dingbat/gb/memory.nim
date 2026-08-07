@@ -310,7 +310,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xE000..0xFDFF: read_byte(mem, gb, idx - 0x2000)
   of 0xFE00..0xFE9F: ppu_read(gb.ppu, gb, idx)
   of 0xFEA0..0xFEFF: 0x00'u8
-  of 0xFF00:         joypad_read(gb.joypad)
+  of 0xFF00:         joypad_read(gb.joypad, gb)
   of 0xFF01..0xFF02: serial_read(gb.serial, gb, idx)
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
   of 0xFF0F:         irq_read(gb.interrupts, idx)

@@ -223,20 +223,68 @@ proc sgb_render_border*(s: SgbState) =
 
 # ==================== VRAM transfers ====================
 
-proc sgb_vram_transfer(gb: GB; cmd, arg: uint8) =
-  ## Pan Docs, "VRAM Transfers": the SNES reads 4 KiB out of the display
-  ## signal, reproducing the byte order the data has at 0x8000-0x8FFF in GB
-  ## VRAM. dingbat has the VRAM, so it reads it straight out of bank 0.
+proc sgb_read_transfer(gb: GB; dst: var array[4096, uint8]) =
+  ## Reconstruct the 4 KiB a real SGB would read out of the Game Boy's video
+  ## signal.
   ##
-  ## Timing shortcut: hardware starts reading at the beginning of the NEXT
-  ## frame and finishes five frames later. dingbat copies at the instant the
-  ## command packet completes. Pan Docs requires the data to be in VRAM
-  ## *before* the packet is sent, so the earlier read sees the same bytes —
-  ## and it is strictly safer for the "two CHR_TRNs around one VRAM rewrite"
-  ## pattern, where a deferred read would see the second block for both.
+  ## Pan Docs, "VRAM Transfers", says the data is "normally" at 0x8000-0x8FFF
+  ## and that the SNES "will automatically re-produce the same ordering of bits
+  ## and bytes". Reading 0x8000-0x8FFF directly is therefore the obvious HLE --
+  ## and it is WRONG on real carts. What the SNES actually gets is the picture:
+  ## the preconditions Pan Docs lists ("BG Map must display unsigned characters
+  ## $00-$FF on the screen; $00..$13 in first line, $14..$27 in next line",
+  ## display enabled, no scroll, BGP = $E4) are what make that picture equal to
+  ## the bytes at 0x8000. A cart that leaves LCDC.4 clear -- signed tile
+  ## addressing, so character $00 is at 0x9000, not 0x8000 -- satisfies every
+  ## one of those preconditions and still displays completely different memory.
+  ## Pokemon Blue does exactly this: all three of its transfers run with
+  ## LCDC = 0xE3, and a raw 0x8000 read returns mostly zeroes.
+  ##
+  ## So this walks the display the way the PPU would: for each character $00
+  ## to $FF, find the screen cell it occupies, read the BG map there (honouring
+  ## SCX/SCY and LCDC.3), and fetch that tile's 16 bytes through LCDC.4's
+  ## addressing mode. With the documented preconditions met this is identical
+  ## to a flat 0x8000 read, and it is right when they are not.
+  ##
+  ## Objects are ignored. Pan Docs requires that they not overlap the
+  ## background during a transfer, and honouring them would mean running a
+  ## whole extra frame of compositing for no gain.
+  let ppu = gb.ppu
+  let map_base = if (ppu.lcd_control and 0x08'u8) != 0: 0x1C00 else: 0x1800
+  let signed_tiles = (ppu.lcd_control and 0x10'u8) == 0
+  for n in 0 ..< 256:
+    let cx = n mod 20
+    let cy = n div 20
+    let mx = ((cx * 8 + int(ppu.scx)) shr 3) and 31
+    let my = ((cy * 8 + int(ppu.scy)) shr 3) and 31
+    let tn = ppu.vram[0][map_base + my * 32 + mx]
+    let tile_addr =
+      if signed_tiles: 0x1000 + int(cast[int8](tn)) * 16
+      else:            int(tn) * 16
+    for k in 0 ..< 16:
+      dst[n * 16 + k] = ppu.vram[0][(tile_addr + k) and 0x1FFF]
+
+proc sgb_vram_transfer(gb: GB; cmd, arg: uint8) =
+  ## Timing: hardware starts reading at the beginning of the NEXT frame and
+  ## finishes five frames later. dingbat reads at the instant the command
+  ## packet completes. Pan Docs requires the data to be on screen *before* the
+  ## packet is sent, so the earlier read sees the same picture -- verified on
+  ## Pokemon Blue, whose display is byte-stable across all five frames after
+  ## each of its three transfers -- and it is strictly safer for the "two
+  ## CHR_TRNs around one VRAM rewrite" pattern, where a deferred read would
+  ## see the second block for both.
   let s = gb.sgb
-  let src = addr gb.ppu.vram[0][0]
-  template b(i: int): uint8 = cast[ptr UncheckedArray[uint8]](src)[i]
+  var buf: array[4096, uint8]
+  sgb_read_transfer(gb, buf)
+  template b(i: int): uint8 = buf[i]
+  when defined(sgb_trace):
+    var nz = 0
+    for i in 0 ..< 4096:
+      if buf[i] != 0: inc nz
+    s.trace_watch = 8
+    echo "  VRAM transfer cmd $" & toHex(cmd, 2) & " arg " & toHex(arg, 2) &
+         ": " & $nz & "/4096 nonzero, LCDC=" & toHex(gb.ppu.lcd_control, 2) &
+         " LY=" & $gb.ppu.ly
   case cmd
   of 0x0B:  # PAL_TRN — 512 palettes x 4 colours
     for i in 0 ..< 2048:
@@ -257,9 +305,22 @@ proc sgb_vram_transfer(gb: GB; cmd, arg: uint8) =
 
 # ==================== command dispatch ====================
 
+when defined(sgb_trace):
+  # Packet log for bringing a real cart up. Compiled out of every normal build.
+  const SGB_CMD_NAMES = [
+    "PAL01", "PAL23", "PAL03", "PAL12", "ATTR_BLK", "ATTR_LIN", "ATTR_DIV",
+    "ATTR_CHR", "SOUND", "SOU_TRN", "PAL_SET", "PAL_TRN", "ATRC_EN", "TEST_EN",
+    "ICON_EN", "DATA_SND", "DATA_TRN", "MLT_REQ", "JUMP", "CHR_TRN", "PCT_TRN",
+    "ATTR_TRN", "ATTR_SET", "MASK_EN", "OBJ_TRN", "PAL_PRI"]
+
 proc sgb_execute(gb: GB; d: openArray[uint8]) =
   let s = gb.sgb
   let cmd = d[0] shr 3
+  when defined(sgb_trace):
+    var hex = ""
+    for i in 0 ..< 16: hex.add(" " & toHex(d[i], 2))
+    let nm = if int(cmd) < SGB_CMD_NAMES.len: SGB_CMD_NAMES[int(cmd)] else: "?"
+    echo "SGB cmd $" & toHex(cmd, 2) & " " & nm & " len " & $(d[0] and 7) & hex
   case cmd
   of 0x00: s.sgb_cmd_pal(d, 0, 1)   # PAL01
   of 0x01: s.sgb_cmd_pal(d, 2, 3)   # PAL23
@@ -303,6 +364,14 @@ proc sgb_p1_write*(gb: GB; val: uint8) =
     s.bit_count = 0
     for i in 0 ..< 16: s.packet[i] = 0
     return
+  # MLT_REQ player rotation. Pan Docs: "The next joypad is automatically
+  # selected when P15 goes from LOW (0) to HIGH (1)". bit 1 of `cur` is P15.
+  # Suppressed for the duration of a packet, whose 1 bits are P15 pulses --
+  # otherwise a transfer would spin the counter and the read straight after
+  # MLT_REQ would answer for the wrong player. (Hardware spins it too, which
+  # is why sgb_execute re-zeroes it; this just keeps the answer stable.)
+  if not s.receiving and (prev and 2) == 0 and (cur and 2) != 0 and s.players > 1:
+    s.cur_player = (s.cur_player + 1) and (s.players - 1)
   if cur == 3 or prev != 3 or not s.receiving: return
   if s.bit_count >= 128:
     # The stop bit. Whatever it is, the packet is over.
@@ -332,6 +401,13 @@ proc sgb_p1_write*(gb: GB; val: uint8) =
 proc sgb_frame_end*(gb: GB) =
   ## Runs at the frame boundary, after the PPU has pushed a frame.
   let s = gb.sgb
+  when defined(sgb_trace):
+    if s.trace_watch > 0:
+      dec s.trace_watch
+      var nz = 0
+      for i in 0 ..< 4096:
+        if gb.ppu.vram[0][i] != 0: inc nz
+      echo "    +frame: vram0 4K nonzero = ", nz, " LCDC=", toHex(gb.ppu.lcd_control, 2)
   if s.border_dirty:
     s.sgb_render_border()
     s.border_dirty = false

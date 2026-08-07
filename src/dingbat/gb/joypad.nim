@@ -30,12 +30,19 @@ proc joypad_update*(j: GbJoypad; gb: GB) =
     gb.interrupts.joypad_interrupt = true
   j.prev_lines = now
 
-proc joypad_read*(j: GbJoypad): uint8 =
+proc joypad_read*(j: GbJoypad; gb: GB): uint8 =
   # Bits 6-7 are unused and read high; bits 4-5 read back the selection.
-  0xC0'u8 or
+  result = 0xC0'u8 or
     (if j.button_keys:    0'u8 else: 0x20'u8) or
     (if j.direction_keys: 0'u8 else: 0x10'u8) or
     joypad_lines(j)
+  # SGB multiplayer. With both groups DEselected the low nibble is not the
+  # (all-high) key lines but the joypad ID of the player whose turn it is:
+  # 0xF, 0xE, 0xD, 0xC for players 1..4 (Pan Docs, "Reading Multiple
+  # Controllers"). In one-player mode cur_player is pinned at 0, so this
+  # yields the same 0xF a handheld reads and the path is inert.
+  if gb.sgb != nil and not j.button_keys and not j.direction_keys:
+    result = (result and 0xF0'u8) or (0x0F'u8 - gb.sgb.cur_player)
 
 proc joypad_write*(j: GbJoypad; gb: GB; val: uint8) =
   j.button_keys    = ((val shr 5) and 0x1) == 0

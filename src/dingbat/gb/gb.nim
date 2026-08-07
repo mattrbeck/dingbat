@@ -706,6 +706,8 @@ type
     # MLT_REQ
     players*:     uint8
     cur_player*:  uint8
+    when defined(sgb_trace):
+      trace_watch*: int
 
   # ---- PPU pixel types ----
   GbPixel* = object

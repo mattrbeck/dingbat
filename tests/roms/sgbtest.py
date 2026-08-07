@@ -8,8 +8,12 @@ commands, and the two VRAM transfers that carry a border.
 
 What the ROM does, in order:
 
-  1.  LCD off; copy the 4 KiB CHR payload from ROM 0x4000 into VRAM
-      0x8000-0x8FFF and send CHR_TRN (tiles 0x00-0x7F, BG).
+  0.  BGP = 0xE4, no scroll, and an identity BG map ($00..$13 on the first
+      line, $14..$27 on the next) so the VRAM transfers meet the conditions
+      Pan Docs requires -- a transfer is read out of the DISPLAY, not out of
+      memory, and dingbat reads it that way.
+  1.  Copy the 4 KiB CHR payload from ROM 0x4000 into VRAM 0x8000-0x8FFF,
+      turn the LCD on, and send CHR_TRN (tiles 0x00-0x7F, BG).
   2.  Copy the 4 KiB PCT payload from ROM 0x5000 into the same window and
       send PCT_TRN (border tilemap + border palettes 4-6).
   3.  Write four solid-shade BG tiles and a tile map of vertical stripes
@@ -93,6 +97,10 @@ class Asm:
     def and_n(self, n):      self.db(0xE6, n & 0xFF)
     def cp_n(self, n):       self.db(0xFE, n & 0xFF)
     def ld_hli_a(self):      self.db(0x22)
+    def add_hl_bc(self):     self.db(0x09)
+    def ld_e(self, n):       self.db(0x1E, n & 0xFF)
+    def dec_e(self):         self.db(0x1D)
+    def inc_d(self):         self.db(0x14)
     def rrca(self):          self.db(0x0F)
     def nop(self):           self.db(0x00)
     def ret(self):           self.db(0xC9)
@@ -224,30 +232,49 @@ a = Asm(0x0150)
 
 a.di()
 a.ld_sp(0xFFFE)
-a.xor_a()
-a.ldh_to(0x40)                       # LCDC = 0 (LCD off; VRAM always free)
+a.ld_a(0xE4); a.ldh_to(0x47)         # BGP = identity, as a transfer requires
+a.xor_a(); a.ldh_to(0x42); a.ldh_to(0x43)   # SCY = SCX = 0
+
+# A VRAM transfer is read out of the DISPLAY, not out of memory, so the
+# documented preconditions have to actually hold: characters $00-$FF on
+# screen ($00..$13 on the first line, $14..$27 on the next), LCD on, unsigned
+# tile addressing, no scroll, BGP = $E4. Build the identity map once.
+a.xor_a(); a.ldh_to(0x40)            # LCD off so VRAM is always writable
+a.ld_hl(0x9800)
+a.ld_b(0)                            # character number
+a.ld_e(13)                           # 13 rows covers all 256 characters
+a.l("idrow")
+a.ld_c(20)
+a.l("idcol")
+a.ld_a_b(); a.ld_hli_a(); a.db(0x04)  # inc b
+a.dec_c(); a.jr_nz("idcol")
+for _ in range(12): a.inc_hl()       # skip the off-screen map columns
+                                     # (not `ld bc,12 / add hl,bc` -- that
+                                     #  would clobber the B character counter)
+a.dec_e(); a.jr_nz("idrow")
 
 # --- border character data ---
 a.ld_hl(0x4000); a.ld_de(0x8000); a.ld_bc(0x1000); a.call("memcpy")
+a.ld_a(0x91); a.ldh_to(0x40)         # LCD on, BG on, unsigned tiles at 0x8000
 a.ld_hl(0)                           # patched below to the chrtrn packet
 a.fix16.append((a.pc - 2, "pkt_chrtrn"))
 a.call("send_packet")
 
 # --- border tilemap + palettes ---
+a.xor_a(); a.ldh_to(0x40)
 a.ld_hl(0x5000); a.ld_de(0x8000); a.ld_bc(0x1000); a.call("memcpy")
+a.ld_a(0x91); a.ldh_to(0x40)
 a.ld_hl(0)
 a.fix16.append((a.pc - 2, "pkt_pcttrn"))
 a.call("send_packet")
 
 # --- the Game Boy picture: four solid tiles, striped tile map ---
+a.xor_a(); a.ldh_to(0x40)
 a.ld_hl(0x6000); a.ld_de(0x8000); a.ld_bc(64); a.call("memcpy")
 a.ld_hl(0x9800)
 a.l("maploop")
 a.ld_a_l(); a.and_n(3); a.ld_hli_a()
 a.ld_a_h(); a.cp_n(0x9C); a.jr_nz("maploop")
-
-a.ld_a(0xE4); a.ldh_to(0x47)         # BGP = identity
-a.xor_a(); a.ldh_to(0x42); a.ldh_to(0x43)   # SCY = SCX = 0
 a.ld_a(0x91); a.ldh_to(0x40)         # LCD on, BG on, tile data at 0x8000
 
 # --- colour ---
