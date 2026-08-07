@@ -641,16 +641,55 @@ the proxy to the END of the park (the fetch restart) and the row goes exact.
 
 ### What each of the eight rows is now, and what is left in it
 
-| row | before | after | what the diff says |
+Two more landed after that, both against the mealybug suite's own written
+documentation rather than against a diff image, and between them they are worth
+more than either of the above: **`WIN_LINE_START_WX`** (a line starts as a
+window line below WX **6**, not below 7 — gambatte brackets WX 0 and 7 and has
+nothing between, so mealybug's three `m3_wx_{4,5,6}_change` ROMs are the only
+oracle, and only 6 satisfies all three) and **`WIN_EN_ABORT`** (clearing LCDC.5
+mid-mode-3 returns the fetcher to background tiles at the next tile-map read —
+documented in mealybug's PPU notes, filed in this tree as SameBoy's *CGB-only*
+fetcher abort, and measured by two ROMs whose scored references are
+`_dmg_blob`). Derivations at their constants in `gb/gb.nim`.
+
+### Where the whole scored DMG set stands
+
+**Only the 24 DMG mealybug rows are scored by the shootout** (`mealybug.py`
+ends `all = dmgs`), so the 13 CGB rows in `tests/results.md` carry no shootout
+weight even though they moved a long way here. Wrong pixels of 23040, `main` at
+`6d81502` against this branch:
+
+| row | before | after | what is left in it |
 |---|---|---|---|
-| `m3_wx_4_change_sprites` (DMG) | 2 | **0** | the park, above |
-| `m3_obp0_change` (DMG) | 74 | **0** | the mixer's second stage |
-| `m3_lcdc_obj_en_change` (DMG) | 60 | 2 | see below |
-| `acid/cgb-acid-hell` | 2 | 2 | see below |
-| `m3_lcdc_obj_size_change_scx` (DMG) | 30 | 30 | untouched by either fix |
-| `m3_lcdc_win_map_change` (DMG) | 34 | 34 | see below |
-| `m3_lcdc_obj_size_change` (DMG) | 57 | 57 | untouched by either fix |
-| `m3_lcdc_tile_sel_win_change` (DMG) | 106 | 106 | untouched by either fix |
+| `m3_lcdc_win_en_change_multiple` | 8874 | **0** | `WIN_EN_ABORT` |
+| `m3_obp0_change` | 74 | **0** | the mixer's second stage |
+| `m3_wx_4_change_sprites` | 2 | **0** | the park |
+| `m3_wx_6_change` | 13810 | 4611 | `WIN_LINE_START_WX`; the rest is the window line advancing on re-activation |
+| `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above |
+| `m3_lcdc_obj_en_change` | 60 | 2 | see below |
+| `m3_lcdc_obj_en_change_variant` | 380 | 102 | the mixer |
+| `m3_window_timing` | 299 | 29 | — |
+| `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
+| `m3_bgp_change_sprites` | 1044 | 536 | as above |
+| `m3_window_timing_wx_0` | 902 | 652 | — |
+| `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
+| `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
+| `m3_lcdc_win_map_change` | 34 | 34 | see below |
+| `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed |
+| `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed |
+| `m3_scy_change` | 417 | 417 | not diagnosed |
+| `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling |
+| `m3_lcdc_bg_en_change` | 2193 | 2193 | LCDC.0 is read at the PUSH here, not at the mixer |
+
+### `acid/cgb-acid-hell` is a real failure, not a scoring artefact
+
+Worth stating because the shootout's rule is a **±50 luma tolerance**, not an
+exact match, and dingbat's own runner applies exact comparison to the bundled
+acid ROMs. Run through `util.compareImage` verbatim, the two pixels are
+`(80, 68)` and `(80, 69)`, black against yellow, **luma delta 226** — four
+times the tolerance, in both directions. `compareImage()` returns `False`. The
+row is genuinely 2 pixels short and the framing holds.
 
 **`m3_lcdc_obj_en_change`, the last 2 pixels.** One object, OAM X = 2, at LY 17
 and 22 — the only two rows of its band where its column 6 is opaque and its
@@ -734,6 +773,29 @@ two 6-row bands at the very top and bottom of the frame (`y = 2..7` and
 is the signature of a 16-pixel-tall object's row selection rather than of a
 write dot; `m3_lcdc_obj_size_change` has the same shape plus a left-edge
 component at `x = 0..2`.
+
+### Two more mid-mode-3 rules, and the ones next to them
+
+**`m3_wx_6_change`'s remaining 4611 pixels** and
+**`m3_lcdc_win_en_change_multiple_wx`'s remaining 343** are the same sentence
+of mealybug's PPU notes, and it is not modelled: *"If WX has been updated
+correctly and WIN_EN is set again then the PPU stops drawing the background,
+and will activate the window again, but it will start drawing the **next row**
+of the window, on the same scanline."* `fifo_reset_bg` already increments
+`current_window_line`, so the WIN_EN path gets it for free — but a **WX
+re-trigger while the window is still the active source** (`window_reactivate`)
+does not restart anything and so does not advance the row. `m3_wx_6_change`'s
+reference is exactly that: our rows are one uniform window row where the
+reference is two window rows spliced at the re-trigger pixel. Whether the row
+advances on a bare WX re-trigger, or only on a full re-activation through
+WIN_EN, is the open question, and `m3_wx_4_change` / `m3_wx_5_change` are the
+constraint — both are pixel-exact today and must stay so.
+
+**The primary source nobody has read.** mealybug's `expected/` PNGs are Beaten
+Dying Moon's *output*, not hardware captures; the only hardware evidence in the
+suite is `photos/<device>/*.jpg`, which exists for 21 of the 24 scored DMG
+rows. Where a reference and dingbat disagree and neither is obviously right,
+that photo is the tiebreaker, and it has never been used here.
 
 ### What the mixer tail does not explain, and what it costs
 
