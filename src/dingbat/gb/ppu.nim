@@ -198,6 +198,27 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
   write_boot_logo(gb.cartridge.rom, ppu.vram[0])
   for i in 0 ..< POST_BOOT_RA_TILE.len:
     ppu.vram[0][0x190 + i] = POST_BOOT_RA_TILE[i]  # tile $19 = byte offset 400
+  if not gb.cgb_enabled:
+    # ...and the tile MAP those tiles are placed through. The DMG boot ROM's
+    # last drawing act, verbatim from the published disassembly:
+    #
+    #   LD A,$19 / LD ($9910),A / LD HL,$992f
+    #   .row:  LD C,$0c
+    #   .cell: DEC A / JR Z,done / LD (HL-),A / DEC C / JR NZ,.cell
+    #          LD L,$0f / JR .row
+    #
+    # so $9910 holds the (R) tile $19, $992F..$9924 hold $18..$0D and
+    # $990F..$9904 hold $0C..$01 — two 12-tile rows of logo with the (R) tile
+    # to the right of the first one. Everything else stays $00, which the boot
+    # ROM's VRAM clear already left there. dingbat wrote the logo tile DATA at
+    # the handoff but never the map, so a cart that reads the map back sees an
+    # all-zero one: BullyGB's `initmap` prints "Invalid initial map data".
+    # The CGB path is deliberately not seeded here — its boot ROM builds a
+    # different map and nothing in the tree measures it.
+    ppu.vram[0][0x1910] = 0x19
+    for i in 0 ..< 12:
+      ppu.vram[0][0x1904 + i] = uint8(0x01 + i)
+      ppu.vram[0][0x1924 + i] = uint8(0x0D + i)
   if gb.cgb_enabled:
     # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
     # reads LY=0x90); the sub-frame phase is calibrated against gambatte
