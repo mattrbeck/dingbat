@@ -103,6 +103,45 @@ window.benchHash = (frames) => {
   return { frames, hash: h.toString(16) };
 };
 
+// Rewind cost end to end: benchFramesFull runs what loop_tick runs per frame
+// (clip note + rewind push + frame prepare), so the fps difference between
+// mask 0 and mask 1 IS what the rewind ring costs in the shipping loop.
+window.benchRewind = (frames = 600, reps = 7) => {
+  if (!Module._benchFramesFull) return "build has no -d:defaultsprobe";
+  window.benchSetHle(false);
+  const run = (mask) => {
+    window.benchLoadState();
+    if (Module._wasm_probe_setpad) Module._wasm_probe_setpad(1);
+    Module._wasm_probe_disable(mask);
+    const t0 = performance.now();
+    Module._benchFramesFull(frames);
+    const ms = performance.now() - t0;
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+    return frames * 1000 / ms;
+  };
+  const on = [], off = [];
+  for (let i = 0; i < reps; i++) { on.push(run(0)); off.push(run(1)); }
+  on.sort((a,b)=>a-b); off.sort((a,b)=>a-b);
+  const mOn = on[(on.length/2)|0], mOff = off[(off.length/2)|0];
+  return "rewind ON " + mOn.toFixed(1) + " fps, OFF " + mOff.toFixed(1) +
+         " fps  -> rewind costs " + ((mOff-mOn)/mOff*100).toFixed(2) + "%";
+};
+
+// Rewind-delta codec bake-off (-d:codecbench builds only). Runs the same
+// candidates over the same deltas as the native harness, prints the table on
+// screen, and reports it back through the dev server's log — which is how
+// Safari, which cannot be driven from the shell, delivers its numbers.
+window.benchCodecs = (pushes = 24, interval = 10, reps = 3, pad = 0) => {
+  if (!Module._wasm_codec_bench) return "build has no -d:codecbench";
+  window.benchLoadState();
+  // The state on disk came from an unpadded build, so the switch has to flip
+  // AFTER the load — see the schedpad prototype note in common/scheduler.nim.
+  if (Module._wasm_codec_setpad) Module._wasm_codec_setpad(pad);
+  const n = Module._wasm_codec_bench(pushes, interval, reps);
+  const txt = Module.UTF8ToString(Module._wasm_codec_report());
+  return "deltas=" + n + "\n" + txt;
+};
+
 // Median-of-N trial for stable numbers.
 window.benchTrial = (frames, reps) => {
   const r = [];
@@ -156,9 +195,37 @@ window.benchAuto = async () => {
                 encodeURIComponent(bOut.textContent.replace(/\n/g, " | ")));
   } catch (e) { /* reporting is best-effort */ }
 };
-if (new URLSearchParams(location.search).get("auto") === "1") {
-  addEventListener("load", () => window.benchAuto());
-}
+// ?codecs=1 runs the rewind-delta codec bake-off instead of the throughput
+// trial, on the same self-reporting path, so Safari can produce the table.
+window.benchCodecAuto = async () => {
+  const q = new URLSearchParams(location.search);
+  bOut.style.fontSize = "15px";
+  bLog("waiting for runtime…");
+  while (!window.benchRuntimeUp) await new Promise((r) => setTimeout(r, 100));
+  await window.benchInit();
+  bLog("UA: " + navigator.userAgent);
+  bLog("build: " + JSON.stringify(window.benchBuildId()));
+  bLog("CompressionStream: " + (typeof CompressionStream !== "undefined"));
+  if (Module._benchFramesFull) { bLog(window.benchRewind(600, 7)); bLog("DONE"); 
+    try { await fetch("/__benchresult?" + encodeURIComponent(bOut.textContent.replace(/\n/g," | "))); } catch(e){}
+    return; }
+  for (const pad of [0, 1]) {
+    bLog("");
+    bLog(pad ? "=== FIXED-LENGTH PAYLOAD (alignment fix) ==="
+             : "=== SHIPPED PAYLOAD (variable length) ===");
+    bLog(window.benchCodecs(Number(q.get("pushes") || 24),
+                            Number(q.get("interval") || 10),
+                            Number(q.get("reps") || 3), pad));
+  }
+  bLog("DONE");
+  try {
+    await fetch("/__benchresult?" +
+                encodeURIComponent(bOut.textContent.replace(/\n/g, " | ")));
+  } catch (e) { /* best effort */ }
+};
+const _q = new URLSearchParams(location.search);
+if (_q.get("codecs") === "1") addEventListener("load", () => window.benchCodecAuto());
+else if (_q.get("auto") === "1") addEventListener("load", () => window.benchAuto());
 </script>
 <script src="session.js"></script>
 <script async src="../em.js"></script>

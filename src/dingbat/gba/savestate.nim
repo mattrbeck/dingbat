@@ -652,24 +652,49 @@ proc apu_extract_state_events(gba: GBA) =
   take(gba.apu.channel3, etAPUChannel3, gba.apu.channel3.ch3_frequency_timer())
   take(gba.apu.channel4, etAPUChannel4, gba.apu.channel4.ch4_frequency_timer())
 
+when defined(deltachar):
+  # EXPLORATORY (-d:deltachar): byte offset of each payload section, so a delta
+  # histogram can be attributed to EWRAM / IWRAM / VRAM / framebuffer / save
+  # rather than reported as one 604 KB blob.
+  var payloadSections*: seq[(string, int)] = @[]
+
 proc gba_state_payload(gba: GBA): string =
   var w = Writer()
+  when defined(deltachar):
+    payloadSections.setLen(0)
+    template mark(name: string) = payloadSections.add((name, w.buf.len))
+  else:
+    template mark(name: string) = discard
+  mark("cpu")
   save_cpu_state(gba.cpu, w)
+  mark("bus(+ewram+iwram)")
   save_bus_state(gba.bus, w)
+  mark("sched")
   w.write_tag(GBA_SEC_SCHED)
   gba.apu_arm_state_events()
   gba.scheduler.save_to(w)
   gba.apu_disarm_state_events()
+  mark("irq")
   save_irq_state(gba.interrupts, w)
+  mark("mmio")
   save_mmio_state(gba.mmio, w)
+  mark("keypad")
   save_keypad_state(gba.keypad, w)
+  mark("timer")
   save_timer_state(gba.timer, w)
+  mark("serial")
   save_serial_state(gba.serial, w)
+  mark("dma")
   save_dma_state(gba.dma, w)
+  mark("gpio")
   save_gpio_state(gba.bus.gpio, w)
+  mark("ppu(vram+pram+oam+fb)")
   save_ppu_state(gba.ppu, w)
+  mark("apu")
   save_apu_state(gba.apu, w)
+  mark("storage(sram)")
   save_storage_state(gba.storage, w)
+  mark("end")
   w.write_tag(GBA_SEC_END)
   w.buf
 

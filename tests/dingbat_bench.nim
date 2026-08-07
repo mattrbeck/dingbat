@@ -13,6 +13,7 @@ import dingbat/gba/gba
 import dingbat/common/input
 import dingbat/common/test_output
 import dingbat/common/rewind
+import dingbat/common/scheduler
 import dingbat/common/serialize
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
@@ -147,6 +148,10 @@ proc main() =
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
+    when defined(schedpad):
+      # Fixed-length-payload prototype: flip it AFTER the load, because the
+      # state on disk came from an unpadded build. See common/scheduler.nim.
+      schedPadEnabled = true
     # DINGBAT_NO_WAITLOOP=1 turns off idle-loop fast-forwarding. The waitloop
     # path SNAPS scheduler.cycles to the next pending event and discards the
     # loop body's own cycles, so which events happen to be pending changes the
@@ -243,6 +248,22 @@ proc main() =
     if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
       echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0
     report_rewind(rw, frames, elapsed)
+    # DINGBAT_BENCH_REWIND_VERIFY=1 proves the ring restores bit-exactly on a
+    # REAL game rather than on synthetic payloads: pop every retained snapshot,
+    # apply it to the live core, re-serialize, and require the bytes back.
+    # That covers the codec, the delta chain and the core's own load path in
+    # one gate.
+    if rw != nil and getEnv("DINGBAT_BENCH_REWIND_VERIFY") == "1":
+      var checked = 0
+      var bad = 0
+      while true:
+        let snap = rw.pop()
+        if snap.len == 0: break
+        emu.apply_state_payload(snap)
+        if emu.state_payload() != snap: bad.inc
+        checked.inc
+      echo "  rewind verify: ", checked, " snapshots restored, ", bad, " mismatches",
+           (if bad == 0: "  OK" else: "  *** FAILED ***")
     if emu.mp2k != nil and emu.mp2k_hle:
       echo "  mp2k: entry=0x", toHex(emu.mp2k.entry_addr, 8),
            " hook=0x", toHex(emu.mp2k.hook_addr, 8),
