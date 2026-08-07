@@ -1332,6 +1332,97 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
       regressions.add(test.name)
   SuiteResults(suite_name: name, results: results)
 
+proc run_sharded_batch(harness, mode, work_name, prefix: string;
+                       list_lines: seq[string]): seq[string] =
+  ## Runs `list_lines` through one `--mode=<mode> --list=<file>` process per
+  ## core and returns, per input line, the verdict its shard reported — the
+  ## remainder of the `<prefix> <local index> <...>` line the harness wrote,
+  ## or "" if no verdict came back for it.
+  ##
+  ## This exists because two suites (gambatte, GBMicrotest) are thousands of
+  ## runs whose per-ROM emulation is far cheaper than a fork/exec. Splitting
+  ## them cannot change a verdict: every list entry builds a fresh emulator and
+  ## none of them write files.
+  ##
+  ## Spawn rule, which is the whole reason this is one shared proc: real argv,
+  ## no shell, no redirection, and `--out` so the CHILD opens its own verdict
+  ## file. Do NOT rebuild this as a command string ending in `> out.txt 2>&1`.
+  ## Nim's poEvalCommand is `/bin/sh -c` on POSIX but goes straight to
+  ## CreateProcessW on Windows, where those tokens are not redirection but
+  ## three more argv entries — the verdicts then land in a pipe that nothing
+  ## drains, every shard blocks on a full buffer, and the job hangs until it is
+  ## killed. That cost the Windows CI job six hours a push (see 23dcae4).
+  result = newSeq[string](list_lines.len)
+  if list_lines.len == 0: return
+  let work_dir = getTempDir() / work_name
+  removeDir(work_dir)
+  createDir(work_dir)
+  defer: removeDir(work_dir)
+  let shards = max(1, min(countProcessors(), 16))
+  var shard_rows = newSeq[seq[int]](shards)
+  # Round-robin, not contiguous blocks: cost per entry is far from uniform, so
+  # dealing them out keeps the shards balanced.
+  for i in 0 ..< list_lines.len: shard_rows[i mod shards].add(i)
+  var out_paths = newSeq[string](shards)
+  var procs: seq[Process]
+  for s in 0 ..< shards:
+    if shard_rows[s].len == 0: continue
+    let list_path = work_dir / &"list{s}.tsv"
+    out_paths[s] = work_dir / &"out{s}.txt"
+    var lines: seq[string]
+    for i in shard_rows[s]: lines.add(list_lines[i])
+    writeFile(list_path, lines.join("\n") & "\n")
+    procs.add(startProcess(harness, args = @[&"--mode={mode}",
+                                             "--list=" & list_path,
+                                             "--out=" & out_paths[s]],
+                           options = {poUsePath, poParentStreams}))
+  for p in procs:
+    discard p.waitForExit()
+    p.close()
+  for s in 0 ..< shards:
+    if out_paths[s].len == 0 or not fileExists(out_paths[s]): continue
+    for line in readFile(out_paths[s]).splitLines():
+      if not line.startsWith(prefix & " "): continue
+      let parts = line.split(' ', maxsplit = 2)
+      if parts.len < 3: continue
+      var local: int
+      try: local = parseInt(parts[1])
+      except ValueError: continue
+      if local < 0 or local >= shard_rows[s].len: continue
+      result[shard_rows[s][local]] = parts[2]
+
+proc split_verdict(v: string): tuple[passed: bool; detail: string] =
+  ## `"PASS some detail"` -> (true, "some detail"). An empty verdict is a shard
+  ## that never reported this row, which is a failure with a legible reason
+  ## rather than a silent pass.
+  if v.len == 0:
+    return (false, "harness produced no verdict (crash or timeout in its shard)")
+  let sp = v.find(' ')
+  if sp < 0: (v == "PASS", "")
+  else: (v[0 ..< sp] == "PASS", v[sp + 1 .. ^1].strip())
+
+proc run_microtest_suite(name: string; tests: seq[TestDef]; harness: string;
+                         previous: Table[string, bool];
+                         regressions: var seq[string]): SuiteResults =
+  ## GBMicrotest, batched. 513 ROMs that each run for two frames: a process
+  ## apiece made spawn+load the whole cost (11.2s of the runner's 31s locally,
+  ## and process creation is dearer on Windows). Same rows, same verdicts, one
+  ## process per core. These ROMs are `no_save` and write nothing, so there is
+  ## no state for concurrent entries to race.
+  echo &"\n=== {name} ==="
+  var list_lines: seq[string]
+  for t in tests: list_lines.add($t.timeout & "\t" & t.rom_path)
+  let verdicts = run_sharded_batch(harness, "microtest", "dingbat-microtest",
+                                   "MT", list_lines)
+  var results: seq[TestResult]
+  for i, t in tests:
+    let (passed, detail) = split_verdict(verdicts[i])
+    echo &"  [{(if passed: \"PASS\" else: \"FAIL\")}] {t.name} - {detail}"
+    results.add(TestResult(name: t.name, passed: passed, output: detail))
+    if previous.getOrDefault(t.name) and not passed:
+      regressions.add(t.name)
+  SuiteResults(suite_name: name, results: results)
+
 proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     regressions: var seq[string];
                     detail: var seq[MgbaSuiteDetail];
@@ -1592,53 +1683,19 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
     return SuiteResults(suite_name: "Game Boy - gambatte")
 
   # One process per ROM would cost more than the emulation: each row is 15
-  # frames (a few ms), and there are thousands of them. Batch them into one
-  # --mode=gambatte process per core instead, round-robin so the shards stay
-  # balanced (the suite's cost per ROM is far from uniform). Rows are
-  # independent — each builds a fresh GB — so the split cannot change a
-  # verdict; `tests/README.md` records how that was verified.
-  let work_dir = getTempDir() / "dingbat-gambatte"
-  removeDir(work_dir)
-  createDir(work_dir)
-  defer: removeDir(work_dir)
-  let shards = max(1, min(countProcessors(), 16))
-  var shard_rows = newSeq[seq[int]](shards)
-  for i in 0 ..< rows.len: shard_rows[i mod shards].add(i)
-  var cmds: seq[string]
-  var out_paths: seq[string]
-  for s in 0 ..< shards:
-    let list_path = work_dir / &"list{s}.tsv"
-    let out_path = work_dir / &"out{s}.txt"
-    var lines: seq[string]
-    for i in shard_rows[s]:
-      lines.add(rows[i].dev & "\t" & rows[i].kind & "\t" & rows[i].expected &
-                "\t" & rows[i].rom)
-    writeFile(list_path, lines.join("\n") & "\n")
-    cmds.add(&"{harness.quoteShell} --mode=gambatte --list={list_path.quoteShell}" &
-             &" > {out_path.quoteShell} 2>&1")
-    out_paths.add(out_path)
-  discard execProcesses(cmds, options = {poUsePath, poEvalCommand}, n = shards)
-
+  # frames (a few ms), and there are thousands of them. run_sharded_batch puts
+  # them through one --mode=gambatte process per core. Rows are independent —
+  # each builds a fresh GB — so the split cannot change a verdict;
+  # `tests/README.md` records how that was verified.
+  var list_lines: seq[string]
+  for r in rows:
+    list_lines.add(r.dev & "\t" & r.kind & "\t" & r.expected & "\t" & r.rom)
+  let verdicts = run_sharded_batch(harness, "gambatte", "dingbat-gambatte",
+                                   "GAM", list_lines)
   var passed = newSeq[bool](rows.len)
   var detail = newSeq[string](rows.len)
-  var seen = newSeq[bool](rows.len)
-  for s in 0 ..< shards:
-    if not fileExists(out_paths[s]): continue
-    for line in readFile(out_paths[s]).splitLines():
-      if not line.startsWith("GAM "): continue
-      let parts = line.split(' ', maxsplit = 3)
-      if parts.len < 3: continue
-      var local: int
-      try: local = parseInt(parts[1])
-      except ValueError: continue
-      if local < 0 or local >= shard_rows[s].len: continue
-      let g = shard_rows[s][local]
-      seen[g] = true
-      passed[g] = parts[2] == "PASS"
-      detail[g] = if parts.len > 3: parts[3].strip() else: ""
   for i in 0 ..< rows.len:
-    if not seen[i]:
-      detail[i] = "harness produced no verdict (crash or timeout in its shard)"
+    (passed[i], detail[i]) = split_verdict(verdicts[i])
 
   var order: seq[string]
   var by_group = initTable[string, GambatteGroup]()
@@ -1821,7 +1878,10 @@ proc main() =
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
 
   # GBMicrotest (HRAM verdict byte)
-  all_suites.add(run_suite("Game Boy - GBMicrotest",
+  # Batched rather than a process per ROM — see run_microtest_suite. Same rows
+  # and same verdicts as run_suite would produce, which is gated by results.md
+  # coming back byte-identical.
+  all_suites.add(run_microtest_suite("Game Boy - GBMicrotest",
     build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),
     harness, previous, regressions))
 

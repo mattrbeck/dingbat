@@ -1,0 +1,80 @@
+name: Build
+
+# Desktop binaries for all three platforms on every push and PR, downloadable
+# from the run's Artifacts section. Previously only Windows was built here and
+# macOS existed solely inside the tag-triggered Release workflow, so there was
+# no way to get a macOS or Linux build of an arbitrary commit — and the Linux
+# desktop target was not built anywhere at all, which is how it stayed broken
+# (see the SDL2 include path in nim.cfg).
+#
+# Artifacts are retained for the repository's default period and are not
+# releases: they are unsigned, and the .dmg reports version 0.0.0 unless built
+# from a tag.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  artifacts:
+    uses: ./.github/workflows/build-artifacts.yml
+
+  # Publish those same three files to a rolling "Latest build" release, so the
+  # Releases page always offers a current download without anyone cutting a
+  # version tag. A GitHub release must be attached to SOME tag — there is no
+  # tagless release — so `latest` is a moving tag that is force-pushed to the
+  # head of main on every run. It is marked prerelease, which keeps the
+  # "Latest release" badge for real v* tags whenever those start being cut.
+  #
+  # Pull requests build (above) but do not publish: this job is push-to-main
+  # only, and a PR from a fork could not get a write token anyway.
+  publish-latest:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage + checksum
+        run: .github/scripts/stage-release.sh artifacts release
+      - name: Move the rolling tag to this commit
+        # Without this the release would keep pointing at whatever commit first
+        # created the tag: action-gh-release creates a missing tag but does not
+        # move an existing one, so the assets would update while the tag and
+        # "source code" links silently went stale.
+        run: |
+          git tag -f latest
+          git push -f origin latest
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (main)
+          prerelease: true
+          # Same asset names every time, so a bookmark or script pointing at
+          # /releases/download/latest/<name> keeps working across rebuilds.
+          # Note that form — the `latest` TAG. The similar-looking
+          # /releases/latest/download/<name> means "the latest non-prerelease
+          # release" and 404s while this prerelease is the only one.
+          files: release/*
+          body: |
+            Automatically rebuilt from `main` on every push — these are
+            development builds, not a tagged release, and they change without
+            notice.
+
+            | Platform | File |
+            |---|---|
+            | Linux x64 | `dingbat-linux-x64.tar.gz` |
+            | macOS (Apple Silicon) | `dingbat-macos.dmg` |
+            | Windows x64 | `dingbat-windows-x64.exe` |
+
+            All binaries are **unsigned**: macOS needs *System Settings →
+            Privacy & Security → Open Anyway*, Windows needs *More info → Run
+            anyway*, once each. The Linux build needs SDL2 installed
+            (`apt install libsdl2-2.0-0`) and is built against glibc 2.34.
+
+            Verify with `shasum -a 256 -c SHA256SUMS.txt`.

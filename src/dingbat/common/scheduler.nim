@@ -108,6 +108,15 @@ proc clear*(s: Scheduler; kind: EventType) =
   s.nevents = j
   s.next_event = if j > 0: s.evbuf[j - 1].cycles else: high(CycleCount)
 
+proc has_event*(s: Scheduler; kind: EventType): bool =
+  ## Is an event of this kind still waiting to fire? Used by the GBA state
+  ## loader to tell "this machine has already recognised its pending interrupt"
+  ## apart from "the recognition check is still in flight" — see
+  ## gba/savestate.nim.
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind == kind: return true
+  false
+
 proc call_current*(s: Scheduler) =
   while s.nevents > 0:
     let ev = s.evbuf[s.nevents - 1]

@@ -771,7 +771,51 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
   # irq_line is derived from IE/IF/IME and not serialized; recompute it so a
   # pending-but-untaken IRQ at the save point isn't lost. Same for the
   # WAITCNT-derived bus timing tables.
+  #
+  # check_interrupts is not a pure recompute: it also RESOLVES the halt, and
+  # doing that here runs it early. A peripheral that raises IF schedules the
+  # recognition check IRQ_SYNC_DELAY cycles later (see interrupts.nim), and a
+  # state written at a frame boundary is written the instant vblank raises its
+  # flag — so nearly every state of a game that idles in HALT/IntrWait carries
+  # a pending etInterrupts event that has not fired yet. Calling this
+  # unconditionally fired it, clearing `halted` and setting `halt_wake` three
+  # cycles ahead of the schedule the state itself preserves; the event then
+  # fires on time and does the same work again. The visible symptom was that
+  # save -> load -> save was not idempotent (two payload bytes plus the header
+  # hash), and the same two bytes drifted on every rewind pop, rollback restore
+  # and run-ahead frame, which all reload a payload through here. Take the
+  # derived value and leave the halt to the event that owns it.
+  #
+  # Safe because every path that raises IF schedules that check in the same
+  # breath (dma/keypad/timer/ppu/serial/rtc/hle_bios, and the IE/IF/IME writes
+  # in mmio), so a state with a pending interrupt always carries the event that
+  # will resolve the halt. Nothing else can wake a halted CPU, and nothing else
+  # runs while it is halted, so the pending set cannot change in between.
+  #
+  # irq_line has the same shape of problem and the same answer. It is not a
+  # function of IE/IF/IME alone — it is the RESULT of the last recognition
+  # check, and a raise that has not been checked yet must not show up in it.
+  # Recomputing unconditionally recognised the interrupt up to IRQ_SYNC_DELAY
+  # cycles early, which for a game still executing at the frame boundary (as
+  # opposed to idling in HALT) moves the IRQ one instruction: Golden Sun 1 and
+  # 2 drifted lr_irq, the word the handler pushes at 0x03007F9C, and the user
+  # stack pointer on every restore. So only recompute when no check is in
+  # flight; when one is, the event carries the answer and will deliver it on
+  # schedule.
+  #
+  # The recompute is exact in that case. IF only GAINS bits between checks (the
+  # only way to clear one is a CPU write to IF, which schedules a check), so
+  # "IE & IF != 0 and IME" holding now and no check pending means it held at
+  # the last check too.
+  let checkPending = gba.scheduler.has_event(etInterrupts)
+  let halted  = gba.cpu.halted
+  let wake    = gba.cpu.halt_wake
+  let stopped = gba.cpu.stopped
   gba.interrupts.check_interrupts()
+  gba.cpu.halted    = halted
+  gba.cpu.halt_wake = wake
+  gba.cpu.stopped   = stopped
+  if checkPending: gba.cpu.irq_line = false
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
   # The MP2K HLE shadow mixer's state is deliberately not serialized (state
   # files stay byte-identical with the HLE on or off); it is rebuilt from the

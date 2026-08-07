@@ -701,7 +701,7 @@
               <div class="kb-shortcut"><span>Fast forward (hold)</span><kbd>Tab</kbd></div>
               <div class="kb-shortcut"><span>2&times; speed</span><kbd>Shift+Tab</kbd></div>
               <div class="kb-shortcut"><span>Slow motion</span><kbd>Shift+`</kbd></div>
-              <div class="kb-shortcut"><span>Rewind (hold)</span><kbd>`</kbd></div>
+              <div class="kb-shortcut" id="kb-shortcut-rewind"><span>Rewind (hold)</span><kbd>`</kbd></div>
               <div class="kb-shortcut"><span>Pause &amp; step one frame</span><kbd>.</kbd></div>
               <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
               <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
@@ -911,6 +911,29 @@
             </span>
           </div>
           <div class="modal-subhead">Emulation</div>
+          <!-- Rewind is ON by default and stays that way for everyone who
+               never opens this tab: the "system" record written before this
+               switch existed has no rewindOn key, and a missing key resolves
+               to on (see loadSystemSettings).
+
+               Turning it off is not cosmetic. The ring is dropped, nothing is
+               pushed, and the snapshot + thumbnail cost goes back to the game
+               (~0.8 ms per push, 6 pushes/s — measured at 8% of loop_tick on
+               the Good Boy Galaxy demo in Chrome/M-series; a heavier game
+               dilutes the share but not the absolute cost). That is the only
+               reason to offer the switch at all. Every rewind control in
+               the app disappears with it (body.rewind-off in styles.css); a
+               visible-but-dead control is worse than no control. -->
+          <div class="modal-toggle-row">
+            <div>
+              <span class="modal-row-label">Rewind</span>
+              <span class="modal-toggle-sub">Keep a rolling history you can scrub backwards through &mdash; hold the rewind button, or double-tap it for the film strip. Costs a few percent of the emulator's speed; turning it off hides the rewind controls.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="rewind-toggle" checked />
+              <span class="switch-track"></span>
+            </label>
+          </div>
           <div class="modal-toggle-row row-flow">
             <span class="modal-row-label">Run-ahead</span>
             <select id="runahead-select" class="kb-select row-flow-ctl" aria-label="Run-ahead frames">
