@@ -86,6 +86,7 @@ else:
 # DINGBAT_BENCH_REWIND_INTERVAL overrides frames-between-snapshots.
 const SCRUB_THUMB_W = 120
 const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * 160 div 240
+const GB_SCRUB_THUMB_H = SCRUB_THUMB_W * 144 div 160
 
 proc rewind_mode(): string = getEnv("DINGBAT_BENCH_REWIND", "off")
 
@@ -148,10 +149,6 @@ proc main() =
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
-    when defined(schedpad):
-      # Fixed-length-payload prototype: flip it AFTER the load, because the
-      # state on disk came from an unpadded build. See common/scheduler.nim.
-      schedPadEnabled = true
     # DINGBAT_NO_WAITLOOP=1 turns off idle-loop fast-forwarding. The waitloop
     # path SNAPS scheduler.cycles to the next pending event and discards the
     # loop body's own cycles, so which events happen to be pending changes the
@@ -360,16 +357,43 @@ proc main() =
       return
 
     for f in 0 ..< warmup: run_scripted(f)
+    let rw = make_bench_rewind()
+    let mode = rewind_mode()
+    template rewind_tick() =
+      if rw != nil:
+        if mode == "web":
+          discard rw.maybe_push(
+            proc(): string = emu.state_payload(),
+            proc(): RewindThumb =
+              RewindThumb(w: SCRUB_THUMB_W, h: GB_SCRUB_THUMB_H,
+                          pixels: downscale_bgr555(emu.ppu.framebuffer, 160, 144,
+                                                   SCRUB_THUMB_W, GB_SCRUB_THUMB_H)))
+        else:
+          discard rw.maybe_push(proc(): string = emu.state_payload())
     total_cycles = 0
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
-    for i in 0 ..< frames: run_scripted(warmup + i)
+    for i in 0 ..< frames:
+      run_scripted(warmup + i)
+      rewind_tick()
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+    report_rewind(rw, frames, elapsed)
+    if rw != nil and getEnv("DINGBAT_BENCH_REWIND_VERIFY") == "1":
+      var checked = 0
+      var bad = 0
+      while true:
+        let snap = rw.pop()
+        if snap.len == 0: break
+        emu.apply_state_payload(snap)
+        if emu.state_payload() != snap: bad.inc
+        checked.inc
+      echo "  rewind verify: ", checked, " snapshots restored, ", bad, " mismatches",
+           (if bad == 0: "  OK" else: "  *** FAILED ***")
     echo "  cycles=", total_cycles, " mcps=",
          formatFloat(total_cycles.float / elapsed / 1e6, ffDecimal, 2)
     # Emulated cycles are the "same work?" check; instructions are the

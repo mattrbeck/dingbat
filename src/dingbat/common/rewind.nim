@@ -160,6 +160,8 @@ proc xor_bytes(dst: var string; src: string; k: int) =
 
 # --- Sparse-block pre-pass on the delta -----------------------------------
 #
+# This is the ring's codec, not an option.
+#
 # The delta is an XOR, so "unchanged" is literally a zero byte, and after the
 # fixed-length-payload fix it is 99% zeros. zlib still has to walk every one of
 # those zeros to rediscover that it is a zero. A bitmap of which 64-byte blocks
@@ -172,12 +174,18 @@ proc xor_bytes(dst: var string; src: string; k: int) =
 # is then zlib'd as before, which still gets to exploit whatever redundancy
 # survives inside the changed blocks.
 #
-# Measured on Pokemon FireRed from an in-game state, fixed-length payloads:
-#   native   4542 B vs 5741 B, encode 0.165 ms vs 0.167 ms, decode 4.3x faster
+# Measured on Pokemon FireRed from an in-game state, against plain zlib on the
+# same (fixed-length) payloads:
+#   native   4504 B vs 5693 B, encode 0.147 ms vs 0.165 ms, decode 4.3x faster
 #   Chrome   4480 B vs 5678 B, encode 2.7x faster, decode 6.4x faster
 #   Safari   4480 B vs 5678 B, encode 2.5x faster
 # The browsers gain far more than native because zippy's deflate is much
-# slower relative to a flat scan under wasm than it is compiled natively.
+# slower relative to a flat scan under wasm than it is compiled natively —
+# which is why the candidate bake-off (common/rewind_codecs.nim) was built to
+# run in-page rather than being settled on the desktop.
+#
+# The encoded form is in-process only: the ring never outlives the process and
+# nothing persists or transmits a delta, so this needed no format version.
 
 const SparseBlock* = 64
 
@@ -239,19 +247,13 @@ proc encode_delta(prev, cur: string): string =
   rp(0 + 1):  # RpXor
     xor_bytes(body, cur, min(prev.len, cur.len))
   rp(0 + 2):  # RpCompress
-    when defined(rewindsparse):
-      result = compress(sparse_encode(body), BestSpeed, dfZlib)
-    else:
-      result = compress(body, BestSpeed, dfZlib)
+    result = compress(sparse_encode(body), BestSpeed, dfZlib)
   when defined(rewindprof):
     rewindprof_bytes[2] += result.len
     rewindprof_bytes[1] += body.len
 
 proc decode_delta(cur, packed: string): string =
-  when defined(rewindsparse):
-    result = sparse_decode(uncompress(packed, dfZlib))
-  else:
-    result = uncompress(packed, dfZlib)
+  result = sparse_decode(uncompress(packed, dfZlib))
   xor_bytes(result, cur, min(result.len, cur.len))
 
 proc oldest_id*(rw: Rewind): int =

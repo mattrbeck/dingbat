@@ -765,7 +765,32 @@ proc apu_extract_state_events(gb: GB) =
   take(gb.apu.channel3, etAPUChannel3)
   take(gb.apu.channel4, etAPUChannel4)
 
-proc gb_state_payload(gb: GB): string =
+# ---- The in-process / file boundary -----------------------------------------
+#
+# `in_process` = true pads the scheduler section so the payload has a FIXED
+# length (see PAD_RATIONALE in common/scheduler.nim). It is what makes the
+# rewind ring's XOR delta align, and it is worth 8.5x on the delta size.
+#
+# It must be TRUE for payloads that stay in this process (the rewind ring,
+# rollback snapshots) and FALSE for anything that can reach a file, because
+# padded bytes are not the .state format and an older build could not read
+# them. The rule is enforced three ways:
+#
+#   1. The rule is drawn at the API, not per call site: the public
+#      state_payload / apply_state_payload family is ENTIRELY in-process and
+#      passes true. The file family — state_bytes, save_state,
+#      load_state_bytes, state_image — is entirely unpadded and reaches the
+#      private *_state_payload / *_apply_state with the default false. If you
+#      are adding a call and cannot tell which you want, ask whether the bytes
+#      can outlive the process.
+#   2. The default is false, so a new call site is unpadded unless it opts in.
+#   3. A mismatch cannot pass silently: the padding sits immediately before a
+#      section tag, so reading padded bytes as unpadded (or the reverse) trips
+#      expect_tag on the very next section and raises StateError. There is a
+#      dedicated regression test for the boundary in
+#      tests/savestate_compat_test.nim.
+
+proc gb_state_payload(gb: GB; in_process = false): string =
   var w = Writer()
   save_cpu_state(gb.cpu, w)
   save_irq_state(gb.interrupts, w)
@@ -776,7 +801,7 @@ proc gb_state_payload(gb: GB): string =
   w.write_bool(gb.cgb_enabled)
   w.write_tag(GB_SEC_SCHED)
   gb.apu_arm_state_events()
-  gb.scheduler.save_to(w)
+  gb.scheduler.save_to(w, pad = in_process)
   gb.apu_disarm_state_events()
   save_ppu_state(gb.ppu, w)
   save_apu_state(gb.apu, w)
@@ -784,7 +809,8 @@ proc gb_state_payload(gb: GB): string =
   w.write_tag(GB_SEC_END)
   w.buf
 
-proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
+proc gb_apply_state(gb: GB; payload: string; rev: uint32;
+                          in_process = false) =
   var r = Reader(buf: payload)
   load_cpu_state(gb.cpu, r, rev)
   load_irq_state(gb.interrupts, r)
@@ -799,7 +825,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   # this change invisible to the committed state corpus.
   gb_sync_cgb_native(gb)
   r.expect_tag(GB_SEC_SCHED)
-  gb.scheduler.load_from(r)
+  gb.scheduler.load_from(r, pad = in_process)
   load_ppu_state(gb.ppu, r, rev)
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
@@ -845,19 +871,23 @@ proc gb_rom_checksum(gb: GB): uint32 =
 proc state_payload*(gb: GB): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses
   ## (the rewind ring buffer). Frame boundaries only.
-  gb.gb_state_payload()
+  ##
+  ## in_process = true: this payload never reaches a file, so it is padded to
+  ## a fixed length. See the boundary note above.
+  gb.gb_state_payload(in_process = true)
 
 proc apply_state_payload*(gb: GB; payload: string) =
   ## Apply a raw payload produced by state_payload. Raises StateError on
   ## corrupt input; no rollback — trusted callers only. Always this build's
   ## revision: the rewind ring and rollback snapshots never outlive the process.
-  gb.gb_apply_state(payload, GB_PAYLOAD_VERSION)
+  gb.gb_apply_state(payload, GB_PAYLOAD_VERSION, in_process = true)
 
 proc apply_state_payload*(gb: GB; payload: string; rev: uint32) =
   ## As above, for a payload known to be in an OLDER revision. Exists so the
   ## format tests can exercise a migration without a whole state image; normal
-  ## load paths get their revision from the header.
-  gb.gb_apply_state(payload, rev)
+  ## load paths get their revision from the header. In-process like the other
+  ## overload: its callers hand it payloads produced by state_payload.
+  gb.gb_apply_state(payload, rev, in_process = true)
 
 const GB_THUMB_W = 120
 const GB_THUMB_H = GB_THUMB_W * 144 div 160   # preserve 10:9 → 120x108

@@ -9,8 +9,16 @@
 ## decides, because it is the closest available proxy for the oldest device
 ## that has to run this.
 ##
-## Nothing here is on a shipping path. If a candidate wins it moves into
-## common/rewind.nim proper.
+## RESEARCH HARNESS, kept deliberately. The winner — sparse64 + zlib — has
+## moved into common/rewind.nim proper and is the ring's codec; what stays here
+## is the bake-off and the losing candidates, because the next person to ask
+## "why not lz4?" or "why not a dirty-page bitmap?" should be able to re-run
+## the comparison in ten minutes on their own hardware and their own games
+## rather than trust a table. The sparse implementation here is a duplicate of
+## rewind.nim's on purpose: the harness must be able to A/B a CHANGED codec
+## against the shipped one without editing the shipped one.
+##
+## Nothing here is on a shipping path.
 
 import std/[strutils, times, monotimes]
 import zippy

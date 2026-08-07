@@ -7,11 +7,25 @@ else:
 
 const MAX_EVENTS* = 64  # far above the ~15 events ever pending at once
 
-when defined(schedpad):
-  ## PROTOTYPE switch so a measurement run can load a state written by the
-  ## unpadded build and then produce padded payloads for the rewind ring.
-  ## A shipping version would be unconditional plus a payload-revision bump.
-  var schedPadEnabled* = false
+# PAD_RATIONALE — why save_to/load_from take a `pad` flag.
+#
+# This is the only variable-length section in either core's payload, and it
+# sits BEFORE the big fixed-size arrays (GBA: VRAM, framebuffer, save chip;
+# GB: VRAM, framebuffer, cart RAM). One event coming or going changes the
+# section by 9 bytes, which shifts every array behind it by 9 — so the rewind
+# ring's XOR delta then compares misaligned memory and lights up hundreds of
+# kilobytes that did not change. Measured on Pokemon FireRed: it happens on
+# 40% of snapshots and makes the delta 8.5x larger than it should be, silently.
+#
+# Padding to MAX_EVENTS makes the payload a fixed length and the problem
+# disappears. It costs (MAX_EVENTS - nevents) * 9 bytes, ~486 B on a 604 KB
+# payload.
+#
+# `pad` is ON for the in-process payload paths only (the rewind ring and
+# rollback snapshots, which never outlive the process) and OFF for anything
+# that reaches a file. That is what keeps the .state format byte-identical and
+# avoids a payload-revision bump. The two savestate.nim files thread it from
+# exactly one place each; see the `in_process` parameter there.
                         # Exported because it is a save-state compatibility
                         # floor, not just a capacity: load_from refuses a
                         # state carrying more pending events than this, so
@@ -202,29 +216,26 @@ proc rebase*(s: Scheduler; keep_phase_mask: CycleCount = 0): CycleCount {.discar
   s.cycles -= base
   base
 
-proc save_to*(s: Scheduler; w: var Writer) =
+proc save_to*(s: Scheduler; w: var Writer; pad = false) =
   ## Serialize all scheduler state. Event kinds are written by ordinal; the
   ## dispatch closure is not serialized — it stays registered on the owning
   ## emulator and maps each kind back to its handler.
+  ##
+  ## `pad` writes MAX_EVENTS slots instead of `nevents`, giving the section —
+  ## and therefore the whole payload — a FIXED length. See PAD_RATIONALE below
+  ## for why that matters and why it is off for anything that reaches a file.
   w.write_u64(uint64(s.cycles))
   w.write_u8(s.current_speed)
   w.write_u8(uint8(s.nevents))
   for i in 0 ..< s.nevents:
     w.write_u8(uint8(ord(s.evbuf[i].kind)))
     w.write_u64(uint64(s.evbuf[i].cycles))
-  when defined(schedpad):
-   if schedPadEnabled:
-    # PROTOTYPE (-d:schedpad): pad to MAX_EVENTS so the payload has a FIXED
-    # length. This section is the only variable-length part of a GBA payload,
-    # and one event coming or going moves the 300 KB behind it by 9 bytes —
-    # which makes the rewind ring's XOR delta compare misaligned VRAM,
-    # framebuffer and save memory and light up ~184 KB that did not change.
-    # Costs (MAX_EVENTS - nevents) * 9 bytes, ~486 B on a 604 KB payload.
+  if pad:
     for i in s.nevents ..< MAX_EVENTS:
       w.write_u8(0'u8)
       w.write_u64(0'u64)
 
-proc load_from*(s: Scheduler; r: var Reader) =
+proc load_from*(s: Scheduler; r: var Reader; pad = false) =
   ## Restore scheduler state saved by save_to. Events are stored in the
   ## internal order (sorted descending by target cycle, soonest last), so
   ## they are restored verbatim.
@@ -242,11 +253,10 @@ proc load_from*(s: Scheduler; r: var Reader) =
       raise newException(StateError, "unknown scheduler event kind in state")
     let target = r.read_u64()
     s.evbuf[i] = Event(cycles: CycleCount(target), kind: EventType(kind))
-  when defined(schedpad):
-    if schedPadEnabled:
-      for i in n ..< MAX_EVENTS:
-        discard r.read_u8()
-        discard r.read_u64()
+  if pad:
+    for i in n ..< MAX_EVENTS:
+      discard r.read_u8()
+      discard r.read_u64()
   s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =

@@ -19,6 +19,7 @@
 import std/[os, strutils, times, monotimes, algorithm, math, bitops]
 import zippy
 import dingbat/gba/gba
+import dingbat/gb/gb
 import dingbat/common/input
 import dingbat/common/test_output
 import dingbat/common/rewind
@@ -202,20 +203,34 @@ proc main() =
   let statePath = if args.len > 3: args[3] else: ""
   let script = if args.len > 4: parse_script(args[4]) else: @[]
 
-  let emu = new_gba("", rom, run_bios = false, use_hle = true)
-  emu.test_output = new_test_output()
-  emu.post_init()
-  if statePath.len > 0 and not emu.load_state_bytes(readFile(statePath)):
-    echo "state REJECTED: ", statePath; quit(1)
-  when defined(schedpad):
-    # From here on every payload is fixed-length (the state above came from an
-    # unpadded build, hence the switch rather than a compile-time constant).
-    schedPadEnabled = true
+  let isGb = rom.splitFile.ext.toLowerAscii() in [".gb", ".gbc"]
+  var emu: GBA = nil
+  var gbEmu: GB = nil
+  if isGb:
+    gbEmu = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+    gbEmu.test_output = new_test_output()
+    gbEmu.post_init()
+    if statePath.len > 0 and not gbEmu.load_state_bytes(readFile(statePath)):
+      echo "state REJECTED: ", statePath; quit(1)
+  else:
+    emu = new_gba("", rom, run_bios = false, use_hle = true)
+    emu.test_output = new_test_output()
+    emu.post_init()
+    if statePath.len > 0 and not emu.load_state_bytes(readFile(statePath)):
+      echo "state REJECTED: ", statePath; quit(1)
 
   template step(f: int) =
-    for ev in script:
-      if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
-    emu.step_frame()
+    if isGb:
+      for ev in script:
+        if ev.frame == f: gbEmu.handle_input(ev.key, ev.pressed)
+      gbEmu.step_frame()
+    else:
+      for ev in script:
+        if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
+      emu.step_frame()
+
+  template payload_now(): string =
+    (if isGb: gbEmu.state_payload() else: emu.state_payload())
 
   for f in 0 ..< warmup: step(f)
 
@@ -233,13 +248,16 @@ proc main() =
   var deltaLen: Stat
   var prev = ""
   var pushes = 0
+  var lenMin = high(int)
+  var lenMax = 0
+  var lenChanges = 0
   var serT: Stat
 
   for i in 0 ..< frames:
     step(warmup + i)
     if (i + 1) mod REWIND_INTERVAL != 0: continue
     let t0 = getMonoTime()
-    let cur = emu.state_payload()
+    let cur = payload_now()
     serT.add((getMonoTime() - t0).inNanoseconds.float / 1e6)
     when defined(deltachar):
       if sectionNames.len == 0:
@@ -250,6 +268,9 @@ proc main() =
           sectionNames.add(nm & " [" & $(nxt - off) & "B]")
           sectionSpans.add((off, nxt))
         sectionNz = newSeq[Stat](sectionNames.len)
+    lenMin = min(lenMin, cur.len)
+    lenMax = max(lenMax, cur.len)
+    if prev.len > 0 and prev.len != cur.len: lenChanges.inc
     if prev.len == 0:
       prev = cur
       continue
@@ -324,6 +345,9 @@ proc main() =
        formatFloat(deltaLen.mean, ffDecimal, 0), " B"
   echo "  serialize: ", formatFloat(serT.mean, ffDecimal, 4), " ms/push"
   echo ""
+  echo "  payload length: min ", lenMin, " max ", lenMax,
+       "  (changed on ", lenChanges, " of ", pushes, " pushes",
+       (if lenChanges == 0: " — FIXED LENGTH" else: " — VARIABLE, deltas will misalign"), ")"
   echo "  --- delta shape (mean over pushes) ---"
   echo "    zero bytes:        ", formatFloat(zeroFrac.mean, ffDecimal, 2), "%"
   echo "    dirty 64 B blocks: ", formatFloat(dirty64.mean, ffDecimal, 2),

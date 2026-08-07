@@ -43,6 +43,9 @@ web/rom.gbc
 /dingbat_ppuobjlist_test
 /dingbat_savestate_compat_test
 /dingbat_rewind_test
+/dingbat_printer_test
+/rewind_codec
+/rewind_codec_nopad
 /dingbat_test_runner
 /dingbat_bench
 /dingbat_bench_native
