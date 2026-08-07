@@ -201,15 +201,38 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   var new_free_since: CycleCount
   if address == bus.rom_next_addr and (bus.prefetch_on or contiguous):
     if bus.prefetch_on and not contiguous:
+      # Same arithmetic as rom_access_cycles' prefetch-hit branch, with the
+      # `floor` term hoisted into the one case that can actually reach it.
+      #
+      # Write gap = now - rom_free_since and cap = 8*s (a full buffer). The
+      # general form is new_free_since = max(rom_free_since + need, done - cap)
+      # with done = now + cost, and for gap <= cap the max is ALWAYS the first
+      # term:
+      #   gap <  need   cost = need - gap, so done = rom_free_since + need
+      #                 exactly, and done - cap is below it.
+      #   gap >= need   cost = 1, so done - cap = rom_free_since + gap+1-cap,
+      #                 and gap <= cap makes gap+1-cap <= 1 <= need.
+      # Only a gap LONGER than a full buffer — the CPU off the ROM bus long
+      # enough that the prefetcher filled up and stopped — can push the floor
+      # above rom_free_since + need, which is exactly what the term is for.
+      # So the common path drops an add, a compare, a subtract and a max.
       let s = int(bus.wait16_s[page])
-      let credit = if now > bus.rom_free_since:
-                     min(int(now - bus.rom_free_since), 8 * s)
-                   else: 0
+      let cap = 8 * s
       let need = when is32: 2 * s else: s
-      cost = max(1, need - credit)
-      let done = now + CycleCount(cost)
-      let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
-      new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+      if now <= bus.rom_free_since:
+        # Waitloop fast-forward pushed rom_free_since past `now`: no credit.
+        cost = need
+        new_free_since = bus.rom_free_since + CycleCount(need)
+      else:
+        let gap = int(now - bus.rom_free_since)
+        if gap <= cap:
+          cost = max(1, need - gap)
+          new_free_since = bus.rom_free_since + CycleCount(need)
+        else:
+          cost = max(1, need - cap)
+          let done = now + CycleCount(cost)
+          let floor = if done > CycleCount(cap): done - CycleCount(cap) else: 0
+          new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
     else:
       cost = int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
       new_free_since = now + CycleCount(cost)
