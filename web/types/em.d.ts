@@ -55,6 +55,7 @@ interface EmscriptenModule {
   _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
   _wasm_state_error?(): number;
+  _wasm_state_error_kind?(): number;
   _wasm_load_state?(data: number, len: number, keepRewind: number): number;
   _benchFrames?(n: number): void;
   _isStopped?(): number;
@@ -76,6 +77,7 @@ interface EmscriptenModule {
   _setInput?(inputId: number, pressed: number): void;
   _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;
+  _setRewindEnabled?(on: number): void;
   _loop_tick?(): void;
   _runahead_tick?(n: number): void;
   _wasm_rewind_pop?(): number;
