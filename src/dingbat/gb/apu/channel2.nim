@@ -24,10 +24,15 @@ proc ch2_catchup_slow(ch: GbChannel2; gb: GB; observer_period: uint32) =
   let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
   if steps == 0: return
   ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  # see ch1_catchup_slow
+  ch.sample_bit = WAVE_DUTY2[ch.duty][ch.wave_duty_position]
   ch.next_step += steps * period
 
 proc ch2_catchup_at*(ch: GbChannel2; gb: GB; observer_period: uint32) {.inline.} =
   ## See ch1_catchup_at.
+  if not ch.enabled:
+    ch.next_step = GB_NO_STEP
+    return
   if ch.next_step > gb.scheduler.cycles: return
   ch2_catchup_slow(ch, gb, observer_period)
 
@@ -37,7 +42,7 @@ proc ch2_catchup*(ch: GbChannel2; gb: GB) {.inline.} =
 proc ch2_dac_input*(ch: GbChannel2): uint8 =
   ## Current 4-bit digital output (0-15), pre-DAC — see ch1_dac_input.
   if ch.enabled and ch.dac_enabled:
-    uint8(int(WAVE_DUTY2[ch.duty][ch.wave_duty_position]) * int(ch.current_volume)) and 0x0F
+    uint8(int(ch.sample_bit) * int(ch.current_volume)) and 0x0F
   else: 0'u8
 
 proc ch2_get_amplitude*(ch: GbChannel2): float32 =
@@ -70,11 +75,14 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
       if ch.length_counter == 0: ch.enabled = false
     ch.length_enable = len_enable
     if (val and 0x80) != 0:
+      let was_enabled = ch.enabled          # see ch1_write's trigger arm
       if ch.dac_enabled: ch.enabled = true
       if ch.length_counter == 0:
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
+      if not was_enabled: ch.sample_bit = 0
+      ch.next_step = gb_pulse_trigger_deadline(gb, ch2_period(ch, gb),
+                                               was_enabled)
       init_volume_envelope(ch)
   else: discard

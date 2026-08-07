@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-03 19:10:40*
+*Generated: 2026-08-07 14:15:19*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3618/5005 passed.**
+**3626/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -1254,9 +1254,9 @@ All 6 tests passed.
 | serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
-## sound (83/116 passed)
+## sound (91/116 passed)
 
-83/116 tests passed, 33 failed:
+91/116 tests passed, 25 failed:
 
 | Test | Result |
 |------|--------|
@@ -1282,14 +1282,6 @@ All 6 tests passed.
 | sound/ch3_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
 | sound/ch3_late_div_write_nr52_1a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
 | sound/ch3_late_div_write_nr52_2a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_reset_nr4init_freq7fd_read_ff30_2_dmg08_outFF_cgb04c_out10 [dmg] | got 10, expected FF |
-| sound/ch3_reset_nr4init_freq7fd_read_ff30_3_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fd_write_ff30_2_dmg08_out32_cgb04c_out00 [dmg] | got 00, expected 32 |
-| sound/ch3_reset_nr4init_freq7fd_write_ff30_4_dmg08_out32_cgb04c_out00 [dmg] | got 00, expected 32 |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_1_dmg08_outFF_cgb04c_out10 [dmg] | got 10, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_2_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_3_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_4_dmg08_outFF_cgb04c_out54 [dmg] | got 54, expected FF |
 | sound/ch4_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 | sound/ch4_late_div_write_nr52_1a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 | sound/ch4_late_div_write_nr52_2a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
