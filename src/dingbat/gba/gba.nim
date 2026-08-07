@@ -378,12 +378,19 @@ type
     # testing each one's enable flag + pointer + address every instruction
     # cost more than the mixing itself. Instead every arming site calls
     # refresh_hle_hook, which folds them into a single sentinel:
-    #   hle_hook_pc  -- the pre-pipeline PC that fires a hook, or NO_HLE_HOOK
-    #   hle_probing  -- true only during the bounded MP2K learning probe
-    # Both are false/sentinel whenever audio HLE is off, so the non-HLE path
-    # pays one load and one perfectly-predicted branch.
-    hle_hook_pc*:                uint32
-    hle_probing*:                bool
+    #   0             -- nothing armed (and the zero-init value, so a freshly
+    #                    constructed CPU is already in the disarmed state)
+    #   NO_HLE_HOOK   -- the bounded MP2K learning probe is running
+    #   anything else -- the pre-pipeline PC that fires a hook
+    # One word, so the non-HLE path really is one load and one
+    # perfectly-predicted branch. It was two of each while the probe lived in
+    # a separate bool, and that second pair measured 2.5% of all retired
+    # instructions on FireRed with audio HLE OFF.
+    #
+    # The three states cannot collide. A hook PC is a RAM instruction address,
+    # so it is never 0; and the pre-pipeline PC can never be NO_HLE_HOOK,
+    # which is the assumption the sentinel already rested on.
+    hle_gate*:                   uint32
 
   SpritePixel* = object
     priority*: uint16
