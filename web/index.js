@@ -2993,15 +2993,43 @@ var gbaRunBios = true;
 // Presentation-side only (the RAF loop polls _wasm_rumble and reacts here),
 // so unlike its siblings it has no wasm setter in applySystemSettings.
 var gbRumble = true;
+// Rewind, on by default — matching the native `rewind` config default, and
+// matching what every existing web install already does (the ring used to be
+// allocated unconditionally). A "system" record written before this setting
+// existed has no rewindOn key, and loadSystemSettings leaves this `true`
+// rather than reading `undefined`, so nobody loses rewind by upgrading.
+//
+// Off is a real saving, not a hidden button: the wasm side stops allocating
+// the ring, so loop_tick's per-interval snapshot + thumbnail never runs.
+// Measured at ~0.8 ms per push (one per 10 frames), i.e. 8% of loop_tick on
+// the Good Boy Galaxy demo — see the bench note in the settings markup.
+var rewindOn = true;
 
 const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
 const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
+const rewindToggle = /** @type {HTMLInputElement} */ (document.getElementById("rewind-toggle"));
+
+// Every rewind affordance is hidden by one body class (see body.rewind-off in
+// styles.css) so there is a single place to add the next one to. Turning it
+// off mid-session also has to shut the film strip if it happens to be open —
+// the ring behind it is about to go away.
+const applyRewindUI = () => {
+  document.body.classList.toggle("rewind-off", !rewindOn);
+  if (!rewindOn) {
+    setRewindHeld(false);          // a held rewind must not survive the switch
+    closeRewindScrubber();
+  }
+};
 
 const applySystemSettings = () => {
   if (typeof Module === "undefined") return;
   if (Module._wasm_set_gb_renderer) Module._wasm_set_gb_renderer(gbFifo ? 1 : 0);
   if (Module._wasm_set_gba_bios_mode) Module._wasm_set_gba_bios_mode(gbaBiosMode);
   if (Module._wasm_set_gba_run_bios) Module._wasm_set_gba_run_bios(gbaRunBios ? 1 : 0);
+  // Live in both directions: off drops the ring now, on allocates a fresh
+  // (empty) one for the session already running. No reload, so no
+  // "takes effect next launch" note is owed here.
+  if (Module._setRewindEnabled) Module._setRewindEnabled(rewindOn ? 1 : 0);
 };
 
 const syncSystemSettingsUI = () => {
@@ -3013,11 +3041,14 @@ const syncSystemSettingsUI = () => {
   }
   gbaRunBiosToggle.checked = gbaRunBios;
   gbRumbleToggle.checked = gbRumble;
+  rewindToggle.checked = rewindOn;
+  applyRewindUI();
 };
 
 const saveSystemSettings = () => {
   applySystemSettings();
-  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios, gbRumble });
+  applyRewindUI();
+  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn });
 };
 
 for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
@@ -3048,6 +3079,11 @@ gbRumbleToggle.addEventListener("change", () => {
   saveSystemSettings();
 });
 
+rewindToggle.addEventListener("change", () => {
+  rewindOn = rewindToggle.checked;
+  saveSystemSettings();
+});
+
 const loadSystemSettings = async () => {
   let s = await dbGet("system");
   if (s) {
@@ -3055,6 +3091,10 @@ const loadSystemSettings = async () => {
     if ([0, 1, 2].includes(s.gbaBiosMode)) gbaBiosMode = s.gbaBiosMode;
     if (typeof s.gbaRunBios === "boolean") gbaRunBios = s.gbaRunBios;
     if (typeof s.gbRumble === "boolean") gbRumble = s.gbRumble;
+    // Deliberately only assigns for a real boolean: a record saved before this
+    // setting existed leaves rewindOn at its `true` default instead of
+    // becoming undefined, so upgrading never silently turns rewind off.
+    if (typeof s.rewindOn === "boolean") rewindOn = s.rewindOn;
   }
   syncSystemSettingsUI();
   applySystemSettings();
@@ -4076,7 +4116,13 @@ const openReportModal = () => {
   reportSlider.max = String(reportSamples); // 0..N; right end (max) = now
   reportSlider.value = String(reportSamples);
   reportScrub.classList.toggle("disabled", !currentOriginalName);
-  reportScrubHint.hidden = reportSamples > 0;
+  // The timeline itself is hidden by body.rewind-off; the hint takes over and
+  // says why, instead of leaving a slider that can only sit at "now" and an
+  // invitation to enable a setting from a modal that cannot reach it.
+  reportScrubHint.textContent = rewindOn
+    ? "Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline."
+    : "Rewind is off, so only this moment can be attached. Turn Rewind on in Settings to pick an earlier one.";
+  reportScrubHint.hidden = rewindOn && reportSamples > 0;
   updateReportPreview();
   reportModal.classList.add("open");
   trapFocus(reportModal);
@@ -4478,6 +4524,7 @@ rwSlider.addEventListener("input", () => {
 
 const openRewindScrubber = () => {
   menuDropdown.hidden = true;
+  if (!rewindOn) return;   // no ring, so the strip would only ever be empty
   if (!currentOriginalName || !speedControlsOk()) return;
   if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
   rwWasPaused = paused;
@@ -4504,7 +4551,7 @@ const openRewindScrubber = () => {
   rwHint.textContent =
     rwSamples > 1
       ? "Drag the strip, or the bar for longer jumps. Everything right of the line is discarded."
-      : "No rewind history yet — it builds up as you play. Enable Rewind in Settings if it is off.";
+      : "No rewind history yet — it builds up as you play.";
   rwOldest.textContent = rwSamples > 1 ? rwFmtDuration(rwTenthsAt(rwSamples - 1)) + " ago" : "";
   rewindModal.classList.add("open");
   trapFocus(rewindModal);
@@ -5830,7 +5877,8 @@ const resetAllSettings = async () => {
 
   // System (GB renderer / GBA BIOS mode + intro / rumble)
   gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
-  syncSystemSettingsUI();
+  rewindOn = true;
+  syncSystemSettingsUI();   // also re-applies the rewind-off body class
   applySystemSettings();
 
   // Audio (volume / mute / pitch-correct fast-forward)
@@ -6787,9 +6835,13 @@ const frameStepButton = document.getElementById("frame-step");
 
 // Rewind: hold to step history backward (the tick loop pops snapshots at a
 // fixed cadence while held)
+// Gated here rather than at each caller: the button gesture, the ` key and
+// netplay's teardown all funnel through this, and with rewind off there is no
+// ring to pop from — the tick loop would burn 30 pops a second on nothing.
+// Only turning it ON is refused; turning it off always works.
 const setRewindHeld = (on) => {
-  rewindHeld = on;
-  rewindButton.classList.toggle("active", on);
+  rewindHeld = on && rewindOn;
+  rewindButton.classList.toggle("active", rewindHeld);
 };
 
 // The button's first job is the hold, and the hold is instant: pointerdown
@@ -7001,6 +7053,9 @@ const shortcutKeyHandler = (e, down) => {
         handled = true;
         break;
       }
+      // With rewind switched off the key is not ours: fall through unhandled
+      // rather than swallowing ` for a feature that is not running.
+      if (!rewindOn) break;
       if (!kbRewindHeld) {
         kbRewindHeld = true;
         setRewindHeld(true);
