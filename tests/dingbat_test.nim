@@ -1706,6 +1706,7 @@ proc main() =
   var link_contract = lcMulti
   var attach_after = 10
   var force_cgb = false
+  var force_dmg = false    # --dmg: run a CGB-flagged cart on DMG hardware
   var no_save = false      # --nosave: blank cart RAM and detach the .sav file
   var screen_check = false # --screen-check: panel settled + not blank (see below)
   var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
@@ -1779,6 +1780,8 @@ proc main() =
         color_mode = true
       of "cgb":
         force_cgb = true
+      of "dmg":
+        force_dmg = true
       of "nosave":
         no_save = true
       of "screen-check":
@@ -1952,8 +1955,19 @@ proc main() =
       echo screenshot_path
       quit(0)
   else:
+    # --mode=screenshot is the mode external screenshot suites drive, and every
+    # one of them names the DEVICE per row, not per cart. `--cgb` says "run
+    # this on a CGB"; the absence of it has to mean "run this on a DMG", or a
+    # row whose cart carries $0143 = $80 silently gets scored on the wrong
+    # hardware — which is what was happening to both ashiepaws ROMs, whose
+    # output was byte-identical under all four flag combinations. This is the
+    # contract --mode=gambatte already has (`force_dmg = not cgb`, and for the
+    # same reason: nearly every gambatte ROM ships a CGB header even for its
+    # dmg08 half). Other modes keep the old behaviour, where the cart header
+    # picks the device unless --dmg says otherwise.
+    let dmg = force_dmg or (mode == tmScreenshot and not force_cgb)
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
-                     force_cgb = force_cgb)
+                     force_cgb = force_cgb, force_dmg = dmg)
     if model_override.len > 0:
       emu.boot_model = case model_override
         of "dmg0": bmDmg0
