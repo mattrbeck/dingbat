@@ -339,6 +339,11 @@ type AppState = ref object
   pending_save:    bool
   pending_load:    bool
   pending_step:    bool  # frame advance: run exactly one frame while paused
+  # A refused save state used to be an echo to stdout and a screen that did not
+  # change — the user pressed Load and nothing happened. This is what the app
+  # says instead; render_state_notice draws it and it clears on dismissal.
+  state_notice:      string
+  state_notice_hint: string
   rewind:          Rewind
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
@@ -623,6 +628,30 @@ proc load_state_slot(slot: int): bool =
     of ekNone: false
   if result: echo "State loaded: ", path
 
+proc state_reject_sentence(): string =
+  ## One sentence per refusal cause, saying what to do about it. The core
+  ## classifies the refusal (StateRejectKind); this never echoes raw exception
+  ## text at the user, and never collapses two causes onto one message.
+  case last_state_reject_kind
+  of srkNotAState:
+    "That file isn't a dingbat save state."
+  of srkWrongCore:
+    "That save state is for the other system - a Game Boy state can't load " &
+    "into a GBA game, or the reverse."
+  of srkWrongRom:
+    "That save state belongs to a different game. Load the game it was made " &
+    "in, then try again."
+  of srkTooNew:
+    "That save state was made by a newer version of dingbat than this one. " &
+    "Update dingbat and try again."
+  of srkTruncated:
+    "That save state file is incomplete - the copy or download was cut short."
+  of srkCorrupt:
+    "That save state is damaged and can't be loaded. The game is still " &
+    "running and nothing was changed."
+  of srkNone:
+    "That save state couldn't be loaded."
+
 proc delete_state_slot(slot: int) =
   let path = state_file_path(slot)
   if path.len > 0 and fileExists(path):
@@ -678,7 +707,12 @@ proc process_pending_state() =
     app.save_states.mark_stale()
   if app.pending_load:
     app.pending_load = false
-    discard load_state_slot(0)
+    # Quick Load is a keypress with no widget behind it, so a discarded bool
+    # here meant the user pressed the key and NOTHING happened — not even a
+    # line they would see. It is the one outcome a refusal must never produce.
+    if not load_state_slot(0):
+      app.state_notice = state_reject_sentence()
+      app.state_notice_hint = last_state_error
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
@@ -901,6 +935,48 @@ proc show_menu_bar(): bool =
 
 proc render_link_window()  # defined below, near the network-link procs
 
+proc render_state_notice() =
+  ## What the app says when a save state is refused. Before this, a refused
+  ## Quick Load was an echo to stdout and a screen that did not change: the
+  ## user pressed the key and nothing happened, which is the worst outcome
+  ## available. Modal on purpose — it is always the direct result of something
+  ## the user just did, so it never appears unbidden.
+  if app.state_notice.len == 0: return
+  const POPUP = "State##notice"
+  if not igIsPopupOpen_Str(POPUP, 0):
+    igOpenPopup_Str(POPUP, 0)
+  var center = ImVec2(x: 0, y: 0)
+  let vp = igGetMainViewport()
+  if vp != nil:
+    when compiles(ImGuiViewport_GetCenter(addr center, vp)):
+      ImGuiViewport_GetCenter(addr center, vp)
+    else:
+      let c = ImGuiViewport_GetCenter(vp)
+      center = ImVec2(x: c.x, y: c.y)
+  igSetNextWindowPos(center, cint(ImGui_Cond_Appearing), ImVec2(x: 0.5, y: 0.5))
+  igSetNextWindowSizeConstraints(ImVec2(x: 380, y: 0), ImVec2(x: 560, y: 400),
+                                 nil, nil)
+  var stay_open = true
+  if igBeginPopupModal(POPUP, addr stay_open,
+                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
+    igPushTextWrapPos(0)
+    igTextUnformatted(cstring(app.state_notice), nil)
+    if app.state_notice_hint.len > 0:
+      igSpacing()
+      # The detail line is for someone reporting a bug, not for reading first:
+      # dimmed, below, and never the whole message.
+      igTextDisabled(cstring(app.state_notice_hint))
+    igPopTextWrapPos()
+    igSpacing()
+    if igButton("OK", ImVec2(x: 120, y: 0)):
+      app.state_notice = ""
+      app.state_notice_hint = ""
+      igCloseCurrentPopup()
+    igEndPopup()
+  if not stay_open:
+    app.state_notice = ""
+    app.state_notice_hint = ""
+
 proc render_imgui() =
   # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
   # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
@@ -915,7 +991,12 @@ proc render_imgui() =
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
-     not app.save_states.window:
+     not app.save_states.window and
+     # A refused Quick Load is a keypress, and the menu bar hides itself after
+     # three idle seconds — exactly the state the keyboard is used in. Without
+     # this the notice would be skipped and the refusal would be silent again,
+     # which is the whole bug it exists to fix.
+     app.state_notice.len == 0:
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -1101,6 +1182,8 @@ proc render_imgui() =
   # File explorer
   app.fe.render("ROM", open_rom, ["gba", "gb", "gbc", "zip"], proc(path: string) =
     load_rom(path))
+
+  render_state_notice()
 
   # Config editor
   app.ce.render()
@@ -1918,9 +2001,11 @@ proc main() =
     # from a newer-build file from a corrupt section; discarding the bool
     # left the user with a silently unchanged screen.
     if not load_state_slot(slot):
-      app.save_states.notice =
-        if last_state_error.len > 0: last_state_error
-        else: "Could not load that slot."
+      # Same sentence-per-cause table the Quick Load path uses, instead of the
+      # core's raw wording. The detail stays available in the log.
+      app.save_states.notice = state_reject_sentence()
+      if last_state_error.len > 0:
+        echo "Slot load refused: ", last_state_error
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
 
   # Default the Join address to localhost (2 instances on one machine).
