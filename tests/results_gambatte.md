@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-07 14:06:22*
+*Generated: 2026-08-07 14:57:40*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3625/5005 passed.**
+**3656/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -270,20 +270,20 @@ All 8 tests passed.
 | Test | Result |
 |------|--------|
 | dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 429/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 289/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 5/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 8/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 8/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 8/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 441/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 437/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 712/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 725/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 721/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 860/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1284/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 288/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 288/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 290/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 4/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 4/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 6/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 8/23040 pixels differ |
 
 ## enable_display (135/184 passed)
 
@@ -1253,45 +1253,17 @@ All 6 tests passed.
 | serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
-## sound (83/116 passed)
+## sound (111/116 passed)
 
-83/116 tests passed, 33 failed:
+111/116 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
-| sound/ch1_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
 | sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
-| sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
-| sound/ch1_init_reset_sweep_counter_timing_nr52_2_dmg08_out0_cgb04c_out1 [cgb] | got 0, expected 1 |
 | sound/ch1_init_reset_sweep_counter_timing_nr52_3_dmg08_out0_cgb04c_out1 [cgb] | got 0, expected 1 |
-| sound/ch1_late_div_write_nr52_1a_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
-| sound/ch1_late_div_write_nr52_2a_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
-| sound/ch2_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_init_reset_length_counter_timing_nr52_4_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| sound/ch2_late_div_write_nr52_1a_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_2a_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_reset_nr52_1a_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_late_reset_nr52_2a_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| sound/ch2_late_reset_nr52_ds_1a_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_late_reset_nr52_ds_2a_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_reset_length_counter_timing_nr52_ds_1_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch3_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_late_div_write_nr52_1a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_late_div_write_nr52_2a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_reset_nr4init_freq7fd_read_ff30_2_dmg08_outFF_cgb04c_out10 [dmg] | got 10, expected FF |
-| sound/ch3_reset_nr4init_freq7fd_read_ff30_3_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fd_write_ff30_2_dmg08_out32_cgb04c_out00 [dmg] | got 00, expected 32 |
-| sound/ch3_reset_nr4init_freq7fd_write_ff30_4_dmg08_out32_cgb04c_out00 [dmg] | got 00, expected 32 |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_1_dmg08_outFF_cgb04c_out10 [dmg] | got 10, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_2_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_3_dmg08_outFF_cgb04c_out32 [dmg] | got 32, expected FF |
-| sound/ch3_reset_nr4init_freq7fe_read_ff30_4_dmg08_outFF_cgb04c_out54 [dmg] | got 54, expected FF |
-| sound/ch4_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
-| sound/ch4_late_div_write_nr52_1a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
-| sound/ch4_late_div_write_nr52_2a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
+| sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
 ## speedchange (112/208 passed)
 
@@ -1472,7 +1444,7 @@ All 6 tests passed.
 | sprites/space/10spritesPrLine_wx3_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx4_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx5_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/10spritesPrLine_wx6_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| sprites/space/10spritesPrLine_wx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/sprite_late_disable_spx18_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_disable_spx19_1_dmg08_out0 [dmg] | got 3, expected 0 |
@@ -1546,9 +1518,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (322/476 passed)
+## window (325/476 passed)
 
-322/476 tests passed, 154 failed:
+325/476 tests passed, 151 failed:
 
 | Test | Result |
 |------|--------|
@@ -1687,10 +1659,7 @@ All 20 tests passed.
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
-| window/on_screen/weon_wx18_weoff_weon_wx80 [dmg, png] | 8420/23040 pixels differ |
-| window/on_screen/weon_wx18_weoff_weon_wx80 [cgb, png] | 8420/23040 pixels differ |
-| window/on_screen/wx17_weoff_wxA5_weon [dmg, png] | 6784/23040 pixels differ |
-| window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 5824/23040 pixels differ |
+| window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |
 | window/on_screen/wxA6_3 [dmg, png] | 10780/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_1 [dmg, png] | 14624/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_2 [dmg, png] | 14624/23040 pixels differ |
