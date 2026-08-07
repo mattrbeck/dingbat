@@ -1,9 +1,13 @@
 # SameSuite APU: what its sources assert, and where dingbat stands
 
-Score: **49/70** (div 5/5, channel_1 12/21, channel_2 12/15, channel_3 14/16,
-channel_4 6/13), up from 10/70. With both blargg sound suites green (dmg_sound
-12/12, cgb_sound 12/12) the APU tally across all three is **73/94**, up from
+Score: **57/70** (div 5/5, channel_1 15/21, channel_2 15/15, channel_3 15/16,
+channel_4 7/13), up from 10/70. With both blargg sound suites green (dmg_sound
+12/12, cgb_sound 12/12) the APU tally across all three is **81/94**, up from
 29/94.
+
+The nine per-revision ROMs are now scored on the revision their filename names
+(`--model=cgb0B` and friends), not on the default; see
+`docs/gb-hardware-revisions.md`.
 
 Run them with:
 
@@ -103,27 +107,44 @@ are shootout rows (SameSuite APU contributes 61). Sorted by channel.
 | `channel_1_volume_div` | "The volume envelope is triggered by the DIV register after it ticks the APU (8 * (NR12 & 7)) times (at 512Hz)" | **matches** |
 | `channel_1_nrx2_speed_change` | "the envelope speed can be changed while it's active, and the change takes effect after the next time it ticks. Enabling and disabling the envelope takes effect instantly. Enabling the envelope trigger an APU bug - in the next *even* DIV-APU tick, the APU will tick the volume envelope of that apropriate channel, even if it would not tick volume envelope at that tick otherwise" | **matches** — the first two sentences were already right; the glitch is `GbVolumeEnvChannel.env_extra_tick`. "Even DIV-APU tick" is dingbat's ODD `frame_sequencer_stage`: hardware's counter increments before the step, so its tick 2 is dingbat's step 1. Fitting the parity the other way passes tests 3/4/5 but fails 6/7, which is why those two exist |
 | `channel_1_restart_nrx2_glitch` | "restarting the channel after triggering the NRx2 write glitch works as expected" | **matches** |
-| `channel_1_nrx2_glitch` | "This tests the NRx2 write glitch ('Zombie Mode'). **It appears to be different across revisions**" | **DOES NOT MATCH — deliberately.** See below |
-| `channel_1_volume` | "Attempts to change the volume of channel 1 without triggering the NRx2 write glitch" | **does not match** (78/128 bytes). Same mechanism as above |
+| `channel_1_nrx2_glitch` | "This tests the NRx2 write glitch ('Zombie Mode'). **It appears to be different across revisions**" | **matches**, 16/16 bytes. See below |
+| `channel_1_volume` | "Attempts to change the volume of channel 1 without triggering the NRx2 write glitch" | **matches**, 128/128 bytes. Same mechanism |
 | `channel_1_stop_div` | "Channel 1 behave similarly to channel 3, but with a smaller length range. See channel_3_stop_div" | **matches**, and it came free with the DIV-APU work |
 | `channel_1_sweep` | *(no header)* | **does not match**, 136/144 bytes: one 16-byte window where the channel should already be silent. Nothing in the source says why |
 | `channel_1_sweep_restart`, `_2` | "Several tests involving restarting the channel while sweep is active" / "Part 2" | **does not match** (85/144, 95/128). No cycle-level assertion to derive from |
-| `channel_1_extra_length_clocking-cgb0B` | quotes the extra-length-clocking rule in full, then: "On revisions <= CPU CGB B, the length counter only has to have been disabled before; the current length enable state doesn't matter… fixed on CPU CGB C" | **correctly does not match** — dingbat models CGB ABCDE. Not a shootout row |
+| `channel_1_extra_length_clocking-cgb0B` | quotes the extra-length-clocking rule in full, then: "On revisions <= CPU CGB B, the length counter only has to have been disabled before; the current length enable state doesn't matter… fixed on CPU CGB C" | **matches on `--model=cgb0B`** (`GbQuirks.length_clock_any_nrx4`), and correctly does NOT on the default. Not a shootout row |
 | `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | *(no header; three ROMs, three CPU revisions)* | at most one can pass on any single model. Not shootout rows |
 
-### On "Zombie Mode", and why it stays as it is
+### On "Zombie Mode" — it was never revision-dependent, and it is now fixed
 
-The DMG rule usually quoted (Pan Docs, Obscure Behavior) is: +1 when the old
-envelope period was zero and the envelope was still updating, ELSE +2 when the
-old direction was decrease. dingbat instead adds +1 in both cases. That variant
-was **tried and measured**: it takes `channel_1_volume` from 78/128 to 92/128
-bytes, breaks two rows the shared +1 already gets right, and passes neither
-version of the test. `channel_1_nrx2_glitch`'s own header says the glitch
-"appears to be different across revisions", so these are two revisions, not one
-right answer and one wrong one. Left alone; the measurement is recorded at
-`write_NRx2`. **4 rows** (`nrx2_glitch` ×2, `volume` ×2) are parked here.
+Two rounds parked these 4 rows behind `channel_1_nrx2_glitch`'s "appears to be
+different across revisions". That sentence is true and it is not an excuse:
+`apu/README.md`'s To Do says **"Currently, only revision E is tested and
+documented"**, and its Results say CPU-CGB-E passes everything. One ROM, one
+answer, and it is the answer for the revision dingbat is scored against
+everywhere else.
 
-## Channel 3 (13 shootout rows) — 12/13, and 14/16 of the full suite
+The rule quoted from Pan Docs (+1 when the old period was zero and the envelope
+was still updating, ELSE +2 when the old direction was decrease) is **one
+column of a three-column table**, and the column is selected by the value being
+WRITTEN. Solving `channel_1_volume`'s 128-byte `CorrectResults` for the
+increment applied before the direction flip:
+
+|  | new dec, per 0 | new dec, per != 0 | new inc |
+|---|---|---|---|
+| old per 0, dec  | 0 | −1 | +1 |
+| old per!=0, dec | 0 |  0 | +2 |
+| old per 0, inc  | 0 | +1 | +1 |
+| old per!=0, inc | 0 |  0 |  0 |
+
+The Pan Docs rule is the right-hand column; the old `+1` in both cases was a
+third variant. `channel_1_nrx2_glitch` is the cross-check, not a second fit —
+its write lands 1024 M-cycles after the trigger instead of 2 and its old
+periods are 2 and 7 — and all 16 of its bytes fall out of the same table.
+**144/144 bytes on both ROMs, both pulse channels; 4 shootout rows.** The table
+is in the comment at `write_NRx2`.
+
+## Channel 3 (13 shootout rows) — 12/13, and 15/16 of the full suite
 
 | source | assertion | dingbat |
 |---|---|---|
@@ -140,7 +161,7 @@ right answer and one wrong one. Left alone; the measurement is recorded at
 | `channel_3_wave_ram_sync` | "the value read from PCM34 and value read from the wave RAM are synced" | **matches** |
 | `channel_3_and_glitch` | "Channel 3 is not affected by the PCM34 AND glitch in neither single not double speed mode" | **matches** — dingbat has no AND glitch to be affected by. Worth recording that a *pass* here is the absence of a behaviour, so it will silently start failing if anyone adds one |
 | `channel_3_wave_ram_dac_on_rw` | "reading and writing to wave RAM while CH3's DAC is active but the channel is inactive" | **matches**. Not a shootout row |
-| `channel_3_extra_length_clocking-cgb0/-cgbB` | as the pulse version, plus "On CPU CGB, CH3 requires ONE write to disable the channel when the length counter is 1. On CPU CGB B, CH3 requires TWO" | `-cgb0` is a shootout row and **does not match**: dingbat models CGB ABCDE and this ROM wants CGB 0. The one SameSuite CH3 row still red |
+| `channel_3_extra_length_clocking-cgb0/-cgbB` | as the pulse version, plus "On CPU CGB, CH3 requires ONE write to disable the channel when the length counter is 1. On CPU CGB B, CH3 requires TWO" | `-cgb0` **matches on `--model=cgb0`**. `-cgbB` still red: its two tables differ by exactly one write per row, but the header states the observable and not the mechanism, and two mechanisms fit it identically — see `docs/gb-hardware-revisions.md` §3.2. Neither is a shootout row |
 
 **The one line that fixed seven of these** is not from SameSuite at all — it is
 Pan Docs, Power Control, on what a power-ON resets: "the frame sequencer is
@@ -288,7 +309,10 @@ gambatte is +20 overall.
 
 Six fields have been added across the two rounds and none is in the save state:
 `GbApu.tick_phase`, `GbApu.div_skip`, `GbChannel1/2.sample_bit`,
-`GbChannel3.wave_fetched`, `GbVolumeEnvChannel.env_extra_tick`. Each is
+`GbChannel3.wave_fetched`, `GbVolumeEnvChannel.env_extra_tick`. **A seventh
+joins them from outside the APU: `GB.revision`** (one byte, wanted next to
+`cgb_enabled` in `GB_SEC_MEM`, older states reading back the default) — see
+`docs/gb-hardware-revisions.md` §2.5 for what breaks until the bump. Each is
 refreshed within one duty period, one APU power cycle or one 512 Hz step of a
 state load; none is CPU-visible except through PCM12/PCM34; and each is written
 only by a register write or a power-on, so a rollback snapshot that replays that

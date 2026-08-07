@@ -540,6 +540,48 @@ type
     bmCgbABCDE   # CGB rev A..E   (dingbat default CGB)
     bmAgb        # Game Boy Advance / SP running a GB(C) cart
 
+  GbRevision* = enum
+    ## The silicon revision the machine is. This is FINER than GbBootModel,
+    ## which is a boot-handoff *table* selector: mooneye ships one
+    ## `boot_regs-cgbABCDE` and one `boot_regs-dmgABC`, so five CGB revisions
+    ## and three DMG revisions hand off identical registers while behaving
+    ## differently once running (SameSuite's extra-length-clocking split at CGB
+    ## C, mooneye `stat_irq_blocking`'s "pass: DMG ABC / fail: DMG 0"). Every
+    ## GbBootModel value is reachable from some revision, so the two are not
+    ## independent axes -- gb_set_revision derives the boot model, and nothing
+    ## sets the boot model to something the revision disagrees with.
+    ##
+    ## Do not branch on this in emulation code. Resolve it once, at
+    ## construction, into GbQuirks; see gb_quirks_for.
+    grDmg0, grDmgABC, grMgb, grSgb, grSgb2
+    grCgb0, grCgbAB, grCgbC, grCgbD, grCgbE
+    grAgb
+
+  GbQuirks* = object
+    ## Per-revision behaviour, resolved from GbRevision once by gb_quirks_for
+    ## and thereafter read as a plain bool off the GB the caller already has.
+    ##
+    ## Flags, not a revision comparison, for three reasons: a flag names the
+    ## behaviour at the site that implements it (`if gb.quirks.x` reads as an
+    ## assertion about hardware, `if gb.revision <= grCgbAB` reads as trivia);
+    ## two revisions that share a behaviour share a flag instead of repeating a
+    ## set literal; and a comparison in a hot path is a range check where a
+    ## flag is a load. Every flag is FALSE on the default revisions
+    ## (grCgbE / grDmgABC), so the default machine is byte-identical to the one
+    ## dingbat shipped before revisions existed.
+    length_clock_any_nrx4*: bool
+      ## CGB 0 and CGB A/B. SameSuite `*_extra_length_clocking-cgb0B.asm`:
+      ## "Extra length clocking occurs when writing to NRx4 when the frame
+      ## sequencer's next step is one that doesn't clock the length counter.
+      ## In this case, if the length counter was PREVIOUSLY disabled and now
+      ## enabled and the length counter is not zero, it is decremented. On
+      ## revisions <= CPU CGB B, the length counter only has to have been
+      ## disabled before; the current length enable state doesn't matter. This
+      ## breaks at least one game (Prehistorik Man), and was fixed on CPU CGB
+      ## C." So the extra clock drops its `and len_enable` term: the ROMs write
+      ## NRx4 = $00 (CH3: $03), with bit 6 clear, and still expect the counter
+      ## to move.
+
   Mbc* = ref object of RootObj
     gb_ref* {.cursor.}: GB   # back-ref to the owning GB; non-owning to avoid a
                              # reference cycle (the GB owns the cartridge)
@@ -1328,6 +1370,25 @@ type
     ram_size*:       int
     cgb_flag*:       CgbFlag
     boot_model*:     GbBootModel
+    # The silicon revision, and the behaviour resolved from it. Set once by
+    # gb_set_revision (new_gb, then any --model= override) and never touched
+    # again, which is why the emulation code can read `quirks` without a
+    # dispatch and why neither field is in the save state.
+    #
+    # NOT SERIALIZED, deliberately, and the same is true of `boot_model` next
+    # door: both are construction-time properties of the *machine*, and a
+    # state is loaded into a machine that was already constructed. The
+    # consequence is real but narrow -- a state saved on `--model=cgb0` and
+    # loaded by a default-revision process runs the loaded state on a CGB E,
+    # silently. Nothing in the shipping frontends can reach a non-default
+    # revision (there is no UI for it), so today this is only reachable from
+    # the test harness. Serializing `revision` (one byte, next to
+    # `cgb_enabled` in GB_SEC_MEM, with older states reading back the default)
+    # costs a GB payload revision bump, which is being taken once for a batch;
+    # see notes/samesuite-apu.md "Unserialized state". IF A GB PAYLOAD BUMP
+    # HAPPENS FOR ANY OTHER REASON, ADD THIS ONE.
+    revision*:       GbRevision
+    quirks*:         GbQuirks
     rom_title*:      string
     scheduler*:      Scheduler
     cpu*:            GbCpu
@@ -2110,6 +2171,61 @@ include cb_opcodes
 include opcodes
 include cpu
 
+# ==================== HARDWARE REVISION ====================
+
+proc gb_quirks_for*(rev: GbRevision): GbQuirks =
+  ## The whole revision -> behaviour table, in one place. A revision that names
+  ## no flag here behaves exactly like the default machine; adding a revision
+  ## therefore costs nothing until some test ROM proves it differs.
+  GbQuirks(
+    length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
+  )
+
+proc gb_boot_model_for*(rev: GbRevision): GbBootModel =
+  ## Which boot-handoff table a revision uses. Many-to-one on purpose: mooneye
+  ## ships one `boot_regs-` ROM per group of revisions that hand off the same
+  ## registers, and this is that grouping.
+  case rev
+  of grDmg0:  bmDmg0
+  of grDmgABC: bmDmgABC
+  of grMgb:   bmMgb
+  of grSgb:   bmSgb
+  of grSgb2:  bmSgb2
+  of grCgb0:  bmCgb0
+  of grCgbAB, grCgbC, grCgbD, grCgbE: bmCgbABCDE
+  of grAgb:   bmAgb
+
+proc gb_set_revision*(gb: GB; rev: GbRevision) =
+  ## The only way to change the machine's identity. Call before post_init:
+  ## skip_boot reads boot_model, and the quirks are read from the first
+  ## register write onward.
+  gb.revision   = rev
+  gb.boot_model = gb_boot_model_for(rev)
+  gb.quirks     = gb_quirks_for(rev)
+
+proc gb_revision_from_name*(name: string): (GbRevision, bool) =
+  ## Parse a `--model=` / test-row token. Returns (revision, ok). Accepts the
+  ## names the suites themselves use: mooneye's filename suffixes (`dmg0`,
+  ## `mgb`, `S`, `A`, `cgb0`), AGE's device tokens and SameSuite's
+  ## `-cgb0B` / `-cgbDE` style ranges. A range resolves to its HIGHEST member:
+  ## the newest silicon that still shows the behaviour is the strongest claim
+  ## the ROM makes, and it is what keeps a `-cgb0` / `-cgbB` pair (SameSuite
+  ## ships both for CH3) resolving to two different revisions instead of
+  ## collapsing onto grCgb0.
+  case name.toLowerAscii()
+  of "dmg0":                         (grDmg0, true)
+  of "dmg", "dmga", "dmgb", "dmgc", "dmgabc", "dmgabcmgb": (grDmgABC, true)
+  of "mgb":                          (grMgb, true)
+  of "sgb", "s":                     (grSgb, true)
+  of "sgb2":                         (grSgb2, true)
+  of "cgb0":                         (grCgb0, true)
+  of "cgb0b", "cgba", "cgbab", "cgbb": (grCgbAB, true)
+  of "cgbc", "cgb0bc", "cgbbc":      (grCgbC, true)
+  of "cgbd", "cgbcd":                (grCgbD, true)
+  of "cgb", "cgbe", "cgbde", "cgbcde", "cgbabcde", "c": (grCgbE, true)
+  of "agb", "ags", "a":              (grAgb, true)
+  else:                              (grCgbE, false)
+
 # ==================== NEW_GB + POST_INIT ====================
 
 proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
@@ -2142,10 +2258,19 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
                     fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
   result.cgb_enabled = force_cgb or
     ((cgb_bootrom or result.cgb_flag != cgbNone) and not force_dmg)
-  # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
-  # The test harness may override this (via --model) before post_init to drive
-  # the model-specific mooneye boot_regs/boot_div acceptance ROMs.
-  result.boot_model = if result.cgb_enabled: bmCgbABCDE else: bmDmgABC
+  # Default revision, which fixes both the boot model and the quirk set. The
+  # test harness may override this (via --model) before post_init to drive the
+  # model-specific mooneye boot_regs/boot_div rows and SameSuite's
+  # per-revision APU ROMs.
+  #
+  # CGB E and DMG ABC are not arbitrary: they are the revisions dingbat is
+  # already scored against. SameSuite's `apu/README.md` says "CPU-CGB-E --
+  # passes all tests" (and CGB C/D do not), the shootout's mealybug set is
+  # DMG-blob with `boot_regs-dmgABC` green, and mooneye's `stat_irq_blocking`
+  # header reads "pass: DMG ABC, MGB, CGB, AGB, AGS / fail: DMG 0". Both
+  # default revisions have every quirk flag clear, so an untouched user gets
+  # exactly the machine dingbat shipped before this axis existed.
+  result.gb_set_revision(if result.cgb_enabled: grCgbE else: grDmgABC)
   result.rom_title = block:
     var s = ""
     for i in 0x0134 ..< 0x013F:
