@@ -2,10 +2,24 @@
 # pair plus the .state file header. Every field is written explicitly per
 # subsystem (no std/marshal — it's JSON + refs and not stable across builds).
 
-import std/os
+import std/[os, strutils]
 
 type
   StateError* = object of CatchableError
+
+  StateRejectKind* = enum
+    ## WHY a state was refused, coarse enough for a frontend to write a
+    ## different sentence for each. The detail string (`last_state_error`)
+    ## stays available underneath, but no UI should have to parse it: the
+    ## whole point is that "this is for a different game" and "this file is
+    ## damaged" are different problems with different things to do about them.
+    srkNone            ## nothing was refused
+    srkNotAState       ## no DGBSTATE magic — not one of our files at all
+    srkWrongCore       ## a Game Boy state offered to the GBA core, or vice versa
+    srkWrongRom        ## a real state, for a different cartridge
+    srkTooNew          ## written by a newer dingbat than this one
+    srkTruncated       ## the file is short — a partial download or copy
+    srkCorrupt         ## hash/marker/range checks failed: the bytes are damaged
 
   CoreKind* = enum
     ckGBA = 0
@@ -69,8 +83,77 @@ const
   # ignore the extra bytes. Layout: thumb_w(2) thumb_h(2) len(4) BGR555 pixels.
   STATE_FLAG_THUMBNAIL* = 0x0001'u16
 
-proc state_error(msg: string): ref StateError =
+var last_state_reject_kind*: StateRejectKind = srkNone
+  ## Set beside `last_state_error` (below) by every refusal, so a frontend can
+  ## pick a sentence instead of echoing the core's wording. Assigned only from
+  ## inside procs the frontends call — see the note on last_state_error about
+  ## module-scope globals in the wasm build.
+
+proc state_error*(msg: string; kind = srkCorrupt): ref StateError =
+  ## Default srkCorrupt: an unqualified refusal from deep inside a subsystem
+  ## reader means the bytes did not describe a machine, which is the honest
+  ## thing to tell the user. Callers that know better say so.
+  last_state_reject_kind = kind
   newException(StateError, msg)
+
+# ==================== Field range guards ====================
+#
+# A save state used to be something you made for yourself, so the readers
+# trusted their input and only checked what would obviously break: the section
+# markers, MAX_EVENTS, high(EventType), high(StorageType). A state that arrives
+# that is shared — posted, mailed, dropped in a chat — is a stranger's file,
+# and the gap showed up immediately under a systematic byte sweep — a wild
+# cycle counter faults with an OverflowDefect on the next step_frame, and a
+# Defect is not a CatchableError, so it walked straight out of the loaders'
+# `except CatchableError` and crashed the emulator.
+#
+# The rule these helpers exist to enforce: EVERY field that is later used as an
+# index, a length, or an operand of unchecked arithmetic gets a documented
+# range at load time. They raise StateError, which the loaders already contain
+# and already restore from, so an out-of-range field is a clean rejection with
+# a message rather than a crash.
+
+proc check_range*(v, lo, hi: int; field: string) =
+  ## Raise unless `lo <= v <= hi`. `field` names the thing for the log; the
+  ## user-facing text comes from the reject KIND, not from this string.
+  if v < lo or v > hi:
+    raise state_error("save state field '" & field & "' is out of range (" &
+                      $v & " not in " & $lo & ".." & $hi & ")")
+
+proc check_one_of*(v: int; allowed: openArray[int]; field: string) =
+  ## Raise unless `v` is one of a small set of legal values (buffer sizes).
+  for a in allowed:
+    if v == a: return
+  raise state_error("save state field '" & field & "' has an impossible value (" &
+                    $v & ")")
+
+proc check_no_undefined_bits*(v: uint32; width: int; field: string) =
+  ## Raise if any bit at or above `width` is set. For the `cast[set[…]]` reads,
+  ## where a bit with no enumerator behind it makes `for x in theSet` yield a
+  ## value that does not exist.
+  ##
+  ## NOTE the name. `check_bits` is the obvious one, and it is unusable: Nim
+  ## identifiers ignore case and underscores, so `check_bits` IS `checkBits`,
+  ## the macro lut_macros exports. The collision does not report itself here —
+  ## it surfaces as "invalid expression" inside every LUT builder in the tree.
+  if width < 32 and (v shr width) != 0:
+    raise state_error("save state field '" & field &
+                      "' has undefined bits set (0x" & toHex(v, 8) & ")")
+
+template restore_backup*(apply: untyped) =
+  ## Put the pre-load machine back after a refused load. `apply` is the core's
+  ## own apply call on a payload IT serialized moments ago, so it cannot fail —
+  ## but "cannot fail" is exactly the claim the field guards above now enforce
+  ## on the way back in, and a raise here would leave the emulator half
+  ## restored AND replace a `false` return with an exception out of a proc
+  ## whose whole contract is the bool. Contain it and say so: there is nothing
+  ## better to do, and it must not be silent.
+  try:
+    apply
+  except CatchableError, Defect:
+    echo "Load state failed AND the pre-load state could not be restored — " &
+         "that is a dingbat bug, please report it: ",
+         getCurrentExceptionMsg()
 
 # ==================== Writer ====================
 
@@ -122,7 +205,7 @@ proc remaining(r: Reader): int {.inline.} =
 
 proc need(r: Reader; n: int) {.inline.} =
   if r.remaining < n:
-    raise state_error("truncated state data")
+    raise state_error("truncated state data", srkTruncated)
 
 proc read_u8*(r: var Reader): uint8 =
   r.need(1)
@@ -321,7 +404,7 @@ proc parse_state_payload*(data: string; core: CoreKind;
   ## still a hash of THIS cart, so a state from a different ROM is refused
   ## exactly as before.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
-    raise state_error("not a dingbat save state: " & origin)
+    raise state_error("not a dingbat save state: " & origin, srkNotAState)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
   let version = r.read_u32()
   if version > STATE_VERSION:
@@ -329,29 +412,30 @@ proc parse_state_payload*(data: string; core: CoreKind;
     # header, so nothing past the magic can be trusted.
     raise state_error("save state was written by a newer version of dingbat " &
                       "(container " & $version & ", this build reads up to " &
-                      $STATE_VERSION & ")")
+                      $STATE_VERSION & ")", srkTooNew)
   let file_core = r.read_u8()
   let file_rev = r.read_u8()
   discard r.read_u16()  # flags (read by parse_state_thumbnail)
   if file_core != uint8(core):
-    raise state_error("save state was created by a different core (GBA/GB mismatch)")
+    raise state_error("save state was created by a different core (GBA/GB mismatch)",
+                      srkWrongCore)
   # Byte 13 was the always-zero `slot` field before v7; 0 means "derive".
   let rev = if file_rev == 0: legacy_payload_version(core, version)
             else: uint32(file_rev)
   if rev > current_payload_version(core):
     raise state_error("save state payload revision " & $rev &
                       " is newer than this build reads (" &
-                      $current_payload_version(core) & ")")
+                      $current_payload_version(core) & ")", srkTooNew)
   let file_checksum = r.read_u32()
   let file_rom_size = r.read_u32()
   if file_rom_size != rom_size or
      (file_checksum != rom_checksum and file_checksum notin legacy_checksums):
-    raise state_error("save state belongs to a different ROM")
+    raise state_error("save state belongs to a different ROM", srkWrongRom)
   let payload_len = int(r.read_u32())
   let payload_hash = r.read_u32()
   # `<`, not `!=`: an optional trailer (e.g. thumbnail) may follow the payload.
   if data.len - STATE_HEADER_SIZE < payload_len:
-    raise state_error("save state is truncated or corrupt")
+    raise state_error("save state is truncated or corrupt", srkTruncated)
   result.payload = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
   result.rev = rev
   if fnv1a(result.payload) != payload_hash:

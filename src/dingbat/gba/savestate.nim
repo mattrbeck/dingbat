@@ -116,7 +116,14 @@ proc save_bus_state(bus: Bus; w: var Writer) =
 
 proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_BUS)
+  # Un-synced cycle debt for the instruction in flight. `catchup` drains it to
+  # 0 constantly, and `bus.now` does `sched.cycles + CycleCount(bus.cycles)` —
+  # an unsigned conversion, so a NEGATIVE value here is an immediate defect,
+  # and a huge positive one overflows the same sum. States are written at
+  # frame boundaries where this is a handful of cycles; the web build can
+  # serialize mid-instruction, so allow a whole scanline's worth and no more.
   bus.cycles = int(r.read_i32())
+  check_range(bus.cycles, 0, 1_232, "bus.cycles")
   bus.bios_latch = r.read_u32()
   r.read_bytes(bus.wram_board)
   r.read_bytes(bus.wram_chip)
@@ -565,19 +572,30 @@ proc load_storage_state(st: Storage; r: var Reader) =
     raise newException(StateError, "save state backup type mismatch")
   let mem = r.read_seq_u8()
   if st of EEPROM:
-    # EEPROM buffers are sized lazily (from the first command's DMA length)
+    # EEPROM buffers are sized lazily (from the first command's DMA length),
+    # so this is the one backup whose length is not fixed by the cart — which
+    # made it the one place a state file could choose it. It cannot be free:
+    # `eeprom.nim`'s write path does
+    #   cast[ptr UncheckedArray[uint64]](unsafeAddr ep.memory[0])[ep.address]
+    # and an UncheckedArray is unchecked at EVERY optimisation level, so an
+    # undersized buffer here is a heap write primitive, and an empty one makes
+    # `unsafeAddr ep.memory[0]` undefined before that. There are exactly two
+    # legal sizes (EepromSize.file_size: 4 Kbit = 0x200, 64 Kbit = 0x2000).
+    check_one_of(mem.len, [0x200, 0x2000], "eeprom.memory.len")
     st.memory = mem
   else:
     if mem.len != st.memory.len:
-      raise newException(StateError, "save state backup size mismatch")
+      raise state_error("save state backup size mismatch")
     st.memory = mem
   if st of Flash:
     let fl = Flash(st)
     let ft = r.read_u8()
     if int(ft) > int(high(StorageType)):
-      raise newException(StateError, "invalid flash type in save state")
+      raise state_error("invalid flash type in save state")
     fl.flash_type = StorageType(ft)
-    fl.state = cast[set[FlashStateFlag]](r.read_u8())
+    let fst = r.read_u8()
+    check_no_undefined_bits(uint32(fst), FlashStateFlag.high.int + 1, "flash.state")
+    fl.state = cast[set[FlashStateFlag]](fst)
     fl.bank = r.read_u8()
   elif st of EEPROM:
     let ep = EEPROM(st)
@@ -586,13 +604,34 @@ proc load_storage_state(st: Storage; r: var Reader) =
       of 0'u8: none(EepromSize)
       of 1'u8: some(eeprom4k)
       else:    some(eeprom64k)
-    ep.state = cast[set[EepromStateFlag]](r.read_u16())
+    let est = r.read_u16()
+    check_no_undefined_bits(uint32(est), EepromStateFlag.high.int + 1, "eeprom.state")
+    ep.state = cast[set[EepromStateFlag]](est)
     ep.buffer.size = int(r.read_i32())
+    # The command shift register is at most a 64-bit-wide word plus its
+    # address bits; `buffer.value` is a uint64 and `size` counts bits into it.
+    check_range(ep.buffer.size, 0, 64, "eeprom.buffer.size")
     ep.buffer.value = r.read_u64()
     ep.address = r.read_u32()
+    # The runtime masks the address to 10 bits on every command, so a state
+    # may only carry what that mask can produce. Without this the address
+    # reaches the UncheckedArray write above before the next mask does.
+    check_range(int(ep.address), 0, 0x3FF, "eeprom.address")
     ep.ignored_reads = int(r.read_i32())
     ep.read_bits = int(r.read_i32())
     ep.wrote_bits = int(r.read_i32())
+    # read_bits/wrote_bits index a 64-bit word: `base = address * 8 +
+    # wrote_bits div 8` indexes `memory` directly, so an unbounded value walks
+    # off the end of the backup.
+    check_range(ep.ignored_reads, 0, 4, "eeprom.ignored_reads")
+    check_range(ep.read_bits, 0, 64, "eeprom.read_bits")
+    check_range(ep.wrote_bits, 0, 64, "eeprom.wrote_bits")
+    # The address is masked to 0x3FF, i.e. up to 0x3FF*8+7 = 8191 bytes, which
+    # a 4 Kbit (0x200-byte) part cannot hold. Reject the combination rather
+    # than let the write land past the end of a legally-sized buffer.
+    if int(ep.address) * 8 + 8 > ep.memory.len:
+      raise state_error("eeprom address " & $ep.address & " is past the end of a " &
+                        $ep.memory.len & "-byte EEPROM")
     # busy_until (write-settle window, <=115000 cycles) is not in the format;
     # treat any in-flight programming as settled. States are frame-boundary
     # only, so at worst a ready-poll observes ready ~0.4 frames early.
@@ -978,6 +1017,44 @@ proc state_bytes*(gba: GBA; thumbnail = false): string =
   else:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload)
 
+proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
+  ## Apply a validated payload, restoring the live machine if it fails midway.
+  ## Both load paths go through here so the containment is written once.
+  let backup = gba.gba_state_payload()
+  try:
+    gba.gba_apply_state(payload, rev)
+    last_state_reject_kind = srkNone
+    return true
+  except CatchableError:
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
+  except Defect as d:
+    # BACKSTOP, not the fix. The fix is the range guards in the readers above
+    # (check_range / check_one_of / check_no_undefined_bits). This catches the
+    # field nobody has bounded yet, and it is here on purpose rather than by
+    # default:
+    #
+    #  - Catching Defect broadly is a bad habit: it hides real bugs. The
+    #    mitigations are that this handler wraps ONE call, that it says in the
+    #    log that reaching it is a bug in dingbat rather than in the file, and
+    #    that tools/statefuzz.nim's byte sweep is a regression gate which
+    #    FAILS on a reachable one instead of letting it be swallowed quietly.
+    #  - Continuing after a Defect is normally indefensible, because the
+    #    program is in an unknown state. It is defensible here, and only here,
+    #    because the next line puts the machine back to a payload this build
+    #    serialized itself moments ago. Nothing half-applied survives.
+    #  - The alternative is worse than the bug it hides. A state file now
+    #    travels — it gets shared, mailed, dropped in a chat — so it can be a
+    #    stranger's, and an uncaught Defect takes the process down: in the wasm
+    #    build it aborts the module, costing the player the game they were
+    #    actually in the middle of, to punish them for opening someone's file.
+    last_state_error = "this save state is damaged"
+    last_state_reject_kind = srkCorrupt
+    echo "Load state failed: an unbounded field reached a ", d.name,
+         " — that is a dingbat bug, please report it: ", d.msg
+  restore_backup(gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION))
+  false
+
 proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
                        tuple[payload: string; rev: uint32] =
   ## Header validation for a full state image against THIS cart, including the
@@ -998,15 +1075,7 @@ proc load_state_bytes*(gba: GBA; data: string): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
     return false
-  let backup = gba.gba_state_payload()
-  try:
-    gba.gba_apply_state(image.payload, image.rev)
-    true
-  except CatchableError:
-    last_state_error = getCurrentExceptionMsg()
-    echo "Load state failed: ", last_state_error
-    gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
-    false
+  gba.gba_apply_checked(image.payload, image.rev)
 
 proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
   ## Serialize the full emulator state to path. Must only be called at a
@@ -1038,12 +1107,4 @@ proc load_state*(gba: GBA; path: string): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
     return false
-  let backup = gba.gba_state_payload()
-  try:
-    gba.gba_apply_state(image.payload, image.rev)
-    true
-  except CatchableError:
-    last_state_error = getCurrentExceptionMsg()
-    echo "Load state failed: ", last_state_error
-    gba.gba_apply_state(backup, GBA_PAYLOAD_VERSION)
-    false
+  gba.gba_apply_checked(image.payload, image.rev)
