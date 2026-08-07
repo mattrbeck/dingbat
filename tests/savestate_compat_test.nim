@@ -376,6 +376,11 @@ proc run_roundtrip() =
           "GB " & rom & " is in mode 0/1 at a frame boundary (the loader " &
           "refuses 2 and 3)",
           "got mode " & $(emu.ppu.lcd_status and 3) & " at ly " & $emu.ppu.ly)
+    # The other pair the loader refuses: a vblank LINE in a non-vblank MODE.
+    # With the LCD on a boundary is LY 144 mode 1; with it off, LY 0 mode 0.
+    check(int(emu.ppu.ly) < 144 or (emu.ppu.lcd_status and 3) == 1,
+          "GB " & rom & " is in mode 1 on a vblank line at a frame boundary",
+          "got mode " & $(emu.ppu.lcd_status and 3) & " at ly " & $emu.ppu.ly)
 
 # ---------------------------------------------------------------------------
 # 3b. ROM identity is a property of the ROM FILE, not of the buffer.

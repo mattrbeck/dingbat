@@ -291,6 +291,29 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   if ppu_mode >= 2:
     raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
                       $int(ppu.ly) & ": no state is written mid-scanline")
+  # And the other half of the same disagreement: a vblank LINE must be in
+  # vblank MODE. Mode 0 with LY already at 144 is the shape, and it is not
+  # caught by the rule above or by ly's own 0..153 range — both fields are
+  # individually legal. What it does is walk off the end: mode 0's line
+  # boundary increments LY to 145, the `int(ppu.ly) == GB_HEIGHT` test that
+  # enters vblank is an equality so it never fires again, and the PPU renders
+  # lines 145, 146, ... into a 160x144 framebuffer.
+  #
+  # Found by sweeping with byte 0x00 rather than 0xFF: this offset is
+  # ppu.lcd_status, and zeroing it selects mode 0 while 0xFF selects mode 3,
+  # which the rule above already refuses. One byte value, one whole bug class
+  # hidden — the 0xFF sweep alone reports clean.
+  #
+  #   [UNCONTAINED] payload offset 33034 := 0x00: index 23200 not in 0..23039
+  #   23200 = 160 * 145.
+  #
+  # Cannot refuse a real state: with the LCD on, every frame boundary is
+  # LY 144 mode 1; with the LCD off it is LY 0 mode 0 (measured, 300 boundaries
+  # each). Both satisfy this.
+  if int(ppu.ly) >= GB_HEIGHT and ppu_mode != 1:
+    raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
+                      $int(ppu.ly) & ", which is a vblank line: only mode 1 " &
+                      "exists there")
   ppu.lyc = r.read_u8()
   r.read_bytes(ppu.bgp)
   r.read_bytes(ppu.obp0)
