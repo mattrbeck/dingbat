@@ -365,6 +365,11 @@ type
     # re-analyzes the same backward branch every iteration (1 = no entry;
     # thumb addresses are always even)
     last_non_waitloop*:          uint32
+    # And the same in front of identified_waitloops. A loop that IS a waitloop
+    # re-enters analyze_loop on every one of its iterations and hit the
+    # HashSet each time; `contains` was 1.4% of all samples on FireRed.
+    # 0 = no entry (a waitloop start is always a ROM address).
+    last_waitloop*:              uint32
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # Audio-HLE hook dispatch, collapsed to one hot-path compare. The MP2K
