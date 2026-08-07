@@ -34,6 +34,32 @@
 import std/deques
 import zippy
 
+when defined(rewindprof):
+  # EXPLORATORY (-d:rewindprof): where the per-snapshot cost goes. Nanoseconds
+  # and call counts, printed by tests/dingbat_bench.nim. Pushes happen ~6/s, so
+  # the getMonoTime pairs are far below the noise of what they measure.
+  import std/monotimes, std/times
+  const
+    RpSerialize* = 0   ## the caller's state_payload()
+    RpXor* = 1         ## XOR of the new payload against the previous one
+    RpCompress* = 2    ## zlib of the delta body
+    RpThumbGrab* = 3   ## the caller's framebuffer downscale
+    RpThumbZlib* = 4   ## zlib of the downscaled thumbnail
+    RpKeyZlib* = 5     ## zlib of a whole keyframe payload
+    RpEvict* = 6       ## eviction at the cap
+    RpPushTotal* = 7   ## the whole push, serialize included
+    RpPops* = 8        ## pop(): inflate + XOR
+  var rewindprof*: array[16, int64]
+  var rewindprof_n*: array[16, int]
+  var rewindprof_bytes*: array[16, int64]
+  template rp(slot: int; body: untyped) =
+    let t0 = getMonoTime()
+    body
+    rewindprof[slot] += (getMonoTime() - t0).inNanoseconds
+    rewindprof_n[slot].inc
+else:
+  template rp(slot: int; body: untyped) = body
+
 type
   RewindThumb* = object
     ## One downscaled frame captured at push time: little-endian BGR555,
@@ -136,8 +162,13 @@ proc encode_delta(prev, cur: string): string =
   ## prefix, raw tail where prev extends past cur (payload lengths vary
   ## slightly — e.g. the scheduler's event count)
   var body = prev
-  xor_bytes(body, cur, min(prev.len, cur.len))
-  compress(body, BestSpeed, dfZlib)
+  rp(0 + 1):  # RpXor
+    xor_bytes(body, cur, min(prev.len, cur.len))
+  rp(0 + 2):  # RpCompress
+    result = compress(body, BestSpeed, dfZlib)
+  when defined(rewindprof):
+    rewindprof_bytes[2] += result.len
+    rewindprof_bytes[1] += body.len
 
 proc decode_delta(cur, packed: string): string =
   result = uncompress(packed, dfZlib)
@@ -184,7 +215,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   if rw.thumb_every > 0 and thumb != nil:
     if rw.thumb_due <= 0:
       rw.thumb_due = rw.thumb_every - 1
-      let t = thumb()
+      var t: RewindThumb
+      rp(3): t = thumb()
       if t.pixels.len > 0:
         # Raw BGR555 is 19-26 KB a picture, which on GB is THREE TIMES the
         # whole delta stream — the strip would have become the ring's biggest
@@ -192,7 +224,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
         # flat-coloured, so BestSpeed takes them to 4% (GB) / 14-22% (GBA) of
         # raw for 0.06-0.09 ms once a second, and ~0.03 ms to inflate one when
         # the strip is read. Measured, both cores.
-        let packed = compress(t.pixels, BestSpeed, dfZlib)
+        var packed: seq[byte]
+        rp(4): packed = compress(t.pixels, BestSpeed, dfZlib)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))
         rw.thumb_total += packed.len
     else:
@@ -200,13 +233,15 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   if rw.key_every > 0:
     if rw.key_due <= 0:
       rw.key_due = rw.key_every - 1
-      let packed = compress(payload, BestSpeed, dfZlib)
+      var packed: string
+      rp(5): packed = compress(payload, BestSpeed, dfZlib)
       rw.keys.addLast(KeyFrame(id: id, packed: packed))
       rw.key_total += packed.len
     else:
       dec rw.key_due
-  while rw.mem_used > rw.cap and rw.deltas.len > 0:
-    rw.evict_oldest()
+  rp(6):
+    while rw.mem_used > rw.cap and rw.deltas.len > 0:
+      rw.evict_oldest()
 
 proc maybe_push*(rw: Rewind; payload: proc(): string;
                  thumb: proc(): RewindThumb = nil): bool =
@@ -215,7 +250,11 @@ proc maybe_push*(rw: Rewind; payload: proc(): string;
   inc rw.frame_count
   if rw.frame_count >= rw.interval:
     rw.frame_count = 0
-    rw.push(payload(), thumb)
+    rp(7):
+      var p: string
+      rp(0): p = payload()
+      when defined(rewindprof): rewindprof_bytes[0] += p.len
+      rw.push(p, thumb)
     return true
   false
 
