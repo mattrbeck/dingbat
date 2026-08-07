@@ -298,6 +298,35 @@ const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const WIN_LINE_START_WX*      {.intdefine.} = 6
+  ## The WX below which a line STARTS as a window line instead of reaching the
+  ## window through the shifter's equality. See the mode 2 -> 3 edge in
+  ## fifo_tick_slow for what the two spellings mean; this is the boundary
+  ## between them and mealybug is its only oracle.
+  ##
+  ## gambatte brackets WX = 0 (m2int_wx00_*) and WX = 7 (m2int_wx07_*) and has
+  ## NOTHING at 4, 5 or 6, so the three m3_wx_{4,5,6}_change ROMs are the whole
+  ## evidence for where in that gap the boundary falls. Swept 2026-08-07, wrong
+  ## pixels of 23040 on the DMG references, and the mealybug DMG total of
+  ## 3,317,760 next to it:
+  ##
+  ##   threshold   wx_4   wx_5    wx_6   window_timing   mealybug DMG
+  ##       5          0  13768    4611        30            515691
+  ##       6 (ship)   0      0    4611        29            529314
+  ##       7          0      0   13810        35            520109
+  ##       8          0      0   13810        41            517392
+  ##
+  ## Three ROMs, one boundary, and only 6 satisfies all of them: 5 breaks WX = 5
+  ## outright and 7 and 8 leave WX = 6 at three times its error. It is worth
+  ## +9205 DMG pixels on its own, the largest single move in the mealybug set,
+  ## and it moves nothing in gambatte -- WX = 6 is the only value whose
+  ## treatment changes, and no gambatte ROM writes it.
+  ##
+  ## What it does NOT do is make m3_wx_6_change pass: 4611 pixels remain, and
+  ## they are a different mechanism (the window line advancing on a mid-line
+  ## re-activation -- see docs/gb-failure-triage.md). This constant is pinned
+  ## from both sides regardless of that residual, which is why it ships without
+  ## it.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const MIXER_PALETTE_BACK*     {.intdefine.} = 2

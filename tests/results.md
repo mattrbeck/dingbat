@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 14:39:10*
+*Generated: 2026-08-07 14:49:41*
 
 ## Game Boy - Blargg
 
@@ -268,15 +268,15 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_scy_change | 👀 98.2% correct (22623/23040 pixels match) |
 | mealybug-cgb/m3_scy_change | 👀 97.7% correct (22506/23040 pixels match) |
 | mealybug-cgb/m3_scy_change2 | 👀 100.0% correct (23034/23040 pixels match) |
-| mealybug/m3_window_timing | 👀 99.8% correct (23005/23040 pixels match) |
-| mealybug-cgb/m3_window_timing | 👀 99.9% correct (23011/23040 pixels match) |
+| mealybug/m3_window_timing | 👀 99.9% correct (23011/23040 pixels match) |
+| mealybug-cgb/m3_window_timing | 👀 99.9% correct (23017/23040 pixels match) |
 | mealybug/m3_window_timing_wx_0 | 👀 97.2% correct (22388/23040 pixels match) |
 | mealybug-cgb/m3_window_timing_wx_0 | 👀 97.2% correct (22388/23040 pixels match) |
 | mealybug/m3_wx_4_change | 👌 |
 | mealybug/m3_wx_4_change_sprites | 👌 |
 | mealybug-cgb/m3_wx_4_change_sprites | 👌 |
 | mealybug/m3_wx_5_change | 👌 |
-| mealybug/m3_wx_6_change | 👀 40.1% correct (9230/23040 pixels match) |
+| mealybug/m3_wx_6_change | 👀 80.0% correct (18429/23040 pixels match) |
 
 ## Game Boy - GBMicrotest
 

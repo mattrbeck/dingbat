@@ -1379,7 +1379,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # window start at screen x = 0 and pays the ordinary restart.
           fifo_reset_bg(ppu,
             window_enabled(ppu) and
-            ppu.wx < 7 and ppu.window_trigger)
+            ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           ppu.lx = 0
           when M3_PIPE_LEAD_ANY:
