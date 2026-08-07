@@ -407,6 +407,86 @@ block cross_config_state:
     echo "  (", e.msg, ")"
   check(ok_on, "a non-SGB state must load into a machine with SGB turned on")
 
+# ---- the save/restore shapes the emulator actually uses -----------------
+# Save states are the visible one, but rewind snapshots ~6x a second and
+# run-ahead saves and restores EVERY frame. All three go through the same
+# payload, so a field the SGB section drops shows up here as a divergence
+# from an uninterrupted reference run -- including across the frames where
+# the cart is mid-transfer, which is where the state machine is least idle.
+block state_shapes:
+  proc runref(n: int): (seq[uint64], seq[uint64]) =
+    var r = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    r.sgb_requested = true
+    r.post_init()
+    for i in 0 ..< n:
+      r.step_frame()
+      var h = 0xCBF29CE484222325'u64
+      for v in r.ppu.framebuffer: h = (h xor uint64(v)) * 0x100000001B3'u64
+      result[0].add(h)
+      var b = 0xCBF29CE484222325'u64
+      for v in r.sgb.border: b = (b xor uint64(v)) * 0x100000001B3'u64
+      for v in r.sgb.pal:    b = (b xor uint64(v)) * 0x100000001B3'u64
+      for v in r.sgb.attr:   b = (b xor uint64(v)) * 0x100000001B3'u64
+      result[1].add(b)
+
+  const N = 240
+  let (refFb, refBd) = runref(N)
+
+  proc hashes(g: GB): (uint64, uint64) =
+    var h = 0xCBF29CE484222325'u64
+    for v in g.ppu.framebuffer: h = (h xor uint64(v)) * 0x100000001B3'u64
+    var b = 0xCBF29CE484222325'u64
+    for v in g.sgb.border: b = (b xor uint64(v)) * 0x100000001B3'u64
+    for v in g.sgb.pal:    b = (b xor uint64(v)) * 0x100000001B3'u64
+    for v in g.sgb.attr:   b = (b xor uint64(v)) * 0x100000001B3'u64
+    (h, b)
+
+  # Save + restore on every frame must be invisible.
+  block:
+    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    g.sgb_requested = true
+    g.post_init()
+    var bad = -1
+    for i in 0 ..< N:
+      g.step_frame()
+      g.apply_state_payload(g.state_payload())
+      let (h, b) = g.hashes()
+      if h != refFb[i] or b != refBd[i]: bad = i; break
+    check(bad < 0, &"save+restore every frame is transparent (broke at {bad})")
+
+  # Run-ahead: save, run a speculative frame, roll back.
+  block:
+    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    g.sgb_requested = true
+    g.post_init()
+    var bad = -1
+    for i in 0 ..< N:
+      g.step_frame()
+      let p = g.state_payload()
+      g.step_frame()
+      g.apply_state_payload(p)
+      let (h, b) = g.hashes()
+      if h != refFb[i] or b != refBd[i]: bad = i; break
+    check(bad < 0, &"run-ahead speculate + roll back is transparent (broke at {bad})")
+
+  # Rewind: jump six frames back and replay forward.
+  block:
+    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    g.sgb_requested = true
+    g.post_init()
+    var ring: seq[string]
+    var bad = -1
+    for i in 0 ..< N:
+      g.step_frame()
+      ring.add(g.state_payload())
+      if ring.len > 8: ring.delete(0)
+      if i > 40 and i mod 20 == 0:
+        let before = g.hashes()
+        g.apply_state_payload(ring[ring.len - 7])
+        for _ in 0 ..< 6: g.step_frame()
+        if g.hashes() != before: bad = i; break
+    check(bad < 0, &"rewind six frames and replay is deterministic (broke at {bad})")
+
 # ---- optional PNG dump ----
 when defined(sgb_png):
   proc dump(path: string; src: openArray[uint16]; w, h: int; over: bool) =

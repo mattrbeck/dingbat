@@ -552,7 +552,151 @@ check replacing an existing indexed load, and it is inside the noise wall
 * **The scanline renderer is covered but not the shipping default**; the FIFO
   renderer is, and the test pins them identical.
 
-## 7. Known rough edges
+## 7. Validation (2026-08-07)
+
+### What was available
+
+**There is no Game Boy library on this machine.** `~/Documents/emu/gba/archive/`
+holds 7,899 `.gba` files and no Game Boy ROMs at all, and SGB is a Game Boy
+feature. The eleven GB/GBC ROMs that exist locally are the whole corpus:
+
+| header (0143/0146/014B) | carts | what they test |
+|---|---|---|
+| `00/03/33` | Pokemon Blue | the only pure SGB-enhanced cart — everything below rests on it |
+| `80/03/33` | Zelda LADX (x2 variants), Pokemon Silver | SGB flag **and** CGB flag: the priority path |
+| `00/00/01`, `00/00/60` | Zelda LADX (mono, x2), pocket.gb, Prehistorik Man | no SGB flag: must be untouched |
+| `c0/00/33` | Kirby Tilt 'n' Tumble, Pokemon Crystal, Shantae | CGB-only |
+
+So this is one cart deep-verified plus ten negative controls, not a sweep.
+§7.4 says plainly what that does and does not buy.
+
+### 7.1 The palettes are numerically right, not just plausible
+
+Blue was driven from power-on through the intro, the title screen, the naming
+keyboard, the bedroom, Pallet Town, the party menu, Route 1 and a wild battle,
+and the live SGB palette registers were read out at each. Against Bulbapedia's
+table of the Generation I SGB palettes (`List of color palettes by index number
+in Generation I`), converted from 24-bit RGB to BGR555:
+
+| scene | dingbat's live palette | reference | |
+|---|---|---|---|
+| Pallet Town | `6F99` `7F54` | Pallet 0x01 `#CEE7DE` `#A5D6FF` → `6F99` `7F54` | exact |
+| Route 1 | `2F95` `7F54` | Route 0x00 `#ADE75A` `#A5D6FF` → `2F95` `7F54` | exact |
+| battle, palette 2 | `2A9F` `195A` | RedMon 0x12 `#FFA552` `#D65231` → `2A9F` `195A` | exact |
+| battle, palette 3 | `3E9C` `25D5` | BrownMon 0x15 `#E7A57B` `#AD734A` → `3E9C` `25D5` | exact |
+| battle, palette 1 | `029A` | YellowMon 0x18 `#D6A500` → `029A` | exact |
+| title screen | `47DE`, `1015` | logo `#F7F78C`, `#AD0021` → `47DE`, `1015` | exact |
+
+Every value matches to the bit. And the **assignment** is right, not just the
+values: the player's Charmander gets the Red-Pokemon palette and the wild
+Pidgey gets the Brown-Pokemon palette, in the same battle, at the same time.
+That is `PAL_TRN` + `PAL_SET` selecting from the 512-entry system palette RAM
+by species — the single hardest thing in this feature to get right by accident.
+
+### 7.2 The attribute map is doing real work
+
+The `ATTR_*` region count per scene, straight out of the live attribute map
+(cells per palette 0/1/2/3):
+
+| scene | attr | reading |
+|---|---|---|
+| intro battle | 200 / 160 / 0 / 0 | two regions: the animation band and the frame |
+| title, main menu | 160 / 40 / 160 / 0 | three: logo, subtitle, background |
+| Oak's intro, dialogue | 360 / 0 / 0 / 0 | one palette, two shades — the text box is shade work, not attribute work |
+| party menu | 61 / 299 / 0 / 0 | the Pokemon's row is its own region |
+| overworld (Pallet, Route 1) | 360 / 0 / 0 / 0 | one palette per map, which is what Gen I does |
+| **wild battle** | 65 / 40 / 192 / 63 | **all four** — enemy box, HP bar, field, player box |
+
+The overworld being a single region is correct behaviour, not a gap: Gen I
+changes the whole-screen palette per map rather than dividing the screen up.
+The place it divides the screen is menus and battles, and it does.
+
+### 7.3 Robustness, since breadth was not available
+
+`sweep.sh` — byte identity, **1500 frames x 11 ROMs x {SGB off, SGB on} x two
+baselines** (this branch's merge-base with `main`, and `main`'s tip; the GB
+core is untouched between them, and the two agree everywhere). Two channels
+per run: a fold of every frame's framebuffer, and a fold of the whole
+save-state payload every 64 frames.
+
+> With SGB **off**, every one of the eleven is identical to the baseline.
+> With SGB **on**, every one is identical *except* Pokemon Blue.
+
+Two traps this sweep walked into first, both worth remembering: the emulator
+writes a cart's `.sav` next to the ROM, so a save left by one run is loaded by
+the next and two runs of the same binary silently differ (ROMs are reached
+through symlinks in a scratch dir now, and saves are cleared between runs);
+and MBC3+RTC carts seed from wall-clock time, so Silver's and Crystal's state
+payload is legitimately different on every run and the state channel is
+skipped for them.
+
+`stress.nim` — nine sections, all passing:
+
+1. all three CGB+SGB carts (`80/03/33`) select **CGB**, with the adapter absent
+   and the renderer hook nil;
+2. **900 consecutive save+restore round trips**, one per frame straight through
+   the transfer window, compared against an uninterrupted reference run;
+3. the **rewind** shape — snapshot every frame, jump six back, replay forward;
+4. the **run-ahead** shape — save, run a speculative frame, roll back, every
+   frame;
+5. reset at every 20th frame of the transfer window leaves the next run clean;
+6. a state crossing the SGB setting, **in both directions, at every phase**;
+7. border validity is monotone and the border is re-rendered a bounded number
+   of times (it settles at generation 2 and never moves again);
+8. every non-SGB cart gets no adapter even when one is requested;
+9. `MASK_EN` is genuinely exercised (modes 0 and 1), the longest mask is 69
+   frames, and the screen is never left masked.
+
+The first three shapes are now also in `tests/sgb_test.nim` against the
+synthetic cart, so they run in CI without needing a commercial ROM.
+
+**`tools/gbfuzz` cannot be used as an SGB oracle as it stands.** Both reference
+runners deliberately refuse SGB — `mgba_gb_runner.c` pins `sgb.model` /
+`cgb.sgbModel` to follow the cartridge's CGB flag "never SGB", and
+`sameboy_runner.c` says the same, both because an SGB frame is 256x224 and the
+harness compares 160x144. Turning it into an SGB differential harness means
+enabling SGB in both runners and teaching the comparison about the larger
+frame. That is the highest-value next step and it is not small.
+
+### 7.4 Residual risk — read this before shipping
+
+**Validated:**
+
+* one SGB-enhanced cart, deeply: eight distinct scenes, palettes checked
+  numerically against a published reference, attribute regions checked per
+  scene, border stable across every scene change;
+* that cart's `MLT_REQ` detection handshake — Blue opens with two `MLT_REQ`
+  packets and only continues sending if it believes an SGB answered, and it
+  does continue;
+* the mode-priority rule against all three CGB+SGB carts present;
+* non-interference against ten carts and two baselines, off and on;
+* every save/restore shape the emulator has, driven through the transfer window.
+
+**Not validated:**
+
+* **any cart other than Pokemon Blue.** Nothing here says anything about how
+  the other ~500 SGB-enhanced titles behave. The commands Blue never sends —
+  `ATTR_LIN`, `ATTR_CHR`, `ATTR_TRN`/`ATTR_SET`, `ATTR_DIV`, `PAL01`–`PAL12`
+  as direct sends, `OBJ_TRN`, `PAL_PRI` — are unit-covered only, against a
+  synthetic cart whose expectations I wrote. A cart that uses them differently
+  from how I read Pan Docs would not be caught.
+* **borders that overlap the Game Boy window** (Mario's Picross, WildSnake).
+  The compositor handles it by construction and the synthetic ROM has a
+  transparent centre; no cart here proves it.
+* **two `CHR_TRN`s for a 256-tile border.** Blue sends one. The immediate-read
+  ordering was chosen specifically to make that case work, and it is untested
+  against a real cart.
+* **`MASK_EN` modes 2 and 3.** Blue only uses mode 1.
+* **the four-player `MLT_REQ` path**, and anything SGB-multiplayer.
+* **cross-emulator agreement.** No SGB oracle was run at all — see gbfuzz above.
+
+**Honest summary:** the *mechanism* is well tested and the *one cart that
+exercises it* is right to the bit. The breadth is missing, and only a library
+can supply it.
+
+---
+
+## 8. Known rough edges
 
 1. **The window resizes mid-session** (native) when a border first appears,
    because the picture genuinely changes size. It is one resize, on the edge,
