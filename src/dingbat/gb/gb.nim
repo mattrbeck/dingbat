@@ -582,7 +582,10 @@ type
     has_rtc*:            bool
     rtc_live*:           array[5, uint8]  # S, M, H, DL, DH
     rtc_latched*:        array[5, uint8]
-    rtc_latch_prev*:     uint8
+    rtc_latch_prev*:     uint8  # DEAD: the latch fires on any write (see
+                                # mbc3.nim), so nothing reads this. It is still
+                                # written and still serialized so the GB
+                                # save-state payload keeps its current layout.
     rtc_halt_remaining*: int  # scheduler cycles left on the pending tick while halted
 
   Mbc5* = ref object of Mbc

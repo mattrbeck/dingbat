@@ -717,17 +717,19 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   # BullyGB (Hacktix) — broad hardware-behavior torture test. The one bundled
   # reference is a CGB capture (the howto records the author's own DMG-C
   # failing it with "Bad Echo RAM Reads"); the cart's CGB flag is $80, so it
-  # boots CGB without --cgb.
+  # used to boot CGB from the header alone. --mode=screenshot now takes the
+  # absence of --cgb as "run it on a DMG", so the device has to be named.
   let bully = roms_dir / "bully"
-  add_if("bully/bully", bully / "bully.gb", bully / "bully.png", 120, color = true)
+  add_if("bully/bully", bully / "bully.gb", bully / "bully.png", 120,
+         color = true, cgb = true)
 
-  # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart,
-  # so only the CGB reference is usable: scoring the -dmg one would mean
-  # running a CGB-flagged cart as a DMG, which this harness cannot do (--cgb
-  # only forces CGB *on*).
+  # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart.
+  # The bundled `-dmg` reference is now reachable too (--dmg / a screenshot run
+  # without --cgb), but it is not wired here: the shootout already scores that
+  # row, and the CGB one is the row this table has a history for.
   let strike = roms_dir / "strikethrough"
   add_if("strikethrough/strikethrough-cgb", strike / "strikethrough.gb",
-         strike / "strikethrough-cgb.png", 60, color = true)
+         strike / "strikethrough-cgb.png", 60, color = true, cgb = true)
 
   # scribbltests (Hacktix). fairylake and winpos ship no reference image, so
   # they cannot be scored; statcount has an "-auto" variant that is the one
@@ -754,7 +756,7 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   # cgb-acid2 already scored above. Finishes on LD B,B.
   let hell = roms_dir / "cgb-acid-hell"
   add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
-         hell / "cgb-acid-hell.png", 120, color = true)
+         hell / "cgb-acid-hell.png", 120, color = true, cgb = true)
 
   # little-things-gb (pinobatch). Only firstwhite is scoreable here: tellinglys
   # needs a scripted button press per its howto, and dingbat_test has no input
@@ -916,6 +918,7 @@ proc build_acid2_tests(): seq[TestDef] =
     timeout: 120,
     expected_png: cgb_ref,
     color: true,
+    cgb: true,
   ))
   tests
 

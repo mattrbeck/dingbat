@@ -100,6 +100,24 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       # test uses to see it (the accounting channel_1_delay spells out). The
       # 1 MHz grid alignment is the same one channel_4_align asserts for this
       # channel as channel_1_align does for the squares.
+      #
+      # The 1 has since been measured against 0, 2 and 3 over the whole
+      # SameSuite APU set, and it is the optimum, so do not retune it hoping to
+      # close channel_4_delay:
+      #   0 -> loses channel_4_align and channel_4_lfsr_7_15    (70 of 90 rows)
+      #   1 -> the current 72 of 90
+      #   2 -> gains lfsr_restart + lfsr_restart_fast but loses align, lfsr,
+      #        lfsr15 and lfsr_15_7                              (70 of 90)
+      #   3 -> 69 of 90
+      # channel_4_delay's residual is not a constant at all. It drives NR43 =
+      # $08, $00, $18, $28 in that order; the $08 and $00 rows (clock shift 0)
+      # are exact, and only the $18 and $28 rows (shifts 1 and 2) are late, by
+      # 1 and 3 M-cycles. A shift-dependent phase is exactly what the
+      # divisor/shift collapse in ch4_frequency_timer cannot express -- one
+      # scalar `divisor << shift` makes encodings with the same product
+      # indistinguishable -- and it is the same defect
+      # channel_4_frequency_alignment and channel_4_equivalent_frequencies
+      # measure. Two cascaded counters, not a different addend.
       ch.next_step = gb_trigger_deadline(gb, ch4_period(ch, gb), 1)
       init_volume_envelope(ch)
       ch.lfsr = 0x7FFF'u16
