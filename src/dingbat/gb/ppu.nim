@@ -236,6 +236,31 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
         cast[ptr uint16](addr ppu.pram[i * 2])[]      = CGB_COMPAT_BG_COLORS[i]
         cast[ptr uint16](addr ppu.obj_pram[i * 2])[]  = CGB_COMPAT_OBJ_COLORS[i]
         cast[ptr uint16](addr ppu.obj_pram[8 + i * 2])[] = CGB_COMPAT_OBJ_COLORS[i]
+    else:
+      # CGB cart on CGB hardware. The boot ROM's closing act is a fade of the
+      # whole background palette to white, and Pan Docs states the resulting
+      # handoff state outright: "All background colors are initialized as white
+      # by the boot ROM." It also blesses the encoding used here — "the
+      # canonical pure white is $7FFF and not $FFFF, but the hardware treats
+      # both identically: it's fine to fill color RAM with $FF bytes to set it
+      # to all-white."
+      #
+      # The OBJ half is deliberately the same fill even though it is NOT
+      # specified: "In CGB mode, the boot ROM leaves all object colors
+      # uninitialized (and thus somewhat random/unreliable), aside from setting
+      # the first byte of OBJ0 color #0 to $00, which is unused." Undefined on
+      # hardware still has to be *something* here — a savestate and a rollback
+      # both have to reproduce it — so it gets the documented-safe white rather
+      # than a random fill, and any cart that reads an OBJ colour it never
+      # wrote is relying on garbage on real hardware too.
+      #
+      # Skipping this is not cosmetic: a native-CGB cart that leans on the boot
+      # ROM's palette renders through an all-zero one, i.e. a black screen.
+      # BullyGB is exactly that cart — its only palette write anywhere is BG
+      # palette 0 colour 3 (`rBCPS = BCPSF_AUTOINC | 6`, then two zero bytes to
+      # rBCPD), so colours 0-2 have to arrive from the boot ROM.
+      for i in 0 ..< ppu.pram.len: ppu.pram[i] = 0xFF
+      for i in 0 ..< ppu.obj_pram.len: ppu.obj_pram[i] = 0xFF
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
     # PC = $0100): DMG/MGB hand off with STAT = $85 and LY = $00. Mode 1 with
