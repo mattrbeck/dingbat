@@ -192,6 +192,7 @@ proc sgb_render_border*(s: SgbState) =
   ## Colour index 0 is transparent (SGB_OPAQUE clear), which is how the Game
   ## Boy window shows through the middle of the frame.
   for i in 0 ..< s.border.len: s.border[i] = 0
+  var opaque = false
   for ty in 0 ..< 28:
     for tx in 0 ..< 32:
       let e = s.map[ty * 32 + tx]
@@ -219,7 +220,14 @@ proc sgb_render_border*(s: SgbState) =
                        (((p3 shr sh) and 1) shl 3))
           if ci != 0:
             s.border[dst + col] = (s.border_pal[pbase + ci] and 0x7FFF) or SGB_OPAQUE
-  s.border_valid = true
+            opaque = true
+  # "Valid" means there is something to show, not merely that a transfer
+  # happened. CHR_TRN usually arrives one command before PCT_TRN, and between
+  # the two the tilemap is still all zeroes -- every cell character 0, which
+  # decodes to fully transparent. Showing a 256x224 window with an empty
+  # margin for those few frames is worse than showing none.
+  s.border_valid = opaque
+  inc s.border_gen
 
 # ==================== VRAM transfers ====================
 
@@ -422,6 +430,29 @@ proc sgb_frame_end*(gb: GB) =
   else:
     let c = s.pal[0]
     for i in 0 ..< gb.ppu.framebuffer.len: gb.ppu.framebuffer[i] = c
+
+proc sgb_active*(gb: GB): bool {.inline.} =
+  ## Is this machine running as a Super Game Boy? The frontends' single
+  ## question: it gates the border surface, the output size and the UI.
+  gb != nil and gb.sgb != nil
+
+proc sgb_has_border*(gb: GB): bool {.inline.} =
+  ## As above, and a border has actually been transferred. A cart that uses
+  ## SGB palettes but sends no CHR_TRN/PCT_TRN (many do) must not get a
+  ## 256x224 window with nothing in the margin.
+  gb != nil and gb.sgb != nil and gb.sgb.border_valid
+
+proc sgb_border_gen*(gb: GB): uint32 {.inline.} = gb.sgb.border_gen
+
+proc sgb_border_ptr*(gb: GB): ptr uint16 =
+  ## The 256x224 border image, BGR555 with bit 15 = opaque. Colour index 0 is
+  ## transparent and shows the Game Boy window (or the backdrop) through it.
+  addr gb.sgb.border[0]
+
+proc sgb_backdrop*(gb: GB): uint16 {.inline.} =
+  ## SGB colour 0, shared by all four screen palettes. What shows wherever the
+  ## border is transparent and the Game Boy window is not.
+  gb.sgb.pal[0]
 
 proc sgb_screen_color*(ppu: GbPpu; x: int; shade: uint8): uint16 {.inline.} =
   ## The colour an SGB puts on the screen for a pixel at column `x` of line

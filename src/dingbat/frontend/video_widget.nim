@@ -9,6 +9,9 @@ type
     filter*:      cint   # 0 = None, 1 = hq4x, 2 = xBR (VideoFilter ordinal)
     scanlines*:   bool
     frame_blend*: bool
+    preserve_aspect*: bool
+    sgb_enable*:  bool
+    sgb_border*:  bool
     visible*:     bool
 
 proc new_video_widget*(cfg: Config): VideoWidget =
@@ -49,15 +52,45 @@ proc render*(v: VideoWidget) =
   discard igCheckbox("Interframe blending", addr v.frame_blend)
   igSameLine(0, -1)
   help_marker("Blend the previous frame into the current one, like the LCD's ghosting")
+  discard igCheckbox("Preserve aspect ratio", addr v.preserve_aspect)
+  igSameLine(0, -1)
+  help_marker("Letterbox the picture instead of stretching it to fill the " &
+              "window. Only visible when the window is not an exact multiple " &
+              "of the console's resolution — fullscreen, or after a manual resize.")
+  igSeparator()
+  igText("Super Game Boy:")
+  igSameLine(0, -1)
+  help_marker("Run monochrome carts whose header unlocks SGB functions on the " &
+              "Super Game Boy adapter: per-region colour palettes and, where " &
+              "the cart ships one, a 256x224 border. Carts without the SGB " &
+              "header bits are unaffected, and a Game Boy Color cart always " &
+              "runs as a Game Boy Color even if it is also SGB-enhanced. " &
+              "Takes effect on the next ROM load or reset.")
+  igIndent(106)
+  discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
+  igBeginDisabled(not v.sgb_enable)
+  discard igCheckbox("Show SGB border", addr v.sgb_border)
+  igEndDisabled()
+  igSameLine(0, -1)
+  help_marker("The border makes the picture 256x224 instead of 160x144, so " &
+              "the window resizes when one appears." &
+              (if not v.sgb_enable: " (Super Game Boy mode is off.)" else: ""))
+  igUnindent(106)
 
 proc reset*(v: VideoWidget) =
   v.gb_renderer = if v.cfg.gb_fifo: 0'i32 else: 1'i32
   v.filter      = cint(ord(v.cfg.video_filter))
   v.scanlines   = v.cfg.scanlines
   v.frame_blend = v.cfg.frame_blend
+  v.preserve_aspect = v.cfg.preserve_aspect
+  v.sgb_enable  = v.cfg.sgb_enable
+  v.sgb_border  = v.cfg.sgb_border
 
 proc apply*(v: VideoWidget) =
   v.cfg.gb_fifo     = v.gb_renderer == 0
   v.cfg.video_filter = VideoFilter(v.filter)
   v.cfg.scanlines   = v.scanlines
   v.cfg.frame_blend = v.frame_blend
+  v.cfg.preserve_aspect = v.preserve_aspect
+  v.cfg.sgb_enable  = v.sgb_enable
+  v.cfg.sgb_border  = v.sgb_border

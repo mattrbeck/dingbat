@@ -700,6 +700,10 @@ type
     border*:      seq[uint16]
     border_valid*: bool
     border_dirty*: bool
+    # Bumped every time `border` is re-rendered. A frontend uploads its border
+    # texture only when this moves -- the image changes a handful of times in
+    # a whole session, and it is 112 KiB.
+    border_gen*:   uint32
     # MASK_EN, and the frame it freezes
     mask*:        uint8
     frozen*:      seq[uint16]
