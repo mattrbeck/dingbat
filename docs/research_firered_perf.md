@@ -587,3 +587,183 @@ open -a Safari 'http://localhost:8765/bench/bench.html?auto=1&reps=5'
 #   then drive Profiler.enable/start/stop over CDP around benchRun(2000) and
 #   histogram profile.samples by node callFrame.functionName.
 ```
+
+---
+
+## 9. What the default configuration costs (2026-08-07)
+
+The question was the cost of the **defaults**, not of the maximum
+configuration. Short answer: the defaults are well chosen, with exactly one
+expensive item.
+
+**Default config vs bare minimum, native, 7 interleaved rounds, FireRed from
+the in-game state:**
+
+| | fps | retired instructions | CPU cycles |
+|---|---|---|---|
+| bare minimum (rewind off) | **819.0** | 13.0173e9 | 2.4006e9 |
+| shipped default (rewind on) | 769.8 | 13.5485e9 | 2.5279e9 |
+| **cost of the default config** | **−6.0%** | **+4.1%** | **+5.3%** |
+
+All of that is rewind. Every other default is off, free, or a win.
+
+### 9.1 Rewind, broken down
+
+**Cadence:** `REWIND_INTERVAL = 10` emulated frames — **6 snapshots/second**,
+confirmed by the counters (60 pushes over 600 frames). Not every frame.
+
+**Per push** (native; `-d:rewindprof`, 604 132-byte payload deflating to
+50 099):
+
+| stage | ms/push | share |
+|---|---|---|
+| `state_payload()` serialize | 0.2136 | 35% |
+| XOR against the previous snapshot | 0.0180 | 3% |
+| **zlib `BestSpeed` of the delta** | **0.3400** | **56%** |
+| keyframe zlib (1 push in 60, amortized) | 0.0155 | 3% |
+| eviction at the cap | 0.0000 | 0% |
+| **total** | **0.6104** | |
+| web only: thumbnail downscale + zlib | +0.0161 | +3% (total 0.6295) |
+
+**Compression is the majority of rewind's cost**, serialization is a third,
+and the XOR, the keyframes, the thumbnails and the eviction are all noise.
+
+**As a share of time, two ways, both true:**
+
+- **0.061 ms per emulated frame** = **0.37% of a 16.7 ms realtime frame.**
+  Invisible on a desktop.
+- **6.0% of the emulator's own CPU work.** On a device with little headroom
+  that is 6% of the compute there is, and it is the framing that matters for
+  the phones the frontend targets.
+
+**What rewind-off buys, measured on both targets:**
+
+| target | default | rewind off | delta |
+|---|---|---|---|
+| Native `-d:release`, fps | 769.8 | 819.0 | **+6.4%** |
+| Chrome, emulation fps (tight loop, one session, 7 reps) | 526.8 | 558.6 | **+6.0%** |
+
+The Chrome figure is internally consistent: with rewind, the clip-capture note
+and the frame prepare all disabled the loop measures 557.3 fps, and bare
+`benchFrames` measures 562.7 — so rewind is essentially the entire gap between
+what the bench page has always reported and what the shipping frame loop costs.
+
+**Memory and history length.** 3.59 MB after 10 s. At ~50 KB per push and
+6 pushes/s the 64 MB cap holds **~3.5 minutes** of history; the iOS 16 MB cap
+(`setRewindCapBytes`, applied only when `IS_IOS`) holds **~53 s**. The cap does
+**not** change the per-push cost — measured: a 16 MB ring pushes for the same
+instruction count as a 64 MB one, because eviction is O(1) amortized and
+measured 0.00 ms.
+
+**Correctness note:** framebuffer hashes are byte-identical with the ring off,
+in native mode and in web mode, so the ring observes the core rather than
+perturbing it.
+
+### 9.2 Run-ahead: OFF by default, on both frontends
+
+`web/index.js`: `let runaheadFrames = 0`, and the stored value only overrides
+it if the user picked one. Native has no run-ahead at all. So the 2.23x / 3.17x
+/ 4.06x figures for N = 1/2/3 are **opt-in** and are not part of the default
+cost. Good — at N=3 it would be 8.0 ms of a 16.7 ms frame on an M-series Mac.
+
+### 9.3 The shipped defaults, priced
+
+Read from `new_config()` in `src/dingbat/common/config.nim` and the variable
+initialisers in `web/index.js` (the IDB records only override them), not
+assumed.
+
+**Native**
+
+| setting | default | cost of the default | cost if flipped |
+|---|---|---|---|
+| `rewind` | **true** | **−6.0% throughput** | off: **+6.4%** |
+| waitloop detection | on (**no user switch**) | **buys +23% fps** | off: −18.7% |
+| `color_correction` | true | **free** (0.4152 vs 0.4152 ms GPU at 2160x1041) | — |
+| `video_filter` | `none` | free | hq4x +0.35 ms, xBR **+1.01 ms** GPU at 2160x1041 |
+| `mp2k_hle` | false | — | on: −7.3% fps / +4.7% instructions |
+| `frame_blend` | false | — | on: a 38 400-pixel CPU blend per present |
+| `scanlines` | false | — | on: free |
+| `audio_lowpass` | false | — | on: a core APU filter (GBA only, unmeasured) |
+| `pitch_correct_ff` | false | — | only during 2x fast-forward |
+| `run_bios` / `use_hle` | false / true | the cheap path | LLE unmeasured — no BIOS in this sandbox |
+| `gb_fifo` | true | GB only | — |
+| `gb_rumble` | true | free unless the cart rumbles | — |
+| `volume` / `mute` | 100 / false | frontend gain only | — |
+| cheats | none loaded | `apply_cheats` early-outs on a nil/empty check once per frame | — |
+| ImGui pass | skipped when no UI is visible | free | — |
+
+**Web**
+
+| setting | default | cost of the default | cost if flipped |
+|---|---|---|---|
+| rewind | **on, and there is no switch** | **−5.7% throughput** | **cannot be turned off** |
+| clip capture (`clip_note_frame`) | on, no switch | −0.9% | n/a |
+| frame prepare (`prepare_game_frame`) | on, no switch | −0.4% | n/a |
+| `runaheadFrames` | **0 (off)** | free | 1/2/3 = **2.23x / 3.17x / 4.06x** emulation |
+| `colorCorrect` | true | +0.033 ms GPU (+21% of the present draw) | off: −0.033 ms |
+| `upscaleFilter` | `"none"` | free | hq4x +0.161 ms, xBR +0.578 ms GPU |
+| `motionBlur` | false | — | on: +5.1% emulation |
+| `ambientGlow` | false | — | on: +0.013 ms/frame main thread |
+| `scanlines`, `integerScale` | false | — | free |
+| `mp2kHle` | false | — | on: +5.5% emulation |
+| `audioLowpass`, `pitchCorrectFF` | false | — | WebAudio node / FF only |
+| `gbFifo` | true | GB only | — |
+| `gbaBiosMode` | 0 (HLE) | the cheap path | — |
+| `gbaRunBios` | **true** | free with no BIOS present | with a BIOS: plays the boot intro |
+| `gbRumble` | true | free unless the cart rumbles | — |
+| rewind cap | 64 MB, 16 MB on iOS | no per-push difference (measured) | shorter history only |
+| everything else per frame (present, audio scheduling, glow, rumble, overlays) | — | 0.019 ms/frame, ~1% of the rAF callback | — |
+
+### 9.4 Where native and web default differently
+
+1. **Rewind has a switch on native and none on web.** `dingbat_wasm.nim`
+   allocates the ring at both ROM-load sites (`loadRom` and `netlink_exit`)
+   with no gate, and `loop_tick` pushes whenever it is non-nil. So the most
+   expensive default in the product is unavoidable on the platform with the
+   least headroom — and the one where memory pressure gets the wasm JIT
+   demoted, which costs far more than 6%.
+2. **Native rewind captures no thumbnails, web does.** `src/dingbat.nim` passes
+   no `thumb` proc to `maybe_push`; `dingbat_wasm.nim` does. Only 0.016 ms/push,
+   but the web ring also carries a thumbnail strip inside the same memory cap.
+3. **`gbaRunBios` defaults `true` on web, `run_bios` defaults `false` on
+   native.** No effect without a BIOS file (`make_gba` folds it to
+   `have_bios and optGbaRunBios`), but with one installed, web plays the GBA
+   boot intro on every load and native skips it. **This looks unintentional.**
+4. **Ambient glow and run-ahead are web-only**; interframe blending exists on
+   both but is a frontend CPU blend natively and core-side on web, which is why
+   it shows up in `loop_tick` on the web measurements and in the present path
+   on native.
+5. **Audio low-pass** is a core APU filter natively and a WebAudio node on web.
+   Same default (off), different mechanism and different cost if enabled.
+
+### 9.5 What to reconsider
+
+1. **Give the web frontend a rewind toggle.** It is the single most expensive
+   default in the product, it costs 5.7% on the platform with the least
+   headroom, and it is the only default a web user cannot escape. Native
+   already has the switch and the menu item. This is the actionable finding.
+2. **The delta compression is 56% of rewind's cost** — the obvious lever if
+   rewind stays unconditional. Unmeasured options: skip zlib when the XOR delta
+   is overwhelmingly zeros and store a sparse/run-length form instead, or drop
+   to a cheaper codec. Both trade retained history against CPU, because the cap
+   is a real memory budget — so neither is free, and neither should be
+   attempted without measuring history length as well as throughput.
+3. **Fix the `gbaRunBios` default divergence** (§9.4.3), which costs nothing
+   but surprises anyone who installs a BIOS on both frontends.
+4. **Everything else is fine.** Run-ahead is off, every cosmetic effect is off,
+   the one default-on shader feature (colour correction) is free on native and
+   0.033 ms on web, and the two defaults with no user switch that do cost
+   something — the clip-capture note and the frame prepare — are 0.9% and 0.4%.
+   The instinct that the defaults are performance-conscious is borne out
+   everywhere except rewind.
+
+**Not a saving, so recorded separately:** turning colour correction off, or
+running the GB scanline renderer instead of the pixel FIFO, would buy time at
+the cost of fidelity. Neither is recommended as a default change.
+
+**Forward risk.** A parallel branch adds bounds-checking to the save-state
+loader. Rewind shares `state_payload`/`apply_state_payload` with that path, and
+serialization is already 35% of rewind's cost — so if those checks land on the
+*write* side, rewind's cost goes up with them. Worth re-running
+`-d:rewindprof` after that merge. (Measured here against this branch only.)
+
