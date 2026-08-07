@@ -95,10 +95,15 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## both a DMG and a CGB title, from a path that does nothing. Keeping the hot
   ## half a leaf is worth ~1% against `main` on both.
   cpu.ime = false
+  # The same three OAM-bug M-cycles PUSH has (cpu_push16); Pan Docs lists
+  # interrupt handling with it.
+  oam_bug_if(gb, cpu.sp, obWrite)
   cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   cpu.pc = interrupt
   clear_interrupt(gb.interrupts, interrupt)
