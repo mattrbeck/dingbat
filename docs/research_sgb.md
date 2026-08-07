@@ -336,6 +336,18 @@ taken mid-packet has to resume mid-packet).
 `tests/savestate_compat_test.nim` passes unchanged: the committed corpus of
 GB rev 1/2/3 states still loads.
 
+**A state must cross the setting.** Super Game Boy is a frontend toggle, so
+saving with it on and loading with it off is an ordinary thing for a user to
+do — and the obvious reader condition, `if gb.sgb != nil and rev >= 5`, gets
+it wrong in both directions: it decides from *this machine's* configuration
+when the only thing that can decide is what is in the payload. The section
+bytes are then left in the stream, the next `expect_tag` reads 0xBB where it
+wants `GB_SEC_END`, and a perfectly good state is refused with "section marker
+mismatch". The reader **peeks the tag** instead (`peek_tag`), and with no
+adapter reads the section into a throwaway and drops it — the state loads and
+simply plays in black and white, which is what turning the setting off means.
+Pinned in `tests/sgb_test.nim` in both directions.
+
 **One-way cost, and it is unavoidable:** a state written by an SGB build for
 an SGB cart is refused by an older build (`rev 5 > 4`). Same class as the
 sub-1 MiB GBA identity fix. States for non-SGB carts are byte-identical.
@@ -361,9 +373,23 @@ Three inputs, in this order:
    you put one in a Game Boy Color, it is the better-looking mode, and it is
    the behaviour dingbat already produces. `force_dmg` (used by the gambatte
    suite) should then be able to fall through to SGB.
-3. **A user toggle**, default on.
+3. **A user toggle**, default **off**. It is off in four places that all have
+   to agree: `GB.sgb_requested` (so the test harnesses, the benchmark and the
+   ROM sweeps keep stock behaviour without knowing SGB exists), `new_config()`,
+   `var sgbEnable` in `web/index.js`, and `var sgbRequested` in
+   `dingbat_wasm.nim` (which is what an *embed* gets, since embed.js never
+   calls `applySystemSettings`).
 
-So: **auto-detected, with an off switch.** Not a per-game prompt. Verified on
+   **Migration is by omission and that is deliberate.** Neither
+   `parse_config`'s `gb.sgb` lookup nor `loadSystemSettings`'s `s.sgbEnable`
+   lookup invents a value when the key is absent, so a config or a `"system"`
+   record written before this feature existed keeps the new default. Nobody
+   silently gains an adapter.
+
+So: **opt-in, then auto-detected.** The switch is off out of the box — a fresh
+install plays a monochrome cart as a Game Boy, which is what it looks like
+everywhere else — and once it is on, whether any given cart gets an adapter is
+decided by the header alone, never by a per-game prompt. Verified on
 Zelda LADX, which carries both flags and runs as a Game Boy Color in both
 frontends.
 
@@ -378,9 +404,14 @@ which is why Pokemon Blue with SGB *off* still hashes identically to `main`.
 renderer radio (the existing GB group; the frontend has no per-system video
 section and inventing one for two checkboxes would have been worse):
 
-* `[x] Super Game Boy mode` — applies on the next ROM load or reset.
-* `[x] Show SGB border` — disabled while the mode is off, the same
-  "disabled while suspended" pattern the scanlines-under-filter checkbox uses.
+* `[ ] Super Game Boy mode` — **off by default**, with an always-visible
+  `Applies on the next ROM load or reset.` under it. Not behind the `(?)`
+  marker: the adapter is chosen when the cartridge is inserted, so ticking the
+  box cannot affect the game already running, and a user who ticks it and sees
+  nothing happen would reasonably conclude it is broken.
+* `[x] Show SGB border` — on, but disabled while the mode is off (the same
+  "disabled while suspended" pattern the scanlines-under-filter checkbox
+  uses). This one *is* live: it only hides a layer the core already has.
 * `[x] Preserve aspect ratio` — new, and not SGB-specific (§3.3).
 
 Config: `sgb_enable` / `sgb_border` in the nested `gb:` block of
@@ -396,9 +427,13 @@ The "Frame size 1x..8x" submenu now sizes from `output_size()`.
 **Settings ▸ Game Boy**, above the Boot ROM row. That pane, not Video: these
 are system settings, not presentation settings.
 
-* "Super Game Boy mode" — applies on next load, with a toast saying so.
-* "Show border" — **live**; it only hides a layer the core already has, and
-  the canvas changes shape immediately. Greys out with the mode.
+* "Super Game Boy mode" — **off by default**; applies on next load, with a
+  toast saying so when a game is already running. The pane's existing
+  `settings-note` now reads "Renderer, Super Game Boy mode and boot ROM
+  changes apply the next time a game is loaded. Showing or hiding the border
+  takes effect immediately."
+* "Show border" — on, and **live**; it only hides a layer the core already
+  has, and the canvas changes shape immediately. Greys out with the mode.
 
 Persisted in the existing grouped `"system"` IndexedDB record, so
 `SETTINGS_KEYS` is unchanged and "Reset all settings" already covers them; the
@@ -521,7 +556,7 @@ check replacing an existing indexed load, and it is inside the noise wall
 
 1. **The window resizes mid-session** (native) when a border first appears,
    because the picture genuinely changes size. It is one resize, on the edge,
-   and it is what a console does — but it is a surprise the first time.
+   and it is what a console does.
 2. **`MASK_EN 1` freezes the frame the emulator last presented**, not the one
    the SNES last stored. Pan Docs notes hardware needs "one or two frames"
    before a freeze is reliable. No cart has been seen to care.
@@ -538,8 +573,17 @@ check replacing an existing indexed load, and it is inside the noise wall
    ATTR_CHR/ATTR_LIN/ATTR_TRN and multi-packet groups are unit-covered only.
    A wider sweep (`tools/gbfuzz` already knows how to walk a library) is the
    obvious next step.
-6. **`web/serve.py` is on port 8781 on this branch** — a sandbox requirement
-   while this was built. Set it back to 8765 before merging.
-7. **The save-state downgrade is one-way**: a state written by this build for
+6. **The window resize is now much less of a surprise** than it was when this
+   defaulted on: it only happens to someone who went and turned Super Game Boy
+   on, reloaded the game, and is watching for it.
+7. **Turning the mode on or off needs a ROM reload.** The adapter is chosen
+   when the cartridge is inserted. Both frontends say so — an always-visible
+   line under the native checkbox, a toast plus the pane's `settings-note` on
+   the web. The *border* toggle is live.
+8. **A pre-existing config that already has `gb: sgb: true`** — which only
+   exists if someone ran a build of this branch from before the default was
+   flipped — keeps it on. That is correct (it is an explicit stored value);
+   flip the toggle or delete the two lines to get the new default.
+9. **The save-state downgrade is one-way**: a state written by this build for
    an SGB cart is refused by an older build (`rev 5 > 4`). States for every
    other cart are byte-identical. Same class as the sub-1 MiB GBA identity fix.

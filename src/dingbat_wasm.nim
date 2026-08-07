@@ -167,7 +167,10 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
 # played whenever a bios.bin has been provided.
 var optGbFifo = true
 # Super Game Boy frontend opt-ins (see wasm_sgb_enable / wasm_sgb_border_show).
-var sgbRequested  = true
+# sgbRequested is OFF by default: index.js pushes the stored setting in at
+# startup, but the embed never calls applySystemSettings, so this is what an
+# embedded game gets -- and an embed should play the cart as the cart is.
+var sgbRequested  = false
 var sgbBorderWanted = true
 var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
 var optGbaRunBios = true

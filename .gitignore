@@ -129,3 +129,4 @@ web/*.gba
 /dingbat_ts_test
 /dingbat_savestate_compat_test
 /dingbat_rewind_test
+web/_serve8781.py

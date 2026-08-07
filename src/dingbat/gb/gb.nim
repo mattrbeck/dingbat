@@ -1156,8 +1156,11 @@ type
     # the SCY bullet at CGB_SCY_LATENCY).
     cgb_enabled*:    bool
     cgb_native*:     bool
-    # Frontend opt-in for Super Game Boy emulation (default on). Only ever
-    # consulted at post_init; the cart header still has the final say.
+    # Frontend opt-in for Super Game Boy emulation. Default OFF, and off for
+    # every caller that does not say otherwise -- the test harnesses, the
+    # benchmark and the ROM sweeps all build a GB directly, and stock DMG
+    # behaviour is what they are scoring against. Only ever consulted at
+    # post_init; the cart header still has the final say after that.
     sgb_requested*:  bool
     fifo*:           bool
     headless*:       bool
@@ -1970,7 +1973,7 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     fifo:         fifo,
     headless:     headless,
     run_bios:     run_bios,
-    sgb_requested: true,
+    sgb_requested: false,
   )
   result.cartridge = load_cartridge(rom_path)
   result.cheats = new_cheat_engine(cpGB)

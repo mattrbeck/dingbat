@@ -165,6 +165,13 @@ proc read_seq_u16_into*(r: var Reader; dest: var openArray[uint16]) =
     raise state_error("state buffer size mismatch")
   for i in 0 ..< n: dest[i] = r.read_u16()
 
+proc peek_tag*(r: Reader): uint8 =
+  ## The next section marker without consuming it, or 0 at end of payload.
+  ## For sections that are conditionally present -- written only when the
+  ## machine has the hardware they describe -- so a reader whose machine does
+  ## NOT have it can still skip past instead of desynchronising.
+  if r.remaining < 1: 0'u8 else: uint8(r.buf[r.pos])
+
 proc expect_tag*(r: var Reader; tag: uint8) =
   let got = r.read_u8()
   if got != tag:

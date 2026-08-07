@@ -65,15 +65,21 @@ proc render*(v: VideoWidget) =
               "the cart ships one, a 256x224 border. Carts without the SGB " &
               "header bits are unaffected, and a Game Boy Color cart always " &
               "runs as a Game Boy Color even if it is also SGB-enhanced. " &
-              "Takes effect on the next ROM load or reset.")
+              "Off by default — stock Game Boy behaviour until you ask for it.")
   igIndent(106)
   discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
+  # Always visible, not tucked behind the (?) marker: the adapter is chosen
+  # when the cartridge is inserted, so turning this on cannot affect the game
+  # already running and a user who ticks it and sees nothing happen would
+  # reasonably conclude it is broken.
+  igTextDisabled("Applies on the next ROM load or reset.")
   igBeginDisabled(not v.sgb_enable)
   discard igCheckbox("Show SGB border", addr v.sgb_border)
   igEndDisabled()
   igSameLine(0, -1)
   help_marker("The border makes the picture 256x224 instead of 160x144, so " &
-              "the window resizes when one appears." &
+              "the window resizes when one appears. This one takes effect " &
+              "immediately — it only hides a layer the core already has." &
               (if not v.sgb_enable: " (Super Game Boy mode is off.)" else: ""))
   igUnindent(106)
 

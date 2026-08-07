@@ -70,6 +70,10 @@ if not fileExists(ROM):
   quit(1)
 
 var m = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+# Explicit: the core defaults to no adapter, so every consumer that has not
+# asked for one (the test harnesses, the benchmark, the ROM sweeps) keeps
+# stock Game Boy behaviour.
+m.sgb_requested = true
 m.post_init()
 for _ in 0 ..< 20: m.step_frame()
 
@@ -135,6 +139,7 @@ check(hole_opaque == 0, &"{hole_opaque} opaque pixels inside the GB window")
 # ---- the scanline renderer must colorize identically ----
 block:
   var sl = new_gb("", ROM, fifo = false, headless = true, run_bios = false)
+  sl.sgb_requested = true
   sl.post_init()
   for _ in 0 ..< 20: sl.step_frame()
   check(sl.sgb != nil, "scanline renderer: no SGB adapter")
@@ -147,9 +152,20 @@ block:
 block:
   var plain = new_gb("", "tests/roms/gblinktest.gb", fifo = true,
                      headless = true, run_bios = false)
+  plain.sgb_requested = true
   plain.post_init()
   check(plain.sgb == nil, "a cart without the SGB header bits got an adapter")
   check(plain.ppu.sgb_attr == nil, "renderer SGB hook set on a non-SGB machine")
+
+# ---- and the adapter is OPT-IN: an SGB cart gets nothing by default ----
+block:
+  var dflt = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  check(not dflt.sgb_requested, "sgb_requested must default to false")
+  dflt.post_init()
+  for _ in 0 ..< 20: dflt.step_frame()
+  check(dflt.sgb == nil, "an SGB cart got an adapter without being asked")
+  check(dflt.ppu.sgb_attr == nil, "renderer SGB hook set without an adapter")
+  check(dflt.boot_model == bmDmgABC, "boot model promoted without an adapter")
 
 # ---- save state round trip ----
 block:
@@ -210,6 +226,7 @@ block multi_packet_attr_chr:
   # ATTR_CHR with 40 data sets, which needs two packets: 4 header/param bytes
   # plus 10 data bytes fit in packet 0, the rest continue in packet 1.
   var m2 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m2.sgb_requested = true
   m2.post_init()
   for _ in 0 ..< 20: m2.step_frame()
   let s2 = m2.sgb
@@ -283,6 +300,7 @@ block multi_packet_attr_chr:
 
 block mask_en:
   var m3 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m3.sgb_requested = true
   m3.post_init()
   for _ in 0 ..< 30: m3.step_frame()
   let s3 = m3.sgb
@@ -323,6 +341,7 @@ block mask_en:
 
 block mlt_req:
   var m4 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m4.sgb_requested = true
   m4.post_init()
   for _ in 0 ..< 20: m4.step_frame()
   let s4 = m4.sgb
@@ -346,6 +365,47 @@ block mlt_req:
   joypad_write(m4.joypad, m4, 0x30)
   check((joypad_read(m4.joypad, m4) and 0x0F) == 0x0F,
         "one-player mode must always read joypad ID 0xF")
+
+# ---- a state written WITH the adapter must load WITHOUT it, and back ----
+block cross_config_state:
+  var withsgb = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  withsgb.sgb_requested = true
+  withsgb.post_init()
+  for _ in 0 ..< 20: withsgb.step_frame()
+  check(withsgb.sgb != nil, "cross-config: setup machine has no adapter")
+  let sgb_payload = withsgb.state_payload()
+
+  # Super Game Boy is a frontend setting, so this is an ordinary thing for a
+  # user to do: save with it on, turn it off, load.
+  var without = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  without.post_init()
+  check(without.sgb == nil, "cross-config: control machine got an adapter")
+  var ok_off = true
+  try: without.apply_state_payload(sgb_payload)
+  except CatchableError as e:
+    ok_off = false
+    echo "  (", e.msg, ")"
+  check(ok_off, "an SGB state must load into a machine with SGB turned off")
+  if ok_off:
+    without.step_frame()
+    var mono = true
+    for v in without.ppu.framebuffer:
+      if v notin DMG_COLORS: mono = false
+    check(mono, "after loading an SGB state with SGB off, the screen must be " &
+                "plain DMG shades")
+
+  # And the other way: a state written without the section into a machine
+  # that has an adapter.
+  let plain_payload = without.state_payload()
+  var back = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  back.sgb_requested = true
+  back.post_init()
+  var ok_on = true
+  try: back.apply_state_payload(plain_payload)
+  except CatchableError as e:
+    ok_on = false
+    echo "  (", e.msg, ")"
+  check(ok_on, "a non-SGB state must load into a machine with SGB turned on")
 
 # ---- optional PNG dump ----
 when defined(sgb_png):

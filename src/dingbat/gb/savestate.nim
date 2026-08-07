@@ -868,7 +868,20 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
-  if gb.sgb != nil and rev >= 5: load_sgb_state(gb.sgb, r)
+  # The SGB section is present only when the machine that WROTE the state had
+  # an adapter, and the machine reading it may not: Super Game Boy is a
+  # frontend setting, so a state saved with it on is entirely likely to be
+  # loaded with it off. Decide from the payload (a peek at the tag), not from
+  # this machine's configuration, or the reader desynchronises and the state
+  # is rejected with "section marker mismatch" -- a real trap, since the
+  # obvious `if gb.sgb != nil` reads correctly and is wrong.
+  #
+  # With no adapter the section is read into a throwaway and dropped: the
+  # game re-establishes its palettes within a few frames, so the state still
+  # loads and simply plays in black and white, which is what the user asked
+  # for by turning the setting off.
+  if rev >= 5 and r.peek_tag() == GB_SEC_SGB:
+    load_sgb_state(if gb.sgb != nil: gb.sgb else: new_sgb_state(), r)
   r.expect_tag(GB_SEC_END)
   # Derived OAM-DMA bus state. Neither field is serialized: both are functions
   # of state that already is (current_dma_source, dma_position, and the source

@@ -2997,9 +2997,15 @@ var gbRumble = true;
 const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
 const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
 
-// Super Game Boy. Both are opt-ins the core only consults at ROM load (the
-// cart header has the final say), so changing them applies to the next game.
-var sgbEnable = true;
+// Super Game Boy. sgbEnable is OFF by default -- a fresh install plays
+// monochrome carts as a Game Boy, and the adapter is something you go and turn
+// on. An existing "system" record predating this feature has no sgbEnable key,
+// so loadSystemSettings leaves it off too: nobody silently gains it.
+// sgbBorder defaults on because it is not a second opt-in; once you have asked
+// for the adapter, the border is most of what it does.
+// Both are only consulted by the core at ROM load (the cart header has the
+// final say after that), so changing sgbEnable applies to the next game.
+var sgbEnable = false;
 var sgbBorder = true;
 const sgbToggle = /** @type {HTMLInputElement} */ (document.getElementById("sgb-toggle"));
 const sgbBorderToggle = /** @type {HTMLInputElement} */ (document.getElementById("sgb-border-toggle"));
@@ -5760,6 +5766,9 @@ const syncGbPaletteUI = () => {
   const sgb = sgbActive();
   if (gbPaletteSelect) gbPaletteSelect.disabled = sgb;
   if (gbPaletteSgbNote) gbPaletteSgbNote.hidden = !sgb;
+  // The In-use swatches and the Reset button belong to the same control.
+  for (const r of document.querySelectorAll(".gb-palette-row"))
+    r.classList.toggle("row-disabled", sgb);
   for (let i = 0; i < 4; i++) {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
   }
@@ -5973,7 +5982,7 @@ const resetAllSettings = async () => {
 
   // Super Game Boy -> on, border shown (the "system" record was already
   // deleted above; this restores the live state and pushes it into the core).
-  sgbEnable = true;
+  sgbEnable = false;
   sgbBorder = true;
   applySystemSettings();
   syncSystemSettingsUI();
