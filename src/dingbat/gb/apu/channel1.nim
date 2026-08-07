@@ -30,16 +30,33 @@ proc ch1_catchup_slow(ch: GbChannel1; gb: GB; observer_period: uint32) =
   let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
   if steps == 0: return
   ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
+  # Only the LAST step's bit matters: ch.duty is immutable between catch-ups
+  # (an NR11 write catches the channel up first), so the intermediate latches a
+  # per-step loop would do are all overwritten. Same argument as CH3's sample
+  # buffer. Latching here rather than reading the table in ch1_dac_input is
+  # what makes a duty change take effect only from the next sample on, and what
+  # holds the pre-trigger sample through the startup delay.
+  ch.sample_bit = WAVE_DUTY1[ch.duty][ch.wave_duty_position]
   ch.next_step += steps * period
 
 proc ch1_catchup_at*(ch: GbChannel1; gb: GB; observer_period: uint32) {.inline.} =
-  ## Bring wave_duty_position up to gb.scheduler.cycles. Closed form: the duty
-  ## counter is a free-running mod-8 counter, so N periods of advance is
+  ## Bring wave_duty_position up to gb.scheduler.cycles. Closed form: while the
+  ## channel is on the duty counter free-runs mod 8, so N periods of advance is
   ## (pos + N) and 7 -- no iteration, and cost independent of the frequency.
   ## Must be called before anything that can observe the duty position or
   ## change the period; see the observation-point list in apu.nim.
   ## observer_period is the caller's own T-cycle period (GB_OBS_CPU for a CPU
   ## access) and only affects a step landing on this exact cycle.
+  if not ch.enabled:
+    # The duty counter is clocked only while the channel is ON. Switching it
+    # off freezes the phase where it stands -- SameSuite channel_1_stop_restart:
+    # "even after stopping the channel, the current sample index/phase remains
+    # unchanged. It is only reset by turning the APU off (NR52)." Parking the
+    # deadline rather than merely skipping the advance keeps it from going stale
+    # enough to underflow apu_rebase; the only route back on is a trigger, and
+    # that re-arms next_step from the current cycle anyway.
+    ch.next_step = GB_NO_STEP
+    return
   if ch.next_step > gb.scheduler.cycles: return   # not due (or never triggered)
   ch1_catchup_slow(ch, gb, observer_period)
 
@@ -74,7 +91,7 @@ proc ch1_dac_input*(ch: GbChannel1): uint8 =
   ## but a hand-edited or truncated save state can, and that must not become an
   ## out-of-bounds read.
   if ch.enabled and ch.dac_enabled:
-    uint8(int(WAVE_DUTY1[ch.duty][ch.wave_duty_position]) * int(ch.current_volume)) and 0x0F
+    uint8(int(ch.sample_bit) * int(ch.current_volume)) and 0x0F
   else: 0'u8
 
 proc ch1_get_amplitude*(ch: GbChannel1): float32 =
@@ -117,16 +134,21 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
       if ch.length_counter == 0: ch.enabled = false
     ch.length_enable = len_enable
     if (val and 0x80) != 0:  # trigger
+      let was_enabled = ch.enabled
       if ch.dac_enabled: ch.enabled = true
       if ch.length_counter == 0:
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      # Same as the old clear(etAPUChannel1) + schedule_gb(period): re-arm a
-      # full period from now. The duty POSITION deliberately carries across a
-      # trigger (hardware only resets it when the APU is powered off) -- which
-      # is why the phase has to be caught up rather than parked.
-      ch.next_step = gb.scheduler.cycles + ch1_period(ch, gb)
+      # The duty POSITION deliberately carries across a trigger (hardware only
+      # resets it when the APU is powered off) -- which is why the phase has to
+      # be caught up rather than parked -- and so does the LATCHED sample: a
+      # channel that was off was latching 0, so it emits nothing until its
+      # first duty step, which is the pulse analogue of CH3's documented
+      # "triggering does not immediately start playing wave RAM".
+      if not was_enabled: ch.sample_bit = 0
+      ch.next_step = gb_trigger_deadline(gb, ch1_period(ch, gb),
+                                         if was_enabled: 1 else: 2)
       init_volume_envelope(ch)
       ch.frequency_shadow = ch.frequency
       ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8'u8

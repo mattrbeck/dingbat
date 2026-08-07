@@ -871,9 +871,34 @@ type
     volume_envelope_timer*:  uint8
     current_volume*:         uint8
     vol_env_is_updating*:    bool
+    # "Enabling the envelope triggers an APU bug - in the next *even* DIV-APU
+    # tick, the APU will tick the volume envelope of that appropriate channel,
+    # even if it would not tick volume envelope at that tick otherwise"
+    # (SameSuite channel_1_nrx2_speed_change). Set by an NRx2 write that takes
+    # the envelope period from zero to non-zero, consumed by the next even
+    # frame-sequencer step. See write_NRx2 and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it lives for at most
+    # one 512 Hz step (~2 ms) and it is set only by a register write, so a
+    # rollback that replays that write reconstructs it.
+    env_extra_tick*:         bool
 
   GbChannel1* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    # The square channel's LATCHED duty output (0 or 1). Hardware does not read
+    # the duty table continuously: it samples it once per duty step and holds
+    # that bit until the next one, so a mid-sample NR11 duty change is not
+    # audible until the step after it (SameSuite channel_1_duty_delay: "Changing
+    # the duty becomes effective only after the current sample finishes"), and a
+    # trigger keeps emitting the PREVIOUS sample -- zero, if the channel was off
+    # -- for the whole startup delay (channel_1_duty / channel_1_align). See
+    # ch1_catchup_slow, which is the only place that refreshes it.
+    #
+    # Deliberately NOT serialized, for the same reason as GbApu.tick_phase: it
+    # is refreshed by the next duty step, so a loaded state is at most one duty
+    # period (4 us to 2 ms) of one channel's sample away from exact, and it
+    # errs towards silence rather than towards a wrong level.
+    sample_bit*:         uint8
     # Absolute scheduler cycle of the next duty step, or GB_NO_STEP when the
     # channel has never been triggered. Replaces a per-period scheduler event:
     # the duty counter is advanced in closed form when something observes it
@@ -893,6 +918,7 @@ type
 
   GbChannel2* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    sample_bit*:         uint8        # see GbChannel1.sample_bit
     next_step*:          CycleCount   # see GbChannel1.next_step
     duty*:               uint8
     length_load*:        uint8
@@ -902,6 +928,18 @@ type
     next_step*:              CycleCount   # see GbChannel1.next_step
     wave_ram*:               array[16, uint8]
     wave_ram_position*:      uint8
+    # Whether CH3 has fetched a byte since its last trigger. A trigger reloads
+    # the frequency timer with period + 6 (Pan Docs: "triggering does not
+    # immediately start playing wave RAM"), so for that whole window there is no
+    # "byte CH3 is currently reading" -- which on DMG means a CPU access to wave
+    # RAM has nothing to land on. See ch3_wave_open; it is the only thing that
+    # separates "the pointer is at 0 because we just triggered" from "the
+    # pointer is at 0 because it just wrapped".
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it is false only
+    # inside a startup window a few T-cycles long, and it defaults to the value
+    # a running channel has.
+    wave_fetched*:           bool
     wave_ram_sample_buffer*: uint8
     length_load*:            uint8
     volume_code*:            uint8
@@ -921,6 +959,40 @@ type
     buffer*:              seq[float32]
     buffer_pos*:          int
     frame_sequencer_stage*: int
+    # Phase of the APU's own 1 MHz tick grid, in scheduler cycles: a tick edge
+    # lands on every cycle congruent to this modulo (4 shl speed). The square
+    # channels' frequency timers are clocked by that grid, not by the CPU, so a
+    # trigger written between two edges does not start counting until the next
+    # one -- which is what SameSuite channel_1_align_cpu measures ("Channel 1 is
+    # aligned to the APU's enable time, not the CPU's start time"): inserting
+    # nops BEFORE the NR52 power-on moves the whole grid with the write and
+    # changes nothing, while the nops between power-on and trigger in
+    # channel_1_align shift the result by one CPU cycle. Reset by an APU
+    # power-on; see apu_write and gb_trigger_deadline.
+    #
+    # Deliberately NOT serialized. It is only ever written by a power-on, so a
+    # rollback snapshot that replays one reconstructs it exactly; a state loaded
+    # from disk falls back to the scheduler's own grid, which costs at most half
+    # an APU tick (~0.25 us) of pulse phase and is inaudible. Serializing it
+    # would cost a GB payload revision bump, which is worth spending on a batch
+    # of fields rather than on this one.
+    tick_phase*:          CycleCount
+    # "The first DIV-APU event after a power-on is skipped when DIV's tap bit
+    # was already high" (SameSuite div_write_trigger_10). The divider is what
+    # actually clocks the sequencer, so powering the APU on part-way through a
+    # tap period leaves the divider half a step ahead of the sequencer: the
+    # edge that ends that period has already been accounted for and produces no
+    # step. See apu_write's NR52 arm and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like tick_phase: it is true only between an
+    # APU power-on and the next 512 Hz edge (under 2 ms), it is written only by
+    # a power-on, and a rollback that replays one reconstructs it exactly.
+    div_skip*:            bool
+    # Whether the sequencer's NEXT step is one that does NOT clock the length
+    # counter -- the "extra length clocking" gate on an NRx4 write. Note it is
+    # a property of the DIVIDER's phase, not of frame_sequencer_stage: while
+    # div_skip is pending the two disagree, and div_write_trigger_10 is exactly
+    # the test that can tell.
     first_half_of_length_period*: bool
     left_enable*:         bool
     left_volume*:         uint8

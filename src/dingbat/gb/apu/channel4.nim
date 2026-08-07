@@ -94,7 +94,13 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      ch.next_step = gb.scheduler.cycles + ch4_period(ch, gb)
+      # One startup tick, not the squares' two, and no shorter form for a
+      # restart: channel_4_delay measures "sample length + 3 M-cycles" from the
+      # NR44 write to the first sample, and two of those three are the read the
+      # test uses to see it (the accounting channel_1_delay spells out). The
+      # 1 MHz grid alignment is the same one channel_4_align asserts for this
+      # channel as channel_1_align does for the squares.
+      ch.next_step = gb_trigger_deadline(gb, ch4_period(ch, gb), 1)
       init_volume_envelope(ch)
       ch.lfsr = 0x7FFF'u16
   else: discard

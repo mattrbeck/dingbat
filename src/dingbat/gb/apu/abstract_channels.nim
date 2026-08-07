@@ -35,6 +35,48 @@ template gb_steps_due*(d, period: CycleCount; defer_tie: bool): CycleCount =
     if defer_tie and (d mod period) == 0: dec s
     s
 
+template gb_apu_tick*(gb: GB): CycleCount =
+  ## One APU tick in scheduler cycles. The APU's frequency timers run at 1 MHz
+  ## (SameSuite channel_1_align: "This test verifies that channel 1 ticks at
+  ## 1MHz"), i.e. one tick per 4 CPU T-cycles at single speed. schedule_gb
+  ## scales every APU delay by the speed shift, so this has to as well: at CGB
+  ## double speed the CPU cycle halves but the APU tick does not, so it spans 8
+  ## scheduler cycles = 2 CPU cycles.
+  CycleCount(4) shl gb.scheduler.speed
+
+proc gb_trigger_deadline*(gb: GB; period: CycleCount;
+                          extra_ticks: int): CycleCount =
+  ## Absolute scheduler cycle of a channel's first waveform step after a
+  ## trigger. Two hardware behaviours, both measured by SameSuite and
+  ## documented in its sources:
+  ##
+  ## 1. The trigger does not take effect between APU ticks. The write is picked
+  ##    up on the next edge of the 1 MHz grid that GbApu.tick_phase tracks --
+  ##    which is why channel_1_align's results move by one CPU cycle when a nop
+  ##    is inserted before the trigger, and why channel_1_align_cpu's do NOT
+  ##    move when the same nop is inserted before the APU power-on that
+  ##    established the grid.
+  ## 2. From that edge, the first sample is due one full period PLUS a fixed
+  ##    startup delay of extra_ticks, which the caller supplies because it
+  ##    differs per channel and per trigger:
+  ##      * squares, channel off:   2 (channel_1_delay: "It takes (sample
+  ##        length + 2) ticks from the moment channel 1 is enabled until PCM12
+  ##        is affected")
+  ##      * squares, channel on:    1 (channel_1_restart: "after restarting,
+  ##        the start delay from the 'delay' test is actually 1 tick shorter")
+  ##      * noise:                  1 (channel_4_delay: "the delay is `sample
+  ##        length + 3` M-cycles" -- the same accounting as channel_1_delay,
+  ##        whose two extra cycles are the read itself, leaves one)
+  ##
+  ## The waveform POSITION is untouched either way -- hardware only resets it on
+  ## an APU power-off -- so the first sample after a restart is the one the old
+  ## pulse would have played next, exactly as channel_1_restart describes.
+  let tick = gb_apu_tick(gb)
+  let now  = gb.scheduler.cycles
+  let past = (now + tick - (gb.apu.tick_phase mod tick)) mod tick
+  let edge = if past == 0: now else: now + (tick - past)
+  edge + period + CycleCount(extra_ticks) * tick
+
 const GB_NO_STEP* = high(CycleCount)
   ## "no pending waveform step" sentinel for the channels' next_step deadline.
   ## Every catch-up guard is `next_step > scheduler.cycles`, so this parks a
@@ -98,11 +140,31 @@ proc write_NRx2*(ch: GbVolumeEnvChannel; value: uint8) =
   # because apu_write catches the target channel up before dispatching here.
   let new_add_mode = (value and 0x08) != 0
   if ch.enabled:
+    # "Zombie mode". The DMG rule usually quoted (Pan Docs, Obscure Behavior) is
+    # +1 when the old period was zero and the envelope was still updating, ELSE
+    # +2 when the old direction was decrease. That variant was tried and is NOT
+    # what the CGB does: it takes SameSuite channel_1_volume from 78/128 to
+    # 92/128 bytes but breaks two of the rows this shared +1 already gets right,
+    # and passes neither version of the test. SameSuite's own
+    # channel_1_nrx2_glitch says the glitch "appears to be different across
+    # revisions", so the two rules are two revisions, not one right and one
+    # wrong. Left as it is because it is the one that scores better here and it
+    # is what every blargg sound row is currently green against.
     if (ch.period == 0 and ch.vol_env_is_updating) or (not ch.envelope_add_mode):
       inc ch.current_volume
     if new_add_mode != ch.envelope_add_mode:
       ch.current_volume = 0x10'u8 - ch.current_volume
     ch.current_volume = ch.current_volume and 0x0F
+  # The envelope "enable" glitch: taking the period from zero to non-zero costs
+  # one extra envelope tick at the next even DIV-APU step, on top of whatever
+  # that step would have done. It is the whole difference between
+  # channel_1_nrx2_speed_change's tests 1/2/5 (speed change and disable, which
+  # this tree already got right) and its tests 3/4/6/7 (enable), every byte of
+  # which came out exactly one volume step short without it.
+  if ch.enabled and ch.period == 0 and (value and 0x07) != 0:
+    ch.env_extra_tick = true
+  elif (value and 0x07) == 0:
+    ch.env_extra_tick = false
   ch.starting_volume   = value shr 4
   ch.envelope_add_mode = new_add_mode
   ch.period            = value and 0x07
