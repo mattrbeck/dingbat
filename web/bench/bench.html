@@ -16,6 +16,24 @@
 <script>
 // NOTE: em.js declares plenty of short top-level names (`out`, `err`, `log`…).
 // Everything here is scoped inside an IIFE / on `window` to avoid colliding.
+// The app's service worker precaches ./em.js and ./em.wasm by fixed name at
+// root scope, so it also controls /bench/. Benchmarking two builds by swapping
+// those two files on disk then silently measures whichever one the SW cached
+// FIRST — an A/B that always comes out a dead heat, with matching framebuffer
+// hashes to "confirm" it. Unregister before anything loads, and check the
+// build identity with benchBuildId() below.
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.getRegistrations?.().then((rs) => rs.forEach((r) => r.unregister()));
+}
+// Byte length of the em.wasm this page actually loaded. Two builds differ in
+// size, so this is a positive identification of which one is being measured.
+window.benchBuildId = () => {
+  const e = performance.getEntriesByType("resource")
+    .filter((r) => r.name.endsWith("em.wasm")).pop();
+  return e ? { size: e.decodedBodySize, transfer: e.transferSize,
+               fromSW: !!e.deliveryType || e.transferSize === 0 } : null;
+};
+
 const bOut = document.getElementById("out");
 const bLog = (s) => { bOut.textContent += s + "\n"; console.log(s); };
 window.benchReady = false;
@@ -67,6 +85,24 @@ window.benchRun = (frames) => {
   return { frames, ms, fps: frames * 1000 / ms };
 };
 
+// Bit-exactness gate for an A/B of two builds: reload the state, run `frames`
+// frames, and hash the framebuffer. `_wasm_fb_ptr` is a pure LUT conversion of
+// the raw BGR555 buffer, so an identical hash means an identical framebuffer.
+// FNV-1a in 32-bit chunks (JS has no cheap u64 mul).
+window.benchHash = (frames) => {
+  window.benchLoadState();
+  Module._benchFrames(frames);
+  if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+  const p = Module._wasm_fb_ptr();
+  const v = new Uint8Array(Module.memory.buffer, p, 240 * 160 * 4);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < v.length; i++) {
+    h ^= v[i];
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return { frames, hash: h.toString(16) };
+};
+
 // Median-of-N trial for stable numbers.
 window.benchTrial = (frames, reps) => {
   const r = [];
@@ -74,6 +110,55 @@ window.benchTrial = (frames, reps) => {
   r.sort((a, b) => a - b);
   return { median: r[(r.length / 2) | 0], min: r[0], max: r[r.length - 1], all: r };
 };
+// Self-reporting mode for browsers that cannot be driven from the shell
+// (Safari, and any device browser): open bench.html?auto=1 and the page runs
+// the trial itself and prints the numbers on screen, large enough to read off
+// a photo or a screenshot. ?frames= and ?reps= override the defaults.
+window.benchAuto = async () => {
+  const q = new URLSearchParams(location.search);
+  const frames = Number(q.get("frames") || 600);
+  const reps = Number(q.get("reps") || 7);
+  bOut.style.fontSize = "18px";
+  bLog("waiting for runtime…");
+  while (!window.benchRuntimeUp) await new Promise((r) => setTimeout(r, 100));
+  await window.benchInit();
+  bLog("UA: " + navigator.userAgent);
+  bLog("build: " + JSON.stringify(window.benchBuildId()));
+  // Which GPU-timing instrument this browser offers, so a settings sweep knows
+  // whether present-path costs are measurable here at all.
+  try {
+    const g = document.createElement("canvas").getContext("webgl2");
+    bLog("webgl2=" + !!g + " timerQuery=" +
+         !!(g && g.getExtension("EXT_disjoint_timer_query_webgl2")) +
+         " simd=" + WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,26,11])));
+  } catch (e) { bLog("gl probe failed: " + e); }
+  for (const hle of [false, true]) {
+    window.benchSetHle(hle);
+    const r = [];
+    for (let i = 0; i < reps; i++) {
+      window.benchLoadState();
+      r.push(window.benchRun(frames).fps);
+      await new Promise((x) => setTimeout(x, 0)); // let the page paint
+    }
+    r.sort((a, b) => a - b);
+    bLog(`HLE ${hle ? "on " : "off"}  median ${r[(r.length / 2) | 0].toFixed(1)} fps` +
+         `  best ${r[r.length - 1].toFixed(1)}  min ${r[0].toFixed(1)}`);
+  }
+  bLog("HASH(400) = " + window.benchHash(400).hash);
+  bLog("DONE");
+  // Report back through the dev server's request log, so a browser that
+  // cannot be driven from the shell (Safari: Apple Events to it need Develop
+  // > "Allow JavaScript from Apple Events", which is off by default) still
+  // delivers its numbers somewhere readable. The 404 is expected; the query
+  // string is the payload.
+  try {
+    await fetch("/__benchresult?" +
+                encodeURIComponent(bOut.textContent.replace(/\n/g, " | ")));
+  } catch (e) { /* reporting is best-effort */ }
+};
+if (new URLSearchParams(location.search).get("auto") === "1") {
+  addEventListener("load", () => window.benchAuto());
+}
 </script>
 <script src="session.js"></script>
 <script async src="../em.js"></script>
