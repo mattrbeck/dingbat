@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-03 19:10:40*
+*Generated: 2026-08-07 14:06:22*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3618/5005 passed.**
+**3625/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -257,7 +257,7 @@ All 8 tests passed.
 | dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80 [cgb] | got FF, expected 80 |
 | dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81 [cgb] | got FF, expected 81 |
 | dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00 [cgb] | got 01, expected 00 |
-| dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00 [cgb] | got FF, expected 00 |
+| dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
 | dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 6B, expected 71 |
@@ -893,9 +893,9 @@ All 6 tests passed.
 | oam_access/prewrite_2_dmg08_out1_cgb04c_out0 [dmg] | got 0, expected 1 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (680/811 passed)
+## oamdma (681/811 passed)
 
-680/811 tests passed, 131 failed:
+681/811 tests passed, 130 failed:
 
 | Test | Result |
 |------|--------|
@@ -924,7 +924,6 @@ All 6 tests passed.
 | oamdma/late_sp39y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oamdma/oamdma_late_speedchange_stat_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
@@ -1294,9 +1293,9 @@ All 6 tests passed.
 | sound/ch4_late_div_write_nr52_1a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 | sound/ch4_late_div_write_nr52_2a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
 
-## speedchange (106/208 passed)
+## speedchange (112/208 passed)
 
-106/208 tests passed, 102 failed:
+112/208 tests passed, 96 failed:
 
 | Test | Result |
 |------|--------|
@@ -1353,45 +1352,39 @@ All 6 tests passed.
 | speedchange/speedchange4_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
 | speedchange/speedchange4_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
 | speedchange/speedchange4_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
+| speedchange/speedchange4_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
 | speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
 | speedchange/speedchange4_ly44_m3_nop_m3stat_scx4_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_ly44_m3_nop_m3stat_scx4_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
+| speedchange/speedchange4_ly44_m3_nop_m3stat_scx4_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange4_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
 | speedchange/speedchange4_nop_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
 | speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
+| speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange5_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange5_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
+| speedchange/speedchange5_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
+| speedchange/speedchange5_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
+| speedchange/speedchange5_ly44_m3_nop_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
+| speedchange/speedchange5_ly44_m3_nop_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
+| speedchange/speedchange5_nop_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
+| speedchange/speedchange5_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
 | speedchange/speedchange_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange_ch2_nr52_ds_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange_lcdoff_tima00_1_cgb04c_out80 [cgb] | got 00, expected 80 |
-| speedchange/speedchange_ly44_m3_m3stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nop_m3stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nop_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx2_m3stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx2_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx3_m3stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx4_m3stat_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_nopx4_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ly44_m3_stat_2_cgb04c_outC2 [cgb] | got C0, expected C2 |
+| speedchange/speedchange_ly44_m3_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nop_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nop_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx2_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx2_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx3_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx4_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_nopx4_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ly44_m3_stat_1_cgb04c_outC0 [cgb] | got C2, expected C0 |
 | speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 00, expected 80 |
 | speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 01, expected 81 |
 | speedchange/speedchange_tima00_2a_cgb04c_out81 [cgb] | got 01, expected 81 |
