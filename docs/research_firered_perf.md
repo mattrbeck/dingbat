@@ -767,3 +767,233 @@ serialization is already 35% of rewind's cost — so if those checks land on the
 *write* side, rewind's cost goes up with them. Worth re-running
 `-d:rewindprof` after that merge. (Measured here against this branch only.)
 
+---
+
+## 10. Rewind compression: what the delta is, and what beats zlib (2026-08-07)
+
+Base for every number here: **this branch** (`agent-fireredperf`, `6ddcbe9`),
+not `main` — `main` has since taken the five §3 wins and a save-state loader
+fix. Numbers are self-consistent; treat the absolutes as branch-relative.
+
+The brief was Pareto improvements — denser **and** faster — with trades
+reported separately. There is one large Pareto win, and it is not a codec.
+
+### 10.1 The delta is 87% zeros, and 40% of that is an alignment bug
+
+Characterising before choosing a codec killed most of the candidate list in ten
+minutes. FireRed, in-game overworld, snapshots on the ring's cadence:
+
+| | shipped | after the alignment fix |
+|---|---|---|
+| zero bytes | 87.46% | **99.15%** |
+| dirty 64 B blocks | 14.91% | 2.05% |
+| dirty 4 KB pages | 27.45% | 12.97% |
+| changed bytes per delta | 75 782 | **5 158** |
+
+**The zeros are not in long runs.** The zero-run histogram is dominated by
+1-byte and 2-byte runs (166 593 and 88 608 of ~326 000). Changed bytes are
+*scattered*, not clustered — which is why a dirty-page scheme loses badly
+(`sparse4k` encodes to 340% of zlib's size) and why "ship only changed 4 KB
+pages" is dead on arrival.
+
+**Where the changed bytes were, and the bug that put them there.** Attributing
+the delta by payload section showed 41 264 B in the PPU section and 31 079 B in
+the 128 KB save chip — on an idle overworld, where the save chip cannot be
+changing at all. Tracing per push showed why:
+
+```
+push  4 len=604135  ppu=2328    storage=0
+push  5 len=604126  ppu=104119  storage=80402
+push  6 len=604135  ppu=104041  storage=80400
+push  7 len=604135  ppu=2319    storage=0
+```
+
+The payload alternates between **604 135 and 604 126 bytes — 9 bytes, exactly
+one scheduler event** (`u8` kind + `u64` cycles). The scheduler section is the
+only variable-length part of a GBA payload, and it sits *before* 300 KB of
+fixed-size arrays. One event coming or going shifts all of them, the XOR then
+compares misaligned VRAM, framebuffer and flash, and ~184 KB of unchanged data
+lights up. On FireRed this happens on **40% of pushes**, silently.
+
+It is workload-dependent: goodboy-demo's event count does not oscillate and its
+delta is unaffected (11 559 B shipped vs 11 553 B aligned). So it is free when
+it does not bite and 8.5x when it does, and which one a user gets is timing
+luck.
+
+### 10.2 Candidates, all three targets
+
+Every codec round-trips bit-exactly on every delta or the harness aborts.
+Native is `-d:release` on an M-series Mac; Chrome and Safari run the *same*
+Nim code compiled to wasm (`-d:codecbench`), over the same deltas, because the
+ranking does not survive the move between engines.
+
+**Shipped payload (variable length), FireRed idle:**
+
+| codec | bytes | native enc | Chrome enc | Safari enc |
+|---|---|---|---|---|
+| zlib:BestSpeed (shipped) | 48 380 | 0.355 | 0.661 | 0.739 |
+| lz4 | 34 906 (78%) | 0.124 | 0.246 | 0.217 |
+| sparse64+zlib | 43 027 (97%) | 0.165 | 0.491 | 0.449 |
+| sparse64+lz4 | 33 020 (74%) | 0.117 | 0.325 | 0.174 |
+| sparse4k | 78 677 (163%) | 0.147 | — | — |
+
+**Fixed-length payload (alignment fixed) — the state that matters:**
+
+| codec | bytes | ratio | native enc | Chrome enc | Safari enc | native dec |
+|---|---|---|---|---|---|---|
+| **zlib:BestSpeed (shipped)** | 5 693 | 100% | 0.165 | 0.354 | 0.362 | 0.203 |
+| zlib:Default | 5 438 | 96% | 0.701 | 0.955 | 1.029 | 0.196 |
+| lz4 | 7 798 | 137% | 0.124 | 0.086 | 0.087 | 0.700 |
+| sparse64 (no zlib) | 13 346 | 235% | 0.089 | 0.042 | 0.101 | 0.012 |
+| **sparse64+zlib** | **4 504** | **79%** | **0.165** | **0.132** | **0.145** | **0.047** |
+| sparse32+zlib | 4 537 | 79% | 0.178 | 0.151 | 0.101 | 0.054 |
+| sparse256+zlib | 4 598 | 80% | 0.167 | 0.158 | 0.073 | 0.043 |
+| sparse64+zlib:Default | 4 354 | 77% | 0.274 | 0.193 | 0.174 | 0.045 |
+| sparse64+lz4 | 5 579 | 98% | 0.117 | 0.077 | 0.087 | 0.029 |
+
+**The ranking genuinely differs by engine.** On native, `sparse64+zlib` merely
+breaks even on encode (0.165 vs 0.165) — its whole value is density and a 4.3x
+faster decode. Under wasm, zippy's deflate is far slower relative to a flat
+scan, so the same codec is **2.7x faster on Chrome and 2.5x faster on Safari**.
+A table taken on the desktop would have called this a trade; Safari calls it a
+clear win, and Safari is the tiebreaker.
+
+`lz4` is the reverse story: 137% of zlib's size once the delta is aligned. It
+only looked good on the *unaligned* delta, where its long-match encoding
+handled the 184 KB of shift damage that should not have been there. Fixing the
+alignment removed its advantage.
+
+### 10.3 Pareto wins, end to end
+
+| | delta bytes | native push | Chrome: rewind's share | Safari: rewind's share |
+|---|---|---|---|---|
+| shipped | 48 380 | 0.666 ms | 6.48% | 7.14% |
+| + alignment fix | 5 693 (−88%) | 0.472 ms (−29%) | — | — |
+| **+ sparse64 pre-pass** | **4 504 (−90.7%)** | **0.456 ms (−32%)** | **1.53%** | **3.23%** |
+
+Both axes improve on all three targets. Per-stage native minima, interleaved:
+
+| stage | shipped | +align | +align+sparse |
+|---|---|---|---|
+| serialize | 0.2336 | 0.2305 | 0.2319 |
+| xor | 0.0196 | 0.0195 | 0.0195 |
+| **compress** | **0.3546** | **0.1648** | **0.1467** |
+| thumbnail (grab+zlib) | 0.0171 | 0.0170 | 0.0171 |
+| keyframe zlib (amortized) | 0.0162 | 0.0165 | 0.0165 |
+| **total** | **0.6662** | **0.4723** | **0.4557** |
+
+Padding costs nothing measurable in serialize (0.2336 → 0.2319), so the 486
+extra bytes are free.
+
+### 10.4 History at cap — the axis that matters on the SE 1
+
+The ring is a memory budget, so density *is* history. Amortized per push:
+delta + keyframe/60 (157 286 B each) + thumbnail/6 (2 621 B each), against the
+cap minus the 604 KB uncompressed `latest`.
+
+| | bytes/push | **64 MB desktop** | **16 MB iOS** |
+|---|---|---|---|
+| shipped | 51 438 | 3.6 min | **52 s** |
+| + alignment | 8 751 | 21.1 min | **5.1 min** |
+| + alignment + sparse64 | 7 562 | 24.4 min | **5.9 min** |
+| + `REWIND_KEY_EVERY` 60→180 | 5 815 | 31.8 min | **7.7 min** |
+
+**On the iOS cap the fix turns 52 seconds of history into nearly six minutes.**
+That is the number to weigh for the SE 1, and it costs less CPU rather than
+more.
+
+The last row is a new consequence, not a pre-existing option: once the delta
+drops 10x, the **keyframe becomes 35% of the ring's memory**. Raising
+`REWIND_KEY_EVERY` to 180 buys another 30% of history, and a scrub seek stays
+*faster than today* despite walking 3x more deltas, because sparse decode is
+4.3x cheaper (180 × 0.047 = 8.5 ms against today's 60 × 0.203 = 12.2 ms).
+
+### 10.5 Trades and non-starters
+
+| candidate | verdict |
+|---|---|
+| `sparse64+zlib:Default` | **Trade.** 3% denser than `sparse64+zlib`, 66% slower to encode on native. Not worth it. |
+| `sparse64+lz4` | **Trade.** Fastest encode everywhere (0.077 ms Chrome) but 24% larger than `sparse64+zlib` — and on a memory-capped ring, size is history. Pick it only if CPU is the binding constraint and history is not. |
+| plain `lz4` | **Rejected.** 137% of zlib's size on aligned deltas. Kept in-tree because the bake-off needs it and it may suit other payloads. |
+| dirty 4 KB page bitmap | **Rejected on the data.** 340% of zlib's size — changed bytes are scattered, not page-clustered. |
+| `sparse64` with no entropy stage | **Rejected.** 235% of zlib. The bitmap removes zeros; it does not compress what is left. |
+| **Dirty tracking at the source** | **Not attempted, and I recommend against.** It would have to instrument every write to EWRAM/IWRAM/VRAM/PRAM/OAM/flash. Those paths are `bus.write_*`, which the §2 profile puts at the centre of the hot loop, and §3 measured a *single extra load and branch* there at 1.2% of all retired instructions. A dirty-bit set per write would cost multiples of the 0.34 ms it aims to save, every frame, to save it 6 times a second. The XOR is already only 0.02 ms — 3% of the push — so diffing is not the expensive part. |
+| **`CompressionStream`** | **Not a candidate, on two independent grounds.** It is asynchronous: it yields a `ReadableStream`, and the rewind push happens inside a synchronous wasm call from rAF. Using it means copying 604 KB out of wasm memory, awaiting a microtask, and keeping the raw payload alive meanwhile — an async ring, more peak memory, on the device with the least. And per MDN it needs **Safari 16.4+**, while an iPhone SE 1 tops out at iOS 15, so the fallback is what would actually run there — which makes the fallback the number that matters. I measured `CompressionStream: true` on desktop Safari 26.6 and Chrome; I could not test iOS 15 and did not. |
+| Cadence (`REWIND_INTERVAL` 10 → 12) | Not measured. Worth knowing it is a lever, but after the fix the delta is small enough that cadence is no longer where the money is. |
+| Skipping a push when nothing changed | Not implemented. After the alignment fix an idle frame's delta is ~5 KB, not ~0, because the framebuffer and EWRAM always move a little; a true "nothing changed" case is rare in a running game. Low value. |
+
+### 10.6 Allocation behaviour, which matters more on the SE 1 than ms/push
+
+`sparse_encode` allocates one output string per call (~13 KB after the fix,
+against the 604 KB the XOR body already allocates) and zlib allocates its own
+output. So the pre-pass adds one small transient allocation per push, 6 times a
+second — small next to what `encode_delta` already does, but it is not zero,
+and on a 2 GB device with a demotable JIT that is worth saying out loud. Both
+`sparse_encode` and `sparse_decode` can be rewritten against a preallocated
+scratch buffer without changing the format; the LZ4 encoder already keeps its
+hash table in a reused `threadvar` for exactly this reason. The codecs that
+*cannot* work in a scratch buffer are the zlib levels, because zippy owns its
+allocation.
+
+### 10.7 What I prototyped, and what shipping still needs
+
+Both prototypes are on this branch behind defines, off by default
+(`6ddcbe9`): `-d:schedpad` (fixed-length payload) and `-d:rewindsparse`
+(sparse pre-pass). The default build's framebuffer hash is unchanged.
+
+Correctness evidence: the rewind property tests pass with either define and
+with both; `DINGBAT_BENCH_REWIND_VERIFY=1` pops all 120 retained snapshots,
+applies each to the live core and re-serializes with **0 mismatches** in every
+configuration; the bake-off round-trips every delta of three workloads across
+two ROMs.
+
+**The one thing shipping needs that the prototype does not carry.** The
+prototype pads via a global switch flipped after the state load, because a
+padded payload cannot be read by an unpadded build. The shipping form should
+thread a `pad` flag through the **in-process** serialization path only — the
+rewind ring and rollback snapshots never outlive the process (`savestate.nim`
+says so), so padding them costs **no format change, no payload-revision bump,
+and file save states stay byte-identical**. Making the padding unconditional
+instead would need `GBA_PAYLOAD_VERSION` 5 → 6 plus a migration. The GB core
+shares the scheduler and therefore shares the hazard; it is unmeasured.
+
+### 10.8 Recommendation
+
+1. **Take the alignment fix.** It is the whole prize: 8.5x smaller deltas, 29%
+   less push time, 52 s → 5.1 min of iOS history, and it removes a silent
+   pathological case rather than tuning a good one. Ship it as an in-process
+   flag so no save-state format changes.
+2. **Take the sparse64 pre-pass with it.** A further 21% density, and on the
+   two engines that matter it is also 2.5-2.7x faster to encode and 4-6x
+   faster to decode. Native breaks even on encode and still wins on both other
+   axes.
+3. **Then reconsider `REWIND_KEY_EVERY`** — 60 → 180 buys 30% more history and
+   seeks *faster* than today.
+4. **Do not build source-side dirty tracking, and do not build on
+   `CompressionStream`.** §10.5 has the reasons.
+5. **Check the GB core for the same alignment hazard.** Same scheduler, same
+   shape of payload, unmeasured.
+
+### Reproducing
+
+```sh
+# native: characterisation + bake-off (add -d:schedpad for the aligned case)
+nim c -d:test_harness -d:release -d:deltachar --path:src \
+      -o:rewind_codec tests/rewind_codec_test.nim
+./rewind_codec <rom> 1200 120 <state>          # DELTA_TRACE=1 for per-push
+
+# native: end-to-end push cost, three configurations
+nim c -d:test_harness -d:release -d:rewindprof [-d:schedpad] [-d:rewindsparse] \
+      --path:src -o:rwb tests/dingbat_bench.nim
+DINGBAT_BENCH_REWIND=web DINGBAT_BENCH_REWIND_VERIFY=1 \
+  DINGBAT_BENCH_STATE=<state> ./rwb <rom> 1200 120
+
+# browser: same codecs, same deltas, in-page
+nim c -d:emscripten -d:codecbench -d:schedpad src/dingbat_wasm.nim
+open http://localhost:8765/bench/bench.html?codecs=1     # Safari reports itself
+#   -> result also lands in the dev server log as /__benchresult?<text>
+
+# ON A REAL DEVICE the origin must be https. A plain-http LAN origin makes
+# iOS withhold the JIT and every number comes out ~10x slow.
+```
+
