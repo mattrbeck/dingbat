@@ -337,7 +337,6 @@ type
     # out of halt as out of running execution (see cpu.irq), so nothing reads
     # this any more; it stays because it is part of the serialized CPU state.
     halt_wake*:   bool
-    count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
     # flags mirror at 0x03007FF8
@@ -905,6 +904,11 @@ type
     use_hle*:        bool
     hle_after_bios*: bool
     scheduler*:      Scheduler
+    # Emulated cycle at which the current frame started, so a frame-progress
+    # readout can be derived instead of counted. CPU.count_cycles used to
+    # accumulate `max(1, total)` on EVERY instruction for one debug progress
+    # bar; stubbing that add out measured 2.2% of all retired instructions.
+    frame_start_cycles*: CycleCount
     cartridge*:  Cartridge
     storage*:    Storage
     mmio*:       MMIO
@@ -1277,7 +1281,7 @@ proc step_frame*(gba: GBA) =
   # the CPU's single hot-path hook sentinel. Unconditional: this is also what
   # disarms the hook when the setting is turned off or a driver tears down.
   gba.refresh_hle_hook()
-  gba.cpu.count_cycles = 0
+  gba.frame_start_cycles = gba.scheduler.cycles
   while gba.ppu.frame == 0:
     gba.cpu.tick()
   gba.end_frame()

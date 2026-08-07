@@ -904,7 +904,7 @@ proc try_advance*(nc: NetCore): NetAdvance =
     return naStalled  # parked at S+D inside an exchange; feed() resolves it
   let gba = nc.gba
   if not nc.in_frame:
-    gba.cpu.count_cycles = 0
+    gba.frame_start_cycles = gba.scheduler.cycles
     nc.in_frame = true
   # A responder mid-exchange has a serial completion already scheduled whose
   # dispatch emits the REPLY the initiator is parked (reply_wait) on. If the

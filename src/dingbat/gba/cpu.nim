@@ -30,7 +30,6 @@ proc new_cpu*(gba: GBA): CPU =
     spsr: cast[PSR](uint32(modeSYS)),
     pipeline: Pipeline(),
     halted: false,
-    count_cycles: 0,
     attempt_waitloop_detection: true,
     cache_waitloop_results: true,
     branch_dest: 0,
@@ -491,7 +490,6 @@ proc tick*(cpu: CPU) =
     if total == 0: remaining = 1  # forward-progress guarantee
     cpu.gba.bus.cycles = 0
     cpu.gba.bus.synced = 0
-    cpu.count_cycles += max(1, total)
     if cpu.entered_waitloop:
       # An idle loop only re-reads what it polls once per skip, so the skip
       # length IS that loop's sampling resolution, and the loop body's own
