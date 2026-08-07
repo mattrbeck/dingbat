@@ -1,9 +1,9 @@
-# SameSuite APU: state, diagnosis, and what full accuracy would cost
+# SameSuite APU: what its sources assert, and where dingbat stands
 
-Score: **30/70** (div 1/5, channel_1 10/21, channel_2 10/15, channel_3 5/16,
-channel_4 4/13), up from 10/70. With both blargg sound suites now green
-(dmg_sound 12/12, cgb_sound 12/12) the APU tally across all three is **54/94**,
-up from 29/94.
+Score: **49/70** (div 5/5, channel_1 12/21, channel_2 12/15, channel_3 14/16,
+channel_4 6/13), up from 10/70. With both blargg sound suites green (dmg_sound
+12/12, cgb_sound 12/12) the APU tally across all three is **73/94**, up from
+29/94.
 
 Run them with:
 
@@ -17,30 +17,40 @@ or, for the whole suite at once alongside the two blargg sound suites:
 ./dingbat_test_runner --apu
 ```
 
-which is opt-in and not part of the default gate (many of these fail, and they
-would swamp `tests/results.md`).
+which is opt-in and not part of the default gate. SameSuite uses the mooneye
+convention (`LD B,B`, then B=3 C=5 D=8 E=13 H=21 L=34). ROMs ship in the
+test-ROM bundle under `same-suite/apu/`.
 
-SameSuite uses the mooneye convention (`LD B,B`, then B=3 C=5 D=8 E=13 H=21
-L=34). ROMs ship in the test-ROM bundle under `same-suite/apu/`. Note its README
-says some apu tests only pass on CPU CGB E, so a few may be unreachable without
-per-revision boot models.
+## The method: read the .asm, not the pixels
 
-## Read the .asm, not the pixels
+**Every SameSuite APU test carries a comment at the top of its source stating
+the hardware behaviour it measures, in cycles.** Those sentences are the whole
+of the model below; nothing here was fitted to a reference image. Two rounds of
+this work produced the same lesson twice, so it is worth stating plainly:
+sweeping a constant until a ROM goes green is slower AND wronger than reading
+the paragraph the ROM's author wrote about what he measured.
 
-The single highest-leverage thing about this suite: **every test's source is in
-the SameSuite repo and every one of them carries a one-paragraph comment stating
-the hardware behaviour it measures, in cycles.** `channel_1_delay.asm` says "It
-takes (sample length + 2) ticks from the moment channel 1 is enabled until PCM12
-is affected"; `channel_1_restart.asm` says the restart delay "is actually 1 tick
-shorter"; `channel_1_align_cpu.asm` says "Channel 1 is aligned to the APU's
-enable time, not the CPU's start time"; `channel_1_duty_delay.asm` says
-"Changing the duty becomes effective only after the current sample finishes".
-Those four sentences ARE the model below. Nothing here was fitted.
+Sources are not in the ROM bundle — they are upstream:
 
-To read a failure as data, dump WRAM `$c000..` after running the ROM headless
+* **`github.com/LIJI32/SameSuite`, pinned at `f15645fb049a47ea235f6d2c9a033e72d8087901`**
+  (master, 2025-10-11). `apu/<channel>/<test>.asm`; `include/common.inc` has the
+  `nops` macro (a `call` into a nop slide, exact to the M-cycle).
+* gambatte's ROMs have sources too, in
+  `github.com/pokemon-speedrunning/gambatte-core`, `test/hwtests/`. Its
+  `.text@<addr>` directives are how it lands a write on an exact cycle; reading
+  them is the only way to know what a `_1a`/`_1b` pair is bracketing.
+
+**A header is strong evidence, not proof.** `channel_4_align.asm` says "channel
+1", `channel_4_volume_div.asm` says "NR12", and `channel_1_stop_div.asm` says
+"Channel 1 behave similarly to channel 3" in the channel_2 copy too. The rule
+that survives: derive a constant from one test, then check it against a test it
+was NOT derived from. Every number below has been through that.
+
+To read a failure as data, dump WRAM from `RESULTS_START` (it is `$c000` in most
+tests but `$c006` in `channel_4_lfsr_restart`) after running the ROM headless,
 and diff it against the `CorrectResults` table, which is a plain `db` block at
-the top of the `.asm` (no need to go looking for it in the ROM image). Rendering
-both as `#`/`.` turns a bare FAIL into an alignment problem you can see.
+the top of the `.asm`. Rendering both as `#`/`.` turns a bare FAIL into an
+alignment problem you can see.
 
 ## Two things this work depends on that are easy to get wrong
 
@@ -48,8 +58,7 @@ both as `#`/`.` turns a bare FAIL into an alignment problem you can see.
 advance lazily — their phase is only materialized at an observation point, and
 these registers *are* an observation point. Reading them without syncing first
 returns the phase from whenever the channel was last touched, which is exactly
-the failure mode the whole suite is built to detect. This is not defensive
-coding; omit it and the tests read stale data.
+the failure mode the whole suite is built to detect.
 
 **Do not reset `frame_sequencer_stage` when the APU is powered off.** Pan Docs
 documents the sequencer being reset when the APU is powered *on*, and the
@@ -58,174 +67,256 @@ harmless and costs `blargg/cgb_sound/08-len ctr during power`.
 
 ## The double-speed detail that governs everything
 
-**Most of these tests run in double-speed mode** (`ld a,1 / ldh [rKEY1],a /
-stop`); `channel_1_delay`, `channel_1_restart` and `channel_1_duty_delay` do
+Most of these tests run in double-speed mode (`ld a,1 / ldh [rKEY1],a / stop`);
+`channel_1_delay`, `channel_1_restart`, `channel_1_duty_delay`,
+`channel_4_delay`, `channel_4_frequency_alignment` and the whole `div` family do
 not, which is what makes them the useful cross-checks. So:
 
 * 1 `nop` = 4 CPU cycles = **half an APU tick** in double speed, a whole one in
   single speed
 * the APU tick is 4 scheduler cycles at single speed and 8 at double: the CPU
   clock doubles and the APU's does not
+* `nops N` is exactly N M-cycles (the `call`+`ret` around the slide are counted)
 
 M-cycle component stepping already provides the resolution these tests need —
-the pulse-channel failures were NOT a granularity wall.
+none of the failures below was a granularity wall.
 
-## The pulse-channel model (resolved)
+---
 
-The previous version of this note proposed two fitted constants: a post-power-off
-duty PHASE (from SameSuite's source commenting its duty patterns as the Pan Docs
-patterns rotated left by one) and a trigger startup SUPPRESSION of "roughly 4
-subtests". The open question was whether one setting of the pair satisfies more
-than one test.
+# The catalogue
 
-**Neither constant was real, and the phase one is falsified.**
-`channel_1_delay` pins the duty table and the reset phase on its own: it runs at
-single speed with duty 3, and its expected column is exactly Pan Docs'
-`01111110` indexed from position 0. Rotating the table (or seeding the position
-at 1, which is the same degree of freedom) breaks it. dingbat's table at
-`channel1.nim:3` was right all along, and so was `wave_duty_position = 0` on
-power-off. SameSuite's comment describes the same waveform from a different
-definition of where the counter's zero sits.
+What each source asserts, whether dingbat matches, and where the code is. Rows
+are shootout rows (SameSuite APU contributes 61). Sorted by channel.
 
-What is real is four separate mechanisms, all of them documented, and **one
-setting of all four satisfies nine tests per channel at once** — delay, align,
-align_cpu, duty, duty_delay, restart, restart_nrx2_glitch, stop_restart and
-freq_change, at single and double speed, at three frequencies, with no per-ROM
-constant anywhere:
+## Pulse channels (channel_1 17 rows, channel_2 14 rows) — 12/17 and 12/14
 
-1. **The trigger is quantized to the APU's own 1 MHz tick grid**, and that grid
-   is re-anchored by an APU power-ON, not by anything the CPU does. This is
-   `channel_1_align_cpu` versus `channel_1_align`: nops inserted before the NR52
-   power-on move the whole grid with the write and change nothing, while nops
-   inserted between the power-on and the trigger move the answer by one CPU
-   cycle. `GbApu.tick_phase` + `gb_pulse_trigger_deadline`.
+| source | assertion | dingbat |
+|---|---|---|
+| `channel_1_align_cpu` | "Channel 1 is aligned to the APU's **enable** time, not the CPU's start time" | **matches** — `GbApu.tick_phase` is set by the NR52 power-on and `gb_trigger_deadline` rounds the trigger up to that grid |
+| `channel_1_align` | "verifies that channel 1 ticks at 1MHz" | **matches** — `gb_apu_tick` |
+| `channel_1_delay` | "It takes (sample length + 2) ticks from the moment channel 1 is enabled until PCM12 is affected. (The read operation itself takes 2 cycles)" | **matches** — `gb_trigger_deadline(..., 2)`. Also pins the duty TABLE: single speed, duty 3, and the expected column is Pan Docs' `01111110` indexed from position 0 |
+| `channel_1_restart` | "after restarting, the start delay from the 'delay' test is actually 1 tick shorter. The countdown for the next sample is reset, but the new pulse's first sample will be the next sample the old pulse would have played" | **matches** — `extra_ticks = 1` when the channel was already on; the position is untouched |
+| `channel_1_duty` | lists the duty patterns as `00000010 / 00000011 / 00001111 / 11111100` | **matches in substance.** These are the Pan Docs patterns rotated left by one, i.e. a different definition of where the counter's zero sits. A previous round proposed rotating dingbat's table or seeding the position at 1; `channel_1_delay` **falsifies both**. Do not rotate the table |
+| `channel_1_duty_delay` | "Changing the duty becomes effective only after the current sample finishes" | **matches** — `GbChannel1.sample_bit` latches the duty bit once per step |
+| `channel_1_freq_change` | "Changing channel 1's frequency takes effect after the current sample finishes" | **matches** — `next_step` is absolute, so a period change cannot move a pending step |
+| `channel_1_stop_restart` | "even after stopping the channel, the current sample index/phase remains unchanged. It is only reset by turning the APU off (NR52)" | **matches** — `ch1_catchup_at` parks `next_step` while `enabled` is false |
+| `channel_1_volume_div` | "The volume envelope is triggered by the DIV register after it ticks the APU (8 * (NR12 & 7)) times (at 512Hz)" | **matches** |
+| `channel_1_nrx2_speed_change` | "the envelope speed can be changed while it's active, and the change takes effect after the next time it ticks. Enabling and disabling the envelope takes effect instantly. Enabling the envelope trigger an APU bug - in the next *even* DIV-APU tick, the APU will tick the volume envelope of that apropriate channel, even if it would not tick volume envelope at that tick otherwise" | **matches** — the first two sentences were already right; the glitch is `GbVolumeEnvChannel.env_extra_tick`. "Even DIV-APU tick" is dingbat's ODD `frame_sequencer_stage`: hardware's counter increments before the step, so its tick 2 is dingbat's step 1. Fitting the parity the other way passes tests 3/4/5 but fails 6/7, which is why those two exist |
+| `channel_1_restart_nrx2_glitch` | "restarting the channel after triggering the NRx2 write glitch works as expected" | **matches** |
+| `channel_1_nrx2_glitch` | "This tests the NRx2 write glitch ('Zombie Mode'). **It appears to be different across revisions**" | **DOES NOT MATCH — deliberately.** See below |
+| `channel_1_volume` | "Attempts to change the volume of channel 1 without triggering the NRx2 write glitch" | **does not match** (78/128 bytes). Same mechanism as above |
+| `channel_1_stop_div` | "Channel 1 behave similarly to channel 3, but with a smaller length range. See channel_3_stop_div" | **matches**, and it came free with the DIV-APU work |
+| `channel_1_sweep` | *(no header)* | **does not match**, 136/144 bytes: one 16-byte window where the channel should already be silent. Nothing in the source says why |
+| `channel_1_sweep_restart`, `_2` | "Several tests involving restarting the channel while sweep is active" / "Part 2" | **does not match** (85/144, 95/128). No cycle-level assertion to derive from |
+| `channel_1_extra_length_clocking-cgb0B` | quotes the extra-length-clocking rule in full, then: "On revisions <= CPU CGB B, the length counter only has to have been disabled before; the current length enable state doesn't matter… fixed on CPU CGB C" | **correctly does not match** — dingbat models CGB ABCDE. Not a shootout row |
+| `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | *(no header; three ROMs, three CPU revisions)* | at most one can pass on any single model. Not shootout rows |
 
-2. **From that edge the first duty step is one full period PLUS two APU ticks**,
-   or plus one tick when re-triggering a channel that is already on. Both
-   numbers are quoted verbatim from `channel_1_delay.asm` and
-   `channel_1_restart.asm`. Previously dingbat armed the next step one plain
-   period from the write, which is early by exactly `period + 2` at single speed
-   and by `period + 2` or `period + 2.5` at double, depending on the grid phase.
+### On "Zombie Mode", and why it stays as it is
 
-3. **The output sample is LATCHED at each duty step, not read from the duty
-   table on demand** (`GbChannel1.sample_bit`, refreshed only in
-   `ch1_catchup_slow`). This is one field that subsumes what the old note called
-   "trigger startup suppression" and also fixes a test the old note never
-   mentioned:
-   * through the startup delay in (2) the latch still holds the pre-trigger
-     sample — zero for a channel that was off — which is the pulse analogue of
-     CH3's documented "triggering does not immediately start playing wave RAM",
-     and is the whole of `channel_1_duty`'s residue;
-   * across a restart it holds the sample the old pulse was playing, which is
-     what `channel_1_restart.asm` describes in as many words;
-   * across a mid-sample NR11 write it holds the OLD duty's bit, which is
-     `channel_1_duty_delay` exactly — including the knife-edge case where the
-     duty write lands on the same cycle as a step and the step still wins
-     (apu_write catches the channel up before dispatching, so this falls out).
+The DMG rule usually quoted (Pan Docs, Obscure Behavior) is: +1 when the old
+envelope period was zero and the envelope was still updating, ELSE +2 when the
+old direction was decrease. dingbat instead adds +1 in both cases. That variant
+was **tried and measured**: it takes `channel_1_volume` from 78/128 to 92/128
+bytes, breaks two rows the shared +1 already gets right, and passes neither
+version of the test. `channel_1_nrx2_glitch`'s own header says the glitch
+"appears to be different across revisions", so these are two revisions, not one
+right answer and one wrong one. Left alone; the measurement is recorded at
+`write_NRx2`. **4 rows** (`nrx2_glitch` ×2, `volume` ×2) are parked here.
 
-4. **The duty counter is clocked only while the channel is ON.** Switching a
-   channel off freezes its phase where it stands; only an APU power-off resets
-   it. `channel_1_stop_restart.asm`: "even after stopping the channel, the
-   current sample index/phase remains unchanged. It is only reset by turning the
-   APU off (NR52)." Implemented by parking `next_step` in `ch1_catchup_at` when
-   `enabled` is false, and by parking all four channels on an APU power-off —
-   which also fixed a plain bug, where the power-off cleared
-   `wave_duty_position` but left a stale deadline armed, so the position it had
-   just cleared stepped forward again on the next observation, off a period the
-   register reset had already zeroed.
+## Channel 3 (13 shootout rows) — 12/13, and 14/16 of the full suite
 
-Per-channel result: channel_1 0/21 → 10/21, channel_2 0/15 → 10/15. In the
-gbdev shootout, which drops `-cgb0B` and the three `freq_change_timing`
-variants, that is 0/17 → 10/17 and 0/14 → 10/14.
+| source | assertion | dingbat |
+|---|---|---|
+| `channel_3_delay` | "It takes (wavelength / 32) (i.e sample length) + 3 ticks from the moment channel 3 is enabled until PCM34 is affected. (The read operation itself takes 2 cycles)" | **matches** — the `+6` T-cycles at the trigger is exactly `sample length + 3 M-cycles` in the same accounting `channel_1_delay` spells out |
+| `channel_3_first_sample` | "When channel 3 starts, it skips the very first wave sample and starts with the second (after the sample-long delay)… the delay is actually just one tick, but the output updates only after a first 'phantom' sample is played" | **matches** — the trigger sets `wave_ram_position = 0` and the first step advances to 1, i.e. the LOW nibble of byte 0 |
+| `channel_3_restart_delay` | "Restarting channel 3 in the middle of a sample takes effect after the same delay calculation as in channel_3_delay. The previous sample remains playing until the first 'phantom' sample finishes" | **matches** — and note this is the test that says a plain trigger does NOT clear the sample buffer |
+| `channel_3_restart_stop_delay` | "starting a pulse after stopping a previous one behaves the same as just starting a pulse" | **matches, after a fix.** Read together with `restart_delay` this is a proof: the only difference between the two is the NR30 stop, so **turning the DAC off is what clears the sample buffer**. `ch3_write`, NR30 arm |
+| `channel_3_freq_change_delay` | "Modifying the wave length while the channel is playing will take effect only for the next sample" | **matches** |
+| `channel_3_shift_delay` | "Modifying the channel 3 shift while the channel is playing affects PCM34 instantly, or at most after 2 ticks" | **matches** — the shift is applied at read time |
+| `channel_3_shift_skip_delay` | "the delay cannot be skipped or shortened by modifying the shift value" | **matches** |
+| `channel_3_stop_delay` | "Stopping channel 3 manually using the NR30 register affects PCM34 instantly" | **matches** |
+| `channel_3_stop_div` | "Channel 3's stop timer is ticked by the DIV register at 512Hz. The sound stops instantly in the same cycle DIV's bit 5 turns from 1 to 0 (or bit 4 in single speed mode). The length of the sound is ((255 - NR31) * 2 + 1) DIV-APU ticks" | **matches**, once the DIV-APU work below landed |
+| `channel_3_wave_ram_locked_write` | "The byte is written at the offset CH3 is currently reading. Except on AGB, where the write is simply ignored" | **matches** on CGB; the AGB case is not modelled and no row asks for it |
+| `channel_3_wave_ram_sync` | "the value read from PCM34 and value read from the wave RAM are synced" | **matches** |
+| `channel_3_and_glitch` | "Channel 3 is not affected by the PCM34 AND glitch in neither single not double speed mode" | **matches** — dingbat has no AND glitch to be affected by. Worth recording that a *pass* here is the absence of a behaviour, so it will silently start failing if anyone adds one |
+| `channel_3_wave_ram_dac_on_rw` | "reading and writing to wave RAM while CH3's DAC is active but the channel is inactive" | **matches**. Not a shootout row |
+| `channel_3_extra_length_clocking-cgb0/-cgbB` | as the pulse version, plus "On CPU CGB, CH3 requires ONE write to disable the channel when the length counter is 1. On CPU CGB B, CH3 requires TWO" | `-cgb0` is a shootout row and **does not match**: dingbat models CGB ABCDE and this ROM wants CGB 0. The one SameSuite CH3 row still red |
 
-### What is still failing on the pulse channels, and why
+**The one line that fixed seven of these** is not from SameSuite at all — it is
+Pan Docs, Power Control, on what a power-ON resets: "the frame sequencer is
+reset so that the next step will be 0, the square duty units are reset to the
+first step of the waveform, **and the wave channel's sample buffer is reset to
+0**". Without it, every CH3 subtest after the first read the PREVIOUS subtest's
+wave byte out of PCM34 for the whole of the startup delay, which looked like a
+delay bug and was not.
 
-| Test (both channels) | Why it is not in the list above |
-|---|---|
-| `nrx2_glitch`, `nrx2_speed_change`, `volume` | The NRx2 "zombie mode" write glitch. Its own source says it "appears to be different across revisions". The DMG rule usually quoted (+1 when the old period was 0 and the envelope was still updating, ELSE +2 when the old direction was decrease) was tried: it takes `channel_1_volume` from 78/128 to 92/128 bytes but breaks two rows the current shared +1 already gets right, and passes neither version. Two revisions, not one right answer. Left alone; see the comment at `write_NRx2`. |
-| `stop_div` | Length-counter clocking against DIV writes; its own comment points at `channel_3_stop_div`, which also fails. A frame-sequencer problem, not a waveform one. |
-| `extra_length_clocking-cgb0B` | Named for a CPU revision. |
-| `freq_change_timing-A/-cgb0BC/-cgbDE` | Three ROMs, three revisions; at most one can pass on any single model. Not in the shootout. |
-| `sweep`, `sweep_restart`, `sweep_restart_2` (ch1 only) | Sweep unit, untouched by this work. |
+## Channel 4 (12 shootout rows) — 6/12
+
+| source | assertion | dingbat |
+|---|---|---|
+| `channel_4_lfsr` / `_lfsr15` | "verifies the LFSR algorithm used is correct" | **matches.** dingbat's register is the BIT-COMPLEMENT of the usual convention: `lfsr = 0x7FFF` at trigger with `output = not bit0` is the same machine as `lfsr = 0` with `output = bit0`. **`channel_4_lfsr_restart`'s "the contents of the LFSR register are cleared on restart" is therefore already satisfied — setting it to 0 would break three passing rows.** This trap is why the sentence is worth writing down |
+| `channel_4_lfsr_15_7` / `_7_15` | "the contents of the LFSR are retained correctly when switching" | **matches** — dingbat never truncates the upper bits |
+| `channel_4_volume_div` | as the pulse version | **matches** |
+| `channel_4_align` | "verifies that channel 1 [sic — it means 4] ticks at 1MHz" | **matches, after a fix** — CH4's trigger now goes through the same `gb_trigger_deadline` grid alignment as the squares |
+| `channel_4_delay` | "**the delay is `sample length + 3` M-cycles, but it might be one M-cycle more or less**… I'm not completely sure about this logic yet. It appears to be related to how the noise frequency is made out of two different values" | **partly.** The `+3 M-cycles` minus the 2-cycle read gives `extra_ticks = 1`, which is now implemented and which is what earned `channel_4_align` and `channel_4_lfsr_7_15`. The test itself still fails on the "one M-cycle more or less" half |
+| `channel_4_frequency_alignment` | *(no prose; the assertion is the annotation on its expected table)* | **does not match.** See below |
+| `channel_4_equivalent_frequencies` | "identical frequencies that are expressed differently generate the same output, other than a potential off-by-one sample caused by the start delay" | **does not match** — same root cause |
+| `channel_4_lfsr_restart` / `_restart_fast` | "the contents of the LFSR register are cleared on restart / even on a fast restart" | **does not match**, but NOT for the reason the header suggests: the whole result table is dingbat's own output shifted by exactly one subtest = one LFSR step = 2 M-cycles. It wants a trigger delay 2 M-cycles longer than `channel_4_delay` and `channel_4_align` allow (a sweep of the delay over {0,1,2,3} × {M-cycles, ticks} × {aligned, not} confirms no single value satisfies both, and +2 costs `lfsr`, `lfsr15` and `lfsr_15_7`) |
+| `channel_4_freq_change` | "what happens when changing the frequency of channel 4 while it's playing. **Unfortunately the logic behind it is still unclear**" | written off by its own author |
+| `channel_4_extra_length_clocking-cgb0B` | per-revision | not a shootout row |
+
+### The divisor/shift split — diagnosed, not fixed
+
+`ch4_frequency_timer` collapses NR43's two fields into one scalar:
+
+```nim
+(if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift
+```
+
+so `$09` (divisor 1, shift 0) and `$18` (divisor 0, shift 1) are literally the
+same number. `channel_4_frequency_alignment` annotates its expected table with
+which encodings are "affected" and which are "not affected", and **the split is
+exactly `divisor_code == 0`**:
+
+```
+$09 affected     $0a affected     $0b affected     $0c affected     $29 affected     $1a affected
+$18 NOT          $28 NOT          $38 NOT
+```
+
+which is a finding beyond the annotation itself: it is the divisor field, not
+the shift field, that decides. That fits the "made out of two different values"
+remark — divisor code 0 means 8 rather than 16, i.e. a half-unit tap on the
+first divider stage.
+
+It is **not** a constant offset, which was checked before giving up: at the same
+period, `$18` fires one M-cycle EARLIER than `$09`, while `$28` fires one
+M-cycle LATER than `$0a`. Modelling it needs the divisor and the shift as two
+real cascaded counters with independent phases, which is a rewrite of
+`ch4_frequency_timer` and its catch-up. **4 rows** (`frequency_alignment`,
+`equivalent_frequencies`, `delay`, `freq_change`) are parked behind it, and
+`freq_change` may be unreachable regardless.
+
+## The DIV-APU family (5 shootout rows) — 5/5
+
+One mechanism, exactly as suspected. All five were red; all five are green.
+
+| source | assertion | dingbat |
+|---|---|---|
+| `div_write_trigger` | "writing to DIV while bit 4 is set triggers a DIV-APU event" | **the event was already there** (`timer.nim`, DIV write). What was missing is that a power-on must also settle `first_half_of_length_period` — leaving it stale from before the power-off made every NRx4 write after a power-on do an extra length clock it should not have |
+| `div_write_trigger_10` | "starting the APU while bit 4 of the DIV register is set causes the APU to **skip the first DIV-APU event**" | **matches, after a fix** — `GbApu.div_skip` |
+| `div_write_trigger_volume`, `_volume_10`, `div_trigger_volume_10` | *(no headers)* | **match**, and they are what pins the skip's exact shape |
+
+### What "skip the first DIV-APU event" turned out to mean
+
+Three readings were tried against the five tests at once, and only one survives:
+
+* **not** "the sequencer starts at step 1" — that puts the envelope's first tick
+  on the seventh event; `div_write_trigger_volume_10` and `div_trigger_volume_10`
+  both want the ninth
+* **not** "the event runs but does nothing" with everything else unchanged —
+  that gets the envelope right and then fails `div_write_trigger_10`'s length
+  column, where a length-1 channel must survive all 15 events
+* **yes**: the event performs nothing and the sequencer does not advance, AND
+  the extra-length-clocking gate reads as "the next step does not clock length"
+  for as long as the skip is pending
+
+The third is the one with a physical story: `first_half_of_length_period` is a
+property of the **divider**, not of `frame_sequencer_stage`, and a skip is
+exactly the state in which the two disagree. That is now what the field's
+comment in `gb.nim` says. `div_write_trigger` and `div_write_trigger_volume`
+were not used to derive it and both pass.
+
+---
 
 ## blargg dmg_sound: 7/12 -> 12/12
 
 All five failures were the same missing axis: `channel3.nim` applied the **CGB**
-wave-RAM rule to both models, and `apu.nim` applied one power-off/power-on rule
-to both.
+wave-RAM rule to both models, and `apu.nim` applied one power rule to both.
 
 * **Wave RAM access (09, 12).** Pan Docs, Wave RAM: "On monochrome consoles,
   wave RAM can only be accessed on the same cycle that CH3 does. Otherwise,
   reads return $FF, and writes are ignored." `ch3_wave_open` is that window: the
-  two T-cycles following a completed fetch. It needs one bit of new state
+  two T-cycles following a completed fetch. It needs one bit of state
   (`wave_fetched`) because a trigger reloads the timer with `period + 6` and
-  during that startup window there is no byte being read at all — without it the
-  first read of blargg 09 comes back as data where hardware returns $FF, which
-  was literally the only wrong byte out of 69.
+  during that startup window there is no byte being read at all.
 * **Restart corruption (10).** Pan Docs: restarting CH3 while it is reading wave
-  RAM corrupts the first four bytes — byte 0 alone if the byte being read is in
-  the first four, else the aligned group of four containing it. The window for
-  this is the OTHER half of the same 1 MHz sample cycle: the two T-cycles ending
-  at the fetch, while it is in flight, and the byte involved is the one the
-  fetch is about to latch (`wave_ram_position + 1`), not the one it last
-  latched. Splitting the two halves (`ch3_wave_open` vs `ch3_wave_fetching`) is
-  what makes 09/12 and 10 pass together; a single shared window passes at most
-  one of them, and lands 10's corruption exactly one delay step late.
+  RAM corrupts the first four bytes. The window for this is the OTHER half of
+  the same 1 MHz sample cycle — the two T-cycles ending at the fetch — and the
+  byte involved is the one the fetch is about to latch. A single shared window
+  passes 09/12 or 10, never both.
 * **Power (08, 11).** Pan Docs, Power Control: the length counters are cleared
   by a power-off on CGB and are *untouched* by power on DMG, where they also
-  remain writable through NRx1 while the APU is off. dingbat cleared them on
-  power-ON for both models. Note the register-zeroing loop reloads each length
-  counter from the now-zero NRx1, so the counters have to be lifted out of that
-  loop and decided separately.
+  remain writable through NRx1 while the APU is off.
 
-`cgb_sound` stayed 12/12 throughout, which is the point of doing this in the
-same sitting as the pulse work: both touch APU power state.
+`cgb_sound` stayed 12/12 throughout.
+
+---
 
 ## Cost
 
-No perf cost. Retired instructions (DINGBAT_BENCH_COUNTERS, 600 frames, 90
-warmup, best of 5): Pokemon Crystal **-0.105%**, Shantae **-0.035%** — slightly
-*fewer*, because parking a switched-off channel's deadline skips catch-up work
-that used to run. Framebuffer output is frame-identical for 600 frames on
-Crystal, Silver, Shantae and Zelda LA DX.
+No perf cost, measured twice. Retired instructions (DINGBAT_BENCH_COUNTERS, 600
+frames, 90 warmup, best of 5) move by well under a tenth of a percent on Pokemon
+Crystal and Shantae, in the *fewer* direction — parking a switched-off channel's
+deadline skips catch-up work that used to run.
 
-`tests/results.md` is unchanged at 978/691. gambatte goes **3618 -> 3626/5005**
-(eight `sound/ch3_*_ff30_*` DMG rows) with zero rows lost.
+`tests/results.md` holds at 978/691. gambatte goes **3618 -> 3646/5005**.
+
+### The two gambatte rows this cost
+
+`sound/ch2_late_reset_nr52_2b` and `..._ds_2b` (both `out0`, both got 2)
+regressed and are still red. They are the `b` half of a two-cycle bracket around
+an APU power-on that lands ~6 T-cycles before DIV's tap bit rises; `1a`, `1b`,
+`2a` and the `ds_` equivalents all still pass. The cause is isolated: it is the
+`first_half_of_length_period` assignment at power-on, not `div_skip`. Five
+variants were measured against these 8 ROMs and the 5 SameSuite div ROMs
+together:
+
+| power-on value of `first_half_of_length_period` | gambatte | SameSuite div |
+|---|---|---|
+| stale (the old behaviour) | 8/8 | 2/5 |
+| `= div_skip` (shipped) | 6/8 | **5/5** |
+| `= true` when `div_skip`, else stale | 4/8 | 4/5 |
+| always `true` | 4/8 | 4/5 |
+| always `false` | 6/8 | 4/5 |
+
+No setting reaches 8/8, so the last two rows need something other than this
+knob — most likely the exact cycle on which an NR52 power-on takes effect. Net
+across the two suites the shipped setting is +7 SameSuite / −2 gambatte, and
+gambatte is +20 overall.
 
 ## Unserialized state
 
-Three fields were added and none of them is in the save state:
-`GbApu.tick_phase`, `GbChannel1/2.sample_bit`, `GbChannel3.wave_fetched`. Each
-is refreshed within one duty period or one APU power cycle of a state load, none
-is CPU-visible except through PCM12/PCM34, and a rollback snapshot that replays
-the write that sets it reconstructs it exactly. Serializing them costs a GB
-payload revision bump, which is worth spending on a batch of fields rather than
-on these three; the field comments in `gb.nim` say so at each one. If a GB
-payload bump happens for another reason, add them.
+Six fields have been added across the two rounds and none is in the save state:
+`GbApu.tick_phase`, `GbApu.div_skip`, `GbChannel1/2.sample_bit`,
+`GbChannel3.wave_fetched`, `GbVolumeEnvChannel.env_extra_tick`. Each is
+refreshed within one duty period, one APU power cycle or one 512 Hz step of a
+state load; none is CPU-visible except through PCM12/PCM34; and each is written
+only by a register write or a power-on, so a rollback snapshot that replays that
+write reconstructs it exactly. Serializing them costs a GB payload revision
+bump, which is a decision to take once for a batch of fields rather than six
+times; the field comments in `gb.nim` say so at each one. **If a GB payload bump
+happens for any other reason, add these six.**
 
 ## What full accuracy would cost
 
-Measured, on an M2, best-of-9 interleaved against a control build whose
-`__text` section is byte-identical to main's:
+Measured, on an M2, best-of-9 interleaved against a control build whose `__text`
+section is byte-identical to main's:
 
 | approach | crystal | shantae | emerald (GBA) |
 |---|---|---|---|
 | per-cycle APU (each channel + sequencer counted down every CPU cycle) | **-24.3%** | **-20.2%** | -0.2% |
 
 That is a **floor** — the prototype's counters reload without doing the duty
-advance, LFSR shift, wave fetch or PCM update. The naive cycle-accurate
-architecture costs about a fifth of GB throughput.
+advance, LFSR shift, wave fetch or PCM update.
 
 The cheap alternative is **on-demand catch-up**: leave the scheduler alone and
-advance the APU to the exact cycle only when software observes it. This is free
-in the hot path — APU reads already sit in their own `of 0xFF10..0xFF3F` /
-`0xFF76` / `0xFF77` branches in `memory.nim`, so non-APU accesses pay nothing —
-with cost proportional to APU register reads, which games do a handful of times
-per frame. It is the pattern the GBA core already uses for the bus (`catch_up`).
-The missing piece is sub-instruction cycle tracking in the GB core. Not built,
-not measured — architectural reasoning only.
+advance the APU to the exact cycle only when software observes it. It is the
+pattern the GBA core already uses for the bus (`catch_up`); the missing piece is
+sub-instruction cycle tracking in the GB core. Not built, not measured.
 
-The pulse-channel work above confirms the prediction that neither was needed:
-every one of those twenty rows was a phase/startup bug at a resolution M-cycle
-stepping already reaches. The remaining channel_3 and channel_4 rows have not
-been analysed and may not be.
+Two rounds of source-reading have now confirmed the prediction that neither was
+needed: **every one of the 39 rows recovered so far was a phase, startup or
+model-axis bug at a resolution M-cycle stepping already reaches.** The remaining
+CH4 divisor/shift work is the first item that plausibly does need finer
+structure, and even that is about having two counters rather than about
+stepping them more often.

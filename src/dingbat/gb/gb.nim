@@ -858,6 +858,17 @@ type
     volume_envelope_timer*:  uint8
     current_volume*:         uint8
     vol_env_is_updating*:    bool
+    # "Enabling the envelope triggers an APU bug - in the next *even* DIV-APU
+    # tick, the APU will tick the volume envelope of that appropriate channel,
+    # even if it would not tick volume envelope at that tick otherwise"
+    # (SameSuite channel_1_nrx2_speed_change). Set by an NRx2 write that takes
+    # the envelope period from zero to non-zero, consumed by the next even
+    # frame-sequencer step. See write_NRx2 and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it lives for at most
+    # one 512 Hz step (~2 ms) and it is set only by a register write, so a
+    # rollback that replays that write reconstructs it.
+    env_extra_tick*:         bool
 
   GbChannel1* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
@@ -944,7 +955,7 @@ type
     # nops BEFORE the NR52 power-on moves the whole grid with the write and
     # changes nothing, while the nops between power-on and trigger in
     # channel_1_align shift the result by one CPU cycle. Reset by an APU
-    # power-on; see apu_write and gb_pulse_trigger_deadline.
+    # power-on; see apu_write and gb_trigger_deadline.
     #
     # Deliberately NOT serialized. It is only ever written by a power-on, so a
     # rollback snapshot that replays one reconstructs it exactly; a state loaded
@@ -953,6 +964,22 @@ type
     # would cost a GB payload revision bump, which is worth spending on a batch
     # of fields rather than on this one.
     tick_phase*:          CycleCount
+    # "The first DIV-APU event after a power-on is skipped when DIV's tap bit
+    # was already high" (SameSuite div_write_trigger_10). The divider is what
+    # actually clocks the sequencer, so powering the APU on part-way through a
+    # tap period leaves the divider half a step ahead of the sequencer: the
+    # edge that ends that period has already been accounted for and produces no
+    # step. See apu_write's NR52 arm and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like tick_phase: it is true only between an
+    # APU power-on and the next 512 Hz edge (under 2 ms), it is written only by
+    # a power-on, and a rollback that replays one reconstructs it exactly.
+    div_skip*:            bool
+    # Whether the sequencer's NEXT step is one that does NOT clock the length
+    # counter -- the "extra length clocking" gate on an NRx4 write. Note it is
+    # a property of the DIVIDER's phase, not of frame_sequencer_stage: while
+    # div_skip is pending the two disagree, and div_write_trigger_10 is exactly
+    # the test that can tell.
     first_half_of_length_period*: bool
     left_enable*:         bool
     left_volume*:         uint8

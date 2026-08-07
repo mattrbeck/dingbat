@@ -44,10 +44,10 @@ template gb_apu_tick*(gb: GB): CycleCount =
   ## scheduler cycles = 2 CPU cycles.
   CycleCount(4) shl gb.scheduler.speed
 
-proc gb_pulse_trigger_deadline*(gb: GB; period: CycleCount;
-                                was_enabled: bool): CycleCount =
-  ## Absolute scheduler cycle of a square channel's first duty step after an
-  ## NR14/NR24 trigger. Two hardware behaviours, both measured by SameSuite and
+proc gb_trigger_deadline*(gb: GB; period: CycleCount;
+                          extra_ticks: int): CycleCount =
+  ## Absolute scheduler cycle of a channel's first waveform step after a
+  ## trigger. Two hardware behaviours, both measured by SameSuite and
   ## documented in its sources:
   ##
   ## 1. The trigger does not take effect between APU ticks. The write is picked
@@ -57,20 +57,25 @@ proc gb_pulse_trigger_deadline*(gb: GB; period: CycleCount;
   ##    move when the same nop is inserted before the APU power-on that
   ##    established the grid.
   ## 2. From that edge, the first sample is due one full period PLUS a fixed
-  ##    startup delay: two ticks for a channel that was off (channel_1_delay:
-  ##    "It takes (sample length + 2) ticks from the moment channel 1 is enabled
-  ##    until PCM12 is affected"), one tick when re-triggering a channel that is
-  ##    already on (channel_1_restart: "after restarting, the start delay from
-  ##    the 'delay' test is actually 1 tick shorter").
+  ##    startup delay of extra_ticks, which the caller supplies because it
+  ##    differs per channel and per trigger:
+  ##      * squares, channel off:   2 (channel_1_delay: "It takes (sample
+  ##        length + 2) ticks from the moment channel 1 is enabled until PCM12
+  ##        is affected")
+  ##      * squares, channel on:    1 (channel_1_restart: "after restarting,
+  ##        the start delay from the 'delay' test is actually 1 tick shorter")
+  ##      * noise:                  1 (channel_4_delay: "the delay is `sample
+  ##        length + 3` M-cycles" -- the same accounting as channel_1_delay,
+  ##        whose two extra cycles are the read itself, leaves one)
   ##
-  ## The duty POSITION is untouched either way -- hardware only resets it on an
-  ## APU power-off -- so the first sample after a restart is the one the old
+  ## The waveform POSITION is untouched either way -- hardware only resets it on
+  ## an APU power-off -- so the first sample after a restart is the one the old
   ## pulse would have played next, exactly as channel_1_restart describes.
   let tick = gb_apu_tick(gb)
   let now  = gb.scheduler.cycles
   let past = (now + tick - (gb.apu.tick_phase mod tick)) mod tick
   let edge = if past == 0: now else: now + (tick - past)
-  edge + period + (if was_enabled: tick else: 2 * tick)
+  edge + period + CycleCount(extra_ticks) * tick
 
 const GB_NO_STEP* = high(CycleCount)
   ## "no pending waveform step" sentinel for the channels' next_step deadline.
@@ -150,6 +155,16 @@ proc write_NRx2*(ch: GbVolumeEnvChannel; value: uint8) =
     if new_add_mode != ch.envelope_add_mode:
       ch.current_volume = 0x10'u8 - ch.current_volume
     ch.current_volume = ch.current_volume and 0x0F
+  # The envelope "enable" glitch: taking the period from zero to non-zero costs
+  # one extra envelope tick at the next even DIV-APU step, on top of whatever
+  # that step would have done. It is the whole difference between
+  # channel_1_nrx2_speed_change's tests 1/2/5 (speed change and disable, which
+  # this tree already got right) and its tests 3/4/6/7 (enable), every byte of
+  # which came out exactly one volume step short without it.
+  if ch.enabled and ch.period == 0 and (value and 0x07) != 0:
+    ch.env_extra_tick = true
+  elif (value and 0x07) == 0:
+    ch.env_extra_tick = false
   ch.starting_volume   = value shr 4
   ch.envelope_add_mode = new_add_mode
   ch.period            = value and 0x07

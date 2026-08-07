@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-07 14:15:19*
+*Generated: 2026-08-07 14:46:17*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3626/5005 passed.**
+**3646/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -1254,37 +1254,17 @@ All 6 tests passed.
 | serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
-## sound (91/116 passed)
+## sound (111/116 passed)
 
-91/116 tests passed, 25 failed:
+111/116 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
-| sound/ch1_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
 | sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
-| sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
-| sound/ch1_init_reset_sweep_counter_timing_nr52_2_dmg08_out0_cgb04c_out1 [cgb] | got 0, expected 1 |
 | sound/ch1_init_reset_sweep_counter_timing_nr52_3_dmg08_out0_cgb04c_out1 [cgb] | got 0, expected 1 |
-| sound/ch1_late_div_write_nr52_1a_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
-| sound/ch1_late_div_write_nr52_2a_dmg08_cgb04c_outF1 [cgb] | got F0, expected F1 |
-| sound/ch2_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_init_reset_length_counter_timing_nr52_4_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| sound/ch2_late_div_write_nr52_1a_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_2a_dmg08_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_div_write_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch2_late_reset_nr52_1a_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_late_reset_nr52_2a_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| sound/ch2_late_reset_nr52_ds_1a_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_late_reset_nr52_ds_2a_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sound/ch2_reset_length_counter_timing_nr52_ds_1_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| sound/ch3_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_late_div_write_nr52_1a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch3_late_div_write_nr52_2a_dmg08_cgb04c_outF4 [cgb] | got F0, expected F4 |
-| sound/ch4_div_write_reset_length_counter_timing_nr52_1_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
-| sound/ch4_late_div_write_nr52_1a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
-| sound/ch4_late_div_write_nr52_2a_dmg08_cgb04c_outF8 [cgb] | got F0, expected F8 |
+| sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+| sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
 ## speedchange (106/208 passed)
 

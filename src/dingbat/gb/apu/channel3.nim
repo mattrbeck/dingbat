@@ -105,7 +105,18 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
   case idx
   of 0xFF1A:
     ch.dac_enabled = (val and 0x80) != 0
-    if not ch.dac_enabled: ch.enabled = false
+    if not ch.dac_enabled:
+      ch.enabled = false
+      # ...and the sample buffer goes with it. SameSuite
+      # channel_3_restart_stop_delay: "starting a pulse after stopping a
+      # previous one behaves the same as just starting a pulse" -- the restart
+      # emits silence for the whole startup delay, where a restart WITHOUT the
+      # NR30 stop keeps emitting the old sample (channel_3_restart_delay, which
+      # is the test that says the buffer survives a plain trigger). The only
+      # difference between the two is this write, so it is this write that
+      # clears the buffer. Same register-level event Pan Docs describes on a
+      # power-on, since powering off writes NR30 = 0 through here.
+      ch.wave_ram_sample_buffer = 0
   of 0xFF1B:
     ch.length_load    = val
     ch.length_counter = 0x100 - int(ch.length_load)

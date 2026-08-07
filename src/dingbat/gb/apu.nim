@@ -213,6 +213,15 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   ch2_catchup_at(apu.channel2, gb, OBS)
   ch3_catchup_at(apu.channel3, gb, OBS)
   ch4_catchup_at(apu.channel4, gb, OBS)
+  if apu.div_skip:
+    # The skipped edge (see GbApu.div_skip). It performs no step at all -- the
+    # sequencer does not advance -- which is what puts the envelope's first
+    # tick on the ninth event rather than the eighth in
+    # div_write_trigger_volume_10. From here on the divider and the sequencer
+    # agree again.
+    apu.div_skip = false
+    apu.first_half_of_length_period = false
+    return
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -232,6 +241,16 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   of 7:
     volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
   else: discard
+  if (apu.frame_sequencer_stage and 1) == 1:
+    # The envelope-enable glitch's extra tick. See
+    # GbVolumeEnvChannel.env_extra_tick.
+    template extra(ch: untyped) =
+      if ch.env_extra_tick:
+        ch.env_extra_tick = false
+        volume_step(ch)
+    extra(apu.channel1)
+    extra(apu.channel2)
+    extra(apu.channel4)
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
 
@@ -524,5 +543,28 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # The APU's 1 MHz tick grid restarts here; every square-channel trigger
       # from now on is quantized to it. See GbApu.tick_phase.
       apu.tick_phase = gb.scheduler.cycles mod gb_apu_tick(gb)
+      # Pan Docs, Power Control, on what a power-ON resets: "the frame sequencer
+      # is reset so that the next step will be 0, the square duty units are
+      # reset to the first step of the waveform, and the wave channel's sample
+      # buffer is reset to 0". The first two are done on the power-OFF side
+      # above, where they are what earns the channel_3/channel_4 passes; the
+      # buffer is genuinely observable on this side, because CH3 keeps emitting
+      # the last byte it read until its next fetch and its trigger has a
+      # sample-long startup delay. Without this every SameSuite CH3 subtest
+      # after the first reads the PREVIOUS subtest's wave byte out of PCM34 for
+      # the whole of that delay (channel_3_delay, _first_sample,
+      # _restart_stop_delay, _shift_skip_delay, _and_glitch).
+      apu.channel3.wave_ram_sample_buffer = 0
+      # SameSuite div_write_trigger_10: "starting the APU while bit 4 of the
+      # DIV register is set causes the APU to skip the first DIV-APU event".
+      # The sequencer is reset here but the DIVIDER is not, so coming up
+      # mid-period means the edge that closes that period has already been
+      # spent -- and the length-clock phase NRx4 samples belongs to the
+      # divider, so it reads as "the next step does not clock length" for as
+      # long as the two disagree. Bit 12 of the internal divider is DIV bit 4,
+      # bit 13 in double speed; see timer.nim's apu_div_bit.
+      let tap = 12 + int(gb.scheduler.speed)
+      apu.div_skip = ((gb.timer.tdiv shr tap) and 1) != 0
+      apu.first_half_of_length_period = apu.div_skip
   of 0xFF30..0xFF3F: ch3_write(apu.channel3, idx, val, gb)
   else: discard

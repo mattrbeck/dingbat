@@ -82,7 +82,7 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
       if not was_enabled: ch.sample_bit = 0
-      ch.next_step = gb_pulse_trigger_deadline(gb, ch2_period(ch, gb),
-                                               was_enabled)
+      ch.next_step = gb_trigger_deadline(gb, ch2_period(ch, gb),
+                                         if was_enabled: 1 else: 2)
       init_volume_envelope(ch)
   else: discard

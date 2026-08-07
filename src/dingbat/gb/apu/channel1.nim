@@ -147,8 +147,8 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
       # first duty step, which is the pulse analogue of CH3's documented
       # "triggering does not immediately start playing wave RAM".
       if not was_enabled: ch.sample_bit = 0
-      ch.next_step = gb_pulse_trigger_deadline(gb, ch1_period(ch, gb),
-                                               was_enabled)
+      ch.next_step = gb_trigger_deadline(gb, ch1_period(ch, gb),
+                                         if was_enabled: 1 else: 2)
       init_volume_envelope(ch)
       ch.frequency_shadow = ch.frequency
       ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
