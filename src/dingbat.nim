@@ -964,8 +964,12 @@ proc render_state_notice() =
     if app.state_notice_hint.len > 0:
       igSpacing()
       # The detail line is for someone reporting a bug, not for reading first:
-      # dimmed, below, and never the whole message.
-      igTextDisabled(cstring(app.state_notice_hint))
+      # dimmed, below, and never the whole message. Through "%s" and not as the
+      # format string itself: this is the one igTextDisabled call in the tree
+      # whose text is not a literal — it carries core wording built from the
+      # FILE's own bytes, and a '%' in there would read arguments that were
+      # never pushed.
+      igTextDisabled("%s", cstring(app.state_notice_hint))
     igPopTextWrapPos()
     igSpacing()
     if igButton("OK", ImVec2(x: 120, y: 0)):

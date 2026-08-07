@@ -3707,6 +3707,7 @@ const looksLikeStateFile = (bytes) =>
 // used to be the answer to all of them, and it is actively wrong for four of
 // the five: it sent people hunting for the wrong problem when the real answer
 // was "your dingbat is older than the one that wrote this".
+//
 // StateRejectKind ordinals, from src/dingbat/common/serialize.nim. The core
 // classifies the refusal; this table turns each cause into a sentence that
 // says what to DO about it, because "wrong game" and "damaged file" are
