@@ -714,10 +714,18 @@ hide.
 (OAM X = 8, screen `x = 0..7`) drawn here and absent on hardware. That band is
 the one where the object's trigger (`lx == 0`) coincides with the window's
 start, because the ROM runs WY = 0 / WX = 7, i.e. `win_lx == 0`. `tick_shifter`
-asks the object question first, so the window start is deferred behind a
-whole object fetch; hardware evidently resolves the tie the other way and the
-object is lost outright (it does not reappear shifted — `x = 8..15` matches).
-That is an ordering rule between the two triggers at one `lx`, not a dot.
+asks the object question first, so the window start is deferred behind a whole
+object fetch, and the object is drawn. Hardware loses it outright — it does not
+reappear shifted, `x = 8..15` matches — so something about the tie at that one
+`lx` is different.
+
+**Simply resolving the tie the other way is refused, and was measured out.**
+Asking the window's start before the object trigger takes this row 34 → 318 and
+the mealybug totals DMG 520109 → 519201 and CGB 1819207 → 1818393, so the
+window start does NOT preempt an object fetch at the same pixel in general.
+Whatever drops that one object is narrower than an ordering rule — the WX = 7
+case is served by a mode-2 special case in this renderer (see the `wx < 7`
+term at the end of `fifo_tick_slow`), and that is where to look next.
 
 **The two `obj_size_change` rows and `m3_lcdc_tile_sel_win_change` were not
 diagnosed** in this pass and did not move. `obj_size_change_scx`'s 30 pixels are
