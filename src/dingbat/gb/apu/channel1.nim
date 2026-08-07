@@ -129,7 +129,11 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
   of 0xFF14:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
     let len_enable = (val and 0x40) != 0
-    if gb.apu.first_half_of_length_period and not ch.length_enable and len_enable and ch.length_counter > 0:
+    # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
+    # clocking rule, which drops the requirement that the write turn the
+    # length counter ON; see GbQuirks in gb.nim.
+    if gb.apu.first_half_of_length_period and not ch.length_enable and
+       (len_enable or gb.quirks.length_clock_any_nrx4) and ch.length_counter > 0:
       dec ch.length_counter
       if ch.length_counter == 0: ch.enabled = false
     ch.length_enable = len_enable

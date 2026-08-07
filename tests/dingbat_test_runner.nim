@@ -503,6 +503,33 @@ proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef]
     ))
   tests
 
+proc samesuite_model_for(base: string): string =
+  ## SameSuite names its per-revision ROMs the way mooneye and AGE do: a
+  ## trailing `-<devices>` token listing the revisions the ROM's own
+  ## `CorrectResults` table was taken on — `channel_1_extra_length_clocking-cgb0B`,
+  ## `channel_3_extra_length_clocking-cgb0` / `-cgbB`,
+  ## `channel_1_freq_change_timing-A` / `-cgb0BC` / `-cgbDE`. Nine of the 70 APU
+  ## ROMs carry one.
+  ##
+  ## Without this the runner scores every one of them on the default revision,
+  ## where most of them CANNOT pass by construction: `-cgb0B` asserts the
+  ## extra-length-clocking rule that CPU CGB C fixed, so a green default row
+  ## would mean the default was wrong. Passing the token through to
+  ## `--model=` is what makes "this ROM passes on revision X" expressible; the
+  ## harness resolves it with the same gb_revision_from_name the emulator uses.
+  ##
+  ## Only tokens after the LAST '-' are considered, and only if they look like
+  ## a device list, so `channel_1_freq_change` (no suffix) and
+  ## `div_write_trigger_10` are left on the default.
+  if '-' notin base: return ""
+  let tok = base.rsplit('-', maxsplit = 1)[1]
+  if tok.len == 0: return ""
+  let head = tok.toLowerAscii()
+  if head == "a" or head.startsWith("cgb") or head.startsWith("dmg") or
+     head.startsWith("agb") or head.startsWith("mgb"):
+    return tok
+  ""
+
 proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
   ## SameSuite's sample-accurate APU tests. They signal the verdict with
   ## mooneye's magic LD B,B breakpoint (registers = fibonacci 3/5/8/13/21/34 on
@@ -523,6 +550,7 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
       mode: tmMooneye,
       timeout: 1800,
       cgb: true,
+      model: samesuite_model_for(rom.splitFile().name),
     ))
   tests
 

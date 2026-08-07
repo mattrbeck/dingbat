@@ -1955,18 +1955,16 @@ proc main() =
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
                      force_cgb = force_cgb)
     if model_override.len > 0:
-      emu.boot_model = case model_override
-        of "dmg0": bmDmg0
-        of "dmg", "dmgabc", "dmgabcmgb": bmDmgABC
-        of "mgb": bmMgb
-        of "sgb", "s": bmSgb
-        of "sgb2": bmSgb2
-        of "cgb0": bmCgb0
-        of "cgb", "cgbabcde", "c": bmCgbABCDE
-        of "agb", "ags", "a": bmAgb
-        else:
-          echo "Unknown model: ", model_override
-          quit(1)
+      # One token selects the whole machine: gb_revision_from_name maps it to a
+      # GbRevision and gb_set_revision derives the boot table and the quirk set
+      # from that. Every string the old boot-model-only `case` accepted still
+      # resolves to the same boot table, so the model-scoped mooneye rows are
+      # untouched.
+      let (rev, ok) = gb_revision_from_name(model_override)
+      if not ok:
+        echo "Unknown model: ", model_override
+        quit(1)
+      emu.gb_set_revision(rev)
     emu.test_output = test_out
     emu.post_init()
     if no_save:
