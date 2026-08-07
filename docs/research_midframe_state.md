@@ -22,6 +22,13 @@ produces the same machine, measured to the byte. But the same call sits on the
 path that rewind, netplay rollback and run-ahead take *sixty times a second*,
 and there the three-cycle-early wake is not free — see §5.
 
+> **Status.** §1-§5 are the original investigation and §7 is the fix that came
+> out of it (merged). §6 was written as an open residual — a 3-4 byte drift on
+> Golden Sun that the §7 fix did not remove — and has since been **chased down
+> and fixed too**: it was the same mechanism acting on `cpu.irq_line` instead of
+> the halt flags. Round-tripping a GBA state is now bit-exact. Neither fix
+> needed a payload format change.
+
 ---
 
 ## 1. What "a frame boundary" is here, and why the web can't miss one
@@ -49,7 +56,7 @@ That is an argument, not a measurement. The measurement is §2.
 
 ## 2. Reproduction: web vs native, byte for byte
 
-`web/midframe-probe.html` (not committed; see §7) loads `em.js` on its own,
+`web/midframe-probe.html` (not committed; see §8) loads `em.js` on its own,
 writes the ROM into MEMFS, calls `initFromEmscripten`, drives exactly *N*
 `_loop_tick()` calls and hands `wasm_state_size`/`wasm_state_data` back to
 Playwright. A native harness runs `new_gba(...)` + *N* × `step_frame()` and
@@ -186,24 +193,119 @@ does not. It does, however, mean a rolled-back peer and a straight-through peer
 were not bit-identical at the payload level, which matters for the relaxed-CRC
 comparisons the link protocol uses.
 
-## 6. The residual: a separate apply-side non-idempotency
+## 6. The residual: `irq_line` was the other half of the same bug
 
-Golden Sun 2 keeps a 3-4 byte drift (one CPU banked register, one IWRAM byte,
-one or two scheduler-event bytes) across repeated live restores, with or without
-the fix. It is **not** the save side — a control that calls `state_payload()` an
-extra time per frame and never applies it is bit-identical for 400 frames on
-every ROM tried. It is **not** the APU `arm_delay` reconstruction — pinning
-`arm_delay` across the load changes nothing. Remaining suspects, untested:
-`scheduler.load_from` replacing the event array (event ordering at equal
-deadlines) and `apu_extract_state_events` clearing and re-appending the four PSG
-events into that array; `bus.fetch_page` invalidation.
+*Chased down 2026-08-07 on the post-merge tree (which also carries five GBA perf
+commits touching `bus.nim`, `cpu.nim`, `waitloop.nim`; the drift survived them
+unchanged, in both magnitude and field identity).*
 
-The mGBA suite is worth flagging separately: it measures cycle counts and
-auto-advances on a timer, so it amplifies any perturbation. Under per-frame live
-restore it goes fully out of phase with a clean run between frames ~210 and ~330
-(tens of KB of VRAM and SRAM differ, though the visible framebuffer never does)
-and settles into a stable offset afterwards. That is not new with this fix — the
-unfixed build did the same, starting earlier.
+Golden Sun 2 kept a 3-4 byte drift across repeated live restores after §7's fix.
+It is **not** the save side (an extra `state_payload()` per frame that is never
+applied is bit-identical for 400 frames on every ROM tried), and it is **not**
+the APU `arm_delay` reconstruction (pinning `arm_delay` across the load changes
+nothing). Both earlier suspects — `scheduler.load_from` event ordering, and
+`bus.fetch_page` invalidation — are also wrong, and a stronger measurement said
+so before either was tested: **`apply_state_payload` is a fixpoint on the
+payload.** 400 frames of `p1 = state_payload; apply(p1); p2 = state_payload`
+gives `p1 == p2` every time. So nothing in the payload is being mangled; the
+drift is in live state the payload does not carry.
+
+Naming the fields (`drift.nim live`, which compares the two cores' objects
+directly rather than their bytes) makes it obvious:
+
+```
+frame 3:  sp_usr  03007EE0 vs 03007EDC
+          lr_irq  081C26E8 vs 081C26E6
+          irq_line   false vs true
+          IWRAM 03007e58..03007e88  (the same values, shifted)
+frame 4:  lr_irq  0801437A vs 08014382
+          irq_line   false vs true
+          IWRAM 03007f9c: 7a vs 82
+```
+
+`0x03007F9C` is the first word below the IRQ stack pointer (`sp_irq` boots to
+`0x03007FA0`) — it is the LR the IRQ handler pushes. So the whole diff is one
+statement: **the restored core takes the vblank IRQ one instruction away from
+where the clean core takes it**, and `lr_irq`, the pushed copy of it, and the
+stack depth follow.
+
+`irq_line: false vs true` is the cause, and it is §4's mechanism again with the
+other flag. `check_interrupts` writes two things the loader wants and one it
+does not: `irq_line` is not a function of IE/IF/IME, it is the **result of the
+last recognition check**, and a raise that has not been checked yet must not
+appear in it. Recomputing unconditionally recognised the interrupt up to
+`IRQ_SYNC_DELAY` = 3 cycles early.
+
+Why Golden Sun and not goodboy or Mother 3: those idle in HALT at the frame
+boundary, so the early recognition only touched `halted`/`halt_wake` (fixed in
+§7) and the CPU was going to sit there until the event fired anyway. Golden Sun
+is still *executing* when vblank raises IF, so the three-cycle window is live
+and an early `irq_line` moves the IRQ by an instruction. Nothing about Golden
+Sun is special beyond that — it is a game that does not halt.
+
+Confirmed causally before designing anything: a diagnostic build that preserves
+`irq_line` verbatim across the load (correct in the self-restore case, wrong in
+general) drops Golden Sun 1 and 2 to **zero divergence over 400 frames**.
+
+### The fix
+
+`gba_apply_state` now recomputes `irq_line` only when **no `etInterrupts` event
+is pending in the restored scheduler**; when one is, the event carries the answer
+and delivers it on schedule. New `scheduler.has_event` asks the question. No
+payload change: the scheduler, including that event, was already serialised.
+
+The recompute is exact in the no-event case. IF only ever *gains* bits between
+checks — the only way to clear one is a CPU write to IF, which itself schedules a
+check (`mmio.nim:46`) — so "IE & IF != 0 and IME" holding now with no check
+pending means it held at the last check too.
+
+The one imperfect case is two raises inside the same three-cycle window: the
+older raise's check may already have set `irq_line`, and forcing it false costs
+up to three cycles of lateness. That is the same bound as the old behaviour's
+earliness, in the rarer direction, and the pending event corrects it. It cannot
+lose an interrupt: the event that would set `irq_line` is in the state.
+
+### Evidence
+
+- Per-frame live snapshot+restore, **1200 frames**, and the same again through
+  the run-ahead path (`k=2`): **byte-identical to a clean run at every frame**,
+  on goodboy-demo-en, Golden Sun, Golden Sun 2, Mother 3 and the mGBA suite ROM.
+  Before: GS2 drifted from frame 3, GS1 from frame 3, the suite from frame 9.
+- Fresh-core resume sweep, 24 checkpoints × 20 frames on each of those five
+  ROMs: 0 divergences, 0-byte save/load/save diff at every checkpoint.
+- `--mode=rollback`, `--mode=rollbacknet`, `--mode=speclink` ×3,
+  `--mode=speclinkbench`, `--mode=stateroundtrip` ×3, `--mode=linktest` ×2,
+  `--mode=normlinktest`, `--mode=norm32linktest`, `--mode=attachtest`: all PASS.
+- `./dingbat_test_runner`: 978 rows, 691 pass, results files byte-identical to
+  the committed ones apart from the timestamp — every mGBA-suite and gambatte row
+  unchanged.
+- `test_savestate_compat`, `test_rewind`, `test_timestretch`, `test_printer`,
+  `test_cheats`, `test_ppucomposite`, `test_ppubgunpack`, `test_ppuobjlist`,
+  `node --test web/tests/*.test.mjs` (212/212), `web/uv.test.mjs`,
+  `web/signaling/server.test.mjs`, the GB HDMA screenshot ROM: all green.
+- All eight committed GBA corpus states still load and make progress.
+- Web still byte-identical to native at N = 137, 300, 901, and with run-ahead
+  1, 2 and 3.
+- GB re-checked (`gbhdmatest.gbc`, `gblinktest.gb`): 0-byte save/load/save diff,
+  no resume divergence. `gb_apply_state` has no equivalent call.
+
+### What this buys
+
+Round-tripping a GBA state through `state_payload`/`apply_state_payload` is now
+**bit-exact** — the machine you get back is the machine you snapshotted, not one
+three cycles ahead of it. That matters in three places, in ascending order of
+how much:
+
+1. Netplay rollback, where a peer that rolled back and a peer that did not must
+   agree exactly. This was precisely the asymmetry that could make them differ,
+   and the difference was an IRQ landing on a different instruction — the kind
+   that compounds. (`--mode=rollbacknet` passed before too: `inputrec.gba` is a
+   HALT-idling ROM, so it never exercised the window.)
+2. Byte-identity as a test oracle. Every future desync hunt that says "these two
+   states should be equal" now gets to mean it.
+3. A scheduler deadline drifting was the least comfortable symptom, because
+   deadlines drive event ordering rather than merely being observed. That is
+   gone; the scheduler section is identical at every one of the 1200 frames.
 
 ## 7. The change
 
@@ -262,6 +364,12 @@ Throwaway, in the investigation scratch dir rather than the tree:
   modes with a per-section breakdown of what differs. The section offset table it
   uses came from a temporary `-d:statesections` instrumentation of
   `gba_state_payload`.
+- `drift.nim` — the one that ended §6. `idemscan` asks whether
+  `apply_state_payload` is a fixpoint on the payload (it is, which is what
+  redirected the search to unserialised live state); `live` compares the two
+  cores' **objects** field by field and prints names — `lr_irq`, `sp_usr`,
+  `IWRAM 03007f9c` — instead of payload offsets. Byte diffs tell you something
+  moved; named diffs tell you what it was. Worth reaching for first next time.
 - `web/midframe-probe.html` + a Playwright driver — a bare page that loads
   `em.js`, drives an exact number of `loop_tick` calls and returns the state
   bytes, with none of `index.js` in the way. Deliberately not committed; it is
