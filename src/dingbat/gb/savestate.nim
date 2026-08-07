@@ -20,6 +20,7 @@ const
   GB_SEC_APU   = 0xB8'u8
   GB_SEC_MBC   = 0xB9'u8
   GB_SEC_SER   = 0xBA'u8
+  GB_SEC_SGB   = 0xBB'u8
   GB_SEC_END   = 0xBF'u8
 
 # ---- CPU ----
@@ -765,6 +766,63 @@ proc apu_extract_state_events(gb: GB) =
   take(gb.apu.channel3, etAPUChannel3)
   take(gb.apu.channel4, etAPUChannel4)
 
+# ---- Super Game Boy ----
+# Payload revision 5. Written only when the machine HAS an SGB adapter, which
+# is a function of the cart header and the frontend's opt-in, not of anything
+# in the payload -- so a state's SGB-ness is decided by the machine loading it,
+# and the section is present exactly when `gb.sgb != nil` on both sides. A
+# rev < 5 state has no section at all and leaves a fresh SgbState in place,
+# which is the state an SGB game re-establishes within a few frames anyway
+# (the palette/attribute commands are re-sent on every screen change).
+#
+# Derived and NOT serialized: `border` (re-rendered from chr/map/border_pal),
+# `border_valid`/`border_dirty` (both forced, so the border is rebuilt on the
+# first frame after a load), and the two GbPpu hook pointers (re-attached).
+
+proc save_sgb_state(s: SgbState; w: var Writer) =
+  w.write_tag(GB_SEC_SGB)
+  w.write_u8(s.prev_lines)
+  w.write_bool(s.receiving)
+  w.write_u16(uint16(s.bit_count))
+  w.write_bytes(s.packet)
+  w.write_bytes(s.group)
+  w.write_u8(uint8(s.pkt_index))
+  w.write_u8(uint8(s.pkt_total))
+  for v in s.pal: w.write_u16(v)
+  w.write_bytes(s.attr)
+  for v in s.syspal: w.write_u16(v)
+  w.write_bytes(s.atf)
+  w.write_bytes(s.chr)
+  for v in s.map: w.write_u16(v)
+  for v in s.border_pal: w.write_u16(v)
+  w.write_u8(s.mask)
+  w.write_seq_u16(s.frozen)
+  w.write_u8(s.players)
+  w.write_u8(s.cur_player)
+
+proc load_sgb_state(s: SgbState; r: var Reader) =
+  r.expect_tag(GB_SEC_SGB)
+  s.prev_lines = r.read_u8()
+  s.receiving  = r.read_bool()
+  s.bit_count  = int(r.read_u16())
+  r.read_bytes(s.packet)
+  r.read_bytes(s.group)
+  s.pkt_index  = int(r.read_u8())
+  s.pkt_total  = int(r.read_u8())
+  for i in 0 ..< s.pal.len: s.pal[i] = r.read_u16()
+  r.read_bytes(s.attr)
+  for i in 0 ..< s.syspal.len: s.syspal[i] = r.read_u16()
+  r.read_bytes(s.atf)
+  r.read_bytes(s.chr)
+  for i in 0 ..< s.map.len: s.map[i] = r.read_u16()
+  for i in 0 ..< s.border_pal.len: s.border_pal[i] = r.read_u16()
+  s.mask = r.read_u8()
+  r.read_seq_u16_into(s.frozen)
+  s.players = r.read_u8()
+  s.cur_player = r.read_u8()
+  s.border_dirty = true
+  s.border_valid = false
+
 proc gb_state_payload(gb: GB): string =
   var w = Writer()
   save_cpu_state(gb.cpu, w)
@@ -781,6 +839,7 @@ proc gb_state_payload(gb: GB): string =
   save_ppu_state(gb.ppu, w)
   save_apu_state(gb.apu, w)
   save_mbc_state(gb.cartridge, w)
+  if gb.sgb != nil: save_sgb_state(gb.sgb, w)
   w.write_tag(GB_SEC_END)
   w.buf
 
@@ -804,6 +863,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
   load_mbc_state(gb.cartridge, r)
+  if gb.sgb != nil and rev >= 5: load_sgb_state(gb.sgb, r)
   r.expect_tag(GB_SEC_END)
   # Derived OAM-DMA bus state. Neither field is serialized: both are functions
   # of state that already is (current_dma_source, dma_position, and the source

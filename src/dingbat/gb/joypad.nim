@@ -40,6 +40,11 @@ proc joypad_read*(j: GbJoypad): uint8 =
 proc joypad_write*(j: GbJoypad; gb: GB; val: uint8) =
   j.button_keys    = ((val shr 5) and 0x1) == 0
   j.direction_keys = ((val shr 4) and 0x1) == 0
+  # The SGB command-packet stream rides on these same two select lines, and
+  # the ICD2 watches them without disturbing the joypad: selecting a button
+  # group still works exactly as it does on a handheld (Pan Docs, "Command
+  # Packet Transfers"). Hence the receiver runs alongside, not instead of.
+  if gb.sgb != nil: sgb_p1_write(gb, val)
   joypad_update(j, gb)
 
 proc handle_input*(j: GbJoypad; gb: GB; inp: Input; pressed: bool) =

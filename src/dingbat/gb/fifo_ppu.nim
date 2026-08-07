@@ -829,9 +829,18 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
                   else: ppu.bgp
           int(p[px.color])
-      let pal_offset = (int(px.palette) * 4 + final_color) * 2
-      ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
-        cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
+      if ppu.sgb_attr != nil:
+        # Super Game Boy. The SNES colorizes the composited 2-bit video signal
+        # per 8x8 SCREEN cell, so the cell's attribute -- not the GB's own
+        # BG/OBJ palette selector -- picks the palette, and objects share it
+        # with the background underneath them. See sgb.nim.
+        let cell = (int(ppu.ly) shr 3) * 20 + (int(ppu.lx) shr 3)
+        ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
+          ppu.sgb_pal[int(ppu.sgb_attr[cell]) * 4 + final_color]
+      else:
+        let pal_offset = (int(px.palette) * 4 + final_color) * 2
+        ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
+          cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
     inc ppu.lx
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
