@@ -48,6 +48,17 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
       if e mod s == s - 1: m = m or (1'u64 shl e)
     bus.pf_commit[page] = m
 
+when defined(fetchprof):
+  # EXPLORATORY (branch-only): where the ROM access path actually goes on a
+  # real workload. Indices:
+  #   0 fetch_half hot   1 fetch_half slow   2 fetch_word hot   3 fetch_word slow
+  #   4 rac fetch calls  5 rac data calls
+  #   6 rac prefetch-hit 7 rac plain-seq     8 rac nonseq
+  #   9 rac went hot after
+  #  10 rac prefetch-hit with credit >= need (cost floor 1)
+  #  11 rac prefetch-hit with zero credit
+  var fetchprof*: array[16, uint64]
+
 proc bus_now(bus: Bus): CycleCount {.inline.} =
   bus.sched.cycles + CycleCount(bus.cycles)
 
@@ -101,6 +112,8 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       bus.rom_next_addr = address
   else:
     seq = address == bus.rom_next_addr and (bus.prefetch_on or contiguous)
+  when defined(fetchprof):
+    fetchprof[if fetch: 4 else: 5].inc
   var cost: int
   var new_free_since: CycleCount
   if seq:
@@ -122,12 +135,18 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       let done = now + CycleCount(cost)
       let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
       new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+      when defined(fetchprof):
+        fetchprof[6].inc
+        if credit >= need: fetchprof[10].inc
+        if credit == 0: fetchprof[11].inc
     else:
       cost = int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
       new_free_since = now + CycleCount(cost)
+      when defined(fetchprof): fetchprof[7].inc
   else:
     cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
     new_free_since = now + CycleCount(cost)
+    when defined(fetchprof): fetchprof[8].inc
   if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
      bus.fetch_page - 0x8 <= 5:
     # Prefetch hand-off. A CPU *data* access to the gamepak takes the ROM bus
@@ -763,9 +782,11 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
       # (unbroken), a sequential fetch is a plain S access and needs no
       # absolute-time bookkeeping at all
       if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[0].inc
         bus.cycles += int(bus.wait16_s[page])
         bus.rom_next_addr = address + 2
       else:
+        when defined(fetchprof): fetchprof[1].inc
         bus.rom_cool()
         let c = if bus.dma_active:
                   bus.rom_access_cycles(address, is32 = false, fetch = true)
@@ -773,7 +794,9 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
         bus.cycles += c
         # Go hot only when no prefetch credit is left over; leftover credit
         # must keep flowing through the slow path to be consumed
-        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
     else:
       bus.cycles += bus.fetch_c16
     read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
@@ -785,15 +808,19 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
   if page == bus.fetch_page or bus.install_fetch_cache(page):
     if page >= 0x8:
       if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[2].inc
         bus.cycles += int(bus.wait32_s[page])
         bus.rom_next_addr = address + 4
       else:
+        when defined(fetchprof): fetchprof[3].inc
         bus.rom_cool()
         let c = if bus.dma_active:
                   bus.rom_access_cycles(address, is32 = true, fetch = true)
                 else: bus.rom_fetch_cycles(address, int(page), is32 = true)
         bus.cycles += c
-        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
     else:
       bus.cycles += bus.fetch_c32
     read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)

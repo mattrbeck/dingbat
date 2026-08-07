@@ -185,6 +185,13 @@ proc main() =
            " engaged=", emu.mp2k.engaged,
            " avg_out_energy=", (if emu.mp2k.dbg_out_count > 0:
              formatFloat(emu.mp2k.dbg_out_energy / emu.mp2k.dbg_out_count.float, ffDecimal, 4) else: "0")
+    when defined(fetchprof):
+      let names = ["fh_hot", "fh_slow", "fw_hot", "fw_slow", "rac_fetch", "rac_data",
+                   "rac_pfhit", "rac_seq", "rac_nonseq", "rac_went_hot",
+                   "rac_pfhit_full", "rac_pfhit_nocredit"]
+      echo "--- fetch profile (per ", frames, " frames) ---"
+      for i, n in names:
+        echo n, ": ", gba.fetchprof[i]
     when defined(pcprofile):
       var tot = 0'u64
       for r in 0..15: tot += gba.prof_cycles[r]
