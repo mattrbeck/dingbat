@@ -1,5 +1,25 @@
 # GB FIFO PPU renderer (included by gb.nim)
 
+# ---- -d:gb_px_trace --------------------------------------------------------
+#
+# Diagnostic pipeline trace (tools only; compiled out of every shipping build).
+# Where `-d:gb_m3_trace` prints one line per mode 3 DOT -- the fetcher's state
+# machine as it steps -- this prints one line per pipeline EVENT, which is what
+# turns a reference frame into an equation for the byte behind a pixel:
+#
+#   FTILE   the tile-map read: address, tile number, LCDC at that dot
+#   FDATA   each bitplane read: address, row, byte, LCDC at that dot
+#   PUSH    the eight pixels entering the BG FIFO, with the `lx` they show at
+#   SPR     an object's two bitplane bytes as they are merged
+#   PX      each emitted pixel: the BG and OBJ FIFO entries and LCDC
+#
+# Shares `-d:GB_TRACE_LY` with gb_m3_trace (-1 traces every drawn line). What
+# it is for: PUSH plus the reference frame gives the bitplane bytes hardware
+# used, so a wrong pixel becomes a wrong BYTE with an address next to it, and
+# PX plus the LCDC write dots gives the register the mixer read against the dot
+# the pixel left the FIFO. The mixer's dot (fifo_recompose_last) and the
+# cgb-acid-hell residual in docs/gb-failure-triage.md were both read off this.
+
 # `lx` runs -7..160, so this is unreachable: with win_lx parked here the
 # shifter's per-dot compare against it is simply never true.
 const WIN_LX_OFF = -128'i32
@@ -64,6 +84,14 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.tile_attrs = 0
   ppu.tile_data_low = 0
   ppu.tile_data_high = 0
+  # The mixer's held pair, same category as the FIFOs and the fetch latches
+  # above: per-line scratch that the save-state payload deliberately does not
+  # carry (see this method's doc comment). It is only ever read by
+  # fifo_recompose_last, which is guarded on mode 3 and on `lx >= 1`, so the
+  # earliest a loaded state can reach it is the first pixel of the first mode 3
+  # after the load -- which has already written it.
+  ppu.mix_bg = GbPixel()
+  ppu.mix_sp = GbPixel()
   ppu.sprites = @[]
 
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
@@ -147,6 +175,12 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
     let obj_to_bg = (attrs and 0x80) shr 7
     let lo = ppu.tile_data_low
     let hi = ppu.tile_data_high
+    when defined(gb_px_trace):
+      if gb_traced(ppu.ly):
+        echo "PUSH ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+             " fx=", ppu.fetcher_x, " num=", toHex(ppu.tile_num, 2),
+             " lo=", toHex(lo, 2), " hi=", toHex(hi, 2),
+             " attr=", toHex(attrs, 2)
     for col in 0 ..< 8:
       let shift = if flip: col else: 7 - col
       let color = uint8((((hi shr shift) and 0x1) shl 1) or ((lo shr shift) and 0x1))
@@ -177,6 +211,12 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         let o = ((ppu.fetcher_x + (int(ppu.scx) shr 3)) and 0x1F) +
                 (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
         (m, o)
+    when defined(gb_px_trace):
+      if gb_traced(ppu.ly):
+        echo "FTILE ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+             " fx=", ppu.fetcher_x, " addr=", toHex(0x8000 + map + offset, 4),
+             " num=", toHex(ppu.vram[0][map + offset], 2),
+             " lcdc=", toHex(ppu.lcd_control, 2)
     ppu.tile_num   = ppu.vram[0][map + offset]
     # Unconditional, and it has to stay that way -- this is the mode 3 dot
     # loop, and one more branch here measured +0.8% of retired instructions on
@@ -197,6 +237,16 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
                    else:
                      (int(ppu.ly) + int(ppu.scy)) and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row
+    when defined(gb_px_trace):
+      if gb_traced(ppu.ly):
+        let off = (if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow: 0 else: 1)
+        echo "FDATA ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+             " fx=", ppu.fetcher_x,
+             " plane=", off, " num=", toHex(ppu.tile_num, 2),
+             " row=", tile_row,
+             " addr=", toHex(0x8000 + tile_ptr + tile_row * 2 + off, 4),
+             " byte=", toHex(ppu.vram[bank_num][tile_ptr + tile_row * 2 + off], 2),
+             " lcdc=", toHex(ppu.lcd_control, 2)
     if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow:
       ppu.tile_data_low = ppu.vram[bank_num][tile_ptr + tile_row * 2]
       inc ppu.fetch_counter
@@ -326,6 +376,12 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ppu.sprites.delete(0)
   let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
   let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
+  when defined(gb_px_trace):
+    if gb_traced(ppu.ly):
+      echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,
+           " tile=", toHex(s.tile_num, 2),
+           " lo=", toHex(ppu.vram[bank][b_lo], 2),
+           " hi=", toHex(ppu.vram[bank][b_hi], 2)
   # Pad OAM FIFO to at least 8 pixels with transparent lowest-priority pixels
   while ppu.fifo_sprite.size < 8:
     fifo_push(ppu.fifo_sprite, GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0))
@@ -438,6 +494,20 @@ proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool 
 # on. See window_reactivate; overridable so the sweep that picked it can be
 # re-run against the three m3_wx_*_change ROMs.
 const WIN_REACT_PHASE {.intdefine.} = 7
+
+proc win_react_last_park(ppu: GbFifoPpu): bool {.inline.} =
+  ## Is this the LAST dot the fetcher spends at the shipping WIN_REACT_PHASE?
+  ##
+  ## Only `fsPushPixel` can be reached on more than one dot of a fetch cycle --
+  ## every other step increments the counter unconditionally -- so this is a
+  ## question about position 7 alone, and it folds to a constant `true` at any
+  ## other setting of the sweep. There, the park ends on the dot the FIFO is
+  ## down to its last pixel: the shifter emits that pixel here and
+  ## `try_push_bg_pixels` finds the FIFO empty on the next dot. See the
+  ## anchoring argument in window_reactivate for why the END of the park is the
+  ## dot that stands in for the hardware fetcher's nametable read.
+  when WIN_REACT_PHASE == 7: ppu.fifo.size == 1
+  else: true
 
 # How far the mode-3 pixel pipeline lags the CPU's view of the PPU registers,
 # in CPU **M-cycles**. Injected as idle dots at the head of mode 3, which moves
@@ -696,6 +766,28 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ## m3_wx_4_change_sprites and m3_wx_5_change: position 5 is the unique best
   ## on all three at once (229/10/638 mismatching pixels -> 53/4/142).
   ##
+  ## THE POSITION IS A DOT, NOT A STATE, and the two are only the same thing on
+  ## a line with no objects on it. `fsPushPixel` is where this fetcher PARKS:
+  ## `try_push_bg_pixels` refuses while the BG FIFO still holds pixels, so the
+  ## counter sits at 7 for as many dots as the FIFO takes to drain. An
+  ## object-free line drains it in one -- the fetcher and the shifter are in
+  ## lockstep, eight pixels per eight dots -- but an object stops the shifter
+  ## without stopping the fetcher's wait dots, and the park stretches to three.
+  ## The read the ROM names does NOT stretch: it is one VRAM cycle wherever the
+  ## fetch cycle is long. So the proxy has to be anchored to the fetch RESTART,
+  ## which is the last dot of the park (the push lands on the next dot and the
+  ## nametable read a fixed two after that), and not to its first -- anchored at
+  ## the first, the distance from the proxy to the real read grows with the
+  ## park and the artifact smears across as many lines as the park is long.
+  ##
+  ## m3_wx_4_change_sprites measures exactly that, and the reference is
+  ## unambiguous: its zero pixels sit at x = 5, 13, 21, 29, 37, 45 ... -- one
+  ## lattice, x mod 8 = 5, running straight through the two 8-line bands that
+  ## carry ten objects each. Objects do not move the surviving phase by a dot.
+  ## dingbat drew the artifact on three consecutive lines inside the object
+  ## band (34, 35, 36 -- the three dots of the park) where hardware draws it on
+  ## one (36, the last of them), which is the whole of that row's 2-pixel diff.
+  ##
   ## The caller reaches this through the same cached `lx == win_lx` compare the
   ## window START uses (GbFifoPpu.win_lx), so neither rule costs the shifter a
   ## register decode on a dot it cannot fire on; the fetcher-position test is
@@ -713,6 +805,92 @@ proc window_reactivate(ppu: GbFifoPpu) =
     GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
   ppu.fifo.head = h
   inc ppu.fifo.size
+
+proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel): uint16 {.inline.} =
+  ## The mixer: one BG FIFO entry and one OBJ FIFO entry in, one panel colour
+  ## out. Split out of the shifter because the SAME pair is mixed twice -- once
+  ## when it is popped, and again for every register write that lands on the
+  ## dot after (fifo_recompose_last).
+  let use_sprite = sprite_wins(ppu, gb, bg_px, sp_px)
+  let (px, arr_pram) =
+    if use_sprite: (sp_px, addr ppu.obj_pram[0])
+    else:          (bg_px, addr ppu.pram[0])
+  let final_color =
+    if gb.cgb_native: int(px.color)
+    else:
+      let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
+              else: ppu.bgp
+      int(p[px.color])
+  let pal_offset = (int(px.palette) * 4 + final_color) * 2
+  cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
+
+# ---- The mixer runs one dot behind the FIFO pop ----------------------------
+#
+# A register the FETCHER reads is sampled on the dot of the VRAM read that uses
+# it; a register the MIXER reads -- BGP/OBP0/OBP1, and LCDC's OBJ-enable and
+# BG-priority bits -- is sampled one dot LATER than the dot on which the pixel
+# it colours left the FIFO. The two stages are one dot apart, and only the
+# fetcher's half of that was modelled here before.
+#
+# mealybug m3_lcdc_obj_en_change measures the mixer's half exactly, and it is
+# the cleanest instrument in the suite for it: nineteen objects, one per 8-line
+# band, each hanging off the left edge at OAM X = 1..18, and a single LCDC write
+# that clears OBJ enable a few dots into mode 3. So each band asks "which is the
+# last object pixel the write does NOT suppress", against a write dot that the
+# ROM itself moves by one M-cycle at LY 64. Every one of the frame's 60 wrong
+# pixels was the same answer: the object pixel emitted on the dot IMMEDIATELY
+# BEFORE the write's own dot survived here and does not on hardware, at both
+# write dots (105 for LY < 64, 109 for LY >= 64) and across all nineteen bands.
+# Nothing else in the frame moved -- there is no second effect in it.
+#
+# One dot LATER at the mixer is what makes a write's effect appear one pixel
+# EARLIER on screen, which is the direction that reads backwards until the two
+# stages are drawn out: the pixel popped on dot D is coloured on dot D + 1, so
+# it sees every write live by D + 1, i.e. one more write than the pop dot did.
+#
+# The whole of that is expressible without a second pipeline stage in the dot
+# loop. Registers only change at a CPU M-cycle boundary, so "the mixer is one
+# dot late" differs from "the mixer is on the pop's dot" in exactly one place:
+# a write also reaches the pixel that was emitted on the dot before it. Redoing
+# that one pixel from the write path costs the mode 3 dot loop two stores per
+# pixel (the FIFO entries the mixer is still holding) and nothing else, where a
+# real holding stage would put a second mix and a tail flush on it -- and the
+# tail accounting at M3_PIPE_DELAY is exactly what a moved shifter has to pay.
+#
+# Why not M3_PIPE_DELAY = 3, which reaches the same dot: because it moves the
+# FETCHER too, and the fetcher is already where hardware has it. Measured on
+# the mealybug DMG set, one build per arm, wrong pixels of 23040:
+#
+#   row                          ship   PIPE_DELAY=3
+#   m3_lcdc_obj_en_change          60        2     mixer-read rows, all better
+#   m3_obp0_change                 74       42
+#   m3_bgp_change                1508      798
+#   m3_bgp_change_sprites        1044      344
+#   m3_lcdc_obj_en_change_variant 380      212
+#   m3_scx_high_5_bits              0       41     fetcher-read rows, all worse
+#   m3_scx_low_3_bits               0      324
+#   m3_scy_change                 417     2157
+#   m3_lcdc_tile_sel_win_change   106     1028
+#   m3_lcdc_bg_map_change         192      444
+#
+# The split is the result: every row whose register is read at the mixer wants
+# the extra dot and every row whose register is read at the fetcher refuses it,
+# which is what says the two stages are one dot apart rather than the pipeline
+# being one dot out.
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## Re-colour the pixel emitted on the previous dot with the registers as they
+  ## stand after this write. See the note above; the caller is ppu_write, on the
+  ## four registers the mixer reads.
+  ##
+  ## Guarded on mode 3 rather than on a validity flag: `lx` only reaches 1..160
+  ## inside mode 3, it is rewound below zero at the mode 2 -> 3 edge, and it
+  ## does not move while an object fetch has the shifter stopped -- so `lx - 1`
+  ## is the last pixel written for as long as the guard holds, stall or no
+  ## stall. Ending mode 3 ends it: hardware clocks the line's last pixel out of
+  ## the mixer on the first dot of mode 0, and a write after that is behind it.
+  if ppu.lx >= 1 and ppu.lx <= GB_WIDTH and (ppu.lcd_status and 3'u8) == 3'u8:
+    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx) - 1] =
+      fifo_mix(ppu, gb, ppu.mix_bg, ppu.mix_sp)
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
@@ -807,10 +985,20 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     #    3609 (window +22) and mealybug DMG +361 pixels, against one GBMicrotest
     #    row (win10_scx3_b, which is one M-cycle from its boundary).
     if ppu.lx == ppu.win_lx:
+      when defined(gb_m3_trace):
+        # Diagnostic only. Every dot the window's WX equality is reached, with
+        # the fetcher position and FIFO depth that decide whether the re-trigger
+        # survives it -- the instrument the park-anchoring above was measured
+        # with, since a mealybug m3_wx_* frame carries one of these per line.
+        if gb_traced(ppu.ly):
+          echo "WINHIT ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+               " fc=", ppu.fetch_counter, " fw=", ppu.fetching_window,
+               " fifo=", ppu.fifo.size
       if not ppu.fetching_window:
         fifo_reset_bg(ppu, true)
         return
-      elif ppu.fetch_counter == WIN_REACT_PHASE and window_enabled(ppu):
+      elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
+           window_enabled(ppu):
         # The re-trigger edge, injected in front of the pixel this dot is about
         # to emit rather than behind the one it just emitted -- the same
         # displacement, one dot earlier, so it can share the compare above.
@@ -819,19 +1007,25 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     let has_sprite = ppu.fifo_sprite.size > 0
     let sp_px = if has_sprite: fifo_shift(ppu.fifo_sprite) else: GbPixel()
     if ppu.lx >= 0:
-      let use_sprite = has_sprite and sprite_wins(ppu, gb, bg_px, sp_px)
-      let (px, arr_pram) =
-        if use_sprite: (sp_px, addr ppu.obj_pram[0])
-        else:          (bg_px, addr ppu.pram[0])
-      let final_color =
-        if gb.cgb_native: int(px.color)
-        else:
-          let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
-                  else: ppu.bgp
-          int(p[px.color])
-      let pal_offset = (int(px.palette) * 4 + final_color) * 2
+      when defined(gb_px_trace):
+        if gb_traced(ppu.ly):
+          echo "PX ly=", ppu.ly, " lx=", ppu.lx, " dot=", ppu.cycle_counter,
+               " bg=", bg_px.color, "/", bg_px.palette, "/", bg_px.obj_to_bg,
+               " hs=", has_sprite, " sp=", sp_px.color, "/", sp_px.palette,
+               "/", sp_px.obj_to_bg, " lcdc=", toHex(ppu.lcd_control, 2),
+               " fc=", ppu.fetch_counter, " fx=", ppu.fetcher_x,
+               " fifo=", ppu.fifo.size
+      # Held for the mixer's extra dot -- see fifo_recompose_last. `has_sprite`
+      # is deliberately not kept with them: an empty OBJ FIFO leaves sp_px at
+      # colour 0, and sprite_wins already refuses colour 0, so the flag is
+      # redundant inside the mix. This and the two guards in ppu_write are the
+      # WHOLE cost of the mixer's dot on the shipping build, which is what
+      # `-d:MIXER_DOT_LAG=0` exists to A/B against.
+      when MIXER_DOT_LAG != 0:
+        ppu.mix_bg = bg_px
+        ppu.mix_sp = sp_px
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
-        cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
+        fifo_mix(ppu, gb, bg_px, sp_px)
     inc ppu.lx
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =

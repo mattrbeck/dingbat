@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-03 19:10:40*
+*Generated: 2026-08-07 14:23:09*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
@@ -270,20 +270,20 @@ All 8 tests passed.
 | Test | Result |
 |------|--------|
 | dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 429/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 289/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 147/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 292/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 292/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 292/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 441/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 437/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 576/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 712/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 583/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 579/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 718/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 998/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 288/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 288/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 290/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 576/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 146/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 146/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 148/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 292/23040 pixels differ |
 
 ## enable_display (135/184 passed)
 

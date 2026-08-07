@@ -387,6 +387,21 @@ proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) !
 # after this file.
 proc fifo_arm_window*(ppu: GbFifoPpu)
 
+# The mixer stage runs one dot behind the FIFO pop, so a mid-mode-3 write to a
+# register the MIXER reads still reaches the pixel already emitted. Forward
+# declaration for the same reason as the line above; the body and the
+# measurement that pins it are at fifo_recompose_last in fifo_ppu.nim.
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB) {.noinline.}
+
+template mixer_write_repaint(gb: GB) =
+  ## Every register write below that the mixer reads ends with this.
+  ## `-d:MIXER_DOT_LAG=0` compiles the mixer's dot out entirely -- this call,
+  ## the two stores in the shifter and the held pair with it -- which is the
+  ## control arm for both the A/B measurements at fifo_recompose_last and the
+  ## retired-instruction count.
+  when MIXER_DOT_LAG != 0:
+    if gb.fifo_ppu != nil: fifo_recompose_last(gb.fifo_ppu, gb)
+
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
 proc bg_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x08
 proc sprite_height*(ppu: GbPpu): int {.inline.} =
@@ -1212,6 +1227,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # Deferred to the end of this M-cycle -- see GbPpu.stat_write_pending and
     # the consume in mem_write. The LCD-enable branch above is NOT deferred:
     # that one restarts the mode machinery itself rather than feeding it.
+    # LCDC.1 (OBJ enable) and, in CGB mode, LCDC.0 (BG priority) are mixer
+    # reads, and mealybug m3_lcdc_obj_en_change is what times them; see
+    # fifo_recompose_last.
+    when CGB_LCDC_MIXER_LATENCY == 0:
+      mixer_write_repaint(gb)
+    else:
+      if not gb.cgb_enabled: mixer_write_repaint(gb)
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF41:
@@ -1258,9 +1280,17 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF46: discard  # handled by memory DMA
-  of 0xFF47: ppu_update_palette(ppu.bgp,  val)
-  of 0xFF48: ppu_update_palette(ppu.obp0, val)
-  of 0xFF49: ppu_update_palette(ppu.obp1, val)
+  # The three DMG palettes are pure mixer reads -- nothing else in the PPU looks
+  # at them -- so each one carries the mixer's extra dot (fifo_recompose_last).
+  of 0xFF47:
+    ppu_update_palette(ppu.bgp,  val)
+    mixer_write_repaint(gb)
+  of 0xFF48:
+    ppu_update_palette(ppu.obp0, val)
+    mixer_write_repaint(gb)
+  of 0xFF49:
+    ppu_update_palette(ppu.obp1, val)
+    mixer_write_repaint(gb)
   of 0xFF4A:
     when defined(gb_win_trace):
       echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
