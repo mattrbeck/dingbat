@@ -3703,20 +3703,65 @@ const looksLikeStateFile = (bytes) =>
 
 // Toast copy for a state image the core refused to load. The core knows
 // exactly why — wrong ROM, written by a newer build, a corrupt section — and
-// says so in wasm_state_error(); prefer that over guessing. "State didn't
-// match this game" is only correct for one of those, and it sent people
-// looking for the wrong problem when the real answer was a version mismatch.
-const stateRejectMessage = (bytes) => {
-  if (!looksLikeStateFile(bytes)) return "Not a dingbat save state file";
-  let why = "";
+// now says WHICH via wasm_state_error_kind(). "State didn't match this game"
+// used to be the answer to all of them, and it is actively wrong for four of
+// the five: it sent people hunting for the wrong problem when the real answer
+// was "your dingbat is older than the one that wrote this".
+//
+// StateRejectKind ordinals, from src/dingbat/common/serialize.nim. The core
+// classifies the refusal; this table turns each cause into a sentence that
+// says what to DO about it, because "wrong game" and "damaged file" are
+// different problems and used to render as the same toast.
+const SRK = {
+  NONE: 0, NOT_A_STATE: 1, WRONG_CORE: 2, WRONG_ROM: 3,
+  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
+};
+const STATE_REJECT_COPY = {
+  [SRK.NOT_A_STATE]: "That file isn't a dingbat save state.",
+  [SRK.WRONG_CORE]:
+    "That save state is for the other system — a Game Boy state can't load into a GBA game, or the reverse.",
+  [SRK.WRONG_ROM]:
+    "That save state belongs to a different game. Load the game it was made in, then try again.",
+  [SRK.TOO_NEW]:
+    "That save state was made by a newer version of dingbat than this one. Update dingbat and try again.",
+  [SRK.TRUNCATED]:
+    "That save state file is incomplete — the download or copy was cut short. Try getting the file again.",
+  [SRK.CORRUPT]:
+    "That save state is damaged and can't be loaded. The game is still running and nothing was changed.",
+  // Only the native build loads from a path, so this one cannot arrive here
+  // today. It is in the table anyway: the ordinals are a shared contract with
+  // the core, and a missing entry would silently fall through to the raw
+  // exception text the moment anything does surface it.
+  [SRK.NO_FILE]: "There's no save state in that slot yet.",
+};
+
+const stateRejectKind = () => {
   try {
-    if (typeof Module !== "undefined" && Module._wasm_state_error) {
-      why = Module.UTF8ToString(Module._wasm_state_error()) || "";
+    if (typeof Module !== "undefined" && Module._wasm_state_error_kind) {
+      return Module._wasm_state_error_kind();
     }
   } catch {}
-  if (!why) return "State didn't match this game";
-  // The core's messages are written for a person; sentence-case the first
-  // letter and drop a trailing period so it sits in a toast.
+  return SRK.NONE;
+};
+
+/** The one-line detail from the core, for the console. */
+const stateRejectDetail = () => {
+  try {
+    if (typeof Module !== "undefined" && Module._wasm_state_error) {
+      return Module.UTF8ToString(Module._wasm_state_error()) || "";
+    }
+  } catch {}
+  return "";
+};
+
+const stateRejectMessage = (bytes) => {
+  if (!looksLikeStateFile(bytes)) return STATE_REJECT_COPY[SRK.NOT_A_STATE];
+  const copy = STATE_REJECT_COPY[stateRejectKind()];
+  if (copy) return copy;
+  const why = stateRejectDetail();
+  if (!why) return "That save state couldn't be loaded.";
+  // Fall back to the core's own wording (it is written for a person), just
+  // sentence-cased so it sits in a toast.
   return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.$/, "");
 };
 

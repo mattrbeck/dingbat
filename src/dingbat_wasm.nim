@@ -405,6 +405,12 @@ proc wasm_state_error(): cstring {.exportc.} =
   ## and a wrong-ROM refusal used to render as the same sentence.
   cstring(last_state_error)
 
+proc wasm_state_error_kind(): cint {.exportc.} =
+  ## WHY the last wasm_load_state returned 0, as a StateRejectKind ordinal, so
+  ## the UI writes its own sentence per cause instead of reformatting the
+  ## core's wording. `wasm_state_error` stays available as the detail line.
+  cint(ord(last_state_reject_kind))
+
 proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc.} =
   ## Validate and apply a state image (same bytes as desktop .state files).
   ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or

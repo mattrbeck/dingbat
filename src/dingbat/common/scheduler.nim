@@ -32,6 +32,24 @@ const MAX_EVENTS* = 64  # far above the ~15 events ever pending at once
                         # lowering it rejects existing files. Pinned in
                         # tests/savestate_compat_test.nim.
 
+# How far from "now" a pending event's deadline may sit in a state file. Like
+# MAX_EVENTS these are acceptance floors, not capacities — lowering either one
+# rejects states that already exist — so both are pinned in
+# tests/savestate_compat_test.nim.
+#
+# HORIZON: the furthest anything in this emulator books is a GBA timer at
+# prescaler 1024 running a full 16-bit period (65536 * 1024 = 67.1M cycles,
+# ~4 s) and the RTC's one-second tick. 1<<28 is ~16 s of GBA time — four times
+# the real maximum, and still 1/16 of the 32-bit CycleCount the emscripten
+# build uses, so it cannot be reached by honest wrap-around either.
+#
+# OVERDUE: call_current drains due events lazily, so at a frame boundary an
+# event may sit slightly in the past. 1<<24 is ~1 s, far more than the one
+# frame that is actually possible.
+const
+  MAX_EVENT_HORIZON* = CycleCount(1'u32 shl 28)
+  MAX_EVENT_OVERDUE* = CycleCount(1'u32 shl 24)
+
 type
   EventType* = enum
     # Shared
@@ -243,16 +261,43 @@ proc load_from*(s: Scheduler; r: var Reader; pad = false) =
   let speed = r.read_u8()
   let n = int(r.read_u8())
   if n > MAX_EVENTS:
-    raise newException(StateError, "too many scheduler events in state")
+    raise state_error("too many scheduler events in state")
   s.cycles = CycleCount(cycles)
+  # A SHIFT AMOUNT (`schedule_gb` does `c = c shl s.current_speed`), and the
+  # only legal values are 0 and 1 — CGB normal and double speed, which
+  # memory.nim toggles with `xor 1`. Taken unvalidated from a file it is the
+  # nastiest field in the format: a large value shifts every scheduled delay to
+  # nothing, so events fire in an unbounded storm inside a single frame and the
+  # emulator livelocks. No crash, no message, no way out — which is worse than
+  # the Defects, not better. Found by the byte sweep taking minutes per
+  # iteration and a stack sample showing the frame sequencer spinning.
+  check_range(int(speed), 0, 1, "scheduler.current_speed")
   s.current_speed = speed
   s.nevents = n
   for i in 0 ..< n:
     let kind = r.read_u8()
     if int(kind) > int(high(EventType)):
-      raise newException(StateError, "unknown scheduler event kind in state")
-    let target = r.read_u64()
-    s.evbuf[i] = Event(cycles: CycleCount(target), kind: EventType(kind))
+      raise state_error("unknown scheduler event kind in state")
+    let target = CycleCount(r.read_u64())
+    # A deadline is always a short way either side of "now". Checking the
+    # DISTANCE rather than the absolute value is what makes one guard cover
+    # both halves of the bug a byte sweep found: a wild `s.cycles` (the
+    # counter itself is unbounded and legitimately so — it only ever counts
+    # up) shows up here as every event being implausibly far away, and a wild
+    # deadline shows up as that one event being far away. Both then overflow
+    # the cycle arithmetic on the next step_frame, which raises a Defect that
+    # is NOT a CatchableError and so escaped every containing handler.
+    #
+    # Unsigned subtraction wraps, which is exactly the arithmetic wanted: the
+    # two differences are the forward and backward distances regardless of
+    # which side of the counter the deadline sits on, and it stays correct for
+    # the 32-bit CycleCount the emscripten build uses.
+    let ahead  = target - s.cycles
+    let behind = s.cycles - target
+    if ahead > MAX_EVENT_HORIZON and behind > MAX_EVENT_OVERDUE:
+      raise state_error("scheduler event " & $EventType(kind) &
+                        " is due an implausible distance from the current cycle")
+    s.evbuf[i] = Event(cycles: target, kind: EventType(kind))
   if pad:
     for i in n ..< MAX_EVENTS:
       discard r.read_u8()
