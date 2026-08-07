@@ -158,6 +158,49 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   bus.rom_free_since = new_free_since
   cost
 
+proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
+                      is32: static bool): int {.inline.} =
+  ## Fetch-only specialisation of `rom_access_cycles`, for the CPU instruction
+  ## fetch path in `fetch_half`/`fetch_word`.
+  ##
+  ## Why it exists: `rom_access_cycles` is marked {.inline.} but is far too
+  ## large for clang to honour that, so every slow-path instruction fetch pays
+  ## a real call — and it is the single hottest non-inlined leaf in the
+  ## profile (7.9% of all samples on FireRed, 569 of its 600 samples reached
+  ## from `fetch_half`). Two of the three branch clusters in it are dead on a
+  ## fetch: the DMA burst trackers (a DMA is not the CPU, and the caller
+  ## routes `dma_active` back to the general proc) and the prefetch hand-off,
+  ## which is `not fetch` by construction. What is left is small enough to
+  ## inline, and `is32` being static folds the remaining selects away.
+  ##
+  ## This is a *duplicate* of the fetch-relevant half of `rom_access_cycles`,
+  ## not a refactor of it, so the two must be kept in step by hand. The
+  ## framebuffer-hash A/B and the mGBA Timing suite are what catch a drift.
+  let now = bus.bus_now()
+  let contiguous = now == bus.rom_free_since
+  var cost: int
+  var new_free_since: CycleCount
+  if address == bus.rom_next_addr and (bus.prefetch_on or contiguous):
+    if bus.prefetch_on and not contiguous:
+      let s = int(bus.wait16_s[page])
+      let credit = if now > bus.rom_free_since:
+                     min(int(now - bus.rom_free_since), 8 * s)
+                   else: 0
+      let need = when is32: 2 * s else: s
+      cost = max(1, need - credit)
+      let done = now + CycleCount(cost)
+      let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
+      new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+    else:
+      cost = int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
+      new_free_since = now + CycleCount(cost)
+  else:
+    cost = int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    new_free_since = now + CycleCount(cost)
+  bus.rom_next_addr = address + (when is32: 4'u32 else: 2'u32)
+  bus.rom_free_since = new_free_since
+  cost
+
 proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   if bits_range(address, 28, 31) > 0:
     # Unmapped (open bus): nothing on the external bus responds, so the
@@ -724,7 +767,10 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
         bus.rom_next_addr = address + 2
       else:
         bus.rom_cool()
-        bus.cycles += bus.rom_access_cycles(address, is32 = false, fetch = true)
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = false, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = false)
+        bus.cycles += c
         # Go hot only when no prefetch credit is left over; leftover credit
         # must keep flowing through the slow path to be consumed
         if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
@@ -743,7 +789,10 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
         bus.rom_next_addr = address + 4
       else:
         bus.rom_cool()
-        bus.cycles += bus.rom_access_cycles(address, is32 = true, fetch = true)
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = true, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = true)
+        bus.cycles += c
         if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
     else:
       bus.cycles += bus.fetch_c32
