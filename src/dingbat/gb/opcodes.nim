@@ -60,14 +60,37 @@ proc cpu_add_hl(cpu: GbCpu; val: uint16) {.inline.} =
   cpu.fn = false
 
 proc cpu_push16(cpu: GbCpu; gb: GB; val: uint16) {.inline.} =
+  # Three OAM-bug M-cycles (see oam_bug_access): the internal cycle below
+  # decrements SP with SP as the IDU's operand, then each write M-cycle puts
+  # its own destination on the bus -- SP-1 with a second IDU step alongside it,
+  # SP-2 on its own. SP is stepped one at a time so each check reads the value
+  # that M-cycle actually drove; the two writes and the final SP are unchanged.
+  oam_bug_if(gb, cpu.sp, obWrite)
   # Extra internal cycle (tick_components equivalent) before the writes
   mem_tick_components(gb.memory, gb, 4)
-  cpu.sp = cpu.sp - 2
-  mem_write_word(gb.memory, gb, int(cpu.sp), val)
+  cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
+  mem_write(gb.memory, gb, int(cpu.sp), uint8(val shr 8))
+  cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
+  mem_write(gb.memory, gb, int(cpu.sp), uint8(val and 0xFF))
 
 proc cpu_pop16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
-  result = mem_read_word(gb.memory, gb, int(cpu.sp))
+  # Two OAM-bug M-cycles, one per read. The first carries an IDU step with it
+  # and the second does not -- Pan Docs' "one read, one glitched write, and
+  # another read without a glitched write"; see oam_bug_access for why the
+  # write goes on the first of the two rather than the second.
+  #
+  # Spelled out rather than left to mem_read_word so each check sits on its own
+  # M-cycle; the `+ 1'u16` wrap is mem_read_word's, kept (a stack straddling
+  # $FFFF reaches $0000 for its second byte -- gambatte oamdma_src*_busypopFFFF).
+  oam_bug_if(gb, cpu.sp, obReadWrite)
+  let lo = mem_read(gb.memory, gb, int(cpu.sp))
+  let hi_addr = cpu.sp + 1'u16
+  oam_bug_if(gb, hi_addr, obRead)
+  let hi = mem_read(gb.memory, gb, int(hi_addr))
   cpu.sp = cpu.sp + 2
+  result = uint16(lo) or (uint16(hi) shl 8)
 
 # Read two bytes (lo, hi) from PC and return as uint16, advancing PC twice.
 proc cpu_read_u16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
@@ -106,6 +129,7 @@ var UNPREFIXED* = [
   # 0x03 INC BC
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.bc, obWrite)
     cpu.bc = cpu.bc + 1
     8,
 
@@ -157,6 +181,7 @@ var UNPREFIXED* = [
   # 0x0B DEC BC
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.bc, obWrite)
     cpu.bc = cpu.bc - 1
     8,
 
@@ -209,6 +234,7 @@ var UNPREFIXED* = [
   # 0x13 INC DE
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.de, obWrite)
     cpu.de = cpu.de + 1
     8,
 
@@ -261,6 +287,7 @@ var UNPREFIXED* = [
   # 0x1B DEC DE
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.de, obWrite)
     cpu.de = cpu.de - 1
     8,
 
@@ -309,6 +336,7 @@ var UNPREFIXED* = [
   # 0x22 LD (HL+),A
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obWrite)
     mem_write(gb.memory, gb, int(cpu.hl), cpu.a)
     cpu.hl = cpu.hl + 1
     8,
@@ -316,6 +344,7 @@ var UNPREFIXED* = [
   # 0x23 INC HL
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obWrite)
     cpu.hl = cpu.hl + 1
     8,
 
@@ -374,6 +403,7 @@ var UNPREFIXED* = [
   # 0x2A LD A,(HL+)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obReadWrite)
     cpu.a = mem_read(gb.memory, gb, int(cpu.hl))
     cpu.hl = cpu.hl + 1
     8,
@@ -381,6 +411,7 @@ var UNPREFIXED* = [
   # 0x2B DEC HL
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obWrite)
     cpu.hl = cpu.hl - 1
     8,
 
@@ -427,6 +458,7 @@ var UNPREFIXED* = [
   # 0x32 LD (HL-),A
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obWrite)
     mem_write(gb.memory, gb, int(cpu.hl), cpu.a)
     cpu.hl = cpu.hl - 1
     8,
@@ -434,6 +466,7 @@ var UNPREFIXED* = [
   # 0x33 INC SP
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.sp, obWrite)
     cpu.sp = cpu.sp + 1
     8,
 
@@ -484,6 +517,7 @@ var UNPREFIXED* = [
   # 0x3A LD A,(HL-)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.hl, obReadWrite)
     cpu.a = mem_read(gb.memory, gb, int(cpu.hl))
     cpu.hl = cpu.hl - 1
     8,
@@ -491,6 +525,7 @@ var UNPREFIXED* = [
   # 0x3B DEC SP
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
+    oam_bug_if(gb, cpu.sp, obWrite)
     cpu.sp = cpu.sp - 1
     8,
 
