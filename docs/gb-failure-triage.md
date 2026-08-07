@@ -586,6 +586,236 @@ low nibble, so a block is 16 aligned bytes and cannot straddle a region boundary
 The four rows recovered are `dma_hiram_read`, `dma_hiram_read_result`,
 `dma_oam_read` and `dma_vram_read`, all `[cgb]`.
 
+## The mid-mode-3 near-miss frames (2026-08-07)
+
+Eight shootout rows were within ~100 wrong pixels of the reference, two of them
+within 2. The brief that opened this pass proposed one cause for four of them
+— *a mid-mode-3 write to LCDC bits 1 and 2 latching at the wrong point, so one
+fix to when the FIFO latches those two bits takes `m3_lcdc_obj_size_change`,
+`m3_lcdc_obj_size_change_scx`, `m3_lcdc_obj_en_change` and
+`m3_wx_4_change_sprites` together*.
+
+**That hypothesis is false as stated, and the diff images say so plainly.** The
+four rows do not share a cause: `m3_wx_4_change_sprites` does not involve LCDC
+at all (it writes LCDC exactly once, at init, and drives WX from LY thereafter), and the
+two `obj_size_change` rows are untouched by everything that fixed
+`obj_en_change`. What the diffs did show is two *other* shared mechanisms, both
+now landed, which between them took four runner rows and moved ten more.
+
+### What LCDC bit 1 actually measures: the mixer is a two-stage tail
+
+`m3_lcdc_obj_en_change` is the sharpest instrument in the mealybug suite and
+had not been read as one. Nineteen objects, one per 8-line band, at OAM X =
+1..18 — so each band is a separate measurement — and a single LCDC write
+clearing OBJ enable a few dots into mode 3, at a dot the ROM itself moves by an
+M-cycle at LY 64. Every band therefore answers "which is the last object pixel
+this write does NOT suppress".
+
+All 60 of the frame's wrong pixels were one answer, at both write dots and
+across all nineteen bands: **the pixel emitted on the dot immediately before
+the write's own dot survived here and does not on hardware.** Not a latch, and
+not bit 1's own: the mixer stage reads its registers a dot after the pixel it
+colours leaves the FIFO. `m3_obp0_change` — the same nineteen objects against
+two OBP0 writes — then separates a second stage: with one dot the pixel emitted
+on dot 108 comes right and the one on 107 does not, uniformly, in every band.
+So the tail is
+
+    +1  LCDC's priority bits (the BG-vs-OBJ decision)
+    +2  BGP / OBP0 / OBP1 (the shade lookup, one stage after it)
+
+and the CGB's write to any of them arrives one dot later than the DMG's, which
+is the shape `CGB_SCY_LATENCY` next door already has. The derivation, the
+measurement and why `M3_PIPE_DELAY = 3` is not the same fix are at
+`fifo_recompose_last` in `gb/fifo_ppu.nim`.
+
+### The window's re-trigger survives on a dot, not on a fetcher state
+
+`WIN_REACT_PHASE` named a fetcher position, and `fsPushPixel` is the one
+position this fetcher can sit at for more than a dot — it parks there while the
+BG FIFO drains. On an object-free line the park is one dot and the two readings
+agree; with objects it stretches to three and the artifact smears over three
+lines. `m3_wx_4_change_sprites`' reference settles it: every zero pixel is on
+one lattice, `x mod 8 == 5`, running straight through two 8-line bands carrying
+ten objects each, so objects do not move the surviving phase by a dot. Anchor
+the proxy to the END of the park (the fetch restart) and the row goes exact.
+
+### What each of the eight rows is now, and what is left in it
+
+Two more landed after that, both against the mealybug suite's own written
+documentation rather than against a diff image, and between them they are worth
+more than either of the above: **`WIN_LINE_START_WX`** (a line starts as a
+window line below WX **6**, not below 7 — gambatte brackets WX 0 and 7 and has
+nothing between, so mealybug's three `m3_wx_{4,5,6}_change` ROMs are the only
+oracle, and only 6 satisfies all three) and **`WIN_EN_ABORT`** (clearing LCDC.5
+mid-mode-3 returns the fetcher to background tiles at the next tile-map read —
+documented in mealybug's PPU notes, filed in this tree as SameBoy's *CGB-only*
+fetcher abort, and measured by two ROMs whose scored references are
+`_dmg_blob`). Derivations at their constants in `gb/gb.nim`.
+
+### Where the whole scored DMG set stands
+
+**Only the 24 DMG mealybug rows are scored by the shootout** (`mealybug.py`
+ends `all = dmgs`), so the 13 CGB rows in `tests/results.md` carry no shootout
+weight even though they moved a long way here. Wrong pixels of 23040, `main` at
+`6d81502` against this branch:
+
+| row | before | after | what is left in it |
+|---|---|---|---|
+| `m3_lcdc_win_en_change_multiple` | 8874 | **0** | `WIN_EN_ABORT` |
+| `m3_obp0_change` | 74 | **0** | the mixer's second stage |
+| `m3_wx_4_change_sprites` | 2 | **0** | the park |
+| `m3_wx_6_change` | 13810 | 4611 | `WIN_LINE_START_WX`; the rest is the window line advancing on re-activation |
+| `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above |
+| `m3_lcdc_obj_en_change` | 60 | 2 | see below |
+| `m3_lcdc_obj_en_change_variant` | 380 | 102 | the mixer |
+| `m3_window_timing` | 299 | 29 | — |
+| `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
+| `m3_bgp_change_sprites` | 1044 | 536 | as above |
+| `m3_window_timing_wx_0` | 902 | 652 | — |
+| `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
+| `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
+| `m3_lcdc_win_map_change` | 34 | 34 | see below |
+| `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed |
+| `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed |
+| `m3_scy_change` | 417 | 417 | not diagnosed |
+| `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling |
+| `m3_lcdc_bg_en_change` | 2193 | 2193 | LCDC.0 is read at the PUSH here, not at the mixer |
+
+### `acid/cgb-acid-hell` is a real failure, not a scoring artefact
+
+Worth stating because the shootout's rule is a **±50 luma tolerance**, not an
+exact match, and dingbat's own runner applies exact comparison to the bundled
+acid ROMs. Run through `util.compareImage` verbatim, the two pixels are
+`(80, 68)` and `(80, 69)`, black against yellow, **luma delta 226** — four
+times the tolerance, in both directions. `compareImage()` returns `False`. The
+row is genuinely 2 pixels short and the framing holds.
+
+**`m3_lcdc_obj_en_change`, the last 2 pixels.** One object, OAM X = 2, at LY 17
+and 22 — the only two rows of its band where its column 6 is opaque and its
+column 7 is not. Every other band in the frame is explained by "the write
+suppresses from the dot before its own": for OAM X = 1..5 the object's last
+on-screen pixel lands on dot 104 and the write is live at 105, and for X = 6, 7
+the pixel at dot 103 is KEPT (LY 51 has an opaque one and the reference draws
+it). X = 2's pixel at dot 103 is suppressed. No uniform number of stages fits
+both. What is special about it is that dot 103 is the FIRST dot after that
+band's object fetch ends (its penalty is 9 dots from a trigger at 94), where
+X = 6's dot 103 is the fourth. So the residual is about what the mixer holds
+across an object stall, not about the register — which is a model, not a
+number, and it is worth one row.
+
+**`acid/cgb-acid-hell`, the 2 pixels — mechanism identified, not landed.** The
+whole frame is explained by a single anomaly, and `-d:gb_px_trace` reads it out
+exactly. The ROM's tile DATA is a constant per scanline (both `$8000` and
+`$8800` hold the same bytes, so `TILE_SEL` has no data effect at all) and the
+picture is drawn by the tile-attribute palettes; on line 68 every tile's
+bitplane bytes are `lo = $7F, hi = $5D`. The two wrong pixels are one tile on
+each of lines 68 and 69 whose bitplane-1 byte hardware read as **the tile
+index** — `$55` where the tile number is `$55`, and `$49` where it is `$49`.
+Two byte-exact coincidences.
+
+That is the CGB `TILE_SEL` glitch the mealybug PPU notes describe verbatim:
+"resetting `TILE_SEL` on the same T-cycle as a bitplane data read will cause
+the tile index to be instead used as the data for that bitplane". The notes'
+other branch is measurably refuted here — the alternatives it lists for a
+*setting* are "bitplane 1 data from the most recently drawn sprite" (`$41` and
+`$22` on those lines, traced) and "from the most recently drawn tile when
+`TILE_SEL` was last reset" (`$5D`), and neither is `$55`/`$49`.
+
+Two things stop it being landed:
+
+* **The polarity is inverted against the notes.** The fetch that glitches has
+  its bitplane-1 read at dot 178 and the nearest LCDC write is `$E3 → $F3` at
+  177 — a `TILE_SEL` **set**. The two resets on that line (177's neighbours at
+  169 and 185) each sit one dot before a bitplane-1 read too and do NOT
+  substitute: at those fetches the tile numbers are `$59` and `$07` against a
+  byte of `$5D`, so a substitution there would be visible and the reference
+  does not have it.
+* **The coincidence needs one more dot.** dingbat's write is live from the dot
+  it is logged on (`m3_lcdc_obj_en_change` pins that), so 177 and 178 are
+  adjacent, not the same T-cycle. Making them coincide needs `TILE_SEL` to
+  reach the FETCHER a dot after the write, which is a second claim and a
+  second constant (`CGB_LCDC_TDSEL_LATENCY`, which ships at 0).
+
+The rest of the frame cannot separate the candidate rules: 2731 of 2736 pushed
+tiles match, and substituting the index at *every* `TILE_SEL` change that lands
+on a bitplane read is never refuted anywhere in the frame — the palettes hide
+it. So it is one field and one compare to implement and **two pixels of
+evidence to choose between three rules**, which is precisely the shape that
+should not be fitted. What would settle it is a second ROM: the four
+`m3_lcdc_tile_sel_change*` mealybug rows scored against their CGB references
+(they are not in the shootout, and `m3_lcdc_tile_sel_change` is 96.3% on CGB
+today), which exercise the same glitch at a write cadence the picture does not
+hide.
+
+**`m3_lcdc_win_map_change`, the 34 pixels.** One 8x8 block, `x = 0..7`,
+`y = 64..71`, and it is not background at all — it is the ® object of band 8
+(OAM X = 8, screen `x = 0..7`) drawn here and absent on hardware. That band is
+the one where the object's trigger (`lx == 0`) coincides with the window's
+start, because the ROM runs WY = 0 / WX = 7, i.e. `win_lx == 0`. `tick_shifter`
+asks the object question first, so the window start is deferred behind a whole
+object fetch, and the object is drawn. Hardware loses it outright — it does not
+reappear shifted, `x = 8..15` matches — so something about the tie at that one
+`lx` is different.
+
+**Simply resolving the tie the other way is refused, and was measured out.**
+Asking the window's start before the object trigger takes this row 34 → 318 and
+the mealybug totals DMG 520109 → 519201 and CGB 1819207 → 1818393, so the
+window start does NOT preempt an object fetch at the same pixel in general.
+Whatever drops that one object is narrower than an ordering rule — the WX = 7
+case is served by a mode-2 special case in this renderer (see the `wx < 7`
+term at the end of `fifo_tick_slow`), and that is where to look next.
+
+**The two `obj_size_change` rows and `m3_lcdc_tile_sel_win_change` were not
+diagnosed** in this pass and did not move. `obj_size_change_scx`'s 30 pixels are
+two 6-row bands at the very top and bottom of the frame (`y = 2..7` and
+`y = 130..135`, `x = 27..31`) with the diff going both ways within a row, which
+is the signature of a 16-pixel-tall object's row selection rather than of a
+write dot; `m3_lcdc_obj_size_change` has the same shape plus a left-edge
+component at `x = 0..2`.
+
+### Two more mid-mode-3 rules, and the ones next to them
+
+**`m3_wx_6_change`'s remaining 4611 pixels** and
+**`m3_lcdc_win_en_change_multiple_wx`'s remaining 343** are the same sentence
+of mealybug's PPU notes, and it is not modelled: *"If WX has been updated
+correctly and WIN_EN is set again then the PPU stops drawing the background,
+and will activate the window again, but it will start drawing the **next row**
+of the window, on the same scanline."* `fifo_reset_bg` already increments
+`current_window_line`, so the WIN_EN path gets it for free — but a **WX
+re-trigger while the window is still the active source** (`window_reactivate`)
+does not restart anything and so does not advance the row. `m3_wx_6_change`'s
+reference is exactly that: our rows are one uniform window row where the
+reference is two window rows spliced at the re-trigger pixel. Whether the row
+advances on a bare WX re-trigger, or only on a full re-activation through
+WIN_EN, is the open question, and `m3_wx_4_change` / `m3_wx_5_change` are the
+constraint — both are pixel-exact today and must stay so.
+
+**The primary source nobody has read.** mealybug's `expected/` PNGs are Beaten
+Dying Moon's *output*, not hardware captures; the only hardware evidence in the
+suite is `photos/<device>/*.jpg`, which exists for 21 of the 24 scored DMG
+rows. Where a reference and dingbat disagree and neither is obviously right,
+that photo is the tiebreaker, and it has never been used here.
+
+### What the mixer tail does not explain, and what it costs
+
+`m3_bgp_change` is BGP written across the whole of mode 3 with **no objects on
+the screen at all**, which is why the `M3_PIPE_DELAY` write-up uses it as the
+pipeline's phase instrument. It went 1508 → 820 wrong pixels and is still the
+largest mid-mode-3 residual in the DMG set, and it is the one row that argues
+against the second mixer stage: it and `m3_bgp_change_sprites` prefer ONE stage
+for the BG palette by 22 and 136 pixels, where `m3_window_timing` prefers two by
+130 and `m3_lcdc_obj_en_change_variant` by 110. Two ships because the structure
+says one palette read is one stage whichever palette it is, and because it is
++190 DMG pixels and free on CGB — but **until that ~800-pixel residual has a
+name, `m3_bgp_change` is not a reliable vote on this dot**, and it is the next
+thing to look at in this area.
+
+`daid/ppu_scanline_bgp-dmg` moved the wrong way with it, 73.2% → 68.4%, red
+either way. It shares exactly that mechanism (mid-mode-3 BGP), so it is the
+same open question rather than a second one, and it should be re-scored
+whenever the residual is understood.
+
 ## Reproducing any of this
 
 ```

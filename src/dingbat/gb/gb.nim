@@ -298,6 +298,112 @@ const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const WIN_EN_ABORT*           {.intdefine.} = 1
+  ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
+  ## tiles on this line. 1 ships; 0 is the control build and restores the old
+  ## behaviour, where `fetching_window` could not be cleared before the next
+  ## line. See the site in tick_bg_fetcher for the rule and the citation.
+  ##
+  ## It is DMG behaviour, not a CGB one. mealybug documents it in its PPU notes
+  ## and measures it with two ROMs whose scored references are `_dmg_blob`, and
+  ## dingbat used to file it as SameBoy's CGB-only fetcher abort and not model
+  ## it at all. Worth, on its own: mealybug m3_lcdc_win_en_change_multiple
+  ## 8874 wrong pixels -> 0 (DMG and CGB both), m3_lcdc_win_en_change_multiple_wx
+  ## 4215 -> 343, DMG total +12746 and CGB +25758, and three gambatte
+  ## window/on_screen rows -- weon_wx18_weoff_weon_wx80 on both devices and
+  ## wx17_weoff_wxA5_weon on DMG, which are that mechanism by name.
+const WIN_LINE_START_WX*      {.intdefine.} = 6
+  ## The WX below which a line STARTS as a window line instead of reaching the
+  ## window through the shifter's equality. See the mode 2 -> 3 edge in
+  ## fifo_tick_slow for what the two spellings mean; this is the boundary
+  ## between them and mealybug is its only oracle.
+  ##
+  ## gambatte brackets WX = 0 (m2int_wx00_*) and WX = 7 (m2int_wx07_*) and has
+  ## NOTHING at 4, 5 or 6, so the three m3_wx_{4,5,6}_change ROMs are the whole
+  ## evidence for where in that gap the boundary falls. Swept 2026-08-07, wrong
+  ## pixels of 23040 on the DMG references, and the mealybug DMG total of
+  ## 3,317,760 next to it:
+  ##
+  ##   threshold   wx_4   wx_5    wx_6   window_timing   mealybug DMG
+  ##       5          0  13768    4611        30            515691
+  ##       6 (ship)   0      0    4611        29            529314
+  ##       7          0      0   13810        35            520109
+  ##       8          0      0   13810        41            517392
+  ##
+  ## Three ROMs, one boundary, and only 6 satisfies all of them: 5 breaks WX = 5
+  ## outright and 7 and 8 leave WX = 6 at three times its error. It is worth
+  ## +9205 DMG pixels on its own, the largest single move in the mealybug set,
+  ## and it moves nothing in gambatte -- WX = 6 is the only value whose
+  ## treatment changes, and no gambatte ROM writes it.
+  ##
+  ## What it does NOT do is make m3_wx_6_change pass: 4611 pixels remain, and
+  ## they are a different mechanism (the window line advancing on a mid-line
+  ## re-activation -- see docs/gb-failure-triage.md). This constant is pinned
+  ## from both sides regardless of that residual, which is why it ships without
+  ## it.
+const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
+  ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
+const MIXER_PALETTE_BACK*     {.intdefine.} = 2
+  ## Stages of the mixer tail BGP/OBP0/OBP1 are read at the far end of. One
+  ## more than the priority bits: the mixer resolves BG-vs-OBJ first and looks
+  ## the shade up after, so a palette write reaches one pixel further back than
+  ## an LCDC write does. m3_obp0_change is what separates them -- it goes to
+  ## pixel-exact at 2 and is 32 pixels out at 1, on a frame where
+  ## m3_lcdc_obj_en_change is 60 out at 0 and 2 out at 1.
+const MIXER_DOT_LAG*          {.intdefine.} = 1
+  ## Whether the pixel mixer runs a dot behind the FIFO pop. 1 ships; 0 is the
+  ## control build and compiles the whole mechanism out. See
+  ## fifo_recompose_last in fifo_ppu.nim for what it buys and how it was
+  ## measured -- it is not a sweepable dot count, only on or off, because a
+  ## second dot is refused by the same rows the first is required by.
+const CGB_MIXER_LATENCY*      {.intdefine.} = 1
+  ## Dots the CGB's write to a register the MIXER reads takes to arrive over
+  ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
+  ## reads one stage down is not repainted on CGB at all.
+  ##
+  ## Two rows pin it, and each is exact on BOTH consoles at these settings and
+  ## on neither at any other. mealybug m3_lcdc_obj_en_change (priority, one
+  ## stage) is pixel-exact on the CGB references with no repaint and 60 pixels
+  ## out with one, and 2 out on the DMG references with one repaint and 60 with
+  ## none. m3_obp0_change (palette, two stages) is pixel-exact on the DMG
+  ## references at two and on the CGB references at one; it is 32 pixels out on
+  ## DMG at one and 126 out on CGB at two. Same cart, same write, same objects;
+  ## only the console differs, and the same single dot separates them at both
+  ## stages.
+  ##
+  ## Shaped as a write latency because that is what every other per-register
+  ## CGB/DMG difference in this block is (the mealybug PPU notes' "writes take
+  ## effect immediately on the DMG. On CGB and AGB devices, writes appear to
+  ## take effect 2 T-cycles later" for SCY is the documented instance, and
+  ## CGB_SCY_LATENCY above is it). It is SEPARATE from CGB_LCDC_LATENCY, which
+  ## is LCDC's latency at the FETCHER: different rows measure them and they come
+  ## out different, and that one ships at 0.
+
+const CGB_LCDC_MIXER_LATENCY* {.intdefine.} = 1
+  ## Dots the CGB's LCDC write takes to reach the pixel MIXER over the DMG's.
+  ##
+  ## The mixer runs one dot behind the FIFO pop (fifo_recompose_last in
+  ## fifo_ppu.nim), so a mid-mode-3 write to a register it reads still reaches
+  ## the pixel already emitted -- on DMG. On CGB it does not, and one row says
+  ## so on its own: mealybug m3_lcdc_obj_en_change is pixel-exact on the CGB
+  ## references WITHOUT the extra dot and 174 pixels out WITH it, while on the
+  ## DMG references it is 60 pixels out without and 2 with. Same cart, same
+  ## write, same objects; only the console differs.
+  ##
+  ## Expressed as a one-dot CGB write latency because that is the shape every
+  ## other per-register CGB/DMG difference in this block has (the mealybug PPU
+  ## notes' "writes take effect immediately on the DMG, 2 T-cycles later on CGB"
+  ## for SCY is the documented instance, and CGB_SCY_LATENCY above is it): one
+  ## dot of CGB latency cancels the mixer's one dot exactly, which is why the
+  ## repaint is simply skipped rather than delayed. It is a SEPARATE constant
+  ## from CGB_LCDC_LATENCY, which is the same register's latency at the
+  ## FETCHER, because the two are measured by different rows and come out
+  ## different -- that one ships at 0.
+  ##
+  ## Only LCDC. The three DMG palettes take the mixer's dot on both consoles
+  ## (mealybug m3_obp0_change goes 96 wrong pixels -> 0 on the CGB references
+  ## with the repaint on, and m3_bgp_change 96.1% -> 98.9%), so whatever this
+  ## dot is, it is not shared by every mixer input.
 const CGB_LATENCY_CAP*        {.intdefine.} = 1
   ## Dots at the end of the M-cycle no latency may reach into. Inert while the
   ## six above are 0. Only DOUBLE SPEED can tell 0 from 1 -- its M-cycle is two
@@ -693,6 +799,16 @@ type
     oam_idx*:   uint8
     obj_to_bg*: uint8
 
+  # One mixer stage's worth of held FIFO output: the BG entry and the OBJ entry
+  # popped on the same dot. Kept as a PAIR rather than as two parallel arrays so
+  # the shifter's store is one eight-byte store at a computed offset rather than
+  # two four-byte ones eight bytes apart -- worth 0.37% of retired instructions
+  # on the mode 3 dot loop, measured, which is half of what the whole mechanism
+  # costs.
+  GbMixHold* = object
+    bg*: GbPixel
+    sp*: GbPixel
+
   GbPixelFifo* = object
     data: array[16, GbPixel]
     head: int
@@ -855,6 +971,15 @@ type
     tile_attrs*:          uint8
     tile_data_low*:       uint8
     tile_data_high*:      uint8
+    # The FIFO entries the mixer is still holding: the pairs popped on the last
+    # two dots that emitted a pixel, indexed by the pixel's own parity. The mixer stage runs one dot behind the
+    # pop (see fifo_recompose_last in fifo_ppu), so a mid-mode-3 write to a
+    # register the mixer reads -- the palettes, LCDC's OBJ-enable and
+    # BG-priority bits -- still reaches the pixel already written out. Kept
+    # here rather than re-read from the ring because the BG ring is rewound and
+    # overwritten by the next push and the OBJ ring is only popped when it is
+    # non-empty, so neither can be indexed backwards safely.
+    mix*:                 array[2, GbMixHold]
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----
