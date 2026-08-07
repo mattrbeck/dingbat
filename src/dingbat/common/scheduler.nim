@@ -6,6 +6,12 @@ else:
   type CycleCount* = uint64
 
 const MAX_EVENTS* = 64  # far above the ~15 events ever pending at once
+
+when defined(schedpad):
+  ## PROTOTYPE switch so a measurement run can load a state written by the
+  ## unpadded build and then produce padded payloads for the rewind ring.
+  ## A shipping version would be unconditional plus a payload-revision bump.
+  var schedPadEnabled* = false
                         # Exported because it is a save-state compatibility
                         # floor, not just a capacity: load_from refuses a
                         # state carrying more pending events than this, so
@@ -197,6 +203,17 @@ proc save_to*(s: Scheduler; w: var Writer) =
   for i in 0 ..< s.nevents:
     w.write_u8(uint8(ord(s.evbuf[i].kind)))
     w.write_u64(uint64(s.evbuf[i].cycles))
+  when defined(schedpad):
+   if schedPadEnabled:
+    # PROTOTYPE (-d:schedpad): pad to MAX_EVENTS so the payload has a FIXED
+    # length. This section is the only variable-length part of a GBA payload,
+    # and one event coming or going moves the 300 KB behind it by 9 bytes —
+    # which makes the rewind ring's XOR delta compare misaligned VRAM,
+    # framebuffer and save memory and light up ~184 KB that did not change.
+    # Costs (MAX_EVENTS - nevents) * 9 bytes, ~486 B on a 604 KB payload.
+    for i in s.nevents ..< MAX_EVENTS:
+      w.write_u8(0'u8)
+      w.write_u64(0'u64)
 
 proc load_from*(s: Scheduler; r: var Reader) =
   ## Restore scheduler state saved by save_to. Events are stored in the
@@ -216,6 +233,11 @@ proc load_from*(s: Scheduler; r: var Reader) =
       raise newException(StateError, "unknown scheduler event kind in state")
     let target = r.read_u64()
     s.evbuf[i] = Event(cycles: CycleCount(target), kind: EventType(kind))
+  when defined(schedpad):
+    if schedPadEnabled:
+      for i in n ..< MAX_EVENTS:
+        discard r.read_u8()
+        discard r.read_u64()
   s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =

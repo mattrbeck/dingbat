@@ -157,6 +157,80 @@ proc xor_bytes(dst: var string; src: string; k: int) =
   for i in (words * 8) ..< k:
     dst[i] = char(uint8(dst[i]) xor uint8(src[i]))
 
+
+# --- Sparse-block pre-pass on the delta -----------------------------------
+#
+# The delta is an XOR, so "unchanged" is literally a zero byte, and after the
+# fixed-length-payload fix it is 99% zeros. zlib still has to walk every one of
+# those zeros to rediscover that it is a zero. A bitmap of which 64-byte blocks
+# contain ANY non-zero byte, followed by only those blocks, costs one bit per
+# block and skips the rest with a word-at-a-time scan.
+#
+# Format: u32 original length, u32 block size, ceil(nblocks/8) bitmap bytes,
+# then the set blocks back to back. The last block may be short; its length
+# falls out of the original length, so nothing else needs storing. The result
+# is then zlib'd as before, which still gets to exploit whatever redundancy
+# survives inside the changed blocks.
+#
+# Measured on Pokemon FireRed from an in-game state, fixed-length payloads:
+#   native   4542 B vs 5741 B, encode 0.165 ms vs 0.167 ms, decode 4.3x faster
+#   Chrome   4480 B vs 5678 B, encode 2.7x faster, decode 6.4x faster
+#   Safari   4480 B vs 5678 B, encode 2.5x faster
+# The browsers gain far more than native because zippy's deflate is much
+# slower relative to a flat scan under wasm than it is compiled natively.
+
+const SparseBlock* = 64
+
+proc sparse_encode*(src: string; bs = SparseBlock): string =
+  let n = src.len
+  if n == 0: return ""
+  let nblocks = (n + bs - 1) div bs
+  let bitmapBytes = (nblocks + 7) div 8
+  var bitmap = newString(bitmapBytes)
+  var body = newStringOfCap(n div 8 + 64)
+  let s = cast[ptr UncheckedArray[byte]](unsafeAddr src[0])
+  for b in 0 ..< nblocks:
+    let lo = b * bs
+    let hi = min(lo + bs, n)
+    var any = false
+    var i = lo
+    while i + 8 <= hi:
+      if cast[ptr uint64](addr s[i])[] != 0: any = true; break
+      i += 8
+    if not any:
+      while i < hi:
+        if s[i] != 0: any = true; break
+        i.inc
+    if any:
+      bitmap[b div 8] = char(uint8(bitmap[b div 8]) or (1'u8 shl (b mod 8)))
+      body.add(src[lo ..< hi])
+  result = newStringOfCap(8 + bitmapBytes + body.len)
+  var hdr = newString(8)
+  cast[ptr uint32](addr hdr[0])[] = uint32(n)
+  cast[ptr uint32](addr hdr[4])[] = uint32(bs)
+  result.add hdr
+  result.add bitmap
+  result.add body
+
+proc sparse_decode*(src: string): string =
+  if src.len == 0: return ""
+  if src.len < 8: raise newException(ValueError, "rewind: truncated sparse delta")
+  let n = int(cast[ptr uint32](unsafeAddr src[0])[])
+  let bs = int(cast[ptr uint32](unsafeAddr src[4])[])
+  if bs <= 0 or n < 0: raise newException(ValueError, "rewind: bad sparse header")
+  let nblocks = (n + bs - 1) div bs
+  let bitmapBytes = (nblocks + 7) div 8
+  result = newString(n)          # zero-filled: unset blocks are already right
+  var p = 8 + bitmapBytes
+  for b in 0 ..< nblocks:
+    if (uint8(src[8 + b div 8]) and (1'u8 shl (b mod 8))) != 0:
+      let lo = b * bs
+      let hi = min(lo + bs, n)
+      if p + (hi - lo) > src.len:
+        raise newException(ValueError, "rewind: sparse body past end")
+      copyMem(addr result[lo], unsafeAddr src[p], hi - lo)
+      p += hi - lo
+
 proc encode_delta(prev, cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
   ## prefix, raw tail where prev extends past cur (payload lengths vary
@@ -165,13 +239,19 @@ proc encode_delta(prev, cur: string): string =
   rp(0 + 1):  # RpXor
     xor_bytes(body, cur, min(prev.len, cur.len))
   rp(0 + 2):  # RpCompress
-    result = compress(body, BestSpeed, dfZlib)
+    when defined(rewindsparse):
+      result = compress(sparse_encode(body), BestSpeed, dfZlib)
+    else:
+      result = compress(body, BestSpeed, dfZlib)
   when defined(rewindprof):
     rewindprof_bytes[2] += result.len
     rewindprof_bytes[1] += body.len
 
 proc decode_delta(cur, packed: string): string =
-  result = uncompress(packed, dfZlib)
+  when defined(rewindsparse):
+    result = sparse_decode(uncompress(packed, dfZlib))
+  else:
+    result = uncompress(packed, dfZlib)
   xor_bytes(result, cur, min(result.len, cur.len))
 
 proc oldest_id*(rw: Rewind): int =
