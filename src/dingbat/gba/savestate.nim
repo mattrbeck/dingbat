@@ -1068,6 +1068,8 @@ proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
+  ## Clears the reject kind first, for the reason written at the GB twin.
+  last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:
     image = gba.parse_state_image(data)
@@ -1098,6 +1100,7 @@ proc load_state*(gba: GBA; path: string): bool =
   ## Restore emulator state from path. Must only be called at a frame
   ## boundary. On any validation error the emulator is left untouched; if
   ## applying fails midway the pre-load state is restored.
+  last_state_reject_kind = srkNone   # see the GB load_state_bytes
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),

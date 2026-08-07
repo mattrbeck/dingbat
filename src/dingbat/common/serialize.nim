@@ -20,6 +20,10 @@ type
     srkTooNew          ## written by a newer dingbat than this one
     srkTruncated       ## the file is short — a partial download or copy
     srkCorrupt         ## hash/marker/range checks failed: the bytes are damaged
+    ## APPEND new causes here. The ordinals cross into JS (web/index.js's SRK
+    ## table reads them off wasm_state_error_kind), so inserting in the middle
+    ## silently renumbers every cause after it.
+    srkNoFile          ## nothing there to load — an empty slot, a missing path
 
   CoreKind* = enum
     ckGBA = 0
@@ -468,6 +472,9 @@ proc read_state_payload*(path: string; core: CoreKind;
                          legacy_checksums: seq[uint32] = @[]):
                         tuple[payload: string; rev: uint32] =
   if not fileExists(path):
-    raise state_error("no save state found at " & path)
+    # Its own kind, not the srkCorrupt default: "there is nothing saved here"
+    # and "what is saved here is damaged" are opposite things to tell someone,
+    # and the empty-slot one is by far the more common.
+    raise state_error("no save state found at " & path, srkNoFile)
   parse_state_payload(readFile(path), core, rom_checksum, rom_size, path,
                       legacy_checksums)

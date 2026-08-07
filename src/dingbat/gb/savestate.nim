@@ -1028,6 +1028,14 @@ proc parse_state_image*(gb: GB; data: string; origin = "state data"):
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
+  ##
+  ## Clear the reject kind FIRST. Not every failure below classifies itself —
+  ## an unreadable file raises IOError, not StateError — and a kind left over
+  ## from the previous refusal would have the frontend confidently explain the
+  ## wrong problem ("that state belongs to a different game" for a file it
+  ## could not open). srkNone falls back to the generic sentence, which is the
+  ## honest answer when the core does not know.
+  last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:
     image = gb.parse_state_image(data)
@@ -1058,6 +1066,7 @@ proc load_state*(gb: GB; path: string): bool =
   ## Restore emulator state from path. Must only be called at a frame
   ## boundary. On any validation error the emulator is left untouched; if
   ## applying fails midway the pre-load state is restored.
+  last_state_reject_kind = srkNone   # see load_state_bytes
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGB, gb.gb_rom_checksum(),

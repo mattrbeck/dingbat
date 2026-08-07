@@ -649,6 +649,11 @@ proc state_reject_sentence(): string =
   of srkCorrupt:
     "That save state is damaged and can't be loaded. The game is still " &
     "running and nothing was changed."
+  of srkNoFile:
+    # The common one, now that Quick Load reports at all: pressing the key
+    # before ever saving used to do nothing, and telling that person their
+    # file is damaged would be worse than saying nothing.
+    "There's no save state in that slot yet."
   of srkNone:
     "That save state couldn't be loaded."
 

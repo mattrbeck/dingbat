@@ -26,7 +26,7 @@ const MAGIC = [..."DGBSTATE"].map((c) => c.charCodeAt(0));
 // StateRejectKind ordinals from src/dingbat/common/serialize.nim.
 const SRK = {
   NONE: 0, NOT_A_STATE: 1, WRONG_CORE: 2, WRONG_ROM: 3,
-  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6,
+  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
 };
 
 // A fake Emscripten Module whose _wasm_load_state returns `result` and whose
@@ -114,12 +114,12 @@ test("every cause gets a distinct sentence", async () => {
   const app = await loadApp();
   const seen = new Set();
   for (const kind of [SRK.WRONG_CORE, SRK.WRONG_ROM, SRK.TOO_NEW,
-                      SRK.TRUNCATED, SRK.CORRUPT]) {
+                      SRK.TRUNCATED, SRK.CORRUPT, SRK.NO_FILE]) {
     app.sandbox.Module = fakeModule(0, kind);
     app.api.applyImportedState(realState());
     seen.add(app.toasts.at(-1));
   }
-  assert.equal(seen.size, 5, "two refusal causes share one message");
+  assert.equal(seen.size, 6, "two refusal causes share one message");
 });
 
 test("an unclassified refusal still says something useful", async () => {

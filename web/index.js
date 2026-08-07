@@ -3714,7 +3714,7 @@ const looksLikeStateFile = (bytes) =>
 // different problems and used to render as the same toast.
 const SRK = {
   NONE: 0, NOT_A_STATE: 1, WRONG_CORE: 2, WRONG_ROM: 3,
-  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6,
+  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
 };
 const STATE_REJECT_COPY = {
   [SRK.NOT_A_STATE]: "That file isn't a dingbat save state.",
@@ -3728,6 +3728,11 @@ const STATE_REJECT_COPY = {
     "That save state file is incomplete — the download or copy was cut short. Try getting the file again.",
   [SRK.CORRUPT]:
     "That save state is damaged and can't be loaded. The game is still running and nothing was changed.",
+  // Only the native build loads from a path, so this one cannot arrive here
+  // today. It is in the table anyway: the ordinals are a shared contract with
+  // the core, and a missing entry would silently fall through to the raw
+  // exception text the moment anything does surface it.
+  [SRK.NO_FILE]: "There's no save state in that slot yet.",
 };
 
 const stateRejectKind = () => {
