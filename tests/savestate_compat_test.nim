@@ -349,6 +349,17 @@ proc run_roundtrip() =
     let (tw, th, px) = parse_state_thumbnail(bytes)
     check(tw > 0 and th > 0 and px.len == tw * th * 2,
           "GBA " & rom & " thumbnail trailer")
+    # The loader refuses a GBA state with no pending PPU event, because
+    # step_frame's `while ppu.frame == 0` would never terminate. That is only
+    # legitimate while every writer produces one, so assert the premise.
+    var ppu_events = 0
+    for ev in emu.scheduler.events:
+      if ev.kind in {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
+                     etPPUEndHBlank}:
+        inc ppu_events
+    check(ppu_events > 0,
+          "GBA " & rom & " carries a pending PPU event at a frame boundary",
+          "got " & $ppu_events)
   for (rom, frames) in GB_ROMS:
     let emu = new_gb_for(rom)
     for _ in 0 ..< frames: emu.step_frame()

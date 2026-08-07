@@ -818,6 +818,41 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_bus_state(gba.bus, r, rev)
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r, pad = in_process)
+  # The display has to be able to advance. `step_frame` is
+  # `while gba.ppu.frame == 0: gba.cpu.tick()`, and nothing but the PPU event
+  # chain ever increments that counter — each handler schedules the next, so a
+  # running machine always carries exactly one of them. A state that carries
+  # none is a machine whose display is stopped for good: step_frame never
+  # returns, and the emulator hangs with no Defect to catch and no frame to
+  # show. (In the sweep it eventually surfaced as an OverflowDefect, hours of
+  # emulated time later, which is the same hang wearing a different hat.)
+  #
+  # This is not an out-of-range field and no range check can find it. The
+  # event KIND is a one-byte enum, every value of which is legal; the sweep
+  # zeroed one and turned this state's etPPUStartHBlank into a second
+  # etAPUFrameSeq. Nothing was out of range — a required event had simply been
+  # renamed out of existence:
+  #
+  #   [UNCONTAINED] payload offset 295262 := 0x00: over- or underflow
+  #
+  # Only reachable by sweeping 0x00; 0xFF lands past high(EventType) and is
+  # already refused by the kind check inside load_from.
+  #
+  # Cannot refuse a real state: 1500 frame boundaries across three GBA ROMs
+  # carry exactly one PPU event (always etPPUStartHBlank), and all eight GBA
+  # states in tests/states load. Written as "at least one of the chain" rather
+  # than "exactly etPPUStartHBlank" so it keeps holding if the phase a state
+  # is captured at ever changes.
+  block:
+    var has_ppu_event = false
+    for ev in gba.scheduler.events:
+      if ev.kind in {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
+                     etPPUEndHBlank}:
+        has_ppu_event = true
+        break
+    if not has_ppu_event:
+      raise state_error("save state has no pending PPU event, so its display " &
+                        "could never advance")
   load_irq_state(gba.interrupts, r)
   load_mmio_state(gba.mmio, r)
   load_keypad_state(gba.keypad, r)
