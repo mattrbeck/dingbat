@@ -90,8 +90,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   # fifo_recompose_last, which is guarded on mode 3 and on `lx >= 1`, so the
   # earliest a loaded state can reach it is the first pixel of the first mode 3
   # after the load -- which has already written it.
-  ppu.mix_bg = GbPixel()
-  ppu.mix_sp = GbPixel()
+  ppu.mix = [GbMixHold(), GbMixHold()]
   ppu.sprites = @[]
 
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
@@ -824,60 +823,85 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel): uint16 {.inline.}
   let pal_offset = (int(px.palette) * 4 + final_color) * 2
   cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
 
-# ---- The mixer runs one dot behind the FIFO pop ----------------------------
+# ---- The mixer is a TAIL, and it runs behind the FIFO pop -------------------
 #
 # A register the FETCHER reads is sampled on the dot of the VRAM read that uses
-# it; a register the MIXER reads -- BGP/OBP0/OBP1, and LCDC's OBJ-enable and
-# BG-priority bits -- is sampled one dot LATER than the dot on which the pixel
-# it colours left the FIFO. The two stages are one dot apart, and only the
-# fetcher's half of that was modelled here before.
+# it. A register the MIXER reads is not: it is sampled one or two dots LATER
+# than the dot on which the pixel it colours left the FIFO, and which of the
+# two depends on how far down the tail it is read. Only the fetcher's half of
+# that was modelled here before.
 #
-# mealybug m3_lcdc_obj_en_change measures the mixer's half exactly, and it is
-# the cleanest instrument in the suite for it: nineteen objects, one per 8-line
-# band, each hanging off the left edge at OAM X = 1..18, and a single LCDC write
-# that clears OBJ enable a few dots into mode 3. So each band asks "which is the
-# last object pixel the write does NOT suppress", against a write dot that the
-# ROM itself moves by one M-cycle at LY 64. Every one of the frame's 60 wrong
-# pixels was the same answer: the object pixel emitted on the dot IMMEDIATELY
-# BEFORE the write's own dot survived here and does not on hardware, at both
-# write dots (105 for LY < 64, 109 for LY >= 64) and across all nineteen bands.
-# Nothing else in the frame moved -- there is no second effect in it.
+# Two stages, and the rows that separate them are 8 apart in the same suite:
 #
-# One dot LATER at the mixer is what makes a write's effect appear one pixel
-# EARLIER on screen, which is the direction that reads backwards until the two
-# stages are drawn out: the pixel popped on dot D is coloured on dot D + 1, so
-# it sees every write live by D + 1, i.e. one more write than the pop dot did.
+#   +1  LCDC's priority bits -- OBJ enable, and BG priority in CGB mode.
+#       The BG-vs-OBJ decision (sprite_wins).
+#   +2  BGP / OBP0 / OBP1. The shade lookup, one stage after the decision that
+#       picks which of them to look in.
 #
-# The whole of that is expressible without a second pipeline stage in the dot
-# loop. Registers only change at a CPU M-cycle boundary, so "the mixer is one
-# dot late" differs from "the mixer is on the pop's dot" in exactly one place:
-# a write also reaches the pixel that was emitted on the dot before it. Redoing
-# that one pixel from the write path costs the mode 3 dot loop two stores per
-# pixel (the FIFO entries the mixer is still holding) and nothing else, where a
-# real holding stage would put a second mix and a tail flush on it -- and the
-# tail accounting at M3_PIPE_DELAY is exactly what a moved shifter has to pay.
+# **m3_lcdc_obj_en_change gives the first stage exactly**, and it is the
+# cleanest instrument in the suite: nineteen objects, one per 8-line band, each
+# hanging off the left edge at OAM X = 1..18, and a single LCDC write clearing
+# OBJ enable a few dots into mode 3. Each band therefore asks "which is the
+# last object pixel the write does NOT suppress", against a write dot the ROM
+# itself moves by an M-cycle at LY 64. All 60 of the frame's wrong pixels were
+# one answer: the object pixel emitted on the dot immediately before the
+# write's own dot survived here and does not on hardware -- at both write dots
+# (105 for LY < 64, 109 for LY >= 64) and across all nineteen bands.
 #
-# Why not M3_PIPE_DELAY = 3, which reaches the same dot: because it moves the
-# FETCHER too, and the fetcher is already where hardware has it. Measured on
-# the mealybug DMG set, one build per arm, wrong pixels of 23040:
+# **m3_obp0_change gives the second**, the same nineteen objects against two
+# OBP0 writes instead. Its write lands on dot 109 of every band, and with the
+# priority stage's one dot the pixel emitted on 108 comes right and the one on
+# 107 does not -- uniformly, every band. At two it is pixel-exact.
 #
-#   row                          ship   PIPE_DELAY=3
-#   m3_lcdc_obj_en_change          60        2     mixer-read rows, all better
-#   m3_obp0_change                 74       42
-#   m3_bgp_change                1508      798
-#   m3_bgp_change_sprites        1044      344
-#   m3_lcdc_obj_en_change_variant 380      212
-#   m3_scx_high_5_bits              0       41     fetcher-read rows, all worse
-#   m3_scx_low_3_bits               0      324
-#   m3_scy_change                 417     2157
-#   m3_lcdc_tile_sel_win_change   106     1028
-#   m3_lcdc_bg_map_change         192      444
+# Later at the mixer is what makes a write's effect appear EARLIER on screen,
+# which reads backwards until the stages are drawn out: the pixel popped on dot
+# D is coloured on D + n, so it sees every write live by D + n, i.e. n more
+# writes than the pop dot did.
 #
-# The split is the result: every row whose register is read at the mixer wants
+# The whole of that is expressible without adding stages to the dot loop.
+# Registers only change at a CPU M-cycle boundary, so "the mixer is n dots
+# late" differs from "the mixer is on the pop's dot" in exactly one place: a
+# write also reaches the n pixels emitted before it. Redoing those from the
+# WRITE path costs the mode 3 loop one eight-byte store per pixel (the FIFO
+# entries the mixer is still holding, two dots of them, indexed by the pixel's
+# parity so two stages cost what one does) and nothing else -- where real
+# holding stages would put another mix and a tail flush on it, and the tail
+# accounting at M3_PIPE_DELAY is exactly what a moved shifter has to pay.
+# Measured, min of four runs per arm, both arms built in the same directory
+# against `-d:MIXER_DOT_LAG=0`: +0.35% of retired instructions on blargg
+# cpu_instrs and +0.51% on cgb-acid-hell, which writes LCDC every eight dots
+# and is the worst case in the tree.
+#
+# Why not M3_PIPE_DELAY = 3, which reaches the first stage's dot: because it
+# moves the FETCHER too, and the fetcher is already where hardware has it.
+# Measured on the mealybug DMG set, one build per arm, wrong pixels of 23040:
+#
+#   row                          before    PIPE_DELAY=3
+#   m3_lcdc_obj_en_change          60         2     mixer-read rows, all better
+#   m3_obp0_change                 74        42
+#   m3_bgp_change                1508       798
+#   m3_bgp_change_sprites        1044       344
+#   m3_lcdc_obj_en_change_variant 380       212
+#   m3_scx_high_5_bits              0        41     fetcher-read rows, all worse
+#   m3_scx_low_3_bits               0       324
+#   m3_scy_change                 417      2157
+#   m3_lcdc_tile_sel_win_change   106      1028
+#   m3_lcdc_bg_map_change         192       444
+#
+# The split IS the result: every row whose register is read at the mixer wants
 # the extra dot and every row whose register is read at the fetcher refuses it,
-# which is what says the two stages are one dot apart rather than the pipeline
-# being one dot out.
-proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+# which is what says the two stages are a dot apart rather than the pipeline
+# being a dot out.
+#
+# What the tail does NOT explain, and is left alone: m3_bgp_change is 96.4%
+# here and prefers ONE stage by 22 pixels where m3_bgp_change_sprites prefers
+# it by 136, while m3_window_timing prefers two by 130 and
+# m3_lcdc_obj_en_change_variant by 110. Two stages ships because it is what the
+# structure says (one palette read, one stage, whichever palette it is) and
+# because it is +190 DMG pixels and free on CGB, but the ~800-pixel residual on
+# m3_bgp_change is a second mechanism and until it is found that row is not a
+# reliable vote on this dot. See docs/gb-failure-triage.md.
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
   ## Re-colour the pixel emitted on the previous dot with the registers as they
   ## stand after this write. See the note above; the caller is ppu_write, on the
   ## four registers the mixer reads.
@@ -888,9 +912,12 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## is the last pixel written for as long as the guard holds, stall or no
   ## stall. Ending mode 3 ends it: hardware clocks the line's last pixel out of
   ## the mixer on the first dot of mode 0, and a write after that is behind it.
-  if ppu.lx >= 1 and ppu.lx <= GB_WIDTH and (ppu.lcd_status and 3'u8) == 3'u8:
-    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx) - 1] =
-      fifo_mix(ppu, gb, ppu.mix_bg, ppu.mix_sp)
+  if (ppu.lcd_status and 3'u8) != 3'u8: return
+  for b in 1'i32 .. back:
+    let x = ppu.lx - b
+    if x < 0 or x >= GB_WIDTH: continue
+    let h = ppu.mix[x and 1]
+    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp)
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
@@ -1022,8 +1049,9 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       # WHOLE cost of the mixer's dot on the shipping build, which is what
       # `-d:MIXER_DOT_LAG=0` exists to A/B against.
       when MIXER_DOT_LAG != 0:
-        ppu.mix_bg = bg_px
-        ppu.mix_sp = sp_px
+        # Indexed by the pixel's own parity rather than shifted down, so two
+        # dots of history cost the dot loop the same two stores one does.
+        ppu.mix[ppu.lx and 1] = GbMixHold(bg: bg_px, sp: sp_px)
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         fifo_mix(ppu, gb, bg_px, sp_px)
     inc ppu.lx

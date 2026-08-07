@@ -298,12 +298,44 @@ const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
+  ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
+const MIXER_PALETTE_BACK*     {.intdefine.} = 2
+  ## Stages of the mixer tail BGP/OBP0/OBP1 are read at the far end of. One
+  ## more than the priority bits: the mixer resolves BG-vs-OBJ first and looks
+  ## the shade up after, so a palette write reaches one pixel further back than
+  ## an LCDC write does. m3_obp0_change is what separates them -- it goes to
+  ## pixel-exact at 2 and is 32 pixels out at 1, on a frame where
+  ## m3_lcdc_obj_en_change is 60 out at 0 and 2 out at 1.
 const MIXER_DOT_LAG*          {.intdefine.} = 1
   ## Whether the pixel mixer runs a dot behind the FIFO pop. 1 ships; 0 is the
   ## control build and compiles the whole mechanism out. See
   ## fifo_recompose_last in fifo_ppu.nim for what it buys and how it was
   ## measured -- it is not a sweepable dot count, only on or off, because a
   ## second dot is refused by the same rows the first is required by.
+const CGB_MIXER_LATENCY*      {.intdefine.} = 1
+  ## Dots the CGB's write to a register the MIXER reads takes to arrive over
+  ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
+  ## reads one stage down is not repainted on CGB at all.
+  ##
+  ## Two rows pin it, and each is exact on BOTH consoles at these settings and
+  ## on neither at any other. mealybug m3_lcdc_obj_en_change (priority, one
+  ## stage) is pixel-exact on the CGB references with no repaint and 60 pixels
+  ## out with one, and 2 out on the DMG references with one repaint and 60 with
+  ## none. m3_obp0_change (palette, two stages) is pixel-exact on the DMG
+  ## references at two and on the CGB references at one; it is 32 pixels out on
+  ## DMG at one and 126 out on CGB at two. Same cart, same write, same objects;
+  ## only the console differs, and the same single dot separates them at both
+  ## stages.
+  ##
+  ## Shaped as a write latency because that is what every other per-register
+  ## CGB/DMG difference in this block is (the mealybug PPU notes' "writes take
+  ## effect immediately on the DMG. On CGB and AGB devices, writes appear to
+  ## take effect 2 T-cycles later" for SCY is the documented instance, and
+  ## CGB_SCY_LATENCY above is it). It is SEPARATE from CGB_LCDC_LATENCY, which
+  ## is LCDC's latency at the FETCHER: different rows measure them and they come
+  ## out different, and that one ships at 0.
+
 const CGB_LCDC_MIXER_LATENCY* {.intdefine.} = 1
   ## Dots the CGB's LCDC write takes to reach the pixel MIXER over the DMG's.
   ##
@@ -711,6 +743,16 @@ type
     oam_idx*:   uint8
     obj_to_bg*: uint8
 
+  # One mixer stage's worth of held FIFO output: the BG entry and the OBJ entry
+  # popped on the same dot. Kept as a PAIR rather than as two parallel arrays so
+  # the shifter's store is one eight-byte store at a computed offset rather than
+  # two four-byte ones eight bytes apart -- worth 0.37% of retired instructions
+  # on the mode 3 dot loop, measured, which is half of what the whole mechanism
+  # costs.
+  GbMixHold* = object
+    bg*: GbPixel
+    sp*: GbPixel
+
   GbPixelFifo* = object
     data: array[16, GbPixel]
     head: int
@@ -873,16 +915,15 @@ type
     tile_attrs*:          uint8
     tile_data_low*:       uint8
     tile_data_high*:      uint8
-    # The two FIFO entries the mixer is still holding: the pair popped on the
-    # last dot that emitted a pixel. The mixer stage runs one dot behind the
+    # The FIFO entries the mixer is still holding: the pairs popped on the last
+    # two dots that emitted a pixel, indexed by the pixel's own parity. The mixer stage runs one dot behind the
     # pop (see fifo_recompose_last in fifo_ppu), so a mid-mode-3 write to a
     # register the mixer reads -- the palettes, LCDC's OBJ-enable and
     # BG-priority bits -- still reaches the pixel already written out. Kept
     # here rather than re-read from the ring because the BG ring is rewound and
     # overwritten by the next push and the OBJ ring is only popped when it is
     # non-empty, so neither can be indexed backwards safely.
-    mix_bg*:              GbPixel
-    mix_sp*:              GbPixel
+    mix*:                 array[2, GbMixHold]
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----
