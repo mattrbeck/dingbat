@@ -2204,10 +2204,11 @@ proc gb_revision_from_name*(name: string): (GbRevision, bool) =
   ## Parse a `--model=` / test-row token. Returns (revision, ok). Accepts the
   ## names the suites themselves use: mooneye's filename suffixes (`dmg0`,
   ## `mgb`, `S`, `A`, `cgb0`), AGE's device tokens and SameSuite's
-  ## `-cgb0B` / `-cgbDE` style ranges. A range resolves to its LOWEST member,
-  ## because a ROM named for a range asserts the behaviour those revisions
-  ## share and the lowest is the one that cannot also be reached by another
-  ## token.
+  ## `-cgb0B` / `-cgbDE` style ranges. A range resolves to its HIGHEST member:
+  ## the newest silicon that still shows the behaviour is the strongest claim
+  ## the ROM makes, and it is what keeps a `-cgb0` / `-cgbB` pair (SameSuite
+  ## ships both for CH3) resolving to two different revisions instead of
+  ## collapsing onto grCgb0.
   case name.toLowerAscii()
   of "dmg0":                         (grDmg0, true)
   of "dmg", "dmga", "dmgb", "dmgc", "dmgabc", "dmgabcmgb": (grDmgABC, true)
