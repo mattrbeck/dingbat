@@ -166,6 +166,9 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
 # hardcoded behavior: GB FIFO renderer; GBA full HLE with the real-BIOS intro
 # played whenever a bios.bin has been provided.
 var optGbFifo = true
+# Super Game Boy frontend opt-ins (see wasm_sgb_enable / wasm_sgb_border_show).
+var sgbRequested  = true
+var sgbBorderWanted = true
 var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
 var optGbaRunBios = true
 var optMp2kHle = false        # MP2K sound-engine HLE (opt-in, engages on detection)
@@ -274,6 +277,66 @@ proc wasm_game_fb_ptr(): pointer {.exportc.} =
   ## (16-bit little-endian; the shader masks 0x7FFF). Valid after the last
   ## loop_tick/netlink_tick/rewind of the RAF turn.
   gamePtr
+
+# --- Super Game Boy ---------------------------------------------------------
+# The border is a second layer, not a bigger framebuffer: the core keeps
+# emitting 160x144 and the presenter composites 256x224 around it. That is what
+# keeps thumbnails, rewind, save states and the link/rollback blit paths on the
+# dimensions they have always had.
+
+proc wasm_sgb_enable(on: cint) {.exportc.} =
+  ## Frontend opt-in, consulted the next time a ROM is loaded. The cart header
+  ## still decides: a cart without the SGB flag, or one that is CGB-capable,
+  ## never gets an adapter.
+  sgbRequested = on != 0
+
+proc wasm_sgb_active(): cint {.exportc.} =
+  ## 1 when the running core actually has an SGB adapter. Drives the UI (the
+  ## DMG shade palette has nothing to substitute once SGB colour is on).
+  if stateKind == ekGB and stateGb != nil and stateGb.sgb_active(): 1 else: 0
+
+proc wasm_sgb_border(): cint {.exportc.} =
+  ## 1 when a border has been transferred AND the frontend wants it shown.
+  if stateKind == ekGB and stateGb != nil and sgbBorderWanted and
+     stateGb.sgb_has_border(): 1 else: 0
+
+proc wasm_sgb_border_show(on: cint) {.exportc.} =
+  sgbBorderWanted = on != 0
+
+proc wasm_sgb_border_ptr(): pointer {.exportc.} =
+  ## 256x224 BGR555, bit 15 = opaque. Same 16-bit layout as the game
+  ## framebuffer, so the presenter uploads it as another R16UI texture.
+  if stateKind == ekGB and stateGb != nil and stateGb.sgb_active():
+    stateGb.sgb_border_ptr() else: nil
+
+proc wasm_sgb_border_gen(): cint {.exportc.} =
+  ## Bumped whenever the border image is re-rendered. The presenter re-uploads
+  ## only when it moves: the image changes a handful of times in a session and
+  ## it is 112 KiB.
+  if stateKind == ekGB and stateGb != nil and stateGb.sgb_active():
+    cint(stateGb.sgb_border_gen()) else: 0
+
+proc wasm_sgb_backdrop(): cint {.exportc.} =
+  ## SGB colour 0, shared by all four screen palettes. Shows wherever the
+  ## border is transparent and the Game Boy window is not.
+  if stateKind == ekGB and stateGb != nil and stateGb.sgb_active():
+    cint(stateGb.sgb_backdrop()) else: 0
+
+proc wasm_out_w(): cint {.exportc.} =
+  ## The presented picture's native width. This is what the canvas backing
+  ## store and the CSS aspect ratio are sized from -- it replaces guessing the
+  ## console from the ROM's file extension, and it is the only source that can
+  ## know a border appeared mid-session.
+  if wasm_sgb_border() != 0: cint(SGB_BORDER_W)
+  elif stateKind == ekGB: cint(GB_W)
+  elif stateKind == ekGBA: cint(GBA_W)
+  else: 0
+
+proc wasm_out_h(): cint {.exportc.} =
+  if wasm_sgb_border() != 0: cint(SGB_BORDER_H)
+  elif stateKind == ekGB: cint(GB_H)
+  elif stateKind == ekGBA: cint(GBA_H)
+  else: 0
 
 proc wasm_panel_gbc(): cint {.exportc.} =
   ## 1 when the running single core is GB/GBC (selects the CGB color model in
@@ -1577,6 +1640,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     curRomCrcValid = false  # the cached CRC belongs to a GBA cart
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
     stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    stateGb.sgb_requested = sgbRequested
     stateGb.post_init()
     printer_attach()  # a printer is always plugged in on solo GB
     stateTexture = stateRenderer.createTexture(

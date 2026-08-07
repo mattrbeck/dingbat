@@ -820,8 +820,13 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
   r.read_seq_u16_into(s.frozen)
   s.players = r.read_u8()
   s.cur_player = r.read_u8()
-  s.border_dirty = true
-  s.border_valid = false
+  # Re-render now rather than flagging it dirty for the next frame boundary.
+  # A deferred render leaves border_valid false for one frame, and the
+  # frontends size the window from exactly that flag -- so a state load would
+  # blink 256x224 -> 160x144 -> 256x224. Cheap enough to do inline (57k
+  # pixels, and only on a load or a rewind step).
+  s.border_dirty = false
+  s.sgb_render_border()
 
 proc gb_state_payload(gb: GB): string =
   var w = Writer()

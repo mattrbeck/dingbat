@@ -43,7 +43,16 @@ const isGbc = () =>
     ? Module._wasm_panel_gbc() === 1
     : !!(currentRomName && currentRomName !== "rom.gba");
 
-const nativeRes = () => (isGbc() ? [160, 144] : [240, 160]);
+// The presented picture's native size. The core is authoritative -- a Super
+// Game Boy border makes it 256x224 -- with the panel check as the bootstrap
+// answer for the frame before the core exists.
+const nativeRes = () => {
+  if (typeof Module !== "undefined" && Module._wasm_out_w && currentRomName) {
+    const w = Module._wasm_out_w(), h = Module._wasm_out_h();
+    if (w > 0 && h > 0) return [w, h];
+  }
+  return isGbc() ? [160, 144] : [240, 160];
+};
 
 const glRenderer = createGlRenderer(canvasEl, nativeRes, (m) =>
   console.log(m)

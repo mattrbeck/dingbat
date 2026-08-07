@@ -725,6 +725,23 @@
               <span>Scanline<span class="radio-sub">Faster, renders each line in one pass</span></span>
             </label>
           </div>
+          <div class="modal-subhead">Super Game Boy</div>
+          <div class="modal-toggle-row">
+            <span class="modal-row-label">Super Game Boy mode</span>
+            <label class="switch">
+              <input type="checkbox" id="sgb-toggle" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <span class="modal-toggle-sub">Run black-and-white cartridges that were made for the Super Game Boy on the adapter: per-region color palettes, and the game's own border where it has one. Cartridges without Super Game Boy support are unaffected, and a Game Boy Color game always runs in color.</span>
+          </div>
+          <div class="modal-toggle-row" id="sgb-border-row">
+            <span class="modal-row-label">Show border</span>
+            <label class="switch">
+              <input type="checkbox" id="sgb-border-toggle" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <span class="modal-toggle-sub">The border makes the picture 256&times;224 instead of 160&times;144, so the screen changes shape when one appears.</span>
+          </div>
           <div class="modal-subhead">Boot ROM</div>
           <div class="modal-row">
             <span class="modal-row-label">GBC Bootrom</span>
@@ -894,6 +911,7 @@
             </select>
             <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Color titles are never affected.</span>
           </div>
+          <p class="modal-hint" id="gb-palette-sgb-note" hidden>This game is running as a Super Game Boy and is drawing its own colors, so the shade palette has nothing to replace. Turn off Super Game Boy mode in the Game Boy tab to use it.</p>
           <div class="gb-palette-row">
             <span class="gb-palette-label">In use</span>
             <span id="gb-palette-preview" class="gb-palette-preview" aria-hidden="true"></span>
