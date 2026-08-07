@@ -262,16 +262,35 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   # the 160*144 framebuffer. (LYC is not bounded: it is only ever COMPARED
   # against LY, so any byte is a value the game itself could have written.)
   check_range(int(ppu.ly), 0, 153, "ppu.ly")
-  # LY and the STAT mode have to agree. The renderer writes
-  # `framebuffer[160 * ly + lx]` and only does so in mode 3, so LY = 144 with
-  # mode 3 in the file — a combination no Game Boy can be in, because mode 3
-  # does not exist during vblank — indexes exactly one past the end of a
-  # 160x144 framebuffer. Modes 0 and 1 never write a pixel, so only 2 and 3 are
-  # refused up here; mode 2 counts because it leads directly into 3 on the same
-  # line.
-  if int(ppu.ly) >= 144 and (int(ppu.lcd_status) and 3) >= 2:
-    raise state_error("save state has PPU mode " & $(int(ppu.lcd_status) and 3) &
-                      " on line " & $int(ppu.ly) & ", which is inside vblank")
+  # A state is never written mid-scanline, so modes 2 and 3 cannot appear in
+  # one — and a file that claims either is refused rather than approximated.
+  #
+  # This is a statement about the FORMAT, not a guess. The renderer's per-line
+  # scratch — the FIFO's `lx`, its fetcher, the OAM scan's progress — is not
+  # serialized at all; `GbPpu.reset_render_scratch` (src/dingbat/gb/ppu.nim)
+  # rebuilds it on every load and says why that is safe: it "is fully rebuilt
+  # on every mode 2->3 transition and never read at vblank, where states are
+  # captured". Measured against that claim: 6000 consecutive frame boundaries
+  # across both GB test ROMs are mode 1 at LY 144, and all 16 states in
+  # tests/states are too. So a file in mode 2 or 3 carries a dot counter with
+  # none of the progress that counter refers to.
+  #
+  # Refusing the pair is also the only way to close a livelock that no
+  # per-field range can catch. Every mode leaves the line on an EXACT dot
+  # comparison (fifo_ppu: mode 2 at `cycle_counter == 80`, modes 0 and 1 at
+  # `== 456`), so a counter sitting past its OWN mode's stop is never reset: it
+  # climbs on every tick until int32 overflows, and step_frame never returns in
+  # the meantime. Measured: mode 2 with cycle_counter 81, and mode 3 with 289,
+  # are both inside the counter's legal 0..456 range checked below, are both
+  # accepted, and both then fault. It is the PAIR that is impossible, which is
+  # the one shape a per-field bound cannot express.
+  #
+  # This subsumes the narrower LY >= 144 case (mode 3 during vblank, which
+  # indexed framebuffer[160*144] exactly one past the end).
+  let ppu_mode = int(ppu.lcd_status) and 3
+  if ppu_mode >= 2:
+    raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
+                      $int(ppu.ly) & ": no state is written mid-scanline")
   ppu.lyc = r.read_u8()
   r.read_bytes(ppu.bgp)
   r.read_bytes(ppu.obp0)
@@ -996,7 +1015,7 @@ proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
     last_state_reject_kind = srkCorrupt
     echo "Load state failed: an unbounded field reached a ", d.name,
          " — that is a dingbat bug, please report it: ", d.msg
-  gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
+  restore_backup(gb.gb_apply_state(backup, GB_PAYLOAD_VERSION))
   false
 
 proc parse_state_image*(gb: GB; data: string; origin = "state data"):

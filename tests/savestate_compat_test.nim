@@ -152,6 +152,20 @@ static:
   doAssert MAX_EVENTS >= 64,
     "MAX_EVENTS is a save-state floor: lowering it refuses existing states"
 
+  # The event-deadline guard (scheduler.load_from) is the same kind of floor:
+  # it refuses a pending event whose deadline sits an implausible distance
+  # from `cycles`, so lowering either constant refuses states that already
+  # exist. Measured headroom in the committed corpus is enormous — the
+  # furthest-out event in any of the 16 states is 83 776 cycles ahead and none
+  # is overdue at all — but the floors are what the guard may not drop below.
+  doAssert MAX_EVENT_HORIZON >= CycleCount(1'u32 shl 27),
+    "MAX_EVENT_HORIZON is a save-state floor: the longest thing this emulator " &
+    "books is a GBA timer at prescaler 1024 over a full 16-bit period, 67.1M " &
+    "cycles, and the guard must stay above it"
+  doAssert MAX_EVENT_OVERDUE >= CycleCount(1'u32 shl 20),
+    "MAX_EVENT_OVERDUE is a save-state floor: call_current drains due events " &
+    "lazily, so a state may carry one slightly in the past"
+
 # ---------------------------------------------------------------------------
 # 2. Header layout constants.
 #
@@ -352,6 +366,16 @@ proc run_roundtrip() =
     check(emu.ppu.dots_since_frame >= 0 and emu.ppu.dots_since_frame < 456,
           "GB " & rom & " dots_since_frame is ~0 at a frame boundary",
           "got " & $emu.ppu.dots_since_frame)
+    # The loader REFUSES a state whose PPU is in mode 2 or 3, because the
+    # per-line render scratch those modes depend on is not in the format (see
+    # load_ppu_state, and GbPpu.reset_render_scratch). That is only legitimate
+    # while no writer can produce one — so assert the premise here rather than
+    # trusting it. If a future change ever does capture mid-scanline, this
+    # fails first and names the bound that has to move with it.
+    check((emu.ppu.lcd_status and 3) < 2,
+          "GB " & rom & " is in mode 0/1 at a frame boundary (the loader " &
+          "refuses 2 and 3)",
+          "got mode " & $(emu.ppu.lcd_status and 3) & " at ly " & $emu.ppu.ly)
 
 # ---------------------------------------------------------------------------
 # 3b. ROM identity is a property of the ROM FILE, not of the buffer.
