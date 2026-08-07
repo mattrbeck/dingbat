@@ -34,6 +34,32 @@
 import std/deques
 import zippy
 
+when defined(rewindprof):
+  # EXPLORATORY (-d:rewindprof): where the per-snapshot cost goes. Nanoseconds
+  # and call counts, printed by tests/dingbat_bench.nim. Pushes happen ~6/s, so
+  # the getMonoTime pairs are far below the noise of what they measure.
+  import std/monotimes, std/times
+  const
+    RpSerialize* = 0   ## the caller's state_payload()
+    RpXor* = 1         ## XOR of the new payload against the previous one
+    RpCompress* = 2    ## zlib of the delta body
+    RpThumbGrab* = 3   ## the caller's framebuffer downscale
+    RpThumbZlib* = 4   ## zlib of the downscaled thumbnail
+    RpKeyZlib* = 5     ## zlib of a whole keyframe payload
+    RpEvict* = 6       ## eviction at the cap
+    RpPushTotal* = 7   ## the whole push, serialize included
+    RpPops* = 8        ## pop(): inflate + XOR
+  var rewindprof*: array[16, int64]
+  var rewindprof_n*: array[16, int]
+  var rewindprof_bytes*: array[16, int64]
+  template rp(slot: int; body: untyped) =
+    let t0 = getMonoTime()
+    body
+    rewindprof[slot] += (getMonoTime() - t0).inNanoseconds
+    rewindprof_n[slot].inc
+else:
+  template rp(slot: int; body: untyped) = body
+
 type
   RewindThumb* = object
     ## One downscaled frame captured at push time: little-endian BGR555,
@@ -131,16 +157,103 @@ proc xor_bytes(dst: var string; src: string; k: int) =
   for i in (words * 8) ..< k:
     dst[i] = char(uint8(dst[i]) xor uint8(src[i]))
 
+
+# --- Sparse-block pre-pass on the delta -----------------------------------
+#
+# This is the ring's codec, not an option.
+#
+# The delta is an XOR, so "unchanged" is literally a zero byte, and after the
+# fixed-length-payload fix it is 99% zeros. zlib still has to walk every one of
+# those zeros to rediscover that it is a zero. A bitmap of which 64-byte blocks
+# contain ANY non-zero byte, followed by only those blocks, costs one bit per
+# block and skips the rest with a word-at-a-time scan.
+#
+# Format: u32 original length, u32 block size, ceil(nblocks/8) bitmap bytes,
+# then the set blocks back to back. The last block may be short; its length
+# falls out of the original length, so nothing else needs storing. The result
+# is then zlib'd as before, which still gets to exploit whatever redundancy
+# survives inside the changed blocks.
+#
+# Measured on Pokemon FireRed from an in-game state, against plain zlib on the
+# same (fixed-length) payloads:
+#   native   4504 B vs 5693 B, encode 0.147 ms vs 0.165 ms, decode 4.3x faster
+#   Chrome   4480 B vs 5678 B, encode 2.7x faster, decode 6.4x faster
+#   Safari   4480 B vs 5678 B, encode 2.5x faster
+# The browsers gain far more than native because zippy's deflate is much
+# slower relative to a flat scan under wasm than it is compiled natively —
+# which is why the candidate bake-off (common/rewind_codecs.nim) was built to
+# run in-page rather than being settled on the desktop.
+#
+# The encoded form is in-process only: the ring never outlives the process and
+# nothing persists or transmits a delta, so this needed no format version.
+
+const SparseBlock* = 64
+
+proc sparse_encode*(src: string; bs = SparseBlock): string =
+  let n = src.len
+  if n == 0: return ""
+  let nblocks = (n + bs - 1) div bs
+  let bitmapBytes = (nblocks + 7) div 8
+  var bitmap = newString(bitmapBytes)
+  var body = newStringOfCap(n div 8 + 64)
+  let s = cast[ptr UncheckedArray[byte]](unsafeAddr src[0])
+  for b in 0 ..< nblocks:
+    let lo = b * bs
+    let hi = min(lo + bs, n)
+    var any = false
+    var i = lo
+    while i + 8 <= hi:
+      if cast[ptr uint64](addr s[i])[] != 0: any = true; break
+      i += 8
+    if not any:
+      while i < hi:
+        if s[i] != 0: any = true; break
+        i.inc
+    if any:
+      bitmap[b div 8] = char(uint8(bitmap[b div 8]) or (1'u8 shl (b mod 8)))
+      body.add(src[lo ..< hi])
+  result = newStringOfCap(8 + bitmapBytes + body.len)
+  var hdr = newString(8)
+  cast[ptr uint32](addr hdr[0])[] = uint32(n)
+  cast[ptr uint32](addr hdr[4])[] = uint32(bs)
+  result.add hdr
+  result.add bitmap
+  result.add body
+
+proc sparse_decode*(src: string): string =
+  if src.len == 0: return ""
+  if src.len < 8: raise newException(ValueError, "rewind: truncated sparse delta")
+  let n = int(cast[ptr uint32](unsafeAddr src[0])[])
+  let bs = int(cast[ptr uint32](unsafeAddr src[4])[])
+  if bs <= 0 or n < 0: raise newException(ValueError, "rewind: bad sparse header")
+  let nblocks = (n + bs - 1) div bs
+  let bitmapBytes = (nblocks + 7) div 8
+  result = newString(n)          # zero-filled: unset blocks are already right
+  var p = 8 + bitmapBytes
+  for b in 0 ..< nblocks:
+    if (uint8(src[8 + b div 8]) and (1'u8 shl (b mod 8))) != 0:
+      let lo = b * bs
+      let hi = min(lo + bs, n)
+      if p + (hi - lo) > src.len:
+        raise newException(ValueError, "rewind: sparse body past end")
+      copyMem(addr result[lo], unsafeAddr src[p], hi - lo)
+      p += hi - lo
+
 proc encode_delta(prev, cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
   ## prefix, raw tail where prev extends past cur (payload lengths vary
   ## slightly — e.g. the scheduler's event count)
   var body = prev
-  xor_bytes(body, cur, min(prev.len, cur.len))
-  compress(body, BestSpeed, dfZlib)
+  rp(0 + 1):  # RpXor
+    xor_bytes(body, cur, min(prev.len, cur.len))
+  rp(0 + 2):  # RpCompress
+    result = compress(sparse_encode(body), BestSpeed, dfZlib)
+  when defined(rewindprof):
+    rewindprof_bytes[2] += result.len
+    rewindprof_bytes[1] += body.len
 
 proc decode_delta(cur, packed: string): string =
-  result = uncompress(packed, dfZlib)
+  result = sparse_decode(uncompress(packed, dfZlib))
   xor_bytes(result, cur, min(result.len, cur.len))
 
 proc oldest_id*(rw: Rewind): int =
@@ -184,7 +297,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   if rw.thumb_every > 0 and thumb != nil:
     if rw.thumb_due <= 0:
       rw.thumb_due = rw.thumb_every - 1
-      let t = thumb()
+      var t: RewindThumb
+      rp(3): t = thumb()
       if t.pixels.len > 0:
         # Raw BGR555 is 19-26 KB a picture, which on GB is THREE TIMES the
         # whole delta stream — the strip would have become the ring's biggest
@@ -192,7 +306,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
         # flat-coloured, so BestSpeed takes them to 4% (GB) / 14-22% (GBA) of
         # raw for 0.06-0.09 ms once a second, and ~0.03 ms to inflate one when
         # the strip is read. Measured, both cores.
-        let packed = compress(t.pixels, BestSpeed, dfZlib)
+        var packed: seq[byte]
+        rp(4): packed = compress(t.pixels, BestSpeed, dfZlib)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))
         rw.thumb_total += packed.len
     else:
@@ -200,13 +315,15 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   if rw.key_every > 0:
     if rw.key_due <= 0:
       rw.key_due = rw.key_every - 1
-      let packed = compress(payload, BestSpeed, dfZlib)
+      var packed: string
+      rp(5): packed = compress(payload, BestSpeed, dfZlib)
       rw.keys.addLast(KeyFrame(id: id, packed: packed))
       rw.key_total += packed.len
     else:
       dec rw.key_due
-  while rw.mem_used > rw.cap and rw.deltas.len > 0:
-    rw.evict_oldest()
+  rp(6):
+    while rw.mem_used > rw.cap and rw.deltas.len > 0:
+      rw.evict_oldest()
 
 proc maybe_push*(rw: Rewind; payload: proc(): string;
                  thumb: proc(): RewindThumb = nil): bool =
@@ -215,7 +332,11 @@ proc maybe_push*(rw: Rewind; payload: proc(): string;
   inc rw.frame_count
   if rw.frame_count >= rw.interval:
     rw.frame_count = 0
-    rw.push(payload(), thumb)
+    rp(7):
+      var p: string
+      rp(0): p = payload()
+      when defined(rewindprof): rewindprof_bytes[0] += p.len
+      rw.push(p, thumb)
     return true
   false
 

@@ -764,6 +764,67 @@ proc run_intr_wait_migration() =
   e.apply_state_payload(untouched)
   check(e.state_payload() == untouched, "the pre-load state restores cleanly")
 
+
+proc run_in_process_boundary() =
+  ## The rewind ring, rollback snapshots and the clip/scrubber history are
+  ## padded to a fixed length (see PAD_RATIONALE in common/scheduler.nim);
+  ## anything that can reach a FILE is not. This asserts the boundary, because
+  ## getting it wrong would write bytes no other build can read.
+  echo ""
+  echo "--- in-process vs file payload boundary ---"
+
+  for (romName, isGba) in [(GBA_ROMS[0][0], true), (GB_ROMS[0][0], false)]:
+    let tag = (if isGba: "GBA" else: "GB") & ": "
+    var inproc, fileImg, reInproc: string
+    if isGba:
+      let e = new_gba_for(romName)
+      for _ in 0 ..< 40: e.step_frame()
+      inproc = e.state_payload()
+      fileImg = e.state_bytes()
+      # in-process round trip
+      for _ in 0 ..< 5: e.step_frame()
+      e.apply_state_payload(inproc)
+      reInproc = e.state_payload()
+      # file round trip, through the real file reader
+      check(e.load_state_bytes(fileImg), tag & "file image loads")
+      check(e.state_bytes() == fileImg, tag & "file image re-serializes identically")
+    else:
+      let g = new_gb_for(romName)
+      for _ in 0 ..< 40: g.step_frame()
+      inproc = g.state_payload()
+      fileImg = g.state_bytes()
+      for _ in 0 ..< 5: g.step_frame()
+      g.apply_state_payload(inproc)
+      reInproc = g.state_payload()
+      check(g.load_state_bytes(fileImg), tag & "file image loads")
+      check(g.state_bytes() == fileImg, tag & "file image re-serializes identically")
+
+    check(reInproc == inproc, tag & "in-process payload round-trips byte-exactly")
+    # The file IMAGE carries a header on top of its payload and is still
+    # smaller than the bare in-process payload — that is the padding, and it
+    # is the whole point: the file shape is untouched by this change.
+    check(fileImg.len < inproc.len,
+          tag & "file image is smaller than the padded in-process payload",
+          "file " & $fileImg.len & " vs in-process " & $inproc.len)
+
+  # The safety net, asserted directly rather than assumed: padding sits
+  # immediately before a section tag, so a writer/reader that disagree about
+  # it cannot pass silently.
+  block:
+    let s0 = new_scheduler()
+    var w = Writer()
+    s0.save_to(w, pad = true)
+    w.write_tag(0x5A'u8)
+    var r = Reader(buf: w.buf)
+    let s1 = new_scheduler()
+    var caught = false
+    try:
+      s1.load_from(r, pad = false)     # deliberately mismatched
+      r.expect_tag(0x5A'u8)
+    except CatchableError:
+      caught = true
+    check(caught, "a pad-flag mismatch is caught at the next section tag")
+
 when isMainModule:
   # Run from the repo root: the ROM and corpus paths are relative to it.
   if paramCount() >= 1 and paramStr(1) == "--write-corpus":
@@ -775,6 +836,7 @@ when isMainModule:
   run_rejections()
   run_intr_wait_migration()
   run_corpus()
+  run_in_process_boundary()
   echo ""
   if failures > 0:
     echo failures, " save-state compatibility check(s) FAILED"

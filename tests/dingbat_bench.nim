@@ -12,6 +12,9 @@ import dingbat/gb/gb
 import dingbat/gba/gba
 import dingbat/common/input
 import dingbat/common/test_output
+import dingbat/common/rewind
+import dingbat/common/scheduler
+import dingbat/common/serialize
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 
@@ -68,6 +71,55 @@ when defined(macosx):
     (raw[RiInstructionsSlot], raw[RiCyclesSlot])
 else:
   proc hw_counters(): (uint64, uint64) = (0'u64, 0'u64)
+
+
+# ---- Rewind capture cost ----
+#
+# DINGBAT_BENCH_REWIND selects what the frontends actually do:
+#   off     no ring at all (the baseline)
+#   native  maybe_push(payload) — src/dingbat.nim passes NO thumbnail proc,
+#           so the native ring never captures the scrubber strip
+#   web     maybe_push(payload, thumb) — src/dingbat_wasm.nim does, and its
+#           ring is allocated unconditionally at both ROM-load sites
+# DINGBAT_BENCH_REWIND_CAP overrides the ring cap in bytes (the web build uses
+# 16 MB on iOS via setRewindCapBytes, 64 MB elsewhere).
+# DINGBAT_BENCH_REWIND_INTERVAL overrides frames-between-snapshots.
+const SCRUB_THUMB_W = 120
+const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * 160 div 240
+const GB_SCRUB_THUMB_H = SCRUB_THUMB_W * 144 div 160
+
+proc rewind_mode(): string = getEnv("DINGBAT_BENCH_REWIND", "off")
+
+proc make_bench_rewind(): Rewind =
+  if rewind_mode() == "off": return nil
+  let cap = parseInt(getEnv("DINGBAT_BENCH_REWIND_CAP", $REWIND_CAP_BYTES))
+  let iv  = parseInt(getEnv("DINGBAT_BENCH_REWIND_INTERVAL", $REWIND_INTERVAL))
+  new_rewind(cap, iv)
+
+proc report_rewind(rw: Rewind; frames: int; elapsed: float) =
+  if rw == nil: return
+  let (d, l, t, k) = rw.mem_breakdown()
+  echo "  rewind[", rewind_mode(), "]: snapshots=", rw.len,
+       " mem=", formatFloat(rw.mem_used().float / 1048576.0, ffDecimal, 2), " MB",
+       " (deltas ", formatFloat(d.float / 1048576.0, ffDecimal, 2),
+       " latest ", formatFloat(l.float / 1048576.0, ffDecimal, 2),
+       " thumbs ", formatFloat(t.float / 1048576.0, ffDecimal, 2),
+       " keys ", formatFloat(k.float / 1048576.0, ffDecimal, 2), ")"
+  when defined(rewindprof):
+    let names = ["serialize", "xor", "compress", "thumb_grab", "thumb_zlib",
+                 "key_zlib", "evict", "PUSH TOTAL", "pops"]
+    let pushes = rewindprof_n[7]
+    echo "  --- rewind profile over ", frames, " frames (", pushes, " pushes) ---"
+    for i, n in names:
+      if rewindprof_n[i] == 0 and rewindprof[i] == 0: continue
+      let ms = rewindprof[i].float / 1e6
+      echo "    ", n.alignLeft(11), " calls=", align($rewindprof_n[i], 6),
+           "  total=", align(formatFloat(ms, ffDecimal, 2), 8), " ms",
+           "  per_push=", align(formatFloat(if pushes > 0: ms / pushes.float else: 0.0, ffDecimal, 4), 8), " ms",
+           "  per_frame=", align(formatFloat(ms / frames.float, ffDecimal, 4), 8), " ms",
+           "  share_of_run=", formatFloat(ms / (elapsed * 1000.0) * 100.0, ffDecimal, 2), "%"
+    echo "    payload bytes/push=", (if pushes > 0: rewindprof_bytes[0] div pushes else: 0),
+         "  delta bytes/push=", (if pushes > 0: rewindprof_bytes[2] div pushes else: 0)
 
 proc main() =
   let args = commandLineParams()
@@ -166,9 +218,24 @@ proc main() =
       fh.close()
       return
     for f in 0 ..< warmup: run_scripted(f)
+    let rw = make_bench_rewind()
+    let mode = rewind_mode()
+    template rewind_tick() =
+      if rw != nil:
+        if mode == "web":
+          discard rw.maybe_push(
+            proc(): string = emu.state_payload(),
+            proc(): RewindThumb =
+              RewindThumb(w: SCRUB_THUMB_W, h: GBA_SCRUB_THUMB_H,
+                          pixels: downscale_bgr555(emu.ppu.framebuffer, 240, 160,
+                                                   SCRUB_THUMB_W, GBA_SCRUB_THUMB_H)))
+        else:
+          discard rw.maybe_push(proc(): string = emu.state_payload())
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
-    for i in 0 ..< frames: run_scripted(warmup + i)
+    for i in 0 ..< frames:
+      run_scripted(warmup + i)
+      rewind_tick()
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
@@ -177,6 +244,23 @@ proc main() =
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
     if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
       echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0
+    report_rewind(rw, frames, elapsed)
+    # DINGBAT_BENCH_REWIND_VERIFY=1 proves the ring restores bit-exactly on a
+    # REAL game rather than on synthetic payloads: pop every retained snapshot,
+    # apply it to the live core, re-serialize, and require the bytes back.
+    # That covers the codec, the delta chain and the core's own load path in
+    # one gate.
+    if rw != nil and getEnv("DINGBAT_BENCH_REWIND_VERIFY") == "1":
+      var checked = 0
+      var bad = 0
+      while true:
+        let snap = rw.pop()
+        if snap.len == 0: break
+        emu.apply_state_payload(snap)
+        if emu.state_payload() != snap: bad.inc
+        checked.inc
+      echo "  rewind verify: ", checked, " snapshots restored, ", bad, " mismatches",
+           (if bad == 0: "  OK" else: "  *** FAILED ***")
     if emu.mp2k != nil and emu.mp2k_hle:
       echo "  mp2k: entry=0x", toHex(emu.mp2k.entry_addr, 8),
            " hook=0x", toHex(emu.mp2k.hook_addr, 8),
@@ -273,16 +357,43 @@ proc main() =
       return
 
     for f in 0 ..< warmup: run_scripted(f)
+    let rw = make_bench_rewind()
+    let mode = rewind_mode()
+    template rewind_tick() =
+      if rw != nil:
+        if mode == "web":
+          discard rw.maybe_push(
+            proc(): string = emu.state_payload(),
+            proc(): RewindThumb =
+              RewindThumb(w: SCRUB_THUMB_W, h: GB_SCRUB_THUMB_H,
+                          pixels: downscale_bgr555(emu.ppu.framebuffer, 160, 144,
+                                                   SCRUB_THUMB_W, GB_SCRUB_THUMB_H)))
+        else:
+          discard rw.maybe_push(proc(): string = emu.state_payload())
     total_cycles = 0
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
-    for i in 0 ..< frames: run_scripted(warmup + i)
+    for i in 0 ..< frames:
+      run_scripted(warmup + i)
+      rewind_tick()
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
          formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+    report_rewind(rw, frames, elapsed)
+    if rw != nil and getEnv("DINGBAT_BENCH_REWIND_VERIFY") == "1":
+      var checked = 0
+      var bad = 0
+      while true:
+        let snap = rw.pop()
+        if snap.len == 0: break
+        emu.apply_state_payload(snap)
+        if emu.state_payload() != snap: bad.inc
+        checked.inc
+      echo "  rewind verify: ", checked, " snapshots restored, ", bad, " mismatches",
+           (if bad == 0: "  OK" else: "  *** FAILED ***")
     echo "  cycles=", total_cycles, " mcps=",
          formatFloat(total_cycles.float / elapsed / 1e6, ffDecimal, 2)
     # Emulated cycles are the "same work?" check; instructions are the

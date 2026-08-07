@@ -652,24 +652,74 @@ proc apu_extract_state_events(gba: GBA) =
   take(gba.apu.channel3, etAPUChannel3, gba.apu.channel3.ch3_frequency_timer())
   take(gba.apu.channel4, etAPUChannel4, gba.apu.channel4.ch4_frequency_timer())
 
-proc gba_state_payload(gba: GBA): string =
+when defined(deltachar):
+  # EXPLORATORY (-d:deltachar): byte offset of each payload section, so a delta
+  # histogram can be attributed to EWRAM / IWRAM / VRAM / framebuffer / save
+  # rather than reported as one 604 KB blob.
+  var payloadSections*: seq[(string, int)] = @[]
+
+# ---- The in-process / file boundary -----------------------------------------
+#
+# `in_process` = true pads the scheduler section so the payload has a FIXED
+# length (see PAD_RATIONALE in common/scheduler.nim). It is what makes the
+# rewind ring's XOR delta align, and it is worth 8.5x on the delta size.
+#
+# It must be TRUE for payloads that stay in this process (the rewind ring,
+# rollback snapshots) and FALSE for anything that can reach a file, because
+# padded bytes are not the .state format and an older build could not read
+# them. The rule is enforced three ways:
+#
+#   1. The rule is drawn at the API, not per call site: the public
+#      state_payload / apply_state_payload family is ENTIRELY in-process and
+#      passes true. The file family — state_bytes, save_state,
+#      load_state_bytes, state_image — is entirely unpadded and reaches the
+#      private *_state_payload / *_apply_state with the default false. If you
+#      are adding a call and cannot tell which you want, ask whether the bytes
+#      can outlive the process.
+#   2. The default is false, so a new call site is unpadded unless it opts in.
+#   3. A mismatch cannot pass silently: the padding sits immediately before a
+#      section tag, so reading padded bytes as unpadded (or the reverse) trips
+#      expect_tag on the very next section and raises StateError. There is a
+#      dedicated regression test for the boundary in
+#      tests/savestate_compat_test.nim.
+
+proc gba_state_payload(gba: GBA; in_process = false): string =
   var w = Writer()
+  when defined(deltachar):
+    payloadSections.setLen(0)
+    template mark(name: string) = payloadSections.add((name, w.buf.len))
+  else:
+    template mark(name: string) = discard
+  mark("cpu")
   save_cpu_state(gba.cpu, w)
+  mark("bus(+ewram+iwram)")
   save_bus_state(gba.bus, w)
+  mark("sched")
   w.write_tag(GBA_SEC_SCHED)
   gba.apu_arm_state_events()
-  gba.scheduler.save_to(w)
+  gba.scheduler.save_to(w, pad = in_process)
   gba.apu_disarm_state_events()
+  mark("irq")
   save_irq_state(gba.interrupts, w)
+  mark("mmio")
   save_mmio_state(gba.mmio, w)
+  mark("keypad")
   save_keypad_state(gba.keypad, w)
+  mark("timer")
   save_timer_state(gba.timer, w)
+  mark("serial")
   save_serial_state(gba.serial, w)
+  mark("dma")
   save_dma_state(gba.dma, w)
+  mark("gpio")
   save_gpio_state(gba.bus.gpio, w)
+  mark("ppu(vram+pram+oam+fb)")
   save_ppu_state(gba.ppu, w)
+  mark("apu")
   save_apu_state(gba.apu, w)
+  mark("storage(sram)")
   save_storage_state(gba.storage, w)
+  mark("end")
   w.write_tag(GBA_SEC_END)
   w.buf
 
@@ -717,7 +767,8 @@ proc migrate_intr_wait_frame(gba: GBA) =
   cpu.r[2] = uint32(cpu.read_intr_mirror())
   cpu.set_sys_lr(0x34C'u32)
 
-proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
+proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
+                          in_process = false) =
   var r = Reader(buf: payload)
   load_cpu_state(gba.cpu, r, rev)
   if rev < 4 and gba.cpu.intr_wait_active and not gba.cpu.halted:
@@ -727,7 +778,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32) =
       "reconstructed — it would resume with a corrupted stack pointer")
   load_bus_state(gba.bus, r, rev)
   r.expect_tag(GBA_SEC_SCHED)
-  gba.scheduler.load_from(r)
+  gba.scheduler.load_from(r, pad = in_process)
   load_irq_state(gba.interrupts, r)
   load_mmio_state(gba.mmio, r)
   load_keypad_state(gba.keypad, r)
@@ -892,19 +943,23 @@ proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
 proc state_payload*(gba: GBA): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses
   ## (the rewind ring buffer). Frame boundaries only.
-  gba.gba_state_payload()
+  ##
+  ## in_process = true: this payload never reaches a file, so it is padded to
+  ## a fixed length. See the boundary note above.
+  gba.gba_state_payload(in_process = true)
 
 proc apply_state_payload*(gba: GBA; payload: string) =
   ## Apply a raw payload produced by state_payload. Raises StateError on
   ## corrupt input; no rollback — trusted callers only. Always this build's
   ## revision: the rewind ring and rollback snapshots never outlive the process.
-  gba.gba_apply_state(payload, GBA_PAYLOAD_VERSION)
+  gba.gba_apply_state(payload, GBA_PAYLOAD_VERSION, in_process = true)
 
 proc apply_state_payload*(gba: GBA; payload: string; rev: uint32) =
   ## As above, for a payload known to be in an OLDER revision. Exists so the
   ## format tests can exercise a migration without a whole state image; normal
-  ## load paths get their revision from the header.
-  gba.gba_apply_state(payload, rev)
+  ## load paths get their revision from the header. In-process like the other
+  ## overload: its callers hand it payloads produced by state_payload.
+  gba.gba_apply_state(payload, rev, in_process = true)
 
 const GBA_THUMB_W = 120
 const GBA_THUMB_H = GBA_THUMB_W * 160 div 240   # preserve 3:2 → 120x80
