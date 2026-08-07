@@ -2,7 +2,7 @@
 #
 # States are only ever written at frame boundaries (right after step_frame
 # returns), so no mid-instruction CPU state exists: bus.cycles has just been
-# reset, count_cycles is per-frame scratch, and entered_waitloop is transient
+# reset, frame progress is derived from the scheduler, and entered_waitloop is transient
 # within a tick. Deterministic caches (waitloop detection sets, the fetch-page
 # fast path) are rebuilt instead of serialized. The ROM itself is not stored;
 # the header carries a checksum + size so the right ROM must already be loaded.
@@ -92,7 +92,6 @@ proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
     # retrofits the frame afterwards (see migrate_intr_wait_frame) for the
     # states where that is provably safe, and refuses the rest.
     cpu.halt_resume_pop = false
-  cpu.count_cycles = 0
   cpu.entered_waitloop = false
 
 # ---- Bus ----

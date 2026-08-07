@@ -30,7 +30,6 @@ proc new_cpu*(gba: GBA): CPU =
     spsr: cast[PSR](uint32(modeSYS)),
     pipeline: Pipeline(),
     halted: false,
-    count_cycles: 0,
     attempt_waitloop_detection: true,
     cache_waitloop_results: true,
     branch_dest: 0,
@@ -332,8 +331,9 @@ when defined(gsprobe):
   var gsProbeIn*: bool
 
 const NO_HLE_HOOK* = 0xFFFFFFFF'u32
-  ## hle_hook_pc sentinel: no audio-HLE hook armed. A real hook PC is a
-  ## RAM-resident instruction address, so this can never collide.
+  ## hle_gate value meaning "the MP2K learning probe is running, no hook armed
+  ## yet". A real hook PC is a RAM-resident instruction address and the
+  ## pre-pipeline PC is never 0xFFFFFFFF, so this can never collide.
 
 proc refresh_hle_hook*(gba: GBA) =
   ## Recompute the CPU's collapsed audio-HLE hook sentinel. Called once per
@@ -352,8 +352,9 @@ proc refresh_hle_hook*(gba: GBA) =
       elif gba.mp2k.probing: probing = true
     if pc == NO_HLE_HOOK and gba.gs_bon != nil and gba.gs_bon.engaged:
       pc = gba.gs_bon.hook_addr
-  gba.cpu.hle_hook_pc = pc
-  gba.cpu.hle_probing = probing
+  gba.cpu.hle_gate = if pc != NO_HLE_HOOK: pc
+                     elif probing: NO_HLE_HOOK
+                     else: 0'u32
 
 proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
   ## Run whichever audio-HLE hook is armed at `cur`. Returns true when the
@@ -429,11 +430,12 @@ proc tick*(cpu: CPU) =
     # host time than the mixing itself. They now share one sentinel compare
     # (see refresh_hle_hook); the work moves out of line into fire_hle_hook.
     # With HLE off this is a single load and a perfectly-predicted branch.
-    if cpu.hle_hook_pc != NO_HLE_HOOK or cpu.hle_probing:
+    let gate = cpu.hle_gate
+    if gate != 0:
       let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-      if cur == cpu.hle_hook_pc:
+      if cur == gate:
         if cpu.fire_hle_hook(cur): return
-      elif cpu.hle_probing:
+      elif gate == NO_HLE_HOOK:
         # Learning probe (bounded: engine-init to first mixer pass). Inline
         # prefilter: RAM-region PC and r0 == &SoundInfo; the out-of-line probe
         # does the lock check and the learn.
@@ -488,7 +490,6 @@ proc tick*(cpu: CPU) =
     if total == 0: remaining = 1  # forward-progress guarantee
     cpu.gba.bus.cycles = 0
     cpu.gba.bus.synced = 0
-    cpu.count_cycles += max(1, total)
     if cpu.entered_waitloop:
       # An idle loop only re-reads what it polls once per skip, so the skip
       # length IS that loop's sampling resolution, and the loop body's own

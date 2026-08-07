@@ -269,6 +269,7 @@ proc render_windows*(d: GbaDebug) =
                        addr d.gba.cpu.attempt_waitloop_detection)
     discard igCheckbox("Cache waitloop results",
                        addr d.gba.cpu.cache_waitloop_results)
-    let progress = cfloat(d.gba.cpu.count_cycles) / 280896.0'f32
+    let elapsed = d.gba.scheduler.cycles - d.gba.frame_start_cycles
+    let progress = cfloat(elapsed) / 280896.0'f32
     igProgressBar(progress, ImVec2(x: 0, y: 0), nil)
     igEnd()

@@ -22,7 +22,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, format, *args):
-        pass  # silence request logs
+        # Worktree-only: the bench page reports its result by requesting
+        # /__benchresult?<payload>, which is how a browser that cannot be
+        # driven from the shell (Safari) delivers numbers. Keep the log.
+        super().log_message(format, *args)
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 httpd = http.server.HTTPServer(("", 8765), Handler)

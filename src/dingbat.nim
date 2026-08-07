@@ -1,4 +1,4 @@
-import std/[os, hashes, math, parseopt, strformat, strutils, tables, times]
+import std/[os, hashes, math, parseopt, strformat, strutils, tables, times, algorithm]
 import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
@@ -788,6 +788,67 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
 
+when defined(gputime):
+  # Throwaway instrument (-d:gputime): GL_TIME_ELAPSED around the game quad,
+  # so the cost of an upscale filter can be measured at a real window size
+  # instead of extrapolated from the web build's fixed 960x640 backing store.
+  # Prints a line a second: viewport, median/p90 GPU ms for the game draw.
+  var gpuq: array[8, GLuint]
+  var gpuq_init = false
+  var gpuq_slot = 0
+  var gpu_samples: seq[float]
+  var gpu_last_report = getTime()
+  var gpu_sweep_step = 0
+
+  proc gpu_begin() =
+    if not gpuq_init:
+      glGenQueries(GLsizei(gpuq.len), addr gpuq[0])
+      gpuq_init = true
+    else:
+      # harvest the slot we are about to reuse (8 frames of latency)
+      var avail: GLint
+      glGetQueryObjectiv(gpuq[gpuq_slot], GL_QUERY_RESULT_AVAILABLE, addr avail)
+      if avail != 0:
+        var ns: GLuint64
+        glGetQueryObjectui64v(gpuq[gpuq_slot], GL_QUERY_RESULT, addr ns)
+        gpu_samples.add(float(ns) / 1e6)
+    glBeginQuery(GL_TIME_ELAPSED, gpuq[gpuq_slot])
+
+  proc gpu_end() =
+    glEndQuery(GL_TIME_ELAPSED)
+    gpuq_slot = (gpuq_slot + 1) mod gpuq.len
+    let now = getTime()
+    if (now - gpu_last_report).inMilliseconds >= 2000 and gpu_samples.len > 8:
+      gpu_last_report = now
+      var v = gpu_samples
+      v.sort()
+      var w, h: cint
+      getSize(app.window, w, h)
+      echo "GPUTIME viewport=", w, "x", h,
+           " filter=", $app.cfg.video_filter,
+           " scanlines=", app.cfg.scanlines,
+           " colorcorrect=", app.cfg.color_correction,
+           " frameblend=", app.cfg.frame_blend,
+           " n=", v.len,
+           " median_ms=", formatFloat(v[v.len div 2], ffDecimal, 4),
+           " p90_ms=", formatFloat(v[(v.len * 9) div 10], ffDecimal, 4),
+           " emu_fps=", formatFloat(emu_fps, ffDecimal, 1)
+      gpu_samples.setLen(0)
+      # DINGBAT_GPUTIME_SWEEP=1 walks the present-path settings itself, one
+      # per report, so a whole matrix comes out of a single launch instead of
+      # a dozen windows.
+      if getEnv("DINGBAT_GPUTIME_SWEEP") == "1":
+        gpu_sweep_step.inc
+        case gpu_sweep_step
+        of 1: app.cfg.video_filter = vfNone;  app.cfg.scanlines = false
+        of 2: app.cfg.video_filter = vfHq4x
+        of 3: app.cfg.video_filter = vfXbr
+        of 4: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
+        of 5: app.cfg.scanlines = false;      app.cfg.color_correction = false
+        of 6: app.cfg.color_correction = true; app.cfg.frame_blend = true
+        of 7: app.cfg.frame_blend = false
+        else: echo "GPUTIME sweep done"; app.running = false
+
 proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
@@ -808,7 +869,9 @@ proc render_game() =
     # previous frame decays instead of freezing on screen
     if app.cfg.frame_blend or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
+    when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    when defined(gputime): gpu_end()
   of ekGB:
     if app.gb_emu == nil: return
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
@@ -1836,7 +1899,7 @@ proc main() =
     cheats:          new_cheats_widget(),
     save_states:     new_save_states_widget(),
     dbg:             nil,
-    scale:           3,
+    scale:           (when defined(gputime): parseInt(getEnv("DINGBAT_SCALE", "3")) else: 3),
     running:         true,
     paused:          false,
     fullscreen:      false,

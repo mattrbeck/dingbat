@@ -337,7 +337,6 @@ type
     # out of halt as out of running execution (see cpu.irq), so nothing reads
     # this any more; it stays because it is part of the serialized CPU state.
     halt_wake*:   bool
-    count_cycles*: int
     # HLE IntrWait state: while active, the CPU re-halts at resume_addr until
     # the user IRQ handler ORs one of the masked flags into the BIOS interrupt
     # flags mirror at 0x03007FF8
@@ -365,6 +364,11 @@ type
     # re-analyzes the same backward branch every iteration (1 = no entry;
     # thumb addresses are always even)
     last_non_waitloop*:          uint32
+    # And the same in front of identified_waitloops. A loop that IS a waitloop
+    # re-enters analyze_loop on every one of its iterations and hit the
+    # HashSet each time; `contains` was 1.4% of all samples on FireRed.
+    # 0 = no entry (a waitloop start is always a ROM address).
+    last_waitloop*:              uint32
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # Audio-HLE hook dispatch, collapsed to one hot-path compare. The MP2K
@@ -373,12 +377,19 @@ type
     # testing each one's enable flag + pointer + address every instruction
     # cost more than the mixing itself. Instead every arming site calls
     # refresh_hle_hook, which folds them into a single sentinel:
-    #   hle_hook_pc  -- the pre-pipeline PC that fires a hook, or NO_HLE_HOOK
-    #   hle_probing  -- true only during the bounded MP2K learning probe
-    # Both are false/sentinel whenever audio HLE is off, so the non-HLE path
-    # pays one load and one perfectly-predicted branch.
-    hle_hook_pc*:                uint32
-    hle_probing*:                bool
+    #   0             -- nothing armed (and the zero-init value, so a freshly
+    #                    constructed CPU is already in the disarmed state)
+    #   NO_HLE_HOOK   -- the bounded MP2K learning probe is running
+    #   anything else -- the pre-pipeline PC that fires a hook
+    # One word, so the non-HLE path really is one load and one
+    # perfectly-predicted branch. It was two of each while the probe lived in
+    # a separate bool, and that second pair measured 2.5% of all retired
+    # instructions on FireRed with audio HLE OFF.
+    #
+    # The three states cannot collide. A hook PC is a RAM instruction address,
+    # so it is never 0; and the pre-pipeline PC can never be NO_HLE_HOOK,
+    # which is the assumption the sentinel already rested on.
+    hle_gate*:                   uint32
 
   SpritePixel* = object
     priority*: uint16
@@ -893,6 +904,11 @@ type
     use_hle*:        bool
     hle_after_bios*: bool
     scheduler*:      Scheduler
+    # Emulated cycle at which the current frame started, so a frame-progress
+    # readout can be derived instead of counted. CPU.count_cycles used to
+    # accumulate `max(1, total)` on EVERY instruction for one debug progress
+    # bar; stubbing that add out measured 2.2% of all retired instructions.
+    frame_start_cycles*: CycleCount
     cartridge*:  Cartridge
     storage*:    Storage
     mmio*:       MMIO
@@ -1265,7 +1281,7 @@ proc step_frame*(gba: GBA) =
   # the CPU's single hot-path hook sentinel. Unconditional: this is also what
   # disarms the hook when the setting is turned off or a driver tears down.
   gba.refresh_hle_hook()
-  gba.cpu.count_cycles = 0
+  gba.frame_start_cycles = gba.scheduler.cycles
   while gba.ppu.frame == 0:
     gba.cpu.tick()
   gba.end_frame()

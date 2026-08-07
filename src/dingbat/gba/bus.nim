@@ -48,6 +48,17 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
       if e mod s == s - 1: m = m or (1'u64 shl e)
     bus.pf_commit[page] = m
 
+when defined(fetchprof):
+  # EXPLORATORY (branch-only): where the ROM access path actually goes on a
+  # real workload. Indices:
+  #   0 fetch_half hot   1 fetch_half slow   2 fetch_word hot   3 fetch_word slow
+  #   4 rac fetch calls  5 rac data calls
+  #   6 rac prefetch-hit 7 rac plain-seq     8 rac nonseq
+  #   9 rac went hot after
+  #  10 rac prefetch-hit with credit >= need (cost floor 1)
+  #  11 rac prefetch-hit with zero credit
+  var fetchprof*: array[16, uint64]
+
 proc bus_now(bus: Bus): CycleCount {.inline.} =
   bus.sched.cycles + CycleCount(bus.cycles)
 
@@ -101,6 +112,8 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       bus.rom_next_addr = address
   else:
     seq = address == bus.rom_next_addr and (bus.prefetch_on or contiguous)
+  when defined(fetchprof):
+    fetchprof[if fetch: 4 else: 5].inc
   var cost: int
   var new_free_since: CycleCount
   if seq:
@@ -122,12 +135,18 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       let done = now + CycleCount(cost)
       let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
       new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+      when defined(fetchprof):
+        fetchprof[6].inc
+        if credit >= need: fetchprof[10].inc
+        if credit == 0: fetchprof[11].inc
     else:
       cost = int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
       new_free_since = now + CycleCount(cost)
+      when defined(fetchprof): fetchprof[7].inc
   else:
     cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
     new_free_since = now + CycleCount(cost)
+    when defined(fetchprof): fetchprof[8].inc
   if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
      bus.fetch_page - 0x8 <= 5:
     # Prefetch hand-off. A CPU *data* access to the gamepak takes the ROM bus
@@ -155,6 +174,72 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       cost += 1
       new_free_since += 1
   bus.rom_next_addr = address + (if is32: 4'u32 else: 2'u32)
+  bus.rom_free_since = new_free_since
+  cost
+
+proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
+                      is32: static bool): int {.inline.} =
+  ## Fetch-only specialisation of `rom_access_cycles`, for the CPU instruction
+  ## fetch path in `fetch_half`/`fetch_word`.
+  ##
+  ## Why it exists: `rom_access_cycles` is marked {.inline.} but is far too
+  ## large for clang to honour that, so every slow-path instruction fetch pays
+  ## a real call — and it is the single hottest non-inlined leaf in the
+  ## profile (7.9% of all samples on FireRed, 569 of its 600 samples reached
+  ## from `fetch_half`). Two of the three branch clusters in it are dead on a
+  ## fetch: the DMA burst trackers (a DMA is not the CPU, and the caller
+  ## routes `dma_active` back to the general proc) and the prefetch hand-off,
+  ## which is `not fetch` by construction. What is left is small enough to
+  ## inline, and `is32` being static folds the remaining selects away.
+  ##
+  ## This is a *duplicate* of the fetch-relevant half of `rom_access_cycles`,
+  ## not a refactor of it, so the two must be kept in step by hand. The
+  ## framebuffer-hash A/B and the mGBA Timing suite are what catch a drift.
+  let now = bus.bus_now()
+  let contiguous = now == bus.rom_free_since
+  var cost: int
+  var new_free_since: CycleCount
+  if address == bus.rom_next_addr and (bus.prefetch_on or contiguous):
+    if bus.prefetch_on and not contiguous:
+      # Same arithmetic as rom_access_cycles' prefetch-hit branch, with the
+      # `floor` term hoisted into the one case that can actually reach it.
+      #
+      # Write gap = now - rom_free_since and cap = 8*s (a full buffer). The
+      # general form is new_free_since = max(rom_free_since + need, done - cap)
+      # with done = now + cost, and for gap <= cap the max is ALWAYS the first
+      # term:
+      #   gap <  need   cost = need - gap, so done = rom_free_since + need
+      #                 exactly, and done - cap is below it.
+      #   gap >= need   cost = 1, so done - cap = rom_free_since + gap+1-cap,
+      #                 and gap <= cap makes gap+1-cap <= 1 <= need.
+      # Only a gap LONGER than a full buffer — the CPU off the ROM bus long
+      # enough that the prefetcher filled up and stopped — can push the floor
+      # above rom_free_since + need, which is exactly what the term is for.
+      # So the common path drops an add, a compare, a subtract and a max.
+      let s = int(bus.wait16_s[page])
+      let cap = 8 * s
+      let need = when is32: 2 * s else: s
+      if now <= bus.rom_free_since:
+        # Waitloop fast-forward pushed rom_free_since past `now`: no credit.
+        cost = need
+        new_free_since = bus.rom_free_since + CycleCount(need)
+      else:
+        let gap = int(now - bus.rom_free_since)
+        if gap <= cap:
+          cost = max(1, need - gap)
+          new_free_since = bus.rom_free_since + CycleCount(need)
+        else:
+          cost = max(1, need - cap)
+          let done = now + CycleCount(cost)
+          let floor = if done > CycleCount(cap): done - CycleCount(cap) else: 0
+          new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
+    else:
+      cost = int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
+      new_free_since = now + CycleCount(cost)
+  else:
+    cost = int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    new_free_since = now + CycleCount(cost)
+  bus.rom_next_addr = address + (when is32: 4'u32 else: 2'u32)
   bus.rom_free_since = new_free_since
   cost
 
@@ -720,14 +805,21 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
       # (unbroken), a sequential fetch is a plain S access and needs no
       # absolute-time bookkeeping at all
       if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[0].inc
         bus.cycles += int(bus.wait16_s[page])
         bus.rom_next_addr = address + 2
       else:
+        when defined(fetchprof): fetchprof[1].inc
         bus.rom_cool()
-        bus.cycles += bus.rom_access_cycles(address, is32 = false, fetch = true)
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = false, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = false)
+        bus.cycles += c
         # Go hot only when no prefetch credit is left over; leftover credit
         # must keep flowing through the slow path to be consumed
-        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
     else:
       bus.cycles += bus.fetch_c16
     read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
@@ -739,12 +831,19 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
   if page == bus.fetch_page or bus.install_fetch_cache(page):
     if page >= 0x8:
       if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[2].inc
         bus.cycles += int(bus.wait32_s[page])
         bus.rom_next_addr = address + 4
       else:
+        when defined(fetchprof): fetchprof[3].inc
         bus.rom_cool()
-        bus.cycles += bus.rom_access_cycles(address, is32 = true, fetch = true)
-        if bus.rom_free_since == bus.bus_now(): bus.rom_hot = true
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = true, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = true)
+        bus.cycles += c
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
     else:
       bus.cycles += bus.fetch_c32
     read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
