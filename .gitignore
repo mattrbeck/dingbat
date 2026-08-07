@@ -125,3 +125,7 @@ dingbat_bench_orig
 /dtr_*
 web/*.gba
 /dingbat_sgb_test
+/dingbat_printer_test
+/dingbat_ts_test
+/dingbat_savestate_compat_test
+/dingbat_rewind_test

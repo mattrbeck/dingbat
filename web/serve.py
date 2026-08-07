@@ -25,6 +25,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass  # silence request logs
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-httpd = http.server.HTTPServer(("", 8781), Handler)
-print("Serving at http://localhost:8781")
+httpd = http.server.HTTPServer(("", 8765), Handler)
+print("Serving at http://localhost:8765")
 httpd.serve_forever()

@@ -1,18 +1,50 @@
 # Super Game Boy: borders and palettes
 
-Investigated 2026-08-06 on branch `agent-sgb`. Nothing here is on `main`.
+Investigated and built 2026-08-06/07 on branch `agent-sgb`. Not on `main`.
 
-The question was whether dingbat can grow SGB border and palette support in
-both frontends, what it costs, and what it breaks. Short answer: **the core
-half is small, well specified, and already works — a prototype on this branch
-decodes the real packet protocol and produces a pixel-exact colorized screen
-and a 256x224 border. The expensive half is the frontends, and the expense is
-almost entirely about the output surface changing shape.**
+**Status: shipped end to end on this branch.** The core decodes the real
+command-packet protocol, colourises the screen per attribute cell and decodes
+the 256x224 border; both frontends composite it; both have settings toggles;
+save states carry it. Verified on Pokemon Blue (a real SGB-enhanced cart) in
+the native GL path and in headless Chromium, and on Zelda: Link's Awakening DX
+(SGB flag *and* CGB flag) for the mode-priority case.
 
 Spec source is Pan Docs (`SGB_Command_Packet.md`, `SGB_VRAM_Transfer.md`,
 `SGB_Color_Palettes.md`, `SGB_Command_{Palettes,Attribute,Border,System,
-Multiplayer}.md`, `SGB_Unlocking.md`). No emulator source was read for the
-decode.
+Multiplayer}.md`, `SGB_Unlocking.md`). No emulator source was read.
+
+## 0. The three things that were not obvious
+
+Everything else in this document is bookkeeping. These three cost the time.
+
+**A VRAM transfer is read out of the display, not out of 0x8000.** Pan Docs
+says the data is "normally" at 0x8000-0x8FFF and that the SNES "will
+automatically re-produce the same ordering of bits and bytes". That sentence
+describes the common case, not the mechanism. The mechanism is the
+precondition list right above it -- characters $00-$FF on screen, $00..$13 on
+the first line, display enabled, no scroll, BGP = $E4 -- which is what makes
+the picture equal to those bytes. All three of Pokemon Blue's transfers run
+with LCDC = 0xE3, i.e. LCDC.4 clear, so character $00 lives at 0x9000 and a
+flat 0x8000 read returns mostly zeroes: empty tilemap, black palettes, no
+border, while the packet decode itself is already perfect. `sgb_read_transfer`
+walks the display instead -- per character, the screen cell it occupies, the
+BG map there (honouring SCX/SCY and LCDC.3), the tile through LCDC.4's
+addressing mode. Identical to the flat read when the preconditions hold.
+
+**The idle level of the P1 select lines is load-bearing.** The receiver takes
+bits on falling edges, so the "previous lines" latch has to start at both-high
+or a game's very first reset pulse is not an edge and its first packet is
+dropped. For a border game that packet is `CHR_TRN`, so the palettes come out
+perfect and the border comes out entirely transparent -- which reads as a
+tile-decode bug and is not one.
+
+**The desktop vertex shader emits a negative V.** `VERT_SRC` flips the image
+with `/ vec2(2.0, -2.0)`, so `tex_coord.y` runs 0 -> -1 and every texture
+fetch is out of range, brought back only by the default `GL_REPEAT` wrap. The
+border texture was given `CLAMP_TO_EDGE` -- which is what "sampled at exactly
+the quad's extent" argues for -- and that pinned the whole border to row 0.
+It renders as vertical stripes. The same flip is why the Game Boy window
+rectangle has to be computed in un-flipped space and flipped back.
 
 ---
 
@@ -192,77 +224,87 @@ Both renderers need the hook (3 edit sites in `scanline_ppu.nim`, 1 in
 `fifo_ppu.nim`). The prototype does both and the test asserts they agree
 pixel-for-pixel.
 
-### 3.2 The border: **the frontend composites, the core does not**
+### 3.2 The border: the frontend composites, the core does not
 
-The border is 256x224; the GB screen is 160x144 centred at (48, 40). Three
-options:
+The border is 256x224; the Game Boy screen is 160x144 centred at (48, 40).
+The core keeps emitting 160x144 and exposes the border as a **second surface**:
+`gb.sgb.border`, 256x224 BGR555 with bit 15 (unused by the colour format)
+meaning "opaque". SNES colour index 0 stays transparent, which is exactly how
+borders that *cover* the Game Boy window (Mario's Picross, WildSnake) work.
 
-| | Core emits 256x224 | Core hands over a second surface | Frontend decodes SGB itself |
-|---|---|---|---|
-| blast radius | every 160/144 constant, thumbnails, netplay, rewind, touch layout, screenshots | one new export per frontend | duplicate protocol in Nim and JS |
-| filters | scanlines/hq4x/xBR/colour-correction hit the border too | frontend chooses per layer | — |
-| GB paths when border is off | changed | **byte-identical** | — |
+Why not have the core emit a bigger frame: thumbnails, the rewind ring, the
+netplay frame transport, the printer, the Pocket Camera, the link/rollback
+blit paths and every 160x144 literal in both frontends would all have had to
+move, and the picture would only be 256x224 for part of a session anyway. As a
+second surface, **all of those are byte-identical when the border is off** --
+measured, see §6.
 
-**Recommendation: the middle column.** The core owns SGB decode and produces
-`sgb.border`, a 256x224 `seq[uint16]` where bit 15 (unused by BGR555) means
-"opaque"; colour index 0 stays transparent, which is exactly how borders that
-*cover* the GB window (Mario's Picross, WildSnake) work. The frontend then:
+Why not decode SGB in the frontends: the protocol would exist twice, in Nim
+and in JS, and the state would not be in save states.
 
-1. draws the border texture over the whole quad — **nearest, no upscale
-   filter**: the border is native SNES art at 1:1, and hq4x/xBR on it looks
-   wrong;
-2. draws the existing GB texture into the centred 160x144 sub-rect with every
-   filter it applies today;
-3. draws the border again (or uses the alpha in one pass) so opaque border
-   pixels win.
+Both frontends composite in **one pass with two samplers**: opaque border wins,
+else the Game Boy window with every filter it already gets, else the SGB
+backdrop (colour 0). Border art is native SNES output, so it takes neither the
+LCD colour-correction curve nor the upscale filters -- those are tuned for 2bpp
+pixel art and smear 4bpp tiles.
 
-In practice one pass with two samplers is simpler than three draws: sample the
-border, and if its bit 15 is clear, sample the GB texture at the remapped UV.
+The scanline pitch had to become its own uniform (`scan_height` /
+`u_scan_height`). With a border the picture is 224 native rows and both layers
+live in it, so a single `fract(uv.y * 224)` is correct for the composite;
+feeding the sampled texture's height (144) instead puts Game Boy scanlines
+over SNES art.
 
-This is the option that keeps `ppu.framebuffer`, save-state thumbnails,
-rewind thumbnails, netplay frame transport, the printer, the Pocket Camera and
-every 160x144 literal exactly as they are.
+The border image is re-uploaded only when a generation counter
+(`SgbState.border_gen`) moves. It changes a handful of times in a session and
+is 112 KiB.
 
-### 3.3 Everything the bigger surface touches
+### 3.3 Aspect ratio and letterboxing (native)
 
-**Native** (`src/dingbat.nim` is the whole frontend; the widgets never touch
-the game texture):
+dingbat stretched the game quad across the whole window. That is invisible
+while the window keeps the size `load_rom` gave it and obviously wrong the
+moment it does not -- fullscreen on a 16:9 panel stretched a 10:9 Game Boy
+picture by 1.6x horizontally. A border makes it worse, because the picture
+changes from 10:9 to 8:7 part way into a session.
 
-| Site | Today | With a border |
-|---|---|---|
-| `:29-32` `GB_W/GB_H/GBA_W/GBA_H` | four consts | a fifth pair, or a runtime `(w, h)` |
-| `:524-526` texture alloc | one `GL_RGB5` texture | a second texture for the border |
-| `:443-446` `apply_panel_uniforms` | `tex_width`/`tex_height` uniforms | must describe the GB layer, not the quad — **the scanline pitch is `fract(uv.y * tex_height)`, so getting this wrong makes scanlines land on the border at the wrong pitch** |
-| `:170-177` `FRAG_SRC` main | one sample | two samplers + a UV remap |
-| `:493` / `:502` / `:1007-1008` window sizing | `GB_W*scale` | `256*scale`, and the aspect changes 10:9 → 8:7 |
-| `:1320-1325` viewport | full window, quad stretched — **there is no letterboxing at all today** | unchanged, but the stretch is now to a different aspect |
-| `:717-747` `save_screenshot` | reads the *core* framebuffer at 160x144, replicates colour correction in CPU float math | must composite the border too, or screenshots silently lose it |
-| `:815-826` rumble jitter | offsets the viewport ±1 px | unchanged |
-| `frontend/gb_debug.nim:208` | BG-map overlay `160 * MAP_SCALE` | unaffected |
+So `game_viewport()` now letterboxes, under a new `preserve_aspect` setting
+(default on), and the window resizes once on the edge where a border appears
+or disappears -- the way a console changes video mode. The letterbox bars are
+black behind a game; the brand purple stays the empty-app backdrop.
+
+### 3.4 Everything the bigger surface touched, and what happened to it
+
+**Native** (`src/dingbat.nim` is the whole frontend):
+
+| Site | Resolution |
+|---|---|
+| `GB_W/GB_H/GBA_W/GBA_H` consts | joined by `output_size()`, which returns 256x224 while a border is on screen |
+| texture allocation | second `GL_RGB5_A1` texture on unit 1; `1_5_5_5_REV` puts BGR555 in RGB and the opaque bit in A with no conversion |
+| `apply_panel_uniforms` | also binds the two samplers to units 0 and 1 — without that the border sampler defaults to unit 0 and samples the game as its own border |
+| `FRAG_SRC` main | two samplers, a UV remap, and `scan_height` split out of `tex_height` |
+| window sizing (3 sites) | all go through `resize_to_output()` |
+| viewport | `game_viewport()` letterboxes; the rumble jitter offsets that rect instead of the window |
+| `save_screenshot` | composites the border the same way the shader does, or screenshots would silently lose it |
 
 **Web**:
 
-| Site | Note |
+| Site | Resolution |
 |---|---|
-| `web/index.js:4828-4830` `nativeRes()` | derived from the **ROM filename extension**, not from wasm. A border needs a real wasm signal — extend `wasm_panel_gbc` to a kind/size export, and add it to the `EXPORTED_FUNCTIONS` list in `src/dingbat_wasm.nims:16` and `web/types/em.d.ts` |
-| `web/index.js:4832-4900` `updateCanvasScaling` | backing store `native * GL_SCALE(4)`; publishes `--game-ar` from the live backing store; integer-scale and contain-fit branches both key off it. A 256x224 surface is 8:7 = 1.143 vs 10:9 = 1.111 — small, but it changes the CSS box |
-| `web/styles.css:1605-1616` `#canvas` | `aspect-ratio: var(--game-ar, 1.5)` — driven from JS, so it follows automatically |
-| `web/styles.css:4215-4222` `body.gb-mode` | hides the shoulder row and gives the vertical space to the stage. A border makes the frame *shorter and wider*, so the portrait touch layout gets slightly more room — no regression, but the short-portrait breakpoint at `:4232` reasons about a 3:2 canvas needing ~213px and should be re-checked |
-| `web/styles.css:4791-4815` tablet rails | `#stage` padding is subtracted in JS; unaffected |
-| `web/embed.css:19-56` | an integer-multiple ladder that is **GBA-only** — the embed already has no 10:9 tier, so it is already wrong for GB and a border does not make it worse |
-| `web/glpresent.js` | contains **zero** hardcoded dimensions (`nativeRes` is injected) — the cleanest file to extend. Needs a second `usampler2D`, a `u_border` flag, and the UV remap |
-| `web/glshaders.mjs` | extracts the `VERT`/`FRAG` template literals **as text by regex**. Renaming them or nesting a backtick breaks `uv.test.mjs` and `render.test.mjs` |
-| thumbnails (`index.js:3726-3753`), glow (`:4914`), paused card (`:7315`), bug-report preview (`:4013`) | all call `nativeRes()`; all would show the border unless they explicitly ask for the GB layer. **Recommend: thumbnails and the paused card keep 160x144** — a 120px-wide thumbnail of a bordered frame is mostly border |
-| `web/index.js:7392-7404` `captureCanvas` | `toBlob` on the backing store, so it gets the border for free |
+| `nativeRes()` (was derived from the **ROM filename**) | new `_wasm_out_w` / `_wasm_out_h` are authoritative; the filename check survives only as the bootstrap answer for the frame before the core exists, and for GBA |
+| the four `_wasm_fb_ptr` consumers (thumbnails, ambient glow, paused card, bug-report preview) | new `gameRes()` — they want the console framebuffer, and a 256x224 heap view over a 160x144 buffer would walk off the end. They also look better without the border |
+| `updateCanvasScaling` | unchanged; it already derives everything from `nativeRes()`. `drawGame` watches for the size changing and re-runs it |
+| `--game-ar` | follows automatically: 8:7 = 1.1428 with a border, verified live |
+| `glpresent.js` | second `usampler2D` on unit 1, `u_sgb_border`, `u_sgb_backdrop`, `u_scan_height` |
+| `web/embed.js` | same authoritative `nativeRes()` |
+| touch layout | no change needed. A border makes the frame shorter and wider, so portrait gets *more* room; verified at 390x844 and 844x390 |
+| DMG shade palette | see below |
 
-**The DMG-palette interaction (web).** `glpresent.js:63-74` substitutes the
-four `DMG_COLORS` words, and `:136` makes a chosen palette bypass LCD colour
-correction. When SGB colour is active the framebuffer no longer contains those
-words, so substitution no-ops — correct, but the UI must say so. Gate the
-"Shade palette" control on `!sgbActive`, the same way it is already gated on
-`gbMonoPanel`.
-
----
+**The shade-palette collision, handled rather than deferred.** The web's
+`u_dmg_remap` works by substituting the four exact `DMG_COLORS` words in the
+shader. An SGB-colourised framebuffer contains none of them, so the feature
+silently stops doing anything. `drawGame` now stops passing the palette once
+the adapter is active, and the control is **disabled with a sentence saying
+why** ("This game is running as a Super Game Boy and is drawing its own
+colors...") instead of being left live and inert.
 
 ## 4. Save states
 
@@ -276,7 +318,7 @@ palettes (4 KiB), 45 attribute files (4050 B), 256 border tiles (8 KiB), the
 and the packet-decode state machine (which genuinely must be saved — a state
 taken mid-packet has to resume mid-packet).
 
-**Correct handling, implemented in the prototype:**
+**What shipped:**
 
 * new section tag `GB_SEC_SGB = 0xBB`, written **only when `gb.sgb != nil`**;
 * `GB_PAYLOAD_VERSION` 4 → 5, **`STATE_VERSION` untouched at 7** — so no GBA
@@ -285,9 +327,11 @@ taken mid-packet has to resume mid-packet).
   SGB machine with a fresh `SgbState`, which an SGB game re-establishes within
   a few frames anyway (games re-send palette/attribute commands on every
   screen change);
-* derived, not serialized: the decoded 256x224 `border` image (re-rendered
-  from `chr`/`map`/`border_pal` on the first frame after a load) and the two
-  `GbPpu` hook pointers (re-attached by `sgb_attach`).
+* derived, not serialized: the decoded 256x224 `border` image and the two
+  `GbPpu` hook pointers (re-attached by `sgb_attach`). The border is
+  re-rendered **inline in the loader**, not flagged dirty for the next frame:
+  both frontends size the window from `border_valid`, so a deferred render
+  would make a state load blink 256x224 → 160x144 → 256x224.
 
 `tests/savestate_compat_test.nim` passes unchanged: the committed corpus of
 GB rev 1/2/3 states still loads.
@@ -319,156 +363,183 @@ Three inputs, in this order:
    suite) should then be able to fall through to SGB.
 3. **A user toggle**, default on.
 
-So: **auto-detected, with an off switch.** Not a per-game prompt.
+So: **auto-detected, with an off switch.** Not a per-game prompt. Verified on
+Zelda LADX, which carries both flags and runs as a Game Boy Color in both
+frontends.
 
-The prototype also promotes `boot_model` `bmDmgABC` → `bmSgb` when the adapter
-attaches, so `C = 0x14` detection works. That is a behaviour change for SGB
-carts (different boot register seeds and DIV phase) and belongs in the same
-commit as the adapter, not before it.
+Attaching the adapter also promotes `boot_model` `bmDmgABC` → `bmSgb`, so the
+`C = 0x14` detection Pan Docs documents works. That changes the boot register
+seeds and the DIV phase for SGB carts, and it is gated by the same opt-in —
+which is why Pokemon Blue with SGB *off* still hashes identically to `main`.
 
 ### Native (ImGui)
 
-The frontend has four menus — File, Emulation, Audio/Video, Debug — and a
-Settings window with tabs Keybindings / Video / Controller / BIOS. There is
-**no per-system video section**: `frontend/video_widget.nim` is one flat pane
-whose only GB-specific control is the FIFO/scanline renderer radio, and
-"LCD Color Correction" lives in the menu bar instead. Match that rather than
-inventing:
+**Settings ▸ Video**, in a "Super Game Boy:" group under the FIFO/scanline
+renderer radio (the existing GB group; the frontend has no per-system video
+section and inventing one for two checkboxes would have been worse):
 
-* **Settings ▸ Video**, directly under the FIFO/scanline radio (the existing
-  GB group): `[x] Super Game Boy mode` and `[x] Show SGB border`, the second
-  disabled while the first is off — the same "disabled while suspended"
-  pattern `video_widget.nim:43-48` already uses for scanlines-under-filter.
-* Config: two `bool`s in the existing nested `gb:` block of
-  `common/config.nim` (`parse_config` `:350-357`, `save_config` `:443-449`),
-  plus `new_config` and `config_editor.do_factory_reset` `:52-74` — **every
-  new field must be listed in all four places** or factory reset silently
-  drops it.
-* Frame size: the "Frame size 1x..8x" submenu (`dingbat.nim:1002-1015`) must
-  size from 256x224 when the border is shown.
+* `[x] Super Game Boy mode` — applies on the next ROM load or reset.
+* `[x] Show SGB border` — disabled while the mode is off, the same
+  "disabled while suspended" pattern the scanlines-under-filter checkbox uses.
+* `[x] Preserve aspect ratio` — new, and not SGB-specific (§3.3).
+
+Config: `sgb_enable` / `sgb_border` in the nested `gb:` block of
+`dingbat.yml`, `preserve_aspect` at the top level. All three are wired in all
+four places a setting has to appear — `new_config`, `parse_config`,
+`save_config`, and `config_editor.do_factory_reset` — plus `video_widget`'s
+`reset`/`apply`.
+
+The "Frame size 1x..8x" submenu now sizes from `output_size()`.
 
 ### Web
 
-Six settings tabs; there is already a **Game Boy** pane
-(`web/index.html:716-738`), which is the obvious home — better than Video,
-because these are system settings, not presentation settings.
+**Settings ▸ Game Boy**, above the Boot ROM row. That pane, not Video: these
+are system settings, not presentation settings.
 
-* Two `modal-toggle-row` switches in the Game Boy pane: "Super Game Boy" and
-  "SGB border".
-* Persist in the existing grouped `"system"` IDB record (not a new key), which
-  keeps `SETTINGS_KEYS` unchanged; if a new key is used it **must** be added
-  to `SETTINGS_KEYS` (`index.js:5820`) or "Reset all settings" leaves it
-  behind — `gb-palette.test.mjs:215` asserts exactly this for the palette.
-* The "Shade palette" control in General must show a disabled/explanatory
-  state while SGB colour is active (see §3.3).
-* Toggling SGB mode requires a core restart, so it should behave like the
-  existing renderer/BIOS settings: applies on next load, with the usual toast.
+* "Super Game Boy mode" — applies on next load, with a toast saying so.
+* "Show border" — **live**; it only hides a layer the core already has, and
+  the canvas changes shape immediately. Greys out with the mode.
 
----
+Persisted in the existing grouped `"system"` IndexedDB record, so
+`SETTINGS_KEYS` is unchanged and "Reset all settings" already covers them; the
+in-memory half of that reset restores both and re-pushes them into the core.
 
-## 6. Prototype
+## 6. What was built, and what proves it
 
-**There is no SGB-enhanced ROM in this repository.** `tests/roms/` holds two
-GB ROMs (`gblinktest.gb`, `gbhdmatest.gbc`), both self-built; `reference/` does
-not exist; `tools/` has no ROMs. Per the brief, no search outside the repo was
-made. The proof is therefore synthetic — but it is a *real* proof: the test ROM
-speaks the actual wire protocol, not a shortcut.
-
-### What was built
+### Files
 
 | File | What |
 |---|---|
-| `src/dingbat/gb/sgb.nim` (new, ~330 lines) | `SgbState`, the P1 pulse receiver, PAL01/23/03/12, PAL_SET, PAL_TRN, ATTR_BLK/LIN/DIV/CHR, ATTR_TRN, ATTR_SET, MASK_EN, CHR_TRN, PCT_TRN, MLT_REQ player count, VRAM transfer, 256x224 border decode |
-| `gb.nim` | `SgbState` type, `GB.sgb` / `GB.sgb_requested`, `GbPpu.sgb_pal` / `.sgb_attr`, header unlock + adapter attach in `post_init`, `sgb_frame_end` in `step_frame` |
-| `joypad.nim` | one line: run the receiver alongside the joypad, not instead of it |
-| `fifo_ppu.nim`, `scanline_ppu.nim` | the per-pixel colorization hook (1 + 3 sites) |
-| `savestate.nim`, `serialize.nim` | `GB_SEC_SGB`, payload rev 4 → 5, migration |
-| `tests/roms/sgbtest.py` (new) | a mini SM83 assembler that emits `sgbtest.gb`: a real 32 KiB cart with the Nintendo logo, SGB flag 0x03, licensee 0x33, and a program that pulses two VRAM transfers and four colour packets down P1 |
+| `src/dingbat/gb/sgb.nim` (new, ~430 lines) | `SgbState`, the P1 pulse receiver, PAL01/23/03/12, PAL_SET, PAL_TRN, ATTR_BLK/LIN/DIV/CHR, ATTR_TRN, ATTR_SET, MASK_EN, CHR_TRN, PCT_TRN, MLT_REQ (count *and* joypad-ID rotation), the display-walking VRAM transfer, the 256x224 border decode |
+| `src/dingbat/gb/gb.nim` | `SgbState` type, `GB.sgb` / `GB.sgb_requested`, `GbPpu.sgb_pal` / `.sgb_attr`, header unlock + adapter attach in `post_init`, `sgb_frame_end` in `step_frame` |
+| `src/dingbat/gb/joypad.nim` | run the receiver alongside the joypad; SGB joypad IDs on a both-deselected read |
+| `src/dingbat/gb/{fifo,scanline}_ppu.nim` | the per-pixel colorization hook (1 + 3 sites) |
+| `src/dingbat/gb/savestate.nim`, `common/serialize.nim` | `GB_SEC_SGB`, payload rev 4 → 5, migration |
+| `src/dingbat.nim` | border texture + compositing shader, `output_size`, `game_viewport` letterbox, screenshot composite, `--capture` |
+| `src/dingbat/frontend/{video_widget,config_editor}.nim`, `common/config.nim` | the three settings |
+| `src/dingbat_wasm.nim(s)` | nine new exports (`_wasm_sgb_*`, `_wasm_out_w/h`) |
+| `web/glpresent.js`, `web/index.js`, `web/index.html`, `web/embed.js`, `web/styles.css`, `web/types/em.d.ts` | the web half |
+| `tests/roms/sgbtest.py` (new) | a mini SM83 assembler emitting `sgbtest.gb` — a real 32 KiB cart with the Nintendo logo, SGB flag 0x03, licensee 0x33, an identity BG map so its transfers meet the documented preconditions, and a program that pulses two VRAM transfers and four colour packets down P1 |
 | `tests/sgb_test.nim` (new) | the acceptance test; `nimble test_sgb` |
 
-### What it proves
+### Automated proof — `nimble test_sgb`
 
-`nimble test_sgb` → `sgb_test: all checks passed`. The assertions:
+From the synthetic cart, driven through the real receiver:
 
-* the adapter attaches for an SGB-flagged cart and `boot_model` becomes `bmSgb`;
-* all 16 palette entries match, **including the shared colour 0** across all
-  four palettes;
-* all 360 attribute cells match the expected `ATTR_DIV` + `ATTR_BLK` result,
-  including `ATTR_BLK`'s "inside only ⇒ the surrounding line follows" rule;
-* **all 23,040 screen pixels** match `pal[attr(cell)][shade]`;
-* **all 57,344 border pixels** match the expected 4bpp tile decode, and the
-  20x18 window hole is fully transparent (0 opaque pixels);
-* the FIFO and scanline renderers produce **identical** SGB output;
-* a cart without the header bits gets `sgb == nil` and `ppu.sgb_attr == nil`
-  (no behaviour change for every other GB game);
-* palettes, attribute map and border tiles survive a save-state round trip
-  after the live state is deliberately scribbled over.
+* the adapter attaches for an SGB-flagged cart, `boot_model` becomes `bmSgb`;
+* all 16 palette entries, **including the shared colour 0** across all four;
+* all 360 attribute cells (ATTR_DIV + ATTR_BLK, including ATTR_BLK's
+  "inside only ⇒ the surrounding line follows" rule);
+* **all 23,040 screen pixels** = `pal[attr(cell)][shade]`;
+* **all 57,344 border pixels** of the 4bpp tile decode, and the 20x18 window
+  hole fully transparent (0 opaque pixels);
+* FIFO and scanline renderers **identical**;
+* a cart without the header bits gets `sgb == nil` and `ppu.sgb_attr == nil`;
+* palettes, attribute map and border tiles survive a state round trip after
+  the live state is deliberately scribbled over.
 
-With `DINGBAT_SGB_PNG=<dir>` it also writes `screen.png`, `border.png` and
-`composite.png` — the last being exactly what §3.2's frontend compositor would
-show. It looks right: a 256x224 colour frame around a per-cell-colorized
-160x144 screen with a transparent window.
+By injecting packet groups directly down P1 (the same receiver, no shortcut),
+for the shapes a 16-byte packet cannot reach and Pokemon Blue does not use:
 
-### Bugs the prototype found, worth keeping
+* **multi-packet ATTR_CHR** — 40 data sets across two packets, and nothing
+  written past the count;
+* ATTR_LIN horizontal and vertical;
+* **PAL_TRN + PAL_SET** — four palettes pulled from system palette RAM, the
+  shared colour 0, and the Apply-ATF flag;
+* ATTR_SET including its cancel-mask bit;
+* **all four MASK_EN modes** — freeze, black, backdrop, release;
+* MLT_REQ joypad IDs alternating 0xF/0xE in two-player mode and pinned at 0xF
+  in one-player mode.
 
-* **The idle-level initialisation.** `prev_lines` must start at "both high" or
-  the first reset pulse is not an edge and the game's first packet is lost.
-  Symptom: everything works except the first command a game sends — which for
-  border games is `CHR_TRN`, so the border comes out entirely transparent
-  while the palettes are perfect. Easy to misdiagnose as a tile-decode bug.
-* **Immediate vs deferred VRAM transfer.** Reading at packet completion rather
-  than "next frame" is not just simpler, it is more correct for the two-call
-  `CHR_TRN` pattern.
+Each of these was confirmed to actually bite: inverting ATTR_CHR's bit-pair
+shift fails 40/40 cells.
 
-### What is stubbed
+### Proof against a real cart (Pokemon Blue)
 
-* The frontends. Nothing in `src/dingbat.nim` or `web/` was changed — the
-  border exists as `gb.sgb.border` and is proven by the test's composite PNG,
-  not by a shader. This is deliberate: it is the chunk that needs the design
-  decision in §3.2 to be signed off first.
-* `MLT_REQ` records the player count but does not rotate joypad IDs on P1, so
-  `MLT_REQ`-based SGB detection does not yet succeed. Small, and needed before
-  older games light up.
-* `PAL_PRI`, sound, SNES objects, SNES CPU commands — accepted and dropped.
+* Core, headless: the full command log is decoded — MLT_REQ ×2, MASK_EN,
+  eight DATA_SND, CHR_TRN, PCT_TRN, PAL_TRN, MASK_EN, PAL_SET, ATTR_BLK ×2 —
+  and the border, per-region palettes, intro and title screen all render.
+* Native GL path, via `--capture`: the composited 768x672 back buffer is
+  correct.
+* Web, headless Chromium driving the real app: `_wasm_out_w/h` = 256x224,
+  canvas backing 1024x896, `--game-ar` 8:7, border and palettes correct;
+  phone portrait (390x844) and landscape (844x390) both lay out correctly.
 
----
+### Proof that SGB off changes nothing
 
-## 7. Landable chunks
+Frame hashes (FNV-1a over every frame's framebuffer) from this branch with
+SGB disabled, against a build of `main`'s `src/`:
 
-Each is independently shippable and independently useful.
+| ROM | frames | result |
+|---|---|---|
+| `gbhdmatest.gbc` | 400 | identical |
+| `gblinktest.gb` | 400 | identical |
+| Zelda LADX (CGB) | 600 | identical |
+| **Pokemon Blue** | 900 | identical |
 
-| # | Chunk | Size | Notes |
-|---|---|---|---|
-| 1 | **Header detection + `bmSgb` boot model.** Read 0x0146/0x014B, promote the boot model, expose `gb.sgb_requested`. No visible change except register-based detection starting to work. | XS (~40 lines) | Already in the prototype. Ships alone. |
-| 2 | **Packet receiver + palettes + attributes.** `sgb.nim` minus the border, the two renderer hooks, `MASK_EN`. **This is where the visible payoff is** — colourised title screens and status bars, no frontend change at all. | M (~250 lines + test) | Prototype-complete. Include `MLT_REQ` ID rotation here. |
-| 3 | **Save-state section.** Payload rev 5 + migration. | S (~70 lines) | Must land with or before 2, or states taken in SGB mode lose their colour. |
-| 4 | **Border decode in the core.** `CHR_TRN`/`PCT_TRN` → `sgb.border`. Still invisible to users. | S (~80 lines) | Prototype-complete. |
-| 5 | **Native border compositing.** Second texture, two-sampler shader with a UV remap, window sizing from 256x224, screenshot compositing, the `tex_height` scanline-pitch fix. | M–L | The riskiest chunk; `dingbat.nim` has no aspect handling to build on. |
-| 6 | **Web border compositing.** A real dimension export from wasm (retire the filename-derived `nativeRes()`), second sampler in `glpresent.js`, `--game-ar`, thumbnails/glow/paused-card kept at 160x144. | M–L | `glpresent.js` is dimension-clean already, which helps a lot. |
-| 7 | **UI toggles + config, both frontends.** | S | Do after 5/6 so there is something to toggle. |
-| 8 | **Polish.** `PAL_PRI`, the SGB1 2.4% clock as an opt-in, a built-in default border for non-SGB mono carts. | S each | All optional. |
+With SGB on, Blue's hash differs — which is the point. Zelda LADX carries SGB
+flag 0x03 *and* CGB flag 0x80 and selects **CGB** in both frontends, which is
+what happens when you put one in a Game Boy Color.
 
-**Total: roughly a week of focused work**, of which chunks 1-4 (about a day
-and a half, and already prototyped) deliver most of the user-visible value.
+The existing suites also still pass: `test_savestate_compat` (the committed
+corpus of GB rev 1/2/3 states still loads), `test_rewind`, `test_printer`,
+`test_cheats`, `test_timestretch`, all of `web/tests/*`, `web/uv.test.mjs`
+and `web/render.test.mjs` (which compiles the *real* shaders in headless
+Chromium).
 
-### Top risks
+### Performance
 
-1. **The frontend surface change is the whole cost.** The native frontend
-   stretches a fixed quad to the window with no aspect logic at all, and the
-   web frontend derives its resolution from *the ROM filename*. Both need real
-   plumbing before a 256x224 output can exist. If the border is descoped,
-   chunks 1-4 still ship and the risk goes to zero.
-2. **The scanline-pitch uniform.** `fract(uv.y * tex_height)` is shared by both
-   frontends. Feed it the quad height instead of the GB layer height and
-   scanlines quietly land at the wrong pitch — a subtle, easily-shipped bug.
-3. **Palettes without attributes look worse than no SGB at all.** Chunk 2 must
-   not be split into "palettes now, attributes later".
-4. **The one-way save-state downgrade.** Unavoidable, small, and precedented.
-5. **No real test ROM.** The synthetic ROM proves the protocol but not the
-   long tail: multi-packet `ATTR_CHR` groups, `PAL_TRN` + `PAL_SET`,
-   `MASK_EN` timing around transfers, and borders that overlap the GB window
-   are all implemented but only unit-covered. First contact with a real
-   SGB-enhanced cart will find something. Budget for it.
-6. **Web palette collision.** The DMG shade-palette feature silently no-ops
-   under SGB colour. Correct behaviour, but it will read as a bug unless the
-   UI says so.
+The per-pixel hook costs **+0.228% of retired instructions**
+(`DINGBAT_BENCH_COUNTERS=1`, `gbhdmatest.gbc`, 600 frames: 5,672,669,709
+against 5,659,770,263 with the branch compiled out). That is a predictable nil
+check replacing an existing indexed load, and it is inside the noise wall
+`docs/performance.md` puts wall-clock A/B at.
+
+### Deliberately not implemented
+
+* **SOUND / SOU_TRN** (the SNES APU), **OBJ_TRN** (SNES sprites),
+  **DATA_SND / DATA_TRN / JUMP** (running 65816 code — this is what Space
+  Invaders' arcade mode needs), **ATRC_EN / TEST_EN / ICON_EN**. All are
+  accepted and dropped, which is what a Game Boy program sees anyway: none of
+  them feeds anything back to the GB. Pokemon Blue sends eight `DATA_SND`
+  packets and does not care that they go nowhere.
+* **PAL_PRI**. It prioritises the game's palette set over one the *player*
+  chose in the SGB's own menus. dingbat has no SGB menu, so there is nothing
+  to prioritise over and the command is a no-op by construction.
+* **The SGB1's 2.4% fast clock.** Real SGB1 hardware chains the Game Boy clock
+  to the SNES master clock; SGB2 does not. Modelling it would move
+  `GB_CLOCK_SPEED`, which every scheduler deadline in every existing GB save
+  state is denominated in. Not worth it for a pitch shift.
+* **A built-in border for non-SGB monochrome carts.** The real SGB shows one
+  for any mono game. Shipping it would mean shipping Nintendo's art.
+* **The 29th border row.** Pan Docs documents that the S-PPU shows part of a
+  29th tile row when the SGB forgets to force-blank. Not modelled.
+* **The scanline renderer is covered but not the shipping default**; the FIFO
+  renderer is, and the test pins them identical.
+
+## 7. Known rough edges
+
+1. **The window resizes mid-session** (native) when a border first appears,
+   because the picture genuinely changes size. It is one resize, on the edge,
+   and it is what a console does — but it is a surprise the first time.
+2. **`MASK_EN 1` freezes the frame the emulator last presented**, not the one
+   the SNES last stored. Pan Docs notes hardware needs "one or two frames"
+   before a freeze is reliable. No cart has been seen to care.
+3. **A VRAM transfer is read at packet completion**, not spread over the five
+   frames hardware takes. Pokemon Blue's display is byte-stable across all
+   five frames after each of its three transfers, and reading early is the
+   only order that survives the two-`CHR_TRN` pattern — but a cart that starts
+   rewriting VRAM in the same frame it sends the packet would break.
+4. **Objects are ignored during a transfer.** Pan Docs requires that they not
+   overlap the background there; a cart that violates it would corrupt its own
+   border on hardware too.
+5. **One real cart is one real cart.** Blue exercises the packet receiver,
+   both VRAM transfers, PAL_TRN/PAL_SET, ATTR_BLK, MASK_EN and MLT_REQ.
+   ATTR_CHR/ATTR_LIN/ATTR_TRN and multi-packet groups are unit-covered only.
+   A wider sweep (`tools/gbfuzz` already knows how to walk a library) is the
+   obvious next step.
+6. **`web/serve.py` is on port 8781 on this branch** — a sandbox requirement
+   while this was built. Set it back to 8765 before merging.
+7. **The save-state downgrade is one-way**: a state written by this build for
+   an SGB cart is refused by an older build (`rev 5 > 4`). States for every
+   other cart are byte-identical. Same class as the sub-1 MiB GBA identity fix.

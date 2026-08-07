@@ -166,7 +166,186 @@ block:
   check(s.pal == pal_before, "SGB palettes did not survive a state round trip")
   check(s.attr == attr_before, "SGB attribute map did not survive a state round trip")
   check(s.chr == chr_before, "SGB border tiles did not survive a state round trip")
+  # The border image itself is derived, and re-rendered inline by the loader:
+  # both frontends size the window from border_valid, so it must be true the
+  # instant the load returns, not one frame later.
+  check(s.border_valid, "border was not re-rendered by the state loader")
+  var post_bad = 0
+  for py in 0 ..< 224:
+    for px in 0 ..< 256:
+      let tile = expected_border_tile(px div 8, py div 8)
+      let ci = tile and 15
+      let want = if ci == 0: 0'u16 else: BORDER_COLORS[ci] or 0x8000'u16
+      if s.border[py * 256 + px] != want: inc post_bad
+  check(post_bad == 0, &"border image wrong after a state load: {post_bad} px")
   check(GB_PAYLOAD_VERSION == 5'u32, "GB payload revision should be 5 for the SGB section")
+
+# ---- direct packet-injection tests --------------------------------------
+# The synthetic ROM cannot reach every command shape (a 16-byte packet holds
+# only so much), and Pokemon Blue happens to use PAL_TRN + PAL_SET + ATTR_BLK
+# and nothing else. These drive the SAME receiver the cart does -- P1 writes,
+# reset pulse, LSB-first bits, stop bit -- so nothing here bypasses the decode.
+
+proc pulse(gb: GB; group: seq[uint8]) =
+  ## Clock a whole command group down P1 the way a cart does.
+  let packets = group.len div 16
+  for p in 0 ..< packets:
+    joypad_write(gb.joypad, gb, 0x00)          # reset pulse
+    joypad_write(gb.joypad, gb, 0x30)
+    for i in 0 ..< 16:
+      let byt = group[p * 16 + i]
+      for b in 0 ..< 8:
+        # P15 low = a 1 bit, P14 low = a 0 bit; both high between.
+        joypad_write(gb.joypad, gb, if ((byt shr b) and 1) != 0: 0x10 else: 0x20)
+        joypad_write(gb.joypad, gb, 0x30)
+    joypad_write(gb.joypad, gb, 0x20)          # stop bit (0)
+    joypad_write(gb.joypad, gb, 0x30)
+
+proc packet(cmd: int; total: int; data: openArray[uint8]): seq[uint8] =
+  result = newSeq[uint8](16)
+  result[0] = uint8(cmd shl 3) or uint8(total)
+  for i in 0 ..< min(data.len, 15): result[i + 1] = data[i]
+
+block multi_packet_attr_chr:
+  # ATTR_CHR with 40 data sets, which needs two packets: 4 header/param bytes
+  # plus 10 data bytes fit in packet 0, the rest continue in packet 1.
+  var m2 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m2.post_init()
+  for _ in 0 ..< 20: m2.step_frame()
+  let s2 = m2.sgb
+  for i in 0 ..< s2.attr.len: s2.attr[i] = 0
+
+  const N = 40
+  var grp = newSeq[uint8](32)
+  grp[0] = uint8(0x07 shl 3) or 2           # ATTR_CHR, 2 packets
+  grp[1] = 0                                # start X
+  grp[2] = 0                                # start Y
+  grp[3] = uint8(N and 0xFF); grp[4] = uint8(N shr 8)
+  grp[5] = 0                                # left to right
+  # Data set i gets palette (i mod 4); four sets per byte, MSB pair first.
+  for i in 0 ..< N:
+    let o = 6 + (i div 4)
+    grp[o] = grp[o] or (uint8(i mod 4) shl (6 - (i mod 4) * 2))
+  m2.pulse(grp)
+  var chr_bad = 0
+  for i in 0 ..< N:
+    let x = i mod 20
+    let y = i div 20
+    if s2.attr[y * 20 + x] != uint8(i mod 4): inc chr_bad
+  check(chr_bad == 0, &"ATTR_CHR across two packets: {chr_bad}/{N} cells wrong")
+  # Everything past the 40 sets must be untouched.
+  check(s2.attr[N] == 0, "ATTR_CHR wrote past its data-set count")
+
+  # ATTR_LIN: one horizontal line (row 5 -> palette 2) and one vertical
+  # (column 3 -> palette 1).
+  m2.pulse(packet(0x05, 1, [2'u8, 0x80'u8 or (2'u8 shl 5) or 5'u8,
+                            (1'u8 shl 5) or 3'u8]))
+  var lin_bad = 0
+  for x in 0 ..< 20:
+    if x != 3 and s2.attr[5 * 20 + x] != 2: inc lin_bad
+  for y in 0 ..< 18:
+    if s2.attr[y * 20 + 3] != 1: inc lin_bad
+  check(lin_bad == 0, &"ATTR_LIN: {lin_bad} cells wrong")
+
+  # PAL_SET pulls four palettes out of the system palette RAM PAL_TRN fills,
+  # and can apply an attribute file in the same command. Seed both directly
+  # (a real PAL_TRN/ATTR_TRN is a VRAM transfer, covered by the ROM above).
+  for id in 0 ..< 512:
+    for c in 0 ..< 4:
+      s2.syspal[id * 4 + c] = uint16((id * 4 + c) and 0x7FFF)
+  for i in 0 ..< s2.atf.len: s2.atf[i] = 0
+  # ATF 3: every cell palette 2 (bit pairs 10 10 10 10 = 0xAA).
+  for i in 0 ..< 90: s2.atf[3 * 90 + i] = 0xAA
+  m2.pulse(packet(0x0A, 1, [
+    0x07'u8, 0x00,        # palette 0 <- system palette 7
+    0x40'u8, 0x01,        # palette 1 <- system palette 320
+    0x02'u8, 0x00,        # palette 2 <- system palette 2
+    0x09'u8, 0x00,        # palette 3 <- system palette 9
+    0x80'u8 or 3'u8]))    # apply ATF 3
+  check(s2.pal[1] == uint16(7 * 4 + 1) and s2.pal[3] == uint16(7 * 4 + 3),
+        "PAL_SET did not copy system palette 7 into palette 0")
+  check(s2.pal[4 * 1 + 2] == uint16(320 * 4 + 2),
+        "PAL_SET did not copy system palette 320 into palette 1")
+  # Colour 0 is one shared backdrop, taken from palette 0's.
+  check(s2.pal[0] == s2.pal[4] and s2.pal[4] == s2.pal[8] and
+        s2.pal[8] == s2.pal[12], "PAL_SET left the four colour 0s unshared")
+  var atf_bad = 0
+  for a in s2.attr:
+    if a != 2: inc atf_bad
+  check(atf_bad == 0, &"PAL_SET's Apply-ATF flag: {atf_bad}/360 cells wrong")
+
+  # ATTR_SET on its own, with the cancel-mask bit.
+  for i in 0 ..< 90: s2.atf[5 * 90 + i] = 0x55   # every cell palette 1
+  s2.mask = 2
+  m2.pulse(packet(0x16, 1, [0x40'u8 or 5'u8]))
+  check(s2.attr[0] == 1 and s2.attr[359] == 1, "ATTR_SET did not apply ATF 5")
+  check(s2.mask == 0, "ATTR_SET bit 6 did not cancel the mask")
+
+block mask_en:
+  var m3 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m3.post_init()
+  for _ in 0 ..< 30: m3.step_frame()
+  let s3 = m3.sgb
+  var live: seq[uint16] = @[]
+  for v in m3.ppu.framebuffer: live.add(v)
+
+  # MASK_EN 1 freezes the picture the SNES last stored.
+  m3.pulse(packet(0x17, 1, [1'u8]))
+  for _ in 0 ..< 5: m3.step_frame()
+  var frozen_ok = true
+  for i in 0 ..< live.len:
+    if m3.ppu.framebuffer[i] != live[i]: frozen_ok = false
+  check(frozen_ok, "MASK_EN 1 did not freeze the screen")
+
+  # MASK_EN 2 blanks it black.
+  m3.pulse(packet(0x17, 1, [2'u8]))
+  m3.step_frame()
+  var black = true
+  for v in m3.ppu.framebuffer:
+    if v != 0: black = false
+  check(black, "MASK_EN 2 did not blank the screen to black")
+
+  # MASK_EN 3 blanks it to the backdrop (colour 0).
+  m3.pulse(packet(0x17, 1, [3'u8]))
+  m3.step_frame()
+  var backdrop_ok = true
+  for v in m3.ppu.framebuffer:
+    if v != s3.pal[0]: backdrop_ok = false
+  check(backdrop_ok, "MASK_EN 3 did not blank the screen to the backdrop")
+
+  # MASK_EN 0 hands the screen back.
+  m3.pulse(packet(0x17, 1, [0'u8]))
+  for _ in 0 ..< 3: m3.step_frame()
+  var restored = false
+  for v in m3.ppu.framebuffer:
+    if v != 0 and v != s3.pal[0]: restored = true
+  check(restored, "MASK_EN 0 did not release the screen")
+
+block mlt_req:
+  var m4 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  m4.post_init()
+  for _ in 0 ..< 20: m4.step_frame()
+  let s4 = m4.sgb
+  check(s4.players == 1, "player count should start at 1")
+  # Deselecting both groups reads a joypad ID: 0xF, 0xE, 0xD, 0xC for players
+  # 1..4, advancing on each rising edge of P15.
+  m4.pulse(packet(0x11, 1, [1'u8]))          # two players
+  check(s4.players == 2, "MLT_REQ 1 should select two players")
+  joypad_write(m4.joypad, m4, 0x30)
+  var ids: seq[uint8] = @[]
+  for _ in 0 ..< 4:
+    ids.add(joypad_read(m4.joypad, m4) and 0x0F)
+    joypad_write(m4.joypad, m4, 0x10)        # P15 low
+    joypad_write(m4.joypad, m4, 0x30)        # rising edge -> next player
+  check(ids == @[0x0F'u8, 0x0E'u8, 0x0F'u8, 0x0E'u8],
+        &"two-player joypad IDs should alternate 0xF/0xE, got {ids}")
+  m4.pulse(packet(0x11, 1, [0'u8]))          # back to one player
+  check(s4.players == 1, "MLT_REQ 0 should return to one player")
+  joypad_write(m4.joypad, m4, 0x30)
+  joypad_write(m4.joypad, m4, 0x10)
+  joypad_write(m4.joypad, m4, 0x30)
+  check((joypad_read(m4.joypad, m4) and 0x0F) == 0x0F,
+        "one-player mode must always read joypad ID 0xF")
 
 # ---- optional PNG dump ----
 when defined(sgb_png):
