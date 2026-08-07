@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 14:57:40*
+*Generated: 2026-08-07 16:09:58*
 
 ## Game Boy - Blargg
 
@@ -810,7 +810,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/m3-bg-bgp/m3-bg-bgp-dmgC | 👀 99.7% correct (22978/23040 pixels match) |
 | age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | 👀 98.9% correct (22784/23040 pixels match) |
-| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | 👀 94.4% correct (21760/23040 pixels match) |
+| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | 👌 |
 | age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
 | age/m3-bg-scx/m3-bg-scx-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
 | age/m3-bg-scx/m3-bg-scx-dmgC | 👀 99.5% correct (22928/23040 pixels match) |
@@ -842,7 +842,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 | Test | Result |
 |------|--------|
-| bully/bully | 👀 0.6% correct (147/23040 pixels match) |
+| bully/bully | 👀 98.2% correct (22620/23040 pixels match) |
 | strikethrough/strikethrough-cgb | 👀 99.8% correct (22987/23040 pixels match) |
 | scribbltests/lycscx | 👌 |
 | scribbltests/lycscy | 👌 |
@@ -873,8 +873,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | rtc3test/rtc3test-1 | 👀 97.5% correct (22459/23040 pixels match) |
 | rtc3test/rtc3test-2 | 👌 |
 | rtc3test/rtc3test-3 | 👀 98.0% correct (22571/23040 pixels match) |
-| cpp/rtc-invalid-banks-test | 👀 91.7% correct (21120/23040 pixels match) |
-| cpp/latch-rtc-test | 👀 90.1% correct (20770/23040 pixels match) |
+| cpp/rtc-invalid-banks-test | 👌 |
+| cpp/latch-rtc-test | 👌 |
 | cpp/ramg-mbc3-test | 👌 |
 | daid/ppu_scanline_bgp-dmg | 👀 68.4% correct (15752/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
 | daid/stop_instr-dmg | 👌 |
@@ -1062,5 +1062,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 978
-- **Pass:** 700
-- **Fail:** 278
+- **Pass:** 703
+- **Fail:** 275
