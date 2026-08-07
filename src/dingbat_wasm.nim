@@ -770,6 +770,30 @@ var rewindCapBytes: int = REWIND_CAP_BYTES
 proc setRewindCapBytes(n: cint) {.exportc.} =
   if n > 0: rewindCapBytes = int(n)
 
+# Master on/off for rewind, mirroring the native `rewind` config toggle. ON is
+# the default on both frontends; JS calls the setter from its settings load and
+# whenever the user flips the switch. Off means the ring is never allocated, so
+# loop_tick's `rewindHistory != nil` guard skips the per-interval
+# state_payload() + thumbnail push outright — the whole point is to give the
+# CPU back, not just to hide the button.
+#
+# Live both ways, so the web UI needs no reload: turning it off drops the ring
+# (and its memory) immediately, turning it back on allocates a fresh, empty one
+# for the session already running. History does not survive a trip through
+# "off" — there is nothing to keep it in.
+var rewindEnabled: bool = true
+
+proc setRewindEnabled(on: cint) {.exportc.} =
+  rewindEnabled = on != 0
+  if not rewindEnabled:
+    rewindHistory = nil
+  elif rewindHistory == nil and stateKind != ekNone and stateNet == nil:
+    # Only for a live single core. The linked modes (2P, online, rollback)
+    # deliberately keep the ring nil — rewinding one side desyncs the pair —
+    # and they tear the single-core session down (stateKind = ekNone) or hold
+    # stateNet, so both are excluded here rather than by a mode flag.
+    rewindHistory = new_rewind(rewindCapBytes)
+
 # Scrubber thumbnails are captured at push time, while the framebuffer that
 # belongs to the snapshot is still the one on screen. Same 120-wide geometry
 # (and BGR555 layout) as the save-state thumbnail trailer — see gba_thumbnail
@@ -1605,7 +1629,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
   prevRaw.setLen(0)  # blend history is per-core (and per-resolution)
-  rewindHistory = new_rewind(rewindCapBytes)
+  rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
 
 # --- Online link mode (multiplayer phase 3b, web side) ---
 # One local GBA core linked to a remote peer over whatever byte transport
@@ -1688,7 +1712,7 @@ proc netlink_exit() {.exportc.} =
   if stateGba != nil:
     stateGba.set_sio_driver(NullSioDriver())
     stateGba.storage.write_save()
-  rewindHistory = new_rewind(rewindCapBytes)
+  rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
 
 proc netlink_feed(data: pointer; len: cint): cint {.exportc.} =
   ## Ingest wire bytes from the transport (any chunking). A REPLY landing
