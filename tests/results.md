@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 14:49:41*
+*Generated: 2026-08-07 14:52:02*
 
 ## Game Boy - Blargg
 
@@ -252,9 +252,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_lcdc_tile_sel_win_change | 👀 99.5% correct (22934/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_tile_sel_win_change | 👀 96.4% correct (22216/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👀 97.1% correct (22375/23040 pixels match) |
-| mealybug/m3_lcdc_win_en_change_multiple | 👀 61.5% correct (14166/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_win_en_change_multiple | 👀 61.5% correct (14166/23040 pixels match) |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 81.7% correct (18825/23040 pixels match) |
+| mealybug/m3_lcdc_win_en_change_multiple | 👌 |
+| mealybug-cgb/m3_lcdc_win_en_change_multiple | 👌 |
+| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 98.5% correct (22697/23040 pixels match) |
 | mealybug/m3_lcdc_win_map_change | 👀 99.9% correct (23006/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_win_map_change | 👀 99.1% correct (22824/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_win_map_change2 | 👀 99.4% correct (22898/23040 pixels match) |
@@ -1055,12 +1055,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 322/476 passed |
+| gambatte/window | 👀 325/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 978
-- **Pass:** 695
-- **Fail:** 283
+- **Pass:** 697
+- **Fail:** 281

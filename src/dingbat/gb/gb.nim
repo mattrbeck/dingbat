@@ -298,6 +298,20 @@ const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const WIN_EN_ABORT*           {.intdefine.} = 1
+  ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
+  ## tiles on this line. 1 ships; 0 is the control build and restores the old
+  ## behaviour, where `fetching_window` could not be cleared before the next
+  ## line. See the site in tick_bg_fetcher for the rule and the citation.
+  ##
+  ## It is DMG behaviour, not a CGB one. mealybug documents it in its PPU notes
+  ## and measures it with two ROMs whose scored references are `_dmg_blob`, and
+  ## dingbat used to file it as SameBoy's CGB-only fetcher abort and not model
+  ## it at all. Worth, on its own: mealybug m3_lcdc_win_en_change_multiple
+  ## 8874 wrong pixels -> 0 (DMG and CGB both), m3_lcdc_win_en_change_multiple_wx
+  ## 4215 -> 343, DMG total +12746 and CGB +25758, and three gambatte
+  ## window/on_screen rows -- weon_wx18_weoff_weon_wx80 on both devices and
+  ## wx17_weoff_wxA5_weon on DMG, which are that mechanism by name.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in

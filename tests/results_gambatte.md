@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-07 14:49:41*
+*Generated: 2026-08-07 14:52:02*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3618/5005 passed.**
+**3621/5005 passed.**
 
 ## bgen (1/2 passed)
 
@@ -1553,9 +1553,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (322/476 passed)
+## window (325/476 passed)
 
-322/476 tests passed, 154 failed:
+325/476 tests passed, 151 failed:
 
 | Test | Result |
 |------|--------|
@@ -1694,10 +1694,7 @@ All 20 tests passed.
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [cgb] | got 5, expected 0 |
-| window/on_screen/weon_wx18_weoff_weon_wx80 [dmg, png] | 8420/23040 pixels differ |
-| window/on_screen/weon_wx18_weoff_weon_wx80 [cgb, png] | 8420/23040 pixels differ |
-| window/on_screen/wx17_weoff_wxA5_weon [dmg, png] | 6784/23040 pixels differ |
-| window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 5824/23040 pixels differ |
+| window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |
 | window/on_screen/wxA6_3 [dmg, png] | 10780/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_1 [dmg, png] | 14624/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_2 [dmg, png] | 14624/23040 pixels differ |

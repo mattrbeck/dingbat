@@ -195,6 +195,27 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
 proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
   case FETCHER_ORDER[ppu.fetch_counter]
   of fsGetTile:
+    when WIN_EN_ABORT != 0:
+      # LCDC.5 cleared while the window is the active fetch source. mealybug's
+      # PPU notes: "WIN_EN can be disabled during mode 3. The disabling will
+      # take effect at the end of the current window tile being drawn. When the
+      # current window tile has finished being drawn, the PPU will start drawing
+      # background tiles again", and "when the background resumes drawing it is
+      # on a tile boundary. The low 3 bits of SCX have no effect."
+      #
+      # This is the next tile-map read after the write, which IS the end of the
+      # tile being drawn: the fetcher runs a tile ahead of the shifter, so the
+      # tile whose map read this is, is the one displayed after the one the FIFO
+      # is holding. Two things fall out of the second sentence. The BG column is
+      # taken from the SCREEN position the fetch will land at rather than
+      # continued from the window's own tile counter -- `lx + fifo.size` is the
+      # first pixel this fetch will show -- and the fine scroll is NOT re-paid:
+      # `dropped_first_fetch` stays set, so there is no throw-away fetch and no
+      # SCX & 7 discard, which is that sentence exactly.
+      if ppu.fetching_window and not window_enabled(ppu):
+        ppu.fetching_window = false
+        ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size)) div 8)
+        fifo_arm_window(ppu)
     let (map, offset) =
       if ppu.fetching_window:
         # Wraps inside the 32x32 tile map exactly as the background fetch
