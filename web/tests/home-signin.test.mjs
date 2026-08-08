@@ -1,7 +1,12 @@
-// The home-screen Drive slot holds Sync when signed in and Sign in when signed
-// out, so reaching Google Drive never requires opening Manage ROMs and Saves.
-// The swap must ride the app's existing auth-state notifications (refreshSyncUI),
-// in both directions.
+// The home-screen Drive slot holds Sync for a linked account and Sign in for an
+// unlinked one, so reaching Google Drive never requires opening Manage ROMs and
+// Saves. The swap must ride the app's existing auth-state notifications
+// (refreshSyncUI), in both directions.
+//
+// "Linked" is deliberately NOT "holds a live access token": Google's token
+// model hands out ~1h tokens, so keying this slot on the token made an hourly
+// rollover look like being logged out. It follows syncState.connected instead,
+// and Sync re-auths lazily when it needs to.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -43,12 +48,13 @@ test("signed out, the slot shows Sign in instead of Sync", async () => {
   assert.equal(sync.hidden, true, "Sync has nothing to sync");
 });
 
-test("the slot swaps to Sync when a token arrives, and back when it goes", async () => {
+test("the slot swaps to Sync when the account links, and back when it goes", async () => {
   const app = await loadApp();
   const { signin, sync } = slot(app);
 
   // Auth state changes are announced through refreshSyncUI — the same call
   // every real sign-in path (connect, boot resume, silent renewal) makes.
+  app.api.syncState = { ...app.api.syncState, connected: true };
   app.api.gdriveToken = "a-token";
   app.runIn("refreshSyncUI()");
   assert.equal(signin.hidden, true, "signed in: no Sign in link");
@@ -60,7 +66,12 @@ test("the slot swaps to Sync when a token arrives, and back when it goes", async
   assert.equal(sync.hidden, true);
 });
 
-test("a revoked session (renewal budget spent) restores the Sign in link", async () => {
+// Spending the renewal budget used to drop the slot back to "Sign in with
+// Google", which is how an ordinary token rollover advertised itself as a
+// logout. The token is still dropped (a dead one must never be sent) but the
+// account stays linked, so the slot keeps offering Sync — and Sync is what buys
+// the new token, at a moment the user chose.
+test("a spent renewal budget keeps Sync, not Sign in", async () => {
   const app = await loadApp();
   const { signin, sync } = slot(app);
   app.api.syncState = { ...app.api.syncState, connected: true };
@@ -68,15 +79,15 @@ test("a revoked session (renewal budget spent) restores the Sign in link", async
   app.api.gdriveToken = "old-token";
   app.api.gdriveTokenExp = Date.now() + 60 * 1000;
   app.runIn("refreshSyncUI()");
-  assert.equal(sync.hidden, false, "starts signed in");
+  assert.equal(sync.hidden, false, "starts linked");
 
   app.api.driveRenewFails = app.api.DRIVE_RENEW_MAX_FAILS - 1;
   await app.api.renewDriveToken();
   await settle();
 
-  assert.equal(app.api.gdriveToken, null, "the grant is gone");
-  assert.equal(signin.hidden, false, "so the slot offers Sign in");
-  assert.equal(sync.hidden, true);
+  assert.equal(app.api.gdriveToken, null, "the dead token is dropped");
+  assert.equal(sync.hidden, false, "but the slot still says Sync");
+  assert.equal(signin.hidden, true, "and never demands a sign-in");
 });
 
 test("clicking Sign in asks Google for a token and then shows Sync", async () => {
