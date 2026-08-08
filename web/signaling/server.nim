@@ -43,8 +43,8 @@
 ##   - The health line is static; SIGNAL_STATS=1 restores the live room count
 ##     (used by the test harness; don't set it on a public deployment).
 
-import std/[asyncdispatch, asyncnet, tables, sets, json, strutils, times, os,
-            hashes, sha1, base64]
+import std/[asyncdispatch, asyncnet, nativesockets, tables, sets, json,
+            strutils, times, os, hashes, sha1, base64]
 
 const
   WsGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -495,7 +495,11 @@ proc serve(port: Port) {.async.} =
     if conns.len >= MaxConns:
       sock.close()                          # shed load rather than grow unbounded
       continue
-    sock.setSockOpt(OptNoDelay, true)         # TCP_NODELAY: relay setup promptly
+    # TCP_NODELAY: relay setup promptly. The level must be given explicitly —
+    # setSockOpt defaults to SOL_SOCKET, where TCP_NODELAY's value decodes as
+    # SO_DEBUG: a silent no-op on macOS, but EPERM without CAP_NET_ADMIN on
+    # Linux, killing the server on the first accepted connection.
+    sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
     var peerIp = ""
     try: peerIp = sock.getPeerAddr()[0]
     except CatchableError: discard            # peer already gone; treated as "?"
