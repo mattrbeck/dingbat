@@ -5645,12 +5645,21 @@ if (lowpassToggle) {
 
 var integerScale = false;
 var scanlines = false;
-// LCD response: "off" | "auto" | "dmg" | "cgb" | "agb" | "ags". This is the
-// panel-response model in src/dingbat/common/lcd_response.nim, and it replaced
-// the old "Motion blur" 50/50 interframe blend (see loadVideoSettings for the
-// migration).
-var lcdResponse = "off";
-const LCD_MODES = ["off", "auto", "dmg", "cgb", "agb", "ags"];
+// LCD response: a plain on/off switch over the panel-response model in
+// src/dingbat/common/lcd_response.nim. On, the core resolves the panel from
+// the machine it is running (DMG / CGB / AGB-001, and nothing under a Super
+// Game Boy) — the panel is never picked here. Two older shapes of this
+// setting are still out there in stored records: the "Motion blur" 50/50
+// interframe blend it replaced, and the six-way panel picker it shipped as.
+// See loadVideoSettings for both migrations.
+var lcdResponse = false;
+// Every panel name the picker could store. All of them mean ON now: someone
+// who chose a panel was asking for that machine's response, and the switch
+// gives it to them. Anything not in here (a newer build's name, a corrupted
+// record) falls back to off rather than sliding a bad value into wasm.
+const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
+                       "dmg", "cgb", "gbc", "agb", "agb001", "gba",
+                       "ags", "ags101", "sp"];
 var ambientGlow = false;
 var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" — GPU upscale filter
 // A smoothing filter and integer-scale pinning fight (integer pinning throws
@@ -5668,7 +5677,7 @@ const glowCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("gl
 const glowCtx = glowCanvas.getContext("2d");
 const integerScaleToggle = /** @type {HTMLInputElement} */ (document.getElementById("integer-scale-toggle"));
 const scanlinesToggle = /** @type {HTMLInputElement} */ (document.getElementById("scanlines-toggle"));
-const lcdResponseSelect = /** @type {HTMLSelectElement} */ (document.getElementById("lcd-response-select"));
+const lcdResponseToggle = /** @type {HTMLInputElement} */ (document.getElementById("lcd-response-toggle"));
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
 const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
 
@@ -5935,8 +5944,7 @@ const saveVideoSettings = () => {
 
 const applyLcdResponse = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
-    const i = LCD_MODES.indexOf(lcdResponse);
-    Module._wasm_set_lcd_response(i < 0 ? 0 : i);
+    Module._wasm_set_lcd_response(lcdResponse ? 1 : 0);
   }
 };
 
@@ -5953,8 +5961,8 @@ scanlinesToggle.addEventListener("change", () => {
   saveVideoSettings();
 });
 
-lcdResponseSelect.addEventListener("change", () => {
-  lcdResponse = lcdResponseSelect.value;
+lcdResponseToggle.addEventListener("change", () => {
+  lcdResponse = lcdResponseToggle.checked;
   applyLcdResponse();
   drawGame();   // the panel state is rebuilt — show the change immediately
   saveVideoSettings();
@@ -5980,18 +5988,22 @@ const loadVideoSettings = async () => {
   if (v) {
     integerScale = !!v.integerScale;
     scanlines = !!v.scanlines;
-    // Migration: "Motion blur" (a 50/50 interframe blend) became the LCD
-    // response model. Anyone who had it on wanted panel ghosting, so they get
-    // the panel their machine shipped with rather than the feature vanishing.
-    if (typeof v.lcdResponse === "string") lcdResponse = v.lcdResponse;
-    else if (v.motionBlur) lcdResponse = "auto";
-    if (!LCD_MODES.includes(lcdResponse)) lcdResponse = "off";
+    // Two migrations, oldest first. "Motion blur" (a 50/50 interframe blend)
+    // became the LCD response model; anyone who had it on wanted panel
+    // ghosting, so the feature stays on for them rather than vanishing. The
+    // model then shipped briefly as a six-way panel picker, which stored a
+    // name here; every name it could store means on (LCD_LEGACY_ON), because
+    // asking for a panel is asking for that machine's response.
+    if (typeof v.lcdResponse === "boolean") lcdResponse = v.lcdResponse;
+    else if (typeof v.lcdResponse === "string")
+      lcdResponse = LCD_LEGACY_ON.includes(v.lcdResponse);
+    else lcdResponse = !!v.motionBlur;
     ambientGlow = !!v.ambientGlow;
     if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
   }
   integerScaleToggle.checked = integerScale;
   scanlinesToggle.checked = scanlines;
-  lcdResponseSelect.value = lcdResponse;
+  lcdResponseToggle.checked = lcdResponse;
   ambientGlowToggle.checked = ambientGlow;
   upscaleFilterSelect.value = upscaleFilter;
   updateSuspendedVideoToggles();
@@ -6772,11 +6784,11 @@ const resetAllSettings = async () => {
   applyColorCorrect();
 
   // Video effects
-  integerScale = false; scanlines = false; lcdResponse = "off"; ambientGlow = false;
+  integerScale = false; scanlines = false; lcdResponse = false; ambientGlow = false;
   upscaleFilter = "none";
   integerScaleToggle.checked = false;
   scanlinesToggle.checked = false;
-  lcdResponseSelect.value = "off";
+  lcdResponseToggle.checked = false;
   ambientGlowToggle.checked = false;
   upscaleFilterSelect.value = "none";
   updateSuspendedVideoToggles();

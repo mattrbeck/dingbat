@@ -160,14 +160,43 @@ by the evidence above rather than by a datasheet:
   it ghosts as much or more); this treats it as the quick panel, which is the
   version the same article supports.
 
-`auto` resolves from the running machine — GBA → `agb`, CGB game → `cgb`, a game
-running as a DMG → `dmg` — which is the only setting that is right for every
-game without being told. It also resolves to **off under a Super Game Boy**,
-and that is the same rule rather than an exception: the SGB is a SNES
-cartridge, its picture leaves through the console's video output, and there is
-no Game Boy LCD anywhere in the path to be slow. (A CRT's phosphor decay is a
-different effect with a different shape, and is not this one.) Choosing a panel
-by hand still forces it, for anyone who wants the look regardless.
+### Which panel, and why the user is never asked
+
+The four panels are internal. The setting is a switch, and when it is on the
+panel is resolved from the running machine — GBA → `agb`, CGB game → `cgb`, a
+game running as a DMG → `dmg`. That is the only answer that is right for every
+game without being told, and it is why the taxonomy above earns its keep even
+though nothing in the UI names it.
+
+It also resolves to **off under a Super Game Boy**, and that is the same rule
+rather than an exception: the SGB is a SNES cartridge, its picture leaves
+through the console's video output, and there is no Game Boy LCD anywhere in
+the path to be slow. (A CRT's phosphor decay is a different effect with a
+different shape, and is not this one.)
+
+**GBA resolves to `agb` (AGB-001), not `ags` (AGS-101).** No ROM can say which
+GBA its player owned, so this has to choose, and the case for the AGB-001 is:
+
+1. It is the original. A GBA game shipped in 2001 was developed, tested and
+   signed off against that panel; the AGS-101 arrived in 2005 and is the
+   variant, not the baseline.
+2. The effects only work on it. Golden Sun's world-map jitter and F-Zero:
+   Maximum Velocity's minimap are alternate-frame tricks written for a panel
+   slow enough to fuse them. Under `ags` the model measures a swing of 8/31
+   codes where `agb` gives 2/31 (`tests/lcdresponse_test.nim`) — i.e. picking
+   the AGS-101 would render exactly the games this feature exists for as
+   strobing. Choosing the panel that makes the effects work is the same
+   principle that picks `dmg` for a monochrome cart.
+3. The AGS-101's numbers are the least defensible of the four. Its reputation
+   is contested (some GBAtemp threads insist it ghosts as much or more), so
+   `ags` is the panel this model is least sure about — a poor thing to make
+   the automatic answer for every GBA game.
+
+The counter-argument is real and worth writing down: for a player whose GBA
+*was* an SP, `agb` is the wrong screen. That is an argument for a second
+setting, and a second setting is precisely the complexity this revision
+removed. If it ever comes back it should come back as evidence that users
+noticed, not pre-emptively. `DINGBAT_BENCH_LCD=ags` forces it meanwhile.
 
 ### Deliberately not modelled
 
@@ -396,10 +425,10 @@ machine load, so only within-run ratios are meaningful.
 | pathological: every pixel, every frame | 100% | 100% | 0.0343 | 0.0586 | **1.71x** |
 
 End-to-end, which is what the user pays — the same shipped build, the setting
-toggled off vs `auto`, interleaved, median of 15 x 900 `loop_tick` calls,
+toggled off vs on, interleaved, median of 15 x 900 `loop_tick` calls,
 spreads under 1%:
 
-| ROM | off | auto | cost of the feature |
+| ROM | off | on | cost of the feature |
 |---|---|---|---|
 | Link's Awakening (GB → `dmg`) | 0.5288 ms | 0.5634 ms | **+0.0347 ms/frame (+6.6%)** |
 | Golden Sun (GBA → `agb`) | 1.2491 ms | 1.2889 ms | **+0.0398 ms/frame (+3.2%)** |
@@ -467,28 +496,77 @@ per pixel", which is false.
 
 ## The settings surface
 
-There is now one control, not two. **Motion blur** (a checkbox) became **LCD
-response** (a picker: Off / Auto / DMG / Game Boy Color / GBA AGB-001 / GBA SP
-AGS-101), in both front ends. Two settings that both mean "ghost the previous
-frame" would have been indefensible.
+**One switch.** Settings ▸ Video, labelled "LCD response", in both front ends:
+an ImGui checkbox with a `(?)` marker natively, a standard toggle row with a
+one-line subtitle on the web. No model name appears anywhere in either UI —
+the panel is resolved from the machine (see "Which panel, and why the user is
+never asked"), so DMG / Game Boy Color / AGB-001 / AGS-101 are implementation
+detail, not a question to put to a player.
 
-Migration, in both directions, is that anyone who had motion blur **on** gets
-`auto` — they had asked for panel ghosting and they keep it, now matching their
-machine — and anyone who had it off gets `off`:
+It got there in two steps, and both are still visible in the migration code.
+**Motion blur** (a 50/50 interframe blend, a checkbox) became **LCD response**,
+which shipped briefly as a six-way picker — Off / Auto / DMG / Game Boy Color /
+GBA AGB-001 / GBA SP AGS-101 — before collapsing to Off / On. Two settings that
+both mean "ghost the previous frame" would have been indefensible; so, on
+reflection, was asking a player to name a panel to get an accuracy feature that
+can work it out.
 
-* native, `config.nim`: a `lcd_response:` key wins; failing that, a legacy
-  `frame_blend: true` maps to `auto`. Verified for both values, an unknown
-  string, an absent key, and a save/load round trip.
-* web, `index.js` `loadVideoSettings`: `v.lcdResponse` wins; failing that,
-  `v.motionBlur` maps to `"auto"`. An unrecognised stored value falls back to
-  `off` rather than sliding into the wasm call as `NaN`.
-  `web/tests/lcd-response.test.mjs` covers all of it, including that the
-  `<option>` order in the markup still matches `LCD_MODES` — that index *is* the
-  wire format.
+### Migration
 
-The wasm export `_wasm_set_frame_blend(0|1)` was replaced by
-`_wasm_set_lcd_response(ordinal)`; both `dingbat_wasm.nims`' export list and the
-one JS caller moved with it.
+Every value either front end could have stored, and what it becomes:
+
+| stored value | new value | why |
+|---|---|---|
+| *(nothing stored)* | **off** | fresh install |
+| `frame_blend: false` / `motionBlur: false` | **off** | had the blend off |
+| `frame_blend: true` / `motionBlur: true` | **on** | asked for panel ghosting; keeps it |
+| `off` | **off** | unchanged |
+| `auto` | **on** | `auto` *is* what on means now |
+| `dmg` | **on** | asked for their machine's response; on gives it |
+| `cgb` | **on** | ” |
+| `agb` | **on** | ” |
+| `ags` | **on** | ” (an SP owner now gets `agb`; see above) |
+| `true` / `false` (the new bool) | **as written** | round trip |
+| anything else | **off** | a newer build's name, or a corrupt record |
+
+The only entry that changes what a user *sees* rather than what they asked for
+is `ags`: someone who had explicitly forced the AGS-101 curve now gets the
+AGB-001 one. They keep the feature, at the panel the machine implies. That is
+the trade the toggle makes, and it is the only one.
+
+* native, `config.nim`: `lcd_response:` is read as a bool now and as a string
+  when an older config wrote one, through `parse_enabled` in
+  `lcd_response.nim`; failing that key entirely, a legacy `frame_blend: true`
+  maps to on. The writer emits a YAML bool, which reads straight back.
+* web, `index.js` `loadVideoSettings`: a stored boolean is taken as-is, a
+  stored string goes through `LCD_LEGACY_ON` (the same name list as
+  `parse_enabled`, and the two have to agree or a config and an IDB record
+  would disagree), and failing both, `v.motionBlur`. An unrecognised value
+  falls back to off rather than sliding into the wasm call as `NaN`.
+  `web/tests/lcd-response.test.mjs` covers every row of the table above at the
+  wasm boundary, plus that the markup really carries a checkbox and that no
+  panel name survives in that row.
+
+The wasm export `_wasm_set_frame_blend(0|1)` became `_wasm_set_lcd_response`,
+which is now `(0|1)` again — the enum ordinal it briefly carried is gone, and
+0 and 1 kept their old meanings across the change (off, and follow-the-machine),
+so the wire format narrowed rather than shifting. `web/types/em.d.ts` is
+generated from the Nim signature (`node web/types/gen-emdts.mjs`) and was
+regenerated for the parameter rename.
+
+### The panels are still there
+
+Collapsing the *choice* did not collapse the model. `LcdPanel`, `SPECS` and
+`build_lut` are untouched, `resolve` still returns one of four panels, and the
+harness hooks that drive them directly all survive:
+
+* `tests/lcdresponse_test.nim` calls `set_panel(lpDmg | lpCgb | lpAgb | lpAgs)`
+  and asserts the ordering between them — it never went through the user-facing
+  type at all.
+* `DINGBAT_BENCH_LCD=<off|on|dmg|cgb|agb|ags>` (`tests/dingbat_bench.nim`) now
+  goes through `parse_panel`, which forces a named panel and otherwise resolves
+  on/off exactly as the frontends do. This is how a per-panel comparison is
+  still made after the picker is gone.
 
 ### One thing the response forced open
 
@@ -505,8 +583,8 @@ keeps a mis-gated colour title safe.
 
 ## Recommendation
 
-**Default it to `auto`.** It is shipped `off`, because that was the instruction,
-but off is the wrong default and here is the case:
+**Default it on.** It is shipped off, because that was the instruction and the
+default is Matt's call, but off is the wrong default and here is the case:
 
 1. It is an accuracy feature. With it off, a documented class of games renders
    in a way the developers never saw and never intended — Link's Awakening's
@@ -521,7 +599,8 @@ but off is the wrong default and here is the case:
    screen is moving. Interframe blending was already considered affordable at
    a comparable price, and the worst case here lasts as long as a screen
    transition does.
-3. `auto` means nobody has to know what an AGS-101 is. The machine picks.
+3. Nobody has to know what an AGS-101 is. The machine picks, which is the whole
+   point of the setting being a switch.
 4. ares enables interframe blending by default for DMG, CGB and GBA. SameBoy
    defaults to its ACCURATE blending mode. Defaulting this off is the outlier.
 

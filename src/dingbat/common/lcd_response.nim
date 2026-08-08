@@ -79,17 +79,6 @@ type
     lpAgs = "ags"      ## AGS-101, the backlit SP. Quick: a light touch of
                        ## response, close to no ghosting.
 
-  LcdMode* = enum
-    ## What the USER picked. `lmAuto` is the interesting one: it resolves to
-    ## the panel the running machine actually shipped with, which is the only
-    ## setting that is right for every game without being told.
-    lmOff  = "off"
-    lmAuto = "auto"
-    lmDmg  = "dmg"
-    lmCgb  = "cgb"
-    lmAgb  = "agb"
-    lmAgs  = "ags"
-
   PanelSpec = object
     ## Times are in milliseconds so they can be compared with panel datasheets
     ## directly; frames only enter when the table is built.
@@ -257,33 +246,54 @@ proc apply*(r: var LcdResponse; fb: ptr UncheckedArray[uint16];
               (((eb and 0xFF) shr 3) shl 10)
   return outb
 
-proc resolve*(m: LcdMode; gba: bool; cgb: bool; sgb = false): LcdPanel =
-  ## Turn the user's choice into a panel. Auto follows the machine: a GBA game
-  ## gets the AGB-001, a CGB game the colour TFT, and a game running as a DMG
-  ## gets the DMG's screen — which is the one that actually matters, since it
-  ## is the DMG's slow panel the flicker tricks were written for.
+proc resolve*(on: bool; gba: bool; cgb: bool; sgb = false): LcdPanel =
+  ## The whole user-facing surface: one switch, and the panel follows the
+  ## machine. A GBA game gets the AGB-001, a CGB game the colour TFT, and a
+  ## game running as a DMG gets the DMG's screen — which is the one that
+  ## actually matters, since it is the DMG's slow panel the flicker tricks
+  ## were written for.
   ##
-  ## Auto also turns the model OFF under a Super Game Boy, and that is not a
-  ## special case so much as the same rule: the SGB is a SNES cartridge, its
-  ## picture leaves through the console's video output, and there is no Game
-  ## Boy LCD anywhere in the signal path to be slow. (A CRT's phosphor decay
-  ## is a different effect with a different shape — not this one.) Picking a
-  ## panel by hand still forces it, for anyone who wants the look regardless.
-  case m
-  of lmOff:  lpOff
-  of lmDmg:  lpDmg
-  of lmCgb:  lpCgb
-  of lmAgb:  lpAgb
-  of lmAgs:  lpAgs
-  of lmAuto: (if sgb: lpOff elif gba: lpAgb elif cgb: lpCgb else: lpDmg)
+  ## GBA resolves to the AGB-001 and not the AGS-101 because no ROM can say
+  ## which GBA its player owned, so this has to pick, and the AGB-001 is both
+  ## the original and the one whose ghosting the tricks were written for.
+  ## Resolving to the AGS-101 would render Golden Sun's world-map jitter and
+  ## F-Zero's minimap the way a late-model SP shows them: strobing. Choosing
+  ## the panel that makes the effects work is the same principle as choosing
+  ## the DMG for a monochrome cart.
+  ##
+  ## On also means OFF under a Super Game Boy, and that is not a special case
+  ## so much as the same rule: the SGB is a SNES cartridge, its picture leaves
+  ## through the console's video output, and there is no Game Boy LCD anywhere
+  ## in the signal path to be slow. (A CRT's phosphor decay is a different
+  ## effect with a different shape — not this one.)
+  if not on: lpOff
+  elif sgb: lpOff
+  elif gba: lpAgb
+  elif cgb: lpCgb
+  else:     lpDmg
 
-proc parse_mode*(s: string): LcdMode =
-  ## Tolerant parse for config files and stored settings; anything unknown is
-  ## off rather than an error, so a stale config cannot brick the present path.
+proc parse_enabled*(s: string): bool =
+  ## Tolerant parse for config files and stored settings. The setting used to
+  ## be a six-way picker (off / auto / dmg / cgb / agb / ags), so every one of
+  ## those names still has to land somewhere sensible: `off` is off, and
+  ## `auto` AND the four panel names are all ON, because someone who named a
+  ## panel was asking for that machine's response and the toggle now gives it
+  ## to them. Anything unknown is off rather than an error, so a stale or
+  ## corrupted config cannot brick the present path.
   case s
-  of "auto", "on", "true": lmAuto
-  of "dmg": lmDmg
-  of "cgb", "gbc": lmCgb
-  of "agb", "agb001", "gba": lmAgb
-  of "ags", "ags101", "sp": lmAgs
-  else: lmOff
+  of "auto", "on", "true", "yes",
+     "dmg", "cgb", "gbc", "agb", "agb001", "gba", "ags", "ags101", "sp": true
+  else: false
+
+proc parse_panel*(s: string; gba: bool; cgb: bool; sgb = false): LcdPanel =
+  ## Drive a panel by name, for harnesses that need one directly rather than
+  ## whatever the loaded machine implies (DINGBAT_BENCH_LCD, and any -d: build
+  ## that wants a fixed panel). The four panel names force themselves;
+  ## everything else goes through the shipping on/off resolution, so
+  ## `off`/`auto` behave exactly as the frontends do.
+  case s
+  of "dmg": lpDmg
+  of "cgb", "gbc": lpCgb
+  of "agb", "agb001", "gba": lpAgb
+  of "ags", "ags101", "sp": lpAgs
+  else: resolve(parse_enabled(s), gba, cgb, sgb)
