@@ -664,7 +664,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_win_en_change_multiple` | 8874 | **0** | `WIN_EN_ABORT` |
 | `m3_obp0_change` | 74 | **0** | the mixer's second stage |
 | `m3_wx_4_change_sprites` | 2 | **0** | the park |
-| `m3_wx_6_change` | 13810 | 4611 | `WIN_LINE_START_WX`; the rest is the window line advancing on re-activation |
+| `m3_wx_6_change` | 13810 | **0** | `WIN_LINE_START_WX`, then `WIN_START_PRE_PIXEL` (2026-08-07, off the hardware photographs) |
 | `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above |
 | `m3_lcdc_obj_en_change` | 60 | 2 | see below |
 | `m3_lcdc_obj_en_change_variant` | 380 | 102 | the mixer |
@@ -776,26 +776,154 @@ component at `x = 0..2`.
 
 ### Two more mid-mode-3 rules, and the ones next to them
 
-**`m3_wx_6_change`'s remaining 4611 pixels** and
-**`m3_lcdc_win_en_change_multiple_wx`'s remaining 343** are the same sentence
-of mealybug's PPU notes, and it is not modelled: *"If WX has been updated
-correctly and WIN_EN is set again then the PPU stops drawing the background,
-and will activate the window again, but it will start drawing the **next row**
-of the window, on the same scanline."* `fifo_reset_bg` already increments
-`current_window_line`, so the WIN_EN path gets it for free — but a **WX
-re-trigger while the window is still the active source** (`window_reactivate`)
-does not restart anything and so does not advance the row. `m3_wx_6_change`'s
-reference is exactly that: our rows are one uniform window row where the
-reference is two window rows spliced at the re-trigger pixel. Whether the row
-advances on a bare WX re-trigger, or only on a full re-activation through
-WIN_EN, is the open question, and `m3_wx_4_change` / `m3_wx_5_change` are the
-constraint — both are pixel-exact today and must stay so.
+**`m3_wx_6_change`'s remaining 4611 pixels** were read as the same sentence of
+mealybug's PPU notes as `m3_lcdc_win_en_change_multiple_wx`'s 343 — *"If WX has
+been updated correctly and WIN_EN is set again then the PPU stops drawing the
+background, and will activate the window again, but it will start drawing the
+**next row** of the window, on the same scanline"* — with the open question
+being whether a bare WX re-trigger advances the row or only a full
+re-activation through WIN_EN does.
 
-**The primary source nobody has read.** mealybug's `expected/` PNGs are Beaten
-Dying Moon's *output*, not hardware captures; the only hardware evidence in the
-suite is `photos/<device>/*.jpg`, which exists for 21 of the 24 scored DMG
-rows. Where a reference and dingbat disagree and neither is obviously right,
-that photo is the tiebreaker, and it has never been used here.
+**That reading was wrong, and the hardware photographs say what is.** It is not
+a re-trigger at all: `m3_wx_6_change` re-triggers on no line of the frame (the
+WX = 80 write lands at dot 189 and the shifter passed lx = 72 at dot ~157). The
+whole 4611 was one extra increment of `current_window_line` at the TOP of the
+frame, on LY 6, which hardware performs and we did not — after which every
+window row we drew was the row above hardware's, for 90 scanlines. Fixed at
+`WIN_START_PRE_PIXEL` (see below); the row is **0**, and
+`m3_lcdc_win_en_change_multiple_wx` did not move, so the two were never the same
+mechanism.
+
+## The hardware photographs: what they say, and how much they can say
+
+**The primary source nobody had read.** mealybug's `expected/` PNGs are Beaten
+Dying Moon's *output* — the suite README says "screenshots from my Game Boy
+emulator (which I believe to be correct)" — and the only hardware evidence it
+ships is `photos/<device>/*.jpg`, "blurry photos of the ROMs running on real
+devices".
+
+**The 21-of-24 claim holds exactly.** At `mattcurrie/mealybug-tearoom-tests`
+`70e88fb`, `photos/DMG-blob` has 21 JPEGs against 24 PNGs in
+`expected/DMG-blob`; the three missing are `m2_win_en_toggle`,
+`m3_scx_high_5_bits` and `m3_scy_change`. `photos/DMG-CPU B` adds three more but
+of rows already covered, and `DMG-CPU B` is not the device the shootout scores.
+Of the 16 DMG rows that were red, **15 have a photo** — only `m3_scy_change`
+does not.
+
+`tools/gbphoto` recovers a 160×144 grid of shade indices from one of these; its
+README has the pipeline, the three validation tests and the limits. The two
+numbers to keep: **adjudication power 87–100% per row, median ≈ 95%** (the
+accuracy of the actual decision procedure on a manufactured one-pixel scanline
+slide, which is the shape of every failure here), and read-back error **0.03–2.6%
+on flat-content rows, 9–22% on the three that are a full page of
+one-pixel-stroke glyphs**.
+
+### Every failing DMG row: hardware agrees with the reference
+
+Disputed cells only — the cells where dingbat and the `_dmg_blob` reference
+differ — with the model's own residual as the noise unit:
+
+| row | disputed | hardware ≈ reference | at > 2σ | strongest region |
+|---|---|---|---|---|
+| `m3_wx_6_change` | 4611 | 79.4% | 79.4% | 4514 of 4611 cells by region, ratios 1.5–230× |
+| `m3_lcdc_bg_en_change` | 2193 | 89.8% | 94.5% | 161 cells, ratio 50× |
+| `m3_bgp_change` | 820 | 81.2% | 83.8% | 387 cells `x = 153..159` |
+| `m3_lcdc_tile_sel_change` | 776 | 75.0% | 75.7% | 332 cells, ratio 65× |
+| `m3_window_timing_wx_0` | 652 | 94.2% | 95.4% | all 652 one region, ratio 7.6× |
+| `m3_bgp_change_sprites` | 536 | 90.1% | 94.6% | 64 cells, ratio 85× |
+| `m3_lcdc_win_en_change_multiple_wx` | 343 | 93.6% | 96.8% | 244 cells, ratio 19× |
+| `m3_lcdc_bg_map_change` | 192 | 75.5% | 87.7% | all 192 one region |
+| `m3_lcdc_tile_sel_win_change` | 106 | 92.5% | 92.5% | 98 cells, ratio 51× |
+| `m3_lcdc_obj_en_change_variant` | 102 | 95.1% | 96.0% | 96 cells, ratio 25× |
+| `m3_lcdc_obj_size_change` | 57 | 98.2% | 98.2% | every region, ratios 4.6–203× |
+| `m3_lcdc_win_map_change` | 34 | **100%** | 100% | one region, ratio 77× |
+| `m3_lcdc_obj_size_change_scx` | 30 | 96.7% | 96.7% | both regions, 6.6× and 38× |
+| `m3_window_timing` | 29 | 86.2% | **100%** | 15 cells, ratio 63× |
+| `m3_lcdc_obj_en_change` | 2 | **100%** | 100% | ratios 610× and 2930× |
+
+**There is no row where hardware sides with dingbat.** The per-cell percentages
+never reach 100% because a photograph cannot read an isolated pixel, but every
+one of the 44 connected disputed regions larger than 15 cells lands on the
+reference except one, and that one is explained below. So the long-open question
+is closed: **the references are sound and the residuals are ours.**
+
+### The one region that did not, and why it is not a conflict
+
+`m3_lcdc_tile_sel_change` has three disputed regions of nearly the same size and
+shape. Two land on the reference at ratios of 65× and 7.3×; the third — 320
+cells at `y = 0..39`, `x = 8..15` — lands on dingbat at 1.2×, split 131/189.
+That region is the only one of the three where the two hypotheses differ by
+**shade 3 against shade 2**, and on this panel those are the closest pair by
+some way (fitted levels 0.740 / 0.662 / 0.563 / 0.518 — the 2↔3 gap is 0.046
+where 0↔1 is 0.078). Its discriminating power is **2.15σ** against 7.98σ for the
+`0`-vs-`2` region next to it. A near-even split at 2σ on the pair the panel reads
+worst is the pipeline's floor, not a disagreement with the reference, and it
+should not be reported as one.
+
+### `WIN_START_PRE_PIXEL`: the window comparator has a slot left of pixel 0
+
+The row the photos made actionable. `m3_wx_6_change` writes WX = 6 in mode 2
+(dot 49), WX = LY at dot 93 and WX = 80 at dot 189, with WY = 4 and SCX = 0; the
+shifter's first dot is 94, so the value the comparator sees at its first slot is
+LY. Decoding the frame's tiles against the ROM's own font:
+
+| LY | WX at dot 94 | WX − 7 | hardware |
+|---|---|---|---|
+| 4 | 4 | −3 | background, no window |
+| 5 | 5 | −2 | background, no window |
+| 6 | 6 | **−1** | **window, whole line** (W row 0) |
+| 7 | 7 | 0 | window, whole line (W row 1) |
+
+`−1` fires and `−2` does not, on adjacent scanlines of one frame with everything
+else equal — a two-sided bracket on a single slot. The comparator's counter runs
+one lower than the emitted-pixel index, which is what "the window's first pixel
+is at screen x = −1" means physically. It is **not** a `>=`: a `>=` would fire at
+WX = 4 and 5 too, and the table says hardware does not. Shipped as a clamp in
+`fifo_arm_window`, which runs on register writes only, so the mode 3 dot loop is
+untouched (retired instructions 0.24% *lower* on blargg cpu_instrs, `cycles=`
+identical).
+
+It also disposes of the standing worry that `WIN_LINE_START_WX = 7` might be the
+real answer: it cannot be, because this ROM's mode-2 write puts WX = 6 at the
+mode 2 → 3 edge of **every** line ≥ 4 and the reference draws no window on LY 4
+or 5. The line-head rule reads WX at the edge and stays at 6; this one reads it
+at the shifter's first dot.
+
+**It trades one row, and the row's own sibling says the trade is right.**
+GBMicrotest `win6_b` goes red. mode 3 at WX = 6 moves 174 → 178, and the `_a`/`_b`
+pair brackets it: `win6_a` reads STAT at `cc = 257` expecting mode 3, `win6_b` at
+`cc = 261` expecting mode 0, so hardware's mode-0 start is in `(255, 259]`, i.e.
+a length of 176..179. **178 satisfies both siblings and 174 satisfies neither** —
+at 174 the `_a` read sits 3 dots past the mode-0 edge and would have to read 0,
+and the ROM expects 3. The new length also puts `win6` exactly on `win7`: same
+178, same PASS/FAIL pair. What reddens `win6_b` is bucket 15's readback lag, the
+same `0x83` vs `0x80` signature as the twenty other `win*_b` rows, surfacing on
+one more row because the mode-3 end moved into the window where it shows. Fix
+bucket 15 and it comes back on its own.
+
+### What the photos say about the rows still open
+
+* **`m3_window_timing` and `m3_window_timing_wx_0` are one inverted pair.**
+  Hardware backs the reference on both (94.2% / 86.2%, and 100% at > 2σ on the
+  smaller). Their references say the opposite things about SCX and we get both
+  backwards: at WX = 0 with `SCX = LY`, hardware's black edge ramps 11, 9, 8, 7,
+  6, 5, 4, 3 across a band and ours is pinned at 11; at WX = 7 hardware's is
+  pinned at 3 and ours ramps 5, 3, 4, 5, 6, 7, 8. 681 pixels across two rows, and
+  the shape says the SCX term sits on the wrong side of the WX = 0 special case
+  rather than being absent.
+* **`m3_bgp_change`'s ~800 is real.** Hardware backs the reference on 81.2% of
+  its disputed cells and on 736 of 820 by region, and on `m3_bgp_change_sprites`
+  at 90.1% — so the residual that makes those two "not a reliable vote" on
+  `MIXER_PALETTE_BACK` is a defect of ours, not an artefact of the reference.
+  The vote can be re-taken once it is found; it cannot be dismissed.
+* **`m3_lcdc_win_map_change`'s 34 pixels are 100% hardware-confirmed at a 77×
+  ratio.** The object really is absent on hardware. The `wx < 7` mode-2 special
+  case named above is still where to look.
+* **`m3_scy_change` (417) has no photograph** and is the only red DMG row that
+  cannot be adjudicated this way. Its mechanism is written down in mealybug's own
+  PPU notes instead ("SCY is read during the background tile fetch B, 0 and 1
+  stages" on DMG and CGB ≤ C, B only on CGB D and AGB), which is a better source
+  than a photo would have been.
 
 ### What the mixer tail does not explain, and what it costs
 
@@ -823,6 +951,11 @@ nimble test_build
 TMPDIR=<private> DINGBAT_ROM_CACHE=<private> ./dingbat_test_runner
 tools/gbppu/gamall.sh /tmp/g_base                  # 5005-row verdict file, ~6 s
 python3 tools/gbppu/famflip.py /tmp/g_base.txt '*' # per-family flip points
+
+git clone https://github.com/mattcurrie/mealybug-tearoom-tests   # @ 70e88fb
+python3 tools/gbphoto/validate.py mealybug-tearoom-tests/photos/DMG-blob \
+    $DINGBAT_ROM_CACHE/game-boy-test-roms/mealybug-tearoom-tests/ppu
+python3 tools/gbphoto/photogrid.py adjudicate <photo>.jpg --ref <ref>.png --got <ours>.png
 ```
 
 All three of `TMPDIR`, `DINGBAT_ROM_CACHE` and the nimcache are shared across
