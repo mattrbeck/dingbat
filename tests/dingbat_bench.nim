@@ -33,7 +33,7 @@ type SeqDump = object
   open: bool
   lcd: LcdResponse
 
-proc seq_dump_init(gba: bool; cgb: bool): SeqDump =
+proc seq_dump_init(gba: bool; cgb: bool; sgb = false): SeqDump =
   let spec = getEnv("DINGBAT_BENCH_DUMP_SEQ")
   if spec.len == 0: return
   let parts = spec.split(':')
@@ -42,7 +42,7 @@ proc seq_dump_init(gba: bool; cgb: bool): SeqDump =
   result.fh = open(getEnv("DINGBAT_BENCH_DUMP_PATH", "/tmp/fbseq.bin"), fmWrite)
   result.open = true
   result.lcd.set_panel(parse_mode(getEnv("DINGBAT_BENCH_LCD", "off"))
-                         .resolve(gba, cgb))
+                         .resolve(gba, cgb, sgb))
 
 proc seq_dump_tick(d: var SeqDump; frame: int; fb: var seq[uint16]) =
   ## Called for EVERY frame, not just the dumped ones: the panel has to settle
@@ -398,7 +398,8 @@ proc main() =
       if not emu.save_state(save_path): quit(1)
       echo "bench: wrote state after ", warmup, " frames: ", save_path
       return
-    var sq = seq_dump_init(gba = false, cgb = emu.cgb_enabled)
+    var sq = seq_dump_init(gba = false, cgb = emu.cgb_enabled,
+                           sgb = emu.sgb_active())
     if sq.count > 0:
       var f = 0
       while not sq.seq_dump_done() and f < 1_000_000:
