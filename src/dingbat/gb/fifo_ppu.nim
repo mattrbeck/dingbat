@@ -58,7 +58,55 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
   ppu.win_lx =
     if not window_enabled(ppu): WIN_LX_OFF
     elif ppu.fetching_window:   int32(ppu.wx) - 8
-    elif ppu.window_trigger:    int32(ppu.wx) - 7
+    elif ppu.window_trigger:
+      # ---- The comparator has ONE slot left of the shifter's first pixel ----
+      #
+      # `WX - 7` is the SCREEN x the window starts at, and this shifter's `lx`
+      # starts at `-(SCX and 7)` -- so with SCX = 0 the target `-1` (WX = 6) is
+      # one slot to the left of anything `lx` ever takes, and the equality can
+      # never fire. On hardware it does, and mealybug m3_wx_6_change brackets it
+      # on three CONSECUTIVE SCANLINES of one frame, which is as tight as this
+      # suite gets.
+      #
+      # That ROM writes WX = 6 in mode 2 (dot 49), WX = LY at dot 93, and
+      # WX = 80 at dot 189, with WY = 4 and SCX = 0. The shifter's first dot is
+      # 94, so the value the comparator sees at its first slot is LY:
+      #
+      #   LY   WX at dot 94   WX - 7   hardware (photos/DMG-blob + expected/)
+      #    4        4           -3     background, no window
+      #    5        5           -2     background, no window
+      #    6        6           -1     WINDOW, whole line (W row 0)
+      #    7        7            0     WINDOW, whole line (W row 1)
+      #
+      # -1 fires and -2 does not, on adjacent lines of the same frame with
+      # everything else identical. That is a two-sided bracket on a single slot,
+      # not a fitted constant. Decoding the frame's tiles confirms the
+      # consequence: hardware's window-line counter is one ahead of ours for the
+      # whole frame, so from LY 8 down every window row we draw is the row above
+      # the one hardware draws -- which is the entire 4611-pixel residual this
+      # row had, and it is the row's LAST residual (it goes to 0).
+      #
+      # This is not `>=`. The comparator is an equality (see the three gambatte
+      # brackets at the shifter's own test); what the evidence adds is that its
+      # counter runs one lower than the emitted-pixel index, which is exactly
+      # what "the window's first pixel is at screen x = -1" means physically.
+      # A `>=` would fire at WX = 4 and WX = 5 too, and the table above says
+      # hardware does not.
+      #
+      # Expressed as a clamp rather than a second compare because the compare is
+      # in the mode 3 dot loop, where one extra branch measured +1.7% of retired
+      # instructions (see M3_END_EARLY); `fifo_arm_window` runs on register
+      # writes only, so the whole rule is free.
+      #
+      # NOT applied to the re-trigger branch above (`fetching_window`): the
+      # window is already the fetch source there, nothing restarts, and no ROM
+      # in the tree measures a re-trigger one slot left of the first pixel.
+      let target = int32(ppu.wx) - 7
+      let first  = -int32(7 and int(ppu.scx))
+      when WIN_START_PRE_PIXEL != 0:
+        if target == first - 1: first else: target
+      else:
+        target
     else:                       WIN_LX_OFF
 
 method reset_render_scratch*(ppu: GbFifoPpu) =
@@ -117,9 +165,61 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
   ppu.smooth_scroll_sampled = true
   if ppu.fetching_window:
-    ppu.lx = int32(-max(0, 7 - int(ppu.wx)))
-    if ppu.wx == 0 and (ppu.scx and 7) > 0:
+    # ---- A line that STARTS as a window line still pays SCX & 7 ------------
+    #
+    # `lx` starting negative is this renderer's discard: those pixels are
+    # shifted out and not drawn, so each one is a dot. A line that starts as a
+    # window line (WX < WIN_LINE_START_WX) discards `7 - WX` for the window's
+    # own fine scroll -- and, until 2026-08-07, nothing at all for SCX, which
+    # made mode 3 independent of SCX & 7 on exactly those lines.
+    #
+    # mealybug m3_window_timing_wx_0 is the instrument, and it is a ruler: WX =
+    # 0, `SCX = LY`, and BGP driven black at a fixed dot of every line, so the
+    # x at which black begins IS the count of dots consumed before x = 0, read
+    # off once per scanline for all eight residues. Reference against ours,
+    # SCX & 7 = 0..7:
+    #
+    #   SCX & 7      0   1   2   3   4   5   6   7
+    #   reference   11   9   8   7   6   5   4   3
+    #   was         11  11  11  11  11  11  11  11     (no SCX term at all)
+    #   is          11   9   8   7   6   5   4   3
+    #
+    # The photograph backs the reference here (tools/gbphoto: 94.2% of the 652
+    # disputed cells, one region, residual ratio 7.6x), and so does the ROM's
+    # own header: "The stair pattern is visible due to the delay from the
+    # lowest 3 bits of SCX, and due to window activating one T-cycle later when
+    # WX = 0 and SCX > 0." Both terms are in that sentence; the second one was
+    # already here with the WRONG SIGN (it read `+= 1`, i.e. one dot EARLIER),
+    # which is invisible without the first because nothing else in the tree
+    # moves SCX on a WX = 0 line.
+    #
+    # So the discard for a window line is `(7 - WX) + (SCX and 7)`, plus the
+    # documented extra T-cycle when WX = 0 and SCX & 7 > 0. The WX = 0 case
+    # discards SIX for its own fine scroll rather than seven -- Pan Docs calls
+    # WX = 0 unreliable and this renderer already carried both 6 and 7 for it;
+    # what the stair adds is which of them goes with SCX & 7 = 0.
+    #
+    # Cross-checks, all three of them independent of the row above:
+    #  * gambatte window/m2int_wx03_scx5_m3stat_1 goes green on BOTH devices --
+    #    a direct mode-3-length bracket at WX < 7 with SCX > 0, and the only
+    #    gambatte family that holds one.
+    #  * gambatte sprites/space/10spritesPrLine_wx0_m3stat_ds_2 goes green.
+    #  * GBMicrotest win0_scx3_a/_b bracket it. `_a` reads STAT at cc = 261 and
+    #    expects mode 3, `_b` at cc = 265 and expects mode 0, and hardware
+    #    samples the mode bits at cc - 2 (see STAT_READ_LAG), so mode 0 starts
+    #    in [260, 263] and mode 3 is 180..183 dots. This makes it 183 -- INSIDE
+    #    the bracket, where the old 178 was outside it on the short side.
+    #
+    # What it costs: win0_scx3_b itself goes red, at `0x83` against `0x80`.
+    # That is not this rule being wrong -- it is the readback lag catalogued as
+    # bucket 15 in docs/gb-failure-triage.md (we sample no earlier than cc - 5
+    # where hardware samples cc - 2) becoming visible on one more row, because
+    # the mode-3 end moved to where that defect shows. Same shape, same
+    # signature and the same twenty siblings as win6_b next door.
+    ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
+    if ppu.wx == 0:
       ppu.lx += 1
+      if (ppu.scx and 7) > 0: ppu.lx -= 1
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 

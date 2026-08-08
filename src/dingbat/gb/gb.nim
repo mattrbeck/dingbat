@@ -341,6 +341,20 @@ const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## re-activation -- see docs/gb-failure-triage.md). This constant is pinned
   ## from both sides regardless of that residual, which is why it ships without
   ## it.
+const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
+  ## Whether the window's WX comparator can match one pixel slot to the LEFT of
+  ## the shifter's first pixel -- screen x = -1 when SCX & 7 = 0, i.e. WX = 6.
+  ## 1 ships; 0 is the control build and compiles the clamp out.
+  ##
+  ## Derivation, and the two-sided bracket that fixes it to exactly one slot,
+  ## at `fifo_arm_window` in gb/fifo_ppu.nim. It is a different mechanism from
+  ## WIN_LINE_START_WX below, and the two do not overlap: that one reads WX at
+  ## the mode 2 -> 3 edge and starts the whole line as a window line, this one
+  ## reads WX at the shifter's first dot and reaches the same place through the
+  ## ordinary equality. m3_wx_6_change needs both and distinguishes them,
+  ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
+  ## mode-2 value is 6 on every line and the reference draws no window on
+  ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const MIXER_PALETTE_BACK*     {.intdefine.} = 2
