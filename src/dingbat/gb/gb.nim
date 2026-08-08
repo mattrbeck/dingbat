@@ -1131,6 +1131,29 @@ type
     frequency_shadow*:   uint16
     sweep_enabled*:      bool
     negate_used*:        bool
+    # Absolute scheduler cycle at which the sweep's SECOND overflow check falls
+    # due, or GB_NO_STEP when none is pending. The check trails the frequency
+    # writeback by 8 M-cycles and re-reads NR10 when it runs; see
+    # GB_SWEEP_CHECK_DELAY for the three SameSuite sources that say so.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it is pending for 8
+    # M-cycles at most (2 us) once per sweep period, it is written only by a
+    # sweep step, and a rollback snapshot that replays that step reconstructs
+    # it. A state loaded from disk mid-window loses one overflow check, which
+    # can at worst leave a channel audible until the next sweep step re-arms it.
+    # Serializing it would cost a GB payload revision bump.
+    sweep_check_at*:     CycleCount
+    # Absolute scheduler cycle of the most recent duty step, or GB_NO_STEP when
+    # none has happened since the last trigger. Only ch1_reload_is_now reads it,
+    # and only to tell "the frequency timer is reloading on this very cycle"
+    # apart from "the trigger's start delay happens to be one period away",
+    # which next_step alone cannot distinguish.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it decides a one-cycle
+    # tie on an NR13/NR14 write and is rewritten by the next duty step, i.e.
+    # within one sample. Serializing it would cost a GB payload revision bump.
+    # GbChannel2 carries its own copy for the same reason.
+    last_step_at*:       CycleCount
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
@@ -1139,6 +1162,7 @@ type
     wave_duty_position*: int
     sample_bit*:         uint8        # see GbChannel1.sample_bit
     next_step*:          CycleCount   # see GbChannel1.next_step
+    last_step_at*:       CycleCount   # see GbChannel1.last_step_at; unserialized
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
@@ -1196,6 +1220,20 @@ type
     # would cost a GB payload revision bump, which is worth spending on a batch
     # of fields rather than on this one.
     tick_phase*:          CycleCount
+    # Phase of the HALF-rate grid the noise channel's divisor stage is clocked
+    # by, in scheduler cycles: this is the power-on cycle taken modulo
+    # (8 shl speed), and an edge of that 512 kHz grid lands on every cycle
+    # congruent to `noise_phase + (4 shl speed)` -- i.e. on the ODD 1 MHz ticks
+    # counted from the power-on. NR43's divisor field counts on this grid and a
+    # trigger cannot reset it, which is what SameSuite
+    # channel_4_frequency_alignment measures; see gb_noise_deadline for the
+    # derivation and the cross-checks. Reset by an APU power-on, exactly like
+    # tick_phase.
+    #
+    # Deliberately NOT serialized, for the same reasons as tick_phase: written
+    # only by a power-on, worth at most one 1 MHz tick of noise phase, and
+    # serializing it would cost a GB payload revision bump.
+    noise_phase*:         CycleCount
     # "The first DIV-APU event after a power-on is skipped when DIV's tap bit
     # was already high" (SameSuite div_write_trigger_10). The divider is what
     # actually clocks the sequencer, so powering the APU on part-way through a
