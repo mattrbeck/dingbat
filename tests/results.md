@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-08 07:19:49*
+*Generated: 2026-08-08 14:44:04*
 
 ## Game Boy - Blargg
 
@@ -865,6 +865,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | same-suite/dma/hdma_mode0 | 👌 |
 | same-suite/ppu/blocking_bgpi_increase | 👌 |
 | same-suite/interrupt/ei_delay_halt | 👀 |
+| same-suite/sgb/command_mlt_req | 👌 |
+| same-suite/sgb/command_mlt_req_1_incrementing | 👌 |
 
 ## Game Boy - Shootout ROMs
 
@@ -1061,6 +1063,6 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 
 ## Summary
 
-- **Total:** 978
-- **Pass:** 702
+- **Total:** 980
+- **Pass:** 704
 - **Fail:** 276

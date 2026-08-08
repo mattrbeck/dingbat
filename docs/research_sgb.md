@@ -112,13 +112,37 @@ The SGB protocol is a self-clocking pulse stream on P1 bits 4 and 5:
 * byte 0 of the first packet is `command << 3 | length`, where length is the
   **number of packets** (1..7) in the group. Up to 111 data bytes.
 
-Because bits are taken on falling edges, **no timing model is needed** — the
+Because the encoding is self-clocking, **no timing model is needed** — the
 receiver is a pure state machine over P1 writes. Pan Docs' 5-M-cycle pulse /
 15-M-cycle space convention is a reliability margin on real silicon, not
 something an emulator has to enforce. (One real trap, found the hard way in
 the prototype: the "previous lines" latch must start at *both high*, or the
 very first reset pulse a game sends is not an edge and its first packet — very
 often `MASK_EN` or `CHR_TRN` — is silently dropped.)
+
+**Which edge carries the bit.** A pulse is two edges — a line falls, then both
+lines are released — and Pan Docs does not say which one the ICD2 samples. It
+is the **release**, and it reads whichever line is low at that moment. The
+prototype guessed the fall, which is indistinguishable for every well-formed
+transfer and wrong for a malformed one. `cpp/sgb-ext-test` is built entirely
+out of malformed ones and settles it three ways:
+
+* `SendPacket20To10` drives `$20` (P14 low) → `$10` (P15 low) → `$30` for one
+  bit. Hardware reads a **1**: the P15 state at the release wins, not the P14
+  fall that came first. Its `MLT_REQ 4` and `MLT_REQ 2` packets, whose affected
+  bit is already 1, survive intact; its `MLT_REQ 1` packet, whose bit is 0, is
+  received as `MLT_REQ 2`. `SendPacket10To20` is the mirror and reads a **0**.
+* `SendPacketShortStart` omits the `$30` that ends the reset pulse, so the
+  first bit's low pulse is entered *from the reset* rather than from both-high.
+  Hardware drops that bit — the packet shifts by one and its command byte stops
+  being `MLT_REQ`. So a release only carries a bit if the line went low from
+  both-high; the receiver needs that one extra "pulse in flight" bit of state.
+* `SendPacketAvoid30` never returns to both-high at all, and hardware receives
+  nothing. `SendPacket10To00` / `SendPacket20To00` drop a `$00` in the middle
+  of a bit's pulse, and the reset wins: the bit in flight is abandoned.
+
+The stop bit's *value* is ignored — `SendPacketCorruptStop` sends a 1 there and
+the packet is still accepted.
 
 The second transport is the **VRAM transfer**: `*_TRN` commands make the SNES
 read 4 KiB out of the Game Boy's video signal, reproducing the byte order the
@@ -159,6 +183,33 @@ transfer pattern on screen for several frames on every border load.
 to the Game Boy, via rotating joypad IDs on P1. Modern games detect SGB with
 the C-register check instead, but older ones use `MLT_REQ` and will not enable
 their SGB features without it.
+
+The joypad-ID counter is not the "reset to player 1 and advance between polls"
+device the obvious reading of Pan Docs suggests. SameSuite's two `sgb/` ROMs
+pin it exactly, and both halves are counter-intuitive:
+
+* It **free-runs on every P15 rising edge**, including the ones a command
+  packet is made of. `command_mlt_req` is built on that: it uses `MLT_REQ`
+  packets purely as a known number of steps, and says so — "Each of these
+  increments the player 5 times before it gets ANDed" beside an `MLT_REQ 1`
+  packet, "6 times" beside `MLT_REQ 3`. A packet is one reset pulse plus one
+  P15 pulse per `1` bit, and `$89 $01` has four 1 bits (five) against `$89 $03`
+  with five (six), so those numbers *are* the rule. `MLT_REQ` itself does not
+  clear the counter; it only ANDs it with the new player mask.
+* Request **2 is not a real mode** — Pan Docs lists 0, 1 and 3 — and the SGB
+  behaves as 3 players, i.e. mask 2. That mask makes the ID stick: `0 →
+  (0+1)&2 = 0` and `2 → (2+1)&2 = 2`, so it never moves again, which is what
+  the ROM's last three groups check. Request 2 also advances the counter once
+  as it lands, which requests 0/1/3 do not. That asymmetry is forced by the
+  data, not chosen: entering an `MLT_REQ 2` from four-player mode with the four
+  possible counters, hardware answers players 2, 2, 0, 0 — `((n+1) & 2)` — while
+  the same four entering an `MLT_REQ 1` answer 1, 0, 1, 0 — `(n & 1)`, with no
+  advance. The two packets carry the same number of 1 bits, so no AND-only or
+  advance-always rule fits both.
+
+In one-player mode the mask is 0, so the free-running counter is pinned at 0
+and P1 reads the same `0xF` a handheld does — the multiplayer path is inert
+rather than special-cased.
 
 **Never.** `SOUND`/`SOU_TRN` (SNES APU), `OBJ_TRN` (SNES sprites),
 `DATA_SND`/`DATA_TRN`/`JUMP` (running 65816 code — this is what Space
@@ -687,8 +738,23 @@ frame. That is the highest-value next step and it is not small.
   ordering was chosen specifically to make that case work, and it is untested
   against a real cart.
 * **`MASK_EN` modes 2 and 3.** Blue only uses mode 1.
-* **the four-player `MLT_REQ` path**, and anything SGB-multiplayer.
+* **anything SGB-multiplayer past the joypad IDs.** The counter and mask are
+  now pinned to hardware by three test ROMs (below), but no second controller
+  is wired to anything.
 * **cross-emulator agreement.** No SGB oracle was run at all — see gbfuzz above.
+
+**Since validated by test ROMs** (all three pass byte-exactly against their
+reference images, and the two SameSuite ones run in the local suite as
+`same-suite/sgb/*`):
+
+* `samesuite/sgb/command_mlt_req` and `.../command_mlt_req_1_incrementing` —
+  the joypad-ID counter, its free run over packet pulses, the per-request mask
+  and the glitched request 2. See §2.2, Tier 3.
+* `cpp/sgb-ext-test` (CasualPokePlayer) — the packet transport against nine
+  deliberately malformed transfers: which edge carries a bit, what a truncated
+  reset does, what a mid-bit reset does, and that the stop bit's value is
+  ignored. See §2.1. This is the only coverage the transport has that is not
+  a well-formed packet.
 
 **Honest summary:** the *mechanism* is well tested and the *one cart that
 exercises it* is right to the bit. The breadth is missing, and only a library

@@ -341,11 +341,34 @@ proc sgb_execute(gb: GB; d: openArray[uint8]) =
   of 0x0A: s.sgb_cmd_pal_set(d)
   of 0x0B, 0x13, 0x14, 0x15: sgb_vram_transfer(gb, cmd, d[1])
   of 0x11:                          # MLT_REQ
-    s.players = case d[1] and 3
-      of 0: 1'u8
-      of 1: 2'u8
-      else: 4'u8
-    s.cur_player = 0
+    # The joypad-ID counter is NOT reset by MLT_REQ: it free-runs on P15 edges
+    # (see sgb_p1_write) and the command only narrows it to the new player
+    # count. SameSuite's sgb/command_mlt_req states both halves of this in its
+    # own comments -- "Each of these increments the player 5 times before it
+    # gets ANDed" next to an MLT_REQ 1 packet (a packet is one reset pulse plus
+    # one P15 pulse per 1 bit: $89 $01 has four 1 bits, so five), and "6 times"
+    # next to MLT_REQ 3 ($89 $03, five 1 bits). So the packet's own pulses land
+    # in the counter first and the AND happens when the command executes.
+    #
+    # `players` is the modulus, so the mask is players-1: request 0/1/3 give
+    # 1/2/4 players. Request 2 is not a real mode -- Pan Docs lists only three
+    # -- and 3 is what the SGB behaves as: the counter wraps on mask 2, which
+    # makes the ID stick at 0 or at 2 forever (0 -> (0+1)&2 = 0, 2 -> (2+1)&2
+    # = 2). command_mlt_req's last three groups exist to pin exactly that.
+    let req = d[1] and 3
+    s.players = req + 1
+    if req == 2:
+      # ...and the unsupported request additionally advances the counter once
+      # as it lands, which the supported ones do not. Derived from the ROM:
+      # with the four possible counters 0..3 entering an MLT_REQ 2 from
+      # four-player mode, hardware answers players 2, 2, 0, 0 (rows 16-19),
+      # which is ((n+1) and 2), while the same four entering an MLT_REQ 1
+      # answer 1, 0, 1, 0 -- (n and 1), with no advance. No AND-only or
+      # advance-always rule fits both, and the two packets carry the same
+      # number of 1 bits, so the extra step belongs to request 2 itself.
+      s.cur_player = (s.cur_player + 1) and req
+    else:
+      s.cur_player = s.cur_player and req
   of 0x16:                          # ATTR_SET
     s.sgb_apply_atf(int(d[1] and 0x3F))
     if (d[1] and 0x40) != 0: s.mask = 0
@@ -358,8 +381,26 @@ proc sgb_p1_write*(gb: GB; val: uint8) =
   ## Pan Docs, "Command Packet Transfers". P14 and P15 both low is the reset
   ## pulse that starts a packet; afterwards each low pulse on P14 sends a 0
   ## bit and each low pulse on P15 sends a 1 bit, LSB of each byte first,
-  ## 16 bytes then a 0 stop bit. Bits are taken on the falling edge, so no
-  ## timing model is needed — the encoding is self-clocking.
+  ## 16 bytes then a 0 stop bit. No timing model is needed — the encoding is
+  ## self-clocking.
+  ##
+  ## WHICH edge carries the bit is the part Pan Docs leaves open, and it is
+  ## what cpp/sgb-ext-test measures. A pulse is not one edge but two: a line
+  ## goes low, then both go high again. The bit is taken on the RELEASE, from
+  ## whichever line is low at that moment — not on the fall:
+  ##
+  ##   * that ROM's SendPacket20To10 drives $20 (P14 low) then $10 (P15 low)
+  ##     then $30 for one bit. Hardware reads a 1 there, the P15 state at the
+  ##     release: the ROM's MLT_REQ 4 and 2 packets, whose affected bit IS 1,
+  ##     come through intact, and its MLT_REQ 1 packet, whose bit is 0, is
+  ##     received as MLT_REQ 2. SendPacket10To20 is the mirror and reads 0.
+  ##   * SendPacketShortStart omits the $30 that ends the reset pulse, so the
+  ##     first bit's low pulse is entered from the reset rather than from
+  ##     both-high. Hardware drops that bit — the whole packet shifts by one
+  ##     and its command byte stops being MLT_REQ. So a release only carries a
+  ##     bit if the line went low FROM both-high, which is what `pending` is.
+  ##   * SendPacketAvoid30 never returns to both-high at all, and hardware
+  ##     receives nothing.
   let s = gb.sgb
   let cur = (val shr 4) and 3       # bit0 = P14 level, bit1 = P15 level
   let prev = s.prev_lines
@@ -367,25 +408,39 @@ proc sgb_p1_write*(gb: GB; val: uint8) =
   if cur == prev: return
   if cur == 0:
     # Reset pulse. Restarts the bit counter; a reset mid-group also restarts
-    # the group, which is what a game does after a failed transfer.
+    # the group, which is what a game does after a failed transfer. It also
+    # abandons any bit in flight — sgb-ext-test's SendPacket10To00 and
+    # SendPacket20To00 drop a $00 in the middle of one bit's pulse and lose it.
     s.receiving = true
+    s.pending = false
     s.bit_count = 0
     for i in 0 ..< 16: s.packet[i] = 0
     return
   # MLT_REQ player rotation. Pan Docs: "The next joypad is automatically
   # selected when P15 goes from LOW (0) to HIGH (1)". bit 1 of `cur` is P15.
-  # Suppressed for the duration of a packet, whose 1 bits are P15 pulses --
-  # otherwise a transfer would spin the counter and the read straight after
-  # MLT_REQ would answer for the wrong player. (Hardware spins it too, which
-  # is why sgb_execute re-zeroes it; this just keeps the answer stable.)
-  if not s.receiving and (prev and 2) == 0 and (cur and 2) != 0 and s.players > 1:
+  #
+  # This is NOT suppressed while a packet is being clocked in. The packet's own
+  # 1 bits are P15 pulses and hardware counts every one of them: SameSuite's
+  # sgb/command_mlt_req is built on it (it sends MLT_REQ packets purely to
+  # advance the counter by a known 5 or 6 steps and then reads the ID back).
+  # sgb/command_mlt_req_1_incrementing pins the edge itself -- $10 then $30
+  # advances, $20 then $30 does not, and a reset pulse ($00) does not stop the
+  # release of P15 from advancing it either.
+  #
+  # In one-player mode the mask is 0, so this is a no-op rather than a special
+  # case: the ID stays 0xF, which is what a handheld reads.
+  if (prev and 2) == 0 and (cur and 2) != 0:
     s.cur_player = (s.cur_player + 1) and (s.players - 1)
-  if cur == 3 or prev != 3 or not s.receiving: return
+  if prev == 3: s.pending = true    # a line just left both-high: bit incoming
+  if cur != 3: return               # still low, and `prev` will name which line
+  if not s.pending: return          # a release with no pulse behind it
+  s.pending = false
+  if not s.receiving: return
   if s.bit_count >= 128:
     # The stop bit. Whatever it is, the packet is over.
     s.receiving = false
     return
-  if cur == 1:                      # P15 low -> a 1 bit
+  if prev == 1:                     # P15 was the line held low -> a 1 bit
     s.packet[s.bit_count shr 3] = s.packet[s.bit_count shr 3] or
                                   (1'u8 shl (s.bit_count and 7))
   inc s.bit_count
