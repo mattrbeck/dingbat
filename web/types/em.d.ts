@@ -44,6 +44,8 @@ interface EmscriptenModule {
   _wasm_hle_audio_active?(): number;
   _wasm_game_fb_ptr?(): number;
   _wasm_panel_gbc?(): number;
+  _wasm_glow_sample?(gw: number, gh: number, remap: number,
+                     p0: number, p1: number, p2: number, p3: number): number;
   _wasm_sgb_enable?(on: number): void;
   _wasm_sgb_active?(): number;
   _wasm_sgb_border?(): number;

@@ -696,7 +696,175 @@ can supply it.
 
 ---
 
-## 8. Known rough edges
+### Re-verified against today's main (2026-08-07, after the merge)
+
+The byte-identity claim above was first made against the `main` this branch was
+cut from. `main` has since taken GB core work (the `fifo_mix` refactor that
+this branch's SGB hook now sits inside), a rewind delta codec, save-state
+loader hardening and web changes — so that claim had expired, and the only
+version of it worth anything is the one against the `main` that exists now.
+
+Re-run at `0aafb51` — which is `main` after it took this branch's earlier
+SGB work, so the comparison is now "did the merge and the glow change disturb
+anything" rather than "is the feature inert" — 400 frames per cart, both channels (a fold of every
+frame's framebuffer, and a fold of the whole save-state payload every 64
+frames, so state that has not reached the screen yet is still compared):
+
+| header | carts | SGB off | SGB on |
+|---|---|---|---|
+| `00/03/33` | Pokemon Blue | identical | **differs** — the intended unlock |
+| `80/03/33` | Zelda LADX, LADX DX, Pokemon Silver | identical | identical |
+| `c0/00/33` | Kirby Tilt 'n' Tumble, Pokemon Crystal, Shantae | identical | identical |
+| `00/00/01`, `00/00/60` | Zelda LADX mono (x2), pocket.gb, Prehistorik Man | identical | identical |
+
+Eleven carts, both switch positions, zero unexpected differences. **With the
+SGB switch off the adapter is not there**, byte for byte, against the `main` of
+today rather than the one this branch was cut from. The two RTC carts
+(Crystal, Silver) skip the state channel only: their payload seeds from
+wall-clock time and legitimately differs run to run.
+
+The merge also *fixed* something rather than merely surviving. `main` split the
+shifter's colour decision out into `fifo_mix`, which is what
+`fifo_recompose_last` calls as well — so moving the SGB substitution in there
+means a register write that re-colours the previous dot now gets the SGB
+palette too. The original placement, in the shifter alone, missed that path.
+
+## 8. The ambient glow samples the composite, not the framebuffer
+
+Added 2026-08-07, after the border landed.
+
+The glow is a 24x16 halo blurred behind the screen. It sampled
+`_wasm_fb_ptr` — the **game** framebuffer — which stopped being the right
+picture the moment an SGB border existed: under a border the Game Boy screen
+occupies the middle 160x144 of a 256x224 picture, so the halo was a blur of
+edges the user cannot see. Pokemon Blue bleeds overworld greens out from
+behind a Poke Ball border that is almost entirely blue.
+
+Matt's generalisation is the right frame: this is one question, not two. If
+the glow samples the wrong stage it will mismatch for colour correction and
+for any future filter too. So the question is **what stage should it sample**,
+and the answer is: **the composited picture, before presentation effects.**
+
+### What that means concretely
+
+Sampled:
+
+* the SGB border layer, where it is opaque — unpacked 5-to-8 bit with **no**
+  panel model, because border art is native SNES output and the shader does
+  not correct it either;
+* the Game Boy window — through the colour LUT, so the halo follows the
+  correction toggle and any curve added later, because the LUT is the one
+  place the curve lives;
+* the DMG shade palette substitution, which is display-space and bypasses the
+  panel model exactly as it does in the shader;
+* the SGB backdrop, where neither layer covers.
+
+Deliberately **not** sampled, with the reasoning written at the code:
+
+| excluded | why |
+|---|---|
+| upscale filters (hq4x / xBR) | at one sample per ~100 output pixels the filter cannot change the answer, and running it would cost real work for a difference nobody can see |
+| scanlines | they darken every other row by 28%; a point sample lands on a dark row about half the time, so the halo would flicker as an artefact of *where the grid fell* rather than of the picture |
+| integer-scale letterbox bars | the bars are black and are not part of the picture; sampling them would wash the glow toward black in exactly the configuration where the screen is smallest and the glow matters most |
+
+"The composited surface" is therefore **not** "the final framebuffer". Reading
+back the presented canvas would have swept in all three, *and* forced a
+GPU→CPU sync every 100 ms that the current path does not have. It was
+rejected on both counts.
+
+### Where it lives, and whether one point serves both frontends
+
+**One frontend, not two: the native frontend has no ambient glow.** The
+feature is web-only, so there is one sampling point to place.
+
+It went into wasm (`wasm_glow_sample`) rather than JS, because that is where
+the colour LUT and the border already are. A second copy of the panel model in
+JS would drift the first time a correction curve is added on one side only —
+which is precisely the failure the selectable-curves workstream would
+otherwise walk into. The shade palette is passed **in** as an argument rather
+than stored, so it still never reaches emulated state (which is what keeps
+save states, rewind and netplay byte-identical).
+
+### Cost: it got cheaper, on both profiles
+
+Matt asked for confirmation that this is not a performance hit, and the answer
+is that it is a performance *win* — for a structural reason, not a lucky one.
+The old path converted the **whole** frame through the colour LUT (23,040
+pixels for a Game Boy, 38,400 for a GBA) and then point-sampled 384 of them.
+The new one composites and converts only the 384 cells asked for.
+
+**Measurement conditions, stated because they matter.** These were taken on a
+machine under heavy concurrent load (load average 14–23; five sibling agents
+building Nim and driving headless browsers). Two things make the result
+survive that:
+
+1. **The arms are interleaved, not sequential.** Both run in the same page on
+   alternating glow ticks — OLD, NEW, OLD, NEW at ~10 Hz. Load drifts over
+   minutes, not between two ticks 100 ms apart, so the paired difference is not
+   at the mercy of what else started halfway through.
+2. **Each timing window batches 25 repetitions.** `performance.now()` is
+   coarsened to 100 us in a page that is not cross-origin-isolated, and a
+   single call of either arm is well under that — it quantises to 0.0 or 0.1
+   and any median of single samples is pure clock artefact. Batching resolves
+   it. Both arms pay the same batching, so the ratio is unaffected; the batch
+   loop does warm the caches, which is why these absolute figures sit below the
+   unbatched ones in the second table.
+
+Medians with the interquartile range as spread, 40 s per profile:
+
+| | OLD per-call | NEW per-call | ratio |
+|---|---|---|---|
+| desktop, no border | 0.0400 ms [0.0360, 0.0480] | 0.0080 ms [0.0080, 0.0120] | **0.20** |
+| desktop, SGB border | 0.0440 ms [0.0440, 0.0480] | 0.0120 ms [0.0080, 0.0120] | **0.27** |
+| phone, no border | 0.1400 ms [0.1320, 0.1480] | 0.0320 ms [0.0160, 0.0360] | **0.23** |
+| phone, SGB border | 0.1480 ms [0.1320, 0.1520] | 0.0300 ms [0.0200, 0.0360] | **0.20** |
+
+**The interquartile ranges do not overlap in any of the four rows** — the
+spread is nowhere near the difference, so this is a point estimate rather than
+a bound. Phone is 390x844 @ dpr 3 with CPU throttled 4x, the profile the
+original figure used.
+
+And per **frame**, which is the budget question, since the glow works on one
+rAF in six. Measured the unbatched way, so it is directly comparable to the
+0.0122 ms/frame desktop and 0.045 ms/frame phone figures already on record for
+the whole feature:
+
+| | before | after |
+|---|---|---|
+| desktop, no border | 0.0153 ms | **0.0080 ms** |
+| desktop, SGB border | 0.0131 ms | **0.0099 ms** |
+| phone, no border | 0.0560 ms | **0.0288 ms** |
+| phone, SGB border | 0.0506 ms | **0.0439 ms** |
+
+The point sample stays a point sample. An area average over the same grid was
+measured at 0.0070 -> 0.1386 ms per sample for a quality gain invisible behind
+a 28-pixel blur, and moving the sampling point does not revive it.
+
+### The ordinary case is provably unchanged
+
+The risk in moving a sampling point is that you fix the case you were looking
+at and quietly change every other one. So: with no SGB and no border, where the
+"composite" is just the game window and there is nothing to composite, the new
+sampler is compared against the old sampling of the same frame.
+
+**Zero of 1152 channels differ** (24x16 cells, three channels), and all 384
+cells are non-black. The change is a strict superset — identical where there is
+nothing to composite, correct where there is.
+
+### What it looks like
+
+`web_15_glow_sampling_compare.png` is the whole argument in one image: the
+screen on the left (a blue Poke Ball border framing a cream battle box), the
+old glow surface in the middle — uniformly cream with a green smear, no blue
+anywhere — and the new one on the right, a blue frame around a cream centre.
+Both are shown as sampled and as the user sees them, blurred.
+
+A trap for whoever regenerates these: `toDataURL()` on the game canvas returns
+**black**. The WebGL context has no `preserveDrawingBuffer`, so the drawing
+buffer is already gone by the time a readback asks for it. Take an element
+screenshot instead.
+
+## 9. Known rough edges
 
 1. **The window resizes mid-session** (native) when a border first appears,
    because the picture genuinely changes size. It is one resize, on the edge,
