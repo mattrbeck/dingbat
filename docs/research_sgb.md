@@ -840,6 +840,17 @@ The point sample stays a point sample. An area average over the same grid was
 measured at 0.0070 -> 0.1386 ms per sample for a quality gain invisible behind
 a 28-pixel blur, and moving the sampling point does not revive it.
 
+### The ordinary case is provably unchanged
+
+The risk in moving a sampling point is that you fix the case you were looking
+at and quietly change every other one. So: with no SGB and no border, where the
+"composite" is just the game window and there is nothing to composite, the new
+sampler is compared against the old sampling of the same frame.
+
+**Zero of 1152 channels differ** (24x16 cells, three channels), and all 384
+cells are non-black. The change is a strict superset — identical where there is
+nothing to composite, correct where there is.
+
 ### What it looks like
 
 `web_15_glow_sampling_compare.png` is the whole argument in one image: the
