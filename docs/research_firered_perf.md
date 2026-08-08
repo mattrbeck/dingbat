@@ -693,8 +693,10 @@ assumed.
 | ImGui pass | skipped when no UI is visible | free | — |
 
 (`frame_blend` was later replaced by `lcd_response`, a per-pixel panel model:
-see `research_lcd_response.md`. Still off by default, and about a third the
-cost of the blend measured here.)
+see `research_lcd_response.md`. Still off by default. Its cost is regime
+dependent rather than a fixed per-pixel price — cheaper than the blend on a
+quiet screen, level on ordinary content, up to 1.7x dearer while the whole
+screen moves — and end to end the setting costs +0.04 ms/frame on a GBA.)
 
 **Web**
 

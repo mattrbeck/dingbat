@@ -162,7 +162,12 @@ by the evidence above rather than by a datasheet:
 
 `auto` resolves from the running machine — GBA → `agb`, CGB game → `cgb`, a game
 running as a DMG → `dmg` — which is the only setting that is right for every
-game without being told.
+game without being told. It also resolves to **off under a Super Game Boy**,
+and that is the same rule rather than an exception: the SGB is a SNES
+cartridge, its picture leaves through the console's video output, and there is
+no Game Boy LCD anywhere in the path to be slow. (A CRT's phosphor decay is a
+different effect with a different shape, and is not this one.) Choosing a panel
+by hand still forces it, for anyone who wants the look regardless.
 
 ### Deliberately not modelled
 
@@ -347,31 +352,118 @@ shipping code path via `dingbat_bench`:
 
 ## Cost
 
-Never worse than the blend it replaces; usually much better, because the
-settled-pixel fast path skips most of the screen.
+The first pass at this section claimed the model was flatly cheaper than the
+blend — 0.53x on GB, 0.34x on GBA in the browser, 0.29x native. **Those figures
+were wrong**, in two separate ways, and both are worth recording because they
+are easy traps:
 
-**Web** (`Module._loop_tick`, headless Chromium, one build, one origin, service
-workers blocked, best of 7 × 600 frames, arms interleaved). Measuring a runtime
-switch inside a single build means there is no file swap for a stale service
-worker to void:
+1. The native arm compared against the *web* blend's per-channel unpack
+   (25 instr/px) rather than the native SWAR one (14 instr/px without checks),
+   and it gave the blend `seq` indexing — i.e. bounds checks — while the new
+   module used `UncheckedArray`. Half of what looked like an algorithmic win
+   was a checks asymmetry.
+2. The web arm was an end-to-end `loop_tick` A/B across two *different* wasm
+   builds. The quantity being measured is ~3% of a tick, and the cross-build
+   difference in code layout swamped it: the deltas it reported (+0.145 vs
+   +0.076 ms) are four times larger than the pixel loops actually cost when
+   measured in isolation.
 
-| ROM | old 50/50 blend | LCD response | ratio |
+### What it actually costs
+
+The honest answer is that the cost depends entirely on how much of the screen
+is **still settling**, and the model is cheaper on quiet screens and dearer on
+busy ones. The crossover is around 30% of pixels unsettled.
+
+Note "unsettled", not "changed". A pixel leaves the fast path when its cell is
+not yet at its target and stays off it until it arrives — several frames after
+it last changed. **The model's own slowness enlarges its own working set**, by
+roughly 4x for content where the changes move around the screen.
+
+**Browser** — both algorithms compiled into ONE wasm binary, replayed over a
+captured ring of real core frames, interleaved within a single page on a single
+origin, batch size auto-calibrated so every timing window is >= 60 ms (well
+clear of `performance.now()` coarsening), median of 11. One binary means there
+is no file swap for a stale service worker to void, and no cross-build layout
+luck; measured spreads are under 2%. Absolute ms drift ~20% between *runs* with
+machine load, so only within-run ratios are meaningful.
+
+| content | pixels changed/frame | still settling | blend | response | ratio |
+|---|---|---|---|---|---|
+| Golden Sun, GBA (a static screen) | 0.0% | 0.3% | 0.0551 | 0.0389 | **0.71x** |
+| Pokémon Crystal, GBC | 1.5% | 7.2% | 0.0331 | 0.0292 | **0.88x** |
+| Link's Awakening, GB (title, wave) | 4.2% | 17.8% | 0.0398 | 0.0392 | **0.98x** |
+| `lcdflicker.gb` (two bands at 30 Hz) | 44.7% | 46.3% | 0.0331 | 0.0386 | **1.17x** |
+| pathological: every pixel, every frame | 100% | 100% | 0.0343 | 0.0586 | **1.71x** |
+
+End-to-end, which is what the user pays — the same shipped build, the setting
+toggled off vs `auto`, interleaved, median of 15 x 900 `loop_tick` calls,
+spreads under 1%:
+
+| ROM | off | auto | cost of the feature |
 |---|---|---|---|
-| Link's Awakening (GB → `dmg`) | +0.1445 ms/frame (+10.4%) | **+0.0763 ms/frame (+5.6%)** | 0.53× |
-| Pokémon Crystal (GBC → `cgb`) | — | +0.0713 ms/frame (+5.2%) | — |
-| Golden Sun (GBA → `agb`) | +0.2538 ms/frame (+8.0%) | **+0.0865 ms/frame (+2.7%)** | 0.34× |
+| Link's Awakening (GB → `dmg`) | 0.5288 ms | 0.5634 ms | **+0.0347 ms/frame (+6.6%)** |
+| Golden Sun (GBA → `agb`) | 1.2491 ms | 1.2889 ms | **+0.0398 ms/frame (+3.2%)** |
 
-(The blend column is the same measurement run against a wasm build of the
-parent commit, back to back on the same machine, so the baselines match to
-within 2%.)
+Those deltas agree with the isolated pixel-loop numbers above to within 6%,
+which is the cross-check that says the end-to-end measurement is measuring the
+pixel loop and not build noise.
 
-**Native** (`-d:release`, micro-benchmark over real frame streams,
-`scratchpad/lcdresp/respbench.nim`), as a multiple of the old blend's cost:
+**Native**, by RETIRED INSTRUCTIONS (`proc_pid_rusage` RUSAGE_INFO_V4, the same
+counter `DINGBAT_BENCH_COUNTERS=1` uses) as well as wall clock, because
+wall-clock A/B on this codebase is unreliable below ~1.3%. Four arms, so the
+checks asymmetry is visible rather than hidden:
 
-| workload | 160×144 | 240×160 |
-|---|---|---|
-| real game frames | **0.29×** | 0.93× |
-| pathological: every pixel changes every frame | 0.62× | 0.84× |
+| arm | instr/px |
+|---|---|
+| native blend as shipped (SWAR, `seq` indexing, `-d:release` bounds checks) | 28.00 |
+| the same SWAR arithmetic on `UncheckedArray` | 14.00 |
+| the web blend's per-channel unpack, no checks (what wasm shipped) | 25.00 |
+| LCD response, fast path only (fully static screen) | 17.00 |
+| LCD response, slow path only (pathological) | 35.94 |
+| LCD response, Link's Awakening walking (2.0% of pixels changing) | 17.39 |
+
+Half the old *native* blend's cost was bounds checking. Against the algorithm
+alone the model is 1.2x on quiet content and 2.6x pathological; against what
+actually shipped it is 0.6x and 1.3x.
+
+Wall clock native (median of 9 x 300, 160x144 / 240x160):
+
+| regime | shipped blend | response | ratio |
+|---|---|---|---|
+| fully static | 0.0306 | 0.0157 | 0.51x |
+| LA walking (2.0% changing) | 0.0247 | 0.0175 | 0.71x |
+| pathological | 0.0246 | 0.0419 | 1.70x |
+| Golden Sun busy transition, 240x160 (32.7% changing) | 0.0441 | 0.0761 | 1.73x |
+
+That last row is the one to keep in mind: the response executes **fewer**
+instructions than the shipped blend there (26.10 vs 28.00 per pixel) and still
+takes 1.73x the time. The slow path is memory- and latency-bound, not
+instruction-bound — it moves a 4-byte cell state per pixel where the blend
+moved 2, and its three table loads are dependent on that state, so they cannot
+be hoisted or vectorised the way the blend's arithmetic can.
+
+### Why those numbers, from the operation counts
+
+The instruction counts are not a black box; they follow from the loops, which
+is the check that says the measurement is believable rather than lucky.
+
+* **fast path (17/px)**: two loads (frame, state), eight ops to rebuild
+  `settled(colour)` from the frame pixel, a compare and a well-predicted
+  branch, one mask and one store, three for the loop.
+* **slow path (36/px)**: the same prologue, then three table-index
+  computations and three loads, seven ops to repack the state, ten to repack
+  the output, two stores.
+* **native SWAR blend (14/px)**: two loads, eight ops (`and`/`shr`/`add` on
+  the packed word — no unpacking at all), two stores, three for the loop.
+* **web per-channel blend (25/px)**: two loads, eight ops to unpack six
+  channels, three adds, three shifts, two shifts and two ors to repack, two
+  stores, three for the loop.
+
+So per pixel the model IS dearer than the native blend — it has to be, it does
+more — and the only reason it comes out ahead in ordinary use is that most of
+the screen never reaches the slow path. That is a real win and it is the one
+that matters for a user, but it is a different claim from "the model is cheaper
+per pixel", which is false.
 
 ## The settings surface
 
@@ -422,17 +514,29 @@ but off is the wrong default and here is the case:
    mGBA's own release notes call the flicker "an intended effect on hardware".
    Every other display-accuracy default in this emulator (colour correction, the
    FIFO renderer) is already on.
-2. It is now **cheaper than the feature it replaces**, and that feature was
-   already considered affordable. On a GBA it costs 2.7% of a frame.
+2. It is affordable, and about the same price as the feature it replaces: it
+   costs **+0.035 ms/frame on GB (+6.6%) and +0.040 ms/frame on GBA (+3.2%)**
+   end to end, and its pixel loop is cheaper than the old blend's on quiet
+   screens, level on ordinary ones, and up to 1.7x dearer only while the whole
+   screen is moving. Interframe blending was already considered affordable at
+   a comparable price, and the worst case here lasts as long as a screen
+   transition does.
 3. `auto` means nobody has to know what an AGS-101 is. The machine picks.
 4. ares enables interframe blending by default for DMG, CGB and GBA. SameBoy
    defaults to its ACCURATE blending mode. Defaulting this off is the outlier.
 
-The counter-argument is that `dmg` is a strong look — the trail behind a fast
-sprite is several frames long, which is faithful but is a bigger visual change
-than colour correction was. If that is the worry, the compromise is to default
-to `auto` and leave the parameters where they are; the panel that produces the
-heaviest smear (`dmg`) is also the one whose smear is best attested.
+There are two counter-arguments and they are worth stating.
+
+* `dmg` is a strong look — the trail behind a fast sprite is several frames
+  long, which is faithful but is a bigger visual change than colour correction
+  was. The panel that produces the heaviest smear is also the one whose smear
+  is best attested, so the answer to that is not to weaken the curve.
+* The cost is not free and it is worst exactly when the machine is busiest: a
+  full-screen transition is both the most expensive frame to emulate and the
+  frame where the model does the most work. On the measurements here that is
+  ~0.08 ms on a 240x160 frame, against a ~1.25 ms tick, so it does not
+  threaten the frame budget — but it is the number to watch if the model ever
+  moves somewhere hotter.
 
 **Naming**: keep "LCD response". "Motion blur" described a video effect;
 "interframe blending" described an implementation. This one describes the
