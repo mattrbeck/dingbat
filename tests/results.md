@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 16:14:30*
+*Generated: 2026-08-07 17:56:14*
 
 ## Game Boy - Blargg
 
@@ -276,7 +276,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_wx_4_change_sprites | 👌 |
 | mealybug-cgb/m3_wx_4_change_sprites | 👌 |
 | mealybug/m3_wx_5_change | 👌 |
-| mealybug/m3_wx_6_change | 👀 80.0% correct (18429/23040 pixels match) |
+| mealybug/m3_wx_6_change | 👌 |
 
 ## Game Boy - GBMicrotest
 
@@ -788,7 +788,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win5_a | 👌 |
 | gbmicrotest/win5_b | 👌 |
 | gbmicrotest/win6_a | 👌 |
-| gbmicrotest/win6_b | 👌 |
+| gbmicrotest/win6_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win7_a | 👌 |
 | gbmicrotest/win7_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win8_a | 👌 |

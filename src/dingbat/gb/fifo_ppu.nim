@@ -58,7 +58,55 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
   ppu.win_lx =
     if not window_enabled(ppu): WIN_LX_OFF
     elif ppu.fetching_window:   int32(ppu.wx) - 8
-    elif ppu.window_trigger:    int32(ppu.wx) - 7
+    elif ppu.window_trigger:
+      # ---- The comparator has ONE slot left of the shifter's first pixel ----
+      #
+      # `WX - 7` is the SCREEN x the window starts at, and this shifter's `lx`
+      # starts at `-(SCX and 7)` -- so with SCX = 0 the target `-1` (WX = 6) is
+      # one slot to the left of anything `lx` ever takes, and the equality can
+      # never fire. On hardware it does, and mealybug m3_wx_6_change brackets it
+      # on three CONSECUTIVE SCANLINES of one frame, which is as tight as this
+      # suite gets.
+      #
+      # That ROM writes WX = 6 in mode 2 (dot 49), WX = LY at dot 93, and
+      # WX = 80 at dot 189, with WY = 4 and SCX = 0. The shifter's first dot is
+      # 94, so the value the comparator sees at its first slot is LY:
+      #
+      #   LY   WX at dot 94   WX - 7   hardware (photos/DMG-blob + expected/)
+      #    4        4           -3     background, no window
+      #    5        5           -2     background, no window
+      #    6        6           -1     WINDOW, whole line (W row 0)
+      #    7        7            0     WINDOW, whole line (W row 1)
+      #
+      # -1 fires and -2 does not, on adjacent lines of the same frame with
+      # everything else identical. That is a two-sided bracket on a single slot,
+      # not a fitted constant. Decoding the frame's tiles confirms the
+      # consequence: hardware's window-line counter is one ahead of ours for the
+      # whole frame, so from LY 8 down every window row we draw is the row above
+      # the one hardware draws -- which is the entire 4611-pixel residual this
+      # row had, and it is the row's LAST residual (it goes to 0).
+      #
+      # This is not `>=`. The comparator is an equality (see the three gambatte
+      # brackets at the shifter's own test); what the evidence adds is that its
+      # counter runs one lower than the emitted-pixel index, which is exactly
+      # what "the window's first pixel is at screen x = -1" means physically.
+      # A `>=` would fire at WX = 4 and WX = 5 too, and the table above says
+      # hardware does not.
+      #
+      # Expressed as a clamp rather than a second compare because the compare is
+      # in the mode 3 dot loop, where one extra branch measured +1.7% of retired
+      # instructions (see M3_END_EARLY); `fifo_arm_window` runs on register
+      # writes only, so the whole rule is free.
+      #
+      # NOT applied to the re-trigger branch above (`fetching_window`): the
+      # window is already the fetch source there, nothing restarts, and no ROM
+      # in the tree measures a re-trigger one slot left of the first pixel.
+      let target = int32(ppu.wx) - 7
+      let first  = -int32(7 and int(ppu.scx))
+      when WIN_START_PRE_PIXEL != 0:
+        if target == first - 1: first else: target
+      else:
+        target
     else:                       WIN_LX_OFF
 
 method reset_render_scratch*(ppu: GbFifoPpu) =
