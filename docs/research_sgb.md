@@ -785,24 +785,71 @@ save states, rewind and netplay byte-identical).
 
 ### Cost: it got cheaper, on both profiles
 
-The old path converted the **whole** frame through the LUT — 23,040 pixels for
-a Game Boy — and then point-sampled 384 of them. The new one composites and
-converts only the 384 cells asked for. Same harness, same build, the sampling
-path selected by a flag so before and after are measured against each other
-rather than against a different binary; per-frame, not per-call, because the
-glow only works every 6th rAF and what matters is what it adds to a frame:
+Matt asked for confirmation that this is not a performance hit, and the answer
+is that it is a performance *win* — for a structural reason, not a lucky one.
+The old path converted the **whole** frame through the colour LUT (23,040
+pixels for a Game Boy, 38,400 for a GBA) and then point-sampled 384 of them.
+The new one composites and converts only the 384 cells asked for.
 
-| | desktop | phone (390x844 @3, CPU x4) |
+**Measurement conditions, stated because they matter.** These were taken on a
+machine under heavy concurrent load (load average 14–23; five sibling agents
+building Nim and driving headless browsers). Two things make the result
+survive that:
+
+1. **The arms are interleaved, not sequential.** Both run in the same page on
+   alternating glow ticks — OLD, NEW, OLD, NEW at ~10 Hz. Load drifts over
+   minutes, not between two ticks 100 ms apart, so the paired difference is not
+   at the mercy of what else started halfway through.
+2. **Each timing window batches 25 repetitions.** `performance.now()` is
+   coarsened to 100 us in a page that is not cross-origin-isolated, and a
+   single call of either arm is well under that — it quantises to 0.0 or 0.1
+   and any median of single samples is pure clock artefact. Batching resolves
+   it. Both arms pay the same batching, so the ratio is unaffected; the batch
+   loop does warm the caches, which is why these absolute figures sit below the
+   unbatched ones in the second table.
+
+Medians with the interquartile range as spread, 40 s per profile:
+
+| | OLD per-call | NEW per-call | ratio |
+|---|---|---|---|
+| desktop, no border | 0.0400 ms [0.0360, 0.0480] | 0.0080 ms [0.0080, 0.0120] | **0.20** |
+| desktop, SGB border | 0.0440 ms [0.0440, 0.0480] | 0.0120 ms [0.0080, 0.0120] | **0.27** |
+| phone, no border | 0.1400 ms [0.1320, 0.1480] | 0.0320 ms [0.0160, 0.0360] | **0.23** |
+| phone, SGB border | 0.1480 ms [0.1320, 0.1520] | 0.0300 ms [0.0200, 0.0360] | **0.20** |
+
+**The interquartile ranges do not overlap in any of the four rows** — the
+spread is nowhere near the difference, so this is a point estimate rather than
+a bound. Phone is 390x844 @ dpr 3 with CPU throttled 4x, the profile the
+original figure used.
+
+And per **frame**, which is the budget question, since the glow works on one
+rAF in six. Measured the unbatched way, so it is directly comparable to the
+0.0122 ms/frame desktop and 0.045 ms/frame phone figures already on record for
+the whole feature:
+
+| | before | after |
 |---|---|---|
-| before, no border | 0.0161 ms | 0.0527 ms |
-| **after, no border** | **0.0071 ms** | **0.0327 ms** |
-| before, SGB border | 0.0115 ms | 0.0800 ms |
-| **after, SGB border** | **0.0135 ms** | **0.0442 ms** |
+| desktop, no border | 0.0153 ms | **0.0080 ms** |
+| desktop, SGB border | 0.0131 ms | **0.0099 ms** |
+| phone, no border | 0.0560 ms | **0.0288 ms** |
+| phone, SGB border | 0.0506 ms | **0.0439 ms** |
 
-(Medians of three 30-second runs; the per-run figures and their spread are in
-§8.1.) The point sample stays a point sample — an area average over the same
-grid was measured at 20x the cost for a difference invisible behind the blur,
-and it stays rejected.
+The point sample stays a point sample. An area average over the same grid was
+measured at 0.0070 -> 0.1386 ms per sample for a quality gain invisible behind
+a 28-pixel blur, and moving the sampling point does not revive it.
+
+### What it looks like
+
+`web_15_glow_sampling_compare.png` is the whole argument in one image: the
+screen on the left (a blue Poke Ball border framing a cream battle box), the
+old glow surface in the middle — uniformly cream with a green smear, no blue
+anywhere — and the new one on the right, a blue frame around a cream centre.
+Both are shown as sampled and as the user sees them, blurred.
+
+A trap for whoever regenerates these: `toDataURL()` on the game canvas returns
+**black**. The WebGL context has no `preserveDrawingBuffer`, so the drawing
+buffer is already gone by the time a readback asks for it. Take an element
+screenshot instead.
 
 ## 9. Known rough edges
 
