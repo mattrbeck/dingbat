@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 17:56:14*
+*Generated: 2026-08-07 18:19:14*
 
 ## Game Boy - Blargg
 
@@ -270,8 +270,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_scy_change2 | 👀 100.0% correct (23034/23040 pixels match) |
 | mealybug/m3_window_timing | 👀 99.9% correct (23011/23040 pixels match) |
 | mealybug-cgb/m3_window_timing | 👀 99.9% correct (23017/23040 pixels match) |
-| mealybug/m3_window_timing_wx_0 | 👀 97.2% correct (22388/23040 pixels match) |
-| mealybug-cgb/m3_window_timing_wx_0 | 👀 97.2% correct (22388/23040 pixels match) |
+| mealybug/m3_window_timing_wx_0 | 👀 100.0% correct (23036/23040 pixels match) |
+| mealybug-cgb/m3_window_timing_wx_0 | 👀 100.0% correct (23036/23040 pixels match) |
 | mealybug/m3_wx_4_change | 👌 |
 | mealybug/m3_wx_4_change_sprites | 👌 |
 | mealybug-cgb/m3_wx_4_change_sprites | 👌 |
@@ -762,7 +762,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win0_a | 👌 |
 | gbmicrotest/win0_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win0_scx3_a | 👌 |
-| gbmicrotest/win0_scx3_b | 👌 |
+| gbmicrotest/win0_scx3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win10_a | 👌 |
 | gbmicrotest/win10_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win10_scx3_a | 👌 |
@@ -1050,17 +1050,17 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 111/116 passed |
 | gambatte/speedchange | 👀 112/208 passed |
-| gambatte/sprites | 👀 393/476 passed |
+| gambatte/sprites | 👀 394/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 325/476 passed |
+| gambatte/window | 👀 326/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 978
-- **Pass:** 703
-- **Fail:** 275
+- **Pass:** 702
+- **Fail:** 276

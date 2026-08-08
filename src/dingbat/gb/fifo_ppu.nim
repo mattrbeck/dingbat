@@ -165,9 +165,61 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
   ppu.smooth_scroll_sampled = true
   if ppu.fetching_window:
-    ppu.lx = int32(-max(0, 7 - int(ppu.wx)))
-    if ppu.wx == 0 and (ppu.scx and 7) > 0:
+    # ---- A line that STARTS as a window line still pays SCX & 7 ------------
+    #
+    # `lx` starting negative is this renderer's discard: those pixels are
+    # shifted out and not drawn, so each one is a dot. A line that starts as a
+    # window line (WX < WIN_LINE_START_WX) discards `7 - WX` for the window's
+    # own fine scroll -- and, until 2026-08-07, nothing at all for SCX, which
+    # made mode 3 independent of SCX & 7 on exactly those lines.
+    #
+    # mealybug m3_window_timing_wx_0 is the instrument, and it is a ruler: WX =
+    # 0, `SCX = LY`, and BGP driven black at a fixed dot of every line, so the
+    # x at which black begins IS the count of dots consumed before x = 0, read
+    # off once per scanline for all eight residues. Reference against ours,
+    # SCX & 7 = 0..7:
+    #
+    #   SCX & 7      0   1   2   3   4   5   6   7
+    #   reference   11   9   8   7   6   5   4   3
+    #   was         11  11  11  11  11  11  11  11     (no SCX term at all)
+    #   is          11   9   8   7   6   5   4   3
+    #
+    # The photograph backs the reference here (tools/gbphoto: 94.2% of the 652
+    # disputed cells, one region, residual ratio 7.6x), and so does the ROM's
+    # own header: "The stair pattern is visible due to the delay from the
+    # lowest 3 bits of SCX, and due to window activating one T-cycle later when
+    # WX = 0 and SCX > 0." Both terms are in that sentence; the second one was
+    # already here with the WRONG SIGN (it read `+= 1`, i.e. one dot EARLIER),
+    # which is invisible without the first because nothing else in the tree
+    # moves SCX on a WX = 0 line.
+    #
+    # So the discard for a window line is `(7 - WX) + (SCX and 7)`, plus the
+    # documented extra T-cycle when WX = 0 and SCX & 7 > 0. The WX = 0 case
+    # discards SIX for its own fine scroll rather than seven -- Pan Docs calls
+    # WX = 0 unreliable and this renderer already carried both 6 and 7 for it;
+    # what the stair adds is which of them goes with SCX & 7 = 0.
+    #
+    # Cross-checks, all three of them independent of the row above:
+    #  * gambatte window/m2int_wx03_scx5_m3stat_1 goes green on BOTH devices --
+    #    a direct mode-3-length bracket at WX < 7 with SCX > 0, and the only
+    #    gambatte family that holds one.
+    #  * gambatte sprites/space/10spritesPrLine_wx0_m3stat_ds_2 goes green.
+    #  * GBMicrotest win0_scx3_a/_b bracket it. `_a` reads STAT at cc = 261 and
+    #    expects mode 3, `_b` at cc = 265 and expects mode 0, and hardware
+    #    samples the mode bits at cc - 2 (see STAT_READ_LAG), so mode 0 starts
+    #    in [260, 263] and mode 3 is 180..183 dots. This makes it 183 -- INSIDE
+    #    the bracket, where the old 178 was outside it on the short side.
+    #
+    # What it costs: win0_scx3_b itself goes red, at `0x83` against `0x80`.
+    # That is not this rule being wrong -- it is the readback lag catalogued as
+    # bucket 15 in docs/gb-failure-triage.md (we sample no earlier than cc - 5
+    # where hardware samples cc - 2) becoming visible on one more row, because
+    # the mode-3 end moved to where that defect shows. Same shape, same
+    # signature and the same twenty siblings as win6_b next door.
+    ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
+    if ppu.wx == 0:
       ppu.lx += 1
+      if (ppu.scx and 7) > 0: ppu.lx -= 1
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 
