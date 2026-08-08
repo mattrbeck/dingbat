@@ -270,6 +270,14 @@ type
     video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr)
     scanlines*:         bool     # darken a strip across each emulated pixel row
     frame_blend*:       bool     # blend the previous frame in (LCD ghosting)
+    preserve_aspect*:   bool     # letterbox instead of stretching to the window
+    # Super Game Boy. sgb_enable is OFF by default: a fresh install plays
+    # monochrome carts as a Game Boy, which is what they look like everywhere
+    # else, and SGB is something you go and turn on. sgb_border defaults ON
+    # because it is not a second opt-in -- once you have asked for the adapter,
+    # the border is most of what it does.
+    sgb_enable*:        bool     # run SGB-flagged DMG carts as a Super Game Boy
+    sgb_border*:        bool     # composite the cart's SGB border (256x224)
     rewind*:            bool     # keep rewind history (hold ` to rewind)
     pitch_correct_ff*:  bool     # WSOLA pitch-preserving 2x fast-forward (off = octave-up)
     audio_lowpass*:     bool     # analog-output low-pass on the GBA mix (cap/speaker smoothing)
@@ -294,6 +302,9 @@ proc new_config*(): Config =
     video_filter:    vfNone,
     scanlines:       false,
     frame_blend:     false,
+    preserve_aspect: true,
+    sgb_enable:      false,
+    sgb_border:      true,
     rewind:          true,
     pitch_correct_ff: false,
     audio_lowpass:   false,
@@ -324,6 +335,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.scanlines = j["scanlines"].getBool(false)
   if j.hasKey("frame_blend"):
     cfg.frame_blend = j["frame_blend"].getBool(false)
+  if j.hasKey("preserve_aspect"):
+    cfg.preserve_aspect = j["preserve_aspect"].getBool(true)
   if j.hasKey("rewind"):
     cfg.rewind = j["rewind"].getBool(true)
   if j.hasKey("pitch_correct_ff"):
@@ -355,6 +368,12 @@ proc parse_config(j: JsonNode): Config =
       cfg.gb_fifo = gb["fifo"].getBool(true)
     if gb.hasKey("rumble") and gb["rumble"].kind == JBool:
       cfg.gb_rumble = gb["rumble"].getBool(true)
+    # No key -> the new_config default, which is OFF. An existing config
+    # predating this feature therefore does NOT silently gain it.
+    if gb.hasKey("sgb") and gb["sgb"].kind == JBool:
+      cfg.sgb_enable = gb["sgb"].getBool(false)
+    if gb.hasKey("sgb_border") and gb["sgb_border"].kind == JBool:
+      cfg.sgb_border = gb["sgb_border"].getBool(true)
   if j.hasKey("keybindings") and j["keybindings"].kind == JObject:
     cfg.keybindings = initTable[cint, Input]()
     for k, v in j["keybindings"].pairs:
@@ -429,6 +448,7 @@ proc save_config*(cfg: Config) =
   lines.add("video_filter: " & $cfg.video_filter)
   lines.add("scanlines: " & $cfg.scanlines)
   lines.add("frame_blend: " & $cfg.frame_blend)
+  lines.add("preserve_aspect: " & $cfg.preserve_aspect)
   lines.add("rewind: " & $cfg.rewind)
   lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)
   lines.add("audio_lowpass: " & $cfg.audio_lowpass)
@@ -447,4 +467,6 @@ proc save_config*(cfg: Config) =
     lines.add("  bootrom:")
   lines.add("  fifo: " & $cfg.gb_fifo)
   lines.add("  rumble: " & $cfg.gb_rumble)
+  lines.add("  sgb: " & $cfg.sgb_enable)
+  lines.add("  sgb_border: " & $cfg.sgb_border)
   writeFile(path, lines.join("\n") & "\n")

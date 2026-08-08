@@ -63,3 +63,8 @@ task test_printer, "Run the Game Boy Printer protocol unit tests":
 task test_cheats, "Run the cheat-engine unit + integration tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"
+
+task test_sgb, "Run the Super Game Boy acceptance test (packets, palettes, border)":
+  exec "python3 tests/roms/sgbtest.py"
+  exec "nim c -r -d:test_harness -d:release -d:sgb_png --path:src " &
+       "-o:dingbat_sgb_test tests/sgb_test.nim"

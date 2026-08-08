@@ -82,11 +82,22 @@ const FRAG_SRC = """
 in vec2 tex_coord;
 out vec4 frag_color;
 uniform sampler2D input_texture;
+uniform sampler2D border_texture;
 uniform bool color_correct;
 uniform bool panel_gbc;
 uniform bool scanlines;
 uniform float tex_width;
 uniform float tex_height;
+// The pixel-row pitch the scanline effect uses. Equal to tex_height without a
+// border; with one it is the OUTPUT height (224), because the SGB border and
+// the Game Boy window are both native rows of the same 224-row picture. Feed
+// tex_height here instead and the border gets 144-row scanlines over 224 rows.
+uniform float scan_height;
+// SGB border: a 256x224 RGB5_A1 layer drawn over the whole quad, with the
+// Game Boy window composited into the 160x144 rect at (48, 40). Alpha 0 is
+// SNES colour 0 -- transparent, so the window (or the backdrop) shows through.
+uniform bool sgb_border;
+uniform vec3 sgb_backdrop;
 uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR
 
 vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
@@ -167,10 +178,34 @@ vec3 correct(vec3 c) {
     vec3(1.0 / outGamma));
 }
 
+// The Game Boy layer, with every filter the no-border path applies.
+vec3 gb_layer(vec2 uv) {
+  vec3 raw = upscale(uv, vec2(tex_width, tex_height));
+  return color_correct ? correct(raw) : raw;
+}
+
 void main() {
-  vec3 raw = upscale(tex_coord, vec2(tex_width, tex_height));
-  vec3 rgb = color_correct ? correct(raw) : raw;
-  if (scanlines && fract(tex_coord.y * tex_height) < 0.3) {
+  vec3 rgb;
+  if (sgb_border) {
+    vec4 b = texture(border_texture, tex_coord);
+    if (b.a > 0.5) {
+      // Border art is native SNES output, not an LCD panel: no colour
+      // correction, and the upscale filters stay off it (they are tuned for
+      // 2bpp pixel art and smear 4bpp tiles).
+      rgb = b.rgb;
+    } else {
+      // tex_coord.y runs 0 -> -1 (the vertex shader flips there), so the
+      // window rectangle has to be worked out in un-flipped space and the
+      // result flipped back for the sampler.
+      vec2 up = vec2(tex_coord.x, -tex_coord.y) * vec2(256.0, 224.0);
+      vec2 guv = (up - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
+      rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
+            ? gb_layer(vec2(guv.x, -guv.y)) : sgb_backdrop;
+    }
+  } else {
+    rgb = gb_layer(tex_coord);
+  }
+  if (scanlines && fract(tex_coord.y * scan_height) < 0.3) {
     rgb *= 0.72;
   }
   frag_color = vec4(rgb, 1.0);
@@ -219,6 +254,11 @@ proc print_help() =
   echo "  --netlink-delay-ms N  Add N ms of send latency (network simulation)"
   echo "  --link-auto         Zero-config auto-pair on localhost (same as opening"
   echo "                      the Link Cable window; for testing two local copies)"
+  echo ""
+  echo "Verification:"
+  echo "  --capture N:PATH    After N presented frames, write the GL back buffer"
+  echo "                      (the real composited picture, letterbox excluded)"
+  echo "                      to PATH as a PNG and exit"
 
 proc compile_shader(src: string; shader_type: GLenum): GLuint =
   result = glCreateShader(shader_type)
@@ -297,6 +337,29 @@ proc load_logo_texture(): (GLuint, float32) =
   let canvas_aspect = float32(h) / float32(w)
   result = (tex, canvas_aspect)
 
+# --capture N:PATH. Reads the actual GL back buffer, so it proves the shader
+# path rather than the core's buffers. -1 disables.
+var capture_after = -1
+var capture_path  = ""
+var present_count = 0
+
+proc setup_border_texture(): GLuint =
+  glGenTextures(1, addr result)
+  glActiveTexture(GL_TEXTURE1)
+  glBindTexture(GL_TEXTURE_2D, result)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
+  # Wrap mode is deliberately left at the default REPEAT, matching the game
+  # texture. VERT_SRC emits tex_coord.y in [0, -1] (it flips the image by
+  # dividing by -2), so every fetch is at a negative V and only REPEAT brings
+  # it back into range. CLAMP_TO_EDGE here pins the whole border to row 0 --
+  # which looks like "the border is a set of vertical stripes".
+  # RGB5_A1 with 1_5_5_5_REV is exactly the core's border format: BGR555 in
+  # bits 0-14 and the opaque flag in bit 15 land straight in RGB and A.
+  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5_A1), GLsizei(256), GLsizei(224),
+               0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  glActiveTexture(GL_TEXTURE0)
+
 proc setup_vao() =
   var vao: GLuint
   glGenVertexArrays(1, addr vao)
@@ -320,6 +383,12 @@ type AppState = ref object
   gl_ctx:          GlContextPtr
   io:              ptr ImGuiIO
   game_texture:    GLuint
+  # SGB border layer, 256x224 RGB5_A1. Allocated once; only uploaded (and only
+  # sampled) while the loaded cart is running as a Super Game Boy and has
+  # actually transferred a border.
+  border_texture:  GLuint
+  border_shown:    bool     # what the last present decided; drives window sizing
+  border_gen:      uint32   # last border generation uploaded to the texture
   logo_texture:    GLuint
   canvas_aspect:   float32
   logo_shader:     GLuint
@@ -437,6 +506,48 @@ proc apply_color_correction() =
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
   glUniform1i(loc, GLint(if app.cfg.color_correction: 1 else: 0))
 
+proc sgb_border_active(): bool =
+  ## Should this present composite a Super Game Boy border? Four conditions,
+  ## and the last one is the one that keeps the window from resizing for a
+  ## cart that colours its screen but ships no border art.
+  app.emu_kind == ekGB and app.gb_emu != nil and
+    app.cfg.sgb_enable and app.cfg.sgb_border and app.gb_emu.sgb_has_border()
+
+proc output_size(): (int, int) =
+  ## The picture's native size, which is what the window is sized from and
+  ## what the aspect is preserved against. 256x224 only while a border is
+  ## actually on screen.
+  case app.emu_kind
+  of ekGBA: (GBA_W, GBA_H)
+  of ekGB:  (if sgb_border_active(): (SGB_BORDER_W, SGB_BORDER_H) else: (GB_W, GB_H))
+  of ekNone: (GBA_W, GBA_H)
+
+proc resize_to_output() =
+  ## Size the window to an integer multiple of the native picture. Skipped in
+  ## fullscreen, where the letterbox does the work instead.
+  if app.fullscreen: return
+  let (w, h) = output_size()
+  setSize(app.window, cint(w * app.scale), cint(h * app.scale))
+
+proc game_viewport(): (GLint, GLint, GLint, GLint) =
+  ## The letterboxed rect the game quad is drawn into.
+  ##
+  ## dingbat used to stretch the quad across the whole window, which is
+  ## invisible as long as the window keeps the size load_rom gave it and
+  ## obviously wrong the moment it does not -- fullscreen on a 16:9 panel
+  ## stretched a 10:9 Game Boy picture by 1.6x horizontally. It matters more
+  ## now: an SGB border switches the picture from 10:9 to 8:7 part way into a
+  ## session, so a window sized for one aspect has to letterbox the other.
+  var ww, wh: cint
+  getSize(app.window, ww, wh)
+  let (ow, oh) = output_size()
+  if not app.cfg.preserve_aspect or ow <= 0 or oh <= 0:
+    return (0.GLint, 0.GLint, GLint(ww), GLint(wh))
+  let scale = min(float(ww) / float(ow), float(wh) / float(oh))
+  let vw = GLint(float(ow) * scale)
+  let vh = GLint(float(oh) * scale)
+  ((GLint(ww) - vw) div 2, (GLint(wh) - vh) div 2, vw, vh)
+
 proc apply_panel_uniforms() =
   ## Select the panel's color-correction model and pixel-row height for the
   ## scanline effect. Depends only on the core kind, so this runs when a core
@@ -449,6 +560,11 @@ proc apply_panel_uniforms() =
               if gbc: GLfloat(GB_H) else: GLfloat(GBA_H))
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
               if gbc: GLfloat(GB_W) else: GLfloat(GBA_W))
+  # Bind the two samplers to their texture units once. Without this the border
+  # sampler defaults to unit 0 and samples the Game Boy texture as its own
+  # border, which reads as "the border is a smeared copy of the game".
+  glUniform1i(glGetUniformLocation(app.game_shader, "input_texture"), 0)
+  glUniform1i(glGetUniformLocation(app.game_shader, "border_texture"), 1)
 
 proc apply_master_volume() =
   if app.gba_emu != nil:
@@ -492,9 +608,14 @@ proc load_rom(path: string) =
   if ext in [".gb", ".gbc"]:
     app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path, app.cfg.gb_fifo,
                         app.cfg.headless, app.cfg.run_bios)
+    # Super Game Boy is opt-in from config but header-gated in the core: a
+    # cart without the SGB flag, or one that is CGB-capable, gets nothing.
+    app.gb_emu.sgb_requested = app.cfg.sgb_enable
     app.gb_emu.post_init()
     app.gba_emu = nil
     app.emu_kind = ekGB
+    app.border_shown = false
+    app.border_gen = 0
     setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
@@ -504,6 +625,7 @@ proc load_rom(path: string) =
     app.gba_emu.post_init()
     app.gb_emu = nil
     app.emu_kind = ekGBA
+    app.border_shown = false
     setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
@@ -758,20 +880,37 @@ proc save_screenshot() =
   ## Applies LCD color correction to match the on-screen image when the
   ## setting is enabled — parity with the web front-end's screenshot button.
   if app.emu_kind == ekNone: return
-  let (w, h) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
+  let border = sgb_border_active()
+  let (w, h) = output_size()
   let correct = app.cfg.color_correction
   let gbc = app.emu_kind == ekGB
   var rgb = newSeq[byte](w * h * 3)
+  template put(i: int; v: uint16; corr: bool) =
+    let c = bgr555_to_rgb(v, corr, gbc)
+    rgb[i * 3 + 0] = c[0]
+    rgb[i * 3 + 1] = c[1]
+    rgb[i * 3 + 2] = c[2]
   template convert(fb: untyped) =
+    for i in 0 ..< w * h: put(i, fb[i], correct)
+  if border:
+    # Same composite the shader does: backdrop, Game Boy window at (48, 40),
+    # then opaque border pixels on top. The border is native SNES art, so it
+    # does NOT get the LCD colour-correction curve — matching what is on
+    # screen is the whole point of this path.
+    let s = app.gb_emu
+    let bp = cast[ptr UncheckedArray[uint16]](s.sgb_border_ptr())
+    let backdrop = s.sgb_backdrop()
+    for i in 0 ..< w * h: put(i, backdrop, false)
+    for y in 0 ..< GB_H:
+      for x in 0 ..< GB_W:
+        put((y + 40) * w + (x + 48), s.ppu.framebuffer[y * GB_W + x], correct)
     for i in 0 ..< w * h:
-      let c = bgr555_to_rgb(fb[i], correct, gbc)
-      rgb[i * 3 + 0] = c[0]
-      rgb[i * 3 + 1] = c[1]
-      rgb[i * 3 + 2] = c[2]
-  case app.emu_kind
-  of ekGBA: convert(app.gba_emu.ppu.framebuffer)
-  of ekGB:  convert(app.gb_emu.ppu.framebuffer)
-  of ekNone: return
+      if (bp[i] and 0x8000'u16) != 0: put(i, bp[i] and 0x7FFF'u16, false)
+  else:
+    case app.emu_kind
+    of ekGBA: convert(app.gba_emu.ppu.framebuffer)
+    of ekGB:  convert(app.gb_emu.ppu.framebuffer)
+    of ekNone: return
   let dir = config_dir() / "screenshots"
   try:
     createDir(dir)
@@ -901,9 +1040,21 @@ proc render_game() =
                 GLint(if scan: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
                 GLint(ord(app.cfg.video_filter)))
+  # The letterboxed rect this present draws into. Computed before the case so
+  # both cores share it, and restored to the full window afterwards so ImGui
+  # is not clipped by it.
+  var win_w, win_h: cint
+  getSize(app.window, win_w, win_h)
+  let (vx, vy, vw, vh) = game_viewport()
+  if app.emu_kind != ekNone:
+    glViewport(vx, vy, GLsizei(vw), GLsizei(vh))
   case app.emu_kind
   of ekGBA:
-    if app.gba_emu == nil: return
+    if app.gba_emu == nil:
+      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
+    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
+                GLfloat(GBA_H))
     # Blending must upload static frames too, so the lingering ghost of the
     # previous frame decays instead of freezing on screen
     if app.cfg.frame_blend or not app.gba_emu.ppu.frame_static:
@@ -912,24 +1063,61 @@ proc render_game() =
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
     when defined(gputime): gpu_end()
   of ekGB:
-    if app.gb_emu == nil: return
+    if app.gb_emu == nil:
+      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
+    let border = sgb_border_active()
+    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"),
+                GLint(if border: 1 else: 0))
+    # The scanline pitch follows the OUTPUT, not the Game Boy texture: with a
+    # border the picture is 224 native rows and both layers live in it.
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
+                if border: GLfloat(SGB_BORDER_H) else: GLfloat(GB_H))
+    if border:
+      let bd = app.gb_emu.sgb_backdrop()
+      glUniform3f(glGetUniformLocation(app.game_shader, "sgb_backdrop"),
+                  GLfloat(float(bd and 0x1F) / 31.0),
+                  GLfloat(float((bd shr 5) and 0x1F) / 31.0),
+                  GLfloat(float((bd shr 10) and 0x1F) / 31.0))
+      let gen = app.gb_emu.sgb_border_gen()
+      if gen != app.border_gen:
+        app.border_gen = gen
+        glActiveTexture(GL_TEXTURE1)
+        glBindTexture(GL_TEXTURE_2D, app.border_texture)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        GLsizei(SGB_BORDER_W), GLsizei(SGB_BORDER_H),
+                        GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+                        app.gb_emu.sgb_border_ptr())
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, app.game_texture)
+      else:
+        glActiveTexture(GL_TEXTURE1)
+        glBindTexture(GL_TEXTURE_2D, app.border_texture)
+        glActiveTexture(GL_TEXTURE0)
+    # A border appearing (or a state load taking one away) changes the
+    # picture's size and aspect, so the window follows it -- once, on the
+    # edge, the same way a console changes video mode.
+    if border != app.border_shown:
+      app.border_shown = border
+      resize_to_output()
+      getSize(app.window, win_w, win_h)
+      let (nx, ny, nw, nh) = game_viewport()
+      glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
       # ±1 px viewport jitter, alternating per present, while the cart's
       # rumble motor runs. Only the viewport origin moves (the quad and
       # texture are untouched), and it's restored right after the draw so
       # ImGui renders unshaken.
-      var w, h: cint
-      getSize(app.window, w, h)
       rumble_flip = not rumble_flip
       let off: GLint = if rumble_flip: 1 else: -1
-      glViewport(off, -off, GLsizei(w), GLsizei(h))
+      let (jx, jy, jw, jh) = game_viewport()
+      glViewport(jx + off, jy - off, GLsizei(jw), GLsizei(jh))
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
-      glViewport(0, 0, GLsizei(w), GLsizei(h))
     else:
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekNone:
     render_logo()
+  glViewport(0, 0, GLsizei(win_w), GLsizei(win_h))
 
 proc show_menu_bar(): bool =
   if app.emu_kind == ekNone: return true
@@ -1156,10 +1344,7 @@ proc render_imgui() =
           for s in 1 .. 8:
             if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):
               app.scale = s
-              case app.emu_kind
-              of ekGBA: setSize(app.window, cint(GBA_W * s), cint(GBA_H * s))
-              of ekGB:  setSize(app.window, cint(GB_W * s),  cint(GB_H * s))
-              of ekNone: discard
+              if app.emu_kind != ekNone: resize_to_output()
           igSeparator()
           if igMenuItem_BoolPtr(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
                                 nil, addr app.fullscreen, true):
@@ -1877,6 +2062,10 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         netlink_delay = parseInt(v)
+      of "capture":
+        let parts = p.val.split(':', 1)
+        capture_after = parseInt(parts[0])
+        capture_path  = if parts.len > 1: parts[1] else: "capture.png"
       of "link-auto":
         # Debug/verification: kick off the same zero-config auto-pair the Link
         # Cable window does, without touching the GUI. Mirrors opening it.
@@ -1947,6 +2136,7 @@ proc main() =
   # GL setup
   glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
   let game_tex = setup_game_texture()
+  let border_tex = setup_border_texture()
   setup_vao()
   let game_shader = create_shader_program()
   let logo_shader = create_logo_shader_program()
@@ -1982,6 +2172,7 @@ proc main() =
     gl_ctx:          gl_ctx,
     io:              io_ptr,
     game_texture:    game_tex,
+    border_texture:  border_tex,
     logo_texture:    logo_tex,
     canvas_aspect:   canvas_aspect,
     logo_shader:     logo_shader,
@@ -2304,8 +2495,32 @@ proc main() =
     # refreshing when nothing was emulated (paused, menus, audio ahead).
     if (emulated and is_paced()) or now - last_present >= present_interval:
       last_present = now
+      # Black behind a game so the letterbox bars read as bezel; the brand
+      # purple is the empty-app backdrop and stays that way.
+      if app.emu_kind == ekNone:
+        glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
+      else:
+        glClearColor(0'f32, 0'f32, 0'f32, 1.0'f32)
       glClear(GL_COLOR_BUFFER_BIT)
       render_game()
+      inc present_count
+      if capture_after >= 0 and present_count >= capture_after:
+        let (cx, cy, cw, ch) = game_viewport()
+        var pix = newSeq[byte](int(cw) * int(ch) * 3)
+        glPixelStorei(GL_PACK_ALIGNMENT, 1)
+        glReadPixels(cx, cy, GLsizei(cw), GLsizei(ch), GL_RGB, GL_UNSIGNED_BYTE,
+                     addr pix[0])
+        # GL reads bottom-up; PNG wants top-down.
+        var flipped = newSeq[byte](pix.len)
+        let stride = int(cw) * 3
+        for row in 0 ..< int(ch):
+          copyMem(addr flipped[row * stride],
+                  addr pix[(int(ch) - 1 - row) * stride], stride)
+        if stbiw.writePNG(capture_path, int(cw), int(ch), 3, flipped):
+          echo "capture written: ", capture_path, " ", cw, "x", ch
+        else:
+          echo "capture FAILED: ", capture_path
+        app.running = false
       render_imgui()
       glSwapWindow(window)
       presented = true

@@ -3155,11 +3155,28 @@ const applyRewindUI = () => {
   }
 };
 
+// Super Game Boy. sgbEnable is OFF by default -- a fresh install plays
+// monochrome carts as a Game Boy, and the adapter is something you go and turn
+// on. An existing "system" record predating this feature has no sgbEnable key,
+// so loadSystemSettings leaves it off too: nobody silently gains it.
+// sgbBorder defaults on because it is not a second opt-in; once you have asked
+// for the adapter, the border is most of what it does.
+// Both are only consulted by the core at ROM load (the cart header has the
+// final say after that), so changing sgbEnable applies to the next game.
+var sgbEnable = false;
+var sgbBorder = true;
+const sgbToggle = /** @type {HTMLInputElement} */ (document.getElementById("sgb-toggle"));
+const sgbBorderToggle = /** @type {HTMLInputElement} */ (document.getElementById("sgb-border-toggle"));
+const sgbBorderRow = document.getElementById("sgb-border-row");
+
 const applySystemSettings = () => {
   if (typeof Module === "undefined") return;
   if (Module._wasm_set_gb_renderer) Module._wasm_set_gb_renderer(gbFifo ? 1 : 0);
   if (Module._wasm_set_gba_bios_mode) Module._wasm_set_gba_bios_mode(gbaBiosMode);
   if (Module._wasm_set_gba_run_bios) Module._wasm_set_gba_run_bios(gbaRunBios ? 1 : 0);
+  if (Module._wasm_sgb_enable) Module._wasm_sgb_enable(sgbEnable ? 1 : 0);
+  // The border switch IS live — it only hides a layer the core already has.
+  if (Module._wasm_sgb_border_show) Module._wasm_sgb_border_show(sgbBorder ? 1 : 0);
   // Live in both directions: off drops the ring now, on allocates a fresh
   // (empty) one for the session already running. No reload, so no
   // "takes effect next launch" note is owed here.
@@ -3175,6 +3192,12 @@ const syncSystemSettingsUI = () => {
   }
   gbaRunBiosToggle.checked = gbaRunBios;
   gbRumbleToggle.checked = gbRumble;
+  if (sgbToggle) sgbToggle.checked = sgbEnable;
+  if (sgbBorderToggle) {
+    sgbBorderToggle.checked = sgbBorder;
+    sgbBorderToggle.disabled = !sgbEnable;
+  }
+  if (sgbBorderRow) sgbBorderRow.classList.toggle("row-disabled", !sgbEnable);
   rewindToggle.checked = rewindOn;
   applyRewindUI();
 };
@@ -3182,7 +3205,8 @@ const syncSystemSettingsUI = () => {
 const saveSystemSettings = () => {
   applySystemSettings();
   applyRewindUI();
-  if (db) dbPut("system", { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn });
+  if (db) dbPut("system",
+    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
 };
 
 for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
@@ -3213,6 +3237,22 @@ gbRumbleToggle.addEventListener("change", () => {
   saveSystemSettings();
 });
 
+if (sgbToggle) sgbToggle.addEventListener("change", () => {
+  sgbEnable = sgbToggle.checked;
+  saveSystemSettings();
+  syncSystemSettingsUI();
+  syncGbPaletteUI();
+  if (currentRomName) showToast("Super Game Boy mode applies the next time a game is loaded");
+});
+
+if (sgbBorderToggle) sgbBorderToggle.addEventListener("change", () => {
+  sgbBorder = sgbBorderToggle.checked;
+  saveSystemSettings();
+  // Live: the canvas changes shape the moment the layer is shown or hidden.
+  updateCanvasScaling();
+  presentDirty = true;
+});
+
 rewindToggle.addEventListener("change", () => {
   rewindOn = rewindToggle.checked;
   saveSystemSettings();
@@ -3225,6 +3265,8 @@ const loadSystemSettings = async () => {
     if ([0, 1, 2].includes(s.gbaBiosMode)) gbaBiosMode = s.gbaBiosMode;
     if (typeof s.gbaRunBios === "boolean") gbaRunBios = s.gbaRunBios;
     if (typeof s.gbRumble === "boolean") gbRumble = s.gbRumble;
+    if (typeof s.sgbEnable === "boolean") sgbEnable = s.sgbEnable;
+    if (typeof s.sgbBorder === "boolean") sgbBorder = s.sgbBorder;
     // Deliberately only assigns for a real boolean: a record saved before this
     // setting existed leaves rewindOn at its `true` default instead of
     // becoming undefined, so upgrading never silently turns rewind off.
@@ -3946,7 +3988,7 @@ const captureThumbnail = () => {
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return null;
-  const [w, h] = nativeRes();
+  const [w, h] = gameRes();
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   const full = document.createElement("canvas");
   full.width = w;
@@ -4233,7 +4275,7 @@ const drawReportLivePreview = () => {
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return;
-  const [w, h] = nativeRes();
+  const [w, h] = gameRes();
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   reportPreview.width = w;
   reportPreview.height = h;
@@ -5051,9 +5093,34 @@ const motionBlurToggle = /** @type {HTMLInputElement} */ (document.getElementByI
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
 const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
 
-// Native resolution of the running system (GBA 240x160, GB/GBC 160x144)
-const nativeRes = () =>
+// The presented picture's native size. The core is authoritative: it is the
+// only thing that knows a Super Game Boy border has appeared and made the
+// picture 256x224 instead of 160x144. The filename check stays as the
+// bootstrap answer for the window before the core exists (updateCanvasScaling
+// runs during load), and as the answer for GBA, which never changes shape.
+const nativeRes = () => {
+  if (typeof Module !== "undefined" && Module._wasm_out_w && currentRomName) {
+    const w = Module._wasm_out_w(), h = Module._wasm_out_h();
+    if (w > 0 && h > 0) return [w, h];
+  }
+  return currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
+};
+
+// The size of the buffer _wasm_fb_ptr / _wasm_game_fb_ptr point at, which is
+// always the console's own framebuffer -- 160x144 even when a Super Game Boy
+// border makes the PRESENTED picture 256x224. Everything that reads those
+// pointers (thumbnails, the ambient-glow sampler, the paused card, the
+// bug-report preview) must use this and not nativeRes(), or it walks off the
+// end of the heap view. Those surfaces also look better without the border: a
+// 160px-wide thumbnail of a bordered frame is mostly border.
+const gameRes = () =>
   currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
+
+// True while the running cart actually has an SGB adapter. Used to explain
+// why the shade palette is inert rather than leaving a dead control.
+const sgbActive = () =>
+  !!(typeof Module !== "undefined" && Module._wasm_sgb_active &&
+     currentRomName && Module._wasm_sgb_active());
 
 const updateCanvasScaling = () => {
   // WebGL2 present: WE own the #canvas backing store now (SDL renders to the
@@ -5143,7 +5210,7 @@ const updateGlow = () => {
   if (glowTick++ % 6 !== 0) return;
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return;
-  const [w, h] = nativeRes();
+  const [w, h] = gameRes();
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   const gw = glowCanvas.width;
   const gh = glowCanvas.height;
@@ -5227,11 +5294,26 @@ const detectMonoPanel = (romFile) => {
   gbMonoPanel = true;
 };
 
+// The output size an SGB border changes mid-session. Watched here rather than
+// pushed from the core, because it is the presenter that has to react: the
+// canvas backing store, --game-ar and the integer-scale/contain-fit maths all
+// key off nativeRes().
+var lastOutW = 0, lastOutH = 0;
+
 const drawGame = () => {
   if (!currentRomName || linkMode || rollbackMode) return;
+  const [ow, oh] = nativeRes();
+  if (ow !== lastOutW || oh !== lastOutH) {
+    lastOutW = ow; lastOutH = oh;
+    updateCanvasScaling();
+    syncGbPaletteUI();   // the SGB note appears with the adapter
+  }
   glRenderer.draw({
     colorCorrect,
-    dmgPalette: gbMonoPanel ? gbPaletteColors() : null,
+    // Under SGB colour the framebuffer no longer holds the four DMG shade
+    // values the shader substitutes, so the palette would silently no-op.
+    // Gate it here and say so in the UI (syncGbPaletteUI).
+    dmgPalette: gbMonoPanel && !sgbActive() ? gbPaletteColors() : null,
     panelGbc: Module._wasm_panel_gbc
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
@@ -5900,9 +5982,20 @@ const gbPaletteColors = () => {
   return null;
 };
 
+const gbPaletteSgbNote = document.getElementById("gb-palette-sgb-note");
+
 const syncGbPaletteUI = () => {
   if (gbPaletteSelect) gbPaletteSelect.value = gbPaletteMode;
   if (gbPaletteCustomRow) gbPaletteCustomRow.hidden = gbPaletteMode !== "custom";
+  // Under SGB colour the shader has nothing to substitute (the framebuffer no
+  // longer holds DMG shade values), so the control is disabled with a reason
+  // rather than left live and inert.
+  const sgb = sgbActive();
+  if (gbPaletteSelect) gbPaletteSelect.disabled = sgb;
+  if (gbPaletteSgbNote) gbPaletteSgbNote.hidden = !sgb;
+  // The In-use swatches and the Reset button belong to the same control.
+  for (const r of document.querySelectorAll(".gb-palette-row"))
+    r.classList.toggle("row-disabled", sgb);
   for (let i = 0; i < 4; i++) {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
   }
@@ -6114,6 +6207,13 @@ const resetAllSettings = async () => {
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
   applyGbPalette();
+
+  // Super Game Boy -> on, border shown (the "system" record was already
+  // deleted above; this restores the live state and pushes it into the core).
+  sgbEnable = false;
+  sgbBorder = true;
+  applySystemSettings();
+  syncSystemSettingsUI();
 
   // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
   // theme section: the <head> boot script needs a synchronous read)
@@ -7554,7 +7654,7 @@ const updatePausedCard = () => {
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return;
-  const [w, h] = nativeRes(); // GBA 240x160, GB/GBC 160x144
+  const [w, h] = gameRes(); // GBA 240x160, GB/GBC 160x144
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   homePausedCanvas.width = w;
   homePausedCanvas.height = h;

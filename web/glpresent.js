@@ -10,10 +10,13 @@
 // (SDL must render to a different, hidden canvas); nativeRes() -> [w,h] gives
 // the core's native pixel size; log(msg) reports GL errors.
 function createGlRenderer(canvasEl, nativeRes, log) {
-  let gl = null, prog = null, tex = null, lost = false;
-  let uColorCorrect, uPanelGbc, uScanlines, uTexHeight, uTexSize, uFilter;
-  let uDmgRemap, uDmgPal;
+  let gl = null, prog = null, tex = null, btex = null, lost = false;
+  let uColorCorrect, uPanelGbc, uScanlines, uScanHeight, uTexSize, uFilter;
+  let uDmgRemap, uDmgPal, uBorderTex, uSgbBorder, uSgbBackdrop;
   let lastW = 0, lastH = 0;
+  // Last SGB border generation uploaded. The image changes a handful of times
+  // in a session and is 112 KiB, so it is re-uploaded only when it moves.
+  let lastBorderGen = -1;
   // Scratch for the vec3[4] palette upload — 12 floats, reused every draw.
   const dmgPalBuf = new Float32Array(12);
 
@@ -45,9 +48,21 @@ uniform usampler2D u_tex;       // R16UI: raw BGR555 pixels
 uniform bool u_color_correct;
 uniform bool u_panel_gbc;       // CGB color model vs AGB
 uniform bool u_scanlines;
-uniform float u_tex_height;     // native rows (for scanline pitch)
-uniform vec2 u_tex_size;        // native texel dimensions (w, h)
+// The pixel-row pitch the scanline effect uses. This is the OUTPUT height, not
+// the game texture's: with an SGB border the picture is 224 native rows and
+// both layers live in it, so feeding the 144-row game height here would put
+// Game Boy scanlines over SNES border art.
+uniform float u_scan_height;
+uniform vec2 u_tex_size;        // game texel dimensions (w, h)
 uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
+// --- Super Game Boy border ---------------------------------------------
+// A 256x224 second layer in the same BGR555 packing as the game framebuffer,
+// with bit 15 = opaque (SNES colour 0 is transparent). The Game Boy window is
+// composited into the 160x144 rect at (48, 40). Off unless the running cart is
+// an SGB game that actually transferred a border.
+uniform usampler2D u_border;
+uniform bool u_sgb_border;
+uniform vec3 u_sgb_backdrop;    // SGB colour 0, shown where nothing else is
 // --- Game Boy shade palette (monochrome DMG titles only) ---
 // A DMG game's framebuffer holds ONLY the four BGR555 values the core writes
 // for shades 0..3 (src/dingbat/gb/gb.nim DMG_COLORS), so recolouring the
@@ -86,9 +101,15 @@ bool similar(vec3 a, vec3 b) {       // hqx per-channel YUV threshold (48,7,6)
   return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
 }
 
-vec3 upscale() {
+vec3 unpack555(uint packed) {
+  return vec3(float(packed & 31u),
+              float((packed >> 5) & 31u),
+              float((packed >> 10) & 31u)) / 31.0;
+}
+
+vec3 upscale(vec2 uv) {
   g_max = ivec2(u_tex_size) - ivec2(1);
-  vec2 pos  = v_uv * u_tex_size;
+  vec2 pos  = uv * u_tex_size;
   ivec2 base = ivec2(floor(pos));
   vec3 E = fetchRGB(base);
   if (u_filter == 0) return E;
@@ -125,8 +146,8 @@ vec3 upscale() {
   return E;
 }
 
-void main() {
-  vec3 c = upscale();
+// The panel colour model, applied to the Game Boy layer only.
+vec3 shade(vec3 c) {
   float outGamma = 2.2;
   vec3 rgb;
   // A chosen palette is already in display space: the LCD colour model would
@@ -153,7 +174,27 @@ void main() {
   } else {
     rgb = c;
   }
-  if (u_scanlines && fract(v_uv.y * u_tex_height) < 0.3) {
+  return rgb;
+}
+
+void main() {
+  vec3 rgb;
+  if (u_sgb_border) {
+    ivec2 bp = clamp(ivec2(v_uv * vec2(256.0, 224.0)), ivec2(0), ivec2(255, 223));
+    uint bw = texelFetch(u_border, bp, 0).r;
+    if ((bw & 0x8000u) != 0u) {
+      // Border art is native SNES output, not an LCD panel: it skips the
+      // colour model, the shade palette and the 2bpp-tuned upscale filters.
+      rgb = unpack555(bw & 0x7FFFu);
+    } else {
+      vec2 guv = (v_uv * vec2(256.0, 224.0) - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
+      rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
+            ? shade(upscale(guv)) : u_sgb_backdrop;
+    }
+  } else {
+    rgb = shade(upscale(v_uv));
+  }
+  if (u_scanlines && fract(v_uv.y * u_scan_height) < 0.3) {
     rgb *= 0.72;
   }
   frag_color = vec4(rgb, 1.0);
@@ -186,12 +227,15 @@ void main() {
     uColorCorrect = gl.getUniformLocation(prog, "u_color_correct");
     uPanelGbc = gl.getUniformLocation(prog, "u_panel_gbc");
     uScanlines = gl.getUniformLocation(prog, "u_scanlines");
-    uTexHeight = gl.getUniformLocation(prog, "u_tex_height");
+    uScanHeight = gl.getUniformLocation(prog, "u_scan_height");
     uTexSize = gl.getUniformLocation(prog, "u_tex_size");
     uFilter = gl.getUniformLocation(prog, "u_filter");
     uDmgRemap = gl.getUniformLocation(prog, "u_dmg_remap");
     // Array uniforms are addressed by their first element.
     uDmgPal = gl.getUniformLocation(prog, "u_dmg_pal[0]");
+    uBorderTex = gl.getUniformLocation(prog, "u_border");
+    uSgbBorder = gl.getUniformLocation(prog, "u_sgb_border");
+    uSgbBackdrop = gl.getUniformLocation(prog, "u_sgb_backdrop");
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     // Integer textures must use NEAREST filtering.
@@ -199,7 +243,19 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    lastW = 0; lastH = 0;
+    // The SGB border layer, on texture unit 1. Allocated lazily on the first
+    // frame that has one.
+    btex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, btex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, 256, 224, 0,
+      gl.RED_INTEGER, gl.UNSIGNED_SHORT, null);
+    gl.activeTexture(gl.TEXTURE0);
+    lastW = 0; lastH = 0; lastBorderGen = -1;
     return true;
   };
 
@@ -234,9 +290,14 @@ void main() {
       if (!ensure()) return;
       const ptr = Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
       if (!ptr) return;
-      const [w, h] = nativeRes();
+      // nativeRes() is the OUTPUT size, which an SGB border makes 256x224.
+      // The game texture is always the console's own framebuffer.
+      const border = !!(Module._wasm_sgb_border && Module._wasm_sgb_border());
+      const [ow, oh] = nativeRes();
+      const w = border ? 160 : ow, h = border ? 144 : oh;
       // Fresh view each frame: ALLOW_MEMORY_GROWTH can detach the old buffer.
       const view = new Uint16Array(Module.memory.buffer, ptr, w * h);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
       if (w !== lastW || h !== lastH) {
@@ -247,13 +308,40 @@ void main() {
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
           gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
       }
+      // --- SGB border layer ---
+      if (border) {
+        const bptr = Module._wasm_sgb_border_ptr && Module._wasm_sgb_border_ptr();
+        const gen = Module._wasm_sgb_border_gen ? Module._wasm_sgb_border_gen() : 0;
+        if (bptr && gen !== lastBorderGen) {
+          lastBorderGen = gen;
+          const bview = new Uint16Array(Module.memory.buffer, bptr, 256 * 224);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, btex);
+          gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 224,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, bview);
+          gl.activeTexture(gl.TEXTURE0);
+        } else {
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, btex);
+          gl.activeTexture(gl.TEXTURE0);
+        }
+      }
       gl.viewport(0, 0, canvasEl.width, canvasEl.height);
       gl.useProgram(prog);
       gl.uniform1i(uColorCorrect, opts.colorCorrect ? 1 : 0);
       gl.uniform1i(uPanelGbc, opts.panelGbc ? 1 : 0);
       gl.uniform1i(uScanlines, opts.scanlines ? 1 : 0);
-      gl.uniform1f(uTexHeight, h);
+      // Scanline pitch follows the OUTPUT height, the game texture does not.
+      gl.uniform1f(uScanHeight, oh);
       gl.uniform2f(uTexSize, w, h);
+      gl.uniform1i(uBorderTex, 1);
+      gl.uniform1i(uSgbBorder, border ? 1 : 0);
+      if (border) {
+        const bd = Module._wasm_sgb_backdrop ? Module._wasm_sgb_backdrop() : 0;
+        gl.uniform3f(uSgbBackdrop, (bd & 31) / 31,
+          ((bd >> 5) & 31) / 31, ((bd >> 10) & 31) / 31);
+      }
       gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
       // opts.dmgPalette: four "#rrggbb" strings (shade 0 -> 3) or null/absent.
       const pal = opts.dmgPalette;

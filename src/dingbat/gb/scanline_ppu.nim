@@ -80,6 +80,8 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
         let pal_idx = int(ppu.vram[1][tn_addr] and 0b111) * 4 * 2 + int(color) * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
           cast[ptr uint16](unsafeAddr ppu.pram[pal_idx])[]
+      elif ppu.sgb_attr != nil:
+        ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] = sgb_screen_color(ppu, x, ppu.bgp[color])
       else:
         let pal_idx = ppu.bgp[color] * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
@@ -110,6 +112,8 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
         let pal_idx = int(ppu.vram[1][tn_addr] and 0b111) * 4 * 2 + int(color) * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
           cast[ptr uint16](unsafeAddr ppu.pram[pal_idx])[]
+      elif ppu.sgb_attr != nil:
+        ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] = sgb_screen_color(ppu, x, ppu.bgp[color])
       else:
         let pal_idx = ppu.bgp[color] * 2
         ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
@@ -138,9 +142,15 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
           else:
             if sprite_priority(s) == 0 or ppu.scanline_color_vals[x].color == 0:
               let palette = if sprite_dmg_palette(s) == 0: ppu.obp0 else: ppu.obp1
-              let pal_idx = palette[color] * 2
-              ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
-                cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
+              if ppu.sgb_attr != nil:
+                # SGB colour is per SCREEN cell, shared by BG and OBJ -- see
+                # the same rule in fifo_ppu's emit.
+                ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
+                  sgb_screen_color(ppu, x, palette[color])
+              else:
+                let pal_idx = palette[color] * 2
+                ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
+                  cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
 
 method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # Snapshot the mode as observed by a CPU read that samples during this M-cycle

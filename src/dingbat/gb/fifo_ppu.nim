@@ -826,11 +826,16 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ppu.fifo.head = h
   inc ppu.fifo.size
 
-proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel): uint16 {.inline.} =
+proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
+               x: int32): uint16 {.inline.} =
   ## The mixer: one BG FIFO entry and one OBJ FIFO entry in, one panel colour
   ## out. Split out of the shifter because the SAME pair is mixed twice -- once
   ## when it is popped, and again for every register write that lands on the
   ## dot after (fifo_recompose_last).
+  ##
+  ## `x` is the screen column the result is being written to. The shifter and
+  ## the recompose pass disagree about it (the latter re-colours lx-1 or lx-2),
+  ## and the Super Game Boy path needs the real one to pick an attribute cell.
   let use_sprite = sprite_wins(ppu, gb, bg_px, sp_px)
   let (px, arr_pram) =
     if use_sprite: (sp_px, addr ppu.obj_pram[0])
@@ -841,6 +846,13 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel): uint16 {.inline.}
       let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
               else: ppu.bgp
       int(p[px.color])
+  if ppu.sgb_attr != nil:
+    # Super Game Boy. The SNES colorizes the composited 2-bit video signal per
+    # 8x8 SCREEN cell, so the cell's attribute -- not the GB's own BG/OBJ
+    # palette selector -- picks the palette, and objects share it with the
+    # background underneath them. See sgb.nim.
+    let cell = (int(ppu.ly) shr 3) * SGB_ATTR_W + (int(x) shr 3)
+    return ppu.sgb_pal[int(ppu.sgb_attr[cell]) * 4 + final_color]
   let pal_offset = (int(px.palette) * 4 + final_color) * 2
   cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
 
@@ -938,7 +950,7 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
     let x = ppu.lx - b
     if x < 0 or x >= GB_WIDTH: continue
     let h = ppu.mix[x and 1]
-    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp)
+    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
@@ -1074,7 +1086,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # dots of history cost the dot loop the same two stores one does.
         ppu.mix[ppu.lx and 1] = GbMixHold(bg: bg_px, sp: sp_px)
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
-        fifo_mix(ppu, gb, bg_px, sp_px)
+        fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
     inc ppu.lx
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
