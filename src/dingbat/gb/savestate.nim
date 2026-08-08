@@ -924,6 +924,12 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
   r.expect_tag(GB_SEC_SGB)
   s.prev_lines = r.read_u8()
   s.receiving  = r.read_bool()
+  # `pending` (a bit pulse in flight) is derived rather than stored, so this
+  # section keeps the byte layout it has had since payload revision 5. Exactly
+  # one select line low means a pulse is in flight: the only way to reach that
+  # state without one is to drive a line low straight out of a reset pulse,
+  # which only cpp/sgb-ext-test's deliberately malformed transfer does.
+  s.pending = s.prev_lines == 1 or s.prev_lines == 2
   s.bit_count  = int(r.read_u16())
   r.read_bytes(s.packet)
   r.read_bytes(s.group)
@@ -938,8 +944,12 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
   for i in 0 ..< s.border_pal.len: s.border_pal[i] = r.read_u16()
   s.mask = r.read_u8()
   r.read_seq_u16_into(s.frozen)
-  s.players = r.read_u8()
-  s.cur_player = r.read_u8()
+  # `players` is the joypad-ID modulus and `players - 1` is used as a mask, so
+  # a 0 out of a damaged payload would widen it to 0xFF. Clamp to the four
+  # values MLT_REQ can produce; states written before request 2 was modelled
+  # hold 1, 2 or 4 and land unchanged.
+  s.players = clamp(r.read_u8(), 1'u8, 4'u8)
+  s.cur_player = r.read_u8() and (s.players - 1)
   # Re-render now rather than flagging it dirty for the next frame boundary.
   # A deferred render leaves border_valid false for one frame, and the
   # frontends size the window from exactly that flag -- so a state load would

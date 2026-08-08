@@ -1707,6 +1707,7 @@ proc main() =
   var attach_after = 10
   var force_cgb = false
   var force_dmg = false    # --dmg: run a CGB-flagged cart on DMG hardware
+  var force_sgb = false    # --sgb: run the cart in a Super Game Boy
   var no_save = false      # --nosave: blank cart RAM and detach the .sav file
   var screen_check = false # --screen-check: panel settled + not blank (see below)
   var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
@@ -1782,6 +1783,8 @@ proc main() =
         force_cgb = true
       of "dmg":
         force_dmg = true
+      of "sgb":
+        force_sgb = true
       of "nosave":
         no_save = true
       of "screen-check":
@@ -1869,7 +1872,7 @@ proc main() =
     quit(microtest_batch(list_path, out_path))
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check] [--cgb|--dmg|--sgb]"
     quit(1)
 
   if mode == tmStateRoundtrip:
@@ -1968,6 +1971,13 @@ proc main() =
     let dmg = force_dmg or (mode == tmScreenshot and not force_cgb)
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
                      force_cgb = force_cgb, force_dmg = dmg)
+    if force_sgb:
+      # --sgb: the row names the DEVICE, same contract as --cgb. This is the
+      # frontends' one knob (src/dingbat.nim's load_rom sets exactly this from
+      # cfg.sgb_enable); the core still header-gates it, so a cart without the
+      # SGB flag pair gets no adapter and runs as a plain DMG. post_init does
+      # the rest, including moving the boot handoff onto the SGB table.
+      emu.sgb_requested = true
     if model_override.len > 0:
       # One token selects the whole machine: gb_revision_from_name maps it to a
       # GbRevision and gb_set_revision derives the boot table and the quirk set

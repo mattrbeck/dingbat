@@ -892,6 +892,11 @@ type
     # Command-packet receiver (P1 pulse decode)
     prev_lines*:  uint8              # last (P15,P14) pair written to P1
     receiving*:   bool
+    # A low pulse is in flight: one select line went low FROM both-high, and
+    # the release back to both-high will latch a bit. Not serialized — it is
+    # reconstructed from prev_lines on load, which is exact for every pulse a
+    # program actually sends (see load_sgb_state).
+    pending*:     bool
     bit_count*:   int
     packet*:      array[16, uint8]   # the packet being clocked in
     group*:       array[7 * 16, uint8]  # packets 1..7 of one command

@@ -48,6 +48,7 @@ type
                           # suite's own tolerance is the mechanism to copy.
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
+    sgb: bool             # run the cart in a Super Game Boy (--sgb)
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
@@ -223,6 +224,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --color")
     if test.cgb:
       cmd.add(" --cgb")
+    if test.sgb:
+      cmd.add(" --sgb")
     if test.model.len > 0:
       cmd.add(" --model=" & test.model)
     if test.no_save:
@@ -354,6 +357,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
     if test.cgb:
       cmd.add(" --cgb")
+    if test.sgb:
+      cmd.add(" --sgb")
     if test.model.len > 0:
       cmd.add(" --model=" & test.model)
     if test.no_save:
@@ -565,23 +570,26 @@ proc build_samesuite_core_tests(samesuite_dir: string): seq[TestDef] =
   ## belong in the default run rather than behind --apu. All of them are CGB
   ## (GBC HDMA/GDMA, CGB palette-index blocking, CGB interrupt timing).
   ##
-  ## `sgb/` is skipped: those two ROMs test the Super Game Boy packet protocol
-  ## and the shootout runs them on an SGB device. dingbat has no SGB model, and
-  ## running them as a CGB scores a different machine — the same reason the AGE
-  ## `ncm*` (CGB-in-non-CGB-mode) images are skipped.
+  ## `sgb/` is the exception: those two ROMs test the Super Game Boy packet
+  ## protocol, so they name a DEVICE the way the shootout does and run with
+  ## --sgb rather than --cgb (an SGB has no CGB in it, and a CGB ignores the
+  ## packet stream, so scoring them on a CGB would score a different machine —
+  ## the same reason the AGE `ncm*` (CGB-in-non-CGB-mode) images are skipped).
   var tests: seq[TestDef]
-  for group in ["dma", "ppu", "interrupt"]:
+  for group in ["dma", "ppu", "interrupt", "sgb"]:
     let dir = samesuite_dir / group
     if not dirExists(dir):
       echo "  Warning: same-suite ", group, " directory not found"
       continue
+    let is_sgb = group == "sgb"
     for rom in find_roms_recursive(dir, ".gb"):
       tests.add(TestDef(
         name: "same-suite/" & group & "/" & rom.splitFile().name,
         rom_path: rom,
         mode: tmMooneye,
         timeout: 1800,
-        cgb: true,
+        cgb: not is_sgb,
+        sgb: is_sgb,
       ))
   tests
 
