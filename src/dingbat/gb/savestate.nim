@@ -506,6 +506,12 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
     ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
+    # sweep_check_at and last_step_at are not in the payload (see their
+    # declarations in gb.nim). They must still be cleared, or a deadline left
+    # over from the state we are REPLACING fires against the loaded registers on
+    # the next observation.
+    ch.sweep_check_at = GB_NO_STEP
+    ch.last_step_at   = GB_NO_STEP
   block:
     let ch = apu.channel2
     load_channel_env(ch, r)
@@ -513,6 +519,7 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
     ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
+    ch.last_step_at = GB_NO_STEP   # see channel1 above
   block:
     let ch = apu.channel3
     load_channel_base(ch, r)
