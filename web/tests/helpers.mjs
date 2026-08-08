@@ -102,31 +102,79 @@ class FakeElement {
 
 // --- Fake IndexedDB (Map-backed, real async request shape) ------------------
 
-const mkReq = (fn) => {
-  const req = {};
-  queueMicrotask(() => {
-    try { req.result = fn(); req.onsuccess?.(); }
-    catch (e) { req.error = e; req.onerror?.(); }
+// A transaction, with the two properties web/index.js's dbMoveKeys depends on:
+// `oncomplete` fires once every request issued on it has settled (including
+// requests issued from inside another request's onsuccess, which is how a
+// multi-key move keeps one transaction alive), and an abort rolls the store
+// back to what it held before the transaction touched it.
+//
+// Writes are applied to the store immediately rather than buffered until
+// commit, because every existing test reads the raw Map straight after
+// awaiting a dbPut. Atomicity is provided by an undo log instead: a real
+// IndexedDB would simply not have made the writes visible yet.
+//
+// `state.idbFail(op, key)` (op: "get" | "put" | "delete") makes that one
+// request fail, which is how a test simulates a rename dying half-way.
+const makeFakeTx = (store, state) => {
+  let pending = 0;
+  let settled = false;
+  const undo = []; // [key, hadIt, previousValue], oldest first
+  const tx = { error: null, abort: () => doAbort(null) };
+
+  const doAbort = (err) => {
+    if (settled) return;
+    settled = true;
+    tx.error = tx.error || err || null;
+    for (let i = undo.length - 1; i >= 0; i--) {
+      const [k, had, prev] = undo[i];
+      had ? store.set(k, prev) : store.delete(k);
+    }
+    tx.onabort?.();
+  };
+
+  const req = (op, key, fn) => {
+    const r = {};
+    if (settled) return r; // post-abort requests are inert, as in a real tx
+    pending++;
+    queueMicrotask(() => {
+      pending--;
+      if (settled) return;
+      if (state?.idbFail?.(op, key)) {
+        r.error = new Error(`fake IndexedDB failure: ${op} ${key}`);
+        r.onerror?.();
+        tx.error = r.error;
+        tx.onerror?.();
+        doAbort(r.error); // a failed request aborts its transaction
+        return;
+      }
+      try { r.result = fn(); }
+      catch (e) { r.error = e; r.onerror?.(); doAbort(e); return; }
+      r.onsuccess?.(); // may issue further requests on this same transaction
+      if (!pending && !settled) { settled = true; tx.oncomplete?.(); }
+    });
+    return r;
+  };
+
+  const remember = (k) => undo.push([k, store.has(k), store.get(k)]);
+
+  tx.objectStore = () => ({
+    get: (k) => req("get", k, () => store.get(k)),
+    put: (v, k) => req("put", k, () => { remember(k); store.set(k, v); }),
+    delete: (k) => req("delete", k, () => { remember(k); store.delete(k); }),
+    // Real IndexedDB returns keys in ascending key order
+    getAllKeys: () => req("getAllKeys", null, () => [...store.keys()].sort()),
   });
-  return req;
+  return tx;
 };
 
-const makeFakeIndexedDB = (store) => ({
+const makeFakeIndexedDB = (store, state) => ({
   open() {
     const req = {};
     queueMicrotask(() => {
       req.result = {
         objectStoreNames: { contains: () => true },
         createObjectStore() {},
-        transaction: () => ({
-          objectStore: () => ({
-            get: (k) => mkReq(() => store.get(k)),
-            put: (v, k) => mkReq(() => { store.set(k, v); }),
-            delete: (k) => mkReq(() => { store.delete(k); }),
-            // Real IndexedDB returns keys in ascending key order
-            getAllKeys: () => mkReq(() => [...store.keys()].sort()),
-          }),
-        }),
+        transaction: () => makeFakeTx(store, state),
       };
       req.onupgradeneeded?.();
       req.onsuccess?.();
@@ -241,7 +289,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     queueMicrotask,
     document,
     localStorage,
-    indexedDB: makeFakeIndexedDB(idb),
+    indexedDB: makeFakeIndexedDB(idb, state),
     fetch: (url, opts = {}) => {
       fetchCalls.push({ url: String(url), opts, method: opts.method || "GET" });
       return state.fetchImpl(url, opts);
@@ -404,6 +452,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     openDB, dbGet, dbPut, dbDelete, dbKeys,
     migrateFromLocalStorage, migrateRecentFormat,
     romKey, artKey, stateKey, linkSaveKey, stripExt, formatBytes,
+    dbMoveKeys, allPerGameKeys, perGameKeys, libraryNames,
+    splitRomName, renameFullName, renameNameError, renameInventory,
+    renameInventoryLines, renameGame, openRenameModal, RENAME_MAX_LEN,
     getRecentMeta, getRomBytes, getRomArt,
     addRecentRom, bumpRecentIndex, touchRecent, deleteRecent, MAX_RECENT,
     evictLocalRom,
