@@ -9,6 +9,7 @@ import imguin/glad/gl
 import stb_image/read as stbi
 import stb_image/write as stbiw
 import dingbat/common/config
+import dingbat/common/lcd_response
 import dingbat/common/input
 import dingbat/common/rewind
 import dingbat/gba/gba
@@ -448,13 +449,11 @@ var app: AppState
 # the debug overlay alongside the ImGui (UI) framerate
 var emu_fps = 0.0
 
-# Interframe blending (LCD ghosting) history: the previously uploaded BGR555
-# frame and a scratch buffer for the averaged upload. Presentation-only —
-# emulation state is untouched, so the toggle is safe to flip live. History
-# is dropped on ROM load and when the toggle turns off, so a stale ghost
-# can't smear across cores (the GBA/GB size change would also re-seed it).
-var blend_prev: seq[uint16]
-var blend_mix:  seq[uint16]
+# LCD response (common/lcd_response.nim): the per-pixel panel model that
+# replaced interframe blending. Presentation-only — emulation state is
+# untouched, so the setting is safe to change live. The cell state is dropped
+# on ROM load, so a stale ghost can't smear across cores.
+var lcd_resp: LcdResponse
 
 # MBC5 rumble (GB cart types 0x1C-0x1E): update_rumble polls the cart's motor
 # once per main-loop iteration into rumble_on, which render_game reads for
@@ -639,7 +638,7 @@ proc load_rom(path: string) =
   apply_audio_lowpass()
   apply_mp2k_hle()
   apply_panel_uniforms()
-  blend_prev.setLen(0)  # fresh core: don't ghost the previous game's frame
+  lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
   app.rewinding = false
   glDisable(GL_BLEND)
@@ -941,28 +940,17 @@ proc render_logo() =
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
 proc upload_frame(fb: ptr uint16; w, h: int) =
-  ## Upload the frame texture, averaging with the previously uploaded frame
-  ## when interframe blending is on. Per-channel BGR555 (a+b)/2 without
-  ## unpacking: halve both with each channel's low bit masked off (0x7BDE),
-  ## then add back the carry the two low bits would produce (0x0421).
+  ## Upload the frame texture, running it through the panel model first when
+  ## the LCD response is on. The model advances once per uploaded frame — i.e.
+  ## in emulated time, not in display refreshes — so the screen settles the
+  ## same way whatever the window's refresh rate is.
   let src = cast[ptr UncheckedArray[uint16]](fb)
-  var upload = cast[pointer](fb)
-  if app.cfg.frame_blend:
-    let pixels = w * h
-    if blend_prev.len != pixels:  # first blended frame: seed history, no ghost
-      blend_prev.setLen(pixels)
-      blend_mix.setLen(pixels)
-      for i in 0 ..< pixels: blend_prev[i] = src[i]
-    for i in 0 ..< pixels:
-      let cur  = src[i]
-      let prev = blend_prev[i]
-      blend_mix[i] = ((cur and 0x7BDE) shr 1) + ((prev and 0x7BDE) shr 1) +
-                     (cur and prev and 0x0421)
-      blend_prev[i] = cur
-    upload = addr blend_mix[0]
-  elif blend_prev.len > 0:
-    blend_prev.setLen(0)  # toggled off: re-enabling must not ghost stale data
-    blend_mix.setLen(0)
+  let gb = app.emu_kind == ekGB and app.gb_emu != nil
+  lcd_resp.set_panel(app.cfg.lcd_response.resolve(
+    gba = app.emu_kind == ekGBA,
+    cgb = gb and app.gb_emu.cgb_enabled,
+    sgb = gb and app.gb_emu.sgb_active()))
+  let upload = cast[pointer](lcd_resp.apply(src, w * h))
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
 
@@ -1006,7 +994,7 @@ when defined(gputime):
            " filter=", $app.cfg.video_filter,
            " scanlines=", app.cfg.scanlines,
            " colorcorrect=", app.cfg.color_correction,
-           " frameblend=", app.cfg.frame_blend,
+           " lcdresponse=", $app.cfg.lcd_response,
            " n=", v.len,
            " median_ms=", formatFloat(v[v.len div 2], ffDecimal, 4),
            " p90_ms=", formatFloat(v[(v.len * 9) div 10], ffDecimal, 4),
@@ -1023,8 +1011,8 @@ when defined(gputime):
         of 3: app.cfg.video_filter = vfXbr
         of 4: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
         of 5: app.cfg.scanlines = false;      app.cfg.color_correction = false
-        of 6: app.cfg.color_correction = true; app.cfg.frame_blend = true
-        of 7: app.cfg.frame_blend = false
+        of 6: app.cfg.color_correction = true; app.cfg.lcd_response = lmAuto
+        of 7: app.cfg.lcd_response = lmOff
         else: echo "GPUTIME sweep done"; app.running = false
 
 proc render_game() =
@@ -1055,9 +1043,9 @@ proc render_game() =
     glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
                 GLfloat(GBA_H))
-    # Blending must upload static frames too, so the lingering ghost of the
-    # previous frame decays instead of freezing on screen
-    if app.cfg.frame_blend or not app.gba_emu.ppu.frame_static:
+    # The panel model must be fed static frames too, or a cell still on its
+    # way to its target would freeze part-settled instead of finishing
+    if app.cfg.lcd_response != lmOff or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)

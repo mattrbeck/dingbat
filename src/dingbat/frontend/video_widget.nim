@@ -1,5 +1,6 @@
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import ../common/config
+import ../common/lcd_response
 import util
 
 type
@@ -8,7 +9,7 @@ type
     gb_renderer*: cint   # 0 = FIFO, 1 = scanline
     filter*:      cint   # 0 = None, 1 = hq4x, 2 = xBR (VideoFilter ordinal)
     scanlines*:   bool
-    frame_blend*: bool
+    lcd_resp*:    cint   # LcdMode ordinal
     preserve_aspect*: bool
     sgb_enable*:  bool
     sgb_border*:  bool
@@ -49,14 +50,33 @@ proc render*(v: VideoWidget) =
   igSameLine(0, -1)
   help_marker("Darken a strip across each emulated pixel row" &
               (if v.filter != 0: " (suspended by the upscale filter)" else: ""))
-  discard igCheckbox("Interframe blending", addr v.frame_blend)
-  igSameLine(0, -1)
-  help_marker("Blend the previous frame into the current one, like the LCD's ghosting")
   discard igCheckbox("Preserve aspect ratio", addr v.preserve_aspect)
   igSameLine(0, -1)
   help_marker("Letterbox the picture instead of stretching it to fill the " &
               "window. Only visible when the window is not an exact multiple " &
               "of the console's resolution — fullscreen, or after a manual resize.")
+  igSeparator()
+  igText("LCD response:")
+  igSameLine(0, -1)
+  help_marker("Emulate how slowly the real screen's pixels settle. Every Game " &
+              "Boy panel is a normally-white liquid-crystal cell: driving it " &
+              "dark is quick, letting it relax back to light is slow, which is " &
+              "why a moving dark object on hardware has a crisp leading edge " &
+              "and a trail behind it. Games that flicker a sprite every other " &
+              "frame to fake transparency were counting on this — without it " &
+              "they strobe. Auto picks the panel the running machine shipped " &
+              "with, and switches the model off under Super Game Boy, where " &
+              "the picture leaves through a television and never meets an LCD. " &
+              "The rest force one panel (AGB-001 is the unlit GBA, AGS-101 the " &
+              "backlit SP, which barely ghosts at all).")
+  igIndent(106)
+  discard igRadioButton_IntPtr("Off", addr v.lcd_resp, cint(ord(lmOff)))
+  discard igRadioButton_IntPtr("Auto (match the machine)", addr v.lcd_resp, cint(ord(lmAuto)))
+  discard igRadioButton_IntPtr("Game Boy (DMG)", addr v.lcd_resp, cint(ord(lmDmg)))
+  discard igRadioButton_IntPtr("Game Boy Color", addr v.lcd_resp, cint(ord(lmCgb)))
+  discard igRadioButton_IntPtr("Game Boy Advance (AGB-001)", addr v.lcd_resp, cint(ord(lmAgb)))
+  discard igRadioButton_IntPtr("Game Boy Advance SP (AGS-101)", addr v.lcd_resp, cint(ord(lmAgs)))
+  igUnindent(106)
   igSeparator()
   igText("Super Game Boy:")
   igSameLine(0, -1)
@@ -87,7 +107,7 @@ proc reset*(v: VideoWidget) =
   v.gb_renderer = if v.cfg.gb_fifo: 0'i32 else: 1'i32
   v.filter      = cint(ord(v.cfg.video_filter))
   v.scanlines   = v.cfg.scanlines
-  v.frame_blend = v.cfg.frame_blend
+  v.lcd_resp    = cint(ord(v.cfg.lcd_response))
   v.preserve_aspect = v.cfg.preserve_aspect
   v.sgb_enable  = v.cfg.sgb_enable
   v.sgb_border  = v.cfg.sgb_border
@@ -96,7 +116,7 @@ proc apply*(v: VideoWidget) =
   v.cfg.gb_fifo     = v.gb_renderer == 0
   v.cfg.video_filter = VideoFilter(v.filter)
   v.cfg.scanlines   = v.scanlines
-  v.cfg.frame_blend = v.frame_blend
+  v.cfg.lcd_response = LcdMode(v.lcd_resp)
   v.cfg.preserve_aspect = v.preserve_aspect
   v.cfg.sgb_enable  = v.sgb_enable
   v.cfg.sgb_border  = v.sgb_border

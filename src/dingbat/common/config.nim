@@ -1,6 +1,7 @@
 import std/[os, json, tables, strutils]
 import yaml/tojson
 import input
+import lcd_response
 
 # Keycode name ↔ SDL keycode integer table, mirroring Crystal's LibSDL::Keycode
 # enum (ysbaddaden/sdl.cr keycode.cr) so that config files are compatible.
@@ -269,7 +270,7 @@ type
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
     video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr)
     scanlines*:         bool     # darken a strip across each emulated pixel row
-    frame_blend*:       bool     # blend the previous frame in (LCD ghosting)
+    lcd_response*:      LcdMode  # panel-response model (off/auto/dmg/cgb/agb/ags)
     preserve_aspect*:   bool     # letterbox instead of stretching to the window
     # Super Game Boy. sgb_enable is OFF by default: a fresh install plays
     # monochrome carts as a Game Boy, which is what they look like everywhere
@@ -301,7 +302,7 @@ proc new_config*(): Config =
     color_correction: true,
     video_filter:    vfNone,
     scanlines:       false,
-    frame_blend:     false,
+    lcd_response:    lmOff,
     preserve_aspect: true,
     sgb_enable:      false,
     sgb_border:      true,
@@ -333,8 +334,13 @@ proc parse_config(j: JsonNode): Config =
       cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
     cfg.scanlines = j["scanlines"].getBool(false)
-  if j.hasKey("frame_blend"):
-    cfg.frame_blend = j["frame_blend"].getBool(false)
+  if j.hasKey("lcd_response") and j["lcd_response"].kind == JString:
+    cfg.lcd_response = parse_mode(j["lcd_response"].getStr("off"))
+  elif j.hasKey("frame_blend"):
+    # Migration: the old interframe blend became the LCD response model, and
+    # anyone who had it on wanted panel ghosting — give them the panel their
+    # machine shipped with rather than silently turning the feature off.
+    cfg.lcd_response = if j["frame_blend"].getBool(false): lmAuto else: lmOff
   if j.hasKey("preserve_aspect"):
     cfg.preserve_aspect = j["preserve_aspect"].getBool(true)
   if j.hasKey("rewind"):
@@ -447,7 +453,7 @@ proc save_config*(cfg: Config) =
   lines.add("color_correction: " & $cfg.color_correction)
   lines.add("video_filter: " & $cfg.video_filter)
   lines.add("scanlines: " & $cfg.scanlines)
-  lines.add("frame_blend: " & $cfg.frame_blend)
+  lines.add("lcd_response: " & $cfg.lcd_response)
   lines.add("preserve_aspect: " & $cfg.preserve_aspect)
   lines.add("rewind: " & $cfg.rewind)
   lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)

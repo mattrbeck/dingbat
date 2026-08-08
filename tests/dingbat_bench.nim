@@ -15,8 +15,49 @@ import dingbat/common/test_output
 import dingbat/common/rewind
 import dingbat/common/scheduler
 import dingbat/common/serialize
+import dingbat/common/lcd_response
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
+
+# ---- Frame-sequence dump (DINGBAT_BENCH_DUMP_SEQ=<first>:<count>) ----
+#
+# Writes `count` consecutive framebuffers to DUMP_PATH as one file, which is
+# what an alternate-frame flicker has to be looked at through: a single
+# screenshot cannot show whether a sprite is strobing or sitting at a steady
+# half-tone. DINGBAT_BENCH_LCD=<off|auto|dmg|cgb|agb|ags> runs the frames
+# through the shipping panel model on the way out (the same code the frontends
+# present through), so an on/off pair of dumps is a like-for-like comparison.
+type SeqDump = object
+  first, count: int
+  fh: File
+  open: bool
+  lcd: LcdResponse
+
+proc seq_dump_init(gba: bool; cgb: bool; sgb = false): SeqDump =
+  let spec = getEnv("DINGBAT_BENCH_DUMP_SEQ")
+  if spec.len == 0: return
+  let parts = spec.split(':')
+  result.first = parseInt(parts[0])
+  result.count = if parts.len > 1: parseInt(parts[1]) else: 1
+  result.fh = open(getEnv("DINGBAT_BENCH_DUMP_PATH", "/tmp/fbseq.bin"), fmWrite)
+  result.open = true
+  result.lcd.set_panel(parse_mode(getEnv("DINGBAT_BENCH_LCD", "off"))
+                         .resolve(gba, cgb, sgb))
+
+proc seq_dump_tick(d: var SeqDump; frame: int; fb: var seq[uint16]) =
+  ## Called for EVERY frame, not just the dumped ones: the panel has to settle
+  ## through the run-up or the first dumped frame would be freshly seeded and
+  ## show no response at all.
+  if d.count == 0: return
+  let p = d.lcd.apply(cast[ptr UncheckedArray[uint16]](addr fb[0]), fb.len)
+  if not d.open or frame < d.first or frame >= d.first + d.count: return
+  discard d.fh.writeBuffer(p, fb.len * 2)
+  if frame == d.first + d.count - 1:
+    d.fh.close()
+    d.open = false
+
+proc seq_dump_done(d: SeqDump): bool =
+  d.count > 0 and not d.open
 
 proc parse_script(script: string): seq[InputEvent] =
   for entry in script.split(','):
@@ -210,6 +251,15 @@ proc main() =
       for ev in script:
         if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
       emu.step_frame()
+    var sq = seq_dump_init(gba = true, cgb = false)
+    if sq.count > 0:
+      var f = 0
+      while not sq.seq_dump_done() and f < 1_000_000:
+        run_scripted(f)
+        sq.seq_dump_tick(f, emu.ppu.framebuffer)
+        f.inc
+      echo "bench: dumped ", sq.count, " frames from ", sq.first
+      return
     let dump_frame = getEnv("DINGBAT_BENCH_DUMP")
     if dump_frame.len > 0:
       for f in 0 .. parseInt(dump_frame): run_scripted(f)
@@ -347,6 +397,16 @@ proc main() =
       for f in 0 ..< warmup: run_scripted(f)
       if not emu.save_state(save_path): quit(1)
       echo "bench: wrote state after ", warmup, " frames: ", save_path
+      return
+    var sq = seq_dump_init(gba = false, cgb = emu.cgb_enabled,
+                           sgb = emu.sgb_active())
+    if sq.count > 0:
+      var f = 0
+      while not sq.seq_dump_done() and f < 1_000_000:
+        run_scripted(f)
+        sq.seq_dump_tick(f, emu.ppu.framebuffer)
+        f.inc
+      echo "bench: dumped ", sq.count, " frames from ", sq.first
       return
     let dump_frame = getEnv("DINGBAT_BENCH_DUMP")
     if dump_frame.len > 0:

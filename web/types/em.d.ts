@@ -38,7 +38,7 @@ interface EmscriptenModule {
   _wasm_set_gb_renderer?(fifo: number): void;
   _wasm_set_gba_bios_mode?(mode: number): void;
   _wasm_set_gba_run_bios?(on: number): void;
-  _wasm_set_frame_blend?(on: number): void;
+  _wasm_set_lcd_response?(mode: number): void;
   _wasm_set_mp2k_hle?(on: number): void;
   _wasm_mp2k_available?(): number;
   _wasm_hle_audio_active?(): number;
