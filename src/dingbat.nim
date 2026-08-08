@@ -1011,8 +1011,8 @@ when defined(gputime):
         of 3: app.cfg.video_filter = vfXbr
         of 4: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
         of 5: app.cfg.scanlines = false;      app.cfg.color_correction = false
-        of 6: app.cfg.color_correction = true; app.cfg.lcd_response = lmAuto
-        of 7: app.cfg.lcd_response = lmOff
+        of 6: app.cfg.color_correction = true; app.cfg.lcd_response = true
+        of 7: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
 proc render_game() =
@@ -1045,7 +1045,7 @@ proc render_game() =
                 GLfloat(GBA_H))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
-    if app.cfg.lcd_response != lmOff or not app.gba_emu.ppu.frame_static:
+    if app.cfg.lcd_response or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)

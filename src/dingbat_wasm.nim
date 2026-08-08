@@ -206,22 +206,22 @@ proc make_gba(rom_path: string): GBA =
 # hardware did instead of strobing. Presentation-only — emulation is untouched,
 # so it is safe to change mid-frame. `lcdResp` follows the module-scope rule:
 # its seqs stay empty here and are allocated from JS-invoked procs only.
-var lcdMode = lmOff
+var lcdOn = false
 var lcdResp: LcdResponse
 
 proc sync_lcd_panel() =
-  ## Resolve lmAuto against whatever core is running. Cheap when nothing
+  ## Resolve the switch against whatever core is running. Cheap when nothing
   ## changed (set_panel early-outs); rebuilds the table on a core switch.
   let gb = stateKind == ekGB and stateGb != nil
-  lcdResp.set_panel(lcdMode.resolve(
+  lcdResp.set_panel(lcdOn.resolve(
     gba = stateKind == ekGBA,
     cgb = gb and stateGb.cgb_enabled,
     sgb = gb and stateGb.sgb_active()))
 
-proc wasm_set_lcd_response(mode: cint) {.exportc.} =
-  ## 0 = off, 1 = auto, 2 = dmg, 3 = cgb, 4 = agb, 5 = ags (LcdMode ordinals).
-  lcdMode = if mode >= ord(low(LcdMode)) and mode <= ord(high(LcdMode)):
-              LcdMode(mode) else: lmOff
+proc wasm_set_lcd_response(on: cint) {.exportc.} =
+  ## 0 = off, anything else = on. Which panel the model then uses is not the
+  ## caller's business: sync_lcd_panel reads it off the running machine.
+  lcdOn = on != 0
   sync_lcd_panel()
   lcdResp.reset()   # drop stale cell state (also on core/resolution switch)
 
@@ -271,7 +271,7 @@ proc prepare_game_frame(fb: ptr UncheckedArray[uint16]; pixels: int) =
   ## Point gamePtr at the pixels JS should upload this frame: the core's raw
   ## framebuffer directly (zero-copy) or, with the LCD response on, the panel's
   ## own output. No color conversion happens here — that is the shader's job.
-  if lcdMode != lmOff: sync_lcd_panel()
+  if lcdOn: sync_lcd_panel()
   gamePtr = cast[pointer](lcdResp.apply(fb, pixels))
 
 proc wasm_game_fb_ptr(): pointer {.exportc.} =

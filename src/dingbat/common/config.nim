@@ -270,7 +270,7 @@ type
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
     video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr)
     scanlines*:         bool     # darken a strip across each emulated pixel row
-    lcd_response*:      LcdMode  # panel-response model (off/auto/dmg/cgb/agb/ags)
+    lcd_response*:      bool     # panel-response model; the panel follows the machine
     preserve_aspect*:   bool     # letterbox instead of stretching to the window
     # Super Game Boy. sgb_enable is OFF by default: a fresh install plays
     # monochrome carts as a Game Boy, which is what they look like everywhere
@@ -302,7 +302,7 @@ proc new_config*(): Config =
     color_correction: true,
     video_filter:    vfNone,
     scanlines:       false,
-    lcd_response:    lmOff,
+    lcd_response:    false,
     preserve_aspect: true,
     sgb_enable:      false,
     sgb_border:      true,
@@ -334,13 +334,21 @@ proc parse_config(j: JsonNode): Config =
       cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
     cfg.scanlines = j["scanlines"].getBool(false)
-  if j.hasKey("lcd_response") and j["lcd_response"].kind == JString:
-    cfg.lcd_response = parse_mode(j["lcd_response"].getStr("off"))
+  if j.hasKey("lcd_response"):
+    # Two generations of stored value land here. The key held a panel name
+    # while the setting was a six-way picker (off/auto/dmg/cgb/agb/ags), and
+    # holds a bool now that it is a switch; parse_enabled maps every one of
+    # the old names on without changing what anybody asked for.
+    cfg.lcd_response =
+      if j["lcd_response"].kind == JString:
+        parse_enabled(j["lcd_response"].getStr("off"))
+      else:
+        j["lcd_response"].getBool(false)
   elif j.hasKey("frame_blend"):
     # Migration: the old interframe blend became the LCD response model, and
     # anyone who had it on wanted panel ghosting — give them the panel their
     # machine shipped with rather than silently turning the feature off.
-    cfg.lcd_response = if j["frame_blend"].getBool(false): lmAuto else: lmOff
+    cfg.lcd_response = j["frame_blend"].getBool(false)
   if j.hasKey("preserve_aspect"):
     cfg.preserve_aspect = j["preserve_aspect"].getBool(true)
   if j.hasKey("rewind"):

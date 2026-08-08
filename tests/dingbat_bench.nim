@@ -24,9 +24,11 @@ type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 # Writes `count` consecutive framebuffers to DUMP_PATH as one file, which is
 # what an alternate-frame flicker has to be looked at through: a single
 # screenshot cannot show whether a sprite is strobing or sitting at a steady
-# half-tone. DINGBAT_BENCH_LCD=<off|auto|dmg|cgb|agb|ags> runs the frames
+# half-tone. DINGBAT_BENCH_LCD=<off|on|dmg|cgb|agb|ags> runs the frames
 # through the shipping panel model on the way out (the same code the frontends
 # present through), so an on/off pair of dumps is a like-for-like comparison.
+# `off`/`on` are what the frontends expose; the four panel names force one
+# panel regardless of the machine, which is the only way to compare panels.
 type SeqDump = object
   first, count: int
   fh: File
@@ -41,8 +43,8 @@ proc seq_dump_init(gba: bool; cgb: bool; sgb = false): SeqDump =
   result.count = if parts.len > 1: parseInt(parts[1]) else: 1
   result.fh = open(getEnv("DINGBAT_BENCH_DUMP_PATH", "/tmp/fbseq.bin"), fmWrite)
   result.open = true
-  result.lcd.set_panel(parse_mode(getEnv("DINGBAT_BENCH_LCD", "off"))
-                         .resolve(gba, cgb, sgb))
+  result.lcd.set_panel(
+    parse_panel(getEnv("DINGBAT_BENCH_LCD", "off"), gba, cgb, sgb))
 
 proc seq_dump_tick(d: var SeqDump; frame: int; fb: var seq[uint16]) =
   ## Called for EVERY frame, not just the dumped ones: the panel has to settle
