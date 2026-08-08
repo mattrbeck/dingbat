@@ -132,9 +132,13 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   let cacheable = cpu.cache_waitloop_results and
                   bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
   if cacheable:
+    if start_addr == cpu.last_waitloop:
+      cpu.entered_waitloop = true
+      return
     if start_addr == cpu.last_non_waitloop:
       return
     if start_addr in cpu.identified_waitloops:
+      cpu.last_waitloop = start_addr
       cpu.entered_waitloop = true
       return
     if start_addr in cpu.identified_non_waitloops:
@@ -172,4 +176,5 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     cur_addr += 2
   if cacheable:
     cpu.identified_waitloops.incl(start_addr)
+    cpu.last_waitloop = start_addr
   cpu.entered_waitloop = true

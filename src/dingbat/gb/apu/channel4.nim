@@ -84,7 +84,11 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
     ch.divisor_code  = val and 0x07
   of 0xFF23:
     let len_enable = (val and 0x40) != 0
-    if gb.apu.first_half_of_length_period and not ch.length_enable and len_enable and ch.length_counter > 0:
+    # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
+    # clocking rule, which drops the requirement that the write turn the
+    # length counter ON; see GbQuirks in gb.nim.
+    if gb.apu.first_half_of_length_period and not ch.length_enable and
+       (len_enable or gb.quirks.length_clock_any_nrx4) and ch.length_counter > 0:
       dec ch.length_counter
       if ch.length_counter == 0: ch.enabled = false
     ch.length_enable = len_enable
@@ -94,7 +98,31 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      ch.next_step = gb.scheduler.cycles + ch4_period(ch, gb)
+      # One startup tick, not the squares' two, and no shorter form for a
+      # restart: channel_4_delay measures "sample length + 3 M-cycles" from the
+      # NR44 write to the first sample, and two of those three are the read the
+      # test uses to see it (the accounting channel_1_delay spells out). The
+      # 1 MHz grid alignment is the same one channel_4_align asserts for this
+      # channel as channel_1_align does for the squares.
+      #
+      # The 1 has since been measured against 0, 2 and 3 over the whole
+      # SameSuite APU set, and it is the optimum, so do not retune it hoping to
+      # close channel_4_delay:
+      #   0 -> loses channel_4_align and channel_4_lfsr_7_15    (70 of 90 rows)
+      #   1 -> the current 72 of 90
+      #   2 -> gains lfsr_restart + lfsr_restart_fast but loses align, lfsr,
+      #        lfsr15 and lfsr_15_7                              (70 of 90)
+      #   3 -> 69 of 90
+      # channel_4_delay's residual is not a constant at all. It drives NR43 =
+      # $08, $00, $18, $28 in that order; the $08 and $00 rows (clock shift 0)
+      # are exact, and only the $18 and $28 rows (shifts 1 and 2) are late, by
+      # 1 and 3 M-cycles. A shift-dependent phase is exactly what the
+      # divisor/shift collapse in ch4_frequency_timer cannot express -- one
+      # scalar `divisor << shift` makes encodings with the same product
+      # indistinguishable -- and it is the same defect
+      # channel_4_frequency_alignment and channel_4_equivalent_frequencies
+      # measure. Two cascaded counters, not a different addend.
+      ch.next_step = gb_trigger_deadline(gb, ch4_period(ch, gb), 1)
       init_volume_envelope(ch)
       ch.lfsr = 0x7FFF'u16
   else: discard

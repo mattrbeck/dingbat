@@ -414,10 +414,17 @@ block cross_config_state:
 # from an uninterrupted reference run -- including across the frames where
 # the cart is mid-transfer, which is where the state machine is least idle.
 block state_shapes:
+  # The ROM's own setup runs with the LCD OFF (a VRAM transfer has to be
+  # copied in before the display can show it), and a state is only ever
+  # written at a frame boundary in vblank -- load_ppu_state rejects mode 2 or
+  # 3 outright. So warm up past the setup before saving anything.
+  const WARM = 40
+
   proc runref(n: int): (seq[uint64], seq[uint64]) =
     var r = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
     r.sgb_requested = true
     r.post_init()
+    for _ in 0 ..< WARM: r.step_frame()
     for i in 0 ..< n:
       r.step_frame()
       var h = 0xCBF29CE484222325'u64
@@ -446,6 +453,7 @@ block state_shapes:
     var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
+    for _ in 0 ..< WARM: g.step_frame()
     var bad = -1
     for i in 0 ..< N:
       g.step_frame()
@@ -459,6 +467,7 @@ block state_shapes:
     var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
+    for _ in 0 ..< WARM: g.step_frame()
     var bad = -1
     for i in 0 ..< N:
       g.step_frame()
@@ -474,6 +483,7 @@ block state_shapes:
     var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
+    for _ in 0 ..< WARM: g.step_frame()
     var ring: seq[string]
     var bad = -1
     for i in 0 ..< N:

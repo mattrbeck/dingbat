@@ -9,7 +9,7 @@
 const PORT = process.env.CDP_PORT || 9222;
 
 const targets = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
-const page = targets.find((t) => t.type === "page" && t.url.includes("bench.html"));
+const page = targets.find((t) => t.type === "page" && t.url.includes(process.env.CDP_MATCH || "bench.html"));
 if (!page) {
   console.error("no bench.html target; open it in the debug Chrome first");
   console.error(targets.map((t) => `${t.type} ${t.url}`).join("\n"));

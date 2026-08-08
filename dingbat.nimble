@@ -47,6 +47,12 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
 
+task statefuzz_build, "Build the hostile-input save-state fuzzer":
+  # Not a `test_` task: the byte sweep is minutes per core, so it is run by
+  # hand (or in a nightly) rather than in the suite. `./statefuzz <rom> sweep
+  # 255` exits non-zero on any uncontained Defect.
+  exec "nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim"
+
 task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_rewind_test tests/rewind_test.nim"

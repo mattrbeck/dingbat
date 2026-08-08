@@ -3366,6 +3366,11 @@ body.debug-2p .home-tile-link {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* A button centres its text by UA default, so a name long enough to wrap
+     ("Atomic Purple" at desktop scale) centres its second line against the
+     first. The swatch pins the left edge, so centred wrapping reads as a
+     typo; align to the start instead. */
+  text-align: start;
   padding: 7px 9px;
   font-size: 12.5px;
   font-weight: 600;
@@ -4538,6 +4543,30 @@ body.rollback-mode #load-state,
 body.rollback-mode #manage-saves,
 body.rollback-mode #screenshot,
 body.rollback-mode #save-sep {
+  display: none !important;
+}
+
+/* Rewind turned off in Settings: every rewind affordance GOES, rather than
+   greying out. The setting's whole promise is that the feature is not there —
+   nothing is being recorded, so a rewind control could only ever fail, and an
+   inert-but-visible control is the failure mode this app has been bitten by
+   before. Same display:none !important treatment as the link modes above, and
+   for the same reason: these live in a segmented bar and a quick-action grid
+   whose layouts already cope with members disappearing.
+
+   The list, and what each one is:
+     #rewind             top-bar hold-to-rewind (and its double-tap)
+     #open-rewind-scrub  the menu's film-strip quick action
+     #kb-shortcut-rewind the "Rewind (hold) `" row in the shortcuts list
+     #report-slider      Report-a-Bug's timeline, which can only address
+                         snapshots the ring would have held (its hint stays,
+                         and says so — see openReportModal)
+   Applied live by applyRewindUI(); no reload, because the ring itself is
+   allocated and dropped live too (setRewindEnabled in dingbat_wasm.nim). */
+body.rewind-off #rewind,
+body.rewind-off #open-rewind-scrub,
+body.rewind-off #kb-shortcut-rewind,
+body.rewind-off #report-slider {
   display: none !important;
 }
 

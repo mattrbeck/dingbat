@@ -1,4 +1,4 @@
-import std/[os, hashes, math, parseopt, strformat, strutils, tables, times]
+import std/[os, hashes, math, parseopt, strformat, strutils, tables, times, algorithm]
 import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
@@ -408,6 +408,11 @@ type AppState = ref object
   pending_save:    bool
   pending_load:    bool
   pending_step:    bool  # frame advance: run exactly one frame while paused
+  # A refused save state used to be an echo to stdout and a screen that did not
+  # change — the user pressed Load and nothing happened. This is what the app
+  # says instead; render_state_notice draws it and it clears on dismissal.
+  state_notice:      string
+  state_notice_hint: string
   rewind:          Rewind
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
@@ -745,6 +750,35 @@ proc load_state_slot(slot: int): bool =
     of ekNone: false
   if result: echo "State loaded: ", path
 
+proc state_reject_sentence(): string =
+  ## One sentence per refusal cause, saying what to do about it. The core
+  ## classifies the refusal (StateRejectKind); this never echoes raw exception
+  ## text at the user, and never collapses two causes onto one message.
+  case last_state_reject_kind
+  of srkNotAState:
+    "That file isn't a dingbat save state."
+  of srkWrongCore:
+    "That save state is for the other system - a Game Boy state can't load " &
+    "into a GBA game, or the reverse."
+  of srkWrongRom:
+    "That save state belongs to a different game. Load the game it was made " &
+    "in, then try again."
+  of srkTooNew:
+    "That save state was made by a newer version of dingbat than this one. " &
+    "Update dingbat and try again."
+  of srkTruncated:
+    "That save state file is incomplete - the copy or download was cut short."
+  of srkCorrupt:
+    "That save state is damaged and can't be loaded. The game is still " &
+    "running and nothing was changed."
+  of srkNoFile:
+    # The common one, now that Quick Load reports at all: pressing the key
+    # before ever saving used to do nothing, and telling that person their
+    # file is damaged would be worse than saying nothing.
+    "There's no save state in that slot yet."
+  of srkNone:
+    "That save state couldn't be loaded."
+
 proc delete_state_slot(slot: int) =
   let path = state_file_path(slot)
   if path.len > 0 and fileExists(path):
@@ -800,7 +834,12 @@ proc process_pending_state() =
     app.save_states.mark_stale()
   if app.pending_load:
     app.pending_load = false
-    discard load_state_slot(0)
+    # Quick Load is a keypress with no widget behind it, so a discarded bool
+    # here meant the user pressed the key and NOTHING happened — not even a
+    # line they would see. It is the one outcome a refusal must never produce.
+    if not load_state_slot(0):
+      app.state_notice = state_reject_sentence()
+      app.state_notice_hint = last_state_error
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
@@ -927,6 +966,67 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
 
+when defined(gputime):
+  # Throwaway instrument (-d:gputime): GL_TIME_ELAPSED around the game quad,
+  # so the cost of an upscale filter can be measured at a real window size
+  # instead of extrapolated from the web build's fixed 960x640 backing store.
+  # Prints a line a second: viewport, median/p90 GPU ms for the game draw.
+  var gpuq: array[8, GLuint]
+  var gpuq_init = false
+  var gpuq_slot = 0
+  var gpu_samples: seq[float]
+  var gpu_last_report = getTime()
+  var gpu_sweep_step = 0
+
+  proc gpu_begin() =
+    if not gpuq_init:
+      glGenQueries(GLsizei(gpuq.len), addr gpuq[0])
+      gpuq_init = true
+    else:
+      # harvest the slot we are about to reuse (8 frames of latency)
+      var avail: GLint
+      glGetQueryObjectiv(gpuq[gpuq_slot], GL_QUERY_RESULT_AVAILABLE, addr avail)
+      if avail != 0:
+        var ns: GLuint64
+        glGetQueryObjectui64v(gpuq[gpuq_slot], GL_QUERY_RESULT, addr ns)
+        gpu_samples.add(float(ns) / 1e6)
+    glBeginQuery(GL_TIME_ELAPSED, gpuq[gpuq_slot])
+
+  proc gpu_end() =
+    glEndQuery(GL_TIME_ELAPSED)
+    gpuq_slot = (gpuq_slot + 1) mod gpuq.len
+    let now = getTime()
+    if (now - gpu_last_report).inMilliseconds >= 2000 and gpu_samples.len > 8:
+      gpu_last_report = now
+      var v = gpu_samples
+      v.sort()
+      var w, h: cint
+      getSize(app.window, w, h)
+      echo "GPUTIME viewport=", w, "x", h,
+           " filter=", $app.cfg.video_filter,
+           " scanlines=", app.cfg.scanlines,
+           " colorcorrect=", app.cfg.color_correction,
+           " frameblend=", app.cfg.frame_blend,
+           " n=", v.len,
+           " median_ms=", formatFloat(v[v.len div 2], ffDecimal, 4),
+           " p90_ms=", formatFloat(v[(v.len * 9) div 10], ffDecimal, 4),
+           " emu_fps=", formatFloat(emu_fps, ffDecimal, 1)
+      gpu_samples.setLen(0)
+      # DINGBAT_GPUTIME_SWEEP=1 walks the present-path settings itself, one
+      # per report, so a whole matrix comes out of a single launch instead of
+      # a dozen windows.
+      if getEnv("DINGBAT_GPUTIME_SWEEP") == "1":
+        gpu_sweep_step.inc
+        case gpu_sweep_step
+        of 1: app.cfg.video_filter = vfNone;  app.cfg.scanlines = false
+        of 2: app.cfg.video_filter = vfHq4x
+        of 3: app.cfg.video_filter = vfXbr
+        of 4: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
+        of 5: app.cfg.scanlines = false;      app.cfg.color_correction = false
+        of 6: app.cfg.color_correction = true; app.cfg.frame_blend = true
+        of 7: app.cfg.frame_blend = false
+        else: echo "GPUTIME sweep done"; app.running = false
+
 proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
@@ -959,7 +1059,9 @@ proc render_game() =
     # previous frame decays instead of freezing on screen
     if app.cfg.frame_blend or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
+    when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    when defined(gputime): gpu_end()
   of ekGB:
     if app.gb_emu == nil:
       glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
@@ -1026,6 +1128,52 @@ proc show_menu_bar(): bool =
 
 proc render_link_window()  # defined below, near the network-link procs
 
+proc render_state_notice() =
+  ## What the app says when a save state is refused. Before this, a refused
+  ## Quick Load was an echo to stdout and a screen that did not change: the
+  ## user pressed the key and nothing happened, which is the worst outcome
+  ## available. Modal on purpose — it is always the direct result of something
+  ## the user just did, so it never appears unbidden.
+  if app.state_notice.len == 0: return
+  const POPUP = "State##notice"
+  if not igIsPopupOpen_Str(POPUP, 0):
+    igOpenPopup_Str(POPUP, 0)
+  var center = ImVec2(x: 0, y: 0)
+  let vp = igGetMainViewport()
+  if vp != nil:
+    when compiles(ImGuiViewport_GetCenter(addr center, vp)):
+      ImGuiViewport_GetCenter(addr center, vp)
+    else:
+      let c = ImGuiViewport_GetCenter(vp)
+      center = ImVec2(x: c.x, y: c.y)
+  igSetNextWindowPos(center, cint(ImGui_Cond_Appearing), ImVec2(x: 0.5, y: 0.5))
+  igSetNextWindowSizeConstraints(ImVec2(x: 380, y: 0), ImVec2(x: 560, y: 400),
+                                 nil, nil)
+  var stay_open = true
+  if igBeginPopupModal(POPUP, addr stay_open,
+                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
+    igPushTextWrapPos(0)
+    igTextUnformatted(cstring(app.state_notice), nil)
+    if app.state_notice_hint.len > 0:
+      igSpacing()
+      # The detail line is for someone reporting a bug, not for reading first:
+      # dimmed, below, and never the whole message. Through "%s" and not as the
+      # format string itself: this is the one igTextDisabled call in the tree
+      # whose text is not a literal — it carries core wording built from the
+      # FILE's own bytes, and a '%' in there would read arguments that were
+      # never pushed.
+      igTextDisabled("%s", cstring(app.state_notice_hint))
+    igPopTextWrapPos()
+    igSpacing()
+    if igButton("OK", ImVec2(x: 120, y: 0)):
+      app.state_notice = ""
+      app.state_notice_hint = ""
+      igCloseCurrentPopup()
+    igEndPopup()
+  if not stay_open:
+    app.state_notice = ""
+    app.state_notice_hint = ""
+
 proc render_imgui() =
   # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
   # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
@@ -1040,7 +1188,12 @@ proc render_imgui() =
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
-     not app.save_states.window:
+     not app.save_states.window and
+     # A refused Quick Load is a keypress, and the menu bar hides itself after
+     # three idle seconds — exactly the state the keyboard is used in. Without
+     # this the notice would be skipped and the refusal would be silent again,
+     # which is the whole bug it exists to fix.
+     app.state_notice.len == 0:
     return
 
   ImGui_Impl_OpenGL3_NewFrame()
@@ -1223,6 +1376,8 @@ proc render_imgui() =
   # File explorer
   app.fe.render("ROM", open_rom, ["gba", "gb", "gbc", "zip"], proc(path: string) =
     load_rom(path))
+
+  render_state_notice()
 
   # Config editor
   app.ce.render()
@@ -2027,7 +2182,7 @@ proc main() =
     cheats:          new_cheats_widget(),
     save_states:     new_save_states_widget(),
     dbg:             nil,
-    scale:           3,
+    scale:           (when defined(gputime): parseInt(getEnv("DINGBAT_SCALE", "3")) else: 3),
     running:         true,
     paused:          false,
     fullscreen:      false,
@@ -2046,9 +2201,11 @@ proc main() =
     # from a newer-build file from a corrupt section; discarding the bool
     # left the user with a silently unchanged screen.
     if not load_state_slot(slot):
-      app.save_states.notice =
-        if last_state_error.len > 0: last_state_error
-        else: "Could not load that slot."
+      # Same sentence-per-cause table the Quick Load path uses, instead of the
+      # core's raw wording. The detail stays available in the log.
+      app.save_states.notice = state_reject_sentence()
+      if last_state_error.len > 0:
+        echo "Slot load refused: ", last_state_error
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
 
   # Default the Join address to localhost (2 instances on one machine).

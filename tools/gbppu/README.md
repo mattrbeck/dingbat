@@ -242,3 +242,32 @@ All eleven `blargg/cpu_instrs` frames against SameBoy at frame 1200, real CGB
 boot ROM both sides. `tests/README.md` explains why this, and not a glyph
 check, is the gate after a GB timing change. Needs `sameboy_runner` from
 `tools/gbfuzz/build.sh` and a boot-ROM directory; neither is in the repo.
+
+## The bytes behind a pixel
+
+    nim c -d:test_harness -d:release -d:gb_m3_trace -d:gb_px_trace \
+      -d:GB_TRACE_LY=-1 --path:src -o:dt_px tests/dingbat_test.nim
+
+`-d:gb_px_trace` prints one line per pipeline *event* rather than per dot: the
+tile-map read (`FTILE`), each bitplane read with its address and byte
+(`FDATA`), the eight pixels entering the BG FIFO with the `lx` they will show
+at (`PUSH`), an object's two bitplane bytes as they are merged (`SPR`), and
+every emitted pixel with the FIFO entries and LCDC behind it (`PX`). Pair it
+with `-d:gb_m3_trace`, whose `LATCH` line marks the start of each line's mode 3
+and whose `LCDC`/`SCX`/`SCY` lines give the dot each register write landed on.
+
+That combination is what makes a one-pixel diff solvable. `PUSH` plus the
+reference frame gives the bitplane bytes **hardware** used for a tile -- invert
+the reference through the palette the trace names, and a wrong pixel becomes a
+wrong byte with an address next to it. `PX` plus the write dots gives the value
+the mixer read against the dot the pixel left the FIFO, which is how the
+mixer's own dot (`fifo_recompose_last`) was measured off
+`m3_lcdc_obj_en_change`, and how the `cgb-acid-hell` residual in
+`docs/gb-failure-triage.md` was identified as a bitplane read returning the
+tile index.
+
+`WINHIT` (under `-d:gb_m3_trace`) is the matching instrument for the window's
+re-trigger: one line per dot the WX equality is reached, with the fetcher
+position and FIFO depth that decide whether the edge survives it. A mealybug
+`m3_wx_*` frame carries exactly one per line, so the whole frame reads out as a
+table.

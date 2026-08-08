@@ -198,6 +198,27 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
   write_boot_logo(gb.cartridge.rom, ppu.vram[0])
   for i in 0 ..< POST_BOOT_RA_TILE.len:
     ppu.vram[0][0x190 + i] = POST_BOOT_RA_TILE[i]  # tile $19 = byte offset 400
+  if not gb.cgb_enabled:
+    # ...and the tile MAP those tiles are placed through. The DMG boot ROM's
+    # last drawing act, verbatim from the published disassembly:
+    #
+    #   LD A,$19 / LD ($9910),A / LD HL,$992f
+    #   .row:  LD C,$0c
+    #   .cell: DEC A / JR Z,done / LD (HL-),A / DEC C / JR NZ,.cell
+    #          LD L,$0f / JR .row
+    #
+    # so $9910 holds the (R) tile $19, $992F..$9924 hold $18..$0D and
+    # $990F..$9904 hold $0C..$01 — two 12-tile rows of logo with the (R) tile
+    # to the right of the first one. Everything else stays $00, which the boot
+    # ROM's VRAM clear already left there. dingbat wrote the logo tile DATA at
+    # the handoff but never the map, so a cart that reads the map back sees an
+    # all-zero one: BullyGB's `initmap` prints "Invalid initial map data".
+    # The CGB path is deliberately not seeded here — its boot ROM builds a
+    # different map and nothing in the tree measures it.
+    ppu.vram[0][0x1910] = 0x19
+    for i in 0 ..< 12:
+      ppu.vram[0][0x1904 + i] = uint8(0x01 + i)
+      ppu.vram[0][0x1924 + i] = uint8(0x0D + i)
   if gb.cgb_enabled:
     # The CGB boot ROM hands off mid-VBlank (gambatte display_startstate/ly
     # reads LY=0x90); the sub-frame phase is calibrated against gambatte
@@ -236,6 +257,31 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
         cast[ptr uint16](addr ppu.pram[i * 2])[]      = CGB_COMPAT_BG_COLORS[i]
         cast[ptr uint16](addr ppu.obj_pram[i * 2])[]  = CGB_COMPAT_OBJ_COLORS[i]
         cast[ptr uint16](addr ppu.obj_pram[8 + i * 2])[] = CGB_COMPAT_OBJ_COLORS[i]
+    else:
+      # CGB cart on CGB hardware. The boot ROM's closing act is a fade of the
+      # whole background palette to white, and Pan Docs states the resulting
+      # handoff state outright: "All background colors are initialized as white
+      # by the boot ROM." It also blesses the encoding used here — "the
+      # canonical pure white is $7FFF and not $FFFF, but the hardware treats
+      # both identically: it's fine to fill color RAM with $FF bytes to set it
+      # to all-white."
+      #
+      # The OBJ half is deliberately the same fill even though it is NOT
+      # specified: "In CGB mode, the boot ROM leaves all object colors
+      # uninitialized (and thus somewhat random/unreliable), aside from setting
+      # the first byte of OBJ0 color #0 to $00, which is unused." Undefined on
+      # hardware still has to be *something* here — a savestate and a rollback
+      # both have to reproduce it — so it gets the documented-safe white rather
+      # than a random fill, and any cart that reads an OBJ colour it never
+      # wrote is relying on garbage on real hardware too.
+      #
+      # Skipping this is not cosmetic: a native-CGB cart that leans on the boot
+      # ROM's palette renders through an all-zero one, i.e. a black screen.
+      # BullyGB is exactly that cart — its only palette write anywhere is BG
+      # palette 0 colour 3 (`rBCPS = BCPSF_AUTOINC | 6`, then two zero bytes to
+      # rBCPD), so colours 0-2 have to arrive from the boot ROM.
+      for i in 0 ..< ppu.pram.len: ppu.pram[i] = 0xFF
+      for i in 0 ..< ppu.obj_pram.len: ppu.obj_pram[i] = 0xFF
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off" (values recorded at
     # PC = $0100): DMG/MGB hand off with STAT = $85 and LY = $00. Mode 1 with
@@ -387,6 +433,25 @@ proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) !
 # after this file.
 proc fifo_arm_window*(ppu: GbFifoPpu)
 
+# The mixer stage runs one dot behind the FIFO pop, so a mid-mode-3 write to a
+# register the MIXER reads still reaches the pixel already emitted. Forward
+# declaration for the same reason as the line above; the body and the
+# measurement that pins it are at fifo_recompose_last in fifo_ppu.nim.
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
+
+template mixer_write_repaint(gb: GB; back: int32) =
+  ## Every register write below that the mixer reads ends with this. `back` is
+  ## how many stages of the mixer tail the register is read at the far end of
+  ## (see fifo_recompose_last), minus the CGB's own dot of write latency.
+  ## `-d:MIXER_DOT_LAG=0` compiles the mixer's dot out entirely -- this call,
+  ## the two stores in the shifter and the held pair with it -- which is the
+  ## control arm for both the A/B measurements at fifo_recompose_last and the
+  ## retired-instruction count.
+  when MIXER_DOT_LAG != 0:
+    if gb.fifo_ppu != nil:
+      let n = back - (if gb.cgb_enabled: int32(CGB_MIXER_LATENCY) else: 0'i32)
+      if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n)
+
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
 proc bg_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x08
 proc sprite_height*(ppu: GbPpu): int {.inline.} =
@@ -480,6 +545,192 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0): bool {.i
   if lag == 3: return false
   if ppu.first_line: return true
   lag != 2 and live != 2 and live != 3
+
+# ---- The DMG OAM corruption bug -------------------------------------------
+#
+# Pan Docs, "OAM Corruption Bug". The 16-bit increment/decrement unit is wired
+# straight to the address bus, so an `inc rr` / `dec rr` puts its OPERAND (the
+# value BEFORE the operation) out as an address even though no read or write is
+# asserted. If that address is in $FE00-$FEFF while the PPU owns OAM, the
+# access lands on the OAM scan and scrambles it.
+#
+# The whole of it is driven from the INSTRUCTIONS, not from the memory path.
+# Every instruction that can put an OAM address on the bus knows that address
+# already, and it knows on which of its own M-cycles each access falls, so each
+# call site names both. That keeps the CPU's OAM read/write LOCK (cpu_oam_open,
+# where gambatte oam_access and mooneye bits/mem_oam are won) completely
+# untouched: a blocked read still answers $FF and a blocked write is still
+# dropped, and the corruption is the separate side effect it is on hardware.
+# It also keeps every test out of mem_read/mem_write, which are the two hottest
+# procs in the emulator.
+#
+# The per-instruction classification, from Pan Docs' "Affected Operations", is:
+#
+#   inc/dec rr        M2: write, operand rr           (the bare IDU step)
+#   ld [hl+/-],a      M2: write, address hl           (store and IDU step in
+#                          one M-cycle -- "behaves just like a single write")
+#   ld a,[hl+/-]      M2: read+write, address hl      (load and IDU step)
+#   push rr, call,    M2: write, operand sp
+#     rst, interrupt  M3: write, address sp-1         (store and IDU step)
+#                     M4: write, address sp-2
+#   pop rr, ret       M2: read+write, address sp      (load and IDU step)
+#                     M3: read, address sp+1
+#
+# The one place that is a genuine choice rather than a reading: Pan Docs says
+# POP triggers the bug three times rather than four, "one read, one glitched
+# write, and another read without a glitched write", without saying which of
+# the two SP steps loses its write. The table above puts it on the second,
+# because that is what 2-causes ("LD SP,$FDFF : POP BC" must corrupt, and only
+# its second M-cycle touches OAM at all) and 3-non_causes ("LD SP,$FDFE : POP
+# BC" must not) leave once 8-instr_effect's POP pattern has to match too.
+#
+# NOT modelled: PC in OAM. Pan Docs says executing from $FE00-$FEFF triggers
+# the bug twice per fetch. Hooking cpu_inc_pc is a test on the single hottest
+# path in the interpreter to buy a case no test ROM and no commercial title
+# reaches.
+#
+# The corruption patterns themselves: OAM is 20 rows of 8 bytes (four 16-bit
+# words each, because OAM has a 16-bit data bus), and mode 2 reads one row per
+# M-cycle, so the row is the M-cycle's index into mode 2. Every operand of
+# every formula below sits at the same byte position inside its own word, so
+# the 16-bit expressions are applied byte by byte and OAM's word endianness
+# never comes into it. Pan Docs states three patterns and this implements all
+# three, verbatim; which one a given M-cycle gets is the OamBugKind the caller
+# passes, and that is decided per instruction (see OamBugKind).
+type OamBugKind* = enum
+  obWrite      ## a write, or a write and an IDU step in the same M-cycle
+               ## ("this case behaves just like a single write")
+  obRead       ## a read with no IDU step in the same M-cycle
+  obReadWrite  ## a read and an IDU step in the same M-cycle
+
+proc oam_bug_write_corrupt(ppu: GbPpu; row: int) =
+  ## "Write Corruption": the first word of the row becomes
+  ## `((a ^ c) & (b ^ c)) ^ c` where a is that word, b the first word and c the
+  ## THIRD word of the preceding row; the other three words are copied from the
+  ## preceding row.
+  let dst = row shl 3
+  let src = dst - 8
+  for i in 0 .. 1:
+    let a = ppu.sprite_table[dst + i]
+    let b = ppu.sprite_table[src + i]
+    let c = ppu.sprite_table[src + 4 + i]
+    ppu.sprite_table[dst + i] = ((a xor c) and (b xor c)) xor c
+  for i in 2 .. 7:
+    ppu.sprite_table[dst + i] = ppu.sprite_table[src + i]
+
+proc oam_bug_read_corrupt(ppu: GbPpu; row: int) =
+  ## "Read Corruption": as the write corruption, with `b | (a & c)` for the
+  ## first word instead.
+  let dst = row shl 3
+  let src = dst - 8
+  for i in 0 .. 1:
+    let a = ppu.sprite_table[dst + i]
+    let b = ppu.sprite_table[src + i]
+    let c = ppu.sprite_table[src + 4 + i]
+    ppu.sprite_table[dst + i] = b or (a and c)
+  for i in 2 .. 7:
+    ppu.sprite_table[dst + i] = ppu.sprite_table[src + i]
+
+proc oam_bug_read_write_corrupt(ppu: GbPpu; row: int) =
+  ## "Read During Increase/Decrease": a read and an IDU write in one M-cycle.
+  ## Pan Docs: it does not happen at all for the first four rows or the last
+  ## one; otherwise the first word of the PRECEDING row becomes
+  ## `(b & (a | c | d)) | (a & c & d)` -- a the first word two rows before the
+  ## accessed one, b the first word of the preceding row (the one being
+  ## corrupted), c the first word of the accessed row, d the third word of the
+  ## preceding row -- and the preceding row is then copied, corrupted first
+  ## word and all, both onto the accessed row and onto the row two before it.
+  ## A normal read corruption is then applied on top, whether or not this ran;
+  ## the caller does that part.
+  if row < 4 or row >= 19: return
+  let cur = row shl 3
+  let pre = cur - 8
+  let two = cur - 16
+  for i in 0 .. 1:
+    let a = ppu.sprite_table[two + i]
+    let b = ppu.sprite_table[pre + i]
+    let c = ppu.sprite_table[cur + i]
+    let d = ppu.sprite_table[pre + 4 + i]
+    ppu.sprite_table[pre + i] = (b and (a or c or d)) or (a and c and d)
+  for i in 0 .. 7:
+    let v = ppu.sprite_table[pre + i]
+    ppu.sprite_table[cur + i] = v
+    ppu.sprite_table[two + i] = v
+
+proc oam_bug_access*(gb: GB; kind: OamBugKind) {.noinline.} =
+  ## One access into the OAM page from the CPU's side of the bus. The caller
+  ## has already established that the address is in $FE00-$FEFF; everything
+  ## else is decided here, out of line, so the inlined half of the check is a
+  ## compare and a not-taken branch.
+  ##
+  ## DMG-family only: Pan Docs, "Game Boy Color and Advance are not affected by
+  ## this bug, even when running monochrome software", so the test is on the
+  ## console (boot_model, what console_is_cgb reads) and not on cgb_enabled,
+  ## which a DMG cart in compatibility mode clears.
+  if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}: return
+  let ppu = gb.ppu
+  if not lcd_enabled(ppu): return
+  when defined(gb_oam_trace):
+    # -d:gb_oam_trace prints every OAM-address bus event the LCD is on for, in
+    # or out of mode 2. This is what located the row phase: run blargg's
+    # 4-scanline_timing under it and the last two lines are the M-cycles that
+    # ROM calls "just before" and "at" the first corruption.
+    echo "OAMBUG ly=", ppu.ly, " cc=", ppu.cycle_counter,
+         " mode=", ppu.lcd_status and 3'u8, " fl=", ppu.first_line,
+         " row=", (int(ppu.cycle_counter) + 3) shr 2, " kind=", kind
+  if (ppu.lcd_status and 3'u8) != 2'u8: return
+  # The first line after the LCD is switched on does not lock OAM at all (see
+  # cpu_oam_open), i.e. that line's mode 2 is not a normal scan here. Whether
+  # hardware corrupts on it is NOT established by any of blargg's rows -- all
+  # of them place their event four frames after the LCD-on write -- so this
+  # follows the lock rather than guessing the other way.
+  if ppu.first_line: return
+  # Which row the scan is on. cycle_counter is the dot this M-cycle starts on,
+  # 1-based within the line (fifo_ppu resets it to 0 at the line end and then
+  # increments before the first dot runs), and the scan reads one row per four
+  # dots, so this M-cycle overlaps row `ceil(cc / 4)`. Row is always 1..19 here
+  # and the two corrupt procs index at most `row * 8 + 7` = 159, so the whole
+  # of it stays inside the 160-byte table without a bounds test.
+  #
+  # The scanline renderer restarts cycle_counter at each mode edge instead, so
+  # there it reads 0, 4, ... 76 across mode 2 and the same expression puts the
+  # skipped M-cycle at the START of the scan rather than the end. Same count of
+  # corrupting M-cycles, one M-cycle out of phase; that renderer is the opt-in
+  # fast path (GB.fifo) and is not scored against any timing suite.
+  #
+  # 1..19, never 0 and never 20, and BOTH ends of that are measured:
+  #
+  #   * 20 is the M-cycle that reaches dot 80, where the scan has already let
+  #     go of OAM before the CPU's strobe -- the same edge OAM_WRITE_M2_TAIL
+  #     models on the write side, and why an OAM write still lands on that
+  #     M-cycle. blargg 4-scanline_timing test 5 ("just after last corruption",
+  #     18+1 M-cycles past the first) says it does not corrupt.
+  #   * 0 is read before the line's first CPU strobe can reach it, which is
+  #     Pan Docs' "objects 0 and 1 are not affected by this bug".
+  #
+  # Together those two are the 19-M-cycle window 4-scanline_timing brackets at
+  # +0 and +18 -- 20 M-cycles of mode 2, minus the one that runs past its end.
+  #
+  # WHICH absolute row each of those 19 M-cycles lands on does not follow from
+  # the window's width; 0..18 would be just as wide. It is pinned separately,
+  # by blargg 7-timing_effect: that ROM CRCs the whole of OAM after triggering
+  # at 116 consecutive positions, and 1..19 is the assignment that produces its
+  # $7D792E7C. (7-timing_effect is not one of the shootout's 261 rows --
+  # upstream has it commented out -- but blargg's combined oam_bug.gb runs it
+  # and reports 07:ok, and the standalone ROM matches its own reference.)
+  let row = (int(ppu.cycle_counter) + 3) shr 2
+  if row <= 0 or row >= 20: return
+  when defined(gb_oam_trace): echo "  -> corrupt row ", row
+  case kind
+  of obWrite: oam_bug_write_corrupt(ppu, row)
+  of obRead:  oam_bug_read_corrupt(ppu, row)
+  of obReadWrite:
+    oam_bug_read_write_corrupt(ppu, row)
+    oam_bug_read_corrupt(ppu, row)
+
+template oam_bug_if*(gb: GB; address: uint16; kind: OamBugKind) =
+  ## The inlined half: does this M-cycle put an OAM address on the bus?
+  if (address and 0xFF00'u16) == 0xFE00'u16: oam_bug_access(gb, kind)
 
 # ---- STAT helpers ----
 proc coincidence_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x40) != 0
@@ -1212,6 +1463,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # Deferred to the end of this M-cycle -- see GbPpu.stat_write_pending and
     # the consume in mem_write. The LCD-enable branch above is NOT deferred:
     # that one restarts the mode machinery itself rather than feeding it.
+    # LCDC.1 (OBJ enable) and, in CGB mode, LCDC.0 (BG priority) are mixer
+    # reads, and mealybug m3_lcdc_obj_en_change is what times them; see
+    # fifo_recompose_last.
+    mixer_write_repaint(gb, MIXER_PRIORITY_BACK)
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF41:
@@ -1258,9 +1513,21 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF46: discard  # handled by memory DMA
-  of 0xFF47: ppu_update_palette(ppu.bgp,  val)
-  of 0xFF48: ppu_update_palette(ppu.obp0, val)
-  of 0xFF49: ppu_update_palette(ppu.obp1, val)
+  # The three DMG palettes are pure mixer reads -- nothing else in the PPU looks
+  # at them -- so each one carries the mixer's extra dot (fifo_recompose_last).
+  of 0xFF47, 0xFF48, 0xFF49:
+    when defined(gb_px_trace):
+      # The palette half of the same instrument as the LCDC line above: which
+      # dot a mid-mode-3 palette write lands on, read against the PX line for
+      # the pixel it is supposed to reach. See fifo_recompose_last.
+      echo "PAL ly=", ppu.ly, " dot=", ppu.cycle_counter, " reg=", toHex(idx, 4),
+           " mode=", (ppu.lcd_status and 3), " new=", toHex(val, 2)
+    case idx
+    of 0xFF47: ppu_update_palette(ppu.bgp,  val)
+    of 0xFF48: ppu_update_palette(ppu.obp0, val)
+    else:      ppu_update_palette(ppu.obp1, val)
+    mixer_write_repaint(gb, MIXER_PALETTE_BACK)
+
   of 0xFF4A:
     when defined(gb_win_trace):
       echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",

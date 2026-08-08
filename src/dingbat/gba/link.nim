@@ -107,7 +107,7 @@ proc step_frame*(link: Link) =
   ## enters the next frame while another still runs the current one.
   for i in 0 ..< link.cores.len:
     link.frame_done[i] = false
-    link.cores[i].cpu.count_cycles = 0
+    link.cores[i].frame_start_cycles = link.cores[i].scheduler.cycles
   while true:
     var best = -1
     var best_t = int64.high

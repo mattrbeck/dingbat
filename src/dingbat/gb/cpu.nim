@@ -2,7 +2,7 @@
 
 proc new_gb_cpu*(): GbCpu =
   GbCpu(pc: 0, sp: 0, ime: false, halted: false, halt_bug: false,
-        locked: false, cached_hl: -1)
+        locked: false, stopped: false, cached_hl: -1)
 
 proc skip_boot*(cpu: GbCpu; gb: GB) =
   # CPU registers at PC=0x100, per hardware model (mooneye boot_regs-* /
@@ -71,8 +71,14 @@ proc cpu_lock*(cpu: GbCpu) =
   ## a real frame, and what keeps a locked ROM from spinning the host).
   ## `locked` is only ever tested on that halted path, so the running CPU pays
   ## nothing for it; it is what stops handle_interrupts from clearing `halted`
-  ## again. Nothing clears it — a fresh GB (reset / load ROM) starts with a
-  ## fresh GbCpu.
+  ## again. Nothing clears it FOR THE LOCKUP — a fresh GB (reset / load ROM)
+  ## starts with a fresh GbCpu.
+  ##
+  ## STOP mode (stop_instr in memory.nim) sets the same two flags plus
+  ## `stopped`, because it needs exactly this "halted, and no interrupt ends
+  ## it" behaviour and reusing `locked` is what keeps the halted path's test
+  ## count where it was. It DOES clear them, on its joypad wake; `locked` on
+  ## its own still means the lockup, and only cpu_stop_tick ever clears it.
   cpu.halted = true
   cpu.locked = true
 
@@ -89,10 +95,15 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## both a DMG and a CGB title, from a path that does nothing. Keeping the hot
   ## half a leaf is worth ~1% against `main` on both.
   cpu.ime = false
+  # The same three OAM-bug M-cycles PUSH has (cpu_push16); Pan Docs lists
+  # interrupt handling with it.
+  oam_bug_if(gb, cpu.sp, obWrite)
   cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
+  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   cpu.pc = interrupt
   clear_interrupt(gb.interrupts, interrupt)
@@ -100,8 +111,35 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
   if interrupt_ready(gb.interrupts):
+    # STOP mode is entered WITH an interrupt pending on one of its two leaves
+    # (Pan Docs' STOP chart; it is the one daid's stop_instr.gb takes), and
+    # nothing but a joypad line ends it -- the clock the interrupt logic runs
+    # on is stopped too. So this cannot be allowed to un-halt the CPU the
+    # M-cycle STOP retires. Tested inside `interrupt_ready`, which all but a
+    # handful of calls fall straight out of, so the hot path is unchanged.
+    if cpu.stopped: return
     cpu.halted = false
     if cpu.ime: dispatch_interrupt(cpu, gb)
+
+proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
+  ## One step of STOP mode (stop_instr in memory.nim): the one halt where the
+  ## rest of the machine is stopped with the CPU, so nothing is ticked and
+  ## mem_tick_stopped only keeps the frontend's frames coming.
+  ##
+  ## Pan Docs: "STOP is terminated by one of the P10 to P13 lines going low",
+  ## which is what joypad_lines reports as a zero bit — a key held on a group
+  ## selected in P1. The same edge sets the joypad interrupt, so a CPU with IME
+  ## set vectors on its way out through tick's ordinary path, on the M-cycle
+  ## after this one.
+  ##
+  ## `noinline` for the same reason dispatch_interrupt carries it: this body
+  ## has no business in `tick`, which a halt-heavy title runs tens of millions
+  ## of times a second.
+  mem_tick_stopped(gb.memory, gb)
+  if joypad_lines(gb.joypad) != 0x0F'u8:
+    cpu.stopped = false
+    cpu.locked  = false
+    cpu.halted  = false
 
 when defined(gbfuzz_trace):
   # Instruction trace for cross-emulator divergence hunting (tools/gbfuzz).
@@ -115,12 +153,26 @@ proc tick*(cpu: GbCpu; gb: GB) =
   # behind it (cpu_lock sets both).
   if cpu.halted:
     cpu.cached_hl = -1
+    # The two halts no interrupt can end: the undefined-opcode lockup, which is
+    # still a running machine, and STOP mode, which is not. `locked` is set by
+    # both (cpu_lock, stop_instr), so this is the SAME test that used to be the
+    # `not cpu.locked` half of the condition below -- just hoisted above the
+    # tick, because STOP mode must not tick. That hoist is not free: it costs
+    # 0.17% of ALL retired instructions on Pokemon Blue, which idles in HALT
+    # (0.03% on Link's Awakening, unmeasurable on Shantae). It is the cheapest
+    # of the shapes tried -- testing `stopped` on its own here instead costs
+    # 0.5% on the same title, and moving the whole halted body out of line
+    # costs 0.7-1.2% on the two titles that halt less.
+    if cpu.locked:
+      if cpu.stopped: cpu_stop_tick(cpu, gb)
+      else:           mem_tick_extra(gb.memory, gb, 4)
+      return
     mem_tick_extra(gb.memory, gb, 4)
     # handle_interrupts, opened up. The halt ends on IF & IE whether or not IME
     # lets an interrupt be taken, and that is the exact M-cycle the question
     # below has to be asked on -- asking it on every halted M-cycle instead
     # costs a real 0.3% of a title that spends its main loop halted.
-    if not cpu.locked and interrupt_ready(gb.interrupts):
+    if interrupt_ready(gb.interrupts):
       # A HBlank VRAM DMA block that came due while the CPU was halted (see the
       # mode-0 edge in `mode_flag=`) is transferred the moment the CPU is back
       # on the bus, which is this one. The DMA takes the bus before the CPU's

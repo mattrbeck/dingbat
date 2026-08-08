@@ -34,9 +34,15 @@ proc save_cpu_state(cpu: GbCpu; w: var Writer) =
   w.write_u16(cpu.pc)
   w.write_u16(cpu.sp)
   w.write_bool(cpu.ime)
-  w.write_bool(cpu.halted)
+  # STOP mode (stop_instr) sets `halted` and `locked` together, but `stopped`
+  # itself is not in this payload — writing the two raw would load back a CPU
+  # that is halted AND locked with nothing left to unlock it. Both are written
+  # as the states they mean without it, so a state captured inside STOP mode
+  # loads as a running CPU at the instruction after the STOP, which is where
+  # the joypad wake would have put it anyway.
+  w.write_bool(cpu.halted and not cpu.stopped)
   w.write_bool(cpu.halt_bug)
-  w.write_bool(cpu.locked)
+  w.write_bool(cpu.locked and not cpu.stopped)
 
 proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_CPU)
@@ -164,7 +170,14 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
 proc load_mem_state(mem: GbMemory; r: var Reader) =
   r.expect_tag(GB_SEC_MEM)
   for i in 0 ..< 8: r.read_bytes(mem.wram[i])
-  mem.wram_bank = r.read_u8()
+  # `wram` is array[8, …] and every 0xD000..0xDFFF access indexes it with this
+  # byte. The MMIO write path masks (`val and 0x7`, then 0 -> 1); the state
+  # loader did not, so a state file could pick any of 256 banks and put the
+  # very next memory read out of bounds. Mask identically rather than reject:
+  # this is the same normalisation SVBK does, so it cannot refuse a state a
+  # real machine could have produced.
+  mem.wram_bank = r.read_u8() and 0x7'u8
+  if mem.wram_bank == 0: mem.wram_bank = 1
   r.read_bytes(mem.hram)
   mem.bootrom = r.read_seq_u8()
   mem.ff72 = r.read_u8()
@@ -178,7 +191,12 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   mem.requested_oam_dma = r.read_bool()
   mem.next_dma_counter = r.read_u8()
   mem.requested_speed_switch = r.read_bool()
+  # The other half of the same hazard as scheduler.current_speed: this one is a
+  # RIGHT shift (`cycles shr mem.current_speed`), so a large value makes every
+  # cycle worth zero PPU dots and the frame never ends. Same livelock, opposite
+  # direction. 0 = normal, 1 = CGB double speed, and nothing else exists.
   mem.current_speed = r.read_u8()
+  check_range(int(mem.current_speed), 0, 1, "mem.current_speed")
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
   # Derived caches, not payload: re-deriving them costs nothing and keeps the
   # section byte-for-byte what it was, so no payload-revision bump.
@@ -240,6 +258,63 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   ppu.scy = r.read_u8()
   ppu.scx = r.read_u8()
   ppu.ly = r.read_u8()
+  # The scanline counter, and the renderers write `framebuffer[ly * 160 + x]`.
+  # 0..153 is the whole frame including the 10 vblank lines; 154+ indexes past
+  # the 160*144 framebuffer. (LYC is not bounded: it is only ever COMPARED
+  # against LY, so any byte is a value the game itself could have written.)
+  check_range(int(ppu.ly), 0, 153, "ppu.ly")
+  # A state is never written mid-scanline, so modes 2 and 3 cannot appear in
+  # one — and a file that claims either is refused rather than approximated.
+  #
+  # This is a statement about the FORMAT, not a guess. The renderer's per-line
+  # scratch — the FIFO's `lx`, its fetcher, the OAM scan's progress — is not
+  # serialized at all; `GbPpu.reset_render_scratch` (src/dingbat/gb/ppu.nim)
+  # rebuilds it on every load and says why that is safe: it "is fully rebuilt
+  # on every mode 2->3 transition and never read at vblank, where states are
+  # captured". Measured against that claim: 6000 consecutive frame boundaries
+  # across both GB test ROMs are mode 1 at LY 144, and all 16 states in
+  # tests/states are too. So a file in mode 2 or 3 carries a dot counter with
+  # none of the progress that counter refers to.
+  #
+  # Refusing the pair is also the only way to close a livelock that no
+  # per-field range can catch. Every mode leaves the line on an EXACT dot
+  # comparison (fifo_ppu: mode 2 at `cycle_counter == 80`, modes 0 and 1 at
+  # `== 456`), so a counter sitting past its OWN mode's stop is never reset: it
+  # climbs on every tick until int32 overflows, and step_frame never returns in
+  # the meantime. Measured: mode 2 with cycle_counter 81, and mode 3 with 289,
+  # are both inside the counter's legal 0..456 range checked below, are both
+  # accepted, and both then fault. It is the PAIR that is impossible, which is
+  # the one shape a per-field bound cannot express.
+  #
+  # This subsumes the narrower LY >= 144 case (mode 3 during vblank, which
+  # indexed framebuffer[160*144] exactly one past the end).
+  let ppu_mode = int(ppu.lcd_status) and 3
+  if ppu_mode >= 2:
+    raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
+                      $int(ppu.ly) & ": no state is written mid-scanline")
+  # And the other half of the same disagreement: a vblank LINE must be in
+  # vblank MODE. Mode 0 with LY already at 144 is the shape, and it is not
+  # caught by the rule above or by ly's own 0..153 range — both fields are
+  # individually legal. What it does is walk off the end: mode 0's line
+  # boundary increments LY to 145, the `int(ppu.ly) == GB_HEIGHT` test that
+  # enters vblank is an equality so it never fires again, and the PPU renders
+  # lines 145, 146, ... into a 160x144 framebuffer.
+  #
+  # Found by sweeping with byte 0x00 rather than 0xFF: this offset is
+  # ppu.lcd_status, and zeroing it selects mode 0 while 0xFF selects mode 3,
+  # which the rule above already refuses. One byte value, one whole bug class
+  # hidden — the 0xFF sweep alone reports clean.
+  #
+  #   [UNCONTAINED] payload offset 33034 := 0x00: index 23200 not in 0..23039
+  #   23200 = 160 * 145.
+  #
+  # Cannot refuse a real state: with the LCD on, every frame boundary is
+  # LY 144 mode 1; with the LCD off it is LY 0 mode 0 (measured, 300 boundaries
+  # each). Both satisfy this.
+  if int(ppu.ly) >= GB_HEIGHT and ppu_mode != 1:
+    raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
+                      $int(ppu.ly) & ", which is a vblank line: only mode 1 " &
+                      "exists there")
   ppu.lyc = r.read_u8()
   r.read_bytes(ppu.bgp)
   r.read_bytes(ppu.obp0)
@@ -247,6 +322,9 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   ppu.wy = r.read_u8()
   ppu.wx = r.read_u8()
   ppu.vram_bank = r.read_u8()
+  # Indexes `ppu.vram`, which is array[2, ...]. VBK is a one-bit register, so
+  # the hardware cannot produce anything else.
+  check_range(int(ppu.vram_bank), 0, 1, "ppu.vram_bank")
   r.read_bytes(ppu.pram)
   ppu.palette_index = r.read_u8()
   ppu.auto_increment = r.read_bool()
@@ -280,6 +358,11 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
     ppu.hdma_dst = (uint16(hdma3) shl 8) or uint16(hdma4 and 0xF0)
   if rev >= 3:
     ppu.dots_since_frame = r.read_i32()
+    # The panel's own refresh clock, `+= int32(cycles)` on every tick — same
+    # overflow shape as cycle_counter, and it is reset at every frame push, so
+    # one frame of dots is the whole range it can hold. (The compat test
+    # asserts real states carry less than one scanline here.)
+    check_range(int(ppu.dots_since_frame), 0, 70224, "ppu.dots_since_frame")
   else:
     # The panel's refresh clock, reset to 0 at every frame push — both the
     # normal one at LY=144 and the blank one lcd_off_frame pushes. States are
@@ -293,6 +376,12 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   ppu.old_stat_flag = r.read_bool()
   ppu.first_line = r.read_bool()
   ppu.cycle_counter = r.read_i32()
+  # Dots within the LINE (gb_line_end is 456), not the frame. `fifo_tick`
+  # computes `cycle_counter + int32(cycles)` and compares it against the line's
+  # next stop; past the end of the line no stop is ever reached, so the counter
+  # is never reset and just climbs every tick until it overflows int32. A
+  # frame-sized bound is therefore not enough — it has to be a line.
+  check_range(int(ppu.cycle_counter), 0, 456, "ppu.cycle_counter")
   ppu.ran_bios = r.read_bool()
   r.read_seq_u16_into(ppu.framebuffer)
   ppu.frame = false
@@ -407,7 +496,7 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
   block:
     let ch = apu.channel1
     load_channel_env(ch, r)
-    ch.wave_duty_position = int(r.read_i32())
+    ch.wave_duty_position = int(r.read_i32()) and 7
     ch.sweep_period = r.read_u8()
     ch.negate = r.read_bool()
     ch.shift = r.read_u8()
@@ -415,34 +504,41 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
     ch.frequency_shadow = r.read_u16()
     ch.sweep_enabled = r.read_bool()
     ch.negate_used = r.read_bool()
-    ch.duty = r.read_u8()
+    ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
   block:
     let ch = apu.channel2
     load_channel_env(ch, r)
-    ch.wave_duty_position = int(r.read_i32())
-    ch.duty = r.read_u8()
+    ch.wave_duty_position = int(r.read_i32()) and 7
+    ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
   block:
     let ch = apu.channel3
     load_channel_base(ch, r)
     r.read_bytes(ch.wave_ram)
-    ch.wave_ram_position = r.read_u8()
+    # wave_ram is 16 bytes indexed as `wave_ram[wave_ram_position div 2]`, so
+    # the position is a 5-bit nibble counter.
+    ch.wave_ram_position = r.read_u8() and 31
     ch.wave_ram_sample_buffer = r.read_u8()
     ch.length_load = r.read_u8()
-    ch.volume_code = r.read_u8()
-    ch.volume_code_shift = r.read_u8()
+    ch.volume_code = r.read_u8() and 3
+    # A SHIFT amount (`nibble shr volume_code_shift`), derived from volume_code
+    # as 4/0/1/2 — so 0..4 covers every value the hardware can select.
+    ch.volume_code_shift = r.read_u8() and 7
     ch.frequency = r.read_u16()
   block:
     let ch = apu.channel4
     load_channel_env(ch, r)
     ch.lfsr = r.read_u16()
     ch.length_load = r.read_u8()
-    ch.clock_shift = r.read_u8()
-    ch.width_mode = r.read_u8()
-    ch.divisor_code = r.read_u8()
+    # NR43: clock_shift is a SHIFT amount (`... shl ch.clock_shift`) and is
+    # four bits wide in the register; shifting a uint32 by more than 31 is
+    # undefined, and the file could ask for 255.
+    ch.clock_shift = r.read_u8() and 0x0F
+    ch.width_mode = r.read_u8() and 1
+    ch.divisor_code = r.read_u8() and 7
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
@@ -623,6 +719,11 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     for i in 0 .. 4: c.rtc_latched[i] = r.read_u8()
     c.rtc_latch_prev = r.read_u8()
     c.rtc_halt_remaining = r.read_int()
+    # Handed straight to scheduler.schedule(), whose s.cycles +
+    # CycleCount(cycles) is an unsigned conversion: a negative value is an
+    # immediate defect and a huge one overflows the sum. One RTC tick is the
+    # most that can ever be outstanding.
+    check_range(c.rtc_halt_remaining, 0, RTC_SECOND_CYCLES, "mbc3.rtc_halt_remaining")
   elif cart of Mbc5:
     let c = Mbc5(cart)
     c.ram_enabled = r.read_bool()
@@ -681,8 +782,16 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.flash_read_mode      = r.read_u8()
     c.flash_status         = r.read_u8()
     c.flash_cmd_step       = r.read_int()
+    # Position in the JEDEC unlock sequence: a 0..5 state machine. The
+    # `case` that reads it has an else branch so this is containment rather
+    # than a crash fix, but a state that says 'step 40' is not a state any
+    # writer produced and silently resetting it would be a lie.
+    check_range(c.flash_cmd_step, 0, 5, "mbc6.flash_cmd_step")
     c.flash_setup          = r.read_u8()
     c.flash_program_addr   = r.read_int()
+    # -1 is the documented 'no address latched' sentinel; anything else is
+    # an offset inside the mapped 0x4000-byte flash window.
+    check_range(c.flash_program_addr, -1, 0xFFFF, "mbc6.flash_program_addr")
     c.flash_program_hidden = r.read_bool()
   elif cart of PocketCamera:
     let c = PocketCamera(cart)
@@ -692,6 +801,10 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.regs_mapped  = r.read_bool()
     for i in 0 ..< c.regs.len: c.regs[i] = r.read_u8()
     c.capture_cycles_left = r.read_int()
+    # Same path as rtc_halt_remaining (camera_start schedules etCameraDone
+    # with it). The longest exposure the Camera can be asked for is well
+    # under a second of GB time; 1<<24 is four times that.
+    check_range(c.capture_cycles_left, 0, 1 shl 24, "camera.capture_cycles_left")
   elif cart of Tama5:
     let c = Tama5(cart)
     c.reg_index = r.read_u8()
@@ -828,7 +941,32 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
   s.border_dirty = false
   s.sgb_render_border()
 
-proc gb_state_payload(gb: GB): string =
+# ---- The in-process / file boundary -----------------------------------------
+#
+# `in_process` = true pads the scheduler section so the payload has a FIXED
+# length (see PAD_RATIONALE in common/scheduler.nim). It is what makes the
+# rewind ring's XOR delta align, and it is worth 8.5x on the delta size.
+#
+# It must be TRUE for payloads that stay in this process (the rewind ring,
+# rollback snapshots) and FALSE for anything that can reach a file, because
+# padded bytes are not the .state format and an older build could not read
+# them. The rule is enforced three ways:
+#
+#   1. The rule is drawn at the API, not per call site: the public
+#      state_payload / apply_state_payload family is ENTIRELY in-process and
+#      passes true. The file family — state_bytes, save_state,
+#      load_state_bytes, state_image — is entirely unpadded and reaches the
+#      private *_state_payload / *_apply_state with the default false. If you
+#      are adding a call and cannot tell which you want, ask whether the bytes
+#      can outlive the process.
+#   2. The default is false, so a new call site is unpadded unless it opts in.
+#   3. A mismatch cannot pass silently: the padding sits immediately before a
+#      section tag, so reading padded bytes as unpadded (or the reverse) trips
+#      expect_tag on the very next section and raises StateError. There is a
+#      dedicated regression test for the boundary in
+#      tests/savestate_compat_test.nim.
+
+proc gb_state_payload(gb: GB; in_process = false): string =
   var w = Writer()
   save_cpu_state(gb.cpu, w)
   save_irq_state(gb.interrupts, w)
@@ -839,7 +977,7 @@ proc gb_state_payload(gb: GB): string =
   w.write_bool(gb.cgb_enabled)
   w.write_tag(GB_SEC_SCHED)
   gb.apu_arm_state_events()
-  gb.scheduler.save_to(w)
+  gb.scheduler.save_to(w, pad = in_process)
   gb.apu_disarm_state_events()
   save_ppu_state(gb.ppu, w)
   save_apu_state(gb.apu, w)
@@ -848,7 +986,8 @@ proc gb_state_payload(gb: GB): string =
   w.write_tag(GB_SEC_END)
   w.buf
 
-proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
+proc gb_apply_state(gb: GB; payload: string; rev: uint32;
+                          in_process = false) =
   var r = Reader(buf: payload)
   load_cpu_state(gb.cpu, r, rev)
   load_irq_state(gb.interrupts, r)
@@ -863,7 +1002,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32) =
   # this change invisible to the committed state corpus.
   gb_sync_cgb_native(gb)
   r.expect_tag(GB_SEC_SCHED)
-  gb.scheduler.load_from(r)
+  gb.scheduler.load_from(r, pad = in_process)
   load_ppu_state(gb.ppu, r, rev)
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
@@ -923,19 +1062,23 @@ proc gb_rom_checksum(gb: GB): uint32 =
 proc state_payload*(gb: GB): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses
   ## (the rewind ring buffer). Frame boundaries only.
-  gb.gb_state_payload()
+  ##
+  ## in_process = true: this payload never reaches a file, so it is padded to
+  ## a fixed length. See the boundary note above.
+  gb.gb_state_payload(in_process = true)
 
 proc apply_state_payload*(gb: GB; payload: string) =
   ## Apply a raw payload produced by state_payload. Raises StateError on
   ## corrupt input; no rollback — trusted callers only. Always this build's
   ## revision: the rewind ring and rollback snapshots never outlive the process.
-  gb.gb_apply_state(payload, GB_PAYLOAD_VERSION)
+  gb.gb_apply_state(payload, GB_PAYLOAD_VERSION, in_process = true)
 
 proc apply_state_payload*(gb: GB; payload: string; rev: uint32) =
   ## As above, for a payload known to be in an OLDER revision. Exists so the
   ## format tests can exercise a migration without a whole state image; normal
-  ## load paths get their revision from the header.
-  gb.gb_apply_state(payload, rev)
+  ## load paths get their revision from the header. In-process like the other
+  ## overload: its callers hand it payloads produced by state_payload.
+  gb.gb_apply_state(payload, rev, in_process = true)
 
 const GB_THUMB_W = 120
 const GB_THUMB_H = GB_THUMB_W * 144 div 160   # preserve 10:9 → 120x108
@@ -955,6 +1098,27 @@ proc state_bytes*(gb: GB; thumbnail = false): string =
     make_state_bytes(ckGB, gb.gb_rom_checksum(),
                      uint32(gb.cartridge.rom.len), payload)
 
+proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
+  ## Apply a validated payload, restoring the live machine if it fails midway.
+  ## Both load paths go through here. See the GBA proc of the same name for why
+  ## the Defect arm exists and why continuing after one is safe in this one
+  ## place — the reasoning is identical and is written out there.
+  let backup = gb.gb_state_payload()
+  try:
+    gb.gb_apply_state(payload, rev)
+    last_state_reject_kind = srkNone
+    return true
+  except CatchableError:
+    last_state_error = getCurrentExceptionMsg()
+    echo "Load state failed: ", last_state_error
+  except Defect as d:
+    last_state_error = "this save state is damaged"
+    last_state_reject_kind = srkCorrupt
+    echo "Load state failed: an unbounded field reached a ", d.name,
+         " — that is a dingbat bug, please report it: ", d.msg
+  restore_backup(gb.gb_apply_state(backup, GB_PAYLOAD_VERSION))
+  false
+
 proc parse_state_image*(gb: GB; data: string; origin = "state data"):
                        tuple[payload: string; rev: uint32] =
   ## Header validation for a full state image against THIS cart — the mirror
@@ -965,6 +1129,14 @@ proc parse_state_image*(gb: GB; data: string; origin = "state data"):
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
+  ##
+  ## Clear the reject kind FIRST. Not every failure below classifies itself —
+  ## an unreadable file raises IOError, not StateError — and a kind left over
+  ## from the previous refusal would have the frontend confidently explain the
+  ## wrong problem ("that state belongs to a different game" for a file it
+  ## could not open). srkNone falls back to the generic sentence, which is the
+  ## honest answer when the core does not know.
+  last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:
     image = gb.parse_state_image(data)
@@ -972,15 +1144,7 @@ proc load_state_bytes*(gb: GB; data: string): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
     return false
-  let backup = gb.gb_state_payload()
-  try:
-    gb.gb_apply_state(image.payload, image.rev)
-    true
-  except CatchableError:
-    last_state_error = getCurrentExceptionMsg()
-    echo "Load state failed: ", last_state_error
-    gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
-    false
+  gb.gb_apply_checked(image.payload, image.rev)
 
 proc save_state*(gb: GB; path: string; thumbnail = false): bool =
   ## Serialize the full emulator state to path. Must only be called at a
@@ -1003,6 +1167,7 @@ proc load_state*(gb: GB; path: string): bool =
   ## Restore emulator state from path. Must only be called at a frame
   ## boundary. On any validation error the emulator is left untouched; if
   ## applying fails midway the pre-load state is restored.
+  last_state_reject_kind = srkNone   # see load_state_bytes
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGB, gb.gb_rom_checksum(),
@@ -1011,12 +1176,4 @@ proc load_state*(gb: GB; path: string): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
     return false
-  let backup = gb.gb_state_payload()
-  try:
-    gb.gb_apply_state(image.payload, image.rev)
-    true
-  except CatchableError:
-    last_state_error = getCurrentExceptionMsg()
-    echo "Load state failed: ", last_state_error
-    gb.gb_apply_state(backup, GB_PAYLOAD_VERSION)
-    false
+  gb.gb_apply_checked(image.payload, image.rev)

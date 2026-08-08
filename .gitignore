@@ -17,6 +17,11 @@ imgui.ini
 # Nim compiler cache
 .cache/
 
+# Per-target caches and logs from .github/scripts/build-tests.sh — the seven
+# test binaries are built concurrently, so each needs its own nimcache.
+.nimcache-tests/
+.build-logs/
+
 # Web test deps (Playwright, installed by the render-readback test)
 web/node_modules/
 
@@ -38,6 +43,9 @@ web/rom.gbc
 /dingbat_ppuobjlist_test
 /dingbat_savestate_compat_test
 /dingbat_rewind_test
+/dingbat_printer_test
+/rewind_codec
+/rewind_codec_nopad
 /dingbat_test_runner
 /dingbat_bench
 /dingbat_bench_native
@@ -130,3 +138,9 @@ web/*.gba
 /dingbat_savestate_compat_test
 /dingbat_rewind_test
 web/_serve8781.py
+
+# Hostile-input save-state fuzzer, built from tools/statefuzz.nim on demand
+# (`nimble statefuzz_build`). Not a test-suite binary: the full sweep is
+# minutes, not seconds.
+/statefuzz
+/statefuzz_dbg

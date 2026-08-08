@@ -298,6 +298,112 @@ const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const WIN_EN_ABORT*           {.intdefine.} = 1
+  ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
+  ## tiles on this line. 1 ships; 0 is the control build and restores the old
+  ## behaviour, where `fetching_window` could not be cleared before the next
+  ## line. See the site in tick_bg_fetcher for the rule and the citation.
+  ##
+  ## It is DMG behaviour, not a CGB one. mealybug documents it in its PPU notes
+  ## and measures it with two ROMs whose scored references are `_dmg_blob`, and
+  ## dingbat used to file it as SameBoy's CGB-only fetcher abort and not model
+  ## it at all. Worth, on its own: mealybug m3_lcdc_win_en_change_multiple
+  ## 8874 wrong pixels -> 0 (DMG and CGB both), m3_lcdc_win_en_change_multiple_wx
+  ## 4215 -> 343, DMG total +12746 and CGB +25758, and three gambatte
+  ## window/on_screen rows -- weon_wx18_weoff_weon_wx80 on both devices and
+  ## wx17_weoff_wxA5_weon on DMG, which are that mechanism by name.
+const WIN_LINE_START_WX*      {.intdefine.} = 6
+  ## The WX below which a line STARTS as a window line instead of reaching the
+  ## window through the shifter's equality. See the mode 2 -> 3 edge in
+  ## fifo_tick_slow for what the two spellings mean; this is the boundary
+  ## between them and mealybug is its only oracle.
+  ##
+  ## gambatte brackets WX = 0 (m2int_wx00_*) and WX = 7 (m2int_wx07_*) and has
+  ## NOTHING at 4, 5 or 6, so the three m3_wx_{4,5,6}_change ROMs are the whole
+  ## evidence for where in that gap the boundary falls. Swept 2026-08-07, wrong
+  ## pixels of 23040 on the DMG references, and the mealybug DMG total of
+  ## 3,317,760 next to it:
+  ##
+  ##   threshold   wx_4   wx_5    wx_6   window_timing   mealybug DMG
+  ##       5          0  13768    4611        30            515691
+  ##       6 (ship)   0      0    4611        29            529314
+  ##       7          0      0   13810        35            520109
+  ##       8          0      0   13810        41            517392
+  ##
+  ## Three ROMs, one boundary, and only 6 satisfies all of them: 5 breaks WX = 5
+  ## outright and 7 and 8 leave WX = 6 at three times its error. It is worth
+  ## +9205 DMG pixels on its own, the largest single move in the mealybug set,
+  ## and it moves nothing in gambatte -- WX = 6 is the only value whose
+  ## treatment changes, and no gambatte ROM writes it.
+  ##
+  ## What it does NOT do is make m3_wx_6_change pass: 4611 pixels remain, and
+  ## they are a different mechanism (the window line advancing on a mid-line
+  ## re-activation -- see docs/gb-failure-triage.md). This constant is pinned
+  ## from both sides regardless of that residual, which is why it ships without
+  ## it.
+const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
+  ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
+const MIXER_PALETTE_BACK*     {.intdefine.} = 2
+  ## Stages of the mixer tail BGP/OBP0/OBP1 are read at the far end of. One
+  ## more than the priority bits: the mixer resolves BG-vs-OBJ first and looks
+  ## the shade up after, so a palette write reaches one pixel further back than
+  ## an LCDC write does. m3_obp0_change is what separates them -- it goes to
+  ## pixel-exact at 2 and is 32 pixels out at 1, on a frame where
+  ## m3_lcdc_obj_en_change is 60 out at 0 and 2 out at 1.
+const MIXER_DOT_LAG*          {.intdefine.} = 1
+  ## Whether the pixel mixer runs a dot behind the FIFO pop. 1 ships; 0 is the
+  ## control build and compiles the whole mechanism out. See
+  ## fifo_recompose_last in fifo_ppu.nim for what it buys and how it was
+  ## measured -- it is not a sweepable dot count, only on or off, because a
+  ## second dot is refused by the same rows the first is required by.
+const CGB_MIXER_LATENCY*      {.intdefine.} = 1
+  ## Dots the CGB's write to a register the MIXER reads takes to arrive over
+  ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
+  ## reads one stage down is not repainted on CGB at all.
+  ##
+  ## Two rows pin it, and each is exact on BOTH consoles at these settings and
+  ## on neither at any other. mealybug m3_lcdc_obj_en_change (priority, one
+  ## stage) is pixel-exact on the CGB references with no repaint and 60 pixels
+  ## out with one, and 2 out on the DMG references with one repaint and 60 with
+  ## none. m3_obp0_change (palette, two stages) is pixel-exact on the DMG
+  ## references at two and on the CGB references at one; it is 32 pixels out on
+  ## DMG at one and 126 out on CGB at two. Same cart, same write, same objects;
+  ## only the console differs, and the same single dot separates them at both
+  ## stages.
+  ##
+  ## Shaped as a write latency because that is what every other per-register
+  ## CGB/DMG difference in this block is (the mealybug PPU notes' "writes take
+  ## effect immediately on the DMG. On CGB and AGB devices, writes appear to
+  ## take effect 2 T-cycles later" for SCY is the documented instance, and
+  ## CGB_SCY_LATENCY above is it). It is SEPARATE from CGB_LCDC_LATENCY, which
+  ## is LCDC's latency at the FETCHER: different rows measure them and they come
+  ## out different, and that one ships at 0.
+
+const CGB_LCDC_MIXER_LATENCY* {.intdefine.} = 1
+  ## Dots the CGB's LCDC write takes to reach the pixel MIXER over the DMG's.
+  ##
+  ## The mixer runs one dot behind the FIFO pop (fifo_recompose_last in
+  ## fifo_ppu.nim), so a mid-mode-3 write to a register it reads still reaches
+  ## the pixel already emitted -- on DMG. On CGB it does not, and one row says
+  ## so on its own: mealybug m3_lcdc_obj_en_change is pixel-exact on the CGB
+  ## references WITHOUT the extra dot and 174 pixels out WITH it, while on the
+  ## DMG references it is 60 pixels out without and 2 with. Same cart, same
+  ## write, same objects; only the console differs.
+  ##
+  ## Expressed as a one-dot CGB write latency because that is the shape every
+  ## other per-register CGB/DMG difference in this block has (the mealybug PPU
+  ## notes' "writes take effect immediately on the DMG, 2 T-cycles later on CGB"
+  ## for SCY is the documented instance, and CGB_SCY_LATENCY above is it): one
+  ## dot of CGB latency cancels the mixer's one dot exactly, which is why the
+  ## repaint is simply skipped rather than delayed. It is a SEPARATE constant
+  ## from CGB_LCDC_LATENCY, which is the same register's latency at the
+  ## FETCHER, because the two are measured by different rows and come out
+  ## different -- that one ships at 0.
+  ##
+  ## Only LCDC. The three DMG palettes take the mixer's dot on both consoles
+  ## (mealybug m3_obp0_change goes 96 wrong pixels -> 0 on the CGB references
+  ## with the repaint on, and m3_bgp_change 96.1% -> 98.9%), so whatever this
+  ## dot is, it is not shared by every mixer input.
 const CGB_LATENCY_CAP*        {.intdefine.} = 1
   ## Dots at the end of the M-cycle no latency may reach into. Inert while the
   ## six above are 0. Only DOUBLE SPEED can tell 0 from 1 -- its M-cycle is two
@@ -434,6 +540,48 @@ type
     bmCgbABCDE   # CGB rev A..E   (dingbat default CGB)
     bmAgb        # Game Boy Advance / SP running a GB(C) cart
 
+  GbRevision* = enum
+    ## The silicon revision the machine is. This is FINER than GbBootModel,
+    ## which is a boot-handoff *table* selector: mooneye ships one
+    ## `boot_regs-cgbABCDE` and one `boot_regs-dmgABC`, so five CGB revisions
+    ## and three DMG revisions hand off identical registers while behaving
+    ## differently once running (SameSuite's extra-length-clocking split at CGB
+    ## C, mooneye `stat_irq_blocking`'s "pass: DMG ABC / fail: DMG 0"). Every
+    ## GbBootModel value is reachable from some revision, so the two are not
+    ## independent axes -- gb_set_revision derives the boot model, and nothing
+    ## sets the boot model to something the revision disagrees with.
+    ##
+    ## Do not branch on this in emulation code. Resolve it once, at
+    ## construction, into GbQuirks; see gb_quirks_for.
+    grDmg0, grDmgABC, grMgb, grSgb, grSgb2
+    grCgb0, grCgbAB, grCgbC, grCgbD, grCgbE
+    grAgb
+
+  GbQuirks* = object
+    ## Per-revision behaviour, resolved from GbRevision once by gb_quirks_for
+    ## and thereafter read as a plain bool off the GB the caller already has.
+    ##
+    ## Flags, not a revision comparison, for three reasons: a flag names the
+    ## behaviour at the site that implements it (`if gb.quirks.x` reads as an
+    ## assertion about hardware, `if gb.revision <= grCgbAB` reads as trivia);
+    ## two revisions that share a behaviour share a flag instead of repeating a
+    ## set literal; and a comparison in a hot path is a range check where a
+    ## flag is a load. Every flag is FALSE on the default revisions
+    ## (grCgbE / grDmgABC), so the default machine is byte-identical to the one
+    ## dingbat shipped before revisions existed.
+    length_clock_any_nrx4*: bool
+      ## CGB 0 and CGB A/B. SameSuite `*_extra_length_clocking-cgb0B.asm`:
+      ## "Extra length clocking occurs when writing to NRx4 when the frame
+      ## sequencer's next step is one that doesn't clock the length counter.
+      ## In this case, if the length counter was PREVIOUSLY disabled and now
+      ## enabled and the length counter is not zero, it is decremented. On
+      ## revisions <= CPU CGB B, the length counter only has to have been
+      ## disabled before; the current length enable state doesn't matter. This
+      ## breaks at least one game (Prehistorik Man), and was fixed on CPU CGB
+      ## C." So the extra clock drops its `and len_enable` term: the ROMs write
+      ## NRx4 = $00 (CH3: $03), with bit 6 clear, and still expect the counter
+      ## to move.
+
   Mbc* = ref object of RootObj
     gb_ref* {.cursor.}: GB   # back-ref to the owning GB; non-owning to avoid a
                              # reference cycle (the GB owns the cartridge)
@@ -476,7 +624,10 @@ type
     has_rtc*:            bool
     rtc_live*:           array[5, uint8]  # S, M, H, DL, DH
     rtc_latched*:        array[5, uint8]
-    rtc_latch_prev*:     uint8
+    rtc_latch_prev*:     uint8  # DEAD: the latch fires on any write (see
+                                # mbc3.nim), so nothing reads this. It is still
+                                # written and still serialized so the GB
+                                # save-state payload keeps its current layout.
     rtc_halt_remaining*: int  # scheduler cycles left on the pending tick while halted
 
   Mbc5* = ref object of Mbc
@@ -616,6 +767,19 @@ type
     # `locked` always implies `halted`, so the fetch/dispatch path never has
     # to test it.
     locked*:     bool
+    # Set by STOP when it enters STOP mode (see stop_instr in memory.nim), on
+    # top of `halted` and `locked`. What it adds to those two is that the rest
+    # of the machine is stopped as well, and that this halt IS exitable: a
+    # joypad line going low clears all three.
+    #
+    # NOT serialized. savestate.nim writes `halted` and `locked` as the states
+    # they mean without it, so a state captured inside STOP mode loads as a
+    # running CPU at the instruction after the STOP. Carrying it properly would
+    # be a GB CPU payload revision, and the value of one is close to zero: no
+    # licensed ROM uses STOP for anything but a speed switch (Pan Docs, "Using
+    # the STOP Instruction"), and a speed switch never survives an instruction
+    # boundary, let alone a state boundary.
+    stopped*:    bool
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----
@@ -719,6 +883,16 @@ type
     palette*:   uint8
     oam_idx*:   uint8
     obj_to_bg*: uint8
+
+  # One mixer stage's worth of held FIFO output: the BG entry and the OBJ entry
+  # popped on the same dot. Kept as a PAIR rather than as two parallel arrays so
+  # the shifter's store is one eight-byte store at a computed offset rather than
+  # two four-byte ones eight bytes apart -- worth 0.37% of retired instructions
+  # on the mode 3 dot loop, measured, which is half of what the whole mechanism
+  # costs.
+  GbMixHold* = object
+    bg*: GbPixel
+    sp*: GbPixel
 
   GbPixelFifo* = object
     data: array[16, GbPixel]
@@ -891,6 +1065,15 @@ type
     tile_attrs*:          uint8
     tile_data_low*:       uint8
     tile_data_high*:      uint8
+    # The FIFO entries the mixer is still holding: the pairs popped on the last
+    # two dots that emitted a pixel, indexed by the pixel's own parity. The mixer stage runs one dot behind the
+    # pop (see fifo_recompose_last in fifo_ppu), so a mid-mode-3 write to a
+    # register the mixer reads -- the palettes, LCDC's OBJ-enable and
+    # BG-priority bits -- still reaches the pixel already written out. Kept
+    # here rather than re-read from the ring because the BG ring is rewound and
+    # overwritten by the next push and the OBJ ring is only popped when it is
+    # non-empty, so neither can be indexed backwards safely.
+    mix*:                 array[2, GbMixHold]
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----
@@ -907,9 +1090,34 @@ type
     volume_envelope_timer*:  uint8
     current_volume*:         uint8
     vol_env_is_updating*:    bool
+    # "Enabling the envelope triggers an APU bug - in the next *even* DIV-APU
+    # tick, the APU will tick the volume envelope of that appropriate channel,
+    # even if it would not tick volume envelope at that tick otherwise"
+    # (SameSuite channel_1_nrx2_speed_change). Set by an NRx2 write that takes
+    # the envelope period from zero to non-zero, consumed by the next even
+    # frame-sequencer step. See write_NRx2 and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it lives for at most
+    # one 512 Hz step (~2 ms) and it is set only by a register write, so a
+    # rollback that replays that write reconstructs it.
+    env_extra_tick*:         bool
 
   GbChannel1* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    # The square channel's LATCHED duty output (0 or 1). Hardware does not read
+    # the duty table continuously: it samples it once per duty step and holds
+    # that bit until the next one, so a mid-sample NR11 duty change is not
+    # audible until the step after it (SameSuite channel_1_duty_delay: "Changing
+    # the duty becomes effective only after the current sample finishes"), and a
+    # trigger keeps emitting the PREVIOUS sample -- zero, if the channel was off
+    # -- for the whole startup delay (channel_1_duty / channel_1_align). See
+    # ch1_catchup_slow, which is the only place that refreshes it.
+    #
+    # Deliberately NOT serialized, for the same reason as GbApu.tick_phase: it
+    # is refreshed by the next duty step, so a loaded state is at most one duty
+    # period (4 us to 2 ms) of one channel's sample away from exact, and it
+    # errs towards silence rather than towards a wrong level.
+    sample_bit*:         uint8
     # Absolute scheduler cycle of the next duty step, or GB_NO_STEP when the
     # channel has never been triggered. Replaces a per-period scheduler event:
     # the duty counter is advanced in closed form when something observes it
@@ -929,6 +1137,7 @@ type
 
   GbChannel2* = ref object of GbVolumeEnvChannel
     wave_duty_position*: int
+    sample_bit*:         uint8        # see GbChannel1.sample_bit
     next_step*:          CycleCount   # see GbChannel1.next_step
     duty*:               uint8
     length_load*:        uint8
@@ -938,6 +1147,18 @@ type
     next_step*:              CycleCount   # see GbChannel1.next_step
     wave_ram*:               array[16, uint8]
     wave_ram_position*:      uint8
+    # Whether CH3 has fetched a byte since its last trigger. A trigger reloads
+    # the frequency timer with period + 6 (Pan Docs: "triggering does not
+    # immediately start playing wave RAM"), so for that whole window there is no
+    # "byte CH3 is currently reading" -- which on DMG means a CPU access to wave
+    # RAM has nothing to land on. See ch3_wave_open; it is the only thing that
+    # separates "the pointer is at 0 because we just triggered" from "the
+    # pointer is at 0 because it just wrapped".
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it is false only
+    # inside a startup window a few T-cycles long, and it defaults to the value
+    # a running channel has.
+    wave_fetched*:           bool
     wave_ram_sample_buffer*: uint8
     length_load*:            uint8
     volume_code*:            uint8
@@ -957,6 +1178,40 @@ type
     buffer*:              seq[float32]
     buffer_pos*:          int
     frame_sequencer_stage*: int
+    # Phase of the APU's own 1 MHz tick grid, in scheduler cycles: a tick edge
+    # lands on every cycle congruent to this modulo (4 shl speed). The square
+    # channels' frequency timers are clocked by that grid, not by the CPU, so a
+    # trigger written between two edges does not start counting until the next
+    # one -- which is what SameSuite channel_1_align_cpu measures ("Channel 1 is
+    # aligned to the APU's enable time, not the CPU's start time"): inserting
+    # nops BEFORE the NR52 power-on moves the whole grid with the write and
+    # changes nothing, while the nops between power-on and trigger in
+    # channel_1_align shift the result by one CPU cycle. Reset by an APU
+    # power-on; see apu_write and gb_trigger_deadline.
+    #
+    # Deliberately NOT serialized. It is only ever written by a power-on, so a
+    # rollback snapshot that replays one reconstructs it exactly; a state loaded
+    # from disk falls back to the scheduler's own grid, which costs at most half
+    # an APU tick (~0.25 us) of pulse phase and is inaudible. Serializing it
+    # would cost a GB payload revision bump, which is worth spending on a batch
+    # of fields rather than on this one.
+    tick_phase*:          CycleCount
+    # "The first DIV-APU event after a power-on is skipped when DIV's tap bit
+    # was already high" (SameSuite div_write_trigger_10). The divider is what
+    # actually clocks the sequencer, so powering the APU on part-way through a
+    # tap period leaves the divider half a step ahead of the sequencer: the
+    # edge that ends that period has already been accounted for and produces no
+    # step. See apu_write's NR52 arm and tick_frame_sequencer.
+    #
+    # Deliberately NOT serialized, like tick_phase: it is true only between an
+    # APU power-on and the next 512 Hz edge (under 2 ms), it is written only by
+    # a power-on, and a rollback that replays one reconstructs it exactly.
+    div_skip*:            bool
+    # Whether the sequencer's NEXT step is one that does NOT clock the length
+    # counter -- the "extra length clocking" gate on an NRx4 write. Note it is
+    # a property of the DIVIDER's phase, not of frame_sequencer_stage: while
+    # div_skip is pending the two disagree, and div_write_trigger_10 is exactly
+    # the test that can tell.
     first_half_of_length_period*: bool
     left_enable*:         bool
     left_volume*:         uint8
@@ -1170,6 +1425,25 @@ type
     ram_size*:       int
     cgb_flag*:       CgbFlag
     boot_model*:     GbBootModel
+    # The silicon revision, and the behaviour resolved from it. Set once by
+    # gb_set_revision (new_gb, then any --model= override) and never touched
+    # again, which is why the emulation code can read `quirks` without a
+    # dispatch and why neither field is in the save state.
+    #
+    # NOT SERIALIZED, deliberately, and the same is true of `boot_model` next
+    # door: both are construction-time properties of the *machine*, and a
+    # state is loaded into a machine that was already constructed. The
+    # consequence is real but narrow -- a state saved on `--model=cgb0` and
+    # loaded by a default-revision process runs the loaded state on a CGB E,
+    # silently. Nothing in the shipping frontends can reach a non-default
+    # revision (there is no UI for it), so today this is only reachable from
+    # the test harness. Serializing `revision` (one byte, next to
+    # `cgb_enabled` in GB_SEC_MEM, with older states reading back the default)
+    # costs a GB payload revision bump, which is being taken once for a batch;
+    # see notes/samesuite-apu.md "Unserialized state". IF A GB PAYLOAD BUMP
+    # HAPPENS FOR ANY OTHER REASON, ADD THIS ONE.
+    revision*:       GbRevision
+    quirks*:         GbQuirks
     rom_title*:      string
     scheduler*:      Scheduler
     cpu*:            GbCpu
@@ -1956,6 +2230,61 @@ include cb_opcodes
 include opcodes
 include cpu
 
+# ==================== HARDWARE REVISION ====================
+
+proc gb_quirks_for*(rev: GbRevision): GbQuirks =
+  ## The whole revision -> behaviour table, in one place. A revision that names
+  ## no flag here behaves exactly like the default machine; adding a revision
+  ## therefore costs nothing until some test ROM proves it differs.
+  GbQuirks(
+    length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
+  )
+
+proc gb_boot_model_for*(rev: GbRevision): GbBootModel =
+  ## Which boot-handoff table a revision uses. Many-to-one on purpose: mooneye
+  ## ships one `boot_regs-` ROM per group of revisions that hand off the same
+  ## registers, and this is that grouping.
+  case rev
+  of grDmg0:  bmDmg0
+  of grDmgABC: bmDmgABC
+  of grMgb:   bmMgb
+  of grSgb:   bmSgb
+  of grSgb2:  bmSgb2
+  of grCgb0:  bmCgb0
+  of grCgbAB, grCgbC, grCgbD, grCgbE: bmCgbABCDE
+  of grAgb:   bmAgb
+
+proc gb_set_revision*(gb: GB; rev: GbRevision) =
+  ## The only way to change the machine's identity. Call before post_init:
+  ## skip_boot reads boot_model, and the quirks are read from the first
+  ## register write onward.
+  gb.revision   = rev
+  gb.boot_model = gb_boot_model_for(rev)
+  gb.quirks     = gb_quirks_for(rev)
+
+proc gb_revision_from_name*(name: string): (GbRevision, bool) =
+  ## Parse a `--model=` / test-row token. Returns (revision, ok). Accepts the
+  ## names the suites themselves use: mooneye's filename suffixes (`dmg0`,
+  ## `mgb`, `S`, `A`, `cgb0`), AGE's device tokens and SameSuite's
+  ## `-cgb0B` / `-cgbDE` style ranges. A range resolves to its HIGHEST member:
+  ## the newest silicon that still shows the behaviour is the strongest claim
+  ## the ROM makes, and it is what keeps a `-cgb0` / `-cgbB` pair (SameSuite
+  ## ships both for CH3) resolving to two different revisions instead of
+  ## collapsing onto grCgb0.
+  case name.toLowerAscii()
+  of "dmg0":                         (grDmg0, true)
+  of "dmg", "dmga", "dmgb", "dmgc", "dmgabc", "dmgabcmgb": (grDmgABC, true)
+  of "mgb":                          (grMgb, true)
+  of "sgb", "s":                     (grSgb, true)
+  of "sgb2":                         (grSgb2, true)
+  of "cgb0":                         (grCgb0, true)
+  of "cgb0b", "cgba", "cgbab", "cgbb": (grCgbAB, true)
+  of "cgbc", "cgb0bc", "cgbbc":      (grCgbC, true)
+  of "cgbd", "cgbcd":                (grCgbD, true)
+  of "cgb", "cgbe", "cgbde", "cgbcde", "cgbabcde", "c": (grCgbE, true)
+  of "agb", "ags", "a":              (grAgb, true)
+  else:                              (grCgbE, false)
+
 # ==================== NEW_GB + POST_INIT ====================
 
 proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
@@ -1989,10 +2318,19 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
                     fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
   result.cgb_enabled = force_cgb or
     ((cgb_bootrom or result.cgb_flag != cgbNone) and not force_dmg)
-  # Default boot model reproduces dingbat's long-standing DMG/CGB boot values.
-  # The test harness may override this (via --model) before post_init to drive
-  # the model-specific mooneye boot_regs/boot_div acceptance ROMs.
-  result.boot_model = if result.cgb_enabled: bmCgbABCDE else: bmDmgABC
+  # Default revision, which fixes both the boot model and the quirk set. The
+  # test harness may override this (via --model) before post_init to drive the
+  # model-specific mooneye boot_regs/boot_div rows and SameSuite's
+  # per-revision APU ROMs.
+  #
+  # CGB E and DMG ABC are not arbitrary: they are the revisions dingbat is
+  # already scored against. SameSuite's `apu/README.md` says "CPU-CGB-E --
+  # passes all tests" (and CGB C/D do not), the shootout's mealybug set is
+  # DMG-blob with `boot_regs-dmgABC` green, and mooneye's `stat_irq_blocking`
+  # header reads "pass: DMG ABC, MGB, CGB, AGB, AGS / fail: DMG 0". Both
+  # default revisions have every quirk flag clear, so an untouched user gets
+  # exactly the machine dingbat shipped before this axis existed.
+  result.gb_set_revision(if result.cgb_enabled: grCgbE else: grDmgABC)
   result.rom_title = block:
     var s = ""
     for i in 0x0134 ..< 0x013F:

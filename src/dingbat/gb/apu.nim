@@ -116,8 +116,12 @@ when not defined(test_harness):
 # it -- pos = (pos + N) and 7 for a square, (pos + N) mod 32 for the wave
 # pointer. This is what mGBA (GBAudioRun, src/gb/audio.c:503) and Gambatte
 # (DutyUnit::updatePos) do; it is phase-exact, so a trigger still inherits the
-# free-running phase the way hardware does (hardware only resets the duty
-# counter on an APU power-off), which parking the channels would not.
+# phase the channel already had, the way hardware does, which parking the
+# channels would not. What DOES stop the counter is the channel being switched
+# off or the APU being powered down -- the timer is clocked only while the
+# channel is on, so it freezes where it stands and only a power-off resets it
+# (SameSuite channel_1_stop_restart). Both are handled by parking next_step:
+# see ch1_catchup_at and the NR52 arm of apu_write.
 #
 # The complete set of observation points, and where each is handled:
 #
@@ -154,7 +158,7 @@ proc apu_catchup_all*(apu: GbApu; gb: GB) {.inline.} =
   ch3_catchup(apu.channel3, gb)
   ch4_catchup(apu.channel4, gb)
 
-proc apu_rebase*(apu: GbApu; base: CycleCount) {.inline.} =
+proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   ## Shift the channel deadlines down by the same base scheduler.rebase just
   ## subtracted from every pending event. Callers must have caught the channels
   ## up first, so each deadline is strictly in the future and cannot underflow.
@@ -164,6 +168,10 @@ proc apu_rebase*(apu: GbApu; base: CycleCount) {.inline.} =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  # The tick grid is a phase, not a deadline: it is in the PAST and would
+  # underflow, so move it modulo one tick instead of subtracting outright.
+  let tick = gb_apu_tick(gb)
+  apu.tick_phase = (apu.tick_phase + tick - (base mod tick)) mod tick
 
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch. Mirrors Scheduler.`speed_mode=`: the remaining delay is
@@ -180,6 +188,12 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  # The tick grid is re-anchored on the current cycle rather than rescaled. A
+  # speed switch is a STOP with DIV reset and an ~8200-cycle stall, so the
+  # phase the APU divider comes out of it with is not something any test here
+  # pins down -- every SameSuite APU test performs its speed switch before it
+  # ever powers the APU on, and the power-on is what sets this.
+  apu.tick_phase = now mod (CycleCount(4) shl new_speed)
 
 proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase (see Scheduler.rebase). Catching the APU
@@ -189,7 +203,7 @@ proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## from wrapping under a channel nobody has looked at.
   gb.apu.apu_catchup_all(gb)
   result = gb.scheduler.rebase()
-  gb.apu.apu_rebase(result)
+  gb.apu.apu_rebase(gb, result)
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   # length_step can clear `enabled` (parks CH4) and sweep_step rewrites
@@ -199,6 +213,15 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   ch2_catchup_at(apu.channel2, gb, OBS)
   ch3_catchup_at(apu.channel3, gb, OBS)
   ch4_catchup_at(apu.channel4, gb, OBS)
+  if apu.div_skip:
+    # The skipped edge (see GbApu.div_skip). It performs no step at all -- the
+    # sequencer does not advance -- which is what puts the envelope's first
+    # tick on the ninth event rather than the eighth in
+    # div_write_trigger_volume_10. From here on the divider and the sequencer
+    # agree again.
+    apu.div_skip = false
+    apu.first_half_of_length_period = false
+    return
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -218,6 +241,16 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   of 7:
     volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
   else: discard
+  if (apu.frame_sequencer_stage and 1) == 1:
+    # The envelope-enable glitch's extra tick. See
+    # GbVolumeEnvChannel.env_extra_tick.
+    template extra(ch: untyped) =
+      if ch.env_extra_tick:
+        ch.env_extra_tick = false
+        volume_step(ch)
+    extra(apu.channel1)
+    extra(apu.channel2)
+    extra(apu.channel4)
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
 
@@ -403,7 +436,7 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
   case idx
   of 0xFF10..0xFF14: ch1_read(apu.channel1, idx)
   of 0xFF16..0xFF19: ch2_read(apu.channel2, idx)
-  of 0xFF1A..0xFF1E: ch3_read(apu.channel3, idx)
+  of 0xFF1A..0xFF1E: ch3_read(apu.channel3, idx, gb)
   of 0xFF20..0xFF23: ch4_read(apu.channel4, idx)
   of 0xFF24:
     (if apu.left_enable: 0x80'u8 else: 0'u8) or (apu.left_volume shl 4) or
@@ -415,11 +448,33 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
     (if apu.channel3.enabled: 0b0100'u8 else: 0'u8) or
     (if apu.channel2.enabled: 0b0010'u8 else: 0'u8) or
     (if apu.channel1.enabled: 0b0001'u8 else: 0'u8)
-  of 0xFF30..0xFF3F: ch3_read(apu.channel3, idx)
+  of 0xFF30..0xFF3F: ch3_read(apu.channel3, idx, gb)
   else: 0xFF'u8
 
 proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
-  if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F): return
+  if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F):
+    # Pan Docs, Power Control: while the APU is off "all registers ... are
+    # instantly written with zero and any writes to them are ignored while power
+    # remains off (except on the DMG, where length counters are unaffected by
+    # power and can still be written while off)". Only the length field lands --
+    # NR11/NR21's duty bits do not -- which is what blargg's dmg_sound
+    # 11-regs_after_power checks register by register.
+    if not gb.cgb_enabled:
+      case idx
+      of 0xFF11:
+        apu.channel1.length_load    = val and 0x3F
+        apu.channel1.length_counter = 0x40 - int(val and 0x3F)
+      of 0xFF16:
+        apu.channel2.length_load    = val and 0x3F
+        apu.channel2.length_counter = 0x40 - int(val and 0x3F)
+      of 0xFF1B:
+        apu.channel3.length_load    = val
+        apu.channel3.length_counter = 0x100 - int(val)
+      of 0xFF20:
+        apu.channel4.length_load    = val and 0x3F
+        apu.channel4.length_counter = 0x40 - int(val and 0x3F)
+      else: discard
+    return
   # Materialize the target channel BEFORE the write lands, so any period /
   # duty / trigger change only affects steps from this cycle on, and so a
   # wave-RAM write resolves against the right wave_ram_position.
@@ -446,7 +501,21 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
   of 0xFF25: apu.nr51 = val
   of 0xFF26:
     if (val and 0x80) == 0 and apu.sound_enabled:
+      # Zeroing NR10-NR51 runs each channel's own register write, which reloads
+      # its length counter from the (now zero) NRx1 -- so the counters have to
+      # be taken out of that loop and decided on their own. Pan Docs, Power
+      # Control: they are cleared on CGB and untouched on DMG.
+      let len1 = apu.channel1.length_counter
+      let len2 = apu.channel2.length_counter
+      let len3 = apu.channel3.length_counter
+      let len4 = apu.channel4.length_counter
       for i in 0xFF10..0xFF25: apu_write(apu, i, 0x00'u8, gb)
+      if gb.cgb_enabled:
+        apu.channel1.length_counter = 0; apu.channel2.length_counter = 0
+        apu.channel3.length_counter = 0; apu.channel4.length_counter = 0
+      else:
+        apu.channel1.length_counter = len1; apu.channel2.length_counter = len2
+        apu.channel3.length_counter = len3; apu.channel4.length_counter = len4
       apu.sound_enabled = false
       # Powering the APU off resets the channels' INTERNAL phase too, not just
       # their registers: the square channels' duty position, the wave channel's
@@ -459,10 +528,43 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.channel1.wave_duty_position = 0
       apu.channel2.wave_duty_position = 0
       apu.channel3.wave_ram_position = 0
+      # ...and the frequency timers stop. A parked channel is one with no
+      # pending step (GB_NO_STEP), which is also the state every channel starts
+      # in; leaving the old deadline armed lets the position that was just
+      # cleared drift forward again on the next observation, off a period the
+      # register reset above has already zeroed.
+      apu.channel1.next_step = GB_NO_STEP
+      apu.channel2.next_step = GB_NO_STEP
+      apu.channel3.next_step = GB_NO_STEP
+      apu.channel4.next_step = GB_NO_STEP
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
-      apu.channel1.length_counter = 0; apu.channel2.length_counter = 0
-      apu.channel3.length_counter = 0; apu.channel4.length_counter = 0
+      # The APU's 1 MHz tick grid restarts here; every square-channel trigger
+      # from now on is quantized to it. See GbApu.tick_phase.
+      apu.tick_phase = gb.scheduler.cycles mod gb_apu_tick(gb)
+      # Pan Docs, Power Control, on what a power-ON resets: "the frame sequencer
+      # is reset so that the next step will be 0, the square duty units are
+      # reset to the first step of the waveform, and the wave channel's sample
+      # buffer is reset to 0". The first two are done on the power-OFF side
+      # above, where they are what earns the channel_3/channel_4 passes; the
+      # buffer is genuinely observable on this side, because CH3 keeps emitting
+      # the last byte it read until its next fetch and its trigger has a
+      # sample-long startup delay. Without this every SameSuite CH3 subtest
+      # after the first reads the PREVIOUS subtest's wave byte out of PCM34 for
+      # the whole of that delay (channel_3_delay, _first_sample,
+      # _restart_stop_delay, _shift_skip_delay, _and_glitch).
+      apu.channel3.wave_ram_sample_buffer = 0
+      # SameSuite div_write_trigger_10: "starting the APU while bit 4 of the
+      # DIV register is set causes the APU to skip the first DIV-APU event".
+      # The sequencer is reset here but the DIVIDER is not, so coming up
+      # mid-period means the edge that closes that period has already been
+      # spent -- and the length-clock phase NRx4 samples belongs to the
+      # divider, so it reads as "the next step does not clock length" for as
+      # long as the two disagree. Bit 12 of the internal divider is DIV bit 4,
+      # bit 13 in double speed; see timer.nim's apu_div_bit.
+      let tap = 12 + int(gb.scheduler.speed)
+      apu.div_skip = ((gb.timer.tdiv shr tap) and 1) != 0
+      apu.first_half_of_length_period = apu.div_skip
   of 0xFF30..0xFF3F: ch3_write(apu.channel3, idx, val, gb)
   else: discard

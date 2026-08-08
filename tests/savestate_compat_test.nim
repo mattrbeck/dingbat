@@ -152,6 +152,20 @@ static:
   doAssert MAX_EVENTS >= 64,
     "MAX_EVENTS is a save-state floor: lowering it refuses existing states"
 
+  # The event-deadline guard (scheduler.load_from) is the same kind of floor:
+  # it refuses a pending event whose deadline sits an implausible distance
+  # from `cycles`, so lowering either constant refuses states that already
+  # exist. Measured headroom in the committed corpus is enormous — the
+  # furthest-out event in any of the 16 states is 83 776 cycles ahead and none
+  # is overdue at all — but the floors are what the guard may not drop below.
+  doAssert MAX_EVENT_HORIZON >= CycleCount(1'u32 shl 27),
+    "MAX_EVENT_HORIZON is a save-state floor: the longest thing this emulator " &
+    "books is a GBA timer at prescaler 1024 over a full 16-bit period, 67.1M " &
+    "cycles, and the guard must stay above it"
+  doAssert MAX_EVENT_OVERDUE >= CycleCount(1'u32 shl 20),
+    "MAX_EVENT_OVERDUE is a save-state floor: call_current drains due events " &
+    "lazily, so a state may carry one slightly in the past"
+
 # ---------------------------------------------------------------------------
 # 2. Header layout constants.
 #
@@ -335,6 +349,17 @@ proc run_roundtrip() =
     let (tw, th, px) = parse_state_thumbnail(bytes)
     check(tw > 0 and th > 0 and px.len == tw * th * 2,
           "GBA " & rom & " thumbnail trailer")
+    # The loader refuses a GBA state with no pending PPU event, because
+    # step_frame's `while ppu.frame == 0` would never terminate. That is only
+    # legitimate while every writer produces one, so assert the premise.
+    var ppu_events = 0
+    for ev in emu.scheduler.events:
+      if ev.kind in {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
+                     etPPUEndHBlank}:
+        inc ppu_events
+    check(ppu_events > 0,
+          "GBA " & rom & " carries a pending PPU event at a frame boundary",
+          "got " & $ppu_events)
   for (rom, frames) in GB_ROMS:
     let emu = new_gb_for(rom)
     for _ in 0 ..< frames: emu.step_frame()
@@ -352,6 +377,21 @@ proc run_roundtrip() =
     check(emu.ppu.dots_since_frame >= 0 and emu.ppu.dots_since_frame < 456,
           "GB " & rom & " dots_since_frame is ~0 at a frame boundary",
           "got " & $emu.ppu.dots_since_frame)
+    # The loader REFUSES a state whose PPU is in mode 2 or 3, because the
+    # per-line render scratch those modes depend on is not in the format (see
+    # load_ppu_state, and GbPpu.reset_render_scratch). That is only legitimate
+    # while no writer can produce one — so assert the premise here rather than
+    # trusting it. If a future change ever does capture mid-scanline, this
+    # fails first and names the bound that has to move with it.
+    check((emu.ppu.lcd_status and 3) < 2,
+          "GB " & rom & " is in mode 0/1 at a frame boundary (the loader " &
+          "refuses 2 and 3)",
+          "got mode " & $(emu.ppu.lcd_status and 3) & " at ly " & $emu.ppu.ly)
+    # The other pair the loader refuses: a vblank LINE in a non-vblank MODE.
+    # With the LCD on a boundary is LY 144 mode 1; with it off, LY 0 mode 0.
+    check(int(emu.ppu.ly) < 144 or (emu.ppu.lcd_status and 3) == 1,
+          "GB " & rom & " is in mode 1 on a vblank line at a frame boundary",
+          "got mode " & $(emu.ppu.lcd_status and 3) & " at ly " & $emu.ppu.ly)
 
 # ---------------------------------------------------------------------------
 # 3b. ROM identity is a property of the ROM FILE, not of the buffer.
@@ -764,6 +804,67 @@ proc run_intr_wait_migration() =
   e.apply_state_payload(untouched)
   check(e.state_payload() == untouched, "the pre-load state restores cleanly")
 
+
+proc run_in_process_boundary() =
+  ## The rewind ring, rollback snapshots and the clip/scrubber history are
+  ## padded to a fixed length (see PAD_RATIONALE in common/scheduler.nim);
+  ## anything that can reach a FILE is not. This asserts the boundary, because
+  ## getting it wrong would write bytes no other build can read.
+  echo ""
+  echo "--- in-process vs file payload boundary ---"
+
+  for (romName, isGba) in [(GBA_ROMS[0][0], true), (GB_ROMS[0][0], false)]:
+    let tag = (if isGba: "GBA" else: "GB") & ": "
+    var inproc, fileImg, reInproc: string
+    if isGba:
+      let e = new_gba_for(romName)
+      for _ in 0 ..< 40: e.step_frame()
+      inproc = e.state_payload()
+      fileImg = e.state_bytes()
+      # in-process round trip
+      for _ in 0 ..< 5: e.step_frame()
+      e.apply_state_payload(inproc)
+      reInproc = e.state_payload()
+      # file round trip, through the real file reader
+      check(e.load_state_bytes(fileImg), tag & "file image loads")
+      check(e.state_bytes() == fileImg, tag & "file image re-serializes identically")
+    else:
+      let g = new_gb_for(romName)
+      for _ in 0 ..< 40: g.step_frame()
+      inproc = g.state_payload()
+      fileImg = g.state_bytes()
+      for _ in 0 ..< 5: g.step_frame()
+      g.apply_state_payload(inproc)
+      reInproc = g.state_payload()
+      check(g.load_state_bytes(fileImg), tag & "file image loads")
+      check(g.state_bytes() == fileImg, tag & "file image re-serializes identically")
+
+    check(reInproc == inproc, tag & "in-process payload round-trips byte-exactly")
+    # The file IMAGE carries a header on top of its payload and is still
+    # smaller than the bare in-process payload — that is the padding, and it
+    # is the whole point: the file shape is untouched by this change.
+    check(fileImg.len < inproc.len,
+          tag & "file image is smaller than the padded in-process payload",
+          "file " & $fileImg.len & " vs in-process " & $inproc.len)
+
+  # The safety net, asserted directly rather than assumed: padding sits
+  # immediately before a section tag, so a writer/reader that disagree about
+  # it cannot pass silently.
+  block:
+    let s0 = new_scheduler()
+    var w = Writer()
+    s0.save_to(w, pad = true)
+    w.write_tag(0x5A'u8)
+    var r = Reader(buf: w.buf)
+    let s1 = new_scheduler()
+    var caught = false
+    try:
+      s1.load_from(r, pad = false)     # deliberately mismatched
+      r.expect_tag(0x5A'u8)
+    except CatchableError:
+      caught = true
+    check(caught, "a pad-flag mismatch is caught at the next section tag")
+
 when isMainModule:
   # Run from the repo root: the ROM and corpus paths are relative to it.
   if paramCount() >= 1 and paramStr(1) == "--write-corpus":
@@ -775,6 +876,7 @@ when isMainModule:
   run_rejections()
   run_intr_wait_migration()
   run_corpus()
+  run_in_process_boundary()
   echo ""
   if failures > 0:
     echo failures, " save-state compatibility check(s) FAILED"

@@ -6,11 +6,49 @@ else:
   type CycleCount* = uint64
 
 const MAX_EVENTS* = 64  # far above the ~15 events ever pending at once
+
+# PAD_RATIONALE — why save_to/load_from take a `pad` flag.
+#
+# This is the only variable-length section in either core's payload, and it
+# sits BEFORE the big fixed-size arrays (GBA: VRAM, framebuffer, save chip;
+# GB: VRAM, framebuffer, cart RAM). One event coming or going changes the
+# section by 9 bytes, which shifts every array behind it by 9 — so the rewind
+# ring's XOR delta then compares misaligned memory and lights up hundreds of
+# kilobytes that did not change. Measured on Pokemon FireRed: it happens on
+# 40% of snapshots and makes the delta 8.5x larger than it should be, silently.
+#
+# Padding to MAX_EVENTS makes the payload a fixed length and the problem
+# disappears. It costs (MAX_EVENTS - nevents) * 9 bytes, ~486 B on a 604 KB
+# payload.
+#
+# `pad` is ON for the in-process payload paths only (the rewind ring and
+# rollback snapshots, which never outlive the process) and OFF for anything
+# that reaches a file. That is what keeps the .state format byte-identical and
+# avoids a payload-revision bump. The two savestate.nim files thread it from
+# exactly one place each; see the `in_process` parameter there.
                         # Exported because it is a save-state compatibility
                         # floor, not just a capacity: load_from refuses a
                         # state carrying more pending events than this, so
                         # lowering it rejects existing files. Pinned in
                         # tests/savestate_compat_test.nim.
+
+# How far from "now" a pending event's deadline may sit in a state file. Like
+# MAX_EVENTS these are acceptance floors, not capacities — lowering either one
+# rejects states that already exist — so both are pinned in
+# tests/savestate_compat_test.nim.
+#
+# HORIZON: the furthest anything in this emulator books is a GBA timer at
+# prescaler 1024 running a full 16-bit period (65536 * 1024 = 67.1M cycles,
+# ~4 s) and the RTC's one-second tick. 1<<28 is ~16 s of GBA time — four times
+# the real maximum, and still 1/16 of the 32-bit CycleCount the emscripten
+# build uses, so it cannot be reached by honest wrap-around either.
+#
+# OVERDUE: call_current drains due events lazily, so at a frame boundary an
+# event may sit slightly in the past. 1<<24 is ~1 s, far more than the one
+# frame that is actually possible.
+const
+  MAX_EVENT_HORIZON* = CycleCount(1'u32 shl 28)
+  MAX_EVENT_OVERDUE* = CycleCount(1'u32 shl 24)
 
 type
   EventType* = enum
@@ -102,6 +140,15 @@ proc clear*(s: Scheduler; kind: EventType) =
   s.nevents = j
   s.next_event = if j > 0: s.evbuf[j - 1].cycles else: high(CycleCount)
 
+proc has_event*(s: Scheduler; kind: EventType): bool =
+  ## Is an event of this kind still waiting to fire? Used by the GBA state
+  ## loader to tell "this machine has already recognised its pending interrupt"
+  ## apart from "the recognition check is still in flight" — see
+  ## gba/savestate.nim.
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind == kind: return true
+  false
+
 proc call_current*(s: Scheduler) =
   while s.nevents > 0:
     let ev = s.evbuf[s.nevents - 1]
@@ -187,18 +234,26 @@ proc rebase*(s: Scheduler; keep_phase_mask: CycleCount = 0): CycleCount {.discar
   s.cycles -= base
   base
 
-proc save_to*(s: Scheduler; w: var Writer) =
+proc save_to*(s: Scheduler; w: var Writer; pad = false) =
   ## Serialize all scheduler state. Event kinds are written by ordinal; the
   ## dispatch closure is not serialized — it stays registered on the owning
   ## emulator and maps each kind back to its handler.
+  ##
+  ## `pad` writes MAX_EVENTS slots instead of `nevents`, giving the section —
+  ## and therefore the whole payload — a FIXED length. See PAD_RATIONALE below
+  ## for why that matters and why it is off for anything that reaches a file.
   w.write_u64(uint64(s.cycles))
   w.write_u8(s.current_speed)
   w.write_u8(uint8(s.nevents))
   for i in 0 ..< s.nevents:
     w.write_u8(uint8(ord(s.evbuf[i].kind)))
     w.write_u64(uint64(s.evbuf[i].cycles))
+  if pad:
+    for i in s.nevents ..< MAX_EVENTS:
+      w.write_u8(0'u8)
+      w.write_u64(0'u64)
 
-proc load_from*(s: Scheduler; r: var Reader) =
+proc load_from*(s: Scheduler; r: var Reader; pad = false) =
   ## Restore scheduler state saved by save_to. Events are stored in the
   ## internal order (sorted descending by target cycle, soonest last), so
   ## they are restored verbatim.
@@ -206,16 +261,47 @@ proc load_from*(s: Scheduler; r: var Reader) =
   let speed = r.read_u8()
   let n = int(r.read_u8())
   if n > MAX_EVENTS:
-    raise newException(StateError, "too many scheduler events in state")
+    raise state_error("too many scheduler events in state")
   s.cycles = CycleCount(cycles)
+  # A SHIFT AMOUNT (`schedule_gb` does `c = c shl s.current_speed`), and the
+  # only legal values are 0 and 1 — CGB normal and double speed, which
+  # memory.nim toggles with `xor 1`. Taken unvalidated from a file it is the
+  # nastiest field in the format: a large value shifts every scheduled delay to
+  # nothing, so events fire in an unbounded storm inside a single frame and the
+  # emulator livelocks. No crash, no message, no way out — which is worse than
+  # the Defects, not better. Found by the byte sweep taking minutes per
+  # iteration and a stack sample showing the frame sequencer spinning.
+  check_range(int(speed), 0, 1, "scheduler.current_speed")
   s.current_speed = speed
   s.nevents = n
   for i in 0 ..< n:
     let kind = r.read_u8()
     if int(kind) > int(high(EventType)):
-      raise newException(StateError, "unknown scheduler event kind in state")
-    let target = r.read_u64()
-    s.evbuf[i] = Event(cycles: CycleCount(target), kind: EventType(kind))
+      raise state_error("unknown scheduler event kind in state")
+    let target = CycleCount(r.read_u64())
+    # A deadline is always a short way either side of "now". Checking the
+    # DISTANCE rather than the absolute value is what makes one guard cover
+    # both halves of the bug a byte sweep found: a wild `s.cycles` (the
+    # counter itself is unbounded and legitimately so — it only ever counts
+    # up) shows up here as every event being implausibly far away, and a wild
+    # deadline shows up as that one event being far away. Both then overflow
+    # the cycle arithmetic on the next step_frame, which raises a Defect that
+    # is NOT a CatchableError and so escaped every containing handler.
+    #
+    # Unsigned subtraction wraps, which is exactly the arithmetic wanted: the
+    # two differences are the forward and backward distances regardless of
+    # which side of the counter the deadline sits on, and it stays correct for
+    # the 32-bit CycleCount the emscripten build uses.
+    let ahead  = target - s.cycles
+    let behind = s.cycles - target
+    if ahead > MAX_EVENT_HORIZON and behind > MAX_EVENT_OVERDUE:
+      raise state_error("scheduler event " & $EventType(kind) &
+                        " is due an implausible distance from the current cycle")
+    s.evbuf[i] = Event(cycles: target, kind: EventType(kind))
+  if pad:
+    for i in n ..< MAX_EVENTS:
+      discard r.read_u8()
+      discard r.read_u64()
   s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
 proc `speed_mode=`*(s: Scheduler; speed: uint8) =
