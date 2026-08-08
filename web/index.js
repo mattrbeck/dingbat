@@ -603,6 +603,61 @@ const dbKeys = () => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
+// Move a set of keys — and write a set of unrelated records — as ONE
+// transaction. This exists for renaming a game, where every record is keyed by
+// the name (see perGameKeys): a half-finished rename would orphan a battery
+// save from its ROM, which is data loss wearing a rename's clothing.
+//
+// Everything lives in the single "blobs" store, so one readwrite transaction
+// covers the whole migration: the copies, the deletes, the recents index that
+// points at them and the Drive queue that mirrors them all commit together or
+// none of them do. That is strictly stronger than write-new/verify/delete-old,
+// which can still be interrupted between its phases.
+//
+// `pairs` is [[from, to], ...]; a `from` that holds nothing is skipped (the
+// per-game key list is a superset of what any one game actually stores), and a
+// `to` that already holds something aborts the whole transaction rather than
+// overwriting it — collisions are refused, never merged. `puts` is
+// [[key, value], ...] applied in the same transaction. Resolves with the list
+// of [from, to] pairs that actually moved.
+const dbMoveKeys = (pairs, puts = []) => new Promise((resolve, reject) => {
+  let tx = db.transaction("blobs", "readwrite");
+  let store = tx.objectStore("blobs");
+  let moved = [];
+  let failure = null;
+  const fail = (msg) => {
+    if (failure) return;
+    failure = new Error(msg);
+    try { tx.abort(); } catch {}
+  };
+  for (let [from, to] of pairs) {
+    // Read the destination first: the guard has to see the same snapshot the
+    // writes land in, and inside one transaction it does.
+    let dest = store.get(to);
+    dest.onsuccess = () => {
+      if (failure) return;
+      if (dest.result !== undefined && dest.result !== null) {
+        fail("Something is already stored under that name (" + to + ").");
+        return;
+      }
+      // Issued from a request callback, so it is still inside this
+      // transaction — an `await` here would end it instead.
+      let src = store.get(from);
+      src.onsuccess = () => {
+        if (failure) return;
+        if (src.result === undefined || src.result === null) return;
+        store.put(src.result, to);
+        store.delete(from);
+        moved.push([from, to]);
+      };
+    };
+  }
+  for (let [k, v] of puts) store.put(v, k);
+  tx.oncomplete = () => resolve(moved);
+  tx.onabort = () => reject(failure || tx.error || new Error("The move was rolled back."));
+  tx.onerror = () => reject(failure || tx.error || new Error("The move failed."));
+});
+
 // Migrate localStorage data to IndexedDB on first run
 const migrateFromLocalStorage = async () => {
   const decodeBase64 = (b64) => {
@@ -1481,6 +1536,14 @@ const romsForManagement = async () => {
   return rows;
 };
 
+// The rename affordance, one per row. Stroked with currentColor so it takes
+// the button's own colour (and its hover/disabled states) rather than carrying
+// a palette of its own.
+const PENCIL_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+  '<path d="M4 20.5h4.2L19 9.7a2.4 2.4 0 0 0-3.4-3.4L4.8 17.1v3.4z"/>' +
+  '<path d="M14.3 7.6l3.4 3.4"/></svg>';
+
 const refreshRomsManageList = async () => {
   if (!db) return;
   romsRowsSignedIn = driveLinked();
@@ -1507,18 +1570,49 @@ const refreshRomsManageList = async () => {
     let row = document.createElement("div");
     row.className = "roms-manage-row";
 
-    let label = document.createElement("span");
+    // A live 2P link has two cores writing this ROM's saves; deleting under it
+    // would corrupt state, so both actions are blocked until link mode exits.
+    // Renaming is blocked for the same reason — it moves those same saves.
+    let linkRunning = linkMode && linkRomEntry && linkRomEntry.name === name;
+
+    // The name, and the pencil that renames it. This wrapper keeps the row's
+    // first child, the .roms-manage-name class and the full-name title exactly
+    // where they were: the title is how the rest of the app identifies a row.
+    let label = document.createElement("div");
     label.className = "roms-manage-name";
-    label.textContent = displayName(name);
     label.title = name; // full filename (with extension) for disambiguation
+    let title = document.createElement("span");
+    title.className = "roms-manage-title";
+    title.textContent = displayName(name);
+    label.appendChild(title);
+    let renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "roms-rename-btn";
+    // An icon-only control with no text of its own; the accessible name says
+    // which game it belongs to, since a list of them is otherwise identical.
+    renameBtn.setAttribute("aria-label", "Rename " + displayName(name));
+    renameBtn.innerHTML = PENCIL_ICON;
+    // A game whose bytes are only on Drive can't be renamed here: the rename
+    // would have to delete the remote files and re-upload them under the new
+    // name, and this device has nothing to re-upload. Sync it down first —
+    // which is the button sitting on this very row.
+    let romHere = localRoms.has(name);
+    if (linkRunning) {
+      renameBtn.disabled = true;
+      renameBtn.title = "Exit link mode to rename this game";
+    } else if (driveLinked() && !romHere) {
+      renameBtn.disabled = true;
+      renameBtn.title = "Sync this game to this device before renaming it";
+    } else {
+      renameBtn.title = "Rename this game and everything saved with it";
+      renameBtn.addEventListener("click", () => openRenameModal(name));
+    }
+    label.appendChild(renameBtn);
     row.appendChild(label);
 
     let actions = document.createElement("div");
     actions.className = "roms-manage-actions";
 
-    // A live 2P link has two cores writing this ROM's saves; deleting under it
-    // would corrupt state, so both actions are blocked until link mode exits.
-    let linkRunning = linkMode && linkRomEntry && linkRomEntry.name === name;
     // The single-player game currently in memory (running or paused at home)
     // needs no special-casing for "Delete Everything" anymore: its confirm
     // handler unloads the game first via unloadGame(), which detaches it from
@@ -2727,6 +2821,486 @@ const deleteGameEverywhere = async (game) => {
     await saveSyncState();
     scheduleFlush();
   }
+};
+
+// --- Rename (Manage ROMs) -------------------------------------------------
+// A game's name is not a label on this record — it IS the record's address.
+// Every key in perGameKeys is built from it, the Drive file names are those
+// same keys one-for-one, the recents index refers to the game by name, and a
+// printed photo carries the name of the game that printed it. So a rename is a
+// migration of the whole record, and the only honest shape for it is
+// all-or-nothing: dbMoveKeys does the lot in one IndexedDB transaction.
+
+// Long enough for any real title, short enough that the name still fits an
+// export file name and a Drive listing row.
+const RENAME_MAX_LEN = 100;
+
+// Split a stored name into the part the user may edit and the extension we
+// keep for them. The extension is not up for editing: it decides the system
+// (systemOf), the file loadRom writes into the Emscripten FS, and the name of
+// an exported save — retyping it wrongly would silently turn a GBA game into a
+// Game Boy one. Kept verbatim (not extOf's lowercased form) so "ZELDA.GB"
+// stays "ZELDA.GB".
+const splitRomName = (name) => {
+  let s = String(name);
+  let i = s.lastIndexOf(".");
+  return i > 0 ? { base: s.slice(0, i), ext: s.slice(i) } : { base: s, ext: "" };
+};
+
+// Every name the library already knows: the recents index (which includes
+// Drive-only games) plus any game whose save data outlived its entry. This is
+// the set a rename must not land on.
+const libraryNames = async () => {
+  let s = new Set();
+  for (let r of await getRecentMeta()) if (r?.name) s.add(r.name);
+  for (let n of await romsWithSaveData()) s.add(n);
+  return s;
+};
+
+// What the user typed, resolved to a full stored name. Two liberties are taken
+// with the input, both of them visible: it is trimmed, and a typed-out copy of
+// the extension is not doubled ("Zelda.gb" while renaming a .gb game means
+// "Zelda.gb", not "Zelda.gb.gb"). The confirmation screen shows the result, so
+// neither happens behind the user's back.
+const renameFullName = (base, oldName) => {
+  let { ext } = splitRomName(oldName);
+  let t = String(base).trim();
+  if (ext && t.length > ext.length && t.slice(-ext.length).toLowerCase() === ext.toLowerCase()) {
+    t = t.slice(0, -ext.length).trim();
+  }
+  return t + ext;
+};
+
+// Why this name can't be used, or null when it can. `taken` is libraryNames()
+// with the game's own name removed.
+const renameNameError = (base, oldName, taken) => {
+  let t = String(base).trim();
+  if (!t) return "Enter a name.";
+  if (t.length > RENAME_MAX_LEN)
+    return "Keep the name to " + RENAME_MAX_LEN + " characters or fewer.";
+  if (/[\u0000-\u001f\u007f]/.test(t)) return "Names can't contain control characters.";
+  if (/[/\\]/.test(t)) return "Names can't contain / or \\ — they'd break the exported file name.";
+  // ":" separates a key from its slot suffix ("state:<name>:slot3"), so a name
+  // containing one could parse back out as a different game.
+  if (t.includes(":")) return "Names can't contain a colon.";
+  let full = renameFullName(base, oldName);
+  // "save:<name>-p2" is the 2P link partner's save, so a name ending in "-p2"
+  // would read back as another game's link save. Only reachable when the name
+  // has no extension to sit after it.
+  if (full.endsWith("-p2")) return "Names can't end in “-p2” — that ending is reserved for 2-player link saves.";
+  if (full === oldName) return "That's already this game's name.";
+  if (taken && taken.has(full))
+    return "“" + displayName(full) + "” is already in your library. Pick another name.";
+  return null;
+};
+
+// What a rename would move, counted, so the confirmation can enumerate it
+// instead of asking "are you sure?". Counts, not key names: what the user
+// recognises is "3 save states", not "state:<name>:slot4".
+const renameInventory = async (name) => {
+  const has = async (k) => (await dbGet(k)) != null;
+  let states = 0;
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    if (await has(slotStateKey(name, s))) states++;
+  }
+  let prints = await dbGet(PRINTER_PHOTOS_KEY);
+  return {
+    rom: await has(romKey(name)),
+    art: await has(artKey(name)),
+    save: await has(linkSaveKey(name, 0)),
+    save2: await has(linkSaveKey(name, 1)),
+    states,
+    session: await has(autoStateKey(name)),
+    cheats: await has(CHEATS_KEY(name)),
+    prints: Array.isArray(prints)
+      ? prints.filter((p) => p?.game === name).length : 0,
+  };
+};
+
+// The user-facing lines for that inventory, most valuable first.
+const renameInventoryLines = (inv) => {
+  let out = [];
+  if (inv.rom) out.push(inv.art ? "The ROM file and its box art" : "The ROM file");
+  if (inv.save) out.push("1 save file");
+  if (inv.save2) out.push("The 2-player link save");
+  if (inv.states) out.push(inv.states + (inv.states === 1 ? " save state" : " save states"));
+  if (inv.session) out.push("The resume snapshot");
+  if (inv.cheats) out.push("Your cheat list");
+  if (inv.prints) out.push(inv.prints + (inv.prints === 1 ? " printed photo" : " printed photos"));
+  return out;
+};
+
+// Rename one game and everything stored with it. Returns { ok: true, moved }
+// or { ok: false, error } — the error is shown verbatim, so it says what
+// happened AND that nothing changed.
+const renameGame = async (oldName, newName) => {
+  if (!db) return { ok: false, error: "Storage isn't ready yet — try again in a moment." };
+  if (oldName === newName) return { ok: false, error: "That's already this game's name." };
+  // A live link/online session has a second core writing this game's saves and
+  // a peer that agreed on the name; renaming under it would corrupt both.
+  if (isRomLoaded(oldName) && (linkMode || rollbackMode || netActive())) {
+    return { ok: false, error: "Close the link or online session before renaming this game." };
+  }
+  // A game whose bytes live only on Drive cannot be renamed from here, and this
+  // is the guard that stops a rename from being a delete. The remote files are
+  // named by the OLD key; renaming would have to delete them and upload the
+  // same content under the new one — but with nothing stored on this device
+  // there is nothing to upload, so the delete would take the only copy. Sync
+  // the game down first (the same row offers it) and the rename is safe.
+  if (driveLinked() && !(await hasLocalRom(oldName))) {
+    return { ok: false, error: "Sync “" + displayName(oldName) +
+             "” to this device before renaming it — its files are only on Drive." };
+  }
+
+  // Collisions are refused, never merged. Two questions, both asked: is the
+  // name in the library, and does ANY record already sit under it?
+  let existing = new Set((await dbKeys()).filter((k) => typeof k === "string"));
+  let taken = await libraryNames();
+  if (taken.has(newName) || allPerGameKeys(newName).some((k) => existing.has(k))) {
+    return { ok: false,
+             error: "“" + displayName(newName) + "” already exists in your library. Nothing was changed." };
+  }
+
+  // The game in memory: flush whatever it has pending under the OLD name, then
+  // detach it. With currentOriginalName null every write path (the 5s autosave,
+  // the tab-switch snapshot, the cheat list, the state slots) skips this game,
+  // so nothing can re-create an old key behind the transaction's back — and
+  // nothing can land on a new key before the transaction claims it, which
+  // would abort the move as a collision.
+  let loaded = isRomLoaded(oldName) && !!currentRomName;
+  if (loaded) {
+    await persistSave(currentRomName, oldName);
+    currentOriginalName = null;
+  }
+
+  // Records that are not per-game keys but do name the game. All written in
+  // the same transaction as the move, so the pointers can never disagree with
+  // the data they point at.
+  let puts = [];
+
+  // The library index. The renamed entry goes to the front with a fresh
+  // timestamp rather than keeping its place, and that is a correctness
+  // requirement, not a flourish: mergeLibrary drops any entry older than a
+  // tombstone of the same name, so a new name that some other device once
+  // deleted would vanish from the merged library (and its tombstone would
+  // offer to delete the freshly renamed game) unless this entry outranks it.
+  let recents = await getRecentMeta();
+  if (recents.some((r) => r?.name === oldName)) {
+    let list = recents.filter((r) => r?.name !== oldName);
+    list.unshift({ name: newName, ts: Date.now() });
+    puts.push(["recent", list]);
+  }
+
+  // Printed photos carry the name of the game that printed them (it names the
+  // exported PNG), so they are re-tagged rather than left pointing at a game
+  // that no longer exists.
+  let prints = await dbGet(PRINTER_PHOTOS_KEY);
+  if (Array.isArray(prints) && prints.some((p) => p?.game === oldName)) {
+    puts.push([PRINTER_PHOTOS_KEY,
+               prints.map((p) => (p?.game === oldName ? { ...p, game: newName } : p))]);
+  }
+
+  // The move list. Every per-game key is offered, not only the ones that exist:
+  // dbMoveKeys skips a source that holds nothing, and reading the truth inside
+  // the transaction beats trusting a list taken before it.
+  let fromKeys = allPerGameKeys(oldName);
+  let toKeys = allPerGameKeys(newName);
+  let pairs = fromKeys.map((k, i) => [k, toKeys[i]]);
+
+  // Drive. The remote file names ARE these keys, and Drive has no rename we
+  // could mirror, so the correct remote consequence of a local rename is
+  // exactly: delete the files under the old names, upload the files under the
+  // new ones, and tombstone the old game name so the other devices drop it
+  // (their library entry for the old name would otherwise come back on the
+  // next merge and re-download a game that no longer exists here).
+  //
+  // Both queues are written INSIDE the move transaction. That is what makes a
+  // tab closed mid-rename safe: the bytes and the record of what still has to
+  // happen to them commit together, so there is no instant where the data has
+  // moved and Drive doesn't know, or vice versa. Nothing is ever deleted
+  // remotely before the local copy is durable under its new name, and a
+  // failed flush leaves both queue entries in place for the next attempt.
+  let nextSync = null;
+  if (driveLinked()) {
+    // Only files this device actually holds. A remote file with no local
+    // counterpart cannot be re-uploaded under the new name, so queueing its
+    // deletion would destroy the only copy — the one asymmetry that matters
+    // here. Erring the other way merely orphans a file on Drive, and pullSync's
+    // reconcile-upward pass re-queues any upload this misses.
+    let mirrored = pairs.filter(([f]) => !!parseDriveFileName(f) && existing.has(f));
+    let oldKeys = mirrored.map(([f]) => f);
+    let newKeys = mirrored.map(([, t]) => t);
+    let sigs = { ...syncState.sigs };
+    let rmt = { ...syncState.rmt };
+    // These record what Drive holds under the OLD names; they die with them.
+    // Nothing is copied to the new names — Drive has never seen those, and
+    // claiming otherwise is how an upload gets skipped.
+    for (let k of oldKeys) { delete sigs[k]; delete rmt[k]; }
+    nextSync = {
+      ...syncState,
+      sigs,
+      rmt,
+      // Old names out, new names in. The flush deletes before it uploads, and
+      // that is safe here precisely because every queued delete has a local
+      // copy behind it: the bytes are already durable under the new name
+      // before the first request goes out.
+      queueDel: [
+        ...syncState.queueDel.filter((n) => !newKeys.includes(n)),
+        ...oldKeys.filter((n) => !syncState.queueDel.includes(n)),
+      ],
+      queueUp: [
+        ...syncState.queueUp.filter((n) => !oldKeys.includes(n)),
+        ...newKeys.filter((n) => !syncState.queueUp.includes(n)),
+      ],
+      // Tombstone the old name; clear any stale tombstone on the new one (the
+      // same rule the fresh recents timestamp above enforces on the remote
+      // side — this game exists now, whatever some older delete said).
+      tomb: [
+        ...syncState.tomb.filter((t) => t?.name !== oldName && t?.name !== newName),
+        { name: oldName, ts: Date.now() },
+      ],
+    };
+    puts.push(["gdrive_sync", nextSync]);
+  }
+
+  let moved;
+  try {
+    moved = await dbMoveKeys(pairs, puts);
+  } catch (e) {
+    // Nothing moved: the transaction either committed whole or rolled back
+    // whole, so the game is exactly as it was. Put the session back on it.
+    if (loaded) currentOriginalName = oldName;
+    return { ok: false, error: (e?.message || "The rename could not be completed.") +
+                              " Nothing was changed." };
+  }
+
+  // Committed. Everything from here is in-memory bookkeeping catching up.
+  if (nextSync) {
+    syncState = nextSync;
+    scheduleFlush();
+  }
+  if (Array.isArray(printerPhotos)) {
+    for (let p of printerPhotos) if (p?.game === oldName) p.game = newName;
+  }
+  // The two "undo the last state load" buffers are keyed by game name.
+  if (stateUndoName === oldName) stateUndoName = newName;
+  if (rwUndoName === oldName) rwUndoName = newName;
+  if (loaded) {
+    currentOriginalName = newName;
+    // The paused-at-home card prints the game's name; refresh it only if it is
+    // actually on screen (it re-shows itself otherwise).
+    if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
+  }
+  return { ok: true, moved: moved.length };
+};
+
+// --- Rename modal ---------------------------------------------------------
+// Three panes in one overlay: name it, confirm it, and (only when something
+// goes wrong) say what happened. The confirmation is not a speed bump — it is
+// where the user learns that a rename moves their saves too, so it enumerates
+// what is about to move, with counts, and says what Drive will do about it.
+
+// Opening reads storage before the overlay exists, so without this a double
+// tap (a phone fires touch AND click) stacks two overlays — the second taking
+// the focus trap and the first left behind when it is dismissed.
+let renameModalOpen = false;
+
+const openRenameModal = async (oldName) => {
+  if (renameModalOpen) return;
+  renameModalOpen = true;
+  let { base, ext } = splitRomName(oldName);
+  let taken, inv;
+  try {
+    taken = await libraryNames();
+    taken.delete(oldName);
+    inv = await renameInventory(oldName);
+  } catch {
+    renameModalOpen = false;
+    showToast("Couldn't read this game's files — nothing was changed");
+    return;
+  }
+  let wasLoaded = isRomLoaded(oldName);
+
+  // The Manage modal stays open behind this one, so hand the Tab trap over
+  // rather than running two of them (trapFocus keeps one handler, and the
+  // overlay that took it is the one allowed to give it back).
+  let reopen = romsModal.classList.contains("open");
+  if (reopen) releaseFocus(romsModal);
+
+  let m;
+  const close = () => {
+    renameModalOpen = false;
+    m.dismiss();
+    if (reopen && romsModal.classList.contains("open")) trapFocus(romsModal);
+  };
+  // hint: null — this modal's intro line changes per pane, so it is rendered
+  // into the body rather than fixed in the header.
+  m = buildSyncModal({ title: "Rename game", hint: null, onDismiss: close });
+
+  const pane = () => { m.body.innerHTML = ""; return m.body; };
+  const para = (parent, cls, text) => {
+    let p = document.createElement("p");
+    p.className = cls;
+    p.textContent = text;
+    parent.appendChild(p);
+    return p;
+  };
+  const actions = (parent) => {
+    let d = document.createElement("div");
+    d.className = "states-actions";
+    parent.appendChild(d);
+    return d;
+  };
+  const action = (parent, label, primary, onClick) => {
+    let b = document.createElement("button");
+    b.type = "button";
+    b.className = "button button-sm" + (primary ? " button-primary" : " button-ghost");
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    parent.appendChild(b);
+    return b;
+  };
+
+  // --- Pane 1: the new name ---
+  const showNameStep = (start) => {
+    let body = pane();
+    para(body, "modal-hint",
+      "The name is how every one of this game's files is stored, so renaming it " +
+      "moves its saves, save states and cheats too. Nothing is deleted." +
+      (ext ? " Its “" + ext + "” ending stays as it is." : ""));
+
+    let label = document.createElement("label");
+    label.className = "modal-row-label";
+    label.textContent = "New name";
+    label.htmlFor = "rename-input";
+    body.appendChild(label);
+
+    let input = document.createElement("input");
+    input.type = "text";
+    input.id = "rename-input";
+    input.className = "cheat-input";
+    input.value = start === undefined ? base : start;
+    input.setAttribute("spellcheck", "false");
+    input.setAttribute("aria-label", "New name for " + displayName(oldName));
+    body.appendChild(input);
+
+    // One live line, doing double duty: the resulting file name while the
+    // input is valid, the reason it isn't while it isn't. aria-live so a
+    // screen reader hears the refusal without hunting for it.
+    let note = para(body, "modal-toggle-sub", "");
+    note.setAttribute("aria-live", "polite");
+
+    let row = actions(body);
+    action(row, "Cancel", false, close);
+    let go = action(row, "Continue", true, () => {
+      let err = renameNameError(input.value, oldName, taken);
+      if (err) { note.className = "cheat-error"; note.textContent = err; return; }
+      showConfirmStep(renameFullName(input.value, oldName));
+    });
+
+    const revalidate = () => {
+      let err = renameNameError(input.value, oldName, taken);
+      go.disabled = !!err;
+      note.className = err ? "cheat-error" : "modal-toggle-sub";
+      note.textContent = err
+        ? err
+        : "Stored as “" + renameFullName(input.value, oldName) + "”.";
+    };
+    input.addEventListener("input", revalidate);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !go.disabled) { e.preventDefault(); go.click(); }
+    });
+    revalidate();
+    input.focus();
+  };
+
+  // --- Pane 2: the confirmation ---
+  const showConfirmStep = (newName) => {
+    let body = pane();
+    para(body, "modal-hint",
+      "Everything stored under the old name moves to the new one. " +
+      "This does not delete anything.");
+
+    let diff = document.createElement("div");
+    diff.className = "rename-diff";
+    for (let [k, v] of [["From", oldName], ["To", newName]]) {
+      let r = document.createElement("div");
+      r.className = "rename-diff-row";
+      let key = document.createElement("span");
+      key.className = "rename-diff-key";
+      key.textContent = k;
+      let val = document.createElement("span");
+      val.className = "rename-diff-val";
+      val.textContent = v;
+      val.title = v;
+      r.appendChild(key);
+      r.appendChild(val);
+      diff.appendChild(r);
+    }
+    body.appendChild(diff);
+
+    let lines = renameInventoryLines(inv);
+    let head = document.createElement("div");
+    head.className = "modal-subhead";
+    head.textContent = lines.length ? "What gets renamed" : "Nothing else is stored here";
+    body.appendChild(head);
+    if (lines.length) {
+      let ul = document.createElement("ul");
+      ul.className = "rename-items";
+      for (let t of lines) {
+        let li = document.createElement("li");
+        li.textContent = t;
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    } else {
+      para(body, "modal-toggle-sub",
+        "This game has no saved data on this device yet — only its place in your library moves.");
+    }
+
+    if (driveLinked()) {
+      para(body, "modal-toggle-sub",
+        "Google Drive: the copies filed under the old name are deleted and the " +
+        "renamed copies uploaded on the next sync. Your other devices drop " +
+        "“" + displayName(oldName) + "” and pick up “" + displayName(newName) + "”.");
+    }
+    if (wasLoaded) {
+      para(body, "modal-toggle-sub",
+        "This game is open right now. It stays open, under its new name.");
+    }
+
+    let row = actions(body);
+    action(row, "Back", false, () => showNameStep(splitRomName(newName).base));
+    let go = action(row, "Rename", true, async () => {
+      go.disabled = true;
+      go.textContent = "Renaming…";
+      let res = await renameGame(oldName, newName);
+      if (!res.ok) { showErrorStep(newName, res.error); return; }
+      close();
+      showToast("Renamed to “" + displayName(newName) + "”");
+      refreshRomsManageList();
+      refreshHomeRecent();
+      updateStorageInfo();
+    });
+  };
+
+  // --- Pane 3: it didn't happen ---
+  // A failed rename has to say two things: what went wrong, and whether
+  // anything moved. Because the move is one transaction, the second answer is
+  // always "no", and saying so is the point of this pane.
+  const showErrorStep = (newName, message) => {
+    let body = pane();
+    let p = para(body, "cheat-error", message);
+    p.setAttribute("role", "alert");
+    para(body, "modal-toggle-sub",
+      "“" + displayName(oldName) + "” is unchanged — its ROM, saves and save " +
+      "states are all still stored under that name.");
+    let row = actions(body);
+    action(row, "Close", false, close);
+    action(row, "Try again", true, () => showNameStep(splitRomName(newName).base));
+  };
+
+  showNameStep();
 };
 
 // --- "Removed on another device" modal ------------------------------------
