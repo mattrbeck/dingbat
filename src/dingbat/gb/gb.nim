@@ -837,6 +837,46 @@ type
     a*:              bool
     prev_lines*:     uint8  # last P1 low nibble, for joypad-interrupt edges
 
+  # ---- Super Game Boy ----
+  # Everything the ICD2 + SNES side of an SGB holds on the Game Boy's behalf.
+  # nil on every machine whose cart header does not unlock SGB functions, which
+  # is what keeps the hooks in the renderer and the joypad free. See sgb.nim.
+  SgbState* = ref object
+    # Command-packet receiver (P1 pulse decode)
+    prev_lines*:  uint8              # last (P15,P14) pair written to P1
+    receiving*:   bool
+    bit_count*:   int
+    packet*:      array[16, uint8]   # the packet being clocked in
+    group*:       array[7 * 16, uint8]  # packets 1..7 of one command
+    pkt_index*:   int
+    pkt_total*:   int
+    # Game-screen colour: 4 palettes x 4 colours, and the 20x18 attribute map
+    # that says which palette each character cell of the GB screen uses.
+    pal*:         array[4 * 4, uint16]
+    attr*:        array[20 * 18, uint8]
+    # SNES-side stores filled by the _TRN commands
+    syspal*:      array[512 * 4, uint16]   # PAL_TRN system colour palettes
+    atf*:         array[45 * 90, uint8]    # ATTR_TRN attribute files
+    chr*:         array[256 * 32, uint8]   # CHR_TRN border tiles (4bpp SNES)
+    map*:         array[32 * 28, uint16]   # PCT_TRN border tilemap
+    border_pal*:  array[3 * 16, uint16]    # PCT_TRN border palettes 4-6
+    # Decoded 256x224 border image; bit 15 of each word is "opaque".
+    border*:      seq[uint16]
+    border_valid*: bool
+    border_dirty*: bool
+    # Bumped every time `border` is re-rendered. A frontend uploads its border
+    # texture only when this moves -- the image changes a handful of times in
+    # a whole session, and it is 112 KiB.
+    border_gen*:   uint32
+    # MASK_EN, and the frame it freezes
+    mask*:        uint8
+    frozen*:      seq[uint16]
+    # MLT_REQ
+    players*:     uint8
+    cur_player*:  uint8
+    when defined(sgb_trace):
+      trace_watch*: int
+
   # ---- PPU pixel types ----
   GbPixel* = object
     color*:     uint8
@@ -961,6 +1001,15 @@ type
     # this is what keeps frame output steady across an LCD that switches off
     # and on again — see lcd_off_frame and ppu_lcd_enabled.
     dots_since_frame*:   int32
+    # ---- Super Game Boy colorization hooks ----
+    # Both nil on every non-SGB machine. When they are set, the emitted pixel
+    # takes its colour from sgb_pal[attr * 4 + shade] instead of PRAM, where
+    # `attr` is the SGB attribute of the 8x8 SCREEN cell the pixel lands in.
+    # That is the whole of SGB screen colour: the SNES sees the composited
+    # 2-bit GB video signal, so background and objects share one palette per
+    # cell. See sgb.nim and docs/research_sgb.md.
+    sgb_pal*:       ptr UncheckedArray[uint16]
+    sgb_attr*:      ptr UncheckedArray[uint8]
     # output
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool
@@ -1082,6 +1131,29 @@ type
     frequency_shadow*:   uint16
     sweep_enabled*:      bool
     negate_used*:        bool
+    # Absolute scheduler cycle at which the sweep's SECOND overflow check falls
+    # due, or GB_NO_STEP when none is pending. The check trails the frequency
+    # writeback by 8 M-cycles and re-reads NR10 when it runs; see
+    # GB_SWEEP_CHECK_DELAY for the three SameSuite sources that say so.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it is pending for 8
+    # M-cycles at most (2 us) once per sweep period, it is written only by a
+    # sweep step, and a rollback snapshot that replays that step reconstructs
+    # it. A state loaded from disk mid-window loses one overflow check, which
+    # can at worst leave a channel audible until the next sweep step re-arms it.
+    # Serializing it would cost a GB payload revision bump.
+    sweep_check_at*:     CycleCount
+    # Absolute scheduler cycle of the most recent duty step, or GB_NO_STEP when
+    # none has happened since the last trigger. Only ch1_reload_is_now reads it,
+    # and only to tell "the frequency timer is reloading on this very cycle"
+    # apart from "the trigger's start delay happens to be one period away",
+    # which next_step alone cannot distinguish.
+    #
+    # Deliberately NOT serialized, like GbApu.tick_phase: it decides a one-cycle
+    # tie on an NR13/NR14 write and is rewritten by the next duty step, i.e.
+    # within one sample. Serializing it would cost a GB payload revision bump.
+    # GbChannel2 carries its own copy for the same reason.
+    last_step_at*:       CycleCount
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
@@ -1090,6 +1162,7 @@ type
     wave_duty_position*: int
     sample_bit*:         uint8        # see GbChannel1.sample_bit
     next_step*:          CycleCount   # see GbChannel1.next_step
+    last_step_at*:       CycleCount   # see GbChannel1.last_step_at; unserialized
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
@@ -1147,6 +1220,20 @@ type
     # would cost a GB payload revision bump, which is worth spending on a batch
     # of fields rather than on this one.
     tick_phase*:          CycleCount
+    # Phase of the HALF-rate grid the noise channel's divisor stage is clocked
+    # by, in scheduler cycles: this is the power-on cycle taken modulo
+    # (8 shl speed), and an edge of that 512 kHz grid lands on every cycle
+    # congruent to `noise_phase + (4 shl speed)` -- i.e. on the ODD 1 MHz ticks
+    # counted from the power-on. NR43's divisor field counts on this grid and a
+    # trigger cannot reset it, which is what SameSuite
+    # channel_4_frequency_alignment measures; see gb_noise_deadline for the
+    # derivation and the cross-checks. Reset by an APU power-on, exactly like
+    # tick_phase.
+    #
+    # Deliberately NOT serialized, for the same reasons as tick_phase: written
+    # only by a power-on, worth at most one 1 MHz tick of noise phase, and
+    # serializing it would cost a GB payload revision bump.
+    noise_phase*:         CycleCount
     # "The first DIV-APU event after a power-on is skipped when DIV's tap bit
     # was already high" (SameSuite div_write_trigger_10). The divider is what
     # actually clocks the sequencer, so powering the APU on part-way through a
@@ -1362,6 +1449,12 @@ type
     # the SCY bullet at CGB_SCY_LATENCY).
     cgb_enabled*:    bool
     cgb_native*:     bool
+    # Frontend opt-in for Super Game Boy emulation. Default OFF, and off for
+    # every caller that does not say otherwise -- the test harnesses, the
+    # benchmark and the ROM sweeps all build a GB directly, and stock DMG
+    # behaviour is what they are scoring against. Only ever consulted at
+    # post_init; the cart header still has the final say after that.
+    sgb_requested*:  bool
     fifo*:           bool
     headless*:       bool
     run_bios*:       bool
@@ -1404,6 +1497,9 @@ type
     serial*:         GbSerial
     memory*:         GbMemory
     apu*:            GbApu
+    # Non-nil only when the cart header unlocks SGB functions and the machine
+    # is not in CGB mode; every SGB hook tests it. See sgb.nim.
+    sgb*:            SgbState
     cheats*:         CheatEngine
     cheat_hooks:     MemHooks       # built once, reused each frame
     when defined(test_harness):
@@ -2145,6 +2241,7 @@ proc gb_sync_cgb_native*(gb: GB) {.inline.} =
 include interrupts
 include serial
 include timer
+include sgb
 include joypad
 # Video: shared PPU base + the two interchangeable renderers
 # Forward declarations needed by ppu.nim (defined in memory.nim included later)
@@ -2243,6 +2340,7 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
     fifo:         fifo,
     headless:     headless,
     run_bios:     run_bios,
+    sgb_requested: false,
   )
   result.cartridge = load_cartridge(rom_path)
   result.cheats = new_cheat_engine(cpGB)
@@ -2349,6 +2447,17 @@ proc post_init*(gb: GB) =
   # Needs the memory: whether the boot ROM is mapped is one of its three inputs.
   gb_sync_cgb_native(gb)
   gb.cpu    = new_gb_cpu()
+  # Super Game Boy. A cart that unlocks SGB functions and is NOT being run as
+  # a CGB gets the adapter: the two are mutually exclusive on hardware (an SGB
+  # has no CGB in it, and a CGB ignores the packet stream), so a CGB-flagged
+  # cart that also carries the SGB flag runs as a CGB here, which is what
+  # happens when you put one in a Game Boy Color.
+  if gb.sgb_requested and not gb.cgb_enabled and sgb_unlocked(gb.cartridge.rom):
+    gb.sgb = new_sgb_state()
+    # The GB in an SGB reports itself through the boot handoff registers
+    # (C = 0x14); a cart that probes for SGB that way has to see it.
+    if gb.boot_model == bmDmgABC: gb.boot_model = bmSgb
+    sgb_attach(gb)
   gb.scheduler.dispatch = gb_dispatch(gb)
   gb.cartridge.gb_ref = gb
   if gb.cartridge of Mbc3:
@@ -2410,6 +2519,7 @@ proc step_frame*(gb: GB) =
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
   gb.ppu.frame = false
+  if gb.sgb != nil: sgb_frame_end(gb)
   gb.gb_rebase()
 
 method run_until_frame*(gb: GB) = gb.step_frame()

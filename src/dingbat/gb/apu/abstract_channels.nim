@@ -44,6 +44,14 @@ template gb_apu_tick*(gb: GB): CycleCount =
   ## scheduler cycles = 2 CPU cycles.
   CycleCount(4) shl gb.scheduler.speed
 
+proc gb_apu_edge*(gb: GB): CycleCount =
+  ## The first edge of the APU's 1 MHz tick grid at or after the current cycle.
+  ## A register write between two edges is not picked up until the next one.
+  let tick = gb_apu_tick(gb)
+  let now  = gb.scheduler.cycles
+  let past = (now + tick - (gb.apu.tick_phase mod tick)) mod tick
+  if past == 0: now else: now + (tick - past)
+
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
   ## Absolute scheduler cycle of a channel's first waveform step after a
@@ -64,18 +72,74 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ##        is affected")
   ##      * squares, channel on:    1 (channel_1_restart: "after restarting,
   ##        the start delay from the 'delay' test is actually 1 tick shorter")
-  ##      * noise:                  1 (channel_4_delay: "the delay is `sample
-  ##        length + 3` M-cycles" -- the same accounting as channel_1_delay,
-  ##        whose two extra cycles are the read itself, leaves one)
+  ##
+  ## Channel 4 does NOT use this: its divisor stage runs off a half-rate grid of
+  ## its own and its first period is half-length. See gb_noise_deadline.
   ##
   ## The waveform POSITION is untouched either way -- hardware only resets it on
   ## an APU power-off -- so the first sample after a restart is the one the old
   ## pulse would have played next, exactly as channel_1_restart describes.
+  gb_apu_edge(gb) + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
+
+proc gb_noise_deadline*(gb: GB; period: CycleCount; divisor_code: uint8;
+                        restarting: bool): CycleCount =
+  ## Absolute scheduler cycle of channel 4's first LFSR shift after a trigger.
+  ## The noise channel does NOT share gb_trigger_deadline's rule, and the three
+  ## tests that measure it agree on every subtest of a model with two parts.
+  ##
+  ## **The first period is half-length.** SameSuite channel_4_delay states the
+  ## delay as "`sample length + 3` M-cycles, but it might be one M-cycle more or
+  ## less", and its author says outright that he is not sure of the logic. What
+  ## its four rows actually show -- NR43 = $08, $00, $18, $28, i.e. sample
+  ## lengths of 2, 2, 4 and 8 M-cycles, first sample at 3, 3, 4 and 6 M-cycles
+  ## after the write -- is `period / 2 + 2` M-cycles, not `period + 1`. The two
+  ## agree only at the 2 M-cycle sample the "+3" was read off. The natural
+  ## reading is a divide-by-two on the divisor stage's output whose flip-flop a
+  ## trigger clears, so that the first edge arrives after one half-period; a
+  ## RESTART of an already-running channel leaves it alone and therefore waits a
+  ## full period, which is what channel_4_lfsr_restart and _restart_fast want
+  ## (their expected tables are channel_4_lfsr's shifted by exactly one LFSR
+  ## step). Both of those use a 2 M-cycle sample, where `period` and
+  ## `period/2 + one extra tick` are the same number, so they pin the SIZE of
+  ## the restart penalty but not its form.
+  ##
+  ## **The divisor stage is clocked by a 512 kHz grid a trigger cannot reset.**
+  ## channel_4_frequency_alignment annotates its expected table with which NR43
+  ## encodings are "affected" by an extra nop inserted before the trigger and
+  ## which are "not affected", and the split is exactly `divisor_code == 0`:
+  ## $18/$28/$38 are not affected, $09/$0a/$0b/$0c/$1a/$29 are. Solving its 18
+  ## rows (nine encodings x two trigger phases) for the effective start:
+  ##
+  ##   divisor_code == 0   start at the 1 MHz tick, like every other channel
+  ##   divisor_code == 1   round the 1 MHz tick UP to the 512 kHz grid
+  ##   divisor_code >= 2   round it DOWN to the 512 kHz grid
+  ##
+  ## The 512 kHz grid sits on the odd 1 MHz ticks counted from the APU power-on
+  ## (GbApu.noise_phase), which is why a power-on and not a trigger is what
+  ## makes these tests repeatable at all. Divisor code 0 escaping the grid is
+  ## the "made out of two different values" remark in channel_4_delay: code 0
+  ## means 8 T-cycles where every other code means 16*code, i.e. it taps the
+  ## half-step of the same divider and so keeps 1 MHz resolution.
+  ##
+  ## Cross-checks, on tests no constant here was derived from:
+  ## channel_4_equivalent_frequencies drives $0c, $1a, $29 and $38 -- one
+  ## encoding per rounding case, all four with a 16 M-cycle sample -- 512 nops
+  ## deep into the LFSR sequence, and all 128 of its bytes fall out of the rule
+  ## above; channel_4_align ($08, double speed) and channel_4_delay are what fix
+  ## the half-period.
+  ##
+  ## Divisor codes 5-7 are not exercised by any SameSuite test; they follow the
+  ## `>= 2` case because that is the only evidence there is.
   let tick = gb_apu_tick(gb)
-  let now  = gb.scheduler.cycles
-  let past = (now + tick - (gb.apu.tick_phase mod tick)) mod tick
-  let edge = if past == 0: now else: now + (tick - past)
-  edge + period + CycleCount(extra_ticks) * tick
+  let edge = gb_apu_edge(gb)
+  var extra = 2 * tick
+  if divisor_code != 0:
+    let half = 2 * tick
+    if ((edge + half - gb.apu.noise_phase) mod half) != tick:
+      # Off the 512 kHz grid. Adding rather than clamping `edge` keeps the sum
+      # from underflowing when the down-rounding case lands before it.
+      extra = (if divisor_code == 1: extra + tick else: extra - tick)
+  edge + (if restarting: period else: period div 2) + extra
 
 const GB_NO_STEP* = high(CycleCount)
   ## "no pending waveform step" sentinel for the channels' next_step deadline.

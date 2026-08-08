@@ -9,7 +9,7 @@ const WAVE_DUTY2: array[4, array[8, uint8]] = [
 
 proc new_channel2*(gb: GB): GbChannel2 =
   GbChannel2(enabled: false, dac_enabled: false, length_counter: 0,
-             next_step: GB_NO_STEP)
+             next_step: GB_NO_STEP, last_step_at: GB_NO_STEP)
 
 proc ch2_frequency_timer(ch: GbChannel2): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 4
@@ -27,6 +27,7 @@ proc ch2_catchup_slow(ch: GbChannel2; gb: GB; observer_period: uint32) =
   # see ch1_catchup_slow
   ch.sample_bit = WAVE_DUTY2[ch.duty][ch.wave_duty_position]
   ch.next_step += steps * period
+  ch.last_step_at = ch.next_step - period
 
 proc ch2_catchup_at*(ch: GbChannel2; gb: GB; observer_period: uint32) {.inline.} =
   ## See ch1_catchup_at.
@@ -38,6 +39,13 @@ proc ch2_catchup_at*(ch: GbChannel2; gb: GB; observer_period: uint32) {.inline.}
 
 proc ch2_catchup*(ch: GbChannel2; gb: GB) {.inline.} =
   ch2_catchup_at(ch, gb, GB_OBS_CPU)
+
+proc ch2_reload_is_now(ch: GbChannel2; gb: GB): bool {.inline.} =
+  ## See ch1_reload_is_now. SameSuite ships no channel_2_freq_change_timing, so
+  ## this is here because CH2 is the same duty hardware as CH1 minus the sweep,
+  ## and every other rule in this file is shared between them; the channel_2
+  ## mirror of channel_1_freq_change still passes either way.
+  ch.enabled and ch.last_step_at == gb.scheduler.cycles
 
 proc ch2_dac_input*(ch: GbChannel2): uint8 =
   ## Current 4-bit digital output (0-15), pre-DAC — see ch1_dac_input.
@@ -66,9 +74,13 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
   of 0xFF17:
     write_NRx2(ch, val)
   of 0xFF18:
+    let reload_now = ch2_reload_is_now(ch, gb)
     ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
+    if reload_now: ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
   of 0xFF19:
+    let reload_now = ch2_reload_is_now(ch, gb)
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
+    if reload_now: ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
     let len_enable = (val and 0x40) != 0
     # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
     # clocking rule, which drops the requirement that the write turn the

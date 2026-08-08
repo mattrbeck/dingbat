@@ -2578,6 +2578,13 @@ body.debug-2p .home-tile-link {
 }
 
 /* Toggle row + subhead (used by the Controls modal) */
+/* A settings row whose control is inert because another setting turned it
+   off. The control itself is also `disabled`; this is the visual half. */
+.modal-toggle-row.row-disabled .modal-row-label,
+.modal-toggle-row.row-disabled .modal-toggle-sub {
+  opacity: 0.45;
+}
+
 .modal-toggle-row {
   display: flex;
   align-items: center;
@@ -3185,6 +3192,21 @@ body.debug-2p .home-tile-link {
    custom colour pickers, and the palette's own Reset. Deliberately compact —
    it hangs off the "Shade palette" select above it rather than reading as
    three more settings. */
+/* The shade palette while a Super Game Boy is drawing its own colours: the
+   control is genuinely `disabled`, and has to look it. A <select> with the
+   attribute set is not reliably dimmed by the UA inside a dark theme, and
+   "reads enabled but does nothing" is exactly the state the SGB note is
+   there to prevent. The In-use swatches and Reset go with it. */
+.kb-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gb-palette-row.row-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .gb-palette-row {
   display: flex;
   align-items: center;

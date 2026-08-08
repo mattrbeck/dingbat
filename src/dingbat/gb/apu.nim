@@ -137,8 +137,9 @@ when not defined(test_harness):
 #      cycles always use the period that was actually in force for them.
 #   5. Frame-sequencer ticks -- length_step can clear `enabled` (a CH4 park
 #      point) and sweep_step rewrites ch1.frequency. tick_frame_sequencer.
-#   6. NR52 channel-active bits -- report `enabled` only, which no catch-up
-#      changes, so no sync is needed (documented at apu_read).
+#   6. NR52 channel-active bits -- report `enabled`, which CH1's pending sweep
+#      overflow check CAN change with nothing else touching the APU, so the
+#      NR52 read runs that check (apu_read, ch1_sweep_check_due).
 #   7. CGB speed switch -- rescales the deadline exactly as the scheduler
 #      rescales pending events. gb/memory.nim stop_instr.
 #   8. Per-frame scheduler rebase -- next_step is an ABSOLUTE cycle and has to
@@ -164,6 +165,13 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   ## up first, so each deadline is strictly in the future and cannot underflow.
   template adj(ch: untyped) =
     if ch.next_step != GB_NO_STEP: ch.next_step -= base
+  if apu.channel1.sweep_check_at != GB_NO_STEP:
+    # Caught up above, so it is either in the future or was just consumed.
+    apu.channel1.sweep_check_at -= base
+  # last_step_at is in the PAST, so it can underflow; a rebase only ever happens
+  # at a frame boundary, and losing a one-cycle tie there is not observable.
+  apu.channel1.last_step_at = GB_NO_STEP
+  apu.channel2.last_step_at = GB_NO_STEP
   adj(apu.channel1)
   adj(apu.channel2)
   adj(apu.channel3)
@@ -172,6 +180,7 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   # underflow, so move it modulo one tick instead of subtracting outright.
   let tick = gb_apu_tick(gb)
   apu.tick_phase = (apu.tick_phase + tick - (base mod tick)) mod tick
+  apu.noise_phase = (apu.noise_phase + 2 * tick - (base mod (2 * tick))) mod (2 * tick)
 
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch. Mirrors Scheduler.`speed_mode=`: the remaining delay is
@@ -184,6 +193,11 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
       let remaining = ch.next_step - now
       ch.next_step = now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
                             else:                     remaining shr (old_speed - new_speed))
+  if apu.channel1.sweep_check_at != GB_NO_STEP:
+    let remaining = apu.channel1.sweep_check_at - now
+    apu.channel1.sweep_check_at =
+      now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
+             else:                     remaining shr (old_speed - new_speed))
   adj(apu.channel1)
   adj(apu.channel2)
   adj(apu.channel3)
@@ -193,7 +207,8 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   # phase the APU divider comes out of it with is not something any test here
   # pins down -- every SameSuite APU test performs its speed switch before it
   # ever powers the APU on, and the power-on is what sets this.
-  apu.tick_phase = now mod (CycleCount(4) shl new_speed)
+  apu.tick_phase  = now mod (CycleCount(4) shl new_speed)
+  apu.noise_phase = now mod (CycleCount(8) shl new_speed)
 
 proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase (see Scheduler.rebase). Catching the APU
@@ -429,10 +444,14 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   get_sample(apu, gb)
 
 proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
-  # Only wave RAM needs a sync: 0xFF30-0xFF3F resolves against
-  # wave_ram_position while CH3 is enabled. Everything else here reports
-  # register bits or `enabled` (NR52), none of which a catch-up can change.
+  # Wave RAM needs a sync because 0xFF30-0xFF3F resolves against
+  # wave_ram_position while CH3 is enabled; everything else here reports plain
+  # register bits. The one exception is NR52's channel-on flags: CH1's pending
+  # sweep overflow check can clear `enabled` between two reads with nothing else
+  # touching the APU, and blargg's cgb_sound 07 sync_sweep is precisely a loop
+  # that polls NR52 waiting for it. See ch1_sweep_check_due.
   if idx >= 0xFF30: ch3_catchup(apu.channel3, gb)
+  elif idx == 0xFF26: ch1_sweep_check_due(apu.channel1, gb)
   case idx
   of 0xFF10..0xFF14: ch1_read(apu.channel1, idx)
   of 0xFF16..0xFF19: ch2_read(apu.channel2, idx)
@@ -534,6 +553,9 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # cleared drift forward again on the next observation, off a period the
       # register reset above has already zeroed.
       apu.channel1.next_step = GB_NO_STEP
+      # A pending sweep overflow check dies with the power, along with the
+      # sweep registers it would have re-read.
+      apu.channel1.sweep_check_at = GB_NO_STEP
       apu.channel2.next_step = GB_NO_STEP
       apu.channel3.next_step = GB_NO_STEP
       apu.channel4.next_step = GB_NO_STEP
@@ -543,6 +565,9 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # The APU's 1 MHz tick grid restarts here; every square-channel trigger
       # from now on is quantized to it. See GbApu.tick_phase.
       apu.tick_phase = gb.scheduler.cycles mod gb_apu_tick(gb)
+      # ...and so does the half-rate grid channel 4's divisor stage counts on.
+      # See GbApu.noise_phase and gb_noise_deadline.
+      apu.noise_phase = gb.scheduler.cycles mod (2 * gb_apu_tick(gb))
       # Pan Docs, Power Control, on what a power-ON resets: "the frame sequencer
       # is reset so that the next step will be 0, the square duty units are
       # reset to the first step of the waveform, and the wave channel's sample

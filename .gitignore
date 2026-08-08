@@ -133,6 +133,12 @@ dingbat_bench_orig
 /dt_*
 /dtr_*
 web/*.gba
+/dingbat_sgb_test
+/dingbat_printer_test
+/dingbat_ts_test
+/dingbat_savestate_compat_test
+/dingbat_rewind_test
+web/_serve8781.py
 
 # Hostile-input save-state fuzzer, built from tools/statefuzz.nim on demand
 # (`nimble statefuzz_build`). Not a test-suite binary: the full sweep is

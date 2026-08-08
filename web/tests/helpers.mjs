@@ -263,6 +263,10 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
         ? { mediaDevices: { getUserMedia: () => new Promise(() => {}),
                             enumerateDevices: async () => [] } }
         : {}),
+      // Transient activation, as the Drive token code reads it before opening
+      // a popup. Tests default to "a gesture is live"; flip isActive to false
+      // to model the background-timer case.
+      userActivation: { get isActive() { return state.userActivation !== false; } },
       storage: {
         estimate: async () => ({ usage: 12345 }),
         persisted: async () => state.persisted,
@@ -431,6 +435,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     set gdriveTokenExp(v) { gdriveTokenExp = v; },
     set gisScriptPromise(v) { gisScriptPromise = v; },
     driveTokenStale, renewDriveToken, armDriveRenewOnGesture,
+    driveLinked, gdriveAcquireToken, ensureDriveSignedIn, gdriveConnect,
+    refreshSyncStatus, resumeDriveOnBoot,
+    get gdriveEmail() { return gdriveEmail; },
+    set gdriveEmail(v) { gdriveEmail = v; },
+    get syncStatus() { return syncStatus; },
     DRIVE_RENEW_LEAD_MS, DRIVE_RENEW_MAX_FAILS,
     get driveRenewFails() { return driveRenewFails; },
     set driveRenewFails(v) { driveRenewFails = v; },

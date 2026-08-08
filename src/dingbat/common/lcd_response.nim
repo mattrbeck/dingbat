@@ -257,18 +257,25 @@ proc apply*(r: var LcdResponse; fb: ptr UncheckedArray[uint16];
               (((eb and 0xFF) shr 3) shl 10)
   return outb
 
-proc resolve*(m: LcdMode; gba: bool; cgb: bool): LcdPanel =
+proc resolve*(m: LcdMode; gba: bool; cgb: bool; sgb = false): LcdPanel =
   ## Turn the user's choice into a panel. Auto follows the machine: a GBA game
-  ## gets the AGB-001, a CGB game the colour STN, and a game running as a DMG
+  ## gets the AGB-001, a CGB game the colour TFT, and a game running as a DMG
   ## gets the DMG's screen — which is the one that actually matters, since it
   ## is the DMG's slow panel the flicker tricks were written for.
+  ##
+  ## Auto also turns the model OFF under a Super Game Boy, and that is not a
+  ## special case so much as the same rule: the SGB is a SNES cartridge, its
+  ## picture leaves through the console's video output, and there is no Game
+  ## Boy LCD anywhere in the signal path to be slow. (A CRT's phosphor decay
+  ## is a different effect with a different shape — not this one.) Picking a
+  ## panel by hand still forces it, for anyone who wants the look regardless.
   case m
   of lmOff:  lpOff
   of lmDmg:  lpDmg
   of lmCgb:  lpCgb
   of lmAgb:  lpAgb
   of lmAgs:  lpAgs
-  of lmAuto: (if gba: lpAgb elif cgb: lpCgb else: lpDmg)
+  of lmAuto: (if sgb: lpOff elif gba: lpAgb elif cgb: lpCgb else: lpDmg)
 
 proc parse_mode*(s: string): LcdMode =
   ## Tolerant parse for config files and stored settings; anything unknown is
