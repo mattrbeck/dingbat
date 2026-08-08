@@ -54,23 +54,48 @@ uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
 // screen is an exact 4-way substitution here in the presenter — the core never
 // sees it, which is what keeps save states, rewind and netplay byte-identical.
 // Off (u_dmg_remap false) unless the caller passes a palette AND the running
-// game is monochrome; a pixel that is not one of the four falls through
+// game is monochrome; a pixel that is not on the shade ramp falls through
 // untouched, so a mis-gated colour title would still render correctly.
+//
+// The LCD response model (src/dingbat/common/lcd_response.nim) is what makes
+// this more than a four-way substitution: a settling pixel sits BETWEEN two
+// shades for a few frames, and an exact-match table would drop those back to
+// the built-in green while everything around them wore the chosen palette.
+// So the lookup finds which pair of shades a pixel lies between and mixes the
+// corresponding pair of palette entries. Exactly-a-shade still lands exactly
+// on its palette entry (t is 0 or 1), and a pixel that is not near the ramp
+// is left alone, which is what keeps a colour game safe.
 uniform bool u_dmg_remap;
 uniform vec3 u_dmg_pal[4];      // sRGB 0..1, shade 0 (lightest) -> 3
+
+// The four values a monochrome core writes (gb.nim DMG_COLORS), as 5-bit
+// channels. Green is strictly decreasing across them, so it is the key that
+// says where between two shades a settling pixel currently is.
+const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 30.0, 26.0),   // 0x6BDF
+                                  vec3(31.0, 21.0, 14.0),   // 0x3ABF
+                                  vec3(29.0, 13.0, 13.0),   // 0x35BD
+                                  vec3(15.0,  7.0, 11.0));  // 0x2CEF
 
 ivec2 g_max;
 vec3 fetchRGB(ivec2 p) {
   uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu;
+  vec3 c = vec3(float(packed & 31u),
+                float((packed >> 5) & 31u),
+                float((packed >> 10) & 31u));
   if (u_dmg_remap) {
-    if (packed == 0x6BDFu) return u_dmg_pal[0];
-    if (packed == 0x3ABFu) return u_dmg_pal[1];
-    if (packed == 0x35BDu) return u_dmg_pal[2];
-    if (packed == 0x2CEFu) return u_dmg_pal[3];
+    for (int i = 0; i < 3; i++) {
+      vec3 a = DMG_SHADE[i], b = DMG_SHADE[i + 1];
+      float t = (a.y - c.y) / (a.y - b.y);
+      if (t >= 0.0 && t <= 1.0) {
+        // Green brackets it; confirm the other two channels agree before
+        // trusting the substitution.
+        if (all(lessThan(abs(mix(a, b, t) - c), vec3(1.5))))
+          return mix(u_dmg_pal[i], u_dmg_pal[i + 1], t);
+        break;
+      }
+    }
   }
-  return vec3(float(packed & 31u),
-              float((packed >> 5) & 31u),
-              float((packed >> 10) & 31u)) / 31.0;
+  return c / 31.0;
 }
 vec3 yuv(vec3 c) {
   return vec3(dot(c, vec3( 0.299,  0.587,  0.114)),

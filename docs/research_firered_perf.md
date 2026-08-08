@@ -692,6 +692,10 @@ assumed.
 | cheats | none loaded | `apply_cheats` early-outs on a nil/empty check once per frame | — |
 | ImGui pass | skipped when no UI is visible | free | — |
 
+(`frame_blend` was later replaced by `lcd_response`, a per-pixel panel model:
+see `research_lcd_response.md`. Still off by default, and about a third the
+cost of the blend measured here.)
+
 **Web**
 
 | setting | default | cost of the default | cost if flipped |

@@ -13,6 +13,7 @@ import dingbat/gb/link as gblink
 import dingbat/gb/rollback as gbrb
 import dingbat/gb/printer
 import dingbat/common/cheats
+import dingbat/common/lcd_response
 
 const GBA_W = 240
 const GBA_H = 160
@@ -192,18 +193,28 @@ proc make_gba(rom_path: string): GBA =
                    hle_after_bios = mode == 2)
   result.mp2k_hle = optMp2kHle
 
-# Interframe blending (LCD ghosting): presents the average of the last two
-# frames, like mGBA's "interframe blending" — the real panels' slow pixel
-# response ghosted the previous frame into the current one, and some games
-# exploit it (fast flicker for transparency). Presentation-only: emulation is
-# untouched, so it can be toggled live. prevRaw follows the module-scope
-# rule (empty here, allocated from JS-invoked procs only).
-var frameBlend = false
-var prevRaw: seq[uint16] = @[]   # raw frame-blend history (per core/resolution)
+# LCD response (common/lcd_response.nim): a per-pixel model of how the real
+# panel settles, replacing the old "average the last two frames" blend. Some
+# games flicker a sprite every other frame and let the screen's slow response
+# turn it into a translucent one; a panel model renders that the way the
+# hardware did instead of strobing. Presentation-only — emulation is untouched,
+# so it is safe to change mid-frame. `lcdResp` follows the module-scope rule:
+# its seqs stay empty here and are allocated from JS-invoked procs only.
+var lcdMode = lmOff
+var lcdResp: LcdResponse
 
-proc wasm_set_frame_blend(on: cint) {.exportc.} =
-  frameBlend = on != 0
-  prevRaw.setLen(0)  # drop stale history (also on core/resolution switch)
+proc sync_lcd_panel() =
+  ## Resolve lmAuto against whatever core is running. Cheap when nothing
+  ## changed (set_panel early-outs); rebuilds the table on a core switch.
+  let cgb = stateKind == ekGB and stateGb != nil and stateGb.cgb_enabled
+  lcdResp.set_panel(lcdMode.resolve(stateKind == ekGBA, cgb))
+
+proc wasm_set_lcd_response(mode: cint) {.exportc.} =
+  ## 0 = off, 1 = auto, 2 = dmg, 3 = cgb, 4 = agb, 5 = ags (LcdMode ordinals).
+  lcdMode = if mode >= ord(low(LcdMode)) and mode <= ord(high(LcdMode)):
+              LcdMode(mode) else: lmOff
+  sync_lcd_panel()
+  lcdResp.reset()   # drop stale cell state (also on core/resolution switch)
 
 proc wasm_set_mp2k_hle(on: cint) {.exportc.} =
   ## Toggle MP2K/M4A sound-engine HLE ("Improve audio quality"): remembered for
@@ -240,34 +251,19 @@ proc wasm_hle_audio_active(): cint {.exportc.} =
 # LUTs above survive only for the low-rate consumers of wasm_fb_ptr (ambient
 # glow, paused-game thumbnail).
 #
-# Interframe blending stays on the CPU but works on the raw 5-bit channels
-# (cheap, and only when enabled); the blended raw frame is what gets uploaded.
-var gameRaw: seq[uint16] = @[]   # blended raw BGR555 upload buffer
+# The LCD response stays on the CPU and works on the raw 5-bit channels
+# (cheap, and only when enabled); the responded raw frame is what gets
+# uploaded. It runs once per EMULATED frame here rather than per present, so
+# the panel advances in emulated time — a 120 Hz display or a dropped present
+# cannot change how the screen settles.
 var gamePtr: pointer = nil       # pointer JS uploads this frame
-
-proc blend_avg16(a, b: uint16): uint16 {.inline.} =
-  ## Per-5-bit-channel average of two BGR555 pixels (LCD ghosting on the raw
-  ## panel values — blend first, correct on the GPU after).
-  let ar = a and 0x1F; let ag = (a shr 5) and 0x1F; let ab = (a shr 10) and 0x1F
-  let br = b and 0x1F; let bg = (b shr 5) and 0x1F; let bb = (b shr 10) and 0x1F
-  ((ar + br) shr 1) or (((ag + bg) shr 1) shl 5) or (((ab + bb) shr 1) shl 10)
 
 proc prepare_game_frame(fb: ptr UncheckedArray[uint16]; pixels: int) =
   ## Point gamePtr at the pixels JS should upload this frame: the core's raw
-  ## framebuffer directly (zero-copy) or, with motion blur on, a blended raw
-  ## buffer. No color conversion happens here — that is the shader's job.
-  if frameBlend:
-    if gameRaw.len != pixels: gameRaw.setLen(pixels)
-    if prevRaw.len != pixels:  # first blended frame: seed history, no ghost
-      prevRaw.setLen(pixels)
-      for i in 0 ..< pixels: prevRaw[i] = fb[i] and 0x7FFF
-    for i in 0 ..< pixels:
-      let cur = fb[i] and 0x7FFF
-      gameRaw[i] = blend_avg16(cur, prevRaw[i])
-      prevRaw[i] = cur
-    gamePtr = addr gameRaw[0]
-  else:
-    gamePtr = addr fb[0]
+  ## framebuffer directly (zero-copy) or, with the LCD response on, the panel's
+  ## own output. No color conversion happens here — that is the shader's job.
+  if lcdMode != lmOff: sync_lcd_panel()
+  gamePtr = cast[pointer](lcdResp.apply(fb, pixels))
 
 proc wasm_game_fb_ptr(): pointer {.exportc.} =
   ## Pointer to this frame's raw BGR555 framebuffer for the WebGL2 uploader
@@ -1405,7 +1401,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     rgbaBuffer.setLen(GB_W * GB_H)
     stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
     discard stateRenderer.setLogicalSize(GB_W, GB_H)
-    prevRaw.setLen(0)
+    lcdResp.reset()
     return 1
   if stateRollback == nil: return 0
   let core = stateRollback.link.cores[rbLocal]
@@ -1423,7 +1419,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   rgbaBuffer.setLen(GBA_W * GBA_H)
   stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
   discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
-  prevRaw.setLen(0)
+  lcdResp.reset()
   1
 
 proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
@@ -1634,7 +1630,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
     discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
-  prevRaw.setLen(0)  # blend history is per-core (and per-resolution)
+  lcdResp.reset()  # the panel state is per-core (and per-resolution)
   rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
 
 # --- Online link mode (multiplayer phase 3b, web side) ---

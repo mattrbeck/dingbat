@@ -153,6 +153,17 @@ jobs:
         # honest. Synthetic payloads; needs no ROMs.
         shell: bash
         run: ./dingbat_rewind_test
+      - name: LCD panel-response model invariants
+        # The panel model is a display filter, so its failure mode is silent:
+        # a wrong table smears static content or leaves a permanent fractional
+        # ghost and nothing else notices. These checks are self-comparing —
+        # a static frame must come out bit-exact for all 32 codes, every
+        # code-to-code transition must actually reach its target, relaxing
+        # toward light must be the slow direction on every panel, and a 30 Hz
+        # alternation must settle instead of strobing on the panels games
+        # relied on for it. Needs no ROMs.
+        shell: bash
+        run: ./dingbat_lcdresponse_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status

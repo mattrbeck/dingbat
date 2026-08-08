@@ -4895,7 +4895,12 @@ if (lowpassToggle) {
 
 var integerScale = false;
 var scanlines = false;
-var motionBlur = false;
+// LCD response: "off" | "auto" | "dmg" | "cgb" | "agb" | "ags". This is the
+// panel-response model in src/dingbat/common/lcd_response.nim, and it replaced
+// the old "Motion blur" 50/50 interframe blend (see loadVideoSettings for the
+// migration).
+var lcdResponse = "off";
+const LCD_MODES = ["off", "auto", "dmg", "cgb", "agb", "ags"];
 var ambientGlow = false;
 var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" — GPU upscale filter
 // A smoothing filter and integer-scale pinning fight (integer pinning throws
@@ -4913,7 +4918,7 @@ const glowCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("gl
 const glowCtx = glowCanvas.getContext("2d");
 const integerScaleToggle = /** @type {HTMLInputElement} */ (document.getElementById("integer-scale-toggle"));
 const scanlinesToggle = /** @type {HTMLInputElement} */ (document.getElementById("scanlines-toggle"));
-const motionBlurToggle = /** @type {HTMLInputElement} */ (document.getElementById("motion-blur-toggle"));
+const lcdResponseSelect = /** @type {HTMLSelectElement} */ (document.getElementById("lcd-response-select"));
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
 const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
 
@@ -5122,12 +5127,13 @@ const updateSuspendedVideoToggles = () => {
 };
 
 const saveVideoSettings = () => {
-  if (db) dbPut("video", { integerScale, scanlines, motionBlur, ambientGlow, upscaleFilter });
+  if (db) dbPut("video", { integerScale, scanlines, lcdResponse, ambientGlow, upscaleFilter });
 };
 
-const applyMotionBlur = () => {
-  if (typeof Module !== "undefined" && Module._wasm_set_frame_blend) {
-    Module._wasm_set_frame_blend(motionBlur ? 1 : 0);
+const applyLcdResponse = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
+    const i = LCD_MODES.indexOf(lcdResponse);
+    Module._wasm_set_lcd_response(i < 0 ? 0 : i);
   }
 };
 
@@ -5144,9 +5150,10 @@ scanlinesToggle.addEventListener("change", () => {
   saveVideoSettings();
 });
 
-motionBlurToggle.addEventListener("change", () => {
-  motionBlur = motionBlurToggle.checked;
-  applyMotionBlur();
+lcdResponseSelect.addEventListener("change", () => {
+  lcdResponse = lcdResponseSelect.value;
+  applyLcdResponse();
+  drawGame();   // the panel state is rebuilt — show the change immediately
   saveVideoSettings();
 });
 
@@ -5170,17 +5177,22 @@ const loadVideoSettings = async () => {
   if (v) {
     integerScale = !!v.integerScale;
     scanlines = !!v.scanlines;
-    motionBlur = !!v.motionBlur;
+    // Migration: "Motion blur" (a 50/50 interframe blend) became the LCD
+    // response model. Anyone who had it on wanted panel ghosting, so they get
+    // the panel their machine shipped with rather than the feature vanishing.
+    if (typeof v.lcdResponse === "string") lcdResponse = v.lcdResponse;
+    else if (v.motionBlur) lcdResponse = "auto";
+    if (!LCD_MODES.includes(lcdResponse)) lcdResponse = "off";
     ambientGlow = !!v.ambientGlow;
     if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
   }
   integerScaleToggle.checked = integerScale;
   scanlinesToggle.checked = scanlines;
-  motionBlurToggle.checked = motionBlur;
+  lcdResponseSelect.value = lcdResponse;
   ambientGlowToggle.checked = ambientGlow;
   upscaleFilterSelect.value = upscaleFilter;
   updateSuspendedVideoToggles();
-  applyMotionBlur();
+  applyLcdResponse();
   updateCanvasScaling();
 };
 
@@ -5946,16 +5958,16 @@ const resetAllSettings = async () => {
   applyColorCorrect();
 
   // Video effects
-  integerScale = false; scanlines = false; motionBlur = false; ambientGlow = false;
+  integerScale = false; scanlines = false; lcdResponse = "off"; ambientGlow = false;
   upscaleFilter = "none";
   integerScaleToggle.checked = false;
   scanlinesToggle.checked = false;
-  motionBlurToggle.checked = false;
+  lcdResponseSelect.value = "off";
   ambientGlowToggle.checked = false;
   upscaleFilterSelect.value = "none";
   updateSuspendedVideoToggles();
   glowFresh = true;
-  applyMotionBlur();
+  applyLcdResponse();
   updateCanvasScaling();
 
   // Keybindings -> default preset (the same path the "Default" preset uses)
@@ -8680,7 +8692,7 @@ var Module = {
     applyColorCorrect();
     applyPitchCorrectFF();
     applyMp2kHle();
-    applyMotionBlur();
+    applyLcdResponse();
     // Unblock queued launches (a ROM tile tapped mid-boot) and retire the
     // home screen's wasm-boot progress strip.
     markRuntimeReady();

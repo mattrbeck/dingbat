@@ -45,7 +45,7 @@ The browser build at [dingbat.gg](https://dingbat.gg) is the default way to play
 - Toasts stack rather than replacing one another, wrap on narrow screens, and are
   individually dismissible
 - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE modes, color
-  correction, integer scaling, scanlines, motion blur (interframe blending), and an
+  correction, integer scaling, scanlines, LCD response (panel ghosting), and an
   ambient glow backdrop
 - Per-panel color correction: mGBA's AGB model for GBA, the hardware-measured
   "GBC-Color" model for GB/GBC
@@ -94,7 +94,8 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 - A refused save state says why (wrong ROM, written by a newer build, corrupt)
   rather than failing silently
 - LCD color correction, per panel: AGB and GBC models
-- Scanlines, interframe blending (LCD ghosting), and hq4x / xBR upscaling
+- Scanlines, LCD response (a per-pixel panel-ghosting model, selectable per panel:
+  DMG / CGB / AGB-001 / AGS-101), and hq4x / xBR upscaling
 - MBC5 rumble (controller rumble + screen shake)
 - Link cable window for network play
 - Debug windows for the PPU, IO registers, and scheduler

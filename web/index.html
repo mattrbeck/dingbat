@@ -814,15 +814,17 @@
               <span class="switch-track"></span>
             </label>
           </div>
-          <div class="modal-toggle-row">
-            <div>
-              <span class="modal-row-label">Motion blur</span>
-              <span class="modal-toggle-sub">Blend the previous frame into the current one, like the original screen's ghosting</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="motion-blur-toggle" />
-              <span class="switch-track"></span>
-            </label>
+          <div class="modal-toggle-row row-flow">
+            <span class="modal-row-label">LCD response</span>
+            <select id="lcd-response-select" class="kb-select row-flow-ctl" aria-label="LCD response">
+              <option value="off">Off</option>
+              <option value="auto">Auto (match the machine)</option>
+              <option value="dmg">Game Boy (DMG)</option>
+              <option value="cgb">Game Boy Color</option>
+              <option value="agb">Game Boy Advance (AGB-001)</option>
+              <option value="ags">Game Boy Advance SP (AGS-101)</option>
+            </select>
+            <span class="modal-toggle-sub">Emulate how slowly the real screen's pixels settle: quick to darken, slow to fade back to light. Games that flicker a sprite every other frame to fake transparency need this — without it they strobe.</span>
           </div>
           <div class="modal-toggle-row">
             <div>
