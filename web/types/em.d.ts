@@ -43,9 +43,6 @@ interface EmscriptenModule {
   _wasm_mp2k_available?(): number;
   _wasm_hle_audio_active?(): number;
   _wasm_game_fb_ptr?(): number;
-  _wasm_panel_gbc?(): number;
-  _wasm_glow_sample?(gw: number, gh: number, remap: number,
-                     p0: number, p1: number, p2: number, p3: number): number;
   _wasm_sgb_enable?(on: number): void;
   _wasm_sgb_active?(): number;
   _wasm_sgb_border?(): number;
@@ -55,6 +52,8 @@ interface EmscriptenModule {
   _wasm_sgb_backdrop?(): number;
   _wasm_out_w?(): number;
   _wasm_out_h?(): number;
+  _wasm_panel_gbc?(): number;
+  _wasm_glow_sample?(gw: number, gh: number, remap: number, p0: number, p1: number, p2: number, p3: number): number;
   _wasm_fb_ptr?(): number;
   _appendAudioSample?(left: number, right: number): void;
   _getAudioBufferPtr?(): number;
