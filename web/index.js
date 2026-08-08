@@ -1483,10 +1483,10 @@ const romsForManagement = async () => {
 
 const refreshRomsManageList = async () => {
   if (!db) return;
-  romsRowsSignedIn = syncActive();
+  romsRowsSignedIn = driveLinked();
   // Keep the intro copy and the rows telling the same story: signed out there
   // is no Remove button, so the sentence describing it goes too.
-  romsHintRemove.hidden = !syncActive();
+  romsHintRemove.hidden = !driveLinked();
   let rows = await romsForManagement();
   // A remote-only entry (on Drive, nothing stored here) has no local save to
   // Reset — it's "just deletable", so those rows show only Delete. Work out
@@ -1547,7 +1547,7 @@ const refreshRomsManageList = async () => {
     let driveOnly = !localRoms.has(name);
     let stateKeyOfGame = (k) =>
       k === "state:" + name || k.startsWith("state:" + name + ":slot");
-    let savesOnDrive = syncActive() && Object.keys(syncState.rmt || {}).some(
+    let savesOnDrive = driveLinked() && Object.keys(syncState.rmt || {}).some(
       (k) => k === "save:" + name || k === "save:" + name + "-p2" || stateKeyOfGame(k));
     let hasSaves = withSaves.has(name) || savesOnDrive;
     let saveBtn = null;
@@ -1602,10 +1602,10 @@ const refreshRomsManageList = async () => {
     // gets no button at all. You cannot evict what exists only here. The sig
     // can still go stale (wiped app folder, different account), so
     // removeGameFromDevice re-checks the live Drive listing before deleting.
-    let romOnDrive = syncActive() && !!syncState.sigs[romKey(name)] &&
+    let romOnDrive = driveLinked() && !!syncState.sigs[romKey(name)] &&
       !syncState.queueDel.includes(romKey(name));
     let freeBtn = null;
-    if (localRoms.has(name) && syncActive() && !romOnDrive) {
+    if (localRoms.has(name) && driveLinked() && !romOnDrive) {
       // Signed in but Drive can't be confirmed to hold this ROM (upload still
       // queued or failing, imported while signed out, lost sig). Locality
       // decides the SLOT — a local row always shows Remove — but eligibility
@@ -1652,7 +1652,7 @@ const refreshRomsManageList = async () => {
     // glyph does. Not a confirm button — it destroys nothing — but clicking
     // it disarms any armed sibling so a half-armed Delete can't linger.
     let downBtn = null;
-    if (driveOnly && syncActive()) {
+    if (driveOnly && driveLinked()) {
       downBtn = document.createElement("button");
       downBtn.type = "button";
       downBtn.className = "button button-sm roms-manage-btn";
@@ -1700,8 +1700,8 @@ const refreshRomsManageList = async () => {
             }
           }
           await deleteGameEverywhere(name);
-          showToast(syncActive() ? "Deleted from all your devices"
-                                 : "Removed from this browser");
+          showToast(driveLinked() ? "Deleted from all your devices"
+                                  : "Removed from this browser");
           refreshRomsManageList();
           refreshHomeRecent();
           updateStorageInfo();
@@ -1794,6 +1794,16 @@ const clearDriveToken = () => {
   saveSyncState();
 };
 
+// The signed-in account's email, remembered across reloads purely so re-grants
+// can carry a login_hint (see gdriveAcquireToken). It is not a credential and
+// it never leaves this origin except back to Google, which already knows it.
+const rememberDriveEmail = (email) => {
+  gdriveEmail = email || null;
+  if (syncState.email === gdriveEmail) return;
+  syncState.email = gdriveEmail;
+  saveSyncState();
+};
+
 // The GIS script loads lazily on first interaction so normal page loads
 // never touch Google's servers.
 let gisScriptPromise = null;
@@ -1812,41 +1822,71 @@ const loadGisScript = () => {
   return gisScriptPromise;
 };
 
+// One token request may be in flight at a time. The GIS client is a single
+// object whose `callback` is overwritten per request, so two overlapping
+// requestAccessToken() calls orphan the first one's popup AND leave its promise
+// unsettled forever. That happened for real: a background 401 clears the token
+// and paints "Sign in", the user taps it, and the window-level renewal listener
+// (capture phase, so it runs first) fires a silent re-grant a beat before the
+// button's own interactive one. Sharing the in-flight promise makes the second
+// caller wait for the first result instead of racing it.
+let gdriveTokenInFlight = null;
+
 // Request an access token. promptMode "" = silent refresh (no UI when the
 // Google session and a prior grant still stand); undefined = the normal
 // account-chooser/consent popup.
-const gdriveAcquireToken = async (promptMode) => {
-  await loadGisScript();
-  gdriveTokenClient ??= google.accounts.oauth2.initTokenClient({
-    client_id: GDRIVE_CLIENT_ID,
-    scope: GDRIVE_SCOPE,
-    callback: () => {}, // replaced per request below
-  });
-  return new Promise((resolve, reject) => {
-    gdriveTokenClient.callback = (resp) => {
-      if (resp.error) {
-        reject(new Error("Google sign-in failed: " + resp.error));
-        return;
-      }
-      gdriveToken = resp.access_token;
-      // expires_in is seconds; keep a 60s margin so we never send a token that
-      // expires mid-request.
-      gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
-      persistDriveToken();
-      resolve();
-    };
-    gdriveTokenClient.error_callback = (err) => {
-      reject(new Error(
-        err?.type === "popup_failed_to_open"
-          ? "Popup blocked — allow popups for this site and try again"
-          : "Sign-in was canceled",
-      ));
-    };
-    gdriveTokenClient.requestAccessToken(
-      promptMode === undefined ? {} : { prompt: promptMode },
-    );
-  });
+//
+// login_hint is the difference between "a window flashes" and "an account
+// chooser appears". Google's docs are explicit that with it "account selection
+// is skipped" — without it, a browser signed in to more than one Google account
+// shows the chooser on EVERY re-grant, which is exactly what a user experiences
+// as "it keeps making me sign in". We know the account (the email scope told us
+// at connect time and it is persisted), so every renewal names it.
+const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
+  if (gdriveTokenInFlight) return gdriveTokenInFlight;
+  gdriveTokenInFlight = (async () => {
+    await loadGisScript();
+    gdriveTokenClient ??= google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE_CLIENT_ID,
+      scope: GDRIVE_SCOPE,
+      callback: () => {}, // replaced per request below
+    });
+    return new Promise((resolve, reject) => {
+      gdriveTokenClient.callback = (resp) => {
+        if (resp.error) {
+          reject(new Error("Google sign-in failed: " + resp.error));
+          return;
+        }
+        gdriveToken = resp.access_token;
+        // expires_in is seconds; keep a 60s margin so we never send a token that
+        // expires mid-request.
+        gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
+        persistDriveToken();
+        resolve();
+      };
+      gdriveTokenClient.error_callback = (err) => {
+        reject(new Error(
+          err?.type === "popup_failed_to_open"
+            ? "Popup blocked — allow popups for this site and try again"
+            : "Sign-in was canceled",
+        ));
+      };
+      const opts = promptMode === undefined ? {} : { prompt: promptMode };
+      if (hint) opts.login_hint = hint;
+      gdriveTokenClient.requestAccessToken(opts);
+    });
+  })();
+  // Settled either way: the next caller starts a fresh request.
+  return gdriveTokenInFlight.finally(() => { gdriveTokenInFlight = null; });
 };
+
+// A token request always opens a popup, so it can only succeed while the tab
+// still holds transient user activation. Asking anyway from a background timer
+// doesn't just fail — some browsers answer a refused popup with a "pop-up
+// blocked" bar, i.e. the background does something visible AND useless. Where
+// the browser will tell us (Chrome 72+, Safari 16.4+), don't try.
+const hasUserActivation = () =>
+  !navigator.userActivation || navigator.userActivation.isActive;
 
 // Best-effort: only works because GDRIVE_SCOPE includes "email".
 const gdriveFetchEmail = async () => {
@@ -1855,7 +1895,7 @@ const gdriveFetchEmail = async () => {
       "https://oauth2.googleapis.com/tokeninfo?access_token=" +
         encodeURIComponent(gdriveToken),
     );
-    if (res.ok) gdriveEmail = (await res.json()).email || null;
+    if (res.ok) rememberDriveEmail((await res.json()).email);
   } catch {}
 };
 
@@ -1876,12 +1916,16 @@ const driveFetch = async (url, opts = {}) => {
   let res = await send();
   if (res.status === 401) {
     try {
+      if (!hasUserActivation()) throw new Error("no activation for a popup");
       await gdriveAcquireToken("");
     } catch {
       clearDriveToken();
       armDriveRenewOnGesture();
       renderGdriveSection();
-      throw new Error("Google session expired — sign in again");
+      // Not "sign in again": the account is still linked and the queue is
+      // still on disk. This aborts one request; the next gesture (or the next
+      // Sync) picks up a token and the work drains.
+      throw new Error("Drive is reconnecting — your changes are saved");
     }
     res = await send();
   }
@@ -1991,7 +2035,7 @@ const gdriveSignOut = () => {
   if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(gdriveToken, () => {});
   }
-  gdriveEmail = null;
+  rememberDriveEmail(null); // no hint left behind: the next sign-in may be another account
   syncState.connected = false;
   clearDriveToken(); // also drops the persisted token + saves
   // Stand down background sync. Queued work stays on disk rather than being
@@ -2012,7 +2056,7 @@ const renderGdriveSection = () => {
   // connected view (sign-in, Sign out, token expiry) lands here, so an open
   // modal re-renders its rows on a real state flip — and only on a flip, so
   // routine repaints can't disarm an armed confirm button.
-  if (romsModal.classList.contains("open") && romsRowsSignedIn !== syncActive()) {
+  if (romsModal.classList.contains("open") && romsRowsSignedIn !== driveLinked()) {
     refreshRomsManageList();
   }
   gdriveBody.innerHTML = "";
@@ -2026,7 +2070,7 @@ const renderGdriveSection = () => {
     return;
   }
 
-  if (!gdriveToken) {
+  if (!driveLinked()) {
     // No sub-caption here: the static hint right above this section already
     // says exactly what signing in does — repeating it read as a glitch.
     let btn = makeGdriveButton("Sign in with Google", false, async () => {
@@ -2041,16 +2085,24 @@ const renderGdriveSection = () => {
   let n = pendingCount();
   let status = document.createElement("p");
   status.className = "gdrive-status";
+  // Linked but between access tokens is NOT signed out — the account, the
+  // library and the queue are all still here, and the next Sync (or the next
+  // tap anywhere) buys a token. Saying "Sign in with Google" at that moment is
+  // what made an hourly token rollover feel like being logged out.
   status.textContent =
     (gdriveEmail || "Connected to Google Drive") +
-    " · " + (n ? n + " change" + (n === 1 ? "" : "s") + " pending"
+    " · " + (!gdriveToken ? "reconnects when you next sync"
+               : n ? n + " change" + (n === 1 ? "" : "s") + " pending"
                : "all changes synced");
   gdriveBody.appendChild(status);
 
   let actions = document.createElement("div");
   actions.className = "gdrive-actions";
   actions.appendChild(
-    makeGdriveButton("Sync now", false, () => runFullSync({ label: "Syncing" })));
+    makeGdriveButton("Sync now", false, async () => {
+      if (!(await ensureDriveSignedIn())) return;
+      runFullSync({ label: "Syncing" });
+    }));
   actions.appendChild(makeGdriveButton("Sign out", true, gdriveSignOut));
   gdriveBody.appendChild(actions);
 };
@@ -2088,7 +2140,7 @@ const SYNC_POLL_MS = 3 * 60 * 1000;
 // Persisted under "gdrive_sync". queueUp/queueDel/tomb survive reloads so an
 // offline edit still reaches Drive later. sigs = last agreed content signature
 // per Drive file; rmt = the remote modifiedTime we last saw for it.
-let syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {} };
+let syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {}, email: null };
 let syncBusy = false;
 let syncTimer = null;
 let syncCapTimer = null;
@@ -2109,12 +2161,27 @@ const loadSyncState = async () => {
       connected: !!s.connected,
       token: typeof s.token === "string" ? s.token : null,
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
+      email: typeof s.email === "string" ? s.email : null,
     };
+    gdriveEmail = syncState.email;
   }
 };
 const saveSyncState = () => dbPut("gdrive_sync", syncState);
 
-// Signed in == syncing. Every hook below no-ops when this is false.
+// Two different questions, and conflating them was the source of most of the
+// "it keeps signing me out" feeling:
+//
+//   driveLinked()  — has the user connected Drive at all? Survives token
+//                    expiry, reloads, being offline. This is what the UI and
+//                    the upload queue key off, so an hour-old access token
+//                    changes nothing the user can see.
+//   syncActive()   — can we talk to the Drive API *right now*? Only true with
+//                    a live access token, so it gates actual network work.
+//
+// A token gap is therefore a quiet, recoverable state: changes keep queueing,
+// the library keeps showing its Drive games, and the re-grant happens on the
+// next gesture (or lazily, when the user asks for something that needs Drive).
+const driveLinked = () => !!GDRIVE_CLIENT_ID && !!syncState.connected;
 const syncActive = () => !!gdriveToken;
 
 const sigOfBytes = (bytes) => saveSignature(bytes); // FNV-1a + length
@@ -2253,19 +2320,27 @@ const SYNC_ICONS = {
   // a broken shape at 15px.
   offline: '<svg viewBox="0 0 24 24"><path d="M17.5 18.5H7.2A4.2 4.2 0 0 1 6.5 10.1a5.8 5.8 0 0 1 11.1 1 3.8 3.8 0 0 1-.1 7.4z"/><path d="M4.5 4.5l15 15"/></svg>',
 };
-const SYNC_WORDS = { syncing: "Syncing", done: "Synced", offline: "Offline" };
+// Same cloud-with-a-slash: from the user's side "no connection" and "no token"
+// are the same fact — Drive is out of reach and their changes are waiting.
+SYNC_ICONS.paused = SYNC_ICONS.offline;
+const SYNC_WORDS = { syncing: "Syncing", done: "Synced", offline: "Offline",
+                     paused: "Paused" };
 const SYNC_DESCS = {
   syncing: "Syncing your games with Google Drive…",
   done: "All changes are synced to Google Drive",
   offline: "Offline — your changes will sync when you reconnect",
+  // Linked, online, but out of access token and out of silent retries. Said
+  // once, quietly, instead of a sign-in prompt: nothing is lost, and tapping
+  // Sync (or the indicator) is all it takes.
+  paused: "Tap Sync to reconnect to Google Drive — your changes are saved",
 };
-let syncStatus = "idle"; // idle | syncing | done | offline
+let syncStatus = "idle"; // idle | syncing | done | offline | paused
 const syncIndicator = document.getElementById("sync-indicator");
 
 const renderSyncIndicator = () => {
   if (!syncIndicator) return;
   let s = syncStatus;
-  let show = s !== "idle" && syncActive();
+  let show = s !== "idle" && driveLinked();
   document.body.classList.toggle("sync-shown", show);
   syncIndicator.hidden = !show;
   if (!show) { syncIndicator.innerHTML = ""; return; }
@@ -2304,15 +2379,25 @@ const pendingCount = () => syncState.queueUp.length + syncState.queueDel.length;
 // Pending and in-flight both read as "Syncing" — a bare number confuses more
 // than it informs, especially icon-only on a phone.
 const refreshSyncStatus = () => {
-  if (!syncActive()) { setSyncStatus("idle"); return; }
+  if (!driveLinked()) { setSyncStatus("idle"); return; }
+  // Out of token AND out of silent retries: stop claiming to be syncing.
+  if (!syncActive() && driveRenewFails >= DRIVE_RENEW_MAX_FAILS && pendingCount()) {
+    setSyncStatus("paused");
+    return;
+  }
   if (syncBusy || pendingCount()) setSyncStatus("syncing");
   else if (syncStatus === "syncing") setSyncStatus("done");
   else renderSyncIndicator();
 };
 
 // --- Dirty queue ---------------------------------------------------------
+// Queueing is keyed off driveLinked(), not a live token: a save made while the
+// access token is between grants must still reach Drive later. (flushSync
+// itself still requires a token — it just finds the work waiting when one
+// arrives.) Before this, an expired token meant those writes were silently
+// never queued, and only a manual full sync ever noticed.
 const scheduleFlush = () => {
-  if (!syncActive()) return;
+  if (!driveLinked()) return;
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(flushSync, SYNC_DEBOUNCE_MS);
   // First change in a burst arms the ceiling so a busy stretch still lands.
@@ -2320,14 +2405,14 @@ const scheduleFlush = () => {
   refreshSyncStatus();
 };
 const markUpload = (name) => {
-  if (!syncActive()) return;
+  if (!driveLinked()) return;
   if (!parseDriveFileName(name)) return;
   if (!syncState.queueUp.includes(name)) syncState.queueUp.push(name);
   saveSyncState();
   scheduleFlush();
 };
 const markDelete = (name) => {
-  if (!syncActive()) return;
+  if (!driveLinked()) return;
   if (!parseDriveFileName(name)) return;
   if (!syncState.queueDel.includes(name)) syncState.queueDel.push(name);
   syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
@@ -2335,7 +2420,7 @@ const markDelete = (name) => {
   scheduleFlush();
 };
 const markGameUpload = (game) => {
-  if (!syncActive()) return;
+  if (!driveLinked()) return;
   localFilesForGame(game).then((names) => {
     for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
     saveSyncState();
@@ -2532,7 +2617,13 @@ const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => 
 
 // --- On-demand download of one Drive-only game ---------------------------
 const downloadGame = async (game) => {
-  if (!syncActive()) { showToast("Sign in to Google Drive first"); return false; }
+  // Called straight from a tap in the manage list as well as behind the home
+  // tile's own ensureDriveSignedIn, so it re-auths for itself: a token that
+  // aged out between opening the modal and pressing the button must not turn
+  // into "sign in first". An account that was never linked still is refused —
+  // there is nothing on Drive to fetch.
+  if (!driveLinked()) { showToast("Sign in to Google Drive first"); return false; }
+  if (!(await ensureDriveSignedIn())) return false;
   if (syncDownloading.has(game)) return false;
   syncDownloading.add(game);
   refreshHomeRecent();
@@ -2581,7 +2672,8 @@ const downloadGame = async (game) => {
 // this same row via Reset. On the way out we queue the leftovers for upload,
 // so the copy that stays behind is also a copy Drive has.
 const removeGameFromDevice = async (game) => {
-  if (!syncActive()) { showToast("Sign in to Google Drive first"); return false; }
+  if (!driveLinked()) { showToast("Sign in to Google Drive first"); return false; }
+  if (!(await ensureDriveSignedIn())) return false;
   // Never take the last copy. The button is already gated on this device's
   // record of the upload (syncState.sigs), but that record can lie: a wiped
   // app folder, or a different Google account signed in, leaves stale sigs
@@ -2619,12 +2711,12 @@ const removeGameFromDevice = async (game) => {
 // tombstone it so every device drops it. Both are local-only when signed out.
 const resetGameSaves = async (game) => {
   await deleteSaveData(game);
-  if (syncActive()) queueSaveDataDeletes(game);
+  if (driveLinked()) queueSaveDataDeletes(game);
 };
 const deleteGameEverywhere = async (game) => {
   await deleteGameLocalData(game);
   await dbPut("recent", (await getRecentMeta()).filter((r) => r.name !== game));
-  if (syncActive()) {
+  if (driveLinked()) {
     // Queue the whole inventory: markDelete drops anything Drive doesn't hold
     // (parseDriveFileName rejects art:/stateauto:/cheats:), so passing every
     // key means a per-game record added to perGameKeys later starts mirroring
@@ -2747,11 +2839,31 @@ const gdriveConnect = async () => {
   refreshHomeRecent();
 };
 
-// Ensure we hold a Drive session before a download. Already signed in → true.
-// Signed out → open sign-in (callers invoke this from a click, so the popup is
-// gesture-allowed); returns whether we ended up connected.
+// Ensure we hold a Drive session before doing Drive work. Already holding a
+// live token → true. Otherwise this is the LAZY re-auth path: callers invoke it
+// from a click, so the popup has the activation it needs.
+//
+// Two cases, deliberately different. An already-linked account only needs a
+// re-grant, so it gets the silent prompt:"" one carrying login_hint — with the
+// Google session and the prior grant standing, that is a window that opens and
+// closes with nothing in it, and the user's tap does what they asked. Only a
+// genuinely new (or revoked) connection falls through to the full
+// account-chooser flow with its "Connected to Google Drive" toast and full sync.
 const ensureDriveSignedIn = async () => {
   if (syncActive()) return true;
+  if (driveLinked()) {
+    try {
+      await gdriveAcquireToken("");
+      driveRenewFails = 0;
+      if (!gdriveEmail) await gdriveFetchEmail();
+      refreshSyncUI();
+      refreshHomeRecent();
+      return true;
+    } catch {
+      // Grant really is gone (or the popup was blocked): fall through and ask
+      // properly rather than leaving the user's tap doing nothing.
+    }
+  }
   try { await gdriveConnect(); }
   catch (e) { showToast(e.message); return false; }
   return syncActive();
@@ -2827,6 +2939,12 @@ const renewDriveToken = async () => {
   try { await loadGisScript(); }
   catch { armDriveRenewOnGesture(); return; }
 
+  // The gesture may have aged out while the script loaded (activation lasts
+  // about five seconds). A popup now is refused, and — worse — that refusal
+  // would spend one of the three strikes that decide whether the grant is
+  // really gone. Wait for a fresh gesture instead.
+  if (!hasUserActivation()) { armDriveRenewOnGesture(); return; }
+
   try {
     await gdriveAcquireToken("");
   } catch {
@@ -2861,6 +2979,14 @@ const renewDriveToken = async () => {
 // no usable token do we arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
+  // Warm the GIS script now, for an account that already uses Drive. A gesture
+  // only carries transient activation for about five seconds (measured: still
+  // live at 1.2s, gone at 5.2s, in both WebKit and Chromium), and fetching
+  // accounts.google.com/gsi/client cold on a phone can eat that whole budget —
+  // so a renewal armed on the first tap after launch could lose its popup to a
+  // script download. Loading it off the gesture path removes that failure mode.
+  // Signed-out users still never touch Google's servers.
+  loadGisScript().catch(() => {});
   if (syncState.token && syncState.tokenExp > Date.now() + 5000) {
     gdriveToken = syncState.token;
     gdriveTokenExp = syncState.tokenExp;
@@ -2871,7 +2997,7 @@ const resumeDriveOnBoot = async () => {
           encodeURIComponent(gdriveToken),
       );
       live = r.ok;
-      if (live) gdriveEmail = (await r.json()).email || null;
+      if (live) rememberDriveEmail((await r.json()).email);
     } catch {
       // Offline at boot: keep the token rather than signing out; the normal
       // sync path retries and its 401 handling covers a genuinely dead token.
@@ -2920,12 +3046,15 @@ window.addEventListener("online", () => {
   flushSync().then(() => pullSync());
 });
 window.addEventListener("offline", () => {
-  if (syncActive() && pendingCount()) setSyncStatus("offline");
+  if (driveLinked() && pendingCount()) setSyncStatus("offline");
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && syncActive()) {
-    flushSync().then(() => pullSync());
-  }
+  if (document.visibilityState !== "visible") return;
+  // Coming back to a phone that was asleep for an hour is the single most
+  // likely moment to be holding a dead token — arm the renewal now rather than
+  // waiting up to three minutes for the poll to notice.
+  if (driveLinked() && driveTokenStale()) armDriveRenewOnGesture();
+  if (syncActive()) flushSync().then(() => pullSync());
 });
 
 // --- Sync UI surfaces -----------------------------------------------------
@@ -2942,13 +3071,13 @@ const refreshHomeSyncButton = () => {
   // Exactly one of the two is ever visible. Signed out is the Sign-in state;
   // a build with no client ID has no Drive at all, so neither shows.
   if (homeSignInBtn) {
-    homeSignInBtn.hidden = !GDRIVE_CLIENT_ID || syncActive();
+    homeSignInBtn.hidden = !GDRIVE_CLIENT_ID || driveLinked();
     // A failed/cancelled sign-in re-enables the control here rather than in the
     // click handler's tail, so every path back to "signed out" is clickable.
     if (!homeSignInBtn.hidden) homeSignInBtn.disabled = false;
   }
   if (!homeSyncBtn) return;
-  homeSyncBtn.hidden = !syncActive();
+  homeSyncBtn.hidden = !driveLinked();
   const busy = syncStatus === "syncing";
   homeSyncBtn.disabled = busy;
   homeSyncBtn.innerHTML = busy
@@ -2963,7 +3092,12 @@ const refreshSyncUI = () => {
   if (romsModal.classList.contains("open")) renderGdriveSection();
 };
 if (homeSyncBtn) {
-  homeSyncBtn.addEventListener("click", () => runFullSync({ label: "Syncing" }));
+  homeSyncBtn.addEventListener("click", async () => {
+    // Doubles as the reconnect affordance: linked but tokenless, this is the
+    // gesture that buys a new token, and then it syncs as asked.
+    if (!(await ensureDriveSignedIn())) return;
+    runFullSync({ label: "Syncing" });
+  });
 }
 if (homeSignInBtn) {
   // gdriveConnect() must be reached with the click's transient activation still
@@ -3153,7 +3287,7 @@ const bumpRecentIndex = async (name) => {
   // re-downloadable, so the library stays whole. Signed out there'd be nothing
   // to come back to, so the entry is dropped as before.
   for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);
-  if (!syncActive()) list = list.slice(0, MAX_RECENT);
+  if (!driveLinked()) list = list.slice(0, MAX_RECENT);
   await dbPut("recent", list);
 };
 
@@ -3231,7 +3365,7 @@ const buildEmptyLibraryCard = () => {
   msg.className = "home-empty-msg";
   msg.textContent = "No games yet — load one to get started.";
   card.appendChild(msg);
-  if (GDRIVE_CLIENT_ID && !gdriveToken) {
+  if (GDRIVE_CLIENT_ID && !driveLinked()) {
     let sub = document.createElement("p");
     sub.className = "home-empty-sub";
     sub.textContent = "Already have games backed up to Google Drive?";
@@ -3246,7 +3380,7 @@ const buildEmptyLibraryCard = () => {
       catch (e) { showToast(e.message); btn.disabled = false; }
     });
     card.appendChild(btn);
-  } else if (GDRIVE_CLIENT_ID && syncActive()) {
+  } else if (driveLinked()) {
     let btn = document.createElement("button");
     btn.type = "button";
     btn.className = "button button-sm";
@@ -3343,8 +3477,8 @@ const refreshHomeRecent = async () => {
     launch.type = "button";
     launch.className = "home-tile-launch";
     launch.title = driveOnly
-      ? romName + (syncActive() ? " — on Drive, tap to download"
-                                : " — on Drive, tap to sign in and download")
+      ? romName + (driveLinked() ? " — on Drive, tap to download"
+                                 : " — on Drive, tap to sign in and download")
       : romName;
 
     // The system chip is the game's identity slot: one place, one signal (it
