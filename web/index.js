@@ -5070,24 +5070,37 @@ let glowImage = null;
 let glowTick = 0;
 let glowFresh = true; // first sample after enabling paints at full alpha
 
+// Pack a "#rrggbb" into the ABGR word the sampler compares against.
+const glowPackHex = (c) => {
+  const n = parseInt(String(c).replace("#", ""), 16) || 0;
+  return (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | ((n >> 16) & 0xff)) >>> 0;
+};
+
 const updateGlow = () => {
   if (glowCanvas.hidden || !currentRomName) return;
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
+  if (typeof Module === "undefined" || !Module._wasm_glow_sample) return;
   if (glowTick++ % 6 !== 0) return;
-  const ptr = Module._wasm_fb_ptr();
-  if (!ptr) return;
-  const [w, h] = gameRes();
-  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   const gw = glowCanvas.width;
   const gh = glowCanvas.height;
+  // The core composites and samples: it owns the colour LUT and the SGB
+  // border, and it only touches the gw*gh cells we ask for instead of running
+  // the whole frame through the LUT the way _wasm_fb_ptr does. See
+  // wasm_glow_sample for what is deliberately NOT sampled (upscale filters,
+  // scanlines, letterbox bars).
+  const pal = gbMonoPanel && !sgbActive() ? gbPaletteColors() : null;
+  const remap = !!(pal && pal.length === 4);
+  const ptr = Module._wasm_glow_sample(
+    gw, gh, remap ? 1 : 0,
+    remap ? glowPackHex(pal[0]) : 0, remap ? glowPackHex(pal[1]) : 0,
+    remap ? glowPackHex(pal[2]) : 0, remap ? glowPackHex(pal[3]) : 0);
+  if (!ptr) return;
+  const heap = new Uint8Array(Module.memory.buffer, ptr, gw * gh * 4);
   if (!glowImage) glowImage = glowBufCtx.createImageData(gw, gh);
   const d = glowImage.data;
   for (let y = 0; y < gh; y++) {
-    const sy = Math.floor(((y + 0.5) * h) / gh);
     for (let x = 0; x < gw; x++) {
-      const sx = Math.floor(((x + 0.5) * w) / gw);
-      const si = (sy * w + sx) * 4;
-      const di = (y * gw + x) * 4;
+      const si = (y * gw + x) * 4;
+      const di = si;
       const r = heap[si], g = heap[si + 1], b = heap[si + 2];
       // Saturation boost, folded in here (384 px) so the CSS filter is just the
       // blur — one compositor pass instead of blur + saturate. Uint8ClampedArray

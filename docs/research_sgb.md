@@ -696,7 +696,115 @@ can supply it.
 
 ---
 
-## 8. Known rough edges
+### Re-verified against today's main (2026-08-07, after the merge)
+
+The byte-identity claim above was first made against the `main` this branch was
+cut from. `main` has since taken GB core work (the `fifo_mix` refactor that
+this branch's SGB hook now sits inside), a rewind delta codec, save-state
+loader hardening and web changes — so that claim had expired, and the only
+version of it worth anything is the one against the `main` that exists now.
+
+Re-run at `0f973f6`, 400 frames per cart, both channels (a fold of every
+frame's framebuffer, and a fold of the whole save-state payload every 64
+frames, so state that has not reached the screen yet is still compared):
+
+| header | carts | SGB off | SGB on |
+|---|---|---|---|
+| `00/03/33` | Pokemon Blue | identical | **differs** — the intended unlock |
+| `80/03/33` | Zelda LADX, LADX DX, Pokemon Silver | identical | identical |
+| `c0/00/33` | Kirby Tilt 'n' Tumble, Pokemon Crystal, Shantae | identical | identical |
+| `00/00/01`, `00/00/60` | Zelda LADX mono (x2), pocket.gb, Prehistorik Man | identical | identical |
+
+Eleven carts, both switch positions, zero unexpected differences. **With the
+SGB switch off the adapter is not there**, byte for byte, against the `main` of
+today rather than the one this branch was cut from. The two RTC carts
+(Crystal, Silver) skip the state channel only: their payload seeds from
+wall-clock time and legitimately differs run to run.
+
+The merge also *fixed* something rather than merely surviving. `main` split the
+shifter's colour decision out into `fifo_mix`, which is what
+`fifo_recompose_last` calls as well — so moving the SGB substitution in there
+means a register write that re-colours the previous dot now gets the SGB
+palette too. The original placement, in the shifter alone, missed that path.
+
+## 8. The ambient glow samples the composite, not the framebuffer
+
+Added 2026-08-07, after the border landed.
+
+The glow is a 24x16 halo blurred behind the screen. It sampled
+`_wasm_fb_ptr` — the **game** framebuffer — which stopped being the right
+picture the moment an SGB border existed: under a border the Game Boy screen
+occupies the middle 160x144 of a 256x224 picture, so the halo was a blur of
+edges the user cannot see. Pokemon Blue bleeds overworld greens out from
+behind a Poke Ball border that is almost entirely blue.
+
+Matt's generalisation is the right frame: this is one question, not two. If
+the glow samples the wrong stage it will mismatch for colour correction and
+for any future filter too. So the question is **what stage should it sample**,
+and the answer is: **the composited picture, before presentation effects.**
+
+### What that means concretely
+
+Sampled:
+
+* the SGB border layer, where it is opaque — unpacked 5-to-8 bit with **no**
+  panel model, because border art is native SNES output and the shader does
+  not correct it either;
+* the Game Boy window — through the colour LUT, so the halo follows the
+  correction toggle and any curve added later, because the LUT is the one
+  place the curve lives;
+* the DMG shade palette substitution, which is display-space and bypasses the
+  panel model exactly as it does in the shader;
+* the SGB backdrop, where neither layer covers.
+
+Deliberately **not** sampled, with the reasoning written at the code:
+
+| excluded | why |
+|---|---|
+| upscale filters (hq4x / xBR) | at one sample per ~100 output pixels the filter cannot change the answer, and running it would cost real work for a difference nobody can see |
+| scanlines | they darken every other row by 28%; a point sample lands on a dark row about half the time, so the halo would flicker as an artefact of *where the grid fell* rather than of the picture |
+| integer-scale letterbox bars | the bars are black and are not part of the picture; sampling them would wash the glow toward black in exactly the configuration where the screen is smallest and the glow matters most |
+
+"The composited surface" is therefore **not** "the final framebuffer". Reading
+back the presented canvas would have swept in all three, *and* forced a
+GPU→CPU sync every 100 ms that the current path does not have. It was
+rejected on both counts.
+
+### Where it lives, and whether one point serves both frontends
+
+**One frontend, not two: the native frontend has no ambient glow.** The
+feature is web-only, so there is one sampling point to place.
+
+It went into wasm (`wasm_glow_sample`) rather than JS, because that is where
+the colour LUT and the border already are. A second copy of the panel model in
+JS would drift the first time a correction curve is added on one side only —
+which is precisely the failure the selectable-curves workstream would
+otherwise walk into. The shade palette is passed **in** as an argument rather
+than stored, so it still never reaches emulated state (which is what keeps
+save states, rewind and netplay byte-identical).
+
+### Cost: it got cheaper, on both profiles
+
+The old path converted the **whole** frame through the LUT — 23,040 pixels for
+a Game Boy — and then point-sampled 384 of them. The new one composites and
+converts only the 384 cells asked for. Same harness, same build, the sampling
+path selected by a flag so before and after are measured against each other
+rather than against a different binary; per-frame, not per-call, because the
+glow only works every 6th rAF and what matters is what it adds to a frame:
+
+| | desktop | phone (390x844 @3, CPU x4) |
+|---|---|---|
+| before, no border | 0.0161 ms | 0.0527 ms |
+| **after, no border** | **0.0071 ms** | **0.0327 ms** |
+| before, SGB border | 0.0115 ms | 0.0800 ms |
+| **after, SGB border** | **0.0135 ms** | **0.0442 ms** |
+
+(Medians of three 30-second runs; the per-run figures and their spread are in
+§8.1.) The point sample stays a point sample — an area average over the same
+grid was measured at 20x the cost for a difference invisible behind the blur,
+and it stays rejected.
+
+## 9. Known rough edges
 
 1. **The window resizes mid-session** (native) when a border first appears,
    because the picture genuinely changes size. It is one resize, on the edge,
