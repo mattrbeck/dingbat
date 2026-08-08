@@ -671,7 +671,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_window_timing` | 299 | 29 | — |
 | `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
-| `m3_window_timing_wx_0` | 902 | 652 | — |
+| `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left are all LY = 0, i.e. bucket 0 |
 | `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below |
@@ -889,7 +889,30 @@ mode 2 → 3 edge of **every** line ≥ 4 and the reference draws no window on L
 or 5. The line-head rule reads WX at the edge and stays at 6; this one reads it
 at the shifter's first dot.
 
-**It trades one row, and the row's own sibling says the trade is right.**
+### The two rows this pass traded, and why neither refutes its change
+
+`WIN_START_PRE_PIXEL` costs GBMicrotest **`win6_b`** and the SCX discard above
+costs **`win0_scx3_b`**. Runner 978/703 → 978/702; gambatte 3656 → 3658, so the
+ROM count is +1 and the row count is −1 (gambatte is one aggregate row).
+
+Both are the same story, and in both cases the row's own `_a` sibling is what
+says the new mode-3 length is right:
+
+| ROM | `_a` reads at | `_b` reads at | hardware's mode 0 must start in | so mode 3 is | was | is |
+|---|---|---|---|---|---|---|
+| `win6` | cc 257, wants 3 | cc 261, wants 0 | [256, 259] | 176..179 | 174 ✗ | **178 ✓** |
+| `win0_scx3` | cc 261, wants 3 | cc 265, wants 0 | [260, 263] | 180..183 | 178 ✗ | **183 ✓** |
+
+(Hardware samples the mode bits at `cc − 2`, bracketed both sides — see the
+mode-0 latch section above.) In each case the old length sat **outside** the
+bracket and the new one sits inside it. What reddens the `_b` half is bucket 15:
+we sample no earlier than `cc − 5`, so at `cc − m0` of 2..4 we answer `0x83`
+where hardware answers `0x80`. That is the same signature and the same twenty
+siblings as the `win{0,1,2,7..15}_b` rows already in that bucket, and both of
+these come back for free when it lands. Neither should be read as evidence
+against the change that exposed it.
+
+**`win6_b` in detail — the row's own sibling says the trade is right.**
 GBMicrotest `win6_b` goes red. mode 3 at WX = 6 moves 174 → 178, and the `_a`/`_b`
 pair brackets it: `win6_a` reads STAT at `cc = 257` expecting mode 3, `win6_b` at
 `cc = 261` expecting mode 0, so hardware's mode-0 start is in `(255, 259]`, i.e.
@@ -903,14 +926,28 @@ bucket 15 and it comes back on its own.
 
 ### What the photos say about the rows still open
 
-* **`m3_window_timing` and `m3_window_timing_wx_0` are one inverted pair.**
-  Hardware backs the reference on both (94.2% / 86.2%, and 100% at > 2σ on the
-  smaller). Their references say the opposite things about SCX and we get both
-  backwards: at WX = 0 with `SCX = LY`, hardware's black edge ramps 11, 9, 8, 7,
-  6, 5, 4, 3 across a band and ours is pinned at 11; at WX = 7 hardware's is
-  pinned at 3 and ours ramps 5, 3, 4, 5, 6, 7, 8. 681 pixels across two rows, and
-  the shape says the SCX term sits on the wrong side of the WX = 0 special case
-  rather than being absent.
+* **`m3_window_timing_wx_0`: fixed, 652 → 4.** A line that starts as a window
+  line was discarding `7 - WX` for the window's own fine scroll and **nothing at
+  all for SCX**, so mode 3 was independent of `SCX & 7` on exactly those lines.
+  That ROM is a ruler for it — WX = 0, `SCX = LY`, BGP driven black at a fixed
+  dot — and the reference's stair (11, 9, 8, 7, 6, 5, 4, 3 against our flat 11)
+  reads the missing dots off directly. Derivation, the ROM's own header sentence
+  that supplies both terms, and the three independent cross-checks at
+  `fifo_sample_smooth_scroll`. **All four remaining pixels are on LY = 0**, the
+  `line_0_fix` line — i.e. bucket 0 (`LY0-RESYNC`), which is an unusually clean
+  confirmation of that bucket's framing from a row that was never counted in it.
+* **`m3_window_timing`'s 29 are a different thing, and still open.** Same shape
+  of instrument (WX = LY, SCX = 0) and hardware backs the reference (86.2%, and
+  100% of the cells above 2σ). Its reference is *pinned* at black-start x = 3 for
+  LY 0..10, ramps 4..9 for LY 11..16 and is pinned at 9 thereafter; ours ramps
+  3, 4, 5, 6, 7, 8 across LY 1..6 where hardware is flat, and its own ramp runs
+  two lines late. The flat part is the sharp claim: **for WX = 1..6 hardware's
+  window fine-scroll discard costs no dots**, where ours costs `7 - WX`. It
+  cannot simply be deleted — `m3_wx_4_change` and `m3_wx_5_change` need the
+  discard for their pixel *alignment* and are exact today — so the model wanted
+  is "the window's own discard is absorbed by the line's throwaway fetch while
+  the SCX discard is not", which is a change to where the discard happens rather
+  than to its size, and is not a constant.
 * **`m3_bgp_change`'s ~800 is real.** Hardware backs the reference on 81.2% of
   its disputed cells and on 736 of 820 by region, and on `m3_bgp_change_sprites`
   at 90.1% — so the residual that makes those two "not a reliable vote" on
