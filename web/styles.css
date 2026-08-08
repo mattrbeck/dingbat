@@ -3641,12 +3641,117 @@ body.debug-2p .home-tile-link {
   border-radius: var(--radius-sm);
 }
 
+/* Name line: the title takes the space and the ellipsis, the pencil sits hard
+   against its right and never shrinks. */
 .roms-manage-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.roms-manage-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Rename. Icon-only and quiet at rest (the row's loud buttons are the
+   destructive ones), following .modal-close's 28px ghost-square shape. */
+.roms-rename-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.roms-rename-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.roms-rename-btn:hover {
+  color: var(--text);
+  background: rgba(var(--hi-rgb), 0.06);
+}
+
+.roms-rename-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Under a thumb the 28px square is below the 44pt minimum. The button grows
+   to 44px there without moving the name: it is the only flex item that can,
+   and the row is already taller than that from its buttons. */
+@media (pointer: coarse) {
+  .roms-rename-btn {
+    width: 44px;
+    height: 44px;
+    /* Won away from the row's own padding so the row height doesn't jump. */
+    margin: -8px 0;
+  }
+}
+
+/* Rename modal — the confirmation's old/new pair. */
+.rename-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+
+.rename-diff-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.rename-diff-key {
+  /* Fixed, so the two names line up under each other and the change between
+     them is the only thing that moves. */
+  flex: 0 0 46px;
+  min-width: 46px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.rename-diff-val {
+  min-width: 0;
+  flex: 1 1 auto;
   font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rename-items {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.rename-items li {
+  margin: 3px 0;
 }
 
 /* Wrapping: arming a confirm button swaps its label for a whole question
