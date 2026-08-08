@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-07 18:24:04*
+*Generated: 2026-08-08 07:10:13*
 
 ## Game Boy - Blargg
 
@@ -228,13 +228,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 |------|--------|
 | mealybug/m2_win_en_toggle | 👌 |
 | mealybug-cgb/m2_win_en_toggle | 👌 |
-| mealybug/m3_bgp_change | 👀 96.4% correct (22220/23040 pixels match) |
+| mealybug/m3_bgp_change | 👀 98.3% correct (22637/23040 pixels match) |
 | mealybug-cgb/m3_bgp_change | 👀 98.7% correct (22732/23040 pixels match) |
-| mealybug/m3_bgp_change_sprites | 👀 97.7% correct (22504/23040 pixels match) |
+| mealybug/m3_bgp_change_sprites | 👀 99.5% correct (22916/23040 pixels match) |
 | mealybug-cgb/m3_bgp_change_sprites | 👀 99.6% correct (22948/23040 pixels match) |
-| mealybug/m3_lcdc_bg_en_change | 👀 90.5% correct (20847/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_bg_en_change | 👀 92.1% correct (21216/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_bg_en_change2 | 👀 98.4% correct (22676/23040 pixels match) |
+| mealybug/m3_lcdc_bg_en_change | 👀 99.7% correct (22973/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_bg_en_change | 👀 100.0% correct (23029/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_bg_en_change2 | 👀 100.0% correct (23034/23040 pixels match) |
 | mealybug/m3_lcdc_bg_map_change | 👀 99.2% correct (22848/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_bg_map_change | 👀 98.6% correct (22720/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_bg_map_change2 | 👀 99.0% correct (22809/23040 pixels match) |
@@ -807,7 +807,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/lcd-align-ly/lcd-align-ly-cgbE | 👀 |
 | age/ly/ly-cgbE | 👌 |
 | age/ly/ly-dmgC-cgbBC | 👀 |
-| age/m3-bg-bgp/m3-bg-bgp-dmgC | 👀 99.7% correct (22978/23040 pixels match) |
+| age/m3-bg-bgp/m3-bg-bgp-dmgC | 👀 100.0% correct (23038/23040 pixels match) |
 | age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | 👀 98.9% correct (22784/23040 pixels match) |
 | age/m3-bg-lcdc/m3-bg-lcdc-dmgC | 👌 |
@@ -876,7 +876,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | cpp/rtc-invalid-banks-test | 👌 |
 | cpp/latch-rtc-test | 👌 |
 | cpp/ramg-mbc3-test | 👌 |
-| daid/ppu_scanline_bgp-dmg | 👀 68.4% correct (15752/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
+| daid/ppu_scanline_bgp-dmg | 👀 68.8% correct (15854/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
 | daid/stop_instr-dmg | 👌 |
 | daid/speed_switch_timing_div | 👌 |
 | daid/speed_switch_timing_ly | 👌 |

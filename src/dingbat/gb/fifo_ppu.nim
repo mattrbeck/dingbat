@@ -254,12 +254,18 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
   if ppu.fifo.size == 0:
-    # LCDC.0 is the one bit whose MEANING changes with the mode: "BG and window
-    # enable" in DMG and DMG-compatibility mode, "BG and window master
-    # priority" in CGB mode, where the layer is drawn either way (Pan Docs,
-    # LCDC.0). gambatte's m2int_m3stat/nobg/*_cgb04c rows are a DMG cart on a
-    # CGB with LCDC.0 clear, so they read the compatibility meaning.
-    let bg_en = bg_display(ppu) or gb.cgb_native
+    # LCDC.0 is read at the MIXER, one pixel at a time -- see BG_EN_AT_MIX in
+    # gb.nim and the sample in fifo_mix. It is NOT read here: the push covers
+    # eight pixels at once, so anything sampled on this dot can only blank a
+    # whole tile, and mealybug m3_lcdc_bg_en_change's 12- and 8-pixel white runs
+    # sit at x = -1 and 19. The control build keeps the old push-time sample.
+    when BG_EN_AT_MIX == 0:
+      # LCDC.0 is the one bit whose MEANING changes with the mode: "BG and
+      # window enable" in DMG and DMG-compatibility mode, "BG and window master
+      # priority" in CGB mode, where the layer is drawn either way (Pan Docs,
+      # LCDC.0). gambatte's m2int_m3stat/nobg/*_cgb04c rows are a DMG cart on a
+      # CGB with LCDC.0 clear, so they read the compatibility meaning.
+      let bg_en = bg_display(ppu) or gb.cgb_native
     inc ppu.fetcher_x
     # The FIFO is empty here, so where head/tail happen to sit in the ring is
     # not observable (nothing reads an empty BG FIFO, and only the sprite FIFO
@@ -284,7 +290,8 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
       let shift = if flip: col else: 7 - col
       let color = uint8((((hi shr shift) and 0x1) shl 1) or ((lo shr shift) and 0x1))
       ppu.fifo.data[col] = GbPixel(
-        color:     if bg_en: color else: 0'u8,
+        color:     when BG_EN_AT_MIX == 0: (if bg_en: color else: 0'u8)
+                   else: color,
         palette:   palette,
         oam_idx:   0,
         obj_to_bg: obj_to_bg,
@@ -593,7 +600,40 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # is the one Pan Docs writes down, and "run for the whole penalty" stays out
   # because it puts the BG fetch and the object fetch on the address bus at the
   # same time whatever it scores.
-  if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
+  #
+  # ---- What DOES separate them, and why none of them is it ------------------
+  #
+  # Re-swept 2026-08-08 through `-d:OBJ_BG_RUN` (mealybug DMG pixels, whole set,
+  # so the sweep is a command line rather than an edit to this line):
+  #
+  #   0  freeze completely          550072
+  #   1  run for the wait (this)    550274
+  #   2  run for the whole penalty  550590
+  #   3  finish the fetch in flight 550513
+  #
+  # Still a quarter of a percent, and every one of them trades rows: 0 and 3 buy
+  # m3_lcdc_tile_sel_change ~250 pixels and give back m3_lcdc_tile_sel_win_change
+  # and m3_lcdc_win_map_change. What the mealybug sources say the answer has to
+  # look like is sharper than any of the four, and is written up in
+  # docs/gb-mealybug-sources.md: on hardware an object fetch NEVER lands between
+  # a background tile's two bitplane reads. m3_lcdc_tile_sel_change is a direct
+  # readout of that -- its LCDC pulse is 8 dots wide and its 18 bands each move
+  # the fetch phase, so every band reports the pair (TILE_SEL at plane 0,
+  # TILE_SEL at plane 1) as a shade, and the reference never once reports a pair
+  # more than 2 dots apart. Here the two reads come out 8 dots apart on 13 of
+  # the 18 bands, because the wait dots let a NEW fetch start and then freeze it
+  # mid-tile. Rule 3 is the literal reading of "waiting for the BG fetch to
+  # finish" and does not fix it either, because on the bands that fail the
+  # fetcher had just pushed and there is no fetch in flight to finish. So the
+  # split is real and none of these four is where it comes from; the remaining
+  # candidate is the phase of the penalty itself against the fetch cycle.
+  when OBJ_BG_RUN == 1:
+    if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
+  elif OBJ_BG_RUN == 2:
+    tick_bg_fetcher(ppu, gb)
+  elif OBJ_BG_RUN == 3:
+    if ppu.obj_penalty > OBJ_FETCH_DOTS and ppu.fetch_counter != 0:
+      tick_bg_fetcher(ppu, gb)
   dec ppu.obj_penalty
   if ppu.obj_penalty <= 0:
     # The tile row lands on the last dot of the fetch. LCDC.2 and the OBP
@@ -601,13 +641,17 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # family brackets.
     sprite_fetch_merge(ppu, gb)
 
-proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_px: GbPixel; sp_px: GbPixel): bool =
+proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_color, bg_obj_to_bg: uint8;
+                  sp_px: GbPixel): bool =
+  ## The BG colour comes in as a value rather than as the FIFO entry: the mixer
+  ## masks it with LCDC.0 before asking (see fifo_mix), and passing the whole
+  ## entry would mean copying it to do that.
   if sprite_enabled(ppu) and sp_px.color > 0:
     if gb.cgb_native:
-      not bg_display(ppu) or bg_px.color == 0 or
-        (bg_px.obj_to_bg == 0 and sp_px.obj_to_bg == 0)
+      not bg_display(ppu) or bg_color == 0 or
+        (bg_obj_to_bg == 0 and sp_px.obj_to_bg == 0)
     else:
-      sp_px.obj_to_bg == 0 or bg_px.color == 0
+      sp_px.obj_to_bg == 0 or bg_color == 0
   else: false
 
 # Which of the eight fetcher positions the window's re-trigger edge survives
@@ -936,16 +980,36 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
   ## `x` is the screen column the result is being written to. The shifter and
   ## the recompose pass disagree about it (the latter re-colours lx-1 or lx-2),
   ## and the Super Game Boy path needs the real one to pick an attribute cell.
-  let use_sprite = sprite_wins(ppu, gb, bg_px, sp_px)
-  let (px, arr_pram) =
-    if use_sprite: (sp_px, addr ppu.obj_pram[0])
-    else:          (bg_px, addr ppu.pram[0])
+  ## LCDC.0's DMG meaning ("BG and window enable": the layer reads as colour 0
+  ## everywhere) is sampled HERE, per pixel, not at the push that produced the
+  ## FIFO entry -- see BG_EN_AT_MIX in gb.nim for the ROM that measures it. In
+  ## CGB mode the bit means master priority instead, the layer is drawn either
+  ## way, and sprite_wins is where it is read; hence the `cgb_native` term,
+  ## which is the same one this test carried at the push.
+  ##
+  ## The masked colour is threaded through as a value rather than written back
+  ## into a copy of the FIFO entry -- this runs once per emitted pixel plus once
+  ## per repaint, and the copy-and-store form measured +1.22% of retired
+  ## instructions on blargg cpu_instrs and +1.73% on cgb-acid-hell against
+  ## `-d:BG_EN_AT_MIX=0`, where this one is under half of that. (A branchless
+  ## `and 0 - (LCDC and 1)` mask was tried and is WORSE than either, +1.59% and
+  ## +2.07%: the branch is predictable and skips the store outright.)
+  let bg_color =
+    when BG_EN_AT_MIX != 0:
+      if bg_display(ppu): bg_px.color        # the bit is set on almost every
+      elif gb.cgb_native: bg_px.color        # pixel of almost every frame, so
+      else: 0'u8                             # nothing else is reached at all
+    else: bg_px.color
+  let use_sprite = sprite_wins(ppu, gb, bg_color, bg_px.obj_to_bg, sp_px)
+  let (px_color, px_palette, arr_pram) =
+    if use_sprite: (sp_px.color, sp_px.palette, addr ppu.obj_pram[0])
+    else:          (bg_color,    bg_px.palette, addr ppu.pram[0])
   let final_color =
-    if gb.cgb_native: int(px.color)
+    if gb.cgb_native: int(px_color)
     else:
       let p = if use_sprite: (if sp_px.palette == 0: ppu.obp0 else: ppu.obp1)
               else: ppu.bgp
-      int(p[px.color])
+      int(p[px_color])
   if ppu.sgb_attr != nil:
     # Super Game Boy. The SNES colorizes the composited 2-bit video signal per
     # 8x8 SCREEN cell, so the cell's attribute -- not the GB's own BG/OBJ
@@ -953,7 +1017,7 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
     # background underneath them. See sgb.nim.
     let cell = (int(ppu.ly) shr 3) * SGB_ATTR_W + (int(x) shr 3)
     return ppu.sgb_pal[int(ppu.sgb_attr[cell]) * 4 + final_color]
-  let pal_offset = (int(px.palette) * 4 + final_color) * 2
+  let pal_offset = (int(px_palette) * 4 + final_color) * 2
   cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
 
 # ---- The mixer is a TAIL, and it runs behind the FIFO pop -------------------
@@ -1051,6 +1115,18 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
     if x < 0 or x >= GB_WIDTH: continue
     let h = ppu.mix[x and 1]
     ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
+
+proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
+  ## Re-colour EXACTLY the pixel `back` dots behind the shifter, where
+  ## fifo_recompose_last re-colours every pixel from 1 to `back`. Same guards,
+  ## same held pair; the caller is the palette write's transition dot (see
+  ## MIXER_PALETTE_OR in gb.nim), which needs the far end of the tail to take a
+  ## different value from the rest of it.
+  if (ppu.lcd_status and 3'u8) != 3'u8: return
+  let x = ppu.lx - back
+  if x < 0 or x >= GB_WIDTH: return
+  let h = ppu.mix[x and 1]
+  ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:

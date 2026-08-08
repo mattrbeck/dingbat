@@ -355,15 +355,48 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const OBJ_BG_RUN*             {.intdefine.} = 1
+  ## Which dots of an object penalty the BG fetcher is allowed to run on:
+  ## 0 = none, 1 = the wait dots only (shipping), 2 = all of them, 3 = the wait
+  ## dots but only to finish a fetch already under way. The reasoning and the
+  ## sweep that cannot separate them are at tick_sprite_fetcher in fifo_ppu.nim;
+  ## this exists so that sweep is a command line rather than an edit to the dot
+  ## loop.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
+const BG_EN_AT_MIX*           {.intdefine.} = 1
+  ## Where LCDC.0 (BG enable, DMG meaning) is sampled: at the MIXER, once per
+  ## emitted pixel (1, shipping), or at the FIFO PUSH, once per eight (0, the
+  ## pre-2026-08-08 behaviour). It is a mixer read like the rest of LCDC's
+  ## priority half, so it carries MIXER_PRIORITY_BACK with them.
+  ##
+  ## mealybug m3_lcdc_bg_en_change is the ruler and it is not a fit: its handler
+  ## clears LCDC.0 for exactly 12 dots, sets it for 8, clears it for 8 and
+  ## leaves it set (`ld [hl],c / nop / ld [hl],b / ld [hl],c / ld [hl],b`, 8
+  ## cycles each), and the DMG reference answers with white runs of exactly 12
+  ## and 8 pixels -- at x = -1..10 and 19..26, neither of them on a tile
+  ## boundary, over a background whose glyphs are otherwise in their normal
+  ## columns. Sampling at the push can only ever blank whole tiles, which is
+  ## what the 2193-pixel residual on that row was.
 const MIXER_PALETTE_BACK*     {.intdefine.} = 2
   ## Stages of the mixer tail BGP/OBP0/OBP1 are read at the far end of. One
   ## more than the priority bits: the mixer resolves BG-vs-OBJ first and looks
   ## the shade up after, so a palette write reaches one pixel further back than
   ## an LCDC write does. m3_obp0_change is what separates them -- it goes to
-  ## pixel-exact at 2 and is 32 pixels out at 1, on a frame where
+  ## pixel-exact at 2 and is 42 pixels out at 1, on a frame where
   ## m3_lcdc_obj_en_change is 60 out at 0 and 2 out at 1.
+  ##
+  ## m3_bgp_change and m3_bgp_change_sprites used to be the two rows that argued
+  ## for ONE stage, by 22 and 136 pixels. MIXER_PALETTE_OR below is what they
+  ## were really measuring: with the transition pixel modelled they prefer TWO
+  ## by 806 and 624, and the vote across all six palette rows is unanimous (the
+  ## table is in docs/gb-failure-triage.md). The constant never moved.
+const MIXER_PALETTE_OR*       {.intdefine.} = 1
+  ## Whether a DMG palette write puts ONE pixel of `old or new` at the far end
+  ## of the mixer tail (1, shipping) or a clean edge (0, the pre-2026-08-08
+  ## behaviour). mealybug m3_bgp_change is the instrument and the derivation is
+  ## at the FF47..FF49 write in ppu.nim -- its frame is BGP's low two bits
+  ## sampled once per dot, so the three-valued edge is read straight off it.
 const MIXER_DOT_LAG*          {.intdefine.} = 1
   ## Whether the pixel mixer runs a dot behind the FIFO pop. 1 ships; 0 is the
   ## control build and compiles the whole mechanism out. See

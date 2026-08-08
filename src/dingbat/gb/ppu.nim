@@ -438,6 +438,7 @@ proc fifo_arm_window*(ppu: GbFifoPpu)
 # declaration for the same reason as the line above; the body and the
 # measurement that pins it are at fifo_recompose_last in fifo_ppu.nim.
 proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
+proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
 
 template mixer_write_repaint(gb: GB; back: int32) =
   ## Every register write below that the mixer reads ends with this. `back` is
@@ -1522,11 +1523,57 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # the pixel it is supposed to reach. See fifo_recompose_last.
       echo "PAL ly=", ppu.ly, " dot=", ppu.cycle_counter, " reg=", toHex(idx, 4),
            " mode=", (ppu.lcd_status and 3), " new=", toHex(val, 2)
+    # ---- The transition pixel: one dot of `old or new` ---------------------
+    #
+    # A DMG palette write is not a clean edge at the mixer. mealybug
+    # m3_bgp_change reads it out directly: VRAM is all zeroes there, so every
+    # pixel is colour 0 and the frame is literally BGP bits 1:0 sampled once per
+    # dot, against a handler that writes BGP six times at known cycles. Its DMG
+    # reference answers with a THREE-valued edge -- on LY 17 the run is
+    #
+    #   x      0    1     2..12   13     14..
+    #   BGP  $11   $13     $12    $13    $11
+    #
+    # where $11 is the value before the write, $12 the value written at that
+    # dot, $12 -> $11 the write twelve dots later, and $13 = $11 or $12 is
+    # neither. The same single pixel of `old or new` sits at the FAR end of the
+    # mixer tail at every one of the six writes, on every line of the frame, and
+    # on m3_bgp_change_sprites next door. Lines where the OR happens to equal
+    # the old or the new value (LY 1's $10 or $11 = $11) show a two-valued edge
+    # and are where the effect hid: with the OR pixel drawn as `new`, that row
+    # was 820 pixels out and this row's own runs were a pixel short at every
+    # boundary.
+    #
+    # Physically it is the palette latch being read on the dot it is written --
+    # the mixer's shade lookup is combinational off those four 2-bit fields, and
+    # the pixel in flight sees both drives. What is measured is that it lasts
+    # exactly one pixel and sits at MIXER_PALETTE_BACK, i.e. the oldest pixel
+    # the write still reaches; every nearer pixel takes the new value cleanly.
+    # The OR pixel sits at MIXER_PALETTE_BACK -- the OLDEST pixel a DMG write
+    # reaches -- and the CGB's own dot of write latency (CGB_MIXER_LATENCY) puts
+    # that pixel out of reach, so on CGB the one pixel the write does repaint
+    # takes the new value cleanly. That is not an assumption: running these two
+    # DMG carts on CGB hardware against the suite's `_cgb_c` references wants a
+    # clean edge (m3_bgp_change 22732/23040 with it, 22321 with an OR pixel;
+    # m3_bgp_change_sprites 22948 against 22600) while the DMG references want
+    # the OR. Same cart, same write; only the console differs, exactly as at
+    # CGB_MIXER_LATENCY.
+    var or_pixel = false
+    when MIXER_PALETTE_OR != 0:
+      or_pixel = MIXER_DOT_LAG != 0 and gb.fifo_ppu != nil and
+                 not gb.cgb_enabled and MIXER_PALETTE_BACK > 0
+      if or_pixel:
+        let cur = case idx
+                  of 0xFF47: addr ppu.bgp
+                  of 0xFF48: addr ppu.obp0
+                  else:      addr ppu.obp1
+        ppu_update_palette(cur[], ppu_palette_from_array(cur[]) or val)
+        fifo_recompose_at(gb.fifo_ppu, gb, int32(MIXER_PALETTE_BACK))
     case idx
     of 0xFF47: ppu_update_palette(ppu.bgp,  val)
     of 0xFF48: ppu_update_palette(ppu.obp0, val)
     else:      ppu_update_palette(ppu.obp1, val)
-    mixer_write_repaint(gb, MIXER_PALETTE_BACK)
+    mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK) - (if or_pixel: 1'i32 else: 0'i32))
 
   of 0xFF4A:
     when defined(gb_win_trace):

@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-07 18:24:04*
+*Generated: 2026-08-08 07:10:13*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
@@ -271,19 +271,19 @@ All 8 tests passed.
 |------|--------|
 | dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 429/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 5/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 8/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 8/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 8/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 150/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 150/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 150/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 725/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 721/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 860/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1284/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1140/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_2 [dmg, png] | 4/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_3 [dmg, png] | 4/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 6/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 8/23040 pixels differ |
+| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 150/23040 pixels differ |
 
 ## enable_display (135/184 passed)
 
