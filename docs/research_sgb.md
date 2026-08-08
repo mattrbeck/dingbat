@@ -704,7 +704,9 @@ this branch's SGB hook now sits inside), a rewind delta codec, save-state
 loader hardening and web changes — so that claim had expired, and the only
 version of it worth anything is the one against the `main` that exists now.
 
-Re-run at `0f973f6`, 400 frames per cart, both channels (a fold of every
+Re-run at `0aafb51` — which is `main` after it took this branch's earlier
+SGB work, so the comparison is now "did the merge and the glow change disturb
+anything" rather than "is the feature inert" — 400 frames per cart, both channels (a fold of every
 frame's framebuffer, and a fold of the whole save-state payload every 64
 frames, so state that has not reached the screen yet is still compared):
 
