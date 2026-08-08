@@ -682,6 +682,36 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling |
 | `m3_lcdc_bg_en_change` | 2193 | 2193 | LCDC.0 is read at the PUSH here, not at the mixer |
 
+### 2026-08-08: three of those came off the ROMs' own source code
+
+`docs/gb-mealybug-sources.md` is the suite read from its `.asm` sources rather
+than from its pixels. Two of the rows above are closed by it and one is
+diagnosed exactly. Wrong pixels of 23040, against the table above:
+
+| row | was | now | why |
+|---|---|---|---|
+| `m3_lcdc_bg_en_change` | 2193 | **67** | the ROM clears LCDC.0 for exactly 12 dots and then 8, and the reference's white runs are 12 and 8 pixels wide at x = −1 and 19 — neither on a tile boundary. LCDC.0 is a MIXER read, once per pixel (`BG_EN_AT_MIX`). CGB: 1824 → 11, and `m3_lcdc_bg_en_change2` 364 → 6 |
+| `m3_bgp_change` | 820 | **403** | a DMG palette write puts one pixel of `old or new` at the far end of the mixer tail (`MIXER_PALETTE_OR`). Zero free parameters: 720 cells over 144 different old/new pairs go exact together |
+| `m3_bgp_change_sprites` | 536 | **124** | as above |
+| `m3_lcdc_tile_sel_change` | 776 | 776 | **diagnosed, not fixed**: hardware never puts an object fetch between a background tile's two bitplane reads; we do on 13 of 18 bands. Not curable by any of the four `OBJ_BG_RUN` rules |
+| `m3_lcdc_bg_map_change` | 192 | 192 | the same defect on a coarser instrument |
+
+Cost, named: gambatte `dmgpalette_during_m3_{4,5,scx1_4}` and `scx3/_5` go
+8 → 150 wrong pixels and `lycint_dmgpalette_during_m3_4` goes 1284 → 1140. All
+five were already red, none is a pass/fail row, and the mealybug photograph
+sides with the OR pixel on all six of its columns (65–93%, table in
+`gb-mealybug-sources.md` §3.2). Suite totals do not move: 978 / 702, gambatte
+3658 / 5005.
+
+A fourth thing the sources say and this pass did **not** act on: `inc/utils.asm`'s
+`line_0_fix` macro burns 4 T-cycles *fewer* on LY 0 than on any other line,
+which asserts that hardware's line-0 mode 2 STAT interrupt arrives 4 T-cycles
+later relative to the start of drawing. dingbat's does not (dot 101 against dot
+105, measured), so every mealybug ROM's line 0 is 4 dots early — 100–150 pixels
+across the set, and the cheapest well-evidenced item left here. It reaches the
+STAT model that mooneye `intr_2_*` and eight gambatte families pin, so it needs
+its own measured trade.
+
 ### `acid/cgb-acid-hell` is a real failure, not a scoring artefact
 
 Worth stating because the shootout's rule is a **±50 luma tolerance**, not an
@@ -980,6 +1010,41 @@ thing to look at in this area.
 either way. It shares exactly that mechanism (mid-mode-3 BGP), so it is the
 same open question rather than a second one, and it should be re-scored
 whenever the residual is understood.
+
+**Resolved 2026-08-08, and the vote is re-taken.** The residual had two names,
+both read off the ROM's source rather than off its pixels (see
+`docs/gb-mealybug-sources.md` §3.2):
+
+1. **The transition pixel.** A DMG palette write puts one pixel of `old or new`
+   at the far end of the mixer tail. `m3_bgp_change` has all-zero VRAM, so its
+   frame is BGP bits 1:0 sampled once per dot, and run-lengthing it gives a
+   three-valued edge at every one of the six writes on every one of the 144
+   lines. `MIXER_PALETTE_OR` ships it: 820 → 403 and `_sprites` 536 → 124,
+   `age/m3-bg-bgp-dmgC` 62 → 2, `daid/ppu_scanline_bgp-dmg` 68.4% → 68.8%.
+2. **The line end.** All 403 that remain are `x = 157..159`. The handler's last
+   BGP write lands on dot 252, the first dot of mode 0, and
+   `fifo_recompose_last` is guarded on mode 3 — but hardware clocks the line's
+   last pixels out of the mixer during H-Blank and that write reaches all three.
+   Relaxing the guard alone is not the fix, because `fifo_burst_tail` has run
+   `lx` to 160 by then; it is a change in the tail's accounting, next to
+   `M3_END_EARLY`. **Still open, and it is now the whole of this row.**
+
+With (1) fixed, **the two rows that argued against the second mixer stage now
+argue for it**, and the vote across the palette rows is unanimous. One build per
+setting, wrong pixels of 23040:
+
+| row | `MIXER_PALETTE_BACK=1` | `=2` (shipping) |
+|---|---|---|
+| `m3_bgp_change` | 1209 | **403** |
+| `m3_bgp_change_sprites` | 748 | **124** |
+| `m3_obp0_change` | 42 | **0** |
+| `m3_lcdc_obj_en_change_variant` | 212 | **102** |
+| `m3_window_timing` | 159 | **29** |
+| `m3_window_timing_wx_0` | 146 | **4** |
+
+Before the OR pixel, the first two preferred **one** stage by 22 and 136. The
+"second mechanism" was what inverted them, and the constant never needed to
+move.
 
 ## Reproducing any of this
 
