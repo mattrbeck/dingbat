@@ -54,6 +54,72 @@ const STAT_READ_HOLD* = STAT_READ_LAG != 3
 # pass today; that is fitting, not measuring.
 const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 
+# ---- The M-cycle a CGB spends leaving HALT that a DMG does not ---------------
+#
+# Charged once, on the M-cycle the pending interrupt is seen, before the CPU is
+# back on the bus -- so ahead of an HBlank DMA block that came due while it
+# slept, and ahead of any dispatch. DMG is the zero of this scale; only the
+# delta would be modelled.
+#
+# **It ships at 0, and the point of the knob is to record what one M-cycle buys
+# and what refuses it.** Both halves are large and neither is ignorable.
+#
+# What ASKS for it. gambatte names a different expected value per device in the
+# file name of ten `halt/` ROMs, and every one of the ten is a read taken a
+# fixed number of M-cycles after a halt an interrupt ended:
+#
+#   m0{int,irq}_m0stat_scx{3,4}_2                     DMG 0 (mode 0)  CGB 2
+#   late_m0int_halt_m0stat_scx3_{1b,3b,4b}            DMG 0           CGB 2
+#   late_m0irq_halt_m0stat_scx3_1b                    DMG 0           CGB 2
+#   lycirq_m2stat_2                                   DMG 2 (mode 2)  CGB 3
+#   m1int_ly_2                                        DMG $90 (144)   CGB $91
+#
+# All ten say the same thing in the same direction -- the CGB's read lands LATER
+# in the PPU's line than the DMG's, by enough to cross the next boundary and by
+# no more than that -- and they say it across three unrelated boundaries: mode 0
+# -> 2 (the line end), mode 2 -> 3 (dot 80) and LY 144 -> 145. dingbat answers
+# the DMG value on the CGB arm of all ten, and the DMG arm of all ten passes at
+# both settings, so the DMG side is pinned and this is purely the difference
+# from it. At 1 all ten flip green, and so do three CGB-only `_ds_` members
+# (`m0{int,irq}_m0stat_scx{2,3}_ds_2`) and eight `dma/hdma_late_*` rows: 22
+# gambatte rows in.
+#
+# What REFUSES it, and this is the larger half: 60 rows out, for a net of -37
+# gambatte and -3 in the whole runner (743 -> 740, measured, one full pass per
+# setting). Two disjoint groups:
+#
+#   * 42 `tima/*` rows, all with ONE expected value for both devices. They halt,
+#     a timer interrupt wakes them and they read TIMA or IF a fixed number of
+#     M-cycles later. An extra M-cycle at the exit is extra TIME, so DIV and
+#     TIMA advance through it too, and hardware says they do not. That is not a
+#     bracket that can be argued with: whatever the CGB is doing here, it is
+#     not spending an M-cycle.
+#   * 11 rows that are the SAME family as the ten above at a different SCX --
+#     `m0{int,irq}_m0stat_scx{2,5}_1`, `late_m0{int,irq}_halt_m0stat_scx2_*`,
+#     `noime_m2irq_m0stat_1`, and 7 `dma/hdma_late_disable_*`. Their SCX 3 and 4
+#     siblings want the M-cycle and their SCX 2 and 5 siblings refuse it, on the
+#     same ladder of one-NOP-apart reads. A halt cost cannot depend on SCX, so
+#     part of what the ten measure is really the CGB's mode 3 length against
+#     SCX (bucket: gambatte scx_during_m3, 49/141) and not this at all.
+#
+# So the CGB is later than the DMG out of a halt in a way that costs no time.
+# That shape is a CPU-to-PPU PHASE offset, not a charge -- see the lcd_offset
+# note at mem_tick_ppu_latched, which is where this belongs and where a whole
+# M-cycle of it is refused by the same SCX ladder. Nothing ships until the SCX
+# half is separated out; turning this to 1 would buy 22 rows by breaking 60.
+#
+# daid's `ppu_scanline_bgp.gb` on CGB is the frame that raised the question and
+# it is worth stating what it does and does not pin. Its whole picture is ONE
+# phase, set by an LYC=0 STAT interrupt that finds the CPU halted in the VBlank
+# handler's `ei / halt`, and against the shootout's `ppu_scanline_bgp.gbc.png`
+# every band of it is 3 pixels early. Exactly one M-cycle here plus exactly one
+# dot of the CGB-C -> CGB-D palette step (CGB_MIXER_LATENCY, which is 1 for the
+# `_cgb_c` references this tree scores and 0 for the `_cgb_d` ones daid's
+# capture matches) accounts for all three, pixel for pixel -- but the same
+# M-cycle is what the 60 rows above refuse, and the palette step is what 27
+# mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
+const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
+
 # ---- CGB per-register PPU write latency -------------------------------------
 #
 # How many dots into its own M-cycle a CPU write to a pipeline register lands

@@ -185,6 +185,16 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # below has to be asked on -- asking it on every halted M-cycle instead
     # costs a real 0.3% of a title that spends its main loop halted.
     if interrupt_ready(gb.interrupts):
+      # The CGB leaves this state LATER than the DMG does -- ten gambatte
+      # `halt/` rows state it, one boundary each -- but not by spending time,
+      # which is what 42 `tima/*` rows refuse. CGB_HALT_EXIT_MCYCLES in gb.nim
+      # is that measurement and it ships at 0, so this compiles away; the hook
+      # is here rather than at the dispatch below because the `_irq_` members
+      # (IME clear, no vector) want the cost too. Charged ahead of the HBlank
+      # DMA block, i.e. before the CPU is back on the bus.
+      when CGB_HALT_EXIT_MCYCLES != 0:
+        if gb.cgb_enabled:
+          mem_tick_extra(gb.memory, gb, 4 * CGB_HALT_EXIT_MCYCLES)
       # A HBlank VRAM DMA block that came due while the CPU was halted (see the
       # mode-0 edge in `mode_flag=`) is transferred the moment the CPU is back
       # on the bus, which is this one. The DMA takes the bus before the CPU's

@@ -1055,13 +1055,26 @@ proc build_shootout_tests(): seq[TestDef] =
   # Only the rows worth gating on are wired up. The shootout also runs
   # `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` "on GBC", but
   # all three carts are DMG-flagged ($143 = $00), so that is a CGB in
-  # **compatibility mode** — the same device the mealybug `_cgb_c` references
-  # capture. That device IS modelled here (see `cgb_native` in gb.nim, and
+  # **compatibility mode** — the same mode the mealybug `_cgb_c` references
+  # capture. That mode IS modelled here (see `cgb_native` in gb.nim, and
   # build_mealybug_tests, which scores 27 rows against it), so these three are
   # skipped as redundant rather than as unmodellable: mealybug covers the same
   # machine far more precisely. `ppu_scanline_bgp.gbc.png` is visibly a compat
   # capture — its only colours are #0063C6/#7BFF31/#FFFFFF, straight out of the
   # compat background palette.
+  #
+  # "The same machine" was measured in 2026-08-09 and it is NOT the same
+  # machine, which is the better reason for leaving `ppu_scanline_bgp` "(GBC)"
+  # out. Run it `--cgb --color` and every band of the frame is exactly 3 pixels
+  # early against that PNG (92.50%), and the 3 decompose as one M-cycle at the
+  # handler's entry MINUS one dot of palette write step — and that one dot is
+  # the CGB-C/CGB-D revision split, which mealybug ships both sides of:
+  # `CGB_MIXER_LATENCY=1` is pixel-exact on `m3_bgp_change_cgb_c.png` and `=0`
+  # is pixel-exact on `_cgb_d.png`, and only `=0` can reach daid's capture. So
+  # this row scores a LATER CGB than the 27 mealybug rows do, and wiring it
+  # would put two references for the same register on opposite sides of a
+  # revision the tree deliberately picks one side of. See
+  # docs/gb-failure-triage.md and CGB_HALT_EXIT_MCYCLES in gb.nim.
   #
   # `stop_instr` "(GBC)" is the trap worth naming, because it would have gone
   # in GREEN for the wrong reason. Its reference is an all-black frame, which is

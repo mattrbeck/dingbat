@@ -1273,6 +1273,81 @@ Before the OR pixel, the first two preferred **one** stage by 22 and 136. The
 "second mechanism" was what inverted them, and the constant never needed to
 move.
 
+### The same cart on CGB: 3 pixels, and they are two different things
+
+`daid/ppu_scanline_bgp.gb` run `--cgb --color` against the shootout's
+`ppu_scanline_bgp.gbc.png` is **92.50% (1728/23040 wrong)**, and the error is
+the cleanest shape in this document: every band boundary of every line sits at
+`16k − 2` where the reference puts it at `16k + 1`. A uniform **3 dots early**,
+144 lines, no exceptions. The row is not wired up (see `build_shootout_tests`);
+this is what it would score.
+
+The ROM is decoded above — one free-running 456-dot handler, ten `ld [c],a`
+sixteen dots apart, the whole frame inheriting the phase the LYC=0 STAT
+interrupt sets. So a uniform 3 is either 3 dots at the handler's entry or 3
+dots at every write. **It is neither, and it cannot be either**, for one reason
+each:
+
+* 3 dots at the **write** is refused by mealybug. Both carts are DMG carts on a
+  CGB, both write BGP mid-mode-3, and `-d:gb_px_trace` puts their writes on
+  known dots (daid's band `k` on dot `93 + 16k`, mealybug's `$12` on dot 97).
+  The first pixel a write reaches is `dot − 94 − r`, and mealybug's CGB
+  reference pins `r = 1` (`CGB_MIXER_LATENCY`) to the pixel — `m3_bgp_change`,
+  `m3_bgp_change_sprites` and `m3_obp0_change` are all pixel-exact on the
+  `_cgb_c` set at that value and all move off it at any other. daid's reference
+  wants `r = −2`. The two cannot both be a property of the palette path.
+* 3 dots at the **dispatch** is refused by arithmetic before it is refused by
+  any ROM. mealybug's handler is a STAT interrupt too (`ldh [rSTAT], $20`, the
+  mode-2 source, every line) and it is exact on CGB, so there is no general
+  dispatch delta — and a CPU cannot move by 3 dots anyway. Every path into a
+  handler ends on an M-cycle boundary, so a dispatch that changes at all
+  changes by 4.
+
+The 3 factors, exactly, into **+4 − 1**, and each factor was measured on its
+own rather than fitted:
+
+* **+4 — one M-cycle at the handler's entry.** Patching the ROM's `statInt`
+  prologue `nop` into a one-byte two-M-cycle `ld a,[hl]` — the ROM's only
+  `E1 FB 00 21` becomes `E1 FB 7E 21`, header checksum refixed — delays the
+  whole frame by exactly one M-cycle and nothing else. That run scores
+  **576/23040 wrong (97.50%)**, one pixel per band boundary, edges at `16k − 1`.
+* **−1 — the CGB-C → CGB-D palette step.** `CGB_MIXER_LATENCY` is that step and
+  mealybug ships both sides of it: at `=1` dingbat is **pixel-exact on
+  `m3_bgp_change_cgb_c.png`** and at `=0` it is **pixel-exact on
+  `m3_bgp_change_cgb_d.png`** (0 wrong, both verified; the two references
+  themselves differ by 864 pixels, one per write edge on every line, with D one
+  pixel earlier than C).
+
+Put together: the patched ROM built at `CGB_MIXER_LATENCY=0` is **0/23040
+wrong** against `ppu_scanline_bgp.gbc.png`. The decomposition is exact and
+complete, and it says daid's capture is a **CGB-D-class device** — a later one
+than the `_cgb_c` set this tree scores 27 mealybug rows against.
+
+Neither factor ships.
+
+The palette step does not because it is 27 rows against 1: at `=0` the CGB arms
+go `m3_bgp_change` 100% → 96.7%, `_sprites` → 97.3%, `m3_obp0_change` → 99.8%,
+`m3_lcdc_obj_en_change` → 99.7%, `_variant` → 99.1%. Picking the other side of
+a revision to win one unwired row is not an accuracy gain, it is a different
+machine.
+
+The M-cycle does not because its own brackets do not hold, and the measurement
+is worth keeping: it is `CGB_HALT_EXIT_MCYCLES` in `gb.nim`, shipping at 0. The
+short version is that daid's CPU is **halted** when the LYC=0 interrupt arrives
+(`vblankInt` ends `ei / halt`), which is what separates it from mealybug, and
+gambatte has ten `halt/` ROMs whose file name states a different expected value
+per device — all ten saying the CGB's post-halt read lands one boundary later,
+across three unrelated boundaries, with dingbat answering DMG on all ten. At 1
+those ten plus three `_ds_` members plus eight `dma/hdma_late_*` go green, and
+**60 rows go red**: 42 `tima/*` (which halt, are woken by the timer, and have
+ONE expected value for both devices — so the CGB does not SPEND the M-cycle,
+because DIV and TIMA would advance through it) and 11 that are the same
+`m0stat` ladder at SCX 2 and 5 where their SCX 3 and 4 siblings wanted it (so
+part of the ten is really the CGB's mode 3 length against SCX). Net **−37
+gambatte, 743 → 740** on a full pass. What is left is a CGB that is later than a
+DMG out of a halt *without spending time*, which is a CPU-to-PPU phase and
+belongs at the `lcd_offset` note, not here.
+
 ## 2026-08-09: the object fetch takes a TILE boundary, and the object picks it
 
 The row above that said "not curable by any of the four `OBJ_BG_RUN` rules" was
