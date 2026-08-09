@@ -360,9 +360,10 @@ Screenshot notes:
 
   dingbat's CGB PPU is not unmeasured: gambatte's `cgb04c` rows are native-CGB
   and there are thousands of them.
-- `strikethrough` and `bully` are `$80` CGB-capable carts, so they always boot
-  CGB here; their `-dmg` references would need a CGB cart forced into DMG mode,
-  which `--cgb` (force CGB *on*) cannot express.
+- `strikethrough` and `bully` are `$80` CGB-capable carts. They used to boot CGB
+  from the header alone, so their `-dmg` references were unreachable; since
+  `--mode=screenshot` reads the *absence* of `--cgb` as "run it on a DMG" the
+  device is named per row and both of strikethrough's references are scored.
 
 Not integrated: `little-things-gb/tellinglys` needs a scripted button press and
 `dingbat_test` has no input scripting — only `dingbat_bench` does, via its

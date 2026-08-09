@@ -10,7 +10,8 @@ const WAVE_DUTY1: array[4, array[8, uint8]] = [
 proc new_channel1*(gb: GB): GbChannel1 =
   GbChannel1(enabled: false, dac_enabled: false, length_counter: 0,
              sweep_period: 0, next_step: GB_NO_STEP,
-             sweep_check_at: GB_NO_STEP, last_step_at: GB_NO_STEP)
+             sweep_check_at: GB_NO_STEP, sweep_stop_at: GB_NO_STEP,
+             sweep_load_at: GB_NO_STEP, last_step_at: GB_NO_STEP)
 
 proc ch1_frequency_timer(ch: GbChannel1): uint32 =
   (0x800'u32 - uint32(ch.frequency)) * 4
@@ -20,16 +21,29 @@ proc ch1_period(ch: GbChannel1; gb: GB): CycleCount {.inline.} =
   ## by the speed shift, so the deadline arithmetic has to as well).
   CycleCount(ch1_frequency_timer(ch)) shl gb.scheduler.speed
 
-proc ch1_frequency_calc(ch: GbChannel1): uint16 =
-  let shifted = ch.frequency_shadow shr ch.shift
-  var calc = int(ch.frequency_shadow) + (if ch.negate: -int(shifted) else: int(shifted))
-  if ch.negate: ch.negate_used = true
-  if calc > 0x07FF: ch.enabled = false
-  result = uint16(calc and 0x7FFF)
+const GB_SWEEP_STOP_DELAY* = CycleCount(4)
+  ## Scheduler cycles (one APU tick) between a sweep overflow CALCULATION and the
+  ## stop it produces becoming visible in NR52 / PCM12 / the mixer.
+  ##
+  ## channel_1_sweep_restart_2 is the only test that sees a sweep calculation and
+  ## its stop separately, because it is the only one whose FIRST calculation
+  ## overflows: NR10 = $10 (pace 1, add, shift 0) doubles the frequency, so a
+  ## channel restarted at $7ff is killed by the very next DIV-APU sweep event
+  ## rather than by the trailing check below. Its N = 0 column reads NR52 at 2, 3,
+  ## 4... M-cycles after the restarting write, the DIV-APU sweep event falls 3
+  ## M-cycles after that write, and the row is `f1 f1 f0 f0...` -- the read
+  ## landing ON the sweep event still sees the channel on, and only the one after
+  ## it sees the stop.
+  ##
+  ## Every other sweep stop in the suite reaches NR52 through this same tick, so
+  ## it is subtracted from the two delays below rather than added on top: the
+  ## totals those tests measure -- 8 M-cycles from a sweep writeback, 9 from a
+  ## trigger -- are unchanged.
 
-const GB_SWEEP_CHECK_DELAY* = CycleCount(32)
-  ## Scheduler cycles (8 M-cycles at single speed) between a sweep writing a new
-  ## frequency back and the second overflow check that can stop the channel.
+const GB_SWEEP_CHECK_DELAY* = CycleCount(28)
+  ## Scheduler cycles (7 M-cycles at single speed) between a sweep writing a new
+  ## frequency back and the second overflow check that can stop the channel. With
+  ## GB_SWEEP_STOP_DELAY on top of it that is the 8 M-cycles the tests measure.
   ##
   ## Pan Docs describes the second calculation as part of the same event; three
   ## separate SameSuite sources say otherwise, in the same words each time.
@@ -39,13 +53,13 @@ const GB_SWEEP_CHECK_DELAY* = CycleCount(32)
   ## If it does, stop the channel", and channel_1_sweep_restart's rounds 3, 4 and
   ## 5 each open with "the channel should stop after 8 cycles, but we <do
   ## something to NR10> before then". Those three rounds are what make the delay
-  ## more than a curiosity: the check reads NR10 as it stands 8 M-cycles LATER,
+  ## more than a curiosity: the check reads NR10 as it stands 7 M-cycles LATER,
   ## so clearing NR10 cancels the stop entirely, and changing the shift changes
   ## which frequency is tested.
   ##
-  ## The first calculation is NOT delayed -- channel_1_sweep_restart_2 drives a
-  ## sweep whose first calculation overflows (shift 0, so the new frequency is
-  ## twice the old) and the channel stops with no 8-cycle grace at all.
+  ## The first calculation is NOT delayed by this: channel_1_sweep_restart_2's
+  ## sweep stops its channel with no 8-cycle grace at all, only the one tick of
+  ## GB_SWEEP_STOP_DELAY.
   ##
   ## The same delay applies to the check an NRx4 TRIGGER performs, with one
   ## extra APU tick: the write is latched on a tick edge and the countdown
@@ -53,26 +67,87 @@ const GB_SWEEP_CHECK_DELAY* = CycleCount(32)
   ## measures that -- restart a channel whose next sweep overflows and it stays
   ## audible for nine more M-cycles, not eight. See the arm in ch1_write.
 
-proc ch1_sweep_check_run(ch: GbChannel1; gb: GB) =
-  ## The body of ch1_sweep_check_due, deliberately NOT inline: the guard is what
-  ## runs on every catch-up and this runs once per sweep period, so inlining it
-  ## only bloats ch1_catchup_at (see notes/perf-measurement-inline-cliff).
-  ch.sweep_check_at = GB_NO_STEP
-  # NR10 is re-read here, not captured when the check was armed: that is the
-  # whole point of rounds 3-5 of channel_1_sweep_restart. Zeroing NR10 between
-  # the two calculations cancels the stop (round 3) while merely changing the
-  # shift does not (round 4), so the gate is the shift, not the period -- and it
-  # has to be the shift, because a trigger arms this check with sweep period 0
-  # (blargg's cgb_sound 06-overflow on trigger).
-  if ch.sweep_enabled and ch.shift > 0:
-    discard ch1_frequency_calc(ch)
+const GB_SWEEP_SHADOW_DELAY* = CycleCount(8)
+  ## Scheduler cycles (2 M-cycles) from a TRIGGER reaching the sweep unit to the
+  ## frequency shadow register actually holding NR13/NR14's value -- so 3
+  ## M-cycles from the write itself, once the one-tick write->unit latency the
+  ## check arm already models is counted in.
+  ##
+  ## channel_1_sweep_restart_2 is what forces it, and it is the whole of that
+  ## test's second half. Each subtest triggers the channel at frequency $7ff, N =
+  ## 0..7 M-cycles earlier than the last, so that the write falls 3, 2, 1, 0...
+  ## M-cycles before a DIV-APU sweep event; the sweep doubles whatever the shadow
+  ## holds and so stops the channel if -- and only if -- it is looking at the
+  ## restarted $7ff rather than the $3ff the channel was triggered with before
+  ## the DIV reset. Hardware stops it for N = 0 alone, i.e. the load has landed
+  ## when the write leads the event by 3 M-cycles and has not when it leads by 2.
+  ## Loading the shadow on the write instead kills N = 0, 1 and 2 alike, which is
+  ## the 32-cell block this constant buys.
+  ##
+  ## Only the shadow is deferred. The sweep timer, `sweep_enabled` and
+  ## `negate_used` are reloaded on the write, and no test here can tell: the
+  ## channel is already sweeping with the same NR10 when it is restarted, so
+  ## every one of those three is reloaded with the value it already had.
 
-template ch1_sweep_check_due*(ch: GbChannel1; gb: GB) =
-  ## Run the pending post-writeback overflow check if its 8 M-cycles are up.
-  ## Called from ch1_catchup_at, so it lands on every observation point rather
-  ## than needing a scheduler event of its own; `enabled` is only visible through
-  ## PCM12, NR52 and the mixer, and all three catch the channel up first.
-  if ch.sweep_check_at <= gb.scheduler.cycles: ch1_sweep_check_run(ch, gb)
+proc ch1_frequency_calc(ch: GbChannel1; gb: GB; at: CycleCount): uint16 =
+  ## One sweep calculation, performed at cycle `at` -- which is NOT always
+  ## gb.scheduler.cycles: the trailing check runs lazily at the first observation
+  ## after it fell due, and the stop it produces has to be dated from the check,
+  ## not from whoever happened to look.
+  let shifted = ch.frequency_shadow shr ch.shift
+  var calc = int(ch.frequency_shadow) + (if ch.negate: -int(shifted) else: int(shifted))
+  if ch.negate: ch.negate_used = true
+  if calc > 0x07FF:
+    ch.sweep_stop_at = at + (GB_SWEEP_STOP_DELAY shl gb.scheduler.speed)
+  result = uint16(calc and 0x7FFF)
+
+proc ch1_sweep_run(ch: GbChannel1; gb: GB) =
+  ## The body of ch1_sweep_due, deliberately NOT inline: the guard is what runs
+  ## on every catch-up and this runs once per sweep period, so inlining it only
+  ## bloats ch1_catchup_at (see notes/perf-measurement-inline-cliff).
+  ##
+  ## Three things can be in flight inside the sweep unit at once -- a trigger's
+  ## shadow load, the trailing overflow check and a stop one of them produced --
+  ## and they are applied in deadline order because the check CONSUMES the
+  ## shadow. In practice a trigger arms the load 5 M-cycles ahead of its own
+  ## check, so the common order is load-then-check; the reverse is only reachable
+  ## when a trigger with shift 0 leaves an older sweep-armed check standing.
+  let now = gb.scheduler.cycles
+  template do_load =
+    if ch.sweep_load_at <= now:
+      ch.sweep_load_at    = GB_NO_STEP
+      ch.frequency_shadow = ch.sweep_load_value
+  template do_check =
+    if ch.sweep_check_at <= now:
+      let at = ch.sweep_check_at
+      ch.sweep_check_at = GB_NO_STEP
+      # NR10 is re-read here, not captured when the check was armed: that is the
+      # whole point of rounds 3-5 of channel_1_sweep_restart. Zeroing NR10
+      # between the two calculations cancels the stop (round 3) while merely
+      # changing the shift does not (round 4), so the gate is the shift, not the
+      # period -- and it has to be the shift, because a trigger arms this check
+      # with sweep period 0 (blargg's cgb_sound 06-overflow on trigger).
+      if ch.sweep_enabled and ch.shift > 0:
+        discard ch1_frequency_calc(ch, gb, at)
+  if ch.sweep_check_at < ch.sweep_load_at:
+    do_check(); do_load()
+  else:
+    do_load(); do_check()
+  # Last, because either calculation above can arm it -- and the check's may
+  # already be due when the check itself is being caught up late.
+  if ch.sweep_stop_at <= now:
+    ch.sweep_stop_at = GB_NO_STEP
+    ch.enabled = false
+
+template ch1_sweep_due*(ch: GbChannel1; gb: GB) =
+  ## Apply whatever the sweep unit has in flight that is now due. Called from
+  ## ch1_catchup_at, so it lands on every observation point rather than needing a
+  ## scheduler event of its own; `enabled` is only visible through PCM12, NR52
+  ## and the mixer, and all three catch the channel up first.
+  if ch.sweep_load_at <= gb.scheduler.cycles or
+     ch.sweep_check_at <= gb.scheduler.cycles or
+     ch.sweep_stop_at <= gb.scheduler.cycles:
+    ch1_sweep_run(ch, gb)
 
 proc ch1_catchup_slow(ch: GbChannel1; gb: GB; observer_period: uint32) =
   let now    = gb.scheduler.cycles
@@ -103,7 +178,7 @@ proc ch1_catchup_at*(ch: GbChannel1; gb: GB; observer_period: uint32) {.inline.}
   ## change the period; see the observation-point list in apu.nim.
   ## observer_period is the caller's own T-cycle period (GB_OBS_CPU for a CPU
   ## access) and only affects a step landing on this exact cycle.
-  ch1_sweep_check_due(ch, gb)
+  ch1_sweep_due(ch, gb)
   if not ch.enabled:
     # The duty counter is clocked only while the channel is ON. Switching it
     # off freezes the phase where it stands -- SameSuite channel_1_stop_restart:
@@ -144,11 +219,11 @@ proc sweep_step*(ch: GbChannel1; gb: GB) =
   if ch.sweep_timer == 0:
     ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
     if ch.sweep_enabled and ch.sweep_period > 0:
-      let calc = ch1_frequency_calc(ch)
+      let calc = ch1_frequency_calc(ch, gb, gb.scheduler.cycles)
       if calc <= 0x07FF and ch.shift > 0:
         ch.frequency_shadow = calc
         ch.frequency         = calc
-        # ...and the check on THAT value is 8 M-cycles away, not now. See
+        # ...and the check on THAT value is 7 M-cycles away, not now. See
         # GB_SWEEP_CHECK_DELAY.
         ch.sweep_check_at = gb.scheduler.cycles + (GB_SWEEP_CHECK_DELAY shl gb.scheduler.speed)
 
@@ -226,18 +301,31 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
       ch.next_step = gb_trigger_deadline(gb, ch1_period(ch, gb),
                                          if was_enabled: 1 else: 2)
       init_volume_envelope(ch)
-      ch.frequency_shadow = ch.frequency
       ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
       ch.sweep_enabled    = ch.sweep_period > 0 or ch.shift > 0
       ch.negate_used      = false
+      # A stop the sweep unit had already decided on does not survive the
+      # restart that re-enabled the channel. Only reachable when the trigger
+      # lands on the very cycle of the calculation that produced it, which no
+      # test covers; clearing it is what keeps the two indistinguishable.
+      ch.sweep_stop_at = GB_NO_STEP
+      # The write reaches the sweep unit on the tick after the one that latches
+      # it -- channel_1_sweep_restart round 2's table is one M-cycle wider than
+      # the sweep's own, which is where that tick comes from -- and from there
+      # the two things a trigger does to the unit run on their own countdowns.
+      #
+      # The shadow load is the shorter of them (GB_SWEEP_SHADOW_DELAY). Pan Docs
+      # would have it happen on the write, and channel_1_sweep_restart_2 says it
+      # does not.
+      let arrives = gb_apu_edge(gb) + gb_apu_tick(gb)
+      ch.sweep_load_value = ch.frequency
+      ch.sweep_load_at    = arrives + (GB_SWEEP_SHADOW_DELAY shl gb.scheduler.speed)
       # Pan Docs: "if the shift is non-zero, frequency calculation and the
       # overflow check are performed immediately". SameSuite
-      # channel_1_sweep_restart round 2 says the same 8 M-cycles apply to this
-      # check as to the sweep's second one -- its channel, restarted at a
-      # frequency whose next sweep overflows, stays audible for eight more
-      # M-cycles -- and that the check is armed off the APU's 1 MHz tick edge,
-      # not off the write, which is the extra M-cycle in that round's table.
+      # channel_1_sweep_restart round 2 says otherwise -- its channel, restarted
+      # at a frequency whose next sweep overflows, stays audible for nine more
+      # M-cycles -- and the check reads the shadow the load above has by then
+      # delivered.
       if ch.shift > 0:
-        ch.sweep_check_at = gb_apu_edge(gb) + gb_apu_tick(gb) +
-                            (GB_SWEEP_CHECK_DELAY shl gb.scheduler.speed)
+        ch.sweep_check_at = arrives + (GB_SWEEP_CHECK_DELAY shl gb.scheduler.speed)
   else: discard

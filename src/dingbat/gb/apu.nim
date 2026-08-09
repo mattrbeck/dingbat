@@ -139,7 +139,7 @@ when not defined(test_harness):
 #      point) and sweep_step rewrites ch1.frequency. tick_frame_sequencer.
 #   6. NR52 channel-active bits -- report `enabled`, which CH1's pending sweep
 #      overflow check CAN change with nothing else touching the APU, so the
-#      NR52 read runs that check (apu_read, ch1_sweep_check_due).
+#      NR52 read runs that check (apu_read, ch1_sweep_due).
 #   7. CGB speed switch -- rescales the deadline exactly as the scheduler
 #      rescales pending events. gb/memory.nim stop_instr.
 #   8. Per-frame scheduler rebase -- next_step is an ABSOLUTE cycle and has to
@@ -165,9 +165,12 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   ## up first, so each deadline is strictly in the future and cannot underflow.
   template adj(ch: untyped) =
     if ch.next_step != GB_NO_STEP: ch.next_step -= base
-  if apu.channel1.sweep_check_at != GB_NO_STEP:
-    # Caught up above, so it is either in the future or was just consumed.
-    apu.channel1.sweep_check_at -= base
+  # Caught up above, so each is either in the future or was just consumed.
+  template adj_sweep(field: untyped) =
+    if apu.channel1.field != GB_NO_STEP: apu.channel1.field -= base
+  adj_sweep(sweep_check_at)
+  adj_sweep(sweep_stop_at)
+  adj_sweep(sweep_load_at)
   # last_step_at is in the PAST, so it can underflow; a rebase only ever happens
   # at a frame boundary, and losing a one-cycle tie there is not observable.
   apu.channel1.last_step_at = GB_NO_STEP
@@ -193,11 +196,15 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
       let remaining = ch.next_step - now
       ch.next_step = now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
                             else:                     remaining shr (old_speed - new_speed))
-  if apu.channel1.sweep_check_at != GB_NO_STEP:
-    let remaining = apu.channel1.sweep_check_at - now
-    apu.channel1.sweep_check_at =
-      now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
-             else:                     remaining shr (old_speed - new_speed))
+  template adj_sweep(field: untyped) =
+    if apu.channel1.field != GB_NO_STEP:
+      let remaining = apu.channel1.field - now
+      apu.channel1.field =
+        now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
+               else:                     remaining shr (old_speed - new_speed))
+  adj_sweep(sweep_check_at)
+  adj_sweep(sweep_stop_at)
+  adj_sweep(sweep_load_at)
   adj(apu.channel1)
   adj(apu.channel2)
   adj(apu.channel3)
@@ -449,9 +456,9 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
   # register bits. The one exception is NR52's channel-on flags: CH1's pending
   # sweep overflow check can clear `enabled` between two reads with nothing else
   # touching the APU, and blargg's cgb_sound 07 sync_sweep is precisely a loop
-  # that polls NR52 waiting for it. See ch1_sweep_check_due.
+  # that polls NR52 waiting for it. See ch1_sweep_due.
   if idx >= 0xFF30: ch3_catchup(apu.channel3, gb)
-  elif idx == 0xFF26: ch1_sweep_check_due(apu.channel1, gb)
+  elif idx == 0xFF26: ch1_sweep_due(apu.channel1, gb)
   case idx
   of 0xFF10..0xFF14: ch1_read(apu.channel1, idx)
   of 0xFF16..0xFF19: ch2_read(apu.channel2, idx)
@@ -553,9 +560,11 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # cleared drift forward again on the next observation, off a period the
       # register reset above has already zeroed.
       apu.channel1.next_step = GB_NO_STEP
-      # A pending sweep overflow check dies with the power, along with the
-      # sweep registers it would have re-read.
+      # Anything in flight inside the sweep unit dies with the power, along with
+      # the sweep registers a pending check would have re-read.
       apu.channel1.sweep_check_at = GB_NO_STEP
+      apu.channel1.sweep_stop_at  = GB_NO_STEP
+      apu.channel1.sweep_load_at  = GB_NO_STEP
       apu.channel2.next_step = GB_NO_STEP
       apu.channel3.next_step = GB_NO_STEP
       apu.channel4.next_step = GB_NO_STEP
