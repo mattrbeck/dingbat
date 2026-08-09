@@ -157,7 +157,7 @@ Diffing the 261 against dingbat's row names:
 | shootout row | dingbat | note |
 |---|---|---|
 | `daid/stop_instr_gbc_mode3.gb` | not run | **see 1.5 — its reference discriminates, unlike `stop_instr (GBC)`** |
-| `daid/ppu_scanline_bgp.gb (GBC)` | not run | deliberate: DMG-flagged cart on CGB = compat mode, "mealybug covers the same machine more precisely" |
+| `daid/ppu_scanline_bgp.gb (GBC)` | not run | deliberate, and **the reason is now measured**: it is 92.50%, a uniform 3 pixels early, and the 3 = one M-cycle at the halt-woken handler entry MINUS one dot of the CGB-C→CGB-D palette step. Its reference is a **later device** than the `_cgb_c` set the 27 mealybug CGB rows score against. See gb-failure-triage.md and `CGB_HALT_EXIT_MCYCLES` |
 | `daid/stop_instr.gb (GBC)` | not run | deliberate and correct: reference is a uniform black frame (147-byte PNG), so the row cannot fail |
 | `ashiepaws/bully.gb (GBC)` | one `bully` row only | dingbat runs the cart CGB (flag `$80`), so its single row is the CGB one |
 | `cpp/sgb-ext-test.gb` | skipped | no SGB model |
