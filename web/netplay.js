@@ -711,7 +711,13 @@ const startLocalLink = (code) => {
 // candidate over the local network, so two phones connect even with no STUN
 // reflexive path between them.
 
-const MANUAL_GATHER_TIMEOUT = 3500; // ms cap on waiting for ICE gathering
+const MANUAL_GATHER_TIMEOUT = 3500; // ms cap on ICE gathering once a public address is in hand
+// A code minted without a server-reflexive (STUN/public) candidate can only
+// pair on its own LAN — across the internet the peer sees nothing but an
+// unresolvable mDNS name and sits in "Connecting…" forever. When STUN is
+// merely slow (cellular CGNAT), wait longer before settling for a LAN-only
+// code; gathering completion still resolves early on fast networks.
+const MANUAL_GATHER_EXTENDED = 8000;
 
 const netConnectView = document.getElementById("net-connect-view");
 const netManualView = document.getElementById("net-manual-view");
@@ -735,21 +741,48 @@ const manualGather = (pc) =>
   new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
     let done = false;
+    let sawSrflx = false;
     const finish = () => { if (done) return; done = true; resolve(); };
     pc.addEventListener("icegatheringstatechange", () => {
       if (pc.iceGatheringState === "complete") finish();
     });
-    pc.addEventListener("icecandidate", (e) => { if (!e.candidate) finish(); });
-    setTimeout(finish, MANUAL_GATHER_TIMEOUT);
+    pc.addEventListener("icecandidate", (e) => {
+      if (!e.candidate) return finish();
+      if (e.candidate.candidate && e.candidate.candidate.includes(" srflx ")) sawSrflx = true;
+    });
+    setTimeout(() => { if (sawSrflx) finish(); }, MANUAL_GATHER_TIMEOUT);
+    setTimeout(finish, MANUAL_GATHER_EXTENDED);
   });
 
 // Connection-state handler (mirrors startRtc's). A pre-start failure means the
 // traded codes are spent (the PC is dead), so put a FRESH code up along with
 // the error — both sides fail together, so both regenerate together.
+// Compact ICE candidate-pair dump for a dead manual pairing: which pairs
+// formed, and whether checks went unanswered (sent>0 got=0 = our packets
+// vanish into a NAT) or never went out at all.
+const logIcePairs = async (pc) => {
+  try {
+    const stats = await pc.getStats();
+    const cand = {};
+    stats.forEach((r) => {
+      if (r.type === "local-candidate" || r.type === "remote-candidate")
+        cand[r.id] = r.candidateType || "?";
+    });
+    stats.forEach((r) => {
+      if (r.type === "candidate-pair")
+        log("netplay: pair " + (cand[r.localCandidateId] || "?") + "→" +
+            (cand[r.remoteCandidateId] || "?") + " " + r.state +
+            " sent=" + (r.requestsSent ?? 0) + " got=" + (r.responsesReceived ?? 0), "warn");
+    });
+  } catch {}
+};
+
 const manualConnState = (pc) => () => {
   if (!net || net.pc !== pc) return;
   const st = pc.connectionState;
+  log("netplay: manual pc " + st + " ice=" + pc.iceConnectionState);
   if (st === "failed") {
+    logIcePairs(pc); // best-effort: the teardown below races the snapshot
     if (net.rtcConnected) {
       netFail("Peer connection lost");
       return;
@@ -788,6 +821,17 @@ const manualPrepare = async () => {
     if (!enc) throw new Error("couldn't encode the offer");
     session.manualCode = enc;
     if (manualOut) manualOut.value = enc;
+    // What the code carries decides where it can pair: srflx = internet-capable
+    // (NAT permitting), mDNS-host only = this LAN only. Logged so a cross-
+    // network "stuck at Connecting…" is diagnosable from the device.
+    const kinds = SDPCodec.fields(pc.localDescription.sdp).candidates.map((c) => {
+      const [type, addr] = c.split("|");
+      return type + (addr.includes(":") ? "/v6" : addr.endsWith(".local") ? "/mdns" : "/v4");
+    });
+    log("netplay: manual code candidates: " + (kinds.join(" ") || "none"));
+    if (!kinds.some((k) => k.startsWith("srflx"))) {
+      log("netplay: manual code has no public address — it can only pair on this network", "warn");
+    }
   } catch (e) {
     if (net === session) {
       manualSetStatus("Couldn't prepare a code: " + (e.message || e), true);
@@ -899,6 +943,23 @@ const manualConfirmGo = async () => {
   if (manualIn) manualIn.readOnly = true;
   if (manualConfirm) manualConfirm.disabled = true;
   manualSetStatus("Connecting…");
+  // A remote list with no routable candidate (mDNS-only, or a stale NAT
+  // mapping) leaves ICE in checking forever without ever reaching 'failed' —
+  // "Connecting…" for eternity. Bound it like the server path's pairing
+  // deadline, with the same fresh-codes recovery as a hard ICE failure.
+  clearTimeout(session.rtcDeadline);
+  session.rtcDeadline = setTimeout(async () => {
+    if (net !== session || session.rtcConnected || session.started) return;
+    log("netplay: manual pairing deadline — no connection in " +
+        RTC_CONNECT_DEADLINE + "ms (ice=" + session.pc?.iceConnectionState + ")", "warn");
+    if (session.pc) await logIcePairs(session.pc);
+    if (net !== session || session.rtcConnected || session.started) return;
+    netFail("Couldn't connect with those codes");
+    if (netModalOpen() && netManualView && !netManualView.hidden) {
+      manualSetStatus("Couldn't connect — trade these fresh codes and try again", true);
+      manualPrepare();
+    }
+  }, RTC_CONNECT_DEADLINE);
 };
 
 manualConfirm?.addEventListener("click", manualConfirmGo);
