@@ -69,7 +69,7 @@ proc ch4_steps_to_rise(counter: uint16; shift: uint8): uint32 =
   let m = 1'u32 shl (int(shift) + 1)
   let t = 1'u32 shl int(shift)
   let c = uint32(counter) and (m - 1)
-  ((t + m - c - 1) mod m) + 1
+  ((t + m - c - 1) and (m - 1)) + 1
 
 proc ch4_next_shift(ch: GbChannel4; gb: GB): CycleCount {.inline.} =
   ## Rebuild the derived LFSR deadline from the two stages.
@@ -86,8 +86,16 @@ proc ch4_grid_up(gb: GB; t: CycleCount; divisor_code: uint8): CycleCount {.inlin
 
 proc ch4_advance_divisor(ch: GbChannel4; gb: GB) =
   ## Run the divisor stage up to the current cycle without touching the LFSR.
-  ## Legal only where no shift can be pending -- every caller has just run
-  ## ch4_catchup, which leaves the next rising edge strictly in the future.
+  ##
+  ## This is the whole reason ch4_catchup_slow does not have to: `div_next` is
+  ## exact at every point the increment period could have changed (trigger,
+  ## NR43 write, speed switch), so however many shifts have gone by since, the
+  ## increments in between are one division away. Callers must have run
+  ## ch4_catchup first, which leaves the next rising edge strictly in the
+  ## future -- so nothing here can have needed to clock the LFSR.
+  ##
+  ## apu_rebase calls it once a frame, which is also what keeps `now -
+  ## div_next` from growing without bound.
   if ch.div_next == GB_NO_STEP: return
   let now = gb.scheduler.cycles
   if ch.div_next > now: return
@@ -130,19 +138,14 @@ proc ch4_catchup_slow(ch: GbChannel4; gb: GB; observer_period: uint32) =
   # shifts (<= 8778 at the shortest divisor) can accumulate -- exactly the
   # number the old event chain would have run anyway.
   #
-  # The divisor stage rides along in closed form, read BEFORE the loop because
-  # the first of these `steps` costs however far the tap's next rising edge was
-  # (`d` increments) and each one after it a whole 2^(shift+1). It follows the
-  # LFSR only as far as the LAST SHIFT: the increments between that and `now`
-  # are nobody's business until an NR43 write asks, and ch4_advance_divisor
-  # settles those when one does.
-  let inc = ch4_inc_period(ch, gb)
-  let m   = CycleCount(1'u32 shl (int(ch.clock_shift) + 1))
-  let d   = CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift))
+  # The divisor stage costs NOTHING here. Its increment period only ever
+  # changes at an NR43 write, a trigger or a speed switch, and each of those
+  # settles it first, so the count between two of them is a division away from
+  # `div_next` whenever somebody asks -- see ch4_advance_divisor. Doing it here
+  # instead measured +0.14% of retired instructions on Pokemon Crystal, paid on
+  # every sample of every noise-using title to serve a register write.
   for _ in 0 ..< steps: ch4_shift(ch)
   ch.next_step += steps * period
-  ch.div_counter += uint16((d + (steps - 1) * m) and CycleCount(0xFFFF))
-  ch.div_next = ch.next_step - period + inc
 
 proc ch4_resync_divisor*(ch: GbChannel4; gb: GB) =
   ## Rebuild the two stages from `next_step` alone. The counter and the divisor
