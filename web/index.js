@@ -457,6 +457,10 @@ const modalFocusables = (overlay) =>
     overlay.querySelectorAll("button, input, select, textarea, [tabindex]")
   ).filter(
     (n) => !n.disabled && n.offsetParent !== null && n.getAttribute("tabindex") !== "-1"
+      // An `inert` subtree is unreachable by Tab, so it must be unreachable by
+      // the trap too: the settings sheet keeps its off-stage screen mounted
+      // (and painted, mid-slide) but inert.
+      && !n.closest?.("[inert]")
   );
 
 const trapFocus = (overlay) => {
@@ -877,40 +881,213 @@ const pickFile = (accept, callback) => {
   input.click();
 };
 
-// Tab bar: one pane visible at a time
-const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
-const settingsTabBar = document.getElementById("settings-tabs");
-const settingsTabsWrap = document.getElementById("settings-tabs-wrap");
+// --- Settings navigation ----------------------------------------------------
+//
+// Which layout is on screen is CSS's business (styles.css, "Settings
+// surface"): >=760px is a fixed 900x640 modal with a section rail, below it an
+// 88dvh sheet whose rail becomes a drill-down list. This half owns which
+// section is showing, which screen the sheet is on, and the navigation that
+// only exists on the sheet — push/pop, the header stepper, hardware back.
+//
+// Order is fixed and never most-recently-used: reordering would mean the item
+// you want is somewhere new each time, which is the original complaint on a
+// different axis.
+const SETTINGS_SECTIONS = ["controls", "gb", "gba", "video", "audio", "general"];
+const SETTINGS_LAST_KEY = "settings-section";
 
-// Edge scrims on the wrapper signal that the bar can scroll further in that
-// direction (the tab bar overflows on narrow phones). Re-checked on scroll,
-// resize, tab selection and modal open — clientWidth is 0 while the modal is
-// closed, so the open-time call does the first real measurement.
-const updateTabsScrollHints = () => {
-  const el = settingsTabBar;
-  settingsTabsWrap.classList.toggle("can-scroll-left", el.scrollLeft > 1);
-  settingsTabsWrap.classList.toggle(
-    "can-scroll-right", el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
+const settingsFrame = document.getElementById("settings-frame");
+const settingsRail = document.getElementById("settings-rail");
+const settingsContent = document.getElementById("settings-content");
+const settingsScroll = document.getElementById("settings-scroll");
+const settingsSectionTitle = document.getElementById("settings-section-title");
+const settingsBackBtn = document.getElementById("settings-back");
+const settingsPrevBtn = document.getElementById("settings-prev");
+const settingsNextBtn = document.getElementById("settings-next");
+const settingsVersionEl = document.getElementById("settings-version");
+
+// Width only, never pointer type or user-agent: an iPad at 1024 gets the rail,
+// and (pointer: coarse) grows its rows rather than handing it a second layout.
+const settingsSheetQuery = window.matchMedia("(max-width: 759px)");
+const settingsIsSheet = () => settingsSheetQuery.matches;
+
+const settingsTabOf = (sec) => settingsTabs.find((t) => t.dataset.tab === sec);
+const settingsName = (sec) => settingsTabOf(sec)?.dataset.name || "";
+const settingsStep = (sec, delta) => {
+  const n = SETTINGS_SECTIONS.length;
+  return SETTINGS_SECTIONS[(SETTINGS_SECTIONS.indexOf(sec) + delta + n) % n];
 };
 
-settingsTabBar.addEventListener("scroll", updateTabsScrollHints, { passive: true });
-window.addEventListener("resize", updateTabsScrollHints);
+let settingsSection = SETTINGS_SECTIONS[0];
+let settingsOnDetail = false;
 
 const selectSettingsTab = (name) => {
-  for (let t of settingsTabs) {
-    let on = t.dataset.tab === name;
+  if (!SETTINGS_SECTIONS.includes(name)) name = SETTINGS_SECTIONS[0];
+  settingsSection = name;
+  for (const t of settingsTabs) {
+    const on = t.dataset.tab === name;
     t.classList.toggle("active", on);
     t.setAttribute("aria-selected", on ? "true" : "false");
-    document.getElementById("settings-pane-" + t.dataset.tab).hidden = !on;
-    // The tab bar scrolls on narrow screens — keep the active tab in view
-    if (on) t.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // Roving tabindex: one stop for the whole list, arrows move within it.
+    t.setAttribute("tabindex", on ? "0" : "-1");
+    const pane = document.getElementById("settings-pane-" + t.dataset.tab);
+    if (pane) pane.hidden = !on;
   }
-  updateTabsScrollHints();
+  settingsSectionTitle.textContent = settingsName(name);
+  // Name the destination, not the direction.
+  settingsPrevBtn.setAttribute(
+    "aria-label", "Previous section: " + settingsName(settingsStep(name, -1)));
+  settingsNextBtn.setAttribute(
+    "aria-label", "Next section: " + settingsName(settingsStep(name, 1)));
+  // Always top, never a restored per-section offset: landing mid-list reads as
+  // the wrong section having loaded.
+  settingsScroll.scrollTop = 0;
+  try { localStorage.setItem(SETTINGS_LAST_KEY, name); } catch {}
 };
 
-settingsTabs.forEach((t) =>
-  t.addEventListener("click", () => selectSettingsTab(t.dataset.tab))
-);
+// The off-stage sheet screen is still painted (it is mid-slide for 200ms) but
+// must not be reachable by Tab or by the modal focus trap. `inert` says both
+// things at once; modalFocusables skips anything inside one.
+const applySettingsScreen = () => {
+  const sheet = settingsIsSheet();
+  settingsFrame.classList.toggle("on-detail", sheet && settingsOnDetail);
+  const off = !sheet ? null : settingsOnDetail ? settingsRail : settingsContent;
+  for (const el of [settingsRail, settingsContent]) {
+    if (el === off) el.setAttribute("inert", "");
+    else el.removeAttribute("inert");
+  }
+};
+
+// One history entry per level, so Android's back gesture matches the sheet:
+// back from a detail returns to the list, back from the list closes the sheet.
+// Entries are only pushed in the sheet layout — a browser Back that closed a
+// desktop dialog would be a surprise.
+const settingsHistOk = typeof history !== "undefined" && !!history.pushState;
+let settingsHistDepth = 0;   // our entries still on the stack
+let settingsHistSkip = 0;    // popstate events we caused ourselves
+
+const settingsHistPush = () => {
+  if (!settingsHistOk) return;
+  settingsHistDepth++;
+  try { history.pushState({ dingbatSettings: settingsHistDepth }, ""); }
+  catch { settingsHistDepth--; }
+};
+
+// Drop n of OUR entries. history.go() fires exactly one popstate however far
+// it travels, so one skip covers the whole unwind.
+const settingsHistDrop = (n) => {
+  if (!settingsHistOk || settingsHistDepth <= 0 || n <= 0) return;
+  n = Math.min(n, settingsHistDepth);
+  settingsHistDepth -= n;
+  settingsHistSkip++;
+  try { history.go(-n); } catch { settingsHistSkip--; }
+};
+
+const showSettingsList = (fromHistory) => {
+  if (!settingsOnDetail) return;
+  settingsOnDetail = false;
+  if (!fromHistory) settingsHistDrop(1);
+  applySettingsScreen();
+  settingsTabOf(settingsSection)?.focus();
+};
+
+const openSettingsSection = (name) => {
+  selectSettingsTab(name);
+  if (!settingsIsSheet() || settingsOnDetail) return;
+  settingsOnDetail = true;
+  settingsHistPush();
+  applySettingsScreen();
+  settingsBackBtn.focus();
+};
+
+window.addEventListener("popstate", () => {
+  if (settingsHistSkip > 0) { settingsHistSkip--; return; }
+  if (settingsHistDepth <= 0) return;
+  settingsHistDepth--;
+  if (settingsOnDetail) showSettingsList(true);
+  else closeSettingsModal(true);
+});
+
+// Layout can change under an open dialog (rotation, a resized window). The
+// sheet always shows a section rather than the bare list in that case, which
+// is where a desktop reader already was.
+settingsSheetQuery.addEventListener?.("change", () => {
+  if (settingsIsSheet() && settingsModal.classList.contains("open")) {
+    settingsOnDetail = true;
+  }
+  applySettingsScreen();
+});
+
+for (const t of settingsTabs) {
+  t.addEventListener("click", () => {
+    if (settingsIsSheet()) openSettingsSection(t.dataset.tab);
+    else selectSettingsTab(t.dataset.tab);
+  });
+}
+
+// Rail keyboard: up/down between sections, Home/End to the ends. On the rail
+// the move selects, because the pane beside it is the thing being labelled; on
+// the sheet's list it only moves focus, because entering is a separate act.
+document.getElementById("settings-tabs").addEventListener("keydown", (e) => {
+  const keys = { ArrowUp: -1, ArrowDown: 1, Home: 0, End: 0 };
+  if (!(e.key in keys)) return;
+  e.preventDefault();
+  const to = e.key === "Home" ? SETTINGS_SECTIONS[0]
+    : e.key === "End" ? SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1]
+    : settingsStep(settingsSection, keys[e.key]);
+  if (settingsIsSheet()) settingsTabOf(to)?.focus();
+  else { selectSettingsTab(to); settingsTabOf(to)?.focus(); }
+});
+
+settingsBackBtn.addEventListener("click", () => showSettingsList());
+settingsPrevBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, -1)));
+settingsNextBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, 1)));
+
+// Swipe the sheet's chrome down to dismiss. The sheet's HEIGHT is never
+// dragged — there is no half-height detent — only its offset, and only far
+// enough to read as a dismissal.
+let sheetDragFrom = 0;
+let sheetDragDy = null;
+const endSheetDrag = () => {
+  if (sheetDragDy === null) return;
+  const dy = sheetDragDy;
+  sheetDragDy = null;
+  settingsFrame.classList.remove("sheet-dragging");
+  settingsFrame.style.transform = "";
+  if (dy > 90) closeSettingsModal();
+};
+settingsFrame.addEventListener("pointerdown", (e) => {
+  if (!settingsIsSheet()) return;
+  const chrome = /** @type {Element} */ (e.target);
+  if (!chrome?.closest?.(".settings-grab, .settings-rail-head, .settings-head")) return;
+  sheetDragFrom = e.clientY;
+  sheetDragDy = 0;
+  settingsFrame.classList.add("sheet-dragging");
+});
+settingsFrame.addEventListener("pointermove", (e) => {
+  if (sheetDragDy === null) return;
+  sheetDragDy = Math.max(0, e.clientY - sheetDragFrom);
+  settingsFrame.style.transform = "translateY(" + sheetDragDy + "px)";
+});
+settingsFrame.addEventListener("pointerup", endSheetDrag);
+settingsFrame.addEventListener("pointercancel", endSheetDrag);
+
+// Anyone reading the build identity is about to retype it into a bug report.
+const copySettingsVersion = async () => {
+  const text = (settingsVersionEl.textContent || "").trim();
+  if (!text) return;
+  try {
+    if (!navigator.clipboard) throw new Error("no clipboard");
+    await navigator.clipboard.writeText(text);
+    showToast("Copied " + text);
+  } catch {
+    showToast("Couldn't access the clipboard");
+  }
+};
+settingsVersionEl.addEventListener("click", copySettingsVersion);
+settingsVersionEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copySettingsVersion(); }
+});
 
 const openSettingsModal = () => {
   menuDropdown.hidden = true;
@@ -919,8 +1096,7 @@ const openSettingsModal = () => {
   fetch("version.txt")
     .then((r) => (r.ok ? r.text() : ""))
     .then((v) => {
-      document.getElementById("settings-version").textContent =
-        v ? "dingbat " + v.trim().slice(0, 12) : "";
+      settingsVersionEl.textContent = v ? "dingbat " + v.trim().slice(0, 12) : "";
     })
     .catch(() => {});
   updateBiosStatusText();
@@ -930,28 +1106,41 @@ const openSettingsModal = () => {
   // Fresh open starts with Advanced folded (defined below the modal helpers;
   // guarded for the pre-parse window, as the menu does for Capture)
   if (typeof collapseAdvanced === "function") collapseAdvanced();
+  // Reopen where they were. A large part of the old friction was people
+  // re-finding the section they had just been in; on the sheet that means
+  // opening ON the section, with the list one back-tap away.
+  let last = null;
+  try { last = localStorage.getItem(SETTINGS_LAST_KEY); } catch {}
+  selectSettingsTab(last || SETTINGS_SECTIONS[0]);
+  settingsOnDetail = settingsIsSheet();
+  applySettingsScreen();
+  if (settingsOnDetail) { settingsHistPush(); settingsHistPush(); }
   settingsModal.classList.add("open");
-  updateTabsScrollHints();  // first measurable layout: modal was display:none
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
 };
 
-const closeSettingsModal = () => {
+const closeSettingsModal = (fromHistory) => {
   kbSelection = -1;
+  if (!fromHistory) settingsHistDrop(settingsHistDepth);
+  settingsHistDepth = 0;
+  settingsOnDetail = false;
   settingsModal.classList.remove("open");
   document.removeEventListener("keydown", kbKeyHandler, true);
   releaseFocus(settingsModal);
 };
 
 document.getElementById("open-settings").addEventListener("click", openSettingsModal);
-document.getElementById("settings-close").addEventListener("click", closeSettingsModal);
+for (const id of ["settings-close", "settings-close-list"]) {
+  document.getElementById(id).addEventListener("click", () => closeSettingsModal());
+}
 
 // Force Update and Toggle Log live in Settings ▸ General ▸ Advanced now. Each
 // one hands the screen to something else (the log overlay, a reload), so
 // Settings has to step aside first. Registered here, ahead of each button's
 // own handler further down the file, so the close happens before the takeover.
 for (const id of ["force-update", "show-log"]) {
-  document.getElementById(id).addEventListener("click", closeSettingsModal);
+  document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
 
 // Advanced is a disclosure, and it refolds on every open of Settings rather
@@ -8402,8 +8591,37 @@ document.getElementById("topbar-handle").addEventListener("click", () => {
 const gpPrev = new Array(10).fill(false);
 const GP_DEADZONE = 0.4;
 
+// Gamepad inside Settings. Worth wiring given the product: the shoulder
+// buttons cycle sections in the same fixed order and with the same wrapping as
+// the sheet's stepper, the d-pad walks the pane's controls, A activates and B
+// goes back or closes. Everything it reads is consumed — with the dialog up,
+// no button reaches the game.
+const settingsGamepadNav = (want) => {
+  const hit = (i) => want[i] && !gpPrev[i];
+  if (hit(8)) selectSettingsTab(settingsStep(settingsSection, -1)); // L
+  if (hit(9)) selectSettingsTab(settingsStep(settingsSection, 1));  // R
+  if (hit(5)) {                                                     // B
+    if (settingsOnDetail) showSettingsList();
+    else closeSettingsModal();
+    return;
+  }
+  if (hit(4)) {                                                     // A
+    const el = /** @type {HTMLElement} */ (document.activeElement);
+    if (el && settingsModal.contains(el) && el.click) el.click();
+  }
+  if (hit(0) || hit(1)) {                                           // d-pad
+    const items = modalFocusables(settingsModal);
+    if (!items.length) return;
+    const d = hit(1) ? 1 : -1;
+    let i = items.indexOf(document.activeElement);
+    if (i < 0) i = d > 0 ? -1 : 0;
+    items[(i + d + items.length) % items.length].focus();
+  }
+};
+
 const pollGamepads = () => {
-  if (typeof Module === "undefined" || !Module._setInput) return;
+  const settingsOpen = settingsModal.classList.contains("open");
+  if (!settingsOpen && (typeof Module === "undefined" || !Module._setInput)) return;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const want = new Array(10).fill(false);
   let anyConnected = false;
@@ -8430,7 +8648,7 @@ const pollGamepads = () => {
     // Tilt cart: the left stick doubles as the accelerometer (full analog
     // range). Only claims the tilt target while deflected so the keyboard /
     // device-orientation sources aren't fought over a centered stick.
-    if (tiltActive) {
+    if (tiltActive && !settingsOpen) {
       if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
         padTiltLive = true;
         tiltTargetX = ax;
@@ -8445,6 +8663,13 @@ const pollGamepads = () => {
   document.body.classList.toggle(
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
   if (!anyConnected) return;
+  if (settingsOpen) {
+    settingsGamepadNav(want);
+    // Absorb the edges: a button held across the close must not arrive at the
+    // game as a fresh press.
+    for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
+    return;
+  }
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
       // In 2P link mode the gamepad is player 2's controller; in online

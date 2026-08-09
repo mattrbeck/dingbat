@@ -3023,110 +3023,722 @@ body.debug-2p .home-tile-link {
   }
 }
 
-/* --- Settings modal (tabbed) --- */
+/* --- Settings surface -----------------------------------------------------
+   One markup tree, two layouts. The rule underneath both, and the whole point
+   of the redesign: THE FRAME IS A FIXED SIZE AND EXACTLY ONE ELEMENT SCROLLS
+   (.settings-scroll). Nothing here is derived from the active section, so the
+   header and the section list stay put when Audio (3 rows) is swapped for
+   General (20). Never animate the frame's width or height.
+
+   >= 760px  a centred 900x640 modal, .settings-rail beside .settings-content.
+   <  760px  an 88dvh bottom sheet where the same two children are the root
+             list and a pushed detail screen.
+
+   760 is derived, not chosen: 200 rail + 460 minimum readable content column
+   + 48 internal gutters + 52 slack. It switches on WIDTH ONLY — an iPad at
+   1024 gets the rail, and the coarse-pointer block below is what makes its
+   rows clear 44px, not a second layout. */
 .modal-settings {
-  max-width: 460px;
+  width: min(900px, 100vw - 64px);
+  max-width: none;
+  /* dvh rather than the spec's vh: identical on any viewport over 736px tall,
+     and correct on a tablet whose toolbar collapses. */
+  height: min(640px, 100dvh - 96px);
+  min-height: 420px;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
 }
 
-/* Wrapper exists to host the non-scrolling edge scrims — the bar itself
-   scrolls, so gradients on it would scroll along with the content */
-#settings-tabs-wrap {
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
   position: relative;
-  margin-bottom: 18px;
 }
 
-/* Edge scrims: shown (via JS class) only while the bar can scroll that way.
-   Two layers each: an opaque fade to the strip surface (clipped tab text
-   visibly dissolves — the shadow alone had near-zero contrast on the dark
-   themes and read as a hard clip), over the --inset-lo shadow that keeps the
-   edge marked even when the cutoff lands exactly on the gap between tabs. */
-#settings-tabs-wrap::before,
-#settings-tabs-wrap::after {
-  content: "";
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  width: 28px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 1;
+/* --- Rail (desktop) / root list (sheet) --- */
+.settings-rail {
+  width: 200px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* One step darker than the content pane; the frame's overflow:hidden is
+     what clips its fill to the corner radius. */
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
 }
 
-#settings-tabs-wrap::before {
-  left: 1px;
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  background:
-    linear-gradient(to right, var(--surface-2) 20%, rgba(0, 0, 0, 0)),
-    linear-gradient(to right, var(--inset-lo), rgba(0, 0, 0, 0));
+.settings-rail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 20px 22px 18px;
 }
 
-#settings-tabs-wrap::after {
-  right: 1px;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background:
-    linear-gradient(to left, var(--surface-2) 20%, rgba(0, 0, 0, 0)),
-    linear-gradient(to left, var(--inset-lo), rgba(0, 0, 0, 0));
+.settings-rail-head h2 {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
 }
 
-#settings-tabs-wrap.can-scroll-left::before,
-#settings-tabs-wrap.can-scroll-right::after {
-  opacity: 1;
+/* Desktop closes from the content header; the sheet's root list closes here. */
+#settings-close-list {
+  display: none;
+}
+
+.settings-rail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 20px;
 }
 
 #settings-tabs {
   display: flex;
-  gap: 4px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  /* More tabs than fit on a narrow phone: scroll horizontally, no scrollbar
-     (a tab clipped at the edge is the scroll affordance) */
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  /* When scrolling a tab into view, stop short of the edge so a sliver of
-     the neighboring tab stays visible as a "there's more" hint */
-  scroll-padding: 0 28px;
-}
-
-#settings-tabs::-webkit-scrollbar {
-  display: none;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .settings-tab {
-  /* Grow to fill the bar when there's room, but never shrink below the
-     label — overflow scrolls instead */
-  flex: 1 0 auto;
-  padding: 7px 4px;
-  font-size: 12.5px;
-  font-weight: 600;
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 12px;
+  font-family: inherit;
+  font-size: 15px;
+  text-align: left;
   color: var(--text-dim);
   background: none;
   border: none;
-  border-radius: calc(var(--radius-sm) - 2px);
+  border-radius: 8px;
   cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.13s, color 0.13s;
 }
 
+/* Neutral fill, no motion and no transform: a rail row that moves under the
+   cursor is the same complaint this redesign exists to fix, in miniature. */
 .settings-tab:hover {
   color: var(--text);
+  background: rgba(var(--hi-rgb), 0.06);
 }
 
 .settings-tab.active {
   color: var(--accent);
-  background: var(--surface-1);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--inset-hi);
+  background: rgba(var(--accent-rgb), 0.12);
+  font-weight: 600;
 }
 
-/* A stable height keeps the dialog from jumping between tabs */
+/* The sheet moves focus to Back on every push, so the ring is seen often
+   enough that the UA's blue would read as a different app's control. */
+.settings-tab:focus-visible,
+.settings-back:focus-visible,
+.settings-stepper button:focus-visible,
+.settings-version:focus-visible,
+.settings-head .modal-close:focus-visible,
+#settings-close-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+/* Row descriptions and the drill-down chevron belong to the sheet's list. */
+.settings-tab-desc,
+.settings-row-chevron {
+  display: none;
+}
+
+/* --- Content pane (desktop) / detail screen (sheet) --- */
+.settings-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-head-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Back and the stepper are sheet chrome. */
+.settings-back,
+.settings-stepper {
+  display: none;
+}
+
+.settings-head .modal-close {
+  position: static;
+  flex: 0 0 auto;
+}
+
+/* The one scroll container in the dialog. scrollbar-gutter keeps short
+   sections from shifting the content sideways by the scrollbar's width when
+   the bar disappears — the second, quieter jump in the old build. */
+.settings-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 24px;
+}
+
+/* Section swap: a 120ms cross-fade of the pane only. Toggling [hidden]
+   restarts the animation, so no JS class is needed. */
 .settings-pane {
-  min-height: 264px;
+  animation: settings-pane-in 0.12s ease-out;
 }
 
-/* The first section label in a pane needs no separator — the tab bar is one */
+@keyframes settings-pane-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* --- Settings rows -------------------------------------------------------
+   Two columns: label + description left, control right-aligned and
+   top-aligned across both text rows, 28px between them. Explicit grid areas
+   rather than auto-placement because the panes carry two row shapes — some
+   wrap label and description in a <div>, some list them flat beside the
+   control — and both have to land the same way. */
+.settings-pane .modal-toggle-row,
+.settings-pane .settings-reset-row,
+/* Out-specify the .row-flow float treatment further down the sheet: inside
+   the settings pane the content column is wide enough for the control to
+   stand beside the description rather than float into it. */
+.settings-pane .modal-toggle-row.row-flow:not(.hidden),
+.settings-pane .settings-reset-row.row-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 28px;
+  align-items: start;
+  margin: 0 0 26px;
+}
+
+.settings-pane .modal-toggle-row > .modal-row-label,
+.settings-pane .settings-reset-row > .modal-row-label {
+  grid-area: 1 / 1;
+  display: block;
+  margin: 0 0 4px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.settings-pane .modal-toggle-row > .modal-toggle-sub,
+.settings-pane .settings-reset-row > .modal-toggle-sub {
+  grid-area: 2 / 1;
+  display: block;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+/* The wrapped shape: one <div> holding label + description. */
+.settings-pane .modal-toggle-row > div:not(.chip-row) {
+  grid-area: 1 / 1 / span 2 / span 1;
+  min-width: 0;
+}
+
+.settings-pane .modal-toggle-row > div:not(.chip-row) .modal-row-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.settings-pane .modal-toggle-row > div:not(.chip-row) .modal-toggle-sub {
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.settings-pane .modal-toggle-row > .switch,
+.settings-pane .modal-toggle-row > .row-flow-ctl,
+.settings-pane .modal-toggle-row > .chip-row,
+.settings-pane .settings-reset-row > .row-flow-ctl {
+  grid-area: 1 / 2 / span 2 / span 1;
+  justify-self: end;
+  align-self: start;
+  float: none;
+  margin: 2px 0 0;
+}
+
+/* Hairline between consecutive rows. Sibling selector, not :has(), so it
+   also works where :has() does not; a hidden row contributes nothing. */
+.settings-pane .modal-toggle-row + .modal-toggle-row {
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-pane .settings-reset-row {
+  margin-top: 26px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Version string ------------------------------------------------------
+   Reference information someone goes looking for while filing a bug, not
+   something read while changing a setting: one fixed place, invisible the
+   rest of the time. Desktop pins it to the foot of the rail with a flex
+   spacer; the sheet puts it at the end of the root list's scroll content. */
+.settings-version {
+  margin: auto 0 0;
+  padding: 20px 12px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.settings-version:hover {
+  color: var(--text-dim);
+}
+
+/* --- Sheet chrome, inert until the sheet layout claims it --- */
+.settings-grab {
+  display: none;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 8px 0 2px;
+}
+
+.settings-grab span {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-2);
+}
+
+.settings-back {
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  margin-left: -10px;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.settings-back svg,
+.settings-stepper svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The stepper is what makes drill-down viable: the next section is one tap
+   away in a position that never moves. Vertical chevrons on purpose — a
+   horizontal pair would read as the same axis as Back, i.e. as going deeper,
+   and this is a sideways move at the same depth. */
+.settings-stepper {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.settings-stepper button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 38px;
+  padding: 0;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.settings-stepper button + button {
+  border-left: 1px solid var(--border-2);
+}
+
+.settings-stepper button:active {
+  background: rgba(var(--hi-rgb), 0.07);
+}
+
+.settings-row-chevron {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-faint);
+}
+
+/* --- Touch on wide screens (3.5) -----------------------------------------
+   Same layout, bigger targets. Width decides the layout; the pointer only
+   decides how tall a row is. */
+@media (pointer: coarse) {
+  .settings-tab {
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+
+  .settings-head .modal-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .settings-stepper button {
+    height: 44px;
+  }
+
+  /* A 42x24 switch is the smallest target in the pane. Grow the hit area
+     without moving anything: padding out, margin back. */
+  .settings-pane .switch {
+    padding: 10px 0;
+    margin: -10px 0;
+  }
+}
+
+/* A wide but very short viewport — a phone in landscape is 812x375, and the
+   layout switches on width only, so it lands here rather than on the sheet.
+   3.4 says the frame stops shrinking at 420 and the page behind it clips; at
+   375 that would put the close button and the rail's title off-screen, so the
+   frame is allowed to fit instead and the rail is compacted to keep its six
+   rows visible without scrolling, which is what the 420 floor was protecting.
+   After the coarse-pointer block on purpose: fitting beats 44px here. */
+@media (min-width: 760px) and (max-height: 479px) {
+  .modal-settings {
+    min-height: 0;
+    height: calc(100dvh - 24px);
+  }
+
+  .settings-rail-head {
+    padding: 12px 22px 8px;
+  }
+
+  .settings-rail-head h2 {
+    font-size: 17px;
+  }
+
+  .settings-rail-body {
+    padding-bottom: 12px;
+  }
+
+  .settings-tab {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .settings-version {
+    padding-top: 10px;
+  }
+
+  .settings-head {
+    padding: 12px 20px 10px;
+  }
+}
+
+/* --- Bottom sheet (< 760px) ---------------------------------------------- */
+@media (max-width: 759px) {
+  #settings-modal {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-settings {
+    width: 100%;
+    /* dvh is required, not a preference: with vh, Safari's collapsing URL bar
+       resizes the sheet mid-scroll and reintroduces exactly the movement this
+       redesign removes. 88 and not 100 so the strip of app above the sheet
+       stays as the tap-to-close affordance. */
+    height: 88dvh;
+    min-height: 0;
+    border-radius: 20px 20px 0 0;
+    border-bottom: none;
+    animation: settings-sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+    /* Only ever used to spring back from an abandoned swipe-to-dismiss; the
+       frame's width and height are never animated. */
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  .modal-settings.sheet-dragging {
+    transition: none;
+  }
+
+  .settings-grab {
+    display: flex;
+  }
+
+  .settings-body {
+    overflow: hidden;
+  }
+
+  /* Push and pop happen INSIDE the sheet — the sheet itself never resizes or
+     re-animates. Both screens stay mounted through the 200ms slide; the one
+     off-stage is `inert` (set from index.js) so the focus trap cannot reach
+     it. */
+  .settings-rail,
+  .settings-content {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: var(--surface-1);
+    border-right: none;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  .settings-content {
+    transform: translateX(100%);
+  }
+
+  .modal-settings.on-detail .settings-rail {
+    transform: translateX(-32%);
+  }
+
+  .modal-settings.on-detail .settings-content {
+    transform: translateX(0);
+  }
+
+  .settings-rail-head {
+    padding: 10px 18px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-rail-head h2 {
+    font-size: 22px;
+  }
+
+  #settings-close-list {
+    display: flex;
+    position: static;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+  }
+
+  .settings-rail-body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 10px 12px calc(12px + var(--safe-b));
+  }
+
+  /* List rows: name, a one-line description that is the reason this beats a
+     tab strip for finding things, and a chevron. One line only — truncated,
+     never wrapped, so every row is the same height. */
+  .settings-tab {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 12px;
+    padding: 17px 12px;
+    border-radius: 10px;
+  }
+
+  .settings-tab-name {
+    grid-area: 1 / 1;
+    font-size: 17px;
+    color: var(--text);
+  }
+
+  .settings-tab-desc {
+    display: block;
+    grid-area: 2 / 1;
+    margin-top: 3px;
+    font-size: 13px;
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-row-chevron {
+    display: block;
+    grid-area: 1 / 2 / span 2 / span 1;
+  }
+
+  .settings-tab:hover {
+    background: none;
+  }
+
+  .settings-tab:active {
+    background: rgba(var(--hi-rgb), 0.06);
+  }
+
+  /* Neutral, not accent: on the list, "last visited" is a memory aid, not a
+     selection. */
+  .settings-tab.active {
+    color: inherit;
+    background: rgba(var(--hi-rgb), 0.045);
+    font-weight: 400;
+  }
+
+  .settings-tab.active .settings-tab-name {
+    font-weight: 600;
+  }
+
+  /* Hairline between rows, inset from both edges. */
+  .settings-tab + .settings-tab::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12px;
+    right: 12px;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .settings-version {
+    margin: 24px 0 0;
+    padding: 0 12px;
+    text-align: right;
+  }
+
+  /* Detail header: back, title, stepper. No close — back and the stepper own
+     that space, and swipe-down plus a backdrop tap still dismiss. */
+  .settings-head {
+    padding: 8px 14px 14px;
+  }
+
+  .settings-back {
+    display: flex;
+  }
+
+  .settings-head-title {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .settings-stepper {
+    display: flex;
+  }
+
+  .settings-head .modal-close {
+    display: none;
+  }
+
+  .settings-scroll {
+    padding: 18px 18px calc(18px + var(--safe-b));
+    scrollbar-gutter: auto;
+  }
+
+  /* 4.3: same two columns, tighter gap, no dividers. */
+  .settings-pane .modal-toggle-row,
+  .settings-pane .settings-reset-row {
+    column-gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .settings-pane .modal-toggle-row + .modal-toggle-row {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .settings-pane .settings-reset-row {
+    margin-top: 24px;
+  }
+}
+
+@keyframes settings-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* A phone in landscape: a partial sheet leaves nothing usable, so it takes
+   the whole viewport, loses the handle, and gets the close button back. */
+@media (max-width: 759px) and (max-height: 479px) {
+  .modal-settings {
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .settings-grab {
+    display: none;
+  }
+
+  .settings-head .modal-close {
+    display: flex;
+  }
+}
+
+/* Under a very narrow sheet a select or a chip pair beside the description
+   leaves it about twenty characters wide. Below 420px those controls go back
+   to floating into the last line of the text (the .row-flow treatment
+   documented further down), which is what that treatment was built for. */
+@media (max-width: 419px) {
+  .settings-pane .modal-toggle-row.row-flow:not(.hidden),
+  .settings-pane .settings-reset-row.row-flow {
+    display: flow-root;
+  }
+
+  .settings-pane .modal-toggle-row.row-flow > .modal-row-label,
+  .settings-pane .settings-reset-row.row-flow > .modal-row-label {
+    margin-bottom: 2px;
+  }
+
+  .settings-pane .modal-toggle-row.row-flow > .modal-toggle-sub,
+  .settings-pane .settings-reset-row.row-flow > .modal-toggle-sub {
+    display: inline;
+  }
+
+  .settings-pane .modal-toggle-row.row-flow > .row-flow-ctl,
+  .settings-pane .settings-reset-row.row-flow > .row-flow-ctl {
+    float: right;
+    margin: 2px 0 0 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-pane {
+    animation: none;
+  }
+
+  .settings-rail,
+  .settings-content {
+    transition: none;
+  }
+
+  .modal-settings {
+    animation: overlay-in 0.15s ease-out;
+  }
+}
+
+/* The first section label in a pane needs no separator — the header is one */
 .settings-pane .modal-subhead:first-child,
 .modal-subhead.no-rule {
   border-top: none;
@@ -3299,15 +3911,6 @@ body.debug-2p .home-tile-link {
   background: linear-gradient(180deg, var(--danger-hi), var(--danger));
   border-color: rgba(var(--danger-rgb), 0.6);
   font-weight: 600;
-}
-
-/* Build identity at the bottom of the settings modal ("dingbat <commit>") */
-.settings-version {
-  margin: 14px 0 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-faint);
-  text-align: right;
 }
 
 /* Radio option rows (renderer / BIOS mode) */
