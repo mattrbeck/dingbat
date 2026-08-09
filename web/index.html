@@ -1098,22 +1098,21 @@
              Same Wi-Fi is the most reliable.</p>
           <!-- No visible code box: the code is minted invisibly and kept fresh
                (re-gathered while unshared) so Share/Copy always send a young
-               one — NAT mappings behind a code decay in under a minute. -->
+               one — NAT mappings behind a code decay in under a minute. The
+               buttons split the row evenly; where Share is hidden (no Web
+               Share API — netplay.js reveals it on touch devices), Copy
+               fills it alone. Short captions so both fit an SE-width modal. -->
           <div class="net-join-row net-manual-out-row">
-            <p class="net-manual-label" id="net-manual-out-label">Your code:</p>
-            <!-- Share revealed on touch devices with the Web Share API
-                 (netplay.js): the code is headed to a messenger anyway. -->
             <button type="button" class="button" id="net-manual-share" hidden
-                    aria-describedby="net-manual-out-label" disabled>Share</button>
+                    disabled>Share code</button>
             <button type="button" class="button" id="net-manual-copy"
-                    aria-describedby="net-manual-out-label" disabled>Copy</button>
+                    disabled>Copy code</button>
           </div>
-          <p class="net-manual-label" id="net-manual-in-label">Friend's code:</p>
           <div class="net-join-row">
             <input id="net-manual-in" class="net-manual-code" type="text"
                    autocomplete="off" autocorrect="off" autocapitalize="off"
-                   spellcheck="false"
-                   aria-labelledby="net-manual-in-label" />
+                   spellcheck="false" placeholder="Friend's code"
+                   aria-label="Friend's code" />
             <button type="button" class="button button-primary" id="net-manual-confirm" disabled>Confirm</button>
           </div>
           <p id="net-manual-status" class="net-status" aria-live="polite"></p>
