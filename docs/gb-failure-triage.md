@@ -234,6 +234,72 @@ lets you sweep the edge across the sampling grid on demand.
 
 ## The mode-0 STAT latch, bracketed on both sides to the dot
 
+> **CLOSED 2026-08-09 — bucket 15's readback half is solved and shipped**
+> (`9ff4bd7`, `965aa1d`; derivation at `stat_read_mode` in `gb/ppu.nim`).
+> The whole model is one threshold, `T`: a read whose M-cycle leaves the PPU dot
+> counter at `cc` returns mode 0 iff `cc - m0 >= T`. dingbat's `T` was **5** at
+> normal speed and **3** in double, because `read_mode` is latched at the top of
+> `fifo_tick` — one dot *before* the M-cycle's first dot — so what it carried was
+> the M-cycle's length plus one and not a sample point at all. **That is the
+> "one dot unaccounted for independently of `L`" below**: `STAT_READ_LAG`'s
+> documented meaning (`cc - 1 - L`) and its implementation (`cc - 2 - L`)
+> differed by one, so the `4D + L = 4` equation was solved a dot out and every
+> cell of that grid is off by the same dot.
+>
+> `T = 2` at normal speed and `3` in double, each bracketed on **both** sides by
+> ROMs that take **no interrupt** — which is the methodological point, because
+> every `m2int_*` row's read dot is only as good as its dispatch dot:
+>
+> | speed | ROM | `cc − m0` | wants | pins |
+> |---|---|---|---|---|
+> | 1x | GBMicrotest `ppu_sprite0_scx0_a` | 1 | mode 3 | `T ≥ 2` |
+> | 1x | gambatte `sprites/1spritesPrLine_m3stat_2` | 2 | mode 0 | `T ≤ 2` |
+> | 2x | gambatte `sprites/1spritesPrLine_m3stat_ds_1` | 2 | mode 3 | `T ≥ 3` |
+> | 2x | gambatte `sprites/10spritesPrLine_m3stat_ds_2` | 3 | mode 0 | `T ≤ 3` |
+>
+> `NspritesPrLine` confirms the *size* of the old error independently: each
+> object moves `m0` by 11 dots across the CPU's 4-dot read grid, so an error of
+> `e` dots leaves `(4 − e)/4` of the object counts agreeing with hardware.
+> Exactly one `N` in four passed, which is `e = 3` and nothing else — and 3 is
+> what `T` going 5 → 2 is.
+>
+> Measured: runner **743 → 765**, GBMicrotest **404 → 430** (all 26 of the
+> `0x83`-against-`0x80` rows and *nothing else in that suite moves*), mooneye
+> **112 → 113** with `acceptance/ppu/intr_2_mode0_timing_sprites` taking
+> acceptance to 66/66, `NspritesPrLine` single-speed **54 → 86 of 88** with the
+> `_ds` column unchanged, and not one row or pixel of mealybug, acid2, blargg,
+> daid or the mGBA suite. gambatte **3856 → 3818** (+64 / −102) — see the note
+> on bucket 14 below, which now owns every one of those 102 rows.
+>
+> Two things falsified on the way. **The double-speed dot is not a readback
+> term**: nothing measured in CPU T-cycles can grow when the CPU clock doubles,
+> so the extra dot is the half-dot the CPU's M-cycle boundary sits at against
+> the PPU's dot grid once the M-cycle is 2 dots, which `cycles shr
+> current_speed` rounds to zero. **And it is not the speed switch's phase
+> either**: moving `SPEED_SWITCH_STALL_T` by the one dot that separates the CPU
+> and the PPU takes the double-speed rows the *other* way (−110 / +18).
+>
+> **What this unblocks is bucket 14, and it also promotes it.** 98 of the 102
+> gambatte rows traded are `m2int_*`-anchored and are arithmetically exactly one
+> CPU M-cycle of mode-2 STAT dispatch away from correct (4 dots at normal speed,
+> 2 in double; the other 4 are `lcd_offset` rows whose read is on a line with no
+> mode 3). GBMicrotest says the same from ROMs that never read STAT —
+> `int_oam_nops` `0x94` vs `0x93`, `int_oam_incs` `0x70` vs `0x6F`,
+> `oam_int_inc_sled`, `oam_int_nops_a`, `lcdon_to_oam_int_l0..2`,
+> `line_144_oam_int_c`, each exactly one M-cycle over, while the hblank, LYC and
+> vblank equivalents are exact. **The old `T = 5` was three dots of readback
+> error cancelling four dots of dispatch error**, which is why moving either
+> alone looks like a regression and why bucket 14 could never be scored before
+> this landed. The six `mooneye-wilbertpol/intr_2_mode0_scx*_timing_nops` rows
+> are the same story from the other side: 6 of 8 passed on the cancellation, and
+> all 8 now fail *uniformly* — one M-cycle, where a residue-split failure was
+> two errors of different sizes.
+>
+> Still open in this bucket: the ~13 SCX-residue rows and the 20 `halt` rows,
+> neither of which moved, and the half-dot itself, which an integer-dot PPU
+> cannot represent anywhere but here.
+
+
 Exactly **21** GBMicrotest rows report `$FF80 = 0x83` against `$FF81 = 0x80`:
 `ppu_sprite0_scx{1,2,3,5,6,7}_b`, `sprite_0_b`, `sprite_1_b`,
 `win{0,1,2,7,8,9,10,11,12,13,14,15}_b`, `win10_scx3_b`. Every `_a` sibling passes,
@@ -449,8 +515,8 @@ exists for it).
 |---|---|---|---|
 | 12 | **HDMA block owed to a CPU that is off the bus** (halted, or stalled by a speed switch) | **61** (`dma` 30 + speed-switch 31) | The rule — a CPU off the bus stalls the block — is already in the tree for HALT (`eb75393`) and is right *in kind*. Built for the speed-switch half: **+11 / −10**. It fixes every `_1` family member and breaks every `_2`/`_3`, because hardware still delivers the **one block already owed** at the instant of the STOP. That last block's phase is set by the mode-0 edge, i.e. bucket 15 |
 | 13 | **PPU dot phase coming out of a speed switch** | **55** (`speedchange*_ly44_m3_*m3stat*`) | Uniform `exp=C3,C0 got=C0,C0`. Sweeping `SPEED_SWITCH_STALL_T` is jagged (+0/+6/+6/+11/+6/+12/+12/+8) and **65544's +11 are all the single→double variants and none of the `speedchange2..5_` ones**, so it is not one stall length. 65540 is SameBoy's ripple counter and is pinned by the blargg canary. The derivable route is the mechanism the existing comment already names as unmodelled: the 6-cycle switch countdown plus the PPU re-alignment freeze |
-| 14 | **OAM STAT source rises one M-cycle late** — and *only* that source | **157 gained / 258 lost** across `window`, `m2enable`, `m2int_*`, `oam_access`, `vram_m3`, `halt`, plus 7 GBMicrotest | The single largest finding in the triage and currently **net −101**. `STAT_IRQ_LEAD` moves all four sources together, which is why `D = 1` was correctly rejected before — the measurement says `D_oam = 1` and `D_hblank = D_lyc = D_vblank = 0`, a per-source lead that was never in the search space. GBMicrotest gives it a clean boundary column (7 rows, all exactly +1, all going exact under the fix). What refuses it is every family where a ROM *writes a PPU register from the STAT handler*, so the interrupt's dot doubles as the write's dot — `scx_during_m3` −28, `scy` −9, `bgtiledata`/`bgtilemap` → 0. **Exactly one of {OAM dispatch dot, mode-3 fetch phase} is wrong and they currently cancel.** Perf risk is **high**: it needs a second stop in `fifo_skip_target`, ~17.5k calls/frame |
-| 15 | **The sub-M-cycle error at the mode 3 → 0 edge** | **≥ 21 GBMicrotest + the `NspritesPrLine` family + 20 `halt` + ~13 SCX-residue rows** | The most over-subscribed unknown in the tree. `M3_END_EARLY`, `LCD_ON_LINE0_TRIM`, `LCD_ON_HEAD_START` and `GDMA_SETUP_MCYCLES` have each been refused for it. Newly bracketed here: hardware samples mode 0 at `cc − 2` (tight both sides), dingbat no earlier than `cc − 5`, and **one of those dots is unexplained even at the shipping `L = 3`** |
+| 14 | **OAM STAT source rises one M-cycle late** — and *only* that source | **157 gained / 258 lost** across `window`, `m2enable`, `m2int_*`, `oam_access`, `vram_m3`, `halt`, plus 7 GBMicrotest | The single largest finding in the triage and currently **net −101**. `STAT_IRQ_LEAD` moves all four sources together, which is why `D = 1` was correctly rejected before — the measurement says `D_oam = 1` and `D_hblank = D_lyc = D_vblank = 0`, a per-source lead that was never in the search space. GBMicrotest gives it a clean boundary column (7 rows, all exactly +1, all going exact under the fix). What refuses it is every family where a ROM *writes a PPU register from the STAT handler*, so the interrupt's dot doubles as the write's dot — `scx_during_m3` −28, `scy` −9, `bgtiledata`/`bgtilemap` → 0. **Exactly one of {OAM dispatch dot, mode-3 fetch phase} is wrong and they currently cancel.** Perf risk is **high**: it needs a second stop in `fifo_skip_target`, ~17.5k calls/frame. **Unblocked and promoted 2026-08-09**: bucket 15's readback landed, and with the readback right the cancellation is gone — 98 more gambatte rows and 6 mooneye-wilbertpol ones are now arithmetically exactly this one M-cycle, on top of the 258 it already owned. Note the lever: `STAT_IRQ_LEAD` moves all four sources and is the wrong one (−184 rows); what is needed is `D_oam = 1` alone, which has never been in that knob's search space |
+| 15 | ~~**The sub-M-cycle error at the mode 3 → 0 edge**~~ | **≥ 21 GBMicrotest + the `NspritesPrLine` family + 20 `halt` + ~13 SCX-residue rows** | **The readback half is CLOSED 2026-08-09** — see the section above. The unexplained dot was the `read_mode` latch being taken one dot before the M-cycle's first, so `STAT_READ_LAG`'s documented meaning and its implementation disagreed by a dot and the `4D + L = 4` grid was solved a dot out. The sample point is `cc − 2` at normal speed and `cc − 3` in double, bracketed both sides at both speeds by ROMs that take no interrupt. Runner 743 → 765, GBMicrotest 404 → 430, mooneye acceptance 66/66, gambatte 3856 → 3818 with all 102 traded rows owned by bucket 14. Still open here: the SCX-residue rows and the 20 `halt` rows |
 | 16 | **CGB `$D000` window aliases `$C000`** | **64** (`oamdma`) | Forcing `$D000-$DFFF → wram[0]` measures **+64 / −2**, and the −2 are exactly the two ROMs that pin banking. But the ROMs' shared prologue writes `SVBK = 2`, so the 64 expectations assert that bank 2 *is* bank 0 — which contradicts the two banking ROMs. **Declined pending hardware**: dump WRAM on a real CGB-C after `LDH ($70),$02`; if `$CFFF ≠ $DFFF` these rows are permanently unreachable |
 | 17 | **LCD-on / boot dot phase** | **75** (`enable_display` 49, `lcd_offset` 22, `display_startstate` 4) | Already written up at `LCD_ON_HEAD_START` / `CGB_BOOT_PHASE`; `lcd_offset` is 100% CGB-only |
 | 18 | **Mode-1 / vblank STAT source values** | **42** (`m1`) | A *value* question (`exp=0,3 got=1,1`), not a phase one: whether the mode-1 STAT source asserts at all on entering vblank, and how it overlaps the vblank IF bit. Untouched by every STAT phase experiment run |
@@ -653,6 +719,9 @@ scores well. Four previous agents declined fits at this exact spot and every one
 of those calls was later vindicated.
 
 ### Runner-up: decide bucket 14 (the OAM STAT source) by resolving the cancellation, not by scoring it
+
+**Now the top recommendation (2026-08-09).** Bucket 15's readback landed, so the cancellation this
+section describes has come apart and the OAM dispatch is the only term left in it.
 
 It is the largest single mechanism found — 7 GBMicrotest rows with a clean
 boundary column, all exactly +1, all going exact under the fix — and it is

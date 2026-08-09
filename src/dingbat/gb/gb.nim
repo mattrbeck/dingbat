@@ -1596,12 +1596,14 @@ type
     when LCD_ON_TRIM_ANY:
       lcdon_lines*:      uint8   # lines left in the LCD-on trim window
     cycle_counter*:      int32
-    # STAT mode bits as observed by a CPU read. A read M-cycle samples the bus
-    # value at the START of the cycle, but the emulator ticks the PPU forward by
-    # the whole M-cycle before read_byte runs; this latch snapshots the mode at
-    # each tick entry so STAT reads see the pre-advance mode (mooneye
-    # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
-    # interrupt and must still observe the old mode).
+    # The mode as it stood when this M-cycle's dots began, snapshotted at each
+    # tick entry because the emulator ticks the PPU forward by the whole
+    # M-cycle before read_byte runs. This is what the CPU's VRAM/OAM locks are
+    # decided on (cpu_vram_open / cpu_oam_open); the mode bits a STAT READ
+    # returns are NOT this -- they come off stat_chg_dot below, which is a
+    # different dot. It was this latch until 2026-08-09, and the dot it lands on
+    # (one before the M-cycle's first) is where the "one unaccounted-for dot" in
+    # docs/gb-failure-triage.md's bucket 15 was hiding.
     #
     # Bit 7 (LY_JUST_CHANGED) rides along in the same byte: it is set by an LY
     # advance and cleared by the next tick's snapshot, i.e. it marks "LY changed
