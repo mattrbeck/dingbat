@@ -313,7 +313,12 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF00:         joypad_read(gb.joypad, gb)
   of 0xFF01..0xFF02: serial_read(gb.serial, gb, idx)
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
-  of 0xFF0F:         irq_read(gb.interrupts, idx)
+  of 0xFF0F:
+    when defined(gb_if_trace):
+      if gb.fifo_ppu != nil:
+        echo "IFREAD ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+             " if=", toHex(irq_read(gb.interrupts, idx), 2)
+    irq_read(gb.interrupts, idx)
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx, gb)
   of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_read(gb.ppu, gb, idx)

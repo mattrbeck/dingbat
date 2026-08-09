@@ -155,6 +155,16 @@ delta, so a family reports its own error in dots rather than a verdict.
 `objsweep.sh` sweeps the two OBJ-penalty terms against a gambatte subdirectory,
 which is how those two constants were pinned.
 
+## Where an interrupt flag was set, and where the CPU read it
+
+`-d:gb_stat_read_trace` says when a STAT source rose, `-d:gb_irq_trace` when the
+CPU vectored off one, and `-d:gb_if_trace` — the third leg — one `IFREAD` line
+per CPU read of `$FF0F`, with the PPU dot and the byte. Together they turn a
+gambatte `_ifw` / `_late_retrigger` / `lcdirq_precedence` row into three dots on
+one line: the edge, the dispatch, and the read the ROM scores. That is how
+`IRQ_SAMPLE_T` (`gb/cpu.nim`) was bracketed, and how the `ly0` rows were shown
+NOT to be that constant.
+
 ## Reading a STAT-bracketed row
 
 The gambatte `*_m3stat_{1,2}` pairs differ by exactly one NOP, so they bracket

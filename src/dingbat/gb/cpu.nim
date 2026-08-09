@@ -82,6 +82,65 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
+const IRQ_SAMPLE_T* {.intdefine.} = 16
+  ## How far into the 5 M-cycle interrupt dispatch, in T-cycles, the IF bit of
+  ## the line being taken is cleared.
+  ##
+  ## dingbat used to do both at T = 0 and then charge all 20 T-cycles, so every
+  ## source that rose anywhere inside the dispatch survived the clear and was
+  ## still set when the handler read IF back. gambatte has a family built to
+  ## measure exactly that -- `*_late_retrigger`, which appears under five
+  ## different STAT sources AND under the timer, so it is a property of the
+  ## dispatch and not of the STAT line. Each ROM's handler re-requests its own
+  ## interrupt with a `LDH ($0F),A` whose position moves by one M-cycle per
+  ## family member, does `EI`, and reads IF back at the top of the second
+  ## dispatch; the step the expected value flips on is where the clear falls.
+  ##
+  ## `m2int_m2irq_late_retrigger_{1,2}` reads it out directly. Its STAT source
+  ## rises on the same dot either way (the next line's OAM pulse), and only the
+  ## dispatch moves: at step 1 the dispatch starts 19 T before that rise and
+  ## hardware still has the bit (out2); at step 2 it starts 15 T before it and
+  ## hardware does not (out0). So the clear is later than 15 T and no later than
+  ## 19 T into the dispatch, i.e. **at the start of the fifth M-cycle** -- the
+  ## one Pan Docs' "Interrupt Handling" describes as setting PC to the handler,
+  ## after the two wait states and the two push cycles. A rise during any of the
+  ## first four is wiped; a rise during the fifth is not.
+  ##
+  ## Swept, whole gambatte suite, one build per cell, against `main` at ab0d7d6
+  ## and with the LY=LYC blind window off, so this column is this constant alone:
+  ##
+  ##   IRQ_SAMPLE_T   gambatte   vs main
+  ##        0           3856      the shipping model before this
+  ##       12           3857     +1 / -0
+  ##       16           3871     +16 / -1   <- ships
+  ##       20           3869     +27 / -14
+  ##
+  ## A strict local maximum, and the two sides fail differently: at 12 nothing
+  ## moves at all, at 20 the `_1` arm of every `*_late_retrigger` family goes red
+  ## (m2int_m2irq, irq_precedence, tima, serial) while their `_2` arms go green,
+  ## which is the whole family sliding one step. 16 is the only setting where
+  ## both arms agree, on both devices and in double speed.
+  ##
+  ## The one row 16 costs is `irq_precedence/late_m0irq_retrigger_ds_1`, and it
+  ## is not this constant: its SCX = 1 twin, the same ROM with one dot more of
+  ## mode 3, is EXACT at 16 in the same build, and both single-speed arms are.
+  ## Two ROMs that differ only in SCX bracketing the same edge from either side
+  ## is the double-speed mode 3 -> 0 residual (bucket 15 of
+  ## docs/gb-failure-triage.md) read through a newly sharpened instrument.
+  ##
+  ## Only the CLEAR moves. Which line is taken is decided earlier and stays
+  ## where it was; the comment at `highest_priority` below is the pair of ROMs
+  ## that separates the two instants, and folding them together costs those four
+  ## rows. mooneye `acceptance/interrupts/ie_push` pins the same decision from
+  ## the other side and is unaffected either way.
+  ##
+  ## Where the two PUSH M-cycles sit inside the dispatch was tried at the same
+  ## time and left alone. Pan Docs puts them third and fourth, after two wait
+  ## states; dingbat runs them first and charges the rest afterwards. Moving them
+  ## to T = 8 (so the low byte's write ends exactly at this sample point) scores
+  ## the same 3871 but trades differently -- +19 / -4, the four including three
+  ## `late_hdma_vs_tima_*` rows that the current order gets right -- so the two
+  ## orders are not distinguishable by score and the incumbent keeps the rows.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge the 5 M-cycles.
   ##
@@ -113,11 +172,27 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
+  # WHICH line is taken is decided between the two push bytes, and that is not
+  # the same instant as the clear below -- gambatte irq_precedence/
+  # if_and_ie_0_vector is four ROMs that separate them. They push over $FFFF
+  # from SP = $0000 and SP = $0001, so the byte that lands in IE is the high one
+  # in the first pair and the low one in the second, and hardware vectors to
+  # $0000 for the first (the new IE is seen) and to $0050 for the second (it is
+  # not). So the decision sits after the high byte's write and ahead of the low
+  # one's -- which is where it has always been here.
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   cpu.pc = interrupt
+  # Run out to the sample point before clearing IF -- see IRQ_SAMPLE_T. The two
+  # writes above have already charged 8 of it.
+  when IRQ_SAMPLE_T > 8:
+    # One call, not one per M-cycle: the PPU's dot loop and the timer are both
+    # granular inside a multi-cycle tick, the two spellings score identically
+    # over the whole gambatte suite, and the M-cycle-at-a-time version inlines
+    # a second copy of the tick pair into this proc for nothing.
+    mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8)
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
