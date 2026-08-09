@@ -93,6 +93,10 @@ const makeSession = (attach) => ({
   abortLocal: null,     // tears down the local path if WebRTC wins the race
   manualChan: null,     // manual-exchange DataChannel (wired only if we end up host)
   manualCode: null,     // our encoded offer, as shown in "Your code"
+  code: null,           // normalized shared code (kept so a redial can re-rendezvous)
+  redials: 0,           // reconnect dials since the server last answered
+  redialTimer: 0,       // pending reconnect after the server socket dropped mid-wait
+  rtcDeadline: 0,       // backstop for a pairing whose DataChannel never opens
   dc: null,
   ptr: 0,
   started: false,       // wasm core linked, game ticking
@@ -103,9 +107,22 @@ const makeSession = (attach) => ({
 });
 let netAttach = true;   // attach mode of the current/last pending session (for retry)
 // Timer that switches the modal to the manual code exchange when the signaling
-// server hasn't responded within ~2s (set in the connect handler).
+// server hasn't answered a rendezvous within ~2s (armed each time one is sent;
+// disarmed by ANY server reply — a peer waiting alone on "waiting" is a healthy
+// state, not an unresponsive server).
 let manualFallbackTimer = 0;
 const MANUAL_FALLBACK_DELAY = 2000;
+// Reconnect pacing for a server socket that drops after the server answered at
+// least once (deploy restart, proxy idling the connection out, network blip):
+// a few spaced dials, then give up into the manual exchange. Any server reply
+// refills the budget, so an arbitrarily long wait survives repeated drops while
+// never dialing faster than this schedule.
+const SIG_REDIAL_DELAYS = [1000, 2000, 4000];
+// Backstop from "paired" to the DataChannel opening. Signaling lost mid-relay
+// can leave ICE without the far side's candidates — a state browsers sit in
+// forever without reaching 'failed'. Generous: real cross-network ICE with a
+// slow STUN round can legitimately take 10s+.
+const RTC_CONNECT_DEADLINE = 20000;
 
 const closeNetModal = () => {
   netModal.classList.remove("open");
@@ -269,11 +286,14 @@ const sigConnect = () =>
     // path runs in parallel for every connect, so a down server must never tear
     // a session down while that path is still live or has already won.
     const hasAltPath = () => !!(net && (net.bc || net.dc || net.rtcConnected || net.started));
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
       sigServerUp = true; // a real dial is as good as a probe
       resolve(true);
     };
     ws.onerror = () => {
+      if (opened) return; // an established socket's failure is onclose's to handle
       sigServerUp = false;
       if (hasAltPath()) {
         // Only note it while we're still waiting on the local peer; once linked
@@ -288,11 +308,17 @@ const sigConnect = () =>
       resolve(false);
     };
     ws.onclose = () => {
-      // Normal after WebRTC connects (we close it); anything earlier is a
-      // failure unless the local path is still live or already carried us.
-      if (net && !hasAltPath()) {
-        netFail("Lost the signaling connection");
-      }
+      // Fires for every socket end, so sort them: our own teardowns null `net`
+      // (netShutdown) or `net.ws` (wireChannel, manualEnter) before closing and
+      // fail the first guard; a linked session no longer needs the server; a
+      // pairing already in flight is the RTC deadline's to resolve (the room
+      // died with the socket, so redialing mid-handshake helps nobody). What
+      // remains is the server — or the path to it — dropping us while we dial
+      // or wait for a friend: reconnect and re-rendezvous, with backoff.
+      if (!net || net.ws !== ws) return;
+      if (net.rtcConnected || net.started) return;
+      if (net.pc) return;
+      sigRedial();
     };
     ws.onmessage = (e) => {
       let msg;
@@ -305,8 +331,64 @@ const sigConnect = () =>
     };
   });
 
+// Arm (or re-arm) the response deadline for a just-sent rendezvous: if the
+// signaling server hasn't answered within ~2s, treat it as unreachable and
+// flip the modal to the manual code exchange (its base text becomes "Trade
+// codes with your friend"). Racing a slow-but-alive server any longer isn't
+// worth it: the exchange also works same-LAN with no internet. Any server
+// reply disarms this (onSigMessage) — waiting for a friend is not a timeout.
+const armManualFallback = (session) => {
+  clearTimeout(manualFallbackTimer);
+  manualFallbackTimer = setTimeout(() => {
+    if (net === session && !net.dc && !net.rtcConnected && !net.started) {
+      sigServerUp = false;
+      manualEnter(true);
+    }
+  }, MANUAL_FALLBACK_DELAY);
+};
+
+// The server answered at least once and its socket then died mid-wait. The
+// room died with it on the server, so reconnect and re-rendezvous with the
+// same code — both peers ride this same path, so a server restart re-pairs
+// them as each side re-registers. A handful of spaced dials, then the same
+// give-up as a server that never answered. The budget refills only when the
+// server actually replies (onSigMessage), so a flapping server is retried at
+// this schedule's pace at worst, never hammered.
+const sigRedial = () => {
+  const session = net;
+  if (!session || !session.code) return;
+  if (!navigator.onLine) {
+    manualEnter(true); // no interface at all — redialing can't help; say so now
+    return;
+  }
+  clearTimeout(manualFallbackTimer); // the redial chain owns the give-up now
+  const attempt = session.redials++;
+  if (attempt >= SIG_REDIAL_DELAYS.length) {
+    sigServerUp = false;
+    manualEnter(true);
+    return;
+  }
+  netSetStatus("Reconnecting to the linking server…");
+  session.redialTimer = setTimeout(async () => {
+    if (net !== session || session.dc || session.rtcConnected || session.started) return;
+    if (await sigConnect()) {
+      if (net !== session || session.dc) return;
+      sigSend({ t: "rendezvous", code: session.code });
+      armManualFallback(session); // a fresh socket must earn a reply too
+    }
+    // else: that dial's onclose lands back in sigRedial for the next attempt
+  }, SIG_REDIAL_DELAYS[attempt]);
+};
+
 const onSigMessage = async (msg) => {
   if (!net) return;
+  // Any reply is proof of life: a solo peer parked on "waiting" is a healthy
+  // server, not an unresponsive one. Disarm the manual-exchange fallback and
+  // refill the redial budget, so an arbitrarily long wait survives any number
+  // of well-spaced socket drops.
+  clearTimeout(manualFallbackTimer);
+  net.redials = 0;
+  sigServerUp = true;
   try {
     switch (msg.t) {
       case "waiting":
@@ -348,8 +430,19 @@ const onSigMessage = async (msg) => {
 // ---------------- WebRTC ----------------
 
 const startRtc = async (isOfferer) => {
+  const session = net;
   const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
-  net.pc = pc;
+  session.pc = pc;
+  // Paired, but the DataChannel never opens: signaling dying mid-relay starves
+  // ICE of the far side's candidates, and a checking phase that never starts
+  // won't reach 'failed' on its own — without a deadline the modal would show
+  // "Friend found — connecting…" forever.
+  clearTimeout(session.rtcDeadline);
+  session.rtcDeadline = setTimeout(() => {
+    if (net === session && !net.rtcConnected && !net.started) {
+      netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
+    }
+  }, RTC_CONNECT_DEADLINE);
   pc.onicecandidate = (e) => {
     if (e.candidate) sigSend({ t: "ice", c: e.candidate });
   };
@@ -392,6 +485,7 @@ const wireChannel = (dc) => {
   dc.binaryType = "arraybuffer";
   dc.onopen = () => {
     net.rtcConnected = true;
+    clearTimeout(net.rtcDeadline);
     // Linked (WebRTC peer, or a same-browser BroadcastChannel): the signaling
     // server's job is done. Closing the socket also RELEASES our room on the
     // server at once — so when two same-browser tabs pair locally, whichever had
@@ -678,7 +772,8 @@ const manualPrepare = async () => {
 // Switch the modal from the shared-code view to the manual exchange. Two ways
 // in: openNetConnect() jumps here straight away when the last liveness probe
 // saw the server down, and the connect flow lands here when a live shared-code
-// attempt finds the server unreachable (outright error, or silent for ~2s) —
+// attempt finds the server unreachable (outright error, silent for ~2s, or
+// gone mid-wait and still dead after the redial budget) —
 // `attemptFailed` distinguishes the latter so the player is told their attempt
 // failed rather than the view just silently changing shape. Cancels the
 // in-progress server/local attempts (this is a distinct rendezvous) but keeps
@@ -693,6 +788,8 @@ const manualEnter = (attemptFailed) => {
     return;
   }
   clearTimeout(manualFallbackTimer);
+  clearTimeout(net.redialTimer);
+  clearTimeout(net.rtcDeadline);
   // Drop any in-progress server attempt WITHOUT tripping its teardown: detach
   // the socket handlers first, else ws.onclose fires netFail (no alt path yet)
   // and destroys the session we're keeping for the manual rendezvous.
@@ -1248,19 +1345,10 @@ netJoinGo.addEventListener("click", async () => {
     netSetStatus("Pick a code of at least 3 letters/numbers", true);
     return;
   }
+  session.code = code; // kept on the session so a redial can re-rendezvous
   netSetConnecting(true);
   netSetStatus("Connecting…");
-  // If the signaling server hasn't carried us anywhere within ~2s, treat it as
-  // unreachable and flip the modal to the manual code exchange (its base text
-  // becomes "Trade codes with your friend"). Racing a slow-but-alive server any
-  // longer isn't worth it: the exchange also works same-LAN with no internet.
-  clearTimeout(manualFallbackTimer);
-  manualFallbackTimer = setTimeout(() => {
-    if (net === session && !net.dc && !net.rtcConnected && !net.started) {
-      sigServerUp = false;
-      manualEnter(true);
-    }
-  }, MANUAL_FALLBACK_DELAY);
+  armManualFallback(session);
   // Two paths race. Same-browser tabs pair instantly over a BroadcastChannel with
   // no server and no WebRTC; everyone else goes through the signaling server. The
   // first to connect wins (wireChannel tears the loser down). Running both means a
@@ -1427,6 +1515,10 @@ const netShutdown = async (opts) => {
   clearTimeout(manualFallbackTimer);
   const s = net;
   net = null;
+  if (s) {
+    clearTimeout(s.redialTimer);
+    clearTimeout(s.rtcDeadline);
+  }
   // Cancelling the connect modal (or any teardown) thaws the game we froze when
   // the modal opened — even if the handshake never got as far as creating rb.
   if (netFrozeGame) {
