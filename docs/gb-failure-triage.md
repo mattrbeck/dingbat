@@ -1022,12 +1022,64 @@ both read off the ROM's source rather than off its pixels (see
    lines. `MIXER_PALETTE_OR` ships it: 820 → 403 and `_sprites` 536 → 124,
    `age/m3-bg-bgp-dmgC` 62 → 2, `daid/ppu_scanline_bgp-dmg` 68.4% → 68.8%.
 2. **The line end.** All 403 that remain are `x = 157..159`. The handler's last
-   BGP write lands on dot 252, the first dot of mode 0, and
-   `fifo_recompose_last` is guarded on mode 3 — but hardware clocks the line's
+   BGP write lands on dot 253, the first dot of mode 0, and
+   `fifo_recompose_last` was guarded on mode 3 — but hardware clocks the line's
    last pixels out of the mixer during H-Blank and that write reaches all three.
-   Relaxing the guard alone is not the fix, because `fifo_burst_tail` has run
-   `lx` to 160 by then; it is a change in the tail's accounting, next to
-   `M3_END_EARLY`. **Still open, and it is now the whole of this row.**
+   **Closed 2026-08-09 by `MIXER_TAIL_HBLANK`; 403 → 21, and all 21 left are
+   LY 0.** See below.
+
+### 2026-08-09: the line end, and what it took
+
+Relaxing the mode-3 guard is not the fix on its own, and the reason is worth
+stating because it is the whole of the change. Two facts about dingbat's own
+timing, both off `-d:gb_m3_trace` on `m3_bgp_change`:
+
+* the shifter emits pixel `x` on dot `x + 94`, so `lx = dot − 94` through the
+  whole of mode 3 — which is what makes the reference's `dot − 96` edge come
+  out as `lx − MIXER_PALETTE_BACK`, i.e. why `lx` can stand in for the dot;
+* mode 3 ends on dot **252**, and `fifo_burst_tail` emits the last `m3_lead`
+  pixels (158 and 159) *on that one dot*. It is the only dot of the line where
+  the shifter is not one pixel per dot, and after it `lx` is 160 and says
+  nothing about where the shifter would be.
+
+So the seventh write, on dot 253, has to be answered with a shifter position of
+**159**: 157 is the far end of the tail (the `old or new` pixel), 158 is inside
+it, and 159 has not been emitted at all yet on hardware — it takes the new
+palette because it is emitted *after* the write. That is exactly the
+reference's three-valued edge at `x = 157`, and it needs two things a countdown
+from `lx` cannot give: a position that keeps counting after `lx` stops
+(`tail_dot0 = cycle_counter − lx`, latched at the burst), and a repaint that
+reaches **forward** to the pixels the burst decided early. The held-pair ring
+goes from 2 entries to 4 to cover columns 156..159.
+
+Nothing about the mode 3 → 0 edge moves — no dot, no lock, no STAT source —
+which is why this is not a `M3_END_EARLY` after all: bucket 15's dozens of rows
+do not see it. Measured, full runner, against `-d:MIXER_TAIL_HBLANK=0`:
+
+| row | before | after |
+|---|---|---|
+| mealybug `m3_bgp_change` | 403 | **21** (all LY 0) |
+| mealybug-cgb `m3_bgp_change` | 790 | **60** (= 20 px × 3 ch) |
+| gambatte `dmgpalette_during_m3_2` | 429 | **3** |
+| gambatte `scx3/dmgpalette_during_m3_1` | 286 | **2** |
+| gambatte `dmgpalette_during_m3_scx2_1` | 143 | **1** |
+
+and **nothing else in the tree moves at all**: gambatte 3658/5005 row for row,
+the mealybug DMG and CGB sets pixel for pixel on all their other rows, the whole
+runner 704/980 with two rows improved and none regressed. The three gambatte
+rows are the independent confirmation — a different suite, different references,
+a BGP write that happens to land at the top of H-Blank, and the same fix takes
+two of them to within 3 pixels of green.
+
+The 21 that remain on `m3_bgp_change` are **all on LY 0**, four pixels wide at
+every edge — the `line_0_fix` item named a section above ("A fourth thing the
+sources say and this pass did not act on"), i.e. bucket 0. That is a second row
+confirming it, after `m3_window_timing_wx_0`'s last 4. `m3_bgp_change_sprites` does not move (124, its left-edge mechanism),
+and `daid/ppu_scanline_bgp-dmg` does not either: **it never writes BGP in mode 0
+at all** (41760 mode-3 writes, 83 in vblank, 3 in mode 2, traced), so the
+prediction that it shares this mechanism is falsified. Its residual is 12-wide
+blocks with 4-wide gaps running the full width of the line — an M-cycle-grain
+error in a tight write loop, and a separate question.
 
 With (1) fixed, **the two rows that argued against the second mixer stage now
 argue for it**, and the vote across the palette rows is unanimous. One build per

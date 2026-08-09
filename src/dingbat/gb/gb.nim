@@ -405,6 +405,28 @@ const MIXER_DOT_LAG*          {.intdefine.} = 1
   ## fifo_recompose_last in fifo_ppu.nim for what it buys and how it was
   ## measured -- it is not a sweepable dot count, only on or off, because a
   ## second dot is refused by the same rows the first is required by.
+const MIXER_TAIL_HBLANK*      {.intdefine.} = 1
+  ## Whether the mixer keeps CLOCKING after the mode 3 -> 0 edge, so that a
+  ## register write on the first dots of H-Blank still reaches the pixels whose
+  ## shade the tail has not latched yet. 1 ships; 0 is the pre-2026-08-09
+  ## behaviour, where every recompose was guarded on mode 3.
+  ##
+  ## It is not a second lag and it moves no edge: the mode 3 -> 0 dot, the
+  ## VRAM/OAM locks and the STAT model are all untouched (bucket 15 in
+  ## docs/gb-failure-triage.md pins that dot from a dozen directions). What it
+  ## fixes is an ACCOUNTING error of ours. The shifter emits one pixel per dot
+  ## and the tail latches its shade MIXER_PALETTE_BACK dots later, so the last
+  ## pixels of a line are still in the tail when the fetcher retires -- but
+  ## `fifo_burst_tail` emits them all on the retire dot, which is the only dot
+  ## in the line where dingbat's shifter is not one pixel per dot. See
+  ## fifo_recompose_last in fifo_ppu.nim for the derivation off m3_bgp_change's
+  ## seventh write.
+const MIX_HOLD*               = 4
+  ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
+  ## the shifter's store indexes with an `and`. It has to cover every pixel a
+  ## write can still reach: the deepest mixer stage, plus the pixels the tail
+  ## burst decided ahead of their own dot (the pipeline lead). fifo_ppu.nim
+  ## static-asserts that sum against this.
 const CGB_MIXER_LATENCY*      {.intdefine.} = 1
   ## Dots the CGB's write to a register the MIXER reads takes to arrive over
   ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
@@ -1127,14 +1149,26 @@ type
     tile_data_low*:       uint8
     tile_data_high*:      uint8
     # The FIFO entries the mixer is still holding: the pairs popped on the last
-    # two dots that emitted a pixel, indexed by the pixel's own parity. The mixer stage runs one dot behind the
+    # MIX_HOLD dots that emitted a pixel, indexed by the pixel's own low bits.
+    # The mixer stage runs one dot behind the
     # pop (see fifo_recompose_last in fifo_ppu), so a mid-mode-3 write to a
     # register the mixer reads -- the palettes, LCDC's OBJ-enable and
     # BG-priority bits -- still reaches the pixel already written out. Kept
     # here rather than re-read from the ring because the BG ring is rewound and
     # overwritten by the next push and the OBJ ring is only popped when it is
     # non-empty, so neither can be indexed backwards safely.
-    mix*:                 array[2, GbMixHold]
+    #
+    # The ring is MIX_HOLD deep rather than as deep as the deepest stage
+    # because the tail burst emits the last `m3_lead` pixels of a line ahead of
+    # their own dots, and a write on the first dots of H-Blank still reaches
+    # them (MIXER_TAIL_HBLANK).
+    mix*:                 array[MIX_HOLD, GbMixHold]
+    # Which dot this line's pixel 0 would have left the shifter on, latched at
+    # the tail burst as `cycle_counter - lx`. Through mode 3 the shifter is one
+    # pixel per dot and `lx` IS the answer; the burst is the one dot where it
+    # is not, and this is what lets the recompose keep counting after it. Only
+    # read while the mode flag is 0 -- see fifo_recompose_last.
+    tail_dot0*:           int32
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----

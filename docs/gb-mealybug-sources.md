@@ -189,7 +189,7 @@ carries `MIXER_PRIORITY_BACK` with the rest of LCDC's priority half for free.
 Residual: one pixel per band at the leading edge of the first run on bands 2 and
 9..17, plus line 0 (§1.2).
 
-### 3.2 `m3_bgp_change` — 820 → **403**, and `m3_bgp_change_sprites` — 536 → **124**
+### 3.2 `m3_bgp_change` — 820 → 403 → **21**, and `m3_bgp_change_sprites` — 536 → **124**
 
 `m3_bgp_change` is the cleanest instrument in the suite and nobody had read it
 as one. It calls neither `reset_tile_maps` nor any VRAM fill, so **VRAM is all
@@ -263,16 +263,31 @@ goes 1284 → 1140. All five were already red and none is a pass/fail row. Those
 PNGs are another emulator's output; the mealybug photograph is hardware, and it
 is the only hardware in the argument.
 
-**What is left (403 + 124):** `m3_bgp_change`'s residual is now *entirely*
-`x = 157..159` — the last write lands on dot 252, which is the first dot of mode
-0, and `fifo_recompose_last` is guarded on mode 3. Hardware clocks the line's
-last pixels out of the mixer during the first dots of H-Blank and that write
-reaches all three of them. Relaxing the guard alone is not the fix: the tail
-burst (`fifo_burst_tail`) has already run `lx` to 160 by then, so the write
-would land on 158/159 and not on 157. That is a change to where the tail is
-accounted, i.e. to `M3_END_EARLY`'s neighbourhood, and it is not taken here.
-`m3_bgp_change_sprites`'s remaining 124 are per-band left-edge pixels (x = 0..9),
-a different mechanism.
+**What was left (403 + 124), and the 403 — closed 2026-08-09.**
+`m3_bgp_change`'s residual was *entirely* `x = 157..159`. The seventh write
+lands on the first dot of mode 0 (dot 253 by `-d:gb_m3_trace`; the offsets in
+the table above are the ROM's own count from the mode 2 IRQ, one less), and
+`fifo_recompose_last` was guarded on mode 3. Hardware clocks the line's last
+pixels out of the mixer during the first dots of H-Blank and that write reaches
+all three of them: 157 takes `old or new`, 158 and 159 take the new value.
+
+Relaxing the guard alone is not the fix — the tail burst (`fifo_burst_tail`)
+has already run `lx` to 160 by then, so a countdown from `lx` lands on 158/159
+and never on 157. What it needed instead was the tail's ACCOUNTING:
+`tail_dot0`, latched at the burst as `cycle_counter − lx`, so the shifter's
+position keeps counting after `lx` stops, and a repaint that reaches *forward*
+to the pixels the burst decided ahead of their own dots. `MIXER_TAIL_HBLANK`
+ships it: **403 → 21**, and all 21 that remain are on LY 0, i.e. the
+`line_0_fix` item in §1.2. It moves the mode 3 → 0 edge by nothing. Derivation
+at `fifo_recompose_last` in `gb/fifo_ppu.nim`.
+
+Confirmed from outside this ROM: gambatte's `dmgpalette_during_m3_2` goes
+429 → 3 wrong pixels, `scx3/dmgpalette_during_m3_1` 286 → 2 and
+`dmgpalette_during_m3_scx2_1` 143 → 1, on the same fix, with no gambatte row
+flipping either way (3658/5005 before and after).
+
+`m3_bgp_change_sprites`'s remaining 124 are per-band left-edge pixels
+(x = 0..9), a different mechanism, and they do not move.
 
 This closes the open item in `docs/gb-failure-triage.md` that said
 `m3_bgp_change` "is not a reliable vote on `MIXER_PALETTE_BACK` until that
