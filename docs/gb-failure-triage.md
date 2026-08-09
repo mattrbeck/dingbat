@@ -676,10 +676,10 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below |
 | `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
-| `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed |
-| `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed |
-| `m3_scy_change` | 417 | 417 | not diagnosed |
-| `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed — 2026-08-09: 8 px on LY 0 and 98 in band 8, the same WX = 7 tie as `m3_lcdc_win_map_change` |
+| `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
+| `m3_scy_change` | 417 | 417 | not diagnosed — **83 as of 2026-08-09**, for free |
+| `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling — **8 as of 2026-08-09** |
 | `m3_lcdc_bg_en_change` | 2193 | 2193 | LCDC.0 is read at the PUSH here, not at the mixer |
 
 ### 2026-08-08: three of those came off the ROMs' own source code
@@ -693,8 +693,8 @@ diagnosed exactly. Wrong pixels of 23040, against the table above:
 | `m3_lcdc_bg_en_change` | 2193 | **67** | the ROM clears LCDC.0 for exactly 12 dots and then 8, and the reference's white runs are 12 and 8 pixels wide at x = −1 and 19 — neither on a tile boundary. LCDC.0 is a MIXER read, once per pixel (`BG_EN_AT_MIX`). CGB: 1824 → 11, and `m3_lcdc_bg_en_change2` 364 → 6 |
 | `m3_bgp_change` | 820 | **403** | a DMG palette write puts one pixel of `old or new` at the far end of the mixer tail (`MIXER_PALETTE_OR`). Zero free parameters: 720 cells over 144 different old/new pairs go exact together |
 | `m3_bgp_change_sprites` | 536 | **124** | as above |
-| `m3_lcdc_tile_sel_change` | 776 | 776 | **diagnosed, not fixed**: hardware never puts an object fetch between a background tile's two bitplane reads; we do on 13 of 18 bands. Not curable by any of the four `OBJ_BG_RUN` rules |
-| `m3_lcdc_bg_map_change` | 192 | 192 | the same defect on a coarser instrument |
+| `m3_lcdc_tile_sel_change` | 776 | 776 | **diagnosed, not fixed**: hardware never puts an object fetch between a background tile's two bitplane reads; we do on 13 of 18 bands. Not curable by any of the four `OBJ_BG_RUN` rules — **fixed 2026-08-09 by a fifth, see below** |
+| `m3_lcdc_bg_map_change` | 192 | 192 | the same defect on a coarser instrument — **0 as of 2026-08-09** |
 
 Cost, named: gambatte `dmgpalette_during_m3_{4,5,scx1_4}` and `scx3/_5` go
 8 → 150 wrong pixels and `lycint_dmgpalette_during_m3_4` goes 1284 → 1140. All
@@ -1045,6 +1045,99 @@ setting, wrong pixels of 23040:
 Before the OR pixel, the first two preferred **one** stage by 22 and 136. The
 "second mechanism" was what inverted them, and the constant never needed to
 move.
+
+## 2026-08-09: the object fetch takes a TILE boundary, and the object picks it
+
+The row above that said "not curable by any of the four `OBJ_BG_RUN` rules" was
+right about the four rules and wrong about the shape of the answer. All four are
+phrased on the fetcher's *phase* — which dots of the penalty it may advance on —
+and the frame that has to be reproduced is not a function of the fetcher's phase
+at all.
+
+`m3_lcdc_tile_sel_change` proves that on its own. Its objects at OAM **X = 0**
+and **X = 8** trigger on the same dot (94, the first push, which is what fills
+the FIFO and lets the shifter ask the question), cost the same 11 dots, and
+leave the fetcher on the same counter — and the DMG reference gives band 0 both
+bitplane reads *inside* the 8-dot LCDC pulse and band 8 *neither*. Two identical
+fetcher states, two different answers. What differs is the tile The Pixel is in.
+
+Read all eighteen bands back that way and the rule is one sentence: **the
+penalty is inserted after the fetch of tile `floor(X / 8)`**, and The Pixel of
+an object at OAM X sits in tile `floor(X / 8) - 1`. The fetcher runs a tile
+ahead of the shifter, so the boundary the object takes is the end of the fetch
+that was in flight while The Pixel's own tile was on screen — Pan Docs' "waiting
+for the BG fetch to finish", with the one-tile lead spelled out. In this
+renderer's state that is `idx` at the trigger and nothing else:
+
+* `idx >= 0` — The Pixel is in the tile the FIFO is displaying, so the fetch of
+  the tile after it is in flight. It runs to completion inside the penalty and
+  then parks, because a stopped shifter cannot empty the FIFO.
+* `idx < 0` — an object hanging off the left edge (OAM X < 8). The fetch it
+  waits for finished *on the trigger dot itself*, so the object takes the bus
+  from the next dot for the whole penalty and the fetcher resumes one dot after
+  the shifter does. **Band 4** (X = 4, penalty 7) is the only band in the suite
+  that separates that dot, and it wants it.
+
+Landed as `OBJ_BG_RUN = 4`, derived in full at `tick_sprite_fetcher` in
+`gb/fifo_ppu.nim`. Wrong pixels of 23040, DMG:
+
+| row | before | after |
+|---|---|---|
+| `m3_lcdc_bg_map_change` | 192 | **0** |
+| `m3_lcdc_tile_sel_change` | 776 | **8** (all eight on LY 0, i.e. bucket 0 / the `line_0_fix` item above) |
+| `m3_scy_change` | 417 | **83** |
+
+Mealybug DMG 550274 → 551568 matching pixels, CGB 1852598 → 1854215, and no
+mealybug row on either device loses a pixel except CGB
+`m3_lcdc_bg_map_change`, 320 → 384. That one trade is entirely inside tile 1 of
+bands 0–2 — band 0 fixed (64 px), bands 1 and 2 broken (128) — i.e. the band the
+transition sits in moved by one, which is the CGB's own write latency and not
+this rule: `-d:CGB_LCDC_LATENCY=1` takes that row 384 → **192** wrong, better
+than it ever was, while costing 401 subpixels elsewhere and the gambatte
+`window` rows the sweep at `CGB_SCY_LATENCY` already prices. It is a separate
+decision with a separate bill, and the mechanism is the one mealybug's own PPU
+notes state for SCY ("on CGB and AGB devices, writes appear to take effect
+2 T-cycles later").
+
+The regression surface, all of it measured:
+
+* **mode 3's length does not move.** `tools/gbppu/objtab.py` against GBMicrotest
+  `ppu_spritex_vs_scx` stays **0/153**, and 1660 ROM/device runs across gambatte
+  `sprites`, `oam_access`, `vram_m3`, `scx_during_m3`, GBMicrotest and mealybug
+  are line-for-line identical under `-d:gb_m3_len`. Per-object cost, the
+  `172 + 11N` measurement and `NspritesPrLine`'s pass set are untouched.
+* **gambatte 3658 → 3659**, one row: `scx_during_m3/scx_attrib_during_m3_spx1_ds`
+  goes FAIL → PASS and its `spx2_ds` sibling 80 → 16 wrong pixels. `sprites`
+  394/476, `oam_access` 52/69 and `vram_m3` 35/50 are unchanged row for row.
+* mooneye `acceptance/ppu/intr_2_mode0_timing_sprites` **fails before and after**,
+  unmoved.
+* the exact rows stay exact: `m3_obp0_change`, `m3_wx_4_change_sprites`,
+  `m3_lcdc_win_en_change_multiple`, and `m3_lcdc_obj_en_change` at its same 2.
+* runner total 704 → **705**.
+
+**Cost, named.** The run arm does the background fetch inside the object's stall
+instead of after it, so `tick_bg_fetcher` is called on up to six dots per object
+that the old rule skipped. Retired instructions, 2400 frames: Pokemon Blue
+**+0.76%**, Shantae +0.41%, Pokemon Crystal +0.01%. All of it is the rule —
+the same file with `-d:OBJ_BG_RUN=1` forced back on measures **−0.06%** against
+the revision before it, so the plumbing (a `bool` result from
+`tick_sprite_fetcher` so `tick_shifter` keeps a single call site) is free. Two
+things bought 0.3 points of that back and are worth keeping in mind for anything
+else on this path: skipping the call when the fetcher is parked at counter 7,
+and refusing to add a field — `idx < 0` is `obj_tile_fx != fetcher_x`, which the
+penalty algorithm already keeps, and a fifth `bool` in `GbFifoPpu`'s bool block
+cost 0.10% on Crystal in layout alone.
+
+**What it does not fix, and why that is now a duplicate.**
+`m3_lcdc_tile_sel_win_change` is unchanged at 106, and the trace says it is not
+this mechanism: 8 of its pixels are LY 0 and the other 98 are band 8 alone —
+`y = 64..71`, tiles 0 and 1 — which is the **same** band, the same tile and the
+same cause as `m3_lcdc_win_map_change`'s 34. Both ROMs run WY = 0 / WX = 7, so
+`win_lx == 0`, and band 8's object (OAM X = 8) triggers at `lx == 0` too; the
+shifter asks the object question first and the window start is deferred behind
+a whole object fetch. That tie is the item already open above ("Simply resolving
+the tie the other way is refused, and was measured out"), and the two rows
+should be taken together by whatever settles it.
 
 ## Reproducing any of this
 
