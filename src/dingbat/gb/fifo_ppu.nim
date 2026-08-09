@@ -1787,12 +1787,42 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
 # The ring of held pairs is MIX_HOLD deep for the same reason: the deepest
 # stage plus the lead, which is exactly the four columns 156..159 that a write
 # on dot 252 or 253 can name.
+#
+# ---- The tail is clocked in dots, not in pixels ----------------------------
+#
+# Everything above counts the reach back from `lx`, which is right for as long
+# as the shifter takes one pixel per dot -- and that is every dot of a line
+# except an object fetch and the tail burst. mealybug's two `_sprites` rows are
+# the ones that stop the shifter under a write and they say DOTS: a write
+# reaches a pixel iff that pixel left the FIFO within `back` DOTS of it, so an
+# object fetch drains the tail rather than freezing it. The bands and the
+# arithmetic are at MIXER_TAIL_DOTS in gb.nim; `tail_dot0` and `mix_run` below
+# are the whole implementation.
+proc mixer_note_emit(ppu: GbFifoPpu) {.inline.} =
+  ## Called on every dot that emits a pixel, with `lx` still that pixel's own.
+  ## In the common case -- the dot after another emission -- `cycle_counter -
+  ## lx` is what it already was and this is a compare with no store at all; the
+  ## stores happen only where the run breaks, which is once per line and once
+  ## per object fetch.
+  when MIXER_DOT_LAG != 0:
+    let t = ppu.cycle_counter - ppu.lx
+    if t != ppu.tail_dot0:
+      ppu.tail_dot0 = t
+      ppu.mix_run = ppu.lx
+
 proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top: int32) =
-  ## Re-colour `[front - back, top]`, clipped to the screen and to the pixels
-  ## the held ring still has. `front` is where the shifter stands (see
-  ## mixer_tail_front) and `back` how many stages down the tail the register
-  ## being written is read.
+  ## Re-colour `[front - back, top]`, clipped to the screen, to the pixels the
+  ## held ring still has, and to the current run of emissions. `front` is where
+  ## the shifter stands (see mixer_tail_front) and `back` how many stages down
+  ## the tail the register being written is read.
   var x = max(front - back, ppu.lx - MIX_HOLD)
+  when MIXER_TAIL_DOTS != 0:
+    # A pixel emitted before the run started is at least a whole object fetch
+    # older than `front - back` claims, so the write cannot reach it. Where
+    # this clips, it also takes the `old or new` pixel with it: the oldest
+    # pixel the write DOES reach latched its shade after the write, so it takes
+    # the new value cleanly (fifo_recompose_at's span goes empty).
+    x = max(x, ppu.mix_run)
   if x < 0: x = 0
   let hi = min(top, ppu.lx - 1)
   while x <= hi:
@@ -1804,19 +1834,23 @@ proc mixer_tail_front(ppu: GbFifoPpu): (int32, int32) {.inline.} =
   ## `(front, top)` for the two recompose procs: where the shifter stands on
   ## this dot, and the last column a write may still reach.
   ##
-  ## In mode 3 that is `lx` and `lx - 1` -- `lx` only reaches 1..160 inside
-  ## mode 3, it is rewound below zero at the mode 2 -> 3 edge, and it does not
-  ## move while an object fetch has the shifter stopped, so it IS the position,
-  ## stall or no stall, and everything at or past it is still in the FIFO.
-  ##
-  ## In mode 0 the shifter has been run to the end of the line by the tail
-  ## burst, so the position comes off the dot counter instead and everything
-  ## the burst decided early is reachable. Any other mode has no tail: the
-  ## values returned there make every span empty rather than costing a branch.
+  ## Inside mode 3 and the first dots of H-Blank alike the position is
+  ## `cycle_counter - tail_dot0` -- the run's own dot base, so it is `lx` while
+  ## the shifter is running, larger while an object fetch has it stopped, and
+  ## still counting after the tail burst has run `lx` to the end of the line.
+  ## Any other mode has no tail: the values returned there make every span
+  ## empty rather than costing a branch, which is also what the park at mode 3
+  ## entry does for a line whose shifter has not emitted anything yet.
   let m = ppu.lcd_status and 3'u8
-  if m == 3'u8: (ppu.lx, ppu.lx - 1'i32)
-  elif MIXER_TAIL_HBLANK != 0 and m == 0'u8:
-    (ppu.cycle_counter - ppu.tail_dot0, int32(GB_WIDTH) - 1)
+  if m == 3'u8 or (MIXER_TAIL_HBLANK != 0 and m == 0'u8):
+    var front = ppu.lx
+    when MIXER_TAIL_DOTS != 0:
+      front = ppu.cycle_counter - ppu.tail_dot0
+    elif MIXER_TAIL_HBLANK != 0:
+      # The control arm: the position is `lx` through mode 3 and only the
+      # H-Blank tail comes off the dot counter.
+      if m == 0'u8: front = ppu.cycle_counter - ppu.tail_dot0
+    (front, int32(GB_WIDTH) - 1)
   else: (int32(GB_WIDTH) + MIX_HOLD, -1'i32)
 
 proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
@@ -2058,6 +2092,9 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # MIX_HOLD dots of history cost the dot loop the same one store that a
         # single dot of it does.
         ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
+        # ...and this dot's place in the run, for a write that arrives while
+        # the shifter is stopped. See MIXER_TAIL_DOTS.
+        mixer_note_emit(ppu)
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
     inc ppu.lx
@@ -2422,12 +2459,14 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           fifo_reset_sprite(ppu)
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           ppu.lx = 0
-          when MIXER_TAIL_HBLANK != 0:
-            # No tail is in flight until this line's fetcher retires. The park
-            # matters for the one path that reaches mode 0 without passing the
-            # retire dot -- the LCD being switched off in the middle of mode 3
-            # -- where the previous line's latch would otherwise still answer.
+          when MIXER_DOT_LAG != 0:
+            # No tail is in flight until this line's shifter emits something.
+            # The park matters for the one path that reaches mode 0 without
+            # passing the retire dot -- the LCD being switched off in the middle
+            # of mode 3 -- where the previous line's base would otherwise still
+            # answer, and for the dots of mode 3 before the first pixel.
             ppu.tail_dot0 = TAIL_DOT0_OFF
+            ppu.mix_run = 0
           when M3_PIPE_LEAD_ANY:
             # Latched per line, not a constant: the M-cycle half of the lead is
             # 4 dots at normal speed and 2 in double speed, and a ROM can switch
@@ -2481,16 +2520,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # pixels from the end of the line here; the burst below finishes them.
         if fetcher_retired(ppu):
           when MIXER_TAIL_HBLANK != 0:
-            # The shifter's position, as a dot rather than as `lx`, latched
-            # BEFORE the burst runs `lx` to the end of the line. It is what the
-            # last pixels' mixer stages keep counting from once the mode flag
-            # has moved on -- see fifo_recompose_last. One store per line.
-            # On line 0 (LY0_PIPE_MCYCLES) the retire dot is revisited while
-            # m3_hold keeps the flag in mode 3; only the FIRST visit is the
-            # pipeline's own dot base, so the park at mode-3 entry is the
-            # latch's guard.
-            if ppu.tail_dot0 == TAIL_DOT0_OFF:
-              ppu.tail_dot0 = ppu.cycle_counter - ppu.lx
+            # The burst below emits the last `m3_lead` pixels on THIS dot, and
+            # hardware clocks them out one per dot from here -- so the run they
+            # belong to starts here, and the shifter's position keeps counting
+            # as `cycle_counter - tail_dot0` once `lx` has stopped at 160.
+            # Noting it before the burst is what makes that arithmetic right
+            # when an object fetch ran into the retire dot; the burst's own
+            # emissions must NOT move it, hence the save and restore.
+            # `lx < GB_WIDTH` is the guard for line 0 (LY0_PIPE_MCYCLES), which
+            # revisits the retire dot while m3_hold keeps the flag in mode 3.
+            if ppu.lx < int32(GB_WIDTH): mixer_note_emit(ppu)
+          let keep_dot0 = ppu.tail_dot0
+          let keep_run  = ppu.mix_run
           when M3_PIPE_LEAD_ANY:
             # The tail of the line, emitted on THIS dot rather than spread over
             # the first dots of H-Blank. "The fetcher retired" means every VRAM
@@ -2501,6 +2542,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # Bursting them costs no dots (the lead was already paid at the head
             # of mode 3) and keeps the fetcher out of H-Blank entirely.
             fifo_burst_tail(ppu, gb)
+          ppu.tail_dot0 = keep_dot0
+          ppu.mix_run   = keep_run
           # A line whose pipeline started early (LY0_PIPE_MCYCLES) retires that
           # many dots early too; the FLAG still leaves mode 3 on the dot every
           # other line does. The burst above is on the retire dot deliberately
