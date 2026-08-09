@@ -251,6 +251,34 @@ test("cancelling while waiting tears down without redialing", async () => {
   assert.equal(sockets.length, 2, "an intentional close never redials");
 });
 
+test("a late WebKit error after a successful probe doesn't mark the server down", async () => {
+  // iOS Safari fires `error` on a socket we close right after it opens; the
+  // probe's verdict must latch on the first outcome or every successful probe
+  // immediately re-flags the server as down and the modal opens onto manual.
+  const { el, api, sockets } = await setup();
+  const probe = sockets[0]; // opened during setup
+  probe.onerror?.(); // the late error Safari delivers after our own close
+  await api.openNetConnect(true);
+  assert.equal(el("net-manual-view").hidden, true, "modal opens on the shared-code view");
+  assert.equal(el("net-connect-view").hidden, false);
+});
+
+test("the footer links toggle between the shared-code and manual views", async () => {
+  const { el, api } = await setup();
+  await api.openNetConnect(true);
+  assert.equal(el("net-manual-view").hidden, true);
+
+  await el("net-to-manual").click();
+  assert.equal(el("net-manual-view").hidden, false, "manual exchange shown");
+  assert.equal(el("net-connect-view").hidden, true);
+
+  await el("net-to-code").click();
+  assert.equal(el("net-manual-view").hidden, true, "back on the shared-code view");
+  assert.equal(el("net-connect-view").hidden, false);
+  assert.ok(api.net, "a fresh session is armed");
+  assert.equal(el("net-join-go").disabled, false, "Connect is usable again");
+});
+
 test("a mid-handshake drop doesn't redial; an unopened DataChannel fails at the 20s deadline", async () => {
   const { el, api, connect, advance, flush, lastWS, sockets } = await setup();
   const clicked = connect("TESTX");

@@ -163,18 +163,30 @@ const probeSignalServer = () => {
     log("netplay: probe " + NET_SIGNAL_URL + " failed to construct: " + (e?.message || e), "warn");
     return;
   }
+  // First outcome wins. iOS Safari fires a LATE error event on a socket we
+  // close right after it opens — without the latch, every successful probe
+  // immediately overwrote its own verdict with "down" on WebKit (seen on an
+  // iPhone as "probe ok in 537ms" followed by "errored after 667ms"), and the
+  // link modal opened onto the manual exchange on a perfectly healthy server.
+  let settled = false;
   const timer = setTimeout(() => {
+    settled = true;
     sigServerUp = false;
     log("netplay: probe " + NET_SIGNAL_URL + " timed out after " + ms(), "warn");
     try { ws.close(); } catch {}
   }, SIG_PROBE_TIMEOUT);
   ws.onopen = () => {
+    if (settled) return;
+    settled = true;
     sigServerUp = true;
     clearTimeout(timer);
     log("netplay: probe " + NET_SIGNAL_URL + " ok in " + ms());
+    ws.onerror = null; // our own close below must not read as a failure
     try { ws.close(); } catch {}
   };
   ws.onerror = () => {
+    if (settled) return;
+    settled = true;
     sigServerUp = false;
     clearTimeout(timer);
     log("netplay: probe " + NET_SIGNAL_URL + " errored after " + ms(), "warn");
@@ -826,6 +838,20 @@ const manualEnter = (attemptFailed) => {
   if (netConnectView) netConnectView.hidden = true;
   if (netManualView) netManualView.hidden = false;
   manualPrepare();
+};
+
+// Return from the manual exchange to the shared-code view (the footer link).
+// The prepared offer is abandoned — codes are cheap to regenerate — and a
+// fresh pending session re-arms so Connect works immediately.
+const manualBack = () => {
+  if (!net || net.dc || net.rtcConnected || net.started) return;
+  try { net.pc?.close(); } catch {}
+  net = makeSession(netAttach);
+  manualReset();
+  netSetConnecting(false);
+  netSetStatus("");
+  netJoinGo.disabled = false;
+  setTimeout(() => netCodeInput?.focus(), 0);
 };
 
 // Restore the shared-code view (called from modal open / close / shutdown).
@@ -1610,6 +1636,17 @@ document.getElementById("rb-disconnect").addEventListener("click", () => {
     showToast("Disconnected");
   }
 });
+
+// Footer links: switch between the shared-code and manual-exchange views.
+// Entering the manual exchange cancels any in-progress server attempt
+// (manualEnter's normal semantics); going back re-arms a fresh session.
+document.getElementById("net-to-manual").addEventListener("click", () => {
+  manualEnter();
+  if (netManualView && !netManualView.hidden) {
+    setTimeout(() => manualIn?.focus(), 0);
+  }
+});
+document.getElementById("net-to-code").addEventListener("click", manualBack);
 
 document.getElementById("net-close").addEventListener("click", netDismissModal);
 netModal.addEventListener("click", (e) => {
