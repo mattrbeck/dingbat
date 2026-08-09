@@ -845,7 +845,7 @@
                   <button type="button" class="button button-sm" id="pick-gba-bios">Choose</button>
                   <button type="button" class="button button-sm button-ghost" id="remove-gba-bios">Remove</button>
                 </div>
-                <div class="modal-toggle-row">
+                <div class="modal-toggle-row" id="gba-run-bios-row">
                   <div>
                     <span class="modal-row-label">Play BIOS intro</span>
                     <span class="modal-toggle-sub">Play the GBA startup animation first. Needs a BIOS file</span>
@@ -856,7 +856,7 @@
                   </label>
                 </div>
                 <div class="modal-subhead">BIOS calls (SWI)</div>
-                <div class="radio-group" role="radiogroup" aria-label="GBA BIOS call handling">
+                <div class="radio-group" id="gba-bios-mode-group" role="radiogroup" aria-label="GBA BIOS call handling">
                   <label class="radio-row">
                     <input type="radio" name="gba-bios-mode" value="0" checked />
                     <span>HLE<span class="radio-sub">No BIOS file needed</span></span>

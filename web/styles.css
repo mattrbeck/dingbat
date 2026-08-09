@@ -2585,6 +2585,24 @@ body.debug-2p .home-tile-link {
   opacity: 0.45;
 }
 
+/* The switch has to fade with its label. A dimmed row beside a fully lit
+   amber track reads as a bug rather than as "not available yet". */
+.switch input:disabled + .switch-track {
+  opacity: 0.4;
+}
+
+.switch:has(input:disabled) {
+  cursor: default;
+}
+
+/* Same idea for a whole radio group whose question has no answer yet — the
+   GBA call modes with no BIOS file. The rows keep showing which one is
+   stored; they just cannot be changed. Not on the subhead above it: fading a
+   heading takes its divider with it and reads as a rendering fault. */
+.radio-group.row-disabled {
+  opacity: 0.45;
+}
+
 .modal-toggle-row {
   display: flex;
   align-items: center;

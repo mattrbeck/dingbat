@@ -840,6 +840,10 @@ for (const row of document.querySelectorAll(".modal-toggle-row")) {
 
 const settingsModal = document.getElementById("settings-modal");
 const gbaBiosStatus = document.getElementById("gba-bios-status");
+const gbaRunBiosRow = document.getElementById("gba-run-bios-row");
+const gbaBiosModeGroup = document.getElementById("gba-bios-mode-group");
+const gbaBiosModeRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
+  document.querySelectorAll('input[name="gba-bios-mode"]'));
 const gbcBootromStatus = document.getElementById("gbc-bootrom-status");
 
 const updateBiosStatusText = async () => {
@@ -847,6 +851,17 @@ const updateBiosStatusText = async () => {
   gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
   let gbc = await dbGet("bios:gbc");
   gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
+  // Both of the settings below the file row are answers to "what should the
+  // BIOS do", and with no BIOS there is nothing to answer: the intro cannot
+  // play and both real-BIOS call modes silently fall back to software. They
+  // keep showing their stored values rather than resetting — the choice is
+  // remembered and comes back the moment a file is set — but they are inert
+  // until then, and the hint underneath says why.
+  const noBios = !gba;
+  gbaRunBiosToggle.disabled = noBios;
+  gbaRunBiosRow.classList.toggle("row-disabled", noBios);
+  gbaBiosModeGroup.classList.toggle("row-disabled", noBios);
+  for (const r of gbaBiosModeRadios) r.disabled = noBios;
 };
 
 // iOS/iPadOS (iPad reports as "MacIntel" with touch points since iPadOS 13).
