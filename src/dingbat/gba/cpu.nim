@@ -406,8 +406,18 @@ proc tick*(cpu: CPU) =
     # the BIOS return path that the real BIOS executes after the wake
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.halt_resume_addr:
-      cpu.gba.bus.add_cycles(int(cpu.halt_resume_charge))
-      cpu.halt_resume_charge = 0
+      # Pay the parked routine time in interruptible chunks, exactly like the
+      # in-SWI charge: the real BIOS body runs with the caller's IRQ mask, so
+      # a SECOND (third, ...) interrupt must also preempt the residue. Paying
+      # it as one atomic lump deferred every further IRQ by up to the whole
+      # remainder — for a large LZ77UnComp (~240k cycles) that starves the
+      # Gen-3 link master's 9-transfers-per-frame cadence and FireRed/
+      # LeafGreen tear the trade down with LAG_MASTER ("Communication
+      # error..."). If an IRQ becomes deliverable mid-payment the rest stays
+      # parked (same serialized fields) and is resumed on the next return.
+      let remain = cpu.hle_charge_units_interruptible(int(cpu.halt_resume_charge))
+      cpu.halt_resume_charge = int32(remain)
+      if remain != 0: return
       # The dispatcher's exit path pops the caller's r12 back (staged in its
       # SVC-stack slot by Halt/Stop and the interruptible decompression
       # parks alike)
