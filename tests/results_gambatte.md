@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 12:29:29*
+*Generated: 2026-08-09 12:39:16*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3818/5005 passed.**
+**3827/5005 passed.**
 
 ## bgen
 
@@ -1228,9 +1228,9 @@ All 67 tests passed.
 | speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
 
-## sprites (398/476 passed)
+## sprites (407/476 passed)
 
-398/476 tests passed, 78 failed:
+407/476 tests passed, 69 failed:
 
 | Test | Result |
 |------|--------|
@@ -1270,7 +1270,6 @@ All 67 tests passed.
 | sprites/9spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/9spritesPrLine_m3stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_disable_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -1301,17 +1300,9 @@ All 67 tests passed.
 | sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/space/10spritesPrLine_wx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/sprite_late_disable_spx18_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_disable_spx19_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_disable_spx1B_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_enable_spx18_2_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_enable_spx1A_2_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_enable_spx1B_2_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx18_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx19_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx1B_1_dmg08_out0 [dmg] | got 3, expected 0 |
 
 ## tima (216/232 passed)
 

@@ -61,6 +61,7 @@ web/rom.gbc
 
 # Local investigation scratch dirs — never commit
 /scratch-repro/
+/.scratch/
 
 # Generated SRAM backing for test ROMs (created at runtime, not a fixture)
 tests/roms/*.sav

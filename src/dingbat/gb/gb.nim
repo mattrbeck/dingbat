@@ -519,6 +519,35 @@ const M3_THROWAWAY_DOTS*      {.intdefine.} = 4
   ## `M3_THROWAWAY_DOTS` in gb/fifo_ppu.nim -- so this constant does not change
   ## mode 3's length; it only says where inside those 12 dots the first real
   ## tile's three VRAM reads fall.
+const OBJ_ABORT*              {.intdefine.} = 1
+  ## Whether clearing LCDC.1 in the middle of an object's stall CANCELS the
+  ## fetch (1, shipping) or lets it run to completion (0, the pre-2026-08-09
+  ## behaviour). Pan Docs describes the cancel; the derivation, the dot the
+  ## shifter resumes on and the ROMs that bracket it are at `fifo_obj_abort`
+  ## in fifo_ppu.nim.
+const CGB_OBJ_ABORT*          {.intdefine.} = 0
+  ## Whether the CGB cancels an object fetch the way the DMG does (1) or lets
+  ## it run (0, shipping). One row measures it and it is the same cart on both
+  ## consoles: mealybug m3_lcdc_obj_en_change_variant is pixel-exact against
+  ## its `_cgb_c` reference with the cancel OFF and 288 pixels out with it on,
+  ## while against its DMG reference it is 96 out without and 0 with. See
+  ## `fifo_obj_abort` for what that one row cannot separate.
+const OBJ_ABORT_LEAD*         {.intdefine.} = 2
+  ## Dots by which the object FETCHER's view of LCDC.1 leads the CPU's write
+  ## dot, when the write cancels a fetch (OBJ_ABORT). The SHIFTER comes back on
+  ## dot `W - OBJ_ABORT_LEAD`, paid as that many catch-up pipeline dots on the
+  ## write's own dot; it is the same two dots M3_PIPE_DELAY already charges the
+  ## rest of the line. What the shifter gets and the FETCHER does not is
+  ## OBJ_ABORT_FLAG_HOLD below; the bracket that pins the pair is at
+  ## `fifo_obj_abort` in fifo_ppu.nim.
+const OBJ_ABORT_FLAG_HOLD*    {.intdefine.} = 1
+  ## Dots the mode 3 -> 0 FLAG keeps after an aborted object fetch that the
+  ## shifter does not: the cancelled VRAM cycle still owns the bus for its last
+  ## dot, so the fetcher retires one dot behind the pixels. It is what makes the
+  ## two instruments agree -- mealybug reads the PIXELS and gambatte's
+  ## sprite_late_disable rows read the FLAG -- and both are exact with the pair
+  ## (2, 1) where no single refund satisfies either pair of rows. See
+  ## `fifo_obj_abort`.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
