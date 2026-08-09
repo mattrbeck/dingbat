@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 15:31:18*
+*Generated: 2026-08-09 16:53:19*
 
 ## Game Boy - Blargg
 
@@ -254,7 +254,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👌 |
 | mealybug/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug-cgb/m3_lcdc_win_en_change_multiple | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 100.0% correct (23038/23040 pixels match) |
+| mealybug/m3_lcdc_win_en_change_multiple_wx | 👌 |
 | mealybug/m3_lcdc_win_map_change | 👌 |
 | mealybug-cgb/m3_lcdc_win_map_change | 👀 99.2% correct (22858/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_win_map_change2 | 👀 99.4% correct (22900/23040 pixels match) |
@@ -1053,7 +1053,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
 | gambatte/speedchange | 👀 109/208 passed |
-| gambatte/sprites | 👀 435/476 passed |
+| gambatte/sprites | 👀 436/476 passed |
 | gambatte/tima | 👀 218/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 765
-- **Fail:** 216
+- **Pass:** 766
+- **Fail:** 215

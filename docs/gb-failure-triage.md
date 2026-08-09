@@ -882,7 +882,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_obp0_change` | 74 | **0** | the mixer's second stage |
 | `m3_wx_4_change_sprites` | 2 | **0** | the park |
 | `m3_wx_6_change` | 13810 | **0** | `WIN_LINE_START_WX`, then `WIN_START_PRE_PIXEL` (2026-08-07, off the hardware photographs) |
-| `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above |
+| `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above — **0 as of 2026-08-09**, and with it the whole scored DMG set (`WIN_WX0_PHASE` + `WIN_PRE_PX_PHASE`, at the end of this file) |
 | `m3_lcdc_obj_en_change` | 60 | 2 | see below |
 | `m3_lcdc_obj_en_change_variant` | 380 | 102 | the mixer |
 | `m3_window_timing` | 299 | 29 | **0 as of 2026-08-09** — 12 px `MIXER_TAIL_DOTS`, 21 px `WIN_HEAD_ABSORB` + `WIN_LINE_START_LATCH` |
@@ -1950,6 +1950,128 @@ pair: **-0.04%** retired instructions on `cgb-acid2` and **-0.18%** on
 `m3_lcdc_obj_en_change` (the latter genuinely does less work -- aborted lines
 are shorter). Nothing is added to the dot loop; the whole mechanism is two
 guards on an LCDC write.
+
+## 2026-08-09: the window's TILE goes where its own first pixel is — the last 2 px
+
+`m3_lcdc_win_en_change_multiple_wx`'s last two wrong pixels, LY 0 at x = 9 and
+LY 6 at x = 7, and with them **the whole scored DMG mealybug set: 24 rows,
+23040/23040 each.**
+
+### Why this ROM alone can see it
+
+It is the only ruler in the suite that measures the window's tile PHASE rather
+than a dot. Every other window ROM drives BGP or reads a black-start x, i.e. it
+counts head dots; this one turns LCDC.5 off again partway across every line with
+`WX = LY`, and its own header says what that shows: *"when the window is turned
+on and off it will always display a multiple of 8 pixels, **except when the
+window begins off the left edge of the screen**"*. The background resumes on the
+WINDOW's tile boundary, so the length of the black run at the head of each line
+IS the phase of the window's first tile, read off the reference per line:
+
+| WX (= LY) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | ≥ 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| reference black run | 9 | 10 | 3 | 4 | 5 | 6 | 7 | 8 | 0 |
+| implied first tile | −7..0 | −6..1 | −5..2 | −4..3 | −3..4 | −2..5 | −1..6 | 0..7 | — |
+| dingbat, before | 10 | 10 | 3 | 4 | 5 | 6 | **8** | 8 | 0 |
+
+(WX = 0 and 1 read one tile later than their own boundary — 1 + 8 and 2 + 8 —
+because the abort catches the fetch after the next one; that is the same
+"multiple of 8" the header describes and it is common to both columns.)
+
+Every row is `first tile = (WX − 7) .. WX`: **the window's tile sits at the
+window's own first pixel, at every WX.** Two of ours did not, and they are the
+two ends of the same statement.
+
+### The two exceptions we carried, and why they were both about dots
+
+Both were spellings that got the number of DOTS right by moving a PIXEL, which
+no other ROM in the tree can distinguish — the rulers all measure dots.
+
+**1. WX = 0 (`WIN_WX0_PHASE`).** The head budget for a line that starts as a
+window line is `idle + discard = 6` (`WIN_HEAD_ABSORB`), with `discard = 7 − WX`
+and `idle = WX − 1`. At WX = 0 that idle is **−1**, which the code could not
+express, so it clamped the idle to 0 and shortened the discard to 6 instead —
+right dots, tile one pixel right. The −1 now comes out of the window's startup
+fetch: one of `FETCHER_ORDER`'s sleeps is skipped, so the fetch pushes a dot
+early and the seventh discarded pixel spends that dot back.
+
+Where the skip is taken matters twice over. It is taken at the dot SCX is
+LATCHED on, not at the head two dots earlier: this ROM and
+`m3_window_timing_wx_0` both write their register per line inside mode 3, and at
+the head dot SCX is still the previous line's value (`-d:gb_m3_trace` prints
+both — the `HEAD` line and the `LATCH` line). Deciding it at the head instead
+costs 105 CGB pixels of `m3_window_timing_wx_0`, on exactly the `LY ≡ 0` and
+`LY ≡ 1 (mod 8)` lines the staleness lands on. And it comes out of the fetch's
+own sleep rather than off its front, so the map read — and the SCX latch riding
+on it, which `m3_scx_low_3_bits` brackets to one M-cycle — does not move.
+
+`m3_window_timing_wx_0`'s *"window activating one T-cycle later when WX = 0 and
+SCX > 0"* is the other half of the same sentence: with `SCX & 7 > 0` there is no
+shortening, and the head is the ordinary `6 + SCX & 7` plus that documented dot.
+The old `+1 / −1` pair in the sampler was that dot spelled as a pixel; it is now
+spelled as the absence of the skip, which is what "activating later" says.
+
+**2. WX = 6 (`WIN_PRE_PX_PHASE`).** The comparator matches one slot LEFT of the
+shifter's first pixel (`WIN_START_PRE_PIXEL`, bracketed on three consecutive
+scanlines of `m3_wx_6_change`), and `win_lx` is clamped UP to that first pixel so
+the equality can fire at all. The clamp is right about the DOT and was wrong
+about the TILE: it moved the window's tile with the match, to `0..7`. Now the
+start takes the shifter back onto the window's own pixel (x = −1, off the left
+edge, so the framebuffer never sees it) and enters `FETCHER_ORDER` one step in.
+**Five dots of fetch plus that pixel is six dots and no pixel**, so the line's
+first drawn pixel lands on the dot it landed on before.
+
+That last identity is why no length instrument moves: GBMicrotest `win6_a/_b`
+still bracket 178, and gambatte's WX = 3 and WX = 6 families are unchanged —
+except `sprites/space/10spritesPrLine_wx6_m3stat_ds_2` [cgb], which goes
+**GREEN**. That row is a mode-3 length probe at WX = 6 in double speed, where
+the fetcher's five-dot phase against an object's penalty is visible at 2-dot
+sampling; it is an independent confirmation from a suite that never looks at a
+pixel.
+
+### Before / after
+
+| | before | after |
+|---|---|---|
+| mealybug `m3_lcdc_win_en_change_multiple_wx` DMG | 23038/23040 | **23040/23040** |
+| mealybug DMG total (24 rows) | 552,958 | **552,960 = 24 × 23040** |
+| mealybug CGB total (27 rows) | 1,861,920 | 1,861,920 (identical, row for row) |
+| gambatte | 3849/5005 | **3850/5005** (+1, −0) |
+| runner | 765/981 | **766/981** |
+| `results_mgba_suite.md` | — | byte-identical |
+
+Perf, retired instructions against a control build of the same tree
+(`-d:WIN_WX0_PHASE=0 -d:WIN_PRE_PX_PHASE=0`, which reproduces the old totals
+exactly), minimum of five runs a side with `cycles=` identical in every pair:
+**−0.034%** (Pokemon Crystal CGB) and **−0.042%** (Link's Awakening DMG). Both
+rules sit off the dot loop — one runs once per line at the fine-scroll latch,
+the other once per window start — and the WX = 0 term is written as an add
+rather than a branch because the `if` form measured +0.03% where this form
+measures −0.03%, which is the same inlining cliff the rest of this file keeps
+meeting.
+
+### What DocBoy's window looks like, and what it was used for
+
+DocBoy scores 24/24 on this set, so it was read as a hypothesis generator —
+behaviour only, and the derivation above is off our own oracles. Two structural
+facts are worth recording because they explain why we needed four constants
+where it needs none:
+
+* **Its shifter runs eight pixels before screen x = 0** (they are popped and not
+  displayed), so `WX = 0..7` are ordinary matches on the ordinary comparator.
+  Ours starts at `−(SCX & 7)`, which is why WX below 7 needs a line-start path
+  at all (`WIN_LINE_START_WX`), why the WX = 6 slot needs a clamp
+  (`WIN_START_PRE_PIXEL`), and why the discard has to be re-created as negative
+  `lx` with idle fetcher steps against it (`WIN_HEAD_ABSORB`). Our `idle + 
+  discard = 6` is that eight-pixel prologue seen through a shorter one.
+* **The activation dot is wasted and the first window tile is pushed a step
+  early**, so a window start costs six dots however it is reached. That is the
+  same six this tree already spends, and it is what makes "one step in" the
+  natural spelling for a start whose slot is left of our first pixel.
+
+Nothing was copied and no constant of theirs is used: both changes are pinned by
+the reference table above, by `m3_window_timing_wx_0`'s own header sentence, and
+by the two length suites that did not move.
 
 ## Reproducing any of this
 

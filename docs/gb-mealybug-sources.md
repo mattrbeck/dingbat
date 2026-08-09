@@ -534,9 +534,16 @@ The row is now pixel-exact on both devices.
 > and due to **window activating one T-cycle later when WX = 0 and SCX > 0**."
 
 **dingbat agrees** — both halves are in `fifo_sample_smooth_scroll`, quoted
-there, and the row is exact. Recorded here as a **confirmation**:
-the `+= 1` / `-= 1` pair around `ppu.wx == 0` in that proc is the second clause
-of that sentence and had the wrong sign until 2026-08-07. Do not "simplify" it.
+there, and the row is exact on both devices. Recorded here as a
+**confirmation**, with the shape of the second clause corrected twice: it had
+the wrong sign until 2026-08-07, and until 2026-08-09 it was spelled as a
+DISCARDED PIXEL (a `+= 1` / `-= 1` pair around `ppu.wx == 0`) where the sentence
+says the window ACTIVATES later. It is now the absence of a dot the WX = 0 head
+otherwise skips — same dots on every line of this ROM, and the difference is the
+window's tile phase, which only §3.9 can see. The `SCX & 7 = 0` test has to be
+taken on the dot SCX is latched on and not at the head two dots earlier; this
+ROM writes SCX = LY inside mode 3, so the head still sees the previous line's
+value and reading it there costs 105 CGB pixels of this row.
 
 ### 3.6 `m3_scx_low_3_bits` — 0, and `m3_scx_high_5_bits` — 0
 
@@ -614,12 +621,37 @@ already written up at `fifo_arm_window` and is not repeated here.
 is incremented **per activation**, not per line, and not on lines where the
 window never starts.
 
-### 3.9 `m3_lcdc_win_en_change_multiple_wx` — 343, unchanged
+### 3.9 `m3_lcdc_win_en_change_multiple_wx` — 343 → **0** (2026-08-09)
 
-Same test with `WX = LY`. Its diff is 8-pixel blocks on LY 2..6 starting at
+Same test with `WX = LY`. Its diff was 8-pixel blocks on LY 2..6 starting at
 x = LY + 1 — that is, exactly the header's stated exception ("except when the
 window begins off the left edge"), on the five lines where `WX < 7`. It belongs
-with §5, not with §3.8, and it is the row `WIN_HEAD_ABSORB` moves most (+32).
+with §5, not with §3.8, and it is the row `WIN_HEAD_ABSORB` moved most (+32).
+
+**The header sentence is the whole instrument, and it closed the row.** Because
+the background resumes on the WINDOW's tile boundary, the black run at the head
+of each line IS the phase of the window's first tile — which makes this the only
+ROM in the suite that measures the window's tile position rather than a count of
+head dots. Read per line, the reference says `first tile = (WX − 7) .. WX` at
+every WX, WX = 0 included:
+
+| WX (= LY) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| black run | 9 | 10 | 3 | 4 | 5 | 6 | 7 | 8 |
+| first tile | −7..0 | −6..1 | −5..2 | −4..3 | −3..4 | −2..5 | −1..6 | 0..7 |
+
+(WX = 0 and 1 read one tile past their own boundary, 1 + 8 and 2 + 8: the abort
+catches the fetch after the next one, which is the "multiple of 8" the header
+describes and is common to both.)
+
+dingbat's last two wrong pixels were the two WX values where a dot had been paid
+with a pixel: WX = 0's discard was six rather than seven (the head's `WX − 1`
+idle term is *minus one* there and was clamped to zero), and WX = 6's tile moved
+with the `WIN_START_PRE_PIXEL` clamp instead of staying at the window's own
+first pixel. Both are now spelled as a dot taken out of the window's startup
+fetch, so no mode 3 length moves; see `WIN_WX0_PHASE` and `WIN_PRE_PX_PHASE` in
+`gb/gb.nim` and the section at the end of `docs/gb-failure-triage.md`. With
+this row at 0 the whole **scored DMG set is 24/24 pixel-exact**.
 
 ### 3.10 `m3_lcdc_obj_en_change` — 2 → **0**, `m3_obp0_change` — 0
 
@@ -752,6 +784,12 @@ See `docs/gb-failure-triage.md`. Shipped with `WIN_LINE_START_LATCH`, which is
 the LY 0 half this section could not see: the ROM writes `WX = LY` inside mode 3,
 so the line-start decision has to be taken after that write and not at the
 mode 2 → 3 edge.
+
+**One refinement more, 2026-08-09** (`WIN_WX0_PHASE`): the budget `idle +
+discard = 6` holds at WX = 0 as well, where the idle term `WX − 1` is **minus
+one** — a startup fetch one dot shorter, not a discard one pixel shorter. That
+is what §3.9's table reads off the reference, and it is the last of this
+section's arithmetic to stop being a clamp.
 
 ---
 

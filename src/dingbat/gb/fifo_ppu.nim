@@ -137,6 +137,10 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
       let target = int32(ppu.wx) - 7
       let first  = -int32(7 and int(ppu.scx))
       when WIN_START_PRE_PIXEL != 0:
+        # The clamp is about the DOT the shifter can notice the match on. The
+        # window's TILE still belongs at `target`, one pixel to the left, and
+        # win_start_reset puts it there -- it recognises this case by reading
+        # the clamp back off `lx` (WIN_PRE_PX_PHASE).
         if target == first - 1: first else: target
       else:
         target
@@ -258,10 +262,51 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     # where hardware samples cc - 2) becoming visible on one more row, because
     # the mode-3 end moved to where that defect shows. Same shape, same
     # signature and the same twenty siblings as win6_b next door.
+    #
+    # ---- The discard is `7 - WX` at EVERY WX, WX = 0 included (WIN_WX0_PHASE)
+    #
+    # This used to carry a `+= 1 / -= 1` pair around `ppu.wx == 0`, which made
+    # the WX = 0 discard six rather than seven when SCX & 7 was zero. That is
+    # the right number of DOTS and the wrong PHASE: it puts the window's first
+    # tile one pixel to the right of where hardware puts it, which is invisible
+    # in every ruler ROM (they measure a black-x, i.e. a dot) and visible in
+    # exactly one place -- a line whose window is turned OFF again partway
+    # across, where the background resumes on the window's own tile boundary.
+    # mealybug m3_lcdc_win_en_change_multiple_wx is that ROM (see
+    # WIN_WX0_PHASE in gb.nim for the reading). The dot the pair was paying for
+    # moves to the head, where the rest of the window's head budget already is.
     ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
-    if ppu.wx == 0:
-      ppu.lx += 1
-      if (ppu.scx and 7) > 0: ppu.lx -= 1
+    when WIN_WX0_PHASE == 0:
+      if ppu.wx == 0:
+        ppu.lx += 1
+        if (ppu.scx and 7) > 0: ppu.lx -= 1
+    else:
+      # The dot the old spelling paid for with that missing seventh pixel. The
+      # head budget is `idle + discard = 6` (WIN_HEAD_ABSORB), and at WX = 0 the
+      # idle term is `WX - 1` = MINUS one: the window's startup fetch is one dot
+      # shorter than everyone else's, which is the other half of
+      # `m3_window_timing_wx_0`'s "window activating one T-cycle later when
+      # WX = 0 and SCX > 0" -- with SCX > 0 there is no such shortening and the
+      # head is the ordinary `6 + SCX & 7` plus that documented dot.
+      #
+      # Spent HERE and not at the head, for two reasons that are the same
+      # reason: this is the dot SCX is latched on, so it is the first dot on
+      # which `SCX & 7 = 0` is even known (at the head, two dots earlier, SCX is
+      # still the value the previous line's write left -- and a ROM that writes
+      # SCX = LY reads one line stale there, which is 105 CGB pixels of
+      # `m3_window_timing_wx_0`); and the dot comes out of the fetch's own
+      # SLEEP rather than off its front, so the map read this dot is making --
+      # and the SCX latch riding on it, which mealybug m3_scx_low_3_bits
+      # brackets to one M-cycle -- does not move. The caller's `inc` takes the
+      # counter from here, so stepping it once skips FETCHER_ORDER's sleep at 2
+      # and the push arrives one dot early, exactly cancelling the extra pixel.
+      #
+      # Written as an add rather than a branch: this proc is reached from the
+      # fetcher's map-read step, and the `if` form measured +0.03% of retired
+      # instructions on Pokemon Crystal where this form measures -0.03% (both
+      # against the same control build, `cycles=` identical) -- the same
+      # inlining cliff the rest of this file's perf notes keep running into.
+      ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) == 0'u8)
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 
@@ -297,6 +342,46 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   if fetching_window: inc ppu.current_window_line
   when WIN_EN_HOLD > 0: ppu.win_hold = 0'u8
   fifo_arm_window(ppu)
+
+proc win_start_reset(ppu: GbFifoPpu) {.inline.} =
+  ## A window START served by the shifter's equality, with the one case the
+  ## equality cannot express folded in: a match on the comparator's PRE-PIXEL
+  ## slot (WIN_START_PRE_PIXEL, i.e. WX = 6 with SCX & 7 = 0).
+  ##
+  ## `win_lx` was clamped UP to the shifter's first pixel so the match could be
+  ## noticed at all, and that is right for the dot -- the window is noticed one
+  ## dot after hardware notices it, and the fetch it starts is one dot shorter
+  ## because of it. It is not right for the TILE: hardware's window tile begins
+  ## at the window's own first pixel, `WX - 7`, whatever the shifter can reach.
+  ## So take the shifter back onto that pixel (it is off the left edge, so the
+  ## framebuffer never sees it) and enter FETCHER_ORDER one step in, at the map
+  ## read. Five dots of fetch and the extra pixel is six dots and no extra pixel:
+  ## the line's first drawn pixel lands on the same dot it lands on today, which
+  ## is what leaves every mode 3 length instrument reading what it read before.
+  ## See WIN_PRE_PX_PHASE.
+  ##
+  ## The test is the clamp, read back: `win_lx` equals `lx` on this dot, so
+  ## "the window's own first pixel is one to the left of the pixel the match
+  ## fired on" IS `WX - 7 == lx - 1`, and an unclamped match (where `win_lx` is
+  ## the target itself) fails it. No flag is kept for it -- fifo_arm_window
+  ## re-derives `win_lx` from WX on every write that can move it, so the two
+  ## cannot disagree, and asking here rather than storing there keeps a store
+  ## off every register write (+0.07% of retired instructions on Pokemon
+  ## Crystal, measured).
+  ##
+  ## A HELD match is excluded explicitly and not by arithmetic: it has walked
+  ## `win_lx` up to two pixels right of the match it is retrying and taken one
+  ## of them back again (WIN_EN_HOLD_BACK), so its second retry lands on this
+  ## test by coincidence -- worth 3 wrong pixels of the same ruler ROM. The two
+  ## rules are about different pixels: the hold's is a match the shifter has
+  ## already passed, this one a match it has not reached.
+  when WIN_PRE_PX_PHASE != 0:
+    if ppu.win_hold == 0'u8 and int32(ppu.wx) - 7 == ppu.lx - 1:
+      dec ppu.lx
+      fifo_reset_bg(ppu, true)
+      ppu.fetch_counter = 1
+      return
+  fifo_reset_bg(ppu, true)
 
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
@@ -459,8 +544,23 @@ proc fifo_head_window(ppu: GbFifoPpu) =
       ppu.fetching_window = true
       inc ppu.current_window_line
       fifo_arm_window(ppu)
+  when defined(gb_m3_trace):
+    # Diagnostic only: the dot the line-start decision is taken on, with the two
+    # registers it is taken from. WX is what decides it; SCX is printed next to
+    # it because this dot is TWO before SCX's own latch (the `B` two steps on),
+    # and a ROM that writes SCX per line is still showing the previous line's
+    # value here -- which is why the WX = 0 head dot is spent at the latch and
+    # not here (WIN_WX0_PHASE).
+    if gb_traced(ppu.ly):
+      echo "HEAD ly=", ppu.ly, " dot=", ppu.cycle_counter, " wx=", ppu.wx,
+           " scx=", ppu.scx, " fw=", ppu.fetching_window
   when WIN_HEAD_ABSORB != 0:
     if ppu.fetching_window:
+      # `WX - 1` idle dots, clamped at 0 because FETCHER_ORDER cannot be entered
+      # above its first sleep from here. WX = 0's missing `-1` is spent in the
+      # fetch instead, at the dot SCX is latched on -- see WIN_WX0_PHASE in
+      # fifo_sample_smooth_scroll, which is where the `7 - WX` discard it goes
+      # with is written.
       ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
 
 # ---- M3_THROWAWAY_DOTS: how long the discarded head fetch lasts -----------
@@ -2413,10 +2513,10 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               # over it. See WIN_EN_HOLD_BACK.
               if ppu.win_hold > 0'u8: dec ppu.lx
             # fifo_reset_bg clears the hold on its way through.
-            fifo_reset_bg(ppu, true)
+            win_start_reset(ppu)
             return
         else:
-          fifo_reset_bg(ppu, true)
+          win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
            window_enabled(ppu):
