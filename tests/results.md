@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 12:13:08*
+*Generated: 2026-08-09 12:29:29*
 
 ## Game Boy - Blargg
 
@@ -254,7 +254,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👀 97.1% correct (22381/23040 pixels match) |
 | mealybug/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug-cgb/m3_lcdc_win_en_change_multiple | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 98.5% correct (22697/23040 pixels match) |
+| mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 98.7% correct (22744/23040 pixels match) |
 | mealybug/m3_lcdc_win_map_change | 👌 |
 | mealybug-cgb/m3_lcdc_win_map_change | 👀 99.2% correct (22858/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_win_map_change2 | 👀 99.4% correct (22900/23040 pixels match) |
@@ -268,8 +268,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_scy_change | 👌 |
 | mealybug-cgb/m3_scy_change | 👌 |
 | mealybug-cgb/m3_scy_change2 | 👌 |
-| mealybug/m3_window_timing | 👀 99.9% correct (23019/23040 pixels match) |
-| mealybug-cgb/m3_window_timing | 👀 99.9% correct (23019/23040 pixels match) |
+| mealybug/m3_window_timing | 👌 |
+| mealybug-cgb/m3_window_timing | 👌 |
 | mealybug/m3_window_timing_wx_0 | 👌 |
 | mealybug-cgb/m3_window_timing_wx_0 | 👌 |
 | mealybug/m3_wx_4_change | 👌 |
@@ -782,11 +782,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win2_a | 👌 |
 | gbmicrotest/win2_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win3_a | 👌 |
-| gbmicrotest/win3_b | 👌 |
+| gbmicrotest/win3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win4_a | 👌 |
-| gbmicrotest/win4_b | 👌 |
+| gbmicrotest/win4_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win5_a | 👌 |
-| gbmicrotest/win5_b | 👌 |
+| gbmicrotest/win5_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win6_a | 👌 |
 | gbmicrotest/win6_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
 | gbmicrotest/win7_a | 👌 |
@@ -1053,17 +1053,17 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 113/116 passed |
 | gambatte/speedchange | 👀 112/208 passed |
-| gambatte/sprites | 👀 395/476 passed |
+| gambatte/sprites | 👀 398/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 342/476 passed |
+| gambatte/window | 👀 348/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 981
-- **Pass:** 731
-- **Fail:** 250
+- **Pass:** 730
+- **Fail:** 251
