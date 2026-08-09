@@ -1313,6 +1313,125 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ppu.fifo.head = h
   inc ppu.fifo.size
 
+proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
+  ## Does the object the shifter has just found have to wait for the window's
+  ## start, instead of the other way round?
+  ##
+  ## ---- The two triggers are ordered by COORDINATE, not by the dot ----------
+  ##
+  ## The window starts at the pixel `WX - 7` and an object's own trigger pixel
+  ## is `X - 8` -- the screen x of its leftmost column. Every event in the
+  ## shifter happens in coordinate order, so an object whose column is to the
+  ## LEFT of the window's first column is fetched before the window starts and
+  ## one to the right after it. What is special about this renderer is that the
+  ## object test above is a `>=`, not an equality: an object at OAM X 1..7 has
+  ## a trigger pixel of -7..-1, which `lx` never takes, and it is noticed on
+  ## the first dot the shifter runs instead -- the same dot a WX = 7 window is
+  ## noticed on. That collision is a modelling artifact of the clamp, and the
+  ## tie it creates is decided the wrong way by the object-first order.
+  ##
+  ## `lag` (below, in the branch this guards) is exactly that displacement:
+  ## `lx + 8 - X` is 0 for an object whose column IS this pixel and 1..8 for
+  ## one whose column already went past. So the ordering rule is
+  ##
+  ##   lag > 0   the object's column is left of the window's  -> object first
+  ##   lag == 0  same column                                  -> window first
+  ##
+  ## and only the second line changes anything: at `lag > 0` the object is
+  ## already pending when the window's pixel arrives, which is what the current
+  ## order does. Resolving the tie the other way round for BOTH cases is not
+  ## this rule and is refused by hardware -- it takes m3_lcdc_win_map_change
+  ## from 34 wrong pixels to 318, because it moves the seven left-hanging
+  ## objects too (see docs/gb-failure-triage.md).
+  ##
+  ## ---- What pins the `lag == 0` line ---------------------------------------
+  ##
+  ## mealybug m3_lcdc_win_map_change and m3_lcdc_tile_sel_win_change both run
+  ## WY = 0 / WX = 7 with one object per 8-line band at OAM X = band, so band 8
+  ## is the one line group where an object's column is the window's column.
+  ## Both ROMs toggle one LCDC bit for 8 dots at a fixed dot of every line
+  ## (105..112 here), so each band's reference reads out WHICH fetch phase the
+  ## PPU was in across those dots -- and band 8's says the window went first:
+  ##
+  ##   * win_map_change (WIN_MAP, read at the tile-map fetch). Band 8's
+  ##     reference has NO black tile anywhere on the line, and bands 9..15 --
+  ##     where the object is unambiguously after the window -- have none
+  ##     either, because the object fetch stalls the fetcher across the whole
+  ##     write. Object-first put our first window map read at dot 107, inside
+  ##     the write, and painted x = 0..7 black over the object.
+  ##   * tile_sel_win_change (TILE_SEL, read at the two bitplane fetches) is
+  ##     the sharper one, because it resolves the write to a single dot. Band
+  ##     8's reference is a WHITE window tile at x = 0..7 and colour 2 at
+  ##     x = 8..15 -- one tile whose low bitplane came from $9000 and whose
+  ##     high bitplane came from $8000. Window-first puts window tile 1's two
+  ##     bitplane reads on dots 104 and 106 with the write at 105, which is
+  ##     that mix exactly; object-first has no fetch there at all.
+  ##
+  ## Both rows go to 0 wrong pixels on this rule and no other mealybug row
+  ## moves: `X == WX + 1` on the line the window starts is the whole of it.
+  ##
+  ## ---- The two neighbouring spellings, both measured out --------------------
+  ##
+  ## The tile_sel row pins this to ONE dot, and the two variants either side of
+  ## it are refused by it, which is what says the deferral is a real edge and
+  ## not a knob:
+  ##
+  ##   * "the object still pays no wait, because it was pending before the
+  ##     window restarted" (pre-charge `obj_tile_fx` over the restart, penalty
+  ##     6 dots instead of 11). Mealybug does not move -- it does not measure
+  ##     the penalty here -- but gambatte loses the three OTHER window/object
+  ##     ties it fixes (window/late_disable_spx10_wx0f_2 on both devices,
+  ##     sprites/space/1pos8_8pos9_wx08_m3stat_ds_1 and
+  ##     10spritesPrLine_wx7_m3stat_ds_1). The object DOES re-pay the wait.
+  ##   * "the object starts its stall on the tie dot, concurrently with the
+  ##     window's restart" (reset the fetch here and fall straight into the
+  ##     trigger, so the wait term covers the restart). Refused by the pixels:
+  ##     win_map_change 34 -> 64 and tile_sel_win_change 98 -> 64. The BG
+  ##     fetcher only runs for the WAIT dots (see tick_sprite_fetcher), so
+  ##     starting the stall on the tie dot freezes the window's FIRST fetch
+  ##     half-done and pushes its second tile's map read into the write window,
+  ##     painting x = 8..15. The window's first tile has to be pushed before
+  ##     the object's stall begins, which is this rule.
+  ##
+  ## Physically the pipeline says the same thing. An object is merged onto the
+  ## BG FIFO entry it will be drawn over; a window start empties that FIFO and
+  ## refetches it. At the same pixel the fetch is upstream of the merge, so the
+  ## window's refetch has to happen before the object has anything to merge
+  ## onto. A left-hanging object was merged a pixel or more earlier, onto the
+  ## background entries the window start then discards -- and it survives that,
+  ## because the window start does not clear the OBJ FIFO, which is why the
+  ## glyph is still drawn over the window in bands 1..7 of both references.
+  ##
+  ## ---- What it costs, named ------------------------------------------------
+  ##
+  ## Ordering the two fetches this way makes mode 3 longer whenever the object
+  ## would have been charged against the tile the window discards: it is now
+  ## charged at column 0 of the window's first tile, which is Pan Docs' 11-dot
+  ## case. On the mealybug lines that is a no-op (the object was already at
+  ## column 0), and gambatte's three mid-line ties above go GREEN on it. At
+  ## `WX = 166` -- the window's first pixel is the LAST pixel of the line -- it
+  ## is +10 dots, and that is where the rule is bought: eight gambatte rows go
+  ## red (gambatte/m0enable 153 -> 147, and window/m2int_wxA6_spxA7_m0irq_2 on
+  ## both devices) against five green, net 3781 -> 3776.
+  ##
+  ## That corner is a device split this tree does not carry, not this rule
+  ## misfiring: hardware wants 180 dots on DMG and 190 on CGB for the same
+  ## frame, and 190 is what this produces -- window/m2int_wxA6_spxA7_m3stat's
+  ## CGB rows go green as its DMG rows go red. The split is already there
+  ## WITHOUT an object: window/m2int_wxA6_m3stat and _scx2_/_scx5_ have DMG and
+  ## CGB expectations one and two M-cycles apart and this tree gives the DMG
+  ## number to both. Until the window-start cost at the last pixel is modelled
+  ## per device, every wxA6 row is decided by which side that one number sits
+  ## on, and there is no setting of THIS rule that moves it.
+  ##
+  ## Restricted to the window's START. `win_lx` also carries the re-trigger
+  ## point while the window is already the fetch source, and that branch can
+  ## decline to do anything (it is gated on the fetcher's phase); yielding to
+  ## an edge that then does not fire would park the shifter on this pixel for
+  ## the rest of the line.
+  ppu.lx == ppu.win_lx and not ppu.fetching_window and
+    ppu.lx + 8 == int32(ppu.sprites[0].x)
+
 proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
                x: int32): uint16 {.inline.} =
   ## The mixer: one BG FIFO entry and one OBJ FIFO entry in, one panel colour
@@ -1538,7 +1657,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
     # Check for sprite at current pixel BEFORE popping/rendering
     if sprite_enabled(ppu) and ppu.sprites.len > 0 and
-       int(ppu.lx) + 8 >= int(ppu.sprites[0].x):
+       int(ppu.lx) + 8 >= int(ppu.sprites[0].x) and
+       # Last, and only reachable once the three tests above have already
+       # passed -- an object trigger is a handful of dots a line, so the whole
+       # tie-break sits off the dot loop's hot path. See obj_yields_to_window.
+       not obj_yields_to_window(ppu):
       ppu.fetching_sprite = true
       # Where The Pixel sits in the BG tile it belongs to. `lx` is the pixel the
       # shifter was about to emit and `8 - fifo.size` is its index inside the
