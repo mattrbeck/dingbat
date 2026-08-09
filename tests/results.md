@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 10:14:48*
+*Generated: 2026-08-09 10:46:24*
 
 ## Game Boy - Blargg
 
@@ -265,8 +265,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_scx_high_5_bits_change2 | 👌 |
 | mealybug/m3_scx_low_3_bits | 👌 |
 | mealybug-cgb/m3_scx_low_3_bits | 👌 |
-| mealybug/m3_scy_change | 👀 99.9% correct (23011/23040 pixels match) |
-| mealybug-cgb/m3_scy_change | 👀 98.7% correct (22744/23040 pixels match) |
+| mealybug/m3_scy_change | 👌 |
+| mealybug-cgb/m3_scy_change | 👌 |
 | mealybug-cgb/m3_scy_change2 | 👌 |
 | mealybug/m3_window_timing | 👀 99.9% correct (23007/23040 pixels match) |
 | mealybug-cgb/m3_window_timing | 👀 99.9% correct (23013/23040 pixels match) |
@@ -1048,8 +1048,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/miscmstatirq | 👀 260/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 681/811 passed |
-| gambatte/scx_during_m3 | 👀 43/141 passed |
-| gambatte/scy | 👀 61/67 passed |
+| gambatte/scx_during_m3 | 👀 49/141 passed |
+| gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 113/116 passed |
 | gambatte/speedchange | 👀 112/208 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 716
-- **Fail:** 265
+- **Pass:** 719
+- **Fail:** 262

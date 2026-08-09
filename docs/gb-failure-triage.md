@@ -725,7 +725,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
 | `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed — 2026-08-09: 8 px on LY 0 and 98 in band 8, the same WX = 7 tie as `m3_lcdc_win_map_change` |
 | `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
-| `m3_scy_change` | 417 | 417 | not diagnosed — **83 as of 2026-08-09**, for free |
+| `m3_scy_change` | 417 | 417 | **0 as of 2026-08-09** — 83 for free with `OBJ_BG_RUN`, 29 with `LY0_PIPE_MCYCLES`, and the last 29 were the length of the discarded fetch at the head of mode 3 (`M3_THROWAWAY_DOTS`) |
 | `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling — **8 as of 2026-08-09** |
 | `m3_lcdc_bg_en_change` | 2193 | 2193 | LCDC.0 is read at the PUSH here, not at the mixer |
 
@@ -1037,7 +1037,10 @@ bucket 15 and it comes back on its own.
   cannot be adjudicated this way. Its mechanism is written down in mealybug's own
   PPU notes instead ("SCY is read during the background tile fetch B, 0 and 1
   stages" on DMG and CGB ≤ C, B only on CGB D and AGB), which is a better source
-  than a photo would have been.
+  than a photo would have been — and the ROM turned out not to need a verdict at
+  all, because its reference **inverts** into the (B, 0, 1) triple the fetch saw.
+  That is how the row closed; see `docs/gb-mealybug-sources.md` §3.4 and
+  `M3_THROWAWAY_DOTS`.
 
 ### What the mixer tail does not explain, and what it costs
 
@@ -1237,6 +1240,62 @@ shifter asks the object question first and the window start is deferred behind
 a whole object fetch. That tie is the item already open above ("Simply resolving
 the tie the other way is refused, and was measured out"), and the two rows
 should be taken together by whatever settles it.
+
+## 2026-08-09: the discarded fetch at the head of mode 3 is FOUR dots
+
+`m3_scy_change`'s last 29 pixels were all in **tile 0** and all on
+`LY ≡ 7 (mod 8)`, which is the one place SCY 0 and SCY 1 disagree about both the
+map row and the row inside the tile. That is not a hint, it is the whole
+measurement: this ROM's reference **inverts** (map `65 + row + col`, BGP
+identity, SCX 0, blank objects), so each 8-pixel tile of it decodes exactly into
+the triple (SCY at B, SCY at 0, SCY at 1) the fetch saw. Decoded, all eighteen
+bands say the same thing — tile 0's `B` read takes the value written at dot 81
+while both its bitplane reads take the one written at dot 89 — and dingbat had
+tile 0 at B = 90, 0 = 92, 1 = 94.
+
+It is **not** a shift of the head: tile 1's reads at 96/98/100 are already right,
+so the gap from tile 0's map read to tile 1's is 8 dots on hardware where this
+tree had 6. What decides it is the head's budget. Mode 3 is 172 at SCX & 7 = 0
+and 160 of those are pixels, so the discarded fetch plus the first real one are
+12 dots; writing the 8-step cycle `s B s 0 s 1 s push`, a discarded fetch of *n*
+dots puts the first real reads at `d+n+1, d+n+3, d+n+5` and its push at `d+n+7`,
+which has to be `d+11`. n = 6 puts `B` at 90 (the residual), n = 2 puts the `0`
+read at 88 where the reference refuses it *and* cannot reach the push, and
+**n = 4 satisfies every band**: B = 88, 0 = 90, 1 = 92, push at 94.
+
+Shipped as `M3_THROWAWAY_DOTS = 4` (`gb/gb.nim`, derived at `tick_bg_fetcher`).
+`-d:M3_THROWAWAY_DOTS=6` is the control build and reproduces the old numbers to
+the pixel. The SCX fine-scroll latch moves with it — from "when the throw-away
+fetch completes" to the `B` of the first `B01s` cycle, which is
+`m3_scx_low_3_bits`' header verbatim and **the same dot**, 88, so that ROM's
+two-sided bracket never moves.
+
+| | before | after |
+|---|---|---|
+| mealybug `m3_scy_change` DMG | 29 wrong px | **0** |
+| mealybug `m3_scy_change` CGB | 592 wrong subpx | **0** |
+| gambatte `scy` | 61/67 | **67/67** |
+| gambatte `scx_during_m3` | 43/141 | **49/141** |
+| gambatte total | 3781/5005 | **3793/5005** |
+| runner total | 716/981 | **719/981** |
+
+Those are the only rows that move, in either direction, anywhere. The regression
+surface:
+
+* **mode 3's length does not move.** `-d:gb_m3_len` over all 5,005 gambatte
+  ROM/device runs is byte-identical between the two arms — 2,000,000 lines — and
+  `tools/gbppu/objtab.py` against GBMicrotest `ppu_spritex_vs_scx` stays 0/153.
+* the whole runner is unchanged row for row apart from the four rows above;
+  `results_mgba_suite.md` does not move at all.
+* the six `scx_during_m3` rows gained are `scx_0060c0/_2`, `_3`, `_ds_2`,
+  `_ds_3` and `scx_0063c0/_3`, `_ds_3`. They are **not** the seven that
+  `LY0_PIPE_MCYCLES` traded (`scx_during_m3_spx0/1/2` and siblings); that item
+  is still open.
+* perf: retired instructions **−0.02%** (Pokemon Crystal) / **+0.04%** (Link's
+  Awakening DMG), one build per arm off the same revision through
+  `GBGATE_FLAGS_A=-d:M3_THROWAWAY_DOTS=6`. The change is two `bool` tests in
+  `tick_bg_fetcher`'s tile and data-high branches, i.e. once per 8 dots, not per
+  dot; the `head_cycle` flag fits in the existing bool block.
 
 ## Reproducing any of this
 

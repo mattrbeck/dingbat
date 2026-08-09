@@ -373,10 +373,14 @@ the line-0 offset of §1.2), `m3_lcdc_bg_map_change` 192 → **0**, `m3_scy_chan
 3658 → 3659. Mode 3's length does not move anywhere: `objtab.py` stays 0/153 and
 1660 ROM/device runs are line-for-line identical under `-d:gb_m3_len`.
 
-### 3.4 `m3_scy_change` — 417 → **83**
+### 3.4 `m3_scy_change` — 417 → **0**, and it measures the head of mode 3
 
 > `; Changes the SCY register during mode 3, with SCX set to LY on each row.`
 > — `m3_scy_change.asm:21`
+
+(The header's second clause is a copy-paste from `m3_scx_high_5_bits`: this ROM
+never writes SCX at all, and SCX is 0 for the whole frame. That is what makes it
+invertible — see below.)
 
 The handler (`:117`) writes SCY 24 times back to back with `ld [hl],r`, cycling
 0,1,2,3,4,3,2,1,0,1,… — one write every 8 dots across the whole visible width,
@@ -385,10 +389,59 @@ the B, 0 and 1 stages" this is a direct readout of which SCY value each of the
 three reads of every tile saw. It is the only red DMG row with no photograph,
 and the doc quoted in §2 is a better source than a photograph would have been.
 
-dingbat's structure matches (B, 0 and 1, each on its own dot). The residual was
-87 lines of a few pixels each, concentrated at tile boundaries, and moved with
-`OBJ_BG_RUN` — i.e. it was the same split-fetch defect as §3.3, and four fifths
-of it went with it (417 → 83 DMG, 534 → 348 CGB) for no change of its own.
+dingbat's structure matches (B, 0 and 1, each on its own dot), and after
+`OBJ_BG_RUN` (§3.3) four fifths of the residual went with it for no change of
+its own: 417 → 83 DMG, 534 → 348 CGB. `LY0_PIPE_MCYCLES` then took the DMG row
+to 29 — all of it in **tile 0**, one to three pixels on each of the seventeen
+lines with `LY ≡ 7 (mod 8)`.
+
+**The reference inverts, exactly, with no oracle at all.** Four properties of
+this ROM together turn its picture into a table:
+
+* the BG map is filled `map[row][col] = 65 + row + col` (`main:`, the `.row` /
+  `.inner` loops), so the glyph at a tile position names its **map row**;
+* `BGP = $E4` is the identity, so a shade IS a colour index;
+* SCX = 0, so tile *n* of the reference is fetch *n*; and
+* every object is tile `$00`, which the font copy leaves blank — the objects
+  move the fetch phase (§1.3) and draw nothing.
+
+So each 8-pixel tile of `m3_scy_change_dmg_blob.png` is literally the triple
+(SCY at B, SCY at 0, SCY at 1), and the triple is recoverable by searching the
+five values SCY takes on a line. `LY ≡ 7 (mod 8)` is where SCY 0 and SCY 1
+disagree about both the map row and the row inside the tile, which is why the
+residual was only visible there.
+
+Decoded that way, **all eighteen bands demand the same thing and it is a
+statement about the head of mode 3**: tile 0's `B` read must take the value
+written at dot 81 and both its bitplane reads the value written at dot 89. The
+line's SCY writes are at 81 + 8k, the fetcher's first dot is 83, and dingbat had
+tile 0 at B = 90, 0 = 92, 1 = 94 — one 2-dot slot too late on the map read
+alone. It cannot be a shift of the whole head: tile 1's reads are at 96/98/100
+and every one of them is already right.
+
+What resolves it is the head's **budget**. Mode 3 is 172 dots at SCX & 7 = 0 and
+160 of those are pixels, so the discarded fetch plus the first real one are 12
+dots. With the fetcher's 8-step cycle written `s B s 0 s 1 s push`, a discarded
+fetch of *n* dots puts the first real cycle's reads at `d+n+1, d+n+3, d+n+5` and
+its push at `d+n+7`, and the push has to be at `d+11`:
+
+| n | tile 0's B, 0, 1 | verdict |
+|---|---|---|
+| 6 (`B01`, was) | 90, 92, 94 | B is one slot late — the whole residual |
+| 4 (`B0`, ships) | 88, 90, 92 | every band satisfied |
+| 2 (`B`) | 86, **88**, 90 | the `0` read lands before the dot-89 write, and 10 dots cannot reach a push at `d+11` |
+
+So the discarded fetch is **four dots**, and the first real cycle runs all the
+way to its own push slot rather than pushing early at its `1` read. Shipped as
+`M3_THROWAWAY_DOTS = 4`, derived at `tick_bg_fetcher` in `gb/fifo_ppu.nim`;
+`-d:M3_THROWAWAY_DOTS=6` is the control build and reproduces the old numbers
+exactly.
+
+It also makes `m3_scx_low_3_bits`' header (§3.6) true as written rather than
+true by coincidence — see there. `m3_scy_change` 29 → **0** DMG and 592 → **0**
+CGB subpixels, `m3_scy_change2` (CGB) stays 0, gambatte `scy` 61/67 → **67/67**
+and `scx_during_m3` 43 → 49, with no row anywhere going the other way and mode
+3's length identical over 2,000,000 traced scanlines.
 
 ### 3.5 `m3_window_timing` — 29, and `m3_window_timing_wx_0` — 4
 
@@ -443,12 +496,17 @@ at dot 92 on rows LY < 72 (where it must not). Both rows are in the same frame.
 > timing. **SCX is read at the start of each tile fetch.**"
 > — `m3_scx_high_5_bits.asm:21`
 
-**dingbat agrees, both exact.** Confirmation, and an important one: the comment
-at the `dropped_first_fetch` branch in `tick_bg_fetcher` says the fine-scroll
-latch is the *fetcher's*, taken when the throw-away fetch completes, and cites
-this ROM. That is the same statement as the header's "the start of the B of the
-first B01s cycle". Anything that moves the latch to the shifter's first dot
-breaks a two-sided bracket.
+**dingbat agrees, both exact.** Confirmation, and an important one: the
+fine-scroll latch is the *fetcher's*, and it sits at dot 88, between the two
+writes. Anything that moves it to the shifter's first dot breaks a two-sided
+bracket.
+
+Until 2026-08-09 this tree took the latch "when the throw-away fetch completes"
+and called that the same statement as the header's. It was the same **dot** but
+not the same **step**, and §3.4 is what separates them: the discarded fetch is a
+four-dot `B0`, so it is not a `B01s` cycle at all and the first one is the first
+on-screen tile's, whose `B` is dot 88. The latch now sits at that `B` — the step
+the ROM names — and the bracket is unmoved, because it was always this dot.
 
 ### 3.7 `m3_wx_4_change`, `m3_wx_5_change`, `m3_wx_6_change`, `m3_wx_4_change_sprites` — all 0
 
@@ -613,7 +671,15 @@ nim c -d:test_harness -d:release -d:gb_px_trace -d:gb_m3_trace -d:GB_TRACE_LY=-1
 nim c ... -d:BG_EN_AT_MIX=0      # LCDC.0 sampled at the push again
 nim c ... -d:MIXER_PALETTE_OR=0  # clean palette edge again
 nim c ... -d:OBJ_BG_RUN=0|2|3    # the BG fetcher during an object penalty
+nim c ... -d:M3_THROWAWAY_DOTS=6 # §3.4 off: the discarded head fetch is B01
 ```
+
+§3.4's decode is not a script in the tree — it is thirty lines that read the
+`FTILE`/`FDATA`/`SCY` lines of the trace above into per-tile triples and search
+`(map row, row at 0, row at 1)` against the reference's eight pixels, on the
+four ROM properties listed there. Anyone re-deriving it should re-read those
+four first: they are what make the search sound, and three of the four are only
+true of this one ROM.
 
 The sources themselves: `git clone https://github.com/mattcurrie/mealybug-tearoom-tests`
 and `git checkout 70e88fb`.

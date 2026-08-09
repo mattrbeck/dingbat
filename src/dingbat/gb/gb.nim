@@ -364,6 +364,13 @@ const OBJ_BG_RUN*             {.intdefine.} = 4
   ## the eighteen-band measurement behind it and the sweep that cannot separate
   ## 0..3 are at tick_sprite_fetcher in fifo_ppu.nim; this exists so that sweep
   ## is a command line rather than an edit to the dot loop.
+const M3_THROWAWAY_DOTS*      {.intdefine.} = 4
+  ## Dots the DISCARDED fetch at the head of mode 3 lasts: 4 (`B0`, shipping) or
+  ## 6 (`B01`, the control build and what this tree did until 2026-08-09). The
+  ## head budget is 12 dots either way -- see the derivation at
+  ## `M3_THROWAWAY_DOTS` in gb/fifo_ppu.nim -- so this constant does not change
+  ## mode 3's length; it only says where inside those 12 dots the first real
+  ## tile's three VRAM reads fall.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
@@ -1117,6 +1124,13 @@ type
     win_lx*:              int32
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
+    # The line's FIRST `B01s` cycle -- the one that follows the discarded fetch
+    # at the head of mode 3 -- is running. It is the one fetch on a line that
+    # may not push early: see M3_THROWAWAY_DOTS in fifo_ppu, where the 12-dot
+    # head budget forces it to run all the way to its push slot. Set when the
+    # discarded fetch is aborted, cleared by that push. Per-line scratch, like
+    # dropped_first_fetch next to it.
+    head_cycle*:          bool
     fetching_window*:     bool
     fetching_sprite*:     bool
     # Dots left in the object fetch the shifter is stalled on, and which BG

@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 10:14:48*
+*Generated: 2026-08-09 10:46:24*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3781/5005 passed.**
+**3793/5005 passed.**
 
 ## bgen
 
@@ -971,9 +971,9 @@ All 6 tests passed.
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
 
-## scx_during_m3 (43/141 passed)
+## scx_during_m3 (49/141 passed)
 
-43/141 tests passed, 98 failed:
+49/141 tests passed, 92 failed:
 
 | Test | Result |
 |------|--------|
@@ -981,21 +981,15 @@ All 6 tests passed.
 | scx_during_m3/scx2_scx0_during_m3_1 [dmg, png] | 14104/23040 pixels differ |
 | scx_during_m3/scx2_scx0_during_m3_1 [cgb, png] | 14104/23040 pixels differ |
 | scx_during_m3/scx2_scx1_during_m3_1 [cgb, png] | 14104/23040 pixels differ |
-| scx_during_m3/scx_0060c0/scx_during_m3_2 [dmg, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_0060c0/scx_during_m3_3 [dmg, png] | 1144/23040 pixels differ |
-| scx_during_m3/scx_0060c0/scx_during_m3_ds_2 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_0060c0/scx_during_m3_ds_3 [cgb, png] | 1144/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_1 [dmg, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_2 [dmg, png] | 1581/23040 pixels differ |
+| scx_during_m3/scx_0063c0/scx_during_m3_2 [dmg, png] | 1573/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_2 [cgb, png] | 1573/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_3 [dmg, png] | 1144/23040 pixels differ |
 | scx_during_m3/scx_0063c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_2 [cgb, png] | 437/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_3 [cgb, png] | 1144/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_2 [dmg, png] | 65/23040 pixels differ |
+| scx_during_m3/scx_0063c0/scx_during_m3_ds_2 [cgb, png] | 429/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_2 [dmg, png] | 68/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_2 [cgb, png] | 68/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 9450/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 9879/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_3 [cgb, png] | 9879/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_4 [dmg, png] | 22312/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_4 [cgb, png] | 22312/23040 pixels differ |
@@ -1003,8 +997,8 @@ All 6 tests passed.
 | scx_during_m3/scx_0360c0/scx_during_m3_5 [cgb, png] | 21168/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_6 [dmg, png] | 21160/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_6 [cgb, png] | 21160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 65/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 9450/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 68/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 9879/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_4 [cgb, png] | 22320/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_5 [cgb, png] | 22320/23040 pixels differ |
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_6 [cgb, png] | 22312/23040 pixels differ |
@@ -1012,9 +1006,9 @@ All 6 tests passed.
 | scx_during_m3/scx_0360c0/scx_during_m3_ds_8 [cgb, png] | 21168/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_1 [dmg, png] | 432/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_2 [dmg, png] | 1581/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_2 [dmg, png] | 1576/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_2 [cgb, png] | 1576/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_3 [dmg, png] | 2299/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_3 [dmg, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_3 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_4 [dmg, png] | 2728/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_4 [cgb, png] | 2728/23040 pixels differ |
@@ -1023,8 +1017,8 @@ All 6 tests passed.
 | scx_during_m3/scx_0363c0/scx_during_m3_6 [dmg, png] | 3880/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_6 [cgb, png] | 3880/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_2 [cgb, png] | 437/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_3 [cgb, png] | 2291/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_ds_2 [cgb, png] | 432/23040 pixels differ |
+| scx_during_m3/scx_0363c0/scx_during_m3_ds_3 [cgb, png] | 1576/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_6 [cgb, png] | 1584/23040 pixels differ |
@@ -1032,9 +1026,9 @@ All 6 tests passed.
 | scx_during_m3/scx_0363c0/scx_during_m3_ds_8 [cgb, png] | 2736/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_1 [dmg, png] | 1008/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_1 [cgb, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_2 [dmg, png] | 2229/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_2 [dmg, png] | 2231/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_2 [cgb, png] | 2231/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12023/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12309/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_3 [cgb, png] | 12309/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_4 [dmg, png] | 2728/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_4 [cgb, png] | 2728/23040 pixels differ |
@@ -1043,8 +1037,8 @@ All 6 tests passed.
 | scx_during_m3/scx_0367c0/scx_during_m3_6 [dmg, png] | 3880/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_6 [cgb, png] | 3880/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_1 [cgb, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 1085/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12015/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 1087/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12301/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
 | scx_during_m3/scx_0367c0/scx_during_m3_ds_6 [cgb, png] | 1584/23040 pixels differ |
@@ -1076,18 +1070,9 @@ All 6 tests passed.
 | scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | scx_during_m3/scx_m3_extend_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## scy (61/67 passed)
+## scy
 
-61/67 tests passed, 6 failed:
-
-| Test | Result |
-|------|--------|
-| scy/scx3/scy_during_m3_2 [dmg, png] | 5/23040 pixels differ |
-| scy/scx3/scy_during_m3_3 [dmg, png] | 715/23040 pixels differ |
-| scy/scy_during_m3_2 [dmg, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_3 [dmg, png] | 1144/23040 pixels differ |
-| scy/scy_during_m3_ds_2 [cgb, png] | 8/23040 pixels differ |
-| scy/scy_during_m3_ds_3 [cgb, png] | 1144/23040 pixels differ |
+All 67 tests passed.
 
 ## serial (48/82 passed)
 

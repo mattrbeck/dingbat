@@ -129,6 +129,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.lx = 0
   ppu.smooth_scroll_sampled = false
   ppu.dropped_first_fetch = false
+  ppu.head_cycle = false
   ppu.fetching_window = false
   ppu.fetching_sprite = false
   ppu.win_lx = WIN_LX_OFF
@@ -246,6 +247,11 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   fifo_clear(ppu.fifo)
   ppu.fetcher_x = 0
   ppu.fetch_counter = 0
+  # A restart is never the line's head cycle: either it IS the head (called at
+  # the mode 2 -> 3 edge, before the discarded fetch has even started) or it is a
+  # window start, whose own startup fetch is six dots and takes the early push
+  # (mealybug m3_window_timing's "6 T-cycle window startup fetch").
+  ppu.head_cycle = false
   ppu.fetching_window = fetching_window
   # Whatever tile an object last paid the BG-fetch wait for is gone: this
   # restarts the fetch, so the next object is looking at a tile no object has
@@ -308,9 +314,51 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
     return true
   return false
 
+# ---- M3_THROWAWAY_DOTS: how long the discarded head fetch lasts -----------
+#
+# The head of mode 3 is a discarded fetch followed by the first real one, and
+# the two together are 12 dots: mode 3 is 172 at SCX & 7 = 0 and 160 of those
+# are pixels. What the 12 dots do NOT say is how they split, and the split
+# decides which dot the first on-screen tile's map read lands on. Writing the
+# fetcher's first dot as `d` and its 8-step cycle as
+# `s B s 0 s 1 s push` (FETCHER_ORDER, and kevtris' `B01s`), a discarded fetch
+# of `n` dots puts the first real cycle's reads at `d+n+1`, `d+n+3`, `d+n+5`
+# and its push at `d+n+7`; the push has to be at `d+11`, so `n = 4` and the
+# cycle runs to its push slot, or `n = 6` and the push is taken early at the
+# `1` read. Both spend 12 dots. mealybug separates them:
+#
+#   * `m3_scy_change` writes SCY every 8 dots from dot 81 of every line, so the
+#     value each of a tile's three reads saw is recoverable from the reference
+#     (map[row][col] = 65 + row + col, BGP identity, SCX 0, blank objects -- the
+#     decode is in docs/gb-mealybug-sources.md §3.4). All eighteen bands demand
+#     the first tile's `B` read take the value written at dot 81 and both its
+#     bitplane reads take the one written at dot 89: with d = 83, `B` must land
+#     in dots 82..89 and `0`/`1` after 89. n = 6 puts `B` at 90 -- one slot too
+#     late, and the whole of this ROM's residual. n = 4 puts it at 88, `0` at 90
+#     and `1` at 92.
+#   * n = 2 is refused twice over: `B` at 86 is early enough but `0` lands at 88
+#     and must not, and the remaining 10 dots cannot reach a push at d+11.
+#
+# n = 4 then makes `m3_scx_low_3_bits`' header true as written -- "the lowest 3
+# bits appear to be read at the start of the 'B' of the first 'B01s' read
+# cycle" -- because the discarded `B0` is not a `B01s` cycle and the first one
+# is the first real tile's, whose `B` is dot 88. That is the dot this tree
+# already latched SCX on (it called it "when the throw-away fetch completes"),
+# so the ROM's two-sided bracket -- a write completing at dot 88 must reach the
+# latch, one at dot 92 must not -- is unmoved. The latch simply moves to the
+# step the ROM names.
+#
+# Everything from the second tile on is unmoved as well: its cycle starts on
+# the dot after the first push either way.
 proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
   case FETCHER_ORDER[ppu.fetch_counter]
   of fsGetTile:
+    when M3_THROWAWAY_DOTS == 4:
+      # "Read at the start of the 'B' of the first 'B01s' read cycle", and this
+      # is that B: the discarded `B0` above ended one step ago. Before the map
+      # offset below, which reads SCX itself.
+      if ppu.head_cycle and not ppu.smooth_scroll_sampled:
+        fifo_sample_smooth_scroll(ppu)
     when WIN_EN_ABORT != 0:
       # LCDC.5 cleared while the window is the active fetch source. mealybug's
       # PPU notes: "WIN_EN can be disabled during mode 3. The disabling will
@@ -386,34 +434,53 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow:
       ppu.tile_data_low = ppu.vram[bank_num][tile_ptr + tile_row * 2]
       inc ppu.fetch_counter
+      when M3_THROWAWAY_DOTS == 4:
+        # The discarded head fetch is `B0` and ends here -- four dots, and the
+        # byte just read is thrown away with it. See M3_THROWAWAY_DOTS above for
+        # why it is four and not six. The fine scroll is NOT latched here: it is
+        # latched at the `B` of the cycle this restart begins, which is the step
+        # m3_scx_low_3_bits names and the same dot this used to use.
+        if not ppu.dropped_first_fetch:
+          ppu.dropped_first_fetch = true
+          ppu.head_cycle = true
+          ppu.fetch_counter = 0
     else:
       ppu.tile_data_high = ppu.vram[bank_num][tile_ptr + tile_row * 2 + 1]
       inc ppu.fetch_counter
-      if not ppu.dropped_first_fetch:
-        ppu.dropped_first_fetch = true
-        ppu.fetch_counter = 0
-        # The fine scroll is the FETCHER's, not the shifter's: the throw-away
-        # first fetch IS the mechanism that implements the SCX & 7 discard, so
-        # SCX is latched when that fetch completes rather than several dots
-        # later when the shifter first finds a pixel to look at. mealybug
-        # m3_scx_low_3_bits brackets the latch with two SCX writes one M-cycle
-        # apart -- one has to reach it and the other must not -- and only the
-        # fetcher-side point sits between them.
-        if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
-      elif try_push_bg_pixels(ppu, gb):
+      when M3_THROWAWAY_DOTS == 4:
         # The push landed on the dot the tile data arrived, so step 4 has
         # already been served and the next fetch starts on the NEXT dot -- Pan
-        # Docs' fetcher goes back to step 1 the moment a push succeeds, and the
-        # 172-dot line only adds up if the line's first push is that immediate
-        # (6 dots of throw-away fetch + 6 of the real one + 160 pixels).
+        # Docs' fetcher goes back to step 1 the moment a push succeeds.
         # Falling through the Sleep/Push steps instead -- which is what this did
         # until 2026-08-03 -- leaves every later fetch on the line reading VRAM
         # two dots late, which is the phase the OBJ penalty is measured against.
         # See the fetch-phase note at tick_sprite_fetcher.
-        ppu.fetch_counter = 0
+        #
+        # The line's first `B01s` cycle is the one fetch that may NOT take it:
+        # its push is the dot that makes the head 12 dots, so it has to wait for
+        # its own push step two dots later. See M3_THROWAWAY_DOTS.
+        if not ppu.head_cycle and try_push_bg_pixels(ppu, gb):
+          ppu.fetch_counter = 0
+      else:
+        if not ppu.dropped_first_fetch:
+          ppu.dropped_first_fetch = true
+          ppu.fetch_counter = 0
+          # The fine scroll is the FETCHER's, not the shifter's: the throw-away
+          # first fetch IS the mechanism that implements the SCX & 7 discard, so
+          # SCX is latched when that fetch completes rather than several dots
+          # later when the shifter first finds a pixel to look at. mealybug
+          # m3_scx_low_3_bits brackets the latch with two SCX writes one M-cycle
+          # apart -- one has to reach it and the other must not -- and only the
+          # fetcher-side point sits between them.
+          if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
+        elif try_push_bg_pixels(ppu, gb):
+          # The 172-dot line only adds up if the line's first push is immediate
+          # (6 dots of throw-away fetch + 6 of the real one + 160 pixels).
+          ppu.fetch_counter = 0
 
   of fsPushPixel:
     if try_push_bg_pixels(ppu, gb):
+      when M3_THROWAWAY_DOTS == 4: ppu.head_cycle = false
       inc ppu.fetch_counter
 
   of fsSleep:
