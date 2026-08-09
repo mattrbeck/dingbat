@@ -297,6 +297,17 @@ const CGB_SCY_LATENCY*        {.intdefine.} = 2
 const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
+const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
+  ## Dots LCDC.2 takes to reach the OBJECT FETCH on CGB over the DMG -- the same
+  ## shape as CGB_MIXER_LATENCY next door, for the one bit of LCDC an object
+  ## fetch reads rather than the mixer. It is separate from CGB_LCDC_LATENCY
+  ## because that one moves the whole register for every reader, and every
+  ## nonzero setting of it costs gambatte rows (the table above).
+  ##
+  ## Derived and swept at OBJ_PLANE1_LAG in fifo_ppu.nim: the two
+  ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
+  ## references on which bands come out mixed, and the disagreement is a clean
+  ## three dots in the same direction on all six bands that separate them.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
@@ -550,6 +561,16 @@ const MIXER_TAIL_HBLANK*      {.intdefine.} = 1
   ## in the line where dingbat's shifter is not one pixel per dot. See
   ## fifo_recompose_last in fifo_ppu.nim for the derivation off m3_bgp_change's
   ## seventh write.
+const NO_LCDC2_FLIP*          = int32.low
+  ## `GbPpu.lcdc2_flip` entry meaning "LCDC.2 has not changed since this mode 3
+  ## began". A dot in the far PAST, so `flip > dot` is false for every dot an
+  ## object fetch can ask about -- including one in the future, which is how the
+  ## merge asks for a read that has not happened yet -- and the empty history
+  ## costs no branch of its own.
+const OBJ_FIX_OFF*            = int32.high
+  ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
+  ## LCDC.2 write". Same shape as above: the window test is one compare either
+  ## way.
 const MIX_HOLD*               = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
@@ -1166,6 +1187,16 @@ type
     # the M-cycle boundary. Never set across an instruction boundary -- mem_write
     # consumes it in the same M-cycle -- so it is not serialized.
     stat_write_pending*: bool
+    # The dots of the last two mid-mode-3 changes of LCDC.2 (the OBJ size bit),
+    # most recent first, or NO_LCDC2_FLIP for "no change since mode 3 began".
+    # An object fetch reads that bit ONCE PER BITPLANE and the two reads are
+    # OBJ_PLANE_GAP dots apart, so the merge -- which happens on one dot -- has
+    # to be able to ask what the bit was a few dots ago; see obj_height_at and
+    # sprite_fetch_merge in fifo_ppu. Two entries is exact for the window it is
+    # asked over: the lookback never exceeds OBJ_FETCH_DOTS dots and a CPU
+    # cannot store to $FF40 more often than every 8 dots (4 in double speed).
+    # Per-line scratch, cleared at every mode 2 -> 3 edge; not serialized.
+    lcdc2_flip*:         array[2, int32]
     first_line*:         bool
     when LCD_ON_TRIM_ANY:
       lcdon_lines*:      uint8   # lines left in the LCD-on trim window
@@ -1274,6 +1305,31 @@ type
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
     obj_penalty*:         int32
     obj_tile_fx*:         int32
+    # ---- The object fetch's two bitplane reads, as dots ---------------------
+    #
+    # `sprite_fetch_merge` runs on one dot, but the fetch it stands for reads
+    # the two bitplanes OBJ_PLANE_GAP dots apart and reads LCDC.2 separately for
+    # each of them. `obj_hi_dot` is the dot the HIGH plane's read samples that
+    # bit on, latched at the trigger because it depends on which end of the
+    # penalty the fetch sits at (see OBJ_PLANE1_LAG in fifo_ppu). The low
+    # plane's is always OBJ_PLANE_GAP dots before it, and always in the past.
+    #
+    # The high plane's can be in the FUTURE -- up to OBJ_PLANE1_LAG dots after
+    # the merge -- so the merge uses the bit as it stands and the write path
+    # redoes the plane if a later write moves it, exactly as fifo_recompose_last
+    # redoes the mixer's tail. `obj_fix_from` is the first dot such a write can
+    # land on (the merge dot + 1) and is OBJ_FIX_OFF when nothing is in flight;
+    # the rest is the whole of what a redo needs -- the low byte the merge kept,
+    # the height the high plane used, its VRAM bank and the object. No snapshot
+    # of the FIFO goes with them: the merge is undoable from the entries
+    # themselves, see fifo_obj_size_write. All per-line scratch, live for at most
+    # OBJ_PLANE1_LAG dots, and not serialized.
+    obj_hi_dot*:          int32
+    obj_fix_from*:        int32
+    obj_fix_bank*:        int32
+    obj_fix_lo*:          uint8
+    obj_fix_h*:           uint8
+    obj_fix_s*:           GbSprite
     # Idle dots left at the head of mode 3 (the pipeline's lead over the CPU's
     # register view; see M3_PIPE_DELAY in fifo_ppu). A byte, not an int, and
     # for one reason: the mode 3 branch of fifo_tick_slow's dot loop asks

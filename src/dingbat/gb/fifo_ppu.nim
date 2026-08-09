@@ -48,6 +48,8 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     window_trigger: base.window_trigger,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
+    obj_fix_from: OBJ_FIX_OFF,
+    lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -136,6 +138,9 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.win_lx = WIN_LX_OFF
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
+  ppu.obj_fix_from = OBJ_FIX_OFF
+  ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
+  ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
   ppu.m3_delay = 0'u8
   ppu.tile_num = 0
   ppu.tile_attrs = 0
@@ -266,6 +271,12 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetching_sprite = false
   ppu.obj_penalty = 0
+  # Both halves of the object fetch's LCDC.2 read are per-line: no object fetch
+  # is in flight across a mode 2 -> 3 edge, and a change of the bit on an
+  # earlier line is already folded into `lcd_control`. See obj_height_at.
+  ppu.obj_fix_from = OBJ_FIX_OFF
+  ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
+  ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -574,6 +585,120 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
+# ---- LCDC.2 is read ONCE PER BITPLANE, and where the fetch sits in the
+# ---- penalty decides which dots those two reads land on --------------------
+#
+# `sprite_fetch_merge` runs on ONE dot and used to take the object's height from
+# LCDC.2 as it stood on that dot, for both bitplanes at once. mealybug
+# `m3_lcdc_obj_size_change` and `m3_lcdc_obj_size_change_scx` refuse that, and
+# they are unusually direct instruments for it: BGP = $00 makes the whole
+# background white, every object is tile $4C with OBP0 = $E4, and the objects
+# are stacked at Y = $10, $20 .. $90 so each 16-line band is one object read out
+# as eight columns of raw bitplane. Both ROMs pulse LCDC.2 four times across
+# mode 3 (8x8, 8x16, 8x8, 8x16), the first at a fixed dot and `_scx` also
+# driving SCX = (LY >> 4) & 7 so each band meets the pulse at a different fetch
+# phase. Decoding the reference frames back into "which height did the low
+# plane use, and which did the high" (tile $4C is even, so the two heights
+# differ only in the `or 1` for the lower tile of an 8x16 object, and the
+# reference names the pair exactly) gives, against this tree's own merge dot M:
+#
+#   ROM              band  object  M     reference  needs
+#   _scx             0, 8  X = 32  135   (16, 8)    lo <= 136, hi >= 137
+#   m3_..._change    0     X = 16  123   ( 8, 16)   lo in [101,125), hi >= 125
+#   m3_..._change    1     X = 33  148   ( 8, 16)   lo in [137,149), hi >= 149
+#   m3_..._change    1..3  X = 1..3 103/102/101  (16, 16)  BOTH reads < 101
+#   m3_..._change    8     X = 8   104   ( 8,  8)   both in [101,125)
+#
+# With the two reads OBJ_PLANE_GAP = 2 dots apart the first three rows have a
+# UNIQUE solution -- low plane on M, high plane on M + 2 -- and it is forced
+# from both sides: band 0 of `m3_lcdc_obj_size_change` needs the high read at
+# least 2 dots after M, band 1's X = 33 needs the low read no later than M.
+#
+# The fourth row cannot be that, and the fifth says why. X = 1..3 hang off the
+# left edge of the screen and are the `idx < 0` arm of the penalty (see
+# OBJ_BG_RUN above): the trigger dot is the BG fetch's own last read, so the
+# object takes the bus from the very next dot and its six dots are the FIRST six
+# of the penalty, not the last. All three of them trigger on dot 94 and all
+# three want both reads before dot 101, which `t + OBJ_FETCH_DOTS` gives exactly
+# -- at any X, because the wait is spent AFTER the fetch on that arm rather than
+# before it, so the penalty's length changes and the read dots do not.
+#
+# X = 8 is the same measurement from the other side and it is what makes the
+# boundary a measurement rather than a choice: it is the first object that does
+# NOT hang off the left edge, and it wants the tail arm's dots (reads at 104 and
+# 106, i.e. 8x8) where the head arm's (100, i.e. 8x16) would draw the other
+# tile. So the split is exactly `idx < 0`, which is the split OBJ_BG_RUN = 4
+# already derived from `m3_lcdc_tile_sel_change` -- two unrelated ROMs, the same
+# line.
+#
+# ---- The CGB reads the bit three dots later, and says so on six bands ------
+#
+# The same two ROMs run as DMG carts on CGB hardware are the suite's own
+# `_cgb_c` references, and they are the COMPLEMENT of the DMG ones here: `_scx`
+# band 0 (merge 135) is mixed on DMG and pure 8x16 on CGB, and its bands 4..7
+# (merge 138/139) are pure 8x8 on DMG and MIXED on CGB. Solving those six bands
+# the same way gives one offset -- three dots earlier than the DMG's, on every
+# one of them, with the write dots and the merge dots identical between the two
+# devices under `-d:gb_m3_trace`. That is CGB_OBJ_SIZE_LATENCY, the same shape
+# as CGB_MIXER_LATENCY for the mixer's registers: the bit reaches this reader
+# later on CGB. The head arm is insensitive to it (both settings put the read
+# before the ROM's first write), so it is applied to the dot rather than to
+# either arm.
+#
+# ---- What is left over, and what these ROMs cannot say ---------------------
+#
+#  * On the tail arm the six dots come out as M-3 .. M+2, which is one dot later
+#    than "the wait, then the fetch" places them (M-4 .. M+1). That one dot is
+#    the same lead of the pipeline over the CPU's register view that
+#    M3_PIPE_DELAY and OBJ_DMA_BUS_LEAD each carry a share of elsewhere in this
+#    file; it is measured here and not derived, which is why OBJ_PLANE1_LAG is
+#    a constant with a sweep rather than an expression.
+#  * Nothing here separates "the tile index's low bit is masked at the OAM read"
+#    from "at each bitplane read": every object in both ROMs is on tile $4C,
+#    which is even, so `tile and $FE` is a no-op and only the `or 1` for the
+#    lower tile is visible. The whole address is recomputed per plane below,
+#    which is the simpler of the two and matches everything either ROM can see.
+#  * A second object at the same X re-arms the stall for a bare OBJ_FETCH_DOTS
+#    (see the chain at the end of sprite_fetch_merge). Its six dots ARE its
+#    penalty, so it takes the tail arm's offset whichever arm the first object
+#    took; no ROM in the tree puts an LCDC.2 write inside a chained fetch.
+#
+# ---- The sweeps, mealybug matching pixels, one build per cell --------------
+#
+# DMG is 552,188 of 552,960 at the shipping settings and CGB 1,856,315 of
+# 1,866,240; both columns move ONLY the two obj_size rows at every cell below.
+#
+#   OBJ_PLANE1_LAG      0        1        2 (ship)   3        4
+#   DMG            552068   552143   552188     552098   552068
+#   CGB           1855880  1855955  1856315    1856285  1856110
+#
+#   OBJ_PLANE_GAP            1        2 (ship)   3
+#   DMG                 552188   552188     552188
+#   CGB                1856285  1856315    1856135
+#
+#   CGB_OBJ_SIZE_LATENCY     0        1        2        3 (ship)   4        5
+#   CGB                1855975  1856110  1856285  1856315    1855955  1855880
+#
+#   OBJ_PLANE1_HEAD          4        5        6 (ship)   7        8
+#   DMG                 552188   552188     552188     552110   552110
+#
+# Each of the first three is a strict optimum pinned from both sides. The fourth
+# is not: the head arm's read only has to be before dot 101 and 4, 5 and 6 all
+# are, so the ROMs bound it from above at 6 and say nothing below. 6 is the
+# structural value -- the six-dot fetch starting on the dot after the trigger --
+# and the two dots below it are the same fetch with the OAM read left out.
+const OBJ_PLANE_GAP {.intdefine.} = 2'i32
+  ## Dots between an object fetch's two bitplane reads. Two dots per VRAM
+  ## access, which is the same spacing the six-dot fetch is built out of.
+const OBJ_PLANE1_LAG {.intdefine.} = 2'i32
+  ## Dots after the merge dot at which the HIGH bitplane's read samples LCDC.2,
+  ## on the `idx >= 0` arm. The low plane's is OBJ_PLANE_GAP earlier, i.e. the
+  ## merge dot itself.
+const OBJ_PLANE1_HEAD {.intdefine.} = 6'i32
+  ## The same read on the `idx < 0` arm, in dots after the object's TRIGGER: the
+  ## fetch sits at the head of the penalty there, so it does not move with the
+  ## wait.
+
 # ---- The object's OAM read, and the one thing that can see it -------------
 #
 # This renderer's mode-2 scan snapshots all four of an object's OAM bytes
@@ -663,15 +788,57 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ppu.sprites[0].tile_num   = b
   ppu.sprites[0].attributes = b
 
+proc sprite_merge_planes(ppu: GbFifoPpu; gb: GB; s: GbSprite; lo, hi: uint8;
+                         lx: int32) =
+  ## Merge one object's eight pixels into the sprite FIFO, given the two
+  ## bitplane BYTES rather than their addresses. Split out of the fetch so
+  ## fifo_obj_size_write can redo it against a different high plane without
+  ## re-deriving the priority rule.
+  let palette = if gb.cgb_native: sprite_cgb_palette(s) else: sprite_dmg_palette(s)
+  for col in 0 ..< 8:
+    let shift = if sprite_x_flip(s): col else: 7 - col
+    let lsb = (lo shr shift) and 0x1
+    let msb = (hi shr shift) and 0x1
+    let color = uint8((msb shl 1) or lsb)
+    let px = GbPixel(color: color, palette: palette, oam_idx: s.oam_idx, obj_to_bg: sprite_priority(s))
+    let fifo_col = col + int(s.x) - 8 - int(lx)
+    if fifo_col >= 0:
+      if fifo_col >= ppu.fifo_sprite.size:
+        fifo_push(ppu.fifo_sprite, px)
+      elif (px.color != 0 and fifo_get(ppu.fifo_sprite, fifo_col).color == 0) or
+           (gb.cgb_native and px.oam_idx <= fifo_get(ppu.fifo_sprite, fifo_col).oam_idx and px.color != 0):
+        fifo_set(ppu.fifo_sprite, fifo_col, px)
+
 proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ## Read sprite tile data and merge into the sprite FIFO.
   # The object's own OAM read lands on this dot, with everything else the fetch
-  # takes here (LCDC.2, the OBP registers, the tile row). One predictable
-  # not-taken branch per object fetch when no transfer is running.
+  # takes here (the OBP registers, the tile row). One predictable not-taken
+  # branch per object fetch when no transfer is running.
   if gb.memory.dma_busy: obj_oam_dma_read(ppu, gb)
   let s = ppu.sprites[0]
   ppu.sprites.delete(0)
-  let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
+  # LCDC.2 is read once per bitplane, on two dots that are not this one -- see
+  # OBJ_PLANE1_LAG above. The low plane's dot is always in the past, so
+  # obj_height_at answers it outright; the high plane's can still be ahead, and
+  # then obj_height_at gives the bit as it stands and the write path takes over.
+  #
+  # The two planes DISAGREE only if the bit moved between the low plane's dot
+  # and now, which is one compare against the newest entry of the history --
+  # and everything after that compare is address arithmetic this used to do
+  # once. Doing it twice unconditionally costs +0.09% of retired instructions on
+  # dmg-acid2 (23,474,243,550 -> 23,453,456,528, min of three; it has objects on
+  # nearly every line), all of it on frames where the answer is the same twice.
+  # NO_LCDC2_FLIP is int32.low, so a line with no LCDC.2 write at all takes the
+  # fast arm without a second test.
+  let hi_dot = ppu.obj_hi_dot
+  var h_hi = sprite_height(ppu)
+  var b_lo, b_hi: uint16
+  if likely(ppu.lcdc2_flip[0] <= hi_dot - OBJ_PLANE_GAP):
+    (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, h_hi)
+  else:
+    h_hi = obj_height_at(ppu, hi_dot)
+    b_lo = sprite_tile_bytes(s, ppu.ly, obj_height_at(ppu, hi_dot - OBJ_PLANE_GAP)).lo
+    b_hi = sprite_tile_bytes(s, ppu.ly, h_hi).hi
   let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
@@ -682,20 +849,18 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   # Pad OAM FIFO to at least 8 pixels with transparent lowest-priority pixels
   while ppu.fifo_sprite.size < 8:
     fifo_push(ppu.fifo_sprite, GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0))
-  for col in 0 ..< 8:
-    let shift = if sprite_x_flip(s): col else: 7 - col
-    let lsb = (ppu.vram[bank][b_lo] shr shift) and 0x1
-    let msb = (ppu.vram[bank][b_hi] shr shift) and 0x1
-    let color = uint8((msb shl 1) or lsb)
-    let palette = if gb.cgb_native: sprite_cgb_palette(s) else: sprite_dmg_palette(s)
-    let px = GbPixel(color: color, palette: palette, oam_idx: s.oam_idx, obj_to_bg: sprite_priority(s))
-    let fifo_col = col + int(s.x) - 8 - int(ppu.lx)
-    if fifo_col >= 0:
-      if fifo_col >= ppu.fifo_sprite.size:
-        fifo_push(ppu.fifo_sprite, px)
-      elif (px.color != 0 and fifo_get(ppu.fifo_sprite, fifo_col).color == 0) or
-           (gb.cgb_native and px.oam_idx <= fifo_get(ppu.fifo_sprite, fifo_col).oam_idx and px.color != 0):
-        fifo_set(ppu.fifo_sprite, fifo_col, px)
+  # If the high plane's read has not happened yet, keep what a redo needs. No
+  # snapshot of the FIFO goes with it: see fifo_obj_size_write for why the merge
+  # is exactly undoable from the entries themselves.
+  if hi_dot > ppu.cycle_counter:
+    ppu.obj_fix_from = ppu.cycle_counter + 1
+    ppu.obj_fix_bank = int32(bank)
+    ppu.obj_fix_lo   = ppu.vram[bank][b_lo]
+    ppu.obj_fix_h    = uint8(h_hi)
+    ppu.obj_fix_s    = s
+  else:
+    ppu.obj_fix_from = OBJ_FIX_OFF
+  sprite_merge_planes(ppu, gb, s, ppu.vram[bank][b_lo], ppu.vram[bank][b_hi], ppu.lx)
   # Check if next sprite shares the same X coordinate
   ppu.fetching_sprite =
     ppu.sprites.len > 0 and ppu.sprites[0].x == s.x
@@ -708,6 +873,10 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # 1..10 objects at X=0 and its expectations step by exactly 6 dots per
     # extra object.
     ppu.obj_penalty = OBJ_FETCH_DOTS
+    # Its six dots ARE its penalty, so its high plane sits at the tail arm's
+    # offset from its own merge dot whichever arm the first object took.
+    ppu.obj_hi_dot = ppu.cycle_counter + OBJ_FETCH_DOTS + OBJ_PLANE1_LAG -
+      (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
 
 proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
   ## One dot of an object fetch. Returns true if this dot was the object's --
@@ -1666,6 +1835,77 @@ proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
   let (front, top) = mixer_tail_front(ppu)
   fifo_recompose_span(ppu, gb, front, back, min(top, front - back))
 
+proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## An LCDC.2 write landed after an object was merged and before its HIGH
+  ## bitplane was read. Redo that plane, and only that plane: the low one was
+  ## read OBJ_PLANE_GAP dots earlier and this write cannot reach it.
+  ##
+  ## Cold, and off the dot loop entirely -- ppu_store_lcdc reaches it only when
+  ## the write actually moves bit 2 AND lands inside the one-or-two dot window
+  ## `obj_fix_from` opens. The same shape as fifo_recompose_last next door: the
+  ## pipeline's read is later than the dot dingbat does the work on, so the
+  ## write path redoes the work rather than the dot loop carrying a stage.
+  ##
+  ## ---- Why no snapshot of the FIFO is needed --------------------------------
+  ##
+  ## The merge is undoable from the entries themselves. It only ever overwrote a
+  ## slot whose colour was 0 (Pan Docs' "the OBJ pixel is drawn only where the
+  ## one already in the FIFO is transparent"), so at each of the object's eight
+  ## columns exactly one of three things is true now, and each says what to do:
+  ##
+  ##   the slot carries THIS object (its `oam_idx`, colour != 0)
+  ##       the object won it. Give it the new colour, or -- if the new colour is
+  ##       0 -- hand the slot back as a transparent one, which is what it was.
+  ##   the slot's colour is 0
+  ##       nothing has claimed it. The object takes it if the new colour is not 0.
+  ##   anything else
+  ##       another object won it and still does; a different high plane cannot
+  ##       change that, because the test it lost is on the OTHER pixel's colour.
+  ##
+  ## The one thing that round trip does not preserve is the `oam_idx` of a
+  ## TRANSPARENT entry the object covered, and nothing on DMG reads it: a
+  ## colour-0 OBJ pixel loses at sprite_wins before any other field is looked at,
+  ## and the only reader of a held entry's index is the CGB merge rule -- which
+  ## this path cannot reach at the shipping CGB_OBJ_SIZE_LATENCY, since that puts
+  ## the high plane's read a dot BEFORE the merge on CGB.
+  if ppu.cycle_counter > ppu.obj_hi_dot: return
+  let h = sprite_height(ppu)
+  if uint8(h) == ppu.obj_fix_h: return
+  ppu.obj_fix_h = uint8(h)
+  let s = ppu.obj_fix_s
+  let lo = ppu.obj_fix_lo
+  let hi = ppu.vram[ppu.obj_fix_bank][sprite_tile_bytes(s, ppu.ly, h).hi]
+  let palette = if gb.cgb_native: sprite_cgb_palette(s) else: sprite_dmg_palette(s)
+  let clear = GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0)
+  for col in 0 ..< 8:
+    let shift = if sprite_x_flip(s): col else: 7 - col
+    let color = uint8((((hi shr shift) and 0x1) shl 1) or ((lo shr shift) and 0x1))
+    let px = GbPixel(color: color, palette: palette, oam_idx: s.oam_idx,
+                     obj_to_bg: sprite_priority(s))
+    let x = int32(col) + int32(s.x) - 8
+    let k = x - ppu.lx
+    if k >= 0:
+      # Still in the FIFO.
+      if k < int32(ppu.fifo_sprite.size):
+        let cur = fifo_get(ppu.fifo_sprite, int(k))
+        if cur.oam_idx == s.oam_idx and cur.color != 0:
+          fifo_set(ppu.fifo_sprite, int(k), if color != 0: px else: clear)
+        elif cur.color == 0 and color != 0:
+          fifo_set(ppu.fifo_sprite, int(k), px)
+    elif x >= 0:
+      # Already emitted, so it belongs to the mixer's held pairs -- the same
+      # place a palette write reaches back into (fifo_recompose_last). `k` is
+      # never further back than OBJ_PLANE1_LAG, which is inside the ring.
+      when MIXER_DOT_LAG != 0:
+        if x >= ppu.lx - MIX_HOLD:
+          var held = ppu.mix[x and (MIX_HOLD - 1)]
+          let owns = held.sp.oam_idx == s.oam_idx and held.sp.color != 0
+          if owns or (held.sp.color == 0 and color != 0):
+            held.sp = (if color != 0: px else: clear)
+            ppu.mix[x and (MIX_HOLD - 1)] = held
+            ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] =
+              fifo_mix(ppu, gb, held.bg, held.sp, x)
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -1714,6 +1954,15 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
+      # Which dot the fetch's HIGH bitplane reads LCDC.2 on. The two arms are
+      # the two ends of the penalty -- see OBJ_PLANE1_LAG for the reference
+      # frames that separate them -- and this is the only place both `idx` and
+      # the penalty are in hand, so it is latched rather than re-derived at the
+      # merge. `cycle_counter + pen` is the merge dot.
+      ppu.obj_hi_dot =
+        (if idx < 0: ppu.cycle_counter + OBJ_PLANE1_HEAD
+         else:       ppu.cycle_counter + pen + OBJ_PLANE1_LAG) -
+        (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
       when defined(gb_m3_trace):
         if gb_traced(ppu.ly):
           echo "OBJTRIG ly=", ppu.ly, " dot=", ppu.cycle_counter,

@@ -581,9 +581,32 @@ stage and 126 out on CGB at two.
 |---|---|---|
 | `m3_lcdc_tile_sel_win_change` | 106 | header adds only "while displaying the window". Read as §3.3's split on window tiles until 2026-08-09; it is NOT — the fix there left it at 106 and the pixels are 8 on LY 0 plus 98 in band 8 alone, the same band, the same two tiles and the same WX = 7 tie as `m3_lcdc_win_map_change`'s 34 below |
 | `m3_lcdc_obj_en_change_variant` | 102 | "Background palette is changed to see the effect disabling sprites has on **timing**" — it is a mode-3-length probe, not a priority probe |
-| `m3_lcdc_obj_size_change` | 57 | nothing beyond "toggles bit 2 with sprites at different X"; the OAM table is the ruler |
+| `m3_lcdc_obj_size_change` | 57 → **0** (2026-08-09) | nothing beyond "toggles bit 2 with sprites at different X"; the OAM table is the ruler, and reading it as one turned out to be the whole answer — see below |
 | `m3_lcdc_win_map_change` | 34 | nothing; photograph says 100% reference at a 77× ratio |
-| `m3_lcdc_obj_size_change_scx` | 30 | "while changing SCX value based on the row's LY value **to affect timing**" — SCX is the ruler here, not the subject |
+| `m3_lcdc_obj_size_change_scx` | 30 → **0** (2026-08-09) | "while changing SCX value based on the row's LY value **to affect timing**" — SCX is the ruler here, not the subject |
+
+**The OAM table read as a ruler, 2026-08-09.** These two are the second and
+third field of every entry read the right way round: `DB $10, $20, $4c, $40` is
+Y = 16, **X = 32**, tile `$4C`, Y-flip — not tile `$20`. So every object in both
+ROMs is on ONE tile, `$4C`, stacked at Y = `$10`, `$20` .. `$90`; with
+`BGP = $00` (a white background) and `OBP0 = $E4` (the identity), each object is
+read out as raw bitplane and the reference states outright which sprite HEIGHT
+each of the fetch's two bitplane reads used. That is what closed both rows on
+both devices: LCDC.2 is read once per bitplane, 2 dots apart. Derivation at
+`OBJ_PLANE1_LAG` in `gb/fifo_ppu.nim`.
+
+What makes a band a *sweep* and not one sample is the X column. Band `k`
+(screen rows `16k .. 16k+15`) of `m3_lcdc_obj_size_change` carries **three**
+objects, at X = `k`, `16+k` and `32+k`, the last of them Y-flipped; `_scx`
+carries two, at X = `$0C` and a Y-flipped `$20`, and moves the whole line
+instead with `SCX = (LY >> 4) and 7`. So one frame meets the handler's four
+LCDC.2 writes at 27 different fetch phases, and it is the objects whose merge
+dot falls *between* two of those writes that name the pair. Both handlers write
+the bit from a `ld [c],a` chain off a counted `nop` field, so the four writes
+are **24, 12 and 12** T-cycles apart (`nop`×3 + 4 + 8, then 4 + 8, then 4 + 8);
+in `m3_lcdc_obj_size_change` that lands them on dots **101, 125, 137, 149** of
+this renderer's line, which is what `-d:gb_m3_trace` prints and what the
+derivation's table brackets each bitplane read against.
 
 ---
 
@@ -595,7 +618,10 @@ A negative result, so the next person does not dig:
   `m3_lcdc_win_map_change`, `m3_lcdc_tile_sel_win_change`,
   `m3_bgp_change_sprites`, `m3_obp0_change`** — the header is a one-line
   restatement of the filename. Everything they assert is in the OAM table and
-  the instruction cycles, both of which are covered by §1.3 and §3.
+  the instruction cycles, both of which are covered by §1.3 and §3. **That is
+  not the same as "nothing useful":** the two `obj_size_change` OAM tables ARE
+  the measurement, and both rows closed on them (§3.11). Read the table, not the
+  header.
 * **The seven `*2.asm` files** — `m3_lcdc_bg_en_change2`, `_bg_map_change2`,
   `_tile_sel_change2`, `_tile_sel_win_change2`, `_win_map_change2`,
   `m3_scx_high_5_bits_change2`, `m3_scy_change2` — are CGB-only re-runs through

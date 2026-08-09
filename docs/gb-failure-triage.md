@@ -720,9 +720,9 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
 | `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left are all LY = 0, i.e. bucket 0 |
 | `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
-| `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
+| `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
-| `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
+| `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
 | `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
 | `m3_scy_change` | 417 | 417 | **0 as of 2026-08-09** — 83 for free with `OBJ_BG_RUN`, 29 with `LY0_PIPE_MCYCLES`, and the last 29 were the length of the discarded fetch at the head of mode 3 (`M3_THROWAWAY_DOTS`) |
@@ -888,6 +888,64 @@ two 6-row bands at the very top and bottom of the frame (`y = 2..7` and
 is the signature of a 16-pixel-tall object's row selection rather than of a
 write dot; `m3_lcdc_obj_size_change` has the same shape plus a left-edge
 component at `x = 0..2`.
+
+### 2026-08-09: both `obj_size_change` rows are 0, on both devices
+
+That reading of the shape was right and it is worth saying what it turned into.
+An object fetch reads **LCDC.2 once per bitplane**, not once, and the two reads
+are 2 dots apart — so a write between them gives the low plane one tile row and
+the high plane another, which is exactly a diff that goes both ways inside a
+row and only ever in the LOWER tile of an 8x16 object (the two heights agree on
+rows 0..7 of an even tile index).
+
+Both ROMs decode cleanly because BGP = `$00` makes the background white and
+every object is tile `$4C` with `OBP0 = $E4`: each 16-line band is one object
+read out as raw bitplane, so the reference names the pair *(height the low plane
+used, height the high plane used)* per band outright. Against dingbat's own
+merge dot `M` that gives, uniquely, **low plane on `M`, high plane on `M + 2`**
+for an ordinary object — and something else for one hanging off the left edge,
+where the fetch sits at the HEAD of the penalty instead of at its tail and both
+reads land `t + 6` dots after the trigger whatever the wait is. The split
+between the two is `idx < 0`, the same split `OBJ_BG_RUN = 4` derived from
+`m3_lcdc_tile_sel_change`, and it is measured here rather than assumed: OAM
+X = 7 refuses the tail arm's dots and X = 8 refuses the head arm's.
+
+The `_cgb_c` references are the complement of the DMG ones band for band, and
+solving them the same way gives one constant three dots in the same direction on
+all six bands that separate the devices (`CGB_OBJ_SIZE_LATENCY`, the same shape
+as `CGB_MIXER_LATENCY`). All four rows — two ROMs, two devices — are now
+pixel-exact, the runner goes 719 → **723**, and nothing else moves: mealybug
+goes 552101 → 552188 on DMG and 1856081 → **1856315** on CGB with only these
+rows changing, gambatte is 3793/5005 row for row, `objtab.py` stays 0/153, and
+`-d:gb_m3_len` over 1,216 ROM/device runs (both mealybug devices first, then
+`sprites`, `window`, `scx_during_m3`, `m0enable`, `vram_m3`, `oam_access`) is
+byte-identical for its whole 1,000,000-line budget — so mode 3 does not move by
+a dot. The derivation, the sweep tables and what these ROMs cannot say are at
+`OBJ_PLANE1_LAG` in `gb/fifo_ppu.nim`.
+
+| | before | after |
+|---|---|---|
+| mealybug `m3_lcdc_obj_size_change` DMG | 57 wrong px | **0** |
+| mealybug `m3_lcdc_obj_size_change` CGB | 114 wrong subpx | **0** |
+| mealybug `m3_lcdc_obj_size_change_scx` DMG | 30 wrong px | **0** |
+| mealybug `m3_lcdc_obj_size_change_scx` CGB | 120 wrong subpx | **0** |
+| runner total | 719/981 | **723/981** |
+
+The cost is one compare on the object-fetch path and nothing at all on the dot
+loop: the redo hangs off `ppu_store_lcdc`, not off `tick_shifter`. Retired
+instructions against `main`, min of several runs each: **−0.04%** on dmg-acid2
+(the fast arm in `sprite_fetch_merge` more than pays for the extra state) and
+**+0.07%** on blargg `cpu_instrs`, which never puts an object on screen at all,
+so that figure is struct-layout drift and nothing else. Both are inside this
+machine's ±0.1% spread on a loaded run and far under the 0.3% this file flags.
+
+Two `GbFifoPpu` micro-optimisations reached for on the way here are **refused**
+at this revision and are not shipped, which is worth recording because both look
+obviously free: latching the CGB's share of the read dot in a new `int32` field
+— to turn the object trigger's `if gb.cgb_enabled` into an add — costs
+**+0.24%** on dmg-acid2, and moving the new field block to the end of the object
+to win that back is a wash (−0.005%). The trigger is not on the dot loop; the
+field is. Layout beats the branch, both times.
 
 ### Two more mid-mode-3 rules, and the ones next to them
 
