@@ -1132,12 +1132,15 @@ const endSheetDrag = () => {
     return;
   }
   if (dy > SHEET_DRAG_CLOSE) {
-    // Down out of the expanded state returns to the normal height rather than
-    // dismissing. Two detents, one gesture, and the way back is the way you
-    // came — dismissing from expanded would make a long swipe feel like it
-    // overshot into closing the thing you had just opened up.
-    if (sheetExpanded) setSheetExpanded(false);
-    else closeSettingsModal();
+    if (!sheetExpanded) { closeSettingsModal(); return; }
+    // Expanded, the pull has two outcomes and the distance picks between them:
+    // a short one steps back down to the normal height, and one past halfway
+    // dismisses outright rather than making you swipe twice. Halfway is
+    // measured off the frame, so it is half of whatever the screen actually
+    // is rather than a number that only suits one device.
+    const half = settingsFrame.getBoundingClientRect().height / 2;
+    if (dy >= half) closeSettingsModal();
+    else setSheetExpanded(false);
   }
 };
 
