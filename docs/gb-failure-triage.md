@@ -391,7 +391,7 @@ exists for it).
 | 17 | **LCD-on / boot dot phase** | **75** (`enable_display` 49, `lcd_offset` 22, `display_startstate` 4) | Already written up at `LCD_ON_HEAD_START` / `CGB_BOOT_PHASE`; `lcd_offset` is 100% CGB-only |
 | 18 | **Mode-1 / vblank STAT source values** | **42** (`m1`) | A *value* question (`exp=0,3 got=1,1`), not a phase one: whether the mode-1 STAT source asserts at all on entering vblank, and how it overlaps the vblank IF bit. Untouched by every STAT phase experiment run |
 | 19 | **OAM-DMA start off-by-one whose sign flips with speed** | **27** | Single speed is 1 M-cycle early, `_ds` is 1 M-cycle late — so it is not a constant offset but a wrong clock domain. No single ±4 T constant can fix it |
-| 20 | **Line-153 LY vs the LYC comparator** | **21** (`ly0`) | Readable LY and the comparator's copy need separate line-153 phases. **Not** the snapback dot — that was parameterised and built: gambatte 3614 → 3606 |
+| 20 | ~~**Line-153 LY vs the LYC comparator**~~ | **21** (`ly0`) | ~~Readable LY and the comparator's copy need separate line-153 phases.~~ **Closed 2026-08-09** — and the reading above was right in kind and wrong in scale. The comparator's copy of LY did not need a *phase*: the snapback ran no edge detector at all, so the LYC=0 STAT interrupt fired at the top of line 0 (451 dots late) and a LYC=153 match was never taken back down. Restoring the edge plus the read path's own one-M-cycle blind window (`LYC_SETTLE_DOTS` in `gb/ppu.nim`) takes `ly0` 66 → 74, `lycEnable` 172 → 179, `lycm2int` 8 → 10, the whole GBMicrotest `line_153_*` set to 23/24, and `daid/ppu_scanline_bgp-dmg` from 68.8% to **pixel-exact**. Still **not** the snapback dot, which stays where it was |
 | 21 | `lycEnable` residual (49), `m2enable` CGB-vs-DMG window (12), misc `oamdma` singletons (14) | **75** | Not one quantity each; need their own pass |
 
 ### Contested / handed between pools
@@ -1243,6 +1243,18 @@ at all** (41760 mode-3 writes, 83 in vblank, 3 in mode 2, traced), so the
 prediction that it shares this mechanism is falsified. Its residual is 12-wide
 blocks with 4-wide gaps running the full width of the line — an M-cycle-grain
 error in a tight write loop, and a separate question.
+
+**Closed 2026-08-09, and it was not a mixer question at all.** Decoding the ROM
+is the whole of it: its handler is ten `ld [c],a` at four M-cycles apart
+followed by 70 `nop`s and a `jp`, which is **exactly 114 M-cycles = one
+scanline**, so the frame is a picture of where the handler *started* and every
+pixel of it inherits that one phase. The phase is re-pinned once a frame by the
+LYC=0 STAT interrupt, and that interrupt was 456 − 12 dots late — see bucket 20
+and `LYC_SETTLE_DOTS` in `gb/ppu.nim`. The 12-and-4 pattern was a whole line of
+error, not an M-cycle of it: the picture was one line up and twelve pixels left,
+which run-lengths alone cannot tell apart from a 12-dot slip. The row is now
+**pixel-exact** against `ppu_scanline_bgp_1.dmg.png`, the OR-variant reference,
+which is the one this tree's `MIXER_PALETTE_OR` predicts it should match.
 
 With (1) fixed, **the two rows that argued against the second mixer stage now
 argue for it**, and the vote across the palette rows is unanimous. One build per

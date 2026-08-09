@@ -2757,6 +2757,45 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
        M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < result:
       result = M2_144_EARLY_DOT
 
+proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## ---- The LY 153 -> 0 snapback is an edge the STAT line has to see --------
+  ##
+  ## It never was: LY was assigned in the vblank branch and the edge detector
+  ## was left for the line boundary 451 dots later, so a LYC=0 STAT interrupt
+  ## fired at the top of line 0 instead of inside line 153, and a LYC=153 one
+  ## was never taken back down at all. Everything the comparator drives moved
+  ## with it -- the readable coincidence bit as much as the interrupt.
+  ##
+  ## daid's ppu_scanline_bgp is what made that visible rather than merely late.
+  ## Its whole frame is one BGP write every four M-cycles, resynced once per
+  ## frame by exactly this interrupt and free-running at 114 M-cycles a line
+  ## afterwards, so the frame is a picture of where the handler started and a
+  ## whole line of error puts every pixel of it 456 dots out of place.
+  ## 68.8% -> 90.5% with the first branch below, and the 4 dots left over are
+  ## the settling window at LYC_SETTLE_DOTS, which the second one closes.
+  ##
+  ## `noinline`, and one call site rather than the two branches spelled out at
+  ## the two dots they fire on, because the caller is fifo_tick_slow's dot loop:
+  ## it is inlined into the bus path and its body sits on clang's inline
+  ## threshold (docs/gb_oam_dma_cost.md). In line it measured **+0.37% of ALL
+  ## retired instructions** on Pokemon Crystal and on Pokemon Blue, for work
+  ## that decides two dots a frame. `lyc_settling` carries the same warning and
+  ## for the same reason; between them they are most of what this change would
+  ## otherwise have cost.
+  if ppu.ly == 153:
+    # The near side: LY changes, and with it any match it had. The new one does
+    # not arrive yet -- the comparator is blind for LYC_SETTLE_DOTS, which
+    # lyc_settling reads back off this same LY and dot.
+    ppu.ly = 0
+    when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+    ppu_handle_stat_interrupt(ppu, gb)
+  elif ppu.ly == 0 and ppu.cycle_counter == LYC_RELATCH_DOT:
+    # The far side: the comparator re-latches, so with LYC = 0 this is the dot
+    # the match -- and its interrupt -- appears on. `mode 1 with LY 0` is line
+    # 153 and nothing else; line 0 is already in mode 2 by the time its own LY
+    # reads 0.
+    ppu_handle_stat_interrupt(ppu, gb)
+
 when STAT_IRQ_SPLIT:
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
     ## The STAT interrupt line's own line boundary, STAT_IRQ_LEAD M-cycles
@@ -2826,13 +2865,17 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       # loop below jumps straight to the next dot that can do something
       # instead of re-dispatching the mode switch for each one. Same
       # sequence of actions at the same dot counts; only the no-op iterations
-      # are collapsed. The one level-triggered rule in the set (LY 153
-      # snapping back to 0 once the counter passes 4) opts out of the jump,
-      # so it still fires on exactly the dot it used to.
+      # are collapsed. The level-triggered rules in the set opt out of the jump
+      # so they still fire on exactly the dots they used to: LY 153 snapping
+      # back to 0 at LY153_SNAP_DOT, and the LY=LYC comparator re-latching at
+      # LYC_RELATCH_DOT after it. One bound on the counter covers both, at the
+      # price of walking the first ten dots of the other nine vblank lines as
+      # well -- 90 no-op iterations a frame.
       let m = ppu.mode_flag
       if m != 3:
         let target = fifo_skip_target(ppu, gb, m)
-        if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
+        if ppu.cycle_counter < target and
+           (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
           remaining -= skip
@@ -3115,13 +3158,25 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # source sees it a lead ahead of the readable LY -- one edge, two
           # clocks. The source is what gambatte lyc0int_* and lyc153int_* time;
           # the flag half below is what a STAT/LY read sees.
+          #
+          # A STAT_IRQ_LEAD build has NOT been re-derived against the settling
+          # window below: `lyc_settling` is written in the flag domain, so in
+          # this build the source would come out of the snap without one. The
+          # shipping build is LEAD = 0, where this whole block is compiled out
+          # and the snap below is the only edge; anyone reviving the axis has to
+          # answer that question first.
           if ppu.ly == 153 and ppu.irq_ly == 153 and
-             ppu.cycle_counter > 4 - lead:
+             ppu.cycle_counter >= LY153_SNAP_DOT - lead:
             ppu.irq_ly = 0
             ppu_handle_stat_interrupt(ppu, gb)
-        if ppu.ly == 153 and ppu.cycle_counter > 4:
-          ppu.ly = 0
-          when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+        # The LY 153 -> 0 snapback and the comparator re-latch after it: see
+        # fifo_line153_edge, which is where both live and why they are not
+        # written out here. Same two compares this branch has always had -- the
+        # field is still 153 through the window, which is also what holds the
+        # idle jump above open across it.
+        if ppu.cycle_counter >= LY153_SNAP_DOT and
+           ppu.cycle_counter <= LYC_RELATCH_DOT:
+          fifo_line153_edge(ppu, gb)
       else: discard
       ppu.cycle_counter += 1
   else:
@@ -3158,7 +3213,9 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # no HDMA block, no pixel. The two level-triggered rules opt out and fall
   # through to the loop, exactly as they did there:
   #   * mode 3 (a pixel per dot), and
-  #   * mode 1 with LY 153 (LY snaps back to 0 once the counter passes 4).
+  #   * mode 1 below LYC_RELATCH_DOT -- LY 153 snaps back to 0 at
+  #     LY153_SNAP_DOT and the LY=LYC comparator re-latches an M-cycle after
+  #     it, and neither dot may be stepped over.
   # An LCD that is off also falls through -- that path re-asserts mode 0 and
   # drives the blank-frame clock every tick.
   if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
@@ -3167,7 +3224,8 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the
     # next entry, where cycle_counter == target fails `cycle_counter < target`.
-    if next <= target and (m != 1 or ppu.ly != 153):
+    if next <= target and
+       (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)

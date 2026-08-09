@@ -95,6 +95,18 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## both a DMG and a CGB title, from a path that does nothing. Keeping the hot
   ## half a leaf is worth ~1% against `main` on both.
   cpu.ime = false
+  when defined(gb_irq_trace):
+    # Diagnostic (tools only; compiled out of every shipping build). One line
+    # per interrupt the CPU actually TAKES, with the PPU dot it was taken on --
+    # the other half of `-d:gb_stat_read_trace`, which says when a STAT source
+    # rose but not whether anything vectored off it. A ROM whose whole frame is
+    # laid out by one interrupt's arrival (daid's ppu_scanline_bgp) is unreadable
+    # without both: the dispatch dot plus a fixed handler prologue is the phase
+    # every later cycle of the frame inherits.
+    if gb.fifo_ppu != nil:
+      echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+           " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+           " pc=", toHex(cpu.pc, 4)
   # The same three OAM-bug M-cycles PUSH has (cpu_push16); Pan Docs lists
   # interrupt handling with it.
   oam_bug_if(gb, cpu.sp, obWrite)

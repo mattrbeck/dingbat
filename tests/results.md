@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 13:50:49*
+*Generated: 2026-08-09 13:57:11*
 
 ## Game Boy - Blargg
 
@@ -452,7 +452,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_stat0_d | 👌 |
 | gbmicrotest/lcdon_to_stat1_a | 👌 |
 | gbmicrotest/lcdon_to_stat1_b | 👌 |
-| gbmicrotest/lcdon_to_stat1_c | 👀 actual=0x81 expected=0x85 verdict=0xFF |
+| gbmicrotest/lcdon_to_stat1_c | 👌 |
 | gbmicrotest/lcdon_to_stat1_d | 👌 |
 | gbmicrotest/lcdon_to_stat1_e | 👌 |
 | gbmicrotest/lcdon_to_stat2_a | 👌 |
@@ -478,8 +478,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_153_lyc0_stat_timing_a | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_b | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_c | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_d | 👀 actual=0xC1 expected=0xC5 verdict=0xFF |
-| gbmicrotest/line_153_lyc0_stat_timing_e | 👀 actual=0xC1 expected=0xC5 verdict=0xFF |
+| gbmicrotest/line_153_lyc0_stat_timing_d | 👌 |
+| gbmicrotest/line_153_lyc0_stat_timing_e | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_f | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_g | 👌 |
 | gbmicrotest/line_153_lyc0_stat_timing_h | 👌 |
@@ -491,13 +491,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_153_lyc0_stat_timing_n | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_a | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_b | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_c | 👀 actual=0xC5 expected=0xC1 verdict=0xFF |
-| gbmicrotest/line_153_lyc153_stat_timing_d | 👀 actual=0xC5 expected=0xC1 verdict=0xFF |
+| gbmicrotest/line_153_lyc153_stat_timing_c | 👌 |
+| gbmicrotest/line_153_lyc153_stat_timing_d | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_e | 👌 |
 | gbmicrotest/line_153_lyc153_stat_timing_f | 👌 |
 | gbmicrotest/line_153_lyc_a | 👌 |
 | gbmicrotest/line_153_lyc_b | 👌 |
-| gbmicrotest/line_153_lyc_c | 👀 actual=0x85 expected=0x81 verdict=0xFF |
+| gbmicrotest/line_153_lyc_c | 👌 |
 | gbmicrotest/line_153_lyc_int_a | 👌 |
 | gbmicrotest/line_153_lyc_int_b | 👌 |
 | gbmicrotest/line_65_ly | 👌 |
@@ -879,7 +879,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | cpp/rtc-invalid-banks-test | 👌 |
 | cpp/latch-rtc-test | 👌 |
 | cpp/ramg-mbc3-test | 👌 |
-| daid/ppu_scanline_bgp-dmg | 👀 68.8% correct (15854/23040 pixels match) vs ppu_scanline_bgp_2.dmg.png |
+| daid/ppu_scanline_bgp-dmg | 👌 |
 | daid/stop_instr-dmg | 👌 |
 | daid/speed_switch_timing_div | 👌 |
 | daid/speed_switch_timing_ly | 👌 |
@@ -950,7 +950,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C | 👌 |
@@ -1024,22 +1024,22 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/irq_precedence | 👀 41/64 passed |
 | gambatte/lcd_offset | 👀 40/62 passed |
 | gambatte/lcdirq_precedence | 👀 54/62 passed |
-| gambatte/ly0 | 👀 66/96 passed |
+| gambatte/ly0 | 👀 74/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
 | gambatte/lyc153int_m2irq | 👀 11/16 passed |
-| gambatte/lycEnable | 👀 172/225 passed |
+| gambatte/lycEnable | 👀 179/225 passed |
 | gambatte/lycint_ly | 👌 6/6 passed |
 | gambatte/lycint_lycflag | 👀 11/12 passed |
 | gambatte/lycint_lycirq | 👀 2/4 passed |
 | gambatte/lycint_m0stat | 👌 6/6 passed |
-| gambatte/lycm2int | 👀 8/18 passed |
+| gambatte/lycm2int | 👀 10/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
 | gambatte/m0enable | 👀 153/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
-| gambatte/m1 | 👀 122/170 passed |
-| gambatte/m2enable | 👀 93/120 passed |
+| gambatte/m1 | 👀 123/170 passed |
+| gambatte/m2enable | 👀 94/120 passed |
 | gambatte/m2int_m0irq | 👀 45/72 passed |
 | gambatte/m2int_m0stat | 👀 3/6 passed |
 | gambatte/m2int_m2irq | 👀 12/18 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 735
-- **Fail:** 246
+- **Pass:** 743
+- **Fail:** 238
