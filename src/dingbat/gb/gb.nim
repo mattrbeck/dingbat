@@ -1566,11 +1566,6 @@ type
     # Next to `lx` on purpose -- the two are compared on every mode 3 dot, and
     # putting it after the bool block instead measured +0.6% on its own.
     win_lx*:              int32
-    # Dots of WIN_EN_HOLD left on a WX match that LCDC.5 refused. Zero means
-    # no match is waiting, which is every dot of almost every line; while it is
-    # nonzero `win_lx` is the hold's own retry pixel and fifo_arm_window leaves
-    # it alone. Per-line scratch.
-    win_hold*:            uint8
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
     # The line's FIRST `B01s` cycle -- the one that follows the discarded fetch
@@ -1596,6 +1591,19 @@ type
     # window restart on that pixel and an object's fetch on it are one fetch
     # slot and not two -- see CGB_WIN_TAIL_LAST.
     obj_last_px*:         bool
+    # Dots of WIN_EN_HOLD left on a WX match that LCDC.5 refused. Zero means
+    # no match is waiting, which is every dot of almost every line; while it is
+    # nonzero `win_lx` is the hold's own retry pixel and fifo_arm_window leaves
+    # it alone. Per-line scratch.
+    #
+    # DOWN HERE, in the bool block, and not next to `win_lx` where it is read:
+    # inserting a byte between `lx` and `win_lx` splits the pair the shifter
+    # compares on every mode 3 dot and measured **+0.6% of retired
+    # instructions** on Pokemon Blue, Pokemon Crystal and Link's Awakening DX
+    # -- the same 0.6% the note on `win_lx` above records for moving `win_lx`
+    # itself. This field is touched a handful of times a line and pays nothing
+    # for sitting with the flags.
+    win_hold*:            uint8
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.

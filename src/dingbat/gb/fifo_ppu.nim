@@ -1687,6 +1687,35 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ppu.fifo.head = h
   inc ppu.fifo.size
 
+proc window_refuse_start(ppu: GbFifoPpu) =
+  ## The WX comparator matched and LCDC.5 was low. See WIN_EN_HOLD: the match
+  ## is neither dropped nor committed -- it holds the comparator on the next
+  ## pixel for `WIN_EN_HOLD` dots, and the shifter goes on drawing meanwhile,
+  ## so a line whose match is never served pays nothing for it.
+  ##
+  ## Split out of tick_shifter for the reading, not for the speed: it runs at
+  ## most three times a line and only on lines that toggle LCDC.5 mid-mode-3,
+  ## and `{.noinline.}` on it measures the same as leaving the compiler to it.
+  ## What DID cost 0.6% was the field's position -- see win_hold in gb.nim.
+  let hold = if ppu.cgb: uint8(CGB_WIN_EN_HOLD) else: uint8(WIN_EN_HOLD)
+  if hold == 0'u8:
+    ppu.win_lx = WIN_LX_OFF
+  elif ppu.win_hold == 0'u8:
+    when WIN_EN_HOLD_ZERO != 0:
+      # The refused match and the fetcher's PUSH on the same dot. `size == 8`
+      # is that collision and only that: the FIFO is full for exactly the dot
+      # the push filled it on, and the shifter has not taken from it yet. The
+      # MATCH's own dot, not the hold's retries -- a retry is a comparator that
+      # has already fired. See WIN_EN_HOLD_ZERO.
+      if ppu.fifo.size == 8:
+        ppu.fifo.data[ppu.fifo.head] =
+          GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+    ppu.win_hold = hold
+    ppu.win_lx = ppu.lx + 1
+  else:
+    dec ppu.win_hold
+    ppu.win_lx = if ppu.win_hold == 0'u8: WIN_LX_OFF else: ppu.lx + 1
+
 proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## Does the object the shifter has just found have to wait for the window's
   ## start, instead of the other way round?
@@ -2341,27 +2370,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           # `win_lx` is WIN_LX_OFF exactly as before and the branch is never
           # reached.
           if not window_enabled(ppu):
-            let hold = if ppu.cgb: uint8(CGB_WIN_EN_HOLD)
-                       else:       uint8(WIN_EN_HOLD)
-            if hold == 0'u8:
-              ppu.win_lx = WIN_LX_OFF
-            elif ppu.win_hold == 0'u8:
-              when WIN_EN_HOLD_ZERO != 0:
-                # The refused match and the fetcher's PUSH on the same dot.
-                # `size == 8` is that collision and only that: the FIFO is full
-                # for exactly the dot the push filled it on, and the shifter has
-                # not taken from it yet. The MATCH's own dot, not the hold's
-                # retries -- a retry is a comparator that has already fired.
-                # See WIN_EN_HOLD_ZERO.
-                if ppu.fifo.size == 8:
-                  ppu.fifo.data[ppu.fifo.head] =
-                    GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
-              ppu.win_hold = hold
-              ppu.win_lx = ppu.lx + 1
-            else:
-              dec ppu.win_hold
-              ppu.win_lx =
-                if ppu.win_hold == 0'u8: WIN_LX_OFF else: ppu.lx + 1
+            window_refuse_start(ppu)
           else:
             when WIN_EN_HOLD_BACK != 0:
               # A match that WAITED starts the window one pixel left of the
