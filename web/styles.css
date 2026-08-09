@@ -3642,6 +3642,18 @@ body.debug-2p .home-tile-link {
     font-weight: 600;
   }
 
+  /* …but nothing is "last visited" until you have visited something. On a
+     fresh open the remembered section is still selected (the rail needs it,
+     and so does the stepper), it just is not drawn as though you had picked
+     it. The mark appears once you come back from a section. */
+  #settings-frame.list-unvisited .settings-tab.active {
+    background: none;
+  }
+
+  #settings-frame.list-unvisited .settings-tab.active .settings-tab-name {
+    font-weight: 400;
+  }
+
   /* Hairline between rows, inset from both edges. */
   .settings-tab + .settings-tab::before {
     content: "";
@@ -3672,6 +3684,15 @@ body.debug-2p .home-tile-link {
     border-top: 1px solid var(--border);
   }
 
+  /* Root list only. This is deliberately a hybrid of the two source documents
+     and not an oversight: the mockup's placement (a footer pinned to the
+     bottom, outside the scroller) with the spec's scope (§5 — "does not appear
+     on detail screens"). A detail screen has better uses for 53px, which at
+     667x375 is 14% of the viewport. Do not "fix" this back to both screens. */
+  #settings-frame.on-detail .settings-foot {
+    display: none;
+  }
+
   /* Detail header: back, title, stepper. No close — back and the stepper own
      that space, and swipe-down plus a backdrop tap still dismiss. */
   .settings-head {
@@ -3696,8 +3717,9 @@ body.debug-2p .home-tile-link {
   }
 
   .settings-scroll {
-    /* Flat 18px: the footer below owns the safe area now. */
-    padding: 18px;
+    /* The footer is list-only, so on a detail screen this IS the bottom-most
+       element and has to clear the home indicator itself. */
+    padding: 18px 18px max(18px, calc(12px + var(--safe-b)));
     scrollbar-gutter: auto;
   }
 

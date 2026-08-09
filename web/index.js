@@ -897,6 +897,8 @@ const SETTINGS_LAST_KEY = "settings-section";
 
 const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
 const settingsFrame = document.getElementById("settings-frame");
+const settingsBody = /** @type {HTMLElement} */ (
+  settingsFrame.querySelector(".settings-body"));
 const settingsRail = document.getElementById("settings-rail");
 const settingsContent = document.getElementById("settings-content");
 const settingsScroll = document.getElementById("settings-scroll");
@@ -924,6 +926,11 @@ const settingsStep = (sec, delta) => {
 
 let settingsSection = SETTINGS_SECTIONS[0];
 let settingsOnDetail = false;
+// Has a section been opened during THIS visit? The list's highlight means
+// "where you just were", so on a fresh open there is no answer yet and no row
+// is marked — a row lit up before you have touched anything reads as a
+// selection you did not make. Set on the first drill-in, cleared on close.
+let settingsVisited = false;
 
 const selectSettingsTab = (name) => {
   if (!SETTINGS_SECTIONS.includes(name)) name = SETTINGS_SECTIONS[0];
@@ -955,6 +962,7 @@ const selectSettingsTab = (name) => {
 const applySettingsScreen = () => {
   const sheet = settingsIsSheet();
   settingsFrame.classList.toggle("on-detail", sheet && settingsOnDetail);
+  settingsFrame.classList.toggle("list-unvisited", sheet && !settingsVisited);
   const off = !sheet ? null : settingsOnDetail ? settingsRail : settingsContent;
   for (const el of [settingsRail, settingsContent]) {
     if (el === off) el.setAttribute("inert", "");
@@ -992,16 +1000,26 @@ const showSettingsList = (fromHistory) => {
   settingsOnDetail = false;
   if (!fromHistory) settingsHistDrop(1);
   applySettingsScreen();
-  settingsTabOf(settingsSection)?.focus();
+  settingsTabOf(settingsSection)?.focus({ preventScroll: true });
+  settingsBody.scrollLeft = 0;
 };
 
 const openSettingsSection = (name) => {
   selectSettingsTab(name);
   if (!settingsIsSheet() || settingsOnDetail) return;
   settingsOnDetail = true;
+  settingsVisited = true;
   settingsHistPush();
   applySettingsScreen();
-  settingsBackBtn.focus();
+  // preventScroll is load-bearing, not a nicety. Back lives inside the detail
+  // screen, which is still translated 100% off to the right at this instant,
+  // so a plain focus() makes the browser scroll .settings-body to reveal it —
+  // 275px on a 375pt phone, even though the container is overflow:hidden and
+  // scrollWidth == clientWidth. Both panes lurch sideways for a few frames and
+  // then unwind as the transform lands, which reads as the pane flying off
+  // screen and coming back. Same reason in showSettingsList.
+  settingsBackBtn.focus({ preventScroll: true });
+  settingsBody.scrollLeft = 0;
 };
 
 window.addEventListener("popstate", () => {
@@ -1113,15 +1131,20 @@ const openSettingsModal = () => {
   // Fresh open starts with Advanced folded (defined below the modal helpers;
   // guarded for the pre-parse window, as the menu does for Capture)
   if (typeof collapseAdvanced === "function") collapseAdvanced();
-  // Reopen where they were. A large part of the old friction was people
-  // re-finding the section they had just been in; on the sheet that means
-  // opening ON the section, with the list one back-tap away.
+  // The remembered section is still selected, so the rail restores it on
+  // desktop and the sheet's list marks where you were — but the SHEET always
+  // opens on the list rather than drilled into that section. The spec argued
+  // the other way (open on the section, list one tap back); testing on a phone
+  // said otherwise, and landing inside Controls when you meant to browse is
+  // the more annoying of the two mistakes.
   let last = null;
   try { last = localStorage.getItem(SETTINGS_LAST_KEY); } catch {}
   selectSettingsTab(last || SETTINGS_SECTIONS[0]);
-  settingsOnDetail = settingsIsSheet();
+  settingsOnDetail = false;
+  settingsVisited = false;
   applySettingsScreen();
-  if (settingsOnDetail) { settingsHistPush(); settingsHistPush(); }
+  // One entry for the list level, so a back gesture closes the sheet.
+  if (settingsIsSheet()) settingsHistPush();
   settingsModal.classList.add("open");
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
