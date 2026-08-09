@@ -1291,11 +1291,15 @@ surface:
   `_ds_3` and `scx_0063c0/_3`, `_ds_3`. They are **not** the seven that
   `LY0_PIPE_MCYCLES` traded (`scx_during_m3_spx0/1/2` and siblings); that item
   is still open.
-* perf: retired instructions **−0.02%** (Pokemon Crystal) / **+0.04%** (Link's
-  Awakening DMG), one build per arm off the same revision through
-  `GBGATE_FLAGS_A=-d:M3_THROWAWAY_DOTS=6`. The change is two `bool` tests in
-  `tick_bg_fetcher`'s tile and data-high branches, i.e. once per 8 dots, not per
-  dot; the `head_cycle` flag fits in the existing bool block.
+* perf: retired instructions **−0.020%** (Pokemon Crystal CGB) and **−0.018%**
+  (Link's Awakening DMG) — i.e. free, and slightly the right side of free. Both
+  slots built off the same revision with
+  `GBGATE_FLAGS_A=-d:M3_THROWAWAY_DOTS=6`, minimum of four runs each, `cycles=`
+  identical in every pair. The change is two `bool` tests in `tick_bg_fetcher`'s
+  Get-Tile and Data-High branches — once per 8 dots, not per dot — and the
+  `head_cycle` flag goes in the existing bool block next to
+  `dropped_first_fetch`; what pays for them is the two dots of throw-away fetch
+  that no longer run.
 
 ## Reproducing any of this
 

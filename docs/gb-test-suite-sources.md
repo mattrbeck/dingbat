@@ -856,6 +856,17 @@ because it is a genuine disagreement with the ROM author's stated model that is
 currently invisible, and because if this ever needs to move, the ROM's sentence
 is the target.
 
+**RESOLVED 2026-08-09, and the sentence was right.** A different ROM decided it:
+`m3_scy_change`'s reference inverts into the (B, 0, 1) SCY triple each fetch saw,
+and all eighteen of its bands put the first on-screen tile's map read one 2-dot
+slot earlier than this tree had it. What that costs is the length of the
+discarded fetch — four dots (`B0`), not six (`B01`), with the 12-dot head budget
+unchanged (`M3_THROWAWAY_DOTS` in `gb/gb.nim`; derivation at `tick_bg_fetcher`).
+The discarded fetch is then **not** a `B01s` cycle, so "the first `B01s` read
+cycle" is the first real tile's, whose `B` is the dot this tree was already
+latching on. The latch moved to the step the author names, its dot did not move,
+and the two models stopped disagreeing.
+
 ---
 
 # 4. Negative results — suites with no useful source documentation
