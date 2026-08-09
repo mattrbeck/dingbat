@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 09:34:13*
+*Generated: 2026-08-09 10:14:48*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3770/5005 passed.**
+**3781/5005 passed.**
 
 ## bgen
 
@@ -209,23 +209,20 @@ All 8 tests passed.
 | dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 6B, expected 71 |
 | dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |
 
-## dmgpalette_during_m3 (4/17 passed)
+## dmgpalette_during_m3 (7/17 passed)
 
-4/17 tests passed, 13 failed:
+7/17 tests passed, 10 failed:
 
 | Test | Result |
 |------|--------|
-| dmgpalette_during_m3/dmgpalette_during_m3_2 [dmg, png] | 429/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 2/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 144/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 144/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx2_1 [dmg, png] | 143/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 730/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 725/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 862/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1140/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_1 [dmg, png] | 286/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
@@ -974,9 +971,9 @@ All 6 tests passed.
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
 
-## scx_during_m3 (37/141 passed)
+## scx_during_m3 (43/141 passed)
 
-37/141 tests passed, 104 failed:
+43/141 tests passed, 98 failed:
 
 | Test | Result |
 |------|--------|
@@ -1072,15 +1069,9 @@ All 6 tests passed.
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_6 [cgb, png] | 22888/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_7 [cgb, png] | 21744/23040 pixels differ |
 | scx_during_m3/scx_0761c0/scx_during_m3_ds_8 [cgb, png] | 21744/23040 pixels differ |
-| scx_during_m3/scx_attrib_during_m3_spx1_ds [cgb, png] | 64/23040 pixels differ |
-| scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 72/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx0 [dmg, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx0 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx1 [dmg, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx1 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2 [dmg, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2 [cgb, png] | 16/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 72/23040 pixels differ |
+| scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
+| scx_during_m3/scx_during_m3_spx2 [cgb, png] | 8/23040 pixels differ |
+| scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | scx_during_m3/scx_m3_extend_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | scx_during_m3/scx_m3_extend_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -1139,14 +1130,12 @@ All 6 tests passed.
 | serial/start_wait_trigger_int8_read_if_3_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
-## sound (111/116 passed)
+## sound (113/116 passed)
 
-111/116 tests passed, 5 failed:
+113/116 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
-| sound/ch1_init_reset_sweep_counter_timing_nr52_1_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
-| sound/ch1_init_reset_sweep_counter_timing_nr52_3_dmg08_out0_cgb04c_out1 [cgb] | got 0, expected 1 |
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
