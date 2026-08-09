@@ -629,7 +629,7 @@
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gb" data-tab="gb" data-name="Game Boy" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gb">
                   <span class="settings-tab-name">Game Boy</span>
-                  <span class="settings-tab-desc">Boot ROM, shades, renderer, Super Game Boy</span>
+                  <span class="settings-tab-desc">Palette, Super Game Boy, boot ROM, renderer</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gba" data-tab="gba" data-name="GBA" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gba">
@@ -771,18 +771,10 @@
               </div>
 
               <div class="settings-pane" id="settings-pane-gb" role="tabpanel" aria-labelledby="settings-tab-gb" hidden>
-                <div class="modal-subhead no-rule">Boot ROM</div>
-                <div class="modal-row">
-                  <span class="modal-row-label">GBC Bootrom</span>
-                  <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
-                  <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
-                </div>
-                <p class="modal-hint">With a boot ROM set, Game Boy games play the startup animation first.</p>
-                <div class="modal-subhead">Game Boy screen</div>
+                <div class="modal-subhead no-rule">Game Boy screen</div>
                 <div class="modal-toggle-row row-flow">
-                  <span class="modal-row-label">Shade palette</span>
-                  <select id="gb-palette-mode" class="kb-select row-flow-ctl" aria-label="Game Boy shade palette">
+                  <span class="modal-row-label">Palette</span>
+                  <select id="gb-palette-mode" class="kb-select row-flow-ctl" aria-label="Game Boy palette">
                     <option value="default">Game Boy default</option>
                     <option value="theme">Match app theme</option>
                     <option value="custom">Custom&hellip;</option>
@@ -795,7 +787,7 @@
                   <span id="gb-palette-preview" class="gb-palette-preview" aria-hidden="true"></span>
                   <button type="button" class="button button-sm gb-palette-reset" id="gb-palette-reset"
                           title="Put the Game Boy shades back to their defaults — no other setting changes"
-                          aria-label="Reset the Game Boy shade palette">Reset</button>
+                          aria-label="Reset the Game Boy palette">Reset</button>
                 </div>
                 <div class="gb-palette-row" id="gb-palette-custom-row" hidden>
                   <span class="gb-palette-label">Pick</span>
@@ -805,17 +797,6 @@
                     <input type="color" id="gb-palette-shade-2" class="gb-shade-input" aria-label="Shade 3" />
                     <input type="color" id="gb-palette-shade-3" class="gb-shade-input" aria-label="Shade 4 (darkest)" />
                   </span>
-                </div>
-                <div class="modal-subhead">Renderer</div>
-                <div class="radio-group" role="radiogroup" aria-label="Game Boy renderer">
-                  <label class="radio-row">
-                    <input type="radio" name="gb-renderer" value="fifo" checked />
-                    <span>Pixel FIFO<span class="radio-sub">Slower. Gets every visual trick right</span></span>
-                  </label>
-                  <label class="radio-row">
-                    <input type="radio" name="gb-renderer" value="scanline" />
-                    <span>Scanline<span class="radio-sub">Faster. Right for almost every game</span></span>
-                  </label>
                 </div>
                 <div class="modal-subhead">Super Game Boy</div>
                 <div class="modal-toggle-row">
@@ -834,7 +815,26 @@
                   </label>
                   <span class="modal-toggle-sub">A border makes the picture wider, so the screen changes shape when one appears.</span>
                 </div>
-                <p class="settings-note">Boot ROM, renderer and Super Game Boy changes apply the next time you load a game. The rest are immediate.</p>
+                <div class="modal-subhead">Boot ROM</div>
+                <div class="modal-row">
+                  <span class="modal-row-label">GBC Bootrom</span>
+                  <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
+                  <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
+                </div>
+                <p class="modal-hint">With a boot ROM set, Game Boy games play the startup animation first.</p>
+                <div class="modal-subhead">Renderer</div>
+                <div class="radio-group" role="radiogroup" aria-label="Game Boy renderer">
+                  <label class="radio-row">
+                    <input type="radio" name="gb-renderer" value="fifo" checked />
+                    <span>Pixel FIFO<span class="radio-sub">Slower. Gets every visual trick right</span></span>
+                  </label>
+                  <label class="radio-row">
+                    <input type="radio" name="gb-renderer" value="scanline" />
+                    <span>Scanline<span class="radio-sub">Faster. Right for almost every game</span></span>
+                  </label>
+                </div>
+                
               </div>
 
               <div class="settings-pane" id="settings-pane-gba" role="tabpanel" aria-labelledby="settings-tab-gba" hidden>
@@ -870,7 +870,6 @@
                     <span>Real BIOS boot, HLE calls<span class="radio-sub">Real startup, software after that</span></span>
                   </label>
                 </div>
-                <p class="modal-hint">Without a BIOS file, both real-BIOS modes fall back to software.</p>
                 <p class="settings-note">Changes apply the next time a game is loaded.</p>
               </div>
 
