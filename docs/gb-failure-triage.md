@@ -285,7 +285,7 @@ net-negative, and that distinction is the whole point of the ranking.
 
 | # | bucket | rows | instrument | effort | perf | net if built |
 |---|---|---|---|---|---|---|
-| **0** | **`LY0-RESYNC` — the vblank → LY=0 re-sync is one M-cycle long.** 125 png rows fail on **scanline 0 only**, with lines 1–143 pixel-exact | **125** (`scy` 55, `bgtilemap` 28, `bgtiledata` 24, `scx_during_m3` 17, `bgen` 1) | **boundary column, and an unusually sharp one**: a per-scanline PNG differ | small | **cold** — not in the dot loop; it is where line 0 starts | not built |
+| **0** | **`LY0-RESYNC` — line 0's pixel pipeline runs one M-cycle ahead.** 125 png rows fail on **scanline 0 only**, with lines 1–143 pixel-exact | **125** (`scy` 55, `bgtilemap` 28, `bgtiledata` 24, `scx_during_m3` 17, `bgen` 1) | **boundary column, and an unusually sharp one**: a per-scanline PNG differ | small | **cold** — not in the dot loop | **+119 / −7**, shipped as `LY0_PIPE_MCYCLES` (gambatte 3658 → 3770) |
 | **1** | **`$FEA0-$FEFF` is real RAM on CGB** — dingbat answers `$00` for every model; the ROMs seed the region with a `PUSH` and read it back | **26** (`oamdma` `busypushFEA1`/`busypushFF01`) | the ROM itself | ~5 lines + a savestate field (payload revision bump) | cold | **+26 / −0** |
 | **2** | **HDMA source outside cartridge/WRAM moves `$FF`** | **4** (`dma`) | `dma_hiram_read_result` reports the *value* | done | cold | **+4 / −0**, shipped as `a7b6355` |
 | **3** | **STAT edge-detector re-trigger** — *every* `*_late_retrigger` ROM in the suite fails, across five STAT sources and the timer, bidirectionally | **28** (`irq_precedence` 6, `m1` 6, `ly0` 6, `m2int_m2irq` 3, `lyc153int_m2irq` 3, `tima` 4) | pairs, ±1 M-cycle | small | cold | not built |
@@ -307,6 +307,53 @@ line including LY=0, at exact 456-dot cadence, and the reference puts hardware's
 LY=0 sample **one CPU M-cycle earlier than ours** while every later line agrees.
 So this is not a mode-3 bug at all — it is the vblank → LY=0 re-sync — and the
 fix is in cold code.
+
+**Built and shipped, 2026-08-09, as `LY0_PIPE_MCYCLES` in `gb/fifo_ppu.nim`.**
+The falsifier held exactly: one change takes all five families
+(`bgen` 1/1, `bgtiledata` 24/24, `bgtilemap` 26/28, `scy` 52/55,
+`scx_during_m3` +13/−7) and, over all 5,005 rows dumped as frames and compared
+scanline by scanline against the same tree with the term at 0, **the only
+scanline that moves anywhere is y = 0**. gambatte 3658 → 3770, runner 704 → 712,
+mealybug DMG +110 pixels with `m3_window_timing_wx_0` going 4 → **0** exactly as
+this bucket's framing predicted, CGB +520 with five more rows pixel-exact. Cost:
+7 `scx_during_m3` rows whose SCX write lands inside the four dots at the head of
+mode 3 that this moves. Retired instructions −0.04% with `cycles=` identical.
+
+Two readings of the same 4 dots were built first and **both are falsified**, and
+that is the useful part of the result — every STAT-visible edge on line 0 is
+already where hardware puts it:
+
+* **"Line 0's mode 2 STAT interrupt is one M-cycle late."** Scores the same five
+  families (gambatte 3658 → 3762) and is refused from three directions.
+  mooneye `acceptance/ppu/intr_1_2_timing-GS` (and wilbertpol's copy) counts
+  `inc b` from the line-144 mode 1 STAT interrupt to the line-0 mode 2 one and
+  wants 20 then 21; moving the pulse makes it 21/22, and that ROM is verified on
+  DMG/MGB/SGB/SGB2. gambatte `m2enable/late_enable_ly0_{1,2}` and eight siblings
+  enable the source one M-cycle apart across the top of line 0 and bracket the
+  pulse's own window where it already is; `lcdirq_precedence/m2irq_ly00_lcdstat30`
+  and `lyc153int_m2irq_ifw_2` bracket the same edge from the vblank side. A
+  variant that skews the pulse by ONE DOT rather than one M-cycle survives the
+  m2enable bracket and scores +111, but `intr_1_2_timing-GS` refuses it too.
+* **"Line 0's mode 2 is four dots short."** Mode 3's flag and the pipeline both
+  start at dot 76 (gambatte 3658 → 3714), which drags the mode 3 → 0 flag with
+  them: `m0enable` −18, `vramw_m3end` −8, `lcd_offset` −7, `enable_display` −7,
+  `m0int_m3stat` −2. `ly0/lycint152_m2stat_1` separately refuses the mode 2 → 3
+  edge moving on its own, and mooneye-wilbertpol's `ly00_mode2_3` /
+  `ly00_mode3_0` are green today.
+
+So the residual is not in any flag or any source: it is the phase at which the
+pipeline samples the registers, which is the per-line version of
+`M3_PIPE_MCYCLES` and is spelled in the same units. gambatte's `_ds` rows are
+what pin the units — the same five families want 2 dots in double speed, not 4,
+and a fixed 4 costs 14 `_ds` rows that one M-cycle keeps.
+
+The open question this leaves is the 7 traded rows. `scx_during_m3_spx0/1/2` and
+four siblings write SCX from the first instruction of the mode 2 handler, so
+their write lands in the four dots between the mode 3 flag and where the
+pipeline's first fetch used to sample the fine scroll. They say line 0's
+fine-scroll latch does NOT move with the pipeline; 13 rows in the same family
+say the rest of it does. Whether the latch is a flag-time event is the next
+thing to settle here, and `tools/gbppu` has no instrument for it yet.
 
 ### The mode-3 pipeline pool, by bucket
 

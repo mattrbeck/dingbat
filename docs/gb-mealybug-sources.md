@@ -58,19 +58,26 @@ the mode 2 STAT interrupt arrives 4 T-cycles later, relative to the start of
 drawing, than it does on lines 1..143** — burn 4 fewer and the write lands on
 the same dot of the line.
 
-**dingbat disagrees.** `-d:gb_m3_trace` on `m3_lcdc_tile_sel_change` puts the
-handler's first LCDC write at **dot 101 on LY 0 and dot 105 on LY 1..143** —
-i.e. dingbat's line-0 interrupt is at the same offset as everybody else's, so
-the macro's 4-cycle correction is uncancelled and every mealybug ROM's line 0 is
-4 dots early. It is visible as a line-0-only residual on
-`m3_bgp_change` (21 of its 403 remaining), `m3_bgp_change_sprites` (20 of 124),
-`m3_lcdc_bg_en_change` (8 of 67), `m3_scy_change` (51 of 417) and
-`m3_lcdc_win_en_change_multiple_wx` (9 of 343) — call it 100–150 pixels across
-the set. **Not changed here**: moving the line-0 mode 2 edge by 4 dots reaches
-the STAT model that mooneye's `intr_2_*` and eight gambatte families pin, and
-that trade has not been measured. It is the cheapest well-evidenced thing left
-in this area and it is written down so the next pass starts from the ROM rather
-than from a pixel.
+**dingbat disagreed**, and this is now fixed. `-d:gb_m3_trace` on
+`m3_lcdc_tile_sel_change` put the handler's first LCDC write at **dot 101 on
+LY 0 and dot 105 on LY 1..143** — i.e. dingbat's line-0 interrupt was at the
+same offset as everybody else's, so the macro's 4-cycle correction was
+uncancelled and every mealybug ROM's line 0 was 4 dots early. It showed up as a
+line-0-only residual on `m3_bgp_change` (21 of its 403), `m3_bgp_change_sprites`
+(20 of 124), `m3_lcdc_bg_en_change` (8 of 67), `m3_scy_change` (51 of 417) and
+`m3_lcdc_win_en_change_multiple_wx` (9 of 343) — 100–150 pixels across the set.
+
+**Fixed 2026-08-09 as `LY0_PIPE_MCYCLES`** (`gb/fifo_ppu.nim`), worth **+110
+pixels on the DMG set and +520 on the CGB one**, with `m3_window_timing_wx_0`
+going 4 → 0 and five CGB rows going pixel-exact. What moves is line 0's pixel
+PIPELINE, one CPU M-cycle ahead of where it runs on lines 1..143, with every
+mode flag and STAT source left alone — the reading this file used to suggest
+(that the line-0 mode 2 STAT interrupt is 4 T-cycles late) is falsified by
+mooneye `acceptance/ppu/intr_1_2_timing-GS`, which times that interrupt against
+the line-144 mode 1 one directly. The 125-row gambatte half of the same
+measurement, and both falsified alternatives, are written up under bucket 0 in
+`docs/gb-failure-triage.md`. Only `m3_window_timing` goes the other way, by 4
+pixels, and its own residual is a separate open item (§3).
 
 ### 1.3 The objects are the ruler, not scenery
 
