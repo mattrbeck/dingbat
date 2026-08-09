@@ -1,32 +1,21 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 12:39:16*
+*Generated: 2026-08-09 13:21:56*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3827/5005 passed.**
+**3835/5005 passed.**
 
 ## bgen
 
 All 2 tests passed.
 
-## bgtiledata (26/34 passed)
+## bgtiledata
 
-26/34 tests passed, 8 failed:
-
-| Test | Result |
-|------|--------|
-| bgtiledata/bgtiledata_spx08_1 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_2 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_3 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx08_4 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_1 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_2 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_3 [cgb, png] | 128/23040 pixels differ |
-| bgtiledata/bgtiledata_spx0A_4 [cgb, png] | 128/23040 pixels differ |
+All 34 tests passed.
 
 ## bgtilemap (28/40 passed)
 

@@ -1254,10 +1254,27 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # object fetch whose high plane has not been read yet is redone against the
   # new value. Cold -- a mid-mode-3 write that moves LCDC.2 at all is rare, and
   # one landing inside a live fetch's two dots rarer still.
-  let flip2 = ((ppu.lcd_control xor val) and 0x04'u8) != 0
+  #
+  # LCDC.4 is the one bit a BACKGROUND bitplane read consults, and on a CGB it
+  # gets there a dot late and glitches a read it lands on. Only the dot of the
+  # change is needed for either half; the fetcher does the rest. CGB only, so a
+  # DMG leaves `tdsel_dot` at NO_TDSEL_CHANGE all frame and the fetcher's test
+  # is one compare that never takes.
+  let moved = ppu.lcd_control xor val
+  let flip2 = (moved and 0x04'u8) != 0
   ppu.lcd_control = val
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
+    when CGB_TDSEL_ANY:
+      if (moved and 0x10'u8) != 0 and gb.fifo_ppu.cgb:
+        # The dot the fetcher sees it on, not the dot it was written on. The
+        # latency is spent HERE because this is where the CPU's speed is known:
+        # it is a CPU-clock delay, so a double-speed M-cycle spends it inside
+        # itself and the fetcher sees the bit on the write's own dot. gambatte's
+        # `bgtiledata` family brackets that from both sides -- see
+        # CGB_TDSEL_LATENCY in gb.nim.
+        gb.fifo_ppu.tdsel_dot = ppu.cycle_counter +
+          int32(max(0, CGB_TDSEL_LATENCY - int(gb.memory.current_speed)))
     if flip2:
       ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
       ppu.lcdc2_flip[0] = ppu.cycle_counter

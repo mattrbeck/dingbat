@@ -308,6 +308,89 @@ const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
   ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
   ## references on which bands come out mixed, and the disagreement is a clean
   ## three dots in the same direction on all six bands that separate them.
+const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
+  ## Dots LCDC.4 takes to reach the BACKGROUND FETCHER on CGB over the DMG --
+  ## the same shape as CGB_OBJ_SIZE_LATENCY above, for the one bit of LCDC a
+  ## background bitplane read consults. Separate from CGB_LCDC_TDSEL_LATENCY
+  ## for the same reason: that one is a WRITE latency and delays the whole
+  ## register (the `run` chain in mem_apply_pipeline is monotonic, so a
+  ## nonzero TDSEL latency drags the other six bits with it), and every nonzero
+  ## setting of THAT costs three gambatte `window` rows.
+  ##
+  ## **The DMG is exactly right, so this is a real CGB delta and not a phase
+  ## error being absorbed.** `m3_lcdc_tile_sel_change` and
+  ## `m3_lcdc_tile_sel_win_change` are 23040/23040 against their `_dmg_blob`
+  ## references, and each is eighteen independent measurements of this
+  ## register's write dot against the fetch cycle (their objects sweep OAM
+  ## X = 0..17 down the screen, one band each, so each band moves the write by
+  ## a dot inside the fetch).
+  ##
+  ## Derived off `m3_lcdc_tile_sel_change2`'s CGB reference, which is the same
+  ## instrument with a picture that reads out the bytes: its background is
+  ## `ABCDEFGH...` on map rows 0..7 with LCDC.4 = 0, and only $9490 (where `I`
+  ## lives in the $8800 region) is initialised -- so every 8 aligned pixels of
+  ## the frame invert through BGP = $E4 into one (plane 0, plane 1) pair and
+  ## name the tile and plane hardware read. Its handler is
+  ## `ld [hl],c / ld [hl],b` three times over, so LCDC.4 goes up and down on a
+  ## 8-dot lattice and the tile columns it lands on are 2/3, 5/6 and 8/9.
+  ## Reading column 2 (the first SET) per band, with the fetch's two reads at
+  ## p0 and p0 + 2:
+  ##
+  ##   band   hardware              dingbat at latency 0
+  ##   0..2   C.0 / C.1             C.0 / C.1        write at or before p0
+  ##   3      <glitch> / C.1        C.0 / C.1        write ON p0 (hardware)
+  ##   4      $00 / C.1             C.0 / C.1        write at p0 + 1
+  ##   5      $00 / <glitch>        $00 / C.1        write ON p1 (hardware)
+  ##   6      $00 / $00             $00 / C.1
+  ##   7      $00 / $00             $00 / $00
+  ##
+  ## The bands step the write by exactly one dot each (the ROM's own comment:
+  ## "sprites are positioned to cause the write to occur on different T-cycles
+  ## of the background tile fetch"), and hardware's write reaches the fetcher
+  ## one band later than dingbat's throughout. One dot, bracketed from both
+  ## sides, on a row whose DMG twin is pixel-exact.
+  ##
+  ## Independently: it is also the only value that puts `cgb-acid-hell`'s
+  ## anomaly on the plane it is observed on. That ROM writes LCDC every 8 dots
+  ## at dot 8n+1 with the bitplane reads at 8n+0 and 8n+2, so 0 puts the change
+  ## between the two reads, -1 on the low plane, and only +1 on the high one.
+const CGB_TDSEL_GLITCH*       {.booldefine.} = true
+  ## Whether an LCDC.4 change that lands ON a background bitplane read glitches
+  ## it, and with what. mealybug's PPU notes describe the effect; what the
+  ## `m3_lcdc_tile_sel_change2` decode above adds is which branch fires when,
+  ## because the frame names the byte. Reading all six affected columns of that
+  ## reference, glitched cells only (`IDX` = the tile index, `spr.1` = the
+  ## object's bitplane 1, `X.p` = tile X's plane p):
+  ##
+  ##   band   col2 SET   col3 RST   col5 SET   col6 RST   col8 SET   col9 RST
+  ##   3      '3'.1      IDX        D.0        IDX        G.0        IDX
+  ##   5      '5'.1      IDX        D.1        IDX        G.1        IDX
+  ##
+  ## Two rules, and neither has a free parameter:
+  ##
+  ##  * a RESET on the read dot delivers the TILE INDEX as that bitplane's
+  ##    byte. Columns 3, 6 and 9 hold `D`, `G` and `J`, and the bytes are $44,
+  ##    $47 and $4A down the whole band -- constant against the row, which no
+  ##    tile-data read can be. This is the notes' "resetting TILE_SEL on the
+  ##    same T-cycle as a bitplane data read will cause the tile index to be
+  ##    instead used as the data for that bitplane", verbatim.
+  ##  * a SET on the read dot delivers the byte at the address of the most
+  ##    recent $8000-REGION tile-data read. The object fetch's last read is its
+  ##    bitplane 1, which is why the first glitch of a line reports the
+  ##    object's plane 1 at EITHER plane (band 3 is a plane-0 glitch and band 5
+  ##    a plane-1 one, and both give the digit's plane 1); after that the
+  ##    RESET-glitched read has driven its own $8000-region address, which is
+  ##    why col 5 reports `D` -- column 3's tile -- and col 8 reports `G`,
+  ##    column 6's, each at the plane the glitch is on. The notes list both as
+  ##    alternatives ("bitplane 1 data from the most recently drawn sprite, if
+  ##    any, or bitplane 1 data from the most recently drawn tile as when
+  ##    TILE_SEL was last reset, if any") without saying which fires; the
+  ##    address latch is the one mechanism that produces both.
+  ##
+  ## `cgb-acid-hell`'s two pixels are NOT this rule and are still open: their
+  ## glitched read is a SET and hardware delivers the tile index there, which
+  ## contradicts every SET cell above. See docs/gb-failure-triage.md.
+const CGB_TDSEL_ANY* = CGB_TDSEL_LATENCY != 0 or CGB_TDSEL_GLITCH
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
@@ -615,6 +698,18 @@ const OBJ_FIX_OFF*            = int32.high
   ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
   ## LCDC.2 write". Same shape as above: the window test is one compare either
   ## way.
+const NO_TDSEL_CHANGE*        = int32.low
+  ## `GbFifoPpu.tdsel_dot` meaning "LCDC.4 has not changed on this line". A dot
+  ## in the far past, so the fetcher's `cycle_counter - tdsel_dot` is a large
+  ## positive that is neither inside the latency nor on the glitch dot, and the
+  ## empty case costs no branch of its own -- the same shape as NO_LCDC2_FLIP.
+  ## It is also what a DMG carries all frame, since only a CGB records a change.
+const TDSEL_ADDR_OFF*         = -1'i32
+  ## `GbFifoPpu.tdsel_addr` meaning "nothing on this line has driven an
+  ## $8000-region tile-data address". A SET-glitched read falls back to its own
+  ## read there. mealybug's notes name a third alternative for that case -- the
+  ## read in progress at the end of the PREVIOUS line -- and no ROM in this
+  ## tree reaches it, so the fallback is deliberately the unglitched byte.
 const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
   ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
@@ -1446,6 +1541,26 @@ type
     # is derived from is 4 dots at normal speed and 2 in double speed. See
     # M3_PIPE_MCYCLES in fifo_ppu.
     m3_lead*:             int32
+    # ---- LCDC.4 against the two bitplane reads (CGB only) -------------------
+    #
+    # `tdsel_dot` is the dot LCDC.4 last CHANGED on, NO_TDSEL_CHANGE when it
+    # has not changed on this line. The fetcher reads the bit
+    # CGB_TDSEL_LATENCY dots later than the CPU wrote it and glitches a read
+    # that lands on that dot exactly; both need the dot, and nothing else does.
+    # Only a CGB records it, which is what keeps the DMG path at one compare.
+    #
+    # `tdsel_addr`/`tdsel_bank` are the VRAM offset and bank of the most recent
+    # $8000-region tile-data read -- an object bitplane, a LCDC.4 = 1
+    # background bitplane, or a RESET-glitched read, which drove its
+    # $8000-region address before the reset arrived. A SET-glitched read
+    # delivers the byte there. TDSEL_ADDR_OFF when nothing on this line has
+    # driven one.
+    #
+    # All three are per-line scratch like obj_fix_from above, cleared at the
+    # mode 2 -> 3 edge, and not serialized: a state is captured in vblank.
+    tdsel_dot*:           int32
+    tdsel_addr*:          int32
+    tdsel_bank*:          int32
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

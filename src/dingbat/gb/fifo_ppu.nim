@@ -60,6 +60,8 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     win_lx: WIN_LX_OFF,
     obj_fix_from: OBJ_FIX_OFF,
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
+    tdsel_dot: NO_TDSEL_CHANGE,
+    tdsel_addr: TDSEL_ADDR_OFF,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -151,6 +153,8 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  ppu.tdsel_dot = NO_TDSEL_CHANGE
+  ppu.tdsel_addr = TDSEL_ADDR_OFF
   ppu.m3_delay = 0'u8
   ppu.tile_num = 0
   ppu.tile_attrs = 0
@@ -291,6 +295,10 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  # LCDC.4's is per-line for the same reason, and the address latch with it:
+  # both only ever answer a fetch on THIS line's dots.
+  ppu.tdsel_dot = NO_TDSEL_CHANGE
+  ppu.tdsel_addr = TDSEL_ADDR_OFF
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -539,9 +547,27 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
-    let tile_num = if bg_window_tile_data(ppu) != 0: int(ppu.tile_num)
+    # ---- LCDC.4, as the FETCHER sees it, and the CGB glitch ----------------
+    #
+    # `sel` is the bit the address is formed from, which on a CGB is the bit as
+    # it stood CGB_TDSEL_LATENCY dots ago (see that constant in gb.nim: the
+    # DMG's own phase is pixel-exact on both `m3_lcdc_tile_sel_*` rows, so the
+    # dot is a CGB delta). `glitch` is set on the one dot the change lands on a
+    # read; what each direction delivers is derived at CGB_TDSEL_GLITCH.
+    var sel = bg_window_tile_data(ppu) != 0
+    var glitch = 0
+    when CGB_TDSEL_ANY:
+      # `tdsel_dot` is already the dot the change goes LIVE on -- the latency is
+      # paid at the write, which is where the speed it is measured in is known.
+      # A compare against it rather than a subtraction, so NO_TDSEL_CHANGE can
+      # be int32.low without overflowing.
+      if unlikely(ppu.cycle_counter <= ppu.tdsel_dot):
+        if ppu.cycle_counter < ppu.tdsel_dot: sel = not sel
+        else:
+          when CGB_TDSEL_GLITCH: glitch = if sel: 1 else: -1
+    let tile_num = if sel: int(ppu.tile_num)
                    else: int(cast[int8](ppu.tile_num))
-    let tile_data_tbl = if bg_window_tile_data(ppu) != 0: 0x0000 else: 0x1000
+    let tile_data_tbl = if sel: 0x0000 else: 0x1000
     let tile_ptr = tile_data_tbl + 16 * tile_num
     let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
     var tile_row = if ppu.fetching_window:
@@ -549,18 +575,45 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
                    else:
                      (int(ppu.ly) + int(ppu.scy)) and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row
+    let low_plane = FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow
+    let off = tile_ptr + tile_row * 2 + (if low_plane: 0 else: 1)
+    var data = ppu.vram[bank_num][off]
+    when CGB_TDSEL_GLITCH:
+      if unlikely(glitch != 0):
+        if glitch < 0:
+          # RESET on the read dot: the tile index is the byte. The address the
+          # read had already driven is the $8000-region one -- the reset had not
+          # reached the address path either -- so it is that address the next
+          # SET-glitched read comes back to.
+          data = ppu.tile_num
+          ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
+                                 (if low_plane: 0 else: 1))
+          ppu.tdsel_bank = int32(bank_num)
+        elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
+          # SET on the read dot: the address never advanced, so the byte comes
+          # from wherever the last $8000-region read left it.
+          data = ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr]
+      # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and by the
+      # latch story it should leave its address here as well. It deliberately
+      # does not, for two reasons. No cell of either `*_change2` frame can tell
+      # the two apart -- every SET glitch in them is preceded by an object fetch
+      # or a RESET-glitched read that overwrites whatever a plain read left --
+      # and doing it costs two stores on EVERY bitplane read of every frame,
+      # which measured +0.55% of retired instructions on blargg cpu_instrs
+      # against +0.27% for the form above. If a ROM ever separates them, this
+      # is the arm to add back.
     when defined(gb_px_trace):
       if gb_traced(ppu.ly):
-        let off = (if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow: 0 else: 1)
         echo "FDATA ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
              " fx=", ppu.fetcher_x,
-             " plane=", off, " num=", toHex(ppu.tile_num, 2),
+             " plane=", (if low_plane: 0 else: 1), " num=", toHex(ppu.tile_num, 2),
              " row=", tile_row,
-             " addr=", toHex(0x8000 + tile_ptr + tile_row * 2 + off, 4),
-             " byte=", toHex(ppu.vram[bank_num][tile_ptr + tile_row * 2 + off], 2),
+             " addr=", toHex(0x8000 + off, 4),
+             " byte=", toHex(data, 2),
+             " glitch=", glitch,
              " lcdc=", toHex(ppu.lcd_control, 2)
-    if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow:
-      ppu.tile_data_low = ppu.vram[bank_num][tile_ptr + tile_row * 2]
+    if low_plane:
+      ppu.tile_data_low = data
       inc ppu.fetch_counter
       when M3_THROWAWAY_DOTS == 4:
         # The discarded head fetch is `B0` and ends here -- four dots, and the
@@ -574,7 +627,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           ppu.fetch_counter = 0
           fifo_head_window(ppu)
     else:
-      ppu.tile_data_high = ppu.vram[bank_num][tile_ptr + tile_row * 2 + 1]
+      ppu.tile_data_high = data
       inc ppu.fetch_counter
       when M3_THROWAWAY_DOTS == 4:
         # The push landed on the dot the tile data arrived, so step 4 has
@@ -963,6 +1016,14 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     b_lo = sprite_tile_bytes(s, ppu.ly, obj_height_at(ppu, hi_dot - OBJ_PLANE_GAP)).lo
     b_hi = sprite_tile_bytes(s, ppu.ly, h_hi).hi
   let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
+  when CGB_TDSEL_GLITCH:
+    # An object fetch always addresses the $8000 region, and its LAST read is
+    # bitplane 1 -- which is why a SET-glitched background read that follows one
+    # reports the object's plane 1 whichever plane it is itself on. See
+    # CGB_TDSEL_GLITCH in gb.nim for the band-3 / band-5 pair that says so.
+    if ppu.cgb:
+      ppu.tdsel_addr = int32(b_hi)
+      ppu.tdsel_bank = int32(bank)
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
       echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,

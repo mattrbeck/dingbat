@@ -723,7 +723,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
-| `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`) |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`). Its CGB twin is a different row and moved 830 → 474 on 2026-08-10 (`CGB_TDSEL_LATENCY` + `CGB_TDSEL_GLITCH`) |
 | `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
 | `m3_scy_change` | 417 | 417 | **0 as of 2026-08-09** — 83 for free with `OBJ_BG_RUN`, 29 with `LY0_PIPE_MCYCLES`, and the last 29 were the length of the discarded fetch at the head of mode 3 (`M3_THROWAWAY_DOTS`) |
 | `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling — **8 as of 2026-08-09** |
@@ -789,7 +789,8 @@ picture is drawn by the tile-attribute palettes; on line 68 every tile's
 bitplane bytes are `lo = $7F, hi = $5D`. The two wrong pixels are one tile on
 each of lines 68 and 69 whose bitplane-1 byte hardware read as **the tile
 index** — `$55` where the tile number is `$55`, and `$49` where it is `$49`.
-Two byte-exact coincidences.
+Two byte-exact coincidences, and both bytes are pinned to all eight bits by the
+eight pixels of the tile, not inferred from the one that differs.
 
 That is the CGB `TILE_SEL` glitch the mealybug PPU notes describe verbatim:
 "resetting `TILE_SEL` on the same T-cycle as a bitplane data read will cause
@@ -799,31 +800,43 @@ other branch is measurably refuted here — the alternatives it lists for a
 `$22` on those lines, traced) and "from the most recently drawn tile when
 `TILE_SEL` was last reset" (`$5D`), and neither is `$55`/`$49`.
 
-Two things stop it being landed:
+Two things stopped it being landed, and **the second ROM the note asked for was
+found on 2026-08-10.** It settles the timing and the *reset* rule outright and
+leaves the two pixels themselves unexplained. See `CGB_TDSEL_LATENCY` and
+`CGB_TDSEL_GLITCH` in `gb/gb.nim` for the full decode; the short version:
 
-* **The polarity is inverted against the notes.** The fetch that glitches has
-  its bitplane-1 read at dot 178 and the nearest LCDC write is `$E3 → $F3` at
-  177 — a `TILE_SEL` **set**. The two resets on that line (177's neighbours at
-  169 and 185) each sit one dot before a bitplane-1 read too and do NOT
-  substitute: at those fetches the tile numbers are `$59` and `$07` against a
-  byte of `$5D`, so a substitution there would be visible and the reference
-  does not have it.
-* **The coincidence needs one more dot.** dingbat's write is live from the dot
-  it is logged on (`m3_lcdc_obj_en_change` pins that), so 177 and 178 are
-  adjacent, not the same T-cycle. Making them coincide needs `TILE_SEL` to
-  reach the FETCHER a dot after the write, which is a second claim and a
-  second constant (`CGB_LCDC_TDSEL_LATENCY`, which ships at 0).
+* **The coincidence really does need one more dot, and the dot is measured.**
+  `m3_lcdc_tile_sel_change2`'s CGB reference reads out the bytes hardware used
+  for every tile of the frame, and its eight bands step the LCDC write by
+  exactly one dot each through the fetch cycle. Hardware glitches the bands
+  where dingbat's write is one dot *earlier* than a bitplane read, in both
+  directions — so LCDC.4 reaches the fetcher one dot late on CGB. Its DMG twin
+  is 23040/23040 with the same eighteen-band ruler, so the dot is a CGB delta
+  and not a phase error being absorbed. It is `CGB_TDSEL_LATENCY`, and it also
+  spends itself inside a double-speed M-cycle: gambatte's `bgtiledata` gains 8
+  `[cgb]` rows at 1 dot and loses 4 `_ds_` ones unless the value is scaled.
+* **The polarity is still inverted against the notes, and now against a second
+  ROM as well.** The same reference names, unambiguously, what each direction
+  substitutes: a **reset** on the read dot gives the tile index, and a **set**
+  gives the byte at the last `$8000`-region address (the object's bitplane 1
+  first, then the last reset-glitched tile's). Both rules are landed and both
+  `*_change2` rows are pixel-exact under them. `cgb-acid-hell`'s glitched read
+  is a **set** — `$E3 → $F3` at dot 177, live at 178, which is the bitplane-1
+  read of the tile at `x = 76..83` — and the set rule delivers `$5D` there, the
+  unglitched byte, because every tile-data byte on that line is `$5D`. Hardware
+  delivers `$55`. **The only thing in the machine that holds `$55` on that dot
+  is the tile-map read**, so the two pixels demand the index at a set, which
+  every set cell of `change2` refuses.
 
-The rest of the frame cannot separate the candidate rules: 2731 of 2736 pushed
-tiles match, and substituting the index at *every* `TILE_SEL` change that lands
-on a bitplane read is never refuted anywhere in the frame — the palettes hide
-it. So it is one field and one compare to implement and **two pixels of
-evidence to choose between three rules**, which is precisely the shape that
-should not be fitted. What would settle it is a second ROM: the four
-`m3_lcdc_tile_sel_change*` mealybug rows scored against their CGB references
-(they are not in the shootout, and `m3_lcdc_tile_sel_change` is 96.3% on CGB
-today), which exercise the same glitch at a write cadence the picture does not
-hide.
+That is where it stands: the timing and the reset rule are landed off a
+23040-pixel readout, and the two pixels are a documented non-landing. The frame
+cannot arbitrate on its own — 2731 of 2736 pushed tiles match, and BG palette 1
+in this ROM is four shades of white, so **the only observable tile per line is
+the single `attr = 00` one**, and on both lines 68 and 69 that tile is a *set*.
+Every reset-glitched tile on those lines is invisible. What is left to try is a
+CGB revision question (the notes split the reset branch by revision already, and
+`cgb-acid-hell` ships one reference with no revision named) or a fourth
+substitution source nobody has written down.
 
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at

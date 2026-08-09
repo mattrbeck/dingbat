@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 12:39:16*
+*Generated: 2026-08-09 13:21:56*
 
 ## Game Boy - Blargg
 
@@ -247,11 +247,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_lcdc_obj_size_change_scx | 👌 |
 | mealybug-cgb/m3_lcdc_obj_size_change_scx | 👌 |
 | mealybug/m3_lcdc_tile_sel_change | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_change | 👀 97.6% correct (22476/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_tile_sel_change2 | 👀 97.1% correct (22376/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_tile_sel_change | 👀 99.5% correct (22924/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_tile_sel_change2 | 👌 |
 | mealybug/m3_lcdc_tile_sel_win_change | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change | 👀 96.4% correct (22210/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👀 97.1% correct (22381/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_tile_sel_win_change | 👀 97.9% correct (22566/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👌 |
 | mealybug/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug-cgb/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 98.7% correct (22744/23040 pixels match) |
@@ -809,7 +809,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/ly/ly-dmgC-cgbBC | 👀 |
 | age/m3-bg-bgp/m3-bg-bgp-dmgC | 👀 100.0% correct (23038/23040 pixels match) |
 | age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | 👀 98.9% correct (22784/23040 pixels match) |
+| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-dmgC | 👌 |
 | age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
 | age/m3-bg-scx/m3-bg-scx-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
@@ -1012,7 +1012,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | Test | Result |
 |------|--------|
 | gambatte/bgen | 👌 2/2 passed |
-| gambatte/bgtiledata | 👀 26/34 passed |
+| gambatte/bgtiledata | 👌 34/34 passed |
 | gambatte/bgtilemap | 👀 28/40 passed |
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 10/14 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 731
-- **Fail:** 250
+- **Pass:** 735
+- **Fail:** 246
