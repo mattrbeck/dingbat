@@ -297,6 +297,17 @@ const CGB_SCY_LATENCY*        {.intdefine.} = 2
 const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
 const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
+const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
+  ## Dots LCDC.2 takes to reach the OBJECT FETCH on CGB over the DMG -- the same
+  ## shape as CGB_MIXER_LATENCY next door, for the one bit of LCDC an object
+  ## fetch reads rather than the mixer. It is separate from CGB_LCDC_LATENCY
+  ## because that one moves the whole register for every reader, and every
+  ## nonzero setting of it costs gambatte rows (the table above).
+  ##
+  ## Derived and swept at OBJ_PLANE1_LAG in fifo_ppu.nim: the two
+  ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
+  ## references on which bands come out mixed, and the disagreement is a clean
+  ## three dots in the same direction on all six bands that separate them.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
@@ -355,6 +366,128 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const WIN_TAIL_FETCH*         {.intdefine.} = 1
+  ## Whether a window START holds mode 3 open for the fetch it restarts, when
+  ## the start lands inside the last pixels of the line. 1 ships; 0 is the
+  ## control build and restores the pre-2026-08-09 behaviour, where the restart
+  ## was absorbed by the pipeline's tail burst and cost nothing.
+  ##
+  ## That was an accident of `fetcher_retired`'s shape rather than a rule: the
+  ## term that keeps mode 3 open for a window which has not started yet is
+  ## written `not fetching_window and ...`, so the instant the window DOES
+  ## start the term goes false and, with nothing else owing, the fetcher
+  ## retires on that same dot -- restart, push and pixel all in one burst.
+  ## Nothing about hardware says a window start is free: it empties the BG FIFO
+  ## and the pixel it starts on cannot be drawn until the refetch pushes.
+  ##
+  ## Bracketed by `window/m2int_wxA5_m3stat` (WX = 165, first window pixel
+  ## x = 158, so the restart lands one pixel inside the tail), which is red on
+  ## BOTH devices without this -- `_1` wants 3 and gets 0, i.e. mode 3 ends too
+  ## early -- and green on both with it. See CGB_WIN_TAIL_LAST for WX = 166,
+  ## which needs this AND the device split before either device's rows are
+  ## right, and `fetch_work_pending` in gb/fifo_ppu.nim for the code.
+const CGB_WIN_TAIL_LAST*      {.intdefine.} = 1
+  ## Whether a window restart issued on the LINE'S LAST PIXEL holds mode 3
+  ## open, which only the CGB does. 1 ships; 0 is the control build, where
+  ## neither device waits for it and the two are identical again.
+  ##
+  ## Narrows WIN_TAIL_FETCH, and requires it. In one sentence: **the DMG's
+  ## mode 3 ends with the last PIXEL and the CGB's with the last FETCH.**
+  ## Everywhere else on a line the two coincide, because the fetcher runs ahead
+  ## of the shifter and any restart it is handed has pixels after it to fill;
+  ## the one place they can come apart is a restart whose own first pixel is
+  ## x = 159, and only WX = 166 puts one there. That is exactly where gambatte
+  ## splits the two devices.
+  ##
+  ## ---- What differs is the mode 3 END, and it is bracketed to 5..7 dots ----
+  ##
+  ## Every `window/m2int_wx*_m3stat` family in gambatte has IDENTICAL DMG and
+  ## CGB expectations -- wx00, wx03, wx07, wxA5, wx17_wxA5, with and without
+  ## SCX -- except at WX = 166, where all of them differ and the CGB is always
+  ## the longer one. Each family is a ladder of ROMs `_1.._n` that read STAT
+  ## one CPU M-cycle apart, so "the last `_n` that still reads mode 3" brackets
+  ## the end of mode 3 to within 4 dots, and the DMG-CGB DIFFERENCE to within
+  ## a window of 8 dots centred on 4 * (n_cgb - n_dmg):
+  ##
+  ##   family (all `window/m2int_wxA6_`)  last _n reading 3   difference
+  ##                                        DMG      CGB      is inside
+  ##   m3stat                                1        2       ( 0,  8)
+  ##   scx2_m3stat                           1        3       ( 4, 12)
+  ##   scx3_m3stat                           1        3       ( 4, 12)
+  ##   scx5_m3stat                           1        2       ( 0,  8)
+  ##
+  ## (SCX moves the end of mode 3 by SCX & 7 dots, which slides the boundary
+  ## across the M-cycle grid the ROMs sample on; that is why two of these
+  ## families see one step and two see two, and it is what makes the four of
+  ## them a two-sided bracket rather than four copies of one measurement.)
+  ##
+  ## The four intersect at **5..7 dots**, and a BG fetch is six -- Pan Docs'
+  ## "6 dots from the fetch restart", and this fetcher's counter 0 -> push.
+  ## `-d:gb_m3_len` on the wxA6 line reads 174 dots when the restart is issued
+  ## and not waited for and 180 when it is waited for, against 172 for a plain
+  ## line, so DMG = 174 / CGB = 180 is the only assignment the bracket allows
+  ## and the split needs no constant of its own: it is one fetch, waited for on
+  ## one device. `wxA6_oambusyread` and `wxA6_vrambusyread` carry the same
+  ## split from the bus side (CGB `_2` reads 0 where DMG reads 5), so it is the
+  ## END of mode 3 that moves and not the STAT read model.
+  ##
+  ## ---- What this is NOT, measured -----------------------------------------
+  ##
+  ## The tempting unification is that the DMG's window comparator runs one
+  ## slot lower than the emitted-pixel index -- which is already forced at the
+  ## LEFT end of the line, where a DMG starts a window at WX = 6, screen
+  ## x = -1, and no reference says the CGB does (WIN_START_PRE_PIXEL). One
+  ## offset would also stop the DMG one slot short of the LAST pixel, i.e.
+  ## draw no window at all at WX = 166.
+  ##
+  ## **Refused, built and scored 2026-08-09.** It gives the DMG 172 dots where
+  ## the bracket wants 174, and takes `window/m2int_wxA6_m3stat_1`,
+  ## `_firstline_m3stat_1`, `_oambusyread_1` and `_vrambusyread_1` red on DMG.
+  ## The DMG does reach the slot and does restart the fetch there -- those two
+  ## dots are that slot. What it does not do is wait for the fetch. So the two
+  ## ends of the line are two mechanisms and WIN_START_PRE_PIXEL stays
+  ## device-independent.
+  ##
+  ## ---- An object on the same pixel is the SAME fetch slot, not a second ----
+  ##
+  ## The one place a fetch can already be in flight when the restart is issued
+  ## is an object whose trigger pixel is also x = 159, i.e. WX = 166 with an
+  ## object at X = 167. There the CGB's extra six is NOT charged again, which
+  ## is what `obj_last_px` carries into fetch_work_pending: both devices come
+  ## out at 180 dots, the plain 174 plus the object's own six.
+  ##
+  ## Four mode-0 INTERRUPT rows bracket that, and they are the ones to trust
+  ## here because they read the flag's own dot rather than a STAT read three
+  ## dots behind it (STAT_READ_LAG): `window/m2int_wxA6_spxA7_m0irq_1/_2` on
+  ## both devices, and `m0enable/enable_wxA6_2x_spxA7_ds_1.._3` on the CGB in
+  ## double speed, which sample it every two dots. All four want mode 0 open by
+  ## the 180 mark on the CGB; charging the restart on top (186) takes all four
+  ## red, and so does deferring the object behind the restart (190).
+  ##
+  ## The two rows that ask for a longer CGB here -- `_spxA7_m3stat_2` and `_4`,
+  ## `dmg08_out0_cgb04c_out3` -- cannot arbitrate it, and that is measurable
+  ## rather than a preference: swept over a tail hold of 0..16 dots, `_4` is
+  ## red at EVERY length on the CGB, including the 190 at which it is green
+  ## when the object is deferred instead. A row whose verdict is not monotone
+  ## in the quantity is not measuring that quantity. `_2` is left red, as it is
+  ## on main.
+  ##
+  ## ---- The one row this costs, and why it is not fitted away --------------
+  ##
+  ## `window/m2int_wxA6_scx5_m3stat_3` goes red on the CGB (it is green on
+  ## main), and its own family's double-speed sibling
+  ## `window/m2int_wxA6_scx5_m3stat_ds_1` goes green with it. The two are one
+  ## dot apart and cannot both be satisfied: same device, same WX, same SCX,
+  ## same measured mode 3 (185 dots) -- only the sampling grid differs, 4 dots
+  ## single speed against 2 in double. Swept, `_3` needs the CGB's extra to be
+  ## at most 5 dots and `_ds_1` needs at least 6.
+  ##
+  ## **Six ships, because six is a fetch.** Five is available -- it scores the
+  ## same net, trading `_ds_1` back for `_3` -- and is refused as a fit: no
+  ## mechanism makes a BG fetch five dots long, and the SCX = 0, 2 and 3
+  ## families are two-sided at six with nothing to say against it. The
+  ## disagreement is one dot on ONE double-speed row and belongs to whatever
+  ## puts the double-speed sampling grid a dot off, not to this constant.
 const OBJ_BG_RUN*             {.intdefine.} = 4
   ## Which dots of an object penalty the BG fetcher is allowed to run on:
   ## 0 = none, 1 = the wait dots only, 2 = all of them, 3 = the wait dots but
@@ -364,6 +497,13 @@ const OBJ_BG_RUN*             {.intdefine.} = 4
   ## the eighteen-band measurement behind it and the sweep that cannot separate
   ## 0..3 are at tick_sprite_fetcher in fifo_ppu.nim; this exists so that sweep
   ## is a command line rather than an edit to the dot loop.
+const M3_THROWAWAY_DOTS*      {.intdefine.} = 4
+  ## Dots the DISCARDED fetch at the head of mode 3 lasts: 4 (`B0`, shipping) or
+  ## 6 (`B01`, the control build and what this tree did until 2026-08-09). The
+  ## head budget is 12 dots either way -- see the derivation at
+  ## `M3_THROWAWAY_DOTS` in gb/fifo_ppu.nim -- so this constant does not change
+  ## mode 3's length; it only says where inside those 12 dots the first real
+  ## tile's three VRAM reads fall.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
@@ -421,6 +561,68 @@ const MIXER_TAIL_HBLANK*      {.intdefine.} = 1
   ## in the line where dingbat's shifter is not one pixel per dot. See
   ## fifo_recompose_last in fifo_ppu.nim for the derivation off m3_bgp_change's
   ## seventh write.
+const NO_LCDC2_FLIP*          = int32.low
+  ## `GbPpu.lcdc2_flip` entry meaning "LCDC.2 has not changed since this mode 3
+  ## began". A dot in the far PAST, so `flip > dot` is false for every dot an
+  ## object fetch can ask about -- including one in the future, which is how the
+  ## merge asks for a read that has not happened yet -- and the empty history
+  ## costs no branch of its own.
+const OBJ_FIX_OFF*            = int32.high
+  ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
+  ## LCDC.2 write". Same shape as above: the window test is one compare either
+  ## way.
+const MIXER_TAIL_DOTS*        {.intdefine.} = 1
+  ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
+  ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
+  ## from `lx`).
+  ##
+  ## The two agree everywhere the shifter runs one pixel per dot, which is all
+  ## of a line except an object fetch and the tail burst. Where they differ,
+  ## mealybug says dots. `m3_bgp_change_sprites` is the ruler: its object stalls
+  ## the shifter at the head of each band and its handler writes BGP on a fixed
+  ## dot, so each band asks "how far back does a write reach while the shifter
+  ## is stopped". The DMG reference answers ZERO pixels back for a stall older
+  ## than the tail (bands 8..12, the edge sits exactly on the stalled `lx`), ONE
+  ## for a stall one dot old (band 13) and the full two for an unstalled shifter
+  ## (bands 14..17) -- i.e. the write reaches a pixel iff that pixel LEFT THE
+  ## FIFO within MIXER_PALETTE_BACK dots, stall or no stall. A pixel-clocked
+  ## tail holds the last two pixels for the whole of a 6..11 dot object fetch
+  ## and repaints them; that was 104 of that row's wrong pixels and 59 of
+  ## `m3_lcdc_bg_en_change`'s, on the same three bands' worth of arithmetic.
+  ##
+  ## Implementation: GbFifoPpu.tail_dot0 is the dot pixel 0 of the current
+  ## unbroken run of emissions would have left on, so the shifter's position on
+  ## any later dot reads back as `cycle_counter - tail_dot0` whether or not `lx`
+  ## has moved since. It subsumes the tail-burst latch MIXER_TAIL_HBLANK needed.
+const MIXER_HEAD_LINGER*      {.intdefine.} = 1
+  ## Whether the line's FIRST pixel holds the SHALLOW stages of the mixer tail
+  ## open until the deepest one is read (1, shipping; 0 is the pre-2026-08-10
+  ## behaviour, where every pixel of the line was the same depth).
+  ##
+  ## Pixel 0 alone, and only for a register read at a stage shallower than the
+  ## palettes': LCDC's priority bits reach it for MIXER_PALETTE_BACK dots after
+  ## it leaves the FIFO rather than MIXER_PRIORITY_BACK.
+  ##
+  ## mealybug `m3_lcdc_bg_en_change` is the whole of the measurement, and it is
+  ## a ±1 step and not a fit. Its object's OAM X advances one per 8-line band,
+  ## which moves the dot pixel 0 leaves the FIFO on -- dots 105, 104, 103, 102,
+  ## 101, 100 for bands 0..5 by `-d:gb_px_trace` -- while the handler's LCDC
+  ## write stays on dot 105 for every band. The DMG reference blanks x = 0 in
+  ## bands 0, 1 and 2 and leaves it alone in bands 3..7, i.e. pixel 0 is still
+  ## reachable exactly TWO dots after it leaves, where MIXER_PRIORITY_BACK is
+  ## one and every other pixel of the same bands obeys it.
+  ##
+  ## The palettes are NOT extended, and the same suite says so: `m3_bgp_change`
+  ## writes BGP on dot 97 with pixel 0 leaving on dot 94, and its reference puts
+  ## the `old or new` pixel at x = 1 -- a two-dot reach for pixel 0, the same as
+  ## for every other pixel. So this is not "pixel 0 lingers a dot"; it is the
+  ## two stages COINCIDING for the line's first pixel, which is why it is
+  ## written as `back < head` and not as a lag.
+  ##
+  ## Note the DMG references are the only oracle here. gambatte's
+  ## `dmgpalette_during_m3` family looks like a second one and is not: its PNGs
+  ## carry no `old or new` pixel at all (MIXER_PALETTE_OR's named cost), so
+  ## every disagreement with them in this area is already that one.
 const MIX_HOLD*               = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
@@ -1037,6 +1239,16 @@ type
     # the M-cycle boundary. Never set across an instruction boundary -- mem_write
     # consumes it in the same M-cycle -- so it is not serialized.
     stat_write_pending*: bool
+    # The dots of the last two mid-mode-3 changes of LCDC.2 (the OBJ size bit),
+    # most recent first, or NO_LCDC2_FLIP for "no change since mode 3 began".
+    # An object fetch reads that bit ONCE PER BITPLANE and the two reads are
+    # OBJ_PLANE_GAP dots apart, so the merge -- which happens on one dot -- has
+    # to be able to ask what the bit was a few dots ago; see obj_height_at and
+    # sprite_fetch_merge in fifo_ppu. Two entries is exact for the window it is
+    # asked over: the lookback never exceeds OBJ_FETCH_DOTS dots and a CPU
+    # cannot store to $FF40 more often than every 8 dots (4 in double speed).
+    # Per-line scratch, cleared at every mode 2 -> 3 edge; not serialized.
+    lcdc2_flip*:         array[2, int32]
     first_line*:         bool
     when LCD_ON_TRIM_ANY:
       lcdon_lines*:      uint8   # lines left in the LCD-on trim window
@@ -1117,13 +1329,59 @@ type
     win_lx*:              int32
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
+    # The line's FIRST `B01s` cycle -- the one that follows the discarded fetch
+    # at the head of mode 3 -- is running. It is the one fetch on a line that
+    # may not push early: see M3_THROWAWAY_DOTS in fifo_ppu, where the 12-dot
+    # head budget forces it to run all the way to its push slot. Set when the
+    # discarded fetch is aborted, cleared by that push. Per-line scratch, like
+    # dropped_first_fetch next to it.
+    head_cycle*:          bool
     fetching_window*:     bool
     fetching_sprite*:     bool
+    # The CONSOLE, cached off GB.cgb_enabled when the FIFO PPU is built. The
+    # end of mode 3 is per-device for one window start (CGB_WIN_TAIL_LAST) and
+    # the two procs that decide it -- fetcher_retired and fifo_irq_m0_ready --
+    # are reached from the dot loop with no `gb` in hand; a bool inside the
+    # bool block costs the object nothing. Not serialized: a machine cannot
+    # change model under a running core, so a loaded state re-derives it the
+    # same way GB.cgb_enabled does.
+    cgb*:                 bool
+    # An object was fetched on the LINE'S LAST PIXEL. Per-line scratch, like
+    # dropped_first_fetch: set at the object trigger, cleared at the mode 2 ->
+    # 3 edge. Read only by fetch_work_pending, and only on a CGB, where a
+    # window restart on that pixel and an object's fetch on it are one fetch
+    # slot and not two -- see CGB_WIN_TAIL_LAST.
+    obj_last_px*:         bool
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
     obj_penalty*:         int32
     obj_tile_fx*:         int32
+    # ---- The object fetch's two bitplane reads, as dots ---------------------
+    #
+    # `sprite_fetch_merge` runs on one dot, but the fetch it stands for reads
+    # the two bitplanes OBJ_PLANE_GAP dots apart and reads LCDC.2 separately for
+    # each of them. `obj_hi_dot` is the dot the HIGH plane's read samples that
+    # bit on, latched at the trigger because it depends on which end of the
+    # penalty the fetch sits at (see OBJ_PLANE1_LAG in fifo_ppu). The low
+    # plane's is always OBJ_PLANE_GAP dots before it, and always in the past.
+    #
+    # The high plane's can be in the FUTURE -- up to OBJ_PLANE1_LAG dots after
+    # the merge -- so the merge uses the bit as it stands and the write path
+    # redoes the plane if a later write moves it, exactly as fifo_recompose_last
+    # redoes the mixer's tail. `obj_fix_from` is the first dot such a write can
+    # land on (the merge dot + 1) and is OBJ_FIX_OFF when nothing is in flight;
+    # the rest is the whole of what a redo needs -- the low byte the merge kept,
+    # the height the high plane used, its VRAM bank and the object. No snapshot
+    # of the FIFO goes with them: the merge is undoable from the entries
+    # themselves, see fifo_obj_size_write. All per-line scratch, live for at most
+    # OBJ_PLANE1_LAG dots, and not serialized.
+    obj_hi_dot*:          int32
+    obj_fix_from*:        int32
+    obj_fix_bank*:        int32
+    obj_fix_lo*:          uint8
+    obj_fix_h*:           uint8
+    obj_fix_s*:           GbSprite
     # Idle dots left at the head of mode 3 (the pipeline's lead over the CPU's
     # register view; see M3_PIPE_DELAY in fifo_ppu). A byte, not an int, and
     # for one reason: the mode 3 branch of fifo_tick_slow's dot loop asks
@@ -1163,12 +1421,22 @@ type
     # their own dots, and a write on the first dots of H-Blank still reaches
     # them (MIXER_TAIL_HBLANK).
     mix*:                 array[MIX_HOLD, GbMixHold]
-    # Which dot this line's pixel 0 would have left the shifter on, latched at
-    # the tail burst as `cycle_counter - lx`. Through mode 3 the shifter is one
-    # pixel per dot and `lx` IS the answer; the burst is the one dot where it
-    # is not, and this is what lets the recompose keep counting after it. Only
-    # read while the mode flag is 0 -- see fifo_recompose_last.
+    # Which dot this line's pixel 0 would have left the shifter on, if the
+    # shifter's current unbroken run of one-pixel-per-dot emissions had started
+    # there: `cycle_counter - lx`, written at each of the three places the
+    # shifter STOPS (mixer_note_stop), which is everywhere that quantity can
+    # change. While a stall is in progress it therefore still describes the run
+    # the stall interrupted, and the shifter's position reads back as
+    # `cycle_counter - tail_dot0` -- which keeps counting through an object
+    # fetch and through the tail burst, where `lx` does not.
+    # That is the whole of MIXER_TAIL_DOTS; see fifo_recompose_last.
     tail_dot0*:           int32
+    # The first `lx` of that run, i.e. the `lx` the NEXT run starts at once the
+    # stall clears. Pixels before it left the FIFO at least one dot further back
+    # than `tail_dot0` says, so nothing may reach them -- the stall that broke
+    # the run is 6..11 dots long (an object fetch) and the deepest mixer stage
+    # is two.
+    mix_run*:             int32
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----

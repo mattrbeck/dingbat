@@ -437,13 +437,23 @@ proc fifo_arm_window*(ppu: GbFifoPpu)
 # register the MIXER reads still reaches the pixel already emitted. Forward
 # declaration for the same reason as the line above; the body and the
 # measurement that pins it are at fifo_recompose_last in fifo_ppu.nim.
-proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
+                          skip: int32 = 0) {.noinline.}
 proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
 
-template mixer_write_repaint(gb: GB; back: int32) =
+# An object fetch's HIGH bitplane is read up to OBJ_PLANE1_LAG dots after the
+# dot dingbat merges the object on, so an LCDC.2 write in between still moves
+# it. Forward declaration for the same reason as the two lines above; the
+# derivation, off mealybug m3_lcdc_obj_size_change and its `_scx` sibling, is at
+# sprite_fetch_merge in fifo_ppu.nim.
+proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
+
+template mixer_write_repaint(gb: GB; back: int32; skip: int32 = 0'i32) =
   ## Every register write below that the mixer reads ends with this. `back` is
   ## how many stages of the mixer tail the register is read at the far end of
-  ## (see fifo_recompose_last), minus the CGB's own dot of write latency.
+  ## (see fifo_recompose_last), minus the CGB's own dot of write latency, and
+  ## `skip` how many pixels at that far end the caller has already painted
+  ## itself (the `old or new` pixel of a DMG palette write).
   ## `-d:MIXER_DOT_LAG=0` compiles the mixer's dot out entirely -- this call,
   ## the two stores in the shifter and the held pair with it -- which is the
   ## control arm for both the A/B measurements at fifo_recompose_last and the
@@ -451,12 +461,25 @@ template mixer_write_repaint(gb: GB; back: int32) =
   when MIXER_DOT_LAG != 0:
     if gb.fifo_ppu != nil:
       let n = back - (if gb.cgb_enabled: int32(CGB_MIXER_LATENCY) else: 0'i32)
-      if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n)
+      if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n, skip)
 
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
 proc bg_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x08
 proc sprite_height*(ppu: GbPpu): int {.inline.} =
   if (ppu.lcd_control and 0x04) != 0: 16 else: 8
+proc obj_height_at*(ppu: GbPpu; dot: int32): int {.inline.} =
+  ## `sprite_height` as it stood on `dot` rather than now. Each entry of
+  ## `lcdc2_flip` is a dot on which LCDC.2 CHANGED, so undoing every change
+  ## later than `dot` walks the current value back to that dot's. A dot in the
+  ## future asks nothing (no flip is later than it yet) and correctly answers
+  ## with the value as it stands -- which is what the merge needs when the high
+  ## plane's read has not happened yet; see fifo_obj_size_write for the other
+  ## half of that case.
+  var b = ppu.lcd_control and 0x04'u8
+  if ppu.lcdc2_flip[0] > dot:
+    b = b xor 0x04'u8
+    if ppu.lcdc2_flip[1] > dot: b = b xor 0x04'u8
+  if b != 0: 16 else: 8
 proc sprite_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x02) != 0
 proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 
@@ -1220,8 +1243,21 @@ proc ppu_store_lcdc_tdsel*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.lcd_control = (ppu.lcd_control and not 0x10'u8) or (val and 0x10'u8)
 
 proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  # LCDC.2 is the one bit in this register that an OBJECT FETCH reads, and it
+  # reads it twice, once per bitplane. Both halves of that live here: the dot of
+  # the change goes into the history obj_height_at walks back over, and any
+  # object fetch whose high plane has not been read yet is redone against the
+  # new value. Cold -- a mid-mode-3 write that moves LCDC.2 at all is rare, and
+  # one landing inside a live fetch's two dots rarer still.
+  let flip2 = ((ppu.lcd_control xor val) and 0x04'u8) != 0
   ppu.lcd_control = val
-  if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+  if gb.fifo_ppu != nil:
+    fifo_arm_window(gb.fifo_ppu)
+    if flip2:
+      ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
+      ppu.lcdc2_flip[0] = ppu.cycle_counter
+      if gb.fifo_ppu.obj_fix_from <= ppu.cycle_counter:
+        fifo_obj_size_write(gb.fifo_ppu, gb)
 
 when CGB_WRITE_LATENCY_ANY:
   proc ppu_apply_pipeline_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -1573,7 +1609,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     of 0xFF47: ppu_update_palette(ppu.bgp,  val)
     of 0xFF48: ppu_update_palette(ppu.obp0, val)
     else:      ppu_update_palette(ppu.obp1, val)
-    mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK) - (if or_pixel: 1'i32 else: 0'i32))
+    mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK),
+                        if or_pixel: 1'i32 else: 0'i32)
 
   of 0xFF4A:
     when defined(gb_win_trace):

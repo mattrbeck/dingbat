@@ -819,6 +819,14 @@ cycle's two idle dots at the HEAD, where Pan Docs' fetcher has them at the tail
 dots late. The 172-dot line is the check: 6 dots of throw-away fetch plus 6 of
 the real one plus 160 pixels only adds up if the first push is immediate.
 
+(Amended 2026-08-09: the 12-dot head is right and the immediate push was the
+right conclusion **for a six-dot throw-away**, but the split is 4 + 8, not
+6 + 6 — the discarded fetch is a `B0` and the first real cycle runs to its own
+push slot. mealybug m3_scy_change reads the split off directly; see
+`M3_THROWAWAY_DOTS` at `tick_bg_fetcher` and `docs/gb-mealybug-sources.md` §3.4.
+Nothing about the phase of the reads from the second tile on changes, which is
+why the paragraph above still holds everywhere it is used.)
+
 Those two dots were cancelling a real two-dot lead of the whole pipeline over
 the CPU's register view, which is why neither error was visible on its own and
 why fixing either alone is worse than main. M3_PIPE_DELAY carries the lead and
