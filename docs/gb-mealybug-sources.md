@@ -160,7 +160,7 @@ which is **the one red DMG row with no hardware photograph**.
 
 Rows are ordered by wrong pixels **before** this pass.
 
-### 3.1 `m3_lcdc_bg_en_change` — 2193 → **67**
+### 3.1 `m3_lcdc_bg_en_change` — 2193 → 67 → 59 → **0**
 
 Source (`m3_lcdc_bg_en_change.asm:21`, handler at `:144`):
 
@@ -194,9 +194,25 @@ carries `MIXER_PRIORITY_BACK` with the rest of LCDC's priority half for free.
 `m3_lcdc_bg_en_change2` 364 → 6.
 
 Residual: one pixel per band at the leading edge of the first run on bands 2 and
-9..17, plus line 0 (§1.2).
+9..17, plus line 0 (§1.2). **Closed 2026-08-09**, and it took both halves of the
+mixer-tail work: 55 of the 59 are `MIXER_TAIL_DOTS` (this ROM's object stalls
+the shifter exactly as `m3_bgp_change_sprites`' does, one stage shallower), and
+the last 4 are `MIXER_HEAD_LINGER`.
 
-### 3.2 `m3_bgp_change` — 820 → 403 → **21**, and `m3_bgp_change_sprites` — 536 → **124**
+Those 4 are the whole derivation of that constant, and this ROM is the only
+oracle for it. The object sweeps its OAM X down the screen, so the dot pixel 0
+leaves the FIFO on moves band by band — **105, 104, 103, 102, 101, 100** for
+bands 0..5 under `-d:gb_px_trace` — while the handler's LCDC write stays on dot
+**105** for every band (`-d:gb_m3_trace`; LY 0 is 101 for both, so it cancels).
+The reference blanks x = 0 in bands 0, 1 and 2 and leaves it alone in bands
+3..7: pixel 0 is reachable **exactly two dots** after it leaves, where
+`MIXER_PRIORITY_BACK` is one and every other pixel of the same bands obeys that
+one. A reach of 1 loses band 2 and a reach of 3 blanks band 3, so it is a ±1
+step and not a fit. What it says is not "pixel 0 lingers a dot" — `m3_bgp_change`
+refuses that, see §3.2 — but that the shallow stages COINCIDE with the deepest
+one for the line's first pixel. `-d:MIXER_HEAD_LINGER=0` is the control build.
+
+### 3.2 `m3_bgp_change` — 820 → 403 → 21 → 1 → **0**, and `m3_bgp_change_sprites` — 536 → 124 → 104 → **0**
 
 `m3_bgp_change` is the cleanest instrument in the suite and nobody had read it
 as one. It calls neither `reset_tile_maps` nor any VRAM fill, so **VRAM is all
@@ -295,6 +311,26 @@ flipping either way (3658/5005 before and after).
 
 `m3_bgp_change_sprites`'s remaining 124 are per-band left-edge pixels
 (x = 0..9), a different mechanism, and they do not move.
+
+**Both closed 2026-08-09 by `MIXER_TAIL_DOTS`.** That left-edge mechanism is the
+tail being clocked in DOTS rather than in emitted pixels, and this ROM's
+`_sprites` variant is what measures it: the object stalls the shifter at the
+head of each band while the handler's BGP write stays on a fixed dot, so the
+eighteen bands sweep the stall's age. The reference answers **zero** pixels back
+for a stall older than the tail (bands 8..12, the edge sitting exactly on the
+stalled `lx`), **one** at a stall one dot old (band 13) and the full **two** for
+a shifter still running (bands 14..17) — i.e. a write reaches a pixel iff that
+pixel left the FIFO within `MIXER_PALETTE_BACK` DOTS, stall or no stall, where a
+pixel-clocked tail freezes its last two pixels for the whole 6..11 dot fetch.
+104 → 0.
+
+The same accounting closes `m3_bgp_change`'s last pixel, the LY-0 one at
+x = 158 that §1.2's `line_0_fix` was blamed for: with the position read back as
+`cycle_counter − tail_dot0` on any dot rather than latched once at the burst, it
+keeps counting through the four dots `LY0_PIPE_MCYCLES` holds the mode 3 flag
+after that line's early retire. 1 → 0. Derivation at `MIXER_TAIL_DOTS` in
+`gb/gb.nim` and above `fifo_recompose_span`; `-d:MIXER_TAIL_DOTS=0` is the
+control build.
 
 This closes the open item in `docs/gb-failure-triage.md` that said
 `m3_bgp_change` "is not a reliable vote on `MIXER_PALETTE_BACK` until that
@@ -443,7 +479,7 @@ CGB subpixels, `m3_scy_change2` (CGB) stays 0, gambatte `scy` 61/67 → **67/67*
 and `scx_during_m3` 43 → 49, with no row anywhere going the other way and mode
 3's length identical over 2,000,000 traced scanlines.
 
-### 3.5 `m3_window_timing` — 29, and `m3_window_timing_wx_0` — 4
+### 3.5 `m3_window_timing` — 29 → 33 → **21**, and `m3_window_timing_wx_0` — **0**
 
 `m3_window_timing.asm:21` is the most quantitative header in the suite:
 
@@ -469,13 +505,24 @@ which is the reference, row for row, including the six-wide stair. The rule
 extends to WX < 7 (window on from the first pixel) as black-x = 3 as well, and
 that is what the reference reads there too. **See §5 for what this settles.**
 
+The residual went 33 → **21** on 2026-08-09 with `MIXER_TAIL_DOTS`, and what is
+left is one shape: a triangular staircase at x = 3..8 on lines 0..6, i.e. band 0
+only, plus nothing else in the frame. The 12 it closed are the band-1 and
+band-2 pixels at x = 3..8 on lines 11..17, where the window restart empties the
+BG FIFO and the palette write lands while the tail is draining under it — the
+same rule the `_sprites` rows measure, seen through a restart instead of an
+object. Line 17's single pixel at x = 9 is what pins the guard in
+`mixer_tail_front` that recognises that stall (`fifo.size == 0 and
+lx == mix_run`); with it frozen instead of draining, that pixel is wrong and
+nothing else in the suite changes.
+
 `m3_window_timing_wx_0.asm:21` adds the one term the other ROM cannot see:
 
 > "The stair pattern is visible due to the delay from the lowest 3 bits of SCX,
 > and due to **window activating one T-cycle later when WX = 0 and SCX > 0**."
 
 **dingbat agrees** — both halves are in `fifo_sample_smooth_scroll`, quoted
-there, and the row is 4 pixels from exact. Recorded here as a **confirmation**:
+there, and the row is exact. Recorded here as a **confirmation**:
 the `+= 1` / `-= 1` pair around `ppu.wx == 0` in that proc is the second clause
 of that sentence and had the wrong sign until 2026-08-07. Do not "simplify" it.
 
@@ -562,7 +609,7 @@ x = LY + 1 — that is, exactly the header's stated exception ("except when the
 window begins off the left edge"), on the five lines where `WX < 7`. It belongs
 with §5, not with §3.8, and it is the row `WIN_HEAD_ABSORB` moves most (+32).
 
-### 3.10 `m3_lcdc_obj_en_change` — 2, `m3_obp0_change` — 0
+### 3.10 `m3_lcdc_obj_en_change` — 2 → **0**, `m3_obp0_change` — 0
 
 > `; 28 cycles`
 > `; delay an extra 4 cycles when LY > 64`
@@ -574,6 +621,13 @@ the answer from both sides. These two rows are what pinned `MIXER_PRIORITY_BACK`
 Recorded as a confirmation: the two-stage mixer tail is measured, not assumed,
 and `m3_obp0_change`'s 100% is a *tight* constraint — it is 32 pixels out at one
 stage and 126 out on CGB at two.
+
+`m3_lcdc_obj_en_change`'s last 2 went **2 → 0** on 2026-08-09, and they are the
+independent confirmation of `MIXER_HEAD_LINGER` (§3.1) — the constant was
+derived off `m3_lcdc_bg_en_change` and these two fell out of it. The triage
+write-up had them as "what the mixer holds at the first dot after an object
+fetch" and could fit no uniform number of stages to them; they are OAM X = 2's
+object column 6, which is screen pixel 0, and the same one dot answers them.
 
 ### 3.11 The rest, briefly
 

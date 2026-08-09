@@ -1397,6 +1397,124 @@ surface:
   `dropped_first_fetch`; what pays for them is the two dots of throw-away fetch
   that no longer run.
 
+## 2026-08-09: the mixer tail is clocked in DOTS, and pixel 0 holds it open
+
+Three rows left in the mixer/palette family — `m3_bgp_change` (1 px),
+`m3_bgp_change_sprites` (104) and `m3_lcdc_bg_en_change` (59) — and they are two
+mechanisms, one per constant. Both are ±1-step measurements off the DMG
+references, and each is confirmed by a row it was not derived from.
+
+### `MIXER_TAIL_DOTS`: an object fetch DRAINS the tail, it does not freeze it
+
+Everything above counted the tail's reach back from `lx`, which is right for as
+long as the shifter takes one pixel per dot — every dot of a line except an
+object fetch and the tail burst. The two `_sprites` rows are the ones that stop
+the shifter under a mid-mode-3 write, and they say **dots**: a write reaches a
+pixel iff that pixel left the FIFO within `back` DOTS of it, stall or no stall.
+
+`m3_bgp_change_sprites` is eighteen measurements of exactly that — its object's
+OAM X advances one per band while the handler's BGP write stays on a fixed dot,
+so each band asks the question at a different stall age. The DMG reference
+answers **zero** pixels back for a stall older than the tail (bands 8..12, where
+the edge sits exactly on the stalled `lx`), **one** for a stall one dot old
+(band 13) and the full **two** for a shifter still running (bands 14..17). A
+pixel-clocked tail holds the last two pixels through the whole 6..11 dot fetch
+and repaints them: that is all 104 of this row's wrong pixels, 55 of
+`m3_lcdc_bg_en_change`'s 59 one stage shallower, and — because it subsumes the
+burst latch — `m3_bgp_change`'s single LY-0 pixel at x = 158, where
+`LY0_PIPE_MCYCLES` holds the mode 3 flag for four dots after the burst and the
+position has to keep counting through them.
+
+### `MIXER_HEAD_LINGER`: the line's first pixel keeps the shallow stages live
+
+`m3_lcdc_bg_en_change`'s last 4. Its object sweeps its OAM X down the screen, so
+the dot pixel 0 leaves the FIFO on moves band by band — **105, 104, 103, 102,
+101, 100** for bands 0..5, `-d:gb_px_trace` — while the handler's LCDC write
+stays on dot **105** for every one of them (`-d:gb_m3_trace`; LY 0 is 101 for
+both, so it cancels). The reference blanks x = 0 in bands 0, 1 and 2 and leaves
+it alone in bands 3..7, i.e. pixel 0 is reachable **exactly two dots** after it
+leaves, where `MIXER_PRIORITY_BACK` is one and every other pixel of the very
+same bands obeys that one. Both neighbours are refused: a reach of 1 loses band
+2, a reach of 3 blanks band 3.
+
+The palettes are **not** extended, and the same suite says so — `m3_bgp_change`
+writes BGP on dot 97 (traced: 81, 97, 109, 169, 181, 241, 253) with pixel 0
+leaving on dot 94, and its reference puts the `old or new` pixel at x = **1**,
+not at x = 0: the same `MIXER_PALETTE_BACK` two stages that govern every other
+pixel of that line, with no extension for the first. So the rule is
+not "pixel 0 lingers a dot", it is the two stages **coinciding** for the line's
+first pixel: a register read at a stage shallower than the deepest one reaches
+pixel 0 for as long as the deepest one does. `m3_lcdc_obj_en_change`'s last 2
+pixels are the independent confirmation — the write-up above had them as "what
+the mixer holds at the first dot after an object fetch" and could fit no uniform
+number of stages to them; they are OAM X = 2's object column 6, i.e. screen
+pixel 0, and the same one dot answers them.
+
+### Wrong pixels of 23040, one build per constant
+
+| row | main | `TAIL_DOTS` only | `HEAD_LINGER` only | both |
+|---|---|---|---|---|
+| `m3_bgp_change` | 1 | **0** | 1 | **0** |
+| `m3_bgp_change_sprites` | 104 | **0** | 104 | **0** |
+| `m3_lcdc_bg_en_change` | 59 | 4 | 59 | **0** |
+| `m3_lcdc_obj_en_change` | 2 | 2 | **0** | **0** |
+| `m3_lcdc_obj_en_change_variant` | 98 | 98 | 96 | 96 |
+| `m3_window_timing` | 33 | 21 | 33 | 21 |
+
+CGB (DMG-compat, subpixels of 69120): `m3_bgp_change` 3 → 0,
+`m3_bgp_change_sprites` 216 → 0, `m3_window_timing` 81 → 63. The runner goes
+**725 → 731** (main measured, not the checked-in file, which was a revision
+stale at 721); gambatte stays 3809/5005 row for row with
+`dmgpalette_during_m3_3` and `lycint_dmgpalette_during_m3_1` each one pixel
+better — that family's PNGs carry no `old or new` pixel at all, so it is not a
+second oracle here, and the remaining disagreement is `MIXER_PALETTE_OR`'s
+already-named cost. Nothing else in the tree moves in either direction, and
+`-d:MIXER_TAIL_DOTS=0 -d:MIXER_HEAD_LINGER=0` reproduces main pixel for pixel.
+
+### What it may NOT cost: the dot loop
+
+`tail_dot0` has to answer "where is the shifter now" on a register write, and
+the obvious way to keep it is to note `cycle_counter - lx` on every emitted
+pixel. That is **+5.02% of retired instructions** (Pokemon Crystal, min of four
+runs a side) — the inline cliff, not the arithmetic. It is not payable, and it
+is not necessary: `cycle_counter - lx` cannot change while the shifter takes one
+pixel per dot, so it is written only where the shifter STOPS — the object
+trigger, a BG FIFO reset, and the tail burst — all of which are already cold
+branches. See the block above `fifo_recompose_span`.
+
+The one thing that costs is the test that replaces it. Two of the three stalls
+are a flag and a bound; a mid-line window restart has no state of its own, and
+an empty BG FIFO alone will not do (the FIFO also empties for a dot at an
+ordinary tile boundary). `fifo.size == 0 and lx == mix_run` separates them, and
+`m3_window_timing` line 17 is the one pixel that measures it.
+
+Perf, `tools/gbppu/counters.sh`, minimum of five runs a side, `cycles=` identical
+in every pair, idle machine: **+0.20%** retired instructions on Pokemon Crystal
+and **+0.25%** on Link's Awakening against main — and **all of it is code
+layout, none of it the mechanism**. The control says so directly: the same
+branch built `-d:MIXER_TAIL_DOTS=0 -d:MIXER_HEAD_LINGER=0` measures **+0.195%**
+and **+0.250%** against the same main, i.e. the two mechanisms together are
+within 0.005% of free and what is being measured is where the linker put things.
+The per-function size diff agrees — 91 functions change size for a net **+220
+bytes**, `fifo_tick_slow` is 120 bytes *smaller*, and the only new symbol is
+`mixer_tail_front` (+284, out-of-lined from its two cold callers now that it
+returns a triple).
+
+### The one place it is knowingly incomplete
+
+A window START inside the tail (`WIN_TAIL_FETCH`, WX = 166) restarts the fetch
+with `lx` at 159 and runs `lx` to 160 before `fetcher_retired` is true, so the
+retire dot's `lx < GB_WIDTH` guard skips its note and `tail_dot0` stays at what
+`fifo_reset_bg` wrote six dots earlier. A palette write in the first dots of
+that line's H-Blank would therefore under-reach by the length of the restart.
+Nothing in the tree can see it — no mealybug row and none of the 5,005 gambatte
+rows moves whichever way it is spelled — and it is strictly better than what
+preceded it, where that line's `tail_dot0` was left over from the *previous*
+line. Recorded rather than guessed at: closing it needs a run-start note at the
+BG push, and a push is speculative (an object can trigger on the same dot and
+the shifter never emits), which costs more rows than it buys — built and scored,
+it loses 62 pixels on `m3_obp0_change` alone.
+
 ## Reproducing any of this
 
 ```

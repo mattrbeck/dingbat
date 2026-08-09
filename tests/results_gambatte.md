@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 11:45:24*
+*Generated: 2026-08-09 12:13:08*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
@@ -215,11 +215,11 @@ All 8 tests passed.
 
 | Test | Result |
 |------|--------|
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 2/23040 pixels differ |
+| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 144/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 | dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 144/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 730/23040 pixels differ |
+| dmgpalette_during_m3/lycint_dmgpalette_during_m3_1 [dmg, png] | 729/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_2 [dmg, png] | 725/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 862/23040 pixels differ |
 | dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 1140/23040 pixels differ |

@@ -571,6 +571,58 @@ const OBJ_FIX_OFF*            = int32.high
   ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
   ## LCDC.2 write". Same shape as above: the window test is one compare either
   ## way.
+const MIXER_TAIL_DOTS*        {.intdefine.} = 1
+  ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
+  ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
+  ## from `lx`).
+  ##
+  ## The two agree everywhere the shifter runs one pixel per dot, which is all
+  ## of a line except an object fetch and the tail burst. Where they differ,
+  ## mealybug says dots. `m3_bgp_change_sprites` is the ruler: its object stalls
+  ## the shifter at the head of each band and its handler writes BGP on a fixed
+  ## dot, so each band asks "how far back does a write reach while the shifter
+  ## is stopped". The DMG reference answers ZERO pixels back for a stall older
+  ## than the tail (bands 8..12, the edge sits exactly on the stalled `lx`), ONE
+  ## for a stall one dot old (band 13) and the full two for an unstalled shifter
+  ## (bands 14..17) -- i.e. the write reaches a pixel iff that pixel LEFT THE
+  ## FIFO within MIXER_PALETTE_BACK dots, stall or no stall. A pixel-clocked
+  ## tail holds the last two pixels for the whole of a 6..11 dot object fetch
+  ## and repaints them; that was 104 of that row's wrong pixels and 59 of
+  ## `m3_lcdc_bg_en_change`'s, on the same three bands' worth of arithmetic.
+  ##
+  ## Implementation: GbFifoPpu.tail_dot0 is the dot pixel 0 of the current
+  ## unbroken run of emissions would have left on, so the shifter's position on
+  ## any later dot reads back as `cycle_counter - tail_dot0` whether or not `lx`
+  ## has moved since. It subsumes the tail-burst latch MIXER_TAIL_HBLANK needed.
+const MIXER_HEAD_LINGER*      {.intdefine.} = 1
+  ## Whether the line's FIRST pixel holds the SHALLOW stages of the mixer tail
+  ## open until the deepest one is read (1, shipping; 0 is the pre-2026-08-10
+  ## behaviour, where every pixel of the line was the same depth).
+  ##
+  ## Pixel 0 alone, and only for a register read at a stage shallower than the
+  ## palettes': LCDC's priority bits reach it for MIXER_PALETTE_BACK dots after
+  ## it leaves the FIFO rather than MIXER_PRIORITY_BACK.
+  ##
+  ## mealybug `m3_lcdc_bg_en_change` is the whole of the measurement, and it is
+  ## a ±1 step and not a fit. Its object's OAM X advances one per 8-line band,
+  ## which moves the dot pixel 0 leaves the FIFO on -- dots 105, 104, 103, 102,
+  ## 101, 100 for bands 0..5 by `-d:gb_px_trace` -- while the handler's LCDC
+  ## write stays on dot 105 for every band. The DMG reference blanks x = 0 in
+  ## bands 0, 1 and 2 and leaves it alone in bands 3..7, i.e. pixel 0 is still
+  ## reachable exactly TWO dots after it leaves, where MIXER_PRIORITY_BACK is
+  ## one and every other pixel of the same bands obeys it.
+  ##
+  ## The palettes are NOT extended, and the same suite says so: `m3_bgp_change`
+  ## writes BGP on dot 97 with pixel 0 leaving on dot 94, and its reference puts
+  ## the `old or new` pixel at x = 1 -- a two-dot reach for pixel 0, the same as
+  ## for every other pixel. So this is not "pixel 0 lingers a dot"; it is the
+  ## two stages COINCIDING for the line's first pixel, which is why it is
+  ## written as `back < head` and not as a lag.
+  ##
+  ## Note the DMG references are the only oracle here. gambatte's
+  ## `dmgpalette_during_m3` family looks like a second one and is not: its PNGs
+  ## carry no `old or new` pixel at all (MIXER_PALETTE_OR's named cost), so
+  ## every disagreement with them in this area is already that one.
 const MIX_HOLD*               = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
@@ -1369,12 +1421,22 @@ type
     # their own dots, and a write on the first dots of H-Blank still reaches
     # them (MIXER_TAIL_HBLANK).
     mix*:                 array[MIX_HOLD, GbMixHold]
-    # Which dot this line's pixel 0 would have left the shifter on, latched at
-    # the tail burst as `cycle_counter - lx`. Through mode 3 the shifter is one
-    # pixel per dot and `lx` IS the answer; the burst is the one dot where it
-    # is not, and this is what lets the recompose keep counting after it. Only
-    # read while the mode flag is 0 -- see fifo_recompose_last.
+    # Which dot this line's pixel 0 would have left the shifter on, if the
+    # shifter's current unbroken run of one-pixel-per-dot emissions had started
+    # there: `cycle_counter - lx`, written at each of the three places the
+    # shifter STOPS (mixer_note_stop), which is everywhere that quantity can
+    # change. While a stall is in progress it therefore still describes the run
+    # the stall interrupted, and the shifter's position reads back as
+    # `cycle_counter - tail_dot0` -- which keeps counting through an object
+    # fetch and through the tail burst, where `lx` does not.
+    # That is the whole of MIXER_TAIL_DOTS; see fifo_recompose_last.
     tail_dot0*:           int32
+    # The first `lx` of that run, i.e. the `lx` the NEXT run starts at once the
+    # stall clears. Pixels before it left the FIFO at least one dot further back
+    # than `tail_dot0` says, so nothing may reach them -- the stall that broke
+    # the run is 6..11 dots long (an object fetch) and the deepest mixer stage
+    # is two.
+    mix_run*:             int32
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----
