@@ -1084,30 +1084,38 @@
             <button type="button" class="button button-primary" id="net-join-go">Connect</button>
           </div>
           <p id="net-status" class="net-status" aria-live="polite"></p>
+          <button type="button" class="net-view-toggle" id="net-to-manual">
+            Trade codes manually instead</button>
         </div>
 
         <!-- ===== Manual code exchange ===== -->
         <!-- Shown instead of the connect view when the network is up but the
-             signaling server is unreachable: each side copies its code to the
-             other (any messenger works), pastes the friend's, and confirms. -->
+             signaling server is unreachable, or via the footer toggle: each
+             side copies its code to the other (any messenger works), pastes
+             the friend's, and confirms. -->
         <div id="net-manual-view" hidden>
-          <p>Cannot connect to the linking server. If you're on the same network,
-             try trading codes with your friend.</p>
+          <p>Trade codes with your friend — any messenger works.
+             Same Wi-Fi is the most reliable.</p>
           <p class="net-manual-label" id="net-manual-out-label">Your code:</p>
           <div class="net-join-row">
             <input id="net-manual-out" class="net-manual-code" type="text" disabled
                    aria-labelledby="net-manual-out-label" />
             <button type="button" class="button" id="net-manual-copy">Copy</button>
+            <!-- Revealed on touch devices with the Web Share API (netplay.js):
+                 the code is headed to a messenger anyway. -->
+            <button type="button" class="button" id="net-manual-share" hidden>Share</button>
           </div>
           <p class="net-manual-label" id="net-manual-in-label">Friend's code:</p>
           <div class="net-join-row">
             <input id="net-manual-in" class="net-manual-code" type="text"
                    autocomplete="off" autocorrect="off" autocapitalize="off"
-                   spellcheck="false" placeholder="Paste your friend's code"
+                   spellcheck="false"
                    aria-labelledby="net-manual-in-label" />
             <button type="button" class="button button-primary" id="net-manual-confirm" disabled>Confirm</button>
           </div>
           <p id="net-manual-status" class="net-status" aria-live="polite"></p>
+          <button type="button" class="net-view-toggle" id="net-to-code">
+            Use a shared code instead</button>
         </div>
       </div>
     </div>

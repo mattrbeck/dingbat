@@ -149,25 +149,47 @@ const probeSignalServer = () => {
   const now = Date.now();
   if (now - sigProbeAt < SIG_PROBE_MIN_INTERVAL) return;
   sigProbeAt = now;
+  // Every outcome is logged with its timing: this probe decides whether the
+  // link modal even offers the shared-code flow, and it used to fail silently
+  // — "the modal opens straight to code trading and the log says nothing" was
+  // undiagnosable from the device.
+  const t0 = performance.now();
+  const ms = () => Math.round(performance.now() - t0) + "ms";
   let ws;
   try {
     ws = new WebSocket(NET_SIGNAL_URL);
-  } catch {
+  } catch (e) {
     sigServerUp = false;
+    log("netplay: probe " + NET_SIGNAL_URL + " failed to construct: " + (e?.message || e), "warn");
     return;
   }
+  // First outcome wins. iOS Safari fires a LATE error event on a socket we
+  // close right after it opens — without the latch, every successful probe
+  // immediately overwrote its own verdict with "down" on WebKit (seen on an
+  // iPhone as "probe ok in 537ms" followed by "errored after 667ms"), and the
+  // link modal opened onto the manual exchange on a perfectly healthy server.
+  let settled = false;
   const timer = setTimeout(() => {
+    settled = true;
     sigServerUp = false;
+    log("netplay: probe " + NET_SIGNAL_URL + " timed out after " + ms(), "warn");
     try { ws.close(); } catch {}
   }, SIG_PROBE_TIMEOUT);
   ws.onopen = () => {
+    if (settled) return;
+    settled = true;
     sigServerUp = true;
     clearTimeout(timer);
+    log("netplay: probe " + NET_SIGNAL_URL + " ok in " + ms());
+    ws.onerror = null; // our own close below must not read as a failure
     try { ws.close(); } catch {}
   };
   ws.onerror = () => {
+    if (settled) return;
+    settled = true;
     sigServerUp = false;
     clearTimeout(timer);
+    log("netplay: probe " + NET_SIGNAL_URL + " errored after " + ms(), "warn");
   };
 };
 probeSignalServer();
@@ -198,6 +220,7 @@ const openNetConnect = async (attach) => {
   // flow — open straight onto the manual exchange (re-probing in the background
   // so a recovered server puts the next open back on the normal path).
   if (sigServerUp === false && navigator.onLine) {
+    log("netplay: last probe saw the server down — opening onto the manual exchange", "warn");
     probeSignalServer();
     manualEnter();
   }
@@ -295,6 +318,7 @@ const sigConnect = () =>
     ws.onerror = () => {
       if (opened) return; // an established socket's failure is onclose's to handle
       sigServerUp = false;
+      log("netplay: dial " + NET_SIGNAL_URL + " errored before opening", "warn");
       if (hasAltPath()) {
         // Only note it while we're still waiting on the local peer; once linked
         // (dc set) the server is simply irrelevant.
@@ -369,6 +393,8 @@ const sigRedial = () => {
     return;
   }
   netSetStatus("Reconnecting to the linking server…");
+  log("netplay: signaling socket dropped — redial " + (attempt + 1) + "/" +
+      SIG_REDIAL_DELAYS.length + " in " + SIG_REDIAL_DELAYS[attempt] + "ms", "warn");
   session.redialTimer = setTimeout(async () => {
     if (net !== session || session.dc || session.rtcConnected || session.started) return;
     if (await sigConnect()) {
@@ -790,6 +816,9 @@ const manualEnter = (attemptFailed) => {
   clearTimeout(manualFallbackTimer);
   clearTimeout(net.redialTimer);
   clearTimeout(net.rtcDeadline);
+  if (attemptFailed) {
+    log("netplay: server attempt failed — switching to the manual code exchange", "warn");
+  }
   // Drop any in-progress server attempt WITHOUT tripping its teardown: detach
   // the socket handlers first, else ws.onclose fires netFail (no alt path yet)
   // and destroys the session we're keeping for the manual rendezvous.
@@ -809,6 +838,20 @@ const manualEnter = (attemptFailed) => {
   if (netConnectView) netConnectView.hidden = true;
   if (netManualView) netManualView.hidden = false;
   manualPrepare();
+};
+
+// Return from the manual exchange to the shared-code view (the footer link).
+// The prepared offer is abandoned — codes are cheap to regenerate — and a
+// fresh pending session re-arms so Connect works immediately.
+const manualBack = () => {
+  if (!net || net.dc || net.rtcConnected || net.started) return;
+  try { net.pc?.close(); } catch {}
+  net = makeSession(netAttach);
+  manualReset();
+  netSetConnecting(false);
+  netSetStatus("");
+  netJoinGo.disabled = false;
+  setTimeout(() => netCodeInput?.focus(), 0);
 };
 
 // Restore the shared-code view (called from modal open / close / shutdown).
@@ -880,6 +923,24 @@ manualCopyBtn?.addEventListener("click", async () => {
     ta.remove();
   }
   showToast("Code copied");
+});
+
+// Native share sheet for the code — the natural mobile flow, where the code
+// is headed to a messenger anyway. Revealed only where the Web Share API
+// exists and the primary pointer is a finger; desktop keeps just Copy.
+const manualShareBtn = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-share"));
+if (manualShareBtn && navigator.share && matchMedia("(pointer: coarse)").matches) {
+  manualShareBtn.hidden = false;
+}
+manualShareBtn?.addEventListener("click", async () => {
+  const code = manualOut?.value;
+  if (!code) return;
+  try {
+    // The bare code, no prose: whatever the friend pastes back must decode.
+    await navigator.share({ text: code });
+  } catch {
+    // A dismissed share sheet rejects with AbortError; nothing to report.
+  }
 });
 // Keep the emulator's key handlers from swallowing input; Enter confirms.
 // Escape must still dismiss the modal: stopping propagation here means the
@@ -1593,6 +1654,17 @@ document.getElementById("rb-disconnect").addEventListener("click", () => {
     showToast("Disconnected");
   }
 });
+
+// Footer links: switch between the shared-code and manual-exchange views.
+// Entering the manual exchange cancels any in-progress server attempt
+// (manualEnter's normal semantics); going back re-arms a fresh session.
+document.getElementById("net-to-manual").addEventListener("click", () => {
+  manualEnter();
+  if (netManualView && !netManualView.hidden) {
+    setTimeout(() => manualIn?.focus(), 0);
+  }
+});
+document.getElementById("net-to-code").addEventListener("click", manualBack);
 
 document.getElementById("net-close").addEventListener("click", netDismissModal);
 netModal.addEventListener("click", (e) => {

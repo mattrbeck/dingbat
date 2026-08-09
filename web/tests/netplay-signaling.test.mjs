@@ -31,9 +31,19 @@ const NET_SOURCE =
 
 const NO_RESPONSE = "Couldn't connect — the linking server didn't respond";
 
-const setup = async () => {
+const setup = async (opts = {}) => {
   const app = await loadApp();
   const { sandbox } = app;
+
+  // The Share button ships hidden in index.html and netplay.js only ever
+  // reveals it; fake-DOM elements default to hidden=false, so mirror the
+  // markup's starting state before the script evaluates.
+  app.document.getElementById("net-manual-share").hidden = true;
+  const shares = []; // every payload handed to navigator.share
+  if (opts.mobileShare) {
+    app.state.mediaMatches["(pointer: coarse)"] = true;
+    sandbox.navigator.share = (data) => { shares.push(data); return Promise.resolve(); };
+  }
 
   // Scripted WebSocket: the test plays the server's side of every socket.
   const sockets = [];
@@ -131,7 +141,7 @@ const setup = async () => {
     return el("net-join-go").click();
   };
 
-  return { app, el, api, sockets, pcs, connect, advance, flush,
+  return { app, el, api, sockets, pcs, shares, connect, advance, flush,
            lastWS: () => sockets[sockets.length - 1] };
 };
 
@@ -249,6 +259,49 @@ test("cancelling while waiting tears down without redialing", async () => {
 
   await advance(60 * 1000);
   assert.equal(sockets.length, 2, "an intentional close never redials");
+});
+
+test("a late WebKit error after a successful probe doesn't mark the server down", async () => {
+  // iOS Safari fires `error` on a socket we close right after it opens; the
+  // probe's verdict must latch on the first outcome or every successful probe
+  // immediately re-flags the server as down and the modal opens onto manual.
+  const { el, api, sockets } = await setup();
+  const probe = sockets[0]; // opened during setup
+  probe.onerror?.(); // the late error Safari delivers after our own close
+  await api.openNetConnect(true);
+  assert.equal(el("net-manual-view").hidden, true, "modal opens on the shared-code view");
+  assert.equal(el("net-connect-view").hidden, false);
+});
+
+test("the footer links toggle between the shared-code and manual views", async () => {
+  const { el, api } = await setup();
+  await api.openNetConnect(true);
+  assert.equal(el("net-manual-view").hidden, true);
+
+  await el("net-to-manual").click();
+  assert.equal(el("net-manual-view").hidden, false, "manual exchange shown");
+  assert.equal(el("net-connect-view").hidden, true);
+
+  await el("net-to-code").click();
+  assert.equal(el("net-manual-view").hidden, true, "back on the shared-code view");
+  assert.equal(el("net-connect-view").hidden, false);
+  assert.ok(api.net, "a fresh session is armed");
+  assert.equal(el("net-join-go").disabled, false, "Connect is usable again");
+});
+
+test("Share appears on touch devices with the Web Share API and shares the bare code", async () => {
+  const { el, api, shares } = await setup({ mobileShare: true });
+  assert.equal(el("net-manual-share").hidden, false, "revealed at load");
+  await api.openNetConnect(true);
+  el("net-manual-out").value = "FAKECODE123";
+  await el("net-manual-share").click();
+  assert.equal(shares.length, 1);
+  assert.equal(shares[0].text, "FAKECODE123", "bare code, no prose — it must paste back cleanly");
+});
+
+test("Share stays hidden without the Web Share API", async () => {
+  const { el } = await setup();
+  assert.equal(el("net-manual-share").hidden, true);
 });
 
 test("a mid-handshake drop doesn't redial; an unopened DataChannel fails at the 20s deadline", async () => {

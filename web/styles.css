@@ -2899,6 +2899,9 @@ body.debug-2p .home-tile-link {
   resize: vertical;
   min-height: 68px;
   font: inherit;
+  /* The modal body is 12.5px; a focusable field below 16px makes iOS Safari
+     zoom the page in on focus. */
+  font-size: 16px;
   padding: 8px 10px;
   color: var(--text);
   background: var(--surface-2);
@@ -5928,7 +5931,9 @@ body.rewind-off #report-slider {
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 13px;
+  /* 16px is iOS Safari's no-auto-zoom threshold: anything smaller makes
+     focusing the field zoom the whole page in. */
+  font-size: 16px;
   color: var(--text);
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -5936,6 +5941,27 @@ body.rewind-off #report-slider {
   padding: 8px 10px;
 }
 .net-manual-code:focus { outline: none; border-color: var(--accent); }
+
+/* Footer toggle between the shared-code and manual-exchange views: a quiet
+   text link (same treatment as .home-manage-link), centered under the form.
+   A button (not an input) — small text here doesn't trigger iOS focus zoom. */
+.net-view-toggle {
+  display: block;
+  margin: 16px auto 0;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.net-view-toggle:hover {
+  color: var(--text);
+}
 /* The "Your code" box is disabled (Copy moves it); keep it legible, not grey-out. */
 input.net-manual-code:disabled {
   color: var(--text-dim);
@@ -6314,7 +6340,8 @@ body.sync-shown #status {
   border: 1px solid var(--border-2);
   border-radius: 8px;
   color: var(--text);
-  font-size: 13px;
+  /* 16px: below that, iOS Safari zooms the page in when the field is focused. */
+  font-size: 16px;
 }
 
 .cheat-textarea {
