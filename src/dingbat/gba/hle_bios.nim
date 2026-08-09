@@ -1026,7 +1026,12 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_word(dst + 12, cast[uint32](start_y))
       src += 20
       dst += 16
-    cpu.hle_charge_body(body_t0, affine_model)
+    # Interruptible like the decompressions: count is caller-controlled, and
+    # per-scanline effect tables (count=160, the mode7 staple) cost ~75+/entry
+    # — an atomic ~12k+ charge starves anything on a per-frame cadence, the
+    # same shape as the LZ77 trade-room regression (SIO needs 9 rounds/frame).
+    # The real routine runs with the caller's IRQ mask.
+    cpu.hle_charge_body_interruptible(body_t0, affine_model)
   of 0x0F:  # ObjAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -1057,7 +1062,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_half(dst, uint16(sin_val_y));           dst += dst_stride  # pc
       cpu.gba.bus.write_half(dst, uint16(cos_val_y));           dst += dst_stride  # pd
       count -= 1
-    cpu.hle_charge_body(body_t0, affine_model)
+    # Same reasoning as BgAffineSet: a full OAM's worth of entries (~128 at
+    # ~45+/entry) exceeds a SIO multi round several times over.
+    cpu.hle_charge_body_interruptible(body_t0, affine_model)
   of 0x11:  # LZ77UnCompWram (8-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
