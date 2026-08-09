@@ -355,13 +355,15 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
-const OBJ_BG_RUN*             {.intdefine.} = 1
+const OBJ_BG_RUN*             {.intdefine.} = 4
   ## Which dots of an object penalty the BG fetcher is allowed to run on:
-  ## 0 = none, 1 = the wait dots only (shipping), 2 = all of them, 3 = the wait
-  ## dots but only to finish a fetch already under way. The reasoning and the
-  ## sweep that cannot separate them are at tick_sprite_fetcher in fifo_ppu.nim;
-  ## this exists so that sweep is a command line rather than an edit to the dot
-  ## loop.
+  ## 0 = none, 1 = the wait dots only, 2 = all of them, 3 = the wait dots but
+  ## only to finish a fetch already under way, 4 = the tile-boundary rule
+  ## (shipping) -- all of them when the fetch the object is waiting for is still
+  ## in flight, none of them plus one when it is already done. The derivation,
+  ## the eighteen-band measurement behind it and the sweep that cannot separate
+  ## 0..3 are at tick_sprite_fetcher in fifo_ppu.nim; this exists so that sweep
+  ## is a command line rather than an edit to the dot loop.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1

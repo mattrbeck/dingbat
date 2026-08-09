@@ -539,10 +539,17 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # extra object.
     ppu.obj_penalty = OBJ_FETCH_DOTS
 
-proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
-  ## One dot of an object fetch. The shifter is stopped for the whole of it, so
-  ## the only thing that varies is how many dots it lasts -- see the trigger in
-  ## tick_shifter for where that count comes from.
+proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
+  ## One dot of an object fetch. Returns true if this dot was the object's --
+  ## the shifter is stopped for the whole of it -- and false for the one tail
+  ## dot the shifter has back but the BG fetcher does not (see OBJ_BG_RUN = 4).
+  ## A return value and not a call to tick_shifter from in here: tick_shifter is
+  ## the mode 3 dot loop's body and a SECOND call site stops clang inlining it
+  ## into fifo_pipeline_dot, which measured +0.9% of retired instructions on
+  ## Pokemon Blue for a dot that happens at most once per object.
+  ##
+  ## Only the number of dots it lasts varies -- see the trigger in tick_shifter
+  ## for where that count comes from.
   #
   # The BG fetcher runs for the WAIT and is stopped for the object's own fetch.
   # That split is the two halves of the penalty read literally: the wait exists
@@ -627,7 +634,96 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # fetcher had just pushed and there is no fetch in flight to finish. So the
   # split is real and none of these four is where it comes from; the remaining
   # candidate is the phase of the penalty itself against the fetch cycle.
-  when OBJ_BG_RUN == 1:
+  #
+  # ---- Rule 4: the object fetch goes at a TILE boundary, and which one is
+  # ---- decided by the object, not by the fetcher's phase -------------------
+  #
+  # `m3_lcdc_tile_sel_change` answers this outright. Its LCDC pulse is 8 dots
+  # wide, its tile data is all-$00 at $9000 and all-$FF at $8000, so every tile
+  # of the frame reports the pair (TILE_SEL at the plane-0 read, TILE_SEL at the
+  # plane-1 read) as one of four shades; its eighteen objects sit at OAM X = k
+  # in band k, so each 8-line band is an independent measurement of where the
+  # penalty falls against the fetch cycle. Reading the DMG reference off as a
+  # shade per band, and writing the pulse as the dot window W = [105, 112] and
+  # the object-free fetch schedule as tile n's B/0/1 reads on dots 8n+88, 8n+90,
+  # 8n+92 (n >= 1; tile 0's are 90/92/94), the whole frame is:
+  #
+  #   X = 0..7    the pulse falls on the fetch of the tile displayed at x=8..15
+  #   X = 8..15   ...on the fetch of the tile at x=16..23, undisturbed
+  #   X = 16, 17  ...on the fetch of the tile at x=16..23, undisturbed
+  #
+  # i.e. the penalty is inserted after the fetch of tile `floor(X / 8)`, and
+  # The Pixel of an object at OAM X sits in tile `floor(X / 8) - 1`. So the
+  # boundary the object takes is the one at the END of the fetch that was in
+  # flight while The Pixel's own tile was being displayed -- the fetcher runs a
+  # tile ahead, and Pan Docs' "waiting for the BG fetch to finish" is that fetch.
+  # A background tile's three reads are never split by it, which is the finding
+  # `docs/gb-mealybug-sources.md` states and none of rules 0..3 can produce.
+  #
+  # Two objects can be in identical FETCHER states at the trigger and still take
+  # different boundaries, which is why no rule phrased on `fetch_counter` can
+  # work: X = 0 and X = 8 both trigger on the dot the first push fills the FIFO,
+  # both cost 11 dots, and both leave the fetcher at counter 0 -- yet the
+  # reference gives band 0 shade 3 (both planes read inside W) and band 8 shade 0
+  # (neither). The one thing that differs is the tile The Pixel is in, and that
+  # is exactly `idx` at the trigger:
+  #
+  #   idx >= 0  The Pixel is in the tile the FIFO is displaying, so the fetch of
+  #             the tile after it is the one in flight. It runs, inside the
+  #             penalty, to completion -- and then parks, because the shifter is
+  #             stopped and the FIFO cannot drain, so it cannot start another.
+  #   idx < 0   The Pixel is in the tile BEFORE it (an object hanging off the
+  #             left edge, OAM X < 8). The fetch the object waits for is the one
+  #             that has just this dot finished -- the trigger dot IS its
+  #             plane-1 read, which is what filled the FIFO and let the shifter
+  #             ask the question. So the object takes the bus from the NEXT dot
+  #             for the whole penalty and the fetcher gets none of it, including
+  #             one dot past the end of the shifter's stall: the stall runs
+  #             t .. t+P-1 and the object's accesses t+1 .. t+P, offset by the
+  #             one dot the BG fetch had already taken. That last dot is the
+  #             `obj_penalty <= 0` tail below, and it is not free padding --
+  #             band 4 (OAM X = 4, P = 7) is shade 3 with it and shade 2
+  #             without, and it is the only band that separates the two.
+  #
+  # Mode 3's length does not move either way, and that is checked rather than
+  # hoped: neither arm can make the fetcher LATE for a push. In the hold arm the
+  # shifter resumes on t+P with a full FIFO and empties it on t+P+8, while the
+  # fetch resumes on t+P+1 and has its plane-1 read on t+P+6, two dots clear; in
+  # the run arm the fetch finishes earlier than rule 1 left it, and an earlier
+  # fetch can only remove a stall, never add one. GBMicrotest
+  # ppu_spritex_vs_scx stays 0/153 through tools/gbppu/objtab.py, and 1660
+  # ROM/device runs over gambatte sprites, oam_access, vram_m3, scx_during_m3,
+  # GBMicrotest and mealybug are line-for-line identical under -d:gb_m3_len.
+  #
+  # What it does cost is the run arm's dots: the fetch happens inside the
+  # object's stall instead of after it, so tick_bg_fetcher is called on up to
+  # six dots per object that rule 1 skipped (the same stages, moved, plus the
+  # call overhead). Pokemon Blue, retired instructions, +0.76%; Shantae +0.41%;
+  # Pokemon Crystal +0.01%. All of it is the rule and none of it is the
+  # plumbing -- this file's shape with rule 1 forced back on measures -0.06%
+  # against the revision before it.
+  #
+  # `idx < 0` needs no state of its own. `obj_tile_fx` is the tile the wait was
+  # charged against -- `fetcher_x - 1` when idx is negative and `fetcher_x` when
+  # it is not -- and neither it nor `fetcher_x` can move for the duration of the
+  # stall, because fetcher_x only advances on a push and a push needs an empty
+  # FIFO, which a stopped shifter cannot produce. So the two fields the penalty
+  # algorithm already keeps ARE the question, and this costs one compare on a
+  # path no object-free line ever visits.
+  when OBJ_BG_RUN == 4:
+    let bg_hold = ppu.obj_tile_fx != int32(ppu.fetcher_x)
+    if ppu.obj_penalty <= 0:
+      # The tail dot. The shifter has its dot back; the fetcher does not.
+      ppu.fetching_sprite = false
+      return false
+    # `fetch_counter == 7` is the park, and a park is where the run arm always
+    # ends up: the fetch it was allowed to finish cannot push, because a stopped
+    # shifter never empties the FIFO. Skipping the call there is not a rule, it
+    # is the same nothing done without a call -- and it is most of the arm's
+    # dots, so it is worth the compare: Pokemon Blue against the previous rule,
+    # retired instructions, +1.06% without it and +0.76% with.
+    if not bg_hold and ppu.fetch_counter != 7: tick_bg_fetcher(ppu, gb)
+  elif OBJ_BG_RUN == 1:
     if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
   elif OBJ_BG_RUN == 2:
     tick_bg_fetcher(ppu, gb)
@@ -640,6 +736,13 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # registers are read here, so this is the dot the gambatte late_sizechange
     # family brackets.
     sprite_fetch_merge(ppu, gb)
+    when OBJ_BG_RUN == 4:
+      # A second object at the same X re-armed the stall; the tail belongs to
+      # the end of the whole chain, not to each link of it.
+      if bg_hold and not ppu.fetching_sprite:
+        ppu.fetching_sprite = true
+        ppu.obj_penalty = 0
+  true
 
 proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_color, bg_obj_to_bg: uint8;
                   sp_px: GbPixel): bool =
@@ -1409,10 +1512,14 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
            " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
            " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
            " tn=", toHex(ppu.tile_num, 2), " mode=", ppu.mode_flag
-  if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
+  # One call site for tick_shifter, deliberately: it is this loop's body, and a
+  # second one costs the inlining (see tick_sprite_fetcher's result). The
+  # object's tail dot is the only way through here with neither fetcher run.
+  if ppu.fetching_sprite:
+    if tick_sprite_fetcher(ppu, gb): return
   else:
     tick_bg_fetcher(ppu, gb)
-    tick_shifter(ppu, gb)
+  tick_shifter(ppu, gb)
 
 template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## The next dot of this line an idle mode (0, 1 or 2) has something to do on.
