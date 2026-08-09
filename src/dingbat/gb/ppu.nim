@@ -775,6 +775,9 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
 #   T (2x)      2          3         4         5
 #   at 1x=2   3727/430  3818/430  3769/430  3686/430
 #
+# (sweep them as `-d:STAT_READ_SAMPLE=<T 1x>` and
+# `-d:STAT_READ_SAMPLE_DS_ADD=<T 2x minus T 1x>`.)
+#
 # The gambatte column is lower at the answer than at the old T = 5 and that is
 # not a defect in T: 98 of the 102 rows it trades are m2int_*-anchored and are
 # arithmetically exactly one M-cycle of mode-2 dispatch away from correct (see
@@ -791,8 +794,8 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## as a sampled dot, because nothing per-dot or per-M-cycle then has to
   ## maintain it: `mode_flag=` stamps the change's dot three times a line and
   ## the line wrap rebases it.
-  let t = if gb.memory.current_speed != 0: int32(STAT_READ_SAMPLE_DS)
-          else: int32(STAT_READ_SAMPLE)
+  let t = int32(STAT_READ_SAMPLE) +
+          int32(STAT_READ_SAMPLE_DS_ADD) * int32(gb.memory.current_speed)
   if ppu.cycle_counter - ppu.stat_chg_dot < t: ppu.stat_prev_mode
   else: ppu.lcd_status and 3'u8
 

@@ -46,8 +46,10 @@ const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
 # if and only if `cc - X >= STAT_READ_SAMPLE`, i.e. it samples dot
 # `cc - STAT_READ_SAMPLE`. Bracketed on both sides by different ROMs at each
 # speed; the derivation, the brackets and the sweep are at stat_read_mode.
-const STAT_READ_SAMPLE*    {.intdefine.} = 2
-const STAT_READ_SAMPLE_DS* {.intdefine.} = 3
+const STAT_READ_SAMPLE*     {.intdefine.} = 2
+# The extra dots in double speed, kept as an addend rather than a second
+# absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
+const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
 
 # `stat_chg_dot` for "no mode change is inside any read's sampling window".
 # A line is 456 dots and the counter is rebased at every wrap, so anything this
