@@ -222,6 +222,12 @@
         if (addrKind === A_HOST) w.str(hostStr);
         else w.bytes(addrBytes);
       }
+      // Mint timestamp (epoch seconds), appended AFTER the v1 payload: the
+      // v1 decoder reads exactly its declared fields and ignores trailing
+      // bytes, so older clients still accept these codes — only a new
+      // decoder surfaces the age (diagnostic: the NAT mappings behind a
+      // code decay in under a minute, so age ≈ viability cross-network).
+      w.u32(Math.floor(Date.now() / 1000));
       return b64urlEncode(w.out());
     } catch {
       return null;
@@ -284,7 +290,9 @@
         "a=mid:0\r\n" +
         "a=sctp-port:5000\r\n" +
         "a=max-message-size:262144\r\n";
-      return { type: kind, sdp };
+      // Trailing mint timestamp (newer encoders append it; absent = unknown).
+      const mintedAt = r.left() >= 4 ? r.u32() : null;
+      return { type: kind, sdp, mintedAt };
     } catch {
       return null;
     }

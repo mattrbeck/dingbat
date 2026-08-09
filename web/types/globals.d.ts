@@ -11,7 +11,7 @@
 /** Compact SDP codec published by sdputil.js (classic-script/UMD). */
 interface SDPCodecT {
   encode(desc: { type?: string; sdp?: string } | RTCSessionDescription): string;
-  decode(code: string): { type: string; sdp: string };
+  decode(code: string): { type: string; sdp: string; mintedAt: number | null };
   answerFrom(code: string, setup: string): { type: string; sdp: string };
   fields(sdp: string): {
     ufrag: string | null;

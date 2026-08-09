@@ -339,6 +339,33 @@ test("an unshared code re-mints on a timer; a shared one is pinned", async () =>
   assert.equal(pcs.length, pinned, "no re-mint once the friend holds the code");
 });
 
+test("pipeline statuses mirror into the manual view while it's up", async () => {
+  const { el, api, app } = await setup();
+  await api.openNetConnect(true);
+  app.runIn(`netSetStatus("Transferring games… 40%")`);
+  assert.equal(el("net-manual-status").textContent, "",
+    "hidden manual view: no mirror");
+  await el("net-to-manual").click();
+  app.runIn(`netSetStatus("Transferring games… 60%")`);
+  assert.equal(el("net-manual-status").textContent, "Transferring games… 60%",
+    "visible manual view sees the post-connect pipeline");
+});
+
+test("disconnecting a live link asks for confirmation first", async () => {
+  const { el, api, app, flush } = await setup();
+  await api.openNetConnect(true);
+  api.net.started = true; // simulate a running linked session
+  app.setConfirmResult(false);
+  await el("rb-disconnect").click();
+  await flush();
+  assert.equal(app.confirms.length, 1, "asked before disconnecting");
+  assert.ok(api.net, "declined: the session survives");
+  app.setConfirmResult(true);
+  await el("rb-disconnect").click();
+  await flush();
+  assert.equal(api.net, null, "confirmed: the session is torn down");
+});
+
 test("the link modal holds a screen wake lock while open", async () => {
   const { el, api, wakeLocks, flush } = await setup();
   await api.openNetConnect(true);
