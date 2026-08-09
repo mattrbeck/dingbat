@@ -355,6 +355,128 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const WIN_TAIL_FETCH*         {.intdefine.} = 1
+  ## Whether a window START holds mode 3 open for the fetch it restarts, when
+  ## the start lands inside the last pixels of the line. 1 ships; 0 is the
+  ## control build and restores the pre-2026-08-09 behaviour, where the restart
+  ## was absorbed by the pipeline's tail burst and cost nothing.
+  ##
+  ## That was an accident of `fetcher_retired`'s shape rather than a rule: the
+  ## term that keeps mode 3 open for a window which has not started yet is
+  ## written `not fetching_window and ...`, so the instant the window DOES
+  ## start the term goes false and, with nothing else owing, the fetcher
+  ## retires on that same dot -- restart, push and pixel all in one burst.
+  ## Nothing about hardware says a window start is free: it empties the BG FIFO
+  ## and the pixel it starts on cannot be drawn until the refetch pushes.
+  ##
+  ## Bracketed by `window/m2int_wxA5_m3stat` (WX = 165, first window pixel
+  ## x = 158, so the restart lands one pixel inside the tail), which is red on
+  ## BOTH devices without this -- `_1` wants 3 and gets 0, i.e. mode 3 ends too
+  ## early -- and green on both with it. See CGB_WIN_TAIL_LAST for WX = 166,
+  ## which needs this AND the device split before either device's rows are
+  ## right, and `fetch_work_pending` in gb/fifo_ppu.nim for the code.
+const CGB_WIN_TAIL_LAST*      {.intdefine.} = 1
+  ## Whether a window restart issued on the LINE'S LAST PIXEL holds mode 3
+  ## open, which only the CGB does. 1 ships; 0 is the control build, where
+  ## neither device waits for it and the two are identical again.
+  ##
+  ## Narrows WIN_TAIL_FETCH, and requires it. In one sentence: **the DMG's
+  ## mode 3 ends with the last PIXEL and the CGB's with the last FETCH.**
+  ## Everywhere else on a line the two coincide, because the fetcher runs ahead
+  ## of the shifter and any restart it is handed has pixels after it to fill;
+  ## the one place they can come apart is a restart whose own first pixel is
+  ## x = 159, and only WX = 166 puts one there. That is exactly where gambatte
+  ## splits the two devices.
+  ##
+  ## ---- What differs is the mode 3 END, and it is bracketed to 5..7 dots ----
+  ##
+  ## Every `window/m2int_wx*_m3stat` family in gambatte has IDENTICAL DMG and
+  ## CGB expectations -- wx00, wx03, wx07, wxA5, wx17_wxA5, with and without
+  ## SCX -- except at WX = 166, where all of them differ and the CGB is always
+  ## the longer one. Each family is a ladder of ROMs `_1.._n` that read STAT
+  ## one CPU M-cycle apart, so "the last `_n` that still reads mode 3" brackets
+  ## the end of mode 3 to within 4 dots, and the DMG-CGB DIFFERENCE to within
+  ## a window of 8 dots centred on 4 * (n_cgb - n_dmg):
+  ##
+  ##   family (all `window/m2int_wxA6_`)  last _n reading 3   difference
+  ##                                        DMG      CGB      is inside
+  ##   m3stat                                1        2       ( 0,  8)
+  ##   scx2_m3stat                           1        3       ( 4, 12)
+  ##   scx3_m3stat                           1        3       ( 4, 12)
+  ##   scx5_m3stat                           1        2       ( 0,  8)
+  ##
+  ## (SCX moves the end of mode 3 by SCX & 7 dots, which slides the boundary
+  ## across the M-cycle grid the ROMs sample on; that is why two of these
+  ## families see one step and two see two, and it is what makes the four of
+  ## them a two-sided bracket rather than four copies of one measurement.)
+  ##
+  ## The four intersect at **5..7 dots**, and a BG fetch is six -- Pan Docs'
+  ## "6 dots from the fetch restart", and this fetcher's counter 0 -> push.
+  ## `-d:gb_m3_len` on the wxA6 line reads 174 dots when the restart is issued
+  ## and not waited for and 180 when it is waited for, against 172 for a plain
+  ## line, so DMG = 174 / CGB = 180 is the only assignment the bracket allows
+  ## and the split needs no constant of its own: it is one fetch, waited for on
+  ## one device. `wxA6_oambusyread` and `wxA6_vrambusyread` carry the same
+  ## split from the bus side (CGB `_2` reads 0 where DMG reads 5), so it is the
+  ## END of mode 3 that moves and not the STAT read model.
+  ##
+  ## ---- What this is NOT, measured -----------------------------------------
+  ##
+  ## The tempting unification is that the DMG's window comparator runs one
+  ## slot lower than the emitted-pixel index -- which is already forced at the
+  ## LEFT end of the line, where a DMG starts a window at WX = 6, screen
+  ## x = -1, and no reference says the CGB does (WIN_START_PRE_PIXEL). One
+  ## offset would also stop the DMG one slot short of the LAST pixel, i.e.
+  ## draw no window at all at WX = 166.
+  ##
+  ## **Refused, built and scored 2026-08-09.** It gives the DMG 172 dots where
+  ## the bracket wants 174, and takes `window/m2int_wxA6_m3stat_1`,
+  ## `_firstline_m3stat_1`, `_oambusyread_1` and `_vrambusyread_1` red on DMG.
+  ## The DMG does reach the slot and does restart the fetch there -- those two
+  ## dots are that slot. What it does not do is wait for the fetch. So the two
+  ## ends of the line are two mechanisms and WIN_START_PRE_PIXEL stays
+  ## device-independent.
+  ##
+  ## ---- An object on the same pixel is the SAME fetch slot, not a second ----
+  ##
+  ## The one place a fetch can already be in flight when the restart is issued
+  ## is an object whose trigger pixel is also x = 159, i.e. WX = 166 with an
+  ## object at X = 167. There the CGB's extra six is NOT charged again, which
+  ## is what `obj_last_px` carries into fetch_work_pending: both devices come
+  ## out at 180 dots, the plain 174 plus the object's own six.
+  ##
+  ## Four mode-0 INTERRUPT rows bracket that, and they are the ones to trust
+  ## here because they read the flag's own dot rather than a STAT read three
+  ## dots behind it (STAT_READ_LAG): `window/m2int_wxA6_spxA7_m0irq_1/_2` on
+  ## both devices, and `m0enable/enable_wxA6_2x_spxA7_ds_1.._3` on the CGB in
+  ## double speed, which sample it every two dots. All four want mode 0 open by
+  ## the 180 mark on the CGB; charging the restart on top (186) takes all four
+  ## red, and so does deferring the object behind the restart (190).
+  ##
+  ## The two rows that ask for a longer CGB here -- `_spxA7_m3stat_2` and `_4`,
+  ## `dmg08_out0_cgb04c_out3` -- cannot arbitrate it, and that is measurable
+  ## rather than a preference: swept over a tail hold of 0..16 dots, `_4` is
+  ## red at EVERY length on the CGB, including the 190 at which it is green
+  ## when the object is deferred instead. A row whose verdict is not monotone
+  ## in the quantity is not measuring that quantity. `_2` is left red, as it is
+  ## on main.
+  ##
+  ## ---- The one row this costs, and why it is not fitted away --------------
+  ##
+  ## `window/m2int_wxA6_scx5_m3stat_3` goes red on the CGB (it is green on
+  ## main), and its own family's double-speed sibling
+  ## `window/m2int_wxA6_scx5_m3stat_ds_1` goes green with it. The two are one
+  ## dot apart and cannot both be satisfied: same device, same WX, same SCX,
+  ## same measured mode 3 (185 dots) -- only the sampling grid differs, 4 dots
+  ## single speed against 2 in double. Swept, `_3` needs the CGB's extra to be
+  ## at most 5 dots and `_ds_1` needs at least 6.
+  ##
+  ## **Six ships, because six is a fetch.** Five is available -- it scores the
+  ## same net, trading `_ds_1` back for `_3` -- and is refused as a fit: no
+  ## mechanism makes a BG fetch five dots long, and the SCX = 0, 2 and 3
+  ## families are two-sided at six with nothing to say against it. The
+  ## disagreement is one dot on ONE double-speed row and belongs to whatever
+  ## puts the double-speed sampling grid a dot off, not to this constant.
 const OBJ_BG_RUN*             {.intdefine.} = 4
   ## Which dots of an object penalty the BG fetcher is allowed to run on:
   ## 0 = none, 1 = the wait dots only, 2 = all of them, 3 = the wait dots but
@@ -1133,6 +1255,20 @@ type
     head_cycle*:          bool
     fetching_window*:     bool
     fetching_sprite*:     bool
+    # The CONSOLE, cached off GB.cgb_enabled when the FIFO PPU is built. The
+    # end of mode 3 is per-device for one window start (CGB_WIN_TAIL_LAST) and
+    # the two procs that decide it -- fetcher_retired and fifo_irq_m0_ready --
+    # are reached from the dot loop with no `gb` in hand; a bool inside the
+    # bool block costs the object nothing. Not serialized: a machine cannot
+    # change model under a running core, so a loaded state re-derives it the
+    # same way GB.cgb_enabled does.
+    cgb*:                 bool
+    # An object was fetched on the LINE'S LAST PIXEL. Per-line scratch, like
+    # dropped_first_fetch: set at the object trigger, cleared at the mode 2 ->
+    # 3 edge. Read only by fetch_work_pending, and only on a CGB, where a
+    # window restart on that pixel and an object's fetch on it are one fetch
+    # slot and not two -- see CGB_WIN_TAIL_LAST.
+    obj_last_px*:         bool
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.

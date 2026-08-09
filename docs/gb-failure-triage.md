@@ -721,9 +721,9 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left are all LY = 0, i.e. bucket 0 |
 | `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | not diagnosed |
-| `m3_lcdc_win_map_change` | 34 | 34 | see below |
+| `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | not diagnosed |
-| `m3_lcdc_tile_sel_win_change` | 106 | 106 | not diagnosed — 2026-08-09: 8 px on LY 0 and 98 in band 8, the same WX = 7 tie as `m3_lcdc_win_map_change` |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
 | `m3_scy_change` | 417 | 417 | **0 as of 2026-08-09** — 83 for free with `OBJ_BG_RUN`, 29 with `LY0_PIPE_MCYCLES`, and the last 29 were the length of the discarded fetch at the head of mode 3 (`M3_THROWAWAY_DOTS`) |
 | `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling — **8 as of 2026-08-09** |
@@ -825,26 +825,64 @@ should not be fitted. What would settle it is a second ROM: the four
 today), which exercise the same glitch at a write cadence the picture does not
 hide.
 
-**`m3_lcdc_win_map_change`, the 34 pixels.** One 8x8 block, `x = 0..7`,
-`y = 64..71`, and it is not background at all — it is the ® object of band 8
-(OAM X = 8, screen `x = 0..7`) drawn here and absent on hardware. That band is
-the one where the object's trigger (`lx == 0`) coincides with the window's
-start, because the ROM runs WY = 0 / WX = 7, i.e. `win_lx == 0`. `tick_shifter`
-asks the object question first, so the window start is deferred behind a whole
-object fetch, and the object is drawn. Hardware loses it outright — it does not
-reappear shifted, `x = 8..15` matches — so something about the tie at that one
-`lx` is different.
+**`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
+are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
+`x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one
+band where the object's trigger pixel (`X - 8 = 0`) IS the window's start pixel,
+because the ROMs run WY = 0 / WX = 7. It was read here as "the ® object drawn
+where hardware loses it"; that is wrong, and the reference says so. Ours was a
+solid BLACK 8x8 there and hardware's is the ® glyph over a WHITE window tile —
+the object is drawn on both sides, and what differed was the window tile under
+it. `tick_shifter` asked the object question first, so the window's first
+tile-map read landed inside the ROM's 8-dot LCDC pulse (dots 105..112) instead
+of before it.
+
+**The rule is that the two triggers are ordered by COORDINATE**, and only the
+tie changes hands: an object at `X - 8 < WX - 7` is fetched first (that is
+every left-hanging object, `X` = 1..7 here, and it is what the current order
+already did), one at `X - 8 == WX - 7` waits for the window's first tile to be
+pushed. See `obj_yields_to_window` in `gb/fifo_ppu.nim` for the derivation off
+both ROMs' `.asm` and both references, and for the two neighbouring spellings
+the tile_sel reference refuses. Resolving the tie the other way for ALL objects
+is still refused, and is still the measurement quoted below.
 
 **Simply resolving the tie the other way is refused, and was measured out.**
 Asking the window's start before the object trigger takes this row 34 → 318 and
 the mealybug totals DMG 520109 → 519201 and CGB 1819207 → 1818393, so the
 window start does NOT preempt an object fetch at the same pixel in general.
-Whatever drops that one object is narrower than an ordering rule — the WX = 7
-case is served by a mode-2 special case in this renderer (see the `wx < 7`
-term at the end of `fifo_tick_slow`), and that is where to look next.
 
-**The two `obj_size_change` rows and `m3_lcdc_tile_sel_win_change` were not
-diagnosed** in this pass and did not move. `obj_size_change_scx`'s 30 pixels are
+**What the tie rule cost was one open item, and it is closed (2026-08-09).**
+The corner is `WX = 166` — the window's start pixel is the LAST pixel of the
+line — and the tie rule alone gave it 190 dots on both devices, which took
+`gambatte/m0enable` 153 → 147. Two constants close it, `WIN_TAIL_FETCH` and
+`CGB_WIN_TAIL_LAST` in `gb/gb.nim`, and the whole derivation is written at the
+second one. In short:
+
+* a window START inside the tail holds mode 3 open for the fetch it restarts —
+  it used to be absorbed by the pipeline's tail burst and cost nothing, which
+  `window/m2int_wxA5_m3stat_1` catches on both devices;
+* the DMG's mode 3 ends with the last PIXEL and the CGB's with the last FETCH,
+  so only at `WX = 166` do the two part: DMG 174 dots, CGB 180. The four
+  `m2int_wxA6_*_m3stat` families bracket that difference to **5..7 dots** and a
+  BG fetch is six;
+* an object whose trigger pixel is also `x = 159` is the same fetch slot, not a
+  second one: both devices come out at 180 (174 + the object's own six), which
+  is what the four `spxA7` mode-0 interrupt rows want.
+
+gambatte 3793 → 3809, +17/−1 (see below), and the mealybug tie-rule wins are
+untouched.
+
+**The one row it costs, named.** `window/m2int_wxA6_scx5_m3stat_3` goes red on
+CGB and its own family's `_ds_1` goes green. Same device, same WX, same SCX,
+same measured mode 3 (185 dots) — only the sampling grid differs (4 dots single
+speed, 2 in double), and the two want the CGB's extra to be ≤ 5 and ≥ 6
+respectively. Six ships because six is a fetch; five is a fit at the same net
+score and is refused. The residual is one dot on the double-speed sampling
+grid, not on this constant.
+
+**The two `obj_size_change` rows were not diagnosed** in this pass and did not
+move (`m3_lcdc_tile_sel_win_change` was in this sentence too and is closed
+above). `obj_size_change_scx`'s 30 pixels are
 two 6-row bands at the very top and bottom of the frame (`y = 2..7` and
 `y = 130..135`, `x = 27..31`) with the diff going both ways within a row, which
 is the signature of a 16-pixel-tall object's row selection rather than of a

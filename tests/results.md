@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 10:46:24*
+*Generated: 2026-08-09 11:45:24*
 
 ## Game Boy - Blargg
 
@@ -249,14 +249,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_lcdc_tile_sel_change | 👌 |
 | mealybug-cgb/m3_lcdc_tile_sel_change | 👀 97.6% correct (22476/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_tile_sel_change2 | 👀 97.1% correct (22376/23040 pixels match) |
-| mealybug/m3_lcdc_tile_sel_win_change | 👀 99.6% correct (22942/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change | 👀 96.5% correct (22224/23040 pixels match) |
+| mealybug/m3_lcdc_tile_sel_win_change | 👌 |
+| mealybug-cgb/m3_lcdc_tile_sel_win_change | 👀 96.4% correct (22210/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_tile_sel_win_change2 | 👀 97.1% correct (22381/23040 pixels match) |
 | mealybug/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug-cgb/m3_lcdc_win_en_change_multiple | 👌 |
 | mealybug/m3_lcdc_win_en_change_multiple_wx | 👀 98.5% correct (22697/23040 pixels match) |
-| mealybug/m3_lcdc_win_map_change | 👀 99.9% correct (23006/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_win_map_change | 👀 99.1% correct (22824/23040 pixels match) |
+| mealybug/m3_lcdc_win_map_change | 👌 |
+| mealybug-cgb/m3_lcdc_win_map_change | 👀 99.2% correct (22858/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_win_map_change2 | 👀 99.4% correct (22900/23040 pixels match) |
 | mealybug/m3_obp0_change | 👌 |
 | mealybug-cgb/m3_obp0_change | 👌 |
@@ -1053,17 +1053,17 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | 👀 48/82 passed |
 | gambatte/sound | 👀 113/116 passed |
 | gambatte/speedchange | 👀 112/208 passed |
-| gambatte/sprites | 👀 394/476 passed |
+| gambatte/sprites | 👀 395/476 passed |
 | gambatte/tima | 👀 216/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 327/476 passed |
+| gambatte/window | 👀 342/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 981
-- **Pass:** 719
-- **Fail:** 262
+- **Pass:** 721
+- **Fail:** 260
