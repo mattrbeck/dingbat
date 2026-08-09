@@ -1084,13 +1084,32 @@ settingsNextBtn.addEventListener("click", () => selectSettingsTab(settingsStep(s
 // contact. In the content it could equally be a scroll, so it stays PENDING
 // until the finger has moved far enough, and downward enough, to be sure —
 // and is abandoned the moment it looks like a scroll or a sideways drag.
-const SHEET_DRAG_SLOP = 8;    // px before a content drag commits
-const SHEET_DRAG_CLOSE = 90;  // px of travel that counts as a dismissal
+const SHEET_DRAG_SLOP = 8;     // px before a content drag commits
+const SHEET_DRAG_CLOSE = 90;   // px of travel that counts as a dismissal
+const SHEET_DRAG_EXPAND = 40;  // px UP on the chrome that fills the screen
+// Below this much spare room there is nothing to expand into, so the gesture
+// is not offered: a phone in landscape is already 100dvh, and an SE gains a
+// sliver not worth a detent.
+const SHEET_EXPAND_MIN_GAIN = 80;
 let sheetDragFrom = 0;
 let sheetDragX0 = 0;
 let sheetDragDy = null;       // non-null once committed
 let sheetDragPending = false;
 let sheetDragScroller = null;
+let sheetDragOnChrome = false;
+let sheetExpanded = false;
+
+const sheetCanExpand = () => {
+  if (sheetExpanded) return false;
+  const h = settingsFrame.getBoundingClientRect().height;
+  const vh = window.visualViewport?.height || window.innerHeight;
+  return vh - h >= SHEET_EXPAND_MIN_GAIN;
+};
+
+const setSheetExpanded = (on) => {
+  sheetExpanded = on;
+  settingsFrame.classList.toggle("sheet-expanded", on);
+};
 
 const sheetScrollerFor = (el) =>
   el?.closest?.(".settings-scroll, .settings-rail-body") || null;
@@ -1100,10 +1119,26 @@ const endSheetDrag = () => {
   sheetDragScroller = null;
   if (sheetDragDy === null) return;
   const dy = sheetDragDy;
+  const onChrome = sheetDragOnChrome;
   sheetDragDy = null;
+  sheetDragOnChrome = false;
   settingsFrame.classList.remove("sheet-dragging");
   settingsFrame.style.transform = "";
-  if (dy > SHEET_DRAG_CLOSE) closeSettingsModal();
+  // Upward, from the chrome: take the whole screen. Only from the chrome —
+  // an upward drag in the content is a scroll, and the pending logic has
+  // already refused it long before this.
+  if (dy <= -SHEET_DRAG_EXPAND && onChrome) {
+    if (sheetCanExpand()) setSheetExpanded(true);
+    return;
+  }
+  if (dy > SHEET_DRAG_CLOSE) {
+    // Down out of the expanded state returns to the normal height rather than
+    // dismissing. Two detents, one gesture, and the way back is the way you
+    // came — dismissing from expanded would make a long swipe feel like it
+    // overshot into closing the thing you had just opened up.
+    if (sheetExpanded) setSheetExpanded(false);
+    else closeSettingsModal();
+  }
 };
 
 const commitSheetDrag = () => {
@@ -1118,6 +1153,7 @@ settingsFrame.addEventListener("pointerdown", (e) => {
   sheetDragFrom = e.clientY;
   sheetDragX0 = e.clientX;
   if (target?.closest?.(".settings-grab, .settings-rail-head, .settings-head")) {
+    sheetDragOnChrome = true;
     commitSheetDrag();
     return;
   }
@@ -1145,8 +1181,12 @@ settingsFrame.addEventListener("pointermove", (e) => {
     commitSheetDrag();
   }
   if (sheetDragDy === null) return;
-  sheetDragDy = Math.max(0, dy);
-  settingsFrame.style.transform = "translateY(" + sheetDragDy + "px)";
+  sheetDragDy = dy;
+  // Only the downward half is previewed. An upward drag cannot be shown by
+  // translating — the sheet is anchored to the bottom edge, so it would lift
+  // off and leave a gap under it — and growing its height every frame is the
+  // one thing this layout refuses to do. The expansion lands on release.
+  settingsFrame.style.transform = "translateY(" + Math.max(0, dy) + "px)";
 });
 
 // Non-passive, and the only reason it exists: once the drag is committed the
@@ -1220,6 +1260,10 @@ const closeSettingsModal = (fromHistory) => {
   if (!fromHistory) settingsHistDrop(settingsHistDepth);
   settingsHistDepth = 0;
   settingsOnDetail = false;
+  // Expansion is a gesture for the session you are in, not a preference. It
+  // starts collapsed every time, so the sheet always opens the size it was
+  // designed to open at.
+  setSheetExpanded(false);
   settingsModal.classList.remove("open");
   document.removeEventListener("keydown", kbKeyHandler, true);
   releaseFocus(settingsModal);

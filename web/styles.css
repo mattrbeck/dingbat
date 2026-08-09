@@ -3570,6 +3570,30 @@ body.debug-2p .home-tile-link {
     touch-action: none;
   }
 
+  /* Swipe UP on the chrome and the sheet takes the whole screen. The cap that
+     makes the sheet a comfortable size on a big phone is also the thing that
+     wastes half an iPad mini when you are actually reading a long section, so
+     this is the escape hatch — a second detent, entered and left deliberately.
+     The height animates ONLY here: everywhere else the frame's size is fixed,
+     and this is a gesture whose whole point is the size changing. */
+  .modal-settings {
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1),
+                height 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  .modal-settings.sheet-expanded {
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  /* Expanded, there is no backdrop left to tap, so the detail screen needs its
+     close button back — the same trade the landscape block makes for the same
+     reason. The grab handle stays, unlike landscape: it is how you get back
+     down. */
+  .modal-settings.sheet-expanded .settings-head .modal-close {
+    display: flex;
+  }
+
   .settings-grab {
     display: flex;
   }
