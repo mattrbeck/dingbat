@@ -7738,6 +7738,10 @@ const setSpeed2x = (on, fromRemote) => {
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(on ? 1 : 0);
   }
+  // Re-push the pitch-correct preference alongside turbo: rollback_init builds
+  // fresh cores that never saw it (solo cores get it at loadRom), so without
+  // this a linked 2x plays pitched-up until the settings toggle re-applies it.
+  applyPitchCorrectFF();
   // While linked online, 2x must drive BOTH cores or the pair desyncs — relay
   // our toggle to the peer (unless this change *came* from the peer).
   if (!fromRemote && rollbackMode && typeof window.rbSendSpeed === "function") {
