@@ -184,6 +184,9 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu.cycle_counter -= 204
         ppu.ly += 1
         when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+        # The comparator's blind window across an LY advance, at the same scope
+        # the FIFO renderer opens it (see ly_advance_close and LY_BLIND_SCOPE):
+        # rendered lines and vblank-to-vblank, not the entry into vblank.
         if int(ppu.ly) == GB_HEIGHT:
           ppu.`mode_flag=`(1'u8, gb)
           gb.interrupts.vblank_interrupt = true
@@ -191,14 +194,17 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           when defined(gb_dot_counter): inc gb_frame_normal
           ppu.dots_since_frame = 0
         else:
-          ppu.`mode_flag=`(2'u8, gb)
+          ly_advance_line(ppu, gb)
     elif ppu.mode_flag == 1:     # V-Blank
       if ppu.cycle_counter >= 456:
         ppu.cycle_counter -= 456
-        if ppu.ly != 0: ppu.ly += 1
-        when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-        ppu_handle_stat_interrupt(ppu, gb)
-        if ppu.ly == 0:
+        if ppu.ly != 0:
+          ppu.ly += 1
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+          ly_advance_vblank(ppu, gb)
+        else:
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+          ppu_handle_stat_interrupt(ppu, gb)
           ppu.`mode_flag=`(2'u8, gb)
       # Same edge as the FIFO renderer's (see fifo_line153_edge): LY changing is
       # what the STAT line's comparator watches, so the detector runs on it.

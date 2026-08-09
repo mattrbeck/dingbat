@@ -1016,6 +1016,10 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # frame). What that costs is exactly the rows where the drop and the rise are
   # two edges of their own, which is what a level-triggered OR into one detector
   # does with a comparator that really does go low.
+  #
+  # Every OTHER LY advance opens the same window, and it is NOT spelled here:
+  # see ly_advance_open below for why it is spelled as the enable bit instead,
+  # and the write-up above it for what derives it.
   # `ly == 0` first, in line, and the rest behind the call: see lyc_settling.
   let settling = ppu.ly == 0'u8 and ppu.lyc_settling
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
@@ -1037,6 +1041,114 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
            " mode=", ppu.mode_flag
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
+
+# ---- An ordinary LY advance is an edge the STAT line has to see too ---------
+#
+# The line boundary moves two of the STAT interrupt line's inputs at once -- LY,
+# and the mode -- and dingbat used to move both and then ask the edge detector
+# once. A level-OR asked once cannot see one source hand the line over to
+# another, so every such handover was silently swallowed. gambatte's
+# lcdirq_precedence family is thirty-one ROMs built to catch exactly that, and
+# they do not agree with each other unless the inputs move in a definite order:
+#
+#   * `lycirq_ly44_lcdstat48` -- sources LYC + mode 0, LYC = $44. The mode 0
+#     source holds the line high through line $43's HBlank and LYC = $44 comes
+#     true at the top of line $44. Hardware wants an interrupt (out2), so the
+#     line DIPS: mode 0 lets go before the match arrives.
+#   * `lcdirqprecedence_lycirq_ly44_lcdstat68` -- the same, plus the mode 2
+#     source. Hardware wants NO interrupt (out0), so mode 2 catches the line on
+#     the way down: mode 0 -> mode 2 really is one instant, and the dip above is
+#     the match arriving LATE rather than the mode leaving early.
+#   * `m1irq_lcdstat50_lyc8f` -- sources LYC + mode 1, LYC = $8F. The match
+#     holds the line high through line 143 and mode 1 takes over at line 144.
+#     Hardware wants an interrupt (out3), so the line dips here too: the match
+#     lets go BEFORE the mode change.
+#   * `m1irq_lcdstat18` -- sources mode 1 + mode 0, no LYC at all, over the same
+#     two lines, and hardware wants no interrupt (out1). So it is not the
+#     mode 0 -> mode 1 handover that dips; it is only ever the comparator.
+#   * `m2enable/enable_after_lycint_1` -- sources LYC + mode 2, LYC = 5, and the
+#     match hands over to the next line's OAM pulse. Hardware wants NO interrupt
+#     (out1). So the OAM pulse is NOT after the comparator's drop the way mode 1
+#     is; it is at least simultaneous with it.
+#
+# One rule fits all of them. **The LY=LYC comparator answers nothing while LY is
+# changing**: it drops before LY moves and comes back only after the mode has
+# moved with it. That is not a new mechanism -- it is the one the READ path
+# already has (LY_JUST_CHANGED in ppu_read, pinned by mooneye lcdon_timing-GS,
+# and written up at LYC_SETTLE_DOTS above, which says in as many words that the
+# 153 -> 0 snapback is "an LY change like any other"). The interrupt SOURCE
+# simply never got it.
+#
+# And the OAM source sits INSIDE that window rather than after it, which is the
+# reading this file already argues for on independent grounds: see m2_source --
+# "it is tied to a line starting, not to a mode". A rendered line starting is
+# the same instant the comparator lets go on, so mode 2's arrival and mode 0's
+# departure both happen with the window open. Entering vblank is not a line
+# start: nothing scans OAM, the mode 1 source and m2_line144's once-a-frame
+# pulse are consequences of the mode changing, and they land after the
+# comparator's drop. That asymmetry is what the last two ROMs above measure
+# against each other, and it is the whole difference between them.
+#
+# Width: the entire window lives inside the boundary dot, so no CPU M-cycle can
+# observe the low and no interrupt's arrival time moves -- a LYC match still
+# reaches IF on the M-cycle it always did. A window one M-cycle wide, like the
+# snapback's, would push every LYC STAT interrupt a whole M-cycle later, which
+# gambatte lycEnable/lycm2int and mooneye intr_2_* refuse.
+#
+# What bounds the blast radius: every evaluation the boundary now runs is the
+# old one with the comparator masked off, and the LAST one is the old one
+# exactly. Masking a term out of an OR can only lower the line, so a rise the
+# old single call reached is still reached; this can only ADD an edge, where the
+# line dipped inside the dot, and never lose one.
+#
+# The one exception the callers carry is a CPU write to LYC/STAT/LCDC parked in
+# the same M-cycle (`stat_write_pending`). That write has already been given its
+# own instant -- the M-cycle boundary, where mem_flush_deferred takes its edge
+# (see ppu_write_machinery) -- and running the comparator's glitch as well would
+# count one change of the comparator's inputs twice. gambatte's lycEnable
+# `ff45_enable_weirdpoint` family is what says so and is named for it: four ROMs
+# that write LYC = LY+1 one M-cycle apart across the LY advance, expecting an
+# interrupt on either side and NONE at the step that lands on the boundary
+# itself (dmg 3,3,1,3; cgb 3,1,3,3). Without the exception the window fills that
+# notch in on both devices; with it, 3 of the 4 rows it would cost come back and
+# `lyc153_late_ff45_enable` with them, at a cost of 5 of the 36 it gains.
+#
+# ---- Why this is spelled as the enable bit --------------------------------
+#
+# The window wants ONE term of the STAT line held low for two evaluations, and
+# the obvious spelling is a `ly_changing` flag ORed into `settling` above. That
+# flag was built and costs **+1.19% of ALL retired instructions** on Pokemon
+# Crystal, for work that happens 154 times a frame. It is not the work: the same
+# tree with the flag present and never set costs the same. It is the extra field
+# read in `stat_flag`, which reaches the mode-3 dot loop through `mode_flag=`
+# and pushes it over clang's inline threshold -- the cliff at
+# docs/gb_oam_dma_cost.md, the same one `lyc_settling` and `fifo_line153_edge`
+# are `noinline` for.
+#
+# Taking the LYC source's ENABLE bit away instead costs nothing at all: the line
+# already loads `lcd_status` for that very term, so the window adds no read to
+# the hot expression and no field to GbPpu. It is a means and not the model --
+# the ROM's bit has not changed and is put straight back -- and it is safe
+# because nothing is ticked between the two calls, so no CPU read and no capture
+# can fall inside. The readable coincidence bit deliberately does NOT dip with
+# it: that half of the window is already the read path's (LY_JUST_CHANGED), it
+# is a whole M-cycle wide there rather than one dot, and no read can see this
+# one anyway.
+proc ly_advance_open*(ppu: GbPpu): uint8 {.inline.} =
+  ## The comparator lets go, and returns what to put back. Zero if a CPU write
+  ## to LYC/STAT/LCDC is parked for this M-cycle: that write has its own instant
+  ## at the M-cycle boundary already (mem_flush_deferred), and running the
+  ## comparator's glitch as well counts one input change twice -- see the
+  ## ff45_enable_weirdpoint paragraph above.
+  if ppu.stat_write_pending: return 0'u8
+  result = ppu.lcd_status and 0x40'u8
+  ppu.lcd_status = ppu.lcd_status and 0b1011_1111'u8
+
+proc ly_advance_close*(ppu: GbPpu; gb: GB; lyc_en: uint8) {.inline.} =
+  ## The far side: the mode has moved, so the comparator answers again and a
+  ## match that has just become true raises the line here.
+  ppu.lcd_status = ppu.lcd_status or lyc_en
+  ppu_handle_stat_interrupt(ppu, gb)
 
 proc ppu_stat_write_glitch*(ppu: GbPpu; gb: GB) =
   ## The DMG STAT-write bug. Pan Docs, "Spurious STAT interrupts": "A hardware
@@ -1233,6 +1345,40 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
     if gb.cpu.halted: ppu.hdma_block_due = true
     else:             ppu_step_hdma(ppu, gb)
+
+proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## A rendered line starting, with the comparator's blind window around it:
+  ## see ly_advance_open. The mode change is INSIDE the window, because mode 2
+  ## and the OAM pulse are the line start itself.
+  ##
+  ## The whole boundary rather than the window alone, and `noinline`, because of
+  ## where it is called from: fifo_tick_slow's dot loop is inlined into the bus
+  ## path and sits on clang's inline threshold (docs/gb_oam_dma_cost.md). Spelled
+  ## open, `mode_flag=`, close at the call site it costs **+1.19% of ALL retired
+  ## instructions** on Pokemon Crystal -- for work that happens 144 times a frame
+  ## and cannot be that -- and the same tree with the window compiled out costs
+  ## nothing, so it is the dot loop's shape and not the work. As one call
+  ## replacing the `mode_flag=` call that was already there, it is free.
+  let lyc_en = ly_advance_open(ppu)
+  ppu.`mode_flag=`(2'u8, gb)
+  ly_advance_close(ppu, gb, lyc_en)
+
+proc ly_advance_vblank*(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## A vblank line starting: the same window with no mode change inside it.
+  ## `noinline` for the reason above.
+  let lyc_en = ly_advance_open(ppu)
+  ppu_handle_stat_interrupt(ppu, gb)
+  ly_advance_close(ppu, gb, lyc_en)
+
+proc ly_advance_vblank_entry*(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## Line 143 -> 144. Entering vblank is not a line start, so the mode 1 source
+  ## and m2_line144's once-a-frame pulse arrive AFTER the comparator's drop
+  ## rather than with it. Only reachable at LY_BLIND_SCOPE >= 2, which does not
+  ## ship -- see that knob in gb.nim for what it is waiting on.
+  let lyc_en = ly_advance_open(ppu)
+  ppu_handle_stat_interrupt(ppu, gb)
+  ppu.`mode_flag=`(1'u8, gb)
+  ly_advance_close(ppu, gb, lyc_en)
 
 proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
   palette[0] = val and 0x3

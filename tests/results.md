@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 13:57:11*
+*Generated: 2026-08-09 14:50:49*
 
 ## Game Boy - Blargg
 
@@ -1021,13 +1021,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/dmgpalette_during_m3 | 👀 7/17 passed |
 | gambatte/enable_display | 👀 135/184 passed |
 | gambatte/halt | 👀 124/158 passed |
-| gambatte/irq_precedence | 👀 41/64 passed |
+| gambatte/irq_precedence | 👀 46/64 passed |
 | gambatte/lcd_offset | 👀 40/62 passed |
-| gambatte/lcdirq_precedence | 👀 54/62 passed |
-| gambatte/ly0 | 👀 74/96 passed |
+| gambatte/lcdirq_precedence | 👀 60/62 passed |
+| gambatte/ly0 | 👀 75/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
-| gambatte/lyc153int_m2irq | 👀 11/16 passed |
-| gambatte/lycEnable | 👀 179/225 passed |
+| gambatte/lyc153int_m2irq | 👀 12/16 passed |
+| gambatte/lycEnable | 👀 181/225 passed |
 | gambatte/lycint_ly | 👌 6/6 passed |
 | gambatte/lycint_lycflag | 👀 11/12 passed |
 | gambatte/lycint_lycirq | 👀 2/4 passed |
@@ -1038,23 +1038,23 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
-| gambatte/m1 | 👀 123/170 passed |
+| gambatte/m1 | 👀 124/170 passed |
 | gambatte/m2enable | 👀 94/120 passed |
 | gambatte/m2int_m0irq | 👀 45/72 passed |
 | gambatte/m2int_m0stat | 👀 3/6 passed |
-| gambatte/m2int_m2irq | 👀 12/18 passed |
+| gambatte/m2int_m2irq | 👀 15/18 passed |
 | gambatte/m2int_m2stat | 👀 4/8 passed |
 | gambatte/m2int_m3stat | 👀 29/44 passed |
-| gambatte/miscmstatirq | 👀 260/279 passed |
+| gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 681/811 passed |
 | gambatte/scx_during_m3 | 👀 49/141 passed |
 | gambatte/scy | 👌 67/67 passed |
-| gambatte/serial | 👀 48/82 passed |
+| gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
 | gambatte/speedchange | 👀 112/208 passed |
 | gambatte/sprites | 👀 407/476 passed |
-| gambatte/tima | 👀 216/232 passed |
+| gambatte/tima | 👀 218/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |

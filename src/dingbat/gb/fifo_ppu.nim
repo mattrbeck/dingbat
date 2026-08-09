@@ -3131,28 +3131,43 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # unsplit build and for anything that stepped over that dot.
           when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
           ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
+          # The comparator lets go here and answers again in ly_advance_close. A
+          # rendered line starting happens INSIDE that window -- mode 2 and the
+          # OAM pulse ARE the line start -- so the mode change goes between the
+          # two. Entering vblank is not a line start and is outside the window's
+          # scope entirely; see the write-up above ly_advance_close.
           if int(ppu.ly) == GB_HEIGHT:
-            ppu.`mode_flag=`(1'u8, gb)
+            when LY_BLIND_SCOPE >= 2: ly_advance_vblank_entry(ppu, gb)
+            else:                     ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
             ppu.frame = true
             when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0
             ppu.current_window_line = -1
           else:
-            ppu.`mode_flag=`(2'u8, gb)
+            when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
+            else:                     ppu.`mode_flag=`(2'u8, gb)
       of 1:  # V-Blank
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           when STAT_READ_HOLD: ppu.stat_hold_until -= 456
-          if ppu.ly != 0:
+          # Same window as the visible boundary above, with no mode change
+          # inside it: vblank line to vblank line. Line 153's own advance to 0 is
+          # not here -- fifo_line153_edge already ran it, with the wider
+          # LYC_SETTLE_DOTS window it is measured to have -- and the `ly == 0`
+          # branch is that snap's mode 1 -> 2, not an LY change.
+          if ppu.ly == 0:
+            when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+            ppu_handle_stat_interrupt(ppu, gb)
+            ppu.`mode_flag=`(2'u8, gb)
+          else:
             ppu.ly += 1
             ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
-          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-          ppu_handle_stat_interrupt(ppu, gb)
-          if ppu.ly == 0:
-            ppu.`mode_flag=`(2'u8, gb)
+            when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+            when LY_BLIND_SCOPE >= 1: ly_advance_vblank(ppu, gb)
+            else:                     ppu_handle_stat_interrupt(ppu, gb)
         when STAT_IRQ_SPLIT:
           # LY 153 snaps back to 0 partway through the line, and the LYC=0
           # source sees it a lead ahead of the readable LY -- one edge, two

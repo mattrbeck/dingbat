@@ -7,6 +7,31 @@ import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
+const LY_BLIND_SCOPE* {.intdefine.} = 1
+  ## Which LY advances open the LY=LYC comparator's blind window (the write-up
+  ## is above `ly_advance_close` in ppu.nim): -1 none, 0 rendered line
+  ## boundaries only, 1 also vblank line to vblank line, 2 also the mode 0 -> 1
+  ## entry into vblank on line 144.
+  ##
+  ## Whole gambatte suite, one build per cell, against `main` at ab0d7d6 and
+  ## with IRQ_SAMPLE_T = 16 throughout (its own 16 rows are in every cell):
+  ##
+  ##   scope   gambatte   vs main
+  ##     -1      3871     +16 / -1
+  ##      0      3885     +31 / -2
+  ##      1      3887     +33 / -2   <- ships
+  ##      2      3899     +57 / -14
+  ##
+  ## **2 is not refused; it is unresolved, and it belongs to a different
+  ## quantity.** Every one of the twelve rows it costs is in `m1`, every one is
+  ## a handover between the mode 1 source and something else at the top of line
+  ## 144, and they place that source and the vblank IF bit one M-cycle apart
+  ## (`m2m1irq_ifw` wants 3,1,0 across three steps: the STAT edge before the
+  ## vblank flag, with dingbat putting both on the same dot). That is bucket 18
+  ## of docs/gb-failure-triage.md -- "whether the mode-1 STAT source asserts at
+  ## all on entering vblank, and how it overlaps the vblank IF bit" -- and the
+  ## window cannot be scored at line 144 until it is settled. It is worth +24
+  ## rows gross when it is.
 # The two open axes of the STAT model, declared here rather than next to their
 # write-up in gb/ppu.nim only because the GbPpu fields they gate are in the type
 # block below. Both ship at the value that needs no field and no branch, so the

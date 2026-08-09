@@ -288,12 +288,76 @@ net-negative, and that distinction is the whole point of the ranking.
 | **0** | **`LY0-RESYNC` — line 0's pixel pipeline runs one M-cycle ahead.** 125 png rows fail on **scanline 0 only**, with lines 1–143 pixel-exact | **125** (`scy` 55, `bgtilemap` 28, `bgtiledata` 24, `scx_during_m3` 17, `bgen` 1) | **boundary column, and an unusually sharp one**: a per-scanline PNG differ | small | **cold** — not in the dot loop | **+119 / −7**, shipped as `LY0_PIPE_MCYCLES` (gambatte 3658 → 3770) |
 | **1** | **`$FEA0-$FEFF` is real RAM on CGB** — dingbat answers `$00` for every model; the ROMs seed the region with a `PUSH` and read it back | **26** (`oamdma` `busypushFEA1`/`busypushFF01`) | the ROM itself | ~5 lines + a savestate field (payload revision bump) | cold | **+26 / −0** |
 | **2** | **HDMA source outside cartridge/WRAM moves `$FF`** | **4** (`dma`) | `dma_hiram_read_result` reports the *value* | done | cold | **+4 / −0**, shipped as `a7b6355` |
-| **3** | **STAT edge-detector re-trigger** — *every* `*_late_retrigger` ROM in the suite fails, across five STAT sources and the timer, bidirectionally | **28** (`irq_precedence` 6, `m1` 6, `ly0` 6, `m2int_m2irq` 3, `lyc153int_m2irq` 3, `tima` 4) | pairs, ±1 M-cycle | small | cold | not built |
-| **4** | **STAT source enabled by an `$FF41` write while already high must produce an edge** — the bit is *absent*, not mistimed | **8** (`lcdirq_precedence`, the whole family) | pass/fail only | small | cold | not built |
+| **3** | ~~**STAT edge-detector re-trigger**~~ **— not the edge detector; the interrupt DISPATCH's IF clear.** The level-OR and its rising-edge detector were already right. What was wrong is that the dispatch cleared IF at T = 0 and then charged all 20 T-cycles, so any source that rose inside the 5 M-cycles survived. The clear belongs at **T = 16**, the start of the fifth M-cycle | **28** (`irq_precedence` 6, `m1` 6, `ly0` 6, `m2int_m2irq` 3, `lyc153int_m2irq` 3, `tima` 4) | pairs, ±1 M-cycle | small | cold | **built** as `IRQ_SAMPLE_T` in `gb/cpu.nim`: **+16 / −1**, a strict local maximum (12 → +1/−0, 20 → +27/−14). Recovers `m2int_m2irq`, `tima`, `irq_precedence`, `serial` and the `_ds` arms of `ly0`/`lyc153int_m2irq`/`m1`. **Does NOT recover the nine single-speed `ly0` rows** — see below |
+| **4** | ~~**STAT source enabled by an `$FF41` write while already high**~~ **— not the write; the LY=LYC comparator's blind window on the SOURCE.** A line boundary moves LY and the mode at once, and one evaluation cannot see a source hand the line to another. The comparator drops before LY moves and answers again after the mode has — the read path's own `LY_JUST_CHANGED` rule, which the interrupt line never had | **8** (`lcdirq_precedence`, the whole family) | pass/fail only | small | cold | **built** as `ly_advance_close` / `GbPpu.ly_changing`: **+20 / −1** on top of bucket 3 (6 of the 8 `lcdirq_precedence` rows, plus 12 `miscmstatirq` and 3 `lycEnable`). The other 2 need the window at the line-144 entry, which is blocked on bucket 18 |
 | **5** | **DMG CH3 wave-RAM access rule** — CGB already correct; the documented "wave RAM is only accessible on the dot CH3 reads it" gap | **8** (`sound`, DMG only) | famflip: `exp=FF,FF,FF,FF got=10,32,32,54` | small | cold (APU) | not built |
 
 Tier 1 is **199 rows** for work that is individually small, individually
 self-contained, and blocked on nothing.
+
+**Buckets 3 and 4 were built together, 2026-08-09, and both were misnamed.**
+Neither is what its row above originally said, and the correction is the useful
+part.
+
+Bucket 3 is not the STAT edge detector. `*_late_retrigger` appears under five
+STAT sources *and* under the timer, and the timer has no edge detector at all,
+so the quantity has to be in the part they share: the dispatch. Each ROM's
+handler re-requests its own interrupt with an `LDH ($0F),A` that moves by one
+M-cycle per family member, `EI`s, and reads IF back inside the second dispatch.
+`m2int_m2irq_late_retrigger_{1,2}` reads the answer out directly — the STAT
+source rises on the same dot either way, only the dispatch moves, and hardware
+keeps the bit when the dispatch starts 19 T before the rise and loses it at 15 —
+so the clear is at T = 16, the fifth M-cycle. Pan Docs' "Interrupt Handling"
+describes that M-cycle as the one that sets PC to the handler.
+
+Bucket 4 is not "an `$FF41` write while the condition is already high". The
+failing ROMs' `$FF41` write is ~200 M-cycles ahead of the IF read it is scored
+on, and the edge hardware produces is at the LY advance in between. The whole
+`lcdirq_precedence` family is a bracket on the ORDER of the line boundary's two
+input changes, and four of its ROMs pin it against each other:
+`lycirq_ly44_lcdstat48` (LYC + mode 0) wants a dip, its `_lcdstat68` twin (the
+same, plus mode 2) wants none, `m1irq_lcdstat50_lyc8f` (LYC + mode 1) wants one
+and `m1irq_lcdstat18` (mode 1 + mode 0, no LYC) wants none. One rule fits all
+four and no other does: **the LY=LYC comparator answers nothing while LY is
+changing** — it lets go before LY moves and comes back only after the mode has
+moved with it. That is the read path's rule (`LY_JUST_CHANGED` in `ppu_read`,
+mooneye `lcdon_timing-GS`) applied to the interrupt SOURCE, which never had it,
+and it is the same sentence `LYC_SETTLE_DOTS` already writes for the 153 → 0
+snapback: "an LY change like any other".
+
+Two riders came out of the same measurement and are worth keeping:
+
+* **The OAM source rises with the LINE, not with the mode.** `m2enable/
+  enable_after_lycint_1` hands a LYC match over to the next line's OAM pulse and
+  wants NO interrupt, while `m1irq_lcdstat50_lyc8f` hands the same match over to
+  mode 1 and wants one. So mode 2's arrival is inside the blind window and mode
+  1's is after it — which is the reading `m2_source` in `gb/ppu.nim` already
+  argues on independent grounds ("tied to a line starting, not to a mode").
+* **A CPU write parked for this M-cycle takes the window's place.** gambatte's
+  `lycEnable/ff45_enable_weirdpoint` is named for the notch it measures: writing
+  LYC = LY+1 one M-cycle apart across the advance gives an interrupt on either
+  side and none at the step that lands on the boundary. `stat_write_pending`
+  already gives that write its own instant at the M-cycle boundary; running the
+  comparator's glitch as well counts one input change twice.
+
+**What is still open, and it is the correction that matters most.** The ten
+gambatte rows `ab0d7d6` traded for the snapback are recorded there as "the known
+STAT edge-detector re-trigger bucket, which used to cancel against this dot".
+That attribution is now measured and is **wrong for nine of the ten**. Bucket 3
+at its pinned T = 16 recovers exactly one of them
+(`lycint152_lyc153irq_late_retrigger_ds_2`). The remaining nine are all `ly0`
+`lyc0irq_ifw` / `lyc0irq_late_retrigger` / `lyc153irq_late_retrigger`, and they
+need the LYC = 0 relatch to land *before* a CPU store that commits in the same
+M-cycle. `daid/ppu_scanline_bgp` independently pins that relatch INTO M-cycle
+[9..12] of line 153 (it is pixel-exact at `LYC_SETTLE_DOTS` = 4 and 6 and wrong
+at 2 and 8, i.e. the pin is at M-cycle granularity), and `mem_write` commits a
+CPU byte at the top of its M-cycle. So the third quantity these rows are waiting
+on is the IF store's commit point against a PPU edge inside the same M-cycle —
+already measured and refused as a whole-register move (`mem_flush_deferred`:
+deferring IF costs 18 rows to buy 1), which means it needs a rule finer than
+"early or late", not a knob. **They are not bucket 3, and no setting of
+`IRQ_SAMPLE_T` reaches them**: at 20 the `_1` arm of every other retrigger
+family goes red.
 
 **Bucket 0 deserves its own paragraph**, because it is the largest actionable
 finding in this triage and it was hiding behind a whole-frame percentage. Every
