@@ -406,6 +406,87 @@ const WIN_EN_ABORT*           {.intdefine.} = 1
   ## 4215 -> 343, DMG total +12746 and CGB +25758, and three gambatte
   ## window/on_screen rows -- weon_wx18_weoff_weon_wx80 on both devices and
   ## wx17_weoff_wxA5_weon on DMG, which are that mechanism by name.
+const WIN_EN_HOLD*            {.intdefine.} = 2
+  ## Dots a WX match that LCDC.5 refused stays live, waiting for the bit. 0 is
+  ## the control build and the pre-2026-08-09 behaviour: a match with LCDC.5
+  ## low is simply dropped and only a later match can start the window.
+  ##
+  ## ---- What refuses the two obvious readings ------------------------------
+  ##
+  ## mealybug `m3_lcdc_win_en_change_multiple_wx` is the ruler. It writes
+  ## WX = LY, then clears LCDC.5 over dots 97..104 of every line and again over
+  ## 125..132, so the window's trigger pixel `t = LY - 7` walks one dot per line
+  ## straight through both pulses and the frame reads out, once per scanline,
+  ## what a match at each offset from the pulse does. Its reference:
+  ##
+  ##   t (band 1)      0    1  2  3..7    8      9     10     11
+  ##   match dot      94   95 96 97..101 102    103    104    105
+  ##   reference     x=0   -- -- --      one    x=10   x=10   x=11
+  ##                                     white
+  ##
+  ## and band 2 (pulse at 125..132) repeats it at t = 28..39. Two readings are
+  ## refused outright by the two ends of that table. The bit sampled at the
+  ## match dot alone (`WIN_EN_HOLD = 0`) draws nothing at t = 9 and t = 10,
+  ## where hardware draws a whole window -- 296 wrong pixels. The bit sampled at
+  ## the fetcher's tile-map read instead, two dots later, gets every band edge
+  ## right but has to RESTART the fetch before it knows the answer, and that is
+  ## refused from the other side: gambatte `window/late_disable_*`,
+  ## `late_reenable_*` and 36 `sprites/space/*` rows read STAT expecting mode 0
+  ## and get mode 3, because the restart the abort then undoes still costs the
+  ## line six dots (measured: gambatte 3827 -> 3750, window -40). Hardware pays
+  ## nothing for a match it refuses.
+  ##
+  ## ---- What the table says instead ----------------------------------------
+  ##
+  ## The match is not dropped and it is not committed: it WAITS. Two dots of
+  ## wait is what the table brackets, from both ends of both bands at once --
+  ## t = 9's match waits two dots for the bit and t = 8's, one dot earlier,
+  ## expires unserved. Two, not three: t = 8 would be served at three. And the
+  ## window then starts on the dot the bit arrives, not on the dot it matched,
+  ## which is why t = 9 and t = 10 both draw from x = 10 (band 2: t = 37 and
+  ## t = 38 both from x = 38) -- one pixel right of where t = 9's own match was.
+  ## That coincidence is the sharpest thing in the row: two adjacent scanlines
+  ## whose windows begin at the same x, which no rule that starts the window at
+  ## its own match pixel can produce.
+  ##
+  ## Worth 296 wrong pixels -> 4 on that row. Nothing else in the mealybug set
+  ## moves and no gambatte row does either: a refused match costs no dots (the
+  ## shifter is not stalled while the hold runs), so every family above keeps
+  ## the length it had.
+const CGB_WIN_EN_HOLD*        {.intdefine.} = 0
+  ## WIN_EN_HOLD on a CGB, which is not the same number. The evidence is thin
+  ## on purpose: mealybug's `_cgb_c` reference for the row above is already
+  ## pixel-exact with no hold at all and stays exact with one, so it says
+  ## nothing, and the only instrument that separates the devices is gambatte
+  ## `window/late_reenable_scx5_2` -- one ROM, whose DMG half wants mode 3 still
+  ## running at the read (which is the hold, and which goes green with it) and
+  ## whose CGB half wants mode 0 (which is no hold). `late_reenable_scx2_2` is
+  ## the same pair one SCX apart and says the same thing, and
+  ## `window/late_enable_ly0_ds_2` refuses a hold on CGB from the second
+  ## direction. So: DMG holds, CGB does not, and this is the constant that
+  ## would move if a CGB ruler ever turns up.
+const WIN_EN_HOLD_BACK*       {.intdefine.} = 1
+  ## Whether a match that WAITED starts the window one pixel left of the pixel
+  ## the shifter has reached (1, shipping) or at that pixel (0). The ruler
+  ## above pins it: at 0, `t = 9` and `t = 10` both draw from x = 11 where the
+  ## reference has x = 10, and band 2's pair from x = 39 against x = 38 -- 10
+  ## wrong pixels against 4.
+  ##
+  ## It is the SAME slot the comparator sits in -- "its counter runs one lower
+  ## than the emitted-pixel index" (WIN_START_PRE_PIXEL) -- and it is what makes
+  ## two adjacent scanlines of the ruler begin their windows at the same x,
+  ## which is the part of that reference no rule anchored to the match pixel
+  ## can produce. The pixel it takes back has already been written as
+  ## background and the window's first push writes over it.
+  ##
+  ## Two gambatte rows bracket the dot it costs, and they are the two halves of
+  ## one family: `window/late_reenable_scx2_2` [dmg] wants mode 3 still running
+  ## at its read, which needs the served restart to be one dot later than the
+  ## drawn-through hold makes it (this rule, green), and
+  ## `window/late_disable_scx2_0` [dmg] wants mode 0 on a line whose match is
+  ## refused and never served, which needs an UNSERVED hold to cost nothing
+  ## (also this rule, green -- the dot is taken at the serve, not at the
+  ## match). Spending the dot at the match instead costs the second row.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in
@@ -1466,6 +1547,11 @@ type
     # Next to `lx` on purpose -- the two are compared on every mode 3 dot, and
     # putting it after the bool block instead measured +0.6% on its own.
     win_lx*:              int32
+    # Dots of WIN_EN_HOLD left on a WX match that LCDC.5 refused. Zero means
+    # no match is waiting, which is every dot of almost every line; while it is
+    # nonzero `win_lx` is the hold's own retry pixel and fifo_arm_window leaves
+    # it alone. Per-line scratch.
+    win_hold*:            uint8
     smooth_scroll_sampled*: bool
     dropped_first_fetch*: bool
     # The line's FIRST `B01s` cycle -- the one that follows the discarded fetch

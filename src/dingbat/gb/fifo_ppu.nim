@@ -77,9 +77,19 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
   ## from every write that can move one of the four inputs (LCDC, WX, the WY
   ## latch) and from fifo_reset_bg, which is where the fourth (fetching_window)
   ## moves. Nothing here is on a per-dot path.
+  when WIN_EN_HOLD > 0:
+    # A refused match owns the comparator until its hold runs out: `win_lx` is
+    # the dot it is waiting on, not a function of WX any more, and the LCDC
+    # write that ENDS the hold is one of the writes that lands here. See
+    # WIN_EN_HOLD.
+    if ppu.win_hold > 0'u8: return
   ppu.win_lx =
-    if not window_enabled(ppu): WIN_LX_OFF
-    elif ppu.fetching_window:   int32(ppu.wx) - 8
+    if ppu.fetching_window:
+      # The re-trigger edge does need the bit here: window_reactivate is only
+      # reached while the window IS the fetch source, and nothing holds a
+      # re-trigger (WIN_EN_HOLD is about the START).
+      if window_enabled(ppu): int32(ppu.wx) - 8 else: WIN_LX_OFF
+    elif not window_enabled(ppu) and WIN_EN_HOLD == 0: WIN_LX_OFF
     elif ppu.window_trigger:
       # ---- The comparator has ONE slot left of the shifter's first pixel ----
       #
@@ -148,6 +158,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.fetching_window = false
   ppu.fetching_sprite = false
   ppu.win_lx = WIN_LX_OFF
+  ppu.win_hold = 0'u8
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.obj_fix_from = OBJ_FIX_OFF
@@ -283,6 +294,7 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   # tile onto the window's.
   ppu.obj_tile_fx = -1
   if fetching_window: inc ppu.current_window_line
+  when WIN_EN_HOLD > 0: ppu.win_hold = 0'u8
   fifo_arm_window(ppu)
 
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
@@ -2310,8 +2322,42 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
                " fc=", ppu.fetch_counter, " fw=", ppu.fetching_window,
                " fifo=", ppu.fifo.size
       if not ppu.fetching_window:
-        fifo_reset_bg(ppu, true)
-        return
+        when WIN_EN_HOLD > 0:
+          # ---- The match waits for LCDC.5; it is not dropped by it ---------
+          #
+          # See WIN_EN_HOLD. `window_enabled` is asked HERE rather than in
+          # fifo_arm_window so that a match the bit refuses is still seen, and
+          # the hold below is what keeps the comparator on it for the two dots
+          # the bit has left to arrive in. Nothing on this path costs a
+          # window-less line anything: with the bit low and no match armed,
+          # `win_lx` is WIN_LX_OFF exactly as before and the branch is never
+          # reached.
+          if not window_enabled(ppu):
+            let hold = if ppu.cgb: uint8(CGB_WIN_EN_HOLD)
+                       else:       uint8(WIN_EN_HOLD)
+            if hold == 0'u8:
+              ppu.win_lx = WIN_LX_OFF
+            else:
+              if ppu.win_hold == 0'u8: ppu.win_hold = hold
+              else: dec ppu.win_hold
+              ppu.win_lx =
+                if ppu.win_hold == 0'u8: WIN_LX_OFF else: ppu.lx + 1
+          else:
+            when WIN_EN_HOLD_BACK != 0:
+              # A match that WAITED starts the window one pixel left of the
+              # pixel the shifter has reached -- the same slot the comparator
+              # itself sits in (WIN_START_PRE_PIXEL), and the reason two
+              # adjacent scanlines of the ruler ROM begin their windows at the
+              # same x. The pixel it takes back has already been written to the
+              # framebuffer as background; the window's own first push writes
+              # over it. See WIN_EN_HOLD_BACK.
+              if ppu.win_hold > 0'u8: dec ppu.lx
+            # fifo_reset_bg clears the hold on its way through.
+            fifo_reset_bg(ppu, true)
+            return
+        else:
+          fifo_reset_bg(ppu, true)
+          return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
            window_enabled(ppu):
         # The re-trigger edge, injected in front of the pixel this dot is about
