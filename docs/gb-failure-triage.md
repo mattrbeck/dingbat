@@ -1462,7 +1462,7 @@ pixel 0, and the same one dot answers them.
 | `m3_bgp_change_sprites` | 104 | **0** | 104 | **0** |
 | `m3_lcdc_bg_en_change` | 59 | 4 | 59 | **0** |
 | `m3_lcdc_obj_en_change` | 2 | 2 | **0** | **0** |
-| `m3_lcdc_obj_en_change_variant` | 98 | 98 | 96 | 96 |
+| `m3_lcdc_obj_en_change_variant` | 98 | 98 | 96 | 96 (0 once the object fetch's cancel lands, below) |
 | `m3_window_timing` | 33 | 21 | 33 | 21 |
 
 CGB (DMG-compat, subpixels of 69120): `m3_bgp_change` 3 → 0,
@@ -1617,6 +1617,69 @@ i.e. main's spelling has no cost left to win back, so replacing a documented,
 in-tree mechanism that is already integrated with `MIXER_HEAD_LINGER`'s
 `(back, head)` reach would have been churn at equal row outcome. Only the two
 window mechanisms were ported.
+
+## `m3_lcdc_obj_en_change_variant`'s last 96 pixels: the object fetch is CANCELLED
+
+The variant's bands 16 and 17 are the only two in either `obj_en` ROM where the
+handler's `ld [c], a` lands *inside* an object's stall (OAM X = 16/17, trigger
+dots 102/103, write on dot 109). Pan Docs says the fetch is abandoned there and
+this tree did not model it; `fifo_obj_abort` in `gb/fifo_ppu.nim` now does, and
+that row goes **96 -> 0**.
+
+What is worth recording is not the cancel but the ONE DOT the two instruments
+that measure it disagree over, because it is the cleanest example in the tree of
+a flag oracle and a pixel oracle reading the same event:
+
+* twelve gambatte `sprites/sprite_late_{,late_}disable_*` rows read the mode
+  3 -> 0 flag back through STAT and bracket the refund from both sides at
+  `charge = W - 1 - T` (`W` the write dot, `T` the trigger dot);
+* the variant's BGP pulse is a pixel ruler -- its bands 8..15 calibrate it
+  exactly at run start `= 161 - P` for penalty `P` -- and its two aborted bands
+  put the run at x = 156 and 157, i.e. `charge = W - 2 - T`.
+
+Read as a function of `W - T`, ten of the twelve gambatte rows accept the
+mealybug answer too, so the whole conflict is **one ROM** (`spx19`, read at two
+STAT dots, hence two rows) against **two bands**, at configurations congruent to
+the dot: X mod 8 = 1, wait 4, `W - T` = 6, opposite answers.
+
+The split that satisfies both is a mechanism this tree already asserts -- mode 3
+ends when the FETCHER retires, not when the last pixel leaves:
+
+| | dots refunded | constant |
+|---|---|---|
+| shifter (pixels) | 2 | `OBJ_ABORT_LEAD`, = `M3_PIPE_DELAY` |
+| fetcher (mode 3 -> 0 flag) | 1 | `OBJ_ABORT_FLAG_HOLD`, carried in `m3_hold` |
+
+i.e. the cancelled VRAM cycle still owns the bus for its last dot. One build per
+cell, whole suites:
+
+| lead | hold | gambatte | mealybug DMG | what fails |
+|---|---|---|---|---|
+| 1 | 0 | 3818 | 552580 | variant bands 16/17, 16 px |
+| 2 | 0 | 3816 | 552596 | `spx19_2`, `late_late_spx19_2` |
+| **2** | **1** | **3818** | **552596** | nothing |
+
+At (2, 1) the whole 5,005-row gambatte suite is identical row for row AND detail
+for detail to (1, 0), because the flag's length is `W - 1 - T` either way, and
+the mealybug CGB set does not move at any setting. **No third ROM separates the
+pair from "one of the two instruments is a dot out"**; what would settle it is
+the gambatte geometry re-cut with a BGP pulse instead of a STAT read.
+
+Two other things fall out of the same commits and are pinned separately:
+
+* `fetch_work_pending` was holding mode 3 open for an object LCDC.1 had already
+  disabled -- `-d:gb_m3_len` read 174 where 172 was owed, on 96 lines of one
+  gambatte run -- which is four more `sprite_late_disable_*_1` rows;
+* `CGB_OBJ_ABORT = 0`: the same cart against `_cgb_c` gives those bands the FULL
+  penalty, 288 subpixels out with the cancel on. That one row cannot separate
+  "the CGB has no cancel" from "the CGB's LCDC.1 reaches the fetcher four or
+  more dots later", and every row that could is double-speed.
+
+Perf, `tools/gbppu/counters.sh`, five runs a side, `cycles=` identical in every
+pair: **-0.04%** retired instructions on `cgb-acid2` and **-0.18%** on
+`m3_lcdc_obj_en_change` (the latter genuinely does less work -- aborted lines
+are shorter). Nothing is added to the dot loop; the whole mechanism is two
+guards on an LCDC write.
 
 ## Reproducing any of this
 

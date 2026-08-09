@@ -448,6 +448,11 @@ proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
 # sprite_fetch_merge in fifo_ppu.nim.
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 
+# Clearing LCDC.1 in the middle of an object's stall cancels the fetch. Same
+# forward-declaration reason again; the body, the dot the shifter comes back on
+# and the twelve gambatte rows that bracket it are at fifo_obj_abort.
+proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB)
+
 template mixer_write_repaint(gb: GB; back: int32; skip: int32 = 0'i32) =
   ## Every register write below that the mixer reads ends with this. `back` is
   ## how many stages of the mixer tail the register is read at the far end of
@@ -1504,6 +1509,25 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # reads, and mealybug m3_lcdc_obj_en_change is what times them; see
     # fifo_recompose_last.
     mixer_write_repaint(gb, MIXER_PRIORITY_BACK)
+    # LCDC.1 is also a FETCHER read, and the two are separate: the mixer's copy
+    # decides the pixels already emitted, this decides whether the object's
+    # remaining stall dots are still owed. See fifo_obj_abort.
+    #
+    # `obj_penalty > 0` is "the object has not merged yet" and is the whole of
+    # the test's second half: `fetching_sprite` is still set on the tail dot
+    # OBJ_BG_RUN = 4 gives the fetcher after the merge, and on that dot the
+    # shifter is already running again and the object's pixels are already in
+    # the OBJ FIFO -- so LCDC.1 there is a MIXER question, which the repaint
+    # above has just answered. Without the test, mealybug
+    # m3_lcdc_obj_en_change_variant's band 0 (OAM X = 0, stall dots 94..104,
+    # write on 105) loses a dot it keeps on hardware: 7 pixels, and the only
+    # band in either ROM where the write lands on that dot.
+    when OBJ_ABORT != 0:
+      if (val and 0x02'u8) == 0 and
+         (CGB_OBJ_ABORT != 0 or not gb.cgb_enabled) and
+         gb.fifo_ppu != nil and gb.fifo_ppu.fetching_sprite and
+         gb.fifo_ppu.obj_penalty > 0:
+        fifo_obj_abort(gb.fifo_ppu, gb)
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF41:
