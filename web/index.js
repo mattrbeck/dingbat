@@ -926,11 +926,6 @@ const settingsStep = (sec, delta) => {
 
 let settingsSection = SETTINGS_SECTIONS[0];
 let settingsOnDetail = false;
-// Has a section been opened during THIS visit? The list's highlight means
-// "where you just were", so on a fresh open there is no answer yet and no row
-// is marked — a row lit up before you have touched anything reads as a
-// selection you did not make. Set on the first drill-in, cleared on close.
-let settingsVisited = false;
 
 const selectSettingsTab = (name) => {
   if (!SETTINGS_SECTIONS.includes(name)) name = SETTINGS_SECTIONS[0];
@@ -962,7 +957,6 @@ const selectSettingsTab = (name) => {
 const applySettingsScreen = () => {
   const sheet = settingsIsSheet();
   settingsFrame.classList.toggle("on-detail", sheet && settingsOnDetail);
-  settingsFrame.classList.toggle("list-unvisited", sheet && !settingsVisited);
   const off = !sheet ? null : settingsOnDetail ? settingsRail : settingsContent;
   for (const el of [settingsRail, settingsContent]) {
     if (el === off) el.setAttribute("inert", "");
@@ -1008,7 +1002,6 @@ const openSettingsSection = (name) => {
   selectSettingsTab(name);
   if (!settingsIsSheet() || settingsOnDetail) return;
   settingsOnDetail = true;
-  settingsVisited = true;
   settingsHistPush();
   applySettingsScreen();
   // preventScroll is load-bearing, not a nicety. Back lives inside the detail
@@ -1065,32 +1058,90 @@ settingsBackBtn.addEventListener("click", () => showSettingsList());
 settingsPrevBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, -1)));
 settingsNextBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, 1)));
 
-// Swipe the sheet's chrome down to dismiss. The sheet's HEIGHT is never
-// dragged — there is no half-height detent — only its offset, and only far
-// enough to read as a dismissal.
+// Swipe down to dismiss the sheet, from the chrome OR from anywhere in the
+// content — the latter only when its scroller is already at the top, which is
+// the rule every native bottom sheet uses. The sheet's HEIGHT is never dragged
+// (there is no half-height detent), only its offset, and only far enough to
+// read as a dismissal.
+//
+// Two states, because the two starting places want different commitments. On
+// the chrome there is nothing else the gesture could mean, so it drags on
+// contact. In the content it could equally be a scroll, so it stays PENDING
+// until the finger has moved far enough, and downward enough, to be sure —
+// and is abandoned the moment it looks like a scroll or a sideways drag.
+const SHEET_DRAG_SLOP = 8;    // px before a content drag commits
+const SHEET_DRAG_CLOSE = 90;  // px of travel that counts as a dismissal
 let sheetDragFrom = 0;
-let sheetDragDy = null;
+let sheetDragX0 = 0;
+let sheetDragDy = null;       // non-null once committed
+let sheetDragPending = false;
+let sheetDragScroller = null;
+
+const sheetScrollerFor = (el) =>
+  el?.closest?.(".settings-scroll, .settings-rail-body") || null;
+
 const endSheetDrag = () => {
+  sheetDragPending = false;
+  sheetDragScroller = null;
   if (sheetDragDy === null) return;
   const dy = sheetDragDy;
   sheetDragDy = null;
   settingsFrame.classList.remove("sheet-dragging");
   settingsFrame.style.transform = "";
-  if (dy > 90) closeSettingsModal();
+  if (dy > SHEET_DRAG_CLOSE) closeSettingsModal();
 };
-settingsFrame.addEventListener("pointerdown", (e) => {
-  if (!settingsIsSheet()) return;
-  const chrome = /** @type {Element} */ (e.target);
-  if (!chrome?.closest?.(".settings-grab, .settings-rail-head, .settings-head")) return;
-  sheetDragFrom = e.clientY;
+
+const commitSheetDrag = () => {
+  sheetDragPending = false;
   sheetDragDy = 0;
   settingsFrame.classList.add("sheet-dragging");
+};
+
+settingsFrame.addEventListener("pointerdown", (e) => {
+  if (!settingsIsSheet()) return;
+  const target = /** @type {Element} */ (e.target);
+  sheetDragFrom = e.clientY;
+  sheetDragX0 = e.clientX;
+  if (target?.closest?.(".settings-grab, .settings-rail-head, .settings-head")) {
+    commitSheetDrag();
+    return;
+  }
+  // Anywhere else: only if the thing under the finger is scrolled to the top.
+  // A control still works — a drag needs SHEET_DRAG_SLOP of travel, and a tap
+  // never gets there.
+  const scroller = sheetScrollerFor(target);
+  if (!scroller || scroller.scrollTop > 0) return;
+  sheetDragScroller = scroller;
+  sheetDragPending = true;
 });
+
 settingsFrame.addEventListener("pointermove", (e) => {
+  const dy = e.clientY - sheetDragFrom;
+  if (sheetDragPending) {
+    // Scrolled away under the finger, or the gesture turned upward or
+    // sideways: it was a scroll after all.
+    if ((sheetDragScroller && sheetDragScroller.scrollTop > 0) ||
+        dy < -2 || Math.abs(e.clientX - sheetDragX0) > Math.abs(dy)) {
+      sheetDragPending = false;
+      sheetDragScroller = null;
+      return;
+    }
+    if (dy < SHEET_DRAG_SLOP) return;
+    commitSheetDrag();
+  }
   if (sheetDragDy === null) return;
-  sheetDragDy = Math.max(0, e.clientY - sheetDragFrom);
+  sheetDragDy = Math.max(0, dy);
   settingsFrame.style.transform = "translateY(" + sheetDragDy + "px)";
 });
+
+// Non-passive, and the only reason it exists: once the drag is committed the
+// scroller underneath must stop rubber-banding, or iOS bounces the content
+// against the sheet's own translation. Pointer events cannot preventDefault
+// the touch scroll after the fact, so this does it.
+settingsFrame.addEventListener("touchmove", (e) => {
+  if (sheetDragDy !== null && e.cancelable) e.preventDefault();
+}, { passive: false });
+
 settingsFrame.addEventListener("pointerup", endSheetDrag);
 settingsFrame.addEventListener("pointercancel", endSheetDrag);
 
@@ -1141,7 +1192,6 @@ const openSettingsModal = () => {
   try { last = localStorage.getItem(SETTINGS_LAST_KEY); } catch {}
   selectSettingsTab(last || SETTINGS_SECTIONS[0]);
   settingsOnDetail = false;
-  settingsVisited = false;
   applySettingsScreen();
   // One entry for the list level, so a back gesture closes the sheet.
   if (settingsIsSheet()) settingsHistPush();

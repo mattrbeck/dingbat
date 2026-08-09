@@ -629,7 +629,7 @@
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gb" data-tab="gb" data-name="Game Boy" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gb">
                   <span class="settings-tab-name">Game Boy</span>
-                  <span class="settings-tab-desc">Renderer, Super Game Boy, boot ROM</span>
+                  <span class="settings-tab-desc">Boot ROM, shades, renderer, Super Game Boy</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gba" data-tab="gba" data-name="GBA" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gba">
@@ -649,7 +649,7 @@
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-general" data-tab="general" data-name="General" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-general">
                   <span class="settings-tab-name">General</span>
-                  <span class="settings-tab-desc">Theme, palette, rewind, run-ahead</span>
+                  <span class="settings-tab-desc">Theme, rewind, run-ahead, updates</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
               </div>
@@ -771,6 +771,41 @@
               </div>
 
               <div class="settings-pane" id="settings-pane-gb" role="tabpanel" aria-labelledby="settings-tab-gb" hidden>
+                <div class="modal-subhead no-rule">Boot ROM</div>
+                <div class="modal-row">
+                  <span class="modal-row-label">GBC Bootrom</span>
+                  <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
+                  <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
+                </div>
+                <p class="modal-hint">When a bootrom is set, the boot animation plays on Game Boy games.</p>
+                <div class="modal-subhead">Game Boy screen</div>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">Shade palette</span>
+                  <select id="gb-palette-mode" class="kb-select row-flow-ctl" aria-label="Game Boy shade palette">
+                    <option value="default">Game Boy default</option>
+                    <option value="theme">Match app theme</option>
+                    <option value="custom">Custom&hellip;</option>
+                  </select>
+                  <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Color titles are never affected.</span>
+                </div>
+                <p class="modal-hint" id="gb-palette-sgb-note" hidden>This game is running as a Super Game Boy and is drawing its own colors, so the shade palette has nothing to replace. Turn off Super Game Boy mode below to use it.</p>
+                <div class="gb-palette-row">
+                  <span class="gb-palette-label">In use</span>
+                  <span id="gb-palette-preview" class="gb-palette-preview" aria-hidden="true"></span>
+                  <button type="button" class="button button-sm gb-palette-reset" id="gb-palette-reset"
+                          title="Put the Game Boy shades back to their defaults — no other setting changes"
+                          aria-label="Reset the Game Boy shade palette">Reset</button>
+                </div>
+                <div class="gb-palette-row" id="gb-palette-custom-row" hidden>
+                  <span class="gb-palette-label">Pick</span>
+                  <span class="gb-palette-pickers">
+                    <input type="color" id="gb-palette-shade-0" class="gb-shade-input" aria-label="Shade 1 (lightest)" />
+                    <input type="color" id="gb-palette-shade-1" class="gb-shade-input" aria-label="Shade 2" />
+                    <input type="color" id="gb-palette-shade-2" class="gb-shade-input" aria-label="Shade 3" />
+                    <input type="color" id="gb-palette-shade-3" class="gb-shade-input" aria-label="Shade 4 (darkest)" />
+                  </span>
+                </div>
                 <div class="modal-subhead">Renderer</div>
                 <div class="radio-group" role="radiogroup" aria-label="Game Boy renderer">
                   <label class="radio-row">
@@ -799,15 +834,7 @@
                   </label>
                   <span class="modal-toggle-sub">The border makes the picture 256&times;224 instead of 160&times;144, so the screen changes shape when one appears.</span>
                 </div>
-                <div class="modal-subhead">Boot ROM</div>
-                <div class="modal-row">
-                  <span class="modal-row-label">GBC Bootrom</span>
-                  <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
-                  <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
-                </div>
-                <p class="modal-hint">When a bootrom is set, the boot animation plays on Game Boy games.</p>
-                <p class="settings-note">Renderer, Super Game Boy mode and boot ROM changes apply the next time a game is loaded. Showing or hiding the border takes effect immediately.</p>
+                <p class="settings-note">Boot ROM, renderer and Super Game Boy mode changes apply the next time a game is loaded. The shade palette, and showing or hiding the border, take effect immediately.</p>
               </div>
 
               <div class="settings-pane" id="settings-pane-gba" role="tabpanel" aria-labelledby="settings-tab-gba" hidden>
@@ -957,33 +984,6 @@
                   <button type="button" class="theme-chip" data-theme-name="glacier" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Glacier</button>
                   <button type="button" class="theme-chip" data-theme-name="daiei" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Daiei</button>
                   <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
-                </div>
-                <div class="modal-subhead">Game Boy screen</div>
-                <div class="modal-toggle-row row-flow">
-                  <span class="modal-row-label">Shade palette</span>
-                  <select id="gb-palette-mode" class="kb-select row-flow-ctl" aria-label="Game Boy shade palette">
-                    <option value="default">Game Boy default</option>
-                    <option value="theme">Match app theme</option>
-                    <option value="custom">Custom&hellip;</option>
-                  </select>
-                  <span class="modal-toggle-sub">The four shades a black-and-white Game Boy game is drawn in. Color titles are never affected.</span>
-                </div>
-                <p class="modal-hint" id="gb-palette-sgb-note" hidden>This game is running as a Super Game Boy and is drawing its own colors, so the shade palette has nothing to replace. Turn off Super Game Boy mode in the Game Boy tab to use it.</p>
-                <div class="gb-palette-row">
-                  <span class="gb-palette-label">In use</span>
-                  <span id="gb-palette-preview" class="gb-palette-preview" aria-hidden="true"></span>
-                  <button type="button" class="button button-sm gb-palette-reset" id="gb-palette-reset"
-                          title="Put the Game Boy shades back to their defaults — no other setting changes"
-                          aria-label="Reset the Game Boy shade palette">Reset</button>
-                </div>
-                <div class="gb-palette-row" id="gb-palette-custom-row" hidden>
-                  <span class="gb-palette-label">Pick</span>
-                  <span class="gb-palette-pickers">
-                    <input type="color" id="gb-palette-shade-0" class="gb-shade-input" aria-label="Shade 1 (lightest)" />
-                    <input type="color" id="gb-palette-shade-1" class="gb-shade-input" aria-label="Shade 2" />
-                    <input type="color" id="gb-palette-shade-2" class="gb-shade-input" aria-label="Shade 3" />
-                    <input type="color" id="gb-palette-shade-3" class="gb-shade-input" aria-label="Shade 4 (darkest)" />
-                  </span>
                 </div>
                 <div class="modal-subhead">Emulation</div>
                 <!-- Rewind is ON by default and stays that way for everyone who

@@ -3525,6 +3525,9 @@ body.debug-2p .home-tile-link {
 
   .modal-settings.sheet-dragging {
     transition: none;
+    /* The drag owns the gesture from here; without this the scroller under the
+       finger keeps claiming it and the sheet fights the rubber-band. */
+    touch-action: none;
   }
 
   .settings-grab {
@@ -3630,27 +3633,14 @@ body.debug-2p .home-tile-link {
     background: rgba(var(--hi-rgb), 0.06);
   }
 
-  /* Neutral, not accent: on the list, "last visited" is a memory aid, not a
-     selection. */
+  /* The list marks nothing. `active` still rides on a row — the rail needs a
+     current section on desktop, and the stepper and roving tabindex need one
+     here — but a drill-down list is a set of destinations, not a set of
+     choices, and highlighting the one you just backed out of only draws the
+     eye to where you have already been. */
   .settings-tab.active {
     color: inherit;
-    background: rgba(var(--hi-rgb), 0.045);
-    font-weight: 400;
-  }
-
-  .settings-tab.active .settings-tab-name {
-    font-weight: 600;
-  }
-
-  /* …but nothing is "last visited" until you have visited something. On a
-     fresh open the remembered section is still selected (the rail needs it,
-     and so does the stepper), it just is not drawn as though you had picked
-     it. The mark appears once you come back from a section. */
-  #settings-frame.list-unvisited .settings-tab.active {
     background: none;
-  }
-
-  #settings-frame.list-unvisited .settings-tab.active .settings-tab-name {
     font-weight: 400;
   }
 
