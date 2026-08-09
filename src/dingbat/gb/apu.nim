@@ -165,6 +165,12 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   ## up first, so each deadline is strictly in the future and cannot underflow.
   template adj(ch: untyped) =
     if ch.next_step != GB_NO_STEP: ch.next_step -= base
+  # Channel 4's divisor stage is the one deadline the catch-up leaves in the
+  # PAST -- it only advances as far as the last LFSR shift, and the increments
+  # since then are the NR43 path's business. Settle them here or the
+  # subtraction below can underflow it.
+  ch4_advance_divisor(apu.channel4, gb)
+  if apu.channel4.div_next != GB_NO_STEP: apu.channel4.div_next -= base
   # Caught up above, so each is either in the future or was just consumed.
   template adj_sweep(field: untyped) =
     if apu.channel1.field != GB_NO_STEP: apu.channel1.field -= base
@@ -209,6 +215,15 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  # Channel 4's divisor stage rescales like any other pending delay -- but it
+  # can be in the past (see apu_rebase), so settle it first and rescale what is
+  # genuinely still pending.
+  ch4_advance_divisor(apu.channel4, gb)
+  if apu.channel4.div_next != GB_NO_STEP:
+    let rem4 = apu.channel4.div_next - now
+    apu.channel4.div_next =
+      now + (if new_speed > old_speed: rem4 shl (new_speed - old_speed)
+             else:                     rem4 shr (old_speed - new_speed))
   # The tick grid is re-anchored on the current cycle rather than rescaled. A
   # speed switch is a STOP with DIV reset and an ~8200-cycle stall, so the
   # phase the APU divider comes out of it with is not something any test here
@@ -568,6 +583,11 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.channel2.next_step = GB_NO_STEP
       apu.channel3.next_step = GB_NO_STEP
       apu.channel4.next_step = GB_NO_STEP
+      # ...and so does the divisor stage behind it, counter and all: the count
+      # a later NR43 write re-interprets is only meaningful while the stage
+      # that produced it is running. See ch4_steps_to_rise.
+      apu.channel4.div_next    = GB_NO_STEP
+      apu.channel4.div_counter = 0
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
