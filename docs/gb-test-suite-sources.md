@@ -349,6 +349,33 @@ minimises the error, the whole row is one number — the STAT-entry phase or the
 BGP sample dot — and the mealybug `m3_bgp_change` pair is very likely the same
 number.
 
+### Answered 2026-08-09: it was one number, and it was 444 dots
+
+The cross-correlation was run and it does minimise, at **−12 pixels on 97 of the
+144 lines** (the other 47 are lines whose bands are wide enough that several
+shifts tie). That reading is a trap, and the trap is worth recording: a −12
+shift and a −456−12 shift are indistinguishable from one line's run-lengths, and
+the truth was the second. Reconstructing the write train from the ROM's own
+palette table settles it — model the frame as `V[j]` written on dot
+`φ + 456·⌊j/10⌋ + 16·(j mod 10)`, colour every pixel from the largest `j` whose
+dot is ≤ `456·LY + x + 96`, and sweep `φ`:
+
+* `φ = −362` reproduces `_0` **exactly**, 23040/23040;
+* `φ = −363` reproduces `_2` **exactly** — the same write, the two conventions
+  for its transition pixel (old, or new), which is what daid's own note means by
+  "hardware and instance dependent";
+* `_1` is those two with the OR pixel between them, and it is the one this tree
+  models (`MIXER_PALETTE_OR`).
+
+φ negative means the handler starts **inside line 153**, not line 0: the LYC=0
+interrupt this ROM syncs on belongs to the LY 153 → 0 snapback. dingbat entered
+it at line 0 dot 1 — 444 dots late — because the snapback ran no STAT edge
+detector at all (§8.2) and the comparator's blind window was not modelled. Both
+fixed; the row is now pixel-exact against `_1`, 0 of 23040 wrong. The prediction
+that `m3_bgp_change`'s residual is "very likely the same number" is **falsified**
+— it is unaffected, because its handler is re-entered per line off a mode-2 STAT
+interrupt rather than free-running from one LYC=0 a frame.
+
 ## 1.3 `m3_wx_6_change` is 60% wrong, and nothing outside mealybug constrains WX 4/5/6
 
 **Row: `mealybug/m3_wx_6_change` (13810 px, the worst mealybug row). Confidence:
@@ -1321,6 +1348,8 @@ with dingbat, and that the split is a DMG/AGS one. Mark these rows
 ## 8.2 Line 153: the LY snapback is one M-cycle late and the LYC comparator misses the whole window
 
 **≈8 dingbat rows. Confidence: high. Cost: medium.**
+**SHIPPED 2026-08-09 (the comparator half); see the closing note at the end of
+this section for what it bought and what is left.**
 
 `line_153_ly_{a,b,c,d}.s` pin the DMG sequence at M-cycle resolution: `nops 4` →
 LY 152, `nops 5` → 153, `nops 6` → `.ifdef DMG / .define RESULT 0 / .else /
@@ -1368,6 +1397,39 @@ dingbat already has the two-clock machinery (`fifo_ppu.nim:1257-1266`, `irq_ly`
 snapping back a `lead` ahead of the readable `ly`), so this is a threshold and
 coverage bug, not a missing feature — but the same comment records gambatte
 `lyc0int_*` / `lyc153int_*` pinning it, so it has to be swept, not nudged.
+
+### Closed 2026-08-09, and the diagnosis above was half right
+
+The **coverage** half was the whole of it, and it was worse than "misses the
+window": the snapback assigned `ppu.ly = 0` and ran **no edge detector at all**,
+so the comparator's next look was the line boundary 451 dots later. Every
+consequence listed above follows from that one missing call, and so does one the
+list never connected to it — `daid/ppu_scanline_bgp-dmg`, whose entire frame is
+laid out by the arrival of this interrupt (§ the shootout notes).
+
+Restoring the call, plus the read path's own one-M-cycle blind window
+(`LYC_SETTLE_DOTS` in `gb/ppu.nim`, where the derivation and the sweep table
+live), takes the `line_153_*` set from 19/24 to **23/24** and closes
+`lcdon_to_stat1_c`, both `mooneye-wilbertpol ly_lyc_{0,153}_write-GS`, and the
+daid row (68.8% → pixel-exact). gambatte `ly0` 66 → 74, `lycEnable` 172 → 179,
+`lycm2int` 8 → 10, `m1` 122 → 123, `m2enable` 93 → 94 — whole suite 3837 →
+3856, whole runner 735 → 743, zero PASS → FAIL, against `a4a3a46`.
+
+The ten gambatte rows it costs are all `*_ifw_*`, `*_late_retrigger*` or
+`lyc0_late_m2enable_lycdisable_1`, i.e. the STAT edge-detector re-trigger
+bucket, and `tools/gbppu/famflip.py` shows why: at the old dot `_ifw` read
+`E2,E0` and now reads `E2,E2`, which is what its `_late_retrigger` sibling read
+at BOTH settings. That gap and this one used to cancel.
+
+The **threshold** half — `line_153_ly_c`, "the threshold wants to be ~3" — is
+NOT shipped, and this pass added the measurement that says it is not a threshold
+question either. `line_153_ly_c`, `line_153_lyc0_int_inc_sled` and
+`line_153_lyc0_stat_timing_c` all move together with `LCD_ON_LINE0_TRIM` and
+trade 1:1 against each other on it (built: at `=2` the first two pass and the
+third fails, at `=0` the reverse), while nothing else in the tree — including
+the daid frame, which does not sync off an LCD enable — moves at all. They are
+three readings of the LCD-on dot phase (bucket 17 / bucket 15), not of the
+line-153 snapback, and they should be scored there.
 
 ## 8.3 The mode-2 / OAM STAT edge is uniformly one M-cycle late
 

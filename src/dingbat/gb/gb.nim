@@ -308,6 +308,89 @@ const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
   ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
   ## references on which bands come out mixed, and the disagreement is a clean
   ## three dots in the same direction on all six bands that separate them.
+const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
+  ## Dots LCDC.4 takes to reach the BACKGROUND FETCHER on CGB over the DMG --
+  ## the same shape as CGB_OBJ_SIZE_LATENCY above, for the one bit of LCDC a
+  ## background bitplane read consults. Separate from CGB_LCDC_TDSEL_LATENCY
+  ## for the same reason: that one is a WRITE latency and delays the whole
+  ## register (the `run` chain in mem_apply_pipeline is monotonic, so a
+  ## nonzero TDSEL latency drags the other six bits with it), and every nonzero
+  ## setting of THAT costs three gambatte `window` rows.
+  ##
+  ## **The DMG is exactly right, so this is a real CGB delta and not a phase
+  ## error being absorbed.** `m3_lcdc_tile_sel_change` and
+  ## `m3_lcdc_tile_sel_win_change` are 23040/23040 against their `_dmg_blob`
+  ## references, and each is eighteen independent measurements of this
+  ## register's write dot against the fetch cycle (their objects sweep OAM
+  ## X = 0..17 down the screen, one band each, so each band moves the write by
+  ## a dot inside the fetch).
+  ##
+  ## Derived off `m3_lcdc_tile_sel_change2`'s CGB reference, which is the same
+  ## instrument with a picture that reads out the bytes: its background is
+  ## `ABCDEFGH...` on map rows 0..7 with LCDC.4 = 0, and only $9490 (where `I`
+  ## lives in the $8800 region) is initialised -- so every 8 aligned pixels of
+  ## the frame invert through BGP = $E4 into one (plane 0, plane 1) pair and
+  ## name the tile and plane hardware read. Its handler is
+  ## `ld [hl],c / ld [hl],b` three times over, so LCDC.4 goes up and down on a
+  ## 8-dot lattice and the tile columns it lands on are 2/3, 5/6 and 8/9.
+  ## Reading column 2 (the first SET) per band, with the fetch's two reads at
+  ## p0 and p0 + 2:
+  ##
+  ##   band   hardware              dingbat at latency 0
+  ##   0..2   C.0 / C.1             C.0 / C.1        write at or before p0
+  ##   3      <glitch> / C.1        C.0 / C.1        write ON p0 (hardware)
+  ##   4      $00 / C.1             C.0 / C.1        write at p0 + 1
+  ##   5      $00 / <glitch>        $00 / C.1        write ON p1 (hardware)
+  ##   6      $00 / $00             $00 / C.1
+  ##   7      $00 / $00             $00 / $00
+  ##
+  ## The bands step the write by exactly one dot each (the ROM's own comment:
+  ## "sprites are positioned to cause the write to occur on different T-cycles
+  ## of the background tile fetch"), and hardware's write reaches the fetcher
+  ## one band later than dingbat's throughout. One dot, bracketed from both
+  ## sides, on a row whose DMG twin is pixel-exact.
+  ##
+  ## Independently: it is also the only value that puts `cgb-acid-hell`'s
+  ## anomaly on the plane it is observed on. That ROM writes LCDC every 8 dots
+  ## at dot 8n+1 with the bitplane reads at 8n+0 and 8n+2, so 0 puts the change
+  ## between the two reads, -1 on the low plane, and only +1 on the high one.
+const CGB_TDSEL_GLITCH*       {.booldefine.} = true
+  ## Whether an LCDC.4 change that lands ON a background bitplane read glitches
+  ## it, and with what. mealybug's PPU notes describe the effect; what the
+  ## `m3_lcdc_tile_sel_change2` decode above adds is which branch fires when,
+  ## because the frame names the byte. Reading all six affected columns of that
+  ## reference, glitched cells only (`IDX` = the tile index, `spr.1` = the
+  ## object's bitplane 1, `X.p` = tile X's plane p):
+  ##
+  ##   band   col2 SET   col3 RST   col5 SET   col6 RST   col8 SET   col9 RST
+  ##   3      '3'.1      IDX        D.0        IDX        G.0        IDX
+  ##   5      '5'.1      IDX        D.1        IDX        G.1        IDX
+  ##
+  ## Two rules, and neither has a free parameter:
+  ##
+  ##  * a RESET on the read dot delivers the TILE INDEX as that bitplane's
+  ##    byte. Columns 3, 6 and 9 hold `D`, `G` and `J`, and the bytes are $44,
+  ##    $47 and $4A down the whole band -- constant against the row, which no
+  ##    tile-data read can be. This is the notes' "resetting TILE_SEL on the
+  ##    same T-cycle as a bitplane data read will cause the tile index to be
+  ##    instead used as the data for that bitplane", verbatim.
+  ##  * a SET on the read dot delivers the byte at the address of the most
+  ##    recent $8000-REGION tile-data read. The object fetch's last read is its
+  ##    bitplane 1, which is why the first glitch of a line reports the
+  ##    object's plane 1 at EITHER plane (band 3 is a plane-0 glitch and band 5
+  ##    a plane-1 one, and both give the digit's plane 1); after that the
+  ##    RESET-glitched read has driven its own $8000-region address, which is
+  ##    why col 5 reports `D` -- column 3's tile -- and col 8 reports `G`,
+  ##    column 6's, each at the plane the glitch is on. The notes list both as
+  ##    alternatives ("bitplane 1 data from the most recently drawn sprite, if
+  ##    any, or bitplane 1 data from the most recently drawn tile as when
+  ##    TILE_SEL was last reset, if any") without saying which fires; the
+  ##    address latch is the one mechanism that produces both.
+  ##
+  ## `cgb-acid-hell`'s two pixels are NOT this rule and are still open: their
+  ## glitched read is a SET and hardware delivers the tile index there, which
+  ## contradicts every SET cell above. See docs/gb-failure-triage.md.
+const CGB_TDSEL_ANY* = CGB_TDSEL_LATENCY != 0 or CGB_TDSEL_GLITCH
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
@@ -323,6 +406,106 @@ const WIN_EN_ABORT*           {.intdefine.} = 1
   ## 4215 -> 343, DMG total +12746 and CGB +25758, and three gambatte
   ## window/on_screen rows -- weon_wx18_weoff_weon_wx80 on both devices and
   ## wx17_weoff_wxA5_weon on DMG, which are that mechanism by name.
+const WIN_EN_HOLD*            {.intdefine.} = 2
+  ## Dots a WX match that LCDC.5 refused stays live, waiting for the bit. 0 is
+  ## the control build and the pre-2026-08-09 behaviour: a match with LCDC.5
+  ## low is simply dropped and only a later match can start the window.
+  ##
+  ## ---- What refuses the two obvious readings ------------------------------
+  ##
+  ## mealybug `m3_lcdc_win_en_change_multiple_wx` is the ruler. It writes
+  ## WX = LY, then clears LCDC.5 over dots 97..104 of every line and again over
+  ## 125..132, so the window's trigger pixel `t = LY - 7` walks one dot per line
+  ## straight through both pulses and the frame reads out, once per scanline,
+  ## what a match at each offset from the pulse does. Its reference:
+  ##
+  ##   t (band 1)      0    1  2  3..7    8      9     10     11
+  ##   match dot      94   95 96 97..101 102    103    104    105
+  ##   reference     x=0   -- -- --      one    x=10   x=10   x=11
+  ##                                     white
+  ##
+  ## and band 2 (pulse at 125..132) repeats it at t = 28..39. Two readings are
+  ## refused outright by the two ends of that table. The bit sampled at the
+  ## match dot alone (`WIN_EN_HOLD = 0`) draws nothing at t = 9 and t = 10,
+  ## where hardware draws a whole window -- 296 wrong pixels. The bit sampled at
+  ## the fetcher's tile-map read instead, two dots later, gets every band edge
+  ## right but has to RESTART the fetch before it knows the answer, and that is
+  ## refused from the other side: gambatte `window/late_disable_*`,
+  ## `late_reenable_*` and 36 `sprites/space/*` rows read STAT expecting mode 0
+  ## and get mode 3, because the restart the abort then undoes still costs the
+  ## line six dots (measured: gambatte 3827 -> 3750, window -40). Hardware pays
+  ## nothing for a match it refuses.
+  ##
+  ## ---- What the table says instead ----------------------------------------
+  ##
+  ## The match is not dropped and it is not committed: it WAITS. Two dots of
+  ## wait is what the table brackets, from both ends of both bands at once --
+  ## t = 9's match waits two dots for the bit and t = 8's, one dot earlier,
+  ## expires unserved. Two, not three: t = 8 would be served at three. And the
+  ## window then starts on the dot the bit arrives, not on the dot it matched,
+  ## which is why t = 9 and t = 10 both draw from x = 10 (band 2: t = 37 and
+  ## t = 38 both from x = 38) -- one pixel right of where t = 9's own match was.
+  ## That coincidence is the sharpest thing in the row: two adjacent scanlines
+  ## whose windows begin at the same x, which no rule that starts the window at
+  ## its own match pixel can produce.
+  ##
+  ## Worth 296 wrong pixels -> 4 on that row. Nothing else in the mealybug set
+  ## moves and no gambatte row does either: a refused match costs no dots (the
+  ## shifter is not stalled while the hold runs), so every family above keeps
+  ## the length it had.
+const CGB_WIN_EN_HOLD*        {.intdefine.} = 0
+  ## WIN_EN_HOLD on a CGB, which is not the same number. The evidence is thin
+  ## on purpose: mealybug's `_cgb_c` reference for the row above is already
+  ## pixel-exact with no hold at all and stays exact with one, so it says
+  ## nothing, and the only instrument that separates the devices is gambatte
+  ## `window/late_reenable_scx5_2` -- one ROM, whose DMG half wants mode 3 still
+  ## running at the read (which is the hold, and which goes green with it) and
+  ## whose CGB half wants mode 0 (which is no hold). `late_reenable_scx2_2` is
+  ## the same pair one SCX apart and says the same thing, and
+  ## `window/late_enable_ly0_ds_2` refuses a hold on CGB from the second
+  ## direction. So: DMG holds, CGB does not, and this is the constant that
+  ## would move if a CGB ruler ever turns up.
+const WIN_EN_HOLD_BACK*       {.intdefine.} = 1
+  ## Whether a match that WAITED starts the window one pixel left of the pixel
+  ## the shifter has reached (1, shipping) or at that pixel (0). The ruler
+  ## above pins it: at 0, `t = 9` and `t = 10` both draw from x = 11 where the
+  ## reference has x = 10, and band 2's pair from x = 39 against x = 38 -- 10
+  ## wrong pixels against 4.
+  ##
+  ## It is the SAME slot the comparator sits in -- "its counter runs one lower
+  ## than the emitted-pixel index" (WIN_START_PRE_PIXEL) -- and it is what makes
+  ## two adjacent scanlines of the ruler begin their windows at the same x,
+  ## which is the part of that reference no rule anchored to the match pixel
+  ## can produce. The pixel it takes back has already been written as
+  ## background and the window's first push writes over it.
+  ##
+  ## Two gambatte rows bracket the dot it costs, and they are the two halves of
+  ## one family: `window/late_reenable_scx2_2` [dmg] wants mode 3 still running
+  ## at its read, which needs the served restart to be one dot later than the
+  ## drawn-through hold makes it (this rule, green), and
+  ## `window/late_disable_scx2_0` [dmg] wants mode 0 on a line whose match is
+  ## refused and never served, which needs an UNSERVED hold to cost nothing
+  ## (also this rule, green -- the dot is taken at the serve, not at the
+  ## match). Spending the dot at the match instead costs the second row.
+const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
+  ## Whether a refused match that lands on the fetcher's PUSH dot puts one
+  ## pixel of colour 0 on the front of the FIFO (1, shipping) or leaves it
+  ## alone (0).
+  ##
+  ## The ruler carries exactly two of these and they are its last two wrong
+  ## pixels: `t = 8` and `t = 32`, the only refused matches in either band whose
+  ## pixel is a multiple of 8, i.e. the only two the fetcher pushes on. Both
+  ## read out as a single WHITE pixel at the match column with the background
+  ## unshifted either side of it -- no window, no stall, one colour-0 pixel.
+  ## Every other refused match in the frame is at a phase where the FIFO
+  ## already holds pixels and hardware shows nothing at all, and the two
+  ## SERVED matches on push dots (`t = 16`, `t = 24`) show the window's own
+  ## black at that column, so it is the collision of a refused start with the
+  ## push, and not the push or the start on its own.
+  ##
+  ## Costs nothing: the entry is replaced rather than dropped, so the shifter
+  ## does not stall and mode 3 does not move. Worth 2 wrong pixels; no other
+  ## mealybug row and no gambatte row has a refused match on a push dot.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in
@@ -615,6 +798,18 @@ const OBJ_FIX_OFF*            = int32.high
   ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
   ## LCDC.2 write". Same shape as above: the window test is one compare either
   ## way.
+const NO_TDSEL_CHANGE*        = int32.low
+  ## `GbFifoPpu.tdsel_dot` meaning "LCDC.4 has not changed on this line". A dot
+  ## in the far past, so the fetcher's `cycle_counter - tdsel_dot` is a large
+  ## positive that is neither inside the latency nor on the glitch dot, and the
+  ## empty case costs no branch of its own -- the same shape as NO_LCDC2_FLIP.
+  ## It is also what a DMG carries all frame, since only a CGB records a change.
+const TDSEL_ADDR_OFF*         = -1'i32
+  ## `GbFifoPpu.tdsel_addr` meaning "nothing on this line has driven an
+  ## $8000-region tile-data address". A SET-glitched read falls back to its own
+  ## read there. mealybug's notes name a third alternative for that case -- the
+  ## read in progress at the end of the PREVIOUS line -- and no ROM in this
+  ## tree reaches it, so the fallback is deliberately the unglitched byte.
 const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
   ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
@@ -1396,6 +1591,19 @@ type
     # window restart on that pixel and an object's fetch on it are one fetch
     # slot and not two -- see CGB_WIN_TAIL_LAST.
     obj_last_px*:         bool
+    # Dots of WIN_EN_HOLD left on a WX match that LCDC.5 refused. Zero means
+    # no match is waiting, which is every dot of almost every line; while it is
+    # nonzero `win_lx` is the hold's own retry pixel and fifo_arm_window leaves
+    # it alone. Per-line scratch.
+    #
+    # DOWN HERE, in the bool block, and not next to `win_lx` where it is read:
+    # inserting a byte between `lx` and `win_lx` splits the pair the shifter
+    # compares on every mode 3 dot and measured **+0.6% of retired
+    # instructions** on Pokemon Blue, Pokemon Crystal and Link's Awakening DX
+    # -- the same 0.6% the note on `win_lx` above records for moving `win_lx`
+    # itself. This field is touched a handful of times a line and pays nothing
+    # for sitting with the flags.
+    win_hold*:            uint8
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
@@ -1446,6 +1654,26 @@ type
     # is derived from is 4 dots at normal speed and 2 in double speed. See
     # M3_PIPE_MCYCLES in fifo_ppu.
     m3_lead*:             int32
+    # ---- LCDC.4 against the two bitplane reads (CGB only) -------------------
+    #
+    # `tdsel_dot` is the dot LCDC.4 last CHANGED on, NO_TDSEL_CHANGE when it
+    # has not changed on this line. The fetcher reads the bit
+    # CGB_TDSEL_LATENCY dots later than the CPU wrote it and glitches a read
+    # that lands on that dot exactly; both need the dot, and nothing else does.
+    # Only a CGB records it, which is what keeps the DMG path at one compare.
+    #
+    # `tdsel_addr`/`tdsel_bank` are the VRAM offset and bank of the most recent
+    # $8000-region tile-data read -- an object bitplane, a LCDC.4 = 1
+    # background bitplane, or a RESET-glitched read, which drove its
+    # $8000-region address before the reset arrived. A SET-glitched read
+    # delivers the byte there. TDSEL_ADDR_OFF when nothing on this line has
+    # driven one.
+    #
+    # All three are per-line scratch like obj_fix_from above, cleared at the
+    # mode 2 -> 3 edge, and not serialized: a state is captured in vblank.
+    tdsel_dot*:           int32
+    tdsel_addr*:          int32
+    tdsel_bank*:          int32
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

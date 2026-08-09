@@ -891,17 +891,139 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   else:
     false
 
+# ---- The LY 153 -> 0 snapback, and the comparator's blind window -----------
+#
+# Both are dots into line 153.
+#
+# LY153_SNAP_DOT is LY's own edge and is not new -- it is the
+# `cycle_counter > 4` the two renderers already had. It stays where it was, and
+# the table below is why: GBMicrotest's `line_153_ly_c` does want it an M-cycle
+# earlier, but moving it is a whole-suite loss and it is not this dot's
+# question. (It was also swept on its own before this window existed and
+# refused then: gambatte 3614 -> 3606, see docs/gb-failure-triage.md.)
+#
+# LYC_SETTLE_DOTS is new. It is the READ path's rule applied to the same edge:
+# the LY_JUST_CHANGED branch in ppu_read already says the comparator does not
+# follow LY instantaneously -- the M-cycle in which LY advances reads back with
+# the coincidence bit CLEAR *whatever LYC holds*, and the comparison re-appears
+# one M-cycle later. mooneye lcdon_timing-GS pins both halves of that at the
+# line 0 -> 1 advance: at the advance M-cycle it wants bit 2 clear for LYC=1 (a
+# match that has just become true) AND for LYC=0 (one that has just become
+# false). It is a suppression window, not a stale copy.
+#
+# The 153 -> 0 snapback is an LY change like any other, so it opens the same
+# window. That is the whole model, and four suites read it out:
+#
+#   * GBMicrotest `line_153_lyc153_stat_timing_*` (LYC=153) ships hardware's
+#     table as its own header: `line 153 / 101 - C5 / 102 - C1`. The LYC=153
+#     match lasts ONE M-cycle -- so the comparator sees the snap at once, which
+#     is the near side of the window.
+#   * GBMicrotest `line_153_lyc0_stat_timing_*` (LYC=0) ships the complement:
+#     `107 - c1 / 108 - c5`. Its letters differ by a single inserted NOP, so
+#     the pair brackets the LYC=0 match's arrival to one M-cycle -- the far
+#     side of the window, one M-cycle behind the near side.
+#   * gambatte `ly0/lycint152_lyc0flag_1..4` (the flag) and
+#     `ly0/lycint152_lyc0irq_1..2` (the interrupt) reproduce EXACTLY at 4 and
+#     are one step out at 0, on dmg, on cgb, and in double speed.
+#   * daid's `ppu_scanline_bgp` is the fourth and the most direct: its whole
+#     frame is a picture of where this interrupt's handler started (see
+#     fifo_ppu.nim's write-up at the snapback). At 4 it is exact -- 23040 of
+#     23040 pixels against the reference; at 0 the whole frame is four columns
+#     out and 2656 pixels are wrong. It is also the only one of the four that
+#     does not sync off an LCD enable.
+#
+# Four dots, and it is a fixed dot count rather than `4 shr current_speed`
+# because the comparator is on the PPU's own clock, which double speed does not
+# touch (Pan Docs, "Dots") -- gambatte's `_ds_` arms in ly0 are what would say
+# otherwise, and they agree with the single-speed ones.
+#
+# Measured, whole gambatte suite (tools/gbppu/gamall.sh), one build per cell,
+# with the snapback edge in place throughout, from 776505c (main moved twice
+# under this pass, so read the row as a shape and not as absolute totals):
+#
+#   LYC_SETTLE_DOTS   0     2     4     6     8
+#   gambatte          3850  3850  3846  3844  3839
+#   daid px wrong     2656  2656  0     0     2656
+#
+# The daid row tracks the RE-LATCH dot exactly -- every cell with
+# LY153_SNAP_DOT + LYC_SETTLE_DOTS = 9 is pixel-exact and every other cell is
+# out by a column -- which is the independent confirmation that this window's
+# far side, and not its near side, is what the STAT source rises on.
+#
+# The four gambatte rows 4 costs against 0 are not a contradiction, and
+# tools/gbppu/famflip.py is what says so: every one of them has a SECOND
+# mechanism in it, and every clean member of the same families goes exact.
+# `lycint152_lyc0irq_ifw_*` (the handler writes IF) reads E2,E0 at 0 and E2,E2
+# at 4 -- which is exactly what its sibling `_late_retrigger` reads at BOTH
+# settings, i.e. the known STAT edge-detector re-trigger gap (bucket 3 in
+# docs/gb-failure-triage.md). At 0 that gap and this window cancelled.
+# `lycEnable/lyc0_ff4{1,5}_disable_*` put a register write on the edge itself
+# and their flip point moves one step either way. Against that: six rows that
+# measure nothing but this dot become exact.
+#
+# One GBMicrotest row disagrees outright, `line_153_lyc0_int_inc_sled`, and it
+# is worth naming precisely because it looks like a counter-example and is not.
+# It arms LYC=0, EIs, and runs 1122 `INC A` -- so it passes iff the interrupt
+# arrives before its last one, a boundary that sits between dots 5 and 9 of
+# line 153 in this tree. Its whole phase chain hangs off an LCD enable 16,300
+# M-cycles earlier, and that phase is a known open ±2 dots (LCD_ON_LINE0_TRIM
+# in gb.nim). Built: at `-d:LCD_ON_LINE0_TRIM=2` the sled PASSES and
+# `line_153_ly_c` with it, while `line_153_lyc0_stat_timing_c` goes red -- the
+# three trade 1:1 against each other on that constant and not on this one, and
+# daid stays pixel-exact through all of it. They are readings of the LCD-on
+# phase, not of the comparator.
+const LY153_SNAP_DOT_D {.intdefine: "LY153_SNAP_DOT".} = 5
+const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
+const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
+const LYC_SETTLE_DOTS* = int32(LYC_SETTLE_DOTS_D)
+const LYC_RELATCH_DOT* = LY153_SNAP_DOT + LYC_SETTLE_DOTS
+
+proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
+  ## Is the LY=LYC comparator inside the blind window the LY 153 -> 0 snapback
+  ## opens? See LYC_SETTLE_DOTS above.
+  ##
+  ## Stateless, and it has to be: the window is one M-cycle inside line 153, so
+  ## a save state or a rollback snapshot taken in it would otherwise carry a
+  ## field nothing else in the frame can reconstruct, and the GB save state is
+  ## captured at vblank. `mode 1 with LY 0` is reached exactly once per frame --
+  ## line 0 is already in mode 2 by the time its LY reads 0 -- so the mode and
+  ## the dot are the whole of the state.
+  ##
+  ## `noinline`, and the caller leads with the `ly == 0` half itself, which
+  ## between them are worth **0.29% of ALL retired instructions** on Pokemon
+  ## Crystal. Nothing here is hot -- this answers a few hundred times a frame --
+  ## but ppu_handle_stat_interrupt is reached from `mode_flag=`, which IS inside
+  ## the mode-3 dot loop, and that loop sits on clang's inline threshold (the
+  ## cliff at docs/gb_oam_dma_cost.md). Three compares inlined into it cost more
+  ## than the whole of the rest of this change.
+  ppu.mode_flag == 1'u8 and ppu.ly == 0'u8 and
+    ppu.cycle_counter >= LY153_SNAP_DOT and
+    ppu.cycle_counter < LYC_RELATCH_DOT
+
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
   # bit freezes at its last value and no STAT interrupt fires (mooneye
   # stat_lyc_onoff — LYC writes while off must not change the retained bit).
   if not ppu.lcd_enabled:
     return
+  # The comparator is blind for the M-cycle the LY 153 -> 0 snapback falls in,
+  # and it is blind to BOTH sides of the comparison: the flag and the source go
+  # low together and the new match arrives an M-cycle later (see lyc_settling).
+  #
+  # Blind and not HELD: the alternative -- the source keeping its pre-snap value
+  # through the window, so a LYC=153 match does not glitch low -- was built, and
+  # it is worse by three whole-suite rows (gambatte 3843 against 3846, same daid
+  # frame). What that costs is exactly the rows where the drop and the rise are
+  # two edges of their own, which is what a level-triggered OR into one detector
+  # does with a comparator that really does go low.
+  # `ly == 0` first, in line, and the rest behind the call: see lyc_settling.
+  let settling = ppu.ly == 0'u8 and ppu.lyc_settling
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
-  ppu.coincidence_flag = ppu.ly == ppu.lyc
+  ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
   let stat_flag =
-    (ppu.irq_ly_of == ppu.lyc and ppu.coincidence_interrupt_enabled) or
+    (ppu.irq_ly_of == ppu.lyc and ppu.coincidence_interrupt_enabled and
+     not settling) or
     (ppu.m2_source(gb)        and ppu.oam_interrupt_enabled) or
     # The OAM (mode 2) STAT source also asserts at the start of vblank
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
@@ -1254,10 +1376,27 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # object fetch whose high plane has not been read yet is redone against the
   # new value. Cold -- a mid-mode-3 write that moves LCDC.2 at all is rare, and
   # one landing inside a live fetch's two dots rarer still.
-  let flip2 = ((ppu.lcd_control xor val) and 0x04'u8) != 0
+  #
+  # LCDC.4 is the one bit a BACKGROUND bitplane read consults, and on a CGB it
+  # gets there a dot late and glitches a read it lands on. Only the dot of the
+  # change is needed for either half; the fetcher does the rest. CGB only, so a
+  # DMG leaves `tdsel_dot` at NO_TDSEL_CHANGE all frame and the fetcher's test
+  # is one compare that never takes.
+  let moved = ppu.lcd_control xor val
+  let flip2 = (moved and 0x04'u8) != 0
   ppu.lcd_control = val
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
+    when CGB_TDSEL_ANY:
+      if (moved and 0x10'u8) != 0 and gb.fifo_ppu.cgb:
+        # The dot the fetcher sees it on, not the dot it was written on. The
+        # latency is spent HERE because this is where the CPU's speed is known:
+        # it is a CPU-clock delay, so a double-speed M-cycle spends it inside
+        # itself and the fetcher sees the bit on the write's own dot. gambatte's
+        # `bgtiledata` family brackets that from both sides -- see
+        # CGB_TDSEL_LATENCY in gb.nim.
+        gb.fifo_ppu.tdsel_dot = ppu.cycle_counter +
+          int32(max(0, CGB_TDSEL_LATENCY - int(gb.memory.current_speed)))
     if flip2:
       ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
       ppu.lcdc2_flip[0] = ppu.cycle_counter

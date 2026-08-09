@@ -200,9 +200,19 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu_handle_stat_interrupt(ppu, gb)
         if ppu.ly == 0:
           ppu.`mode_flag=`(2'u8, gb)
-      if ppu.ly == 153 and ppu.cycle_counter > 4:
+      # Same edge as the FIFO renderer's (see fifo_line153_edge): LY changing is
+      # what the STAT line's comparator watches, so the detector runs on it.
+      # This renderer steps in whole PPU events rather than dots, so it cannot
+      # be relied on to land inside the settling window at all; it asks on every
+      # tick of the line from LY153_SNAP_DOT on instead, which costs nothing --
+      # the detector is idempotent, it fires on a rising edge of a level it
+      # recomputes from scratch.
+      if ppu.ly == 153 and ppu.cycle_counter >= LY153_SNAP_DOT:
         ppu.ly = 0
         when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+        ppu_handle_stat_interrupt(ppu, gb)
+      elif ppu.ly == 0 and ppu.cycle_counter >= LYC_RELATCH_DOT:
+        ppu_handle_stat_interrupt(ppu, gb)
   else:
     ppu.cycle_counter = 0
     ppu.`mode_flag=`(0'u8, gb)

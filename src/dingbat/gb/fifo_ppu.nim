@@ -60,6 +60,8 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     win_lx: WIN_LX_OFF,
     obj_fix_from: OBJ_FIX_OFF,
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
+    tdsel_dot: NO_TDSEL_CHANGE,
+    tdsel_addr: TDSEL_ADDR_OFF,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -75,9 +77,19 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
   ## from every write that can move one of the four inputs (LCDC, WX, the WY
   ## latch) and from fifo_reset_bg, which is where the fourth (fetching_window)
   ## moves. Nothing here is on a per-dot path.
+  when WIN_EN_HOLD > 0:
+    # A refused match owns the comparator until its hold runs out: `win_lx` is
+    # the dot it is waiting on, not a function of WX any more, and the LCDC
+    # write that ENDS the hold is one of the writes that lands here. See
+    # WIN_EN_HOLD.
+    if ppu.win_hold > 0'u8: return
   ppu.win_lx =
-    if not window_enabled(ppu): WIN_LX_OFF
-    elif ppu.fetching_window:   int32(ppu.wx) - 8
+    if ppu.fetching_window:
+      # The re-trigger edge does need the bit here: window_reactivate is only
+      # reached while the window IS the fetch source, and nothing holds a
+      # re-trigger (WIN_EN_HOLD is about the START).
+      if window_enabled(ppu): int32(ppu.wx) - 8 else: WIN_LX_OFF
+    elif not window_enabled(ppu) and WIN_EN_HOLD == 0: WIN_LX_OFF
     elif ppu.window_trigger:
       # ---- The comparator has ONE slot left of the shifter's first pixel ----
       #
@@ -146,11 +158,14 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.fetching_window = false
   ppu.fetching_sprite = false
   ppu.win_lx = WIN_LX_OFF
+  ppu.win_hold = 0'u8
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  ppu.tdsel_dot = NO_TDSEL_CHANGE
+  ppu.tdsel_addr = TDSEL_ADDR_OFF
   ppu.m3_delay = 0'u8
   ppu.tile_num = 0
   ppu.tile_attrs = 0
@@ -279,6 +294,7 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   # tile onto the window's.
   ppu.obj_tile_fx = -1
   if fetching_window: inc ppu.current_window_line
+  when WIN_EN_HOLD > 0: ppu.win_hold = 0'u8
   fifo_arm_window(ppu)
 
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
@@ -291,6 +307,10 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  # LCDC.4's is per-line for the same reason, and the address latch with it:
+  # both only ever answer a fetch on THIS line's dots.
+  ppu.tdsel_dot = NO_TDSEL_CHANGE
+  ppu.tdsel_addr = TDSEL_ADDR_OFF
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -508,6 +528,14 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         ppu.fetching_window = false
         ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size)) div 8)
         fifo_arm_window(ppu)
+        when WIN_EN_HOLD > 0:
+          # The comparator is an edge on a counter that only counts up, and
+          # `lx` has not moved since the start this read is undoing -- the
+          # restart parked the shifter on that very pixel. Re-arming WX - 7 on
+          # it would fire the START a second time on the same slot (and, with
+          # the bit low, arm a hold nothing can serve). A genuine second start
+          # needs a pixel the shifter has not reached.
+          if ppu.win_lx == ppu.lx: ppu.win_lx = WIN_LX_OFF
     let (map, offset) =
       if ppu.fetching_window:
         # Wraps inside the 32x32 tile map exactly as the background fetch
@@ -539,9 +567,27 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
-    let tile_num = if bg_window_tile_data(ppu) != 0: int(ppu.tile_num)
+    # ---- LCDC.4, as the FETCHER sees it, and the CGB glitch ----------------
+    #
+    # `sel` is the bit the address is formed from, which on a CGB is the bit as
+    # it stood CGB_TDSEL_LATENCY dots ago (see that constant in gb.nim: the
+    # DMG's own phase is pixel-exact on both `m3_lcdc_tile_sel_*` rows, so the
+    # dot is a CGB delta). `glitch` is set on the one dot the change lands on a
+    # read; what each direction delivers is derived at CGB_TDSEL_GLITCH.
+    var sel = bg_window_tile_data(ppu) != 0
+    var glitch = 0
+    when CGB_TDSEL_ANY:
+      # `tdsel_dot` is already the dot the change goes LIVE on -- the latency is
+      # paid at the write, which is where the speed it is measured in is known.
+      # A compare against it rather than a subtraction, so NO_TDSEL_CHANGE can
+      # be int32.low without overflowing.
+      if unlikely(ppu.cycle_counter <= ppu.tdsel_dot):
+        if ppu.cycle_counter < ppu.tdsel_dot: sel = not sel
+        else:
+          when CGB_TDSEL_GLITCH: glitch = if sel: 1 else: -1
+    let tile_num = if sel: int(ppu.tile_num)
                    else: int(cast[int8](ppu.tile_num))
-    let tile_data_tbl = if bg_window_tile_data(ppu) != 0: 0x0000 else: 0x1000
+    let tile_data_tbl = if sel: 0x0000 else: 0x1000
     let tile_ptr = tile_data_tbl + 16 * tile_num
     let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
     var tile_row = if ppu.fetching_window:
@@ -549,18 +595,45 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
                    else:
                      (int(ppu.ly) + int(ppu.scy)) and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row
+    let low_plane = FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow
+    let off = tile_ptr + tile_row * 2 + (if low_plane: 0 else: 1)
+    var data = ppu.vram[bank_num][off]
+    when CGB_TDSEL_GLITCH:
+      if unlikely(glitch != 0):
+        if glitch < 0:
+          # RESET on the read dot: the tile index is the byte. The address the
+          # read had already driven is the $8000-region one -- the reset had not
+          # reached the address path either -- so it is that address the next
+          # SET-glitched read comes back to.
+          data = ppu.tile_num
+          ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
+                                 (if low_plane: 0 else: 1))
+          ppu.tdsel_bank = int32(bank_num)
+        elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
+          # SET on the read dot: the address never advanced, so the byte comes
+          # from wherever the last $8000-region read left it.
+          data = ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr]
+      # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and by the
+      # latch story it should leave its address here as well. It deliberately
+      # does not, for two reasons. No cell of either `*_change2` frame can tell
+      # the two apart -- every SET glitch in them is preceded by an object fetch
+      # or a RESET-glitched read that overwrites whatever a plain read left --
+      # and doing it costs two stores on EVERY bitplane read of every frame,
+      # which measured +0.55% of retired instructions on blargg cpu_instrs
+      # against +0.27% for the form above. If a ROM ever separates them, this
+      # is the arm to add back.
     when defined(gb_px_trace):
       if gb_traced(ppu.ly):
-        let off = (if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow: 0 else: 1)
         echo "FDATA ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
              " fx=", ppu.fetcher_x,
-             " plane=", off, " num=", toHex(ppu.tile_num, 2),
+             " plane=", (if low_plane: 0 else: 1), " num=", toHex(ppu.tile_num, 2),
              " row=", tile_row,
-             " addr=", toHex(0x8000 + tile_ptr + tile_row * 2 + off, 4),
-             " byte=", toHex(ppu.vram[bank_num][tile_ptr + tile_row * 2 + off], 2),
+             " addr=", toHex(0x8000 + off, 4),
+             " byte=", toHex(data, 2),
+             " glitch=", glitch,
              " lcdc=", toHex(ppu.lcd_control, 2)
-    if FETCHER_ORDER[ppu.fetch_counter] == fsGetTileDataLow:
-      ppu.tile_data_low = ppu.vram[bank_num][tile_ptr + tile_row * 2]
+    if low_plane:
+      ppu.tile_data_low = data
       inc ppu.fetch_counter
       when M3_THROWAWAY_DOTS == 4:
         # The discarded head fetch is `B0` and ends here -- four dots, and the
@@ -574,7 +647,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           ppu.fetch_counter = 0
           fifo_head_window(ppu)
     else:
-      ppu.tile_data_high = ppu.vram[bank_num][tile_ptr + tile_row * 2 + 1]
+      ppu.tile_data_high = data
       inc ppu.fetch_counter
       when M3_THROWAWAY_DOTS == 4:
         # The push landed on the dot the tile data arrived, so step 4 has
@@ -963,6 +1036,14 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     b_lo = sprite_tile_bytes(s, ppu.ly, obj_height_at(ppu, hi_dot - OBJ_PLANE_GAP)).lo
     b_hi = sprite_tile_bytes(s, ppu.ly, h_hi).hi
   let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
+  when CGB_TDSEL_GLITCH:
+    # An object fetch always addresses the $8000 region, and its LAST read is
+    # bitplane 1 -- which is why a SET-glitched background read that follows one
+    # reports the object's plane 1 whichever plane it is itself on. See
+    # CGB_TDSEL_GLITCH in gb.nim for the band-3 / band-5 pair that says so.
+    if ppu.cgb:
+      ppu.tdsel_addr = int32(b_hi)
+      ppu.tdsel_bank = int32(bank)
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
       echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,
@@ -1605,6 +1686,35 @@ proc window_reactivate(ppu: GbFifoPpu) =
     GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
   ppu.fifo.head = h
   inc ppu.fifo.size
+
+proc window_refuse_start(ppu: GbFifoPpu) =
+  ## The WX comparator matched and LCDC.5 was low. See WIN_EN_HOLD: the match
+  ## is neither dropped nor committed -- it holds the comparator on the next
+  ## pixel for `WIN_EN_HOLD` dots, and the shifter goes on drawing meanwhile,
+  ## so a line whose match is never served pays nothing for it.
+  ##
+  ## Split out of tick_shifter for the reading, not for the speed: it runs at
+  ## most three times a line and only on lines that toggle LCDC.5 mid-mode-3,
+  ## and `{.noinline.}` on it measures the same as leaving the compiler to it.
+  ## What DID cost 0.6% was the field's position -- see win_hold in gb.nim.
+  let hold = if ppu.cgb: uint8(CGB_WIN_EN_HOLD) else: uint8(WIN_EN_HOLD)
+  if hold == 0'u8:
+    ppu.win_lx = WIN_LX_OFF
+  elif ppu.win_hold == 0'u8:
+    when WIN_EN_HOLD_ZERO != 0:
+      # The refused match and the fetcher's PUSH on the same dot. `size == 8`
+      # is that collision and only that: the FIFO is full for exactly the dot
+      # the push filled it on, and the shifter has not taken from it yet. The
+      # MATCH's own dot, not the hold's retries -- a retry is a comparator that
+      # has already fired. See WIN_EN_HOLD_ZERO.
+      if ppu.fifo.size == 8:
+        ppu.fifo.data[ppu.fifo.head] =
+          GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+    ppu.win_hold = hold
+    ppu.win_lx = ppu.lx + 1
+  else:
+    dec ppu.win_hold
+    ppu.win_lx = if ppu.win_hold == 0'u8: WIN_LX_OFF else: ppu.lx + 1
 
 proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## Does the object the shifter has just found have to wait for the window's
@@ -2249,8 +2359,34 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
                " fc=", ppu.fetch_counter, " fw=", ppu.fetching_window,
                " fifo=", ppu.fifo.size
       if not ppu.fetching_window:
-        fifo_reset_bg(ppu, true)
-        return
+        when WIN_EN_HOLD > 0:
+          # ---- The match waits for LCDC.5; it is not dropped by it ---------
+          #
+          # See WIN_EN_HOLD. `window_enabled` is asked HERE rather than in
+          # fifo_arm_window so that a match the bit refuses is still seen, and
+          # the hold below is what keeps the comparator on it for the two dots
+          # the bit has left to arrive in. Nothing on this path costs a
+          # window-less line anything: with the bit low and no match armed,
+          # `win_lx` is WIN_LX_OFF exactly as before and the branch is never
+          # reached.
+          if not window_enabled(ppu):
+            window_refuse_start(ppu)
+          else:
+            when WIN_EN_HOLD_BACK != 0:
+              # A match that WAITED starts the window one pixel left of the
+              # pixel the shifter has reached -- the same slot the comparator
+              # itself sits in (WIN_START_PRE_PIXEL), and the reason two
+              # adjacent scanlines of the ruler ROM begin their windows at the
+              # same x. The pixel it takes back has already been written to the
+              # framebuffer as background; the window's own first push writes
+              # over it. See WIN_EN_HOLD_BACK.
+              if ppu.win_hold > 0'u8: dec ppu.lx
+            # fifo_reset_bg clears the hold on its way through.
+            fifo_reset_bg(ppu, true)
+            return
+        else:
+          fifo_reset_bg(ppu, true)
+          return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
            window_enabled(ppu):
         # The re-trigger edge, injected in front of the pixel this dot is about
@@ -2621,6 +2757,45 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
        M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < result:
       result = M2_144_EARLY_DOT
 
+proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## ---- The LY 153 -> 0 snapback is an edge the STAT line has to see --------
+  ##
+  ## It never was: LY was assigned in the vblank branch and the edge detector
+  ## was left for the line boundary 451 dots later, so a LYC=0 STAT interrupt
+  ## fired at the top of line 0 instead of inside line 153, and a LYC=153 one
+  ## was never taken back down at all. Everything the comparator drives moved
+  ## with it -- the readable coincidence bit as much as the interrupt.
+  ##
+  ## daid's ppu_scanline_bgp is what made that visible rather than merely late.
+  ## Its whole frame is one BGP write every four M-cycles, resynced once per
+  ## frame by exactly this interrupt and free-running at 114 M-cycles a line
+  ## afterwards, so the frame is a picture of where the handler started and a
+  ## whole line of error puts every pixel of it 456 dots out of place.
+  ## 68.8% -> 90.5% with the first branch below, and the 4 dots left over are
+  ## the settling window at LYC_SETTLE_DOTS, which the second one closes.
+  ##
+  ## `noinline`, and one call site rather than the two branches spelled out at
+  ## the two dots they fire on, because the caller is fifo_tick_slow's dot loop:
+  ## it is inlined into the bus path and its body sits on clang's inline
+  ## threshold (docs/gb_oam_dma_cost.md). In line it measured **+0.37% of ALL
+  ## retired instructions** on Pokemon Crystal and on Pokemon Blue, for work
+  ## that decides two dots a frame. `lyc_settling` carries the same warning and
+  ## for the same reason; between them they are most of what this change would
+  ## otherwise have cost.
+  if ppu.ly == 153:
+    # The near side: LY changes, and with it any match it had. The new one does
+    # not arrive yet -- the comparator is blind for LYC_SETTLE_DOTS, which
+    # lyc_settling reads back off this same LY and dot.
+    ppu.ly = 0
+    when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+    ppu_handle_stat_interrupt(ppu, gb)
+  elif ppu.ly == 0 and ppu.cycle_counter == LYC_RELATCH_DOT:
+    # The far side: the comparator re-latches, so with LYC = 0 this is the dot
+    # the match -- and its interrupt -- appears on. `mode 1 with LY 0` is line
+    # 153 and nothing else; line 0 is already in mode 2 by the time its own LY
+    # reads 0.
+    ppu_handle_stat_interrupt(ppu, gb)
+
 when STAT_IRQ_SPLIT:
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
     ## The STAT interrupt line's own line boundary, STAT_IRQ_LEAD M-cycles
@@ -2690,13 +2865,17 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       # loop below jumps straight to the next dot that can do something
       # instead of re-dispatching the mode switch for each one. Same
       # sequence of actions at the same dot counts; only the no-op iterations
-      # are collapsed. The one level-triggered rule in the set (LY 153
-      # snapping back to 0 once the counter passes 4) opts out of the jump,
-      # so it still fires on exactly the dot it used to.
+      # are collapsed. The level-triggered rules in the set opt out of the jump
+      # so they still fire on exactly the dots they used to: LY 153 snapping
+      # back to 0 at LY153_SNAP_DOT, and the LY=LYC comparator re-latching at
+      # LYC_RELATCH_DOT after it. One bound on the counter covers both, at the
+      # price of walking the first ten dots of the other nine vblank lines as
+      # well -- 90 no-op iterations a frame.
       let m = ppu.mode_flag
       if m != 3:
         let target = fifo_skip_target(ppu, gb, m)
-        if ppu.cycle_counter < target and (m != 1 or ppu.ly != 153):
+        if ppu.cycle_counter < target and
+           (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
           let skip = min(remaining, int(target - ppu.cycle_counter))
           ppu.cycle_counter += int32(skip)
           remaining -= skip
@@ -2979,13 +3158,25 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # source sees it a lead ahead of the readable LY -- one edge, two
           # clocks. The source is what gambatte lyc0int_* and lyc153int_* time;
           # the flag half below is what a STAT/LY read sees.
+          #
+          # A STAT_IRQ_LEAD build has NOT been re-derived against the settling
+          # window below: `lyc_settling` is written in the flag domain, so in
+          # this build the source would come out of the snap without one. The
+          # shipping build is LEAD = 0, where this whole block is compiled out
+          # and the snap below is the only edge; anyone reviving the axis has to
+          # answer that question first.
           if ppu.ly == 153 and ppu.irq_ly == 153 and
-             ppu.cycle_counter > 4 - lead:
+             ppu.cycle_counter >= LY153_SNAP_DOT - lead:
             ppu.irq_ly = 0
             ppu_handle_stat_interrupt(ppu, gb)
-        if ppu.ly == 153 and ppu.cycle_counter > 4:
-          ppu.ly = 0
-          when STAT_IRQ_SPLIT: ppu.irq_ly = 0
+        # The LY 153 -> 0 snapback and the comparator re-latch after it: see
+        # fifo_line153_edge, which is where both live and why they are not
+        # written out here. Same two compares this branch has always had -- the
+        # field is still 153 through the window, which is also what holds the
+        # idle jump above open across it.
+        if ppu.cycle_counter >= LY153_SNAP_DOT and
+           ppu.cycle_counter <= LYC_RELATCH_DOT:
+          fifo_line153_edge(ppu, gb)
       else: discard
       ppu.cycle_counter += 1
   else:
@@ -3022,7 +3213,9 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # no HDMA block, no pixel. The two level-triggered rules opt out and fall
   # through to the loop, exactly as they did there:
   #   * mode 3 (a pixel per dot), and
-  #   * mode 1 with LY 153 (LY snaps back to 0 once the counter passes 4).
+  #   * mode 1 below LYC_RELATCH_DOT -- LY 153 snaps back to 0 at
+  #     LY153_SNAP_DOT and the LY=LYC comparator re-latches an M-cycle after
+  #     it, and neither dot may be stepped over.
   # An LCD that is off also falls through -- that path re-asserts mode 0 and
   # drives the blank-frame clock every tick.
   if m != 3 and (ppu.lcd_control and 0x80'u8) != 0:
@@ -3031,7 +3224,8 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # `<=` not `<`: landing exactly on the target is what the loop did too --
     # it consumed the whole span in one skip and left the transition for the
     # next entry, where cycle_counter == target fails `cycle_counter < target`.
-    if next <= target and (m != 1 or ppu.ly != 153):
+    if next <= target and
+       (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)
