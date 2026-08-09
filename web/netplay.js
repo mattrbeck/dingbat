@@ -757,10 +757,32 @@ const manualGather = (pc) =>
 // Connection-state handler (mirrors startRtc's). A pre-start failure means the
 // traded codes are spent (the PC is dead), so put a FRESH code up along with
 // the error — both sides fail together, so both regenerate together.
+// Compact ICE candidate-pair dump for a dead manual pairing: which pairs
+// formed, and whether checks went unanswered (sent>0 got=0 = our packets
+// vanish into a NAT) or never went out at all.
+const logIcePairs = async (pc) => {
+  try {
+    const stats = await pc.getStats();
+    const cand = {};
+    stats.forEach((r) => {
+      if (r.type === "local-candidate" || r.type === "remote-candidate")
+        cand[r.id] = r.candidateType || "?";
+    });
+    stats.forEach((r) => {
+      if (r.type === "candidate-pair")
+        log("netplay: pair " + (cand[r.localCandidateId] || "?") + "→" +
+            (cand[r.remoteCandidateId] || "?") + " " + r.state +
+            " sent=" + (r.requestsSent ?? 0) + " got=" + (r.responsesReceived ?? 0), "warn");
+    });
+  } catch {}
+};
+
 const manualConnState = (pc) => () => {
   if (!net || net.pc !== pc) return;
   const st = pc.connectionState;
+  log("netplay: manual pc " + st + " ice=" + pc.iceConnectionState);
   if (st === "failed") {
+    logIcePairs(pc); // best-effort: the teardown below races the snapshot
     if (net.rtcConnected) {
       netFail("Peer connection lost");
       return;
@@ -926,10 +948,12 @@ const manualConfirmGo = async () => {
   // "Connecting…" for eternity. Bound it like the server path's pairing
   // deadline, with the same fresh-codes recovery as a hard ICE failure.
   clearTimeout(session.rtcDeadline);
-  session.rtcDeadline = setTimeout(() => {
+  session.rtcDeadline = setTimeout(async () => {
     if (net !== session || session.rtcConnected || session.started) return;
     log("netplay: manual pairing deadline — no connection in " +
-        RTC_CONNECT_DEADLINE + "ms", "warn");
+        RTC_CONNECT_DEADLINE + "ms (ice=" + session.pc?.iceConnectionState + ")", "warn");
+    if (session.pc) await logIcePairs(session.pc);
+    if (net !== session || session.rtcConnected || session.started) return;
     netFail("Couldn't connect with those codes");
     if (netModalOpen() && netManualView && !netManualView.hidden) {
       manualSetStatus("Couldn't connect — trade these fresh codes and try again", true);
