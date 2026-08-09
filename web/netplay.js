@@ -13,12 +13,17 @@
 // ?signal=ws://... overrides the signaling server (dev/self-hosted);
 // ?linkdelay=50 adds N ms of artificial latency to every outgoing message
 // (internet simulation, mirrors the native --netlink-delay-ms knob).
+// Localhost talks to a locally-run server; everywhere else defaults to the
+// production endpoint (the static site is on GitHub Pages, which can't proxy
+// WebSockets, so a same-origin /signal path can never work there). A LAN dev
+// page (192.168.x.x) therefore also hits production — use ?signal= to point
+// it at a local server. wss: from an http: page is allowed (not mixed content).
 const NET_PARAMS = new URLSearchParams(location.search);
 const NET_SIGNAL_URL =
   NET_PARAMS.get("signal") ||
-  (location.protocol === "https:"
-    ? "wss://" + location.host + "/signal"
-    : "ws://" + location.hostname + ":8790");
+  (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
+    ? "ws://" + location.hostname + ":8790"
+    : "wss://signal.dingbat.gg/signal");
 const NET_LINK_DELAY = parseInt(NET_PARAMS.get("linkdelay") || "0", 10) || 0;
 // SIO-word speculation is DISABLED — it is unsafe for a real trade. It predicts
 // the peer's reply and puts the *next* transfer (built from that prediction) on
