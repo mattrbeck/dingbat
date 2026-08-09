@@ -52,6 +52,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
+    cgb: gb.cgb_enabled,
   )
   when STAT_IRQ_SPLIT:
     result.irq_mode = base.irq_mode
@@ -1429,8 +1430,21 @@ proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## decline to do anything (it is gated on the fetcher's phase); yielding to
   ## an edge that then does not fire would park the shifter on this pixel for
   ## the rest of the line.
+  ##
+  ## And restricted to a pixel that HAS a pixel after it. On x = 159 there is
+  ## nothing left for the object to queue behind: the line's last fetch is the
+  ## window's restart (CGB_WIN_TAIL_LAST), so an object deferred there is
+  ## deferred past the end of the line. gambatte measures that corner directly
+  ## -- WX = 166 with an object at X = 167, `window/m2int_wxA6_spxA7_*` and
+  ## `m0enable/enable_wxA6_2x_spxA7_*` -- and its four mode-0 INTERRUPT rows
+  ## want 180 dots on both devices, which is 174 (the window start alone) plus
+  ## the object's own six, charged where the object is: on this pixel, in front
+  ## of the restart. Deferring here instead charges it on the far side and
+  ## gives 190, which takes six of those rows red. See CGB_WIN_TAIL_LAST for
+  ## why the CGB's extra fetch is not ALSO added here.
   ppu.lx == ppu.win_lx and not ppu.fetching_window and
-    ppu.lx + 8 == int32(ppu.sprites[0].x)
+    ppu.lx + 8 == int32(ppu.sprites[0].x) and
+    ppu.lx < int32(GB_WIDTH) - 1
 
 proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
                x: int32): uint16 {.inline.} =
@@ -1663,6 +1677,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
        # tie-break sits off the dot loop's hot path. See obj_yields_to_window.
        not obj_yields_to_window(ppu):
       ppu.fetching_sprite = true
+      when CGB_WIN_TAIL_LAST != 0:
+        # One store, on the object trigger and nowhere else (a handful of dots
+        # a line). See fetch_work_pending: on the last pixel this fetch and a
+        # window restart at the same pixel are the same slot.
+        if ppu.lx == int32(GB_WIDTH) - 1: ppu.obj_last_px = true
       # Where The Pixel sits in the BG tile it belongs to. `lx` is the pixel the
       # shifter was about to emit and `8 - fifo.size` is its index inside the
       # tile the FIFO is holding; The Pixel is `lag` pixels to the LEFT of it,
@@ -1794,6 +1813,43 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
     inc ppu.lx
 
+proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
+  ## What the fetcher still owes for the last `m3_lead` pixels of a line,
+  ## shared by fetcher_retired and (under STAT_IRQ_SPLIT) fifo_irq_m0_ready,
+  ## which ask the same question a fixed number of dots apart. Only reached
+  ## once the shifter is inside the tail, so it costs the other 150-odd pixels
+  ## of a line nothing. See fetcher_retired for what each term is for.
+  if ppu.fetching_sprite: return true
+  if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return true
+  when WIN_TAIL_FETCH != 0:
+    # A window that HAS started, whose restart has not pushed yet. Without this
+    # the term below stops holding mode 3 open the instant the window starts,
+    # and the restart, its push and the pixel all fall into the tail burst for
+    # nothing -- see WIN_TAIL_FETCH in gb.nim for the gambatte bracket.
+    # `fetcher_x == 0` is "the restart still owes its first push": a window
+    # fetch has no discarded fetch in front of it (dropped_first_fetch is a
+    # line-start flag and stays set), so the counter leaves 0 on that push and
+    # cannot return to it on this line. Nor can it alias the head of a line
+    # that STARTS as a window line -- that has fetcher_x = 0 at lx = -7..0, and
+    # nothing below the lead reaches here.
+    #
+    # A restart issued on the LAST pixel is the one place the devices part
+    # (CGB_WIN_TAIL_LAST): the CGB waits for it and the DMG does not, so the
+    # DMG's mode 3 ends with the last PIXEL and the CGB's with the last FETCH.
+    # Everywhere else on the line the two coincide, because the fetcher is
+    # always ahead of the shifter; only WX = 166 can put a restart here.
+    #
+    # `obj_last_px` is the exception to the exception: an object whose trigger
+    # pixel is also this one has already been fetched in front of the restart,
+    # and the CGB does not pay for the slot twice. Six dots either way, once.
+    if ppu.fetching_window and ppu.fetcher_x == 0 and
+       (ppu.lx < int32(GB_WIDTH) - 1 or
+        (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px)):
+      return true
+  if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
+     int(ppu.wx) <= GB_WIDTH + 6: return true
+  false
+
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## Has the BG fetcher run out of work for this line? That -- not the last
   ## pixel leaving the shifter -- is what ends mode 3 and hands VRAM back to
@@ -1855,11 +1911,7 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
     else:
       if ppu.lx < int32(GB_WIDTH) - ppu.m3_lead: return false
     if ppu.lx >= GB_WIDTH: return true
-    if ppu.fetching_sprite: return false
-    if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
-    if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-       int(ppu.wx) <= GB_WIDTH + 6: return false
-    true
+    not fetch_work_pending(ppu)
 
 proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
   ## One dot of the fetch/shift pipeline. The first `m3_lead` dots of a line do
@@ -1948,11 +2000,7 @@ when STAT_IRQ_SPLIT:
     ## mode 3 open past that point exactly as fetcher_retired describes.
     if ppu.lx < int32(GB_WIDTH) - lead: return false
     if ppu.lx >= GB_WIDTH: return true
-    if ppu.fetching_sprite: return false
-    if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return false
-    if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-       int(ppu.wx) <= GB_WIDTH + 6: return false
-    true
+    not fetch_work_pending(ppu)
 
 when M3_PIPE_LEAD_ANY:
   proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.inline.} =
@@ -2123,6 +2171,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             window_enabled(ppu) and
             ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
+          when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           ppu.lx = 0
           when MIXER_TAIL_HBLANK != 0:
             # No tail is in flight until this line's fetcher retires. The park

@@ -851,16 +851,34 @@ Asking the window's start before the object trigger takes this row 34 → 318 an
 the mealybug totals DMG 520109 → 519201 and CGB 1819207 → 1818393, so the
 window start does NOT preempt an object fetch at the same pixel in general.
 
-**What the tie rule costs is one open item, named.** `gambatte/m0enable`
-153 → 147, all of it at `WX = 166` with an object at `X = 167` — the window's
-start pixel is the LAST pixel of the line. Hardware wants 180 dots there on DMG
-and 190 on CGB; this tree has one number for both and it is now 190, so the
-wxA6 rows swapped which device they satisfy (`window/` is unchanged at 327: four
-DMG rows out, four CGB rows in). The device split is already visible WITHOUT an
-object — `window/m2int_wxA6_m3stat`, `_scx2_`, `_scx5_` all have DMG and CGB
-expectations one to two M-cycles apart and get the DMG number from this tree —
-so the fix is a per-device cost for a window start at the last pixel, not
-anything in the tie rule.
+**What the tie rule cost was one open item, and it is closed (2026-08-09).**
+The corner is `WX = 166` — the window's start pixel is the LAST pixel of the
+line — and the tie rule alone gave it 190 dots on both devices, which took
+`gambatte/m0enable` 153 → 147. Two constants close it, `WIN_TAIL_FETCH` and
+`CGB_WIN_TAIL_LAST` in `gb/gb.nim`, and the whole derivation is written at the
+second one. In short:
+
+* a window START inside the tail holds mode 3 open for the fetch it restarts —
+  it used to be absorbed by the pipeline's tail burst and cost nothing, which
+  `window/m2int_wxA5_m3stat_1` catches on both devices;
+* the DMG's mode 3 ends with the last PIXEL and the CGB's with the last FETCH,
+  so only at `WX = 166` do the two part: DMG 174 dots, CGB 180. The four
+  `m2int_wxA6_*_m3stat` families bracket that difference to **5..7 dots** and a
+  BG fetch is six;
+* an object whose trigger pixel is also `x = 159` is the same fetch slot, not a
+  second one: both devices come out at 180 (174 + the object's own six), which
+  is what the four `spxA7` mode-0 interrupt rows want.
+
+gambatte 3793 → 3809, +17/−1 (see below), and the mealybug tie-rule wins are
+untouched.
+
+**The one row it costs, named.** `window/m2int_wxA6_scx5_m3stat_3` goes red on
+CGB and its own family's `_ds_1` goes green. Same device, same WX, same SCX,
+same measured mode 3 (185 dots) — only the sampling grid differs (4 dots single
+speed, 2 in double), and the two want the CGB's extra to be ≤ 5 and ≥ 6
+respectively. Six ships because six is a fetch; five is a fit at the same net
+score and is refused. The residual is one dot on the double-speed sampling
+grid, not on this constant.
 
 **The two `obj_size_change` rows were not diagnosed** in this pass and did not
 move (`m3_lcdc_tile_sel_win_change` was in this sentence too and is closed
