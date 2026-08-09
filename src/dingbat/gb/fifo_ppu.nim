@@ -506,8 +506,101 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
+# ---- The object's OAM read, and the one thing that can see it -------------
+#
+# This renderer's mode-2 scan snapshots all four of an object's OAM bytes
+# (fifo_get_sprites) and mode 3 uses that snapshot. Hardware splits the two:
+# the scan latches Y and X -- they are all it decides with -- and the object's
+# TILE NUMBER and ATTRIBUTES are read out of OAM again during mode 3, at the
+# object's own fetch. With OAM quiet the two readings agree and the split is
+# invisible, which is why nothing in this tree had to model it.
+#
+# An OAM DMA is where it stops being invisible. While the unit owns OAM the
+# PPU's read does not reach the array; what it gets is the byte the unit has on
+# its bus, the same byte a colliding CPU read latches (mem_read_busy). So the
+# object renders with a tile number the DMA is only passing through, which need
+# not be anywhere near the object's own OAM slot. Pan Docs ("OAM DMA Transfer")
+# says only that the PPU cannot read OAM properly during the transfer; which
+# byte it does get is Hacktix's strikethrough.gb's own finding, and that ROM is
+# the whole of the evidence below.
+#
+# ---- What the ROM does ----------------------------------------------------
+# It fills OAM with forty objects at Y $54 (LY 68) and X $17, $1F, ... -- tile
+# 0, a solid bar -- eight pixels apart, so every object is one bar's width from
+# the next. On LY 67 a STAT LYC interrupt waits for mode 0, idles 28 NOPs and
+# starts an OAM DMA whose 160-byte source is $01 (a blank tile) everywhere
+# except ONE $00 at offset 46. The transfer then spans the whole of LY 68.
+# Hardware draws exactly ONE eight-pixel bar: one object's fetch lands on the
+# M-cycle carrying that $00 and every other object on the line reads a $01.
+# Off the mode-2 snapshot this renderer drew all ten.
+#
+# ---- Which M-cycle, and how the ROM pins it -------------------------------
+# The transfer is one byte per M-cycle, so the ROM resolves the fetch's OAM read
+# to four dots and no finer -- but it does resolve it to four dots, because the
+# bar it draws names the object. On LY 68 the DMA has already overwritten
+# objects 0-5 by the time mode 2 ends, so the ten objects drawn are 6..15
+# (screen x 63..135) and the bar is object 7's, at screen x 71. This renderer's
+# six-dot fetch for that object is dots 171-176 of the line and it merges the
+# tile row on 176; the M-cycle carrying source byte 46 is dots 177-180. So the
+# read is one M-cycle AHEAD of the fetch's own dots -- OBJ_DMA_BUS_LEAD.
+#
+# That is a phase between the pipeline and the bus half of an M-cycle, and it is
+# the same quantity M3_PIPE_MCYCLES names for the CPU: exactly one M-cycle,
+# measured. M3_PIPE_MCYCLES ships at 0 only because the CPU's half of it is paid
+# on the write side instead (mem_write commits a byte at the top of its
+# M-cycle); the OAM DMA unit writes through its own path and was never given
+# that compensation, so the term is still owed here and this is where it lands.
+#
+# ---- Two readings that are NOT it -----------------------------------------
+#  * "The DMA starts earlier." Moving the unit's own start is the other way to
+#    put the $00 under object 7's fetch, and it is refuted outright: one M-cycle
+#    earlier (the `next_dma_counter == 8` threshold at 4) does take
+#    strikethrough to 0 wrong pixels, and it costs sixteen mooneye acceptance
+#    rows -- oam_dma_start, oam_dma_timing, oam_dma_restart and the whole
+#    call/ret/push/rst timing family -- and gambatte/oamdma 681 -> 350.
+#  * "The read is somewhere inside the fetch." Swept over all six dots of the
+#    fetch (and out to eleven, into the wait): every one of them reads a $01 and
+#    the ROM draws no bar at all. The window the ROM leaves is four dots wide
+#    and it does not overlap the fetch.
+#
+# ---- Why scanline_ppu does not mirror this --------------------------------
+# It cannot. That renderer draws a whole line in one step at the mode 2 -> 3
+# boundary, so every object on the line would take the same DMA byte and the
+# picture would be ten bars or none -- the answer this change exists to avoid.
+# The distinction only exists for a renderer with a dot per object fetch. The
+# FIFO renderer is the shipping and scored one either way (config `gb_fifo`
+# defaults true; every harness in tests/ passes `fifo = true`).
+const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
+  ## M-cycles the object fetch leads the OAM DMA unit's bus by. 0 is "the byte
+  ## the unit is driving on the fetch's own M-cycle" (mem.dma_latch).
+
+proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## The object's mode-3 OAM read while an OAM DMA owns OAM. Cold: `dma_busy`
+  ## is false for all but ~160 of the ~17,500 M-cycles of a frame, and only for
+  ## the frames that run a transfer at all.
+  let mem = gb.memory
+  var b: uint8
+  if mem.dma_openbus:
+    b = 0xFF'u8
+  else:
+    # `dma_position` is the index of the byte the unit moves NEXT, so a lead of
+    # one M-cycle is exactly that byte. The unit drives nothing past 0xA0, so
+    # the last M-cycle of a transfer keeps what it has rather than reading off
+    # the end of the source.
+    var src = int(mem.current_dma_source) +
+              min(mem.dma_position + OBJ_DMA_BUS_LEAD - 1, 0x9F)
+    # Same echo fold as the unit itself (mooneye oam_dma/sources-GS).
+    if src >= 0xE000: src = src and not 0x2000
+    b = read_byte(mem, gb, src)
+  ppu.sprites[0].tile_num   = b
+  ppu.sprites[0].attributes = b
+
 proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ## Read sprite tile data and merge into the sprite FIFO.
+  # The object's own OAM read lands on this dot, with everything else the fetch
+  # takes here (LCDC.2, the OBP registers, the tile row). One predictable
+  # not-taken branch per object fetch when no transfer is running.
+  if gb.memory.dma_busy: obj_oam_dma_read(ppu, gb)
   let s = ppu.sprites[0]
   ppu.sprites.delete(0)
   let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
