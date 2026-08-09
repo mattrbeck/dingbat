@@ -3530,8 +3530,26 @@ body.debug-2p .home-tile-link {
     /* dvh is required, not a preference: with vh, Safari's collapsing URL bar
        resizes the sheet mid-scroll and reintroduces exactly the movement this
        redesign removes. 88 and not 100 so the strip of app above the sheet
-       stays as the tap-to-close affordance. */
-    height: 88dvh;
+       stays as the tap-to-close affordance.
+
+       The cap is what stops a tall phone or a small tablet from opening 400px
+       of empty sheet under six rows. Measured, the root list needs 606px —
+       14 handle + 69 header + 470 rows + 53 footer — and does not vary with
+       width, because the rows are a fixed height and the descriptions are one
+       ellipsised line. 612 is that plus enough slack to absorb a platform's
+       font metrics; overshoot it and the list simply scrolls a few px.
+       88dvh still wins on anything shorter — an SE gets 500 and its list
+       scrolls, exactly as before.
+
+       It caps the WHOLE sheet, not just the list. Sizing the list to content
+       and leaving detail screens at 88dvh would resize the frame on every
+       drill-in, which is the movement this redesign exists to remove. The
+       trade is real and deliberate: a detail pane on a big phone now scrolls
+       sooner, and in exchange the sheet sits under your thumb.
+
+       If a seventh section is ever added, the list simply starts scrolling —
+       raise this by one row height (72px) if that is not wanted. */
+    height: min(88dvh, 612px);
     min-height: 0;
     border-radius: 20px 20px 0 0;
     border-bottom: none;
