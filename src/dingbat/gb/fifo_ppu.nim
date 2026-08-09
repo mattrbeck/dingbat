@@ -340,6 +340,108 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
     return true
   return false
 
+# ---- The head of a line that starts as a WINDOW line -----------------------
+#
+# WX below WIN_LINE_START_WX puts the window's first pixel left of the screen,
+# where the shifter's equality can never reach it, so the whole line is fetched
+# from the window map from its first tile (the note at the mode 2 -> 3 edge has
+# that half). Two things about that start were wrong, and mealybug
+# `m3_window_timing` measures both. It is a ruler, not a picture: WX = LY, WY =
+# 0, SCX = 0, and BGP driven black at a fixed dot of every line, so the x at
+# which black begins IS the count of dots the head consumed before x = 0. Its
+# reference reads
+#
+#   WX (= LY)     0   1   2   3   4   5   6 ..  10   11  12 .. 16  17+
+#   reference     3   3   3   3   3   3   3 ..   3    4   5 ..   9    9
+#   was           9   3   4   5   6   7   8 ..   3    4   5 ..   9    9
+#
+# and the 17+ tail is the control: there the window starts right of everything
+# the write can reach, so 9 is what a line with no window head at all reads.
+#
+# ---- 1. WHERE WX is read (WIN_LINE_START_LATCH) ---------------------------
+#
+# This ROM writes WX inside mode 3 -- dingbat's trace puts the write on dot 85
+# of every line, and on dot 81 of LY 0, whose handler is one M-cycle shorter
+# (`line_0_fix`). Reading WX at the mode 2 -> 3 edge therefore reads the
+# PREVIOUS line's value, which for LY 0 is the 144 left from the bottom of the
+# frame: dingbat drew no window on LY 0 at all and read 9 where the reference
+# reads 3. So the read is AFTER dot 85.
+#
+# The other side is `m3_wx_6_change`, which writes WX = 6 in mode 2 and
+# WX = LY at dot 93, with WY = 4: its reference draws NO window on LY 4 and
+# LY 5, so the value the line-start decision sees on those lines is still 6 and
+# the read is BEFORE dot 93. This latch -- the last dot of the throw-away fetch
+# at the head of mode 3, dot 86, or 82 on LY 0 -- is the fetcher event inside
+# that bracket, and it is the same event that already latches the fine scroll
+# two dots later at the `B`. Nothing about the decision changes, only its dot;
+# the throw-away fetch that just ended read the BACKGROUND map, and every byte
+# of it is overwritten by the fetch this restarts.
+#
+# ---- 2. The window's OWN discard is absorbed (WIN_HEAD_ABSORB) -------------
+#
+# `fifo_sample_smooth_scroll` seeds `lx` at `-(7 - WX)` so the window's first
+# tile lands on the right pixel, and this shifter charges a dot for every one
+# of those discarded pixels. Hardware does not. The reference above is FLAT at
+# 3 across WX = 0..6, and 3 is also what WX = 7..10 read -- lines whose window
+# starts on screen and pays the ordinary six-dot startup fetch. So the head
+# costs the same six dots whether the window starts at screen x = WX - 7 or off
+# the left edge, which is the ROM's own header sentence: it accounts for the
+# entire WX-dependence of the frame with "the 6 T-cycle window startup fetch"
+# moving relative to a fixed write, and names no other per-WX term. (The
+# hardware photograph backs the reference: 86.2% of the disputed cells and 100%
+# of the cells above 2 sigma -- tools/gbphoto.)
+#
+# It cannot be spelled as a smaller discard. Seeding `lx` at a flat -6 gets
+# m3_window_timing to 0 the same way and COLLAPSES three other rows that are
+# pixel-exact today -- `m3_wx_4_change` 23040 -> 12809, `m3_wx_5_change`
+# -> 14731, `m3_window_timing_wx_0` -> 22914 -- because the discard is what
+# ALIGNS the window's glyphs and carries the SCX term. So the discard stays
+# where it is and only the DOTS move: they come back as
+# `6 - (7 - WX)` = `WX - 1` idle dots at the head of the window's own fetch --
+# the negative steps of FETCHER_ORDER -- which leaves mode 3 at 172 + 6 for
+# every WX in 0..6, exactly the length WX = 7 already had.
+#
+# WX = 0 needs no idle dot and gets none: its discard is already six (the
+# `+= 1` in the sampler, from `m3_window_timing_wx_0`'s stair), and
+# `max(0, WX - 1)` is that. The SCX term is deliberately NOT absorbed -- it is
+# the throw-away fetch's own discard, not the window's, and
+# `m3_window_timing_wx_0` is pixel-exact with it charged in full.
+#
+# ---- Two suites that never see a pixel say the same thing ------------------
+#
+# The consequence is a MODE 3 LENGTH, so it is measurable without any
+# reference frame at all, and both length instruments agree:
+#
+#   * GBMicrotest `win<WX>_a` reads STAT at cc = 257 wanting mode 3 and
+#     `win<WX>_b` at cc = 261 wanting mode 0. Hardware samples the mode bits at
+#     `cc - 2`, so mode 0 starts in [256, 259] and mode 3 is 176..179 dots --
+#     for every WX in 0..15, the whole family answering the same bracket.
+#     Charging the discard on top put WX = 4 at 175 and WX = 5 at 174, OUTSIDE
+#     it on the short side, and `-d:gb_stat_read_trace` shows both `_a` rows
+#     passing on a mode flag that was already 0 when the ROM read it. At 178
+#     every WX is inside the bracket and `live` is 3 where the ROM wants 3.
+#   * gambatte's WX = 3 length brackets go green with it, six rows on both
+#     devices: `window/m2int_wx03_m3stat_1`, `window/m2int_wx03_scx3_m3stat_1`,
+#     `window/late_wx_wx03_2` and `sprites/space/10spritesPrLine_wx{3,4,5}
+#     _m3stat_ds_1`. Nothing anywhere in that suite goes the other way.
+proc fifo_head_window(ppu: GbFifoPpu) =
+  ## The head of mode 3 reading WX: does this line start as a window line, and
+  ## how many of the window startup fetch's six dots are left over once its
+  ## fine-scroll discard has taken its share. Called once per line, from the
+  ## dot the throw-away fetch ends on.
+  when WIN_LINE_START_LATCH != 0:
+    if not ppu.fetching_window and window_enabled(ppu) and ppu.window_trigger and
+       ppu.wx < uint8(WIN_LINE_START_WX):
+      # `fifo_reset_bg`'s window half, without the reset: the FIFO is empty,
+      # `fetcher_x` is 0 and `obj_tile_fx` is -1 already, because nothing has
+      # pushed yet and the caller has just rewound `fetch_counter` itself.
+      ppu.fetching_window = true
+      inc ppu.current_window_line
+      fifo_arm_window(ppu)
+  when WIN_HEAD_ABSORB != 0:
+    if ppu.fetching_window:
+      ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
+
 # ---- M3_THROWAWAY_DOTS: how long the discarded head fetch lasts -----------
 #
 # The head of mode 3 is a discarded fetch followed by the first real one, and
@@ -470,6 +572,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           ppu.dropped_first_fetch = true
           ppu.head_cycle = true
           ppu.fetch_counter = 0
+          fifo_head_window(ppu)
     else:
       ppu.tile_data_high = ppu.vram[bank_num][tile_ptr + tile_row * 2 + 1]
       inc ppu.fetch_counter
@@ -491,6 +594,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         if not ppu.dropped_first_fetch:
           ppu.dropped_first_fetch = true
           ppu.fetch_counter = 0
+          fifo_head_window(ppu)
           # The fine scroll is the FETCHER's, not the shifter's: the throw-away
           # first fetch IS the mechanism that implements the SCX & 7 discard, so
           # SCX is latched when that fetch completes rather than several dots
@@ -505,16 +609,20 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           ppu.fetch_counter = 0
 
   of fsPushPixel:
+    # Step 7 is the last of the order, so this is the wrap -- and it is the
+    # ONLY one. Every other `inc` above starts from a step whose successor is
+    # still inside the order (the three reads sit at 1, 3 and 5, and fsSleep is
+    # never step 7), so 8 was only ever reachable from here. It used to be an
+    # `and 7` on the way out of this proc, which is a dot-loop instruction this
+    # does not need -- and which would silently fold the window head's negative
+    # steps (WIN_HEAD_ABSORB, above) back into the positive ones, `-3 and 7`
+    # being 5.
     if try_push_bg_pixels(ppu, gb):
       when M3_THROWAWAY_DOTS == 4: ppu.head_cycle = false
-      inc ppu.fetch_counter
+      ppu.fetch_counter = 0
 
   of fsSleep:
     inc ppu.fetch_counter
-
-  # Counter is never negative and never exceeds 8, so the mask is the `mod 8`
-  # it replaces without the signed-remainder correction.
-  ppu.fetch_counter = ppu.fetch_counter and 7
 
 # ---- The OBJ penalty ------------------------------------------------------
 #
@@ -2529,9 +2637,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # gambatte m2int_wx00_m3stat_1/2 and gbmicrotest win0_scx3_a/_b pin
           # that. WX = 7 is NOT in here: that one is a perfectly ordinary
           # window start at screen x = 0 and pays the ordinary restart.
-          fifo_reset_bg(ppu,
-            window_enabled(ppu) and
-            ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
+          #
+          # WHICH WX decides it is not read here any more -- it is read at the
+          # end of the throw-away fetch six dots from now, where the fine
+          # scroll that implements the decision is read too (fifo_head_window,
+          # and WIN_LINE_START_LATCH). This edge only has to start the line as
+          # a background line so that fetch has a source.
+          when WIN_LINE_START_LATCH != 0:
+            fifo_reset_bg(ppu, false)
+          else:
+            fifo_reset_bg(ppu,
+              window_enabled(ppu) and
+              ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           ppu.lx = 0

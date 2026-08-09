@@ -352,6 +352,21 @@ const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## re-activation -- see docs/gb-failure-triage.md). This constant is pinned
   ## from both sides regardless of that residual, which is why it ships without
   ## it.
+const WIN_HEAD_ABSORB*        {.intdefine.} = 1
+  ## Whether a line that STARTS as a window line pays its `7 - WX` fine-scroll
+  ## discard OUT OF the window's own six-dot startup fetch (1, shipping) or on
+  ## top of it (0, the pre-2026-08-09 behaviour). With it, mode 3 is `172 + 6`
+  ## for every WX below WIN_LINE_START_WX -- the same length a WX >= 7 window
+  ## start has, which is what mealybug m3_window_timing's flat reference says.
+  ##
+  ## The derivation and the ruler it is read off are at the head latch in
+  ## fifo_ppu.nim.
+const WIN_LINE_START_LATCH*   {.intdefine.} = 1
+  ## Which dot WX is read on to decide whether a line STARTS as a window line:
+  ## the last dot of the throw-away fetch at the head of mode 3 (1, shipping),
+  ## or the mode 2 -> 3 edge six dots earlier (0, the pre-2026-08-09
+  ## behaviour). Bracketed from both sides by two mealybug ROMs; see the head
+  ## latch in fifo_ppu.nim.
 const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## Whether the window's WX comparator can match one pixel slot to the LEFT of
   ## the shifter's first pixel -- screen x = -1 when SCX & 7 = 0, i.e. WX = 6.
@@ -1881,10 +1896,21 @@ type
       test_output*:  TestOutput
 
 # ==================== FETCHER ORDER ====================
-const FETCHER_ORDER*: array[8, FetchStage] = [
+const FETCHER_ORDER*: array[-5 .. 7, FetchStage] = [
+  # Steps -5..-1 are the window startup fetch's IDLE HEAD, and only a line that
+  # starts as a window line ever enters there (WIN_HEAD_ABSORB in fifo_ppu):
+  # the head is six dots whatever WX is, the `7 - WX` fine-scroll discard eats
+  # that many of them at the shifter, and the fetcher waits out the other
+  # `WX - 1`. Spelling it as negative steps of the fetcher's own order costs
+  # the mode 3 dot loop nothing -- the `case` on it is dispatched every dot
+  # already, and fsSleep's `inc` walks the counter back up to 0 on its own.
+  # WX < WIN_LINE_START_WX, so five entries covers every threshold up to 7.
+  fsSleep, fsSleep, fsSleep, fsSleep, fsSleep,
   fsSleep, fsGetTile, fsSleep, fsGetTileDataLow,
   fsSleep, fsGetTileDataHigh, fsSleep, fsPushPixel,
 ]
+static: doAssert WIN_LINE_START_WX - 2 <= 5,
+  "WIN_HEAD_ABSORB idles WX - 1 dots; FETCHER_ORDER's negative head must cover it"
 
 # DMG default colors (BGR555)
 const DMG_COLORS*: array[4, uint16] = [0x6BDF'u16, 0x3ABF'u16, 0x35BD'u16, 0x2CEF'u16]
