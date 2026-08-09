@@ -1108,6 +1108,13 @@ type
     # `ldr`+`cmp`+`b.le`. The value is 0..12 by construction (M3_PIPE_MCYCLES
     # * 4 + M3_PIPE_DELAY).
     m3_delay*:            uint8
+    # Dots the mode 3 -> 0 FLAG still owes after the fetcher has retired, so
+    # that a line whose pipeline started early (LY0_PIPE_MCYCLES in fifo_ppu:
+    # line 0, and only line 0) still leaves mode 3 on the dot every other line
+    # does. Zero on every other line, and a byte for the same reason m3_delay
+    # is one. Transient per-line state, like m3_delay and m3_lead: not
+    # serialized.
+    m3_hold*:             uint8
     # How far the pipeline lags the CPU's view of the PPU registers on THIS
     # line, in dots. Latched at the mode 2 -> 3 edge because the CPU M-cycle it
     # is derived from is 4 dots at normal speed and 2 in double speed. See

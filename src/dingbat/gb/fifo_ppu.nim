@@ -897,12 +897,72 @@ const M3_PIPE_DELAY {.intdefine.} = 2
 # the residual is somewhere else. See LCD_ON_LINE0_TRIM in gb.nim for the other
 # two routes to the same 2 dots and what refuses each of them.
 const M3_END_EARLY {.intdefine.} = 0
-# Compiles the pipeline-lead machinery out entirely when all three terms are
+
+# CPU M-cycles by which the pixel pipeline runs AHEAD on line 0, and only on
+# line 0, of where it runs on lines 1..143 -- with every mode flag, every STAT
+# source and the mode 3 length left exactly where they are. It is the one term
+# here that is per-line rather than per-frame, and the only one whose head is
+# paid back at both ends: the head delay is `LY0_PIPE_MCYCLES` M-cycles shorter
+# and the mode 3 -> 0 flag is held for the same number of dots, so the pixels
+# move and nothing else does.
+#
+# ---- What measures it -------------------------------------------------------
+# Two suites, neither of which was written with the other in mind, and they
+# agree to the dot:
+#
+#   * mealybug `inc/utils.asm`'s `line_0_fix` macro burns 24 T-cycles on LY 0
+#     against 28 on every other line -- "line 0 timing is different by 4
+#     cycles", its own comment. Every `m3_*` ROM writes its register out of a
+#     mode 2 STAT handler, so what the macro cancels is that the line-0 handler
+#     reaches its write 4 T-cycles FURTHER INTO the drawn line than it does on
+#     lines 1..143.
+#   * gambatte's `scy`, `bgtilemap`, `bgtiledata`, `scx_during_m3` and `bgen`
+#     reference-PNG families say it without a macro: the ROM takes a mode 2
+#     STAT interrupt on every line and writes SCY/SCX/LCDC a counted number of
+#     M-cycles into the handler (`scy/scy_during_m3_2.asm` is the shortest one
+#     to read). 125 of those rows were pixel-exact on lines 1..143 and wrong
+#     ONLY on LY 0, and a family's steps are one M-cycle each, so the step the
+#     expected value flips on IS the measurement: `scy_during_m3_1..6`'s
+#     reference moves its boundary at steps 2, 4, 6 where this tree moved it at
+#     3, 5, 7.
+#
+# ---- Why it is here and not in the STAT source or the mode edges ------------
+# "The line-0 mode 2 interrupt is one M-cycle late" is the obvious reading of
+# both and it is FALSE. Built and scored 2026-08-09, it buys the same five
+# families (gambatte 3658 -> 3762) and is refused from three directions:
+#
+#   * mooneye `acceptance/ppu/intr_1_2_timing-GS` (and wilbertpol's copy) times
+#     the line-144 mode 1 STAT interrupt to the line-0 mode 2 one directly, by
+#     counting `inc b` between them, and wants 20 then 21. Moving the pulse
+#     makes it 21/22. It is verified on DMG/MGB/SGB/SGB2 hardware.
+#   * gambatte `m2enable/late_enable_ly0_{1,2}` and eight siblings enable the
+#     mode 2 source one M-cycle apart across the top of line 0 and want an
+#     interrupt at the first offset and NONE at the second, which brackets the
+#     pulse's own window where it already is.
+#   * `lcdirq_precedence/m2irq_ly00_lcdstat30` and `lyc153int_m2irq_ifw_2`
+#     bracket the same edge from the vblank side.
+#
+# The mode EDGES are pinned just as hard, and from the other side. Making line
+# 0's mode 2 four dots short instead (mode 3 flag and pipeline both starting at
+# dot 76, gambatte 3658 -> 3714) moves the mode 3 -> 0 flag with them and costs
+# `m0enable` -18, `vramw_m3end` -8, `lcd_offset` -7, `enable_display` -7 and
+# `m0int_m3stat` -2; and `ly0/lycint152_m2stat_1` refuses the mode 2 -> 3 edge
+# moving on its own. So every flag on line 0 is where it is, the STAT sources
+# are where they are, and what is one M-cycle out is only the phase at which
+# the pipeline samples the registers -- which is exactly what M3_PIPE_MCYCLES
+# above is the whole-frame version of, and why this is spelled in the same
+# units it is. That is also what the `_ds` rows say: in double speed the same
+# five families want 2 dots, not 4, so the quantity is a CPU M-cycle and not a
+# count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
+const LY0_PIPE_MCYCLES {.intdefine.} = 1
+
+# Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
-# -d:M3_END_EARLY=0` control build for an A/B wants; every guard below is a
-# compile-time short circuit at that setting, not a runtime test.
+# -d:M3_END_EARLY=0 -d:LY0_PIPE_MCYCLES=0` control build for an A/B wants;
+# every guard below is a compile-time short circuit at that setting, not a
+# runtime test.
 const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
-                         M3_END_EARLY != 0
+                         M3_END_EARLY != 0 or LY0_PIPE_MCYCLES != 0
 
 proc window_reactivate(ppu: GbFifoPpu) =
   ## WX was re-reached while the window was ALREADY the active fetch source.
@@ -1601,9 +1661,34 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # share is not, which is the whole difference between "the pipeline
             # runs late" and "mode 3 is short".
             ppu.m3_delay = uint8(int(ppu.m3_lead) - M3_END_EARLY)
+            ppu.m3_hold = 0
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
+          when LY0_PIPE_MCYCLES != 0:
+            # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
+            # where every other line's does, with the flags left alone. Two
+            # halves, and both are paid here:
+            #
+            #  * the head. The advance is larger than the head delay this line
+            #    had to give (4 dots against M3_PIPE_DELAY's 2 at normal
+            #    speed), so the delay goes to zero and the rest is spent as
+            #    pipeline dots on this dot -- the same "the dots are already
+            #    decided, emit them here" step fifo_burst_tail makes at the
+            #    other end of the line.
+            #  * the tail. The fetcher will now retire `adv` dots early, so the
+            #    mode 3 -> 0 flag is held for `adv` dots (m3_hold, below) and
+            #    lands on the dot it lands on for every other line.
+            #
+            # `first_line` is excluded: the line 0 that follows an LCD enable
+            # was never in vblank, and it has a model of its own already (the
+            # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
+            if ppu.ly == 0 and not ppu.first_line:
+              let adv = LY0_PIPE_MCYCLES * (4 shr gb.memory.current_speed)
+              let head = int(ppu.m3_delay)
+              ppu.m3_delay = uint8(max(0, head - adv))
+              ppu.m3_hold  = uint8(adv)
+              for _ in 0 ..< adv - min(head, adv): fifo_pipeline_dot(ppu, gb)
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
               var xs = ""
@@ -1618,8 +1703,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # rendered pixel. With a nonzero lead the shifter is still `m3_lead`
         # pixels from the end of the line here; the burst below finishes them.
         if fetcher_retired(ppu):
-          when defined(gb_win_trace):
-            echo "M3END ly=", ppu.ly, " dot=", ppu.cycle_counter, " len=", ppu.cycle_counter-80
           when M3_PIPE_LEAD_ANY:
             # The tail of the line, emitted on THIS dot rather than spread over
             # the first dots of H-Blank. "The fetcher retired" means every VRAM
@@ -1630,6 +1713,17 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # Bursting them costs no dots (the lead was already paid at the head
             # of mode 3) and keeps the fetcher out of H-Blank entirely.
             fifo_burst_tail(ppu, gb)
+          # A line whose pipeline started early (LY0_PIPE_MCYCLES) retires that
+          # many dots early too; the FLAG still leaves mode 3 on the dot every
+          # other line does. The burst above is on the retire dot deliberately
+          # -- that is where the pixels are decided -- and only the flag waits.
+          when LY0_PIPE_MCYCLES != 0:
+            if ppu.m3_hold != 0:
+              dec ppu.m3_hold
+              ppu.cycle_counter += 1
+              continue
+          when defined(gb_win_trace):
+            echo "M3END ly=", ppu.ly, " dot=", ppu.cycle_counter, " len=", ppu.cycle_counter-80
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
               dec gb_m3_len_lines
