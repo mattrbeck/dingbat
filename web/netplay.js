@@ -13,15 +13,24 @@
 // ?signal=ws://... overrides the signaling server (dev/self-hosted);
 // ?linkdelay=50 adds N ms of artificial latency to every outgoing message
 // (internet simulation, mirrors the native --netlink-delay-ms knob).
-// Localhost talks to a locally-run server; everywhere else defaults to the
-// production endpoint (the static site is on GitHub Pages, which can't proxy
-// WebSockets, so a same-origin /signal path can never work there). A LAN dev
-// page (192.168.x.x) therefore also hits production — use ?signal= to point
-// it at a local server. wss: from an http: page is allowed (not mixed content).
+// Loopback, RFC 1918 LAN, and mDNS .local origins are dev serves: they talk
+// to a signaling server on the same host (:8790, plain ws). Everything else
+// defaults to the production endpoint (the static site is on GitHub Pages,
+// which can't proxy WebSockets, so a same-origin /signal path can never work
+// there). An https dev serve needs ?signal= — ws: from https: is blocked as
+// mixed content.
 const NET_PARAMS = new URLSearchParams(location.search);
+const NET_LOCAL_HOST =
+  location.hostname === "localhost" ||
+  location.hostname === "[::1]" ||
+  location.hostname.endsWith(".local") ||
+  /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(location.hostname) ||
+  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(location.hostname) ||
+  /^192\.168\.\d{1,3}\.\d{1,3}$/.test(location.hostname) ||
+  /^172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}$/.test(location.hostname);
 const NET_SIGNAL_URL =
   NET_PARAMS.get("signal") ||
-  (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
+  (NET_LOCAL_HOST
     ? "ws://" + location.hostname + ":8790"
     : "wss://signal.dingbat.gg/signal");
 const NET_LINK_DELAY = parseInt(NET_PARAMS.get("linkdelay") || "0", 10) || 0;
