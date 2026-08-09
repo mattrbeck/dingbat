@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 14:50:49*
+*Generated: 2026-08-09 15:31:18*
 
 ## Game Boy - Blargg
 
@@ -85,7 +85,7 @@
 | mooneye/acceptance/ppu/intr_1_2_timing-GS | 👌 |
 | mooneye/acceptance/ppu/intr_2_0_timing | 👌 |
 | mooneye/acceptance/ppu/intr_2_mode0_timing | 👌 |
-| mooneye/acceptance/ppu/intr_2_mode0_timing_sprites | 👀 |
+| mooneye/acceptance/ppu/intr_2_mode0_timing_sprites | 👌 |
 | mooneye/acceptance/ppu/intr_2_mode3_timing | 👌 |
 | mooneye/acceptance/ppu/intr_2_oam_ok_timing | 👌 |
 | mooneye/acceptance/ppu/lcdon_timing-GS | 👌 |
@@ -624,19 +624,19 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/ppu_sprite0_scx0_a | 👌 |
 | gbmicrotest/ppu_sprite0_scx0_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx1_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx1_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx1_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx2_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx2_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx2_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx3_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx3_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx4_a | 👌 |
 | gbmicrotest/ppu_sprite0_scx4_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx5_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx5_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx5_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx6_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx6_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx6_b | 👌 |
 | gbmicrotest/ppu_sprite0_scx7_a | 👌 |
-| gbmicrotest/ppu_sprite0_scx7_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/ppu_sprite0_scx7_b | 👌 |
 | gbmicrotest/ppu_sprite_testbench | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/ppu_spritex_vs_scx | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/ppu_win_vs_wx | 👀 actual=0x00 expected=0x00 verdict=0x00 |
@@ -658,9 +658,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/sprite4_7_a | 👌 |
 | gbmicrotest/sprite4_7_b | 👌 |
 | gbmicrotest/sprite_0_a | 👌 |
-| gbmicrotest/sprite_0_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/sprite_0_b | 👌 |
 | gbmicrotest/sprite_1_a | 👌 |
-| gbmicrotest/sprite_1_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/sprite_1_b | 👌 |
 | gbmicrotest/stat_write_glitch_l0_a | 👌 |
 | gbmicrotest/stat_write_glitch_l0_b | 👌 |
 | gbmicrotest/stat_write_glitch_l0_c | 👌 |
@@ -760,41 +760,41 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/vram_write_l1_d | 👌 |
 | gbmicrotest/wave_write_to_0xC003 | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/win0_a | 👌 |
-| gbmicrotest/win0_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win0_b | 👌 |
 | gbmicrotest/win0_scx3_a | 👌 |
-| gbmicrotest/win0_scx3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win0_scx3_b | 👌 |
 | gbmicrotest/win10_a | 👌 |
-| gbmicrotest/win10_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win10_b | 👌 |
 | gbmicrotest/win10_scx3_a | 👌 |
-| gbmicrotest/win10_scx3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win10_scx3_b | 👌 |
 | gbmicrotest/win11_a | 👌 |
-| gbmicrotest/win11_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win11_b | 👌 |
 | gbmicrotest/win12_a | 👌 |
-| gbmicrotest/win12_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win12_b | 👌 |
 | gbmicrotest/win13_a | 👌 |
-| gbmicrotest/win13_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win13_b | 👌 |
 | gbmicrotest/win14_a | 👌 |
-| gbmicrotest/win14_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win14_b | 👌 |
 | gbmicrotest/win15_a | 👌 |
-| gbmicrotest/win15_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win15_b | 👌 |
 | gbmicrotest/win1_a | 👌 |
-| gbmicrotest/win1_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win1_b | 👌 |
 | gbmicrotest/win2_a | 👌 |
-| gbmicrotest/win2_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win2_b | 👌 |
 | gbmicrotest/win3_a | 👌 |
-| gbmicrotest/win3_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win3_b | 👌 |
 | gbmicrotest/win4_a | 👌 |
-| gbmicrotest/win4_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win4_b | 👌 |
 | gbmicrotest/win5_a | 👌 |
-| gbmicrotest/win5_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win5_b | 👌 |
 | gbmicrotest/win6_a | 👌 |
-| gbmicrotest/win6_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win6_b | 👌 |
 | gbmicrotest/win7_a | 👌 |
-| gbmicrotest/win7_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win7_b | 👌 |
 | gbmicrotest/win8_a | 👌 |
-| gbmicrotest/win8_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win8_b | 👌 |
 | gbmicrotest/win9_a | 👌 |
-| gbmicrotest/win9_b | 👀 actual=0x83 expected=0x80 verdict=0xFF |
+| gbmicrotest/win9_b | 👌 |
 
 ## Game Boy - AGE
 
@@ -910,16 +910,16 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_timing | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops | 👀 |
@@ -1022,7 +1022,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/enable_display | 👀 135/184 passed |
 | gambatte/halt | 👀 124/158 passed |
 | gambatte/irq_precedence | 👀 46/64 passed |
-| gambatte/lcd_offset | 👀 40/62 passed |
+| gambatte/lcd_offset | 👀 41/62 passed |
 | gambatte/lcdirq_precedence | 👀 60/62 passed |
 | gambatte/ly0 | 👀 75/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
@@ -1044,7 +1044,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m0stat | 👀 3/6 passed |
 | gambatte/m2int_m2irq | 👀 15/18 passed |
 | gambatte/m2int_m2stat | 👀 4/8 passed |
-| gambatte/m2int_m3stat | 👀 29/44 passed |
+| gambatte/m2int_m3stat | 👀 22/44 passed |
 | gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 52/69 passed |
 | gambatte/oamdma | 👀 681/811 passed |
@@ -1052,18 +1052,18 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
-| gambatte/speedchange | 👀 112/208 passed |
-| gambatte/sprites | 👀 407/476 passed |
+| gambatte/speedchange | 👀 109/208 passed |
+| gambatte/sprites | 👀 435/476 passed |
 | gambatte/tima | 👀 218/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 35/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 350/476 passed |
+| gambatte/window | 👀 293/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 981
-- **Pass:** 743
-- **Fail:** 238
+- **Pass:** 765
+- **Fail:** 216
