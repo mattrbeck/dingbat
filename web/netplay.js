@@ -924,6 +924,24 @@ manualCopyBtn?.addEventListener("click", async () => {
   }
   showToast("Code copied");
 });
+
+// Native share sheet for the code — the natural mobile flow, where the code
+// is headed to a messenger anyway. Revealed only where the Web Share API
+// exists and the primary pointer is a finger; desktop keeps just Copy.
+const manualShareBtn = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-share"));
+if (manualShareBtn && navigator.share && matchMedia("(pointer: coarse)").matches) {
+  manualShareBtn.hidden = false;
+}
+manualShareBtn?.addEventListener("click", async () => {
+  const code = manualOut?.value;
+  if (!code) return;
+  try {
+    // The bare code, no prose: whatever the friend pastes back must decode.
+    await navigator.share({ text: code });
+  } catch {
+    // A dismissed share sheet rejects with AbortError; nothing to report.
+  }
+});
 // Keep the emulator's key handlers from swallowing input; Enter confirms.
 // Escape must still dismiss the modal: stopping propagation here means the
 // document-level Escape handler below never sees it while this field has

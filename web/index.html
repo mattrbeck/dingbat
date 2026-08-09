@@ -1101,6 +1101,9 @@
             <input id="net-manual-out" class="net-manual-code" type="text" disabled
                    aria-labelledby="net-manual-out-label" />
             <button type="button" class="button" id="net-manual-copy">Copy</button>
+            <!-- Revealed on touch devices with the Web Share API (netplay.js):
+                 the code is headed to a messenger anyway. -->
+            <button type="button" class="button" id="net-manual-share" hidden>Share</button>
           </div>
           <p class="net-manual-label" id="net-manual-in-label">Friend's code:</p>
           <div class="net-join-row">
