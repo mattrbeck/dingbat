@@ -966,12 +966,16 @@ const MIXER_HEAD_LINGER*      {.intdefine.} = 1
   ## `dmgpalette_during_m3` family looks like a second one and is not: its PNGs
   ## carry no `old or new` pixel at all (MIXER_PALETTE_OR's named cost), so
   ## every disagreement with them in this area is already that one.
-const MIX_HOLD*               = 4
+const MIX_HOLD*               {.intdefine.} = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
   ## write can still reach: the deepest mixer stage, plus the pixels the tail
   ## burst decided ahead of their own dot (the pipeline lead). fifo_ppu.nim
   ## static-asserts that sum against this.
+  ##
+  ## Overridable only so a sweep of the pipeline lead can build at all -- a
+  ## whole M-cycle of M3_PIPE_MCYCLES needs 8. Depth alone changes no pixel;
+  ## it is a bound, not a model.
 const CGB_MIXER_LATENCY*      {.intdefine.} = 1
   ## Dots the CGB's write to a register the MIXER reads takes to arrive over
   ## the DMG's. Subtracted from every mixer stage below, so a register the DMG

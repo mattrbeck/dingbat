@@ -38,7 +38,13 @@ const DMG_BOOT_PHASE* {.intdefine.} = 397
 # not the dispatch. That is bucket 14 of docs/gb-failure-triage.md; the 98
 # gambatte rows the readback fix traded are all of them arithmetically exactly
 # that one M-cycle (4 dots at normal speed, 2 in double), and they come back
-# with it.
+# with it. (line_144_oam_int_c is NOT one of them -- it is m2_line144's pulse,
+# which has its own measurement and does not move; it stays red.)
+#
+# **Measured and built 2026-08-09: it is STAT_M2_LEAD below**, one CPU M-cycle,
+# on every line except line 0. Read that constant for the derivation, for the
+# second axis it needs (M3_PIPE_AHEAD in fifo_ppu.nim) and for why the pair
+# ships off -- every row it costs is a ROM that waits with EI; HALT.
 #
 # What that leaves STAT_IRQ_LEAD as is the WRONG lever for it, and it is kept
 # only as the record of a falsified one. It moves all four sources together:
@@ -858,7 +864,170 @@ const STAT_M2_PULSE* {.intdefine.} = 3
   ## "Dots"), so a PPU-side pulse is a fixed number of dots. The M-cycle-scaled
   ## spelling is kept reachable as -2 because those five rows are the only
   ## direct measurement of it.
+
+# ---- ...and it rises one CPU M-cycle before the line it belongs to --------
+#
+# The pulse above is the OAM source's WIDTH. Its rising DOT is a separate
+# quantity and it is bucket 14 of docs/gb-failure-triage.md: the source comes up
+# one CPU M-cycle BEFORE the line whose OAM scan it belongs to, not on the line
+# boundary where every other STAT source rises. What says so is at the top of
+# this file -- GBMicrotest's `int_oam_nops` ($94 against $93), `int_oam_incs`,
+# `oam_int_nops_a`, `oam_int_inc_sled` and `lcdon_to_oam_int_l0/l1/l2`, each
+# exactly one M-cycle over while `int_lyc_nops`, `int_vblank1_nops` and
+# `int_hblank_nops_scx0..7` are exact -- plus the 98 `m2int_*`-anchored gambatte
+# rows the readback fix traded.
+#
+# **It ships OFF, and the reason is a second error it uncovers rather than any
+# doubt about the measurement.** Turning it on is worth gambatte 3849 -> 3964,
+# GBMicrotest 429 -> 433 and the whole runner 765 -> 773, and it costs seventeen
+# rows -- and every one of those seventeen is a ROM that waits for its interrupt
+# with `EI; HALT` rather than with a sled. See the halt paragraph below.
+const STAT_M2_LEAD* {.intdefine.} = 0
+  ## CPU M-cycles the OAM STAT source comes up before the line boundary.
+  ## 0 is the boundary itself and compiles the whole mechanism out.
+  ##
+  ## ---- M-cycles, not dots ---------------------------------------------------
+  ##
+  ## Spelled as a fixed PPU dot first, because a pulse the OAM scan generates
+  ## ought to be a dot count the CPU's clock cannot touch (Pan Docs, "Dots").
+  ## The `_ds` column refuses that outright. A rise at a fixed dot 452 -- four
+  ## dots early, one M-cycle at normal speed -- is TWO M-cycles early in double
+  ## speed, where an M-cycle is 2 dots, and the difference between the fixed dot
+  ## and this scaled lead is **75 gambatte rows gained and 4 lost, of which every
+  ## single one is a `_ds_` row** (`scy_during_m3_ds_*`, `m2int_*_ds_2`,
+  ## `bgtiledata_spx09_ds_*`, `oam_access/postread_ds_2`, ...). Nothing at normal
+  ## speed moves between the two spellings at all. So the quantity is one CPU
+  ## M-cycle at either speed, which is what the gambatte families say directly
+  ## too: `m2int_m0irq` is `exp=0,2 got=2,2` and its `_ds` twin `exp=1,3
+  ## got=3,3` -- one family step, i.e. one M-cycle, either way.
+  ##
+  ## Fixed-dot sweep, for the record (gambatte of 5005 / GBMicrotest of 513, with
+  ## `M3_PIPE_AHEAD` off, so only the GBMicrotest column means anything here):
+  ##
+  ##   rise dot  449      450      451      452      453      454      455      456
+  ##            3696/433 3698/433 3702/433 3702/433 3833/428 3838/428 3841/428 3849/429
+  ##
+  ## 453..455 do not move the dispatch at all, and that is not a defect in them:
+  ## this tree's line boundary falls on the LAST dot of a CPU M-cycle, so a rise
+  ## at 453..455 is in the same M-cycle as the boundary and only 449..452 cross
+  ## it. Which is also the shape of the whole bucket -- nothing observes a rise
+  ## inside an M-cycle, so a rising dot decides only WHICH M-cycle it lands in.
+  ##
+  ## ---- The two-axis sweep ---------------------------------------------------
+  ##
+  ## The lead cannot be scored alone. Every gambatte family that writes a PPU
+  ## register out of the mode 2 handler measures the dispatch against the pixel
+  ## pipeline, so moving one demands moving the other (`M3_PIPE_AHEAD` in
+  ## fifo_ppu.nim). Both axes are two-sided and the maximum is a single cell.
+  ## gambatte of 5005 / GBMicrotest of 513, one build per cell:
+  ##
+  ##   STAT_M2_LEAD \ M3_PIPE_AHEAD    0           1           2
+  ##                              0   3849/429    3671/429       --
+  ##                              1   3743/433    3963/433    3716/433
+  ##                              2      --       3605/425    3754/425
+  ##
+  ## GBMicrotest depends on the LEAD alone -- 429 / 433 / 425 at 0 / 1 / 2, and
+  ## not one of its OAM rows writes a PPU register mid-mode-3 -- so the lead is
+  ## pinned two-sided by an instrument the pipeline cannot reach.
+  ## `LY0_PIPE_MCYCLES` is then pinned the other way: with the model below it
+  ## must be 0 (3964, against 3819 at 1 and 3826 at 2), because line 0's four
+  ## dots ARE this lead on lines 1..143 and that constant was counting them
+  ## twice.
+  ##
+  ## ---- Line 0 is not in it --------------------------------------------------
+  ##
+  ## `STAT_M2_EARLY_LY0`. Line 0's predecessor is line 153, which is vblank and
+  ## scans no OAM, and the suite says the pulse does not lead there: including
+  ## line 0 costs `mooneye acceptance/ppu/intr_1_2_timing-GS` (and wilbertpol's
+  ## copy), which counts `inc b` from the line-144 mode 1 STAT interrupt to the
+  ## line-0 mode 2 one and is verified on DMG/MGB/SGB/SGB2 hardware, and it is a
+  ## gambatte row worse besides (3963 against 3964). That is the same fact
+  ## `LY0_PIPE_MCYCLES` was built on from the other side -- mealybug's
+  ## `line_0_fix` burning 24 T-cycles on LY 0 against 28 on every other line --
+  ## and this reading of it needs no per-line pipeline at all: the handler
+  ## reaches its write four T-cycles further into line 0's drawn area because
+  ## line 0's interrupt is the one that does NOT come early.
+  ##
+  ## ---- Why it ships off: the halt/sled split --------------------------------
+  ##
+  ## Seventeen rows go red with it on, and the list is not miscellaneous:
+  ##
+  ##   mooneye + wilbertpol  intr_2_0_timing, intr_2_mode0_timing,
+  ##                         intr_2_mode0_timing_sprites, intr_2_mode3_timing,
+  ##                         intr_2_oam_ok_timing   (5 rows, twice over)
+  ##   GBMicrotest           int_oam_halt, oam_int_halt_b, lcdon_to_if_oam_a,
+  ##                         oam_int_if_edge_a
+  ##   pixel                 daid ppu_scanline_bgp-dmg, strikethrough dmg + cgb
+  ##
+  ## All five mooneye ROMs, both strikethroughs and daid wait for their interrupt
+  ## with `EI; HALT` (`$FB $76`, at $1D0 / $22E / $BF3 / $1DC / $231, $215 and
+  ## $17E); two of the four GBMicrotest rows are the halt half of a halt/sled
+  ## pair by name. Meanwhile wilbertpol's `intr_2_mode0_scx1..8_timing_nops` and
+  ## `intr_2_mode0_timing_sprites*_nops` -- the SAME measurements with the halt
+  ## replaced by a NOP sled, and carrying no $76 anywhere -- are twelve of the
+  ## rows that go GREEN. The suite sorts by how the ROM waits and by nothing
+  ## else.
+  ##
+  ## GBMicrotest states the mechanism outright, in four pairs that differ only in
+  ## halt-versus-sled:
+  ##
+  ##   source   nops   halt   where it rises
+  ##   ------   ----   ----   ----------------------------------------
+  ##   OAM      $93    $94    one M-cycle before a line boundary (this)
+  ##   hblank   $61    $62    at the mode 3 -> 0 edge, mid-M-cycle
+  ##   LYC      $99    $99    on a line boundary
+  ##   vblank   $42    $42    on a line boundary
+  ##
+  ## Hardware puts the halt one M-cycle AFTER the sled for exactly the two
+  ## sources that do NOT rise on a line boundary, and level with it for the two
+  ## that do. That is a sub-M-cycle difference between where a halted CPU samples
+  ## IF and where an executing one does, and this tree cannot represent it: it
+  ## ticks the PPU over a whole M-cycle and then asks for IF, so both paths see
+  ## every rise at the same instant and dingbat's halt and sled agree for all
+  ## four sources. With the source on the boundary that lands the halt right and
+  ## the sled one M-cycle out; with the source where it belongs it lands the sled
+  ## right and the halt one M-cycle out. **Both models are exactly one M-cycle
+  ## wrong and they differ only in which instrument reads them wrong** -- and the
+  ## twelve `_nops` rows are what says the sled is the half that measures the
+  ## SOURCE rather than the wait.
+  ##
+  ## A uniform "halt exit costs one more M-cycle" is not the missing piece, and
+  ## is refused before it is built: it takes `int_lyc_halt` $99 -> $9A,
+  ## `int_vblank1_halt` $42 -> $43, `int_vblank2_halt`, all three
+  ## `int_timer_halt*` and both `int_hblank_halt_bug_*` with it -- nine green
+  ## rows for two, and the timer source has nothing to do with the PPU. What is
+  ## needed is the halt bucket's own quantity, where inside an M-cycle each of
+  ## the two paths samples IF, and the four pairs above bracket it on both sides.
+const STAT_M2_EARLY_LY0* {.booldefine.} = false
+  ## Does LINE 0's pulse lead too? It does not -- see above, and mooneye
+  ## intr_1_2_timing-GS is what says so.
+const STAT_M2_EARLY* = STAT_M2_LEAD != 0
+
+template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
+  ## The dot of the outgoing line the source comes up on.
+  gb_line_end(ppu) - int32(STAT_M2_LEAD) * int32(4 shr gb.memory.current_speed)
+
+proc m2_early*(ppu: GbPpu): bool {.inline.} =
+  ## Is this line's tail handing over to a line that SCANS OAM? Mode 0 covers
+  ## 0..142 handing over to 1..143, and mode 1 with LY already 0 is line 153
+  ## handing over to line 0 (the snapback ran at LY153_SNAP_DOT, hundreds of
+  ## dots back). Line 143 -> 144 is deliberately not here: nothing scans OAM
+  ## there, and that pulse is m2_line144's, on its own measurement and with its
+  ## own DMG/CGB split.
+  let m = ppu.lcd_status and 3'u8
+  (m == 0'u8 and ppu.ly < 143'u8) or
+    (STAT_M2_EARLY_LY0 and m == 1'u8 and ppu.ly == 0'u8)
+
+template m2_early_stop*(ppu: GbPpu): bool =
+  ## The skip target's half of the same question, so the dot loop is guaranteed
+  ## to visit the rising dot. Folds to `false` -- and takes the extra stop out
+  ## of fifo_skip_target's three compares -- when the rise is on the boundary.
+  when STAT_M2_EARLY: ppu.m2_early
+  else: false
+
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
+  when STAT_M2_EARLY:
+    if ppu.cycle_counter >= ppu.m2_early_dot(gb): return ppu.m2_early
   when STAT_M2_PULSE == -1: ppu.irq_mode_of == 2
   elif STAT_M2_PULSE == -2:
     ppu.irq_mode_of == 2 and ppu.cycle_counter < int32(4 shr gb.memory.current_speed)

@@ -1603,13 +1603,43 @@ const M3_END_EARLY {.intdefine.} = 0
 # count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
 const LY0_PIPE_MCYCLES {.intdefine.} = 1
 
+# The same mechanism on EVERY line -- the second axis of bucket 14, and it only
+# means anything alongside `STAT_M2_LEAD` in ppu.nim.
+#
+# Every gambatte family that writes a PPU register out of the mode 2 handler
+# measures the dispatch against the pipeline and NOTHING else: `scy`,
+# `bgtiledata`, `bgtilemap`, `scx_during_m3`, `dmgpalette_during_m3`, and the
+# mealybug `m3_*` frames with them. So the OAM dispatch and the pipeline's phase
+# are one unknown to those 180-odd rows, and moving the dispatch four dots early
+# on its own costs every one of them -- `scy` 67/67 -> 0/67. One M-cycle here
+# gives all of them back exactly (`scy` and `bgtiledata` and `bgtilemap` and
+# `scx_during_m3` all return to their baseline row for row), which is the
+# cancellation docs/gb-failure-triage.md's bucket 14 predicted, resolved: with
+# `STAT_M2_LEAD = 1` this is 3963 gambatte against 3743 at 0 and 3716 at 2,
+# and with the LEAD at 0 it is 3671, so neither term scores without the other.
+#
+# It ships at 0 because the LEAD does; see the halt/sled paragraph at
+# STAT_M2_LEAD for what blocks the pair. Two notes for whoever lands them:
+#
+#  * `LY0_PIPE_MCYCLES` must go to 0 at the same time (3964 against 3819). Line
+#    0's four dots and this lead are the same four dots, seen from the two ends,
+#    and mealybug's `line_0_fix` reads either way round.
+#  * daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's
+#    phase against something OTHER than the mode 2 interrupt -- it syncs on the
+#    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM,
+#    so it moves with the halt bucket rather than with this. It goes 100% ->
+#    90.5% here, which is four dots, and it is expected back when the halt half
+#    lands.
+const M3_PIPE_AHEAD {.intdefine.} = 0
+const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0
+
 # Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
 # -d:M3_END_EARLY=0 -d:LY0_PIPE_MCYCLES=0` control build for an A/B wants;
 # every guard below is a compile-time short circuit at that setting, not a
 # runtime test.
 const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
-                         M3_END_EARLY != 0 or LY0_PIPE_MCYCLES != 0
+                         M3_END_EARLY != 0 or LY0_PIPE_ANY
 
 # The held-pair ring has to name every pixel a register write can still reach:
 # the deepest mixer stage, plus the pixels the tail burst decided ahead of
@@ -2741,6 +2771,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   when not STAT_IRQ_SPLIT:
     if m == 2: 80'i32
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+    elif ppu.m2_early_stop: ppu.m2_early_dot(gb)
     else: gb_line_end(ppu)
   else:
     # Every boundary is two stops in a STAT_IRQ_LEAD build, `lead` dots apart:
@@ -2759,6 +2790,19 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
          M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < tgt:
         tgt = M2_144_EARLY_DOT
       tgt
+
+when STAT_M2_EARLY:
+  proc fifo_m2_early_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The OAM STAT source comes up one CPU M-cycle (STAT_M2_LEAD) before the
+    ## line that scans OAM starts, and nothing else happens on that dot -- so
+    ## the edge detector has to be run here explicitly, exactly the way
+    ## m2_line144's CGB pulse is four dots ahead of the vblank boundary. The
+    ## skip target stops on the dot so the loop visits it at all.
+    ##
+    ## `noinline` for the reason fifo_line153_edge and lyc_settling are: the
+    ## caller is the dot loop, it is inlined into the bus path, and its body
+    ## sits on clang's inline threshold (docs/gb_oam_dma_cost.md).
+    if ppu.m2_early: ppu_handle_stat_interrupt(ppu, gb)
 
 proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## ---- The LY 153 -> 0 snapback is an edge the STAT line has to see --------
@@ -3034,9 +3078,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
-          when LY0_PIPE_MCYCLES != 0:
+          when LY0_PIPE_ANY:
             # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
-            # where every other line's does, with the flags left alone. Two
+            # where every other line's does (and M3_PIPE_AHEAD, if it is on,
+            # runs EVERY line's ahead by that much again), with the flags left
+            # alone. Two
             # halves, and both are paid here:
             #
             #  * the head. The advance is larger than the head delay this line
@@ -3052,8 +3098,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # `first_line` is excluded: the line 0 that follows an LCD enable
             # was never in vblank, and it has a model of its own already (the
             # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
-            if ppu.ly == 0 and not ppu.first_line:
-              let adv = LY0_PIPE_MCYCLES * (4 shr gb.memory.current_speed)
+            let mc = M3_PIPE_AHEAD +
+                     (if ppu.ly == 0 and not ppu.first_line: LY0_PIPE_MCYCLES
+                      else: 0)
+            if mc != 0:
+              let adv = mc * (4 shr gb.memory.current_speed)
               let head = int(ppu.m3_delay)
               ppu.m3_delay = uint8(max(0, head - adv))
               ppu.m3_hold  = uint8(adv)
@@ -3095,7 +3144,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # many dots early too; the FLAG still leaves mode 3 on the dot every
           # other line does. The burst above is on the retire dot deliberately
           # -- that is where the pixels are decided -- and only the flag waits.
-          when LY0_PIPE_MCYCLES != 0:
+          when LY0_PIPE_ANY:
             if ppu.m3_hold != 0:
               dec ppu.m3_hold
               ppu.cycle_counter += 1
@@ -3122,6 +3171,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
            gb.cgb_enabled:
           ppu_handle_stat_interrupt(ppu, gb)
+        # ...and the OAM source of the line about to START comes up in this
+        # line's last M-cycle, on every line that scans OAM. Same shape, same
+        # reason the skip target stops here. See STAT_M2_LEAD.
+        when STAT_M2_EARLY:
+          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
@@ -3151,6 +3205,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
             else:                     ppu.`mode_flag=`(2'u8, gb)
       of 1:  # V-Blank
+        # The one vblank line whose successor scans OAM is 153, handing over
+        # to line 0 -- and the suite says line 0's pulse does NOT lead, so
+        # m2_early answers false here unless STAT_M2_EARLY_LY0 is on. The stop
+        # is spelled anyway, because that is the knob's whole point.
+        when STAT_M2_EARLY:
+          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
