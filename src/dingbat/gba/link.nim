@@ -69,6 +69,10 @@ when defined(linkTrace):
   # participation. Compiled out entirely in normal builds.
   var onMultiRound*: proc(data: array[4, uint16]; multi: array[4, bool]) = nil
   var onCoalesce*: proc(core: int) = nil
+  # Fires when a single bounded step advanced a core's clock by more than one
+  # multi-mode round (2336 cycles) — i.e. the lockstep's bounded-overshoot
+  # assumption was violated (e.g. an atomic HLE SWI charging its full cost).
+  var onBigStep*: proc(g: GBA; dc: int; pc: uint32) = nil
 
 # ---------------- clock plumbing ----------------
 
@@ -79,10 +83,18 @@ proc advance_once(gba: GBA) {.inline.} =
   # One bounded step: an instruction, or — when halted — a jump to the next
   # scheduled event. Never uses cpu.tick's halted branch, which drains
   # events until wake or frame end (unbounded for lockstep purposes).
+  when defined(linkTrace):
+    let c0 = int64(gba.scheduler.cycles)
+    let pc0 = gba.cpu.r[15]
   if gba.cpu.halted:
     gba.scheduler.fast_forward()
   else:
     gba.cpu.tick()
+  when defined(linkTrace):
+    if onBigStep != nil:
+      let dc = int(int64(gba.scheduler.cycles) - c0)
+      if dc > 2336:
+        onBigStep(gba, dc, pc0)
 
 proc run_to(link: Link; i: int; target: int64) =
   ## Advance core i until its global clock reaches `target`.

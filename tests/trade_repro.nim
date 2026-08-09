@@ -175,7 +175,12 @@ proc observe(cs: var CommState; g0: GBA; f: int) =
   if (sio and 0x6000'u16) == 0x6000'u16 or (st and 0x00FF'u32) != 0:
     cs.linkLive = true
   if cs.commError: return
-  let teardown = cs.linkLive and sio == 0x2000'u16 and (st and 0x2000'u32) != 0
+  # Any high-16 gLinkStatus bit is a LINK_STAT_ERROR_* (checksum 0x2000 is in
+  # the low half of that error field; lag-master is bit 16). The 2026-08
+  # regression fails with 0x00010368 (LAG_MASTER), which the old 0x2000-only
+  # check missed.
+  let teardown = cs.linkLive and sio == 0x2000'u16 and
+                 ((st and 0x2000'u32) != 0 or (st shr 16) != 0)
   if teardown or bad != 0'u8:
     cs.commError = true
     cs.errFrame = f
@@ -218,6 +223,7 @@ proc report(v: Verdict) =
 
 type Config = object
   rom0, rom1: string
+  state0, state1: string            # optional .state files (full save states)
   held: array[2, seq[set[Input]]]   # heldPerFrame[core][frame]
   frames: int
   shotdir: string
@@ -225,10 +231,15 @@ type Config = object
   shots: bool
   delay: int
 
-proc mk(rom: string): GBA =
+proc mk(rom: string; statePath = ""): GBA =
   result = new_gba("", rom, run_bios = false, use_hle = true)
   result.post_init()
   result.enable_deterministic_rtc(1_700_000_000'i64)
+  if statePath.len > 0:
+    if not result.load_state(statePath):
+      echo "FATAL: could not load state ", statePath
+      quit 2
+    echo "loaded state ", statePath
 
 proc shoot(cfg: Config; g0, g1: GBA; f: int) =
   if not cfg.shots: return
@@ -240,24 +251,58 @@ proc shoot(cfg: Config; g0, g1: GBA; f: int) =
 
 proc runLockstep(cfg: Config): Verdict =
   result.path = "lockstep"
-  let g0 = mk(cfg.rom0)
-  let g1 = mk(cfg.rom1)
+  let g0 = mk(cfg.rom0, cfg.state0)
+  let g1 = mk(cfg.rom1, cfg.state1)
   let lnk = new_link(@[g0, g1])
   # Optional assertion: the multi-mode drain fix must leave zero coalescing
   # (an unserviced serial IRQ at the next transfer). Available under -d:linkTrace.
   var coalesce = 0
+  var curFrame = 0
+  var trc: File = nil
+  var rounds = 0
   when defined(linkTrace):
-    onCoalesce = proc(core: int) = inc coalesce
+    let trcPath = getEnv("TRACELOG")
+    if trcPath.len > 0:
+      trc = open(trcPath, fmWrite)
+    onCoalesce = proc(core: int) =
+      inc coalesce
+      if trc != nil: trc.writeLine("f", curFrame, " COALESCE core=", core)
+    onMultiRound = proc(data: array[4, uint16]; multi: array[4, bool]) =
+      inc rounds
+      if trc != nil:
+        trc.writeLine("f", curFrame, " r", rounds, " d0=", toHex(data[0], 4),
+          " d1=", toHex(data[1], 4))
+    onBigStep = proc(g: GBA; dc: int; pc: uint32) =
+      if trc != nil:
+        let who = if g == g0: 0 else: 1
+        trc.writeLine("f", curFrame, " BIGSTEP core=", who, " dc=", dc,
+          " pc=", toHex(pc, 8))
   var cs: CommState
   var prev: array[2, set[Input]]
   for f in 0 ..< cfg.frames:
+    curFrame = f
     for c in 0 .. 1:
       applyHeld(lnk.cores[c], prev[c], cfg.held[c][f]); prev[c] = cfg.held[c][f]
     lnk.step_frame()
+    if trc != nil:
+      # FireRed rev1 gLink fields (core 0) + both SIOCNTs, once per frame.
+      trc.writeLine("f", f,
+        " sio0=", toHex(g0.serial.siocnt, 4), " sio1=", toHex(g1.serial.siocnt, 4),
+        " st=", toHex(iw32(g0, 0x03003F20), 8),
+        " cb=", toHex(iw32(g0, 0x03003F80), 8),
+        " lstate=", toHex(iw8(g0, 0x03003FB1), 2),
+        " serCtr=", toHex(iw8(g0, 0x03003FBD), 2),
+        " bad=", toHex(iw8(g0, 0x03003FC1), 2),
+        " lag=", toHex(iw8(g0, 0x03003FC3), 2),
+        " snd=", toHex(iw8(g0, 0x03003FC6), 2),
+        " rcv=", toHex(iw8(g0, 0x03003FC7), 2))
     cs.observe(g0, f)
     shoot(cfg, g0, g1, f + 1)
   when defined(linkTrace):
     onCoalesce = nil
+    onMultiRound = nil
+    onBigStep = nil
+    if trc != nil: trc.close()
   result.reachedLink = cs.linkLive
   result.commError = cs.commError
   result.errFrame = cs.errFrame
@@ -271,8 +316,12 @@ proc runLockstep(cfg: Config): Verdict =
 
 proc runNetcore(cfg: Config): Verdict =
   result.path = "netcore"
-  let g0 = mk(cfg.rom0)
-  let g1 = mk(cfg.rom1)
+  let g0 = mk(cfg.rom0, cfg.state0)
+  let g1 = mk(cfg.rom1, cfg.state1)
+  var ncTrc: File = nil
+  when defined(linkTrace):
+    let ncTrcPath = getEnv("TRACELOG")
+    if ncTrcPath.len > 0: ncTrc = open(ncTrcPath, fmWrite)
   let crc0 = crc32(readFile(cfg.rom0))
   let crc1 = crc32(readFile(cfg.rom1))
   # strict_crc=false is REQUIRED for cross-version (different CRCs, link-compatible).
@@ -318,6 +367,16 @@ proc runNetcore(cfg: Config): Verdict =
       inc framedone[1]; setHeld(1, framedone[1]); lastProgress = iter
     if r0 == naFrame:
       inc framedone[0]; setHeld(0, framedone[0]); lastProgress = iter
+      when defined(linkTrace):
+        if ncTrc != nil:
+          let f = framedone[0]
+          ncTrc.writeLine("f", f,
+            " sio0=", toHex(g0.serial.siocnt, 4), " sio1=", toHex(g1.serial.siocnt, 4),
+            " st=", toHex(iw32(g0, 0x03003F20), 8),
+            " serCtr=", toHex(iw8(g0, 0x03003FBD), 2),
+            " lag=", toHex(iw8(g0, 0x03003FC3), 2),
+            " snd=", toHex(iw8(g0, 0x03003FC6), 2),
+            " rcv=", toHex(iw8(g0, 0x03003FC7), 2))
       cs.observe(g0, framedone[0])
       shoot(cfg, g0, g1, framedone[0])
     if framedone[0] >= cfg.frames and framedone[1] >= cfg.frames: break
@@ -325,6 +384,7 @@ proc runNetcore(cfg: Config): Verdict =
       result.deadlock = true
       break
 
+  if ncTrc != nil: ncTrc.close()
   result.reachedLink = cs.linkLive
   result.commError = cs.commError
   result.errFrame = cs.errFrame
@@ -338,8 +398,8 @@ proc runNetcore(cfg: Config): Verdict =
 
 proc runRollback(cfg: Config): Verdict =
   result.path = "rollback"
-  let g0 = mk(cfg.rom0)
-  let g1 = mk(cfg.rom1)
+  let g0 = mk(cfg.rom0, cfg.state0)
+  let g1 = mk(cfg.rom1, cfg.state1)
   let lnk = new_link(@[g0, g1])
   let sess = new_rollback_session(lnk, 0, maxAhead = max(12, cfg.delay + 6))
   # Precompute per-frame input masks: core 0 local (drives tick), core 1 remote.
@@ -400,11 +460,14 @@ when isMainModule:
   if pathSel.len == 0 and getEnv("PATH") in ["lockstep", "netcore", "rollback"]:
     pathSel = getEnv("PATH")
   var pos: seq[string]
+  var state0, state1 = ""
   var delay = 0
   var shotEvery = 300
   var shots = true
   for a in commandLineParams():
     if a.startsWith("--path="): pathSel = a[7 .. ^1]
+    elif a.startsWith("--state0="): state0 = a[9 .. ^1]
+    elif a.startsWith("--state1="): state1 = a[9 .. ^1]
     elif a.startsWith("--delay="): delay = parseInt(a[8 .. ^1])
     elif a.startsWith("--shots="): shotEvery = parseInt(a[8 .. ^1])
     elif a == "--no-shots": shots = false
@@ -420,6 +483,7 @@ when isMainModule:
 
   var cfg = Config(
     rom0: pos[0], rom1: pos[1],
+    state0: state0, state1: state1,
     frames: parseInt(pos[3]),
     shotdir: pos[4],
     shotEvery: shotEvery, shots: shots, delay: delay)
