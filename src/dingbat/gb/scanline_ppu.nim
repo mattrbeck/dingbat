@@ -16,6 +16,7 @@ proc new_gb_scanline_ppu*(gb: GB): GbScanlinePpu =
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
     current_window_line: base.current_window_line,
+    stat_chg_dot: STAT_NO_HOLD,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -163,7 +164,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # the opt-in fast path (GB.fifo) and is not scored against the STAT-timing
   # suites; `mode_flag=` keeps irq_mode in step for it, and the assignments
   # below keep irq_ly in step.
-  when STAT_READ_HOLD: ppu.stat_hold_until = 0
+  ppu.stat_chg_dot = STAT_NO_HOLD
   # See the FIFO renderer: the panel's refresh clock runs on both paths.
   ppu.dots_since_frame += int32(cycles)
   when defined(gb_dot_counter): gb_total_dots += uint64(cycles)

@@ -32,16 +32,27 @@ const LY_BLIND_SCOPE* {.intdefine.} = 1
   ## all on entering vblank, and how it overlaps the vblank IF bit" -- and the
   ## window cannot be scored at line 144 until it is settled. It is worth +24
   ## rows gross when it is.
-# The two open axes of the STAT model, declared here rather than next to their
-# write-up in gb/ppu.nim only because the GbPpu fields they gate are in the type
-# block below. Both ship at the value that needs no field and no branch, so the
-# shipping build is exactly the tree without them. See ppu.nim for what they
-# mean, the equation that motivated them, and the measured table that rejected
-# every setting but this one.
+# The STAT model's knobs, declared here rather than next to their write-up in
+# gb/ppu.nim only because the GbPpu fields they gate are in the type block
+# below. See ppu.nim for what they mean and for the ROMs that bracket each.
+#
+# STAT_IRQ_LEAD still ships at the value that needs no field and no branch, so
+# the shipping build is exactly the tree without it.
 const STAT_IRQ_LEAD* {.intdefine.} = 0
-const STAT_READ_LAG* {.intdefine.} = 3
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
-const STAT_READ_HOLD* = STAT_READ_LAG != 3
+
+# Where the mode bits a CPU STAT read returns are sampled: a read whose M-cycle
+# leaves the PPU dot counter at `cc` sees the mode the PPU changed to on dot X
+# if and only if `cc - X >= STAT_READ_SAMPLE`, i.e. it samples dot
+# `cc - STAT_READ_SAMPLE`. Bracketed on both sides by different ROMs at each
+# speed; the derivation, the brackets and the sweep are at stat_read_mode.
+const STAT_READ_SAMPLE*    {.intdefine.} = 2
+const STAT_READ_SAMPLE_DS* {.intdefine.} = 3
+
+# `stat_chg_dot` for "no mode change is inside any read's sampling window".
+# A line is 456 dots and the counter is rebased at every wrap, so anything this
+# far back can never come within STAT_READ_SAMPLE of the counter again.
+const STAT_NO_HOLD* = -1024'i32
 
 # Fixed setup cost of a CGB general-purpose VRAM DMA, in CPU M-cycles, charged
 # once per transfer on top of the 8 M-cycles per $10 bytes Pan Docs specifies
@@ -1596,11 +1607,20 @@ type
     # its own field keeps the per-M-cycle cost at the one store the latch
     # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
-    # ---- Sweep scratch: the STAT model's two open axes ---------------------
-    # Both groups are gone from the shipping build -- the knobs that gate them
-    # ship at the values that need neither, so GbPpu's layout is untouched by
-    # their existing. See the write-up at STAT_IRQ_LEAD in ppu.nim, which is
-    # also where the measurements that rejected both live.
+    # ---- What a STAT read's mode bits are sampled from ---------------------
+    # The dot the mode last changed on and what it changed away from, which is
+    # everything stat_read_mode needs: a read at dot `cc` reports the new mode
+    # once `cc - stat_chg_dot >= STAT_READ_SAMPLE` and `stat_prev_mode` until
+    # then. Written only by `mode_flag=` (three times a line) and rebased by
+    # the line wrap, so nothing per-dot or per-M-cycle maintains it. Not
+    # serialized: a state is captured at VBlank, where no mode change is inside
+    # a read's sampling window, so load_ppu_state just retires the hold.
+    stat_chg_dot*:       int32
+    stat_prev_mode*:     uint8
+    # ---- Sweep scratch: the STAT interrupt line's own phase ----------------
+    # Gone from the shipping build -- the knob that gates it ships at the value
+    # that needs neither field, so GbPpu's layout is untouched by its existing.
+    # See the write-up at STAT_IRQ_LEAD in ppu.nim.
     when STAT_IRQ_SPLIT:
       # The mode and LY the STAT interrupt SOURCES compare against, as opposed
       # to the ones the CPU reads back out of lcd_status/LY. Not serialized:
@@ -1608,12 +1628,6 @@ type
       # exact at the VBlank a state is captured at.
       irq_mode*:         uint8
       irq_ly*:           uint8
-    when STAT_READ_HOLD:
-      # How long a mode change stays invisible to a STAT read: the dot up to
-      # which `stat_hold_mode` is still what a read returns, or 0 for none.
-      # Rebased by the line wrap rather than maintained per tick.
-      stat_hold_until*:  int32
-      stat_hold_mode*:   uint8
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off

@@ -393,7 +393,7 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   when STAT_IRQ_SPLIT:
     ppu.irq_mode = ppu.lcd_status and 3'u8
     ppu.irq_ly = ppu.ly
-  when STAT_READ_HOLD: ppu.stat_hold_until = 0
+  ppu.stat_chg_dot = STAT_NO_HOLD
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.
   ppu.reset_render_scratch()

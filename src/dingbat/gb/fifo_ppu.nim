@@ -58,6 +58,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     window_trigger: base.window_trigger,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
+    stat_chg_dot: STAT_NO_HOLD,
     obj_fix_from: OBJ_FIX_OFF,
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
     tdsel_dot: NO_TDSEL_CHANGE,
@@ -2749,13 +2750,15 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
     # it returned before the loop body ran), so it is still the next thing to
     # do. At normal speed the lead's dot and M2_144_EARLY_DOT coincide; in
     # double speed they do not, hence three candidates rather than two.
-    let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
-    result = boundary
-    let irq_dot = boundary - stat_irq_lead(gb)
-    if irq_dot >= ppu.cycle_counter: result = irq_dot
-    if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
-       M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < result:
-      result = M2_144_EARLY_DOT
+    block:
+      let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
+      var tgt = boundary
+      let irq_dot = boundary - stat_irq_lead(gb)
+      if irq_dot >= ppu.cycle_counter: tgt = irq_dot
+      if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
+         M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < tgt:
+        tgt = M2_144_EARLY_DOT
+      tgt
 
 proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## ---- The LY 153 -> 0 snapback is an edge the STAT line has to see --------
@@ -3122,7 +3125,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
-          when STAT_READ_HOLD: ppu.stat_hold_until -= ppu.cycle_counter
+          ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
             if ppu.lcdon_lines > 0: dec ppu.lcdon_lines
           ppu.cycle_counter = 0
@@ -3152,7 +3155,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
-          when STAT_READ_HOLD: ppu.stat_hold_until -= 456
+          ppu.stat_chg_dot -= 456
           # Same window as the visible boundary above, with no mode change
           # inside it: vblank line to vblank line. Line 153's own advance to 0 is
           # not here -- fifo_line153_edge already ran it, with the wider
@@ -3199,7 +3202,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0
-    when STAT_READ_HOLD: ppu.stat_hold_until = 0
+    ppu.stat_chg_dot = STAT_NO_HOLD
     lcd_off_frame(ppu, gb)
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
