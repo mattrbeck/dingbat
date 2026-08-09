@@ -1228,7 +1228,7 @@ type
     negate_used*:        bool
     # Absolute scheduler cycle at which the sweep's SECOND overflow check falls
     # due, or GB_NO_STEP when none is pending. The check trails the frequency
-    # writeback by 8 M-cycles and re-reads NR10 when it runs; see
+    # writeback by 7 M-cycles and re-reads NR10 when it runs; see
     # GB_SWEEP_CHECK_DELAY for the three SameSuite sources that say so.
     #
     # Deliberately NOT serialized, like GbApu.tick_phase: it is pending for 8
@@ -1236,8 +1236,20 @@ type
     # sweep step, and a rollback snapshot that replays that step reconstructs
     # it. A state loaded from disk mid-window loses one overflow check, which
     # can at worst leave a channel audible until the next sweep step re-arms it.
-    # Serializing it would cost a GB payload revision bump.
+    # Serializing it would cost a GB payload revision bump. The three sweep-unit
+    # deadlines below are unserialized for exactly the same reason and are part
+    # of the same deferred batch.
     sweep_check_at*:     CycleCount
+    # Absolute scheduler cycle at which a sweep overflow STOP reaches NR52, or
+    # GB_NO_STEP when none is in flight. Every sweep calculation's stop is one
+    # APU tick behind the calculation itself; see GB_SWEEP_STOP_DELAY.
+    sweep_stop_at*:      CycleCount
+    # A trigger's frequency-shadow load in flight: the value NR13/NR14 held when
+    # the channel was triggered, and the absolute scheduler cycle it reaches the
+    # sweep unit's shadow register (GB_NO_STEP when none is pending). The load
+    # does NOT happen on the write; see GB_SWEEP_SHADOW_DELAY.
+    sweep_load_at*:      CycleCount
+    sweep_load_value*:   uint16
     # Absolute scheduler cycle of the most recent duty step, or GB_NO_STEP when
     # none has happened since the last trigger. Only ch1_reload_is_now reads it,
     # and only to tell "the frequency timer is reloading on this very cycle"
