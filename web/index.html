@@ -1096,14 +1096,17 @@
         <div id="net-manual-view" hidden>
           <p>Trade codes with your friend — any messenger works.
              Same Wi-Fi is the most reliable.</p>
-          <p class="net-manual-label" id="net-manual-out-label">Your code:</p>
-          <div class="net-join-row">
-            <input id="net-manual-out" class="net-manual-code" type="text" disabled
-                   aria-labelledby="net-manual-out-label" />
-            <button type="button" class="button" id="net-manual-copy">Copy</button>
-            <!-- Revealed on touch devices with the Web Share API (netplay.js):
-                 the code is headed to a messenger anyway. -->
-            <button type="button" class="button" id="net-manual-share" hidden>Share</button>
+          <!-- No visible code box: the code is minted invisibly and kept fresh
+               (re-gathered while unshared) so Share/Copy always send a young
+               one — NAT mappings behind a code decay in under a minute. -->
+          <div class="net-join-row net-manual-out-row">
+            <p class="net-manual-label" id="net-manual-out-label">Your code:</p>
+            <!-- Share revealed on touch devices with the Web Share API
+                 (netplay.js): the code is headed to a messenger anyway. -->
+            <button type="button" class="button" id="net-manual-share" hidden
+                    aria-describedby="net-manual-out-label" disabled>Share</button>
+            <button type="button" class="button" id="net-manual-copy"
+                    aria-describedby="net-manual-out-label" disabled>Copy</button>
           </div>
           <p class="net-manual-label" id="net-manual-in-label">Friend's code:</p>
           <div class="net-join-row">

@@ -92,7 +92,8 @@ const makeSession = (attach) => ({
   localChan: null,      // LocalChannel wrapping bc, once the local path pairs
   abortLocal: null,     // tears down the local path if WebRTC wins the race
   manualChan: null,     // manual-exchange DataChannel (wired only if we end up host)
-  manualCode: null,     // our encoded offer, as shown in "Your code"
+  manualCode: null,     // our encoded offer, held invisibly for Share/Copy
+  codeShared: false,    // Share/Copy happened: pin the code (no auto re-mint)
   code: null,           // normalized shared code (kept so a redial can re-rendezvous)
   redials: 0,           // reconnect dials since the server last answered
   redialTimer: 0,       // pending reconnect after the server socket dropped mid-wait
@@ -127,6 +128,7 @@ const RTC_CONNECT_DEADLINE = 20000;
 const closeNetModal = () => {
   netModal.classList.remove("open");
   netSetConnecting(false);
+  releaseWakeLock();
   clearTimeout(manualFallbackTimer);
   if (typeof manualReset === "function") manualReset();
   releaseFocus(netModal);
@@ -216,6 +218,7 @@ const openNetConnect = async (attach) => {
   if (typeof manualReset === "function") manualReset();
   netModal.classList.add("open");
   trapFocus(netModal);
+  acquireWakeLock(); // keep the screen (and our sockets/mappings) alive while waiting
   // Server known-down from the last probe: no point walking into the shared-code
   // flow — open straight onto the manual exchange (re-probing in the background
   // so a recovered server puts the next open back on the normal path).
@@ -721,9 +724,8 @@ const MANUAL_GATHER_EXTENDED = 8000;
 
 const netConnectView = document.getElementById("net-connect-view");
 const netManualView = document.getElementById("net-manual-view");
-const manualOut = /** @type {HTMLInputElement} */ (document.getElementById("net-manual-out"));
 const manualIn = /** @type {HTMLInputElement} */ (document.getElementById("net-manual-in"));
-const manualCopyBtn = document.getElementById("net-manual-copy");
+const manualCopyBtn = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-copy"));
 const manualConfirm = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-confirm"));
 const manualStatusDiv = document.getElementById("net-manual-status");
 
@@ -797,17 +799,40 @@ const manualConnState = (pc) => () => {
   }
 };
 
-// Build this side's offer and put its code in the "Your code" box. The
+// Build this side's offer and hold its code invisibly for Share/Copy. The
 // DataChannel must exist before the offer (its m-line), but which side WIRES
 // its channel isn't known until the friend's code arrives, so it waits unwired
 // in net.manualChan.
-const manualPrepare = async () => {
+//
+// Freshness: the NAT mappings behind a code decay in under a minute once
+// idle, so an unshared code is silently re-minted on a timer and whenever
+// the page returns to the foreground — a Share/Copy tap then always sends a
+// young one. (Minting AT the tap would be fresher still, but gathering takes
+// seconds and iOS voids the tap's user activation before navigator.share may
+// run.) Once shared the code is pinned — the friend holds it — and a stale
+// return surfaces a re-share notice instead (see the visibility handler).
+const MANUAL_CODE_MAX_AGE = 45000;
+let manualFreshTimer = 0;
+
+const manualButtonsEnabled = (on) => {
+  if (manualCopyBtn) manualCopyBtn.disabled = !on;
+  if (manualShareBtn) manualShareBtn.disabled = !on;
+};
+
+const manualPrepare = async (opts) => {
   if (!net) net = makeSession(netAttach);
   const session = net;
   session.manualCode = null;
-  if (manualOut) manualOut.value = "";
-  if (manualIn) { manualIn.value = ""; manualIn.readOnly = false; }
-  if (manualConfirm) manualConfirm.disabled = true;
+  session.codeShared = false;
+  clearTimeout(manualFreshTimer);
+  manualButtonsEnabled(false);
+  // A refresh replaces the pending offer wholesale; drop the old pc quietly.
+  try { session.pc?.close(); } catch {}
+  if (!opts?.keepFriendBox) {
+    if (manualIn) { manualIn.value = ""; manualIn.readOnly = false; }
+    if (manualConfirm) manualConfirm.disabled = true;
+  }
+  const mintT0 = performance.now();
   try {
     const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
     session.pc = pc;
@@ -820,23 +845,39 @@ const manualPrepare = async () => {
     const enc = SDPCodec.encode(pc.localDescription);
     if (!enc) throw new Error("couldn't encode the offer");
     session.manualCode = enc;
-    if (manualOut) manualOut.value = enc;
+    manualButtonsEnabled(true);
     // What the code carries decides where it can pair: srflx = internet-capable
-    // (NAT permitting), mDNS-host only = this LAN only. Logged so a cross-
-    // network "stuck at Connecting…" is diagnosable from the device.
+    // (NAT permitting), mDNS-host only = this LAN only. Logged with the mint
+    // duration so a cross-network "stuck at Connecting…" — or a slow STUN
+    // path — is diagnosable from the device.
     const kinds = SDPCodec.fields(pc.localDescription.sdp).candidates.map((c) => {
       const [type, addr] = c.split("|");
       return type + (addr.includes(":") ? "/v6" : addr.endsWith(".local") ? "/mdns" : "/v4");
     });
-    log("netplay: manual code candidates: " + (kinds.join(" ") || "none"));
+    log("netplay: manual code minted in " + Math.round(performance.now() - mintT0) +
+        "ms: " + (kinds.join(" ") || "no candidates"));
     if (!kinds.some((k) => k.startsWith("srflx"))) {
       log("netplay: manual code has no public address — it can only pair on this network", "warn");
     }
+    manualArmFresh(session);
   } catch (e) {
     if (net === session) {
       manualSetStatus("Couldn't prepare a code: " + (e.message || e), true);
     }
   }
+};
+
+// While the code is unshared and the friend's box is empty, re-mint on a
+// timer so it never grows stale on the shelf. Stops the moment it's shared
+// (the friend holds that exact code) or the exchange starts.
+const manualArmFresh = (session) => {
+  clearTimeout(manualFreshTimer);
+  manualFreshTimer = setTimeout(() => {
+    if (net !== session || session.codeShared || session.rtcConnected) return;
+    if (!netManualView || netManualView.hidden) return;
+    if (manualIn?.value || manualIn?.readOnly) return; // exchange underway
+    manualPrepare({ keepFriendBox: true });
+  }, MANUAL_CODE_MAX_AGE);
 };
 
 // Switch the modal from the shared-code view to the manual exchange. Two ways
@@ -902,7 +943,8 @@ const manualBack = () => {
 const manualReset = () => {
   if (netManualView) netManualView.hidden = true;
   if (netConnectView) netConnectView.hidden = false;
-  if (manualOut) manualOut.value = "";
+  clearTimeout(manualFreshTimer);
+  manualButtonsEnabled(false);
   if (manualIn) { manualIn.value = ""; manualIn.readOnly = false; }
   if (manualConfirm) manualConfirm.disabled = true;
   manualSetStatus("");
@@ -968,8 +1010,10 @@ manualIn?.addEventListener("input", () => {
   manualConfirm.disabled = manualIn.readOnly || manualIn.value.trim().length === 0;
 });
 manualCopyBtn?.addEventListener("click", async () => {
-  const code = manualOut?.value;
+  const code = net?.manualCode;
   if (!code) return;
+  if (net) net.codeShared = true; // pinned: the friend will hold this code
+  clearTimeout(manualFreshTimer);
   try {
     await navigator.clipboard.writeText(code);
   } catch {
@@ -994,13 +1038,55 @@ if (manualShareBtn && navigator.share && matchMedia("(pointer: coarse)").matches
   manualShareBtn.hidden = false;
 }
 manualShareBtn?.addEventListener("click", async () => {
-  const code = manualOut?.value;
+  const code = net?.manualCode;
   if (!code) return;
+  if (net) net.codeShared = true; // pinned: the friend will hold this code
+  clearTimeout(manualFreshTimer);
   try {
     // The bare code, no prose: whatever the friend pastes back must decode.
     await navigator.share({ text: code });
   } catch {
     // A dismissed share sheet rejects with AbortError; nothing to report.
+  }
+});
+
+// ---------------- screen wake lock + return-to-foreground freshness --------
+// While the link modal is up somebody is usually WAITING — on a friend to
+// join the code, or mid manual exchange. iOS auto-locks the screen after
+// ~30s idle, which suspends Safari and silently kills the NAT mappings and
+// the signaling socket behind that wait. Hold a screen wake lock while the
+// modal is open; the OS drops it on backgrounding, so it re-arms on return.
+let screenLock = null;
+const acquireWakeLock = async () => {
+  try {
+    screenLock = (await navigator.wakeLock?.request("screen")) || null;
+  } catch {} // denied (low power mode etc.) — the wait just risks auto-lock
+};
+const releaseWakeLock = () => {
+  try { screenLock?.release(); } catch {}
+  screenLock = null;
+};
+
+let modalHiddenAt = Date.now();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    modalHiddenAt = Date.now();
+    return;
+  }
+  if (!netModalOpen()) return;
+  acquireWakeLock(); // released by the OS while we were backgrounded
+  // Manual-view code freshness on return: an unshared code re-mints
+  // silently (nobody holds it). A shared one is pinned — but if we were
+  // away long enough for its NAT mappings to have died, mint a fresh one
+  // and say so, since the friend needs the replacement anyway.
+  if (!net || !netManualView || netManualView.hidden) return;
+  if (net.rtcConnected || net.started || manualIn?.readOnly) return;
+  if (!net.manualCode) return; // still minting
+  if (!net.codeShared) {
+    manualPrepare({ keepFriendBox: true });
+  } else if (Date.now() - modalHiddenAt > MANUAL_CODE_MAX_AGE) {
+    manualPrepare({ keepFriendBox: true });
+    manualSetStatus("Away a while — your code was refreshed, share the new one");
   }
 });
 // Keep the emulator's key handlers from swallowing input; Enter confirms.

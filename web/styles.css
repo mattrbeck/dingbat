@@ -5962,11 +5962,15 @@ body.rewind-off #report-slider {
 .net-view-toggle:hover {
   color: var(--text);
 }
-/* The "Your code" box is disabled (Copy moves it); keep it legible, not grey-out. */
-input.net-manual-code:disabled {
-  color: var(--text-dim);
-  -webkit-text-fill-color: var(--text-dim);
-  opacity: 1;
+/* "Your code:  [Share] [Copy]" — label rides the row's left edge, buttons
+   right. The label's own top margin becomes the row's spacing instead. */
+.net-manual-out-row {
+  align-items: center;
+  margin-top: 14px;
+}
+.net-manual-out-row .net-manual-label {
+  flex: 1 1 auto;
+  margin: 0;
 }
 
 /* "waiting for peer" badge: subtle chip over the top-right of the stage,

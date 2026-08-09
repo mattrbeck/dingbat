@@ -44,6 +44,12 @@ const setup = async (opts = {}) => {
     app.state.mediaMatches["(pointer: coarse)"] = true;
     sandbox.navigator.share = (data) => { shares.push(data); return Promise.resolve(); };
   }
+  // Screen wake lock: count acquires/releases so tests can pin the modal's
+  // hold-while-open behavior.
+  const wakeLocks = { acquired: 0, released: 0 };
+  sandbox.navigator.wakeLock = {
+    request: async () => { wakeLocks.acquired++; return { release: async () => { wakeLocks.released++; } }; },
+  };
 
   // Scripted WebSocket: the test plays the server's side of every socket.
   const sockets = [];
@@ -66,18 +72,28 @@ const setup = async (opts = {}) => {
 
   // Inert RTCPeerConnection: enough surface for startRtc and manualPrepare;
   // it never gathers ICE and its channel never opens (that's the point of the
-  // deadline tests).
+  // deadline tests). The offer SDP is shaped well enough for SDPCodec.encode
+  // to mint a real code from it, so the Share/Copy/freshness flows run whole.
+  const FAKE_SDP = [
+    "v=0",
+    "a=ice-ufrag:testUFRG",
+    "a=ice-pwd:testpwd0123456789012345",
+    "a=fingerprint:sha-256 " + Array(32).fill("AB").join(":"),
+    "a=setup:actpass",
+    "a=candidate:842163049 1 udp 1677729535 203.0.113.7 4242 typ srflx raddr 0.0.0.0 rport 0",
+    "",
+  ].join("\r\n");
   const pcs = [];
   class FakeRTCPeerConnection {
-    constructor() { this.iceGatheringState = "gathering"; pcs.push(this); }
+    constructor() { this.iceGatheringState = "gathering"; pcs.push(this); this.closed = false; }
     createDataChannel() { return { readyState: "connecting", close() {} }; }
-    async createOffer() { return { type: "offer", sdp: "v=0" }; }
-    async createAnswer() { return { type: "answer", sdp: "v=0" }; }
+    async createOffer() { return { type: "offer", sdp: FAKE_SDP }; }
+    async createAnswer() { return { type: "answer", sdp: FAKE_SDP }; }
     async setLocalDescription(d) { this.localDescription = d; }
     async setRemoteDescription() {}
     async addIceCandidate() {}
     addEventListener() {}
-    close() {}
+    close() { this.closed = true; }
   }
 
   // Inert BroadcastChannel: the same-browser local path stays present but
@@ -141,7 +157,7 @@ const setup = async (opts = {}) => {
     return el("net-join-go").click();
   };
 
-  return { app, el, api, sockets, pcs, shares, connect, advance, flush,
+  return { app, el, api, sockets, pcs, shares, wakeLocks, connect, advance, flush,
            lastWS: () => sockets[sockets.length - 1] };
 };
 
@@ -289,14 +305,48 @@ test("the footer links toggle between the shared-code and manual views", async (
   assert.equal(el("net-join-go").disabled, false, "Connect is usable again");
 });
 
-test("Share appears on touch devices with the Web Share API and shares the bare code", async () => {
-  const { el, api, shares } = await setup({ mobileShare: true });
+test("Share appears on touch devices, waits for the mint, and shares the bare code", async () => {
+  const { el, api, shares, advance, flush } = await setup({ mobileShare: true });
   assert.equal(el("net-manual-share").hidden, false, "revealed at load");
   await api.openNetConnect(true);
-  el("net-manual-out").value = "FAKECODE123";
+  await el("net-to-manual").click();
+  assert.equal(el("net-manual-share").disabled, true, "disabled while the code is minting");
+  await advance(8000); // gather cap (no srflx event from the fake pc)
+  await flush();
+  const code = api.net.manualCode;
+  assert.ok(code, "a code was minted from the offer");
+  assert.equal(el("net-manual-share").disabled, false);
   await el("net-manual-share").click();
   assert.equal(shares.length, 1);
-  assert.equal(shares[0].text, "FAKECODE123", "bare code, no prose — it must paste back cleanly");
+  assert.equal(shares[0].text, code, "bare code, no prose — it must paste back cleanly");
+  assert.equal(api.net.codeShared, true, "shared codes are pinned");
+});
+
+test("an unshared code re-mints on a timer; a shared one is pinned", async () => {
+  const { el, api, pcs, advance, flush } = await setup({ mobileShare: true });
+  await api.openNetConnect(true);
+  await el("net-to-manual").click();
+  await advance(8000);
+  await flush();
+  assert.ok(api.net.manualCode);
+  const minted = pcs.length;
+  await advance(46000 + 8000); // freshness interval + the re-mint's own gather
+  await flush();
+  assert.ok(pcs.length > minted, "unshared code re-minted with a fresh pc");
+  await el("net-manual-share").click(); // pin it
+  const pinned = pcs.length;
+  await advance(10 * 60 * 1000);
+  assert.equal(pcs.length, pinned, "no re-mint once the friend holds the code");
+});
+
+test("the link modal holds a screen wake lock while open", async () => {
+  const { el, api, wakeLocks, flush } = await setup();
+  await api.openNetConnect(true);
+  await flush();
+  assert.ok(wakeLocks.acquired >= 1, "acquired on open");
+  await el("net-close").click();
+  await flush();
+  assert.ok(wakeLocks.released >= 1, "released on close");
 });
 
 test("Share stays hidden without the Web Share API", async () => {
