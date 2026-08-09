@@ -58,19 +58,26 @@ the mode 2 STAT interrupt arrives 4 T-cycles later, relative to the start of
 drawing, than it does on lines 1..143** — burn 4 fewer and the write lands on
 the same dot of the line.
 
-**dingbat disagrees.** `-d:gb_m3_trace` on `m3_lcdc_tile_sel_change` puts the
-handler's first LCDC write at **dot 101 on LY 0 and dot 105 on LY 1..143** —
-i.e. dingbat's line-0 interrupt is at the same offset as everybody else's, so
-the macro's 4-cycle correction is uncancelled and every mealybug ROM's line 0 is
-4 dots early. It is visible as a line-0-only residual on
-`m3_bgp_change` (21 of its 403 remaining), `m3_bgp_change_sprites` (20 of 124),
-`m3_lcdc_bg_en_change` (8 of 67), `m3_scy_change` (51 of 417) and
-`m3_lcdc_win_en_change_multiple_wx` (9 of 343) — call it 100–150 pixels across
-the set. **Not changed here**: moving the line-0 mode 2 edge by 4 dots reaches
-the STAT model that mooneye's `intr_2_*` and eight gambatte families pin, and
-that trade has not been measured. It is the cheapest well-evidenced thing left
-in this area and it is written down so the next pass starts from the ROM rather
-than from a pixel.
+**dingbat disagreed**, and this is now fixed. `-d:gb_m3_trace` on
+`m3_lcdc_tile_sel_change` put the handler's first LCDC write at **dot 101 on
+LY 0 and dot 105 on LY 1..143** — i.e. dingbat's line-0 interrupt was at the
+same offset as everybody else's, so the macro's 4-cycle correction was
+uncancelled and every mealybug ROM's line 0 was 4 dots early. It showed up as a
+line-0-only residual on `m3_bgp_change` (21 of its 403), `m3_bgp_change_sprites`
+(20 of 124), `m3_lcdc_bg_en_change` (8 of 67), `m3_scy_change` (51 of 417) and
+`m3_lcdc_win_en_change_multiple_wx` (9 of 343) — 100–150 pixels across the set.
+
+**Fixed 2026-08-09 as `LY0_PIPE_MCYCLES`** (`gb/fifo_ppu.nim`), worth **+110
+pixels on the DMG set and +520 on the CGB one**, with `m3_window_timing_wx_0`
+going 4 → 0 and five CGB rows going pixel-exact. What moves is line 0's pixel
+PIPELINE, one CPU M-cycle ahead of where it runs on lines 1..143, with every
+mode flag and STAT source left alone — the reading this file used to suggest
+(that the line-0 mode 2 STAT interrupt is 4 T-cycles late) is falsified by
+mooneye `acceptance/ppu/intr_1_2_timing-GS`, which times that interrupt against
+the line-144 mode 1 one directly. The 125-row gambatte half of the same
+measurement, and both falsified alternatives, are written up under bucket 0 in
+`docs/gb-failure-triage.md`. Only `m3_window_timing` goes the other way, by 4
+pixels, and its own residual is a separate open item (§3).
 
 ### 1.3 The objects are the ruler, not scenery
 
@@ -189,7 +196,7 @@ carries `MIXER_PRIORITY_BACK` with the rest of LCDC's priority half for free.
 Residual: one pixel per band at the leading edge of the first run on bands 2 and
 9..17, plus line 0 (§1.2).
 
-### 3.2 `m3_bgp_change` — 820 → **403**, and `m3_bgp_change_sprites` — 536 → **124**
+### 3.2 `m3_bgp_change` — 820 → 403 → **21**, and `m3_bgp_change_sprites` — 536 → **124**
 
 `m3_bgp_change` is the cleanest instrument in the suite and nobody had read it
 as one. It calls neither `reset_tile_maps` nor any VRAM fill, so **VRAM is all
@@ -263,22 +270,37 @@ goes 1284 → 1140. All five were already red and none is a pass/fail row. Those
 PNGs are another emulator's output; the mealybug photograph is hardware, and it
 is the only hardware in the argument.
 
-**What is left (403 + 124):** `m3_bgp_change`'s residual is now *entirely*
-`x = 157..159` — the last write lands on dot 252, which is the first dot of mode
-0, and `fifo_recompose_last` is guarded on mode 3. Hardware clocks the line's
-last pixels out of the mixer during the first dots of H-Blank and that write
-reaches all three of them. Relaxing the guard alone is not the fix: the tail
-burst (`fifo_burst_tail`) has already run `lx` to 160 by then, so the write
-would land on 158/159 and not on 157. That is a change to where the tail is
-accounted, i.e. to `M3_END_EARLY`'s neighbourhood, and it is not taken here.
-`m3_bgp_change_sprites`'s remaining 124 are per-band left-edge pixels (x = 0..9),
-a different mechanism.
+**What was left (403 + 124), and the 403 — closed 2026-08-09.**
+`m3_bgp_change`'s residual was *entirely* `x = 157..159`. The seventh write
+lands on the first dot of mode 0 (dot 253 by `-d:gb_m3_trace`; the offsets in
+the table above are the ROM's own count from the mode 2 IRQ, one less), and
+`fifo_recompose_last` was guarded on mode 3. Hardware clocks the line's last
+pixels out of the mixer during the first dots of H-Blank and that write reaches
+all three of them: 157 takes `old or new`, 158 and 159 take the new value.
+
+Relaxing the guard alone is not the fix — the tail burst (`fifo_burst_tail`)
+has already run `lx` to 160 by then, so a countdown from `lx` lands on 158/159
+and never on 157. What it needed instead was the tail's ACCOUNTING:
+`tail_dot0`, latched at the burst as `cycle_counter − lx`, so the shifter's
+position keeps counting after `lx` stops, and a repaint that reaches *forward*
+to the pixels the burst decided ahead of their own dots. `MIXER_TAIL_HBLANK`
+ships it: **403 → 21**, and all 21 that remain are on LY 0, i.e. the
+`line_0_fix` item in §1.2. It moves the mode 3 → 0 edge by nothing. Derivation
+at `fifo_recompose_last` in `gb/fifo_ppu.nim`.
+
+Confirmed from outside this ROM: gambatte's `dmgpalette_during_m3_2` goes
+429 → 3 wrong pixels, `scx3/dmgpalette_during_m3_1` 286 → 2 and
+`dmgpalette_during_m3_scx2_1` 143 → 1, on the same fix, with no gambatte row
+flipping either way (3658/5005 before and after).
+
+`m3_bgp_change_sprites`'s remaining 124 are per-band left-edge pixels
+(x = 0..9), a different mechanism, and they do not move.
 
 This closes the open item in `docs/gb-failure-triage.md` that said
 `m3_bgp_change` "is not a reliable vote on `MIXER_PALETTE_BACK` until that
 ~800-pixel residual has a name". It has two names now, one of them fixed.
 
-### 3.3 `m3_lcdc_tile_sel_change` — 776, unchanged, and `m3_lcdc_bg_map_change` — 192, unchanged
+### 3.3 `m3_lcdc_tile_sel_change` — 776 → **8**, and `m3_lcdc_bg_map_change` — 192 → **0**
 
 Both handlers are the same six lines: `line_0_fix`, 9 `nop`s, `ld [hl],c`,
 `ld [hl],b`. So **the changed bit is set for exactly 8 dots**, dots 105..112 by
@@ -300,8 +322,8 @@ defect on a coarser instrument (two maps, white and black tiles), which is why
 it moves in lockstep.
 
 This is *not* fixed by any of the four rules for "which dots of the penalty the
-BG fetcher may run on" — they were swept again through the new `-d:OBJ_BG_RUN`
-knob and are 550072 / 550274 / 550590 / 550513 mealybug DMG pixels, all trading
+BG fetcher may run on" — they were swept through the `-d:OBJ_BG_RUN` knob and
+are 550072 / 550274 / 550590 / 550513 mealybug DMG pixels, all trading
 `m3_lcdc_tile_sel_win_change` and `m3_lcdc_win_map_change` for what they buy.
 In particular the literal reading of Pan Docs' "waiting for the BG fetch to
 finish" (`OBJ_BG_RUN=3`: run only to complete a fetch already under way) does
@@ -310,11 +332,48 @@ is no fetch in flight. **The finding, stated precisely: hardware never puts an
 object fetch between a background tile's two bitplane reads, dingbat does on 13
 of 18 bands, and the cause is the phase of the penalty against the fetch cycle
 rather than the penalty's own length** (which `objtab.py` against GBMicrotest
-`ppu_spritex_vs_scx` pins at 0/153 mismatched cells and must not move). Next
-instrument: `tools/gbppu/objtab.py` and the band trace together, not the frame
-percentage.
+`ppu_spritex_vs_scx` pins at 0/153 mismatched cells and must not move).
 
-### 3.4 `m3_scy_change` — 417, unchanged
+#### 2026-08-09: read the whole frame back, and it names the boundary
+
+The way through was to stop asking "which dots may the fetcher run on" and ask
+the frame **which fetch the pulse landed on**, band by band. Write the pulse as
+the dot window `W = [105, 112]` and the object-free schedule as tile *n*'s
+B/0/1 reads on dots `8n+88`, `8n+90`, `8n+92` (tile 0's on 90/92/94), and all
+eighteen bands of the reference say one thing:
+
+| OAM X | the pulse falls on the fetch of | tile it displays |
+|---|---|---|
+| 0–7 | the tile drawn at x = 8..15 | shade 3, or 2 then 1 for X = 5..7 |
+| 8–15 | the tile drawn at x = 16..23 | shade 0, then 1 from X = 13 |
+| 16, 17 | the tile drawn at x = 16..23, **undisturbed** | shade 3 |
+
+i.e. **the penalty is inserted after the fetch of tile `floor(X / 8)`**, while
+The Pixel of an object at OAM X sits in tile `floor(X / 8) - 1`. The fetcher
+runs a tile ahead of the shifter, so that is the fetch which was in flight while
+The Pixel's own tile was on screen — Pan Docs' "waiting for the BG fetch to
+finish", with the lead made explicit. A tile's three reads are never split.
+
+**No rule phrased on the fetcher's phase can express this, and the frame proves
+it rather than suggesting it.** X = 0 and X = 8 trigger on the same dot (the
+first push, which fills the FIFO), cost the same 11 dots, and leave the fetcher
+on the same counter — and the reference gives band 0 both planes inside the
+pulse and band 8 neither. The only thing that differs between them is which
+tile The Pixel is in, which is `idx` at the trigger, and `idx < 0` (an object
+hanging off the left edge) is exactly the case where the fetch being waited for
+finished *on the trigger dot itself*. Band 4 (X = 4, penalty 7) is the one band
+that then separates whether the fetcher resumes with the shifter or one dot
+after it: it wants one dot after, which is the dot the BG fetch had already
+taken.
+
+Landed as `OBJ_BG_RUN = 4`, derived at `tick_sprite_fetcher` in
+`gb/fifo_ppu.nim`. `m3_lcdc_tile_sel_change` 776 → 8 (all eight on LY 0, i.e.
+the line-0 offset of §1.2), `m3_lcdc_bg_map_change` 192 → **0**, `m3_scy_change`
+417 → 83, mealybug DMG 550274 → 551568 and CGB 1852598 → 1854215, gambatte
+3658 → 3659. Mode 3's length does not move anywhere: `objtab.py` stays 0/153 and
+1660 ROM/device runs are line-for-line identical under `-d:gb_m3_len`.
+
+### 3.4 `m3_scy_change` — 417 → **83**
 
 > `; Changes the SCY register during mode 3, with SCX set to LY on each row.`
 > — `m3_scy_change.asm:21`
@@ -326,9 +385,10 @@ the B, 0 and 1 stages" this is a direct readout of which SCY value each of the
 three reads of every tile saw. It is the only red DMG row with no photograph,
 and the doc quoted in §2 is a better source than a photograph would have been.
 
-dingbat's structure matches (B, 0 and 1, each on its own dot). The residual is
-87 lines of a few pixels each, concentrated at tile boundaries, and moves with
-`OBJ_BG_RUN` — i.e. it is the same split-fetch defect as §3.3.
+dingbat's structure matches (B, 0 and 1, each on its own dot). The residual was
+87 lines of a few pixels each, concentrated at tile boundaries, and moved with
+`OBJ_BG_RUN` — i.e. it was the same split-fetch defect as §3.3, and four fifths
+of it went with it (417 → 83 DMG, 534 → 348 CGB) for no change of its own.
 
 ### 3.5 `m3_window_timing` — 29, and `m3_window_timing_wx_0` — 4
 
@@ -461,7 +521,7 @@ stage and 126 out on CGB at two.
 
 | row | wrong px | what the source adds |
 |---|---|---|
-| `m3_lcdc_tile_sel_win_change` | 106 | header adds only "while displaying the window"; §3.3's split, on window tiles |
+| `m3_lcdc_tile_sel_win_change` | 106 | header adds only "while displaying the window". Read as §3.3's split on window tiles until 2026-08-09; it is NOT — the fix there left it at 106 and the pixels are 8 on LY 0 plus 98 in band 8 alone, the same band, the same two tiles and the same WX = 7 tie as `m3_lcdc_win_map_change`'s 34 below |
 | `m3_lcdc_obj_en_change_variant` | 102 | "Background palette is changed to see the effect disabling sprites has on **timing**" — it is a mode-3-length probe, not a priority probe |
 | `m3_lcdc_obj_size_change` | 57 | nothing beyond "toggles bit 2 with sprites at different X"; the OAM table is the ruler |
 | `m3_lcdc_win_map_change` | 34 | nothing; photograph says 100% reference at a 77× ratio |

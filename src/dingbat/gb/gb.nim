@@ -355,13 +355,15 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
-const OBJ_BG_RUN*             {.intdefine.} = 1
+const OBJ_BG_RUN*             {.intdefine.} = 4
   ## Which dots of an object penalty the BG fetcher is allowed to run on:
-  ## 0 = none, 1 = the wait dots only (shipping), 2 = all of them, 3 = the wait
-  ## dots but only to finish a fetch already under way. The reasoning and the
-  ## sweep that cannot separate them are at tick_sprite_fetcher in fifo_ppu.nim;
-  ## this exists so that sweep is a command line rather than an edit to the dot
-  ## loop.
+  ## 0 = none, 1 = the wait dots only, 2 = all of them, 3 = the wait dots but
+  ## only to finish a fetch already under way, 4 = the tile-boundary rule
+  ## (shipping) -- all of them when the fetch the object is waiting for is still
+  ## in flight, none of them plus one when it is already done. The derivation,
+  ## the eighteen-band measurement behind it and the sweep that cannot separate
+  ## 0..3 are at tick_sprite_fetcher in fifo_ppu.nim; this exists so that sweep
+  ## is a command line rather than an edit to the dot loop.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
@@ -403,6 +405,28 @@ const MIXER_DOT_LAG*          {.intdefine.} = 1
   ## fifo_recompose_last in fifo_ppu.nim for what it buys and how it was
   ## measured -- it is not a sweepable dot count, only on or off, because a
   ## second dot is refused by the same rows the first is required by.
+const MIXER_TAIL_HBLANK*      {.intdefine.} = 1
+  ## Whether the mixer keeps CLOCKING after the mode 3 -> 0 edge, so that a
+  ## register write on the first dots of H-Blank still reaches the pixels whose
+  ## shade the tail has not latched yet. 1 ships; 0 is the pre-2026-08-09
+  ## behaviour, where every recompose was guarded on mode 3.
+  ##
+  ## It is not a second lag and it moves no edge: the mode 3 -> 0 dot, the
+  ## VRAM/OAM locks and the STAT model are all untouched (bucket 15 in
+  ## docs/gb-failure-triage.md pins that dot from a dozen directions). What it
+  ## fixes is an ACCOUNTING error of ours. The shifter emits one pixel per dot
+  ## and the tail latches its shade MIXER_PALETTE_BACK dots later, so the last
+  ## pixels of a line are still in the tail when the fetcher retires -- but
+  ## `fifo_burst_tail` emits them all on the retire dot, which is the only dot
+  ## in the line where dingbat's shifter is not one pixel per dot. See
+  ## fifo_recompose_last in fifo_ppu.nim for the derivation off m3_bgp_change's
+  ## seventh write.
+const MIX_HOLD*               = 4
+  ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
+  ## the shifter's store indexes with an `and`. It has to cover every pixel a
+  ## write can still reach: the deepest mixer stage, plus the pixels the tail
+  ## burst decided ahead of their own dot (the pipeline lead). fifo_ppu.nim
+  ## static-asserts that sum against this.
 const CGB_MIXER_LATENCY*      {.intdefine.} = 1
   ## Dots the CGB's write to a register the MIXER reads takes to arrive over
   ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
@@ -1108,6 +1132,13 @@ type
     # `ldr`+`cmp`+`b.le`. The value is 0..12 by construction (M3_PIPE_MCYCLES
     # * 4 + M3_PIPE_DELAY).
     m3_delay*:            uint8
+    # Dots the mode 3 -> 0 FLAG still owes after the fetcher has retired, so
+    # that a line whose pipeline started early (LY0_PIPE_MCYCLES in fifo_ppu:
+    # line 0, and only line 0) still leaves mode 3 on the dot every other line
+    # does. Zero on every other line, and a byte for the same reason m3_delay
+    # is one. Transient per-line state, like m3_delay and m3_lead: not
+    # serialized.
+    m3_hold*:             uint8
     # How far the pipeline lags the CPU's view of the PPU registers on THIS
     # line, in dots. Latched at the mode 2 -> 3 edge because the CPU M-cycle it
     # is derived from is 4 dots at normal speed and 2 in double speed. See
@@ -1118,14 +1149,26 @@ type
     tile_data_low*:       uint8
     tile_data_high*:      uint8
     # The FIFO entries the mixer is still holding: the pairs popped on the last
-    # two dots that emitted a pixel, indexed by the pixel's own parity. The mixer stage runs one dot behind the
+    # MIX_HOLD dots that emitted a pixel, indexed by the pixel's own low bits.
+    # The mixer stage runs one dot behind the
     # pop (see fifo_recompose_last in fifo_ppu), so a mid-mode-3 write to a
     # register the mixer reads -- the palettes, LCDC's OBJ-enable and
     # BG-priority bits -- still reaches the pixel already written out. Kept
     # here rather than re-read from the ring because the BG ring is rewound and
     # overwritten by the next push and the OBJ ring is only popped when it is
     # non-empty, so neither can be indexed backwards safely.
-    mix*:                 array[2, GbMixHold]
+    #
+    # The ring is MIX_HOLD deep rather than as deep as the deepest stage
+    # because the tail burst emits the last `m3_lead` pixels of a line ahead of
+    # their own dots, and a write on the first dots of H-Blank still reaches
+    # them (MIXER_TAIL_HBLANK).
+    mix*:                 array[MIX_HOLD, GbMixHold]
+    # Which dot this line's pixel 0 would have left the shifter on, latched at
+    # the tail burst as `cycle_counter - lx`. Through mode 3 the shifter is one
+    # pixel per dot and `lx` IS the answer; the burst is the one dot where it
+    # is not, and this is what lets the recompose keep counting after it. Only
+    # read while the mode flag is 0 -- see fifo_recompose_last.
+    tail_dot0*:           int32
     sprites*:             seq[GbSprite]
 
   # ---- APU Channels (base types) ----
@@ -1185,7 +1228,7 @@ type
     negate_used*:        bool
     # Absolute scheduler cycle at which the sweep's SECOND overflow check falls
     # due, or GB_NO_STEP when none is pending. The check trails the frequency
-    # writeback by 8 M-cycles and re-reads NR10 when it runs; see
+    # writeback by 7 M-cycles and re-reads NR10 when it runs; see
     # GB_SWEEP_CHECK_DELAY for the three SameSuite sources that say so.
     #
     # Deliberately NOT serialized, like GbApu.tick_phase: it is pending for 8
@@ -1193,8 +1236,20 @@ type
     # sweep step, and a rollback snapshot that replays that step reconstructs
     # it. A state loaded from disk mid-window loses one overflow check, which
     # can at worst leave a channel audible until the next sweep step re-arms it.
-    # Serializing it would cost a GB payload revision bump.
+    # Serializing it would cost a GB payload revision bump. The three sweep-unit
+    # deadlines below are unserialized for exactly the same reason and are part
+    # of the same deferred batch.
     sweep_check_at*:     CycleCount
+    # Absolute scheduler cycle at which a sweep overflow STOP reaches NR52, or
+    # GB_NO_STEP when none is in flight. Every sweep calculation's stop is one
+    # APU tick behind the calculation itself; see GB_SWEEP_STOP_DELAY.
+    sweep_stop_at*:      CycleCount
+    # A trigger's frequency-shadow load in flight: the value NR13/NR14 held when
+    # the channel was triggered, and the absolute scheduler cycle it reaches the
+    # sweep unit's shadow register (GB_NO_STEP when none is pending). The load
+    # does NOT happen on the write; see GB_SWEEP_SHADOW_DELAY.
+    sweep_load_at*:      CycleCount
+    sweep_load_value*:   uint16
     # Absolute scheduler cycle of the most recent duty step, or GB_NO_STEP when
     # none has happened since the last trigger. Only ch1_reload_is_now reads it,
     # and only to tell "the frequency timer is reloading on this very cycle"

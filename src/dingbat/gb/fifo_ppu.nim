@@ -24,6 +24,13 @@
 # shifter's per-dot compare against it is simply never true.
 const WIN_LX_OFF = -128'i32
 
+# `tail_dot0` parked out of reach. The H-Blank recompose reads the shifter's
+# position back as `cycle_counter - tail_dot0`, so a large NEGATIVE park puts
+# that position a million pixels past the end of the line, where every span it
+# can ask for is empty. It is what "no tail is in flight" means -- see
+# fifo_recompose_last.
+const TAIL_DOT0_OFF = -(1'i32 shl 20)
+
 proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
   let base = new_ppu_base(gb.cgb_enabled)
   result = GbFifoPpu(
@@ -132,13 +139,15 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.tile_attrs = 0
   ppu.tile_data_low = 0
   ppu.tile_data_high = 0
-  # The mixer's held pair, same category as the FIFOs and the fetch latches
+  # The mixer's held pairs, same category as the FIFOs and the fetch latches
   # above: per-line scratch that the save-state payload deliberately does not
   # carry (see this method's doc comment). It is only ever read by
-  # fifo_recompose_last, which is guarded on mode 3 and on `lx >= 1`, so the
-  # earliest a loaded state can reach it is the first pixel of the first mode 3
-  # after the load -- which has already written it.
-  ppu.mix = [GbMixHold(), GbMixHold()]
+  # fifo_recompose_last, which is guarded on mode 3 and on `lx >= 1`, or on
+  # mode 0 behind a `tail_dot0` that only the tail burst sets, so the earliest
+  # a loaded state can reach it is the first pixel of the first mode 3 after
+  # the load -- which has already written it.
+  ppu.mix = default(array[MIX_HOLD, GbMixHold])
+  ppu.tail_dot0 = TAIL_DOT0_OFF
   ppu.sprites = @[]
 
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
@@ -497,8 +506,101 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
+# ---- The object's OAM read, and the one thing that can see it -------------
+#
+# This renderer's mode-2 scan snapshots all four of an object's OAM bytes
+# (fifo_get_sprites) and mode 3 uses that snapshot. Hardware splits the two:
+# the scan latches Y and X -- they are all it decides with -- and the object's
+# TILE NUMBER and ATTRIBUTES are read out of OAM again during mode 3, at the
+# object's own fetch. With OAM quiet the two readings agree and the split is
+# invisible, which is why nothing in this tree had to model it.
+#
+# An OAM DMA is where it stops being invisible. While the unit owns OAM the
+# PPU's read does not reach the array; what it gets is the byte the unit has on
+# its bus, the same byte a colliding CPU read latches (mem_read_busy). So the
+# object renders with a tile number the DMA is only passing through, which need
+# not be anywhere near the object's own OAM slot. Pan Docs ("OAM DMA Transfer")
+# says only that the PPU cannot read OAM properly during the transfer; which
+# byte it does get is Hacktix's strikethrough.gb's own finding, and that ROM is
+# the whole of the evidence below.
+#
+# ---- What the ROM does ----------------------------------------------------
+# It fills OAM with forty objects at Y $54 (LY 68) and X $17, $1F, ... -- tile
+# 0, a solid bar -- eight pixels apart, so every object is one bar's width from
+# the next. On LY 67 a STAT LYC interrupt waits for mode 0, idles 28 NOPs and
+# starts an OAM DMA whose 160-byte source is $01 (a blank tile) everywhere
+# except ONE $00 at offset 46. The transfer then spans the whole of LY 68.
+# Hardware draws exactly ONE eight-pixel bar: one object's fetch lands on the
+# M-cycle carrying that $00 and every other object on the line reads a $01.
+# Off the mode-2 snapshot this renderer drew all ten.
+#
+# ---- Which M-cycle, and how the ROM pins it -------------------------------
+# The transfer is one byte per M-cycle, so the ROM resolves the fetch's OAM read
+# to four dots and no finer -- but it does resolve it to four dots, because the
+# bar it draws names the object. On LY 68 the DMA has already overwritten
+# objects 0-5 by the time mode 2 ends, so the ten objects drawn are 6..15
+# (screen x 63..135) and the bar is object 7's, at screen x 71. This renderer's
+# six-dot fetch for that object is dots 171-176 of the line and it merges the
+# tile row on 176; the M-cycle carrying source byte 46 is dots 177-180. So the
+# read is one M-cycle AHEAD of the fetch's own dots -- OBJ_DMA_BUS_LEAD.
+#
+# That is a phase between the pipeline and the bus half of an M-cycle, and it is
+# the same quantity M3_PIPE_MCYCLES names for the CPU: exactly one M-cycle,
+# measured. M3_PIPE_MCYCLES ships at 0 only because the CPU's half of it is paid
+# on the write side instead (mem_write commits a byte at the top of its
+# M-cycle); the OAM DMA unit writes through its own path and was never given
+# that compensation, so the term is still owed here and this is where it lands.
+#
+# ---- Two readings that are NOT it -----------------------------------------
+#  * "The DMA starts earlier." Moving the unit's own start is the other way to
+#    put the $00 under object 7's fetch, and it is refuted outright: one M-cycle
+#    earlier (the `next_dma_counter == 8` threshold at 4) does take
+#    strikethrough to 0 wrong pixels, and it costs sixteen mooneye acceptance
+#    rows -- oam_dma_start, oam_dma_timing, oam_dma_restart and the whole
+#    call/ret/push/rst timing family -- and gambatte/oamdma 681 -> 350.
+#  * "The read is somewhere inside the fetch." Swept over all six dots of the
+#    fetch (and out to eleven, into the wait): every one of them reads a $01 and
+#    the ROM draws no bar at all. The window the ROM leaves is four dots wide
+#    and it does not overlap the fetch.
+#
+# ---- Why scanline_ppu does not mirror this --------------------------------
+# It cannot. That renderer draws a whole line in one step at the mode 2 -> 3
+# boundary, so every object on the line would take the same DMA byte and the
+# picture would be ten bars or none -- the answer this change exists to avoid.
+# The distinction only exists for a renderer with a dot per object fetch. The
+# FIFO renderer is the shipping and scored one either way (config `gb_fifo`
+# defaults true; every harness in tests/ passes `fifo = true`).
+const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
+  ## M-cycles the object fetch leads the OAM DMA unit's bus by. 0 is "the byte
+  ## the unit is driving on the fetch's own M-cycle" (mem.dma_latch).
+
+proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## The object's mode-3 OAM read while an OAM DMA owns OAM. Cold: `dma_busy`
+  ## is false for all but ~160 of the ~17,500 M-cycles of a frame, and only for
+  ## the frames that run a transfer at all.
+  let mem = gb.memory
+  var b: uint8
+  if mem.dma_openbus:
+    b = 0xFF'u8
+  else:
+    # `dma_position` is the index of the byte the unit moves NEXT, so a lead of
+    # one M-cycle is exactly that byte. The unit drives nothing past 0xA0, so
+    # the last M-cycle of a transfer keeps what it has rather than reading off
+    # the end of the source.
+    var src = int(mem.current_dma_source) +
+              min(mem.dma_position + OBJ_DMA_BUS_LEAD - 1, 0x9F)
+    # Same echo fold as the unit itself (mooneye oam_dma/sources-GS).
+    if src >= 0xE000: src = src and not 0x2000
+    b = read_byte(mem, gb, src)
+  ppu.sprites[0].tile_num   = b
+  ppu.sprites[0].attributes = b
+
 proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   ## Read sprite tile data and merge into the sprite FIFO.
+  # The object's own OAM read lands on this dot, with everything else the fetch
+  # takes here (LCDC.2, the OBP registers, the tile row). One predictable
+  # not-taken branch per object fetch when no transfer is running.
+  if gb.memory.dma_busy: obj_oam_dma_read(ppu, gb)
   let s = ppu.sprites[0]
   ppu.sprites.delete(0)
   let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
@@ -539,10 +641,17 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # extra object.
     ppu.obj_penalty = OBJ_FETCH_DOTS
 
-proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
-  ## One dot of an object fetch. The shifter is stopped for the whole of it, so
-  ## the only thing that varies is how many dots it lasts -- see the trigger in
-  ## tick_shifter for where that count comes from.
+proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
+  ## One dot of an object fetch. Returns true if this dot was the object's --
+  ## the shifter is stopped for the whole of it -- and false for the one tail
+  ## dot the shifter has back but the BG fetcher does not (see OBJ_BG_RUN = 4).
+  ## A return value and not a call to tick_shifter from in here: tick_shifter is
+  ## the mode 3 dot loop's body and a SECOND call site stops clang inlining it
+  ## into fifo_pipeline_dot, which measured +0.9% of retired instructions on
+  ## Pokemon Blue for a dot that happens at most once per object.
+  ##
+  ## Only the number of dots it lasts varies -- see the trigger in tick_shifter
+  ## for where that count comes from.
   #
   # The BG fetcher runs for the WAIT and is stopped for the object's own fetch.
   # That split is the two halves of the penalty read literally: the wait exists
@@ -627,7 +736,96 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
   # fetcher had just pushed and there is no fetch in flight to finish. So the
   # split is real and none of these four is where it comes from; the remaining
   # candidate is the phase of the penalty itself against the fetch cycle.
-  when OBJ_BG_RUN == 1:
+  #
+  # ---- Rule 4: the object fetch goes at a TILE boundary, and which one is
+  # ---- decided by the object, not by the fetcher's phase -------------------
+  #
+  # `m3_lcdc_tile_sel_change` answers this outright. Its LCDC pulse is 8 dots
+  # wide, its tile data is all-$00 at $9000 and all-$FF at $8000, so every tile
+  # of the frame reports the pair (TILE_SEL at the plane-0 read, TILE_SEL at the
+  # plane-1 read) as one of four shades; its eighteen objects sit at OAM X = k
+  # in band k, so each 8-line band is an independent measurement of where the
+  # penalty falls against the fetch cycle. Reading the DMG reference off as a
+  # shade per band, and writing the pulse as the dot window W = [105, 112] and
+  # the object-free fetch schedule as tile n's B/0/1 reads on dots 8n+88, 8n+90,
+  # 8n+92 (n >= 1; tile 0's are 90/92/94), the whole frame is:
+  #
+  #   X = 0..7    the pulse falls on the fetch of the tile displayed at x=8..15
+  #   X = 8..15   ...on the fetch of the tile at x=16..23, undisturbed
+  #   X = 16, 17  ...on the fetch of the tile at x=16..23, undisturbed
+  #
+  # i.e. the penalty is inserted after the fetch of tile `floor(X / 8)`, and
+  # The Pixel of an object at OAM X sits in tile `floor(X / 8) - 1`. So the
+  # boundary the object takes is the one at the END of the fetch that was in
+  # flight while The Pixel's own tile was being displayed -- the fetcher runs a
+  # tile ahead, and Pan Docs' "waiting for the BG fetch to finish" is that fetch.
+  # A background tile's three reads are never split by it, which is the finding
+  # `docs/gb-mealybug-sources.md` states and none of rules 0..3 can produce.
+  #
+  # Two objects can be in identical FETCHER states at the trigger and still take
+  # different boundaries, which is why no rule phrased on `fetch_counter` can
+  # work: X = 0 and X = 8 both trigger on the dot the first push fills the FIFO,
+  # both cost 11 dots, and both leave the fetcher at counter 0 -- yet the
+  # reference gives band 0 shade 3 (both planes read inside W) and band 8 shade 0
+  # (neither). The one thing that differs is the tile The Pixel is in, and that
+  # is exactly `idx` at the trigger:
+  #
+  #   idx >= 0  The Pixel is in the tile the FIFO is displaying, so the fetch of
+  #             the tile after it is the one in flight. It runs, inside the
+  #             penalty, to completion -- and then parks, because the shifter is
+  #             stopped and the FIFO cannot drain, so it cannot start another.
+  #   idx < 0   The Pixel is in the tile BEFORE it (an object hanging off the
+  #             left edge, OAM X < 8). The fetch the object waits for is the one
+  #             that has just this dot finished -- the trigger dot IS its
+  #             plane-1 read, which is what filled the FIFO and let the shifter
+  #             ask the question. So the object takes the bus from the NEXT dot
+  #             for the whole penalty and the fetcher gets none of it, including
+  #             one dot past the end of the shifter's stall: the stall runs
+  #             t .. t+P-1 and the object's accesses t+1 .. t+P, offset by the
+  #             one dot the BG fetch had already taken. That last dot is the
+  #             `obj_penalty <= 0` tail below, and it is not free padding --
+  #             band 4 (OAM X = 4, P = 7) is shade 3 with it and shade 2
+  #             without, and it is the only band that separates the two.
+  #
+  # Mode 3's length does not move either way, and that is checked rather than
+  # hoped: neither arm can make the fetcher LATE for a push. In the hold arm the
+  # shifter resumes on t+P with a full FIFO and empties it on t+P+8, while the
+  # fetch resumes on t+P+1 and has its plane-1 read on t+P+6, two dots clear; in
+  # the run arm the fetch finishes earlier than rule 1 left it, and an earlier
+  # fetch can only remove a stall, never add one. GBMicrotest
+  # ppu_spritex_vs_scx stays 0/153 through tools/gbppu/objtab.py, and 1660
+  # ROM/device runs over gambatte sprites, oam_access, vram_m3, scx_during_m3,
+  # GBMicrotest and mealybug are line-for-line identical under -d:gb_m3_len.
+  #
+  # What it does cost is the run arm's dots: the fetch happens inside the
+  # object's stall instead of after it, so tick_bg_fetcher is called on up to
+  # six dots per object that rule 1 skipped (the same stages, moved, plus the
+  # call overhead). Pokemon Blue, retired instructions, +0.76%; Shantae +0.41%;
+  # Pokemon Crystal +0.01%. All of it is the rule and none of it is the
+  # plumbing -- this file's shape with rule 1 forced back on measures -0.06%
+  # against the revision before it.
+  #
+  # `idx < 0` needs no state of its own. `obj_tile_fx` is the tile the wait was
+  # charged against -- `fetcher_x - 1` when idx is negative and `fetcher_x` when
+  # it is not -- and neither it nor `fetcher_x` can move for the duration of the
+  # stall, because fetcher_x only advances on a push and a push needs an empty
+  # FIFO, which a stopped shifter cannot produce. So the two fields the penalty
+  # algorithm already keeps ARE the question, and this costs one compare on a
+  # path no object-free line ever visits.
+  when OBJ_BG_RUN == 4:
+    let bg_hold = ppu.obj_tile_fx != int32(ppu.fetcher_x)
+    if ppu.obj_penalty <= 0:
+      # The tail dot. The shifter has its dot back; the fetcher does not.
+      ppu.fetching_sprite = false
+      return false
+    # `fetch_counter == 7` is the park, and a park is where the run arm always
+    # ends up: the fetch it was allowed to finish cannot push, because a stopped
+    # shifter never empties the FIFO. Skipping the call there is not a rule, it
+    # is the same nothing done without a call -- and it is most of the arm's
+    # dots, so it is worth the compare: Pokemon Blue against the previous rule,
+    # retired instructions, +1.06% without it and +0.76% with.
+    if not bg_hold and ppu.fetch_counter != 7: tick_bg_fetcher(ppu, gb)
+  elif OBJ_BG_RUN == 1:
     if ppu.obj_penalty > OBJ_FETCH_DOTS: tick_bg_fetcher(ppu, gb)
   elif OBJ_BG_RUN == 2:
     tick_bg_fetcher(ppu, gb)
@@ -640,6 +838,13 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # registers are read here, so this is the dot the gambatte late_sizechange
     # family brackets.
     sprite_fetch_merge(ppu, gb)
+    when OBJ_BG_RUN == 4:
+      # A second object at the same X re-armed the stall; the tail belongs to
+      # the end of the whole chain, not to each link of it.
+      if bg_hold and not ppu.fetching_sprite:
+        ppu.fetching_sprite = true
+        ppu.obj_penalty = 0
+  true
 
 proc sprite_wins*(ppu: GbFifoPpu; gb: GB; bg_color, bg_obj_to_bg: uint8;
                   sp_px: GbPixel): bool =
@@ -897,12 +1102,83 @@ const M3_PIPE_DELAY {.intdefine.} = 2
 # the residual is somewhere else. See LCD_ON_LINE0_TRIM in gb.nim for the other
 # two routes to the same 2 dots and what refuses each of them.
 const M3_END_EARLY {.intdefine.} = 0
-# Compiles the pipeline-lead machinery out entirely when all three terms are
+
+# CPU M-cycles by which the pixel pipeline runs AHEAD on line 0, and only on
+# line 0, of where it runs on lines 1..143 -- with every mode flag, every STAT
+# source and the mode 3 length left exactly where they are. It is the one term
+# here that is per-line rather than per-frame, and the only one whose head is
+# paid back at both ends: the head delay is `LY0_PIPE_MCYCLES` M-cycles shorter
+# and the mode 3 -> 0 flag is held for the same number of dots, so the pixels
+# move and nothing else does.
+#
+# ---- What measures it -------------------------------------------------------
+# Two suites, neither of which was written with the other in mind, and they
+# agree to the dot:
+#
+#   * mealybug `inc/utils.asm`'s `line_0_fix` macro burns 24 T-cycles on LY 0
+#     against 28 on every other line -- "line 0 timing is different by 4
+#     cycles", its own comment. Every `m3_*` ROM writes its register out of a
+#     mode 2 STAT handler, so what the macro cancels is that the line-0 handler
+#     reaches its write 4 T-cycles FURTHER INTO the drawn line than it does on
+#     lines 1..143.
+#   * gambatte's `scy`, `bgtilemap`, `bgtiledata`, `scx_during_m3` and `bgen`
+#     reference-PNG families say it without a macro: the ROM takes a mode 2
+#     STAT interrupt on every line and writes SCY/SCX/LCDC a counted number of
+#     M-cycles into the handler (`scy/scy_during_m3_2.asm` is the shortest one
+#     to read). 125 of those rows were pixel-exact on lines 1..143 and wrong
+#     ONLY on LY 0, and a family's steps are one M-cycle each, so the step the
+#     expected value flips on IS the measurement: `scy_during_m3_1..6`'s
+#     reference moves its boundary at steps 2, 4, 6 where this tree moved it at
+#     3, 5, 7.
+#
+# ---- Why it is here and not in the STAT source or the mode edges ------------
+# "The line-0 mode 2 interrupt is one M-cycle late" is the obvious reading of
+# both and it is FALSE. Built and scored 2026-08-09, it buys the same five
+# families (gambatte 3658 -> 3762) and is refused from three directions:
+#
+#   * mooneye `acceptance/ppu/intr_1_2_timing-GS` (and wilbertpol's copy) times
+#     the line-144 mode 1 STAT interrupt to the line-0 mode 2 one directly, by
+#     counting `inc b` between them, and wants 20 then 21. Moving the pulse
+#     makes it 21/22. It is verified on DMG/MGB/SGB/SGB2 hardware.
+#   * gambatte `m2enable/late_enable_ly0_{1,2}` and eight siblings enable the
+#     mode 2 source one M-cycle apart across the top of line 0 and want an
+#     interrupt at the first offset and NONE at the second, which brackets the
+#     pulse's own window where it already is.
+#   * `lcdirq_precedence/m2irq_ly00_lcdstat30` and `lyc153int_m2irq_ifw_2`
+#     bracket the same edge from the vblank side.
+#
+# The mode EDGES are pinned just as hard, and from the other side. Making line
+# 0's mode 2 four dots short instead (mode 3 flag and pipeline both starting at
+# dot 76, gambatte 3658 -> 3714) moves the mode 3 -> 0 flag with them and costs
+# `m0enable` -18, `vramw_m3end` -8, `lcd_offset` -7, `enable_display` -7 and
+# `m0int_m3stat` -2; and `ly0/lycint152_m2stat_1` refuses the mode 2 -> 3 edge
+# moving on its own. So every flag on line 0 is where it is, the STAT sources
+# are where they are, and what is one M-cycle out is only the phase at which
+# the pipeline samples the registers -- which is exactly what M3_PIPE_MCYCLES
+# above is the whole-frame version of, and why this is spelled in the same
+# units it is. That is also what the `_ds` rows say: in double speed the same
+# five families want 2 dots, not 4, so the quantity is a CPU M-cycle and not a
+# count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
+const LY0_PIPE_MCYCLES {.intdefine.} = 1
+
+# Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
-# -d:M3_END_EARLY=0` control build for an A/B wants; every guard below is a
-# compile-time short circuit at that setting, not a runtime test.
+# -d:M3_END_EARLY=0 -d:LY0_PIPE_MCYCLES=0` control build for an A/B wants;
+# every guard below is a compile-time short circuit at that setting, not a
+# runtime test.
 const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
-                         M3_END_EARLY != 0
+                         M3_END_EARLY != 0 or LY0_PIPE_MCYCLES != 0
+
+# The held-pair ring has to name every pixel a register write can still reach:
+# the deepest mixer stage, plus the pixels the tail burst decided ahead of
+# their own dot. Both are compile-time here, so this is a compile-time check --
+# a sweep of any of the four constants that overflows the ring would otherwise
+# read a pixel four columns older than the one it means. See MIX_HOLD in gb.nim
+# and fifo_recompose_span.
+static:
+  doAssert M3_PIPE_MCYCLES * 4 + M3_PIPE_DELAY + M3_END_EARLY +
+           max(MIXER_PALETTE_BACK, MIXER_PRIORITY_BACK) <= MIX_HOLD,
+           "MIX_HOLD is too shallow for this lead + mixer tail"
 
 proc window_reactivate(ppu: GbFifoPpu) =
   ## WX was re-reached while the window was ALREADY the active fetch source.
@@ -1090,43 +1366,105 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
 # which is what says the two stages are a dot apart rather than the pipeline
 # being a dot out.
 #
-# What the tail does NOT explain, and is left alone: m3_bgp_change is 96.4%
-# here and prefers ONE stage by 22 pixels where m3_bgp_change_sprites prefers
-# it by 136, while m3_window_timing prefers two by 130 and
-# m3_lcdc_obj_en_change_variant by 110. Two stages ships because it is what the
-# structure says (one palette read, one stage, whichever palette it is) and
-# because it is +190 DMG pixels and free on CGB, but the ~800-pixel residual on
-# m3_bgp_change is a second mechanism and until it is found that row is not a
-# reliable vote on this dot. See docs/gb-failure-triage.md.
-proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
-  ## Re-colour the pixel emitted on the previous dot with the registers as they
-  ## stand after this write. See the note above; the caller is ppu_write, on the
-  ## four registers the mixer reads.
-  ##
-  ## Guarded on mode 3 rather than on a validity flag: `lx` only reaches 1..160
-  ## inside mode 3, it is rewound below zero at the mode 2 -> 3 edge, and it
-  ## does not move while an object fetch has the shifter stopped -- so `lx - 1`
-  ## is the last pixel written for as long as the guard holds, stall or no
-  ## stall. Ending mode 3 ends it: hardware clocks the line's last pixel out of
-  ## the mixer on the first dot of mode 0, and a write after that is behind it.
-  if (ppu.lcd_status and 3'u8) != 3'u8: return
-  for b in 1'i32 .. back:
-    let x = ppu.lx - b
-    if x < 0 or x >= GB_WIDTH: continue
-    let h = ppu.mix[x and 1]
+# The two stages used to ship on the structure alone -- m3_bgp_change and
+# m3_bgp_change_sprites preferred ONE by 22 and 136 pixels where
+# m3_window_timing preferred two by 130 and m3_lcdc_obj_en_change_variant by
+# 110 -- because the ~800 pixels those two rows had left were a second
+# mechanism and an unnamed residual is not a vote. Both names have since been
+# found, and both are in this file's neighbourhood rather than in the stage
+# count: MIXER_PALETTE_OR (the transition pixel) and MIXER_TAIL_HBLANK (the
+# line end, below). With them the two rows prefer TWO by 806 and 624 and the
+# vote across the palette rows is unanimous. See docs/gb-failure-triage.md.
+#
+# ---- The tail does not stop at the mode 3 -> 0 edge ------------------------
+#
+# The guard below used to be "mode 3, or nothing". It is one dot too strict,
+# and m3_bgp_change's own handler is what says so. That ROM writes BGP seven
+# times per line at `ld [c],a`, and dingbat's own trace puts the writes on dots
+# 81, 97, 109, 169, 181, 241 and **253**; the reference's run-lengths put the
+# edge each write draws at exactly `dot - 96`, at all six of the writes that
+# land inside mode 3. Mode 3 ends on dot 252 here, so the seventh write is on
+# the FIRST DOT OF MODE 0 -- and the reference draws its edge at x = 157 all
+# the same, three-valued, with 158 and 159 taking the new value cleanly.
+#
+# So the rule the six inside-mode-3 writes measure -- a write on dot D reaches
+# every pixel from `D - MIXER_PALETTE_BACK - 94` up -- simply does not stop at
+# the mode flag. It cannot: the shifter emits one pixel per dot and the tail
+# latches a pixel's shade two dots after it leaves the FIFO, so on dot 252
+# there are still two pixels inside the tail and one (159) not yet emitted.
+# The mode flag is a statement about the FETCHER (fetcher_retired), and the
+# fetcher being done is exactly why those last pixels are safe to keep
+# clocking: no VRAM read decides them any more.
+#
+# What has to change is OURS, not the model's. `lx` is the shifter's position
+# and stands in for the dot through the whole of mode 3 -- one pixel per dot,
+# stalls included -- but `fifo_burst_tail` emits the last `m3_lead` pixels of
+# the line ALL ON THE RETIRE DOT, which is the one dot of the line where it
+# does not. Two consequences, and both are accounting:
+#
+#   * the position has to keep counting after `lx` has stopped. `tail_dot0` is
+#     latched at the burst as `cycle_counter - lx`, so the shifter's position
+#     on any later dot of the line reads back as `cycle_counter - tail_dot0`.
+#     Nothing about the edge, the locks or the STAT model moves -- this is a
+#     subtraction on a register write, not a dot;
+#   * the pixels the burst decided EARLY are in the write's future, not its
+#     past, so a write in the tail has to reach FORWARD to them as well. On
+#     dot 253 the shifter's position is 159: 157 is the far end of the tail
+#     (the `old or new` pixel), 158 is inside it, and 159 has not been emitted
+#     at all -- on hardware it takes the new palette because it is emitted
+#     after the write, and here it takes it because the recompose sweeps up to
+#     the end of the line. That is why this is a span and not a countdown.
+#
+# The ring of held pairs is MIX_HOLD deep for the same reason: the deepest
+# stage plus the lead, which is exactly the four columns 156..159 that a write
+# on dot 252 or 253 can name.
+proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top: int32) =
+  ## Re-colour `[front - back, top]`, clipped to the screen and to the pixels
+  ## the held ring still has. `front` is where the shifter stands (see
+  ## mixer_tail_front) and `back` how many stages down the tail the register
+  ## being written is read.
+  var x = max(front - back, ppu.lx - MIX_HOLD)
+  if x < 0: x = 0
+  let hi = min(top, ppu.lx - 1)
+  while x <= hi:
+    let h = ppu.mix[x and (MIX_HOLD - 1)]
     ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
+    inc x
+
+proc mixer_tail_front(ppu: GbFifoPpu): (int32, int32) {.inline.} =
+  ## `(front, top)` for the two recompose procs: where the shifter stands on
+  ## this dot, and the last column a write may still reach.
+  ##
+  ## In mode 3 that is `lx` and `lx - 1` -- `lx` only reaches 1..160 inside
+  ## mode 3, it is rewound below zero at the mode 2 -> 3 edge, and it does not
+  ## move while an object fetch has the shifter stopped, so it IS the position,
+  ## stall or no stall, and everything at or past it is still in the FIFO.
+  ##
+  ## In mode 0 the shifter has been run to the end of the line by the tail
+  ## burst, so the position comes off the dot counter instead and everything
+  ## the burst decided early is reachable. Any other mode has no tail: the
+  ## values returned there make every span empty rather than costing a branch.
+  let m = ppu.lcd_status and 3'u8
+  if m == 3'u8: (ppu.lx, ppu.lx - 1'i32)
+  elif MIXER_TAIL_HBLANK != 0 and m == 0'u8:
+    (ppu.cycle_counter - ppu.tail_dot0, int32(GB_WIDTH) - 1)
+  else: (int32(GB_WIDTH) + MIX_HOLD, -1'i32)
+
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
+  ## Re-colour every pixel this write still reaches with the registers as they
+  ## stand after it. See the notes above; the caller is ppu_write, on the four
+  ## registers the mixer reads.
+  let (front, top) = mixer_tail_front(ppu)
+  fifo_recompose_span(ppu, gb, front, back, top)
 
 proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
-  ## Re-colour EXACTLY the pixel `back` dots behind the shifter, where
-  ## fifo_recompose_last re-colours every pixel from 1 to `back`. Same guards,
-  ## same held pair; the caller is the palette write's transition dot (see
-  ## MIXER_PALETTE_OR in gb.nim), which needs the far end of the tail to take a
-  ## different value from the rest of it.
-  if (ppu.lcd_status and 3'u8) != 3'u8: return
-  let x = ppu.lx - back
-  if x < 0 or x >= GB_WIDTH: return
-  let h = ppu.mix[x and 1]
-  ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
+  ## Re-colour EXACTLY the pixel `back` stages down the tail, where
+  ## fifo_recompose_last re-colours the whole span from there forward. Same
+  ## position, same held pairs; the caller is the palette write's transition
+  ## dot (see MIXER_PALETTE_OR in gb.nim), which needs the far end of the tail
+  ## to take a different value from the rest of it.
+  let (front, top) = mixer_tail_front(ppu)
+  fifo_recompose_span(ppu, gb, front, back, min(top, front - back))
 
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
@@ -1258,9 +1596,10 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       # WHOLE cost of the mixer's dot on the shipping build, which is what
       # `-d:MIXER_DOT_LAG=0` exists to A/B against.
       when MIXER_DOT_LAG != 0:
-        # Indexed by the pixel's own parity rather than shifted down, so two
-        # dots of history cost the dot loop the same two stores one does.
-        ppu.mix[ppu.lx and 1] = GbMixHold(bg: bg_px, sp: sp_px)
+        # Indexed by the pixel's own low bits rather than shifted down, so
+        # MIX_HOLD dots of history cost the dot loop the same one store that a
+        # single dot of it does.
+        ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
       ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
         fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
     inc ppu.lx
@@ -1349,10 +1688,14 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
            " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
            " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
            " tn=", toHex(ppu.tile_num, 2), " mode=", ppu.mode_flag
-  if ppu.fetching_sprite: tick_sprite_fetcher(ppu, gb)
+  # One call site for tick_shifter, deliberately: it is this loop's body, and a
+  # second one costs the inlining (see tick_sprite_fetcher's result). The
+  # object's tail dot is the only way through here with neither fetcher run.
+  if ppu.fetching_sprite:
+    if tick_sprite_fetcher(ppu, gb): return
   else:
     tick_bg_fetcher(ppu, gb)
-    tick_shifter(ppu, gb)
+  tick_shifter(ppu, gb)
 
 template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## The next dot of this line an idle mode (0, 1 or 2) has something to do on.
@@ -1591,6 +1934,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           ppu.lx = 0
+          when MIXER_TAIL_HBLANK != 0:
+            # No tail is in flight until this line's fetcher retires. The park
+            # matters for the one path that reaches mode 0 without passing the
+            # retire dot -- the LCD being switched off in the middle of mode 3
+            # -- where the previous line's latch would otherwise still answer.
+            ppu.tail_dot0 = TAIL_DOT0_OFF
           when M3_PIPE_LEAD_ANY:
             # Latched per line, not a constant: the M-cycle half of the lead is
             # 4 dots at normal speed and 2 in double speed, and a ROM can switch
@@ -1601,9 +1950,34 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # share is not, which is the whole difference between "the pipeline
             # runs late" and "mode 3 is short".
             ppu.m3_delay = uint8(int(ppu.m3_lead) - M3_END_EARLY)
+            ppu.m3_hold = 0
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
+          when LY0_PIPE_MCYCLES != 0:
+            # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
+            # where every other line's does, with the flags left alone. Two
+            # halves, and both are paid here:
+            #
+            #  * the head. The advance is larger than the head delay this line
+            #    had to give (4 dots against M3_PIPE_DELAY's 2 at normal
+            #    speed), so the delay goes to zero and the rest is spent as
+            #    pipeline dots on this dot -- the same "the dots are already
+            #    decided, emit them here" step fifo_burst_tail makes at the
+            #    other end of the line.
+            #  * the tail. The fetcher will now retire `adv` dots early, so the
+            #    mode 3 -> 0 flag is held for `adv` dots (m3_hold, below) and
+            #    lands on the dot it lands on for every other line.
+            #
+            # `first_line` is excluded: the line 0 that follows an LCD enable
+            # was never in vblank, and it has a model of its own already (the
+            # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
+            if ppu.ly == 0 and not ppu.first_line:
+              let adv = LY0_PIPE_MCYCLES * (4 shr gb.memory.current_speed)
+              let head = int(ppu.m3_delay)
+              ppu.m3_delay = uint8(max(0, head - adv))
+              ppu.m3_hold  = uint8(adv)
+              for _ in 0 ..< adv - min(head, adv): fifo_pipeline_dot(ppu, gb)
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
               var xs = ""
@@ -1618,8 +1992,17 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # rendered pixel. With a nonzero lead the shifter is still `m3_lead`
         # pixels from the end of the line here; the burst below finishes them.
         if fetcher_retired(ppu):
-          when defined(gb_win_trace):
-            echo "M3END ly=", ppu.ly, " dot=", ppu.cycle_counter, " len=", ppu.cycle_counter-80
+          when MIXER_TAIL_HBLANK != 0:
+            # The shifter's position, as a dot rather than as `lx`, latched
+            # BEFORE the burst runs `lx` to the end of the line. It is what the
+            # last pixels' mixer stages keep counting from once the mode flag
+            # has moved on -- see fifo_recompose_last. One store per line.
+            # On line 0 (LY0_PIPE_MCYCLES) the retire dot is revisited while
+            # m3_hold keeps the flag in mode 3; only the FIRST visit is the
+            # pipeline's own dot base, so the park at mode-3 entry is the
+            # latch's guard.
+            if ppu.tail_dot0 == TAIL_DOT0_OFF:
+              ppu.tail_dot0 = ppu.cycle_counter - ppu.lx
           when M3_PIPE_LEAD_ANY:
             # The tail of the line, emitted on THIS dot rather than spread over
             # the first dots of H-Blank. "The fetcher retired" means every VRAM
@@ -1630,6 +2013,17 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # Bursting them costs no dots (the lead was already paid at the head
             # of mode 3) and keeps the fetcher out of H-Blank entirely.
             fifo_burst_tail(ppu, gb)
+          # A line whose pipeline started early (LY0_PIPE_MCYCLES) retires that
+          # many dots early too; the FLAG still leaves mode 3 on the dot every
+          # other line does. The burst above is on the retire dot deliberately
+          # -- that is where the pixels are decided -- and only the flag waits.
+          when LY0_PIPE_MCYCLES != 0:
+            if ppu.m3_hold != 0:
+              dec ppu.m3_hold
+              ppu.cycle_counter += 1
+              continue
+          when defined(gb_win_trace):
+            echo "M3END ly=", ppu.ly, " dot=", ppu.cycle_counter, " len=", ppu.cycle_counter-80
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
               dec gb_m3_len_lines

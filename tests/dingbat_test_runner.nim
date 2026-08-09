@@ -760,10 +760,14 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
          color = true, cgb = true)
 
   # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart.
-  # The bundled `-dmg` reference is now reachable too (--dmg / a screenshot run
-  # without --cgb), but it is not wired here: the shootout already scores that
-  # row, and the CGB one is the row this table has a history for.
+  # BOTH devices are scored. The picture is one line of forty objects crossed
+  # with a running OAM DMA (see obj_oam_dma_read in fifo_ppu.nim) and the two
+  # references differ only in palette, so a device-specific break would show on
+  # one row and not the other — which is exactly what makes the pair worth two
+  # rows rather than the CGB one this table used to carry alone.
   let strike = roms_dir / "strikethrough"
+  add_if("strikethrough/strikethrough-dmg", strike / "strikethrough.gb",
+         strike / "strikethrough-dmg.png", 60)
   add_if("strikethrough/strikethrough-cgb", strike / "strikethrough.gb",
          strike / "strikethrough-cgb.png", 60, color = true, cgb = true)
 
