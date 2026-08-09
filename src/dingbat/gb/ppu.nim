@@ -1622,14 +1622,18 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:
+    # The mode bits (0-1) are sampled STAT_READ_SAMPLE dots back from where
+    # this read's M-cycle leaves the dot counter -- see stat_read_mode, which
+    # is also where the ROMs that bracket that dot at both speeds live.
+    let rm = stat_read_mode(ppu, gb)
     when defined(gb_stat_read_trace):
       # Diagnostic only (tools; compiled out of every shipping build). What
-      # the m2int_* derivation in STAT_MODE_HOLD was traced with.
+      # the sample-point brackets at stat_read_mode were traced with. `rm` is
+      # what this read RETURNS; `latch` is the VRAM/OAM-lock latch, which is a
+      # different dot and is printed only so the two can be told apart.
       echo "STATRD ly=", ppu.ly, " cc=", ppu.cycle_counter,
-           " rm=", ppu.read_mode and 3'u8, " live=", ppu.lcd_status and 3'u8
-    # The mode bits (0-1) are sampled at the last dot of this read's own
-    # M-cycle -- see stat_read_mode, and STAT_READ_LAG for what pins that dot.
-    let rm = stat_read_mode(ppu, gb)
+           " rm=", rm, " chg=", ppu.stat_chg_dot,
+           " latch=", ppu.read_mode and 3'u8, " live=", ppu.lcd_status and 3'u8
     var live = (ppu.lcd_status and 0b1111_1100'u8) or rm
     # The LY=LYC comparator does not follow LY instantaneously: the M-cycle in
     # which LY advances reads back with the coincidence bit CLEAR whatever LYC
