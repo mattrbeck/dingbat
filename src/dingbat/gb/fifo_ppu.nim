@@ -1810,6 +1810,13 @@ proc mixer_note_emit(ppu: GbFifoPpu) {.inline.} =
       ppu.tail_dot0 = t
       ppu.mix_run = ppu.lx
 
+proc mixer_head_back(gb: GB): int32 {.inline.} =
+  ## The DEEPEST stage of the mixer tail on this console, in dots -- the one
+  ## the palettes are read at, less the CGB's own dot of write latency. It is
+  ## what MIXER_HEAD_LINGER measures the shallower stages against.
+  int32(MIXER_PALETTE_BACK) -
+    (if gb.cgb_enabled: int32(CGB_MIXER_LATENCY) else: 0'i32)
+
 proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top: int32) =
   ## Re-colour `[front - back, top]`, clipped to the screen, to the pixels the
   ## held ring still has, and to the current run of emissions. `front` is where
@@ -1830,7 +1837,7 @@ proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top: int32) =
     ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
     inc x
 
-proc mixer_tail_front(ppu: GbFifoPpu): (int32, int32) {.inline.} =
+proc mixer_tail_front(ppu: GbFifoPpu; back, head: int32): (int32, int32) {.inline.} =
   ## `(front, top)` for the two recompose procs: where the shifter stands on
   ## this dot, and the last column a write may still reach.
   ##
@@ -1850,15 +1857,34 @@ proc mixer_tail_front(ppu: GbFifoPpu): (int32, int32) {.inline.} =
       # The control arm: the position is `lx` through mode 3 and only the
       # H-Blank tail comes off the dot counter.
       if m == 0'u8: front = ppu.cycle_counter - ppu.tail_dot0
+    when MIXER_HEAD_LINGER != 0:
+      # The line's FIRST pixel keeps every stage of the tail live until the
+      # deepest one is read, so a register read at a shallower stage (`back <
+      # head`: LCDC's priority bits, against the palettes') still reaches pixel
+      # 0 one dot after it has stopped reaching pixel 1. See MIXER_HEAD_LINGER
+      # in gb.nim; `mix_run` is zero exactly while the run pixel 0 belongs to
+      # is the live one, and `front == back + 1` is "the reach stops at pixel
+      # 1", which is the only place the two rules can differ.
+      if back < head and front - back == 1'i32 and ppu.mix_run == 0'i32:
+        dec front
     (front, int32(GB_WIDTH) - 1)
   else: (int32(GB_WIDTH) + MIX_HOLD, -1'i32)
 
-proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
+proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
+                          skip: int32 = 0) {.noinline.} =
   ## Re-colour every pixel this write still reaches with the registers as they
   ## stand after it. See the notes above; the caller is ppu_write, on the four
   ## registers the mixer reads.
-  let (front, top) = mixer_tail_front(ppu)
-  fifo_recompose_span(ppu, gb, front, back, top)
+  ##
+  ## `back` is the register's own depth in the tail and `skip` how many pixels
+  ## at the far end of it the caller has already painted itself -- one, for a
+  ## DMG palette write, whose oldest pixel takes `old or new` (MIXER_PALETTE_OR)
+  ## and is done by fifo_recompose_at. Passing `back - 1` instead would work out
+  ## the same everywhere but at the head of the line, where MIXER_HEAD_LINGER
+  ## makes the reach a function of `back` and the two calls have to agree on
+  ## which register they are talking about.
+  let (front, top) = mixer_tail_front(ppu, back, mixer_head_back(gb))
+  fifo_recompose_span(ppu, gb, front, back - skip, top)
 
 proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
   ## Re-colour EXACTLY the pixel `back` stages down the tail, where
@@ -1866,7 +1892,7 @@ proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
   ## position, same held pairs; the caller is the palette write's transition
   ## dot (see MIXER_PALETTE_OR in gb.nim), which needs the far end of the tail
   ## to take a different value from the rest of it.
-  let (front, top) = mixer_tail_front(ppu)
+  let (front, top) = mixer_tail_front(ppu, back, mixer_head_back(gb))
   fifo_recompose_span(ppu, gb, front, back, min(top, front - back))
 
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =

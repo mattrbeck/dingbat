@@ -594,6 +594,35 @@ const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## unbroken run of emissions would have left on, so the shifter's position on
   ## any later dot reads back as `cycle_counter - tail_dot0` whether or not `lx`
   ## has moved since. It subsumes the tail-burst latch MIXER_TAIL_HBLANK needed.
+const MIXER_HEAD_LINGER*      {.intdefine.} = 1
+  ## Whether the line's FIRST pixel holds the SHALLOW stages of the mixer tail
+  ## open until the deepest one is read (1, shipping; 0 is the pre-2026-08-10
+  ## behaviour, where every pixel of the line was the same depth).
+  ##
+  ## Pixel 0 alone, and only for a register read at a stage shallower than the
+  ## palettes': LCDC's priority bits reach it for MIXER_PALETTE_BACK dots after
+  ## it leaves the FIFO rather than MIXER_PRIORITY_BACK.
+  ##
+  ## mealybug `m3_lcdc_bg_en_change` is the whole of the measurement, and it is
+  ## a ±1 step and not a fit. Its object's OAM X advances one per 8-line band,
+  ## which moves the dot pixel 0 leaves the FIFO on -- dots 105, 104, 103, 102,
+  ## 101, 100 for bands 0..5 by `-d:gb_px_trace` -- while the handler's LCDC
+  ## write stays on dot 105 for every band. The DMG reference blanks x = 0 in
+  ## bands 0, 1 and 2 and leaves it alone in bands 3..7, i.e. pixel 0 is still
+  ## reachable exactly TWO dots after it leaves, where MIXER_PRIORITY_BACK is
+  ## one and every other pixel of the same bands obeys it.
+  ##
+  ## The palettes are NOT extended, and the same suite says so: `m3_bgp_change`
+  ## writes BGP on dot 97 with pixel 0 leaving on dot 94, and its reference puts
+  ## the `old or new` pixel at x = 1 -- a two-dot reach for pixel 0, the same as
+  ## for every other pixel. So this is not "pixel 0 lingers a dot"; it is the
+  ## two stages COINCIDING for the line's first pixel, which is why it is
+  ## written as `back < head` and not as a lag.
+  ##
+  ## Note the DMG references are the only oracle here. gambatte's
+  ## `dmgpalette_during_m3` family looks like a second one and is not: its PNGs
+  ## carry no `old or new` pixel at all (MIXER_PALETTE_OR's named cost), so
+  ## every disagreement with them in this area is already that one.
 const MIX_HOLD*               = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
