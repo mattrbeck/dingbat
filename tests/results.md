@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 11:45:24*
+*Generated: 2026-08-09 12:13:08*
 
 ## Game Boy - Blargg
 
@@ -228,24 +228,24 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 |------|--------|
 | mealybug/m2_win_en_toggle | 👌 |
 | mealybug-cgb/m2_win_en_toggle | 👌 |
-| mealybug/m3_bgp_change | 👀 100.0% correct (23039/23040 pixels match) |
-| mealybug-cgb/m3_bgp_change | 👀 100.0% correct (23039/23040 pixels match) |
-| mealybug/m3_bgp_change_sprites | 👀 99.5% correct (22936/23040 pixels match) |
-| mealybug-cgb/m3_bgp_change_sprites | 👀 99.7% correct (22968/23040 pixels match) |
-| mealybug/m3_lcdc_bg_en_change | 👀 99.7% correct (22981/23040 pixels match) |
+| mealybug/m3_bgp_change | 👌 |
+| mealybug-cgb/m3_bgp_change | 👌 |
+| mealybug/m3_bgp_change_sprites | 👌 |
+| mealybug-cgb/m3_bgp_change_sprites | 👌 |
+| mealybug/m3_lcdc_bg_en_change | 👌 |
 | mealybug-cgb/m3_lcdc_bg_en_change | 👌 |
 | mealybug-cgb/m3_lcdc_bg_en_change2 | 👌 |
 | mealybug/m3_lcdc_bg_map_change | 👌 |
 | mealybug-cgb/m3_lcdc_bg_map_change | 👀 98.3% correct (22656/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_bg_map_change2 | 👀 99.1% correct (22822/23040 pixels match) |
-| mealybug/m3_lcdc_obj_en_change | 👀 100.0% correct (23038/23040 pixels match) |
+| mealybug/m3_lcdc_obj_en_change | 👌 |
 | mealybug-cgb/m3_lcdc_obj_en_change | 👌 |
-| mealybug/m3_lcdc_obj_en_change_variant | 👀 99.6% correct (22942/23040 pixels match) |
+| mealybug/m3_lcdc_obj_en_change_variant | 👀 99.6% correct (22944/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_obj_en_change_variant | 👌 |
-| mealybug/m3_lcdc_obj_size_change | 👀 99.8% correct (22983/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_obj_size_change | 👀 99.8% correct (22998/23040 pixels match) |
-| mealybug/m3_lcdc_obj_size_change_scx | 👀 99.9% correct (23010/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_obj_size_change_scx | 👀 99.7% correct (22980/23040 pixels match) |
+| mealybug/m3_lcdc_obj_size_change | 👌 |
+| mealybug-cgb/m3_lcdc_obj_size_change | 👌 |
+| mealybug/m3_lcdc_obj_size_change_scx | 👌 |
+| mealybug-cgb/m3_lcdc_obj_size_change_scx | 👌 |
 | mealybug/m3_lcdc_tile_sel_change | 👌 |
 | mealybug-cgb/m3_lcdc_tile_sel_change | 👀 97.6% correct (22476/23040 pixels match) |
 | mealybug-cgb/m3_lcdc_tile_sel_change2 | 👀 97.1% correct (22376/23040 pixels match) |
@@ -268,8 +268,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/m3_scy_change | 👌 |
 | mealybug-cgb/m3_scy_change | 👌 |
 | mealybug-cgb/m3_scy_change2 | 👌 |
-| mealybug/m3_window_timing | 👀 99.9% correct (23007/23040 pixels match) |
-| mealybug-cgb/m3_window_timing | 👀 99.9% correct (23013/23040 pixels match) |
+| mealybug/m3_window_timing | 👀 99.9% correct (23019/23040 pixels match) |
+| mealybug-cgb/m3_window_timing | 👀 99.9% correct (23019/23040 pixels match) |
 | mealybug/m3_window_timing_wx_0 | 👌 |
 | mealybug-cgb/m3_window_timing_wx_0 | 👌 |
 | mealybug/m3_wx_4_change | 👌 |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 721
-- **Fail:** 260
+- **Pass:** 731
+- **Fail:** 250

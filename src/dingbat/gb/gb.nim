@@ -1423,15 +1423,19 @@ type
     mix*:                 array[MIX_HOLD, GbMixHold]
     # Which dot this line's pixel 0 would have left the shifter on, if the
     # shifter's current unbroken run of one-pixel-per-dot emissions had started
-    # there: `cycle_counter - lx` at the last emission. The shifter's position
-    # on any later dot is `cycle_counter - tail_dot0`, which keeps counting
-    # through an object fetch and through the tail burst, where `lx` does not.
+    # there: `cycle_counter - lx`, written at each of the three places the
+    # shifter STOPS (mixer_note_stop), which is everywhere that quantity can
+    # change. While a stall is in progress it therefore still describes the run
+    # the stall interrupted, and the shifter's position reads back as
+    # `cycle_counter - tail_dot0` -- which keeps counting through an object
+    # fetch and through the tail burst, where `lx` does not.
     # That is the whole of MIXER_TAIL_DOTS; see fifo_recompose_last.
     tail_dot0*:           int32
-    # The first `lx` of that run. Pixels before it left the FIFO at least one
-    # dot further back than `tail_dot0` says, so nothing may reach them --
-    # the stall that broke the run is 6..11 dots long (an object fetch) and the
-    # deepest mixer stage is two.
+    # The first `lx` of that run, i.e. the `lx` the NEXT run starts at once the
+    # stall clears. Pixels before it left the FIFO at least one dot further back
+    # than `tail_dot0` says, so nothing may reach them -- the stall that broke
+    # the run is 6..11 dots long (an object fetch) and the deepest mixer stage
+    # is two.
     mix_run*:             int32
     sprites*:             seq[GbSprite]
 
