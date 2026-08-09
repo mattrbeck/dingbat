@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 13:21:56*
+*Generated: 2026-08-09 13:50:49*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3835/5005 passed.**
+**3837/5005 passed.**
 
 ## bgen
 
@@ -1353,9 +1353,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (348/476 passed)
+## window (350/476 passed)
 
-348/476 tests passed, 128 failed:
+350/476 tests passed, 126 failed:
 
 | Test | Result |
 |------|--------|
@@ -1438,9 +1438,7 @@ All 20 tests passed.
 | window/late_reenable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx5_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
