@@ -78,6 +78,14 @@ const netSetStatus = (msg, isError) => {
   netStatusDiv.classList.toggle("net-error", !!isError);
   // An error ends the waiting state; unlock the form so the code can be fixed.
   if (isError) netSetConnecting(false);
+  // The whole post-connect pipeline (channel open, ROM/state transfer, session
+  // start, failures) reports through here — but this element lives in the
+  // shared-code view. When the MANUAL view is up, mirror the message there,
+  // or a healthy manual link shows "Connecting…" from confirm until the game
+  // swaps in (40+ seconds of apparent hang on a cross-network transfer).
+  if (netManualView && !netManualView.hidden && typeof manualSetStatus === "function") {
+    manualSetStatus(msg, isError);
+  }
 };
 
 // A fresh pending session. `attach` = bind to the already-running core with no
@@ -259,6 +267,9 @@ document.getElementById("net-connect").addEventListener("click", () => {
   menuDropdown.hidden = true;
   // Already linked → this is the disconnect action.
   if (net?.started || net?.rb?.inited) {
+    // Guarded: a live session dies for both players, and the menu item sits
+    // close to its neighbors.
+    if (!confirm("Disconnect the link cable?")) return;
     netShutdown();
     showToast("Disconnected");
     return;
@@ -814,6 +825,13 @@ const manualConnState = (pc) => () => {
 const MANUAL_CODE_MAX_AGE = 45000;
 let manualFreshTimer = 0;
 
+// "srflx/v4 host/mdns …" — the candidate mix of an SDP, for the log.
+const candKinds = (sdp) =>
+  SDPCodec.fields(sdp).candidates.map((c) => {
+    const [type, addr] = c.split("|");
+    return type + (addr.includes(":") ? "/v6" : addr.endsWith(".local") ? "/mdns" : "/v4");
+  });
+
 const manualButtonsEnabled = (on) => {
   if (manualCopyBtn) manualCopyBtn.disabled = !on;
   if (manualShareBtn) manualShareBtn.disabled = !on;
@@ -837,6 +855,12 @@ const manualPrepare = async (opts) => {
     const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
     session.pc = pc;
     pc.onconnectionstatechange = manualConnState(pc);
+    // STUN/TURN failures surface here and nowhere else; without this a dead
+    // STUN path just looks like a code that never got its public address.
+    pc.addEventListener("icecandidateerror", (/** @type {*} */ e) => {
+      log("netplay: ICE candidate error " + (e.errorCode || "?") + " " +
+          (e.errorText || "") + (e.url ? " via " + e.url : ""), "warn");
+    });
     session.manualChan = pc.createDataChannel("link", { ordered: true });
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -850,10 +874,7 @@ const manualPrepare = async (opts) => {
     // (NAT permitting), mDNS-host only = this LAN only. Logged with the mint
     // duration so a cross-network "stuck at Connecting…" — or a slow STUN
     // path — is diagnosable from the device.
-    const kinds = SDPCodec.fields(pc.localDescription.sdp).candidates.map((c) => {
-      const [type, addr] = c.split("|");
-      return type + (addr.includes(":") ? "/v6" : addr.endsWith(".local") ? "/mdns" : "/v4");
-    });
+    const kinds = candKinds(pc.localDescription.sdp);
     log("netplay: manual code minted in " + Math.round(performance.now() - mintT0) +
         "ms: " + (kinds.join(" ") || "no candidates"));
     if (!kinds.some((k) => k.startsWith("srflx"))) {
@@ -962,6 +983,18 @@ const manualConfirmGo = async () => {
     manualSetStatus("That's your own code — paste your friend's", true);
     return;
   }
+  // Diagnostic: what the friend's code carries and how old it is — a
+  // cross-network pairing lives on their srflx being fresh (mappings decay
+  // in under a minute; age comes from the mint timestamp newer codes carry).
+  try {
+    const fd = SDPCodec.decode(friendCode);
+    if (fd) {
+      const age = fd.mintedAt
+        ? Math.max(0, Math.round(Date.now() / 1000 - fd.mintedAt)) + "s old"
+        : "age unknown";
+      log("netplay: friend's code: " + candKinds(fd.sdp).join(" ") + " — " + age);
+    }
+  } catch {}
   const isHost = session.manualCode > friendCode;
   // Our peer takes the opposite DTLS role: if we're the server ("host"), their
   // synthesized answer must say active, and vice versa.
@@ -985,6 +1018,29 @@ const manualConfirmGo = async () => {
   if (manualIn) manualIn.readOnly = true;
   if (manualConfirm) manualConfirm.disabled = true;
   manualSetStatus("Connecting…");
+  // Progress heartbeat while pairing: one compact line every 5s (ICE state,
+  // pair count, checks sent vs answered) — sent>0 got=0 is checks vanishing
+  // into a NAT; pairs=0 is a remote list nothing could be built from. Self-
+  // clears on success, teardown, or the deadline replacing the session.
+  const progress = setInterval(async () => {
+    if (net !== session || session.rtcConnected || session.started || !session.pc) {
+      clearInterval(progress);
+      return;
+    }
+    let pairs = 0, sent = 0, got = 0;
+    try {
+      const stats = await session.pc.getStats();
+      stats.forEach((r) => {
+        if (r.type === "candidate-pair") {
+          pairs++;
+          sent += r.requestsSent ?? 0;
+          got += r.responsesReceived ?? 0;
+        }
+      });
+    } catch {}
+    log("netplay: pairing… ice=" + session.pc.iceConnectionState +
+        " pairs=" + pairs + " sent=" + sent + " got=" + got);
+  }, 5000);
   // A remote list with no routable candidate (mDNS-only, or a stale NAT
   // mapping) leaves ICE in checking forever without ever reaching 'failed' —
   // "Connecting…" for eternity. Bound it like the server path's pairing
@@ -1797,6 +1853,9 @@ const netDismissModal = () => {
 // The prominent in-toolbar disconnect button (shown only in rollback mode).
 document.getElementById("rb-disconnect").addEventListener("click", () => {
   if (net?.started || net?.rb?.inited) {
+    // Same guard as the menu item: the toolbar button borders other controls
+    // and one mis-tap ends the session for both players.
+    if (!confirm("Disconnect the link cable?")) return;
     netShutdown();
     showToast("Disconnected");
   }

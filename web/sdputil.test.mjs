@@ -151,6 +151,24 @@ async function run() {
     assert(SDPCodec.answerFrom("garbage!!!", "active") === null, "garbage code -> null");
   }
 
+  console.log("mint timestamp rides as trailing bytes (v1-compatible):");
+  {
+    const before = Math.floor(Date.now() / 1000);
+    const enc = SDPCodec.encode({ type: "offer", sdp: OFFER });
+    const after = Math.floor(Date.now() / 1000);
+    const dec = SDPCodec.decode(enc);
+    assert(dec && typeof dec.mintedAt === "number", "decode surfaces mintedAt");
+    assert(dec.mintedAt >= before && dec.mintedAt <= after, "mintedAt is the encode moment");
+    // A code WITHOUT the trailing timestamp (an older encoder) still decodes;
+    // age just reads unknown. Strip the last 4 payload bytes to simulate.
+    const raw = Buffer.from(enc.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    const stripped = Buffer.from(raw.subarray(0, raw.length - 4))
+      .toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const old = SDPCodec.decode(stripped);
+    assert(old && old.mintedAt === null, "timestamp-less codes decode with mintedAt null");
+    assert(old.sdp === dec.sdp, "payload identical with or without the trailing timestamp");
+  }
+
   console.log("version byte guards forward compatibility:");
   {
     const enc = SDPCodec.encode({ type: "offer", sdp: OFFER });

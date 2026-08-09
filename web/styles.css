@@ -5920,12 +5920,6 @@ body.rewind-off #report-slider {
 
 #net-manual-view[hidden] { display: none; }
 
-.net-manual-label {
-  margin: 14px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-dim);
-}
 
 .net-manual-code {
   flex: 1 1 auto;
@@ -5962,15 +5956,13 @@ body.rewind-off #report-slider {
 .net-view-toggle:hover {
   color: var(--text);
 }
-/* "Your code:  [Share] [Copy]" — label rides the row's left edge, buttons
-   right. The label's own top margin becomes the row's spacing instead. */
+/* "[Share code] [Copy code]" — the buttons split the row evenly (Copy fills
+   it alone where Share is hidden), so no width leaves a stray gap. */
 .net-manual-out-row {
-  align-items: center;
   margin-top: 14px;
 }
-.net-manual-out-row .net-manual-label {
-  flex: 1 1 auto;
-  margin: 0;
+.net-manual-out-row .button {
+  flex: 1 1 0;
 }
 
 /* "waiting for peer" badge: subtle chip over the top-right of the stage,
