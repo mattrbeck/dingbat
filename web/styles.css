@@ -3533,13 +3533,17 @@ body.debug-2p .home-tile-link {
        stays as the tap-to-close affordance.
 
        The cap is what stops a tall phone or a small tablet from opening 400px
-       of empty sheet under six rows. Measured, the root list needs 606px —
-       14 handle + 69 header + 470 rows + 53 footer — and does not vary with
-       width, because the rows are a fixed height and the descriptions are one
-       ellipsised line. 612 is that plus enough slack to absorb a platform's
-       font metrics; overshoot it and the list simply scrolls a few px.
-       88dvh still wins on anything shorter — an SE gets 500 and its list
-       scrolls, exactly as before.
+       of empty sheet under six rows: an iPad mini in portrait was 997 and a
+       15 Pro Max 820, against a root list that needs 606.
+
+       714 is the 13 mini's own 88dvh, picked because that is the proportion
+       that reads right — not the list's measured 606. Fitting the content
+       exactly was tried and is too short: the sheet stops looking like a
+       surface the app slid up and starts looking like a dialog that happens
+       to touch the bottom edge. The ~108px under the last row is doing a job.
+
+       88dvh still wins on anything shorter, so an SE is untouched at 500 and
+       its list scrolls exactly as before.
 
        It caps the WHOLE sheet, not just the list. Sizing the list to content
        and leaving detail screens at 88dvh would resize the frame on every
@@ -3549,7 +3553,7 @@ body.debug-2p .home-tile-link {
 
        If a seventh section is ever added, the list simply starts scrolling —
        raise this by one row height (72px) if that is not wanted. */
-    height: min(88dvh, 612px);
+    height: min(88dvh, 714px);
     min-height: 0;
     border-radius: 20px 20px 0 0;
     border-bottom: none;
