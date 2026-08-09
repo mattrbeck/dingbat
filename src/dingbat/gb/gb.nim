@@ -487,6 +487,25 @@ const WIN_EN_HOLD_BACK*       {.intdefine.} = 1
   ## refused and never served, which needs an UNSERVED hold to cost nothing
   ## (also this rule, green -- the dot is taken at the serve, not at the
   ## match). Spending the dot at the match instead costs the second row.
+const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
+  ## Whether a refused match that lands on the fetcher's PUSH dot puts one
+  ## pixel of colour 0 on the front of the FIFO (1, shipping) or leaves it
+  ## alone (0).
+  ##
+  ## The ruler carries exactly two of these and they are its last two wrong
+  ## pixels: `t = 8` and `t = 32`, the only refused matches in either band whose
+  ## pixel is a multiple of 8, i.e. the only two the fetcher pushes on. Both
+  ## read out as a single WHITE pixel at the match column with the background
+  ## unshifted either side of it -- no window, no stall, one colour-0 pixel.
+  ## Every other refused match in the frame is at a phase where the FIFO
+  ## already holds pixels and hardware shows nothing at all, and the two
+  ## SERVED matches on push dots (`t = 16`, `t = 24`) show the window's own
+  ## black at that column, so it is the collision of a refused start with the
+  ## push, and not the push or the start on its own.
+  ##
+  ## Costs nothing: the entry is replaced rather than dropped, so the shifter
+  ## does not stall and mode 3 does not move. Worth 2 wrong pixels; no other
+  ## mealybug row and no gambatte row has a refused match on a push dot.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in

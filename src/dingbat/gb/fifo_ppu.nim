@@ -528,6 +528,14 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         ppu.fetching_window = false
         ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size)) div 8)
         fifo_arm_window(ppu)
+        when WIN_EN_HOLD > 0:
+          # The comparator is an edge on a counter that only counts up, and
+          # `lx` has not moved since the start this read is undoing -- the
+          # restart parked the shifter on that very pixel. Re-arming WX - 7 on
+          # it would fire the START a second time on the same slot (and, with
+          # the bit low, arm a hold nothing can serve). A genuine second start
+          # needs a pixel the shifter has not reached.
+          if ppu.win_lx == ppu.lx: ppu.win_lx = WIN_LX_OFF
     let (map, offset) =
       if ppu.fetching_window:
         # Wraps inside the 32x32 tile map exactly as the background fetch
@@ -2337,9 +2345,21 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
                        else:       uint8(WIN_EN_HOLD)
             if hold == 0'u8:
               ppu.win_lx = WIN_LX_OFF
+            elif ppu.win_hold == 0'u8:
+              when WIN_EN_HOLD_ZERO != 0:
+                # The refused match and the fetcher's PUSH on the same dot.
+                # `size == 8` is that collision and only that: the FIFO is full
+                # for exactly the dot the push filled it on, and the shifter has
+                # not taken from it yet. The MATCH's own dot, not the hold's
+                # retries -- a retry is a comparator that has already fired.
+                # See WIN_EN_HOLD_ZERO.
+                if ppu.fifo.size == 8:
+                  ppu.fifo.data[ppu.fifo.head] =
+                    GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+              ppu.win_hold = hold
+              ppu.win_lx = ppu.lx + 1
             else:
-              if ppu.win_hold == 0'u8: ppu.win_hold = hold
-              else: dec ppu.win_hold
+              dec ppu.win_hold
               ppu.win_lx =
                 if ppu.win_hold == 0'u8: WIN_LX_OFF else: ppu.lx + 1
           else:
