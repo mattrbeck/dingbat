@@ -3067,8 +3067,12 @@ body.debug-2p .home-tile-link {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* One step darker than the content pane; the frame's overflow:hidden is
-     what clips its fill to the corner radius. */
+  /* One step off the content pane so the rail reads as its own column. The
+     mockup and the spec both say "darker"; in this theme system the step away
+     from --surface-1 is --surface-2, which is LIGHTER in the dark themes and
+     in the light ones alike. Going the other way would mean reaching past the
+     modal's own surfaces for --bg, so the direction is left as the token
+     system has it. The frame's overflow:hidden clips the fill to the radius. */
   background: var(--surface-2);
   border-right: 1px solid var(--border);
 }
@@ -3305,15 +3309,14 @@ body.debug-2p .home-tile-link {
 /* --- Version string ------------------------------------------------------
    Reference information someone goes looking for while filing a bug, not
    something read while changing a setting: one fixed place, invisible the
-   rest of the time. Desktop pins it to the foot of the rail with a flex
-   spacer; the sheet puts it at the end of the root list's scroll content. */
+   rest of the time. Two copies, one per layout, because the two layouts put
+   it under different parents: desktop pins it to the foot of the rail with a
+   flex spacer, the sheet gives it a fixed footer below the scroller. Exactly
+   one is ever displayed. */
 .settings-version {
-  margin: auto 0 0;
-  padding: 20px 12px 0;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
-  text-align: left;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -3321,6 +3324,22 @@ body.debug-2p .home-tile-link {
 
 .settings-version:hover {
   color: var(--text-dim);
+}
+
+.settings-rail .settings-version {
+  margin: auto 0 0;
+  padding: 20px 12px 0;
+  text-align: left;
+}
+
+/* Sheet chrome; the sheet breakpoint is what displays it. */
+.settings-foot {
+  display: none;
+}
+
+.settings-foot .settings-version {
+  margin: 0;
+  padding: 0;
 }
 
 /* --- Sheet chrome, inert until the sheet layout claims it --- */
@@ -3476,6 +3495,16 @@ body.debug-2p .home-tile-link {
   #settings-modal {
     padding: 0;
     align-items: flex-end;
+    /* The sheet's bottom edge must be the bottom of the VISIBLE viewport, and
+       `inset: 0` alone does not promise that: where a UA sizes the fixed
+       positioning containing block to the large viewport (URL bar retracted),
+       flex-end lands the sheet a URL-bar's height below what you can see. An
+       explicit height in dvh is what pins it — with `top` and `bottom` both 0
+       a specified height wins and `bottom` is dropped, so the overlay spans
+       [0, 100dvh] whichever viewport the ICB was sized to. dvh includes the
+       area under the home indicator (viewport-fit=cover), which is why the
+       footer's bottom padding below carries the safe-area inset. */
+    height: 100dvh;
   }
 
   .modal-settings {
@@ -3553,7 +3582,9 @@ body.debug-2p .home-tile-link {
   .settings-rail-body {
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 10px 12px calc(12px + var(--safe-b));
+    /* No safe-area inset here any more: .settings-foot sits below this
+       scroller and is what the home indicator lands on. */
+    padding: 10px 12px 12px;
   }
 
   /* List rows: name, a one-line description that is the reason this beats a
@@ -3622,10 +3653,23 @@ body.debug-2p .home-tile-link {
     background: var(--border);
   }
 
-  .settings-version {
-    margin: 24px 0 0;
-    padding: 0 12px;
-    text-align: right;
+  /* The build identity is the sheet's footer, not the last thing in the root
+     list's scroll content: same fixed place on the list and on every detail
+     screen, always at the bottom edge. It costs ~50px of sheet, and buys a
+     version string that is where you left it whichever screen you are on. */
+  .settings-rail .settings-version {
+    display: none;
+  }
+
+  .settings-foot {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    /* 22px of bottom padding, or the home indicator's inset plus the 12px the
+       top edge gets — whichever is larger. The indicator sits on this, which
+       is the whole reason it is here. */
+    padding: 12px 18px max(22px, calc(12px + var(--safe-b)));
+    border-top: 1px solid var(--border);
   }
 
   /* Detail header: back, title, stepper. No close — back and the stepper own
@@ -3652,7 +3696,8 @@ body.debug-2p .home-tile-link {
   }
 
   .settings-scroll {
-    padding: 18px 18px calc(18px + var(--safe-b));
+    /* Flat 18px: the footer below owns the safe area now. */
+    padding: 18px;
     scrollbar-gutter: auto;
   }
 

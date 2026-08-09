@@ -904,7 +904,11 @@ const settingsSectionTitle = document.getElementById("settings-section-title");
 const settingsBackBtn = document.getElementById("settings-back");
 const settingsPrevBtn = document.getElementById("settings-prev");
 const settingsNextBtn = document.getElementById("settings-next");
-const settingsVersionEl = document.getElementById("settings-version");
+// Two copies of the build identity, one per layout — the rail's foot on
+// desktop, the sheet's fixed footer below the scroller. CSS displays exactly
+// one; both carry the same text and the same click-to-copy.
+const settingsVersionEls = Array.from(
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-version")));
 
 // Width only, never pointer type or user-agent: an iPad at 1024 gets the rail,
 // and (pointer: coarse) grows its rows rather than handing it a second layout.
@@ -1074,7 +1078,7 @@ settingsFrame.addEventListener("pointercancel", endSheetDrag);
 
 // Anyone reading the build identity is about to retype it into a bug report.
 const copySettingsVersion = async () => {
-  const text = (settingsVersionEl.textContent || "").trim();
+  const text = (settingsVersionEls[0]?.textContent || "").trim();
   if (!text) return;
   try {
     if (!navigator.clipboard) throw new Error("no clipboard");
@@ -1084,10 +1088,12 @@ const copySettingsVersion = async () => {
     showToast("Couldn't access the clipboard");
   }
 };
-settingsVersionEl.addEventListener("click", copySettingsVersion);
-settingsVersionEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copySettingsVersion(); }
-});
+for (const el of settingsVersionEls) {
+  el.addEventListener("click", copySettingsVersion);
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copySettingsVersion(); }
+  });
+}
 
 const openSettingsModal = () => {
   menuDropdown.hidden = true;
@@ -1096,7 +1102,8 @@ const openSettingsModal = () => {
   fetch("version.txt")
     .then((r) => (r.ok ? r.text() : ""))
     .then((v) => {
-      settingsVersionEl.textContent = v ? "dingbat " + v.trim().slice(0, 12) : "";
+      const text = v ? "dingbat " + v.trim().slice(0, 12) : "";
+      for (const el of settingsVersionEls) el.textContent = text;
     })
     .catch(() => {});
   updateBiosStatusText();

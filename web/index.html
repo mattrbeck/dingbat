@@ -653,9 +653,10 @@
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
               </div>
-              <!-- Reference information, not a setting: bottom of the rail on
-                   desktop (pushed down by margin-top:auto), the last thing in
-                   the root list on mobile. Click / long-press to copy. -->
+              <!-- Reference information, not a setting. Desktop pins it to the
+                   foot of the rail (pushed down by margin-top:auto); the sheet
+                   uses .settings-foot below instead, and hides this one. Click
+                   to copy. -->
               <p class="settings-version" id="settings-version" tabindex="0" role="button" title="Copy the build identity"></p>
             </div>
           </div>
@@ -1056,6 +1057,14 @@
               </div>
             </div>
           </div>
+        </div>
+        <!-- Sheet only: a fixed footer BELOW the scroller, on the list and on
+             every detail screen alike, so the build identity is always at the
+             bottom edge of the sheet. Its bottom padding is what the home
+             indicator lands on. Hidden at >=760px, where the rail's copy above
+             is the one that shows. -->
+        <div class="settings-foot">
+          <p class="settings-version" id="settings-version-sheet" tabindex="0" role="button" title="Copy the build identity"></p>
         </div>
       </div>
     </div>
