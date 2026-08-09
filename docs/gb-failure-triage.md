@@ -715,10 +715,10 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_win_en_change_multiple_wx` | 4215 | 343 | as above |
 | `m3_lcdc_obj_en_change` | 60 | 2 | see below |
 | `m3_lcdc_obj_en_change_variant` | 380 | 102 | the mixer |
-| `m3_window_timing` | 299 | 29 | — |
+| `m3_window_timing` | 299 | 29 | **0 as of 2026-08-09** — 12 px `MIXER_TAIL_DOTS`, 21 px `WIN_HEAD_ABSORB` + `WIN_LINE_START_LATCH` |
 | `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
-| `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left are all LY = 0, i.e. bucket 0 |
+| `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left were all LY = 0, i.e. bucket 0, and are **0 as of 2026-08-09** |
 | `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
@@ -1109,18 +1109,22 @@ bucket 15 and it comes back on its own.
   `fifo_sample_smooth_scroll`. **All four remaining pixels are on LY = 0**, the
   `line_0_fix` line — i.e. bucket 0 (`LY0-RESYNC`), which is an unusually clean
   confirmation of that bucket's framing from a row that was never counted in it.
-* **`m3_window_timing`'s 29 are a different thing, and still open.** Same shape
-  of instrument (WX = LY, SCX = 0) and hardware backs the reference (86.2%, and
-  100% of the cells above 2σ). Its reference is *pinned* at black-start x = 3 for
-  LY 0..10, ramps 4..9 for LY 11..16 and is pinned at 9 thereafter; ours ramps
-  3, 4, 5, 6, 7, 8 across LY 1..6 where hardware is flat, and its own ramp runs
-  two lines late. The flat part is the sharp claim: **for WX = 1..6 hardware's
-  window fine-scroll discard costs no dots**, where ours costs `7 - WX`. It
-  cannot simply be deleted — `m3_wx_4_change` and `m3_wx_5_change` need the
-  discard for their pixel *alignment* and are exact today — so the model wanted
-  is "the window's own discard is absorbed by the line's throwaway fetch while
-  the SCX discard is not", which is a change to where the discard happens rather
-  than to its size, and is not a constant.
+* **`m3_window_timing`: fixed, 33 → 0 on both devices** (2026-08-09), in two
+  halves that turned out to be independent. Hardware backs the reference
+  throughout (86.2%, and 100% of the cells above 2σ). The reference is *pinned*
+  at black-start x = 3 for LY 0..10, ramps 4..9 for LY 11..16 and is pinned at 9
+  thereafter; ours ramped 3..8 across LY 1..6 where hardware is flat, and its own
+  ramp ran two lines late. The **ramp's two-line lag** was the mixer tail counted
+  in emitted pixels instead of dots (`MIXER_TAIL_DOTS`, 12 px, and the section
+  at the end of this file). The **flat part** was the sharp claim it looked
+  like: for WX = 1..6 the window's own fine-scroll discard costs no dots of its
+  own, because it is paid out of the window's six-dot startup fetch
+  (`WIN_HEAD_ABSORB`). It could not simply be deleted — `m3_wx_4_change` and
+  `m3_wx_5_change` need the discard for their pixel *alignment* — so what moved
+  is where the dots are spent, not the discard. LY 0 needed a third thing: WX is
+  read at the end of the head's throw-away fetch, not at the mode 2 → 3 edge
+  (`WIN_LINE_START_LATCH`), because this ROM writes WX *inside* mode 3 and the
+  edge was still reading the previous line's 144.
 * **`m3_bgp_change`'s ~800 is real.** Hardware backs the reference on 81.2% of
   its disputed cells and on 736 of 820 by region, and on `m3_bgp_change_sprites`
   at 90.1% — so the residual that makes those two "not a reliable vote" on
@@ -1514,6 +1518,105 @@ line. Recorded rather than guessed at: closing it needs a run-start note at the
 BG push, and a push is speculative (an object can trigger on the same dot and
 the shifter never emits), which costs more rows than it buys — built and scored,
 it loses 62 pixels on `m3_obp0_change` alone.
+
+## 2026-08-09: the window's head is six dots whatever WX is, and its WX is read late
+
+`MIXER_TAIL_DOTS` (above) took `m3_window_timing` from 33 wrong pixels to 21 by
+fixing the two-line lag in its stair. The 21 it left were all on **LY 0..6**, a
+triangular staircase at x = 3..8, and they are a different mechanism: the head
+of a line that *starts* as a window line.
+
+The ROM is a ruler — WX = LY, WY = 0, SCX = 0, BGP driven black at a fixed dot,
+so black-start x IS the number of dots the head consumed before x = 0:
+
+| WX (= LY) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7..10 | 11..16 | 17+ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| reference | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 4..9 | 9 |
+| was (main) | 9 | 3 | 4 | 5 | 6 | 7 | 8 | 3 | 4..9 | 9 |
+
+The 17+ tail is the control: there the window starts right of everything the
+write can reach, so 9 is what a line with no window head reads at all.
+
+**1. The window's own fine-scroll discard is absorbed** (`WIN_HEAD_ABSORB`, WX
+1..6). The reference is FLAT at 3 across WX = 0..6, and 3 is also what
+WX = 7..10 read — lines whose window starts on screen and pays the ordinary
+six-dot startup fetch. So a line-start window costs the same six dots, which is
+the ROM's own header sentence: it accounts for the entire WX-dependence of the
+frame with "the 6 T-cycle window startup fetch" moving relative to a fixed
+write, and names no other per-WX term (`docs/gb-mealybug-sources.md` §3.5 and
+§5 read that out of the source alone, before this was built). The `7 − WX`
+discard itself stays — it is what ALIGNS the window's glyphs, and a flat −6
+seeding takes `m3_wx_4_change` to 12809, `m3_wx_5_change` to 14731 and
+`m3_window_timing_wx_0` to 22914 — so only the DOTS move, as `WX − 1` idle steps
+at the head of the window's fetch (the negative entries of `FETCHER_ORDER`).
+Mode 3 is then 172 + 6 at every WX in 0..6, the length WX = 7 already had.
+
+**2. WX is read at the end of the head's throw-away fetch**
+(`WIN_LINE_START_LATCH`, LY 0's 6 px). This ROM writes WX *inside* mode 3 — dot
+85, and dot 81 on LY 0, whose handler is one M-cycle shorter (`line_0_fix`) — so
+reading WX at the mode 2 → 3 edge reads the PREVIOUS line's value, which on LY 0
+is the 144 left from the bottom of the frame. We drew no window on LY 0 at all.
+The other side of the bracket is `m3_wx_6_change`, whose dot-93 write must NOT
+be seen or its LY 4 and LY 5 grow a window the reference has not got; the last
+dot of the throw-away fetch is the fetcher event between them.
+
+**Two length instruments that never look at a pixel confirm (1)**, which is the
+one of the two that changes mode 3's duration:
+
+| | `_a` reads | `_b` reads | hardware's mode 0 starts in | so mode 3 is | was | is |
+|---|---|---|---|---|---|---|
+| GBMicrotest `win<WX>` | cc 257, wants 3 | cc 261, wants 0 | [256, 259] | 176..179 | WX 4 → 175, WX 5 → 174 | **178 at every WX** |
+
+(Hardware samples the mode bits at `cc − 2`; see the mode-0 latch section
+above.) `-d:gb_stat_read_trace` shows `win4_a` and `win5_a` passing on a mode
+flag that was already 0 when the ROM read it — `rm=3` over `live=0`. And
+gambatte's WX = 3 length brackets go green: `window/m2int_wx03_m3stat_1`,
+`window/m2int_wx03_scx3_m3stat_1`, `window/late_wx_wx03_2` and
+`sprites/space/10spritesPrLine_wx{3,4,5}_m3stat_ds_1`, on both devices.
+
+| | before | after |
+|---|---|---|
+| mealybug `m3_window_timing` DMG / CGB | 21 / 63 wrong px | **0 / 0** |
+| mealybug `m3_lcdc_win_en_change_multiple_wx` DMG | 343 | 296 |
+| mealybug DMG / CGB totals | 552500 / 1856612 | **552568 / 1856675** |
+| gambatte | 3809/5005 | **3818/5005** |
+| runner | 731/981 | 730/981 (+9 gambatte ROMs, +2 rows, −3 rows) |
+
+The regression surface, checked row by row against main:
+
+* gambatte is **+9 rows and −0 rows** over all 5,005 ROM/device runs. The two
+  sentinels for the window-tie work this composes with are untouched: all 111
+  `wxA6` rows and all 193 `m0enable` rows are identical verdicts.
+* every mealybug row main takes to 0 stays 0 on both devices, and nothing else
+  in either set moves a pixel. `results_mgba_suite.md` is identical.
+* GBMicrotest trades **three rows**: `win3_b`, `win4_b`, `win5_b`. All eighteen
+  `win*_b` rows now report the identical `0x83`-against-`0x80` signature, i.e.
+  bucket 15's readback lag, and the `_a` bracket above says two of the three
+  were only green because the mode-3 end was wrong in the compensating
+  direction. Same precedent as `win6_b` and `win0_scx3_b`; all of them come back
+  when bucket 15 lands.
+* perf: retired instructions **−0.90%** (Pokemon Crystal CGB) and **−0.86%**
+  (Link's Awakening DMG) against main, minimum of five runs a side, `cycles=`
+  identical in every pair. It is a *win* because the window head's idle steps
+  need `FETCHER_ORDER` to run below zero, which means deleting the
+  `fetch_counter = fetch_counter and 7` that used to run on every dot of mode 3;
+  the wrap it replaced only ever happened at `fsPushPixel` and is now written
+  there.
+
+### Why this branch's own `MIXER_TAIL_DOTS` was dropped rather than merged
+
+This work was developed in parallel with the tail-in-dots branch and arrived at
+the same mechanism independently, with a different spelling: the last two dots
+the shifter did NOT emit on, and a tail whose low end is `lx` minus the emits in
+the window, against main's run base (`tail_dot0`) plus run start (`mix_run`)
+noted at the stop sites. Both hit the same +2.5–5% inline cliff in their first
+per-emit form and both moved the state off the dot loop. Measured on this tree,
+`-d:MIXER_TAIL_DOTS=0` against the shipping build is **+0.001%** of retired
+instructions on Pokemon Crystal (minimum of four runs, `cycles=` identical) —
+i.e. main's spelling has no cost left to win back, so replacing a documented,
+in-tree mechanism that is already integrated with `MIXER_HEAD_LINGER`'s
+`(back, head)` reach would have been churn at equal row outcome. Only the two
+window mechanisms were ported.
 
 ## Reproducing any of this
 

@@ -479,7 +479,7 @@ CGB subpixels, `m3_scy_change2` (CGB) stays 0, gambatte `scy` 61/67 → **67/67*
 and `scx_during_m3` 43 → 49, with no row anywhere going the other way and mode
 3's length identical over 2,000,000 traced scanlines.
 
-### 3.5 `m3_window_timing` — 29 → 33 → **21**, and `m3_window_timing_wx_0` — **0**
+### 3.5 `m3_window_timing` — 29 → 33 → 21 → **0**, and `m3_window_timing_wx_0` — **0**
 
 `m3_window_timing.asm:21` is the most quantitative header in the suite:
 
@@ -515,6 +515,18 @@ object. Line 17's single pixel at x = 9 is what pins the guard in
 `mixer_tail_front` that recognises that stall (`fifo.size == 0 and
 lx == mix_run`); with it frozen instead of draining, that pixel is wrong and
 nothing else in the suite changes.
+
+The band-0 staircase closed the same day and the header above is exactly what
+closed it: the head of a line that STARTS as a window line is six dots whatever
+WX is, so the `7 − WX` fine-scroll discard is paid out of those six rather than
+on top of them (`WIN_HEAD_ABSORB`, §5 — which had already predicted it from this
+sentence alone). LY 0 needed one more thing, and it is this ROM's own doing:
+`WX = LY` is written *inside* mode 3, on dot 81 of LY 0 and dot 85 elsewhere, so
+the line-start decision cannot be taken at the mode 2 → 3 edge — there WX is
+still the 144 left from the bottom of the previous frame, and dingbat drew no
+window on LY 0 at all. Moved to the last dot of the head's throw-away fetch
+(`WIN_LINE_START_LATCH`), bracketed on the other side by §3.8's dot-93 write.
+The row is now pixel-exact on both devices.
 
 `m3_window_timing_wx_0.asm:21` adds the one term the other ROM cannot see:
 
@@ -699,7 +711,7 @@ A negative result, so the next person does not dig:
 
 ---
 
-## 5. Verdict on `WIN_HEAD_ABSORB` (branch `agent-gbmealy`, unmerged)
+## 5. Verdict on `WIN_HEAD_ABSORB` (shipped 2026-08-09)
 
 The proposal: on a line that *starts* as a window line (`WX < 6`), the `7 − WX`
 fine-scroll discard is paid **out of** the window's 6-dot startup fetch, so
@@ -731,7 +743,15 @@ that pair has to be re-expressed with it or WX = 0 will silently change.
 
 **Nothing in the sources refutes it**, and nothing in them speaks to the three
 GBMicrotest rows it trades — those are STAT readback, which no mealybug ROM
-touches.
+touches. Two *non*-mealybug instruments settled those independently when it
+shipped: GBMicrotest's own `win<WX>_a` sibling brackets mode 3 to 176..179 at
+every WX, and the absorbed head is the only setting inside that bracket at
+WX = 4 and 5 (`-d:gb_stat_read_trace` shows the `_a` rows passing on a flag that
+had already gone to 0); and gambatte's WX = 3 length brackets go green with it.
+See `docs/gb-failure-triage.md`. Shipped with `WIN_LINE_START_LATCH`, which is
+the LY 0 half this section could not see: the ROM writes `WX = LY` inside mode 3,
+so the line-start decision has to be taken after that write and not at the
+mode 2 → 3 edge.
 
 ---
 
