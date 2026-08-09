@@ -2290,7 +2290,8 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
   ## once the shifter is inside the tail, so it costs the other 150-odd pixels
   ## of a line nothing. See fetcher_retired for what each term is for.
   if ppu.fetching_sprite: return true
-  if ppu.sprites.len > 0 and int(ppu.sprites[0].x) <= GB_WIDTH + 7: return true
+  if sprite_enabled(ppu) and ppu.sprites.len > 0 and
+     int(ppu.sprites[0].x) <= GB_WIDTH + 7: return true
   when WIN_TAIL_FETCH != 0:
     # A window that HAS started, whose restart has not pushed yet. Without this
     # the term below stops holding mode 3 open the instant the window starts,
@@ -2333,7 +2334,18 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## screen alone:
   ##
   ##   * a pending object: X in 160..167 is partly on screen, so it is a real
-  ##     VRAM read (gambatte sprites/10spritesPrLine_10xposA6/A7_*);
+  ##     VRAM read (gambatte sprites/10spritesPrLine_10xposA6/A7_*). It is
+  ##     conditioned on LCDC.1 for the same reason the window term below is
+  ##     conditioned on LCDC.5: an object the mode-2 scan left in the list but
+  ##     that the shifter will never trigger (tick_shifter asks
+  ##     `sprite_enabled` before anything else) owes the fetcher nothing, so it
+  ##     must not hold mode 3 open. Without the gate, clearing LCDC.1 anywhere
+  ##     before an object's trigger still bought that line the whole pipeline
+  ##     lead -- `-d:gb_m3_len` reads 174 against 172 on every such line, and
+  ##     four gambatte DMG rows measure exactly that from the mode 3 -> 0 edge
+  ##     (sprites/late_disable_1 and sprite_late_disable_spx18/19/1B_1, whose
+  ##     write lands one dot BEFORE the object's trigger so no fetch happens at
+  ##     all);
   ##   * a window that has not started yet: WX up to 166 still reaches lx 159,
   ##     and starting it restarts the BG fetch (gambatte window/m2int_wxA6_*).
   ##     There is deliberately no `ly >= wy` term next to `window_trigger`
