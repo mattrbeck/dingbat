@@ -457,6 +457,10 @@ const modalFocusables = (overlay) =>
     overlay.querySelectorAll("button, input, select, textarea, [tabindex]")
   ).filter(
     (n) => !n.disabled && n.offsetParent !== null && n.getAttribute("tabindex") !== "-1"
+      // An `inert` subtree is unreachable by Tab, so it must be unreachable by
+      // the trap too: the settings sheet keeps its off-stage screen mounted
+      // (and painted, mid-slide) but inert.
+      && !n.closest?.("[inert]")
   );
 
 const trapFocus = (overlay) => {
@@ -836,6 +840,10 @@ for (const row of document.querySelectorAll(".modal-toggle-row")) {
 
 const settingsModal = document.getElementById("settings-modal");
 const gbaBiosStatus = document.getElementById("gba-bios-status");
+const gbaRunBiosRow = document.getElementById("gba-run-bios-row");
+const gbaBiosModeGroup = document.getElementById("gba-bios-mode-group");
+const gbaBiosModeRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
+  document.querySelectorAll('input[name="gba-bios-mode"]'));
 const gbcBootromStatus = document.getElementById("gbc-bootrom-status");
 
 const updateBiosStatusText = async () => {
@@ -843,6 +851,17 @@ const updateBiosStatusText = async () => {
   gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
   let gbc = await dbGet("bios:gbc");
   gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
+  // Both of the settings below the file row are answers to "what should the
+  // BIOS do", and with no BIOS there is nothing to answer: the intro cannot
+  // play and both real-BIOS call modes silently fall back to software. They
+  // keep showing their stored values rather than resetting — the choice is
+  // remembered and comes back the moment a file is set — but they are inert
+  // until then, and the hint underneath says why.
+  const noBios = !gba;
+  gbaRunBiosToggle.disabled = noBios;
+  gbaRunBiosRow.classList.toggle("row-disabled", noBios);
+  gbaBiosModeGroup.classList.toggle("row-disabled", noBios);
+  for (const r of gbaBiosModeRadios) r.disabled = noBios;
 };
 
 // iOS/iPadOS (iPad reports as "MacIntel" with touch points since iPadOS 13).
@@ -877,40 +896,331 @@ const pickFile = (accept, callback) => {
   input.click();
 };
 
-// Tab bar: one pane visible at a time
-const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
-const settingsTabBar = document.getElementById("settings-tabs");
-const settingsTabsWrap = document.getElementById("settings-tabs-wrap");
+// --- Settings navigation ----------------------------------------------------
+//
+// Which layout is on screen is CSS's business (styles.css, "Settings
+// surface"): >=760px is a fixed 900x640 modal with a section rail, below it an
+// 88dvh sheet whose rail becomes a drill-down list. This half owns which
+// section is showing, which screen the sheet is on, and the navigation that
+// only exists on the sheet — push/pop, the header stepper, hardware back.
+//
+// Order is fixed and never most-recently-used: reordering would mean the item
+// you want is somewhere new each time, which is the original complaint on a
+// different axis.
+const SETTINGS_SECTIONS = ["controls", "gb", "gba", "video", "audio", "general"];
+const SETTINGS_LAST_KEY = "settings-section";
 
-// Edge scrims on the wrapper signal that the bar can scroll further in that
-// direction (the tab bar overflows on narrow phones). Re-checked on scroll,
-// resize, tab selection and modal open — clientWidth is 0 while the modal is
-// closed, so the open-time call does the first real measurement.
-const updateTabsScrollHints = () => {
-  const el = settingsTabBar;
-  settingsTabsWrap.classList.toggle("can-scroll-left", el.scrollLeft > 1);
-  settingsTabsWrap.classList.toggle(
-    "can-scroll-right", el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
+const settingsFrame = document.getElementById("settings-frame");
+const settingsBody = /** @type {HTMLElement} */ (
+  settingsFrame.querySelector(".settings-body"));
+const settingsRail = document.getElementById("settings-rail");
+const settingsContent = document.getElementById("settings-content");
+const settingsScroll = document.getElementById("settings-scroll");
+const settingsSectionTitle = document.getElementById("settings-section-title");
+const settingsBackBtn = document.getElementById("settings-back");
+const settingsPrevBtn = document.getElementById("settings-prev");
+const settingsNextBtn = document.getElementById("settings-next");
+// Two copies of the build identity, one per layout — the rail's foot on
+// desktop, the sheet's fixed footer below the scroller. CSS displays exactly
+// one; both carry the same text and the same click-to-copy.
+const settingsVersionEls = Array.from(
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-version")));
+
+// Width only, never pointer type or user-agent: an iPad at 1024 gets the rail,
+// and (pointer: coarse) grows its rows rather than handing it a second layout.
+const settingsSheetQuery = window.matchMedia("(max-width: 759px)");
+const settingsIsSheet = () => settingsSheetQuery.matches;
+
+const settingsTabOf = (sec) => settingsTabs.find((t) => t.dataset.tab === sec);
+const settingsName = (sec) => settingsTabOf(sec)?.dataset.name || "";
+const settingsStep = (sec, delta) => {
+  const n = SETTINGS_SECTIONS.length;
+  return SETTINGS_SECTIONS[(SETTINGS_SECTIONS.indexOf(sec) + delta + n) % n];
 };
 
-settingsTabBar.addEventListener("scroll", updateTabsScrollHints, { passive: true });
-window.addEventListener("resize", updateTabsScrollHints);
+let settingsSection = SETTINGS_SECTIONS[0];
+let settingsOnDetail = false;
 
 const selectSettingsTab = (name) => {
-  for (let t of settingsTabs) {
-    let on = t.dataset.tab === name;
+  if (!SETTINGS_SECTIONS.includes(name)) name = SETTINGS_SECTIONS[0];
+  settingsSection = name;
+  for (const t of settingsTabs) {
+    const on = t.dataset.tab === name;
     t.classList.toggle("active", on);
     t.setAttribute("aria-selected", on ? "true" : "false");
-    document.getElementById("settings-pane-" + t.dataset.tab).hidden = !on;
-    // The tab bar scrolls on narrow screens — keep the active tab in view
-    if (on) t.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // Roving tabindex: one stop for the whole list, arrows move within it.
+    t.setAttribute("tabindex", on ? "0" : "-1");
+    const pane = document.getElementById("settings-pane-" + t.dataset.tab);
+    if (pane) pane.hidden = !on;
   }
-  updateTabsScrollHints();
+  settingsSectionTitle.textContent = settingsName(name);
+  // Name the destination, not the direction.
+  settingsPrevBtn.setAttribute(
+    "aria-label", "Previous section: " + settingsName(settingsStep(name, -1)));
+  settingsNextBtn.setAttribute(
+    "aria-label", "Next section: " + settingsName(settingsStep(name, 1)));
+  // Always top, never a restored per-section offset: landing mid-list reads as
+  // the wrong section having loaded.
+  settingsScroll.scrollTop = 0;
+  try { localStorage.setItem(SETTINGS_LAST_KEY, name); } catch {}
 };
 
-settingsTabs.forEach((t) =>
-  t.addEventListener("click", () => selectSettingsTab(t.dataset.tab))
-);
+// The off-stage sheet screen is still painted (it is mid-slide for 200ms) but
+// must not be reachable by Tab or by the modal focus trap. `inert` says both
+// things at once; modalFocusables skips anything inside one.
+const applySettingsScreen = () => {
+  const sheet = settingsIsSheet();
+  settingsFrame.classList.toggle("on-detail", sheet && settingsOnDetail);
+  const off = !sheet ? null : settingsOnDetail ? settingsRail : settingsContent;
+  for (const el of [settingsRail, settingsContent]) {
+    if (el === off) el.setAttribute("inert", "");
+    else el.removeAttribute("inert");
+  }
+};
+
+// One history entry per level, so Android's back gesture matches the sheet:
+// back from a detail returns to the list, back from the list closes the sheet.
+// Entries are only pushed in the sheet layout — a browser Back that closed a
+// desktop dialog would be a surprise.
+const settingsHistOk = typeof history !== "undefined" && !!history.pushState;
+let settingsHistDepth = 0;   // our entries still on the stack
+let settingsHistSkip = 0;    // popstate events we caused ourselves
+
+const settingsHistPush = () => {
+  if (!settingsHistOk) return;
+  settingsHistDepth++;
+  try { history.pushState({ dingbatSettings: settingsHistDepth }, ""); }
+  catch { settingsHistDepth--; }
+};
+
+// Drop n of OUR entries. history.go() fires exactly one popstate however far
+// it travels, so one skip covers the whole unwind.
+const settingsHistDrop = (n) => {
+  if (!settingsHistOk || settingsHistDepth <= 0 || n <= 0) return;
+  n = Math.min(n, settingsHistDepth);
+  settingsHistDepth -= n;
+  settingsHistSkip++;
+  try { history.go(-n); } catch { settingsHistSkip--; }
+};
+
+const showSettingsList = (fromHistory) => {
+  if (!settingsOnDetail) return;
+  settingsOnDetail = false;
+  if (!fromHistory) settingsHistDrop(1);
+  applySettingsScreen();
+  settingsTabOf(settingsSection)?.focus({ preventScroll: true });
+  settingsBody.scrollLeft = 0;
+};
+
+const openSettingsSection = (name) => {
+  selectSettingsTab(name);
+  if (!settingsIsSheet() || settingsOnDetail) return;
+  settingsOnDetail = true;
+  settingsHistPush();
+  applySettingsScreen();
+  // preventScroll is load-bearing, not a nicety. Back lives inside the detail
+  // screen, which is still translated 100% off to the right at this instant,
+  // so a plain focus() makes the browser scroll .settings-body to reveal it —
+  // 275px on a 375pt phone, even though the container is overflow:hidden and
+  // scrollWidth == clientWidth. Both panes lurch sideways for a few frames and
+  // then unwind as the transform lands, which reads as the pane flying off
+  // screen and coming back. Same reason in showSettingsList.
+  settingsBackBtn.focus({ preventScroll: true });
+  settingsBody.scrollLeft = 0;
+};
+
+window.addEventListener("popstate", () => {
+  if (settingsHistSkip > 0) { settingsHistSkip--; return; }
+  if (settingsHistDepth <= 0) return;
+  settingsHistDepth--;
+  if (settingsOnDetail) showSettingsList(true);
+  else closeSettingsModal(true);
+});
+
+// Layout can change under an open dialog (rotation, a resized window). The
+// sheet always shows a section rather than the bare list in that case, which
+// is where a desktop reader already was.
+settingsSheetQuery.addEventListener?.("change", () => {
+  if (settingsIsSheet() && settingsModal.classList.contains("open")) {
+    settingsOnDetail = true;
+  }
+  applySettingsScreen();
+});
+
+for (const t of settingsTabs) {
+  t.addEventListener("click", () => {
+    if (settingsIsSheet()) openSettingsSection(t.dataset.tab);
+    else selectSettingsTab(t.dataset.tab);
+  });
+}
+
+// Rail keyboard: up/down between sections, Home/End to the ends. On the rail
+// the move selects, because the pane beside it is the thing being labelled; on
+// the sheet's list it only moves focus, because entering is a separate act.
+document.getElementById("settings-tabs").addEventListener("keydown", (e) => {
+  const keys = { ArrowUp: -1, ArrowDown: 1, Home: 0, End: 0 };
+  if (!(e.key in keys)) return;
+  e.preventDefault();
+  const to = e.key === "Home" ? SETTINGS_SECTIONS[0]
+    : e.key === "End" ? SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1]
+    : settingsStep(settingsSection, keys[e.key]);
+  if (settingsIsSheet()) settingsTabOf(to)?.focus();
+  else { selectSettingsTab(to); settingsTabOf(to)?.focus(); }
+});
+
+settingsBackBtn.addEventListener("click", () => showSettingsList());
+settingsPrevBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, -1)));
+settingsNextBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, 1)));
+
+// Swipe down to dismiss the sheet, from the chrome OR from anywhere in the
+// content — the latter only when its scroller is already at the top, which is
+// the rule every native bottom sheet uses. The sheet's HEIGHT is never dragged
+// (there is no half-height detent), only its offset, and only far enough to
+// read as a dismissal.
+//
+// Two states, because the two starting places want different commitments. On
+// the chrome there is nothing else the gesture could mean, so it drags on
+// contact. In the content it could equally be a scroll, so it stays PENDING
+// until the finger has moved far enough, and downward enough, to be sure —
+// and is abandoned the moment it looks like a scroll or a sideways drag.
+const SHEET_DRAG_SLOP = 8;     // px before a content drag commits
+const SHEET_DRAG_CLOSE = 90;   // px of travel that counts as a dismissal
+const SHEET_DRAG_EXPAND = 40;  // px UP on the chrome that fills the screen
+// Below this much spare room there is nothing to expand into, so the gesture
+// is not offered: a phone in landscape is already 100dvh, and an SE gains a
+// sliver not worth a detent.
+const SHEET_EXPAND_MIN_GAIN = 80;
+let sheetDragFrom = 0;
+let sheetDragX0 = 0;
+let sheetDragDy = null;       // non-null once committed
+let sheetDragPending = false;
+let sheetDragScroller = null;
+let sheetDragOnChrome = false;
+let sheetExpanded = false;
+
+const sheetCanExpand = () => {
+  if (sheetExpanded) return false;
+  const h = settingsFrame.getBoundingClientRect().height;
+  const vh = window.visualViewport?.height || window.innerHeight;
+  return vh - h >= SHEET_EXPAND_MIN_GAIN;
+};
+
+const setSheetExpanded = (on) => {
+  sheetExpanded = on;
+  settingsFrame.classList.toggle("sheet-expanded", on);
+};
+
+const sheetScrollerFor = (el) =>
+  el?.closest?.(".settings-scroll, .settings-rail-body") || null;
+
+const endSheetDrag = () => {
+  sheetDragPending = false;
+  sheetDragScroller = null;
+  if (sheetDragDy === null) return;
+  const dy = sheetDragDy;
+  const onChrome = sheetDragOnChrome;
+  sheetDragDy = null;
+  sheetDragOnChrome = false;
+  settingsFrame.classList.remove("sheet-dragging");
+  settingsFrame.style.transform = "";
+  // Upward, from the chrome: take the whole screen. Only from the chrome —
+  // an upward drag in the content is a scroll, and the pending logic has
+  // already refused it long before this.
+  if (dy <= -SHEET_DRAG_EXPAND && onChrome) {
+    if (sheetCanExpand()) setSheetExpanded(true);
+    return;
+  }
+  if (dy > SHEET_DRAG_CLOSE) {
+    if (!sheetExpanded) { closeSettingsModal(); return; }
+    // Expanded, the pull has two outcomes and the distance picks between them:
+    // a short one steps back down to the normal height, and one past halfway
+    // dismisses outright rather than making you swipe twice. Halfway is
+    // measured off the frame, so it is half of whatever the screen actually
+    // is rather than a number that only suits one device.
+    const half = settingsFrame.getBoundingClientRect().height / 2;
+    if (dy >= half) closeSettingsModal();
+    else setSheetExpanded(false);
+  }
+};
+
+const commitSheetDrag = () => {
+  sheetDragPending = false;
+  sheetDragDy = 0;
+  settingsFrame.classList.add("sheet-dragging");
+};
+
+settingsFrame.addEventListener("pointerdown", (e) => {
+  if (!settingsIsSheet()) return;
+  const target = /** @type {Element} */ (e.target);
+  sheetDragFrom = e.clientY;
+  sheetDragX0 = e.clientX;
+  if (target?.closest?.(".settings-grab, .settings-rail-head, .settings-head")) {
+    sheetDragOnChrome = true;
+    commitSheetDrag();
+    return;
+  }
+  // Anywhere else: only if the thing under the finger is scrolled to the top.
+  // A control still works — a drag needs SHEET_DRAG_SLOP of travel, and a tap
+  // never gets there.
+  const scroller = sheetScrollerFor(target);
+  if (!scroller || scroller.scrollTop > 0) return;
+  sheetDragScroller = scroller;
+  sheetDragPending = true;
+});
+
+settingsFrame.addEventListener("pointermove", (e) => {
+  const dy = e.clientY - sheetDragFrom;
+  if (sheetDragPending) {
+    // Scrolled away under the finger, or the gesture turned upward or
+    // sideways: it was a scroll after all.
+    if ((sheetDragScroller && sheetDragScroller.scrollTop > 0) ||
+        dy < -2 || Math.abs(e.clientX - sheetDragX0) > Math.abs(dy)) {
+      sheetDragPending = false;
+      sheetDragScroller = null;
+      return;
+    }
+    if (dy < SHEET_DRAG_SLOP) return;
+    commitSheetDrag();
+  }
+  if (sheetDragDy === null) return;
+  sheetDragDy = dy;
+  // Only the downward half is previewed. An upward drag cannot be shown by
+  // translating — the sheet is anchored to the bottom edge, so it would lift
+  // off and leave a gap under it — and growing its height every frame is the
+  // one thing this layout refuses to do. The expansion lands on release.
+  settingsFrame.style.transform = "translateY(" + Math.max(0, dy) + "px)";
+});
+
+// Non-passive, and the only reason it exists: once the drag is committed the
+// scroller underneath must stop rubber-banding, or iOS bounces the content
+// against the sheet's own translation. Pointer events cannot preventDefault
+// the touch scroll after the fact, so this does it.
+settingsFrame.addEventListener("touchmove", (e) => {
+  if (sheetDragDy !== null && e.cancelable) e.preventDefault();
+}, { passive: false });
+
+settingsFrame.addEventListener("pointerup", endSheetDrag);
+settingsFrame.addEventListener("pointercancel", endSheetDrag);
+
+// Anyone reading the build identity is about to retype it into a bug report.
+const copySettingsVersion = async () => {
+  const text = (settingsVersionEls[0]?.textContent || "").trim();
+  if (!text) return;
+  try {
+    if (!navigator.clipboard) throw new Error("no clipboard");
+    await navigator.clipboard.writeText(text);
+    showToast("Copied " + text);
+  } catch {
+    showToast("Couldn't access the clipboard");
+  }
+};
+for (const el of settingsVersionEls) {
+  el.addEventListener("click", copySettingsVersion);
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copySettingsVersion(); }
+  });
+}
 
 const openSettingsModal = () => {
   menuDropdown.hidden = true;
@@ -919,8 +1229,8 @@ const openSettingsModal = () => {
   fetch("version.txt")
     .then((r) => (r.ok ? r.text() : ""))
     .then((v) => {
-      document.getElementById("settings-version").textContent =
-        v ? "dingbat " + v.trim().slice(0, 12) : "";
+      const text = v ? "dingbat " + v.trim().slice(0, 12) : "";
+      for (const el of settingsVersionEls) el.textContent = text;
     })
     .catch(() => {});
   updateBiosStatusText();
@@ -930,28 +1240,49 @@ const openSettingsModal = () => {
   // Fresh open starts with Advanced folded (defined below the modal helpers;
   // guarded for the pre-parse window, as the menu does for Capture)
   if (typeof collapseAdvanced === "function") collapseAdvanced();
+  // The remembered section is still selected, so the rail restores it on
+  // desktop and the sheet's list marks where you were — but the SHEET always
+  // opens on the list rather than drilled into that section. The spec argued
+  // the other way (open on the section, list one tap back); testing on a phone
+  // said otherwise, and landing inside Controls when you meant to browse is
+  // the more annoying of the two mistakes.
+  let last = null;
+  try { last = localStorage.getItem(SETTINGS_LAST_KEY); } catch {}
+  selectSettingsTab(last || SETTINGS_SECTIONS[0]);
+  settingsOnDetail = false;
+  applySettingsScreen();
+  // One entry for the list level, so a back gesture closes the sheet.
+  if (settingsIsSheet()) settingsHistPush();
   settingsModal.classList.add("open");
-  updateTabsScrollHints();  // first measurable layout: modal was display:none
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
 };
 
-const closeSettingsModal = () => {
+const closeSettingsModal = (fromHistory) => {
   kbSelection = -1;
+  if (!fromHistory) settingsHistDrop(settingsHistDepth);
+  settingsHistDepth = 0;
+  settingsOnDetail = false;
+  // Expansion is a gesture for the session you are in, not a preference. It
+  // starts collapsed every time, so the sheet always opens the size it was
+  // designed to open at.
+  setSheetExpanded(false);
   settingsModal.classList.remove("open");
   document.removeEventListener("keydown", kbKeyHandler, true);
   releaseFocus(settingsModal);
 };
 
 document.getElementById("open-settings").addEventListener("click", openSettingsModal);
-document.getElementById("settings-close").addEventListener("click", closeSettingsModal);
+for (const id of ["settings-close", "settings-close-list"]) {
+  document.getElementById(id).addEventListener("click", () => closeSettingsModal());
+}
 
 // Force Update and Toggle Log live in Settings ▸ General ▸ Advanced now. Each
 // one hands the screen to something else (the log overlay, a reload), so
 // Settings has to step aside first. Registered here, ahead of each button's
 // own handler further down the file, so the close happens before the takeover.
 for (const id of ["force-update", "show-log"]) {
-  document.getElementById(id).addEventListener("click", closeSettingsModal);
+  document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
 
 // Advanced is a disclosure, and it refolds on every open of Settings rather
@@ -8402,8 +8733,37 @@ document.getElementById("topbar-handle").addEventListener("click", () => {
 const gpPrev = new Array(10).fill(false);
 const GP_DEADZONE = 0.4;
 
+// Gamepad inside Settings. Worth wiring given the product: the shoulder
+// buttons cycle sections in the same fixed order and with the same wrapping as
+// the sheet's stepper, the d-pad walks the pane's controls, A activates and B
+// goes back or closes. Everything it reads is consumed — with the dialog up,
+// no button reaches the game.
+const settingsGamepadNav = (want) => {
+  const hit = (i) => want[i] && !gpPrev[i];
+  if (hit(8)) selectSettingsTab(settingsStep(settingsSection, -1)); // L
+  if (hit(9)) selectSettingsTab(settingsStep(settingsSection, 1));  // R
+  if (hit(5)) {                                                     // B
+    if (settingsOnDetail) showSettingsList();
+    else closeSettingsModal();
+    return;
+  }
+  if (hit(4)) {                                                     // A
+    const el = /** @type {HTMLElement} */ (document.activeElement);
+    if (el && settingsModal.contains(el) && el.click) el.click();
+  }
+  if (hit(0) || hit(1)) {                                           // d-pad
+    const items = modalFocusables(settingsModal);
+    if (!items.length) return;
+    const d = hit(1) ? 1 : -1;
+    let i = items.indexOf(document.activeElement);
+    if (i < 0) i = d > 0 ? -1 : 0;
+    items[(i + d + items.length) % items.length].focus();
+  }
+};
+
 const pollGamepads = () => {
-  if (typeof Module === "undefined" || !Module._setInput) return;
+  const settingsOpen = settingsModal.classList.contains("open");
+  if (!settingsOpen && (typeof Module === "undefined" || !Module._setInput)) return;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const want = new Array(10).fill(false);
   let anyConnected = false;
@@ -8430,7 +8790,7 @@ const pollGamepads = () => {
     // Tilt cart: the left stick doubles as the accelerometer (full analog
     // range). Only claims the tilt target while deflected so the keyboard /
     // device-orientation sources aren't fought over a centered stick.
-    if (tiltActive) {
+    if (tiltActive && !settingsOpen) {
       if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
         padTiltLive = true;
         tiltTargetX = ax;
@@ -8445,6 +8805,13 @@ const pollGamepads = () => {
   document.body.classList.toggle(
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
   if (!anyConnected) return;
+  if (settingsOpen) {
+    settingsGamepadNav(want);
+    // Absorb the edges: a button held across the close must not arrive at the
+    // game as a fresh press.
+    for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
+    return;
+  }
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
       // In 2P link mode the gamepad is player 2's controller; in online
