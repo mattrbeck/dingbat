@@ -331,6 +331,34 @@ framebuffer give each palette's four colours, which is what inverts the
 reference PNG. A palette whose entries collide simply leaves those bits
 unpinned.
 
+### The offset table: what a change does when it does NOT land on a read
+
+    python3 tools/gbppu/tdselphase.py ./dt_px
+
+asks the prior question, over the same five frames. `tdselcells.py` starts from
+a glitched read and asks *which byte* hardware substituted; this starts from
+EVERY pinned bitplane read and asks *whether hardware disturbed it at all*,
+bucketed by `delta = read dot - the dot the last LCDC.4 change went live` (the
+`chg` column of `FDATA`) and by where that change fell inside the fetch cycle
+(`mapoff`, counted from the tile-map read, so the tile-map slot is 0 and the two
+bitplane slots are 2 and 4 when the fetcher runs at pitch).
+
+It exists because `CGB_HALT_PPU_LEAD` moves `cgb-acid-hell`'s write burst by 4
+dots — off the bitplane reads and into the map slot — and the shipping rules
+then fire on nothing, so "what does a change in the map slot do" has to be
+answered from the mealybug references, which sweep exactly that offset across
+their bands. The answer is the 2026-08-14 entry in `docs/gb-failure-triage.md`:
+of 6352 mealybug reads with a change on their line, hardware disturbs the ones
+at `delta = 0` and no others.
+
+Two things to know before reading its output. The **row count per bucket is
+load-bearing**: an empty bucket means the corpus is silent about that offset,
+which for some of them is the whole finding. And `cgb-acid-hell` carries 16
+pinned reads (lines 136..143, one tile column) whose push-to-pixel attribution
+is unsound and which report a mismatch on a frame that is pixel-exact — they are
+at `mapoff = none`, nowhere near the mechanism, and they are why `tdselcells.py`
+builds cells from glitched reads only.
+
 `WINHIT` (under `-d:gb_m3_trace`) is the matching instrument for the window's
 re-trigger: one line per dot the WX equality is reached, with the fetcher
 position and FIFO depth that decide whether the edge survives it. A mealybug

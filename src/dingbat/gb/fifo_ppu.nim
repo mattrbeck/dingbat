@@ -790,7 +790,13 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
                            ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)], 2)),
              " prevd=", toHex(px_prev_data, 2),
              " prevu=", toHex(px_prev_uns, 2),
-             " lcdc=", toHex(ppu.lcd_control, 2)
+             " lcdc=", toHex(ppu.lcd_control, 2),
+             # The dot the most recent LCDC.4 change went live on, whether or
+             # not it landed on THIS read. `glitch` above is only the delta = 0
+             # case; a scorer that has to ask what a change one or two fetcher
+             # STEPS earlier does needs the dot itself. NO_TDSEL_CHANGE prints
+             # as a large negative, which every delta test then fails.
+             " chg=", (when CGB_TDSEL_ANY: $ppu.tdsel_dot else: "-2147483648")
         px_prev_data = data
         if sel: px_prev_uns = data
     if low_plane:
