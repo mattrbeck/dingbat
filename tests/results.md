@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-09 17:15:00*
+*Generated: 2026-08-10 07:34:43*
 
 ## Game Boy - Blargg
 
@@ -852,7 +852,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | scribbltests/statcount-auto | 👌 |
 | turtle-tests/window_y_trigger | 👌 |
 | turtle-tests/window_y_trigger_wx_offscreen | 👌 |
-| cgb-acid-hell/cgb-acid-hell | 👀 100.0% correct (23038/23040 pixels match) |
+| cgb-acid-hell/cgb-acid-hell | 👌 |
 | little-things-gb/firstwhite | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | 👀 94.4% correct (21760/23040 pixels match) |
 
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 768
-- **Fail:** 213
+- **Pass:** 769
+- **Fail:** 212

@@ -670,9 +670,110 @@ const CGB_TDSEL_GLITCH*       {.booldefine.} = true
   ## this is where the two disagree, because a data latch is the cheaper thing
   ## to implement and it is what the notes' wording suggests.
   ##
-  ## `cgb-acid-hell`'s two pixels are NOT this rule and are still open: their
-  ## glitched read is a SET and hardware delivers the tile index there, which
-  ## contradicts every SET cell above. See docs/gb-failure-triage.md.
+  ## `cgb-acid-hell`'s two pixels are the ONE exception, and they are
+  ## CGB_TDSEL_IDX_DOTS below: a SET glitch close behind a RESET one delivers
+  ## the index instead. Every other SET cell in the tree is this rule.
+const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
+  ## How long a RESET glitch leaves the INDEX path armed, in dots. A SET glitch
+  ## that lands inside that window delivers the CURRENT tile's index -- the same
+  ## byte a RESET glitch delivers -- instead of the address latch above. 0 is
+  ## the control build, where a SET is always the latch.
+  ##
+  ## This is the whole of `cgb-acid-hell`'s residual and it is the only thing in
+  ## the tree that fires it. What follows is what the corpus proves and what it
+  ## does not, because those are different sizes.
+  ##
+  ## ---- What the corpus proves ---------------------------------------------
+  ##
+  ## Scored over the same instrument as the SET rule above -- every glitched
+  ## bitplane read of the four CGB `tile_sel` references and `cgb-acid-hell`
+  ## whose bits the reference PNG pins, rebuilt 2026-08-12 as 192 RESET cells
+  ## and 223 SET cells (184 / 151 of them with all eight bits pinned; the
+  ## earlier 188 / 161 census used a pinning convention that was not written
+  ## down, and this one is a superset of it either way). Cells, not pixels, so
+  ## a rule that is wrong under an object or in a four-shades-of-white palette
+  ## is still counted wrong:
+  ##
+  ##   SET-branch trigger for "deliver the index"        SET cells right
+  ##   never (the rule above, alone)                        221 / 223
+  ##   always                                               125 / 223
+  ##   the latch was written by a RESET glitch, any age     158 / 223
+  ##   the IMMEDIATELY preceding read was RESET-glitched    221 / 223
+  ##   the latch is <= 8 dots old, whatever wrote it        215 / 223
+  ##   a RESET glitch landed <= 8 dots ago                  223 / 223
+  ##   ...and it wrote the latch, i.e. nothing since  <--   223 / 223
+  ##
+  ## So the trigger has two halves and the corpus forces both, each by a whole
+  ## band rather than a cell:
+  ##
+  ##  * **It is not recency alone.** `*_change2`'s first glitch of a line has an
+  ##    OBJECT fetch 8 dots behind it and wants the LATCH (the object's bitplane
+  ##    1). 8 cells, and they are why the window is armed by a RESET GLITCH and
+  ##    not by the last $8000-region read.
+  ##  * **It is not provenance alone.** `*_change2`'s columns 5 and 8 are SET
+  ##    glitches whose latch was written by the RESET glitch two tile columns
+  ##    back, and they want the LATCH. 64 cells, and they are why the window is
+  ##    short.
+  ##  * **It is not "the immediately preceding read".** `cgb-acid-hell` toggles
+  ##    LCDC.4 every 8 dots, so its RESET glitch is the previous FETCH's read of
+  ##    the same plane and an unglitched signed read sits between the two. That
+  ##    spelling scores 221/223 -- it misses the two pixels it was written for.
+  ##
+  ## The window is bracketed to **8..15 dots** and nothing narrows it further:
+  ## 7 loses `cgb-acid-hell`'s cells (its RESET glitch is exactly 8 dots back)
+  ## and 16 breaks `*_change2`'s 64 (theirs is exactly 16). 8 is the fetch
+  ## cycle's own pitch, which is the only number in that range the hardware has
+  ## a name for, so the rule reads "the RESET glitch was in this fetch or the
+  ## one before it". Measured in dots and not in reads deliberately: the two
+  ## agree wherever the fetcher runs at pitch and the corpus scores 223/223
+  ## either way, and dots need no counter.
+  ##
+  ## The last row of the table is what ships, and it is the last row because it
+  ## is what the PACKING gives for free -- the arming rides `tdsel_addr` above
+  ## the bank (TDSEL_IDX_SHIFT), so anything that writes the latch disarms it.
+  ## The looser row is the same 223/223 and no cell separates the two.
+  ##
+  ## ---- What the corpus does NOT prove -------------------------------------
+  ##
+  ## **The distinguishing bucket is populated by one ROM.** At every setting in
+  ## 8..15 the trigger fires on exactly seven cells, all of them
+  ## `cgb-acid-hell`'s, and it changes no other pixel of any frame in this tree.
+  ## The other 216 SET cells prove the rule is CONSISTENT with everything else
+  ## measured; they do not vote on the trigger's shape, because none of them is
+  ## in the bucket. Five of the seven are cells where the index and the latch
+  ## happen to hold the same byte, so the ROM's own arbitrating evidence is two
+  ## pixels -- `(80, 68)` and `(80, 69)`, both hardware-photo-verified against
+  ## the repo's `img/photo.jpg` as well as the bundled PNG.
+  ##
+  ## **The experiment that would settle it does not exist.** It is a hardware
+  ## capture of `m3_lcdc_tile_sel_change2` with its LCDC writes moved onto an
+  ## 8-dot lattice, or equivalently any second ROM that puts a SET glitch one
+  ## fetch behind a RESET one. mealybug's `*_change2` pair are the only ROMs
+  ## with the readout and their handler writes on a 16-dot pitch, which is why
+  ## the corpus has a gap exactly where the trigger lives.
+  ##
+  ## **A revision split is excluded, not merely unsupported.** `cgb-acid-hell`
+  ## picks its tile data off a `$FEA0` readback and dingbat takes the same
+  ## branch the bundled reference was captured on, which is a CGB-C -- the same
+  ## device every `*_change2` reference is. See the 2026-08-10 entry in
+  ## docs/gb-failure-triage.md; whoever models `$FEA0..$FEFF` per revision has
+  ## to re-score this row in the same commit.
+  ##
+  ## What the rule assumes beyond the two pixels is deliberately as little as
+  ## possible: the window is not consumed by the SET glitch that uses it (no
+  ## cell has two SET glitches behind one RESET), the substituted byte is the
+  ## CURRENT tile's index and not the RESET-glitched tile's (the reference says
+  ## so: on line 68 the tile is `$55` and hardware's byte is `$55`, while the
+  ## RESET-glitched tile one fetch back is `$59`), and the address latch is left
+  ## exactly as the rule above leaves it.
+  ##
+  ## Cost, `tools/gbppu/counters.sh` against the commit before it, retired
+  ## instructions over repeated runs: **+0.05..0.08% Pokemon Crystal, +0.02%
+  ## blargg cpu_instrs, +0.05% Link's Awakening DX** -- effectively the one
+  ## guarded compare per line in fifo_reset_sprite, since the arming rides a
+  ## store the RESET branch already did and the dot loop never sees the rule at
+  ## all. The unpacked shape, with the same behaviour, was +0.30% / +0.21% /
+  ## +0.22%; see TDSEL_IDX_SHIFT for where that went.
 const CGB_TDSEL_ANY* = CGB_TDSEL_LATENCY != 0 or CGB_TDSEL_GLITCH
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
@@ -1151,6 +1252,29 @@ const TDSEL_ADDR_OFF*         = -1'i32
 const TDSEL_ADDR_BANK*        = 13
   ## Bit `tdsel_addr` carries the VRAM bank in. Offsets are 13 bits, so the
   ## bank rides above them and the whole latch is one store on the fetch path.
+const TDSEL_IDX_SHIFT*        = 14
+  ## Bit `tdsel_addr` carries the INDEX path's arming in, as the first dot PAST
+  ## the window (see CGB_TDSEL_IDX_DOTS). Above the bank at bit 13, so a dot
+  ## needs nine bits and the whole word stays positive. One-past rather than the
+  ## last dot so that zero up there means "not armed" for every dot including 0,
+  ## and the whole test is `(latch shr 14) > cycle_counter` -- one compare, with
+  ## the unarmed case and the negative TDSEL_ADDR_OFF sentinel both answered by
+  ## it and neither costing a branch of its own.
+  ##
+  ## It rides `tdsel_addr` rather than living in a field because a field of its
+  ## own is not free: GbFifoPpu is 632 bytes and every offset above the latch is
+  ## the fetch path's, so one more int32 grows it to 640 and moves `tile_num`,
+  ## the tile attributes and both bitplane bytes with it. That measured
+  ## **+0.22% of retired instructions on Pokemon Crystal with the rule compiled
+  ## out** -- pure layout, more than the rule itself costs. Packed, the arming
+  ## is written by the store the RESET branch already does.
+  ##
+  ## The packing also decides one thing the corpus leaves open, in the direction
+  ## of less mechanism: because every write of the latch clears these bits, an
+  ## object fetch or a plain unsigned read between the RESET glitch and the SET
+  ## one disarms it. That is the "the latch is <= 8 dots old AND a RESET glitch
+  ## wrote it" spelling, which scores the same 223/223 as the looser "a RESET
+  ## glitch landed <= 8 dots ago" -- no cell in the tree separates them.
 const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
   ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
@@ -2031,10 +2155,17 @@ type
     # where the packed one costs +0.20% for the whole rule. Unpacking happens
     # once per glitched read, which is a handful of dots a frame at most.
     #
-    # `tdsel_dot` is per-line scratch cleared at the mode 2 -> 3 edge;
-    # `tdsel_addr` deliberately is NOT, because H-Blank does not clear the bus
-    # register it stands for (see CGB_TDSEL_GLITCH). Neither is serialized: a
-    # state is captured in vblank.
+    # THE INDEX PATH'S ARMING IS PACKED IN TOO, at bit 14 and above: the last
+    # dot a SET-glitched read may still answer with the tile INDEX rather than
+    # the byte at the address (CGB_TDSEL_IDX_DOTS, TDSEL_IDX_SHIFT). A field of
+    # its own costs 8 bytes of object and moves the whole fetch path's offsets,
+    # which measured more than the rule does.
+    #
+    # `tdsel_dot` is per-line scratch cleared at the mode 2 -> 3 edge, and so
+    # are the arming bits -- they are a dot on this line's clock. The ADDRESS
+    # deliberately is NOT, because H-Blank does not clear the bus register it
+    # stands for (see CGB_TDSEL_GLITCH). Neither field is serialized: a state is
+    # captured in vblank.
     tdsel_dot*:           int32
     tdsel_addr*:          int32
     tile_num*:            uint8

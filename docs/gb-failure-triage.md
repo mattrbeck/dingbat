@@ -924,7 +924,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
 | `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left were all LY = 0, i.e. bucket 0, and are **0 as of 2026-08-09** |
-| `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below |
+| `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below — **0 as of 2026-08-12** (`CGB_TDSEL_IDX_DOTS`, the SET glitch behind a RESET one) |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
@@ -966,6 +966,10 @@ its own measured trade.
 
 ### `acid/cgb-acid-hell` is a real failure, not a scoring artefact
 
+*(It was. The row is 0 as of 2026-08-12 — `CGB_TDSEL_IDX_DOTS`, further down.
+This section is kept because it is the calibration that stopped the row being
+written off, and the same question comes back for every near-miss frame.)*
+
 Worth stating because the shootout's rule is a **±50 luma tolerance**, not an
 exact match, and dingbat's own runner applies exact comparison to the bundled
 acid ROMs. Run through `util.compareImage` verbatim, the two pixels are
@@ -986,7 +990,11 @@ X = 6's dot 103 is the fourth. So the residual is about what the mixer holds
 across an object stall, not about the register — which is a model, not a
 number, and it is worth one row.
 
-**`acid/cgb-acid-hell`, the 2 pixels — mechanism identified, not landed.** The
+**`acid/cgb-acid-hell`, the 2 pixels — mechanism identified, and landed on
+2026-08-12 as `CGB_TDSEL_IDX_DOTS`. The row is 23040/23040.** Everything from
+here to that entry is the derivation in the order it happened, and it is kept
+because three of the four routes through it were refuted and the refutations are
+the reusable part. The
 whole frame is explained by a single anomaly, and `-d:gb_px_trace` reads it out
 exactly. The ROM's tile DATA is a constant per scanline (both `$8000` and
 `$8800` hold the same bytes, so `TILE_SEL` has no data effect at all) and the
@@ -1069,7 +1077,8 @@ on different PLANES and hardware answers with the same tile at the plane the
 glitch is on, which only an address can do.
 
 **`cgb-acid-hell` is unchanged at 2, and it is now the only thing in the tree
-that refuses the rule.** Its observable cells were undercounted here: there are
+that refuses the rule** (as of this entry — the 2026-08-12 one below closes it).
+Its observable cells were undercounted here: there are
 **seven**, not two — lines 64..70, all at `x = 76..83`, all bitplane-1 SET
 glitches, all eight bits of each pinned. All seven want the tile index; five of
 them are cells where the latch happens to hold the same byte, and the two the
@@ -1225,6 +1234,73 @@ have no source. `cgb-acid-hell` stays at 2 pixels, `CGB_HALT_PPU_LEAD` ships at
 0 for an unrelated reason (one `strikethrough` row), and `H1` — the
 back-to-back-glitch SET rule scored over the 349-cell corpus — remains the only
 live candidate for the row.
+
+#### 2026-08-12: H1 holds, and `cgb-acid-hell` is 0
+
+The corpus was rebuilt from scratch (the previous pass's scorer was never
+committed; this one is, as `tools/gbppu/tdselcells.py`, and its self-check
+column is what says the rebuild is sound — all five frames reconstruct their
+own bytes from their references with 0 mismatches once the row is passing).
+The census came out **192 RESET cells and 223 SET cells**, not 188 and 161: the
+pinning convention behind the older numbers was not written down, and this one
+counts a cell whenever the reference pins at least one of its eight bits and
+scores per pinned bit, which is a superset either way.
+
+**H1 scores 223/223 SET and 192/192 RESET, and `cgb-acid-hell` is 23040/23040.**
+The whole 981-row runner moves by exactly one row (768 → 769 pass) and every
+other file the runner writes is byte-identical.
+
+The trigger has **two halves and the corpus forces both**, each by a whole band
+rather than a cell — which is the part worth carrying forward, because it is the
+only thing here that is not fitted to two pixels:
+
+| SET-branch trigger for "deliver the index" | SET cells |
+|---|---|
+| never (the address latch alone — what shipped) | 221 / 223 |
+| always | 125 / 223 |
+| the latch was written by a RESET glitch, any age | 158 / 223 |
+| **the immediately preceding read was RESET-glitched** | **221 / 223** |
+| the latch is ≤ 8 dots old, whatever wrote it | 215 / 223 |
+| a RESET glitch landed ≤ 8 dots ago | 223 / 223 |
+| **the latch is ≤ 8 dots old AND a RESET glitch wrote it** (shipped) | **223 / 223** |
+
+* Recency alone fails on 8 cells: `*_change2`'s first glitch of a line has an
+  *object* fetch 8 dots behind it and wants the latch, so the window is armed by
+  a RESET glitch specifically and not by the last `$8000`-region read.
+* Provenance alone fails on 64: `*_change2`'s columns 5 and 8 are SET glitches
+  whose latch a RESET glitch wrote two tile columns back, and they want the
+  latch. So the window is short.
+* **The task's own first spelling — "the immediately preceding read was
+  glitched" — is refuted, and by the two pixels it was written for.**
+  `cgb-acid-hell` toggles LCDC.4 on an 8-dot lattice, so its RESET glitch is the
+  *previous fetch's* read of the same plane and an unglitched signed read sits
+  between the two. It scores 221/223, i.e. exactly what shipping already did.
+
+The window is bracketed to **8..15 dots** with a clean gap on both sides (7
+loses acid-hell, 16 breaks 64 `*_change2` cells), and 8 is the fetch cycle's own
+pitch. It is measured in dots rather than reads because the two spellings score
+223/223 identically and dots need no counter.
+
+The two 223/223 rows differ only in whether an intervening write of the address
+latch disarms the window, and no cell in the tree separates them. **The
+narrower one ships because it is what the implementation gives for free**: a
+field of its own costs 8 bytes of `GbFifoPpu` and moves the whole fetch path's
+offsets, which measured +0.22% of retired instructions on Pokemon Crystal *with
+the rule compiled out* — more than the rule itself. Packed above the bank in
+`tdsel_addr` it is the same single store the RESET branch already did, and any
+write of the latch clears it.
+
+**What this does not establish, and the honesty is load-bearing:** at every
+setting in 8..15 the trigger fires on exactly seven cells and all seven are
+`cgb-acid-hell`'s. The other 216 SET cells prove the rule is consistent with
+everything else measured; none of them is in the distinguishing bucket, so they
+do not vote on the trigger's shape. Five of the seven are cells where the index
+and the latch hold the same byte, so the arbitrating evidence is still two
+pixels — hardware-photo-verified, on a device the `$FEA0` gate above pins to the
+same CGB-C the `*_change2` references are, but two pixels. The settling
+experiment is unchanged and still does not exist: a hardware capture of
+`m3_lcdc_tile_sel_change2` (or any second ROM) with a SET glitch one fetch
+behind a RESET one. Full arithmetic at `CGB_TDSEL_IDX_DOTS` in `gb/gb.nim`.
 
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at

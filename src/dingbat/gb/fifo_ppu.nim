@@ -410,8 +410,13 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   # LCDC.4's is per-line for the same reason: it only ever answers a fetch on
   # THIS line's dots. The ADDRESS latch is not reset with it -- see
   # CGB_TDSEL_GLITCH in gb.nim: it is a bus register, and the first glitched
-  # read of a line reports the address the line before it left there.
+  # read of a line reports the address the line before it left there. The
+  # arming packed ABOVE the address does go with the dot: it is a dot on this
+  # line's clock, and a stale one would compare live against the next line's.
   ppu.tdsel_dot = NO_TDSEL_CHANGE
+  when CGB_TDSEL_IDX_DOTS > 0:
+    if ppu.tdsel_addr > 0:
+      ppu.tdsel_addr = ppu.tdsel_addr and ((1'i32 shl TDSEL_IDX_SHIFT) - 1)
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -722,13 +727,33 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # reached the address path either -- so it is that address the next
           # SET-glitched read comes back to.
           data = ppu.tile_num
+          # ...and it leaves the INDEX path armed for one fetch cycle, which is
+          # the whole of CGB_TDSEL_IDX_DOTS. The window rides the same store
+          # above the bank, so this is still one store and no wider a field --
+          # see TDSEL_IDX_SHIFT in gb.nim for why that mattered. What is stored
+          # is the FIRST dot past the window, so that zero up there means "not
+          # armed" for every dot including 0.
           ppu.tdsel_addr = int32((16 * int(ppu.tile_num) + tile_row * 2 +
                                   (if low_plane: 0 else: 1)) or
-                                 (bank_num shl TDSEL_ADDR_BANK))
+                                 (bank_num shl TDSEL_ADDR_BANK) or
+                                 (when CGB_TDSEL_IDX_DOTS > 0:
+                                    (int(ppu.cycle_counter) +
+                                     CGB_TDSEL_IDX_DOTS + 1) shl TDSEL_IDX_SHIFT
+                                  else: 0))
+        elif CGB_TDSEL_IDX_DOTS > 0 and
+             (ppu.tdsel_addr shr TDSEL_IDX_SHIFT) > ppu.cycle_counter:
+          # SET on the read dot with the index path still armed: it answers
+          # first, and with THIS tile's index rather than the RESET-glitched
+          # one's. `cgb-acid-hell` is the only ROM in the tree that reaches
+          # here -- see CGB_TDSEL_IDX_DOTS in gb.nim for what that does and
+          # does not establish. TDSEL_ADDR_OFF is -1, so the arithmetic shift
+          # keeps it negative and the sentinel cannot arm anything either.
+          data = ppu.tile_num
         elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
           # SET on the read dot: the address never advanced, so the byte comes
-          # from wherever the last $8000-region read left it.
-          data = ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+          # from wherever the last $8000-region read left it. The bank needs a
+          # mask now that the arming sits above it.
+          data = ppu.vram[(ppu.tdsel_addr shr TDSEL_ADDR_BANK) and 1][
                           ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)]
       elif sel:
         # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and it
@@ -760,7 +785,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
              " uns=", toHex(ppu.vram[bank_num][unsO], 2),
              " sgn=", toHex(ppu.vram[bank_num][sgnO], 2),
              " latch=", (if ppu.tdsel_addr == TDSEL_ADDR_OFF: "--"
-                         else: toHex(ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+                         else: toHex(ppu.vram[(ppu.tdsel_addr shr
+                                               TDSEL_ADDR_BANK) and 1][
                            ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)], 2)),
              " prevd=", toHex(px_prev_data, 2),
              " prevu=", toHex(px_prev_uns, 2),

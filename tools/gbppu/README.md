@@ -300,13 +300,36 @@ tile index.
 `FDATA` also carries one column per **candidate** byte the read could have
 returned — `uns`/`sgn` (the two addressing modes' bytes for this tile, row and
 plane), `latch` (what the SET-glitch rule delivers), `prevd`/`prevu` (the
-previous bitplane read's data, and the previous `$8000`-region one) — and a
-`VRAM0`/`VRAM1` hex dump lands once a frame. Together those turn "which rule
-does hardware use" into an offline replay: parse the last frame, invert the
-reference through the palette, and score every candidate over every glitched
-read at once, with no rebuild between hypotheses. The `CGB_TDSEL_GLITCH` table
-in `gb/gb.nim` (188 RESET cells and 161 SET cells over four references) was
-produced that way.
+previous bitplane read's data, and the previous `$8000`-region one). Together
+those turn "which rule does hardware use" into an offline replay: parse the last
+frame, invert the reference through the palette, and score every candidate over
+every glitched read at once, with no rebuild between hypotheses.
+
+## The TILE_SEL arbitration corpus
+
+    python3 tools/gbppu/tdselcells.py ./dt_px
+
+is that replay, packaged: it runs the four CGB `m3_lcdc_tile_sel*` references
+and `cgb-acid-hell`, rebuilds one CELL per glitched bitplane read whose bits the
+reference pins, and scores every candidate substitution source and every trigger
+spelling over the whole set. It is the instrument behind `CGB_TDSEL_GLITCH` and
+`CGB_TDSEL_IDX_DOTS` in `gb/gb.nim`, and the reason to run it before touching
+either is that a whole-frame percentage cannot see the cells under an object or
+in a flat palette — those are ~40% of the corpus and they are where the wrong
+rules hide.
+
+Read the **self-check** column first: for every plane the reference pins fully,
+dingbat's own byte is compared with the reconstructed one, and on a passing tree
+all five frames report 0. A nonzero count on the four mealybug frames means the
+parser drifted (the `PUSH` `lx` is the first pixel's own `lx`, and a one-pixel
+error there mis-scores the whole corpus silently); a nonzero count on
+`cgb-acid-hell` alone is the row's residual and is what "2 wrong pixels" looks
+like from this side.
+
+It needs no VRAM dump and no palette table — the `PX` lines plus dingbat's own
+framebuffer give each palette's four colours, which is what inverts the
+reference PNG. A palette whose entries collide simply leaves those bits
+unpinned.
 
 `WINHIT` (under `-d:gb_m3_trace`) is the matching instrument for the window's
 re-trigger: one line per dot the WX equality is reached, with the fetcher
