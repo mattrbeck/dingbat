@@ -3,6 +3,17 @@
 Research round. No renderer code was changed. What is committed alongside this
 note is four instruments under `tools/gbedge/` and the measurements below.
 
+> **Implemented later the same day.** The design in §7 shipped, and the one
+> thing §7.5 called "the whole risk" — the CGB mealybug corpus — closed
+> completely. The gap was not the LY-vs-OAM-source ordering this note predicted:
+> the residue was **line 0 alone**, because `LY0_PIPE_MCYCLES` is a *difference*
+> between line 0 and its neighbours and was being ADDED to a term every line now
+> has. Spelling it as a `max` returns the whole corpus to byte-identity.
+> Final: runner 769 -> **770**, gambatte 3876 -> **3940 (+64)**, mealybug
+> unmoved on both devices, daid-GBC exact. The one open item is
+> `CGB_TDSEL_LATENCY`, worth 2 pixels of `cgb-acid-hell`; see the 2026-08-10
+> addendum in `docs/gb-failure-triage.md` and that constant's own note.
+
 The question this round was asked to answer:
 
 > `daid/ppu_scanline_bgp` on CGB needs the CPU's writes to land 4 dots later

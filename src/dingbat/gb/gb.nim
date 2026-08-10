@@ -681,6 +681,42 @@ const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ## anomaly on the plane it is observed on. That ROM writes LCDC every 8 dots
   ## at dot 8n+1 with the bitplane reads at 8n+0 and 8n+2, so 0 puts the change
   ## between the two reads, -1 on the low plane, and only +1 on the high one.
+  ##
+  ## ---- 2026-08-10: the one quantity `CGB_PIPE_MCYCLES` does NOT resolve -----
+  ##
+  ## Advancing the CGB pipeline one M-cycle moves this register's write four
+  ## dots around the ROM's own 8-dot fetch lattice, so the arithmetic above says
+  ## the compensated value is 1 + 4 = **5**. It is not takeable, and the reason
+  ## is that this constant's two witnesses do not share an anchor:
+  ##
+  ##   * the four mealybug `tile_sel` frames sync on **mode 2**, which moves with
+  ##     the pipeline (`STAT_M2_LEAD_CGB`), so their write lands where it always
+  ##     did and they want **1**;
+  ##   * `cgb-acid-hell` syncs on **LYC**, which does not move, so its write
+  ##     lands four dots later on the lattice and it wants **5**.
+  ##
+  ## Both are CGB, both are this register, and one constant cannot be both. It
+  ## is a strict two-sided bracket and it is measured, world against world, with
+  ## no reference image in the loop:
+  ##
+  ##   value   mealybug tile_sel CGB (4 frames)      cgb-acid-hell
+  ##   1 ship  byte-identical to the pre-advance     23038/23040
+  ##   5       3859 wrong px (1468 + 1525 + 866)     byte-identical
+  ##
+  ## **1 ships because it costs 2 pixels and 5 costs 3859**, and because the two
+  ## pixels are not this constant's fault. The arbitration corpus
+  ## (tools/gbppu/tdselcells.py) says so directly: on the PRE-ADVANCE tree the
+  ## shipping SET rule already scores 221/223 with the two misses attributed
+  ## `{'cgb-acid-hell': 2}`. Those two cells were already wrong and merely
+  ## invisible in that frame; the advance makes them visible. So the residue is
+  ## a known gap in the SET substitution rule, not evidence against the phase,
+  ## and the corpus is where it should be closed. The four mealybug frames score
+  ## identically before and after the advance (48/64, 48/48, 72/32, 48/48, all
+  ## with 0 self-check mismatches), so the cell alignment did not move.
+  ##
+  ## Note also that `cgb-acid-hell`'s reference is a **C/E-class** capture: it is
+  ## exact at `--cgb-rev=C` and `=E` and 22864/23040 at `=D` on the pre-advance
+  ## tree, where daid's `.gbc.png` is a D-class capture. Two ROMs, two machines.
 const CGB_TDSEL_GLITCH*       {.booldefine.} = true
   ## Whether an LCDC.4 change that lands ON a background bitplane read glitches
   ## it, and with what. mealybug's PPU notes describe the effect; what the
@@ -2155,6 +2191,15 @@ type
     # of mode 0, so it is never set at a frame boundary — where every state,
     # rewind snapshot and rollback snapshot is captured — and is not serialized.
     hdma_block_due*: bool
+    # The OAM STAT source's lead for THIS console, in CPU M-cycles, latched at
+    # construction (`STAT_M2_LEAD` + `STAT_M2_LEAD_CGB`). It is a constant for
+    # the life of the machine and is cached here only so the dot loop can read
+    # it off `ppu` -- which it already has in a register -- instead of chasing
+    # `gb.fifo_ppu.cgb` on every dot. Measured: with the lead device-split, the
+    # deref form costs the DMG +0.51% of retired instructions for behaviour it
+    # never uses. Not serialized: it is derived from the console, which a state
+    # already carries.
+    m2_lead_mc*: int32
     # window state
     window_trigger*:     bool
     current_window_line*: int

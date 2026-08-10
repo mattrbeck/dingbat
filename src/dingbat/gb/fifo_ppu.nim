@@ -31,6 +31,53 @@ const WIN_LX_OFF = -128'i32
 # fifo_recompose_last.
 const TAIL_DOT0_OFF = -(1'i32 shl 20)
 
+const CGB_PIPE_MCYCLES* {.intdefine.} = 1
+  ## CPU M-cycles the CGB's mode-3 pipeline runs AHEAD of machine time, over the
+  ## DMG's. Declared here, at the top of the file, rather than beside
+  ## `M3_PIPE_AHEAD` where it is spent, because two consumers below need it and
+  ## a const cannot be read before it is declared: `obj_oam_dma_read` (the OAM
+  ## DMA bus lead) and `CGB_TDSEL_LATENCY`'s note in gb.nim. That it has
+  ## consumers at all is the point of this constant -- see below.
+  ##
+  ## ---- What pins it ---------------------------------------------------------
+  ##
+  ## daid `ppu_scanline_bgp`, which is the one instrument in the tree that pins
+  ## the pipeline's phase against something other than the mode 2 interrupt: it
+  ## takes ONE STAT LYC=0 interrupt out of `halt` on the LY 153 -> 0 snapback,
+  ## pops its return address and never returns, then free-runs a loop of
+  ## 10x(`ld a,[hl+]` + `ld [c],a`) + 70 `nop` + `jp` -- 114 M-cycles, exactly
+  ## one scanline -- for the whole frame. One anchor, 144 lines of ruler.
+  ##
+  ## The same cart on the two consoles wants two different values, which is why
+  ## this is a device split and not a change to `M3_PIPE_AHEAD`:
+  ##
+  ##   * DMG: pixel-exact against `ppu_scanline_bgp_1.dmg.png` at 0, and 90.5%
+  ##     at 1. The DMG pipeline does not move.
+  ##   * CGB: 2130/2130 band edges exact at 1 with `--cgb-rev=D`, and three dots
+  ##     early at 0. Measured by pairing colour-transition columns row by row
+  ##     (tools/gbedge/bandedge.py), not by a whole-frame shift metric, which
+  ##     understates a uniform dot error on a banded frame.
+  ##
+  ## ---- Why it took three constants to land ---------------------------------
+  ##
+  ## Because three OTHER constants in this tree silently encode this phase, and
+  ## the 2026-08-10 sweep that declared this axis contradictory held all three
+  ## fixed while moving the phase. Each is `f(phase) + a real hardware delta`,
+  ## and each has to move with it or its witness goes red for a reason that has
+  ## nothing to do with the phase being wrong:
+  ##
+  ##   * `OBJ_DMA_BUS_LEAD` (below) -- `strikethrough`. Derived: the DMA unit is
+  ##     on machine time, so an earlier fetch must look an M-cycle further ahead.
+  ##   * `LY0_PIPE_MCYCLES` (below) -- the whole CGB mealybug corpus, on LINE 0
+  ##     ALONE. Derived: that constant is a DIFFERENCE between line 0 and its
+  ##     neighbours, so it must not stack with a term every line already has.
+  ##   * `CGB_TDSEL_LATENCY` (gb.nim) -- `cgb-acid-hell` against the mealybug
+  ##     `tile_sel` set. This one does NOT resolve; see that constant.
+  ##
+  ## `STAT_M2_LEAD_CGB` (ppu.nim) is the fourth term and is not a compensation:
+  ## it is the mode-2 anchor's own M-cycle, independently measured, and the
+  ## corpus needs it because the corpus anchors there.
+
 when defined(gb_px_trace):
   # Trace-only running state for the FDATA candidate columns; the harness runs
   # one GB, so module scope is enough and nothing here reaches a shipping build.
@@ -74,6 +121,11 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
     cgb: gb.cgb_enabled,
+    # The OAM STAT source's lead is a per-CONSOLE constant, so latch it beside
+    # the console flag it is derived from rather than recomputing it on the dot
+    # loop. See m2_lead_for in ppu.nim, and GbPpu.m2_lead_mc for the cost of
+    # not doing this.
+    m2_lead_mc: m2_lead_for(gb.cgb_enabled),
   )
   when STAT_IRQ_SPLIT:
     result.irq_mode = base.irq_mode
@@ -1127,8 +1179,40 @@ const OBJ_PLANE1_HEAD {.intdefine.} = 6'i32
 # FIFO renderer is the shipping and scored one either way (config `gb_fifo`
 # defaults true; every harness in tests/ passes `fifo = true`).
 const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
-  ## M-cycles the object fetch leads the OAM DMA unit's bus by. 0 is "the byte
-  ## the unit is driving on the fetch's own M-cycle" (mem.dma_latch).
+  ## M-cycles the object fetch leads the OAM DMA unit's bus by, **on a console
+  ## whose mode-3 pipeline is not advanced**. 0 is "the byte the unit is driving
+  ## on the fetch's own M-cycle" (mem.dma_latch).
+  ##
+  ## ---- It is a phase, so it MOVES WITH THE PHASE ---------------------------
+  ##
+  ## The paragraphs above derive this as "a phase between the pipeline and the
+  ## bus half of an M-cycle... the OAM DMA unit writes through its own path and
+  ## was never given that compensation, so the term is still owed here". Read
+  ## that literally and the consequence is forced: the DMA unit runs on machine
+  ## time and the fetch runs on the pipeline, so advancing the pipeline by an
+  ## M-cycle moves the fetch an M-cycle EARLIER against the unit's bus, and the
+  ## fetch has to look one M-cycle FURTHER AHEAD to land on the same source
+  ## byte. The effective lead is `OBJ_DMA_BUS_LEAD + CGB_PIPE_MCYCLES`, and at
+  ## `CGB_PIPE_MCYCLES = 1` that is 2 on CGB and 1 on DMG.
+  ##
+  ## This was the whole of `strikethrough`'s objection to a moved pipeline, and
+  ## it was never a witness of the phase at all -- it is a witness of the SUM.
+  ## The 2026-08-10 sweep that bracketed the phase two-sidedly held this
+  ## constant fixed while moving the phase, so it was reading the sum move and
+  ## attributing it to the phase. With the sum held, `strikethrough-cgb` is
+  ## byte-identical to its pre-advance frame, all 23040 pixels.
+  ##
+  ## **Bracketed from both sides, and the DMG arm is one of the two sides.**
+  ## The lead is device-independent as a base and the ADDITION is CGB-only,
+  ## because the DMG pipeline does not move: charge the DMG the extra M-cycle
+  ## and `strikethrough-dmg` breaks by the same 7 pixels the CGB arm was
+  ## breaking by, measured. So 1 is pinned on DMG by that frame and 2 is pinned
+  ## on CGB by the same frame on the other console -- one ROM, two consoles,
+  ## two values, no fit.
+  ##
+  ## Nothing else in the tree reads it: `dma_openbus` and the `0xE000` echo fold
+  ## are untouched, and the sweep at the head of this block (every dot of the
+  ## fetch, out to eleven) still says the read is not inside the fetch.
 
 proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## The object's mode-3 OAM read while an OAM DMA owns OAM. Cold: `dma_busy`
@@ -1143,8 +1227,15 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # one M-cycle is exactly that byte. The unit drives nothing past 0xA0, so
     # the last M-cycle of a transfer keeps what it has rather than reading off
     # the end of the source.
+    # The lead moves with the pipeline's phase against the bus -- see the
+    # constant. `CGB_PIPE_MCYCLES` is the pipeline's own advance and this is the
+    # same M-cycle seen from the DMA unit's side.
+    let lead = OBJ_DMA_BUS_LEAD +
+               (when CGB_PIPE_MCYCLES != 0:
+                  (if ppu.cgb: CGB_PIPE_MCYCLES else: 0)
+                else: 0)
     var src = int(mem.current_dma_source) +
-              min(mem.dma_position + OBJ_DMA_BUS_LEAD - 1, 0x9F)
+              min(mem.dma_position + lead - 1, 0x9F)
     # Same echo fold as the unit itself (mooneye oam_dma/sources-GS).
     if src >= 0xE000: src = src and not 0x2000
     b = read_byte(mem, gb, src)
@@ -1798,23 +1889,19 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 #    90.5% here, which is four dots, and it is expected back when the halt half
 #    lands.
 const M3_PIPE_AHEAD {.intdefine.} = 0
-const M3_PIPE_AHEAD_CGB {.intdefine.} = 0
-  ## The same advance, on CGB only, ADDED to the device-independent one above.
+  ## The device-INDEPENDENT advance. Still 0: nothing measured here asks the DMG
+  ## pipeline to move, and daid's DMG arm refuses it outright (pixel-exact at 0,
+  ## 90.5% at 1). The CGB's M-cycle is `CGB_PIPE_MCYCLES`, at the head of this
+  ## file, and the two are added.
   ##
-  ## It exists because the two devices' witnesses for this one quantity
-  ## disagree, and the disagreement is inside one ROM: daid `ppu_scanline_bgp`
-  ## is 23040/23040 on DMG at 0 and on CGB (`--cgb-rev=D`) at 1. A device split
-  ## is the standard shape for that in this tree (see WIN_TAIL), so it is worth
-  ## having built rather than argued about.
-  ##
-  ## **It does not resolve the contradiction and it ships at 0**, because the
-  ## CGB side is internally inconsistent: at 1 daid-GBC comes right and
-  ## `strikethrough-cgb` (23040 -> 23033) and `cgb-acid-hell` (23040 -> 23038)
-  ## both go wrong, and all three are CGB rows measuring the same phase. See the
-  ## 2026-08-10 entry in docs/gb-failure-triage.md for the full witness table
-  ## and the two-sided bracket.
+  ## The paragraph above -- "daid ... is a HALT ROM, so it moves with the halt
+  ## bucket rather than with this ... expected back when the halt half lands" --
+  ## is superseded as of 2026-08-10 and left standing because its measurements
+  ## are still good. daid did not need the halt half. It needed this file to
+  ## stop double-counting the phase into three other constants; see
+  ## `CGB_PIPE_MCYCLES`.
 const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
-                     M3_PIPE_AHEAD_CGB != 0
+                     CGB_PIPE_MCYCLES != 0
 
 # Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
@@ -2953,7 +3040,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   when not STAT_IRQ_SPLIT:
     if m == 2: 80'i32
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
-    elif ppu.m2_early_stop: ppu.m2_early_dot(gb)
+    elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
     else: gb_line_end(ppu)
   else:
     # Every boundary is two stops in a STAT_IRQ_LEAD build, `lead` dots apart:
@@ -3283,12 +3370,41 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # `first_line` is excluded: the line 0 that follows an LCD enable
             # was never in vblank, and it has a model of its own already (the
             # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
-            let mc = M3_PIPE_AHEAD +
-                     (when M3_PIPE_AHEAD_CGB != 0:
-                        (if ppu.cgb: M3_PIPE_AHEAD_CGB else: 0)
-                      else: 0) +
-                     (if ppu.ly == 0 and not ppu.first_line: LY0_PIPE_MCYCLES
-                      else: 0)
+            # The device-independent term plus the CGB one; `base` is what EVERY
+            # line of this frame gets.
+            let base = M3_PIPE_AHEAD +
+                       (when CGB_PIPE_MCYCLES != 0:
+                          (if ppu.cgb: CGB_PIPE_MCYCLES else: 0)
+                        else: 0)
+            # ---- Line 0 does not get a second helping ---------------------
+            #
+            # `LY0_PIPE_MCYCLES` says line 0's pipeline runs one M-cycle ahead
+            # of every OTHER line's. That is a statement about the DIFFERENCE
+            # between line 0 and its neighbours, not an extra M-cycle line 0
+            # owns outright -- so once `base` has advanced every line by an
+            # M-cycle there is nothing left for line 0 to be ahead OF, and
+            # adding the two puts line 0 two M-cycles out on its own.
+            #
+            # Measured, and it is the whole of the CGB mealybug residue this
+            # spelling was found by: with the terms ADDED, thirteen CGB rows
+            # come back wrong on LINE 0 ALONE and nowhere else (m3_bgp_change
+            # 22 wrong pixels, all at y = 0; m3_lcdc_tile_sel_change 16, all at
+            # y = 0), which is exactly what one M-cycle of double-count on one
+            # line looks like and is nothing like the whole-frame band shift a
+            # wrong phase gives. Taking the MAX instead returns every one of
+            # them to byte-identity with the pre-advance frame.
+            #
+            # mealybug's own ROMs are the outside confirmation that the term is
+            # a difference: `m3_bgp_change.asm` opens its handler with
+            # `ldh a,[rLY] / and a / jr nz,.line_0` -- a deliberate one-M-cycle
+            # swing on line 0 only, commented "line 0 timing is different by 4
+            # cycles". A difference is what the ROM compensates and a difference
+            # is what this models.
+            # On DMG `base` is 0, so line 0 keeps exactly the M-cycle it always
+            # had; on CGB `base` is already that M-cycle and line 0 shares it.
+            let mc = if ppu.ly == 0 and not ppu.first_line:
+                       max(base, LY0_PIPE_MCYCLES)
+                     else: base
             if mc != 0:
               let adv = mc * (4 shr gb.memory.current_speed)
               let head = int(ppu.m3_delay)
@@ -3363,7 +3479,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # line's last M-cycle, on every line that scans OAM. Same shape, same
         # reason the skip target stops here. See STAT_M2_LEAD.
         when STAT_M2_EARLY:
-          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
+          if ppu.m2_lead_active and ppu.cycle_counter == ppu.m2_early_dot(gb):
+            fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
@@ -3400,7 +3517,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # m2_early answers false here unless STAT_M2_EARLY_LY0 is on. The stop
         # is spelled anyway, because that is the knob's whole point.
         when STAT_M2_EARLY:
-          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
+          if ppu.m2_lead_active and ppu.cycle_counter == ppu.m2_early_dot(gb):
+            fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:

@@ -1927,6 +1927,59 @@ same separation. Until then `cgb-acid-hell`, `strikethrough-dmg` and
 `strikethrough-cgb` are pixel-exact on `main` and daid-GBC is the one row this
 axis owes, at 20736/23040 with `--cgb-rev=D`.
 
+#### 2026-08-10 (addendum): the bracket was real and the CONCLUSION was wrong — three of these constants were reading the phase
+
+**Everything above is left standing, because every measurement in it
+reproduces. What was wrong is the inference.** The bracket was two-sided
+because the sweep that drew it moved `M3_PIPE_AHEAD` while holding fixed three
+other constants that are each `f(pipeline phase) + a hardware delta`. Move the
+phase and they go stale, and their witnesses go red for a reason that has
+nothing to do with the phase being wrong. Shipped as `CGB_PIPE_MCYCLES = 1`
+with its three dependants moved with it; runner 769 -> **770**, gambatte
+3876 -> **3940 (+64)**.
+
+| constant | why it moves with the phase | new value |
+|---|---|---|
+| `OBJ_DMA_BUS_LEAD` | it IS "the phase between the pipeline and the bus", by its own note — the DMA unit is on machine time, so an earlier fetch must look an M-cycle further ahead | 1 (+1 on CGB) |
+| `LY0_PIPE_MCYCLES` | it is a DIFFERENCE between line 0 and its neighbours, so it must not STACK with a term every line now has | `max`, not `+` |
+| `STAT_M2_LEAD` | not a compensation — the mode-2 anchor's own M-cycle, which the whole mealybug corpus anchors on | 0 (+1 on CGB) |
+
+**Which of the five refutations survive.** Three do, one is an artifact, one is
+newly narrowed:
+
+| candidate | status now |
+|---|---|
+| a uniform CGB halt phase (`CGB_HALT_PPU_LEAD`) | **stands.** Refuted on its own witnesses (`hdma_late_disable` vs `lycirq_m2stat`), which this touches at all — that family is byte-for-byte unmoved here. daid did not need it |
+| a device-split snapback edge (`LYC_SETTLE_DOTS`) | **stands.** Refuted on its own CGB witnesses, dot 9 bracketed from both sides. Unmoved |
+| `STAT_LYC_LEAD` (six GBMicrotest LYC sleds) | **stands**, untouched |
+| `STAT_M2_LEAD = 2` (that bucket's own sled) | **stands**, untouched — the value taken is 1 |
+| a global pipeline phase, refuted by `strikethrough-cgb` vs daid-GBC | **ARTIFACT.** `strikethrough` was never a witness of the phase; it is a witness of `phase + OBJ_DMA_BUS_LEAD`. With the sum held it is byte-identical to its pre-advance frame, all 23040 px |
+
+**And the documented alternative — "the OAM scan may not share a phase with
+pixel emission" — is refuted, twice.** (1) The mealybug corpus anchors on mode 2
+and contains both a family measuring emission (`m3_bgp_change`) and a family
+measuring the fetch grid (`m3_lcdc_tile_sel_change`), both exact; one anchor
+cannot move for one and not the other. (2) Neither SameBoy nor DocBoy has an
+output stage — both run fetch and emission off one counter and one dot, and
+DocBoy indexes the object trigger by `lx` itself. Nothing was restructured and
+nothing needed to be.
+
+**The signature was misread.** `strikethrough`'s 7 pixels being identical at
+`P = 1` and `P = 2` was recorded as evidence that it reads a different quantity
+from daid. It is the signature of a **saturated boundary crossing in a
+stale compensation**: once the fetch's OAM read leaves the ROM's 4-dot window it
+reads `$01` at any further offset, so the picture stops changing.
+
+**What did NOT resolve, stated as the one open contradiction.**
+`CGB_TDSEL_LATENCY` has two CGB witnesses that do not share an anchor —
+mealybug `tile_sel` on mode 2 (wants 1) and `cgb-acid-hell` on LYC (wants 5) —
+and one constant cannot be both. 1 ships: it costs `cgb-acid-hell` **2 pixels**
+where 5 costs the four mealybug frames **3859**. The two pixels are not the
+constant's fault: `tools/gbppu/tdselcells.py` scores the shipping SET rule at
+221/223 on the PRE-advance tree with both misses attributed to `cgb-acid-hell`,
+so those cells were already wrong and merely invisible. The corpus, not the
+phase, is where that is closed. See `CGB_TDSEL_LATENCY` in `gb/gb.nim`.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one

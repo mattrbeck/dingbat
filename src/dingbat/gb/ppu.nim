@@ -1071,11 +1071,37 @@ const STAT_M2_LEAD* {.intdefine.} = 0
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
   ## Does LINE 0's pulse lead too? It does not -- see above, and mooneye
   ## intr_1_2_timing-GS is what says so.
-const STAT_M2_EARLY* = STAT_M2_LEAD != 0
+const STAT_M2_LEAD_CGB* {.intdefine.} = 1
+  ## CGB-only ADDITION to `STAT_M2_LEAD`, in the same M-cycles.
+  ##
+  ## It exists because the lead and `CGB_PIPE_MCYCLES` (fifo_ppu.nim) are a
+  ## matched pair on this device and neither is scoreable beside the other
+  ## without it. The mealybug corpus anchors on THIS source, so advancing the
+  ## CGB pipeline one M-cycle under a fixed source moves every mode-2-anchored
+  ## band by four dots; the two together leave the corpus where it was. Measured
+  ## rather than argued: with the pipeline advanced and this at 0 the CGB
+  ## mealybug set is 1/23 green, and at 1 it is back (see the ladder in
+  ## docs/gb-renderer-structure-research-2026-08-10.md).
+  ##
+  ## **Device-gated because the DMG pipeline does not move.** Left
+  ## device-independent it takes the whole DMG mode-2 side down with it --
+  ## `m3_bgp_change` alone reads 3163 wrong pixels -- which is a property of the
+  ## half-applied gate and not of the quantity. The DMG half of `STAT_M2_LEAD`
+  ## is a separate question with its own seven GBMicrotest rows and its own
+  ## blocker (`HALT_IF_SAMPLE_T`); it still ships at 0 and this does not
+  ## prejudge it.
+const STAT_M2_EARLY* = STAT_M2_LEAD != 0 or STAT_M2_LEAD_CGB != 0
+
+proc m2_lead_for*(cgb: bool): int32 {.inline.} =
+  ## The lead this CONSOLE gets, in CPU M-cycles. `cgb` is the console -- the
+  ## same flag `CGB_PIPE_MCYCLES` gates on, and the two must agree or the
+  ## mode-2-anchored corpus is scored against a pipeline that moved for a
+  ## different set of frames. Latched into `ppu.m2_lead_mc` at construction.
+  int32(STAT_M2_LEAD) + (if cgb: int32(STAT_M2_LEAD_CGB) else: 0'i32)
 
 template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
   ## The dot of the outgoing line the source comes up on.
-  gb_line_end(ppu) - int32(STAT_M2_LEAD) * int32(4 shr gb.memory.current_speed)
+  gb_line_end(ppu) - ppu.m2_lead_mc * int32(4 shr gb.memory.current_speed)
 
 proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## Is this line's tail handing over to a line that SCANS OAM? Mode 0 covers
@@ -1088,16 +1114,33 @@ proc m2_early*(ppu: GbPpu): bool {.inline.} =
   (m == 0'u8 and ppu.ly < 143'u8) or
     (STAT_M2_EARLY_LY0 and m == 1'u8 and ppu.ly == 0'u8)
 
-template m2_early_stop*(ppu: GbPpu): bool =
+template m2_lead_active*(ppu: GbPpu): bool =
+  ## Is the lead nonzero for THIS console? With the lead device-split, "the
+  ## mechanism is compiled in" and "this run uses it" stopped being the same
+  ## question, and every reader below has to ask the second one.
+  ##
+  ## Without this the DMG pays for the CGB's gate: at a lead of 0 the rising dot
+  ## IS `gb_line_end`, so `m2_source` would answer off `m2_early` on the last
+  ## dot of every DMG line instead of falling through to `STAT_M2_PULSE`, and
+  ## the dot loop would run an extra edge-detector pass there. Measured: that
+  ## alone moves `gbmicrotest/lyc1_write_timing_d` and
+  ## `mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS`, both DMG rows, on a
+  ## change that is supposed to be CGB-only.
+  when STAT_M2_LEAD != 0: true
+  elif STAT_M2_LEAD_CGB != 0: ppu.m2_lead_mc != 0
+  else: false
+
+template m2_early_stop*(ppu: GbPpu; gb: GB): bool =
   ## The skip target's half of the same question, so the dot loop is guaranteed
   ## to visit the rising dot. Folds to `false` -- and takes the extra stop out
   ## of fifo_skip_target's three compares -- when the rise is on the boundary.
-  when STAT_M2_EARLY: ppu.m2_early
+  when STAT_M2_EARLY: ppu.m2_lead_active and ppu.m2_early
   else: false
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_EARLY:
-    if ppu.cycle_counter >= ppu.m2_early_dot(gb): return ppu.m2_early
+    if ppu.m2_lead_active and ppu.cycle_counter >= ppu.m2_early_dot(gb):
+      return ppu.m2_early
   when STAT_M2_PULSE == -1: ppu.irq_mode_of == 2
   elif STAT_M2_PULSE == -2:
     ppu.irq_mode_of == 2 and ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
