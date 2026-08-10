@@ -276,6 +276,17 @@ mixer's own dot (`fifo_recompose_last`) was measured off
 `docs/gb-failure-triage.md` was identified as a bitplane read returning the
 tile index.
 
+`FDATA` also carries one column per **candidate** byte the read could have
+returned — `uns`/`sgn` (the two addressing modes' bytes for this tile, row and
+plane), `latch` (what the SET-glitch rule delivers), `prevd`/`prevu` (the
+previous bitplane read's data, and the previous `$8000`-region one) — and a
+`VRAM0`/`VRAM1` hex dump lands once a frame. Together those turn "which rule
+does hardware use" into an offline replay: parse the last frame, invert the
+reference through the palette, and score every candidate over every glitched
+read at once, with no rebuild between hypotheses. The `CGB_TDSEL_GLITCH` table
+in `gb/gb.nim` (188 RESET cells and 161 SET cells over four references) was
+produced that way.
+
 `WINHIT` (under `-d:gb_m3_trace`) is the matching instrument for the window's
 re-trigger: one line per dot the WX equality is reached, with the fetcher
 position and FIFO depth that decide whether the edge survives it. A mealybug

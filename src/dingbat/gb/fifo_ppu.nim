@@ -31,6 +31,12 @@ const WIN_LX_OFF = -128'i32
 # fifo_recompose_last.
 const TAIL_DOT0_OFF = -(1'i32 shl 20)
 
+when defined(gb_px_trace):
+  # Trace-only running state for the FDATA candidate columns; the harness runs
+  # one GB, so module scope is enough and nothing here reaches a shipping build.
+  var px_prev_data: uint8
+  var px_prev_uns:  uint8
+
 proc mixer_note_stop(ppu: GbFifoPpu) {.inline.} =
   ## The shifter is about to STOP on this dot: note the dot base the run it is
   ## interrupting was on, and the `lx` the next run will start at. Two stores,
@@ -209,6 +215,14 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
+  when defined(gb_px_trace):
+    # One VRAM dump per frame, so an offline decode can evaluate any address
+    # formula against the reference without another rebuild.
+    if ppu.ly == 0:
+      for b in 0 .. 1:
+        var s = newStringOfCap(2 * ppu.vram[b].len + 8)
+        for v in ppu.vram[b]: s.add toHex(v, 2)
+        echo "VRAM", b, " ", s
   ppu.smooth_scroll_sampled = true
   if ppu.fetching_window:
     # ---- A line that STARTS as a window line still pays SCX & 7 ------------
@@ -393,10 +407,11 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
-  # LCDC.4's is per-line for the same reason, and the address latch with it:
-  # both only ever answer a fetch on THIS line's dots.
+  # LCDC.4's is per-line for the same reason: it only ever answers a fetch on
+  # THIS line's dots. The ADDRESS latch is not reset with it -- see
+  # CGB_TDSEL_GLITCH in gb.nim: it is a bus register, and the first glitched
+  # read of a line reports the address the line before it left there.
   ppu.tdsel_dot = NO_TDSEL_CHANGE
-  ppu.tdsel_addr = TDSEL_ADDR_OFF
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -707,24 +722,34 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # reached the address path either -- so it is that address the next
           # SET-glitched read comes back to.
           data = ppu.tile_num
-          ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
-                                 (if low_plane: 0 else: 1))
-          ppu.tdsel_bank = int32(bank_num)
+          ppu.tdsel_addr = int32((16 * int(ppu.tile_num) + tile_row * 2 +
+                                  (if low_plane: 0 else: 1)) or
+                                 (bank_num shl TDSEL_ADDR_BANK))
         elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
           # SET on the read dot: the address never advanced, so the byte comes
           # from wherever the last $8000-region read left it.
-          data = ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr]
-      # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and by the
-      # latch story it should leave its address here as well. It deliberately
-      # does not, for two reasons. No cell of either `*_change2` frame can tell
-      # the two apart -- every SET glitch in them is preceded by an object fetch
-      # or a RESET-glitched read that overwrites whatever a plain read left --
-      # and doing it costs two stores on EVERY bitplane read of every frame,
-      # which measured +0.55% of retired instructions on blargg cpu_instrs
-      # against +0.27% for the form above. If a ROM ever separates them, this
-      # is the arm to add back.
+          data = ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+                          ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)]
+      elif sel:
+        # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and it
+        # leaves its address here like any other. `m3_lcdc_tile_sel_change` and
+        # its window twin are the ROMs that separate this from the narrower
+        # form (object fetches and RESET-glitched reads only) -- see
+        # CGB_TDSEL_GLITCH in gb.nim for the two references' arithmetic. ONE
+        # store, which is why the bank is packed in: this line runs on every
+        # unsigned bitplane read of every frame.
+        ppu.tdsel_addr = int32(off or (bank_num shl TDSEL_ADDR_BANK))
     when defined(gb_px_trace):
       if gb_traced(ppu.ly):
+        # Every candidate substitution source this read could have delivered,
+        # so a reference frame can arbitrate between them without a rebuild:
+        #   uns/sgn  the two addressing modes' bytes for THIS tile+row+plane
+        #   latch    the address-latch byte (what the landed SET rule delivers)
+        #   prevd    the previous bitplane read's data, whatever mode
+        #   prevu    the previous $8000-region read's data (objects included)
+        let unsO = 16 * int(ppu.tile_num) + tile_row * 2 + (if low_plane: 0 else: 1)
+        let sgnO = 0x1000 + 16 * int(cast[int8](ppu.tile_num)) +
+                   tile_row * 2 + (if low_plane: 0 else: 1)
         echo "FDATA ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
              " fx=", ppu.fetcher_x,
              " plane=", (if low_plane: 0 else: 1), " num=", toHex(ppu.tile_num, 2),
@@ -732,7 +757,16 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
              " addr=", toHex(0x8000 + off, 4),
              " byte=", toHex(data, 2),
              " glitch=", glitch,
+             " uns=", toHex(ppu.vram[bank_num][unsO], 2),
+             " sgn=", toHex(ppu.vram[bank_num][sgnO], 2),
+             " latch=", (if ppu.tdsel_addr == TDSEL_ADDR_OFF: "--"
+                         else: toHex(ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+                           ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)], 2)),
+             " prevd=", toHex(px_prev_data, 2),
+             " prevu=", toHex(px_prev_uns, 2),
              " lcdc=", toHex(ppu.lcd_control, 2)
+        px_prev_data = data
+        if sel: px_prev_uns = data
     if low_plane:
       ppu.tile_data_low = data
       inc ppu.fetch_counter
@@ -1143,14 +1177,15 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # reports the object's plane 1 whichever plane it is itself on. See
     # CGB_TDSEL_GLITCH in gb.nim for the band-3 / band-5 pair that says so.
     if ppu.cgb:
-      ppu.tdsel_addr = int32(b_hi)
-      ppu.tdsel_bank = int32(bank)
+      ppu.tdsel_addr = int32(int(b_hi) or (bank shl TDSEL_ADDR_BANK))
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
       echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,
            " tile=", toHex(s.tile_num, 2),
            " lo=", toHex(ppu.vram[bank][b_lo], 2),
            " hi=", toHex(ppu.vram[bank][b_hi], 2)
+      px_prev_data = ppu.vram[bank][b_hi]
+      px_prev_uns  = ppu.vram[bank][b_hi]
   # Pad OAM FIFO to at least 8 pixels with transparent lowest-priority pixels
   while ppu.fifo_sprite.size < 8:
     fifo_push(ppu.fifo_sprite, GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0))
