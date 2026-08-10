@@ -121,11 +121,6 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
     cgb: gb.cgb_enabled,
-    # The OAM STAT source's lead is a per-CONSOLE constant, so latch it beside
-    # the console flag it is derived from rather than recomputing it on the dot
-    # loop. See m2_lead_for in ppu.nim, and GbPpu.m2_lead_mc for the cost of
-    # not doing this.
-    m2_lead_mc: m2_lead_for(gb.cgb_enabled),
   )
   when STAT_IRQ_SPLIT:
     result.irq_mode = base.irq_mode
@@ -3467,6 +3462,30 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           else:
             fifo_pipeline_dot(ppu, gb)
       of 0:  # H-Blank
+        # ---- The line-tail gate was TRIED HERE and is REFUSED ---------------
+        #
+        # Four boundary events live in this branch and all four are at dots in
+        # `[line_end - 4, line_end]` -- the CGB line-144 pulse, the OAM source's
+        # lead, the split IRQ domain's lead, the line advance -- so gating them
+        # behind one `cycle_counter >= line_end - 4` compare looks like it must
+        # be free money, and it is the obvious way to stop the DMG paying for a
+        # CGB-only OAM lead.
+        #
+        # It costs **+2.2% on cgb-acid-hell and buys the DMG exactly nothing**
+        # (25.03e9 against 24.50e9 retired instructions; dmg-acid2 unmoved at
+        # 23.79e9), with the line-end load hoisted into a local so the gate is
+        # not paying for a repeated `case` either. The premise is simply wrong:
+        # `fifo_skip_target` already jumps the dot loop STRAIGHT to these dots
+        # and never visits H-Blank's other ~50, so there is no per-dot cost here
+        # to fold away -- the gate is a compare added to dots that were all
+        # going to do the work anyway.
+        #
+        # Which also relocates the DMG's residual cost: it is not in this
+        # branch. What the DMG pays for a compiled-in `STAT_M2_EARLY` is the
+        # extra stop in `fifo_skip_target` (once per skip) and the extra compare
+        # in `m2_source` (once per STAT evaluation), neither of which a gate
+        # here can reach.
+        #
         # CGB raises the line-144 mode 2 STAT source one M-cycle before the
         # line ends (see m2_line144). The source is level-triggered off the
         # dot counter, but nothing else happens on this dot, so the edge
@@ -3479,10 +3498,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # line's last M-cycle, on every line that scans OAM. Same shape, same
         # reason the skip target stops here. See STAT_M2_LEAD.
         when STAT_M2_EARLY:
-          if ppu.m2_lead_active and ppu.cycle_counter == ppu.m2_early_dot(gb):
+          if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
-          if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
+          if ppu.cycle_counter == gb_line_end(ppu) - lead:
+            fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
           ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
@@ -3517,7 +3537,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # m2_early answers false here unless STAT_M2_EARLY_LY0 is on. The stop
         # is spelled anyway, because that is the knob's whole point.
         when STAT_M2_EARLY:
-          if ppu.m2_lead_active and ppu.cycle_counter == ppu.m2_early_dot(gb):
+          if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)

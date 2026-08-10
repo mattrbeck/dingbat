@@ -1092,16 +1092,29 @@ const STAT_M2_LEAD_CGB* {.intdefine.} = 1
   ## prejudge it.
 const STAT_M2_EARLY* = STAT_M2_LEAD != 0 or STAT_M2_LEAD_CGB != 0
 
-proc m2_lead_for*(cgb: bool): int32 {.inline.} =
-  ## The lead this CONSOLE gets, in CPU M-cycles. `cgb` is the console -- the
-  ## same flag `CGB_PIPE_MCYCLES` gates on, and the two must agree or the
+template m2_lead_mcycles*(gb: GB): int32 =
+  ## The lead this CONSOLE gets, in CPU M-cycles. `fifo_ppu.cgb` is the console
+  ## -- the same flag `CGB_PIPE_MCYCLES` gates on, and the two must agree or the
   ## mode-2-anchored corpus is scored against a pipeline that moved for a
-  ## different set of frames. Latched into `ppu.m2_lead_mc` at construction.
-  int32(STAT_M2_LEAD) + (if cgb: int32(STAT_M2_LEAD_CGB) else: 0'i32)
+  ## different set of frames.
+  ##
+  ## Read through `gb` rather than latched into a field on the PPU, and that is
+  ## a MEASURED choice, not the obvious one. The field form looks strictly
+  ## better -- one `int32` on an object the dot loop already holds, no cross
+  ## object hop -- and it costs **+2.2% of retired instructions on
+  ## cgb-acid-hell** (25.04e9 against 24.50e9) while buying the DMG nothing,
+  ## because adding a field to `GbPpu` shifts every later field of `GbFifoPpu`
+  ## and the dot loop's own hot state moves with it. Same struct-layout hazard
+  ## the object-fetch latch hit at OBJ_PLANE1_LAG. The deref stays.
+  when STAT_M2_LEAD_CGB == 0:
+    int32(STAT_M2_LEAD)
+  else:
+    int32(STAT_M2_LEAD) +
+      (if gb.fifo_ppu.cgb: int32(STAT_M2_LEAD_CGB) else: 0'i32)
 
 template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
   ## The dot of the outgoing line the source comes up on.
-  gb_line_end(ppu) - ppu.m2_lead_mc * int32(4 shr gb.memory.current_speed)
+  gb_line_end(ppu) - m2_lead_mcycles(gb) * int32(4 shr gb.memory.current_speed)
 
 proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## Is this line's tail handing over to a line that SCANS OAM? Mode 0 covers
@@ -1114,7 +1127,7 @@ proc m2_early*(ppu: GbPpu): bool {.inline.} =
   (m == 0'u8 and ppu.ly < 143'u8) or
     (STAT_M2_EARLY_LY0 and m == 1'u8 and ppu.ly == 0'u8)
 
-template m2_lead_active*(ppu: GbPpu): bool =
+template m2_lead_active*(gb: GB): bool =
   ## Is the lead nonzero for THIS console? With the lead device-split, "the
   ## mechanism is compiled in" and "this run uses it" stopped being the same
   ## question, and every reader below has to ask the second one.
@@ -1127,19 +1140,19 @@ template m2_lead_active*(ppu: GbPpu): bool =
   ## `mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS`, both DMG rows, on a
   ## change that is supposed to be CGB-only.
   when STAT_M2_LEAD != 0: true
-  elif STAT_M2_LEAD_CGB != 0: ppu.m2_lead_mc != 0
+  elif STAT_M2_LEAD_CGB != 0: gb.fifo_ppu.cgb
   else: false
 
 template m2_early_stop*(ppu: GbPpu; gb: GB): bool =
   ## The skip target's half of the same question, so the dot loop is guaranteed
   ## to visit the rising dot. Folds to `false` -- and takes the extra stop out
   ## of fifo_skip_target's three compares -- when the rise is on the boundary.
-  when STAT_M2_EARLY: ppu.m2_lead_active and ppu.m2_early
+  when STAT_M2_EARLY: m2_lead_active(gb) and ppu.m2_early
   else: false
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_EARLY:
-    if ppu.m2_lead_active and ppu.cycle_counter >= ppu.m2_early_dot(gb):
+    if m2_lead_active(gb) and ppu.cycle_counter >= ppu.m2_early_dot(gb):
       return ppu.m2_early
   when STAT_M2_PULSE == -1: ppu.irq_mode_of == 2
   elif STAT_M2_PULSE == -2:

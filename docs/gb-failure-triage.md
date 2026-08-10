@@ -1974,11 +1974,67 @@ reads `$01` at any further offset, so the picture stops changing.
 `CGB_TDSEL_LATENCY` has two CGB witnesses that do not share an anchor —
 mealybug `tile_sel` on mode 2 (wants 1) and `cgb-acid-hell` on LYC (wants 5) —
 and one constant cannot be both. 1 ships: it costs `cgb-acid-hell` **2 pixels**
-where 5 costs the four mealybug frames **3859**. The two pixels are not the
-constant's fault: `tools/gbppu/tdselcells.py` scores the shipping SET rule at
-221/223 on the PRE-advance tree with both misses attributed to `cgb-acid-hell`,
-so those cells were already wrong and merely invisible. The corpus, not the
-phase, is where that is closed. See `CGB_TDSEL_LATENCY` in `gb/gb.nim`.
+where 5 costs the four mealybug frames **3859**. See the next section, which
+chased this to the bottom.
+
+#### 2026-08-10: acid-hell's last chapter — the D=4 "no rule" proof, its real scope, and why the 2 pixels stay
+
+This closes the narrative that ran from the `CGB_HALT_PPU_LEAD` work through
+`CGB_TDSEL_IDX_DOTS` to the pipeline advance. Three findings, in the order they
+matter.
+
+**1. There is no SET-rule gap, and the claim that there was one is retracted.**
+The previous entry read `tdselcells.py`'s trigger table wrong. On the
+pre-advance tree the SHIPPING SET rule scores **223/223**. The 221/223 row is
+`never` — the rule with `CGB_TDSEL_IDX_DOTS` deleted — and its two misses are
+exactly the cells that *prove* that constant. The corpus JSON confirms it per
+cell: acid-hell's `ly = 68` and `ly = 69` cells have `mine == hw` (85 and 73,
+the tile index) against a latch of 93 and 65. dingbat was right about them all
+along. Nothing needed refining.
+
+**2. The two ROMs share an anchor, which is why the phase moves one and not the
+other.** Both sources say so outright: `cgb-acid-hell.asm` sets `rSTAT = $40`
+(LYC), `rLYC = 0`, `rIE = $02` and **halts**, then writes LCDC down a nop slide;
+`ppu_scanline_bgp.asm` takes the same LYC=0 STAT out of `halt` and free-runs.
+So `CGB_PIPE_MCYCLES = 1` moves the fetch grid under both ROMs' writes, and the
+FDATA trace shows precisely that — on `ly = 68`, control has the LCDC.4 change
+landing ON the plane-1 read dot (130/130, 138/138, 162/162, 170/170, 178/178,
+186/186, `glitch = ±1`), and the advanced world has every read 4 dots earlier
+with the changes unmoved, so `glitch = 0` everywhere and the substitution never
+fires.
+
+**This world is not new.** It reproduces the 2026-08-14 `CGB_HALT_PPU_LEAD=1`
+census *exactly* — 408 cells, 216 SET / 192 RESET, 216/216 and 192/192,
+`cgb-acid-hell` at 23038 whatever `CGB_TDSEL_IDX_DOTS` is set to. Two different
+knobs, one displacement.
+
+**3. The old "no rule exists at D=4" proof was narrower than it claimed, and the
+wider question now has an answer too — the same one.** The wider question is
+what `tools/gbppu/tdselphase.py` asks: for a change *d* dots from a read, does
+hardware disturb it? Run in the advanced world it splits the one bucket that
+could fix the row — `mapoff = 0`, read offset +4, RESET, 71 reads — by the
+change *before* the previous one:
+
+| `prev2off` | reads | hw wants INDEX | hw wants SGN | ROM |
+|---|---|---|---|---|
+| −32 | 7 | **7** | 5 | `cgb-acid-hell` |
+| −24 | 32 | 0 | **32** | mealybug |
+| None | 24 | 8 | **24** | mealybug |
+| (prevdir −1) | 8 | 8 | **8** | mealybug |
+
+Firing on the bucket buys acid-hell's 2 pixels and costs **64 mealybug reads**.
+The only feature separating acid-hell's seven from the 32 hard refusers is
+`prev2off = −32` against `−24` — one ROM's own fingerprint, on a context no
+second ROM populates. **So no restatement reaches 223/223, and the minimal
+contradiction is: any rule that fires where acid-hell needs it also fires on 32
+mealybug reads that measure the opposite.**
+
+**A cost the trade carries that is worth naming.** With acid-hell's seven cells
+gone, `CGB_TDSEL_IDX_DOTS` has **no discriminating evidence left in the shipping
+world** — `never` scores the same 216/216 as the shipping rule. The rule is
+still believed, on the 223/223 world and the unchanged offset sweep, but nothing
+in the tree can now falsify it. That is a real loss of coverage, and it is the
+second half of the 2-pixel trade.
 
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at

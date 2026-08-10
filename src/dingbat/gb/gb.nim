@@ -703,16 +703,21 @@ const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ##   1 ship  byte-identical to the pre-advance     23038/23040
   ##   5       3859 wrong px (1468 + 1525 + 866)     byte-identical
   ##
-  ## **1 ships because it costs 2 pixels and 5 costs 3859**, and because the two
-  ## pixels are not this constant's fault. The arbitration corpus
-  ## (tools/gbppu/tdselcells.py) says so directly: on the PRE-ADVANCE tree the
-  ## shipping SET rule already scores 221/223 with the two misses attributed
-  ## `{'cgb-acid-hell': 2}`. Those two cells were already wrong and merely
-  ## invisible in that frame; the advance makes them visible. So the residue is
-  ## a known gap in the SET substitution rule, not evidence against the phase,
-  ## and the corpus is where it should be closed. The four mealybug frames score
-  ## identically before and after the advance (48/64, 48/48, 72/32, 48/48, all
-  ## with 0 self-check mismatches), so the cell alignment did not move.
+  ## **1 ships because it costs 2 pixels and 5 costs 3859.**
+  ##
+  ## *(Correction, 2026-08-10: an earlier revision of this note claimed the
+  ## shipping SET rule "already scores 221/223 on the pre-advance tree", i.e.
+  ## that these two cells were a standing rule gap. That misread the corpus
+  ## table. On the pre-advance tree the SHIPPING rule scores **223/223**; the
+  ## 221/223 row is `never`, the rule with `CGB_TDSEL_IDX_DOTS` deleted, and its
+  ## two misses are precisely the cells that PROVE that constant. There is no
+  ## SET-rule gap. The residue is the phase moving acid-hell's write off the
+  ## read dot, and `CGB_TDSEL_IDX_DOTS`'s note carries the read-level bracket
+  ## showing no refinement recovers it without costing 64 mealybug reads.)*
+  ##
+  ## The four mealybug frames score identically before and after the advance
+  ## (48/64, 48/48, 72/32, 48/48, all with 0 self-check mismatches), so the cell
+  ## alignment did not move.
   ##
   ## Note also that `cgb-acid-hell`'s reference is a **C/E-class** capture: it is
   ## exact at `--cgb-rev=C` and `=E` and 22864/23040 at `=D` on the pre-advance
@@ -902,6 +907,50 @@ const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
   ## read by its offset from the last change, where hardware disturbs exactly
   ## one offset out of the 6352 measured. So this constant is not what stands
   ## between the tree and `LEAD=1`; 4 dots are.
+  ##
+  ## ---- 2026-08-10: `CGB_PIPE_MCYCLES = 1` lands in that same world ---------
+  ##
+  ## The shipped CGB pipeline advance moves this ROM's write lattice by the same
+  ## 4 dots `CGB_HALT_PPU_LEAD=1` did, for the same reason: `cgb-acid-hell` and
+  ## daid `ppu_scanline_bgp` are both anchored on the LYC=0 STAT taken out of
+  ## `halt` (read both ROMs' sources -- acid-hell sets `rSTAT=$40`, `rLYC=0`,
+  ## `rIE=$02` and halts), so an advance that moves the FETCH GRID leaves both
+  ## ROMs' writes where they were. The census reproduces the 2026-08-14 entry
+  ## above **exactly**: 408 cells, 216 SET / 192 RESET, 216/216 and 192/192, and
+  ## the row at 23038 whatever this constant is set to.
+  ##
+  ## **Two consequences, and the second one is the one to carry forward.**
+  ##
+  ## First, the trade is bounded and small. `CGB_TDSEL_LATENCY = 5` puts the
+  ## lattice back and takes `cgb-acid-hell` to 23040 -- and costs the four
+  ## mealybug frames 3859 pixels, because their writes DID move with their
+  ## mode-2 anchor. 1 ships. Two pixels against 3859.
+  ##
+  ## Second, **this constant now has no evidence at all in the shipping world**,
+  ## and that is a fact about the corpus rather than about the rule. With
+  ## acid-hell's seven cells gone, every trigger hypothesis in the table above
+  ## -- including `never`, i.e. deleting this constant outright -- scores the
+  ## same 216/216. The rule is still believed (it is what the 223/223 world
+  ## measured, and the 2026-08-14 offset sweep is unchanged) but nothing in the
+  ## tree can now falsify it. Do not read "216/216" as support.
+  ##
+  ## **And the read-level bracket, which is what a refinement would have to
+  ## beat.** `tools/gbppu/tdselphase.py` in this world splits the one bucket
+  ## that could fix the row -- `mapoff=0`, read offset +4, RESET, 71 reads -- by
+  ## the change BEFORE the previous one:
+  ##
+  ##   prev2off   reads   hardware wants INDEX   hardware wants SGN   ROM
+  ##   -32            7                      7                    5   acid-hell
+  ##   -24           32                      0                   32   mealybug
+  ##   None          24                      8                   24   mealybug
+  ##   (prevdir -1)   8                      8                    8   mealybug
+  ##
+  ## Firing on the whole bucket buys acid-hell's 2 and costs **64 mealybug
+  ## reads**. The only feature that separates acid-hell's seven from the 32 hard
+  ## refusers is `prev2off = -32` against `-24` -- one ROM's own fingerprint, on
+  ## a context no second ROM populates. So there is no refinement here that is
+  ## not a fit, and the 2 pixels are an integration decision, not a modelling
+  ## one.
   ##
   ## **A revision split is excluded, not merely unsupported.** `cgb-acid-hell`
   ## picks its tile data off a `$FEA0` readback and dingbat takes the same
@@ -2191,15 +2240,6 @@ type
     # of mode 0, so it is never set at a frame boundary — where every state,
     # rewind snapshot and rollback snapshot is captured — and is not serialized.
     hdma_block_due*: bool
-    # The OAM STAT source's lead for THIS console, in CPU M-cycles, latched at
-    # construction (`STAT_M2_LEAD` + `STAT_M2_LEAD_CGB`). It is a constant for
-    # the life of the machine and is cached here only so the dot loop can read
-    # it off `ppu` -- which it already has in a register -- instead of chasing
-    # `gb.fifo_ppu.cgb` on every dot. Measured: with the lead device-split, the
-    # deref form costs the DMG +0.51% of retired instructions for behaviour it
-    # never uses. Not serialized: it is derived from the console, which a state
-    # already carries.
-    m2_lead_mc*: int32
     # window state
     window_trigger*:     bool
     current_window_line*: int
