@@ -133,9 +133,15 @@ def main():
     meta, pages = parse(src)
     assert meta["platform"] == "gba", "gb rendering lands with gb hardware"
     os.makedirs(outdir, exist_ok=True)
-    ident = next(p for p in pages if p["num"] == 0 and not p["post"])
+    ident = next((p["bytes"] for p in pages
+                  if p["num"] == 0 and not p["post"]), None)
+    if ident is None:
+        # partial run without page 0: `model: 18 7F` gives the two IDENT
+        # bytes the MODEL line displays (in display order = [1], [0])
+        hi, lo = meta["model"].split()
+        ident = [int(lo, 16), int(hi, 16)]
     for p in pages:
-        g = render_gba(p, p["all"] or meta["all"], ident["bytes"])
+        g = render_gba(p, p["all"] or meta["all"], ident)
         name = f"p{p['num']:02d}{'-post' if p['post'] else ''}.png"
         write_png(os.path.join(outdir, name), g.pix, g.w, g.h)
         print(os.path.join(outdir, name))

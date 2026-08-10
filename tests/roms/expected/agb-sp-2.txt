@@ -1,0 +1,48 @@
+# gbaedge.gba hardware transcription — session 2 (the nine v4 pages)
+# GBA SP (AGS-001, clear purple) + EverDrive GBA, 2026-08-10
+# 25-page manual build @ c1c5d8f, photos IMG_3623-3631
+# Pages 00-0F not photographed this session (covered by ALL); BXDECODE
+# was NOT run: pressing START on page 18 hangs the console indefinitely
+# (no screen change, no recovery) — the watchdog is IRQ-based, so a
+# candidate that masks IRQs or wedges the core in an exception mode is
+# beyond rescue.  Its slot below is the pre-START marker state.
+platform: gba
+console: GBA SP AGS-001, EverDrive GBA, 2026-08-10
+all: 4B70
+model: 18 7F
+
+page 10 IORW crc 626A
+01 60 01 60 01 60 01 60 56 E2 01 60 56 E2 00 00
+00 00 00 00 01 60 01 60 00 00 00 00 00 00 00 00
+
+page 11 CPSRBITS crc F153
+1F 00 00 F0 1F 00 00 F0 1F 00 00 F0 FF 00 00 F0
+10 00 00 00 1F 00 00 00 1F 00 00 20 00 00 00 00
+
+page 12 THUMBPC crc D0B1
+0C 0C 0C 00 DE C0 DE C0 92 00 00 A0 92 00 00 A0
+04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+page 13 LDMUSER crc 856D
+01 00 FE CA 04 00 00 00 01 00 FE CA 00 00 00 00
+43 40 02 37 D2 00 00 60 78 56 34 12 00 00 00 00
+
+page 14 IRQWIN crc B383
+0C 00 08 00 0C 00 08 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+page 15 DMAEDGE crc 670E
+01 00 80 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+page 16 CAPDMA crc 6B5A
+80 02 00 00 80 02 00 00 80 02 00 00 00 37 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+page 17 SWEEPQ crc 3305
+00 00 08 00 00 00 00 00 00 00 00 00 75 0F 00 00
+00 00 00 00 4B 00 00 00 00 00 00 00 00 00 00 00
+
+page 18 BXDECODE crc DCB3
+99 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 EE

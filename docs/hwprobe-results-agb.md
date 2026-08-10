@@ -1,4 +1,4 @@
-# gbaedge hardware results — AGB session 1
+# gbaedge hardware results — AGB sessions 1 & 2
 
 Real hardware: **GBA SP (AGS-001)**, EverDrive GBA flashcart, 2026-08-10.
 Manual build of `tests/roms/gbaedge.gba` at 5b0db6b. `MODEL 18 7F` on every
@@ -50,7 +50,28 @@ Divergences (dingbat != hardware), ranked:
    CpuFastSet 256-word copy 450 cycles slow (0DFB vs 0FBD); Sqrt/ArcTan2/
    BgAffineSet off by 1-4 cycles in SWITIME.
 
-## Raw hardware transcription
+## Session 2 — the nine guessed-at-behavior pages (25-page build @ c1c5d8f)
+
+Same console and cart, 2026-08-10.  `ALL 4B70`, MODEL 18 7F.  Raw
+transcription: `tests/roms/expected/agb-sp-2.txt` (rendered PNGs beside
+it).  One page matches dingbat outright; seven diverge; BXDECODE could
+not be run — **pressing START on it hangs the console with no recovery**
+(the watchdog is IRQ-driven, so a candidate that masks IRQs or wedges
+the core in an exception mode is unrescuable; that alone proves at least
+one near-BX encoding does something violent rather than execute as BX or
+fall through).
+
+| page | verdict |
+|---|---|
+| IORW | **MATCH** (CRC 626A) — dingbat's unused/write-only IO read map is exactly right on all 16 registers |
+| CPSRBITS | diverges: only NZCV latch in CPSR (dingbat latches bits 8-27 too); SPSR holds exactly F00000FF; **SPSR bit4 is forced high** (write 0 -> read 10, write 0F -> read 1F; dingbat reads back what was written); sys-mode mrs SPSR returns CPSR (that part matches) |
+| THUMBPC | diverges on the headline: hardware CPSR after Thumb `cmp pc, r0` = **A0000092 — the pre-loaded SPSR value, mode bits included.  The SPSR-load theory is TRUE on silicon**; dingbat does a normal compare (20000092).  Stored-PC deltas (+12/+12/+12), `ldm pc` fetch (+8), Thumb `mov r0, pc` (+4) all match |
+| LDMUSER | diverges: `stm r13!, {r13}^` stores **user r13** (CAFE0001; dingbat stores 0) and the writeback lands in the **user bank as base+4** (user r13 becomes EWDST+0x44; dingbat adds 4 to the old user value instead).  No banked writeback either way; post-ldm^ SPSR read is UNCHANGED (600000D2) — the OR-with-CPSR theory is false, dingbat agrees |
+| IRQWIN | diverges: hardware dispatches after **3 sled instructions** for the IME and IE stores and **2** for the msr I-clear (dingbat: 1 everywhere); ack-race survivors 8/16 vs 9/16 |
+| DMAEDGE | diverges: after `strb 0x80 -> 0x040000DF`, CNT_H reads back **0080** — the byte write mirrored into BOTH bytes (enable ran + src-ctl bit left behind), so the rumor is real for the upper byte; the 0xDE and 0xDD byte writes did nothing at all (no mirroring down, not even a low-byte write — asymmetric).  dingbat: no mirroring anywhere |
+| CAPDMA | diverges: hardware transfers **640 words in frame 1 (160 triggers x 4) then the enable bit self-clears** (readback 3700) — capture DMA runs a full frame of lines then hardware disables it; no every-other-frame pattern with this arming.  dingbat fires one trigger (4 words) and also self-clears |
+| SWEEPQ | diverges: freq-1300 dies AT TRIGGER on hardware (poll 0) — the immediate trigger recalc apparently runs the overflow check **twice** (1950 passes, its own recalc 2925 fails); dingbat lets it live to the first tick.  freq-1000 dies at first tick, faster than dingbat (F75 vs 12F4 polls); the mid-note period rewrite kills the channel instantly (0 polls; dingbat 1CBF); the length-63 control dies in 4B polls — near-instant, suggesting a trigger-adjacent length clock (dingbat 12AA9).  Period-0 never ticks (cap) — matches dingbat |
+| BXDECODE | **not run — hangs the console** (see above).  Needs a v2 that runs one candidate per START press with results persisted and redrawn between candidates, so the wedging candidate is identified and the survivors still report |
 
 P00 IDENT      CRC 985C
 00: 7F 18 AE BA   04: 80 00 00 00   08: 00 00 FF 03   0C: 01 00 00 00

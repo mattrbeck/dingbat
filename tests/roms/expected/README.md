@@ -26,8 +26,12 @@ cart-influenced; each run's `.txt` header names the cart used.
 ## Runs
 
 - `agb-sp-1/` — GBA SP AGS-001 + EverDrive GBA, 2026-08-10 (gbaedge,
-  all 16 pages + MSRTBIT post-START; `ALL F54C`, post-START `1512`).
-  Analysis: `docs/hwprobe-results-agb.md`.
+  all 16 pages + MSRTBIT post-START; `ALL F54C`, post-START `1512`;
+  16-page build @ 5b0db6b).  Analysis: `docs/hwprobe-results-agb.md`.
+- `agb-sp-2/` — same console/cart, 2026-08-10 (gbaedge pages 16-24 of
+  the 25-page build @ c1c5d8f; `ALL 4B70`; BXDECODE not run — it hangs
+  the console, see the results doc).  Partial runs omit page 0 and give
+  `model:` in the `.txt` instead.
 
 gbedge (GB/GBC) runs land here the same way once a GB-slot cart run is
 transcribed; `hwprobe_expected.py` grows the 160x144 renderer then.
