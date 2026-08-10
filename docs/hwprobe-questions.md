@@ -151,3 +151,51 @@ most load-bearing points.  The v3 items above (a gbvis.gb visual ROM, the
 VRAM-contention timer page, per-source IRQ latency, the LCD-on H-Blank
 count page) are the next build, best shaped after the first photo set
 shows where silicon actually disagrees.
+
+## v4 candidates — shaped by AGB hardware session 1 (2026-08-10)
+
+Session 1 (docs/hwprobe-results-agb.md) confirmed 9/16 GBA pages outright
+and left six divergences, each of which is a *single anchor* that a
+follow-up page can turn into a *mechanism*.  Ranked by leverage:
+
+1. **IRQDECOMP** — decompose the undelivered reload-0 one-shot timer IRQ
+   (IRQLAT +0/+2): reload-0 vs reload-1 vs reload-0xFFF0; enable+IRQ in
+   one write vs two; IF-ack racing a new source; the IME=1→dispatch
+   window in instructions; halt-exit latency per source vs non-halt
+   latency.  Converts divergence #1 and the two synchronizer knobs into
+   a delivery-pipeline model.
+2. **CONTEND2** — session 1's CONTEND (mode 3, OBJ on, no sprites)
+   matched dingbat exactly; the *loaded* cases are where emulators
+   disagree: 128 OBJs on one line, modes 0/2 with all BGs, hblank-free
+   bit on/off — VRAM/OAM/palette access cost during visible vs hblank
+   vs vblank.  This is the CPU-visible face of the OBJ cycle budget
+   (Tier 3's visual item, without photographs).
+3. **MULTIME** — MULFLAGS gave 8 carry anchors (hardware CLEARS C where
+   dingbat keeps it); add the timing half: MUL/MLA/UMULL/SMLAL cycle
+   counts across operand byte-lengths (early-termination sweep) plus a
+   16-pair carry matrix, enough to fit the actual carry function rather
+   than patch the 6 known-wrong rows.
+4. **TIMPHASE + PSGPHASE** — the one-counter-many-taps cluster on AGB:
+   is the timer prescaler a single free-running divider (session 1's
+   staircase says the phase survives boot) shared across timers?  Does
+   enable reset it?  And the PSG frame sequencer: sweep ch1 trigger
+   phase against a timer to staircase the length-expiry tick (PSGSTAT's
+   ~14% divergence), and test whether SOUNDCNT_X master-off resets the
+   sequencer phase.
+5. **MEMCTL** — 0x04000800 read back 0D000020 on hardware (dingbat:
+   unimplemented, open bus).  Probe field writability, the 64K mirrors,
+   and the EWRAM-waitstate field's measured effect on a timed EWRAM
+   loop (write documented-safe values only; restore).
+6. **DMATIME** — DMA start delay, per-region transfer cost, the exact
+   trigger instant of hblank/vblank DMA vs DISPSTAT edges (TM0
+   timestamps), and DMA-completion-IRQ vs CPU-resume ordering.
+7. **IWCYCLE** — IntrWait/VBlankIntrWait return-path cost and the
+   0x03007FF8 BIOS-flag protocol: the known-deliberate HLE gaps become
+   measured quantities (real-BIOS path proved byte-exact in session 1,
+   so dingbat's own real-BIOS run can pre-verify the probe).
+
+Zero-code item with immediate payoff: run the *same* gbaedge build on
+every other GBA-family console available (AGB-001, micro, DS/DS Lite in
+GBA mode).  Page 0's ALL CRC instantly reports whether any probe differs
+across silicon revisions; MODEL separates the BIOS families (DS reads
+`18 80`).  Divergent consoles get their own expected/ directory.

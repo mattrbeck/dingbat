@@ -168,6 +168,15 @@ one-shot timer IRQ undelivered + per-source latencies), MULFLAGS carry
 after MUL, IDENT boot handoff (DISPCNT/POSTFLG/0x04000800), TIMERS boot
 prescaler phase, PSGSTAT length expiry, and the HLE-only SWI costs.
 
+## Expected results
+
+`tests/roms/expected/` holds one directory per transcribed hardware run:
+PNGs of every page rendered from the hardware values with the ROM's own
+font (`tests/roms/hwprobe_expected.py`), pixel-identical to the viewer's
+display.  An emulator screenshot that equals the PNG matches hardware on
+every byte of that page; see `tests/roms/expected/README.md` for the
+comparison rules (the `ALL` line encodes whole-run agreement).
+
 ## Regenerating / extending
 
 ```
