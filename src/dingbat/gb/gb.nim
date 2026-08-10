@@ -1004,11 +1004,13 @@ const NO_TDSEL_CHANGE*        = int32.low
   ## empty case costs no branch of its own -- the same shape as NO_LCDC2_FLIP.
   ## It is also what a DMG carries all frame, since only a CGB records a change.
 const TDSEL_ADDR_OFF*         = -1'i32
-  ## `GbFifoPpu.tdsel_addr` meaning "nothing on this line has driven an
-  ## $8000-region tile-data address". A SET-glitched read falls back to its own
-  ## read there. mealybug's notes name a third alternative for that case -- the
-  ## read in progress at the end of the PREVIOUS line -- and no ROM in this
-  ## tree reaches it, so the fallback is deliberately the unglitched byte.
+  ## `GbFifoPpu.tdsel_addr` meaning "nothing has driven an $8000-region
+  ## tile-data address yet". A SET-glitched read falls back to its own read
+  ## there. Only reachable before the first such read of a frame now that the
+  ## latch survives H-Blank, and no reference in this tree reaches it.
+const TDSEL_ADDR_BANK*        = 13
+  ## Bit `tdsel_addr` carries the VRAM bank in. Offsets are 13 bits, so the
+  ## bank rides above them and the whole latch is one store on the fetch path.
 const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
   ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
@@ -1870,18 +1872,24 @@ type
     # that lands on that dot exactly; both need the dot, and nothing else does.
     # Only a CGB records it, which is what keeps the DMG path at one compare.
     #
-    # `tdsel_addr`/`tdsel_bank` are the VRAM offset and bank of the most recent
-    # $8000-region tile-data read -- an object bitplane, a LCDC.4 = 1
-    # background bitplane, or a RESET-glitched read, which drove its
-    # $8000-region address before the reset arrived. A SET-glitched read
-    # delivers the byte there. TDSEL_ADDR_OFF when nothing on this line has
-    # driven one.
+    # `tdsel_addr` is the most recent $8000-region tile-data read's VRAM
+    # address -- an object bitplane, an LCDC.4 = 1 background bitplane, or a
+    # RESET-glitched read, which drove its $8000-region address before the
+    # reset arrived. A SET-glitched read delivers the byte there.
+    # TDSEL_ADDR_OFF when nothing has driven one yet.
     #
-    # All three are per-line scratch like obj_fix_from above, cleared at the
-    # mode 2 -> 3 edge, and not serialized: a state is captured in vblank.
+    # BANK IS PACKED IN, at bit 13, rather than kept in a field of its own:
+    # this is written by EVERY unsigned bitplane read of every frame, and the
+    # second store cost +0.20% of retired instructions on blargg cpu_instrs
+    # where the packed one costs +0.20% for the whole rule. Unpacking happens
+    # once per glitched read, which is a handful of dots a frame at most.
+    #
+    # `tdsel_dot` is per-line scratch cleared at the mode 2 -> 3 edge;
+    # `tdsel_addr` deliberately is NOT, because H-Blank does not clear the bus
+    # register it stands for (see CGB_TDSEL_GLITCH). Neither is serialized: a
+    # state is captured in vblank.
     tdsel_dot*:           int32
     tdsel_addr*:          int32
-    tdsel_bank*:          int32
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8

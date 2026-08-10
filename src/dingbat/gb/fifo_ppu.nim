@@ -723,20 +723,22 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # SET-glitched read comes back to.
           data = ppu.tile_num
           ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
-                                 (if low_plane: 0 else: 1))
-          ppu.tdsel_bank = int32(bank_num)
+                                 (if low_plane: 0 else: 1) or
+                                 (bank_num shl TDSEL_ADDR_BANK))
         elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
           # SET on the read dot: the address never advanced, so the byte comes
           # from wherever the last $8000-region read left it.
-          data = ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr]
+          data = ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+                          ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)]
       elif sel:
         # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and it
         # leaves its address here like any other. `m3_lcdc_tile_sel_change` and
         # its window twin are the ROMs that separate this from the narrower
         # form (object fetches and RESET-glitched reads only) -- see
-        # CGB_TDSEL_GLITCH in gb.nim for the two references' arithmetic.
-        ppu.tdsel_addr = int32(off)
-        ppu.tdsel_bank = int32(bank_num)
+        # CGB_TDSEL_GLITCH in gb.nim for the two references' arithmetic. ONE
+        # store, which is why the bank is packed in: this line runs on every
+        # unsigned bitplane read of every frame.
+        ppu.tdsel_addr = int32(off or (bank_num shl TDSEL_ADDR_BANK))
     when defined(gb_px_trace):
       if gb_traced(ppu.ly):
         # Every candidate substitution source this read could have delivered,
@@ -758,7 +760,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
              " uns=", toHex(ppu.vram[bank_num][unsO], 2),
              " sgn=", toHex(ppu.vram[bank_num][sgnO], 2),
              " latch=", (if ppu.tdsel_addr == TDSEL_ADDR_OFF: "--"
-                         else: toHex(ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr], 2)),
+                         else: toHex(ppu.vram[ppu.tdsel_addr shr TDSEL_ADDR_BANK][
+                           ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)], 2)),
              " prevd=", toHex(px_prev_data, 2),
              " prevu=", toHex(px_prev_uns, 2),
              " lcdc=", toHex(ppu.lcd_control, 2)
@@ -1174,8 +1177,7 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # reports the object's plane 1 whichever plane it is itself on. See
     # CGB_TDSEL_GLITCH in gb.nim for the band-3 / band-5 pair that says so.
     if ppu.cgb:
-      ppu.tdsel_addr = int32(b_hi)
-      ppu.tdsel_bank = int32(bank)
+      ppu.tdsel_addr = int32(int(b_hi) or (bank shl TDSEL_ADDR_BANK))
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
       echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,
