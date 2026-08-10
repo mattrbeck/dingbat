@@ -317,11 +317,27 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
   ## `acid/cgb-acid-hell` needs the CPU's write burst TWO M-cycles later against
   ## the PPU, not one. Its LCDC writes and the fetcher's reads are both on an
   ## 8-dot lattice, so only a whole 8 dots changes which of the sixteen written
-  ## bytes lands on the observable bitplane read; 4 dots moves the write onto
-  ## the tile-map read, where it does nothing at all, and the frame comes out
-  ## BIT-IDENTICAL to `main`. At 2 the row is 23040/23040 -- and the bracket
-  ## above refuses 2 outright. See the acid-hell section of
-  ## docs/gb-failure-triage.md.
+  ## bytes lands on the observable bitplane read; 4 dots moves the write into
+  ## the tile-MAP slot, where no read is on the change's dot at all. At 2 the
+  ## row is 23040/23040 -- and the bracket above refuses 2 outright. See the
+  ## acid-hell section of docs/gb-failure-triage.md.
+  ##
+  ## **At 1 the row is 23038/23040 and there is no rule that fixes it.** (The
+  ## sentence this replaces said the frame came out BIT-IDENTICAL to `main`
+  ## here; that predates `CGB_TDSEL_IDX_DOTS`, which fires at 0 and on nothing
+  ## at 1, so the two builds differ by exactly the two famous pixels.) The
+  ## whole question -- what the CGB TILE_SEL glitch rule must be in THIS world
+  ## -- was measured on 2026-08-14 with `tools/gbppu/tdselphase.py`, which
+  ## buckets every pinned background bitplane read of the five reference frames
+  ## by how far the last LCDC.4 change is from it. Hardware disturbs a read on
+  ## exactly ONE offset, zero, and 6352 mealybug reads at every other offset
+  ## from -8 to +40 dots are undisturbed. At 1 acid-hell's changes sit 4 dots
+  ## off its observable reads, in a bucket 56 mealybug reads share and 48 of
+  ## them refuse the index in. Full account, including the two-sided bracket
+  ## that kills the last spelling, in docs/gb-failure-triage.md's 2026-08-14
+  ## entry. **What the 4 dots are is now answered and it is not this knob:**
+  ## `M3_PIPE_AHEAD` supplies them from the consumer side, and the same entry
+  ## carries the bundle world's numbers.
 const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## T-cycles between the write to FF46 and the OAM DMA unit taking the bus, on
   ## CGB. 8 is what both devices ship with (mem_dma_tick) and what this tree
@@ -817,6 +833,20 @@ const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
   ## `objtab.py`'s hardware table (153/153 cells). Full account, both sides, in
   ## docs/gb-failure-triage.md's 2026-08-13 entry -- read it before changing
   ## anything here.
+  ##
+  ## **The world in between was measured on 2026-08-14 and has no rule at all.**
+  ## At `CGB_HALT_PPU_LEAD=1` -- the value the halt bracket actually wants --
+  ## this ROM's write lattice moves 4 dots, into the tile-MAP slot, and NO
+  ## bitplane read of the frame has an LCDC.4 change on its dot: the census
+  ## drops to 408 cells (216 SET / 192 RESET, still 216/216 and 192/192 under
+  ## the rules above), this constant fires on nothing at any window in 0..19,
+  ## and the row is 23038 whatever it is set to. A rule that fired in the map
+  ## slot instead is refused by 48 `*_change2` cells in the identical bucket,
+  ## and the one context that separates them is bracketed from both sides.
+  ## `tools/gbppu/tdselphase.py` is that instrument -- every pinned bitplane
+  ## read by its offset from the last change, where hardware disturbs exactly
+  ## one offset out of the 6352 measured. So this constant is not what stands
+  ## between the tree and `LEAD=1`; 4 dots are.
   ##
   ## **A revision split is excluded, not merely unsupported.** `cgb-acid-hell`
   ## picks its tile data off a `$FEA0` readback and dingbat takes the same

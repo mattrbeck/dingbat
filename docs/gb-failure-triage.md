@@ -1445,6 +1445,158 @@ and the only thing standing between that reading and this one is one M-cycle of
 CGB halt phase, measured against two gambatte families and nothing else". The
 settling experiment is unchanged and still does not exist.
 
+#### 2026-08-14: the `LEAD=1` world has no TILE_SEL rule, and the tile-MAP slot is what refuses it
+
+The entry above leaves one obvious move open: `CGB_HALT_PPU_LEAD=1` is the
+value the halt bracket wants, it closes daid `ppu_scanline_bgp` on CGB, and the
+only thing it costs on this side is `cgb-acid-hell`. So ask the question
+directly — **what must the CGB TILE_SEL glitch rule be in the `LEAD=1` world,
+such that the 415-cell corpus, the four mealybug `tile_sel` rows and
+`cgb-acid-hell` are all right in one build?**
+
+The answer is that there is no such rule, and the refusal is not a near miss.
+It is measured over 23984 pinned bitplane reads with a two-sided bracket on the
+last free parameter. What follows is the derivation; `tools/gbppu/tdselphase.py`
+is the instrument and it is committed with this entry.
+
+**First, the premise: the corpus really is `LEAD`-invariant, and this is
+verified rather than argued.** The four mealybug ROMs sync on a mode-2 STAT
+interrupt in a NOP slide and never execute `halt`, so the halt phase cannot
+reach them. Checked by building the pipeline trace twice and comparing:
+
+| ROM | pipeline events | `LEAD=0` vs `LEAD=1` |
+|---|---|---|
+| `m3_lcdc_tile_sel_change` | 1796441 | byte-identical |
+| `m3_lcdc_tile_sel_change2` | 1607480 | byte-identical |
+| `m3_lcdc_tile_sel_win_change` | 1842377 | byte-identical |
+| `m3_lcdc_tile_sel_win_change2` | 1648664 | byte-identical |
+
+Every dot, every address, every byte, 6.9M events. So the corpus constrains the
+rule *identically* in both worlds, and only `cgb-acid-hell` moves.
+
+**Where its write burst lands at `LEAD=1`.** The wake is one M-cycle later in
+PPU time, so the whole 8-dot write lattice shifts +4 dots — from the plane-1
+read dots onto the tile-MAP read dots. Line 68, the observable tile
+(`attr = 00`, `num = $55`), traced both ways:
+
+| | `LEAD=0` | `LEAD=1` |
+|---|---|---|
+| LCDC.4 change dots on the line | 154, 162, 170, **178**, 186 | 158, 166, **174**, 182, 190 |
+| tile-map read | 174 | 174 |
+| plane 0 read | 176 (signed) | 176 (signed) |
+| plane 1 read | **178** (unsigned, glitch SET) | 178 (signed, **no glitch**) |
+| which of the 16 written bytes is on it | #10, `$E3 → $F3`, a SET | #9, `$F3 → $E3`, a RESET, in the MAP slot |
+
+At `LEAD=1` **not one bitplane read of the frame has an LCDC.4 change on its
+dot**: the corpus census drops from 415 cells to 408 (216 SET / 192 RESET,
+scoring 216/216 and 192/192 under the shipping rules), `CGB_TDSEL_IDX_DOTS`
+fires on nothing at any window in 0..19, and the row is 23038/23040 at every
+setting of it. The two pixels are not mis-substituted there; nothing is
+substituted at all.
+
+**So the rule would have to fire in the map slot — and that is a bucket the
+mealybug references populate.** `tdselphase.py` keeps every background bitplane
+read whose eight bits a reference pins (not only the glitched ones, which is
+what `tdselcells.py` scores) and buckets it by `delta = read dot - the dot the
+last LCDC.4 change went live`. The four mealybug frames give 23680 pinned reads,
+6352 of them with a change on the same line within -8..+40 dots:
+
+| offset of the change from the read | pinned mealybug reads | disturbed by hardware |
+|---|---|---|
+| `delta = 0` (the change is ON the read) | 408 | all of them — the SET/RESET rules |
+| `delta = 1..40` | 5720 | **0** |
+| `delta = -8..-1` | 224 | **0** |
+
+**Hardware disturbs a read on exactly one offset, and it is zero.** That single
+table is the whole refutation: at `LEAD=1` `cgb-acid-hell`'s seven observable
+reads sit at `delta = 4`, and 160 mealybug reads at `delta = 4` say a change
+there does nothing.
+
+**The bucket is shared right down to the previous change, and then bracketed
+from both sides.** Sliced by the fetch cycle's own origin — `mapoff = 0` is a
+change on the tile-map read dot, `read+4` is the plane-1 read of that fetch,
+RESET direction, which is `cgb-acid-hell`'s exact situation:
+
+| context | reads | hardware = the plain byte | hardware = the tile index |
+|---|---|---|---|
+| previous change: SET at -8, and one at **-32** | **7** (all `cgb-acid-hell`) | 5 (coincidences) | **7** |
+| previous change: SET at -8, and one at **-24** | 32 (`*_change2`) | **32** | 0 |
+| previous change: SET at -8, **none before it** | 24 (`*_change2`) | **24** | 8 (coincidences) |
+| **no** previous change on the line | 8 | **8** | 8 (coincidences) |
+
+Read the last free parameter off that table. Every candidate rule that fires on
+acid-hell and not on the mealybug reads has to be keyed on the age of the
+change *before last*, and the two neighbours of acid-hell's -32 bracket it from
+both sides: at -24 hardware is quiet, and with no earlier change at all —
+i.e. infinitely stale — hardware is quiet. A predicate true only at exactly -32,
+with quiet on both sides of it, is not a rule. **`H_toggle`, "the bit was
+already toggling one fetch back", dies here too**: 56 mealybug reads have
+exactly that history (SET at -8, RESET at 0) and refuse the index, 48 of them
+with the index pinned wrong.
+
+**The two neighbouring-constant escapes are refuted by rows, not cells.** The
+missing 4 dots cannot be borrowed from the LCDC.4 delivery path, because that
+path is shared with the ROMs that pin it:
+
+| build | `cgb-acid-hell` | the four mealybug `tile_sel` rows (CGB) |
+|---|---|---|
+| `LEAD=1` (shipping rules) | 23038 | 23040 / 23040 / 23040 / 23040 |
+| `LEAD=1`, `CGB_TDSEL_IDX_DOTS=0` | 23038 | 23040 / 23040 / 23040 / 23040 |
+| `LEAD=1`, `CGB_TDSEL_LATENCY=5` (the +4-dot escape) | **23040** | 21572 / 21515 / 22174 / 21499 |
+
+The escape works exactly as advertised and costs 1468, 1525, 866 and 1541
+pixels on the four rows it is derived from. `CGB_LCDC_TDSEL_LATENCY` is the same
+shift applied at the write instead of the read and is refused the same way, with
+three `window` rows on top (the table at that constant).
+
+**The verdict.** At `LEAD=1` the missing thing is not a substitution rule; it is
+4 dots, and every instrument that could supply them is already pinned:
+
+* the fetch grid is pinned by `objtab.py`'s 153/153 OBJ-penalty cells, which
+  fix the 6 dots this ROM's timing sprite costs;
+* the change-to-read phase is pinned by the four mealybug rows through
+  `CGB_TDSEL_LATENCY`, bracketed to one dot from both sides;
+* the wake-to-write phase is pinned by `halt/lycirq_m2stat_{1,2,3}` — three
+  ROMs one NOP apart, on `cgb-acid-hell`'s own IME-clear LYC path — to one
+  M-cycle, which is `LEAD=1` itself.
+
+The only door left open is a phase that separates an **LYC**-sourced STAT wake
+from the **mode-2** STAT sync the mealybug ROMs use, since that would move this
+ROM and not them. It is not free either: `halt/lycirq_m2stat` measures the same
+composite (LYC raise → wake → read) and brackets it, so anything found there has
+to re-explain that family in the same commit. Worth stating because it is the
+one shape that is not yet excluded, and it is a halt/STAT question rather than
+a PPU one.
+
+So the ledger for whoever integrates `LEAD=1` is: it buys `halt/lycirq_m2stat_2`
+and `halt/m1int_ly_2`, it closes daid `ppu_scanline_bgp` on CGB, and it costs
+`cgb-acid-hell` two hardware-photo-verified pixels **with no rule available to
+buy them back**. `CGB_TDSEL_IDX_DOTS` is not what stands in the way and turning
+it off does not help; it is the 4 dots.
+
+**The whole-runner `LEAD=1` baseline, for the integration that has to price
+this.** One full `dingbat_test_runner` pass per build, same tree, same day; the
+`LEAD=0` column is `main`'s `tests/results.md` reproduced row for row:
+
+| row | `LEAD=0` | `LEAD=1` |
+|---|---|---|
+| local runner total | **769** / 981 | **765** / 981 |
+| gambatte total | 3850 / 5005 | 3850 / 5005 |
+| `gambatte/halt` | 124 / 158 | **128** / 158 |
+| `gambatte/dma` | 124 / 229 | 120 / 229 |
+| `acid/cgb-acid-hell` | 23040 | 23038 |
+| `strikethrough/strikethrough-cgb` | 23040 | 23033 |
+| `daid/speed_switch_timing_ly` | 23040 | 22915 |
+| `daid/speed_switch_timing_stat` | 23040 | 22807 |
+
+Nothing else in the tree moves. The two `daid/speed_switch_*` rows are not a
+cost of the phase, they are the phase being double-counted: `SPEED_SWITCH_STALL_T`
+absorbed this same M-cycle and its window moves 65548 → 65544 with it (see that
+constant in `memory.nim`), which is worth 4 net gambatte `speedchange` rows on
+its own. So the real standing cost of `LEAD=1` is `strikethrough-cgb`'s 7 pixels
+and `cgb-acid-hell`'s 2, against +4 `halt` rows, -4 `dma`, and daid
+`ppu_scanline_bgp`.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one
