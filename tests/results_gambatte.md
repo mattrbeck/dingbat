@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 15:31:18*
+*Generated: 2026-08-09 16:53:19*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3849/5005 passed.**
+**3850/5005 passed.**
 
 ## bgen
 
@@ -1178,9 +1178,9 @@ All 67 tests passed.
 | speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
 
-## sprites (435/476 passed)
+## sprites (436/476 passed)
 
-435/476 tests passed, 41 failed:
+436/476 tests passed, 40 failed:
 
 | Test | Result |
 |------|--------|
@@ -1216,7 +1216,6 @@ All 67 tests passed.
 | sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/space/10spritesPrLine_wx6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/sprite_late_disable_spx18_2_dmg08_out3 [dmg] | got 0, expected 3 |
 | sprites/sprite_late_disable_spx19_2_dmg08_out3 [dmg] | got 0, expected 3 |
 | sprites/sprite_late_disable_spx1B_2_dmg08_out3 [dmg] | got 0, expected 3 |

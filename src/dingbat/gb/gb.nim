@@ -687,6 +687,41 @@ const WIN_HEAD_ABSORB*        {.intdefine.} = 1
   ##
   ## The derivation and the ruler it is read off are at the head latch in
   ## fifo_ppu.nim.
+const WIN_WX0_PHASE*          {.intdefine.} = 1
+  ## Where WX = 0's line-start window puts its FIRST TILE, and where the extra
+  ## dot that goes with SCX > 0 is spent. 1 ships: the discard is `7 - WX` at
+  ## every WX (so seven at WX = 0) and the head's idle term is `WX - 1`
+  ## unclamped, which at WX = 0 is *minus one* -- a startup fetch one dot
+  ## shorter, taken by skipping one of FETCHER_ORDER's sleeps so the push
+  ## arrives a dot early. 0 is the control build and the pre-2026-08-09
+  ## spelling: a six-pixel discard at WX = 0 with `SCX & 7 = 0` and zero idle
+  ## dots.
+  ##
+  ## Both spend the same DOTS -- `idle + discard = 6`, which is what every
+  ## length instrument in the tree measures and none of them moves. What they
+  ## disagree about is the window's tile PHASE, one pixel, and exactly one ROM
+  ## can see it: mealybug `m3_lcdc_win_en_change_multiple_wx` turns the window
+  ## off again partway across every line, and the background resumes on the
+  ## WINDOW's tile boundary ("it will always display a multiple of 8 pixels,
+  ## except when the window begins off the left edge of the screen" --
+  ## `m3_lcdc_win_en_change_multiple.asm:21`). So the boundary reads the phase
+  ## straight off the reference, per line, with WX = LY:
+  ##
+  ##   WX (= LY)      0    1    2    3    4    5    6    7
+  ##   black run      9   10    3    4    5    6    7    8
+  ##   first tile   -7..0 -6..1 -5..2 -4..3 -3..4 -2..5 -1..6  0..7
+  ##
+  ## Every WX from 1 up is `first tile = (WX - 7) .. WX`, the window's own
+  ## first pixel; WX = 0 is the same formula and NOT the six-pixel exception
+  ## (its run is 9 = one tile boundary at x = 1, plus the eight pixels of the
+  ## tile after it, the same "one tile later" WX = 1's 10 is).
+  ##
+  ## The dot it hands back is the one the sampler used to pay: "window
+  ## activating one T-cycle later when WX = 0 and SCX > 0"
+  ## (`m3_window_timing_wx_0.asm:21`) is now the ABSENCE of that skip, which is
+  ## what "activating later" says, instead of a ninth discarded pixel. The test
+  ## is taken at the dot SCX is latched on, because that is the first dot the
+  ## answer exists on -- see fifo_sample_smooth_scroll.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
   ## Which dot WX is read on to decide whether a line STARTS as a window line:
   ## the last dot of the throw-away fetch at the head of mode 3 (1, shipping),
@@ -707,6 +742,27 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const WIN_PRE_PX_PHASE*       {.intdefine.} = 1
+  ## What a match on the comparator's PRE-PIXEL slot (WIN_START_PRE_PIXEL) does
+  ## with the window's TILE. 1 ships: the tile keeps its own first pixel, so it
+  ## covers `WX - 7 .. WX` exactly as at every other WX, and the startup fetch
+  ## is one dot shorter because one of its six dots was spent before the shifter
+  ## got to its first pixel. 0 is the control build and the pre-2026-08-09
+  ## spelling, where the clamp moved the tile with the match and the window's
+  ## first tile covered `0 .. 7`.
+  ##
+  ## The mode 3 LENGTH is identical either way, by construction -- five dots of
+  ## fetch plus the pixel at x = -1 is six dots plus the pixel at x = 0 -- so
+  ## every length instrument that pinned the clamp (GBMicrotest `win6_a/_b` at
+  ## 178, gambatte's WX = 3 families) reads exactly what it read before. What
+  ## moves is one pixel of phase, and mealybug
+  ## `m3_lcdc_win_en_change_multiple_wx` is again the only ROM that can see it:
+  ## on its WX = 6 line the background resumes at x = 7, i.e. on the boundary of
+  ## a window tile that covers `-1 .. 6`, where the clamped tile would put it at
+  ## x = 8. That is the same reading as WIN_WX0_PHASE at the other end of the
+  ## same table, and the same conclusion -- the window's tile sits where its own
+  ## first pixel is, and the clamp is only about which dot our shifter can
+  ## notice it on.
 const WIN_TAIL_FETCH*         {.intdefine.} = 1
   ## Whether a window START holds mode 3 open for the fetch it restarts, when
   ## the start lands inside the last pixels of the line. 1 ships; 0 is the
