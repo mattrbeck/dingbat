@@ -1,7 +1,10 @@
 # hwprobe: gbedge.gb + gbaedge.gba — hardware edge-case probe ROMs
 
-**Date:** 2026-08-09  **ROMs:** `tests/roms/gbedge.gb` (21 pages, DMG+CGB),
-`tests/roms/gbaedge.gba` (12 pages).  Both built from committed sources
+**Date:** 2026-08-10 (v2)  **ROMs:** `tests/roms/gbedge.gb` (25 pages,
+DMG+CGB), `tests/roms/gbaedge.gba` (14 pages).  v2 adds six pages aimed at
+the highest-leverage open questions in docs/gb-failure-triage.md and the
+GBA bus/HLE calibrations; the full research catalog behind them is
+docs/hwprobe-questions.md.  Both built from committed sources
 (`gbedge.py` hand-assembles; `gbaedge.py` drives arm-none-eabi-as/ld).
 
 ## Why these exist
@@ -83,8 +86,13 @@ via `--mode=microtest --list=...` (scored "PASS" == ROM healthy).
 | 12 | PCMPSG (CGB/AGB) | 24 PCM12 samples at 5 M-cycles right after ch1 trigger (latency + duty steps), ch2 join, NR52 flags | the digital scope the SameSuite APU work needs — sub-period sampling answers the channel_1/2 offset question on silicon |
 | 13 | DSTAT (CGB) | STAT string + LY153 quirk **in double speed** (10-dot sampling) | double resolution on the same edges; directly validates the cc-2 STAT readback change |
 | 14 | SPEED (CGB) | KEY1 switch: DIV reset?, TIMA across the stall (stall length!), LY across both switches, double-rate DIV check | Pan Docs' ~2050-cycle stall figure vs silicon |
+| 15 | M1STAT | IF bits 0+1 sampled together across the 143->144 boundary at 4-dot resolution, mode-1 source only; the mode-2-source-at-144 quirk; a control | bucket 18: 42 gambatte `m1` rows are VALUE failures on whether the mode-1 STAT source asserts at vblank entry and how it overlaps the vblank IF bit |
+| 16 | HALTPHASE | halt-woken handler vs a timed sled racing the same mode-0 edge, both TIMA- and LY-timestamped, 1 M-cycle resolution via grid phase sweeps, SCX 0 and 3 | bucket 24: GBMicrotest and mooneye contradict each other about exactly this on the same silicon; resolving it gates ~21 runner rows (STAT_M2_LEAD) |
+| 17 | WYLATCH | mode-0-IRQ timestamp of the window-start line while the WY write time is swept across line 39, four 4-dot-spaced timestamp grids + early-armed and never-hits controls | the late_wy anomaly: CGB samples WY SOONER than DMG (the only backwards CGB latency); ~26 late_wy rows + the 51-row WY-LATCH pipeline sub-bucket |
+| 18 | CGBWRAM | $D000-window banking under every SVBK value with alias sentinels, incl. the exact SVBK=2 configuration | bucket 16's 64 rows, "Declined pending hardware": byte 0A reads 77 on a console where $D000 aliases $C000, 5C where banking is real |
 
-CGB-only pages show `EE` at offset 1F on DMG-class hardware.
+CGB-only pages show `EE` at offset 1F on DMG-class hardware.  (CGBWRAM
+runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 
@@ -117,6 +125,8 @@ CGB-only pages show `EE` at offset 1F on DMG-class hardware.
 | 09 | PPUSTAT | [DISPSTAT,VCOUNT] pairs across line 40, fine window after hblank-flag rise, vblank-entry pairs | hblank-set-at-1006 vs mGBA's model; boundary sampling mirrors the GB cc-2 work |
 | 0A | PSGSTAT | ch1 active-flag after trigger, poll-count until length expiry, SOUNDBIAS boot value, ch3 wave-RAM bank readback while playing | GB channels on AGB silicon (SameSuite-on-AGB context) |
 | 0B | WAITSTATE | 16 sequential ROM reads under 4 WAITCNT settings; a 32-nop ROM call with prefetch off/on; WAITCNT restored to boot value | prefetch-buffer modelling; flashcart-dependent — record the cart |
+| 0C | PFPHASE | one timer-bracketed ROM data read after k=0..7 sequential ROM fetches, two waitstate settings | dingbat's prefetch dead-cycle rule (`elapsed mod s == s-1`) is fitted per-row to the mGBA suite and provably wrong-shaped for the DMA rows; the cost-vs-k wobble IS the real rule |
+| 0D | SWIREGION | Sqrt cycle counts at 4 inputs between the fit's calibration points; Div and CpuSet issued from IWRAM/EWRAM/ROM callers | SWI_HLE_BASE and the "S16-1" refill residual were calibrated against the suite's IWRAM column only; Sqrt is a 3-point piecewise guess |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 

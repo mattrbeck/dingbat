@@ -1920,6 +1920,280 @@ def t_speed(a, slot, p):
     a.ld_nn_a(slot + 7)
 
 
+@test("M1STAT")
+def t_m1stat(a, slot, p):
+    """Bucket 18 (docs/gb-failure-triage.md): does the mode-1 STAT source
+    assert at all on entering vblank, and how does it overlap the vblank IF
+    bit?  42 gambatte `m1` rows are value (not phase) failures on exactly
+    this, and no STAT phase experiment has ever touched it.
+
+    00-17  four 6-sample sweeps of IF across the line 143->144 boundary at
+           phase offsets 0/1/2/3 M-cycles, STAT=$10 (mode-1 source ONLY)
+           armed, IE=0.  Each byte carries bit0 (vblank IF) and bit1 (STAT
+           IF) together, so their relative rise order is read at 4-dot
+           resolution from a single column.
+    18-1D  6 samples with STAT=$20 (mode-2 source only): the famous "OAM
+           source pulses at line 144" quirk, same boundary.
+    1E     IF one sample after entry with STAT=$00 (control: bit1 clear).
+    """
+    def entry_sweep(stat_en, dest, n, phase, tag):
+        a.ld_r_n("a", stat_en)
+        a.ldh_n_a(STAT)
+        wait_line(a, f"{p}_{tag}", 143)
+        a.xor_r("a")
+        a.ldh_n_a(IF)
+        a.ld_rr_nn("hl", 0xFF00 + IF)
+        a.ld_rr_nn("de", dest)
+        a.delay(78 + phase)            # samples span ~dot 370..490 of 143
+        for _ in range(n):
+            a.ld_r_r("a", "hl")
+            a.ld_rr_a("de")
+            a.inc_rr("de")
+        a.xor_r("a")
+        a.ldh_n_a(STAT)
+
+    for ph in range(4):
+        entry_sweep(0x10, slot + 6 * ph, 6, ph, f"m1p{ph}")
+    entry_sweep(0x20, slot + 24, 6, 0, "m2q")
+    entry_sweep(0x00, slot + 30, 1, 40, "ctl")
+
+
+@test("HALTPHASE")
+def t_haltphase(a, slot, p):
+    """Bucket 24: GBMicrotest (TIMA oracle) and mooneye (LY oracle) disagree
+    about where a halt-woken handler stands relative to the mode-0 edge, on
+    the same device at the same SCX — the arithmetic says they can't both be
+    right, and resolving it gates the STAT_M2_LEAD work (~21 runner rows).
+    This page runs BOTH shapes with BOTH oracles.
+
+    Layout per SCX in {0, 3} (16 bytes each, at +00 / +10):
+    +0..3   halt arm: TIMA at STAT-mode-0 handler entry, with the TIMA
+            grid phase-swept 0..3 M-cycles (recovers 1 M-cycle resolution
+            from the 4 M-cycle counter)
+    +4      halt arm: LY at handler entry (phase 0)
+    +5..8   sled arm: IF read at a fixed aligned point, delay swept
+            0..3 M-cycles (where the IF bit rises, no halt involved)
+    +9..12  sled arm: TIMA at those same four points
+    +13     sled arm: LY at the phase-0 point
+    """
+    patch_tramp(a, 4, f"{p}_stat")     # stat vector -> recording handler
+    for si, scx in enumerate((0, 3)):
+        base = slot + 16 * si
+        # ── halt arm ────────────────────────────────────────────────────
+        for ph in range(4):
+            a.ld_r_n("a", scx)
+            a.ldh_n_a(SCX)
+            a.ld_r_n("a", 0x08)        # mode-0 source
+            a.ldh_n_a(STAT)
+            a.ld_r_n("a", 0x02)
+            a.ldh_n_a(IE)
+            wait_line(a, f"{p}_h{si}_{ph}", 40)
+            a.delay(ph)                # shifts the TIMA grid, not the halt
+            a.xor_r("a")
+            a.ldh_n_a(DIV)
+            a.ldh_n_a(TIMA)
+            a.ld_r_n("a", 0x05)        # 16-dot period timestamp counter
+            a.ldh_n_a(TAC)
+            a.xor_r("a")
+            a.ldh_n_a(IF)
+            a.ei()
+            a.halt()                   # mode 0 of line 40 wakes+dispatches
+            a.di()
+            a.xor_r("a")
+            a.ldh_n_a(TAC)
+            a.ldh_n_a(IE)
+            a.ldh_n_a(STAT)
+            a.ld_a_nn(SCRATCH + 0x28)  # handler's TIMA
+            a.ld_nn_a(base + ph)
+            if ph == 0:
+                a.ld_a_nn(SCRATCH + 0x29)
+                a.ld_nn_a(base + 4)
+        # ── sled arm (no halt, no IRQ: IME off, poll-free timed reads) ──
+        for ph in range(4):
+            a.ld_r_n("a", scx)
+            a.ldh_n_a(SCX)
+            a.ld_r_n("a", 0x08)
+            a.ldh_n_a(STAT)
+            wait_line(a, f"{p}_s{si}_{ph}", 40)
+            a.xor_r("a")
+            a.ldh_n_a(DIV)
+            a.ldh_n_a(TIMA)
+            a.ld_r_n("a", 0x05)
+            a.ldh_n_a(TAC)
+            a.xor_r("a")
+            a.ldh_n_a(IF)
+            a.delay(30 + 3 * ph)       # 4 points straddling the 3->0 edge
+            a.ldh_a_n(IF)
+            a.ld_nn_a(base + 5 + ph)
+            a.ldh_a_n(TIMA)
+            a.ld_nn_a(base + 9 + ph)
+            if ph == 0:
+                a.ldh_a_n(LY)
+                a.ld_nn_a(base + 13)
+            a.xor_r("a")
+            a.ldh_n_a(TAC)
+            a.ldh_n_a(STAT)
+    a.xor_r("a")
+    a.ldh_n_a(SCX)
+    a.jr(f"{p}_end")
+    a.label(f"{p}_stat")
+    a.push("af")
+    a.ldh_a_n(TIMA)
+    a.ld_nn_a(SCRATCH + 0x28)
+    a.ldh_a_n(LY)
+    a.ld_nn_a(SCRATCH + 0x29)
+    a.pop("af")
+    a.reti()
+    a.label(f"{p}_end")
+
+
+@test("WYLATCH")
+def t_wylatch(a, slot, p):
+    """The late_wy anomaly: 13 of 14 gambatte late_wy families expect
+    DIFFERENT values per device, all shifted so that the CGB samples WY
+    SOONER than the DMG — the opposite direction of every other CGB write
+    latency.  dingbat models no device split at all (~26 late_wy rows +
+    the 51-row WY-LATCH pipeline sub-bucket).
+
+    Oracle: the window starting on a line stretches that line's mode 3, so
+    the mode-0 STAT IRQ arrives measurably later.  Sweep WHEN WY is written
+    across the line-39/40 boundary and timestamp line 40's mode-0 edge:
+    the k where the timestamp jumps is the WY sample point, at ~3 M-cycle
+    granularity.  Photograph on DMG and CGB — the flip-k delta between the
+    two IS the late_wy device split.
+
+    00-17  TIMA timestamp of line 40's mode-0 IRQ: WY=40 written at
+           k=0..5 (x3 M-cycles) into line 39, at TIMA grid phases
+           +0/+1/+2/+3 M-cycles (grouped [ph][k], 6 per phase).  The grid
+           zeroes at a FIXED dot early in line 40 (computed delay, not a
+           second LY poll, so the k sweep cannot smear it), and four
+           grids 4 dots apart mean even a stretch smaller than one
+           16-dot tick must flip at least one of them.
+    18-1B  oracle validation at phases 0..3: WY=40 armed BEFORE the
+           frame — must sit above the control by the window-start
+           stretch, or the oracle itself is too coarse
+    1C-1F  control at phases 0..3: WY stays 200 (window never hits)
+    """
+    patch_tramp(a, 4, f"{p}_stat")
+    runs = []
+    for ph in range(4):
+        runs.append((40, slot + 6 * ph, ph, False, 6))
+    runs.append((40, slot + 24, None, True, 4))    # ph = k for these two
+    runs.append((200, slot + 28, None, False, 4))
+    for run, (wy_val, dest, phase, early, nk) in enumerate(runs):
+        for k in range(nk):
+            ph = phase if phase is not None else k
+            a.call("lcd_off_safe")
+            a.ld_r_n("a", 40 if early else 200)   # early: window armed now
+            a.ldh_n_a(WY)
+            a.ld_r_n("a", 80)
+            a.ldh_n_a(WX)
+            a.ld_r_n("a", 0xB1)        # LCD + BG + WINDOW enable
+            a.ldh_n_a(LCDC)
+            wait_line(a, f"{p}_r{run}k{k}", 39)
+            a.delay(3 * k)
+            a.ld_r_n("a", wy_val)      # the swept WY write, in line 39
+            a.ldh_n_a(WY)
+            # exact remainder to a fixed dot early in line 40: everything
+            # from the poll exit to the DIV reset totals 112 M-cycles + ph
+            # regardless of k (wy write block is 5 M)
+            a.delay(107 - 3 * k + ph)
+            a.xor_r("a")
+            a.ldh_n_a(DIV)
+            a.ldh_n_a(TIMA)
+            a.ld_r_n("a", 0x05)
+            a.ldh_n_a(TAC)
+            a.ld_r_n("a", 0x08)        # arm mode-0 IRQ: line 40's own edge
+            a.ldh_n_a(STAT)
+            a.xor_r("a")
+            a.ldh_n_a(IF)
+            a.ld_r_n("a", 0x02)
+            a.ldh_n_a(IE)
+            a.ei()
+            a.halt()
+            a.di()
+            a.ld_a_nn(SCRATCH + 0x28)
+            a.ld_nn_a(dest + k)
+            a.xor_r("a")
+            a.ldh_n_a(TAC)
+            a.ldh_n_a(IE)
+            a.ldh_n_a(STAT)
+    a.ld_r_n("a", 200)
+    a.ldh_n_a(WY)
+    a.ld_r_n("a", 0x91)                # window back off
+    a.ldh_n_a(LCDC)
+    a.jr(f"{p}_end")
+    a.label(f"{p}_stat")
+    a.push("af")
+    a.ldh_a_n(TIMA)
+    a.ld_nn_a(SCRATCH + 0x28)
+    a.ldh_a_n(LY)
+    a.ld_nn_a(SCRATCH + 0x29)
+    a.pop("af")
+    a.reti()
+    a.label(f"{p}_end")
+
+
+@test("CGBWRAM")
+def t_cgbwram(a, slot, p):
+    """Bucket 16 — the triage doc's single most explicit hardware request
+    (64 gambatte oamdma rows, 'Declined pending hardware: dump WRAM on a
+    real CGB after LDH ($70),$02; if $CFFF != $DFFF these rows are
+    permanently unreachable').  Does the $D000 window really bank, and
+    does any SVBK value alias it onto bank 0 ($C000 window)?
+
+    Straight-line code only — the stack lives in the $D000 window, so no
+    call/push may execute while SVBK is switched.  Marker cell $D500 was
+    chosen so that IF $D000 aliases $C000, the writes land in unused
+    $C500 (sentinel-checked), never in this ROM's own state.
+
+    00-07  read $D500 under SVBK=0..7 after writing B0+b to each bank
+           (hardware: 00 -> B1, else B0+b; an alias shows as repeats)
+    08     SVBK readback after writing 7 (upper-bit mask)
+    09     the $C500 sentinel afterwards (5C = no alias hit bank 0)
+    0A     SVBK=2, write 77 to $D500: $C500 read under the same SVBK
+           (bucket 16's exact question: 77 here = $D000 aliases $C000)
+    0B     back on SVBK=1: $D500 (B1 = bank 2 write stayed in bank 2)
+    0C     boot SVBK value (as this probe found it)
+    0D     $D500 read on a DMG-class machine ends up B7 here (control)
+    """
+    a.ldh_a_n(SVBK)
+    a.ld_nn_a(slot + 12)
+    a.ld_r_r("c", "a")                 # c = boot SVBK, restored at the end
+    a.ld_r_n("a", 0x5C)
+    a.ld_nn_a(0xC500)                  # bank-0-window sentinel
+    for b in range(8):
+        a.ld_r_n("a", b)
+        a.ldh_n_a(SVBK)
+        a.ld_r_n("a", 0xB0 + b)
+        a.ld_nn_a(0xD500)
+    for b in range(8):
+        a.ld_r_n("a", b)
+        a.ldh_n_a(SVBK)
+        a.ld_a_nn(0xD500)
+        a.ld_nn_a(slot + b)
+    a.ld_r_n("a", 7)
+    a.ldh_n_a(SVBK)
+    a.ldh_a_n(SVBK)
+    a.ld_nn_a(slot + 8)
+    a.ld_a_nn(0xC500)
+    a.ld_nn_a(slot + 9)
+    a.ld_r_n("a", 2)                   # ── the bucket-16 configuration ──
+    a.ldh_n_a(SVBK)
+    a.ld_r_n("a", 0x77)
+    a.ld_nn_a(0xD500)
+    a.ld_a_nn(0xC500)
+    a.ld_nn_a(slot + 10)
+    a.ld_r_n("a", 1)
+    a.ldh_n_a(SVBK)
+    a.ld_a_nn(0xD500)
+    a.ld_nn_a(slot + 11)
+    a.ld_a_nn(0xD500)
+    a.ld_nn_a(slot + 13)
+    a.ld_r_r("a", "c")                 # restore the boot bank before any
+    a.ldh_n_a(SVBK)                    # stack use can happen again
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # program assembly
 # ═══════════════════════════════════════════════════════════════════════════

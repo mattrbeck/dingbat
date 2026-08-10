@@ -99,6 +99,8 @@ main:
     bl  probe_ppustat
     bl  probe_psgstat
     bl  probe_waitstate
+    bl  probe_pfphase
+    bl  probe_swiregion
     @ MSRTBIT: interactive only — mark the slot so the page says so
     ldr r8, =SLOTS + 8*SLOTSZ
     mov r0, #0x99
@@ -954,6 +956,139 @@ rom_nopsled:
     nop
     .endr
     bx  lr
+
+@ ── slot 12: PFPHASE — the prefetch dead-cycle phase rule ────────────────
+@ dingbat's bus model decides whether a ROM data access pays an extra
+@ cycle from `elapsed mod s == s-1` — a rule fitted per-row to the mGBA
+@ suite's CPU column, and docs/prefetch-model-rewrite.md proves no rule of
+@ that shape fits the DMA rows.  This page reads the rule off silicon:
+@ k = 0..7 sequential ROM fetches (nops) after a fixed non-sequential
+@ point, then one timer-bracketed ROM data read.  The cost-vs-k pattern
+@ IS the phase rule, at two waitstate settings.
+@ +0..+15   halfword cycle counts, k=0..7, WAITCNT=0x4000 (4/2, prefetch)
+@ +16..+31  the same under WAITCNT=0x4014 (3/1, prefetch)
+.macro pf_one k, off
+    bl  tm_start
+    .rept \k
+    nop
+    .endr
+    ldrh r3, [r5]
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+
+probe_pfphase:
+    push {r4-r8, lr}
+    ldr r8, =SLOTS + 12*SLOTSZ
+    ldr r4, =0x04000204
+    ldr r5, =rom_pattern
+    ldr r0, =0x4000
+    strh r0, [r4]
+    .irp k, 0, 1, 2, 3, 4, 5, 6, 7
+    pf_one \k, (\k * 2)
+    .endr
+    ldr r0, =0x4014
+    strh r0, [r4]
+    .irp k, 0, 1, 2, 3, 4, 5, 6, 7
+    pf_one \k, (16 + \k * 2)
+    .endr
+    ldr r0, =SCRATCH               @ restore the boot WAITCNT
+    ldrh r0, [r0, #4]
+    strh r0, [r4]
+    pop {r4-r8, pc}
+    .ltorg
+
+@ ── slot 13: SWIREGION — HLE timing oracles the suite never measured ─────
+@ dingbat's SWI_HLE_BASE / refill residual are calibrated against the mGBA
+@ suite's IWRAM column only, and its Sqrt cost is a 3-point piecewise fit.
+@ +0..+7   Sqrt cycle counts for r0 = 0x10 / 0x1000 / 0x100000 /
+@          0x40000000 (halfwords — bit-length sweep between the fit's
+@          calibration points)
+@ +8/+10   Div (0x12345678 / 7) issued from an IWRAM / EWRAM caller
+@ +12/+14  CpuSet 64-halfword ROM->EWRAM copy from an IWRAM / EWRAM caller
+@ +16      Div from this ROM caller (cross-check against SWITIME +0)
+probe_swiregion:
+    push {r4-r8, lr}
+    ldr r8, =SLOTS + 13*SLOTSZ
+    bl  tm_start
+    mov r0, #0x10
+    swi 0x080000
+    bl  tm_stop
+    strh r0, [r8, #0]
+    bl  tm_start
+    mov r0, #0x1000
+    swi 0x080000
+    bl  tm_stop
+    strh r0, [r8, #2]
+    bl  tm_start
+    ldr r0, =0x100000
+    swi 0x080000
+    bl  tm_stop
+    strh r0, [r8, #4]
+    bl  tm_start
+    ldr r0, =0x40000000
+    swi 0x080000
+    bl  tm_stop
+    strh r0, [r8, #6]
+    @ copy the two "swi ; bx lr" stubs into IWRAM and EWRAM
+    ldr r4, =swi_stubs
+    ldr r5, =IWSTUB + 0x40
+    ldmia r4, {r0-r3}
+    stmia r5, {r0-r3}
+    ldr r6, =EWSTUB + 0x40
+    stmia r6, {r0-r3}
+    @ Div from IWRAM
+    bl  tm_start
+    ldr r0, =0x12345678
+    mov r1, #7
+    mov lr, pc
+    bx  r5
+    bl  tm_stop
+    strh r0, [r8, #8]
+    @ Div from EWRAM
+    bl  tm_start
+    ldr r0, =0x12345678
+    mov r1, #7
+    mov lr, pc
+    bx  r6
+    bl  tm_stop
+    strh r0, [r8, #10]
+    @ CpuSet from IWRAM (stub at +8 in the block)
+    add r5, r5, #8
+    add r6, r6, #8
+    bl  tm_start
+    ldr r0, =rom_pattern
+    ldr r1, =EWDST
+    mov r2, #64
+    mov lr, pc
+    bx  r5
+    bl  tm_stop
+    strh r0, [r8, #12]
+    @ CpuSet from EWRAM
+    bl  tm_start
+    ldr r0, =rom_pattern
+    ldr r1, =EWDST
+    mov r2, #64
+    mov lr, pc
+    bx  r6
+    bl  tm_stop
+    strh r0, [r8, #14]
+    @ Div from ROM (baseline)
+    bl  tm_start
+    ldr r0, =0x12345678
+    mov r1, #7
+    swi 0x060000
+    bl  tm_stop
+    strh r0, [r8, #16]
+    pop {r4-r8, pc}
+    .ltorg
+swi_stubs:
+    .word 0xEF060000               @ swi 0x06 (Div)
+    .word 0xE12FFF1E               @ bx lr
+    .word 0xEF0B0000               @ swi 0x0B (CpuSet)
+    .word 0xE12FFF1E               @ bx lr
+sqrt_inputs:
+    .word 0x10, 0x1000, 0x100000, 0x40000000
 
 @ ── slot 8: MSRTBIT — MSR CPSR with T set, from ARM state (interactive) ──
 @ Slot before running: +0 = 0x99, +31 = 0xEE ("press START on this page").

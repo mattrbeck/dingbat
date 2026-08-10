@@ -1,4 +1,4 @@
-.equ NPAGES, 12
+.equ NPAGES, 14
 
 .global font_data
 font_data:
@@ -57,6 +57,8 @@ name_table:
     .byte 26,26,31,29,30,11,30,0,0,0   @ PPUSTAT
     .byte 26,29,17,29,30,11,30,0,0,0   @ PSGSTAT
     .byte 33,11,19,30,29,30,11,30,15,0   @ WAITSTATE
+    .byte 26,16,26,18,11,29,15,0,0,0   @ PFPHASE
+    .byte 29,33,19,28,15,17,19,25,24,0   @ SWIREGION
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2
