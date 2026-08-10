@@ -154,8 +154,19 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
   (`31323334` = last word of the preceding DMA).
 - **TIMERS +8/+10**: with TM1 cascading a TM0 that started at 0xFFFC,
   dingbat reads TM1=0x33 and TM0=0xFFFC — TM1 looks like it's counting
-  system clocks and TM0 looks frozen. Suspicious; hardware will arbitrate.
+  system clocks and TM0 looks frozen. ~~Suspicious; hardware will
+  arbitrate.~~ **Hardware matches exactly** (AGB session 1) — the model
+  is right.
 - **MSRTBIT**: r7=04 (resume at A+8, skip A+10), watchdog not needed.
+  **Confirmed on AGB silicon** (session 1): identical breadcrumb, clean
+  run, valid control.
+
+**Hardware session 1 (AGB SP + EverDrive, 2026-08-10) is transcribed and
+diffed in `docs/hwprobe-results-agb.md`** — 9/16 pages byte-perfect
+(11/16 on the real-BIOS path); confirmed divergences: IRQLAT (reload-0
+one-shot timer IRQ undelivered + per-source latencies), MULFLAGS carry
+after MUL, IDENT boot handoff (DISPCNT/POSTFLG/0x04000800), TIMERS boot
+prescaler phase, PSGSTAT length expiry, and the HLE-only SWI costs.
 
 ## Regenerating / extending
 
