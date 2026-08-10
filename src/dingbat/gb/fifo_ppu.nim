@@ -722,8 +722,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # reached the address path either -- so it is that address the next
           # SET-glitched read comes back to.
           data = ppu.tile_num
-          ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
-                                 (if low_plane: 0 else: 1) or
+          ppu.tdsel_addr = int32((16 * int(ppu.tile_num) + tile_row * 2 +
+                                  (if low_plane: 0 else: 1)) or
                                  (bank_num shl TDSEL_ADDR_BANK))
         elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
           # SET on the read dot: the address never advanced, so the byte comes
