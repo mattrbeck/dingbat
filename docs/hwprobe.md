@@ -42,7 +42,11 @@ GBA: BIOS checksum low half).
    behavior (MSR setting the T bit from ARM state; executing near-BX
    encodings). A timer-IRQ watchdog attempts recovery, but a power cycle
    may be needed, so run them LAST, after every other page is
-   photographed. Photograph each page after it redraws.
+   photographed. Photograph each page after it redraws.  BXDECODE runs
+   ONE candidate per START press (photograph between presses!); if a
+   press freezes the console, power cycle, page back to 18, press
+   **SELECT once** to skip the wedging candidate, and keep going —
+   candidate k wedged if the freeze came on press k+1.
 6. Emulator side: the `-auto` builds flip pages every 64 frames for
    input-less harnesses; `tests/roms/hwprobe_ocr.py <shot.ppm>` reads a
    dingbat screenshot back as exact text (it matches the ROMs' own font).
@@ -52,7 +56,7 @@ GBA: BIOS checksum low half).
 
 ### AGB-only sessions (GBA console + EverDrive)
 
-All 25 gbaedge pages run natively — CONTEND, IRQLAT, and the nine
+All 28 gbaedge pages run natively — CONTEND, IRQLAT, and the nine
 guessed-at-behavior pages (16-24) are entirely on-die, so the flashcart cannot
 influence them; WAITSTATE/PFPHASE and ROM open-bus bytes carry the
 flashcart caveat below.  NOTE: growing the ROM to 25 pages changed the
@@ -157,7 +161,10 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 | 15 | DMAEDGE | DMA3 primed, then byte writes 0x80 to 0xDF / 0xDE / 0xDD each followed by did-it-run + CNT_H readback; vblank DMA enabled then disabled before any vblank | the byte-mirroring DMA-enable rumor (and does it affect all bits?), plus disable-while-starting |
 | 16 | CAPDMA | DMA3 armed in Special timing with repeat; nonzero-word counts in the destination ring after frames 1/2/3 + CNT_H readback | the "capture DMA only runs every other frame" rumor; dingbat currently fires exactly ONE trigger ever (count stays 4) |
 | 17 | SWEEPQ | ch1 sweep death times (poll counts to the SOUNDCNT_X active-flag drop): period 0, immediate-trigger-recalc overflow, the unwritten second recalc, a mid-note period rewrite, plus a pure length-death control | three sweep-unit unknowns (divider 0 / immediate recalc / unwritten second recalc), CPU-visible on AGB without audio capture |
-| 18 | BXDECODE | **interactive (START)**: four encodings run from IWRAM with breadcrumbs — genuine BX r1, the ARMv5 BLX-r1 word 0xE12FFF31, BX with an SBO field violated (0xE120FF11), BX r15.  r7 verdict: 1 = took the BX, 6 = fell through, 4 = branched to $+8; phase byte 2 = watchdog recovered | do near-BX encodings execute as BX, fall through, or trap?  dingbat answers [1, 6, 1, 4] — its 12-bit decode LUT cannot see the SBO fields |
+| 18 | BXDECODE | **interactive**: four encodings run from IWRAM with breadcrumbs — genuine BX r1, the ARMv5 BLX-r1 word 0xE12FFF31, BX with an SBO field violated (0xE120FF11), BX r15.  **v2: each START press runs ONE candidate** (byte +9 = next index, page redraws between presses); **SELECT skips** the next candidate (result byte DD) — session 2 proved a candidate can wedge the console beyond the watchdog, so after a freeze: power cycle, page RIGHT back to 18, skip the wedger, harvest the rest.  r7 verdict: 1 = took the BX, 6 = fell through, 4 = branched to $+8; phase 2 = watchdog recovered | do near-BX encodings execute as BX, fall through, or trap?  dingbat answers [1, 6, 1, 4] — its 12-bit decode LUT cannot see the SBO fields |
+| 19 | THUMBPC2 | Thumb `cmp/add/mov pc, r0` with SPSR = 0x9000009F (a DIFFERENT mode than current) — CPSR-after words say whether the r15 SPSR-load is full-CPSR or flags-only, breadcrumbs say whether add/mov still branch; plus `ldm/str/ldr r15` base-writeback rows under the timer watchdog with distinct-breadcrumb sleds | scopes session 2's SPSR-load discovery, and the last untested r15 corners |
+| 1A | IRQWIN2 | the IRQWIN gates again but TM0-timestamped (pre-store stamp vs handler entry stamp) + an EWRAM-load sled for the IME gate + a one-shot TM2 overflow swept in 2-cycle steps across an IF-ack write (bit0 = IF right after, bit1 = 8 nops later) | converts the gate windows from instructions to cycles, and extracts the same-cycle ack-vs-assert priority |
+| 1B | IOBYTE | byte-writes 0x44 to the low then high byte of eight readable registers (DISPCNT, DISPSTAT, BG0CNT, WININ, BLDCNT, SOUND1CNT_L w/ master forced on, IE, DMA3CNT_H sans enable), halfword readback after each, original restored | is DMAEDGE's byte-mirroring asymmetry bus-wide or DMA-specific — one byte, both bytes, or ignored, per register |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 

@@ -1,4 +1,4 @@
-.equ NPAGES, 25
+.equ NPAGES, 28
 
 .global font_data
 font_data:
@@ -70,6 +70,9 @@ name_table:
     .byte 13,11,26,14,23,11,0,0,0,0   @ CAPDMA
     .byte 29,33,15,15,26,27,0,0,0,0   @ SWEEPQ
     .byte 12,34,14,15,13,25,14,15,0,0   @ BXDECODE
+    .byte 30,18,31,23,12,26,13,3,0,0   @ THUMBPC2
+    .byte 19,28,27,33,19,24,3,0,0,0   @ IRQWIN2
+    .byte 19,25,12,35,30,15,0,0,0,0   @ IOBYTE
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2

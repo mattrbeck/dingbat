@@ -173,6 +173,9 @@ data for everyone.
 | write-only/unused IO reads: 0 or open bus, per register | 16 IORW |
 | sweep divider 0 / immediate trigger recalc / the unwritten second recalc / mid-note divider change | 23 SWEEPQ |
 | Thumb open-bus halfword composition ($+4 vs $+6 by alignment) | deferred (THUMBBUS) |
+| SPSR-load scope (full CPSR or flags only?) + hi-reg ADD/MOV pc + r15 writeback | 25 THUMBPC2 (v5) |
+| gate windows in cycles + same-cycle IF-ack priority | 26 IRQWIN2 (v5) |
+| byte-write mirroring: bus-wide or DMA-specific? | 27 IOBYTE (v5) |
 | envelope timer mid-note reload | not CPU-visible on AGB; PCM12/34 makes it a **gbedge** (CGB) item |
 | backup-chip (EEPROM/flash/RTC) corner behaviors | unanswerable from a flashcart (the EverDrive emulates those chips) |
 | 17-bit VRAM fetch addresses, mid-line OAM remap, mosaic timing | pixel-only — the gbvis visual ROM |

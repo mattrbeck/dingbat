@@ -26,7 +26,7 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          "LDMSTM", "MULFLAGS", "MSRTBIT", "PPUSTAT", "PSGSTAT", "WAITSTATE",
          "PFPHASE", "SWIREGION", "CONTEND", "IRQLAT", "IORW", "CPSRBITS",
          "THUMBPC", "LDMUSER", "IRQWIN", "DMAEDGE", "CAPDMA", "SWEEPQ",
-         "BXDECODE"]
+         "BXDECODE", "THUMBPC2", "IRQWIN2", "IOBYTE"]
 
 # The compressed Nintendo logo every bootable cart carries at 0x04-0x9F.
 LOGO = bytes.fromhex(

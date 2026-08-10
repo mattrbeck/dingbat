@@ -125,6 +125,9 @@ main:
     bl  probe_dmaedge
     bl  probe_capdma
     bl  probe_sweepq
+    bl  probe_thumbpc2
+    bl  probe_irqwin2
+    bl  probe_iobyte
     @ MSRTBIT + BXDECODE: interactive only — mark the slots so the pages
     @ say so
     ldr r8, =SLOTS + 8*SLOTSZ
@@ -139,6 +142,9 @@ main:
     strb r0, [r8, #31]
 .ifdef MSRBOOT                     @ debug builds: run them unattended
     bl  run_msr_probe
+    bl  run_bxdecode               @ v2 runs one candidate per call
+    bl  run_bxdecode
+    bl  run_bxdecode
     bl  run_bxdecode
 .endif
 
@@ -174,6 +180,8 @@ view_loop:
     bne page_next
     tst r2, #0x22                  @ LEFT or B
     bne page_prev
+    tst r2, #0x04                  @ SELECT
+    bne 6f
     tst r2, #0x08                  @ START
     beq view_loop
     cmp r5, #8                     @ meaningful on the interactive pages
@@ -182,7 +190,11 @@ view_loop:
     b   page_redraw
 5:  cmp r5, #24
     bne view_loop
-    bl  run_bxdecode
+    bl  run_bxdecode               @ START: run the NEXT candidate only
+    b   page_redraw
+6:  cmp r5, #24                    @ SELECT on the BXDECODE page: skip the
+    bne view_loop                  @ next candidate (for one that wedges
+    bl  bx_skip                    @ the console — power cycle, then skip)
     b   page_redraw
 page_next:
     add r5, r5, #1
@@ -1900,6 +1912,12 @@ probe_dmaedge:
 @ deltas mean the rumor is true; 0 means Special DMA3 needs something
 @ emulators don't model.
 @ +0/+4/+8  word counts after frames 1/2/3     +12  DMA3CNT_H readback
+@ Session-2 hardware: one armed frame transfers 160 triggers then the
+@ enable SELF-CLEARS — so the every-other-frame rumor can only apply to
+@ the pattern games actually use, re-arming every vblank.  v5 adds that:
+@ +16/+20/+24  cumulative word counts after re-arming at three successive
+@ vblanks (equal steps = every re-armed frame captures; a flat step = the
+@ rumor)                                        +28  final CNT_H readback
 probe_capdma:
     push {r4-r7, lr}
     ldr r8, =SLOTS + 22*SLOTSZ
@@ -1928,6 +1946,21 @@ probe_capdma:
     blt 2b
     ldrh r0, [r4, #10]             @ still armed? (StopVideoTransferDMA q)
     strh r0, [r8, #12]
+    mov r0, #0
+    strh r0, [r4, #10]
+    @ v5: the game pattern — re-arm at each vblank, count per frame
+    mov r7, #16
+2:  bl  wait_vblank                @ frame boundary: arm for this frame
+    ldr r0, =0xB700
+    strh r0, [r4, #10]
+    bl  wait_vblank                @ the armed frame has now run
+    bl  capdma_count
+    str r0, [r8, r7]
+    add r7, r7, #4
+    cmp r7, #28
+    blt 2b
+    ldrh r0, [r4, #10]
+    strh r0, [r8, #28]             @ did the re-armed enable self-clear too
     mov r0, #0
     strh r0, [r4, #10]
     pop {r4-r7, pc}
@@ -1960,6 +1993,13 @@ capdma_count:                      @ -> r0 = nonzero words in the ring
 @ +16 freq 1024, shift 1, period 7 -> period rewritten to 1 mid-note:
 @     immediate reload vs next-reload
 @ +20 control: length-63 death, no sweep (cross-check with PSGSTAT)
+@ Session-2 hardware killed +16 INSTANTLY and +20 in 75 polls — both
+@ suspicious enough to decompose before believing them (v5):
+@ +24 the +16 experiment but rewriting NR10 with the SAME value 0x71:
+@     separates "any NR10 write kills mid-note" from "the period change"
+@ +28 the +20 length control re-run after two idle frames: separates a
+@     trigger-adjacent length clock from frame-sequencer phase left over
+@     from the preceding experiments
 probe_sweepq:
     push {r4-r7, lr}
     ldr r8, =SLOTS + 23*SLOTSZ
@@ -2027,6 +2067,45 @@ probe_sweepq:
     cmp r6, r7
     blt 4b
 5:  str r6, [r8, #20]
+    @ v5 +24: mid-note rewrite with the SAME sweep value
+    ldr r0, =0x71
+    strh r0, [r4]
+    ldr r0, =0xF000
+    strh r0, [r4, #2]
+    ldr r0, =0x8000 + 1024
+    strh r0, [r4, #4]
+    ldr r0, =20000
+6:  subs r0, r0, #1
+    bne 6b
+    ldr r0, =0x71
+    strh r0, [r4]                  @ 0x71 -> 0x71: no change at all
+    mov r6, #0
+    ldr r7, =0x80000
+7:  ldrh r0, [r5, #4]
+    tst r0, #1
+    beq 8f
+    add r6, r6, #1
+    cmp r6, r7
+    blt 7b
+8:  str r6, [r8, #24]
+    @ v5 +28: length control again after two idle frames
+    bl  wait_vblank
+    bl  wait_vblank
+    mov r0, #0
+    strh r0, [r4]
+    ldr r0, =0xF03F
+    strh r0, [r4, #2]
+    ldr r0, =0xC000 + 1024
+    strh r0, [r4, #4]
+    mov r6, #0
+    ldr r7, =0x80000
+9:  ldrh r0, [r5, #4]
+    tst r0, #1
+    beq 10f
+    add r6, r6, #1
+    cmp r6, r7
+    blt 9b
+10: str r6, [r8, #28]
     mov r0, #0
     strh r0, [r5, #4]              @ master off — silence again
     pop {r4-r7, pc}
@@ -2045,15 +2124,24 @@ probe_sweepq:
 @ r7 afterwards: 2+4=6 fell through, 1 took the BX to r1, 4 means the
 @ candidate branched to $+8 (BX r15).  Watchdog phase byte 2 = it wedged
 @ and the timer diverted the return.
-@ +0..+3  r7 per candidate       +4..+7  phase byte per candidate
-@ +8  0xAA ran marker
+@
+@ v2: hardware session 2 proved a candidate can wedge the console beyond
+@ the IRQ watchdog's reach (exception entry masks IRQs), which lost every
+@ candidate's data.  Now each START press runs ONE candidate and the page
+@ redraws between presses; SELECT skips the next candidate (result byte
+@ 0xDD) so a power cycle + skip harvests the survivors and the wedger is
+@ identified by which press froze.
+@ +0..+3  r7 per candidate (0xDD = skipped)   +4..+7  phase byte each
+@ +8  0xAA all-four-done marker               +9  next candidate index
 run_bxdecode:
     push {r4-r11, lr}
     ldr r8, =SLOTS + 24*SLOTSZ
-    mov r0, #0
-    strb r0, [r8, #0]              @ clear the 0x99 "press start" marker
-    mov r10, #0                    @ candidate index
-bx_next:
+    ldrb r10, [r8, #9]             @ next candidate index
+    cmp r10, #4
+    bge bx_alldone
+    cmp r10, #0                    @ +0 is ALSO candidate 0's result byte:
+    moveq r0, #0                   @ only the first press may clear the
+    streqb r0, [r8, #0]            @ 0x99 "press start" marker
     ldr r0, =bx_candidates
     ldr r9, [r0, r10, lsl #2]      @ candidate word
     @ build the block in IWRAM
@@ -2116,16 +2204,423 @@ bx_recover:
     mov r0, #0
     str r0, [r2, #8]
     add r10, r10, #1
+    strb r10, [r8, #9]             @ persist progress between presses
     cmp r10, #4
-    blt bx_next
-    mov r0, #0xAA
-    strb r0, [r8, #8]
+    movge r0, #0xAA
+    strgeb r0, [r8, #8]
+bx_alldone:
     pop {r4-r11, pc}
+
+bx_skip:                           @ SELECT: mark the next candidate as
+    ldr r8, =SLOTS + 24*SLOTSZ     @ skipped and move past it
+    ldrb r1, [r8, #9]
+    cmp r1, #4
+    bxge lr
+    mov r0, #0xDD
+    strb r0, [r8, r1]              @ (this also replaces the 0x99 marker
+    add r1, r1, #1                 @ when candidate 0 is the one skipped)
+    strb r1, [r8, #9]
+    cmp r1, #4
+    movge r0, #0xAA
+    strgeb r0, [r8, #8]
+    bx  lr
 bx_candidates:
     .word 0xE12FFF11               @ control: genuine BX r1
     .word 0xE12FFF31               @ the BLX-r1 encoding (ARMv5, not v4T)
     .word 0xE120FF11               @ BX with an SBO field violated
     .word 0xE12FFF1F               @ BX r15
+    .ltorg
+
+@ boot-time watchdog for recoverable UNPREDICTABLE rows (nothing in the
+@ candidate path touches CPSR.I, so unlike BXDECODE the timer can always
+@ fire): divert target deposited for the shared irq_handler diversion.
+.macro wdg_arm rec
+    ldr r2, =MARKER
+    ldr r0, =\rec
+    str r0, [r2, #20]
+    mov r0, #1
+    str r0, [r2, #8]
+    ldr r2, =0x0400010C            @ TM3, 65536 cycles
+    mov r0, #0
+    str r0, [r2]
+    ldr r0, =0x00C00000
+    str r0, [r2]
+    ldr r2, =0x04000200
+    mov r0, #0x40
+    strh r0, [r2]
+    ldr r2, =0x04000208
+    mov r0, #1
+    strh r0, [r2]
+.endm
+.macro wdg_disarm
+    ldr r2, =0x04000208
+    mov r0, #0
+    strh r0, [r2]
+    ldr r2, =0x04000200
+    strh r0, [r2]
+    ldr r0, =0x3FFF
+    strh r0, [r2, #2]
+    ldr r2, =0x0400010C
+    mov r0, #0
+    str r0, [r2]
+.endm
+
+@ ── slot 25: THUMBPC2 — scope of the r15 SPSR-load + r15 writeback ───────
+@ Session 2 proved Thumb `cmp pc, r0` loads SPSR FLAGS into CPSR but
+@ pinned SPSR's mode to the current mode.  Here SPSR = 0x9000009F (SYSTEM
+@ mode, I set, N|V flags) while executing in IRQ mode, so the readback
+@ mode bits say whether the restore is full-CPSR or flags-only; the
+@ sibling hi-reg ADD/MOV pc forms get the same treatment; and the
+@ LDM/LDR/STR base-writeback-to-r15 forms run under the timer watchdog
+@ with distinct-breadcrumb sleds to find where execution lands.
+@ +0  word CPSR after Thumb cmp pc, r0 (SPSR = 0x9000009F: mode bits 1F
+@     here = full restore, 12 = flags-only)
+@ +4  word SPSR read right after that (raw)
+@ +8  word CPSR after Thumb add pc, r0 (same SPSR pattern)
+@ +12 word CPSR after Thumb mov pc, r0
+@ +16 byte r7 after add pc  (0 = branched to pad+8, 7 = fell through)
+@ +17 byte r7 after mov pc  (0 = branched, 7 = fell through)
+@ +18 byte r7 after `ldmia r15!, {r1}` sled (15 = executed as no-wb ldm,
+@     12 = PC became base+4, 14 = PC became base, 8 = base+8)
+@ +19 byte r7 after `str r1, [r15], #4` sled (same key)
+@ +20 byte r7 after `ldr r1, [r15], #4` sled
+@ +21 byte watchdog-fired bitmask for the three writeback rows
+@ +24 word r1 the ldm-writeback loaded    +28 word r1 the ldr loaded
+probe_thumbpc2:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 25*SLOTSZ
+    mrs r9, CPSR                   @ saved good state (system mode)
+    @ ── Thumb cmp pc, r0 with a DIFFERENT-mode SPSR ──
+    bic r0, r9, #0x1F
+    orr r0, r0, #0x92              @ IRQ mode, I set
+    msr CPSR_c, r0
+    ldr r0, =SCRATCH + 0xF0
+    mov sp, r0                     @ sp_irq hygiene (never used)
+    ldr r1, =0x9000009F            @ SYSTEM mode, I set, N|V
+    msr SPSR_cxsf, r1
+    msr CPSR_f, #0
+    mov r0, #0
+    adr r3, 21f
+    adr r1, 20f
+    orr r1, r1, #1
+    bx  r1
+    .thumb
+20: .hword 0x4587                  @ cmp pc, r0
+    .hword 0x4718                  @ bx r3
+    .align 2
+    .arm
+21: mrs r1, CPSR
+    str r1, [r8, #0]
+    mrs r1, SPSR
+    str r1, [r8, #4]
+    msr CPSR_c, r9                 @ back to known system state
+    msr CPSR_f, r9
+    @ ── Thumb add pc, r0 (branch?  and does it touch CPSR?) ──
+    bic r0, r9, #0x1F
+    orr r0, r0, #0x92
+    msr CPSR_c, r0
+    ldr r1, =0x9000009F
+    msr SPSR_cxsf, r1
+    msr CPSR_f, #0
+    mov r0, #4                     @ target = pad+4+4 = pad+8
+    mov r7, #0
+    adr r3, 23f
+    adr r1, 22f
+    orr r1, r1, #1
+    bx  r1
+    .thumb
+22: .hword 0x4487                  @ add pc, r0
+    .hword 0x3701                  @ +2: adds r7, #1   (fallthrough path)
+    .hword 0x3702                  @ +4: adds r7, #2
+    .hword 0x3704                  @ +6: adds r7, #4
+    .hword 0x4718                  @ +8: bx r3         (branch target)
+    .align 2
+    .arm
+23: mrs r1, CPSR
+    str r1, [r8, #8]
+    strb r7, [r8, #16]
+    msr CPSR_c, r9
+    @ ── Thumb mov pc, r0 ──
+    bic r0, r9, #0x1F
+    orr r0, r0, #0x92
+    msr CPSR_c, r0
+    ldr r1, =0x9000009F
+    msr SPSR_cxsf, r1
+    msr CPSR_f, #0
+    adr r3, 25f
+    adr r1, 24f
+    add r0, r1, #7                 @ = pad+8 with bit0 set; ARM7TDMI MOV
+    bic r0, r0, #1                 @ pc ignores bit0 — pass it even
+    orr r1, r1, #1
+    mov r7, #0
+    bx  r1
+    .thumb
+24: .hword 0x4687                  @ mov pc, r0
+    .hword 0x3701                  @ +2: adds r7, #1
+    .hword 0x3702                  @ +4: adds r7, #2
+    .hword 0x3704                  @ +6: adds r7, #4
+    .hword 0x4718                  @ +8: bx r3
+    .align 2
+    .arm
+25: mrs r1, CPSR
+    str r1, [r8, #12]
+    strb r7, [r8, #17]
+    msr CPSR_c, r9
+    msr CPSR_f, r9
+    @ ── base-writeback-to-r15 rows, watchdogged ──
+    mov r11, #0                    @ watchdog-fired bitmask
+    wdg_arm tw_rec1
+    mov r7, #0
+    mov r1, #0
+    .word 0xE8BF0002               @ ldmia r15!, {r1}
+    add r7, r7, #1                 @ base+0-ish landings accumulate
+    add r7, r7, #2                 @ base   (candidate+8)
+    add r7, r7, #4                 @ base+4 (candidate+12)
+    add r7, r7, #8                 @ base+8 (candidate+16)
+tw_rec1:
+    wdg_disarm
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    cmp r0, #2
+    orreq r11, r11, #1
+    mov r0, #0
+    str r0, [r2, #8]
+    strb r7, [r8, #18]
+    str r1, [r8, #24]
+    wdg_arm tw_rec2
+    mov r7, #0
+    mov r1, #0
+    .word 0xE48F1004               @ str r1, [r15], #4
+    add r7, r7, #1
+    add r7, r7, #2
+    add r7, r7, #4
+    add r7, r7, #8
+tw_rec2:
+    wdg_disarm
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    cmp r0, #2
+    orreq r11, r11, #2
+    mov r0, #0
+    str r0, [r2, #8]
+    strb r7, [r8, #19]
+    wdg_arm tw_rec3
+    mov r7, #0
+    mov r1, #0
+    .word 0xE49F1004               @ ldr r1, [r15], #4
+    add r7, r7, #1
+    add r7, r7, #2
+    add r7, r7, #4
+    add r7, r7, #8
+tw_rec3:
+    wdg_disarm
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    cmp r0, #2
+    orreq r11, r11, #4
+    mov r0, #0
+    str r0, [r2, #8]
+    strb r7, [r8, #20]
+    str r1, [r8, #28]
+    strb r11, [r8, #21]
+    mrs r0, CPSR                   @ leave with IRQs unmasked for irqwin2
+    bic r0, r0, #0x80
+    msr CPSR_c, r0
+    pop {r4-r11, pc}
+    .ltorg
+
+@ ── slot 26: IRQWIN2 — the gate windows in CYCLES, and the same-cycle
+@ IF-ack race ──────────────────────────────────────────────────────────────
+@ Session 2 gave the windows in uniform-width instructions (3/3/2).  Here
+@ each gate's dispatch is TM0-timestamped (pre-store stamp vs the
+@ handler's entry stamp), an EWRAM-load sled re-measures the IME window
+@ with multi-cycle instructions (instructions-vs-cycles disambiguation),
+@ and a one-shot TM2 overflow is swept cycle-by-cycle across an IF ack
+@ write.
+@ +0/+2/+4  halfword TM0 deltas (pre-store -> handler entry) for the
+@           IME / IE / msr-I-clear gates
+@ +6  halfword ldr-sled landing byte offset for the IME gate
+@ +8..+15  ack-race bytes for overflow offsets k=0..7: bit0 = IF set
+@          right after the ack, bit1 = IF set 8 nops later
+probe_irqwin2:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 26*SLOTSZ
+    ldr r7, =SCRATCH
+    ldr r4, =0x04000200
+    bl  tm_start
+    @ ── IME gate, timestamped ──
+    mov r0, #0
+    strh r0, [r4, #8]
+    mov r0, #0x20
+    strh r0, [r4]
+    iw_prime
+    ldr r6, =0x04000100
+    ldrh r5, [r6]                  @ pre-store stamp
+    mov r0, #1
+    strh r0, [r4, #8]
+    bl  iw2_wait
+    mov r0, #0
+    strh r0, [r4, #8]
+    ldrh r0, [r7, #0x48]
+    sub r0, r0, r5
+    strh r0, [r8, #0]
+    @ ── IE gate, timestamped ──
+    mov r0, #1
+    strh r0, [r4, #8]
+    mov r0, #0
+    strh r0, [r4]
+    iw_prime
+    ldr r6, =0x04000100
+    ldrh r5, [r6]
+    mov r0, #0x20
+    strh r0, [r4]
+    bl  iw2_wait
+    mov r0, #0
+    strh r0, [r4]
+    ldrh r0, [r7, #0x48]
+    sub r0, r0, r5
+    strh r0, [r8, #2]
+    @ ── msr-I gate, timestamped ──
+    mov r0, #0x20
+    strh r0, [r4]
+    mrs r6, CPSR
+    orr r0, r6, #0x80
+    msr CPSR_c, r0
+    iw_prime
+    ldr r6, =0x04000100
+    ldrh r5, [r6]
+    mrs r0, CPSR
+    bic r0, r0, #0x80
+    msr CPSR_c, r0
+    bl  iw2_wait
+    ldrh r0, [r7, #0x48]
+    sub r0, r0, r5
+    strh r0, [r8, #4]
+    @ ── IME gate again, multi-cycle-instruction sled ──
+    mov r0, #0
+    strh r0, [r4, #8]
+    iw_prime
+    ldr r3, =EWDST
+    mov r0, #1
+    strh r0, [r4, #8]
+iw2m:
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    ldr r0, [r3]
+    iw_sled 6, iw2m
+    mov r0, #0
+    strh r0, [r4, #8]
+    strh r0, [r4]                  @ IE off — ack race runs without IRQs
+    @ ── ack racing a one-shot overflow, swept one cycle per row ──
+.macro ar_one k
+    ldr r5, =0x04000108
+    mov r0, #0
+    str r0, [r5]
+    ldr r0, =0x3FFF
+    strh r0, [r4, #2]              @ ack everything stale
+    ldr r0, =0x00C00000 + 0xFFFC - (\k * 2)
+    str r0, [r5]                   @ overflow lands (4+2k)+latency out
+    mov r0, #0
+    strh r0, [r5]                  @ NEXT reload = 0: the counter keeps
+                                   @ its loaded value, but any repeat
+                                   @ overflow is 65536 cycles away, so
+                                   @ bit1 is not contaminated
+    mov r1, #0x20
+    strh r1, [r4, #2]              @ THE ack, racing the overflow
+    ldrh r0, [r4, #2]
+    and r0, r0, #0x20
+    mov r2, r0, lsr #5             @ bit0: survived/reasserted immediately
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    ldrh r0, [r4, #2]
+    tst r0, #0x20
+    orrne r2, r2, #2               @ bit1: (re)set by 8 nops later
+    strb r2, [r8, #8 + \k]
+    mov r0, #0
+    str r0, [r5]
+    ldr r0, =0x3FFF
+    strh r0, [r4, #2]
+.endm
+    ar_one 0
+    ar_one 1
+    ar_one 2
+    ar_one 3
+    ar_one 4
+    ar_one 5
+    ar_one 6
+    ar_one 7
+    pop {r4-r7, pc}
+iw2_wait:                          @ bounded wait on the handler flag
+    ldr r1, =0x40000
+1:  ldr r0, [r7, #0x4C]
+    cmp r0, #0
+    bxne lr
+    subs r1, r1, #1
+    bne 1b
+    bx  lr
+    .ltorg
+
+@ ── slot 27: IOBYTE — is byte-write mirroring bus-wide or DMA-specific? ──
+@ DMAEDGE found strb 0x80 to DMA3CNT_H's upper byte landing in BOTH bytes
+@ while lower-byte writes were ignored.  Here 0x44 is byte-written to the
+@ low then high byte of eight READABLE registers, halfword readback after
+@ each (original value restored between): a normal bus shows 0x44 in one
+@ byte, mirroring shows both, an ignored write shows the original.
+@ +0/+2   DISPCNT lo/hi     +4/+6   DISPSTAT     +8/+10  BG0CNT
+@ +12/+14 WININ              +16/+18 BLDCNT       +20/+22 SOUND1CNT_L
+@                                                 (master forced on)
+@ +24/+26 IE                 +28/+30 DMA3CNT_H (0x44: no enable bit)
+probe_iobyte:
+    push {r4-r8, lr}
+    ldr r8, =SLOTS + 27*SLOTSZ
+    ldr r4, =IOBASE
+.macro ib_one slot
+    ldrh r6, [r5]
+    mov r0, #0x44
+    strb r0, [r5]
+    ldrh r0, [r5]
+    strh r0, [r8, #\slot]
+    strh r6, [r5]
+    mov r0, #0x44
+    strb r0, [r5, #1]
+    ldrh r0, [r5]
+    strh r0, [r8, #\slot + 2]
+    strh r6, [r5]
+.endm
+    mov r5, r4                     @ DISPCNT
+    ib_one 0
+    add r5, r4, #0x04              @ DISPSTAT
+    ib_one 4
+    add r5, r4, #0x08              @ BG0CNT
+    ib_one 8
+    add r5, r4, #0x48              @ WININ
+    ib_one 12
+    add r5, r4, #0x50              @ BLDCNT
+    ib_one 16
+    add r5, r4, #0x84              @ PSG master on for the NR10 row
+    ldrh r7, [r5]
+    mov r0, #0x80
+    strh r0, [r5]
+    add r5, r4, #0x60              @ SOUND1CNT_L
+    ib_one 20
+    add r5, r4, #0x84
+    strh r7, [r5]                  @ master back to what it was
+    add r5, r4, #0x200             @ IE (IME is off here)
+    ib_one 24
+    add r5, r4, #0xDE              @ DMA3CNT_H, enable bit NOT in 0x44
+    ib_one 28
+    pop {r4-r8, pc}
     .ltorg
 
 @ ═══════════════════════════ RENDERING ═══════════════════════════════════
