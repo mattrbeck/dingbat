@@ -399,19 +399,27 @@ proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 # and the twelve gambatte rows that bracket it are at fifo_obj_abort.
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB)
 
-template mixer_write_repaint(gb: GB; back: int32; skip: int32 = 0'i32) =
+template mixer_write_repaint(gb: GB; back: int32; latency: int32;
+                             skip: int32 = 0'i32) =
   ## Every register write below that the mixer reads ends with this. `back` is
   ## how many stages of the mixer tail the register is read at the far end of
-  ## (see fifo_recompose_last), minus the CGB's own dot of write latency, and
-  ## `skip` how many pixels at that far end the caller has already painted
-  ## itself (the `old or new` pixel of a DMG palette write).
+  ## (see fifo_recompose_last), `latency` the CGB's own dot of write latency
+  ## for THAT register, and `skip` how many pixels at that far end the caller
+  ## has already painted itself (the `old or new` pixel of a DMG palette
+  ## write).
+  ##
+  ## `latency` is a parameter rather than one shared expression because the
+  ## two callers no longer agree on it: CGB-D drops the palette dot and keeps
+  ## the LCDC one (gb_mixer_latency / gb_lcdc_mixer_latency, and the mealybug
+  ## reference pair that splits them is quoted at the first).
+  ##
   ## `-d:MIXER_DOT_LAG=0` compiles the mixer's dot out entirely -- this call,
   ## the two stores in the shifter and the held pair with it -- which is the
   ## control arm for both the A/B measurements at fifo_recompose_last and the
   ## retired-instruction count.
   when MIXER_DOT_LAG != 0:
     if gb.fifo_ppu != nil:
-      let n = back - (if gb.cgb_enabled: int32(CGB_MIXER_LATENCY) else: 0'i32)
+      let n = back - latency
       if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n, skip)
 
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
@@ -2006,7 +2014,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # LCDC.1 (OBJ enable) and, in CGB mode, LCDC.0 (BG priority) are mixer
     # reads, and mealybug m3_lcdc_obj_en_change is what times them; see
     # fifo_recompose_last.
-    mixer_write_repaint(gb, MIXER_PRIORITY_BACK)
+    mixer_write_repaint(gb, MIXER_PRIORITY_BACK, gb_lcdc_mixer_latency(gb))
     # LCDC.1 is also a FETCHER read, and the two are separate: the mixer's copy
     # decides the pixels already emitted, this decides whether the object's
     # remaining stall dots are still owed. See fifo_obj_abort.
@@ -2131,7 +2139,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     of 0xFF47: ppu_update_palette(ppu.bgp,  val)
     of 0xFF48: ppu_update_palette(ppu.obp0, val)
     else:      ppu_update_palette(ppu.obp1, val)
-    mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK),
+    mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK), gb_mixer_latency(gb),
                         if or_pixel: 1'i32 else: 0'i32)
 
   of 0xFF4A:

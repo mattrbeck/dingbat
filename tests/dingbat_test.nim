@@ -1797,6 +1797,19 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         model_override = v.toLowerAscii()
+      of "cgb-rev":
+        # Spelling sugar over --model for the CGB axis alone: --cgb-rev=D is
+        # --model=cgbd. Same variable, same resolution, so the two cannot
+        # disagree; the bare letter is what the revision is called everywhere
+        # it is discussed (CGB-C, CGB-D), and typing `cgbd` to get it reads
+        # like a boot-table token rather than a silicon one.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        v = v.toLowerAscii()
+        if v.len == 1 and v[0] in {'0', 'a'..'e'}:
+          model_override = "cgb" & v
+        else:
+          model_override = v
       of "bios":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1872,7 +1885,7 @@ proc main() =
     quit(microtest_batch(list_path, out_path))
 
   if rom_path.len == 0:
-    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check] [--cgb|--dmg|--sgb]"
+    echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check] [--cgb|--dmg|--sgb] [--cgb-rev <0|A|B|C|D|E>] [--model <token>]"
     quit(1)
 
   if mode == tmStateRoundtrip:

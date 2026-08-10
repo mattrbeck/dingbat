@@ -352,7 +352,7 @@ net-negative, and that distinction is the whole point of the ranking.
 | # | bucket | rows | instrument | effort | perf | net if built |
 |---|---|---|---|---|---|---|
 | **0** | **`LY0-RESYNC` — line 0's pixel pipeline runs one M-cycle ahead.** 125 png rows fail on **scanline 0 only**, with lines 1–143 pixel-exact | **125** (`scy` 55, `bgtilemap` 28, `bgtiledata` 24, `scx_during_m3` 17, `bgen` 1) | **boundary column, and an unusually sharp one**: a per-scanline PNG differ | small | **cold** — not in the dot loop | **+119 / −7**, shipped as `LY0_PIPE_MCYCLES` (gambatte 3658 → 3770) |
-| **1** | **`$FEA0-$FEFF` is real RAM on CGB** — dingbat answers `$00` for every model; the ROMs seed the region with a `PUSH` and read it back | **26** (`oamdma` `busypushFEA1`/`busypushFF01`) | the ROM itself | ~5 lines + a savestate field (payload revision bump) | cold | **+26 / −0** |
+| **1** | **`$FEA0-$FEFF` is real RAM on CGB** — dingbat answers `$00` for every model; the ROMs seed the region with a `PUSH` and read it back | **26** (`oamdma` `busypushFEA1`/`busypushFF01`) | the ROM itself | ~5 lines + a savestate field (payload revision bump) | cold | **+26 / −0**, shipped 2026-08-10 (see that section; the savestate field is deferred to the batched bump, not taken) |
 | **2** | **HDMA source outside cartridge/WRAM moves `$FF`** | **4** (`dma`) | `dma_hiram_read_result` reports the *value* | done | cold | **+4 / −0**, shipped as `a7b6355` |
 | **3** | ~~**STAT edge-detector re-trigger**~~ **— not the edge detector; the interrupt DISPATCH's IF clear.** The level-OR and its rising-edge detector were already right. What was wrong is that the dispatch cleared IF at T = 0 and then charged all 20 T-cycles, so any source that rose inside the 5 M-cycles survived. The clear belongs at **T = 16**, the start of the fifth M-cycle | **28** (`irq_precedence` 6, `m1` 6, `ly0` 6, `m2int_m2irq` 3, `lyc153int_m2irq` 3, `tima` 4) | pairs, ±1 M-cycle | small | cold | **built** as `IRQ_SAMPLE_T` in `gb/cpu.nim`: **+16 / −1**, a strict local maximum (12 → +1/−0, 20 → +27/−14). Recovers `m2int_m2irq`, `tima`, `irq_precedence`, `serial` and the `_ds` arms of `ly0`/`lyc153int_m2irq`/`m1`. **Does NOT recover the nine single-speed `ly0` rows** — see below |
 | **4** | ~~**STAT source enabled by an `$FF41` write while already high**~~ **— not the write; the LY=LYC comparator's blind window on the SOURCE.** A line boundary moves LY and the mode at once, and one evaluation cannot see a source hand the line to another. The comparator drops before LY moves and answers again after the mode has — the read path's own `LY_JUST_CHANGED` rule, which the interrupt line never had | **8** (`lcdirq_precedence`, the whole family) | pass/fail only | small | cold | **built** as `ly_advance_close` / `GbPpu.ly_changing`: **+20 / −1** on top of bucket 3 (6 of the 8 `lcdirq_precedence` rows, plus 12 `miscmstatirq` and 3 `lycEnable`). The other 2 need the window at the line-144 entry, which is blocked on bucket 18 |
@@ -723,7 +723,7 @@ bucket.
 ### 2. Take the rest of Tier 1 — 74 more rows, five independent changes
 
 Every one is small, cold-path, self-contained, and either already measured
-(`$FEA0`: **+26/−0**; HDMA source: **+4/−0**, shipped) or backed by a rule the
+(`$FEA0`: **+26/−0**, shipped 2026-08-10; HDMA source: **+4/−0**, shipped) or backed by a rule the
 suite states uniformly (the `*_late_retrigger` family fails on *every* STAT source
 *and* the timer, which is one rule rather than five). None touches the mode-3 dot
 loop or the CPU dispatch, so none of them can cost performance, and none has to
@@ -2566,3 +2566,163 @@ Two things to know before doing it:
 The remaining Misc failure either way is `DMA Prefetch Break`, whose expected
 value is `0x10000000 + 4*iterations` and is therefore not comparable across
 builds by construction.
+
+## 2026-08-10: the CGB revision axis becomes runtime-selectable
+
+Three CGB behaviours are now selected by `GB.revision` rather than by a `-d:`
+constant, and one of them was previously not modelled at all. `--cgb-rev=<0|A|B
+|C|D|E>` on `tests/dingbat_test` selects the machine (it is spelling sugar over
+the `--model=` token that already existed; `--model=cgbd` is the same thing).
+Everything resolves once at construction into `GbQuirks` — nothing added here
+branches on the revision in a hot path.
+
+**The default CGB machine moved from `grCgbE` to `grCgbC`, and this is a
+correction rather than a change.** The tree has been scored against C-class
+references all along — mealybug's `_cgb_c` set, `CGB_MIXER_LATENCY = 1`,
+`cgb-acid-hell`'s C-class capture, and `docs/gb-derivations.md`'s own "every
+reference it is scored against is CPU CGB C" — while the enum's default claimed
+E. The move is behaviour-neutral by construction (C and E resolve to the same
+`bmCgbABCDE` boot table and the same `length_clock_any_nrx4 = false`) and
+measured to be so; what it changes is which revision the two new quirks below
+hand the default machine.
+
+### What each revision setting changes
+
+| behaviour | 0 / A / B | C | D | E / AGB | evidence |
+|---|---|---|---|---|---|
+| extra length clocking (`length_clock_any_nrx4`) | on | off | off | off | SameSuite `*_extra_length_clocking-cgb0B.asm`, quoted at the flag |
+| palette write dot at the mixer (`mixer_write_immediate`) | charged | charged | **dropped** | **dropped** | mealybug `_cgb_c` vs `_cgb_d` reference pair |
+| LCDC write dot at the mixer (`gb_lcdc_mixer_latency`) | charged | charged | charged | charged | the same pair, which is IDENTICAL on the LCDC ROMs |
+| `$FEA0-$FEFF` (`unusable_region`) | RAM, `addr and not $18` | same | **RAM, unmasked** | **nibble echo** | Pan Docs + `cgb-acid-hell`'s own readback |
+
+`CGB_HALT_PPU_LEAD` is **not** revision-gated and must not be gated on a guess.
+It ships at 0 for a reason that has nothing to do with silicon revision — one
+pixel-exact shootout row (`strikethrough-cgb`) refuses the quantity from the
+other side — and no reference pair, ROM header or Pan Docs sentence splits the
+CGB halt phase by revision. The same goes for `CGB_HALT_EXIT_MCYCLES` and
+`SPEED_SWITCH_STALL_T`. Its own write-up in `gb.nim` is the place that argues
+the quantity; this axis has nothing to add to it.
+
+### The palette dot is a palette dot, not a mixer dot
+
+The interesting result of wiring this up. `CGB_MIXER_LATENCY` was being
+subtracted at BOTH mixer call sites — the palette stage and the LCDC/priority
+stage — and `CGB_LCDC_MIXER_LATENCY` sat declared and unread beside it, because
+both constants are 1 and nothing could tell them apart. The C/D split is the
+first thing that can. Run every mealybug ROM that ships both captures:
+
+* the palette ROMs' two references **differ** (`m3_bgp_change` by 864 px,
+  `m3_bgp_change_sprites` by 716, `m3_obp0_change` by 42);
+* the LCDC ROMs' two references are **identical** (`m3_lcdc_bg_en_change`,
+  `m3_lcdc_obj_en_change` — dingbat scores the same against both at every
+  revision).
+
+Hardware shipping two identical captures is hardware saying the behaviour did
+not change between those devices, so gating LCDC on the revision would be
+inventing a difference the captures deny. Measured, gating it anyway: 23040 ->
+22637 and 23040 -> 22980 **on both references at once**, which is the signature
+of moving a stage no reference wanted moved. So `mixer_write_immediate` gates
+the palette stage only, `gb_lcdc_mixer_latency` is ungated, and
+`CGB_LCDC_MIXER_LATENCY` is now the live constant it always described.
+
+### Mealybug, per revision: 20 ROMs ship both captures
+
+`--cgb-rev=C` is exact on `_cgb_c` for 18 of 20; `--cgb-rev=D` (and `E`, which
+is identical here) is exact on `_cgb_d` for 17 of 20.
+
+* **Five flip sides as intended**: `m3_bgp_change`, `m3_bgp_change_sprites`,
+  `m3_obp0_change`, `m3_window_timing`, `m3_window_timing_wx_0` — each pixel-
+  exact on `_cgb_c` at C and pixel-exact on `_cgb_d` at D.
+* **One is fixed by the LCDC split**: `m3_lcdc_obj_en_change_variant` reaches
+  23040/23040 on `_cgb_d` at D only because LCDC keeps its dot; with LCDC gated
+  it stalled at 22980.
+* **Two fail identically at every revision**: `m3_lcdc_bg_map_change` (22656)
+  and `m3_lcdc_win_map_change` (22858) are off on BOTH captures by the same
+  count, so they are pre-existing and revision-independent. Not this axis.
+* **One is the honest gap: `m3_scy_change`**, 23040 on `_cgb_c` at C and
+  16823/23040 on `_cgb_d` at D. This is the OTHER documented CGB-D difference
+  and dingbat does not model it. Pan Docs, `Scrolling.md`: *"All models before
+  the CGB-D read the Y coordinate once for each bitplane (so a very precisely
+  timed SCY write allows 'desyncing' them), but CGB-D and later use the same Y
+  coordinate for both no matter what."* That is a fetcher change, not a mixer
+  one, and it is the next quirk anyone extending this axis should take: the
+  evidence is a Pan Docs sentence naming the revision outright, and the target
+  is 6217 pixels on one row.
+
+### `$FEA0-$FEFF`: what Pan Docs gives, and what it refuses to
+
+Pan Docs' "FEA0-FEFF range" splits the region three ways and dingbat now
+implements all three (`GbUnusableRegion`). It gives the DMG case (`$00`) and the
+CGB-E case (`(addr >> 4 and $F) * $11`) outright, formula included. For CGB 0-D
+it says the region is *"a unique RAM area, but is masked with a revision-
+specific value"* — **and then never states the value, anywhere in the book.**
+There is no table, footnote or other page supplying it.
+
+So the mask is sourced from the ROM that measures it rather than from the book.
+`cgb-acid-hell` writes `$55` to `$FEA0` and `$44` to `$FEB8`, reads `$FEA0`
+back, and draws different tile data depending on whether it sees `$55`. Two
+hardware captures bracket the answer: the author's bundled reference (dingbat's
+scored PNG) is the not-`$55` branch, and the repo's issue tracker carries a
+photo of a real device taking the `$55` branch. For the reference device the
+`$FEB8` store must therefore land on `$FEA0`, which is `addr and not $18`.
+SameBoy was read afterwards and agrees; it was a check on a derived answer, not
+the source of one.
+
+**Measured, and this closes the hazard the 2026-08-10 entry above raised.**
+`cgb-acid-hell`, scored against its bundled reference:
+
+| revision | result |
+|---|---|
+| 0, A, B, C | **23040/23040 pixel-exact** |
+| D | 22864/23040 |
+| E | **23040/23040 pixel-exact** |
+| default (no flag) | **23040/23040 pixel-exact** |
+
+The scored runner row is untouched, and the hazard's own target is met: a CGB-C
+reads `$44` back and keeps the reference branch. The rev-D number is **correct
+behaviour, not a failure** — the ROM's gate exists precisely to refuse CGB-D
+(*"the bugs in the PPU this test relies on work differently on CGB-D"*), the
+bundled reference is a C-class capture, and a D machine has no business
+matching it.
+
+That the 176 pixels are the gate and nothing else is proved rather than
+asserted: built with `-d:gb_unusable_zero` (the control arm that answers `$00`
+everywhere, as the tree did before this change), `cgb-acid-hell` is
+23040/23040 at C, D and E alike. The palette-dot split does not touch this ROM
+at all, so every one of those 176 pixels is the `$FEA0` readback.
+
+**One correction to the entry above.** It predicts that the `$55` branch draws
+the `SORRY YOU CAN'T GET TO PLAY` screen. The frame says otherwise: the two
+branches differ by 176 pixels, which is a tile-data swap and not a full-screen
+refusal. The branch demonstrably flips (proof in the paragraph above); what it
+draws is smaller than the disassembly reading assumed.
+
+**What is NOT modelled, deliberately.** Pan Docs opens the section with *"This
+area returns $FF when OAM is blocked"*, and dingbat answers the per-revision
+model during mode 2/3 instead. That gap predates this change — the OAM read
+lock lives inside `ppu_read`, which only `$FE00-$FE9F` reaches — and closing it
+is a different axis from the revision one. The OAM-DMA half IS handled and
+always was (`mem_read_busy` answers `$FF` for the whole page). `cgb-acid-hell`
+waits for STAT bit 1 to clear before every access, so it does not depend on the
+gap either way.
+
+### Score
+
+Full local runner, default build, against the base commit:
+
+| | rows | pass | gambatte |
+|---|---|---|---|
+| base (`a8a549e`) | 981 | 769 | 3850/5005 |
+| this change | 981 | 769 | **3876/5005** |
+
+**Zero rows moved sides.** The whole delta is +26 / -0 inside
+`gambatte/oamdma`, and every one of the 26 is a `busypushFEA1` or
+`busypushFF01` `[cgb]` row — the family the Tier-1 table above priced at
+"+26 / -0" and the only rows in the suite that read `$FEA0`. Their expected
+values are named `cgb04c`, i.e. a C-class device, which is a third independent
+witness for the default revision.
+
+The revision plumbing on its own is byte-identical: built with
+`-d:gb_unusable_zero`, `results.md` matches the base commit's exactly but for
+its timestamp, and gambatte returns to 3850/5005. So every row this work moved,
+the `$FEA0` model moved.

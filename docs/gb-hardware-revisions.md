@@ -330,24 +330,50 @@ token resolves to its **lowest** member, because a ROM named for a range
 asserts the behaviour those revisions share and the lowest is the one no other
 token also reaches.
 
-**The default is `grCgbE` on CGB hardware and `grDmgABC` on DMG.** This is not
-a guess — it is the revision dingbat is *already scored against*:
+**The default is `grCgbC` on CGB hardware and `grDmgABC` on DMG** (changed from
+`grCgbE` on 2026-08-10, see below). This is not a guess — it is the revision
+dingbat is *already scored against*:
 
-* SameSuite `apu/README.md`: "CPU-CGB-E – passes all tests" (C and D do not);
+* the mealybug PPU references the local runner scores are the **`_cgb_c`** set,
+  and mealybug ships a `_cgb_d` set beside it that genuinely differs;
+* `CGB_MIXER_LATENCY = 1` — the value that ships — is pixel-exact on
+  `m3_bgp_change_cgb_c.png` and 864 pixels out on the `_cgb_d` one;
+* `cgb-acid-hell`'s bundled reference is a C-class capture, and the ROM picks
+  its tile data off a `$FEA0` readback that only a CGB-C answers that way;
+* `docs/gb-derivations.md` has said "every reference it is scored against is
+  CPU CGB C" since before this axis existed;
 * mooneye `boot_regs-dmgABC` and `boot_div-dmgABCmgb` are green, and
-  `stat_irq_blocking.s` reads "pass: DMG ABC … fail: DMG 0";
-* the shootout scores mealybug against `_dmg_blob` and dingbat's local runner
-  uses the same references.
+  `stat_irq_blocking.s` reads "pass: DMG ABC … fail: DMG 0".
 
-**Every flag is `false` at both defaults**, so a user who never touches this
-gets the machine dingbat shipped before the axis existed — bit for bit, not
-approximately (see §4). There is no config field and no GUI selector, and that
-is deliberate: today the axis changes nothing a game can see, so a
-"which CGB revision" dropdown would be a knob with no upside and a new way to
-misconfigure a save. When something game-visible lands (the CGB ≤ B length rule
-does break Prehistorik Man — the ROM header names it), the wiring is one
-`Config` field plus one `gb_set_revision` call at construction, and
-`gb_revision_from_name` is already the parser for it.
+**Why it was `grCgbE` first, and why that is now wrong.** The original reading
+was SameSuite `apu/README.md`: "CPU-CGB-E – passes all tests" (C and D do not).
+That does not survive contact with the pixel references above, and it never
+bound anything: SameSuite's nine per-revision APU ROMs each carry their own
+`--model=` token, so they never ran on the default. The move from E to C is
+behaviour-neutral by construction — both resolve to `bmCgbABCDE` and to
+`length_clock_any_nrx4 = false` — and was measured to be so (§4). What it
+changes is which side of the two 2026-08-10 quirks the default machine lands
+on, and on both of them C is the side the references are captured from.
+
+**Every *flag* is `false` at both defaults.** `unusable_region` is the one
+member that is not a flag and not `false`: it has three states, no natural
+"off", and its CGB default (`urRamMasked`) is the first thing on this axis that
+a *game* could see. That was a deliberate, measured change and it is the
+subject of the 2026-08-10 section of `docs/gb-failure-triage.md`.
+
+**There is still no config field and no GUI selector, and as of 2026-08-10 that
+is a harder rule than it was, not a softer one.** The original reason was that
+the axis changed nothing a game could see, so a dropdown would be a knob with
+no upside. That reason has now expired — the palette dot and `$FEA0` are both
+game-visible — but the §2.5 blocker has correspondingly *tightened*: a state
+carries no revision byte, so a config field would let a user save on one
+revision and load on another with no warning and a real pixel difference
+between them. **The field must not be added before the payload bump.** The
+wiring, when the bump happens, is unchanged and small: one `Config` field
+(`config.nim`, beside `gb_fifo`/`sgb_enable` — declaration, default, the `gb:`
+parse block and the `gb:` save block) plus one `gb_set_revision` call next to
+`app.gb_emu.sgb_requested` in `src/dingbat.nim`'s `load_rom`, with
+`gb_revision_from_name` as the parser.
 
 ## 2.4 Cost
 
@@ -381,6 +407,12 @@ Until the batched bump:
   a deliberate experiment.
 * **This becomes a real bug the moment a `Config` field is added**, and the
   field must not be added before the payload bump.
+* **2026-08-10 raises the stakes without changing the rule.** When this was
+  written the axis was unobservable, so "a state saved on `--model=cgb0` runs
+  on a CGB E" cost nothing. It now costs a pixel (the palette dot, C vs D) and
+  96 bytes of `$FEA0-$FEFF`. The unserialized-field list gained both `revision`
+  and `GbMemory.unusable` — see `notes/samesuite-apu.md`, which now names
+  fourteen fields waiting on one bump.
 * The declaration in `gb.nim` says all of this at the field, and
   `notes/samesuite-apu.md` "Unserialized state" — which already lists six
   waiting APU fields — now lists this as the seventh.

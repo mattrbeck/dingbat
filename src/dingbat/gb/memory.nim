@@ -292,6 +292,48 @@ proc mem_tick_extra*(mem: GbMemory; gb: GB; total_expected: int) =
   if remaining > 0: mem_tick_components(mem, gb, remaining)
   mem_reset_cycle_count(mem)
 
+proc unusable_index(gb: GB; idx: int): int {.inline.} =
+  ## Which cell of `mem.unusable` an address in `$FEA0..$FEFF` reaches. The
+  ## C-class mask (`addr and not 0x18`) folds four addresses onto each cell;
+  ## CGB-D keeps all 96 apart. See GbUnusableRegion in gb.nim for where the
+  ## mask comes from -- Pan Docs states that one exists and declines to give
+  ## its value, so `cgb-acid-hell`'s own readback is the source.
+  let a = if gb.quirks.unusable_region == urRamMasked: idx and not 0x18 else: idx
+  a - 0xFEA0
+
+proc read_unusable(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
+  ## `$FEA0..$FEFF`, the prohibited tail of the OAM page. Three models, one per
+  ## GbUnusableRegion member; the quote from Pan Docs' "FEA0-FEFF range" that
+  ## each comes from is at the enum.
+  ##
+  ## NOT modelled, and the same before this split as after it: Pan Docs' "This
+  ## area returns $FF when OAM is blocked" for a CPU read during mode 2/3.
+  ## dingbat answers the model below there instead. The OAM lock for this range
+  ## has never existed (`mem_read_open` says so at its docstring: the OAM lock
+  ## lives inside `ppu_read`, which only `$FE00..$FE9F` reaches), so leaving it
+  ## alone keeps this change to the revision axis it is about. The OAM-DMA
+  ## case IS handled and always was -- `mem_read_busy` answers $FF for the
+  ## whole page. `cgb-acid-hell`, the one ROM known to read this range for its
+  ## value, waits for STAT bit 1 to clear before every access, so it is not
+  ## sensitive to the gap.
+  case gb.quirks.unusable_region
+  of urZero:       0x00'u8
+  of urNibbleEcho:
+    # "returns the high nibble of the lower address byte twice, e.g. FEAx
+    # returns $AA" -- Pan Docs, verbatim but for its FFAx/FEAx typo.
+    let nib = uint8((idx shr 4) and 0x0F)
+    (nib shl 4) or nib
+  of urRamMasked, urRamPlain:
+    mem.unusable[unusable_index(gb, idx)]
+
+proc write_unusable(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
+  ## The write half of read_unusable. Only the two RAM models keep the byte;
+  ## on DMG and on CGB-E-and-later the store goes nowhere.
+  case gb.quirks.unusable_region
+  of urZero, urNibbleEcho: discard
+  of urRamMasked, urRamPlain:
+    mem.unusable[unusable_index(gb, idx)] = val
+
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   # The CGB boot ROM is 0x900 bytes with a hole at 0x100..0x1FF, where the
   # cartridge header shows through; the DMG one is a flat 0x100. Bounding by
@@ -309,7 +351,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xD000..0xDFFF: mem.wram[mem.wram_bank][idx - 0xD000]
   of 0xE000..0xFDFF: read_byte(mem, gb, idx - 0x2000)
   of 0xFE00..0xFE9F: ppu_read(gb.ppu, gb, idx)
-  of 0xFEA0..0xFEFF: 0x00'u8
+  of 0xFEA0..0xFEFF: read_unusable(mem, gb, idx)
   of 0xFF00:         joypad_read(gb.joypad, gb)
   of 0xFF01..0xFF02: serial_read(gb.serial, gb, idx)
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
@@ -488,7 +530,7 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xD000..0xDFFF: mem.wram[mem.wram_bank][idx - 0xD000] = val
   of 0xE000..0xFDFF: write_byte(mem, gb, idx - 0x2000, val)
   of 0xFE00..0xFE9F: ppu_write(gb.ppu, gb, idx, val)
-  of 0xFEA0..0xFEFF: discard
+  of 0xFEA0..0xFEFF: write_unusable(mem, gb, idx, val)
   of 0xFF00:         joypad_write(gb.joypad, gb, val)
   of 0xFF01..0xFF02: serial_write(gb.serial, gb, idx, val)
   of 0xFF04..0xFF07: timer_write(gb.timer, gb, idx, val)

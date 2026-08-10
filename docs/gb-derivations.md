@@ -549,7 +549,7 @@ Ordered by whether anything in the suite can see it. Measurable and unfixed:
 the DMG-only OBJ fetch cancel on LCDC.1 (and the CGB's matching refusal to
 skip the penalty), the CGB-only LCDC.4 mid-fetch glitch, the CGB-only window
 Y-condition reset on LCDC.5, WX=166 and the WX+1 trigger as monochrome bugs,
-$FEA0-$FEFF answering 0x00 on every model, OAM DMA above $DFFF, OPRI, and an
+OAM DMA above $DFFF, OPRI, and an
 APU with no model branch anywhere despite three documented ones. Unmeasurable
 here: HALT granularity, DI's contested CGB delay, joypad settling, the IR
 port, STOP.
@@ -557,6 +557,16 @@ port, STOP.
 And the boundary: CGB-revision splits are out of scope, because this tree
 models one CGB and every reference it is scored against is CPU CGB C.
 ```
+
+**Superseded 2026-08-10 on both counts.** `$FEA0-$FEFF` no longer answers
+`0x00` on every model (`GbUnusableRegion`), and CGB-revision splits are no
+longer out of scope: `--cgb-rev=<0|A|B|C|D|E>` selects the machine at runtime
+and three behaviours now hang off it. The last sentence survives as the reason
+the *default* is what it is — the default CGB moved to `grCgbC` in the same
+change, so "every reference it is scored against is CPU CGB C" is now what the
+enum says rather than something only this paragraph knew. See
+`docs/gb-failure-triage.md`, 2026-08-10, and `docs/gb-hardware-revisions.md`
+§2.3.
 
 ## gb: HDMA1-4 are write-only; reads return $FF
 

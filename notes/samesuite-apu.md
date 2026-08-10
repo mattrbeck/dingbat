@@ -576,14 +576,26 @@ Round four adds the noise channel's two-stage timer:
 
 **A thirteenth joins them from outside the APU: `GB.revision`** (one byte, wanted next to
 `cgb_enabled` in `GB_SEC_MEM`, older states reading back the default) — see
-`docs/gb-hardware-revisions.md` §2.5 for what breaks until the bump. Each is
+`docs/gb-hardware-revisions.md` §2.5 for what breaks until the bump.
+
+**A fourteenth, added 2026-08-10: `GbMemory.unusable`**, the 96 bytes of
+`$FEA0-$FEFF` that a CGB 0-D answers reads from (`GbUnusableRegion` in
+`gb.nim`). This one is larger than the rest put together and it is the only one
+that is plain RAM rather than a phase or a deadline, so it is the weakest
+member of the batch on principle. What holds it here anyway: the region is
+prohibited, the only ROMs known to seed it are test ROMs that do so once during
+setup, and a state loaded with it zeroed is exactly the machine dingbat shipped
+before 2026-08-10. It is also the field that makes the thirteenth above start
+to matter — `revision` was unobservable when it was added and is not any more.
+
+Each is
 refreshed within one duty period, one APU power cycle or one 512 Hz step of a
 state load; none is CPU-visible except through PCM12/PCM34; and each is written
 only by a register write or a power-on, so a rollback snapshot that replays that
 write reconstructs it exactly. Serializing them costs a GB payload revision
 bump, which is a decision to take once for a batch of fields rather than twelve
 times; the field comments in `gb.nim` say so at each one. **If a GB payload bump
-happens for any other reason, add these twelve.**
+happens for any other reason, add all fourteen.**
 
 ## What full accuracy would cost
 

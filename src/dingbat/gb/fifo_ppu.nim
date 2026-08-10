@@ -2256,8 +2256,7 @@ proc mixer_head_back(gb: GB): int32 {.inline.} =
   ## The DEEPEST stage of the mixer tail on this console, in dots -- the one
   ## the palettes are read at, less the CGB's own dot of write latency. It is
   ## what MIXER_HEAD_LINGER measures the shallower stages against.
-  int32(MIXER_PALETTE_BACK) -
-    (if gb.cgb_enabled: int32(CGB_MIXER_LATENCY) else: 0'i32)
+  int32(MIXER_PALETTE_BACK) - gb_mixer_latency(gb)
 
 proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top, run: int32) =
   ## Re-colour `[front - back, top]`, clipped to the screen, to the pixels the

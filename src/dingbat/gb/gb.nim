@@ -774,8 +774,15 @@ const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
   ## picks its tile data off a `$FEA0` readback and dingbat takes the same
   ## branch the bundled reference was captured on, which is a CGB-C -- the same
   ## device every `*_change2` reference is. See the 2026-08-10 entry in
-  ## docs/gb-failure-triage.md; whoever models `$FEA0..$FEFF` per revision has
-  ## to re-score this row in the same commit.
+  ## docs/gb-failure-triage.md.
+  ##
+  ## `$FEA0..$FEFF` IS now modelled per revision (GbUnusableRegion), and the
+  ## re-score this note used to ask for was done in that commit: the row is
+  ## 23040/23040 on revisions 0/A/B/C/E and on the default, and 22864/23040 on
+  ## D alone, which is the ROM refusing CGB-D on purpose. The branch dingbat
+  ## takes by default is unchanged -- it is now taken because a C-class machine
+  ## reads `$44` back, rather than because the region was not modelled -- so
+  ## the exclusion above still holds, and now holds for a reason.
   ##
   ## What the rule assumes beyond the two pixels is deliberately as little as
   ## possible: the window is not consumed by the SET glitch that uses it (no
@@ -1356,9 +1363,15 @@ const MIX_HOLD*               {.intdefine.} = 4
   ## whole M-cycle of M3_PIPE_MCYCLES needs 8. Depth alone changes no pixel;
   ## it is a bound, not a model.
 const CGB_MIXER_LATENCY*      {.intdefine.} = 1
-  ## Dots the CGB's write to a register the MIXER reads takes to arrive over
-  ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
-  ## reads one stage down is not repainted on CGB at all.
+  ## Dots a **C-class CGB**'s write to a register the MIXER reads takes to
+  ## arrive over the DMG's. Subtracted from every mixer stage below, so a
+  ## register the DMG reads one stage down is not repainted on CGB at all.
+  ##
+  ## This is the QUANTITY only. Whether a given machine is charged it is a
+  ## runtime question as of 2026-08-10 -- `quirks.mixer_write_immediate` says
+  ## CGB D and later are not -- and `gb_mixer_latency` is the one place the two
+  ## meet. The constant stays an `intdefine` so a sweep of the quantity still
+  ## builds; overriding it moves the C-class machine and leaves D and E at 0.
   ##
   ## Two rows pin it, and each is exact on BOTH consoles at these settings and
   ## on neither at any other. mealybug m3_lcdc_obj_en_change (priority, one
@@ -1556,6 +1569,57 @@ type
     grCgb0, grCgbAB, grCgbC, grCgbD, grCgbE
     grAgb
 
+  GbUnusableRegion* = enum
+    ## What `$FEA0..$FEFF` -- the "prohibited" tail of the OAM page -- answers
+    ## a CPU read, and whether a CPU write to it is kept. Pan Docs' "FEA0-FEFF
+    ## range" splits this three ways and this enum is that split, one member
+    ## per bullet:
+    ##
+    ##   "This area returns $FF when OAM is blocked, and otherwise the
+    ##    behavior depends on the hardware revision.
+    ##    - On DMG, MGB, SGB, and SGB2, reads during OAM block trigger OAM
+    ##      corruption. Reads otherwise return $00.
+    ##    - On CGB revisions 0-D, this area is a unique RAM area, but is masked
+    ##      with a revision-specific value.
+    ##    - On CGB revision E, AGB, AGS, and GBP, it returns the high nibble of
+    ##      the lower address byte twice, e.g. FFAx returns $AA, FFBx returns
+    ##      $BB, and so forth."
+    ##
+    ## (Pan Docs' `FFAx`/`FFBx` there is a typo for `FEAx`/`FEBx`; the formula
+    ## in the same sentence is unambiguous.)
+    urZero
+      ## DMG / MGB / SGB / SGB2: reads answer `$00`, writes are dropped. This
+      ## is also what dingbat answered on *every* model before the split, so it
+      ## is what a DMG machine keeps bit for bit.
+    urRamMasked
+      ## CGB 0 / A / B / C: real RAM, with address bits 3 and 4 masked off, so
+      ## the 96 addresses fold onto 24 distinct cells, each reachable from four
+      ## of them.
+      ##
+      ## Pan Docs states the RAM and states that the mask is
+      ## "revision-specific" without giving any mask value, so the quantity is
+      ## sourced from the ROM that measures it rather than from the book:
+      ## `cgb-acid-hell` writes `$55` to `$FEA0` and `$44` to `$FEB8`, reads
+      ## `$FEA0` back, and draws a *different picture* depending on whether it
+      ## sees `$55`. Two hardware captures bracket it -- the author's bundled
+      ## reference (and dingbat's scored PNG) is the not-`$55` branch, and the
+      ## repo's issue tracker carries a photo of a real device taking the
+      ## `$55` branch. So on the reference device the `$FEB8` store must land
+      ## on `$FEA0`, which is exactly `addr and not 0x18`. SameBoy agrees, and
+      ## was checked after the fact, not copied; see docs/gb-failure-triage.md
+      ## "the CGB-D gate, with the semantics spelled out".
+    urRamPlain
+      ## CGB D: the same RAM with no mask, so `$FEA0` and `$FEB8` are distinct
+      ## cells and the readback above is `$55`. This is the one revision
+      ## `cgb-acid-hell` refuses outright ("the bugs in the PPU this test
+      ## relies on work differently on CGB-D"): it draws its SORRY YOU CAN'T
+      ## GET TO PLAY screen instead of the test pattern, which is CORRECT
+      ## behaviour for the machine and not a dingbat failure.
+    urNibbleEcho
+      ## CGB E / AGB / AGS / GBP: not RAM at all. Reads answer the high nibble
+      ## of the low address byte, doubled (`$FEAx` -> `$AA`), and writes are
+      ## dropped. Pan Docs gives this one outright, formula included.
+
   GbQuirks* = object
     ## Per-revision behaviour, resolved from GbRevision once by gb_quirks_for
     ## and thereafter read as a plain bool off the GB the caller already has.
@@ -1566,8 +1630,14 @@ type
     ## two revisions that share a behaviour share a flag instead of repeating a
     ## set literal; and a comparison in a hot path is a range check where a
     ## flag is a load. Every flag is FALSE on the default revisions
-    ## (grCgbE / grDmgABC), so the default machine is byte-identical to the one
-    ## dingbat shipped before revisions existed.
+    ## (grCgbC / grDmgABC), so the default machine is byte-identical to the one
+    ## dingbat shipped before revisions existed. `unusable_region` is the one
+    ## member that is not a bool, because the behaviour it names has three
+    ## states and no natural "off". It is also the one member whose default is
+    ## NOT what dingbat did before revisions existed: the CGB default moved
+    ## from `urZero` (the region unmodelled) to `urRamMasked` (the region
+    ## modelled, on the revision the tree is scored against), which is a
+    ## deliberate, measured change -- see docs/gb-failure-triage.md.
     length_clock_any_nrx4*: bool
       ## CGB 0 and CGB A/B. SameSuite `*_extra_length_clocking-cgb0B.asm`:
       ## "Extra length clocking occurs when writing to NRx4 when the frame
@@ -1580,6 +1650,34 @@ type
       ## C." So the extra clock drops its `and len_enable` term: the ROMs write
       ## NRx4 = $00 (CH3: $03), with bit 6 clear, and still expect the counter
       ## to move.
+    mixer_write_immediate*: bool
+      ## CGB D and later. The CGB takes a mid-mode-3 write to a PALETTE
+      ## register one dot later than the DMG does -- that dot is
+      ## `CGB_MIXER_LATENCY`, and this flag is the revision that stops taking
+      ## it, so the write reaches the mixer at the DMG's phase again.
+      ##
+      ## Palettes only. LCDC is read by the same mixer and keeps its dot on
+      ## every revision; mealybug's `_cgb_c` and `_cgb_d` captures of the LCDC
+      ## ROMs are byte-identical to each other, and that is the whole argument.
+      ## See gb_lcdc_mixer_latency, which is the other half.
+      ##
+      ## The evidence is one pair of mealybug reference captures of the same
+      ## ROM on two devices. `m3_bgp_change` is pixel-exact against
+      ## `m3_bgp_change_cgb_c.png` with the dot and against
+      ## `m3_bgp_change_cgb_d.png` without it; the two PNGs differ by exactly
+      ## one pixel per write edge, which is the dot. So C-class keeps it, D
+      ## drops it, and mealybug shipped both pictures because both devices
+      ## exist. See CGB_MIXER_LATENCY for what the dot is and which rows pin
+      ## its value on the C side.
+      ##
+      ## `grAgb` is deliberately NOT in this set even though AGB is silicon
+      ## later than CGB-E. Nothing has measured an AGB against these captures
+      ## -- mealybug ships no `_agb` reference for this ROM -- and the tree's
+      ## AGE `agb` rows are scored against the current behaviour. A guess that
+      ## moves scored rows is worse than an honest gap.
+    unusable_region*: GbUnusableRegion
+      ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
+      ## carries the Pan Docs quote and the per-member evidence.
 
   Mbc* = ref object of RootObj
     gb_ref* {.cursor.}: GB   # back-ref to the owning GB; non-owning to avoid a
@@ -2471,6 +2569,19 @@ type
     wram*:                 array[8, seq[uint8]]
     wram_bank*:            uint8
     hram*:                 array[0x7F, uint8]
+    # $FEA0-$FEFF, the "prohibited" tail of the OAM page. On CGB revisions 0-D
+    # it is real RAM (Pan Docs, "FEA0-FEFF range": "On CGB revisions 0-D, this
+    # area is a unique RAM area"); on DMG and on CGB-E and later nothing here
+    # is read. Which of the three models applies is GbQuirks.unusable_region.
+    #
+    # NOT SERIALIZED, deliberately, and for the same reason `revision` is not:
+    # a byte-array in GB_SEC_MEM costs a GB payload revision bump, which is
+    # being taken once for a batch (notes/samesuite-apu.md, "Unserialized
+    # state"). The consequence is bounded -- a state saved after a ROM seeded
+    # this region loads with it zeroed -- and the only ROMs known to seed it
+    # do so once during setup, before any state a user would take.
+    # IF A GB PAYLOAD BUMP HAPPENS FOR ANY OTHER REASON, ADD THIS ONE.
+    unusable*:             array[0x60, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
     # A CPU write this M-cycle has left something for the M-cycle boundary to
@@ -3386,6 +3497,46 @@ proc mbc_load*(cart: Mbc) =
     elif cart of Mbc6:
       mbc6_load_footer(Mbc6(cart), data)
 
+proc gb_mixer_latency*(gb: GB): int32 {.inline.} =
+  ## Dots this machine's write to a PALETTE register arrives at the mixer after
+  ## the DMG's. The one reader of `CGB_MIXER_LATENCY` outside its own
+  ## declaration, so the compile-time constant stays the C-class QUANTITY and
+  ## the revision decides only whether it is charged.
+  ##
+  ## Here rather than beside gb_quirks_for, its natural neighbour, because the
+  ## PPU files are INCLUDED below and Nim needs the declaration first.
+  if gb.cgb_enabled and not gb.quirks.mixer_write_immediate:
+    int32(CGB_MIXER_LATENCY)
+  else:
+    0'i32
+
+proc gb_lcdc_mixer_latency*(gb: GB): int32 {.inline.} =
+  ## The same dot for LCDC, which the mixer also reads -- and which CGB-D does
+  ## NOT drop. Not revision-gated, and mealybug's two CGB reference sets are
+  ## why: run every ROM that ships both a `_cgb_c` and a `_cgb_d` capture and
+  ## the two sets disagree on the palette rows and agree on the LCDC ones.
+  ##
+  ##   ROM                        _cgb_c vs _cgb_d
+  ##   ------------------------   ----------------------------------
+  ##   m3_bgp_change              differ  (864 px)   <- palette
+  ##   m3_bgp_change_sprites      differ  (716 px)   <- palette
+  ##   m3_obp0_change             differ  (42 px)    <- palette
+  ##   m3_lcdc_bg_en_change       IDENTICAL          <- LCDC
+  ##   m3_lcdc_obj_en_change      IDENTICAL          <- LCDC
+  ##
+  ## A reference pair that is identical on two devices is hardware saying the
+  ## behaviour did not change between them, so gating LCDC on the revision
+  ## would be inventing a difference the captures deny. Measured: gating it
+  ## anyway takes `m3_lcdc_bg_en_change` 23040 -> 22637 and
+  ## `m3_lcdc_obj_en_change` 23040 -> 22980 on BOTH references at once, which
+  ## is the signature of moving a stage no reference wanted moved.
+  ##
+  ## This is also what `CGB_LCDC_MIXER_LATENCY` was declared for. It sat unread
+  ## while both stages shared `CGB_MIXER_LATENCY` -- the two constants are both
+  ## 1, so nothing showed -- and the C/D split is the first thing that tells
+  ## them apart.
+  if gb.cgb_enabled: int32(CGB_LCDC_MIXER_LATENCY) else: 0'i32
+
 # ==================== INCLUDES ====================
 # Textual includes, not imports: the whole GB core compiles as this one
 # module (a single C translation unit), so the files below share one
@@ -3455,12 +3606,33 @@ include cpu
 
 # ==================== HARDWARE REVISION ====================
 
+const GB_UNUSABLE_ZERO* = defined(gb_unusable_zero)
+  ## Control arm: answer `$00` for `$FEA0..$FEFF` on every revision, the way
+  ## dingbat did before the region was modelled at all.
+  ##
+  ## It exists because it is the arm that PROVES the revision axis is otherwise
+  ## behaviour-neutral, and re-establishing that later is a two-run experiment.
+  ## Measured 2026-08-10 on the full local runner: `-d:gb_unusable_zero` is
+  ## byte-identical to the pre-revision tree (981 rows, 769 pass, gambatte
+  ## 3850/5005, results.md identical but for its timestamp), and without it the
+  ## only thing that moves anywhere is gambatte `oamdma` at 3850 -> 3876. So
+  ## every row the revision work moved, the `$FEA0` model moved.
+
 proc gb_quirks_for*(rev: GbRevision): GbQuirks =
   ## The whole revision -> behaviour table, in one place. A revision that names
   ## no flag here behaves exactly like the default machine; adding a revision
   ## therefore costs nothing until some test ROM proves it differs.
   GbQuirks(
     length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
+    mixer_write_immediate: rev in {grCgbD, grCgbE},
+    unusable_region:
+      if GB_UNUSABLE_ZERO: urZero
+      else:
+        case rev
+        of grCgb0, grCgbAB, grCgbC: urRamMasked
+        of grCgbD:                  urRamPlain
+        of grCgbE, grAgb:           urNibbleEcho
+        else:                       urZero,   # DMG / MGB / SGB / SGB2
   )
 
 proc gb_boot_model_for*(rev: GbRevision): GbBootModel =
@@ -3546,14 +3718,34 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
   # model-specific mooneye boot_regs/boot_div rows and SameSuite's
   # per-revision APU ROMs.
   #
-  # CGB E and DMG ABC are not arbitrary: they are the revisions dingbat is
-  # already scored against. SameSuite's `apu/README.md` says "CPU-CGB-E --
-  # passes all tests" (and CGB C/D do not), the shootout's mealybug set is
-  # DMG-blob with `boot_regs-dmgABC` green, and mooneye's `stat_irq_blocking`
-  # header reads "pass: DMG ABC, MGB, CGB, AGB, AGS / fail: DMG 0". Both
-  # default revisions have every quirk flag clear, so an untouched user gets
-  # exactly the machine dingbat shipped before this axis existed.
-  result.gb_set_revision(if result.cgb_enabled: grCgbE else: grDmgABC)
+  # CGB C and DMG ABC are not arbitrary: they are the revisions dingbat is
+  # already scored against, and on the CGB side the tree now says so in three
+  # places at once.
+  #
+  #  * The mealybug PPU references this tree scores are the `_cgb_c` set, and
+  #    mealybug ships a `_cgb_d` set beside it that differs. `m3_bgp_change` is
+  #    pixel-exact on `_cgb_c` at `CGB_MIXER_LATENCY = 1`, which is the value
+  #    that ships -- so the pixel pipeline has been a C-class machine all
+  #    along, and `quirks.mixer_write_immediate` is now where that is written
+  #    down.
+  #  * `cgb-acid-hell` picks its tile data off a `$FEA0` readback, dingbat is
+  #    scored against the branch a C-class device takes, and
+  #    `quirks.unusable_region` is now what takes it (see GbUnusableRegion).
+  #  * docs/gb-derivations.md has said "every reference it is scored against is
+  #    CPU CGB C" since before this axis existed.
+  #
+  # This default was `grCgbE` when the axis was introduced, on the strength of
+  # SameSuite's `apu/README.md` ("CPU-CGB-E -- passes all tests"). That reading
+  # does not survive contact with the pixel references above, and it never
+  # bound anything: SameSuite's nine per-revision APU ROMs each carry their own
+  # `--model=` token, so they never ran on the default in the first place. The
+  # move from E to C changes no behaviour by itself -- both resolve to
+  # `bmCgbABCDE` and to the same `length_clock_any_nrx4 = false` -- it only
+  # stops the default from claiming to be a machine the tree does not model.
+  # DMG: mooneye's `boot_regs-dmgABC` / `boot_div-dmgABCmgb` are green and
+  # `stat_irq_blocking.s` reads "pass: DMG ABC, MGB, CGB, AGB, AGS / fail:
+  # DMG 0".
+  result.gb_set_revision(if result.cgb_enabled: grCgbC else: grDmgABC)
   result.rom_title = block:
     var s = ""
     for i in 0x0134 ..< 0x013F:

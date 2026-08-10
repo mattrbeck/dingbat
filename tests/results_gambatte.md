@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-09 17:15:00*
+*Generated: 2026-08-10 12:44:16*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3850/5005 passed.**
+**3876/5005 passed.**
 
 ## bgen
 
@@ -783,9 +783,9 @@ All 6 tests passed.
 | oam_access/prewrite_2_dmg08_out1_cgb04c_out0 [dmg] | got 0, expected 1 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (681/811 passed)
+## oamdma (707/811 passed)
 
-681/811 tests passed, 130 failed:
+707/811 tests passed, 104 failed:
 
 | Test | Result |
 |------|--------|
@@ -823,8 +823,6 @@ All 6 tests passed.
 | oamdma/oamdma_src0000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
 | oamdma/oamdma_src0000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
 | oamdma/oamdma_src0000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
-| oamdma/oamdma_src0000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_src0000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
 | oamdma/oamdma_src7F00_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
 | oamdma/oamdma_src7F00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
 | oamdma/oamdma_src7F00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
@@ -833,22 +831,14 @@ All 6 tests passed.
 | oamdma/oamdma_src7F00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
 | oamdma/oamdma_src7F00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
 | oamdma/oamdma_src7F00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
-| oamdma/oamdma_src7F00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_src7F00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_src8000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_src8000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oamdma/oamdma_src9F00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_src9F00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
 | oamdma/oamdma_srcA000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
 | oamdma/oamdma_srcA000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
 | oamdma/oamdma_srcA000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [cgb] | got 657600FF, expected 657655FF |
 | oamdma/oamdma_srcA000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
 | oamdma/oamdma_srcA000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
 | oamdma/oamdma_srcA000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
-| oamdma/oamdma_srcA000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_srcA000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
 | oamdma/oamdma_srcBF00_busypopBFFF_2_dmg08_outFFFFFFFF_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
 | oamdma/oamdma_srcBF00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
 | oamdma/oamdma_srcBF00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
@@ -857,28 +847,18 @@ All 6 tests passed.
 | oamdma/oamdma_srcBF00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
 | oamdma/oamdma_srcBF00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
 | oamdma/oamdma_srcBF00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
-| oamdma/oamdma_srcBF00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_srcBF00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_srcC000_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_srcC000_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
-| oamdma/oamdma_srcDF00_busypushFEA1_dmg08_out65768700_cgb04c_out65768734 [cgb] | got 65768700, expected 65768734 |
-| oamdma/oamdma_srcDF00_busypushFF01_dmg08_out657600DF_cgb04c_out657612DF [cgb] | got 657600DF, expected 657612DF |
 | oamdma/oamdma_srcE000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
 | oamdma/oamdma_srcE000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
 | oamdma/oamdma_srcE000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
 | oamdma/oamdma_srcE000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
 | oamdma/oamdma_srcE000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
 | oamdma/oamdma_srcE000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcE000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcE000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
 | oamdma/oamdma_srcEF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
 | oamdma/oamdma_srcEF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
 | oamdma/oamdma_srcEF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
 | oamdma/oamdma_srcEF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
 | oamdma/oamdma_srcEF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
 | oamdma/oamdma_srcEF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcEF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcEF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
 | oamdma/oamdma_srcF000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
 | oamdma/oamdma_srcF000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
 | oamdma/oamdma_srcF000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
@@ -887,8 +867,6 @@ All 6 tests passed.
 | oamdma/oamdma_srcF000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
 | oamdma/oamdma_srcF000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
 | oamdma/oamdma_srcF000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcF000_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcF000_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
 | oamdma/oamdma_srcFE00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
 | oamdma/oamdma_srcFE00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
 | oamdma/oamdma_srcFE00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
@@ -897,8 +875,6 @@ All 6 tests passed.
 | oamdma/oamdma_srcFE00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
 | oamdma/oamdma_srcFE00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
 | oamdma/oamdma_srcFE00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcFE00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcFE00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
 | oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank [dmg] | got 1, expected 0 |
@@ -911,8 +887,6 @@ All 6 tests passed.
 | oamdma/oamdma_srcFF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
 | oamdma/oamdma_srcFF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
 | oamdma/oamdma_srcFF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcFF00_busypushFEA1_dmg08_out65768700_cgb04c_outFFFFFF34 [cgb] | got FFFFFF00, expected FFFFFF34 |
-| oamdma/oamdma_srcFF00_busypushFF01_dmg08_out657600DF_cgb04c_outFFFF12DF [cgb] | got FFFF00DF, expected FFFF12DF |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [dmg] | got A0, expected 81 |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [cgb] | got A0, expected 81 |
 | oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [dmg] | got 2B, expected 81 |
