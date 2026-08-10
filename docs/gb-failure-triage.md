@@ -3497,3 +3497,184 @@ with the mode and `hdma_active` at that dot (`FF55`), every HBlank/GP block copy
 (`HDMABLOCK`), every STAT/LY read (`REGREAD`), and every mode change (`MODE`) —
 all with `ly` and the PPU dot. Every number in this section came off it. It pairs
 with `-d:gb_halt_trace`, which reports the wake.
+
+## 2026-08-10: `scx_during_m3`, and the BG fetcher's address is a screen position
+
+The family the mode-3 campaign named as its first target: **gambatte
+`scx_during_m3`, 49/141**, the biggest single accuracy bucket in the tree. It is
+now **113/141** shipping, **119/141** with one flag, and the whole suite went
+**3940 → 4004**. Every row that moved is inside this family; nothing else in
+5005 rows shifted, and the four screenshot witnesses this file spends most of
+its length on are byte-identical either way.
+
+### The family, decoded
+
+Every ROM is one STAT handler at `$1000`. It takes a **mode-2** interrupt, then
+writes SCX three times down a NOP slide; the directory name is literally the
+three values (`scx_0363c0` is `$03, $63, $C0`). Successive members move the
+second write one M-cycle **later** and the third one M-cycle **earlier** —
+both move, which is why the boundaries in the frames walk in the direction they
+do. `tools/gbscx/writedots.py` reads the three M-cycles straight from the bytes;
+`tools/gbscx/disasm.py` is a plain SM83 disassembler written for this and useful
+anywhere the suites' ROMs need reading.
+
+**The frame is a ruler, not a picture, and that is a property of the ROM.** Its
+background row is 32 map columns of two alternating tile pairs whose local
+pattern is aperiodic enough that a dozen pixels pin the background coordinate
+they came from. So a scanline reads back as a function `screen x → background X`,
+and `X − x` is the effective SCX at that pixel. `tools/gbscx/scxread.py` does the
+inversion (palette computed from the ROM's own `BGP = $27` and CGB palette, not
+guessed, so it is device-independent); `scxmap.py` puts ours and hardware's
+segmentation side by side. Reported **mod 16**, which is the honest resolution:
+the background row is 16-pixel periodic inside each half, so an absolute
+displacement is sometimes ambiguous but the tile-column PARITY and the fine
+scroll never are — and those are exactly what a mid-line SCX write moves.
+
+### Finding 1: the column carries a borrow (shipped, `SCX_FINE_BORROW`)
+
+The BG fetcher is **not** addressed as "a tile index plus a scroll". Its map
+column is
+
+    ((SCX + 8*k − F) shr 3) and 31
+
+where `8*k − F` is the **screen position** of the fetch and `F` is `SCX and 7` as
+the line latched it. That is the old `k + (SCX shr 3)` in every case but one:
+when a mid-line store **lowers** the low three bits below `F`, the subtraction
+borrows and the column comes out one tile lower for the rest of the line. SCX's
+low bits take part in the carry into the tile-address bits — one adder and one
+register, which a tile index plus a scroll cannot express.
+
+The correlation is exact in both directions across all six directories: every
+failing row's disputed span followed a store that lowered `SCX and 7`, every row
+without one passed, and `scx_0060c0` — the directory that never moves the low
+bits — was green all along. The error was always the **same** error, one tile,
+whatever the size of the drop (`3→0` is minus three, `7→1` is minus six, both
+cost exactly 8 pixels), which is what says carry and not count.
+
+Two neighbouring shapes are refused by measurement:
+
+* *"the discard re-arms and throws 8 more pixels away"* — refused by the
+  residue. Every measured span keeps the **old** fine offset, never the new one.
+* *"an extra tile is fetched"* — refused by sign. The spans sit one tile
+  **lower**, which is a borrow and not an insertion.
+
+**A device split falls out, bracketed from both sides.** Three ROMs move only
+the low bits and are the only rows in the tree that can see the borrow alone:
+
+| ROM | drop | DMG hardware | CGB hardware |
+|---|---|---|---|
+| `scx1_scx0_during_m3_1` | 1→0 | no change at all | borrows at x = 63 |
+| `scx2_scx1_during_m3_1` | 2→1 | no change at all | borrows at x = 62 |
+| `scx2_scx0_during_m3_1` | 2→0 | borrows at x = 62 | borrows at x = 62 |
+
+Same ROM, same dot, same drop of one, and the consoles disagree; a drop of two
+borrows on both. So the DMG's threshold is one pixel tighter — it borrows on
+`(SCX and 7) + 1 < F` where the CGB borrows on `(SCX and 7) < F` — and that is
+`SCX_FINE_BORROW_DMG_LEAD`. At 0 the two `−1` rows go red on DMG, at 2 the `2→0`
+row does. It is **not** `CGB_PIPE_MCYCLES`, which is four dots against machine
+time; this is one pixel inside the fetcher's own sum.
+
+**An independent oracle confirms it.** AGE's `m3-bg-scx` — three rows, both
+devices and double speed, not used in the derivation — goes from 99.4/99.5%
+to **pixel-exact**. Local runner 770 → 773.
+
+**It is free, and the dot loop got cheaper.** The whole SCX term including the
+borrow is cached by `fifo_arm_scx` and re-derived at the two events that can
+change it, exactly as `win_lx` is kept by `fifo_arm_window`, so the fetch site
+is the single add it already was and no longer does a shift. `git archive` both
+sides, blargg cpu_instrs, 2400 frames after 300 warmup, six interleaved runs,
+`cycles=` identical in all twelve: **−0.148%** retired instructions against the
+base commit, six times the arm's own spread. The first spelling, which decided
+the borrow at the fetch, measured **+0.22%** and is why the cached one exists.
+
+### Finding 2: the fine-scroll sample is a window (derived, ships OFF)
+
+`SCX_FINE_LATCH_LIVE`, worth a further **+6 / −1**. A store to SCX joins the
+discard for as long as the discard still has pixels to throw away, moving the
+line's fine scroll, its `lx` and mode 3's own length with it.
+
+Traced, dingbat latches at dot 88 and the interesting stores land at 89 and 93:
+
+| family | `F` | store at 89 | store at 93 | hardware's residue |
+|---|---|---|---|---|
+| `scx_0063c0` | 0 | no | no | keeps 0 — there is no discard |
+| `scx_0367c0` | 3 | **yes** | no | takes 7, the whole of `$67` |
+| `scx_0360c0` | 3 | **yes** | no | takes 0, the whole of `$60` |
+| `scx_0761c0` | 7 | **yes** | **yes** | takes 1, the whole of `$61` |
+
+Read down the `store 89` column and a fixed window is refused outright: same
+dot, same offset from the same latch, and one family says no while three say
+yes. The only thing separating them is `F`, which is exactly how many dots of
+discard are left. Read across `scx_0761c0` and the window is still open five
+dots in at `F = 7`, which no capped spelling reaches without also opening it at
+`F = 0`. Swept as `min(N, F)`, the score saturates at N = 3 while the RESIDUES
+keep falling to N = 7 (`scx_0761c0/scx_during_m3_4`: 6292 wrong pixels at N = 3
+against 2145 at N = 7, and its DMG/CGB asymmetry vanishes). So the window is the
+discard, and there is no constant.
+
+Two spellings were built and refused:
+
+* **`lx < 0`** — "the discard is still running", which reads like the same
+  statement — scores **3992/5005**. The head's throw-away fetch parks the
+  shifter, so `lx` stays negative long after the discard is spent and the window
+  opens on exactly the `_4` steps hardware shuts it on.
+* **widening the window by one M-cycle on line 0 alone**, which is the shape
+  `LY0_PIPE_MCYCLES` predicts and which would buy back the one row this costs:
+  **3998** against 4009. It loses eleven rows to win one.
+
+It ships off on price. On the only whole-cartridge workload available here it
+reads **+0.446%** of retired instructions, and five net rows do not buy that
+much of the dot loop. Off is free — the field it needs costs +0.21% through
+object layout with the mechanism compiled out, the same cliff `win_lx` and
+`win_hold` each record, so the field is declared inside the `when` and the
+default build matches the previous commit to 0.002%. **Re-price it on Pokemon
+Crystal and Link's Awakening; it is one build.**
+
+### What is left in the family, and the one bracket worth having
+
+22 rows shipping, in three groups.
+
+* **`scx_m3_extend_{1,ds_1}`, 3 rows — mode 3's LENGTH, and this is the
+  interesting one.** SCX `$07` then `$05`, a low-bit drop, and the pair brackets
+  the mode 3 → 0 edge to one M-cycle. Measured with `-d:gb_m3_len` and
+  `-d:gb_dma_trace`: on the scored line our mode 3 is 179 dots and ends at dot
+  **259**, the ROM's STAT read is at dot **269**, and `_2`'s is at **273**. `_1`
+  wants mode 3 at 269 and `_2` wants mode 0 by 273, so **hardware's mode-3 end is
+  11 to 14 dots later than ours on that line.** The borrow's natural 8 does not
+  reach it, and the content rows cannot arbitrate because an extension past
+  x = 159 is invisible in a 160-pixel frame. The double-speed member is a
+  *descending staircase* — `SUB 2` and store, repeatedly — so the effect
+  accumulates, which is what "m3 extend" is named for and the instrument to
+  derive it with.
+* **~16 rows, the discard-window boundary**, all bought by Finding 2 or sitting
+  next to it.
+* **3 rows at 8 pixels, CGB only** (`scx_during_m3_spx2`, `scx_attrib_*`), an
+  object case that has nothing to do with either finding.
+
+### What this did NOT touch, stated plainly
+
+* **The same-wake contradiction is untouched.** `halt/lycirq_m2stat_2` versus
+  `dma/hdma_late_disable_{1,2}` is byte-for-byte unmoved: the whole-suite row
+  diff is `+64 / −0` and every one of the 64 is in `scx_during_m3`. Nothing here
+  bears on it except one pointer, and it is a real one — `scx_m3_extend` is
+  direct evidence that **mode 3's END can move without its CONTENT moving**,
+  which is the "the edges do not move together" shape that contradiction needs.
+  That bracket, above, is the cheapest place left to attack it.
+* **acid-hell is unchanged at 23038/23040, and the shootout stays 260/261.**
+  This is a positive statement rather than an absence: `cgb-acid-hell` writes
+  LCDC and `daid/ppu_scanline_bgp` writes BGP, and neither writes SCX mid-line,
+  so neither mechanism here can reach them. Verified rather than assumed —
+  `cgb-acid-hell` at `--cgb-rev=C` and at `--cgb-rev=E`, `daid` on DMG and on
+  CGB at rev C and rev D, both `strikethrough` frames and both acid2 frames are
+  all **byte-identical** to a `-d:SCX_FINE_BORROW=0` control
+  (`tools/gbscx/witness.sh`, `witdiff.sh`), and mealybug's CGB total is
+  1863574 in both arms.
+
+### Instruments
+
+`tools/gbscx/`: `disasm.py` (SM83), `scxread.py` + `scxmap.py` (the displacement
+ruler), `writedots.py`, `dumpfam.sh`, `gamdiff.sh` (attribute every moved row),
+`sweep.sh` (one build and one whole-suite score per constant value),
+`witness.sh` + `witdiff.sh` (the ladder, world against world),
+`bench.sh` / `benchref.sh` (interleaved retired-instruction A/B, by flag or by
+git ref), `mb.sh`, `handlers.sh`, `build.sh`, `r.sh`, `env.sh`.
