@@ -215,7 +215,40 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
   when op == 0b00:
     discard cpu.set_reg(rd, cpu.add(cpu.r[rd], cpu.r[rs], false))
   elif op == 0b01:
-    discard cpu.sub(cpu.r[rd], cpu.r[rs], true)
+    when h1:
+      if rd == 15:
+        # Thumb hi-reg CMP with Rd=pc is not a compare on hardware: it
+        # performs a FULL SPSR->CPSR restore (mode bits included) and
+        # execution continues with no branch (gbaedge THUMBPC/THUMBPC2
+        # pages, AGB SP sessions 2/3: with SPSR=0x9000009F in IRQ mode the
+        # CPSR after reads 0x9000009F - the mode switched to System). In a
+        # mode without an SPSR (user/system) MRS-style SPSR reads return
+        # CPSR, so the restore degenerates to CPSR := CPSR - a no-op.
+        let mode = cast[CpuMode](cpu.cpsr.mode)
+        if mode != modeUSR and mode != modeSYS:
+          let new_spsr = uint32(cpu.spsr)
+          let was_irq_disabled = cpu.cpsr.irq_disable
+          cpu.switch_mode(cast[CpuMode](new_spsr and 0x1F'u32))
+          cpu.cpsr = cast[PSR](new_spsr)
+          # switch_mode already loaded the destination bank's SPSR when the
+          # mode changed; only the unbanked modes need the CPSR mirror. (Do
+          # NOT reload spsr_banks here when the mode did not change - the
+          # live SPSR is newer than its bank copy.)
+          if mode_bank(cast[CpuMode](new_spsr and 0x1F'u32)) == 0:
+            cpu.spsr = cpu.cpsr
+          if was_irq_disabled and not cpu.cpsr.irq_disable:
+            cpu.gba.interrupts.schedule_interrupt_check()
+          if not cpu.cpsr.thumb:
+            # The restore cleared T. On hardware execution resumes in ARM
+            # state at the next word boundary (the THUMBPC/THUMBPC2 probes
+            # continue cleanly into the aligned ARM code right after the
+            # Thumb pad): flush and refill as ARM there.
+            discard cpu.set_reg(15, cpu.r[15] and not 3'u32)
+            return
+      else:
+        discard cpu.sub(cpu.r[rd], cpu.r[rs], true)
+    else:
+      discard cpu.sub(cpu.r[rd], cpu.r[rs], true)
   elif op == 0b10:
     discard cpu.set_reg(rd, cpu.r[rs])
   else:  # 0b11: BX
