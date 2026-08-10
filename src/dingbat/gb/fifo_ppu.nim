@@ -210,6 +210,8 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.fetch_counter = 0
   ppu.fetcher_x = 0
   ppu.scx_fine = 0
+  when SCX_FINE_LATCH_LIVE:
+    ppu.scx_latch_until = -1'i32
   fifo_arm_scx(ppu)
   ppu.lx = 0
   ppu.smooth_scroll_sampled = false
@@ -361,19 +363,95 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Written as an `ord` term rather than an `if` for the reason line 370 gives:
   ## this is the mode 3 dot loop and a branch here is measurable.
 
-proc fifo_arm_scx*(ppu: GbFifoPpu) =
-  ## Recompute the fetcher's SCX term. Called from the one place SCX is stored
-  ## (`ppu_store_scx`) and from the fine-scroll latch, which are the only two
-  ## events that can change either input.
-  ppu.scx_tile = (int(ppu.scx) shr 3) -
-                 SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
-
 const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
   ## Pixels the DMG's fetcher position leads the CGB's by inside the borrow
   ## comparison above. Derived and bracketed in that constant's note, off the
   ## three `scxN_scxM_during_m3_1` ROMs, which are the only rows in the tree
   ## that move the low three bits of SCX and nothing else. Subtracted into
   ## `scx_fine` at the latch so the dot loop never sees it.
+
+# ---- SCX_FINE_LATCH_LIVE ------------------------------------------------
+#
+# The switch itself is declared in gb.nim, beside the type it grows a field
+# on; this is its derivation.
+#
+# The fine scroll is not sampled on ONE dot. A store to SCX joins the
+# discard for as long as the discard still has pixels to throw away, moving
+# the line's fine scroll and its own length with it. `false` is the old
+# model, where the sample and the discard shared a dot.
+#
+# **Derived, measured, and shipping OFF on price alone.** The rule below is
+# as well evidenced as anything in this file and it is worth
+# gambatte +6 / -1. What is not established is what it costs: on the only
+# whole-cartridge workload this worktree has (blargg cpu_instrs) the
+# mechanism reads +0.24% of retired instructions and the FIELD IT NEEDS
+# reads a further +0.21% with the mechanism compiled out -- which is the
+# object-layout cliff `win_lx` and `win_hold` both record, not a cost of the
+# rule. Shrinking `scx_fine` to `int32` to pay for the field does not move
+# it and `{.noinline.}` on `fifo_arm_scx` costs +0.44% on its own. Five net
+# rows do not buy half a percent of the dot loop, and this bench is not the
+# one docs/gb_oam_dma_cost.md quotes. Re-price it on Pokemon Crystal and
+# Link's Awakening before flipping it: it is one build.
+#
+# ---- What derives it, and what fixes its length --------------------------
+#
+# gambatte `scx_during_m3` sweeps one store across the head of mode 3 one
+# M-cycle at a time. Traced with `-d:gb_m3_trace`, dingbat latches at dot 88
+# on every line but line 0, and the interesting stores land at dot 89 and
+# dot 93. Whether hardware lets them move the fine scroll depends on the
+# fine scroll the line already had, which is what says the window is the
+# discard rather than a fixed number of dots:
+#
+#   family      F   store 89   store 93   hardware's residue after it
+#   scx_0063c0  0     no          no      keeps 0 -- there is no discard
+#   scx_0367c0  3     YES         no      takes 7, the whole of `$67`
+#   scx_0360c0  3     YES         no      takes 0, the whole of `$60`
+#   scx_0761c0  7     YES         YES     takes 1, the whole of `$61`
+#
+# Read down the `store 89` column and a fixed window is refused outright:
+# the same dot, the same offset from the same latch, and `scx_0063c0` says
+# no while the other three say yes. The only thing that separates them is
+# `F`, and `F` is exactly how many dots of discard are left. Read across
+# `scx_0761c0` and the window is at least 5 dots long at `F = 7`, which no
+# capped spelling reaches without also opening it at `F = 0`.
+#
+# So there is no constant here at all: the condition is `lx < 0`, which is
+# what a negative `lx` already means in this renderer. Swept as a capped
+# `min(N, F)` first, the score saturates at N = 3 and the residues keep
+# falling to N = 7 (`scx_0761c0/scx_during_m3_4`, 6292 wrong pixels at
+# N = 3 against 2145 at N = 7, and the DMG/CGB asymmetry there vanishes) --
+# i.e. the data wanted the cap gone.
+#
+# ---- The one row it costs --------------------------------------------
+#
+# `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`. It is a mode-3 LENGTH
+# row on line 0, and line 0 is where this tree already carries a one
+# M-cycle difference (`LY0_PIPE_MCYCLES`, and the latch there is dot 84 and
+# not 88). Its siblings `_scx0_2` and `_scx0_3` stay green, so this is not
+# the mechanism being wrong in general.
+#
+# The obvious repair is REFUSED and was built rather than argued away:
+# widening the window by that M-cycle on line 0 alone -- which is the shape
+# `LY0_PIPE_MCYCLES` would predict -- scores 3998/5005 against 4009, losing
+# eleven `scx_during_m3` rows to buy the one back. So line 0's latch is
+# early by something that is not simply this window's length, and the row
+# is left red with its cause named rather than papered over.
+
+proc fifo_arm_scx*(ppu: GbFifoPpu) =
+  ## Recompute the fetcher's SCX term. Called from the one place SCX is stored
+  ## (`ppu_store_scx`) and from the fine-scroll latch, which are the only two
+  ## events that can change either input.
+  when SCX_FINE_LATCH_LIVE:
+    # The discard has pixels left to throw away, so this store joins it rather
+    # than being measured against it: the fine scroll moves, `lx` moves by the
+    # difference, and mode 3 lengthens or shortens with it.
+    if ppu.scx_latch_until >= 0'i32 and ppu.cycle_counter <= ppu.scx_latch_until:
+      let want = int(ppu.scx and 7) -
+                 (if ppu.cgb: 0 else: SCX_FINE_BORROW_DMG_LEAD)
+      ppu.lx -= int32(want - ppu.scx_fine)
+      ppu.scx_fine = want
+  ppu.scx_tile = (int(ppu.scx) shr 3) -
+                 SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
 
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
@@ -396,6 +474,14 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   ppu.scx_fine = int(ppu.scx and 7) -
                  (if ppu.cgb: 0 else: SCX_FINE_BORROW_DMG_LEAD)
   fifo_arm_scx(ppu)
+  when SCX_FINE_LATCH_LIVE:
+    # The window is the discard's own length. `SCX and 7` here is the RAW fine
+    # scroll, before the DMG lead `scx_fine` carries, because it is a count of
+    # discard pixels and not a comparison threshold. It cannot be read off `lx`
+    # instead: the head's throw-away fetch parks the shifter, so `lx` stays
+    # negative long after the discard is spent, and that spelling opens the
+    # window on the `_4` steps hardware shuts it on (measured, 3992/5005).
+    ppu.scx_latch_until = ppu.cycle_counter + int32(ppu.scx and 7)
   if ppu.fetching_window:
     # ---- A line that STARTS as a window line still pays SCX & 7 ------------
     #
@@ -3468,6 +3554,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.m3_delay = uint8(int(ppu.m3_lead) - M3_END_EARLY)
             ppu.m3_hold = 0
           ppu.smooth_scroll_sampled = false
+          when SCX_FINE_LATCH_LIVE:
+            ppu.scx_latch_until = -1'i32
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
           when LY0_PIPE_ANY:

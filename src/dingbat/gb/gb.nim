@@ -1696,6 +1696,17 @@ const LCD_ON_LINE0_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_LINE1_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_TRIM_ANY* = LCD_ON_LINE0_TRIM != 0 or LCD_ON_LINE1_TRIM != 0
 
+const SCX_FINE_LATCH_LIVE* {.booldefine.} = false
+  ## A store to SCX joins the line's fine-scroll discard for as long as the
+  ## discard still has pixels to throw away, instead of being measured against
+  ## a value sampled on one dot. Declared here, with the other pipeline
+  ## constants, because `GbFifoPpu` below grows a field only when it is on --
+  ## the field costs 0.21% of retired instructions on its own through object
+  ## layout, so `false` has to be byte-identical to not having built it.
+  ##
+  ## The derivation, the two-sided evidence and the price are all at this
+  ## constant's note in gb/fifo_ppu.nim.
+
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
 
@@ -2400,6 +2411,13 @@ type
     # itself. This field is touched a handful of times a line and pays nothing
     # for sitting with the flags.
     win_hold*:            uint8
+    # The last dot on which a store to SCX still moves this line's fine
+    # scroll, or -1 outside that window. Only `SCX_FINE_LATCH_LIVE` reads it,
+    # and it exists only when that is on: an unconditional field here measured
+    # +0.21% of retired instructions with the mechanism itself compiled out,
+    # which is the object-layout cliff `win_lx` and `win_hold` both record.
+    when SCX_FINE_LATCH_LIVE:
+      scx_latch_until*:   int32
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
