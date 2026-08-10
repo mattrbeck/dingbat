@@ -48,6 +48,18 @@ GBA: BIOS checksum low half).
    GBA open-bus/pipeline bytes legitimately differ between the manual and
    auto binaries (the code around the capture points differs).
 
+### AGB-only sessions (GBA console + EverDrive)
+
+All 16 gbaedge pages run natively — CONTEND and IRQLAT are entirely
+on-die, so the flashcart cannot influence them; WAITSTATE/PFPHASE and
+ROM open-bus bytes carry the flashcart caveat below.  gbedge.gb runs on
+the same console **only via a GB-slot flashcart** (the GBA's CGB
+compatibility mode; MODEL line reads 11 01 = AGB) — a GBA-slot cart
+running a GB emulator (Goomba etc.) is worthless here, it would measure
+the emulator.  An AGB session answers every CGB-mode page for the AGB
+model (CGBWRAM/M1STAT/HALTPHASE/WYLATCH/PCMPSG/SPEED/DSTAT/DIVTAPS
+included); DMG and CGB-revision data still needs the real handhelds.
+
 Caveats: GBA WAITSTATE/prefetch rows and any open-bus-from-ROM bytes are
 flashcart-influenced — note which cart was used (EverDrive vs EZ-Flash vs
 repro board can differ); everything else is cart-independent.  gbedge only
@@ -90,6 +102,7 @@ via `--mode=microtest --list=...` (scored "PASS" == ROM healthy).
 | 16 | HALTPHASE | halt-woken handler vs a timed sled racing the same mode-0 edge, both TIMA- and LY-timestamped, 1 M-cycle resolution via grid phase sweeps, SCX 0 and 3 | bucket 24: GBMicrotest and mooneye contradict each other about exactly this on the same silicon; resolving it gates ~21 runner rows (STAT_M2_LEAD) |
 | 17 | WYLATCH | mode-0-IRQ timestamp of the window-start line while the WY write time is swept across line 39, four 4-dot-spaced timestamp grids + early-armed and never-hits controls | the late_wy anomaly: CGB samples WY SOONER than DMG (the only backwards CGB latency); ~26 late_wy rows + the 51-row WY-LATCH pipeline sub-bucket |
 | 18 | CGBWRAM | $D000-window banking under every SVBK value with alias sentinels, incl. the exact SVBK=2 configuration | bucket 16's 64 rows, "Declined pending hardware": byte 0A reads 77 on a console where $D000 aliases $C000, 5C where banking is real |
+| 19 | DIVTAPS | phase staircases: serial-completion poll counts at 8 DIV-reset phases, APU length-expiry poll counts at 8 phases | the mechanism page — DIV/timer/serial/frame-sequencer are supposed to be taps off ONE counter; the staircase periods ARE the tap bits.  (dingbat's length-expiry flag only clears at 1 of 8 phases — already suspicious) |
 
 CGB-only pages show `EE` at offset 1F on DMG-class hardware.  (CGBWRAM
 runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
@@ -127,6 +140,8 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 | 0B | WAITSTATE | 16 sequential ROM reads under 4 WAITCNT settings; a 32-nop ROM call with prefetch off/on; WAITCNT restored to boot value | prefetch-buffer modelling; flashcart-dependent — record the cart |
 | 0C | PFPHASE | one timer-bracketed ROM data read after k=0..7 sequential ROM fetches, two waitstate settings | dingbat's prefetch dead-cycle rule (`elapsed mod s == s-1`) is fitted per-row to the mGBA suite and provably wrong-shaped for the DMA rows; the cost-vs-k wobble IS the real rule |
 | 0D | SWIREGION | Sqrt cycle counts at 4 inputs between the fit's calibration points; Div and CpuSet issued from IWRAM/EWRAM/ROM callers | SWI_HLE_BASE and the "S16-1" refill residual were calibrated against the suite's IWRAM column only; Sqrt is a 3-point piecewise guess |
+| 0E | CONTEND | timed PRAM/VRAM/OAM/EWRAM reads mid-line visible vs forced blank vs hblank vs vblank, plus VRAM writes | dingbat models ZERO PPU/CPU contention (constant access costs while rendering); every byte here is on-die, so the flashcart cannot touch it |
+| 0F | IRQLAT | trigger-vs-handler TM0 stamps for TM2-overflow / DMA3 / hblank / vblank IRQs | dingbat's two fitted synchronizer latencies (3 and 6, one suite row each); source-to-source deltas cancel the fixed dispatch cost.  (dingbat never delivers the TM2 IRQ at all — fresh divergence) |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 

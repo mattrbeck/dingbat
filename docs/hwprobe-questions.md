@@ -57,12 +57,36 @@ measurements are the only way off that circle.
 | 21 | MSR T-bit hand-off: "mGBA-verified hardware model" means verified against mGBA; the synthesized Thumb nop at A+4 is a fabrication for PC arithmetic | `arm/arm.nim:311-324` | **[built p08 MSRTBIT]** — dingbat reads r7=04 (resume A+8, skip A+10); silicon answer wanted |
 | 22 | MUL/MLA carry left untouched while UMULL/SMULL gets an elaborate Booth model with an uncited `Rs[31:29]==7` special case | `arm/arm.nim:69-117` | **[built p07 MULFLAGS]** |
 | 23 | Timer: `TIMER_START_DELAY=2` (no citation), zero-delay recursive cascade, 1-cycle reload window, prescaler phase anchored to emulator cycle 0 | `timer.nim:6-37` | **[built p04 TIMERS]** — the cascade row already looks wrong in dingbat (TM1=0x33, TM0 stuck at reload) |
-| 24 | IRQ synchronizer latencies: 3 (timer) vs 6 (hblank, midpoint of an admitted 5-cycle plateau), shared by DMA/keypad without evidence | `interrupts.nim:18-21`, `ppu.nim:72-80` | **open** — per-source spin-and-timestamp page (v3) |
+| 24 | IRQ synchronizer latencies: 3 (timer) vs 6 (hblank, midpoint of an admitted 5-cycle plateau), shared by DMA/keypad without evidence | `interrupts.nim:18-21`, `ppu.nim:72-80` | **[built p0F IRQLAT]** — and dingbat never delivers the TM2-overflow IRQ it arms (reload 0, enable+IRQ one word store): fresh divergence |
 | 25 | Open bus: Thumb duplicates the halfword (hardware: region-dependent pair), DMA-latch window "until next instruction boundary" (one game's evidence), page-0 DMA carve-out unexplained | `bus.nim:952-976/502-506` | **[built p01 OPENBUS + p05 DMALATCH]**; add a Thumb-odd-PC read in v3 |
 | 26 | OBJ per-line cycle budget 1210/954 + cutoff granularity **copied from mGBA** ("the sprite that exhausts the budget still draws fully" — hardware truncates) | `ppu.nim:540-551` | **open** — sprite-overflow readback page (marker sprite visibility), or visual |
 | 27 | Affine reference latched once at vcount 160 and updated immediately on write (hardware: per-line during vblank, latch semantics differ) | `ppu.nim:125-127/1449-1455` | **visual** — mid-frame BG2X write ROM, photograph |
-| 28 | No PPU/CPU memory contention modeled at all (PRAM/VRAM/OAM constant cost while rendering) | `bus.nim:3-6` | **open** — timer-bracketed VRAM read loop during mode 0/2/visible vs forced blank (v3, cheap!) |
+| 28 | No PPU/CPU memory contention modeled at all (PRAM/VRAM/OAM constant cost while rendering) | `bus.nim:3-6` | **[built p0E CONTEND]** — dingbat baseline shows visible == forced-blank exactly, as predicted |
 | 29 | GBA APU: frame sequencer free-running vs DIV-tapped, SOUNDBIAS resolution changes depth but not rate, PSG volume-3 mute is an emulator-consensus vote | `apu.nim:19-27/358-360/458-466` | **[built p0A PSGSTAT]** partially; volume-3 needs **analog** |
+
+### The mechanism consolidations (what "getting it for free" looks like)
+
+Three clusters of knobs are plausibly shadows of ONE quantity each; the
+probes are designed so a single parameter either explains all their
+columns (mechanism found — replace the knobs) or provably cannot
+(model shape wrong — stop tuning it):
+
+1. **The sub-M-cycle event grid** — `STAT_READ_SAMPLE`, `HALT_IF_SAMPLE_T`,
+   `IRQ_SAMPLE_T`, the serial tap, the half-dot, the 2-dot residual are
+   all "at which T-cycle inside an M-cycle does event X happen".  Pages:
+   STATSEQ/DSTAT + HALTPHASE + IEPUSH + SERIAL.  One consistent grid
+   fitted to all five pages' hardware columns replaces six knobs.
+2. **One counter, many taps** — DIV, TIMA mux, serial clock, APU frame
+   sequencer.  Page: DIVTAPS (staircase periods ARE the tap bits), plus
+   DIVPHASE/TIMAGLITCH.  Replaces the seed/tap constants with bit
+   indices off a single modeled counter.
+3. **The CGB write-latency table** — per-register constants
+   (`CGB_*_LATENCY`) that mealybug's own notes describe as "writes take
+   effect 2 T-cycles later" with per-fetcher-stage sampling.  WYLATCH's
+   per-device transition-k, plus the visual ROM below, either collapse
+   the table into "CGB bus commit is N T-cycles later + each PPU
+   register is sampled at fetcher stage S" or prove the per-register
+   shape is real.
 
 ## Tier 3 — pixel-only: needs a visual ROM + photographs (v3: "gbvis.gb")
 

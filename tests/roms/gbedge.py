@@ -2194,6 +2194,79 @@ def t_cgbwram(a, slot, p):
     a.ldh_n_a(SVBK)                    # stack use can happen again
 
 
+@test("DIVTAPS")
+def t_divtaps(a, slot, p):
+    """The mechanism page: DIV, the timer, the serial clock and the APU
+    frame sequencer are all supposed to be TAPS off one 16-bit counter.
+    If that is true, sweeping the counter phase must shift every
+    subsystem's event times by exactly the swept amount, and the tap bit
+    indices fall out of the staircase periods.  Any subsystem that does
+    NOT follow the sweep is not a tap (or dingbat's model of it isn't).
+
+    00-07  serial: poll-iterations until an internal-clock transfer
+           completes, started 8*k M-cycles (k=0..7) after a DIV reset —
+           the staircase period/phase IS the serial tap bit
+    08-17  APU length: 16-bit poll count until a length-63 ch1 expires,
+           triggered 2048*k M-cycles (k=0..7) after a DIV reset (lo,hi
+           per k) — the staircase reveals the frame-sequencer tap and
+           whether the DIV write itself clocks it (falling edge)
+    18     NR52 right after the last trigger (ch1 active flag sanity)
+    """
+    for k in range(8):
+        a.xor_r("a")
+        a.ldh_n_a(SB)
+        a.ldh_n_a(DIV)
+        a.delay(8 * k)
+        a.ld_r_n("a", 0x81)
+        a.ldh_n_a(SC)
+        a.ld_r_n("b", 0)
+        a.label(f"{p}_sw{k}")
+        a.ldh_a_n(SC)
+        a.rlca()
+        a.jr(f"{p}_sd{k}", "nc")
+        a.inc_r("b")
+        a.jr(f"{p}_sw{k}")
+        a.label(f"{p}_sd{k}")
+        a.ld_r_r("a", "b")
+        a.ld_nn_a(slot + k)
+    # APU length staircase
+    a.ld_r_n("a", 0x80)
+    a.ldh_n_a(0x26)                    # NR52 on
+    a.ld_r_n("a", 0x11)
+    a.ldh_n_a(0x25)
+    a.ld_r_n("a", 0x77)
+    a.ldh_n_a(0x24)
+    for k in range(8):
+        a.ld_r_n("a", 0xBF)            # duty 2, length 63
+        a.ldh_n_a(0x11)
+        a.ld_r_n("a", 0xF0)
+        a.ldh_n_a(0x12)
+        a.xor_r("a")
+        a.ldh_n_a(0x13)
+        a.ldh_n_a(DIV)                 # phase anchor
+        a.delay(2048 * k)
+        a.ld_r_n("a", 0xC4)            # trigger + length enable
+        a.ldh_n_a(0x14)
+        a.ld_rr_nn("bc", 0)
+        a.label(f"{p}_aw{k}")
+        a.ldh_a_n(0x26)
+        a.and_n(0x01)
+        a.jr(f"{p}_ad{k}", "z")
+        a.inc_rr("bc")
+        a.ld_r_r("a", "b")
+        a.cp_n(0x20)                   # cap ~8k iterations
+        a.jr(f"{p}_aw{k}", "c")
+        a.label(f"{p}_ad{k}")
+        a.ld_r_r("a", "c")
+        a.ld_nn_a(slot + 8 + 2 * k)
+        a.ld_r_r("a", "b")
+        a.ld_nn_a(slot + 9 + 2 * k)
+    a.ldh_a_n(0x26)
+    a.ld_nn_a(slot + 24)
+    a.xor_r("a")
+    a.ldh_n_a(0x26)                    # APU off
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # program assembly
 # ═══════════════════════════════════════════════════════════════════════════

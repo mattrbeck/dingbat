@@ -69,10 +69,15 @@ main:
     str r0, [r4, #16]
     str sp, [r4, #20]
 
-    @ zero every slot
+    @ zero every slot, and the IRQ scratch block (EWRAM boots as noise)
     ldr r0, =SLOTS
     mov r1, #(NPAGES * SLOTSZ / 4)
     mov r2, #0
+1:  str r2, [r0], #4
+    subs r1, r1, #1
+    bne 1b
+    ldr r0, =SCRATCH + 0x40
+    mov r1, #8
 1:  str r2, [r0], #4
     subs r1, r1, #1
     bne 1b
@@ -101,6 +106,8 @@ main:
     bl  probe_waitstate
     bl  probe_pfphase
     bl  probe_swiregion
+    bl  probe_contend
+    bl  probe_irqlat
     @ MSRTBIT: interactive only — mark the slot so the page says so
     ldr r8, =SLOTS + 8*SLOTSZ
     mov r0, #0x99
@@ -183,6 +190,14 @@ wait_vblank:
 @ BIOS-saved {r0-r3,r12,lr} block, so [sp,#20] is the return address the
 @ BIOS will `subs pc, lr, #4` through.
 irq_handler:
+    ldr r0, =0x04000100            @ first thing: timestamp the entry
+    ldrh r1, [r0]                  @ (TM0 keeps running through the IRQ)
+    ldr r0, =SCRATCH
+    ldr r2, [r0, #0x4C]            @ only the FIRST entry since the flag
+    cmp r2, #0                     @ was cleared gets recorded — repeat
+    streqh r1, [r0, #0x48]         @ fires must not overwrite it
+    moveq r2, #1
+    streq r2, [r0, #0x4C]
     ldr r0, =0x04000200
     ldrh r1, [r0, #2]              @ IF
     tst r1, #1                     @ ── vblank: BIOSPROT's mid-IRQ read
@@ -1089,6 +1104,220 @@ swi_stubs:
     .word 0xE12FFF1E               @ bx lr
 sqrt_inputs:
     .word 0x10, 0x1000, 0x100000, 0x40000000
+
+@ ── slot 14: CONTEND — PPU/CPU memory contention, which dingbat models ───
+@ NOT AT ALL (bus.nim's ACCESS_TIMING_TABLE charges PRAM/VRAM/OAM a
+@ constant regardless of rendering).  Hardware stalls the CPU when the
+@ renderer owns the bus.  Every access here is on-die, so the EverDrive
+@ cannot influence a single byte of this page.  Rendering load: mode 3
+@ bitmap + OBJ enabled (mode3 streams VRAM continuously).
+@ +0..7   16x ldrh from PRAM/VRAM/OAM/EWRAM, mid-line visible (halfwords)
+@ +8..15  the same four under FORCED BLANK (the free-access baseline)
+@ +16..21 8x ldrh PRAM/VRAM/OAM inside hblank
+@ +22     16x ldrh VRAM during vblank
+@ +24     8x strh to VRAM mid-line visible    +26  same in forced blank
+probe_contend:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 14*SLOTSZ
+    mov r4, #IOBASE
+    ldr r0, =0x1403                @ mode 3, BG2 + OBJ: heavy VRAM traffic
+    strh r0, [r4]
+
+.macro cont_reads base, n, off
+    ldr r2, =\base
+    bl  tm_start
+    .rept \n
+    ldrh r3, [r2]
+    .endr
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+.macro cont_writes base, n, off
+    ldr r2, =\base
+    bl  tm_start
+    .rept \n
+    strh r3, [r2]
+    .endr
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+.macro wait_line40
+1:  ldrh r0, [r4, #6]
+    cmp r0, #39
+    bne 1b
+2:  ldrh r0, [r4, #6]
+    cmp r0, #40
+    bne 2b
+.endm
+
+    wait_line40
+    cont_reads 0x05000000, 16, 0
+    wait_line40
+    cont_reads 0x06000000, 16, 2
+    wait_line40
+    cont_reads 0x07000000, 16, 4
+    wait_line40
+    cont_reads 0x02000000, 16, 6
+    ldr r0, =0x1483                @ forced blank
+    strh r0, [r4]
+    cont_reads 0x05000000, 16, 8
+    cont_reads 0x06000000, 16, 10
+    cont_reads 0x07000000, 16, 12
+    cont_reads 0x02000000, 16, 14
+    ldr r0, =0x1403
+    strh r0, [r4]
+1:  ldrh r0, [r4, #4]              @ wait hblank flag low, then its rise
+    tst r0, #2
+    bne 1b
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 2b
+    cont_reads 0x05000000, 8, 16
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 2b
+    cont_reads 0x06000000, 8, 18
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 2b
+    cont_reads 0x07000000, 8, 20
+    bl  wait_vblank
+    cont_reads 0x06000000, 16, 22
+    wait_line40
+    cont_writes 0x06012C00, 8, 24  @ VRAM well away from the visible bitmap
+    ldr r0, =0x1483
+    strh r0, [r4]
+    cont_writes 0x06012C00, 8, 26
+    ldr r0, =0x0403                @ restore the viewer's DISPCNT
+    strh r0, [r4]
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 15: IRQLAT — IRQ recognition latency per source ─────────────────
+@ dingbat posits IRQ_SYNC_DELAY=3 for timers/DMA/keypad and a separate
+@ HBLANK_IRQ_SYNC_DELAY=6 (the midpoint of an admitted 5-cycle plateau),
+@ each fitted to one mGBA-suite row.  Here every IRQ entry is timestamped
+@ against free-running TM0 by the handler itself; the trigger instant is
+@ timestamped by the arming code.  The per-source (entry - trigger)
+@ deltas share every fixed cost (BIOS dispatch, pipeline), so the
+@ DIFFERENCES between sources are pure synchronizer latency.
+@ +0/+2   TM2-overflow IRQ: trigger TM0 stamp / handler TM0 stamp
+@ +4/+6   DMA3-complete IRQ: the same pair
+@ +8/+10  hblank IRQ: DISPSTAT-armed, trigger stamp is the poll exit
+@ +12/+14 vblank IRQ: the same pair
+probe_irqlat:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 15*SLOTSZ
+    ldr r7, =SCRATCH
+    mov r4, #IOBASE
+
+.macro irq_arm ie_bits
+    ldr r5, =0x04000200
+    mov r0, #\ie_bits
+    strh r0, [r5]
+    ldr r0, =0x3FFF
+    strh r0, [r5, #2]              @ ack everything stale
+    ldr r5, =0x04000208
+    mov r0, #1
+    strh r0, [r5]
+.endm
+.macro irq_disarm
+    ldr r5, =0x04000208
+    mov r0, #0
+    strh r0, [r5]
+    ldr r5, =0x04000200
+    mov r0, #0
+    strh r0, [r5]
+.endm
+.macro irq_spin
+    ldr r6, =0x00040000
+9:  subs r6, r6, #1
+    beq 8f
+    ldr r0, [r7, #0x4C]            @ handler sets this flag
+    cmp r0, #0
+    beq 9b
+8:
+.endm
+
+    bl  tm_start                   @ TM0 free-runs as the session clock
+
+    @ ── TM2 overflow ──
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    ldr r5, =0x04000108            @ TM2
+    str r0, [r5]
+    irq_arm 0x20                   @ IE: timer 2
+    ldr r0, =0x00C00000            @ reload 0: one overflow 65536 cycles
+    str r0, [r5]                   @ in (enable + IRQ); TM0 wraps too, so
+                                   @ the mod-2^16 delta is still the latency
+    ldr r6, =0x04000100
+    ldrh r0, [r6]                  @ trigger-side stamp
+    strh r0, [r8, #0]
+    irq_spin
+    irq_disarm
+    mov r0, #0
+    str r0, [r5]
+    ldrh r0, [r7, #0x48]
+    strh r0, [r8, #2]
+
+    @ ── DMA3 complete ──
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    irq_arm 0x0800                 @ IE: DMA3
+    ldr r5, =0x040000D4
+    ldr r0, =rom_pattern
+    str r0, [r5]
+    ldr r1, =EWDST
+    str r1, [r5, #4]
+    ldr r6, =0x04000100
+    ldrh r0, [r6]
+    strh r0, [r8, #4]
+    ldr r0, =0xC4000004            @ enable + IRQ, word, count 4
+    str r0, [r5, #8]
+    irq_spin
+    irq_disarm
+    ldrh r0, [r7, #0x48]
+    strh r0, [r8, #6]
+
+    @ ── hblank ──
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    ldrh r0, [r4, #4]
+    orr r0, r0, #0x10              @ DISPSTAT hblank IRQ enable
+    strh r0, [r4, #4]
+    irq_arm 0x02
+    ldr r6, =0x04000100
+    ldrh r0, [r6]
+    strh r0, [r8, #8]
+    irq_spin
+    irq_disarm
+    ldrh r0, [r4, #4]
+    bic r0, r0, #0x10
+    strh r0, [r4, #4]
+    ldrh r0, [r7, #0x48]
+    strh r0, [r8, #10]
+
+    @ ── vblank ──
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    ldrh r0, [r4, #4]
+    orr r0, r0, #0x08
+    strh r0, [r4, #4]
+    irq_arm 0x01
+    ldr r6, =0x04000100
+    ldrh r0, [r6]
+    strh r0, [r8, #12]
+    irq_spin
+    irq_disarm
+    ldrh r0, [r4, #4]
+    bic r0, r0, #0x08
+    strh r0, [r4, #4]
+    ldrh r0, [r7, #0x48]
+    strh r0, [r8, #14]
+
+    bl  tm_stop
+    pop {r4-r7, pc}
+    .ltorg
 
 @ ── slot 8: MSRTBIT — MSR CPSR with T set, from ARM state (interactive) ──
 @ Slot before running: +0 = 0x99, +31 = 0xEE ("press START on this page").
