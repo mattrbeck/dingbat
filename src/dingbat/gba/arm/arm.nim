@@ -302,12 +302,19 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         cpu.r[int(bits_range(instr, 0, 3))] and mask
     when spsr:
       if has_spsr:
-        cpu.spsr = cast[PSR]((uint32(cpu.spsr) and not mask) or value)
+        # SPSR physical bits (hardware-verified, CPSRBITS page, AGB session
+        # 2/3): only NZCV+I+F+T+mode exist (0xF00000FF) and bit4 of the mode
+        # field is forced high (write 0 -> read 0x10, write 0x0F -> 0x1F).
+        cpu.spsr = cast[PSR](
+          (((uint32(cpu.spsr) and not mask) or value) and PSR_PHYS_MASK) or 0x10'u32)
     else:
       let was_irq_disabled = cpu.cpsr.irq_disable
       if (mask and 0xFF) > 0:
         cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
-      cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and not mask) or value)
+      # CPSR physical bits: bits 8-27 do not latch (hardware-verified,
+      # CPSRBITS page — an all-ones write to any MSR field reads back with
+      # only the NZCV/control bits set).
+      cpu.cpsr = cast[PSR]((((uint32(cpu.cpsr) and not mask) or value) and PSR_PHYS_MASK))
       if cpu.cpsr.thumb:
         # MSR really does write the T bit on ARM7TDMI (architecturally
         # UNPREDICTABLE, but well-defined on this core and relied on by
