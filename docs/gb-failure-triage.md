@@ -1832,6 +1832,101 @@ does not claim it is derivable — it is the named place to look, and the ROM to
 look with is `strikethrough`, whose 7 pixels are identical at `P = 1` and
 `P = 2` (a boundary crossed, not a ruler) where daid's bands step linearly.
 
+#### 2026-08-10: the LY 153 snapback edge is NOT device-split, and that closes the last door
+
+The entry above rules out a global pipeline phase and leaves one narrow door,
+because daid `ppu_scanline_bgp`'s phase-setting event is structurally unlike
+every other witness's: it syncs on the **LYC = 0 STAT edge of the LY 153 -> 0
+snapback** (the `LYC_SETTLE_DOTS` window in `ppu.nim`), and nothing else in the
+bracket observes that edge at all. `strikethrough` syncs on LYC = 67,
+`lycirq_m2stat` and `hdma_late_disable` on LYC = 1, `cgb-acid-hell` on LYC = N
+of a normal line (measured, `-d:gb_stat_src_trace`), the corpus on mode 2, the
+sleds on normal-line LYC. So "on CGB the snapback edge rises one M-cycle later
+than on DMG" would hand daid-GBC its +4 in TODAY's shipping world and, by
+construction, move nothing else. **It is refuted, from both sides, by CGB rows.**
+
+**The +4 is exactly expressible at that edge, and both devices are two-sided on
+it.** `LYC_SETTLE_DOTS` moves precisely this edge, so no new code is needed to
+ask: the relatch dot is `LY153_SNAP_DOT + LYC_SETTLE_DOTS`, 5 + 4 = **9** today.
+
+| relatch dot | daid-GBC `revD` | daid-DMG (best of 3) |
+|---|---|---|
+| 5 | 18432 | 20848 |
+| **9** (ships) | 20736 | **23040 exact** |
+| **13** | **23040 exact** | 20848 |
+
+One M-cycle apart, each pixel-exact at its own value and wrong at its
+neighbour's — the cleanest possible statement of what the hypothesis wanted.
+
+**And the witness sweep kills it.** Because `LYC_SETTLE_DOTS` is
+device-independent, moving it moves BOTH devices, so every `[cgb]` row that
+breaks is a row pinning the CGB edge. Whole gambatte suite, one build per dot:
+
+| relatch dot | CGB rows that break |
+|---|---|
+| 5 | `ly0/lycint152_lyc0flag_1 [cgb]`, `ly0/lycint152_lyc0irq_1 [cgb]`, `..._flag_ds_1 [cgb]`, `..._irq_ds_1 [cgb]` (+ `ifw_ds_1`, `late_retrigger_ds_1`, `lycEnable/lyc0_ff4{1,5}_disable_ds_1 [cgb]`) |
+| **9** | **none** |
+| 13 | `ly0/lycint152_lyc0flag_2 [cgb]`, `ly0/lycint152_lyc0irq_2 [cgb]`, `..._flag_ds_2 [cgb]`, `..._irq_ds_2 [cgb]` (+ `lycEnable/lyc0_ff41_disable_ds_2 [cgb]`) |
+
+The `_1` members refuse dot 5 and the `_2` members refuse dot 13, so **dot 9 is
+bracketed from both sides on CGB alone** — the DMG arms of the same ROMs are not
+needed for the argument and agree anyway. The `_ds_` members are CGB
+double-speed and bracket it there too, which independently re-confirms this is a
+fixed PPU-dot count rather than an M-cycle.
+
+**The filenames make the silence informative rather than merely absent.**
+gambatte encodes per-device expectations in the name, and these ROMs carry ONE
+value for both: `lycint152_lyc0flag_2_dmg08_cgb04c_outC5`,
+`lycint152_lyc0irq_2_dmg08_cgb04c_outE2`. The convention is perfectly capable of
+splitting — `lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0` splits, in the
+same suite, on the same edge family — so "DMG and CGB expect the same value
+here" is a positive statement of hardware behaviour, not a gap in coverage.
+
+So: **daid-GBC demands the CGB snapback relatch at dot 13; four CGB gambatte
+rows demand dot 9 and pass there today.** Same device, same edge, two-sided.
+The door is shut and nothing was built, because there was nothing left to build.
+
+*(Item 4, for the record: at dot 13 daid-GBC is 23040 at `--cgb-rev=D` and 22464
+at `revC` — 576 pixels, one pixel at each of 8 band boundaries, which is the
+CGB-C -> CGB-D palette step. The revision knob really is the remaining -1, so
+the composition the hypothesis proposed was arithmetically right. Only the
+device split it needed is false.)*
+
+#### Where the acid-hell / daid / strikethrough axis now stands, and the one alternative left
+
+Three doors have been opened and shut, each with a two-sided bracket:
+
+| candidate | refuted by |
+|---|---|
+| a uniform CGB halt phase (`CGB_HALT_PPU_LEAD`) | `hdma_late_disable` vs `lycirq_m2stat` sharing a wake (`d8ef3b1`) |
+| a global pipeline phase (`M3_PIPE_AHEAD`, device-gated or not) | `strikethrough-cgb` (P=0) vs daid-GBC (P=1), both CGB |
+| a device-split snapback edge (`LYC_SETTLE_DOTS`) | `ly0/lycint152_lyc0{flag,irq}_{1,2} [cgb]`, dot 9 both sides |
+
+And a per-source wake phase (`STAT_LYC_LEAD`) is refuted by six GBMicrotest LYC
+sleds, and a second M-cycle of OAM lead (`STAT_M2_LEAD=2`) by that bucket's own
+sled. What survives all of it is the **one documented alternative**, restated
+here so the record carries it in one place:
+
+> **The consumers may not share one phase.** `strikethrough` reads the pipeline's
+> position through an OAM-DMA race — mode 2's OAM scan against the DMA unit's
+> bus, which runs on machine time — and daid reads it through pixel emission.
+> A world in which the OAM scan keeps machine time while pixel emission moves
+> one M-cycle satisfies both, and it is not expressible today: `M3_PIPE_AHEAD`
+> and `m3_lead` both move the whole pipeline, and they cancel exactly
+> (measured: `M3_PIPE_AHEAD=1` with `M3_PIPE_DELAY=6` returns every witness to
+> its `main` value).
+
+Two things about that alternative are already known and worth keeping with it.
+It has a **signature**: `strikethrough`'s 7 pixels are identical at `P = 1` and
+`P = 2` — a boundary crossed, not a ruler — where daid's bands step linearly
+with `P`, which is what "these two rows are reading different things" looks like
+from the outside. And it has a **cost of entry**: separating the OAM scan from
+the pixel pipeline is a structural change to the renderer, not a constant, so it
+should not be attempted until some ROM other than `strikethrough` measures the
+same separation. Until then `cgb-acid-hell`, `strikethrough-dmg` and
+`strikethrough-cgb` are pixel-exact on `main` and daid-GBC is the one row this
+axis owes, at 20736/23040 with `--cgb-rev=D`.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one

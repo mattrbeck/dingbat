@@ -1214,6 +1214,34 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 # three trade 1:1 against each other on that constant and not on this one, and
 # daid stays pixel-exact through all of it. They are readings of the LCD-on
 # phase, not of the comparator.
+# ---- It is NOT device-split, and daid's CGB arm is what asks -----------------
+#
+# daid `ppu_scanline_bgp` is listed above as the fourth witness, exact at 4.
+# That is its DMG arm. Its CGB arm (`--cgb-rev=D`) is 20736/23040 there and
+# **23040/23040 at 8** -- one M-cycle later, the same +4 the whole
+# acid-hell/strikethrough axis has been chasing, and this edge is the only one
+# in the machine that daid observes and no other witness does. So "the snapback
+# edge rises one M-cycle later on CGB" is the last shape that could give daid-GBC
+# its four dots while moving nothing else, and it was measured on 2026-08-10.
+#
+# **It is refused from both sides by CGB rows.** This constant is
+# device-independent, so a sweep of it moves both devices and every `[cgb]` row
+# that breaks is a row pinning the CGB edge. Whole gambatte suite, one build per
+# dot: at 5 `ly0/lycint152_lyc0{flag,irq}_1 [cgb]` and their `_ds_` CGB twins
+# break, at 13 the `_2` members and their `_ds_` twins break, and at 9 -- here --
+# none of them does. Two-sided on CGB alone, and re-confirmed in double speed by
+# the `_ds_` arms.
+#
+# The filenames are what make that a positive statement rather than a gap:
+# gambatte encodes per-device expectations in the name and these carry ONE value
+# for both (`lycint152_lyc0flag_2_dmg08_cgb04c_outC5`), while
+# `lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0` in the same suite and the
+# same edge family splits. Hardware is being asked and is answering "the same".
+#
+# So daid-GBC's four dots are not here either. See the 2026-08-10 entries in
+# docs/gb-failure-triage.md for the three doors this closes and for the one
+# alternative left standing (the OAM scan and pixel emission may not share a
+# phase, which is a renderer change and not a constant).
 const LY153_SNAP_DOT_D {.intdefine: "LY153_SNAP_DOT".} = 5
 const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
