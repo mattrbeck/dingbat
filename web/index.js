@@ -7669,12 +7669,22 @@ document.addEventListener("drop", (e) => {
   if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
-const togglePause = () => {
+const togglePause = (fromRemote) => {
   paused = !paused;
   pauseButton.classList.toggle("paused", paused);
   pauseButton.classList.toggle("active", paused);
   pauseButton.title = paused ? "Resume" : "Pause";
   document.body.classList.toggle("paused", paused);
+  // While linked online, pause freezes BOTH sides — same reasoning as 2x: a
+  // one-sided pause just stalls the peer at the prediction limit with no
+  // explanation on their screen. Relay unless this change came FROM them.
+  if (!fromRemote && rollbackMode && typeof window.rbSendPause === "function") {
+    window.rbSendPause(paused);
+  }
+};
+// The peer paused/resumed; match it without echoing back.
+window.applyRemotePause = (on) => {
+  if (paused !== on) togglePause(true);
 };
 
 // iOS suppresses the synthesized `click` for a SECOND finger while the first

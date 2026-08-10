@@ -35,6 +35,8 @@ interface Window {
   rbSendInput?: (frame: number, bits: number) => void;
   rbSendSpeed?: (on: boolean | number) => void;
   applyRemoteSpeed2x?: (on: boolean | number) => void;
+  rbSendPause?: ((on: boolean | number) => void) | null;
+  applyRemotePause?: (on: boolean | number) => void;
   setNetConnectLabel?: (connected: boolean) => void;
   driveNet?: () => void;
   dumpLinkStates?: () => void;

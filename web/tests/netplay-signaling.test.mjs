@@ -351,19 +351,20 @@ test("pipeline statuses mirror into the manual view while it's up", async () => 
     "visible manual view sees the post-connect pipeline");
 });
 
-test("disconnecting a live link asks for confirmation first", async () => {
-  const { el, api, app, flush } = await setup();
+test("disconnecting a live link is a two-step armed confirm, not a one-tap", async () => {
+  const { el, api, advance, flush } = await setup();
   await api.openNetConnect(true);
   api.net.started = true; // simulate a running linked session
-  app.setConfirmResult(false);
   await el("rb-disconnect").click();
   await flush();
-  assert.equal(app.confirms.length, 1, "asked before disconnecting");
-  assert.ok(api.net, "declined: the session survives");
-  app.setConfirmResult(true);
-  await el("rb-disconnect").click();
+  assert.ok(el("rb-disconnect").classList.contains("armed"), "first tap arms");
+  assert.ok(api.net, "armed but not disconnected");
+  await advance(4000); // the arm window expires
+  assert.ok(!el("rb-disconnect").classList.contains("armed"), "auto-disarmed");
+  await el("rb-disconnect").click(); // re-arm…
+  await el("rb-disconnect").click(); // …and confirm within the window
   await flush();
-  assert.equal(api.net, null, "confirmed: the session is torn down");
+  assert.equal(api.net, null, "second tap while armed disconnects");
 });
 
 test("the link modal holds a screen wake lock while open", async () => {

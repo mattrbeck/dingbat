@@ -267,11 +267,10 @@ document.getElementById("net-connect").addEventListener("click", () => {
   menuDropdown.hidden = true;
   // Already linked → this is the disconnect action.
   if (net?.started || net?.rb?.inited) {
-    // Guarded: a live session dies for both players, and the menu item sits
-    // close to its neighbors.
-    if (!confirm("Disconnect the link cable?")) return;
-    netShutdown();
-    showToast("Disconnected");
+    // Two-step, like the delete lists' armed buttons: the first tap turns the
+    // item red ("Are you sure?") and keeps the menu open; a second within
+    // 3.5s disconnects. A mis-tap here ends the session for both players.
+    menuDisconnectArm.fire();
     return;
   }
   const oext = extOf(currentOriginalName || "");
@@ -1182,6 +1181,7 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
+const RB_PAUSE = 8;
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Keep at most this much queued in the DataChannel send buffer while streaming a
 // ROM; pause until it drains below. Well under Chrome's ~16 MB hard cap (a send()
@@ -1226,6 +1226,17 @@ const rbSendSpeed = (on) => {
   const buf = new ArrayBuffer(2);
   const v = new DataView(buf);
   v.setUint8(0, RB_SPEED);
+  v.setUint8(1, on ? 1 : 0);
+  rbSend(buf);
+};
+
+// Tell the peer to match our pause. Same reasoning as 2x: a one-sided pause
+// just stalls the other player at the prediction limit with no explanation —
+// whoever pauses freezes the pair, visibly, on both screens.
+const rbSendPause = (on) => {
+  const buf = new ArrayBuffer(2);
+  const v = new DataView(buf);
+  v.setUint8(0, RB_PAUSE);
   v.setUint8(1, on ? 1 : 0);
   rbSend(buf);
 };
@@ -1390,6 +1401,12 @@ const rbMessage = (data) => {
     window.applyRemoteSpeed2x?.(v.getUint8(1) === 1);
     return;
   }
+  if (kind === RB_PAUSE) {
+    // Peer paused/resumed — mirror it (without echoing back) so the freeze
+    // shows on both screens instead of reading as a stall.
+    window.applyRemotePause?.(v.getUint8(1) === 1);
+    return;
+  }
   if (kind === RB_HELLO) {
     rb.remoteRomHash = v.getUint32(5);
     if (!net.isHost) rb.epoch = v.getUint32(1); // guest adopts the host's clock
@@ -1505,6 +1522,7 @@ const rbStartIfReady = () => {
   closeNetModal();
   window.rbSendInput = rbSendInput;
   window.rbSendSpeed = rbSendSpeed;
+  window.rbSendPause = rbSendPause;
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
   // The ROMs + states now live in wasm/MEMFS; drop the JS-side copies (up to
@@ -1524,6 +1542,7 @@ const rbTeardown = async () => {
   if (!net?.rb?.inited) return;
   window.rbSendInput = null;
   window.rbSendSpeed = null;
+  window.rbSendPause = null;
   const kept =
     Module._rollback_exit_to_single && Module._rollback_exit_to_single() === 1;
   if (kept) {
@@ -1851,14 +1870,69 @@ const netDismissModal = () => {
 };
 
 // The prominent in-toolbar disconnect button (shown only in rollback mode).
-document.getElementById("rb-disconnect").addEventListener("click", () => {
-  if (net?.started || net?.rb?.inited) {
-    // Same guard as the menu item: the toolbar button borders other controls
-    // and one mis-tap ends the session for both players.
-    if (!confirm("Disconnect the link cable?")) return;
+// Two-step confirm on an EXISTING element, mirroring index.js's
+// makeConfirmButton semantics (armed class + label swap + 3.5s auto-disarm):
+// the first activation arms, a second within the window runs the action.
+const armedAction = (el, setLabel, action) => {
+  let armed = false;
+  let timer = 0;
+  const disarm = () => {
+    armed = false;
+    clearTimeout(timer);
+    el?.classList.remove("armed");
+    setLabel(false);
+  };
+  return {
+    disarm,
+    fire: () => {
+      if (!armed) {
+        armed = true;
+        el?.classList.add("armed");
+        setLabel(true);
+        timer = setTimeout(disarm, 3500);
+        return;
+      }
+      disarm();
+      action();
+    },
+  };
+};
+
+const menuDisconnectArm = armedAction(
+  document.getElementById("net-connect"),
+  (armed) => {
+    if (!netConnectLabel) return;
+    if (armed) netConnectLabel.textContent = "Are you sure?";
+    // Restore through the normal label logic: the session may have died
+    // remotely while armed, in which case this reads "Link Cable" again.
+    else window.setNetConnectLabel(!!(net?.started || net?.rb?.inited));
+  },
+  () => {
+    menuDropdown.hidden = true;
     netShutdown();
     showToast("Disconnected");
   }
+);
+
+const rbDisconnectBtn = document.getElementById("rb-disconnect");
+// The label span holds "Disconnect<span class=rb-dc-suffix> Link Cable</span>";
+// remember the markup so disarming restores the responsive suffix.
+const rbDcSpan = rbDisconnectBtn?.querySelector?.("span");
+const rbDcHTML = rbDcSpan ? rbDcSpan.innerHTML : "";
+const rbDisconnectArm = armedAction(
+  rbDisconnectBtn,
+  (armed) => {
+    if (!rbDcSpan) return;
+    if (armed) rbDcSpan.textContent = "Are you sure?";
+    else rbDcSpan.innerHTML = rbDcHTML;
+  },
+  () => {
+    netShutdown();
+    showToast("Disconnected");
+  }
+);
+rbDisconnectBtn.addEventListener("click", () => {
+  if (net?.started || net?.rb?.inited) rbDisconnectArm.fire();
 });
 
 // Footer links: switch between the shared-code and manual-exchange views.

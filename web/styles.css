@@ -5956,6 +5956,16 @@ body.rewind-off #report-slider {
 .net-view-toggle:hover {
   color: var(--text);
 }
+
+/* Armed (two-step) disconnect: same treatment as the delete lists' confirm
+   buttons — first tap turns the control red, second tap disconnects. */
+#rb-disconnect.armed,
+#net-connect.armed {
+  color: var(--accent-ink);
+  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
+  border-color: rgba(var(--danger-rgb), 0.6);
+  font-weight: 600;
+}
 /* "[Share code] [Copy code]" — the buttons split the row evenly (Copy fills
    it alone where Share is hidden), so no width leaves a stray gap. */
 .net-manual-out-row {
