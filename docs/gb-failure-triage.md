@@ -893,7 +893,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
-| `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`). Its CGB twin is a different row and moved 830 → 474 on 2026-08-10 (`CGB_TDSEL_LATENCY` + `CGB_TDSEL_GLITCH`) |
+| `m3_lcdc_tile_sel_win_change` | 106 | 106 | the same WX = 7 tie as `m3_lcdc_win_map_change` — **0 as of 2026-08-09** (`obj_yields_to_window`). Its CGB twin is a different row and moved 830 → 474 on 2026-08-10 (`CGB_TDSEL_LATENCY` + `CGB_TDSEL_GLITCH`), then **474 → 0 on 2026-08-11** (the SET rule's address latch survives H-Blank, see below); the CGB `m3_lcdc_tile_sel_change` went with it, 116 → 0 |
 | `m3_lcdc_bg_map_change` | 192 | 192 | not diagnosed — **0 as of 2026-08-09** |
 | `m3_scy_change` | 417 | 417 | **0 as of 2026-08-09** — 83 for free with `OBJ_BG_RUN`, 29 with `LY0_PIPE_MCYCLES`, and the last 29 were the length of the discarded fetch at the head of mode 3 (`M3_THROWAWAY_DOTS`) |
 | `m3_lcdc_tile_sel_change` | 776 | 776 | the CGB `TILE_SEL` glitch's DMG sibling — **8 as of 2026-08-09** |
@@ -1007,6 +1007,78 @@ Every reset-glitched tile on those lines is invisible. What is left to try is a
 CGB revision question (the notes split the reset branch by revision already, and
 `cgb-acid-hell` ships one reference with no revision named) or a fourth
 substitution source nobody has written down.
+
+#### 2026-08-11: the SET rule was incomplete, and closing it closed two rows
+
+Re-derived from all four CGB `tile_sel` references at once rather than from
+`*_change2` alone. Every glitched bitplane read of the four frames whose eight
+pixels the reference pins is one cell — 188 RESET cells and 161 SET cells — and
+the whole set is scored against a candidate substitution source at a time. Two
+results, and neither is about `cgb-acid-hell`:
+
+* **RESET is the tile index on 188/188 cells.** Nothing moved here.
+* **The SET rule's address latch is a bus register, and H-Blank does not clear
+  it.** The two plain rows (`m3_lcdc_tile_sel_change`, `..._win_change`, CGB)
+  put their first glitched read of a line *before* anything on that line has
+  driven an `$8000`-region address, and hardware substitutes anyway — with what
+  the line above left there. Dropping the per-line clear takes the SET cells
+  from 133/161 to 158/161; also letting a plain unglitched `LCDC.4 = 1` read
+  leave its address there takes it to 159/161. Both rows go **22924/23040 and
+  22566/23040 → 23040/23040**, i.e. from the pair's whole residual to pass.
+  Full arithmetic at `CGB_TDSEL_GLITCH` in `gb/gb.nim`.
+
+A plain DATA latch — the last `$8000`-region *byte* rather than its address,
+which is the cheaper thing to build and what the notes' wording suggests — is
+refuted by a whole band and not a cell (89/161): `*_change2`'s two bands glitch
+on different PLANES and hardware answers with the same tile at the plane the
+glitch is on, which only an address can do.
+
+**`cgb-acid-hell` is unchanged at 2, and it is now the only thing in the tree
+that refuses the rule.** Its observable cells were undercounted here: there are
+**seven**, not two — lines 64..70, all at `x = 76..83`, all bitplane-1 SET
+glitches, all eight bits of each pinned. All seven want the tile index; five of
+them are cells where the latch happens to hold the same byte, and the two the
+frame can tell apart are lines 68 and 69. So the ROM votes 7/7 for the index
+and 5/7 for the latch, against 96 cells of `*_change2` / `*_win_change2` that
+vote 48/48 for the latch and 0/48 for the index.
+
+Two things are now settled that were guesses before:
+
+* **No address-latch rule of any shape can produce those two bytes.** A VRAM
+  search of the frame is decisive: on line 68 the only tile-data byte equal to
+  `$55` at row 4 plane 1 is `$8699` (tile `$69`, which the line never fetches),
+  and on line 69 the only one equal to `$49` at row 5 plane 1 is `$869B`, the
+  same absent tile. The only other addresses holding those bytes are tile-MAP
+  entries, and one of them on each line is the current tile's own map address
+  (`$98A0` and `$98C0`). The byte is the tile index, arrived at as an index and
+  not as a tile-data address.
+* **The two ROMs' cells are structurally identical**, which is what kills the
+  remaining "our bookkeeping diverges" hypotheses. `cgb-acid-hell` line 68:
+  map read at dot 174, plane 0 at 176 (signed), LCDC `$E3 → $F3` at 177, plane
+  1 at 178. `m3_lcdc_tile_sel_change2` line 43: map at 142, plane 0 at 144
+  (signed), LCDC `$C3 → $D3` at 145, plane 1 at 146. Same plane, same direction,
+  same offsets, same `< $80` tile index — and different answers.
+
+The one thing that does separate them, measured over all 161 SET cells: in
+`cgb-acid-hell` the latch was written **8 dots and one intervening read** ago
+(its LCDC.4 toggles every 8 dots, so the RESET-glitched read is in the
+immediately preceding tile fetch), and **every other cell in the tree is at
+least three reads or a whole scanline stale**. That bucket is populated by this
+ROM alone, so "back-to-back glitched fetches substitute the index" is a rule
+fitted to two pixels with no independent confirmation, and is not landed.
+
+The revision question is now *narrower but still open*. mealybug ships a
+`_cgb_d` reference for `m3_lcdc_tile_sel_change` and `..._win_change` and they
+are **pixel-identical to the `_cgb_c` ones** — but those are exactly the two
+rows where the index and the latch agree, so they cannot arbitrate either. The
+two ROMs that can (`*_change2`) ship `_cgb_c` only. So: every reference this
+rule is derived from is a CGB-C capture, `cgb-acid-hell`'s names no revision,
+and the one experiment that would settle it — a `_cgb_d` capture of
+`m3_lcdc_tile_sel_change2` — does not exist. Landing it as a revision split
+would mean `CGB_TDSEL_GLITCH` growing a second SET branch selected by the
+behaviour-flag mechanism in `docs/gb-hardware-revisions.md` §2.1, on the
+evidence of two pixels and no reference that names its device. Not worth it
+yet; worth it the day a second acid-hell-shaped ROM appears.
 
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
