@@ -29,6 +29,11 @@ type
 converter toU32*(psr: PSR): uint32 = cast[uint32](psr)
 converter toPSR*(v: uint32): PSR   = cast[PSR](v)
 
+const PSR_PHYS_MASK* = 0xF00000FF'u32
+  ## The status bits that physically exist on the ARM7TDMI: N/Z/C/V and
+  ## I/F/T/mode. Bits 8-27 never latch (hardware-verified, gbaedge CPSRBITS
+  ## page, AGB SP sessions 2/3). SPSR additionally forces bit4 high.
+
 ####################
 # GBA 16-bit I/O registers
 

@@ -11,6 +11,10 @@ macro armLutBuilder(): untyped =
       of "00001...1001": call("arm_multiply_long", i.bit(6), i.bit(5), i.bit(4))
       of "00010.001001": call("arm_single_data_swap", i.bit(6))
       of "000100100001": call("arm_branch_exchange")
+      # The ARMv5 BLX-register word (bits 7-4 = 0011) EXECUTES AS BX on
+      # ARM7TDMI silicon (gbaedge BXDECODE candidate 1, AGB SP session 3):
+      # the loose decode takes the branch-exchange path, no link write.
+      of "000100100011": call("arm_branch_exchange")
       of "000.....1..1": call("arm_halfword_data_transfer", i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), bits_range(i, 1, 2))
       of "011........1": call("arm_unimplemented")  # undefined instruction
       of "01..........": call("arm_single_data_transfer", i.bit(9), i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), i.bit(0))
