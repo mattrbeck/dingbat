@@ -73,6 +73,20 @@ fall through).
 | SWEEPQ | diverges: freq-1300 dies AT TRIGGER on hardware (poll 0) — the immediate trigger recalc apparently runs the overflow check **twice** (1950 passes, its own recalc 2925 fails); dingbat lets it live to the first tick.  freq-1000 dies at first tick, faster than dingbat (F75 vs 12F4 polls); the mid-note period rewrite kills the channel instantly (0 polls; dingbat 1CBF); the length-63 control dies in 4B polls — near-instant, suggesting a trigger-adjacent length clock (dingbat 12AA9).  Period-0 never ticks (cap) — matches dingbat |
 | BXDECODE | **not run — hangs the console** (see above).  Needs a v2 that runs one candidate per START press with results persisted and redrawn between candidates, so the wedging candidate is identified and the survivors still report |
 
+## Session 3 — the v5 pages (28-page build @ 9b0ffc2)
+
+`ALL FDE5`.  Raw: `tests/roms/expected/agb-sp-3.txt`.  This session
+closed every question session 2 left open:
+
+| page | verdict |
+|---|---|
+| THUMBPC2 | **The Thumb `cmp pc` SPSR-load is a FULL CPSR restore**: with SPSR = 9000009F (System) while executing in IRQ mode, CPSR after = 9000009F — mode bits switched (dingbat: flags-only compare, 20000092).  `add pc`/`mov pc` do NOT touch CPSR and branch exactly to the operand (dingbat matches both; the earlier "dingbat lands target-2" note was a probe arithmetic misread — r0 was pad+6).  r15 writeback on hardware is THREE different behaviors: `ldm r15!` performs NO writeback (r7=15; dingbat lands base+8), `str r1,[r15],#4` sets PC=base+4 (r7=12; dingbat base+8), `ldr r1,[r15],#4` sets PC=base+8 (r7=8; matches dingbat) but **suppresses the load** (r1 stays 0; dingbat loads E2877002).  Watchdog never fired |
+| IRQWIN2 | dispatch deltas hw 81/81/84 cycles vs dingbat 67/67/6C (~+25 each, consistent with IRQLAT); the EWRAM-load sled lands after 2 loads vs 3 uniform adds (real width-dependence for the cycle model; dingbat: 1 instruction on both sleds).  Ack-race rows all-zero on BOTH — the swept overflow lands before the ack at every offset in this code shape; inconclusive but same-code comparable |
+| IOBYTE | byte-write behavior is PER-REGISTER: DISPCNT/BG0CNT/WININ/BLDCNT/NR10/IE/DMA3CNT_H all take byte writes normally (masked), but **DISPSTAT's low byte IGNORES byte writes entirely** (hw 0003 = just the flags; dingbat stores bit6 -> 0041).  Everything except DISPSTAT matches dingbat.  Note the tension with DMAEDGE: CNT_H lo-byte 0x44 stores fine here (bit6), yet session 2's lo-byte 0x80 (bit7) stored nothing — bit7 itself is the anomaly, not the byte lane |
+| CAPDMA (re-arm rows) | re-armed enable self-clears every armed frame (+28 = 3700 again); counts stay 640 because re-enabling reloads the internal dst from DAD (the ring is overwritten in place — design note for the record).  Conclusion: capture DMA runs in EVERY armed frame and hardware clears the enable at frame end; the every-other-frame rumor is dead on AGB SP |
+| SWEEPQ (decomp rows) | session 2's "instant" mid-note death did NOT reproduce: period-rewrite and SAME-VALUE-rewrite both die at ~1CBD polls (identical — the NR10 write itself is irrelevant).  The length-63 control now dies at 0 polls both fresh AND after two idle frames: with length=63 one tick remains, and hardware clocks length at/near trigger — the classic extra-length-clock quirk, which dingbat lacks (its two length rows: 12AA9 and 1E9 — wildly phase-dependent) |
+| BXDECODE | **completed via the one-per-press flow** (press 3 froze the console; power cycle + SELECT skipped it).  Hardware: [01, 01, DD, 04] vs dingbat [01, 06, 01, 04].  So: the ARMv5 BLX word 0xE12FFF31 **executes as BX on ARM7TDMI** (the loose-decode "false positive" is real silicon behavior; dingbat falls through — wrong).  The SBO-violated BX 0xE120FF11 does something violent enough to wedge the console with IRQs masked (dingbat takes it as plain BX — also wrong, in the other direction).  BX r15 branches to $+8 in ARM state — both agree |
+
 P00 IDENT      CRC 985C
 00: 7F 18 AE BA   04: 80 00 00 00   08: 00 00 FF 03   0C: 01 00 00 00
 10: 20 00 00 0D   14: 1F 00 00 00   18: 00 7F 00 03   1C: 10 80 BD E8

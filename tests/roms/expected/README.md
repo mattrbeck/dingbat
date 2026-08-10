@@ -32,6 +32,9 @@ cart-influenced; each run's `.txt` header names the cart used.
   the 25-page build @ c1c5d8f; `ALL 4B70`; BXDECODE not run — it hangs
   the console, see the results doc).  Partial runs omit page 0 and give
   `model:` in the `.txt` instead.
+- `agb-sp-3/` — same console/cart, 2026-08-10 (the v5 pages of the
+  28-page build @ 9b0ffc2; `ALL FDE5`; BXDECODE completed one press at
+  a time — candidate 2 wedges the console and is marked DD).
 
 gbedge (GB/GBC) runs land here the same way once a GB-slot cart run is
 transcribed; `hwprobe_expected.py` grows the 160x144 renderer then.

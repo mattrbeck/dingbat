@@ -1,0 +1,39 @@
+# gbaedge.gba hardware transcription — session 3 (the v5 pages)
+# GBA SP (AGS-001, clear purple) + EverDrive GBA, 2026-08-10
+# 28-page manual build @ 9b0ffc2, photos IMG_3632-3642
+# BXDECODE press sequence: START (cand 0 ok), START (cand 1 ok),
+# START on cand 2 FROZE the console -> power cycle -> START x2 to
+# re-run 0/1, SELECT to skip cand 2 (DD), START (cand 3 ok).
+# Page 18 below is the FINAL post-interaction state (its own all).
+platform: gba
+console: GBA SP AGS-001, EverDrive GBA, 2026-08-10
+all: FDE5
+model: 18 7F
+
+page 00 IDENT crc 985C
+7F 18 AE BA 80 00 00 00 00 00 FF 03 01 00 00 00
+20 00 00 0D 1F 00 00 00 00 7F 00 03 10 80 BD E8
+
+page 16 CAPDMA crc F9B7
+80 02 00 00 80 02 00 00 80 02 00 00 00 37 00 00
+80 02 00 00 80 02 00 00 80 02 00 00 00 37 00 00
+
+page 17 SWEEPQ crc AAC3
+00 00 08 00 00 00 00 00 00 00 00 00 9A 0F 00 00
+BF 1C 00 00 00 00 00 00 BD 1C 00 00 00 00 00 00
+
+page 18+ BXDECODE crc 01DD all FB6A
+01 01 DD 04 01 01 00 01 AA 04 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 EE
+
+page 19 THUMBPC2 crc 70E6
+9F 00 00 90 9F 00 00 90 92 00 00 00 92 00 00 00
+00 04 0F 0C 08 00 00 00 02 70 87 E2 00 00 00 00
+
+page 1A IRQWIN2 crc F171
+81 00 81 00 84 00 08 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+page 1B IOBYTE crc 92F2
+44 04 03 44 03 00 03 44 44 00 00 44 04 00 00 04
+44 00 00 04 44 00 00 00 44 00 00 04 40 00 00 44
