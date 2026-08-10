@@ -2596,9 +2596,11 @@ hand the default machine.
 | `$FEA0-$FEFF` (`unusable_region`) | RAM, `addr and not $18` | same | **RAM, unmasked** | **nibble echo** | Pan Docs + `cgb-acid-hell`'s own readback |
 
 `CGB_HALT_PPU_LEAD` is **not** revision-gated and must not be gated on a guess.
-It ships at 0 for a reason that has nothing to do with silicon revision — one
-pixel-exact shootout row (`strikethrough-cgb`) refuses the quantity from the
-other side — and no reference pair, ROM header or Pan Docs sentence splits the
+It ships at 0 for a reason that has nothing to do with silicon revision — a
+pixel-exact local-suite row (`strikethrough-cgb`; the shootout's strikethrough
+row runs on DMG) refuses the quantity from the other side, and the section
+below this one sharpens that into a contradiction inside gambatte's own halt
+family — and no reference pair, ROM header or Pan Docs sentence splits the
 CGB halt phase by revision. The same goes for `CGB_HALT_EXIT_MCYCLES` and
 `SPEED_SWITCH_STALL_T`. Its own write-up in `gb.nim` is the place that argues
 the quantity; this axis has nothing to add to it.
@@ -2745,3 +2747,162 @@ Emulated `cycles=` is identical in all 36 runs (168,537,600 / 325,669,176 /
 168,395,236), which is the control that says both arms did the same work.
 Every delta is an order of magnitude below its own arm's run-to-run spread,
 i.e. not resolvable. Wall-clock is not quoted: it lies below ~1.3%.
+
+## 2026-08-10: `CGB_HALT_PPU_LEAD` is refused by two rows of one gambatte family
+
+`CGB_HALT_PPU_LEAD` (gb.nim) is the CGB halt phase: while a CGB CPU is halted the
+PPU runs behind the rest of the machine and gets the dots back at the wake, so an
+LCD-sourced wake lands later in machine time and a timer wake does not move. It
+scores gambatte 3853/5005 against 3850 and it ships at 0, with one row —
+ashiepaws' `strikethrough-cgb` — named as the thing between it and shipping. This pass went
+after that row and after the seven `dma/hdma_late_disable_*` it also costs.
+
+**Neither is recoverable, and the reason is a contradiction inside gambatte's own
+halt evidence rather than anything about OAM DMA.** What follows is the
+measurement; every dot below is from `-d:gb_dma_trace` on the ROM named.
+
+### The contradiction, in one line of one family
+
+Three rows, the **same wake** — a CGB halted with `LYC = 1` and the LYC STAT
+source armed — measured at three different dots of that same line 1:
+
+| row | after the wake | lands at | brackets | wants |
+|---|---|---|---|---|
+| `halt/lycirq_m2stat_2` | reads STAT, 20 M-cycles on | line 1 dot **81** | mode 2->3 at dot **80** | the read one M-cycle **later** |
+| `dma/hdma_late_disable_1` | writes FF55, 48 M-cycles on | line 1 dot **249** | mode 3->0 at dot **252** | the write **not** later |
+| `dma/hdma_late_disable_2` | the same, one NOP on | line 1 dot **253** | the same edge | already past it |
+
+`lycirq_m2stat_2` is `dmg08_out2 / cgb04c_out3` and `hdma_late_disable_*` are
+CGB-only, so both are statements about a CGB and there is no device comparison to
+argue with. `lycirq_m2stat` halts with IME clear and `hdma_late_disable` with IME
+set, and that is the ONLY structural difference between them: same source, same
+LYC value, same line, same rise dot.
+
+A halt phase cannot answer both. The post-wake CPU is one thing, and between dot
+81 and dot 249 nothing in the model moves it.
+
+### Why the quantity cannot be made smaller
+
+The obvious escape is that the phase is not a whole M-cycle. The bracket in
+`CGB_HALT_PPU_LEAD`'s note is a bracket on whole M-cycles (0, 1, 2) and says
+nothing about 1, 2 or 3 dots, and this tree is full of sub-M-cycle CGB latencies
+(`CGB_MIXER_LATENCY` 1, `CGB_SCY_LATENCY` 2, `CGB_OBJ_SIZE_LATENCY` 3).
+
+`CGB_HALT_PPU_LEAD_DOTS` was added for exactly that sweep. It does not help, and
+the reason is worth writing down because it applies to any future knob here:
+**the halt's exit is latched on the M-cycle grid** (`cpu_halt_tick`), so a lag of
+N dots does not move a wake by N dots. It moves it by a WHOLE M-cycle for a
+source that rises within N dots of the latch, and by nothing at all for every
+other source. dingbat's LYC source rises on the last dot of an M-cycle, so **one
+dot is already the whole M-cycle** for every LYC-woken halt.
+
+Measured, one build per setting (`SPEED_SWITCH_STALL_T=65544` throughout):
+
+| DOTS | gambatte | `lycirq_m2stat_2` | `hdma_late_disable_1` | strikethrough-cgb | daid `ppu_scanline_bgp` |
+|---|---|---|---|---|---|
+| 0 | 3850 | red | green | **23040/23040** | 4 px early |
+| 1 | -- | green | red | 23033/23040 | 4 px early |
+| 2 | **3860** | green | red | 23033/23040 | 4 px early |
+| 3 | -- | green | red | 23033/23040 | 4 px early |
+| 4 | 3853 | green | red | 23033/23040 | **exact** |
+
+Two things fall out of that table that were not known before:
+
+* **Every value from 1 to 4 breaks strikethrough and `hdma_late_disable`
+  identically**, to the same seven pixels and the same `got 7`. There is no
+  sub-M-cycle setting that buys the halt rows without the cost.
+* **`DOTS=2` is a strictly better setting of this knob than the `DOTS=4` the
+  constant currently spells** — gambatte 3860 against 3853, +25 -15 against
+  +27 -24. It keeps all ten `halt/` wins and all eleven `speedchange` wins and
+  additionally holds `m0{int,irq}_m0stat_scx{2,5}_1` and
+  `hdma_late_enable_ds_2`, which `DOTS=4` loses. It is not shippable either: it
+  breaks the same strikethrough and `hdma_late_disable` rows AND it loses daid's
+  `ppu_scanline_bgp` on CGB, which only comes back at the full 4. If this
+  mechanism is ever revisited, 2 is the number to start from, not 4.
+
+daid's row is the reason 4 is not simply "too much": its LYC=**0** source (the
+LY 153 quirk path, not an ordinary line boundary) sits in a different position
+against the M-cycle grid, and 1, 2 and 3 dots do not reach it. So the sweep has
+sources in two different buckets and still no setting that separates the rows
+that need the M-cycle from the rows that refuse it.
+
+### The one PPU-side escape, and the row that closes it
+
+The contradiction has exactly one shape that is not about the CPU: if the CGB's
+mode 3 spanned **four more dots** than dingbat models, the same post-halt CPU
+could be one M-cycle late at dot 81 and on time at dot 249. `hdma_late_disable`
+agrees with that to the dot — at `DOTS=4` its write lands at 253 against an edge
+at 252, so an edge anywhere in [254, 257] passes both `_1` and `_2`.
+
+**strikethrough refuses it, in the opposite direction, on the same edge.** Its
+STAT handler ($0230) is
+
+```
+0230  LDH A,($FF41)      ; 8 M-cycles per iteration = a 32-DOT sampling comb
+0232  AND $03
+0234  JR NZ,$0230        ; wait for mode 0
+0236  <28 NOPs>
+0252  LD A,$C0
+0254  CALL $FF80         ; LDH ($FF46),A -- the OAM DMA the picture is made of
+```
+
+so the DMA start is pinned to the wake **modulo 32 dots**, not to the mode-0 edge.
+Measured on line 67: the poll's samples are at dots 49, 81, ... 241, 273, the
+mode 0 edge is at dot **252**, and the winning sample is 273 — twenty-one dots of
+margin. At `DOTS=4` the comb is 53 ... 245, 277, the winner is still 277, and the
+DMA starts at dot 453 instead of 449. One byte of the transfer, and the object at
+OAM X=79 reads `01` off the DMA's bus where it should read `00`; that is the
+seven pixels, all on line 68, x=71..78.
+
+To put that winner back on 245 the CGB's mode-0 edge would have to arrive **at
+least seven dots EARLIER** than the DMG's. `hdma_late_disable` needs the same
+edge two to five dots **LATER**. Same edge, same device, opposite signs — so no
+adjustment of CGB mode 3, in either direction, satisfies both.
+
+### Candidates measured and refused
+
+Each of these was built and run, not argued away.
+
+* **The debt repayment's placement relative to the wake M-cycle's bus half.**
+  Refused structurally and confirmed by trace: wherever the repayment goes, it
+  restores `PPU == machine` before the CPU's first post-wake bus access, so the
+  post-wake CPU-vs-PPU offset is the wake M-cycle's own shift and nothing else.
+  `DMASTART` in strikethrough is 448 dots after the wake — the halt is long over.
+* **OAM DMA on the PPU's delayed half rather than the bus half.** Same trace kills
+  it: strikethrough's transfer is armed 112 M-cycles after the halt ended, so no
+  clock-domain assignment that only differs *during* a halt can reach it.
+* **A CGB-specific OAM DMA start latency.** `CGB_OAM_DMA_START_T=4` (against the
+  8 T both devices ship) makes **both** strikethrough rows pixel-exact at
+  `DOTS=4` — and gambatte `oamdma` goes 681 -> 578, total 3853 -> **3750**. 103
+  rows say the CGB's OAM DMA takes the bus 8 T after the write to FF46. The knob
+  is kept at 8 in `gb.nim` so the refutation has somewhere to live.
+* **IME / whether a vector is taken as the discriminator.** It is the only
+  structural difference between `lycirq_m2stat` and `hdma_late_disable`, and it
+  is refuted from the other side: `halt/m1int_ly_2` (`EI`/`HALT`, vector taken)
+  and daid's `ppu_scanline_bgp` (`EI`/`HALT` in the VBlank handler, vector taken)
+  both NEED the M-cycle, and `hdma_late_disable` (`EI`/`HALT`, vector taken)
+  refuses it.
+* **CGB mode 2 shorter, i.e. mode 3 starting four dots earlier.** This would
+  explain `lycirq_m2stat_2` with no halt phase at all. `m2int_m2stat_{1,2}`
+  refuse it: they bracket the same mode 2->3 edge at the same NOP index with no
+  halt anywhere in the ROM, and they are `dmg08_cgb04c_out2` / `_out3` — one
+  expected value for both devices.
+
+### What `hdma_late_disable`'s `got 7` actually is
+
+Worth recording, because "7" reads like a wild answer and it is not. The ROM's
+verdict is `LD A,(HL)` with `HL = $8000`, `AND $07`. When the disable write beats
+the mode-0 edge, no block moves and VRAM reads 0 (`out0`). When it loses the
+race, the block has already moved and `hdma_active` is false, so the same
+`XOR A / LDH ($FF55),A` is a **general-purpose** DMA of one block — which steals
+the bus for 32 dots and pushes the verdict read into the next line's mode 3,
+where VRAM reads `$FF`. `7` is `$FF and 7`: not a DMA count, a blocked read.
+
+### Diagnostics added
+
+`-d:gb_dma_trace` (tools only, compiled out of every shipping build) prints one
+line for each of: the OAM DMA unit taking the bus (`DMASTART`), every FF55 write
+with the mode and `hdma_active` at that dot (`FF55`), every HBlank/GP block copy
+(`HDMABLOCK`), every STAT/LY read (`REGREAD`), and every mode change (`MODE`) —
+all with `ly` and the PPU dot. Every number in this section came off it. It pairs
+with `-d:gb_halt_trace`, which reports the wake.
