@@ -491,6 +491,45 @@ const CGB_TDSEL_GLITCH*       {.booldefine.} = true
   ##    TILE_SEL was last reset, if any") without saying which fires; the
   ##    address latch is the one mechanism that produces both.
   ##
+  ## ---- What writes the address latch, and when it is cleared (2026-08-11) ---
+  ##
+  ## `*_change2` cannot see either question: every SET glitch in those two
+  ## frames is preceded, on its own line, by an object fetch or a RESET-glitched
+  ## read. The two ROMs that CAN see them are the plain `m3_lcdc_tile_sel_change`
+  ## and `m3_lcdc_tile_sel_win_change` on CGB, and they were this pair's whole
+  ## residual (232 and 1422 wrong subpixels; both are 23040/23040 now). Scoring
+  ## the four CGB references' glitched reads by the byte each one pins -- 188
+  ## RESET cells and 161 SET cells, all eight bits of every one fixed by its
+  ## tile's eight pixels:
+  ##
+  ##   latch written by                     cleared per line   SET cells right
+  ##   obj + RESET-glitched reads           yes                 133 / 161
+  ##   + every unglitched LCDC.4 = 1 read   yes                 133 / 161
+  ##   obj + RESET-glitched reads           no                  158 / 161
+  ##   + every unglitched LCDC.4 = 1 read   no                  159 / 161
+  ##
+  ## So both arms are separately forced, and neither is a fitted number:
+  ##
+  ##  * the latch is a bus register and H-Blank does not clear it.
+  ##    `m3_lcdc_tile_sel_change` puts its LCDC write at dot 105 and its object
+  ##    at 112, so the first glitched read of each of its lines happens before
+  ##    anything on that line has driven an $8000-region address, and hardware
+  ##    still substitutes -- with the byte the line ABOVE left there. That is
+  ##    the 133 -> 158, and it is both rows' entire residual bar 8 pixels.
+  ##  * an UNGLITCHED LCDC.4 = 1 read is an $8000-region access like any other
+  ##    and leaves its address here too. That is the last cell, 158 -> 159:
+  ##    `m3_lcdc_tile_sel_win_change`'s 8 remaining pixels, one glitched tile
+  ##    whose line has a plain unsigned read after its object and before its
+  ##    glitch.
+  ##
+  ## A plain DATA latch (the last $8000-region BYTE rather than its address) is
+  ## refuted, and by a whole band rather than a cell: it scores 89/161, because
+  ## `*_change2`'s two bands glitch on different PLANES and hardware answers
+  ## with the same tile at the plane the glitch is on (`D.0` in band 3 and `D.1`
+  ## in band 5, above). Only an address can do that. It is worth knowing that
+  ## this is where the two disagree, because a data latch is the cheaper thing
+  ## to implement and it is what the notes' wording suggests.
+  ##
   ## `cgb-acid-hell`'s two pixels are NOT this rule and are still open: their
   ## glitched read is a SET and hardware delivers the tile index there, which
   ## contradicts every SET cell above. See docs/gb-failure-triage.md.
