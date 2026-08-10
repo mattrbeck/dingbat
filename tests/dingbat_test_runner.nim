@@ -662,8 +662,19 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   ## results on a DMG compared to a CGB." A change that moves the fetcher can
   ## now be read on both devices instead of one.
   ##
-  ## `_cgb_d.png` (CPU CGB D) is deliberately not wired: the D revision caches
-  ## the bitplane row differently again, and dingbat models one CGB.
+  ## The `cgb: true` rows are scored on the DEFAULT revision, which is `grCgbC`
+  ## — the same device the `_cgb_c` captures are of. That is not a coincidence
+  ## any more: as of 2026-08-10 the default was moved to CGB C partly because
+  ## these references are what the tree is scored against.
+  ##
+  ## `_cgb_d.png` (CPU CGB D) is still not wired, but the reason has changed.
+  ## It used to be "dingbat models one CGB"; dingbat now models six, and
+  ## `--cgb-rev=D` reproduces 17 of the 20 `_cgb_d` captures pixel-exactly
+  ## (`TestDef.model` is already the passthrough — `model: "cgbd"` is all a row
+  ## would need). What holds them out is that they would add ~20 rows to
+  ## results.md, three of them failing, for an axis no shipping frontend can
+  ## reach; the measurement lives in docs/gb-failure-triage.md (2026-08-10)
+  ## instead. Wire them the day a revision becomes user-selectable.
   var tests: seq[TestDef]
   let ppu_dir = mealybug_dir / "ppu"
   if not dirExists(ppu_dir):

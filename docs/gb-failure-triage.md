@@ -2726,3 +2726,22 @@ The revision plumbing on its own is byte-identical: built with
 `-d:gb_unusable_zero`, `results.md` matches the base commit's exactly but for
 its timestamp, and gambatte returns to 3850/5005. So every row this work moved,
 the `$FEA0` model moved.
+
+### Perf
+
+Free, as a per-PPU-register-write site should be. `tools/gbgate/build.sh`
+a8a549e vs d7e3467 (`git archive` both sides, so neither can see the other's
+artifacts), `DINGBAT_BENCH_COUNTERS=1 DINGBAT_NO_WAITLOOP=1`, retired
+instructions, 2400 frames after 300 warmup, minimum of six interleaved runs
+per arm:
+
+| ROM | A (`a8a549e`) min | B (`d7e3467`) min | delta | A's own 6-run spread |
+|---|---|---|---|---|
+| Pokemon Crystal (CGB) | 23,696,710,663 | 23,696,721,992 | **+0.00005%** | 0.0047% |
+| Shantae (CGB) | 35,953,316,118 | 35,953,490,243 | **+0.00048%** | 0.0032% |
+| Link's Awakening (DMG) | 24,244,700,866 | 24,245,131,306 | **+0.00178%** | 0.0116% |
+
+Emulated `cycles=` is identical in all 36 runs (168,537,600 / 325,669,176 /
+168,395,236), which is the control that says both arms did the same work.
+Every delta is an order of magnitude below its own arm's run-to-run spread,
+i.e. not resolvable. Wall-clock is not quoted: it lies below ~1.3%.
