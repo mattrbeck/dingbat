@@ -221,8 +221,25 @@ proc sweep_step*(ch: GbChannel1; gb: GB) =
     if ch.sweep_enabled and ch.sweep_period > 0:
       let calc = ch1_frequency_calc(ch, gb, gb.scheduler.cycles)
       if calc <= 0x07FF and ch.shift > 0:
+        # The sweep's own frequency write races the frequency timer's reload
+        # exactly like an NR13/NR14 write does, and loses or wins on the same
+        # terms: land on the reload cycle and the reload takes the NEW value.
+        # See ch1_reload_is_now -- this is that rule, reached by the one writer
+        # that does not go through ch1_write.
+        #
+        # channel_1_sweep_restart round 1 is where it shows. It runs the
+        # channel at $7ff, where a duty step lands on EVERY M-cycle, so the
+        # sweep tick that drops the frequency to $7f0 always coincides with a
+        # reload; without this the pending sample keeps the 1 M-cycle period it
+        # was armed with and the whole waveform after the sweep sits one
+        # M-cycle early. Its restart then lands on a duty step that should not
+        # have been there, which is the single byte ($c00f) that row was short.
+        # Round 2 runs the same code the other way round -- $7f0 up to $7ff,
+        # where a step coincides one M-cycle in sixteen -- and is unmoved.
+        let reload_now = ch1_reload_is_now(ch, gb)
         ch.frequency_shadow = calc
         ch.frequency         = calc
+        if reload_now: ch.next_step = gb.scheduler.cycles + ch1_period(ch, gb)
         # ...and the check on THAT value is 7 M-cycles away, not now. See
         # GB_SWEEP_CHECK_DELAY.
         ch.sweep_check_at = gb.scheduler.cycles + (GB_SWEEP_CHECK_DELAY shl gb.scheduler.speed)
