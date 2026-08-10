@@ -752,6 +752,24 @@ const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
   ## with the readout and their handler writes on a 16-dot pitch, which is why
   ## the corpus has a gap exactly where the trigger lives.
   ##
+  ## **And the corpus does not arbitrate against the one alternative, either.**
+  ## The alternative is not another substitution source, it is one M-cycle of
+  ## CGB halt phase: put the CPU 8 dots later (`CGB_HALT_PPU_LEAD=2`) and this
+  ## ROM's glitching write becomes the RESET one 8 dots earlier, the seven cells
+  ## move to the RESET column, and `CGB_TDSEL_IDX_DOTS=0` scores **216/216 SET
+  ## and 199/199 RESET with `cgb-acid-hell` at 23040/23040** -- a strictly
+  ## simpler model that needs nothing on this line at all. Measured 2026-08-13,
+  ## and it is why the shipping rule rests on the halt bracket and not on the
+  ## corpus: `halt/lycirq_m2stat_{1,2}` and `halt/m1int_ly_{1,2}` are green
+  ## together only at `LEAD` 0 or 1 and the `_1` members go red at 2, and
+  ## `lycirq_*` is this ROM's own IME-clear path. The commented disassembly at
+  ## github.com/CelestialAmber/cgb-acid-hell reads the ROM the other way and
+  ## says the reset rule is the whole trick; its own dot arithmetic lands on the
+  ## SET once the 6-dot object delay it documents is applied, and that 6 dots is
+  ## `objtab.py`'s hardware table (153/153 cells). Full account, both sides, in
+  ## docs/gb-failure-triage.md's 2026-08-13 entry -- read it before changing
+  ## anything here.
+  ##
   ## **A revision split is excluded, not merely unsupported.** `cgb-acid-hell`
   ## picks its tile data off a `$FEA0` readback and dingbat takes the same
   ## branch the bundled reference was captured on, which is a CGB-C -- the same

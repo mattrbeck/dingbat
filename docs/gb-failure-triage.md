@@ -1163,7 +1163,10 @@ Two consequences, and the second is a live hazard:
   anything models `$FEA0..$FEFF` per revision — and the OAM-corruption work is
   the obvious way in — **this row silently changes which picture it is drawing
   and stops being comparable to its reference.** Whoever touches that range
-  should re-score `cgb-acid-hell` in the same commit.
+  should re-score `cgb-acid-hell` in the same commit. The 2026-08-13 entry has
+  the per-revision table this gate was written against, and the number to aim
+  for: a CGB-C must read `$44` back from `$FEA0` here, and only CGB-D reads
+  `$55` and takes the SORRY branch.
 
 Two smaller corrections to what is written above:
 
@@ -1301,6 +1304,146 @@ same CGB-C the `*_change2` references are, but two pixels. The settling
 experiment is unchanged and still does not exist: a hardware capture of
 `m3_lcdc_tile_sel_change2` (or any second ROM) with a SET glitch one fetch
 behind a RESET one. Full arithmetic at `CGB_TDSEL_IDX_DOTS` in `gb/gb.nim`.
+*(Read the 2026-08-13 entry below with this one: a commented disassembly of the
+ROM turned up, it confirms the mechanism, it disagrees about which of two
+adjacent writes glitches the read, and it makes the corpus's silence here
+sharper than "the bucket is one ROM's".)*
+
+#### 2026-08-13: the ROM has a documented disassembly, and it agrees about everything except which write
+
+[CelestialAmber/cgb-acid-hell](https://github.com/CelestialAmber/cgb-acid-hell)
+is a commented disassembly of mattcurrie's ROM — five commits of documentation,
+including one called *"Finally figured out the pattern for scroll y"* — and it
+is the only second reading of this test that exists. It is a fellow
+reverse-engineer's account and not a hardware capture, so every claim below was
+scored against this tree's traces before it was believed. Four of the five
+things it says are independently confirmed here, and the fifth is refuted **by
+its own arithmetic**.
+
+**Confirmed: the picture is drawn out of TILE INDICES, and the ROM says so.**
+`gfx/tilemap.asm`'s header: *"The LCDC bit 4 bug the test relies on uses the
+tile index currently used as the high byte for the tile data, and since the
+tiles used end up being the top 7 after the first tile in the first column, they
+(including the 9th tile in the column) get set to the 8 values of the upper
+bitplane of the smiley face tile data."* Its de-obfuscated tilemap makes that
+literal — column 0 of map rows 0..8 is `01 1C 22 55 41 55 49 22 1C`, i.e. the
+happy face's eight bitplane-1 bytes as tile numbers. The SCY pattern
+(`macros/scanline_hell.asm`) is `tilemapYPos = 8 + (9·LY mod 64)` on lines
+64..71 and `129 + (30·LY mod 128)` / `129 + (10·LY mod 128)` elsewhere, so face
+line `64 + k` fetches map row `k + 1` at tile row 4-ish and the *index* it reads
+is the face's row-`k` upper bitplane. dingbat's trace is that, to the byte: line
+68 reads map `$98A0`, `num = $55`, `row = 4`, and hardware's byte is `$55`.
+Everything below `$8000` in the "which address holds `$55`" search of the
+2026-08-11 entry was therefore looking for something that was never there.
+
+**Confirmed: the red herring, named as one.** `HappyFaceGraphicsData` is copied
+to tile `$69` *"merely a red herring to trip up people, as we render the smiley
+face in another, much more indirect way"*, and OAM entry 0 uses that tile
+off-screen to the right *"just there to likely confuse people more"*. That is
+`$8699`/`$869B` from the 2026-08-11 VRAM search — the only two addresses holding
+the disputed bytes, in the one tile the frame never fetches.
+
+**Confirmed: the CGB-D gate, with the semantics spelled out.**
+`CheckIfNotOnCGBD` is our `$FEA0` readback, and the fork gives the table it was
+written against (SameBoy `GB_read_oam`/`write_oam`): CGB 0/A/B/C mask `addr &
+~0x18` so the `$FEB8` write lands on `$FEA0` and the readback is `$44`; CGB-D
+keeps them apart so the readback is `$55`; CGB-E/AGB/GBP ignore the writes and
+return `$AA`. Only `$55` falls through to the SORRY screen — **so the branch
+this ROM refuses is CGB-D alone**, not "later revisions", and the reason is
+stated outright: *"the bugs in the PPU this test relies on work differently on
+CGB-D"*. Two consequences for the hazard note above: the device in the issue
+tracker's SORRY photo is a CGB-D, and whoever models `$FEA0..$FEFF` per revision
+keeps this row comparable as long as CGB-C answers `$44` — the readback dingbat
+must produce is `$44`, not the `$00` it produces today by not modelling the
+region at all.
+
+**Confirmed, and this is the part the analysis here had missed: the sprite is a
+clock.** The tilemap deliberately doubles as OAM, and one entry is load-bearing
+— `4F 01 B9 01`, *"timing sprite for scanlines 63-71"*, at OAM `(1, 79)` =
+screen `(-7, 63)`. The fork's account: it triggers a sprite fetch that
+*"succeeds, but due to the first write on dot 96, the sprite isn't drawn"*, and
+the *"extra delay of 6 cycles"* is what aligns the write burst with the face's
+bitplane-1 fetch. All of it is in dingbat's trace and none of it was fitted:
+
+| | lines 60..62 | lines 63..70 | lines 71..72 |
+|---|---|---|---|
+| object at the left edge | none | `X = 1` (`OBJTRIG dot 94`) | `X = 0` |
+| fetch delay it costs | — | **6 dots** | **11 dots** |
+| the observable tile's plane-1 read | dot **172** | dot **178** | dot **183** |
+| LCDC.4 change on that dot | none | **yes** | none |
+
+The 6 and the 11 are not this tree's numbers: `tools/gbppu/objtab.py` reads the
+whole OBJ-penalty table out of `ppu_spritex_vs_scx.gb` and dingbat matches
+hardware on **153/153 cells**, with `X = 1` at `SCX mod 8 = 4` (this ROM's
+`SCX = 180`) costing exactly 6 and `X = 0` costing 11. So the sprite lines are
+the only ones whose fetches land on the write lattice at all, which is why the
+glitch exists on 63..70 and nowhere else — and why line 71, whose object is a
+different one, renders the face's last row straight out of the SCY trick with no
+glitch. The fork says both of those in prose (*"on scanline 63 the bug still
+happens; however … nothing ends up looking different"*, and *"the last line of
+the smiley face is rendered as normal from the indirect SCY method"*) and the
+trace shows both: line 63 glitches at dot 178 and delivers index `$07` into a
+palette of four whites; line 71 has no glitched read anywhere.
+
+**Refuted: which write is on that read.** The fork's `scanline_hell.asm` says
+the glitching write is `ld [hl], b` — `$F3 → $E3`, a **RESET**, the tenth of the
+sixteen — and therefore that the whole test is the mealybug notes' plain reset
+rule with no new mechanism at all. dingbat has the *next* write, `ld [hl], c`
+(`$E3 → $F3`, a SET), on that read. One 8-dot write slot apart, which is the
+same `±8` the 2026-08-10 entry above bracketed. The fork's own numbers decide it
+against the fork:
+
+* It puts the face tile's top-bitplane fetch at **dot 172**. dingbat measures
+  dot 172 for that fetch — **on the lines with no timing sprite**. The two
+  models of the fetcher agree to the dot.
+* The same sentence invokes the sprite's 6-dot delay and then quotes the
+  coincidence at the *undelayed* dot. Carried through its own arithmetic, 172 +
+  6 = 178, which is `ld [hl], c` and a SET: dingbat's answer.
+* Its CPU accounting (`halt` = 4 cycles for wakeup, then 28 cycles to the SCY
+  write, then 68 to the burst) puts write *i* live at `100 + 8i`; dingbat's
+  lands at `97 + 8i` and is live at `98 + 8i`. Two dots apart, i.e. inside the
+  slop of which T-cycle of `ld [hl], r` the store lands on — not eight.
+* Both grids have an 8-dot pitch, so **only a whole slot can change the
+  answer**, and a shift that is not a multiple of 8 destroys every coincidence
+  on this ROM and renders no face at all. The frame rules out the intermediate
+  values on its own.
+
+**What the fork does change here: the corpus is now known not to arbitrate.**
+The `±8` world was measured again, as `-d:CGB_TDSEL_IDX_DOTS=0
+-d:CGB_HALT_PPU_LEAD=2`, and it is not merely "also passes the frame"
+(23040/23040, as 2026-08-10 recorded) — it is **clean over the whole 415-cell
+corpus with no `IDX_DOTS` rule at all**: the seven `cgb-acid-hell` cells move
+from the SET column to the RESET one, the census becomes 216 SET / 199 RESET,
+and the plain rules score **216/216 and 199/199**. So the corpus cannot tell
+"H1 at this phase" from "no H1, one M-cycle later"; it says only that whichever
+phase is right, the rules are consistent with every other cell measured. The
+table in the entry above is a statement about one world, not a discriminator
+between the two.
+
+**What still decides it is the halt bracket, re-measured today.** Whole
+gambatte suite, `tools/gbppu/gamall.sh`, one build per setting:
+
+| build | gambatte | `cgb-acid-hell` |
+|---|---|---|
+| shipping (`IDX_DOTS=8`, `HALT_PPU_LEAD=0`) | 3850 / 5005 | 23040 |
+| `IDX_DOTS=0, LEAD=1` | 3850 / 5005 | 23038 |
+| `IDX_DOTS=0, LEAD=2` (the fork's world) | 3852 / 5005 | 23040 |
+
+The +2 at `LEAD=2` is `scx_during_m3`/`dma` churn and not evidence; the two
+clean families are. At `LEAD=1`, `halt/lycirq_m2stat_2` and `halt/m1int_ly_2`
+flip green and their `_1` members stay green. At `LEAD=2`, `halt/lycirq_m2stat_1`
+and `halt/m1int_ly_1` go red. Three ROMs one NOP apart per family bracket the
+wake to **exactly one M-cycle**, and `lycirq_*` is `cgb-acid-hell`'s own
+IME-clear path. The fork's world needs two. On the PPU side the same door is
+shut by `objtab.py`'s 153 cells, which pin the 6 dots the fork itself quotes.
+
+So the verdict is: **the fork corroborates the mechanism and refutes its own
+assignment of it**, and `CGB_TDSEL_IDX_DOTS` stays. The caveat at the constant
+gets *sharper*, not weaker — it is no longer "seven cells and all seven are this
+ROM's" but "an independent reader of the source expected the reset rule here,
+and the only thing standing between that reading and this one is one M-cycle of
+CGB halt phase, measured against two gambatte families and nothing else". The
+settling experiment is unchanged and still does not exist.
 
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
