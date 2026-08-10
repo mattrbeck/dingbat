@@ -1720,6 +1720,118 @@ still standing, it is *load-bearing for the bundle*: whoever lands
 `M3_PIPE_AHEAD=1` should know it moves this row to 23038 and that turning the
 constant off does not help, because at `D = 4` nothing fires either way.
 
+#### 2026-08-10: the pipeline phase is ONE quantity, and two CGB rows bracket it to different values
+
+The bundle measurement (`docs/gb-bundle-measurement-2026-08-10.md`) leaves four
+rows broken and one fixed, and the obvious hope is that they are four different
+mechanisms that can be unpicked. **They are not. They are one number**, and this
+entry is the proof plus the minimal contradiction it forces. Call that number
+`P`: how far the mode-3 pipeline runs ahead of machine time, in CPU M-cycles.
+`P = 0` on `main`, `P = 1` under the bundle.
+
+**Every disputed row moves with `M3_PIPE_AHEAD` and nothing else.** The full
+2x2x2 grid over the trio, one build per cell, all five CGB frames plus both
+daid devices plus both strikethrough devices:
+
+| knob | `cgb-acid-hell` | daid-GBC revD | daid-DMG | strikethrough dmg / cgb | mealybug `tile_sel` x4 |
+|---|---|---|---|---|---|
+| `STAT_M2_LEAD` | — | — | — | — | **breaks** (21972…) |
+| `LY0_PIPE_MCYCLES=0` | — | — | — | — | breaks by 8..32 px |
+| **`M3_PIPE_AHEAD`** | **23040→23038** | **20736→23040** | **exact→20848** | **23040→23033 both** | breaks (21572…) |
+
+So `STAT_M2_LEAD` and `LY0_PIPE_MCYCLES` are *only* the corpus's compensation
+pair — they exist to keep the M2-synced mealybug frames still while `P` moves,
+and they touch nothing else in this set. The coordinating hypothesis that
+daid-GBC's +4 might come from the line-0-scoped `LY0_PIPE_MCYCLES` (which would
+have dropped the global term out of the algebra) is **refuted**: that knob moves
+daid by 0 pixels at either setting.
+
+**The fetch grid and pixel emission are the same axis, so there is no depth
+degree of freedom.** The proposed escape was a world with the grid 8 dots early
+and emission only 4 — one extra fetch-cycle of lead, a deeper FIFO — which would
+put `cgb-acid-hell` at `D = 8` (plain reset rule) while leaving daid at +4. It
+is not expressible and the renderer says why: `m3_lead` delays fetch and shift
+*together*, and `M3_PIPE_AHEAD` advances them together, so the two knobs are one
+quantity with opposite signs. Measured rather than read off the source —
+`M3_PIPE_AHEAD=1` with `M3_PIPE_DELAY=6` (advance 4 dots, delay 4 dots) returns
+**every witness to its `main` value**: acid-hell 23040, daid-GBC 20736, daid-DMG
+exact, strikethrough 23040/23040. They cancel exactly, which is what "one axis"
+means. (It is also what the hardware says: the BG FIFO drains one pixel per dot
+and fills eight per fetch, so the fetcher cannot sit a whole extra fetch ahead
+in steady state.)
+
+**daid-DMG did not move to another accepted variant — it broke.** The shootout
+accepts any of `ppu_scanline_bgp_{0,1,2}.dmg.png` and the runner already scores
+the best of the three, but scored separately the row reads:
+
+| build | vs `_0` | vs `_1` | vs `_2` |
+|---|---|---|---|
+| `main` | 22576 | **23040** | 22576 |
+| `P = 1` | 20848 | 20384 | 20272 |
+
+Further from all three, not nearer a different one.
+
+**The witness table, and the two-sided bracket.** `P` swept with everything else
+held (the `P = 2` column carries `STAT_M2_LEAD=2` so the corpus stays scoreable;
+`P = -1` is `M3_PIPE_DELAY=6`, the pipeline four dots LATE):
+
+| row | `P = -1` | `P = 0` | `P = 1` | `P = 2` |
+|---|---|---|---|---|
+| `strikethrough-cgb` | 23033 | **23040** | 23033 | 23033 |
+| `strikethrough-dmg` | 23033 | **23040** | 23040\* | 23040\* |
+| `cgb-acid-hell` | 23038 | **23040** | 23038 | **23040** |
+| daid-GBC `revD` | 18432 | 20736 | **23040** | 20736 |
+| daid-DMG (best of 3) | 20848 | **23040** | 20848\* | 20848\* |
+| mealybug `tile_sel` x4 | — | **23040** | 23040 | 23024/23011/23024/23040 |
+
+(\* the DMG rows are shown under the device-gated build below, which is the only
+way they and daid-GBC can be read in one column at all.)
+
+Read the first four rows: **`strikethrough-cgb` is right only at `P = 0` and
+daid-GBC `revD` only at `P = 1`, and both are bracketed from both sides.** That
+is the contradiction, it is two rows, and they are the same device measuring the
+same quantity — so no device split, no glitch rule, no halt phase and no
+revision flag can reconcile them. `cgb-acid-hell` is a third witness on
+`strikethrough`'s side of it (right at 0, and again at 2 where daid-GBC is
+equally wrong), which is the `D = ±4` dead zone of the entry above seen from
+the pipeline end instead of the halt end.
+
+**The device split is real, is worth having, and does not help here.** daid's
+two devices want different values of the same number — DMG `P = 0`, CGB `P = 1`,
+one ROM — which is exactly the shape this tree already models per device
+(`WIN_TAIL`), so it is built rather than argued about: `M3_PIPE_AHEAD_CGB` in
+`fifo_ppu.nim`, CGB-only, added to the device-independent term. At 1, alone:
+
+* **the whole DMG side is rescued** — daid-DMG exact against `_1` again,
+  `strikethrough-dmg` 23040;
+* daid-GBC `revD` is 23040;
+* and `strikethrough-cgb` (23033) and `cgb-acid-hell` (23038) are still wrong,
+  because they are CGB rows and the CGB side is where the contradiction lives.
+
+It ships at 0 for that reason. The corpus needs `STAT_M2_LEAD` gated the same
+way to be scored beside it; with the lead left device-independent the DMG
+mode-2-synced families (`scy`, `scx_during_m3`, `m2enable`) pay for it and the
+runner reads 752, which is a property of the half-applied gate and not of the
+split.
+
+**So the minimal contradiction, stated to be permanent:**
+
+> `strikethrough-cgb` and daid `ppu_scanline_bgp` on CGB are both pixel-exact
+> witnesses of the mode-3 pipeline's phase against machine time, on the same
+> device, and they are two-sided at `P = 0` and `P = 1` respectively. No
+> assignment of one number satisfies both, and `cgb-acid-hell` sides with
+> `strikethrough` at 0.
+
+What that rules out is a *global* pipeline phase, which is what every knob in
+this family currently is. What it leaves open is finer structure inside the
+consumers: `strikethrough` reads `P` through an OAM-DMA race (mode 2's scan
+against the DMA unit's bus, which runs on machine time) and daid reads it
+through pixel emission, so a world where the OAM scan keeps machine time while
+pixel emission moves would satisfy both. That is not a knob today and this entry
+does not claim it is derivable — it is the named place to look, and the ROM to
+look with is `strikethrough`, whose 7 pixels are identical at `P = 1` and
+`P = 2` (a boundary crossed, not a ruler) where daid's bands step linearly.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one

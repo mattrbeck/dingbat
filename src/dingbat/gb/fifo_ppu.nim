@@ -1798,7 +1798,23 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 #    90.5% here, which is four dots, and it is expected back when the halt half
 #    lands.
 const M3_PIPE_AHEAD {.intdefine.} = 0
-const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0
+const M3_PIPE_AHEAD_CGB {.intdefine.} = 0
+  ## The same advance, on CGB only, ADDED to the device-independent one above.
+  ##
+  ## It exists because the two devices' witnesses for this one quantity
+  ## disagree, and the disagreement is inside one ROM: daid `ppu_scanline_bgp`
+  ## is 23040/23040 on DMG at 0 and on CGB (`--cgb-rev=D`) at 1. A device split
+  ## is the standard shape for that in this tree (see WIN_TAIL), so it is worth
+  ## having built rather than argued about.
+  ##
+  ## **It does not resolve the contradiction and it ships at 0**, because the
+  ## CGB side is internally inconsistent: at 1 daid-GBC comes right and
+  ## `strikethrough-cgb` (23040 -> 23033) and `cgb-acid-hell` (23040 -> 23038)
+  ## both go wrong, and all three are CGB rows measuring the same phase. See the
+  ## 2026-08-10 entry in docs/gb-failure-triage.md for the full witness table
+  ## and the two-sided bracket.
+const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
+                     M3_PIPE_AHEAD_CGB != 0
 
 # Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
@@ -3268,6 +3284,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # was never in vblank, and it has a model of its own already (the
             # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
             let mc = M3_PIPE_AHEAD +
+                     (when M3_PIPE_AHEAD_CGB != 0:
+                        (if ppu.cgb: M3_PIPE_AHEAD_CGB else: 0)
+                      else: 0) +
                      (if ppu.ly == 0 and not ppu.first_line: LY0_PIPE_MCYCLES
                       else: 0)
             if mc != 0:
