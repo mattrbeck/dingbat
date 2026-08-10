@@ -1115,6 +1115,117 @@ behaviour-flag mechanism in `docs/gb-hardware-revisions.md` §2.1, on the
 evidence of two pixels and no reference that names its device. Not worth it
 yet; worth it the day a second acid-hell-shaped ROM appears.
 
+#### 2026-08-10: the revision question is CLOSED, and the ROM closes it
+
+`cgb-acid-hell` does name its device — not in the filename, in the code. The
+disassembly carries a **`$FEA0` readback gate** at `$1AB6`, run once during
+setup on the CGB path (`cp $11 / jp nz` selects the non-CGB one above it):
+
+    ld hl, $fea0 / ld b, $55      ; wait for STAT bit 1 clear, then
+    ld [hl], b                    ;   write $55 to $FEA0
+    ld hl, $feb8 / ld b, $44      ; wait again, then
+    ld [hl], b                    ;   write $44 to $FEB8
+    ld hl, $fea0 / ld a, [hl]     ; wait again, then read $FEA0 back
+    cp $55 / ret nz               ; NOT $55  -> return, caller loads $1F64
+                                  ; IS  $55  -> fall through, load $2044
+
+The two branches load **different tile data** — `$1F64` on the fall-out and
+`$2044` on the fall-through — so the ROM draws a different picture on the two
+sides of the `$FEA0` behaviour, which is a CGB revision split. dingbat takes the
+`$1F64` branch, the bundled reference is the `$1F64` picture (that is what
+23038 of 23040 pixels agreeing means), and the author's photo is of the same
+branch. The repo's issue tracker carries a photo of a device that takes the
+other one — a real CGB showing the ROM's `SORRY YOU CAN'T GET TO PLAY` screen —
+so both branches exist in the wild and the author shipped one reference.
+
+Two consequences, and the second is a live hazard:
+
+* **The reference is a CGB-C capture, like every `*_change2` one**, so the
+  `CGB_TDSEL_GLITCH` rule and this ROM are scoring the same device after all.
+  A revision split for the SET branch is therefore not merely unsupported, it
+  is *excluded*: the two pixels and the 48 `*_change2` SET cells that refuse
+  them are the same silicon. What is left is `H1` — "a SET glitch whose latch
+  was written by the immediately preceding fetch substitutes the index" — which
+  is one rule, scoreable over the 349-cell corpus, and still the only live
+  candidate.
+* **dingbat passes that gate by accident.** `memory.nim`'s read path answers
+  `of 0xFEA0..0xFEFF: 0x00'u8` for every model, so the compare fails and the
+  `$1F64` branch is taken because the region is not modelled at all. The day
+  anything models `$FEA0..$FEFF` per revision — and the OAM-corruption work is
+  the obvious way in — **this row silently changes which picture it is drawing
+  and stops being comparable to its reference.** Whoever touches that range
+  should re-score `cgb-acid-hell` in the same commit.
+
+Two smaller corrections to what is written above:
+
+* **The two pixels are hardware-photo-verified.** The repo ships
+  `img/photo.jpg`, a capture of the ROM on a real device, and the 8x8 cell at
+  `x = 76..83, y = 64..71` is a legible yellow face on white in it. Both
+  disputed pixels are inside that face and both agree with `cgb-acid-hell.png`
+  pixel for pixel: `(80, 68)` is yellow and `(80, 69)` is black. The reference
+  PNG is not the only witness and the pair is not a PNG-generation artefact.
+* **"the notes split the reset branch by revision" is only half of it, and the
+  SET branch has a third alternative this file never listed.** Quoting the
+  mealybug PPU document's `TILE_SEL` section in full, a SET on a bitplane read
+  gives *either* the sprite's bitplane 1, *or* the last reset-`TILE_SEL` tile's
+  bitplane 1, *or* "bitplane 0 or 1 data from the read in progress during pixel
+  159/160 (?) on the previous row when the tile fetcher is interrupted — **the
+  timing of which bitplane is selected differs between CGB revisions**". So the
+  revision language is inside the SET branch too, on the previous-row case's
+  plane selection. It does not rescue a revision split here (the `$FEA0` bullet
+  above kills that), and it is not the two pixels either — that third source is
+  a previous-row *fetch*, and the byte hardware delivers is the current tile's
+  index — but the earlier sentence in this file understated what the notes say,
+  and the reset branch's own CGB-D arm is a wholly different rule ("read the
+  bitplane data from the address for bitplane 0", not the index) that this tree
+  has never needed.
+
+#### 2026-08-10: the write-to-fetch phase is not the answer either, and why
+
+The other live hypothesis was that the write burst is in the wrong place rather
+than the rule being wrong, because dingbat's CGB halt-wake is measurably early.
+It is early — by exactly one M-cycle — and the ROM needs two. That is now
+bracketed from both sides rather than argued, so this route is closed:
+
+* **What the ROM needs is 8 dots, not 4, and the lattice says why.** The
+  handler is `ld a,N / ldh [rLYC],a / xor a / ldh [rIF],a / halt`, then
+  `ld a,$xx / ldh [rSCY],a / 17 nop / 16x ld [hl],r`, and the sixteen bytes it
+  writes to LCDC are `$80 $E1 $80 $E3 $F3 $80 $E1 $80 $F3 $E3 $F3 $80 $E1 $80
+  $F3 $E3` (`de = $80E1`, `bc = $E3F3`). Traced with `-d:gb_halt_trace
+  -d:gb_m3_trace`: the wake is at dot 1 of every line, write *i* lands on dot
+  `97 + 8i`, and the fetch of the one observable tile reads its map at 174, its
+  plane 0 at 176 and its plane 1 at 178. Write 10 is at 177, is live at 178
+  through `CGB_TDSEL_LATENCY`, and is the `$E3 -> $F3` SET. Both grids have an
+  8-dot pitch, so moving the CPU by 4 dots does not change which *write* is on
+  the read, it moves the write off the bitplane read and onto the tile-map read,
+  where nothing glitches at all — the frame comes out **bit-identical** to
+  `main`. Only a whole 8 dots advances the write index by one, and it does so in
+  either direction: at +8 the read is hit by write 9 (`$F3 -> $E3`) and at -8 by
+  write 11 (`$F3 -> $80`), both RESETs, both delivering the index, both making
+  the two pixels correct. Measured: `CGB_HALT_PPU_LEAD=2` is 23040/23040.
+* **The halt is worth exactly one M-cycle, and 2 is refused by ROMs that are
+  not this one.** gambatte `halt/lycirq_m2stat_{1,2,3}` and `halt/m1int_ly_
+  {1,2,3}` are three ROMs each differing by one NOP, with a CGB-specific
+  expected value on the middle member. At 1 both `_2` members flip green and
+  `_1`/`_3` stay green; at 2 the `_1` members go red. `lycirq_*` is the
+  IME-clear path — exactly `cgb-acid-hell`'s — and neither family carries an
+  SCX, so neither is in the `scx_during_m3` bucket. The full derivation, the
+  phase-versus-charge separation the 42 `tima/*` rows force, and the two
+  independent witnesses for the same M-cycle (daid `ppu_scanline_bgp` on CGB,
+  and `SPEED_SWITCH_STALL_T` which was absorbing it) are at `CGB_HALT_PPU_LEAD`
+  in `gb/gb.nim`.
+* **The non-halt half of the phase is pinned to one dot by the four CGB
+  `tile_sel` rows**, which are 23040/23040 and whose ROMs sync on a mode-2 STAT
+  interrupt in a NOP slide with no `halt` anywhere (`inc/lcdc_stat_int_base.asm`).
+  So an 8-dot CPU-to-PPU error that this ROM has and they do not would have to
+  live entirely in the halt, and the halt is worth 4.
+
+So the 8 dots do **not** decompose: 4 are derived and bracketed, and the other 4
+have no source. `cgb-acid-hell` stays at 2 pixels, `CGB_HALT_PPU_LEAD` ships at
+0 for an unrelated reason (one `strikethrough` row), and `H1` — the
+back-to-back-glitch SET rule scored over the 349-cell corpus — remains the only
+live candidate for the row.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one
