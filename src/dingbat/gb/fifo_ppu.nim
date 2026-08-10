@@ -209,6 +209,8 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetch_counter = 0
   ppu.fetcher_x = 0
+  ppu.scx_fine = 0
+  fifo_arm_scx(ppu)
   ppu.lx = 0
   ppu.smooth_scroll_sampled = false
   ppu.dropped_first_fetch = false
@@ -259,6 +261,120 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
       if result.len >= 10: break
     sprite_addr += 4
 
+const SCX_FINE_BORROW* {.intdefine.} = 1
+  ## Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
+  ## `SCX and 7` below the fine scroll the line latched. 1 ships; 0 is the
+  ## previous model and is the control arm.
+  ##
+  ## ---- The shape of the claim -----------------------------------------------
+  ##
+  ## The BG fetcher is NOT addressed as "a tile index plus a scroll". It is
+  ## addressed by a SCREEN POSITION with the live SCX added to it, so SCX's low
+  ## three bits take part in the carry into the tile-address bits:
+  ##
+  ##     column = ((SCX + 8*k - F) shr 3) and 31
+  ##
+  ## where `k` is the fetch index on this line and `F` is `SCX and 7` as it
+  ## stood when the line latched its fine scroll (`scx_fine`, set in
+  ## fifo_sample_smooth_scroll). `8*k - F` is exactly the screen x the fetch is
+  ## for. Expand it and the two forms agree except in one case:
+  ##
+  ##     SCX and 7 >= F   ->   k + (SCX shr 3)        the old model
+  ##     SCX and 7 <  F   ->   k + (SCX shr 3) - 1    the borrow
+  ##
+  ## so nothing moves unless a write LOWERS the low three bits mid-line, and
+  ## then the column comes out one tile lower for the rest of the line. The
+  ## spelling here is the difference rather than the sum, because the sum would
+  ## have to re-derive `8*k - F` from a counter this renderer keeps in tiles.
+  ##
+  ## ---- What derives it ------------------------------------------------------
+  ##
+  ## gambatte's `scx_during_m3`, read as a displacement ruler rather than as
+  ## pass/fail (tools/gbscx). Each ROM writes SCX three times per line off a
+  ## mode-2 STAT interrupt with the writes swept one M-cycle per step, and its
+  ## background row is aperiodic enough that the emitted frame reads back as
+  ## `screen x -> background X`. Six directories, and the directory name is the
+  ## three SCX values:
+  ##
+  ##   dir          SCX and 7 per write   late writes that LOWER it   rows
+  ##   scx_0060c0        0, 0, 0                   none               all pass
+  ##   scx_0063c0        0, 3, 0             the third, when the      2 of 14
+  ##                                         second landed in the
+  ##                                         discard and raised F
+  ##   scx_0360c0        3, 0, 0                   the second         12 of 14
+  ##   scx_0363c0        3, 3, 0                   the third          14 of 14
+  ##   scx_0367c0        3, 7, 0                   the third          14 of 14
+  ##   scx_0761c0        7, 1, 0                   the second         12 of 14
+  ##
+  ## The correlation is exact in both directions: every failing row's disputed
+  ## span follows a write that lowers `SCX and 7`, every row with no such write
+  ## passes, and `scx_0060c0` -- the one directory that never changes the low
+  ## bits at all -- is green from end to end. The error is always the SAME
+  ## error, one tile, and it is one tile whatever the size of the drop (`3->0`
+  ## is minus three, `7->1` is minus six, and both cost exactly 8 pixels), which
+  ## is what says this is a carry and not a count.
+  ##
+  ## The fine scroll itself does not move: after such a write hardware keeps
+  ## emitting on the OLD residue, so the disputed span is displaced by exactly
+  ## 8 and never by 1..7. That is the second half of the derivation -- it says
+  ## `F` is a latch and the borrow is taken against it, rather than the shifter
+  ## re-discarding.
+  ##
+  ## ---- The device split, and the three rows that are the whole of it --------
+  ##
+  ## Three ROMs in the family change ONLY the low bits, so they see the borrow
+  ## with nothing else moving, and they are the only rows in the tree that can
+  ## separate the two devices on it. Read straight off the references:
+  ##
+  ##   ROM                     drop   DMG reference        CGB reference
+  ##   scx1_scx0_during_m3_1   1->0   no change at all     borrows at x = 63
+  ##   scx2_scx1_during_m3_1   2->1   no change at all     borrows at x = 62
+  ##   scx2_scx0_during_m3_1   2->0   borrows at x = 62    borrows at x = 62
+  ##
+  ## Same ROM, same dot, same drop of one -- and the two consoles disagree. A
+  ## drop of TWO borrows on both. So the DMG's threshold is one pixel tighter
+  ## than the CGB's and nothing else differs: the DMG borrows on
+  ## `(SCX and 7) + 1 < F` where the CGB borrows on `(SCX and 7) < F`. That is
+  ## `SCX_FINE_BORROW_DMG_LEAD`, and read as physics it says the DMG fetcher's
+  ## screen position sits ONE PIXEL further along than the CGB's at the moment
+  ## the sum is taken. It is bracketed from both sides by this trio: at 0 the
+  ## two `-1` rows go red on DMG, at 2 the `2->0` row goes red on DMG, and the
+  ## CGB arm of all three is unmoved either way.
+  ##
+  ## It is NOT `CGB_PIPE_MCYCLES`. That term is a whole M-cycle, four dots, and
+  ## moves the pipeline against MACHINE time; this is one pixel inside the
+  ## fetcher's own sum and is invisible to every other row in the suite.
+  ##
+  ## ---- Two neighbouring shapes, and what refuses each ------------------------
+  ##
+  ##   * "the discard re-arms and throws 8 more pixels away". Refused by the
+  ##     residue: a re-armed discard would leave the line emitting on the NEW
+  ##     `SCX and 7`, and every measured span keeps the old one.
+  ##   * "an extra tile is fetched" (column PLUS one). Refused by sign -- the
+  ##     measured spans sit one tile LOWER than the old model, i.e. the picture
+  ##     moves right, which is a borrow and not an insertion.
+  ##
+  ## ---- Where it does not apply ----------------------------------------------
+  ##
+  ## The window's own fetch (above) is addressed from `current_window_line` and
+  ## `fetcher_x` with no SCX term at all, so it cannot borrow and is left alone.
+  ## Written as an `ord` term rather than an `if` for the reason line 370 gives:
+  ## this is the mode 3 dot loop and a branch here is measurable.
+
+proc fifo_arm_scx*(ppu: GbFifoPpu) =
+  ## Recompute the fetcher's SCX term. Called from the one place SCX is stored
+  ## (`ppu_store_scx`) and from the fine-scroll latch, which are the only two
+  ## events that can change either input.
+  ppu.scx_tile = (int(ppu.scx) shr 3) -
+                 SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
+
+const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
+  ## Pixels the DMG's fetcher position leads the CGB's by inside the borrow
+  ## comparison above. Derived and bracketed in that constant's note, off the
+  ## three `scxN_scxM_during_m3_1` ROMs, which are the only rows in the tree
+  ## that move the low three bits of SCX and nothing else. Subtracted into
+  ## `scx_fine` at the latch so the dot loop never sees it.
+
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
@@ -271,6 +387,15 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
         for v in ppu.vram[b]: s.add toHex(v, 2)
         echo "VRAM", b, " ", s
   ppu.smooth_scroll_sampled = true
+  # The fine scroll this line started with, less the DMG's one-pixel lead. `lx`
+  # below spends the fine scroll as a discard; the fetcher needs it as a NUMBER
+  # for the rest of the line, because its map column is formed by adding the
+  # live SCX to a screen position that carries this offset. Folding the device
+  # term in here rather than at the compare keeps the mode 3 dot loop the exact
+  # shape it was. See SCX_FINE_BORROW above.
+  ppu.scx_fine = int(ppu.scx and 7) -
+                 (if ppu.cgb: 0 else: SCX_FINE_BORROW_DMG_LEAD)
+  fifo_arm_scx(ppu)
   if ppu.fetching_window:
     # ---- A line that STARTS as a window line still pays SCX & 7 ------------
     #
@@ -716,7 +841,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         (m, o)
       else:
         let m = if bg_tile_map(ppu) == 0: 0x1800 else: 0x1C00
-        let o = ((ppu.fetcher_x + (int(ppu.scx) shr 3)) and 0x1F) +
+        let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
                 (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
         (m, o)
     when defined(gb_px_trace):

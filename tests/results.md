@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-10 15:37:30*
+*Generated: 2026-08-10 16:18:59*
 
 ## Game Boy - Blargg
 
@@ -811,9 +811,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-dmgC | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE | 👀 99.4% correct (22900/23040 pixels match) |
-| age/m3-bg-scx/m3-bg-scx-dmgC | 👀 99.5% correct (22928/23040 pixels match) |
+| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | 👌 |
+| age/m3-bg-scx/m3-bg-scx-cgbBCE | 👌 |
+| age/m3-bg-scx/m3-bg-scx-dmgC | 👌 |
 | age/oam/oam-read-cgbE | 👀 |
 | age/oam/oam-read-dmgC-cgbBC | 👀 |
 | age/oam/oam-write-cgbBCE | 👀 |
@@ -1048,7 +1048,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 53/69 passed |
 | gambatte/oamdma | 👀 707/811 passed |
-| gambatte/scx_during_m3 | 👀 49/141 passed |
+| gambatte/scx_during_m3 | 👀 113/141 passed |
 | gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 770
-- **Fail:** 211
+- **Pass:** 773
+- **Fail:** 208

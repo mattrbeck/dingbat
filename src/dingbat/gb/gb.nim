@@ -2332,6 +2332,23 @@ type
     fifo_sprite*:         GbPixelFifo
     fetch_counter*:       int
     fetcher_x*:           int
+    # `SCX and 7` as it stood when this line's fine scroll was latched
+    # (fifo_sample_smooth_scroll). The BG fetcher's map column is formed from
+    # the line's SCREEN position plus the LIVE SCX, not from a tile index plus
+    # a scroll, so the low three bits take part in the carry into the tile
+    # address -- see SCX_FINE_BORROW in fifo_ppu.nim, which is where the whole
+    # gambatte `scx_during_m3` family derives it. Per-line scratch, like
+    # `dropped_first_fetch`: none of this block is serialized, because states
+    # are captured at vblank and `reset_render_scratch` re-establishes it.
+    scx_fine*:            int
+    # The whole SCX term the BG fetcher adds to `fetcher_x`, borrow included:
+    # `(SCX shr 3) - borrow`. Derived state kept by `fifo_arm_scx`, exactly as
+    # `win_lx` is kept by `fifo_arm_window` and for the same reason -- SCX is
+    # written a handful of times a line and read at every tile-map fetch, so
+    # deciding the borrow at the write leaves the mode 3 dot loop the single
+    # add it already was. It may be -1, which `and 0x1F` wraps to column 31,
+    # which is what a borrow off column 0 means.
+    scx_tile*:            int
     lx*:                  int32
     # The one `lx` on this line either window rule can fire on -- the start
     # (WX - 7) while the window is not running, the re-trigger edge (WX - 8,

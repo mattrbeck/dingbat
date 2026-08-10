@@ -384,6 +384,11 @@ proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) !
 # after this file.
 proc fifo_arm_window*(ppu: GbFifoPpu)
 
+# The BG fetcher's whole SCX term, borrow included, is cached the same way and
+# for the same reason (GbFifoPpu.scx_tile; the derivation is at
+# SCX_FINE_BORROW). Forward declared here for the reason above.
+proc fifo_arm_scx*(ppu: GbFifoPpu)
+
 # The mixer stage runs one dot behind the FIFO pop, so a mid-mode-3 write to a
 # register the MIXER reads still reaches the pixel already emitted. Forward
 # declaration for the same reason as the line above; the body and the
@@ -1841,6 +1846,12 @@ proc ppu_store_scy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
 
 proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.scx = val
+  # The fetcher's SCX term carries a borrow off the line's latched fine scroll
+  # (SCX_FINE_BORROW in fifo_ppu), and this is one of the two events that can
+  # change it. Decided here rather than at the fetch for the reason
+  # `fifo_arm_window` is called from ppu_store_wx: SCX is written a handful of
+  # times a line and read at every tile-map fetch.
+  if gb.fifo_ppu != nil: fifo_arm_scx(gb.fifo_ppu)
 
 proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.wx = val

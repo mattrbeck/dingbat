@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-10 15:37:30*
+*Generated: 2026-08-10 16:18:59*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**3940/5005 passed.**
+**4004/5005 passed.**
 
 ## bgen
 
@@ -871,98 +871,34 @@ All 6 tests passed.
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
 
-## scx_during_m3 (49/141 passed)
+## scx_during_m3 (113/141 passed)
 
-49/141 tests passed, 92 failed:
+113/141 tests passed, 28 failed:
 
 | Test | Result |
 |------|--------|
-| scx_during_m3/scx1_scx0_during_m3_1 [cgb, png] | 13960/23040 pixels differ |
-| scx_during_m3/scx2_scx0_during_m3_1 [dmg, png] | 14104/23040 pixels differ |
-| scx_during_m3/scx2_scx0_during_m3_1 [cgb, png] | 14104/23040 pixels differ |
-| scx_during_m3/scx2_scx1_during_m3_1 [cgb, png] | 14104/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_1 [dmg, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_2 [dmg, png] | 1573/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_2 [cgb, png] | 1573/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0063c0/scx_during_m3_ds_2 [cgb, png] | 429/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_2 [dmg, png] | 68/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_2 [cgb, png] | 68/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 9879/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [cgb, png] | 9879/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_4 [dmg, png] | 22312/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_4 [cgb, png] | 22312/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_5 [dmg, png] | 21168/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_5 [cgb, png] | 21168/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_6 [dmg, png] | 21160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_6 [cgb, png] | 21160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 68/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 9879/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_4 [cgb, png] | 22320/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_5 [cgb, png] | 22320/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_6 [cgb, png] | 22312/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_7 [cgb, png] | 21168/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_8 [cgb, png] | 21168/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_1 [dmg, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_2 [dmg, png] | 1576/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_2 [cgb, png] | 1576/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_3 [dmg, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_3 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_4 [dmg, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_4 [cgb, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_5 [dmg, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_5 [cgb, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_6 [dmg, png] | 3880/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_6 [cgb, png] | 3880/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_1 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_2 [cgb, png] | 432/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_3 [cgb, png] | 1576/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_6 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_7 [cgb, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0363c0/scx_during_m3_ds_8 [cgb, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_1 [dmg, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_1 [cgb, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_2 [dmg, png] | 2231/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_2 [cgb, png] | 2231/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12309/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_3 [cgb, png] | 12309/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_4 [dmg, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_4 [cgb, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_5 [dmg, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_5 [cgb, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_6 [dmg, png] | 3880/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_6 [cgb, png] | 3880/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_1 [cgb, png] | 1008/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 1087/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12301/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_4 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_5 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_6 [cgb, png] | 1584/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_7 [cgb, png] | 2728/23040 pixels differ |
-| scx_during_m3/scx_0367c0/scx_during_m3_ds_8 [cgb, png] | 2736/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_1 [cgb, png] | 144/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_2 [dmg, png] | 122/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_2 [cgb, png] | 1409/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_3 [dmg, png] | 17568/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_3 [cgb, png] | 16992/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_4 [dmg, png] | 17597/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_4 [cgb, png] | 16453/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_5 [dmg, png] | 21744/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_5 [cgb, png] | 21744/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_6 [dmg, png] | 21736/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_6 [cgb, png] | 21736/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_1 [cgb, png] | 144/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 265/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 16996/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 16992/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 17033/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_6 [cgb, png] | 22888/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_7 [cgb, png] | 21744/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_8 [cgb, png] | 21744/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_2 [dmg, png] | 104/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_2 [cgb, png] | 104/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 14872/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_3 [cgb, png] | 14872/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 104/23040 pixels differ |
+| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 14872/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_2 [dmg, png] | 84/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_2 [cgb, png] | 84/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_3 [dmg, png] | 12012/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_3 [cgb, png] | 12012/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_2 [cgb, png] | 84/23040 pixels differ |
+| scx_during_m3/scx_0367c0/scx_during_m3_ds_3 [cgb, png] | 12012/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_2 [dmg, png] | 44/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_2 [cgb, png] | 46/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_3 [dmg, png] | 6336/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_3 [cgb, png] | 7200/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_4 [dmg, png] | 6292/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_4 [cgb, png] | 7722/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 46/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 7196/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 7200/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 7150/23040 pixels differ |
 | scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
