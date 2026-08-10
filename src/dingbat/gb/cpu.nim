@@ -377,10 +377,33 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     # at the shipping 0; with it on, a halted CPU pays one predictable
     # compare-and-branch per M-cycle, on the path a HALT-idling title spends
     # its main loop in.
-    let mdots = int32(4 shr gb.memory.current_speed)
-    if gb.cpu.halt_ppu_debt < mdots * CGB_HALT_PPU_LEAD and gb.cgb_enabled:
-      gb.cpu.halt_ppu_debt += mdots
+    #
+    # `cgb_enabled` is tested FIRST, and that ordering is worth a measurement:
+    # a DMG title has to walk this block too, and asking the debt question
+    # first makes it load `current_speed`, compute two shifts and take a
+    # TAKEN branch on every halted M-cycle before finding out the answer is
+    # no. Pokemon Blue idles its main loop in HALT and pays +1.30% of ALL
+    # retired instructions for that (24.0593 -> 24.3718 G, min of three);
+    # with the device test in front the same title pays +0.44% (24.1647 G).
+    # The trade is not free on the other side -- Pokemon Crystal goes from
+    # +0.56% to +0.77% (23.6967 -> 23.8299 -> 23.8783 G) for the redundant
+    # test it now takes -- and it is still the right way round, because the
+    # titles that idle hardest in HALT are the ones that get nothing back.
+    # Neither ordering is free, which is the thing to know before the flip:
+    # this is not a CGB-only cost, it is a cost on every HALT-idling title.
+    if gb.cgb_enabled and
+       gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed):
+      let mdots = int32(4 shr gb.memory.current_speed)
+      let lead  = int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)
+      # A lag of a whole M-cycle takes the PPU half entirely; a lag of 1..3
+      # dots takes part of it and the PPU gets the rest, on this M-cycle, in
+      # its own half. Same conservation either way -- what the head holds back
+      # is exactly what the wake pays.
+      let take = min(mdots, lead - gb.cpu.halt_ppu_debt)
+      gb.cpu.halt_ppu_debt += take
       mem_tick_bus(gb.memory, gb, 4)
+      if take < mdots:
+        mem_tick_ppu(gb.memory, gb, int(mdots - take), ignore_speed = true)
       mem_reset_cycle_count(gb.memory)
       return interrupt_ready(gb.interrupts)
   when HALT_IF_SAMPLE_T >= 4:

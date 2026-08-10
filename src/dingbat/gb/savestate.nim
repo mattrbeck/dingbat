@@ -1028,7 +1028,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   when CGB_HALT_PPU_LEAD_ANY:
     gb.cpu.halt_ppu_debt =
       if gb.cpu.halted and not gb.cpu.locked and gb.cgb_enabled:
-        int32((4 shr gb.memory.current_speed) * CGB_HALT_PPU_LEAD)
+        int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)
       else: 0'i32
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r, pad = in_process)

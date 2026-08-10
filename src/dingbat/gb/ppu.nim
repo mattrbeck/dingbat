@@ -1481,6 +1481,9 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
   # this guard a nested transition back into mode 0 re-enters the copy and
   # recurses until the stack overflows.
   if ppu.hdma_copying: return
+  when defined(gb_dma_trace):
+    echo "HDMABLOCK ly=", ppu.ly, " dot=", ppu.cycle_counter,
+         " mode=", (ppu.lcd_status and 3'u8), " hdma5=", toHex(ppu.hdma5, 2)
   ppu.hdma_copying   = true
   ppu.hdma_block_due = false
   let may_continue = ppu_copy_hdma_block(ppu, gb)
@@ -1498,6 +1501,10 @@ when STAT_IRQ_SPLIT:
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
+  when defined(gb_dma_trace):
+    if prev_mode != mode:
+      echo "MODE ", prev_mode, "->", mode, " ly=", ppu.ly,
+           " dot=", ppu.cycle_counter
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1: ppu.window_trigger = false
   # The WY condition, half of it: Pan Docs says the window is drawn once
@@ -1611,6 +1618,10 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   ## three blocks left and reads back $80, not $82). The address counters are
   ## NOT reloaded from anywhere: they are already where the last transfer, or
   ## the last write to FF51-FF54, left them.
+  when defined(gb_dma_trace):
+    echo "FF55 v=", toHex(val, 2), " ly=", ppu.ly, " dot=", ppu.cycle_counter,
+         " mode=", (ppu.lcd_status and 3'u8),
+         " active=", (if ppu.hdma_active: 1 else: 0), " hdma5=", toHex(ppu.hdma5, 2)
   ppu.hdma5 = val and 0x7F
   if (val and 0x80) != 0:
     ppu.hdma_active = true

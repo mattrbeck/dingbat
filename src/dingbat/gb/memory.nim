@@ -1,5 +1,25 @@
 # GB Memory bus (included by gb.nim)
 
+# ---- -d:gb_dma_trace --------------------------------------------------------
+#
+# Diagnostic DMA/mode trace (tools only; compiled out of every shipping build).
+# Where `-d:gb_halt_trace` reports the dot a halt WAKES on, this reports the
+# dots everything a woken handler then does lands on -- which is what turns a
+# "this row moved" into an equation. Five line kinds, all with `ly` and the PPU
+# dot, none of them filtered by GB_TRACE_LY:
+#
+#   DMASTART   the OAM DMA unit taking the bus (mem_dma_tick), i.e. the dot
+#              every later `obj_oam_dma_read` is a function of
+#   REGREAD    every CPU read of STAT or LY, with the value returned
+#   MODE       every PPU mode change (ppu.nim `mode_flag=`)
+#   FF55       every write to FF55, with the mode and `hdma_active` at that dot
+#   HDMABLOCK  every HBlank or general-purpose block copy
+#
+# Written for the 2026-08-10 CGB_HALT_PPU_LEAD measurement, where the question
+# was where a post-halt handler's OAM DMA and FF55 write land against the PPU's
+# own edges; see docs/gb-failure-triage.md for what it produced. `REGREAD` and
+# `MODE` are on hot paths and this is not a flag to leave on.
+
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
   # DMG-family models, 0x00 on CGB (Pan Docs power-up sequence).
@@ -364,6 +384,11 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx, gb)
   of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B:
+    when defined(gb_dma_trace):
+      if (idx == 0xFF41 or idx == 0xFF44) and gb.fifo_ppu != nil:
+        echo "REGREAD a=", toHex(idx, 4), " ly=", gb.fifo_ppu.ly,
+             " dot=", gb.fifo_ppu.cycle_counter,
+             " v=", toHex(ppu_read(gb.ppu, gb, idx), 2)
     when defined(gb_phase_trace):
       if idx == 0xFF44:
         echo "LYREAD v=", ppu_read(gb.ppu, gb, idx), " ly=", gb.ppu.ly,
@@ -666,7 +691,19 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   for _ in 0 ..< cycles:
     if mem.requested_oam_dma:
       inc mem.next_dma_counter
-      if mem.next_dma_counter == 8:
+      if mem.next_dma_counter == (when CGB_OAM_DMA_START_T != 8:
+                                    (if console_is_cgb(gb): CGB_OAM_DMA_START_T
+                                     else: 8)
+                                  else: 8):
+        when defined(gb_dma_trace):
+          # Diagnostic (tools only; compiled out of every shipping build). The
+          # PPU dot the OAM DMA unit takes the bus on -- the quantity every
+          # `obj_oam_dma_read` on a later line is a function of, and the one
+          # `strikethrough` pins to a single byte. See CGB_HALT_PPU_LEAD.
+          if gb.fifo_ppu != nil:
+            echo "DMASTART ly=", gb.fifo_ppu.ly,
+                 " dot=", gb.fifo_ppu.cycle_counter,
+                 " src=", toHex(uint16(mem.dma) shl 8, 4)
         mem.requested_oam_dma  = false
         mem.current_dma_source = uint16(mem.dma) shl 8
         mem.dma_position       = 0

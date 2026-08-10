@@ -286,6 +286,32 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
   ## `noime_m2irq_m0stat_1` -- and 7 are `dma/hdma_late_disable_*`, which that
   ## note lists in the same group.
   ##
+  ## ---- 2026-08-10: it is not one row, and it is not the quantity ---------
+  ##
+  ## `dma/hdma_late_disable_*` does NOT belong in the SCX group above, and
+  ## putting it there is what hid the real objection. `hdma_late_disable_1`
+  ## and `_2` carry no SCX at all: they halt a CGB on `LYC = 1`, write FF55 48
+  ## and 49 M-cycles after the wake, and bracket that write against line 1's
+  ## mode 3 -> 0 edge to a single M-cycle. `halt/lycirq_m2stat_2` is the SAME
+  ## WAKE -- the same LYC = 1 STAT source, the same line -- read 20 M-cycles
+  ## on and bracketed against that line's mode 2 -> 3 edge. The first pair
+  ## says the post-halt CPU is where this tree already puts it; the second
+  ## says it is one M-cycle later. A halt phase answers one or the other and
+  ## the rows differ only in IME, which `m1int_ly_2` and daid (both `EI` /
+  ## `halt`, both vectored, both NEEDING the M-cycle) rule out as the split.
+  ##
+  ## So `strikethrough` is not one stubborn row against five supports: it is
+  ## the third witness on a side that already has two clean gambatte rows, and
+  ## the measurement is a contradiction rather than a missing refinement.
+  ## Sub-M-cycle values do not reach between the two -- see
+  ## CGB_HALT_PPU_LEAD_DOTS below, and the 2026-08-10 section of
+  ## docs/gb-failure-triage.md for the sweep, the trace dots and the four other
+  ## candidates that were built and refused (including a CGB OAM DMA start
+  ## latency, which makes both strikethrough rows green and costs 103
+  ## `oamdma` rows). **If this is revisited, `CGB_HALT_PPU_LEAD_DOTS=2` is a
+  ## better setting of this same knob than the 4 that `=1` spells: gambatte
+  ## 3860 against 3853. It is not shippable either -- it loses daid.**
+  ##
   ## ---- What it does NOT close, which is why it was written ---------------
   ##
   ## `acid/cgb-acid-hell` needs the CPU's write burst TWO M-cycles later against
@@ -296,7 +322,29 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
   ## BIT-IDENTICAL to `main`. At 2 the row is 23040/23040 -- and the bracket
   ## above refuses 2 outright. See the acid-hell section of
   ## docs/gb-failure-triage.md.
-const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD != 0
+const CGB_OAM_DMA_START_T* {.intdefine.} = 8
+  ## T-cycles between the write to FF46 and the OAM DMA unit taking the bus, on
+  ## CGB. 8 is what both devices ship with (mem_dma_tick) and what this tree
+  ## measures; the knob exists only because `strikethrough` at a nonzero
+  ## CGB_HALT_PPU_LEAD wants exactly 4 T taken out of here, and it is worth
+  ## having the row that refuses it on record. See docs/gb-failure-triage.md
+  ## (2026-08-10).
+const CGB_HALT_PPU_LEAD_DOTS* {.intdefine.} = 4 * CGB_HALT_PPU_LEAD
+  ## The same lag in DOTS rather than in M-cycles, which is the unit the
+  ## measurement above never actually had. `CGB_HALT_PPU_LEAD` sets it in whole
+  ## M-cycles and this is what the code reads, so `=1` still means 4 dots and
+  ## the shipping 0 is bit-identical either way; setting THIS directly is what
+  ## reaches the three values between them.
+  ##
+  ## Why the sub-M-cycle values are not a finer knob on the same thing: the
+  ## halt's exit is sampled on the M-cycle grid (`cpu_halt_tick`), so a lag of
+  ## 1, 2 or 3 dots does not move the wake by 1, 2 or 3 dots. It moves it by a
+  ## WHOLE M-cycle for a source whose rise dot is within `DOTS` of the next
+  ## M-cycle boundary, and by nothing at all for every other source. One
+  ## quantity, a per-source answer -- which is the shape the rows below need,
+  ## and the reason this knob exists at all. The sweep that measured it is in
+  ## docs/gb-failure-triage.md (2026-08-10).
+const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 
 # ---- CGB per-register PPU write latency -------------------------------------
 #
