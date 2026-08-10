@@ -321,7 +321,12 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
     irq_read(gb.interrupts, idx)
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx, gb)
   of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
-  of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_read(gb.ppu, gb, idx)
+  of 0xFF40..0xFF45, 0xFF47..0xFF4B:
+    when defined(gb_phase_trace):
+      if idx == 0xFF44:
+        echo "LYREAD v=", ppu_read(gb.ppu, gb, idx), " ly=", gb.ppu.ly,
+             " cc=", gb.ppu.cycle_counter, " mode=", gb.ppu.mode_flag
+    ppu_read(gb.ppu, gb, idx)
   of 0xFF4D:
     if gb.cgb_native:
       0x7E'u8 or (uint8(mem.current_speed) shl 7) or (if mem.requested_speed_switch: 1'u8 else: 0'u8)

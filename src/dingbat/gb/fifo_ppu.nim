@@ -3159,6 +3159,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           dec remaining
         continue
       dec remaining
+      when defined(gb_phase_trace):
+        gb_phase = int32(cycles - remaining - 1)
+        gb_ticklen = int32(cycles)
       case m
       of 2:  # OAM search
         when STAT_IRQ_SPLIT:
@@ -3332,6 +3335,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when LY_BLIND_SCOPE >= 2: ly_advance_vblank_entry(ppu, gb)
             else:                     ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
+            when defined(gb_phase_trace):
+              echo "VBLIRQ ly=", ppu.ly, " t=", gb_phase, "/", gb_ticklen
             ppu.frame = true
             when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0

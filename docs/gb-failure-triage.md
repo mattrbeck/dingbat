@@ -515,8 +515,8 @@ exists for it).
 |---|---|---|---|
 | 12 | **HDMA block owed to a CPU that is off the bus** (halted, or stalled by a speed switch) | **61** (`dma` 30 + speed-switch 31) | The rule — a CPU off the bus stalls the block — is already in the tree for HALT (`eb75393`) and is right *in kind*. Built for the speed-switch half: **+11 / −10**. It fixes every `_1` family member and breaks every `_2`/`_3`, because hardware still delivers the **one block already owed** at the instant of the STOP. That last block's phase is set by the mode-0 edge, i.e. bucket 15 |
 | 13 | **PPU dot phase coming out of a speed switch** | **55** (`speedchange*_ly44_m3_*m3stat*`) | Uniform `exp=C3,C0 got=C0,C0`. Sweeping `SPEED_SWITCH_STALL_T` is jagged (+0/+6/+6/+11/+6/+12/+12/+8) and **65544's +11 are all the single→double variants and none of the `speedchange2..5_` ones**, so it is not one stall length. 65540 is SameBoy's ripple counter and is pinned by the blargg canary. The derivable route is the mechanism the existing comment already names as unmodelled: the 6-cycle switch countdown plus the PPU re-alignment freeze |
-| 14 | ~~**OAM STAT source rises one M-cycle late**~~ — and *only* that source | **+228 / −114 gambatte, +8 / −4 GBMicrotest, runner 765 → 773** | **MEASURED AND DERIVED 2026-08-09, and it ships OFF** — `STAT_M2_LEAD` + `M3_PIPE_AHEAD`, both `intdefine`s at 0, derivation at `STAT_M2_LEAD` in `gb/ppu.nim`. The source rises **one CPU M-cycle** (not a fixed dot count: the 75-row `_ds_`-only delta is the proof) before the line whose OAM scan it belongs to, on every line except line 0, whose predecessor is vblank. The cancellation this bucket named is real and is resolved: moving the dispatch alone costs `scy` 67/67 → 0/67, and one M-cycle of `M3_PIPE_AHEAD` gives **every** one of those pixel rows back, `scx_during_m3` and `bgtiledata` and `bgtilemap` included, with `LY0_PIPE_MCYCLES` going to 0 because line 0's four dots ARE this lead. Two-sided on both axes; GBMicrotest pins the lead alone (429 / 433 / 425 at 0 / 1 / 2). **What blocks it is a different bucket:** all 17 rows it costs are ROMs that wait with `EI; HALT`, and the twelve wilbertpol `*_timing_nops` rows — the same measurements with the halt replaced by a sled — are among the rows it *wins*. See bucket 15's halt rows |
-| 15 | ~~**The sub-M-cycle error at the mode 3 → 0 edge**~~ | **≥ 21 GBMicrotest + the `NspritesPrLine` family + 20 `halt` + ~13 SCX-residue rows** | **The readback half is CLOSED 2026-08-09** — see the section above. The unexplained dot was the `read_mode` latch being taken one dot before the M-cycle's first, so `STAT_READ_LAG`'s documented meaning and its implementation disagreed by a dot and the `4D + L = 4` grid was solved a dot out. The sample point is `cc − 2` at normal speed and `cc − 3` in double, bracketed both sides at both speeds by ROMs that take no interrupt. Runner 743 → 765, GBMicrotest 404 → 430, mooneye acceptance 66/66, gambatte 3856 → 3818 with all 102 traded rows owned by bucket 14. Still open here: the SCX-residue rows and the 20 `halt` rows |
+| 14 | ~~**OAM STAT source rises one M-cycle late**~~ — and *only* that source | **+228 / −114 gambatte, +8 / −4 GBMicrotest, runner 765 → 773** | **MEASURED AND DERIVED 2026-08-09, and it ships OFF** — `STAT_M2_LEAD` + `M3_PIPE_AHEAD`, both `intdefine`s at 0, derivation at `STAT_M2_LEAD` in `gb/ppu.nim`. The source rises **one CPU M-cycle** (not a fixed dot count: the 75-row `_ds_`-only delta is the proof) before the line whose OAM scan it belongs to, on every line except line 0, whose predecessor is vblank. The cancellation this bucket named is real and is resolved: moving the dispatch alone costs `scy` 67/67 → 0/67, and one M-cycle of `M3_PIPE_AHEAD` gives **every** one of those pixel rows back, `scx_during_m3` and `bgtiledata` and `bgtilemap` included, with `LY0_PIPE_MCYCLES` going to 0 because line 0's four dots ARE this lead. Two-sided on both axes; GBMicrotest pins the lead alone (429 / 433 / 425 at 0 / 1 / 2). **What blocks it is a different bucket:** all 17 rows it costs are ROMs that wait with `EI; HALT`, and the twelve wilbertpol `*_timing_nops` rows — the same measurements with the halt replaced by a sled — are among the rows it *wins*. See bucket 15's halt rows. **The halt quantity is measured 2026-08-09** — `HALT_IF_SAMPLE_T` in `gb/cpu.nim`, the T-cycle of the M-cycle a halted CPU latches the interrupt line on, which is the MIDPOINT where a running CPU's is the end. With it, this bucket lands: runner **765 → 786**, gambatte 3972, GBMicrotest 439, fifteen of the seventeen back including all five mooneye `intr_2_*` and their wilbertpol copies. The pair is still off, on ONE row the latch costs by itself — `mooneye acceptance/ppu/hblank_ly_scx_timing-GS`, bucket 24 below |
+| 15 | ~~**The sub-M-cycle error at the mode 3 → 0 edge**~~ | **≥ 21 GBMicrotest + the `NspritesPrLine` family + 20 `halt` + ~13 SCX-residue rows** | **The readback half is CLOSED 2026-08-09** — see the section above. The unexplained dot was the `read_mode` latch being taken one dot before the M-cycle's first, so `STAT_READ_LAG`'s documented meaning and its implementation disagreed by a dot and the `4D + L = 4` grid was solved a dot out. The sample point is `cc − 2` at normal speed and `cc − 3` in double, bracketed both sides at both speeds by ROMs that take no interrupt. Runner 743 → 765, GBMicrotest 404 → 430, mooneye acceptance 66/66, gambatte 3856 → 3818 with all 102 traded rows owned by bucket 14. Still open here: the SCX-residue rows. **The 20 `halt` rows are CLOSED 2026-08-09** by `HALT_IF_SAMPLE_T` (bucket 14): gambatte `halt` 124 → 136 in the composed build, and GBMicrotest's `int_hblank_halt_scx0/3/4/7` — the four SCX steps whose mode-0 edge lands in the M-cycle's second half — go green with the latch alone |
 | 16 | **CGB `$D000` window aliases `$C000`** | **64** (`oamdma`) | Forcing `$D000-$DFFF → wram[0]` measures **+64 / −2**, and the −2 are exactly the two ROMs that pin banking. But the ROMs' shared prologue writes `SVBK = 2`, so the 64 expectations assert that bank 2 *is* bank 0 — which contradicts the two banking ROMs. **Declined pending hardware**: dump WRAM on a real CGB-C after `LDH ($70),$02`; if `$CFFF ≠ $DFFF` these rows are permanently unreachable |
 | 17 | **LCD-on / boot dot phase** | **75** (`enable_display` 49, `lcd_offset` 22, `display_startstate` 4) | Already written up at `LCD_ON_HEAD_START` / `CGB_BOOT_PHASE`; `lcd_offset` is 100% CGB-only |
 | 18 | **Mode-1 / vblank STAT source values** | **42** (`m1`) | A *value* question (`exp=0,3 got=1,1`), not a phase one: whether the mode-1 STAT source asserts at all on entering vblank, and how it overlaps the vblank IF bit. Untouched by every STAT phase experiment run |
@@ -538,6 +538,33 @@ exit is *correct*: 13 GBMicrotest ROMs pin it (`int_lyc_halt`, `int_oam_halt`,
 column matches exactly on `halt/m1int_ly`, `lycirq_m2stat` and
 `m0int_m0stat_scx3/scx4`. CGB is one M-cycle short — the already-documented "CGB
 termination M-cycle". Blocked on bucket 23.
+
+**Re-read that "DMG halt exit is correct" against `HALT_IF_SAMPLE_T`
+(2026-08-09).** It is correct only in the sense those 13 ROMs can express: every
+one of them waits on a source that rises in the FIRST half of its M-cycle (LYC,
+vblank, the timer), where a halted CPU and a running one do agree. The eight
+`int_hblank_*_scx*` pairs walk the mode-0 edge across the other half and say the
+DMG halt is one M-cycle later than the DMG sled on four of the eight — so the
+DMG exit is not "correct", it is *unmeasured by those 13*, and the CGB delta
+this bucket is about has to be re-derived on top of the latch rather than
+against a DMG zero that four other ROMs refuse.
+
+**Bucket 24 — the mode-0 edge to LY-advance distance, as a halt-woken handler
+sees it (2 mooneye acceptance rows, and it is what blocks 14).** `mooneye
+acceptance/ppu/hblank_ly_scx_timing-GS` and wilbertpol's copy are the only rows
+`HALT_IF_SAMPLE_T = 2` costs on its own, and they are a direct contradiction
+with `gbmicrotest/int_hblank_halt_scx0`: same source, same SCX, same device.
+GBMicrotest reads TIMA out of the handler and so times the dispatch against the
+timer, and says halt is one M-cycle after sled. mooneye reads LY out of the
+handler twice, one M-cycle apart, and so times it against the LY advance — and
+puts the halt-woken read on the near side of a boundary that the extra M-cycle
+crosses. Both endpoints of mooneye's span are separately pinned against TIMA and
+both are green (`int_hblank_nops_scx0`; `poweron_ly_*`, `lcdon_to_ly*`,
+`line_153_ly_*`), so the arithmetic says they should agree. The family already
+shows the error from the other side: the sled sibling
+`hblank_ly_scx_timing_nops` is **red on main**, at either latch. A read-side lag
+is FALSIFIED — giving `$FF44` the sample point `STAT_READ_LAG` gives the mode
+bits does not fix the mooneye row and takes seven GBMicrotest LY rows with it.
 
 **Bucket 23 — timer IRQ visibility (16 `tima` rows, and it gates 22).** This is
 the bucket whose received description is most wrong, so it is worth stating
@@ -561,6 +588,14 @@ These are the most valuable results here, because each one closes a line of work
    timer-IRQ time) that recovers them**, so the joint fix is not derivable as
    stated. The untested third term is when `mem_tick_components` runs relative to
    the CPU's bus action, which `e823f9e` moved to the start of the M-cycle.
+   **2026-08-09: that third term is the whole of the 84, and it is now measured.**
+   The timer IRQ lands on T 3 of its M-cycle in this tree, and with
+   `HALT_IF_SAMPLE_T = 2` and nothing else, `tima` goes 218 → **134** — the same
+   84 rows, produced on demand. Running the M-cycle's bus half whole in front of
+   the latch (i.e. treating the timer IRQ as a HEAD source, which is what
+   `int_timer_halt`, `int_timer_halt_div_a` and `int_timer_halt_div_b` say)
+   gives all 84 back. The 84 are not a timer-IRQ *offset* and not a halt cost;
+   they are which half of the M-cycle the timer IRQ is in.
 3. **The 90 CGB `oamdma` `busypush`/`busypop` failures are not an OAM-DMA
    arbitration bug, not `DriveZero`, and not the SVBK 0→1 rule.** They are 26
    `$FEA0` rows plus 64 WRAM-window rows. The decisive evidence is a ROM

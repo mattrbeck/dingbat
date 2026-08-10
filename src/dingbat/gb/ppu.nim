@@ -882,6 +882,16 @@ const STAT_M2_PULSE* {.intdefine.} = 3
 # GBMicrotest 429 -> 433 and the whole runner 765 -> 773, and it costs seventeen
 # rows -- and every one of those seventeen is a ROM that waits for its interrupt
 # with `EI; HALT` rather than with a sled. See the halt paragraph below.
+#
+# **The halt quantity is now measured: it is HALT_IF_SAMPLE_T in cpu.nim**, the
+# T-cycle of the M-cycle a halted CPU latches the interrupt line on, and it is
+# the midpoint -- two-sided, off `int_hblank_{nops,halt}_scx0..7`. With it on,
+# this constant at 1 and `M3_PIPE_AHEAD` at 1 and `LY0_PIPE_MCYCLES` at 0 the
+# whole runner is 786 (gambatte 3972, GBMicrotest 439): fifteen of the seventeen
+# come back, the mooneye `intr_2_*` five and their wilbertpol copies among them.
+# HALT_IF_SAMPLE_T nevertheless ships at 4, on ONE row it costs on its own --
+# mooneye `acceptance/ppu/hblank_ly_scx_timing-GS` -- so this pair is still
+# blocked, but on a stated and much smaller bucket. That constant carries it.
 const STAT_M2_LEAD* {.intdefine.} = 0
   ## CPU M-cycles the OAM STAT source comes up before the line boundary.
   ## 0 is the boundary itself and compiles the whole mechanism out.
@@ -998,6 +1008,28 @@ const STAT_M2_LEAD* {.intdefine.} = 0
   ## rows for two, and the timer source has nothing to do with the PPU. What is
   ## needed is the halt bucket's own quantity, where inside an M-cycle each of
   ## the two paths samples IF, and the four pairs above bracket it on both sides.
+  ##
+  ## ---- ...and that quantity is now measured ----------------------------------
+  ##
+  ## `HALT_IF_SAMPLE_T` in cpu.nim: the halted CPU latches the interrupt line at
+  ## the MIDPOINT of its M-cycle where the running one latches at the end, so a
+  ## source that rises in the M-cycle's second half wakes it one boundary later.
+  ## The four pairs above are three of its four cross-checks; the two-sided
+  ## bracket is a fifth family this write-up did not use, `int_hblank_*_scx0..7`,
+  ## whose eight SCX steps walk the mode-0 edge across two whole M-cycles and
+  ## flip the halt/sled difference on exactly the T the midpoint predicts.
+  ##
+  ## With that constant at 2, this one at 1, `M3_PIPE_AHEAD` at 1 and
+  ## `LY0_PIPE_MCYCLES` at 0, the runner is 786 against main's 765 -- gambatte
+  ## 3972, GBMicrotest 439 -- and fifteen of the seventeen rows above are green,
+  ## including all five mooneye ROMs, both wilbertpol copies of them and
+  ## `int_oam_halt`/`oam_int_halt_b`. What is left is `lcdon_to_if_oam_a` and
+  ## `oam_int_if_edge_a`, which are IF *reads* rather than halts, and the three
+  ## pixel rows, whose phase comes from an LYC halt -- a source the midpoint
+  ## leaves alone -- while `M3_PIPE_AHEAD` moves the pixels under it.
+  ##
+  ## The pair is still blocked, but the block is now one named row rather than a
+  ## whole unexplained bucket: see the ship-off paragraph at HALT_IF_SAMPLE_T.
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
   ## Does LINE 0's pulse lead too? It does not -- see above, and mooneye
   ## intr_1_2_timing-GS is what says so.
@@ -1211,6 +1243,9 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     when defined(gb_stat_read_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " mode=", ppu.mode_flag
+    when defined(gb_phase_trace):
+      echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " t=", gb_phase, "/", gb_ticklen, " mode=", ppu.mode_flag
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
 

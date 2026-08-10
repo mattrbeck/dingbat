@@ -41,6 +41,8 @@ proc skip_boot*(t: GbTimer; gb: GB) =
       if native: 0x1E9C'u16 else: 0x2674'u16  # misc/boot_div-cgbABCDE
 
 proc timer_reload_tima(t: GbTimer; gb: GB) =
+  when defined(gb_phase_trace):
+    echo "TIMIRQ t=", gb_phase, "/", gb_ticklen
   gb.interrupts.timer_interrupt = true
   t.tima = t.tma
 
@@ -67,7 +69,11 @@ proc apu_div_bit(gb: GB): int {.inline.} =
 
 proc timer_tick_slow(t: GbTimer; gb: GB; cycles: int) =
   let serial = gb.serial
+  when defined(gb_phase_trace):
+    gb_phase = -1
+    gb_ticklen = int32(cycles)
   for _ in 0 ..< cycles:
+    when defined(gb_phase_trace): inc gb_phase
     if t.countdown > -1: dec t.countdown
     if t.countdown == 0: timer_reload_tima(t, gb)
     t.tdiv = t.tdiv + 1
