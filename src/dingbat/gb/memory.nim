@@ -669,7 +669,7 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
-const SPEED_SWITCH_STALL_T* = 65548
+const SPEED_SWITCH_STALL_T* {.intdefine.} = 65548
   ## How long the CPU clock is stopped by a KEY1 speed switch, in T-cycles of
   ## the 4.194304 MHz base clock, i.e. real time (~15.6 ms) — the CPU clock is
   ## what is stopped, so it cannot be the unit of its own stall.
@@ -740,6 +740,39 @@ const SPEED_SWITCH_STALL_T* = 65548
   ## 680 -> 681, nothing else moving, no row lost — which is what says this is
   ## the countdown and not a fit to one ROM. daid's speed_switch_timing_div.gbc
   ## passes on both values; DIV is reset either way, so it cannot see this.
+  ##
+  ## ---- Half of those 8 dots is not the countdown (2026-08-10) --------------
+  ##
+  ## It is the CGB's halt-exit M-cycle, and this constant has been absorbing it.
+  ## Both daid ROMs take exactly ONE halt each — LY 144, vblank, IME clear,
+  ## traced with `-d:gb_halt_trace` — and everything they sample hangs off that
+  ## wake, so what they really pin is the whole PPU advance from the wake to the
+  ## reads, this stall included. Turn `CGB_HALT_PPU_LEAD` (gb.nim) on and the
+  ## two-dot "both correct" window slides down by exactly one M-cycle. Wrong
+  ## pixels of 23040, one build per cell, at LEAD = 1:
+  ##
+  ##       stall    ly    stat      (`_div` is 0 at every cell — DIV is reset
+  ##       65540   109     109       either way, so it cannot see this)
+  ##       65542   109       0
+  ##       65543   109       0
+  ##       65544     0       0   <-  the pair, = 65548 - 4
+  ##       65545     0       0
+  ##       65546     0     233
+  ##       65548   125     233       i.e. what `main` is, with the lead on
+  ##
+  ## Same two-dot window as the table above, moved by exactly this M-cycle, and
+  ## the ROMs agree on it from both sides. (65545 is inside the window and is
+  ## still not the value: an odd stall wrecks the dot alignment everywhere else,
+  ## costing 118 gambatte rows, 95 of them in `sprites`.) That leaves 65544 =
+  ## 65540 + 4, i.e. the unexplained countdown halves to one M-cycle and moves
+  ## TOWARDS SameBoy's sourced 65540 rather than away from it, and it is
+  ## worth 4 net gambatte `speedchange` rows on top of what LEAD itself buys.
+  ##
+  ## This constant therefore stays at 65548 for exactly as long as
+  ## CGB_HALT_PPU_LEAD stays at 0. They move together or not at all: 65544 with
+  ## the lead off puts `speed_switch_timing_ly` a sample early (109 wrong
+  ## pixels) while gaining the same 4 `speedchange` rows, which is the shape of
+  ## a constant being fitted to a suite past the ROM that measures it.
 
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   ## mem_tick_components for the speed-switch stall, where the CPU clock is

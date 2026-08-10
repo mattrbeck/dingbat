@@ -146,6 +146,13 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # M-cycle of it is refused by the same SCX ladder. Nothing ships until the SCX
 # half is separated out; turning this to 1 would buy 22 rows by breaking 60.
 #
+# **That phase was built and measured on 2026-08-10: it is CGB_HALT_PPU_LEAD
+# below.** It keeps all 42 `tima/*` rows (no time is spent anywhere), the
+# quantity is bracketed to exactly one M-cycle from both sides by two clean
+# `halt/` families, and the SCX ladder above is 10 of the 17 rows it still
+# costs. It also ships at 0, and for one row rather than sixty. Read that
+# constant, not this one, for where the measurement now stands.
+#
 # daid's `ppu_scanline_bgp.gb` on CGB is the frame that raised the question and
 # it is worth stating what it does and does not pin. Its whole picture is ONE
 # phase, set by an LYC=0 STAT interrupt that finds the CPU halted in the VBlank
@@ -157,6 +164,139 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
+const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
+  ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
+  ## as time -- which is the shape the two halves of that measurement demand.
+  ## **It ships at 0 as well**, and for a narrower reason than the charge does:
+  ## the quantity is now bracketed from both sides and the mechanism is settled,
+  ## and what is left between it and shipping is ONE ROW. See the last section.
+  ##
+  ## The model, in one sentence: **while a CGB CPU is halted, the PPU runs one
+  ## M-cycle of dots behind the rest of the machine, and gets them back on the
+  ## way out.** The first halted M-cycle ticks the bus half only (the scheduler,
+  ## the timer, the serial shifter, OAM DMA); the wake ticks those dots into the
+  ## PPU with no bus half at all (cpu_halt_tick and `tick` in cpu.nim). Nothing
+  ## is created or destroyed: a halt of k M-cycles still gives the PPU exactly
+  ## k M-cycles of dots, and the CPU still spends exactly the T-cycles it slept.
+  ## `halt_ppu_debt` is the memo, and it is reconstructed on a state load rather
+  ## than serialized (savestate.nim) because it is the same value for the whole
+  ## of any one halt.
+  ##
+  ## ---- Why a phase and not a charge: the tima rows pick -----------------
+  ##
+  ## Both models put the CPU's post-wake reads one M-cycle later IN THE PPU'S
+  ## LINE, so both flip the ten `halt/` rows whose file names name a different
+  ## expected value per device. They differ on every other consumer, and that
+  ## difference is the whole measurement:
+  ##
+  ##   wake source   charge (EXIT_MCYCLES)      phase (this)
+  ##   -----------   -----------------------    --------------------------
+  ##   STAT / LYC /  read is 1 M-cycle later     the source itself rose one
+  ##   vblank        in the line  (right)        M-cycle later in machine time,
+  ##                                             so the read is 1 M-cycle later
+  ##                                             in the line  (right)
+  ##   timer         TIMA has advanced one       the timer never stopped and the
+  ##                 more M-cycle  (WRONG)       wake is where it was  (right)
+  ##
+  ## The 42 `tima/*` rows are exactly the second line of that table -- they
+  ## halt, a TIMER interrupt wakes them, and they read TIMA or IF a fixed number
+  ## of M-cycles later, with ONE expected value for both devices. A charge moves
+  ## all 42; the phase moves none of them, because the timer half of the halted
+  ## M-cycle is never the half that is held back. Whole gambatte suite, one
+  ## build per setting, baseline 3850/5005 (2026-08-10):
+  ##
+  ##   setting                          total   what moved
+  ##   (control, all off)                3850   --
+  ##   CGB_HALT_EXIT_MCYCLES=1           3813   halt +14 -10, dma +8 -7,
+  ##                                            irq_precedence +1 -1, tima -42
+  ##   CGB_HALT_EXIT_MCYCLES=2           3815   halt +14 -24, dma +37 -18,
+  ##                                            tima -43
+  ##   CGB_HALT_PPU_LEAD=1               3850   halt +14 -10, dma +3 -7
+  ##   ..and SPEED_SWITCH_STALL_T=65544  3853   ..plus speedchange +11 -7
+  ##
+  ## A third mechanism was built and measured and is NOT kept, because it buys
+  ## nothing over the phase: charging the M-cycle only when the ready set is
+  ## LCD-only (so the timer wake is exempt by construction rather than by
+  ## consequence) scores the same 3850 and the same rows as the phase does.
+  ## The tima half does not separate the two; only the model does, and the
+  ## phase is the one that costs no time anywhere.
+  ##
+  ## ---- It is ONE M-cycle, bracketed from both sides ---------------------
+  ##
+  ## Two `halt/` families are three ROMs each whose only difference is one NOP
+  ## before the read, so they bracket the wake to a single M-cycle on the CGB:
+  ##
+  ##   family              _1        _2                 _3
+  ##   ----------------    -------   ----------------   -------
+  ##   lycirq_m2stat       out 2     dmg 2 / cgb 3      out 3
+  ##   m1int_ly            out $90   dmg $90 / cgb $91  out $91
+  ##
+  ## At 0 the `_2` members answer the DMG value on a CGB; at 1 both flip green
+  ## and `_1` and `_3` stay green; at 2 the `_1` members go red as well -- under
+  ## the phase and the charge alike, so the bracket is a property of the
+  ## quantity and not of either mechanism. Neither family carries an SCX, so
+  ## neither is in the `scx_during_m3` bucket the ten SCX-laddered rows are.
+  ## `lycirq_*` is the IME-clear path (the halt ends with no vector taken) and
+  ## `m1int_*` the IME-set one, so the M-cycle is on both.
+  ##
+  ## Two more witnesses, neither of them a gambatte row:
+  ##
+  ##  * **daid `ppu_scanline_bgp.gb` on CGB.** Its whole frame is one phase, set
+  ##    by an LYC=0 STAT interrupt that finds the CPU halted, and on `main` every
+  ##    band of it is 3 pixels early against the shootout's `.gbc.png`. Turning
+  ##    this on moves every band of that frame by exactly 4 pixels (measured as
+  ##    the best whole-frame shift between the two builds), which leaves the 1
+  ##    pixel that is the CGB-C -> CGB-D palette step (`CGB_MIXER_LATENCY`, 1 for
+  ##    the `_cgb_c` references this tree scores and 0 for the `_cgb_d` ones
+  ##    daid captured). 4 - 1 = 3, pixel for pixel, and it is a whole-frame band
+  ##    measurement rather than one boundary crossing.
+  ##  * **`SPEED_SWITCH_STALL_T` was carrying this M-cycle.** daid's
+  ##    `speed_switch_timing_ly.gbc` / `_stat.gbc` sample the PPU every 8 dots
+  ##    from the instruction after a STOP, and their phase is set by the single
+  ##    halt each ROM takes at LY 144 -- so what they really pin is the total
+  ##    PPU advance from that wake to the reads, stall included. On `main` the
+  ##    two-dot window that puts both buffers where hardware has them is
+  ##    65548..65549; with this constant at 1 it is 65544..65545, the same
+  ##    window moved by exactly this M-cycle, and both rows are pixel-exact
+  ##    again at 65544. That also takes the residual "switch countdown" the
+  ##    stall's own note is left holding from 8 dots to 4, i.e. TOWARDS
+  ##    SameBoy's independently sourced 65540 rather than away from it, and it
+  ##    is worth 4 net gambatte `speedchange` rows on its own. See
+  ##    SPEED_SWITCH_STALL_T in memory.nim.
+  ##
+  ## ---- What is left between this and shipping: one row ------------------
+  ##
+  ## `strikethrough/strikethrough-cgb` is pixel-exact on `main` and goes to
+  ## 23033/23040 here -- 7 pixels, all on line 68, and the same 7 under the
+  ## charge, so it refuses the QUANTITY and not the mechanism. The ROM is an
+  ## OAM DMA test: it halts once a frame (LY 67, LYC STAT, IME set), starts a
+  ## DMA in the handler, and the DMA is still running when the PPU's mode 2
+  ## scans line 68, so the row is a knife edge on which OAM bytes are in place
+  ## when that scan reads them. It is also the only row in the tree whose DMG
+  ## and CGB references are structurally identical -- the CGB one is the DMG
+  ## one inverted through the palette, pixel for pixel -- so it says hardware
+  ## puts the two devices' DMA at the same place against that scan, and 4 dots
+  ## crosses it. That is one 7-pixel row against five supports, but it is a
+  ## green pixel-exact shootout row and this tree does not trade those for
+  ## +3 gambatte, so the flag stays off until it is understood.
+  ##
+  ## The other 17 rows this costs are already accounted for elsewhere: 10 are
+  ## the SCX ladder the note above attributes to `scx_during_m3` (49/141) --
+  ## `m0{int,irq}_m0stat_scx{2,5}_1`, the `late_*_scx2_*a` members and
+  ## `noime_m2irq_m0stat_1` -- and 7 are `dma/hdma_late_disable_*`, which that
+  ## note lists in the same group.
+  ##
+  ## ---- What it does NOT close, which is why it was written ---------------
+  ##
+  ## `acid/cgb-acid-hell` needs the CPU's write burst TWO M-cycles later against
+  ## the PPU, not one. Its LCDC writes and the fetcher's reads are both on an
+  ## 8-dot lattice, so only a whole 8 dots changes which of the sixteen written
+  ## bytes lands on the observable bitplane read; 4 dots moves the write onto
+  ## the tile-map read, where it does nothing at all, and the frame comes out
+  ## BIT-IDENTICAL to `main`. At 2 the row is 23040/23040 -- and the bracket
+  ## above refuses 2 outright. See the acid-hell section of
+  ## docs/gb-failure-triage.md.
+const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD != 0
 
 # ---- CGB per-register PPU write latency -------------------------------------
 #
@@ -1497,6 +1637,13 @@ type
     # the STOP Instruction"), and a speed switch never survives an instruction
     # boundary, let alone a state boundary.
     stopped*:    bool
+    # Dots of PPU time a HALTED CGB CPU is holding back from the PPU; see
+    # CGB_HALT_PPU_LEAD in this file and cpu_halt_tick. Nonzero only while
+    # `halted` is set on a CGB, and always the same value for a whole halt, so
+    # it is NOT serialized: load_cpu_state reconstructs it from `halted` and
+    # the speed, which is exact for every state a halt can be captured in bar
+    # the single M-cycle between the HALT fetch and the first halted tick.
+    halt_ppu_debt*: int32
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----

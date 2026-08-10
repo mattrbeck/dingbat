@@ -362,6 +362,27 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
   ## One halted M-cycle's worth of ticking, answering "does this M-cycle end
   ## with the CPU awake". The whole M-cycle is spent either way; the latch is
   ## just taken part way through it.
+  when CGB_HALT_PPU_LEAD_ANY:
+    # The head of a CGB halt: the bus half of this M-cycle runs and the PPU
+    # half does not, so the PPU spends the rest of the halt one M-cycle of dots
+    # behind the rest of the machine. The wake pays them back (`tick` below).
+    # CGB_HALT_PPU_LEAD in gb.nim is the derivation and the bracket; the short
+    # version is that this is what makes a STAT/LYC/vblank wake land one
+    # M-cycle later in the PPU's line while a TIMER wake -- and TIMA with it --
+    # does not move at all, which is what the two halves of that measurement
+    # demand of each other.
+    #
+    # `halt_ppu_debt` is what says the head is over, so the test doubles as the
+    # per-halt latch and no extra flag is needed. The whole block compiles out
+    # at the shipping 0; with it on, a halted CPU pays one predictable
+    # compare-and-branch per M-cycle, on the path a HALT-idling title spends
+    # its main loop in.
+    let mdots = int32(4 shr gb.memory.current_speed)
+    if gb.cpu.halt_ppu_debt < mdots * CGB_HALT_PPU_LEAD and gb.cgb_enabled:
+      gb.cpu.halt_ppu_debt += mdots
+      mem_tick_bus(gb.memory, gb, 4)
+      mem_reset_cycle_count(gb.memory)
+      return interrupt_ready(gb.interrupts)
   when HALT_IF_SAMPLE_T >= 4:
     mem_tick_extra(gb.memory, gb, 4)
     interrupt_ready(gb.interrupts)
@@ -443,6 +464,18 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # costs a real 0.3% of a title that spends its main loop halted. WHERE in
     # the M-cycle it is asked is HALT_IF_SAMPLE_T, above.
     if cpu_halt_tick(gb):
+      when defined(gb_halt_trace):
+        # Diagnostic (tools only; compiled out of every shipping build). One
+        # line per halt EXIT, with the PPU dot the CPU resumed on. That dot is
+        # what every `halt/` row's expected value is a function of -- the ROMs
+        # read STAT or LY a fixed number of M-cycles after it -- and it is the
+        # only quantity in this file no other trace reports: `gb_irq_trace`
+        # prints the DISPATCH, which the IME = 0 members never reach.
+        if gb.fifo_ppu != nil:
+          echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+               " mode=", (gb.ppu.lcd_status and 3'u8),
+               " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+               " ime=", (if cpu.ime: 1 else: 0)
       # The CGB leaves this state LATER than the DMG does -- ten gambatte
       # `halt/` rows state it, one boundary each -- but not by spending time,
       # which is what 42 `tima/*` rows refuse. CGB_HALT_EXIT_MCYCLES in gb.nim
@@ -466,6 +499,14 @@ proc tick*(cpu: GbCpu; gb: GB) =
           ppu_step_hdma(gb.ppu, gb)
         else:
           gb.ppu.hdma_block_due = false
+      when CGB_HALT_PPU_LEAD_ANY:
+        # ...and the dots the head of this halt held back from the PPU, paid
+        # with no bus half, which is what makes the whole thing a phase and not
+        # a charge: no scheduler, no timer, no OAM DMA, no time.
+        if gb.cpu.halt_ppu_debt != 0:
+          mem_tick_ppu(gb.memory, gb, int(gb.cpu.halt_ppu_debt),
+                       ignore_speed = true)
+          gb.cpu.halt_ppu_debt = 0
       cpu.halted = false
       if cpu.ime: dispatch_interrupt(cpu, gb)
     return

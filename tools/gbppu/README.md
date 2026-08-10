@@ -165,6 +165,27 @@ one line: the edge, the dispatch, and the read the ROM scores. That is how
 `IRQ_SAMPLE_T` (`gb/cpu.nim`) was bracketed, and how the `ly0` rows were shown
 NOT to be that constant.
 
+## The dot a halt ended on
+
+    nim c -d:test_harness -d:release -d:gb_halt_trace --path:src \
+      -o:dt_halt tests/dingbat_test.nim
+
+`-d:gb_halt_trace` prints one `HALTWAKE` line per halt EXIT — the LY, the PPU
+dot, the mode, `IF` and `IME`. It is the fourth leg of the group above and the
+one none of the other three report: `gb_irq_trace` prints the *dispatch*, which
+the `IME = 0` members of gambatte's `halt/` families never reach, and a halt
+that ends without vectoring leaves no other mark at all.
+
+Every `halt/` row's expected value is a function of that dot plus a fixed number
+of M-cycles, so printing it turns the family into an equation. It is also what
+identifies which ROMs are *anchored* to a halt without looking like it:
+`strikethrough` takes one wake a frame at LY 67 and daid's
+`speed_switch_timing_{ly,stat}` take exactly one each in the whole run, at
+LY 144 — in both cases the entire frame's phase hangs off that single line of
+output, which is why they move when nothing else does. `CGB_HALT_PPU_LEAD`
+(`gb/gb.nim`) and the halt paragraph at `SPEED_SWITCH_STALL_T` (`gb/memory.nim`)
+were both measured with it.
+
 ## Reading a STAT-bracketed row
 
 The gambatte `*_m3stat_{1,2}` pairs differ by exactly one NOP, so they bracket
