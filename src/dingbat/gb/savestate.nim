@@ -393,7 +393,7 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   when STAT_IRQ_SPLIT:
     ppu.irq_mode = ppu.lcd_status and 3'u8
     ppu.irq_ly = ppu.ly
-  when STAT_READ_HOLD: ppu.stat_hold_until = 0
+  ppu.stat_chg_dot = STAT_NO_HOLD
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.
   ppu.reset_render_scratch()
@@ -1020,11 +1020,24 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   # restored the last of those. Keeping it out of the payload is what makes
   # this change invisible to the committed state corpus.
   gb_sync_cgb_native(gb)
+  # Derived, not serialized for the same reason: the dots a halted CGB CPU is
+  # holding back from the PPU (`halt_ppu_debt`, see CGB_HALT_PPU_LEAD in
+  # gb.nim) are the same for the whole of any one halt, so `halted` plus the
+  # speed reconstructs the value exactly. Both of those have just been
+  # restored, which is why this is here and not in load_cpu_state.
+  when CGB_HALT_PPU_LEAD_ANY:
+    gb.cpu.halt_ppu_debt =
+      if gb.cpu.halted and not gb.cpu.locked and gb.cgb_enabled:
+        int32((4 shr gb.memory.current_speed) * CGB_HALT_PPU_LEAD)
+      else: 0'i32
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r, pad = in_process)
   load_ppu_state(gb.ppu, r, rev)
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
+  # Derived, not serialized: channel 4's divisor stage, re-derived from the
+  # LFSR deadline the events above just restored. See ch4_resync_divisor.
+  ch4_resync_divisor(gb.apu.channel4, gb)
   load_mbc_state(gb.cartridge, r)
   # The SGB section is present only when the machine that WROTE the state had
   # an adapter, and the machine reading it may not: Super Game Boy is a

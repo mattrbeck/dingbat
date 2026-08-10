@@ -16,6 +16,7 @@ proc new_gb_scanline_ppu*(gb: GB): GbScanlinePpu =
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
     current_window_line: base.current_window_line,
+    stat_chg_dot: STAT_NO_HOLD,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -163,7 +164,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # the opt-in fast path (GB.fifo) and is not scored against the STAT-timing
   # suites; `mode_flag=` keeps irq_mode in step for it, and the assignments
   # below keep irq_ly in step.
-  when STAT_READ_HOLD: ppu.stat_hold_until = 0
+  ppu.stat_chg_dot = STAT_NO_HOLD
   # See the FIFO renderer: the panel's refresh clock runs on both paths.
   ppu.dots_since_frame += int32(cycles)
   when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
@@ -184,6 +185,9 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu.cycle_counter -= 204
         ppu.ly += 1
         when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+        # The comparator's blind window across an LY advance, at the same scope
+        # the FIFO renderer opens it (see ly_advance_close and LY_BLIND_SCOPE):
+        # rendered lines and vblank-to-vblank, not the entry into vblank.
         if int(ppu.ly) == GB_HEIGHT:
           ppu.`mode_flag=`(1'u8, gb)
           gb.interrupts.vblank_interrupt = true
@@ -191,14 +195,17 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           when defined(gb_dot_counter): inc gb_frame_normal
           ppu.dots_since_frame = 0
         else:
-          ppu.`mode_flag=`(2'u8, gb)
+          ly_advance_line(ppu, gb)
     elif ppu.mode_flag == 1:     # V-Blank
       if ppu.cycle_counter >= 456:
         ppu.cycle_counter -= 456
-        if ppu.ly != 0: ppu.ly += 1
-        when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-        ppu_handle_stat_interrupt(ppu, gb)
-        if ppu.ly == 0:
+        if ppu.ly != 0:
+          ppu.ly += 1
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+          ly_advance_vblank(ppu, gb)
+        else:
+          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+          ppu_handle_stat_interrupt(ppu, gb)
           ppu.`mode_flag=`(2'u8, gb)
       # Same edge as the FIFO renderer's (see fifo_line153_edge): LY changing is
       # what the STAT line's comparator watches, so the detector runs on it.

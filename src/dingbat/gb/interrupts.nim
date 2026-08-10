@@ -8,6 +8,24 @@ const
   INT_JOYPAD* = 0x0060'u16
   INT_NONE*   = 0x0000'u16
 
+when defined(gb_phase_trace):
+  # ---- Which T-cycle of the M-cycle an IF bit rose on ------------------------
+  #
+  # Diagnostic only, compiled out of every shipping build. `gb_phase` is set by
+  # the PPU's dot loop (fifo_tick_slow) and by the timer's per-cycle loop, and
+  # read by the four IF-raise echoes hanging off them -- `STATIRQ` in ppu.nim,
+  # `VBLIRQ` in fifo_ppu.nim, `TIMIRQ` in timer.nim -- plus `LYREAD` on the
+  # `$FF44` read path in memory.nim. `gb_ticklen` is the length of the tick the
+  # phase is counted within, which is 4 for an ordinary M-cycle and 2 for either
+  # half of a split halted one.
+  #
+  # This is the instrument HALT_IF_SAMPLE_T in cpu.nim is derived with: which
+  # half of its M-cycle each interrupt source rises in is the whole question,
+  # and no suite reports it -- it has to be read off the tree and scored against
+  # the halt/sled pairs.
+  var gb_phase*: int32 = 0
+  var gb_ticklen*: int32 = 0
+
 proc new_gb_interrupts*(): GbInterrupts =
   GbInterrupts()
 

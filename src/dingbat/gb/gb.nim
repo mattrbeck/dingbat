@@ -7,16 +7,54 @@ import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
-# The two open axes of the STAT model, declared here rather than next to their
-# write-up in gb/ppu.nim only because the GbPpu fields they gate are in the type
-# block below. Both ship at the value that needs no field and no branch, so the
-# shipping build is exactly the tree without them. See ppu.nim for what they
-# mean, the equation that motivated them, and the measured table that rejected
-# every setting but this one.
+const LY_BLIND_SCOPE* {.intdefine.} = 1
+  ## Which LY advances open the LY=LYC comparator's blind window (the write-up
+  ## is above `ly_advance_close` in ppu.nim): -1 none, 0 rendered line
+  ## boundaries only, 1 also vblank line to vblank line, 2 also the mode 0 -> 1
+  ## entry into vblank on line 144.
+  ##
+  ## Whole gambatte suite, one build per cell, against `main` at ab0d7d6 and
+  ## with IRQ_SAMPLE_T = 16 throughout (its own 16 rows are in every cell):
+  ##
+  ##   scope   gambatte   vs main
+  ##     -1      3871     +16 / -1
+  ##      0      3885     +31 / -2
+  ##      1      3887     +33 / -2   <- ships
+  ##      2      3899     +57 / -14
+  ##
+  ## **2 is not refused; it is unresolved, and it belongs to a different
+  ## quantity.** Every one of the twelve rows it costs is in `m1`, every one is
+  ## a handover between the mode 1 source and something else at the top of line
+  ## 144, and they place that source and the vblank IF bit one M-cycle apart
+  ## (`m2m1irq_ifw` wants 3,1,0 across three steps: the STAT edge before the
+  ## vblank flag, with dingbat putting both on the same dot). That is bucket 18
+  ## of docs/gb-failure-triage.md -- "whether the mode-1 STAT source asserts at
+  ## all on entering vblank, and how it overlaps the vblank IF bit" -- and the
+  ## window cannot be scored at line 144 until it is settled. It is worth +24
+  ## rows gross when it is.
+# The STAT model's knobs, declared here rather than next to their write-up in
+# gb/ppu.nim only because the GbPpu fields they gate are in the type block
+# below. See ppu.nim for what they mean and for the ROMs that bracket each.
+#
+# STAT_IRQ_LEAD still ships at the value that needs no field and no branch, so
+# the shipping build is exactly the tree without it.
 const STAT_IRQ_LEAD* {.intdefine.} = 0
-const STAT_READ_LAG* {.intdefine.} = 3
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
-const STAT_READ_HOLD* = STAT_READ_LAG != 3
+
+# Where the mode bits a CPU STAT read returns are sampled: a read whose M-cycle
+# leaves the PPU dot counter at `cc` sees the mode the PPU changed to on dot X
+# if and only if `cc - X >= STAT_READ_SAMPLE`, i.e. it samples dot
+# `cc - STAT_READ_SAMPLE`. Bracketed on both sides by different ROMs at each
+# speed; the derivation, the brackets and the sweep are at stat_read_mode.
+const STAT_READ_SAMPLE*     {.intdefine.} = 2
+# The extra dots in double speed, kept as an addend rather than a second
+# absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
+const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
+
+# `stat_chg_dot` for "no mode change is inside any read's sampling window".
+# A line is 456 dots and the counter is rebased at every wrap, so anything this
+# far back can never come within STAT_READ_SAMPLE of the counter again.
+const STAT_NO_HOLD* = -1024'i32
 
 # Fixed setup cost of a CGB general-purpose VRAM DMA, in CPU M-cycles, charged
 # once per transfer on top of the 8 M-cycles per $10 bytes Pan Docs specifies
@@ -108,6 +146,13 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # M-cycle of it is refused by the same SCX ladder. Nothing ships until the SCX
 # half is separated out; turning this to 1 would buy 22 rows by breaking 60.
 #
+# **That phase was built and measured on 2026-08-10: it is CGB_HALT_PPU_LEAD
+# below.** It keeps all 42 `tima/*` rows (no time is spent anywhere), the
+# quantity is bracketed to exactly one M-cycle from both sides by two clean
+# `halt/` families, and the SCX ladder above is 10 of the 17 rows it still
+# costs. It also ships at 0, and for one row rather than sixty. Read that
+# constant, not this one, for where the measurement now stands.
+#
 # daid's `ppu_scanline_bgp.gb` on CGB is the frame that raised the question and
 # it is worth stating what it does and does not pin. Its whole picture is ONE
 # phase, set by an LYC=0 STAT interrupt that finds the CPU halted in the VBlank
@@ -119,6 +164,139 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
+const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
+  ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
+  ## as time -- which is the shape the two halves of that measurement demand.
+  ## **It ships at 0 as well**, and for a narrower reason than the charge does:
+  ## the quantity is now bracketed from both sides and the mechanism is settled,
+  ## and what is left between it and shipping is ONE ROW. See the last section.
+  ##
+  ## The model, in one sentence: **while a CGB CPU is halted, the PPU runs one
+  ## M-cycle of dots behind the rest of the machine, and gets them back on the
+  ## way out.** The first halted M-cycle ticks the bus half only (the scheduler,
+  ## the timer, the serial shifter, OAM DMA); the wake ticks those dots into the
+  ## PPU with no bus half at all (cpu_halt_tick and `tick` in cpu.nim). Nothing
+  ## is created or destroyed: a halt of k M-cycles still gives the PPU exactly
+  ## k M-cycles of dots, and the CPU still spends exactly the T-cycles it slept.
+  ## `halt_ppu_debt` is the memo, and it is reconstructed on a state load rather
+  ## than serialized (savestate.nim) because it is the same value for the whole
+  ## of any one halt.
+  ##
+  ## ---- Why a phase and not a charge: the tima rows pick -----------------
+  ##
+  ## Both models put the CPU's post-wake reads one M-cycle later IN THE PPU'S
+  ## LINE, so both flip the ten `halt/` rows whose file names name a different
+  ## expected value per device. They differ on every other consumer, and that
+  ## difference is the whole measurement:
+  ##
+  ##   wake source   charge (EXIT_MCYCLES)      phase (this)
+  ##   -----------   -----------------------    --------------------------
+  ##   STAT / LYC /  read is 1 M-cycle later     the source itself rose one
+  ##   vblank        in the line  (right)        M-cycle later in machine time,
+  ##                                             so the read is 1 M-cycle later
+  ##                                             in the line  (right)
+  ##   timer         TIMA has advanced one       the timer never stopped and the
+  ##                 more M-cycle  (WRONG)       wake is where it was  (right)
+  ##
+  ## The 42 `tima/*` rows are exactly the second line of that table -- they
+  ## halt, a TIMER interrupt wakes them, and they read TIMA or IF a fixed number
+  ## of M-cycles later, with ONE expected value for both devices. A charge moves
+  ## all 42; the phase moves none of them, because the timer half of the halted
+  ## M-cycle is never the half that is held back. Whole gambatte suite, one
+  ## build per setting, baseline 3850/5005 (2026-08-10):
+  ##
+  ##   setting                          total   what moved
+  ##   (control, all off)                3850   --
+  ##   CGB_HALT_EXIT_MCYCLES=1           3813   halt +14 -10, dma +8 -7,
+  ##                                            irq_precedence +1 -1, tima -42
+  ##   CGB_HALT_EXIT_MCYCLES=2           3815   halt +14 -24, dma +37 -18,
+  ##                                            tima -43
+  ##   CGB_HALT_PPU_LEAD=1               3850   halt +14 -10, dma +3 -7
+  ##   ..and SPEED_SWITCH_STALL_T=65544  3853   ..plus speedchange +11 -7
+  ##
+  ## A third mechanism was built and measured and is NOT kept, because it buys
+  ## nothing over the phase: charging the M-cycle only when the ready set is
+  ## LCD-only (so the timer wake is exempt by construction rather than by
+  ## consequence) scores the same 3850 and the same rows as the phase does.
+  ## The tima half does not separate the two; only the model does, and the
+  ## phase is the one that costs no time anywhere.
+  ##
+  ## ---- It is ONE M-cycle, bracketed from both sides ---------------------
+  ##
+  ## Two `halt/` families are three ROMs each whose only difference is one NOP
+  ## before the read, so they bracket the wake to a single M-cycle on the CGB:
+  ##
+  ##   family              _1        _2                 _3
+  ##   ----------------    -------   ----------------   -------
+  ##   lycirq_m2stat       out 2     dmg 2 / cgb 3      out 3
+  ##   m1int_ly            out $90   dmg $90 / cgb $91  out $91
+  ##
+  ## At 0 the `_2` members answer the DMG value on a CGB; at 1 both flip green
+  ## and `_1` and `_3` stay green; at 2 the `_1` members go red as well -- under
+  ## the phase and the charge alike, so the bracket is a property of the
+  ## quantity and not of either mechanism. Neither family carries an SCX, so
+  ## neither is in the `scx_during_m3` bucket the ten SCX-laddered rows are.
+  ## `lycirq_*` is the IME-clear path (the halt ends with no vector taken) and
+  ## `m1int_*` the IME-set one, so the M-cycle is on both.
+  ##
+  ## Two more witnesses, neither of them a gambatte row:
+  ##
+  ##  * **daid `ppu_scanline_bgp.gb` on CGB.** Its whole frame is one phase, set
+  ##    by an LYC=0 STAT interrupt that finds the CPU halted, and on `main` every
+  ##    band of it is 3 pixels early against the shootout's `.gbc.png`. Turning
+  ##    this on moves every band of that frame by exactly 4 pixels (measured as
+  ##    the best whole-frame shift between the two builds), which leaves the 1
+  ##    pixel that is the CGB-C -> CGB-D palette step (`CGB_MIXER_LATENCY`, 1 for
+  ##    the `_cgb_c` references this tree scores and 0 for the `_cgb_d` ones
+  ##    daid captured). 4 - 1 = 3, pixel for pixel, and it is a whole-frame band
+  ##    measurement rather than one boundary crossing.
+  ##  * **`SPEED_SWITCH_STALL_T` was carrying this M-cycle.** daid's
+  ##    `speed_switch_timing_ly.gbc` / `_stat.gbc` sample the PPU every 8 dots
+  ##    from the instruction after a STOP, and their phase is set by the single
+  ##    halt each ROM takes at LY 144 -- so what they really pin is the total
+  ##    PPU advance from that wake to the reads, stall included. On `main` the
+  ##    two-dot window that puts both buffers where hardware has them is
+  ##    65548..65549; with this constant at 1 it is 65544..65545, the same
+  ##    window moved by exactly this M-cycle, and both rows are pixel-exact
+  ##    again at 65544. That also takes the residual "switch countdown" the
+  ##    stall's own note is left holding from 8 dots to 4, i.e. TOWARDS
+  ##    SameBoy's independently sourced 65540 rather than away from it, and it
+  ##    is worth 4 net gambatte `speedchange` rows on its own. See
+  ##    SPEED_SWITCH_STALL_T in memory.nim.
+  ##
+  ## ---- What is left between this and shipping: one row ------------------
+  ##
+  ## `strikethrough/strikethrough-cgb` is pixel-exact on `main` and goes to
+  ## 23033/23040 here -- 7 pixels, all on line 68, and the same 7 under the
+  ## charge, so it refuses the QUANTITY and not the mechanism. The ROM is an
+  ## OAM DMA test: it halts once a frame (LY 67, LYC STAT, IME set), starts a
+  ## DMA in the handler, and the DMA is still running when the PPU's mode 2
+  ## scans line 68, so the row is a knife edge on which OAM bytes are in place
+  ## when that scan reads them. It is also the only row in the tree whose DMG
+  ## and CGB references are structurally identical -- the CGB one is the DMG
+  ## one inverted through the palette, pixel for pixel -- so it says hardware
+  ## puts the two devices' DMA at the same place against that scan, and 4 dots
+  ## crosses it. That is one 7-pixel row against five supports, but it is a
+  ## green pixel-exact shootout row and this tree does not trade those for
+  ## +3 gambatte, so the flag stays off until it is understood.
+  ##
+  ## The other 17 rows this costs are already accounted for elsewhere: 10 are
+  ## the SCX ladder the note above attributes to `scx_during_m3` (49/141) --
+  ## `m0{int,irq}_m0stat_scx{2,5}_1`, the `late_*_scx2_*a` members and
+  ## `noime_m2irq_m0stat_1` -- and 7 are `dma/hdma_late_disable_*`, which that
+  ## note lists in the same group.
+  ##
+  ## ---- What it does NOT close, which is why it was written ---------------
+  ##
+  ## `acid/cgb-acid-hell` needs the CPU's write burst TWO M-cycles later against
+  ## the PPU, not one. Its LCDC writes and the fetcher's reads are both on an
+  ## 8-dot lattice, so only a whole 8 dots changes which of the sixteen written
+  ## bytes lands on the observable bitplane read; 4 dots moves the write onto
+  ## the tile-map read, where it does nothing at all, and the frame comes out
+  ## BIT-IDENTICAL to `main`. At 2 the row is 23040/23040 -- and the bracket
+  ## above refuses 2 outright. See the acid-hell section of
+  ## docs/gb-failure-triage.md.
+const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD != 0
 
 # ---- CGB per-register PPU write latency -------------------------------------
 #
@@ -453,9 +631,149 @@ const CGB_TDSEL_GLITCH*       {.booldefine.} = true
   ##    TILE_SEL was last reset, if any") without saying which fires; the
   ##    address latch is the one mechanism that produces both.
   ##
-  ## `cgb-acid-hell`'s two pixels are NOT this rule and are still open: their
-  ## glitched read is a SET and hardware delivers the tile index there, which
-  ## contradicts every SET cell above. See docs/gb-failure-triage.md.
+  ## ---- What writes the address latch, and when it is cleared (2026-08-11) ---
+  ##
+  ## `*_change2` cannot see either question: every SET glitch in those two
+  ## frames is preceded, on its own line, by an object fetch or a RESET-glitched
+  ## read. The two ROMs that CAN see them are the plain `m3_lcdc_tile_sel_change`
+  ## and `m3_lcdc_tile_sel_win_change` on CGB, and they were this pair's whole
+  ## residual (232 and 1422 wrong subpixels; both are 23040/23040 now). Scoring
+  ## the four CGB references' glitched reads by the byte each one pins -- 188
+  ## RESET cells and 161 SET cells, all eight bits of every one fixed by its
+  ## tile's eight pixels:
+  ##
+  ##   latch written by                     cleared per line   SET cells right
+  ##   obj + RESET-glitched reads           yes                 133 / 161
+  ##   + every unglitched LCDC.4 = 1 read   yes                 133 / 161
+  ##   obj + RESET-glitched reads           no                  158 / 161
+  ##   + every unglitched LCDC.4 = 1 read   no                  159 / 161
+  ##
+  ## So both arms are separately forced, and neither is a fitted number:
+  ##
+  ##  * the latch is a bus register and H-Blank does not clear it.
+  ##    `m3_lcdc_tile_sel_change` puts its LCDC write at dot 105 and its object
+  ##    at 112, so the first glitched read of each of its lines happens before
+  ##    anything on that line has driven an $8000-region address, and hardware
+  ##    still substitutes -- with the byte the line ABOVE left there. That is
+  ##    the 133 -> 158, and it is both rows' entire residual bar 8 pixels.
+  ##  * an UNGLITCHED LCDC.4 = 1 read is an $8000-region access like any other
+  ##    and leaves its address here too. That is the last cell, 158 -> 159:
+  ##    `m3_lcdc_tile_sel_win_change`'s 8 remaining pixels, one glitched tile
+  ##    whose line has a plain unsigned read after its object and before its
+  ##    glitch.
+  ##
+  ## A plain DATA latch (the last $8000-region BYTE rather than its address) is
+  ## refuted, and by a whole band rather than a cell: it scores 89/161, because
+  ## `*_change2`'s two bands glitch on different PLANES and hardware answers
+  ## with the same tile at the plane the glitch is on (`D.0` in band 3 and `D.1`
+  ## in band 5, above). Only an address can do that. It is worth knowing that
+  ## this is where the two disagree, because a data latch is the cheaper thing
+  ## to implement and it is what the notes' wording suggests.
+  ##
+  ## `cgb-acid-hell`'s two pixels are the ONE exception, and they are
+  ## CGB_TDSEL_IDX_DOTS below: a SET glitch close behind a RESET one delivers
+  ## the index instead. Every other SET cell in the tree is this rule.
+const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
+  ## How long a RESET glitch leaves the INDEX path armed, in dots. A SET glitch
+  ## that lands inside that window delivers the CURRENT tile's index -- the same
+  ## byte a RESET glitch delivers -- instead of the address latch above. 0 is
+  ## the control build, where a SET is always the latch.
+  ##
+  ## This is the whole of `cgb-acid-hell`'s residual and it is the only thing in
+  ## the tree that fires it. What follows is what the corpus proves and what it
+  ## does not, because those are different sizes.
+  ##
+  ## ---- What the corpus proves ---------------------------------------------
+  ##
+  ## Scored over the same instrument as the SET rule above -- every glitched
+  ## bitplane read of the four CGB `tile_sel` references and `cgb-acid-hell`
+  ## whose bits the reference PNG pins, rebuilt 2026-08-12 as 192 RESET cells
+  ## and 223 SET cells (184 / 151 of them with all eight bits pinned; the
+  ## earlier 188 / 161 census used a pinning convention that was not written
+  ## down, and this one is a superset of it either way). Cells, not pixels, so
+  ## a rule that is wrong under an object or in a four-shades-of-white palette
+  ## is still counted wrong:
+  ##
+  ##   SET-branch trigger for "deliver the index"        SET cells right
+  ##   never (the rule above, alone)                        221 / 223
+  ##   always                                               125 / 223
+  ##   the latch was written by a RESET glitch, any age     158 / 223
+  ##   the IMMEDIATELY preceding read was RESET-glitched    221 / 223
+  ##   the latch is <= 8 dots old, whatever wrote it        215 / 223
+  ##   a RESET glitch landed <= 8 dots ago                  223 / 223
+  ##   ...and it wrote the latch, i.e. nothing since  <--   223 / 223
+  ##
+  ## So the trigger has two halves and the corpus forces both, each by a whole
+  ## band rather than a cell:
+  ##
+  ##  * **It is not recency alone.** `*_change2`'s first glitch of a line has an
+  ##    OBJECT fetch 8 dots behind it and wants the LATCH (the object's bitplane
+  ##    1). 8 cells, and they are why the window is armed by a RESET GLITCH and
+  ##    not by the last $8000-region read.
+  ##  * **It is not provenance alone.** `*_change2`'s columns 5 and 8 are SET
+  ##    glitches whose latch was written by the RESET glitch two tile columns
+  ##    back, and they want the LATCH. 64 cells, and they are why the window is
+  ##    short.
+  ##  * **It is not "the immediately preceding read".** `cgb-acid-hell` toggles
+  ##    LCDC.4 every 8 dots, so its RESET glitch is the previous FETCH's read of
+  ##    the same plane and an unglitched signed read sits between the two. That
+  ##    spelling scores 221/223 -- it misses the two pixels it was written for.
+  ##
+  ## The window is bracketed to **8..15 dots** and nothing narrows it further:
+  ## 7 loses `cgb-acid-hell`'s cells (its RESET glitch is exactly 8 dots back)
+  ## and 16 breaks `*_change2`'s 64 (theirs is exactly 16). 8 is the fetch
+  ## cycle's own pitch, which is the only number in that range the hardware has
+  ## a name for, so the rule reads "the RESET glitch was in this fetch or the
+  ## one before it". Measured in dots and not in reads deliberately: the two
+  ## agree wherever the fetcher runs at pitch and the corpus scores 223/223
+  ## either way, and dots need no counter.
+  ##
+  ## The last row of the table is what ships, and it is the last row because it
+  ## is what the PACKING gives for free -- the arming rides `tdsel_addr` above
+  ## the bank (TDSEL_IDX_SHIFT), so anything that writes the latch disarms it.
+  ## The looser row is the same 223/223 and no cell separates the two.
+  ##
+  ## ---- What the corpus does NOT prove -------------------------------------
+  ##
+  ## **The distinguishing bucket is populated by one ROM.** At every setting in
+  ## 8..15 the trigger fires on exactly seven cells, all of them
+  ## `cgb-acid-hell`'s, and it changes no other pixel of any frame in this tree.
+  ## The other 216 SET cells prove the rule is CONSISTENT with everything else
+  ## measured; they do not vote on the trigger's shape, because none of them is
+  ## in the bucket. Five of the seven are cells where the index and the latch
+  ## happen to hold the same byte, so the ROM's own arbitrating evidence is two
+  ## pixels -- `(80, 68)` and `(80, 69)`, both hardware-photo-verified against
+  ## the repo's `img/photo.jpg` as well as the bundled PNG.
+  ##
+  ## **The experiment that would settle it does not exist.** It is a hardware
+  ## capture of `m3_lcdc_tile_sel_change2` with its LCDC writes moved onto an
+  ## 8-dot lattice, or equivalently any second ROM that puts a SET glitch one
+  ## fetch behind a RESET one. mealybug's `*_change2` pair are the only ROMs
+  ## with the readout and their handler writes on a 16-dot pitch, which is why
+  ## the corpus has a gap exactly where the trigger lives.
+  ##
+  ## **A revision split is excluded, not merely unsupported.** `cgb-acid-hell`
+  ## picks its tile data off a `$FEA0` readback and dingbat takes the same
+  ## branch the bundled reference was captured on, which is a CGB-C -- the same
+  ## device every `*_change2` reference is. See the 2026-08-10 entry in
+  ## docs/gb-failure-triage.md; whoever models `$FEA0..$FEFF` per revision has
+  ## to re-score this row in the same commit.
+  ##
+  ## What the rule assumes beyond the two pixels is deliberately as little as
+  ## possible: the window is not consumed by the SET glitch that uses it (no
+  ## cell has two SET glitches behind one RESET), the substituted byte is the
+  ## CURRENT tile's index and not the RESET-glitched tile's (the reference says
+  ## so: on line 68 the tile is `$55` and hardware's byte is `$55`, while the
+  ## RESET-glitched tile one fetch back is `$59`), and the address latch is left
+  ## exactly as the rule above leaves it.
+  ##
+  ## Cost, `tools/gbppu/counters.sh` against the commit before it, retired
+  ## instructions over repeated runs: **+0.05..0.08% Pokemon Crystal, +0.02%
+  ## blargg cpu_instrs, +0.05% Link's Awakening DX** -- effectively the one
+  ## guarded compare per line in fifo_reset_sprite, since the arming rides a
+  ## store the RESET branch already did and the dot loop never sees the rule at
+  ## all. The unpacked shape, with the same behaviour, was +0.30% / +0.21% /
+  ## +0.22%; see TDSEL_IDX_SHIFT for where that went.
 const CGB_TDSEL_ANY* = CGB_TDSEL_LATENCY != 0 or CGB_TDSEL_GLITCH
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
@@ -610,6 +928,41 @@ const WIN_HEAD_ABSORB*        {.intdefine.} = 1
   ##
   ## The derivation and the ruler it is read off are at the head latch in
   ## fifo_ppu.nim.
+const WIN_WX0_PHASE*          {.intdefine.} = 1
+  ## Where WX = 0's line-start window puts its FIRST TILE, and where the extra
+  ## dot that goes with SCX > 0 is spent. 1 ships: the discard is `7 - WX` at
+  ## every WX (so seven at WX = 0) and the head's idle term is `WX - 1`
+  ## unclamped, which at WX = 0 is *minus one* -- a startup fetch one dot
+  ## shorter, taken by skipping one of FETCHER_ORDER's sleeps so the push
+  ## arrives a dot early. 0 is the control build and the pre-2026-08-09
+  ## spelling: a six-pixel discard at WX = 0 with `SCX & 7 = 0` and zero idle
+  ## dots.
+  ##
+  ## Both spend the same DOTS -- `idle + discard = 6`, which is what every
+  ## length instrument in the tree measures and none of them moves. What they
+  ## disagree about is the window's tile PHASE, one pixel, and exactly one ROM
+  ## can see it: mealybug `m3_lcdc_win_en_change_multiple_wx` turns the window
+  ## off again partway across every line, and the background resumes on the
+  ## WINDOW's tile boundary ("it will always display a multiple of 8 pixels,
+  ## except when the window begins off the left edge of the screen" --
+  ## `m3_lcdc_win_en_change_multiple.asm:21`). So the boundary reads the phase
+  ## straight off the reference, per line, with WX = LY:
+  ##
+  ##   WX (= LY)      0    1    2    3    4    5    6    7
+  ##   black run      9   10    3    4    5    6    7    8
+  ##   first tile   -7..0 -6..1 -5..2 -4..3 -3..4 -2..5 -1..6  0..7
+  ##
+  ## Every WX from 1 up is `first tile = (WX - 7) .. WX`, the window's own
+  ## first pixel; WX = 0 is the same formula and NOT the six-pixel exception
+  ## (its run is 9 = one tile boundary at x = 1, plus the eight pixels of the
+  ## tile after it, the same "one tile later" WX = 1's 10 is).
+  ##
+  ## The dot it hands back is the one the sampler used to pay: "window
+  ## activating one T-cycle later when WX = 0 and SCX > 0"
+  ## (`m3_window_timing_wx_0.asm:21`) is now the ABSENCE of that skip, which is
+  ## what "activating later" says, instead of a ninth discarded pixel. The test
+  ## is taken at the dot SCX is latched on, because that is the first dot the
+  ## answer exists on -- see fifo_sample_smooth_scroll.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
   ## Which dot WX is read on to decide whether a line STARTS as a window line:
   ## the last dot of the throw-away fetch at the head of mode 3 (1, shipping),
@@ -630,6 +983,27 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## because it writes WX = 6 at dot 49 (mode 2) and WX = LY at dot 93: the
   ## mode-2 value is 6 on every line and the reference draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const WIN_PRE_PX_PHASE*       {.intdefine.} = 1
+  ## What a match on the comparator's PRE-PIXEL slot (WIN_START_PRE_PIXEL) does
+  ## with the window's TILE. 1 ships: the tile keeps its own first pixel, so it
+  ## covers `WX - 7 .. WX` exactly as at every other WX, and the startup fetch
+  ## is one dot shorter because one of its six dots was spent before the shifter
+  ## got to its first pixel. 0 is the control build and the pre-2026-08-09
+  ## spelling, where the clamp moved the tile with the match and the window's
+  ## first tile covered `0 .. 7`.
+  ##
+  ## The mode 3 LENGTH is identical either way, by construction -- five dots of
+  ## fetch plus the pixel at x = -1 is six dots plus the pixel at x = 0 -- so
+  ## every length instrument that pinned the clamp (GBMicrotest `win6_a/_b` at
+  ## 178, gambatte's WX = 3 families) reads exactly what it read before. What
+  ## moves is one pixel of phase, and mealybug
+  ## `m3_lcdc_win_en_change_multiple_wx` is again the only ROM that can see it:
+  ## on its WX = 6 line the background resumes at x = 7, i.e. on the boundary of
+  ## a window tile that covers `-1 .. 6`, where the clamped tile would put it at
+  ## x = 8. That is the same reading as WIN_WX0_PHASE at the other end of the
+  ## same table, and the same conclusion -- the window's tile sits where its own
+  ## first pixel is, and the clamp is only about which dot our shifter can
+  ## notice it on.
 const WIN_TAIL_FETCH*         {.intdefine.} = 1
   ## Whether a window START holds mode 3 open for the fetch it restarts, when
   ## the start lands inside the last pixels of the line. 1 ships; 0 is the
@@ -871,11 +1245,36 @@ const NO_TDSEL_CHANGE*        = int32.low
   ## empty case costs no branch of its own -- the same shape as NO_LCDC2_FLIP.
   ## It is also what a DMG carries all frame, since only a CGB records a change.
 const TDSEL_ADDR_OFF*         = -1'i32
-  ## `GbFifoPpu.tdsel_addr` meaning "nothing on this line has driven an
-  ## $8000-region tile-data address". A SET-glitched read falls back to its own
-  ## read there. mealybug's notes name a third alternative for that case -- the
-  ## read in progress at the end of the PREVIOUS line -- and no ROM in this
-  ## tree reaches it, so the fallback is deliberately the unglitched byte.
+  ## `GbFifoPpu.tdsel_addr` meaning "nothing has driven an $8000-region
+  ## tile-data address yet". A SET-glitched read falls back to its own read
+  ## there. Only reachable before the first such read of a frame now that the
+  ## latch survives H-Blank, and no reference in this tree reaches it.
+const TDSEL_ADDR_BANK*        = 13
+  ## Bit `tdsel_addr` carries the VRAM bank in. Offsets are 13 bits, so the
+  ## bank rides above them and the whole latch is one store on the fetch path.
+const TDSEL_IDX_SHIFT*        = 14
+  ## Bit `tdsel_addr` carries the INDEX path's arming in, as the first dot PAST
+  ## the window (see CGB_TDSEL_IDX_DOTS). Above the bank at bit 13, so a dot
+  ## needs nine bits and the whole word stays positive. One-past rather than the
+  ## last dot so that zero up there means "not armed" for every dot including 0,
+  ## and the whole test is `(latch shr 14) > cycle_counter` -- one compare, with
+  ## the unarmed case and the negative TDSEL_ADDR_OFF sentinel both answered by
+  ## it and neither costing a branch of its own.
+  ##
+  ## It rides `tdsel_addr` rather than living in a field because a field of its
+  ## own is not free: GbFifoPpu is 632 bytes and every offset above the latch is
+  ## the fetch path's, so one more int32 grows it to 640 and moves `tile_num`,
+  ## the tile attributes and both bitplane bytes with it. That measured
+  ## **+0.22% of retired instructions on Pokemon Crystal with the rule compiled
+  ## out** -- pure layout, more than the rule itself costs. Packed, the arming
+  ## is written by the store the RESET branch already does.
+  ##
+  ## The packing also decides one thing the corpus leaves open, in the direction
+  ## of less mechanism: because every write of the latch clears these bits, an
+  ## object fetch or a plain unsigned read between the RESET glitch and the SET
+  ## one disarms it. That is the "the latch is <= 8 dots old AND a RESET glitch
+  ## wrote it" spelling, which scores the same 223/223 as the looser "a RESET
+  ## glitch landed <= 8 dots ago" -- no cell in the tree separates them.
 const MIXER_TAIL_DOTS*        {.intdefine.} = 1
   ## Whether the mixer tail is clocked in DOTS (1, shipping) or in emitted
   ## PIXELS (0, the pre-2026-08-10 behaviour, where the reach was counted back
@@ -928,12 +1327,16 @@ const MIXER_HEAD_LINGER*      {.intdefine.} = 1
   ## `dmgpalette_during_m3` family looks like a second one and is not: its PNGs
   ## carry no `old or new` pixel at all (MIXER_PALETTE_OR's named cost), so
   ## every disagreement with them in this area is already that one.
-const MIX_HOLD*               = 4
+const MIX_HOLD*               {.intdefine.} = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two so
   ## the shifter's store indexes with an `and`. It has to cover every pixel a
   ## write can still reach: the deepest mixer stage, plus the pixels the tail
   ## burst decided ahead of their own dot (the pipeline lead). fifo_ppu.nim
   ## static-asserts that sum against this.
+  ##
+  ## Overridable only so a sweep of the pipeline lead can build at all -- a
+  ## whole M-cycle of M3_PIPE_MCYCLES needs 8. Depth alone changes no pixel;
+  ## it is a bound, not a model.
 const CGB_MIXER_LATENCY*      {.intdefine.} = 1
   ## Dots the CGB's write to a register the MIXER reads takes to arrive over
   ## the DMG's. Subtracted from every mixer stage below, so a register the DMG
@@ -1358,6 +1761,13 @@ type
     # the STOP Instruction"), and a speed switch never survives an instruction
     # boundary, let alone a state boundary.
     stopped*:    bool
+    # Dots of PPU time a HALTED CGB CPU is holding back from the PPU; see
+    # CGB_HALT_PPU_LEAD in this file and cpu_halt_tick. Nonzero only while
+    # `halted` is set on a CGB, and always the same value for a whole halt, so
+    # it is NOT serialized: load_cpu_state reconstructs it from `halted` and
+    # the speed, which is exact for every state a halt can be captured in bar
+    # the single M-cycle between the HALT fetch and the first halted tick.
+    halt_ppu_debt*: int32
     cached_hl*:  int   # -1 = invalid
 
   # ---- Interrupts ----
@@ -1558,12 +1968,14 @@ type
     when LCD_ON_TRIM_ANY:
       lcdon_lines*:      uint8   # lines left in the LCD-on trim window
     cycle_counter*:      int32
-    # STAT mode bits as observed by a CPU read. A read M-cycle samples the bus
-    # value at the START of the cycle, but the emulator ticks the PPU forward by
-    # the whole M-cycle before read_byte runs; this latch snapshots the mode at
-    # each tick entry so STAT reads see the pre-advance mode (mooneye
-    # intr_2_mode0/mode3_timing, which read STAT one M-cycle after the mode-2
-    # interrupt and must still observe the old mode).
+    # The mode as it stood when this M-cycle's dots began, snapshotted at each
+    # tick entry because the emulator ticks the PPU forward by the whole
+    # M-cycle before read_byte runs. This is what the CPU's VRAM/OAM locks are
+    # decided on (cpu_vram_open / cpu_oam_open); the mode bits a STAT READ
+    # returns are NOT this -- they come off stat_chg_dot below, which is a
+    # different dot. It was this latch until 2026-08-09, and the dot it lands on
+    # (one before the M-cycle's first) is where the "one unaccounted-for dot" in
+    # docs/gb-failure-triage.md's bucket 15 was hiding.
     #
     # Bit 7 (LY_JUST_CHANGED) rides along in the same byte: it is set by an LY
     # advance and cleared by the next tick's snapshot, i.e. it marks "LY changed
@@ -1571,11 +1983,20 @@ type
     # its own field keeps the per-M-cycle cost at the one store the latch
     # already paid. See ppu_read 0xFF41 for what it suppresses.
     read_mode*:          uint8
-    # ---- Sweep scratch: the STAT model's two open axes ---------------------
-    # Both groups are gone from the shipping build -- the knobs that gate them
-    # ship at the values that need neither, so GbPpu's layout is untouched by
-    # their existing. See the write-up at STAT_IRQ_LEAD in ppu.nim, which is
-    # also where the measurements that rejected both live.
+    # ---- What a STAT read's mode bits are sampled from ---------------------
+    # The dot the mode last changed on and what it changed away from, which is
+    # everything stat_read_mode needs: a read at dot `cc` reports the new mode
+    # once `cc - stat_chg_dot >= STAT_READ_SAMPLE` and `stat_prev_mode` until
+    # then. Written only by `mode_flag=` (three times a line) and rebased by
+    # the line wrap, so nothing per-dot or per-M-cycle maintains it. Not
+    # serialized: a state is captured at VBlank, where no mode change is inside
+    # a read's sampling window, so load_ppu_state just retires the hold.
+    stat_chg_dot*:       int32
+    stat_prev_mode*:     uint8
+    # ---- Sweep scratch: the STAT interrupt line's own phase ----------------
+    # Gone from the shipping build -- the knob that gates it ships at the value
+    # that needs neither field, so GbPpu's layout is untouched by its existing.
+    # See the write-up at STAT_IRQ_LEAD in ppu.nim.
     when STAT_IRQ_SPLIT:
       # The mode and LY the STAT interrupt SOURCES compare against, as opposed
       # to the ones the CPU reads back out of lcd_status/LY. Not serialized:
@@ -1583,12 +2004,6 @@ type
       # exact at the VBlank a state is captured at.
       irq_mode*:         uint8
       irq_ly*:           uint8
-    when STAT_READ_HOLD:
-      # How long a mode change stays invisible to a STAT read: the dot up to
-      # which `stat_hold_mode` is still what a read returns, or 0 for none.
-      # Rebased by the line wrap rather than maintained per tick.
-      stat_hold_until*:  int32
-      stat_hold_mode*:   uint8
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off
@@ -1728,18 +2143,31 @@ type
     # that lands on that dot exactly; both need the dot, and nothing else does.
     # Only a CGB records it, which is what keeps the DMG path at one compare.
     #
-    # `tdsel_addr`/`tdsel_bank` are the VRAM offset and bank of the most recent
-    # $8000-region tile-data read -- an object bitplane, a LCDC.4 = 1
-    # background bitplane, or a RESET-glitched read, which drove its
-    # $8000-region address before the reset arrived. A SET-glitched read
-    # delivers the byte there. TDSEL_ADDR_OFF when nothing on this line has
-    # driven one.
+    # `tdsel_addr` is the most recent $8000-region tile-data read's VRAM
+    # address -- an object bitplane, an LCDC.4 = 1 background bitplane, or a
+    # RESET-glitched read, which drove its $8000-region address before the
+    # reset arrived. A SET-glitched read delivers the byte there.
+    # TDSEL_ADDR_OFF when nothing has driven one yet.
     #
-    # All three are per-line scratch like obj_fix_from above, cleared at the
-    # mode 2 -> 3 edge, and not serialized: a state is captured in vblank.
+    # BANK IS PACKED IN, at bit 13, rather than kept in a field of its own:
+    # this is written by EVERY unsigned bitplane read of every frame, and the
+    # second store cost +0.20% of retired instructions on blargg cpu_instrs
+    # where the packed one costs +0.20% for the whole rule. Unpacking happens
+    # once per glitched read, which is a handful of dots a frame at most.
+    #
+    # THE INDEX PATH'S ARMING IS PACKED IN TOO, at bit 14 and above: the last
+    # dot a SET-glitched read may still answer with the tile INDEX rather than
+    # the byte at the address (CGB_TDSEL_IDX_DOTS, TDSEL_IDX_SHIFT). A field of
+    # its own costs 8 bytes of object and moves the whole fetch path's offsets,
+    # which measured more than the rule does.
+    #
+    # `tdsel_dot` is per-line scratch cleared at the mode 2 -> 3 edge, and so
+    # are the arming bits -- they are a dot on this line's clock. The ADDRESS
+    # deliberately is NOT, because H-Blank does not clear the bus register it
+    # stands for (see CGB_TDSEL_GLITCH). Neither field is serialized: a state is
+    # captured in vblank.
     tdsel_dot*:           int32
     tdsel_addr*:          int32
-    tdsel_bank*:          int32
     tile_num*:            uint8
     tile_attrs*:          uint8
     tile_data_low*:       uint8
@@ -1909,6 +2337,21 @@ type
     clock_shift*:  uint8
     width_mode*:   uint8
     divisor_code*: uint8
+    # The noise channel's frequency timer is not one counter, it is two, and
+    # NR43 selects a different view of BOTH without restarting either. See
+    # ch4_steps_to_rise: `div_counter` is a free-running counter clocked by the
+    # divisor stage, and `clock_shift` picks which of its bits clocks the LFSR;
+    # `div_next` is the divisor stage itself, the absolute cycle of the next
+    # increment. `next_step` stays the derived "next LFSR shift" deadline so the
+    # catch-up guard is still one comparison.
+    #
+    # Deliberately NOT serialized, and joining the batch of GB fields already
+    # waiting on one payload-revision bump rather than spending a bump each.
+    # A state is loaded with both re-derived from `next_step` (gb_apply_state,
+    # ch4_resync_divisor), which reproduces the LFSR schedule exactly and can
+    # only differ if the game writes NR43 inside the first period after a load.
+    div_counter*:  uint16
+    div_next*:     CycleCount
 
   GbApu* = ref object
     sound_enabled*:       bool

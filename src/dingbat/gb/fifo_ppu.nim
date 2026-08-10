@@ -31,6 +31,12 @@ const WIN_LX_OFF = -128'i32
 # fifo_recompose_last.
 const TAIL_DOT0_OFF = -(1'i32 shl 20)
 
+when defined(gb_px_trace):
+  # Trace-only running state for the FDATA candidate columns; the harness runs
+  # one GB, so module scope is enough and nothing here reaches a shipping build.
+  var px_prev_data: uint8
+  var px_prev_uns:  uint8
+
 proc mixer_note_stop(ppu: GbFifoPpu) {.inline.} =
   ## The shifter is about to STOP on this dot: note the dot base the run it is
   ## interrupting was on, and the `lx` the next run will start at. Two stores,
@@ -58,6 +64,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     window_trigger: base.window_trigger,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
+    stat_chg_dot: STAT_NO_HOLD,
     obj_fix_from: OBJ_FIX_OFF,
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
     tdsel_dot: NO_TDSEL_CHANGE,
@@ -136,6 +143,10 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
       let target = int32(ppu.wx) - 7
       let first  = -int32(7 and int(ppu.scx))
       when WIN_START_PRE_PIXEL != 0:
+        # The clamp is about the DOT the shifter can notice the match on. The
+        # window's TILE still belongs at `target`, one pixel to the left, and
+        # win_start_reset puts it there -- it recognises this case by reading
+        # the clamp back off `lx` (WIN_PRE_PX_PHASE).
         if target == first - 1: first else: target
       else:
         target
@@ -204,6 +215,14 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
+  when defined(gb_px_trace):
+    # One VRAM dump per frame, so an offline decode can evaluate any address
+    # formula against the reference without another rebuild.
+    if ppu.ly == 0:
+      for b in 0 .. 1:
+        var s = newStringOfCap(2 * ppu.vram[b].len + 8)
+        for v in ppu.vram[b]: s.add toHex(v, 2)
+        echo "VRAM", b, " ", s
   ppu.smooth_scroll_sampled = true
   if ppu.fetching_window:
     # ---- A line that STARTS as a window line still pays SCX & 7 ------------
@@ -257,10 +276,51 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     # where hardware samples cc - 2) becoming visible on one more row, because
     # the mode-3 end moved to where that defect shows. Same shape, same
     # signature and the same twenty siblings as win6_b next door.
+    #
+    # ---- The discard is `7 - WX` at EVERY WX, WX = 0 included (WIN_WX0_PHASE)
+    #
+    # This used to carry a `+= 1 / -= 1` pair around `ppu.wx == 0`, which made
+    # the WX = 0 discard six rather than seven when SCX & 7 was zero. That is
+    # the right number of DOTS and the wrong PHASE: it puts the window's first
+    # tile one pixel to the right of where hardware puts it, which is invisible
+    # in every ruler ROM (they measure a black-x, i.e. a dot) and visible in
+    # exactly one place -- a line whose window is turned OFF again partway
+    # across, where the background resumes on the window's own tile boundary.
+    # mealybug m3_lcdc_win_en_change_multiple_wx is that ROM (see
+    # WIN_WX0_PHASE in gb.nim for the reading). The dot the pair was paying for
+    # moves to the head, where the rest of the window's head budget already is.
     ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
-    if ppu.wx == 0:
-      ppu.lx += 1
-      if (ppu.scx and 7) > 0: ppu.lx -= 1
+    when WIN_WX0_PHASE == 0:
+      if ppu.wx == 0:
+        ppu.lx += 1
+        if (ppu.scx and 7) > 0: ppu.lx -= 1
+    else:
+      # The dot the old spelling paid for with that missing seventh pixel. The
+      # head budget is `idle + discard = 6` (WIN_HEAD_ABSORB), and at WX = 0 the
+      # idle term is `WX - 1` = MINUS one: the window's startup fetch is one dot
+      # shorter than everyone else's, which is the other half of
+      # `m3_window_timing_wx_0`'s "window activating one T-cycle later when
+      # WX = 0 and SCX > 0" -- with SCX > 0 there is no such shortening and the
+      # head is the ordinary `6 + SCX & 7` plus that documented dot.
+      #
+      # Spent HERE and not at the head, for two reasons that are the same
+      # reason: this is the dot SCX is latched on, so it is the first dot on
+      # which `SCX & 7 = 0` is even known (at the head, two dots earlier, SCX is
+      # still the value the previous line's write left -- and a ROM that writes
+      # SCX = LY reads one line stale there, which is 105 CGB pixels of
+      # `m3_window_timing_wx_0`); and the dot comes out of the fetch's own
+      # SLEEP rather than off its front, so the map read this dot is making --
+      # and the SCX latch riding on it, which mealybug m3_scx_low_3_bits
+      # brackets to one M-cycle -- does not move. The caller's `inc` takes the
+      # counter from here, so stepping it once skips FETCHER_ORDER's sleep at 2
+      # and the push arrives one dot early, exactly cancelling the extra pixel.
+      #
+      # Written as an add rather than a branch: this proc is reached from the
+      # fetcher's map-read step, and the `if` form measured +0.03% of retired
+      # instructions on Pokemon Crystal where this form measures -0.03% (both
+      # against the same control build, `cycles=` identical) -- the same
+      # inlining cliff the rest of this file's perf notes keep running into.
+      ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) == 0'u8)
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 
@@ -297,6 +357,46 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   when WIN_EN_HOLD > 0: ppu.win_hold = 0'u8
   fifo_arm_window(ppu)
 
+proc win_start_reset(ppu: GbFifoPpu) {.inline.} =
+  ## A window START served by the shifter's equality, with the one case the
+  ## equality cannot express folded in: a match on the comparator's PRE-PIXEL
+  ## slot (WIN_START_PRE_PIXEL, i.e. WX = 6 with SCX & 7 = 0).
+  ##
+  ## `win_lx` was clamped UP to the shifter's first pixel so the match could be
+  ## noticed at all, and that is right for the dot -- the window is noticed one
+  ## dot after hardware notices it, and the fetch it starts is one dot shorter
+  ## because of it. It is not right for the TILE: hardware's window tile begins
+  ## at the window's own first pixel, `WX - 7`, whatever the shifter can reach.
+  ## So take the shifter back onto that pixel (it is off the left edge, so the
+  ## framebuffer never sees it) and enter FETCHER_ORDER one step in, at the map
+  ## read. Five dots of fetch and the extra pixel is six dots and no extra pixel:
+  ## the line's first drawn pixel lands on the same dot it lands on today, which
+  ## is what leaves every mode 3 length instrument reading what it read before.
+  ## See WIN_PRE_PX_PHASE.
+  ##
+  ## The test is the clamp, read back: `win_lx` equals `lx` on this dot, so
+  ## "the window's own first pixel is one to the left of the pixel the match
+  ## fired on" IS `WX - 7 == lx - 1`, and an unclamped match (where `win_lx` is
+  ## the target itself) fails it. No flag is kept for it -- fifo_arm_window
+  ## re-derives `win_lx` from WX on every write that can move it, so the two
+  ## cannot disagree, and asking here rather than storing there keeps a store
+  ## off every register write (+0.07% of retired instructions on Pokemon
+  ## Crystal, measured).
+  ##
+  ## A HELD match is excluded explicitly and not by arithmetic: it has walked
+  ## `win_lx` up to two pixels right of the match it is retrying and taken one
+  ## of them back again (WIN_EN_HOLD_BACK), so its second retry lands on this
+  ## test by coincidence -- worth 3 wrong pixels of the same ruler ROM. The two
+  ## rules are about different pixels: the hold's is a match the shifter has
+  ## already passed, this one a match it has not reached.
+  when WIN_PRE_PX_PHASE != 0:
+    if ppu.win_hold == 0'u8 and int32(ppu.wx) - 7 == ppu.lx - 1:
+      dec ppu.lx
+      fifo_reset_bg(ppu, true)
+      ppu.fetch_counter = 1
+      return
+  fifo_reset_bg(ppu, true)
+
 proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetching_sprite = false
@@ -307,10 +407,16 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_fix_from = OBJ_FIX_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
-  # LCDC.4's is per-line for the same reason, and the address latch with it:
-  # both only ever answer a fetch on THIS line's dots.
+  # LCDC.4's is per-line for the same reason: it only ever answers a fetch on
+  # THIS line's dots. The ADDRESS latch is not reset with it -- see
+  # CGB_TDSEL_GLITCH in gb.nim: it is a bus register, and the first glitched
+  # read of a line reports the address the line before it left there. The
+  # arming packed ABOVE the address does go with the dot: it is a dot on this
+  # line's clock, and a stale one would compare live against the next line's.
   ppu.tdsel_dot = NO_TDSEL_CHANGE
-  ppu.tdsel_addr = TDSEL_ADDR_OFF
+  when CGB_TDSEL_IDX_DOTS > 0:
+    if ppu.tdsel_addr > 0:
+      ppu.tdsel_addr = ppu.tdsel_addr and ((1'i32 shl TDSEL_IDX_SHIFT) - 1)
 
 proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   ## Attempt to push 8 pixels to the BG FIFO. Returns true if successful.
@@ -458,8 +564,23 @@ proc fifo_head_window(ppu: GbFifoPpu) =
       ppu.fetching_window = true
       inc ppu.current_window_line
       fifo_arm_window(ppu)
+  when defined(gb_m3_trace):
+    # Diagnostic only: the dot the line-start decision is taken on, with the two
+    # registers it is taken from. WX is what decides it; SCX is printed next to
+    # it because this dot is TWO before SCX's own latch (the `B` two steps on),
+    # and a ROM that writes SCX per line is still showing the previous line's
+    # value here -- which is why the WX = 0 head dot is spent at the latch and
+    # not here (WIN_WX0_PHASE).
+    if gb_traced(ppu.ly):
+      echo "HEAD ly=", ppu.ly, " dot=", ppu.cycle_counter, " wx=", ppu.wx,
+           " scx=", ppu.scx, " fw=", ppu.fetching_window
   when WIN_HEAD_ABSORB != 0:
     if ppu.fetching_window:
+      # `WX - 1` idle dots, clamped at 0 because FETCHER_ORDER cannot be entered
+      # above its first sleep from here. WX = 0's missing `-1` is spent in the
+      # fetch instead, at the dot SCX is latched on -- see WIN_WX0_PHASE in
+      # fifo_sample_smooth_scroll, which is where the `7 - WX` discard it goes
+      # with is written.
       ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
 
 # ---- M3_THROWAWAY_DOTS: how long the discarded head fetch lasts -----------
@@ -606,24 +727,54 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # reached the address path either -- so it is that address the next
           # SET-glitched read comes back to.
           data = ppu.tile_num
-          ppu.tdsel_addr = int32(16 * int(ppu.tile_num) + tile_row * 2 +
-                                 (if low_plane: 0 else: 1))
-          ppu.tdsel_bank = int32(bank_num)
+          # ...and it leaves the INDEX path armed for one fetch cycle, which is
+          # the whole of CGB_TDSEL_IDX_DOTS. The window rides the same store
+          # above the bank, so this is still one store and no wider a field --
+          # see TDSEL_IDX_SHIFT in gb.nim for why that mattered. What is stored
+          # is the FIRST dot past the window, so that zero up there means "not
+          # armed" for every dot including 0.
+          ppu.tdsel_addr = int32((16 * int(ppu.tile_num) + tile_row * 2 +
+                                  (if low_plane: 0 else: 1)) or
+                                 (bank_num shl TDSEL_ADDR_BANK) or
+                                 (when CGB_TDSEL_IDX_DOTS > 0:
+                                    (int(ppu.cycle_counter) +
+                                     CGB_TDSEL_IDX_DOTS + 1) shl TDSEL_IDX_SHIFT
+                                  else: 0))
+        elif CGB_TDSEL_IDX_DOTS > 0 and
+             (ppu.tdsel_addr shr TDSEL_IDX_SHIFT) > ppu.cycle_counter:
+          # SET on the read dot with the index path still armed: it answers
+          # first, and with THIS tile's index rather than the RESET-glitched
+          # one's. `cgb-acid-hell` is the only ROM in the tree that reaches
+          # here -- see CGB_TDSEL_IDX_DOTS in gb.nim for what that does and
+          # does not establish. TDSEL_ADDR_OFF is -1, so the arithmetic shift
+          # keeps it negative and the sentinel cannot arm anything either.
+          data = ppu.tile_num
         elif ppu.tdsel_addr != TDSEL_ADDR_OFF:
           # SET on the read dot: the address never advanced, so the byte comes
-          # from wherever the last $8000-region read left it.
-          data = ppu.vram[ppu.tdsel_bank][ppu.tdsel_addr]
-      # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and by the
-      # latch story it should leave its address here as well. It deliberately
-      # does not, for two reasons. No cell of either `*_change2` frame can tell
-      # the two apart -- every SET glitch in them is preceded by an object fetch
-      # or a RESET-glitched read that overwrites whatever a plain read left --
-      # and doing it costs two stores on EVERY bitplane read of every frame,
-      # which measured +0.55% of retired instructions on blargg cpu_instrs
-      # against +0.27% for the form above. If a ROM ever separates them, this
-      # is the arm to add back.
+          # from wherever the last $8000-region read left it. The bank needs a
+          # mask now that the arming sits above it.
+          data = ppu.vram[(ppu.tdsel_addr shr TDSEL_ADDR_BANK) and 1][
+                          ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)]
+      elif sel:
+        # An UNGLITCHED LCDC.4 = 1 read is an $8000-region access too, and it
+        # leaves its address here like any other. `m3_lcdc_tile_sel_change` and
+        # its window twin are the ROMs that separate this from the narrower
+        # form (object fetches and RESET-glitched reads only) -- see
+        # CGB_TDSEL_GLITCH in gb.nim for the two references' arithmetic. ONE
+        # store, which is why the bank is packed in: this line runs on every
+        # unsigned bitplane read of every frame.
+        ppu.tdsel_addr = int32(off or (bank_num shl TDSEL_ADDR_BANK))
     when defined(gb_px_trace):
       if gb_traced(ppu.ly):
+        # Every candidate substitution source this read could have delivered,
+        # so a reference frame can arbitrate between them without a rebuild:
+        #   uns/sgn  the two addressing modes' bytes for THIS tile+row+plane
+        #   latch    the address-latch byte (what the landed SET rule delivers)
+        #   prevd    the previous bitplane read's data, whatever mode
+        #   prevu    the previous $8000-region read's data (objects included)
+        let unsO = 16 * int(ppu.tile_num) + tile_row * 2 + (if low_plane: 0 else: 1)
+        let sgnO = 0x1000 + 16 * int(cast[int8](ppu.tile_num)) +
+                   tile_row * 2 + (if low_plane: 0 else: 1)
         echo "FDATA ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
              " fx=", ppu.fetcher_x,
              " plane=", (if low_plane: 0 else: 1), " num=", toHex(ppu.tile_num, 2),
@@ -631,7 +782,17 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
              " addr=", toHex(0x8000 + off, 4),
              " byte=", toHex(data, 2),
              " glitch=", glitch,
+             " uns=", toHex(ppu.vram[bank_num][unsO], 2),
+             " sgn=", toHex(ppu.vram[bank_num][sgnO], 2),
+             " latch=", (if ppu.tdsel_addr == TDSEL_ADDR_OFF: "--"
+                         else: toHex(ppu.vram[(ppu.tdsel_addr shr
+                                               TDSEL_ADDR_BANK) and 1][
+                           ppu.tdsel_addr and ((1 shl TDSEL_ADDR_BANK) - 1)], 2)),
+             " prevd=", toHex(px_prev_data, 2),
+             " prevu=", toHex(px_prev_uns, 2),
              " lcdc=", toHex(ppu.lcd_control, 2)
+        px_prev_data = data
+        if sel: px_prev_uns = data
     if low_plane:
       ppu.tile_data_low = data
       inc ppu.fetch_counter
@@ -1042,14 +1203,15 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # reports the object's plane 1 whichever plane it is itself on. See
     # CGB_TDSEL_GLITCH in gb.nim for the band-3 / band-5 pair that says so.
     if ppu.cgb:
-      ppu.tdsel_addr = int32(b_hi)
-      ppu.tdsel_bank = int32(bank)
+      ppu.tdsel_addr = int32(int(b_hi) or (bank shl TDSEL_ADDR_BANK))
   when defined(gb_px_trace):
     if gb_traced(ppu.ly):
       echo "SPR ly=", ppu.ly, " dot=", ppu.cycle_counter, " x=", s.x,
            " tile=", toHex(s.tile_num, 2),
            " lo=", toHex(ppu.vram[bank][b_lo], 2),
            " hi=", toHex(ppu.vram[bank][b_hi], 2)
+      px_prev_data = ppu.vram[bank][b_hi]
+      px_prev_uns  = ppu.vram[bank][b_hi]
   # Pad OAM FIFO to at least 8 pixels with transparent lowest-priority pixels
   while ppu.fifo_sprite.size < 8:
     fifo_push(ppu.fifo_sprite, GbPixel(color: 0, palette: 0, oam_idx: 0xFF, obj_to_bg: 0))
@@ -1602,13 +1764,43 @@ const M3_END_EARLY {.intdefine.} = 0
 # count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
 const LY0_PIPE_MCYCLES {.intdefine.} = 1
 
+# The same mechanism on EVERY line -- the second axis of bucket 14, and it only
+# means anything alongside `STAT_M2_LEAD` in ppu.nim.
+#
+# Every gambatte family that writes a PPU register out of the mode 2 handler
+# measures the dispatch against the pipeline and NOTHING else: `scy`,
+# `bgtiledata`, `bgtilemap`, `scx_during_m3`, `dmgpalette_during_m3`, and the
+# mealybug `m3_*` frames with them. So the OAM dispatch and the pipeline's phase
+# are one unknown to those 180-odd rows, and moving the dispatch four dots early
+# on its own costs every one of them -- `scy` 67/67 -> 0/67. One M-cycle here
+# gives all of them back exactly (`scy` and `bgtiledata` and `bgtilemap` and
+# `scx_during_m3` all return to their baseline row for row), which is the
+# cancellation docs/gb-failure-triage.md's bucket 14 predicted, resolved: with
+# `STAT_M2_LEAD = 1` this is 3963 gambatte against 3743 at 0 and 3716 at 2,
+# and with the LEAD at 0 it is 3671, so neither term scores without the other.
+#
+# It ships at 0 because the LEAD does; see the halt/sled paragraph at
+# STAT_M2_LEAD for what blocks the pair. Two notes for whoever lands them:
+#
+#  * `LY0_PIPE_MCYCLES` must go to 0 at the same time (3964 against 3819). Line
+#    0's four dots and this lead are the same four dots, seen from the two ends,
+#    and mealybug's `line_0_fix` reads either way round.
+#  * daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's
+#    phase against something OTHER than the mode 2 interrupt -- it syncs on the
+#    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM,
+#    so it moves with the halt bucket rather than with this. It goes 100% ->
+#    90.5% here, which is four dots, and it is expected back when the halt half
+#    lands.
+const M3_PIPE_AHEAD {.intdefine.} = 0
+const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0
+
 # Compiles the pipeline-lead machinery out entirely when all the terms are
 # off, which is what the `-d:M3_PIPE_MCYCLES=0 -d:M3_PIPE_DELAY=0
 # -d:M3_END_EARLY=0 -d:LY0_PIPE_MCYCLES=0` control build for an A/B wants;
 # every guard below is a compile-time short circuit at that setting, not a
 # runtime test.
 const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
-                         M3_END_EARLY != 0 or LY0_PIPE_MCYCLES != 0
+                         M3_END_EARLY != 0 or LY0_PIPE_ANY
 
 # The held-pair ring has to name every pixel a register write can still reach:
 # the deepest mixer stage, plus the pixels the tail burst decided ahead of
@@ -2382,10 +2574,10 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               # over it. See WIN_EN_HOLD_BACK.
               if ppu.win_hold > 0'u8: dec ppu.lx
             # fifo_reset_bg clears the hold on its way through.
-            fifo_reset_bg(ppu, true)
+            win_start_reset(ppu)
             return
         else:
-          fifo_reset_bg(ppu, true)
+          win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
            window_enabled(ppu):
@@ -2740,6 +2932,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   when not STAT_IRQ_SPLIT:
     if m == 2: 80'i32
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+    elif ppu.m2_early_stop: ppu.m2_early_dot(gb)
     else: gb_line_end(ppu)
   else:
     # Every boundary is two stops in a STAT_IRQ_LEAD build, `lead` dots apart:
@@ -2749,13 +2942,28 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
     # it returned before the loop body ran), so it is still the next thing to
     # do. At normal speed the lead's dot and M2_144_EARLY_DOT coincide; in
     # double speed they do not, hence three candidates rather than two.
-    let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
-    result = boundary
-    let irq_dot = boundary - stat_irq_lead(gb)
-    if irq_dot >= ppu.cycle_counter: result = irq_dot
-    if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
-       M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < result:
-      result = M2_144_EARLY_DOT
+    block:
+      let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
+      var tgt = boundary
+      let irq_dot = boundary - stat_irq_lead(gb)
+      if irq_dot >= ppu.cycle_counter: tgt = irq_dot
+      if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
+         M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < tgt:
+        tgt = M2_144_EARLY_DOT
+      tgt
+
+when STAT_M2_EARLY:
+  proc fifo_m2_early_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The OAM STAT source comes up one CPU M-cycle (STAT_M2_LEAD) before the
+    ## line that scans OAM starts, and nothing else happens on that dot -- so
+    ## the edge detector has to be run here explicitly, exactly the way
+    ## m2_line144's CGB pulse is four dots ahead of the vblank boundary. The
+    ## skip target stops on the dot so the loop visits it at all.
+    ##
+    ## `noinline` for the reason fifo_line153_edge and lyc_settling are: the
+    ## caller is the dot loop, it is inlined into the bus path, and its body
+    ## sits on clang's inline threshold (docs/gb_oam_dma_cost.md).
+    if ppu.m2_early: ppu_handle_stat_interrupt(ppu, gb)
 
 proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## ---- The LY 153 -> 0 snapback is an edge the STAT line has to see --------
@@ -2977,6 +3185,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           dec remaining
         continue
       dec remaining
+      when defined(gb_phase_trace):
+        gb_phase = int32(cycles - remaining - 1)
+        gb_ticklen = int32(cycles)
       case m
       of 2:  # OAM search
         when STAT_IRQ_SPLIT:
@@ -3031,9 +3242,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           ppu.smooth_scroll_sampled = false
           ppu.dropped_first_fetch = false
           ppu.sprites = fifo_get_sprites(ppu, gb)
-          when LY0_PIPE_MCYCLES != 0:
+          when LY0_PIPE_ANY:
             # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
-            # where every other line's does, with the flags left alone. Two
+            # where every other line's does (and M3_PIPE_AHEAD, if it is on,
+            # runs EVERY line's ahead by that much again), with the flags left
+            # alone. Two
             # halves, and both are paid here:
             #
             #  * the head. The advance is larger than the head delay this line
@@ -3049,8 +3262,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # `first_line` is excluded: the line 0 that follows an LCD enable
             # was never in vblank, and it has a model of its own already (the
             # whole-line mode-2-reads-as-0 rule in ppu_read, LCD_ON_LINE0_TRIM).
-            if ppu.ly == 0 and not ppu.first_line:
-              let adv = LY0_PIPE_MCYCLES * (4 shr gb.memory.current_speed)
+            let mc = M3_PIPE_AHEAD +
+                     (if ppu.ly == 0 and not ppu.first_line: LY0_PIPE_MCYCLES
+                      else: 0)
+            if mc != 0:
+              let adv = mc * (4 shr gb.memory.current_speed)
               let head = int(ppu.m3_delay)
               ppu.m3_delay = uint8(max(0, head - adv))
               ppu.m3_hold  = uint8(adv)
@@ -3092,7 +3308,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # many dots early too; the FLAG still leaves mode 3 on the dot every
           # other line does. The burst above is on the retire dot deliberately
           # -- that is where the pixels are decided -- and only the flag waits.
-          when LY0_PIPE_MCYCLES != 0:
+          when LY0_PIPE_ANY:
             if ppu.m3_hold != 0:
               dec ppu.m3_hold
               ppu.cycle_counter += 1
@@ -3119,10 +3335,15 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
            gb.cgb_enabled:
           ppu_handle_stat_interrupt(ppu, gb)
+        # ...and the OAM source of the line about to START comes up in this
+        # line's last M-cycle, on every line that scans OAM. Same shape, same
+        # reason the skip target stops here. See STAT_M2_LEAD.
+        when STAT_M2_EARLY:
+          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == gb_line_end(ppu) - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
-          when STAT_READ_HOLD: ppu.stat_hold_until -= ppu.cycle_counter
+          ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
             if ppu.lcdon_lines > 0: dec ppu.lcdon_lines
           ppu.cycle_counter = 0
@@ -3131,28 +3352,51 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # unsplit build and for anything that stepped over that dot.
           when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
           ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
+          # The comparator lets go here and answers again in ly_advance_close. A
+          # rendered line starting happens INSIDE that window -- mode 2 and the
+          # OAM pulse ARE the line start -- so the mode change goes between the
+          # two. Entering vblank is not a line start and is outside the window's
+          # scope entirely; see the write-up above ly_advance_close.
           if int(ppu.ly) == GB_HEIGHT:
-            ppu.`mode_flag=`(1'u8, gb)
+            when LY_BLIND_SCOPE >= 2: ly_advance_vblank_entry(ppu, gb)
+            else:                     ppu.`mode_flag=`(1'u8, gb)
             gb.interrupts.vblank_interrupt = true
+            when defined(gb_phase_trace):
+              echo "VBLIRQ ly=", ppu.ly, " t=", gb_phase, "/", gb_ticklen
             ppu.frame = true
             when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0
             ppu.current_window_line = -1
           else:
-            ppu.`mode_flag=`(2'u8, gb)
+            when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
+            else:                     ppu.`mode_flag=`(2'u8, gb)
       of 1:  # V-Blank
+        # The one vblank line whose successor scans OAM is 153, handing over
+        # to line 0 -- and the suite says line 0's pulse does NOT lead, so
+        # m2_early answers false here unless STAT_M2_EARLY_LY0 is on. The stop
+        # is spelled anyway, because that is the knob's whole point.
+        when STAT_M2_EARLY:
+          if ppu.cycle_counter == ppu.m2_early_dot(gb): fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
           if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
-          when STAT_READ_HOLD: ppu.stat_hold_until -= 456
-          if ppu.ly != 0:
+          ppu.stat_chg_dot -= 456
+          # Same window as the visible boundary above, with no mode change
+          # inside it: vblank line to vblank line. Line 153's own advance to 0 is
+          # not here -- fifo_line153_edge already ran it, with the wider
+          # LYC_SETTLE_DOTS window it is measured to have -- and the `ly == 0`
+          # branch is that snap's mode 1 -> 2, not an LY change.
+          if ppu.ly == 0:
+            when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+            ppu_handle_stat_interrupt(ppu, gb)
+            ppu.`mode_flag=`(2'u8, gb)
+          else:
             ppu.ly += 1
             ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED
-          when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-          ppu_handle_stat_interrupt(ppu, gb)
-          if ppu.ly == 0:
-            ppu.`mode_flag=`(2'u8, gb)
+            when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
+            when LY_BLIND_SCOPE >= 1: ly_advance_vblank(ppu, gb)
+            else:                     ppu_handle_stat_interrupt(ppu, gb)
         when STAT_IRQ_SPLIT:
           # LY 153 snaps back to 0 partway through the line, and the LYC=0
           # source sees it a lead ahead of the readable LY -- one edge, two
@@ -3184,7 +3428,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0
-    when STAT_READ_HOLD: ppu.stat_hold_until = 0
+    ppu.stat_chg_dot = STAT_NO_HOLD
     lcd_off_frame(ppu, gb)
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =

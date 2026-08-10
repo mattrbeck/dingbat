@@ -50,9 +50,13 @@ down until the cost column stops being worth it.
 its own `500-scx-timing.s` header backs dingbat), §8.6 (`halt_op_dupe_delay`'s
 expected `$55` is physically unattainable and dingbat's `$01` is right), §8.7
 (`dma_basic` / `400-dma` / `cpu_bus_1` have no verdict by construction),
-`samesuite/apu/channel_4/channel_4_freq_change` (SameBoy fails it too and its own
-header says the logic is unknown), §4.1's two blargg CRC rows (the fill pattern
-they hash is not recoverable from the shipped source).
+§4.1's two blargg CRC rows (the fill pattern they hash is not recoverable from
+the shipped source). `samesuite/apu/channel_4/channel_4_freq_change` used to be
+on this list — SameBoy fails it and its own header says the logic is unknown —
+and it was wrong to be: the header is an honest report that one test needs a
+mechanism no other test can see, not that the mechanism does not exist. It is
+64/64 as of the noise channel's two-stage timer; see `notes/samesuite-apu.md`.
+**"Its author gave up" is not evidence about the hardware.**
 
 **Sections 3 and 7.4-7.6 exist to stop regressions:** they record behaviours
 dingbat gets *right*, with the ROM author's own sentence explaining why.
@@ -1094,9 +1098,12 @@ and the reason the channel-4 rows are the hard ones:
 
 All 26 channel_3/channel_4 ROMs and 3 of the 5 `div_*` ROMs are `CGB_MODE` and
 read `rPCM12`/`rPCM34`; dingbat implements both (`memory.nim:350-358`), so they
-are runnable today. **`channel_4_freq_change` should be written off** — its own
-header says *"Unfortunately the logic behind it is still unclear"* and the README
-records SameBoy failing it.
+are runnable today. `channel_4_freq_change` was written off here on the strength
+of its own header (*"Unfortunately the logic behind it is still unclear"*) and
+the README recording SameBoy failing it. **That was wrong** — the test is the
+only one in the suite that can distinguish the noise timer's divisor stage from
+its shift stage, which is exactly why it reads as unclear, and it passes 64/64
+once both exist. See `notes/samesuite-apu.md`, "The noise timer is two counters".
 
 ## 7.2 CONTRADICTION — the APU must skip its first DIV-APU event if DIV bit 4 is set at power-on
 
@@ -1134,9 +1141,11 @@ skip.
 
 ## 7.3 CONTRADICTION — channel 4 has no trigger delay and no divisor/shift split
 
-**4-5 rows: `channel_4_delay`, `channel_4_align`, `channel_4_frequency_alignment`,
-`channel_4_equivalent_frequencies` (+ `freq_change`, written off). Confidence:
-high on the diagnosis.**
+**5-6 rows: `channel_4_delay`, `channel_4_align`, `channel_4_frequency_alignment`,
+`channel_4_equivalent_frequencies`, `freq_change`. Confidence: high on the
+diagnosis — and the divisor/shift split in this heading was the right call, which
+the round that shipped the first four talked itself out of. All 13 channel_4 rows
+are green.**
 
 `apu/channel_4/channel_4_delay.asm`:
 

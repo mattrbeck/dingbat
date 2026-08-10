@@ -155,6 +155,37 @@ delta, so a family reports its own error in dots rather than a verdict.
 `objsweep.sh` sweeps the two OBJ-penalty terms against a gambatte subdirectory,
 which is how those two constants were pinned.
 
+## Where an interrupt flag was set, and where the CPU read it
+
+`-d:gb_stat_read_trace` says when a STAT source rose, `-d:gb_irq_trace` when the
+CPU vectored off one, and `-d:gb_if_trace` — the third leg — one `IFREAD` line
+per CPU read of `$FF0F`, with the PPU dot and the byte. Together they turn a
+gambatte `_ifw` / `_late_retrigger` / `lcdirq_precedence` row into three dots on
+one line: the edge, the dispatch, and the read the ROM scores. That is how
+`IRQ_SAMPLE_T` (`gb/cpu.nim`) was bracketed, and how the `ly0` rows were shown
+NOT to be that constant.
+
+## The dot a halt ended on
+
+    nim c -d:test_harness -d:release -d:gb_halt_trace --path:src \
+      -o:dt_halt tests/dingbat_test.nim
+
+`-d:gb_halt_trace` prints one `HALTWAKE` line per halt EXIT — the LY, the PPU
+dot, the mode, `IF` and `IME`. It is the fourth leg of the group above and the
+one none of the other three report: `gb_irq_trace` prints the *dispatch*, which
+the `IME = 0` members of gambatte's `halt/` families never reach, and a halt
+that ends without vectoring leaves no other mark at all.
+
+Every `halt/` row's expected value is a function of that dot plus a fixed number
+of M-cycles, so printing it turns the family into an equation. It is also what
+identifies which ROMs are *anchored* to a halt without looking like it:
+`strikethrough` takes one wake a frame at LY 67 and daid's
+`speed_switch_timing_{ly,stat}` take exactly one each in the whole run, at
+LY 144 — in both cases the entire frame's phase hangs off that single line of
+output, which is why they move when nothing else does. `CGB_HALT_PPU_LEAD`
+(`gb/gb.nim`) and the halt paragraph at `SPEED_SWITCH_STALL_T` (`gb/memory.nim`)
+were both measured with it.
+
 ## Reading a STAT-bracketed row
 
 The gambatte `*_m3stat_{1,2}` pairs differ by exactly one NOP, so they bracket
@@ -265,6 +296,40 @@ mixer's own dot (`fifo_recompose_last`) was measured off
 `m3_lcdc_obj_en_change`, and how the `cgb-acid-hell` residual in
 `docs/gb-failure-triage.md` was identified as a bitplane read returning the
 tile index.
+
+`FDATA` also carries one column per **candidate** byte the read could have
+returned — `uns`/`sgn` (the two addressing modes' bytes for this tile, row and
+plane), `latch` (what the SET-glitch rule delivers), `prevd`/`prevu` (the
+previous bitplane read's data, and the previous `$8000`-region one). Together
+those turn "which rule does hardware use" into an offline replay: parse the last
+frame, invert the reference through the palette, and score every candidate over
+every glitched read at once, with no rebuild between hypotheses.
+
+## The TILE_SEL arbitration corpus
+
+    python3 tools/gbppu/tdselcells.py ./dt_px
+
+is that replay, packaged: it runs the four CGB `m3_lcdc_tile_sel*` references
+and `cgb-acid-hell`, rebuilds one CELL per glitched bitplane read whose bits the
+reference pins, and scores every candidate substitution source and every trigger
+spelling over the whole set. It is the instrument behind `CGB_TDSEL_GLITCH` and
+`CGB_TDSEL_IDX_DOTS` in `gb/gb.nim`, and the reason to run it before touching
+either is that a whole-frame percentage cannot see the cells under an object or
+in a flat palette — those are ~40% of the corpus and they are where the wrong
+rules hide.
+
+Read the **self-check** column first: for every plane the reference pins fully,
+dingbat's own byte is compared with the reconstructed one, and on a passing tree
+all five frames report 0. A nonzero count on the four mealybug frames means the
+parser drifted (the `PUSH` `lx` is the first pixel's own `lx`, and a one-pixel
+error there mis-scores the whole corpus silently); a nonzero count on
+`cgb-acid-hell` alone is the row's residual and is what "2 wrong pixels" looks
+like from this side.
+
+It needs no VRAM dump and no palette table — the `PX` lines plus dingbat's own
+framebuffer give each palette's four colours, which is what inverts the
+reference PNG. A palette whose entries collide simply leaves those bits
+unpinned.
 
 `WINHIT` (under `-d:gb_m3_trace`) is the matching instrument for the window's
 re-trigger: one line per dot the WX equality is reached, with the fetcher

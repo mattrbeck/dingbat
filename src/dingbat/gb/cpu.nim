@@ -82,6 +82,65 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
+const IRQ_SAMPLE_T* {.intdefine.} = 16
+  ## How far into the 5 M-cycle interrupt dispatch, in T-cycles, the IF bit of
+  ## the line being taken is cleared.
+  ##
+  ## dingbat used to do both at T = 0 and then charge all 20 T-cycles, so every
+  ## source that rose anywhere inside the dispatch survived the clear and was
+  ## still set when the handler read IF back. gambatte has a family built to
+  ## measure exactly that -- `*_late_retrigger`, which appears under five
+  ## different STAT sources AND under the timer, so it is a property of the
+  ## dispatch and not of the STAT line. Each ROM's handler re-requests its own
+  ## interrupt with a `LDH ($0F),A` whose position moves by one M-cycle per
+  ## family member, does `EI`, and reads IF back at the top of the second
+  ## dispatch; the step the expected value flips on is where the clear falls.
+  ##
+  ## `m2int_m2irq_late_retrigger_{1,2}` reads it out directly. Its STAT source
+  ## rises on the same dot either way (the next line's OAM pulse), and only the
+  ## dispatch moves: at step 1 the dispatch starts 19 T before that rise and
+  ## hardware still has the bit (out2); at step 2 it starts 15 T before it and
+  ## hardware does not (out0). So the clear is later than 15 T and no later than
+  ## 19 T into the dispatch, i.e. **at the start of the fifth M-cycle** -- the
+  ## one Pan Docs' "Interrupt Handling" describes as setting PC to the handler,
+  ## after the two wait states and the two push cycles. A rise during any of the
+  ## first four is wiped; a rise during the fifth is not.
+  ##
+  ## Swept, whole gambatte suite, one build per cell, against `main` at ab0d7d6
+  ## and with the LY=LYC blind window off, so this column is this constant alone:
+  ##
+  ##   IRQ_SAMPLE_T   gambatte   vs main
+  ##        0           3856      the shipping model before this
+  ##       12           3857     +1 / -0
+  ##       16           3871     +16 / -1   <- ships
+  ##       20           3869     +27 / -14
+  ##
+  ## A strict local maximum, and the two sides fail differently: at 12 nothing
+  ## moves at all, at 20 the `_1` arm of every `*_late_retrigger` family goes red
+  ## (m2int_m2irq, irq_precedence, tima, serial) while their `_2` arms go green,
+  ## which is the whole family sliding one step. 16 is the only setting where
+  ## both arms agree, on both devices and in double speed.
+  ##
+  ## The one row 16 costs is `irq_precedence/late_m0irq_retrigger_ds_1`, and it
+  ## is not this constant: its SCX = 1 twin, the same ROM with one dot more of
+  ## mode 3, is EXACT at 16 in the same build, and both single-speed arms are.
+  ## Two ROMs that differ only in SCX bracketing the same edge from either side
+  ## is the double-speed mode 3 -> 0 residual (bucket 15 of
+  ## docs/gb-failure-triage.md) read through a newly sharpened instrument.
+  ##
+  ## Only the CLEAR moves. Which line is taken is decided earlier and stays
+  ## where it was; the comment at `highest_priority` below is the pair of ROMs
+  ## that separates the two instants, and folding them together costs those four
+  ## rows. mooneye `acceptance/interrupts/ie_push` pins the same decision from
+  ## the other side and is unaffected either way.
+  ##
+  ## Where the two PUSH M-cycles sit inside the dispatch was tried at the same
+  ## time and left alone. Pan Docs puts them third and fourth, after two wait
+  ## states; dingbat runs them first and charges the rest afterwards. Moving them
+  ## to T = 8 (so the low byte's write ends exactly at this sample point) scores
+  ## the same 3871 but trades differently -- +19 / -4, the four including three
+  ## `late_hdma_vs_tima_*` rows that the current order gets right -- so the two
+  ## orders are not distinguishable by score and the incumbent keeps the rows.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge the 5 M-cycles.
   ##
@@ -113,11 +172,27 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
+  # WHICH line is taken is decided between the two push bytes, and that is not
+  # the same instant as the clear below -- gambatte irq_precedence/
+  # if_and_ie_0_vector is four ROMs that separate them. They push over $FFFF
+  # from SP = $0000 and SP = $0001, so the byte that lands in IE is the high one
+  # in the first pair and the low one in the second, and hardware vectors to
+  # $0000 for the first (the new IE is seen) and to $0050 for the second (it is
+  # not). So the decision sits after the high byte's write and ahead of the low
+  # one's -- which is where it has always been here.
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   cpu.pc = interrupt
+  # Run out to the sample point before clearing IF -- see IRQ_SAMPLE_T. The two
+  # writes above have already charged 8 of it.
+  when IRQ_SAMPLE_T > 8:
+    # One call, not one per M-cycle: the PPU's dot loop and the timer are both
+    # granular inside a multi-cycle tick, the two spellings score identically
+    # over the whole gambatte suite, and the M-cycle-at-a-time version inlines
+    # a second copy of the tick pair into this proc for nothing.
+    mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8)
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
@@ -132,6 +207,210 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
     if cpu.stopped: return
     cpu.halted = false
     if cpu.ime: dispatch_interrupt(cpu, gb)
+
+# ---- Where inside an M-cycle a HALTED CPU latches the interrupt line --------
+#
+# A running CPU asks `interrupt_ready` after the last M-cycle of an instruction
+# has been ticked -- i.e. at the M-cycle's END, with all four of its T-cycles
+# and all of its PPU dots spent. This tree gives the halted CPU the same point,
+# and that is wrong: the two paths differ by half an M-cycle, and GBMicrotest
+# measures the difference directly.
+#
+# `int_hblank_nops_scx0..7` and `int_hblank_halt_scx0..7` are the bracket. Both
+# halves wait for the same mode-0 STAT interrupt and report how far they got;
+# the only difference between them is a NOP sled against `EI; HALT`. SCX moves
+# the mode 3 -> 0 edge one dot at a time, so the eight pairs walk that edge
+# across two whole M-cycles -- and hardware's halt half is one M-cycle later
+# than its sled half for four of the eight and level with it for the other four:
+#
+#   scx                     0    1    2    3    4    5    6    7
+#   dot of the mode 0 edge  252  253  254  255  256  257  258  259
+#   T of the M-cycle        3    0    1    2    3    0    1    2
+#   sled (`_nops_`)         $61  $62  $62  $62  $62  $63  $63  $63
+#   halt (`_halt_`)         $62  $62  $62  $63  $63  $63  $63  $64
+#   halt - sled             +1   0    0    +1   +1   0    0    +1
+#
+# The sled row is exact in this tree, so the dot grid and the M-cycle grid are
+# both already right -- the sled's two steps (scx 0->1 and 4->5) are what put
+# the M-cycle boundary between dots 252 and 253, and every dot's T below is read
+# off that. Read the last row against it: the halted CPU misses the interrupt
+# for a whole M-cycle exactly when the flag rises on T 2 or T 3, and catches it
+# when it rises on T 0 or T 1. That is a threshold and it is two-sided -- the
+# four level rows refuse any larger value and the four late ones refuse any
+# smaller -- so the halted CPU's latch sits after T 1 and before T 2, i.e. at
+# the MIDPOINT of the M-cycle, four rows either side of it.
+#
+# The other three sources are the cross-check, and they are why this is not
+# "halt costs one more M-cycle" (which nine green rows refuse -- see the note at
+# STAT_M2_LEAD in ppu.nim): `int_lyc_nops/_halt` are both $99 and
+# `int_vblank1_nops/_halt` are both $42, because those sources rise in the first
+# half of their M-cycle, while `int_oam_nops` $93 / `int_oam_halt` $94 differ by
+# one because the OAM source rises in the second half of its own.
+#
+# Spent, not skipped: the M-cycle is still four T-cycles long either way. What
+# moves is only WHERE in it the question is asked, so nothing here can cost or
+# save time, which is what the `tima/*` rows demand of any halt change. That is
+# also what separates this from "halt exit costs one more M-cycle". A uniform
+# charge cannot produce the table above at all: it would move all eight
+# `int_hblank_*_scx*` rows together, so it swaps which four are green for the
+# other four and stays at 4/8, and it takes `int_lyc_halt`, `int_vblank1/2_halt`
+# and all three `int_timer_halt*` with it -- and the timer has nothing to do
+# with the PPU. Only a threshold on T reproduces four and four.
+#
+# ---- What the head/tail split says about the other sources -----------------
+#
+# With the latch pinned, every source is classified by which half of ITS
+# M-cycle it rises in, and the halt rows read that classification out:
+#
+#   source          rises          halt vs sled   ROMs
+#   -------------   ------------   ------------   ----------------------------
+#   mode 0 (STAT)   T 0..3, by scx  +1 on T 2,3   int_hblank_{nops,halt}_scx0-7
+#   OAM (mode 2)    tail            +1            int_oam_nops $93 / _halt $94
+#   LYC             head            level         int_lyc_{nops,halt} both $99
+#   vblank          head            level         int_vblank1_{nops,halt} $42
+#   timer           head            level         int_timer_halt{,_div_a,_div_b}
+#
+# The OAM row is only a tail one once `STAT_M2_LEAD` is on: at 0 that source
+# rises with the line boundary, which is a head, and the pair reads $94/$94.
+# That is the whole of bucket 14's blocker -- see the halt paragraph at
+# STAT_M2_LEAD in ppu.nim.
+#
+# Two of the head sources need saying in code rather than in a dot, because
+# this tree does not spell their rise where the pairs put it; both are in
+# cpu_halt_tick below. Neither is a free parameter: the halt rows are two-sided
+# on the latch, and given the latch each source's half is read off, not fitted.
+#
+# ---- Measured, and it ships OFF --------------------------------------------
+#
+# Whole runner, one full pass per build, against 765/981 on main:
+#
+#   this alone (knobs off)                  766   gambatte 3851, GBMicrotest 433
+#   + STAT_M2_LEAD=1 M3_PIPE_AHEAD=1
+#     LY0_PIPE_MCYCLES=0                    786   gambatte 3972, GBMicrotest 439
+#
+# The second line is bucket 14 landing: +123 gambatte (`window` +80,
+# `m2int_m3stat` 22/44 -> 44/44, `m2int_m0irq` +4, `halt` +12, `sprites` +4,
+# `speedchange` +7 against `m2enable` -8, `irq_precedence` -4, `enable_display`
+# -3), +10 GBMicrotest, and all five mooneye `intr_2_*` plus their wilbertpol
+# copies stay green with the twelve `*_timing_nops` rows joining them.
+#
+# **It ships at 4 anyway, and the reason is a row this tree may not lose:**
+# `mooneye acceptance/ppu/hblank_ly_scx_timing-GS` (and wilbertpol's copy) goes
+# red -- with the latch alone, before any knob. It is the same measurement as
+# `int_hblank_halt_scx0` at the same SCX on the same device, and the two
+# disagree by exactly this M-cycle:
+#
+#   * GBMicrotest reads TIMA out of the handler, so it times the dispatch
+#     against the timer, and says halt is one M-cycle after sled.
+#   * mooneye reads LY out of the handler N M-cycles later, twice, one M-cycle
+#     apart, so it times the dispatch against the LY ADVANCE -- and it puts the
+#     halt-woken read on the near side of a boundary that +1 crosses.
+#
+# Both endpoints of mooneye's span are separately pinned against TIMA and both
+# are green (`int_hblank_nops_scx0` for the mode-0 edge; `poweron_ly_*`,
+# `lcdon_to_ly*`, `line_153_ly_*` for LY), so the arithmetic says the two should
+# agree and they do not. **That is a new bucket, and it is the one thing between
+# this constant and bucket 14** -- and it is already visible from the other side:
+# the sled sibling of the mooneye row, `hblank_ly_scx_timing_nops`, is red on
+# main, at 4 and at 2 alike, so that family carries an error of its own that the
+# halt half was cancelling.
+#
+# A read-side lag was the obvious candidate for it and is FALSIFIED, not
+# untried: giving `$FF44` the same sample point `STAT_READ_LAG` gives the mode
+# bits (two dots before the M-cycle's end) does not fix the mooneye row and does
+# take seven GBMicrotest LY rows with it -- `lcdon_to_ly{1,2,3}_b`,
+# `line_153_ly_{b,f}`, `poweron_ly_{120,234}`. LY reads back where it is.
+#
+# The rest of the residue at 2, for whoever picks this up (all of it against
+# main, with the three knobs on):
+#
+#   mooneye misc/ppu/vblank_stat_intr-C  x2   the CGB line-144 OAM pulse
+#                                             (m2_line144) is a tail source here
+#                                             and its wake then collides with
+#                                             vblank's; its half is unmeasured
+#   daid ppu_scanline_bgp-dmg                 100% -> 90.5%. Its phase is an
+#                                             LYC=0 halt, i.e. a HEAD source, so
+#                                             the latch leaves its dispatch
+#                                             alone while M3_PIPE_AHEAD moves
+#                                             the pixels under it
+#   strikethrough dmg + cgb                   7 pixels each, same shape
+#   gbmicrotest lcdon_to_if_oam_a,            IF *reads*, not halts: they want
+#     oam_int_if_edge_a                       the OAM source's rise on the far
+#                                             side of a read, which is the
+#                                             read-side quantity above
+#
+# ---- Perf, which is a prerequisite for the flip and not an afterthought ----
+#
+# At 4 this costs nothing: the shipping build is within noise of the same tree
+# without cpu_halt_tick at all (Pokemon Blue 24.0705 vs 24.0723 G retired
+# instructions, Link's Awakening 24.2334 vs 24.2334 G, minimum of three).
+#
+# At 2 it is expensive, and it has to come down before anyone ships it: the
+# split doubles the PPU tick calls of every halted M-cycle, which is Pokemon
+# Blue's whole main loop -- **+4.79%** retired instructions there (24.076 ->
+# 25.228 G) and +1.88% on Link's Awakening. The obvious way down is that most
+# halted M-cycles cannot raise anything at all: the PPU's own idle-skip already
+# knows the next dot on which something can happen, so a halted M-cycle that
+# ends before it needs no split and no second call. That is untried.
+const HALT_IF_SAMPLE_T* {.intdefine.} = 4
+  ## T-cycles into a halted M-cycle at which the interrupt line is latched.
+  ## 4 is the M-cycle's end -- the running CPU's point, and what this tree
+  ## ships -- and compiles the split tick and both head rules out entirely.
+  ## 2 is the measurement above.
+
+proc cpu_halt_tick(gb: GB): bool {.inline.} =
+  ## One halted M-cycle's worth of ticking, answering "does this M-cycle end
+  ## with the CPU awake". The whole M-cycle is spent either way; the latch is
+  ## just taken part way through it.
+  when CGB_HALT_PPU_LEAD_ANY:
+    # The head of a CGB halt: the bus half of this M-cycle runs and the PPU
+    # half does not, so the PPU spends the rest of the halt one M-cycle of dots
+    # behind the rest of the machine. The wake pays them back (`tick` below).
+    # CGB_HALT_PPU_LEAD in gb.nim is the derivation and the bracket; the short
+    # version is that this is what makes a STAT/LYC/vblank wake land one
+    # M-cycle later in the PPU's line while a TIMER wake -- and TIMA with it --
+    # does not move at all, which is what the two halves of that measurement
+    # demand of each other.
+    #
+    # `halt_ppu_debt` is what says the head is over, so the test doubles as the
+    # per-halt latch and no extra flag is needed. The whole block compiles out
+    # at the shipping 0; with it on, a halted CPU pays one predictable
+    # compare-and-branch per M-cycle, on the path a HALT-idling title spends
+    # its main loop in.
+    let mdots = int32(4 shr gb.memory.current_speed)
+    if gb.cpu.halt_ppu_debt < mdots * CGB_HALT_PPU_LEAD and gb.cgb_enabled:
+      gb.cpu.halt_ppu_debt += mdots
+      mem_tick_bus(gb.memory, gb, 4)
+      mem_reset_cycle_count(gb.memory)
+      return interrupt_ready(gb.interrupts)
+  when HALT_IF_SAMPLE_T >= 4:
+    mem_tick_extra(gb.memory, gb, 4)
+    interrupt_ready(gb.interrupts)
+  else:
+    # The bus half whole, the PPU half split. The timer is the reason: its IRQ
+    # is one of the sources the halt pairs put in the HEAD of the M-cycle (see
+    # HALT_IF_SAMPLE_T), and this tree runs the timer's four T-cycles as one
+    # step, so the only place the head can be is in front of the latch. That is
+    # not a shortcut around the split -- the timer's tap periods are all
+    # multiples of 4 T and its phase against the M-cycle grid is fixed, so a
+    # timer IRQ is ALWAYS in the same half, and the halt rows say which one.
+    mem_tick_bus(gb.memory, gb, 4)
+    let ly0 = gb.ppu.ly
+    mem_tick_ppu(gb.memory, gb, HALT_IF_SAMPLE_T)
+    result = interrupt_ready(gb.interrupts)
+    mem_tick_ppu(gb.memory, gb, 4 - HALT_IF_SAMPLE_T)
+    mem_reset_cycle_count(gb.memory)
+    # ...and the LY-derived sources are head sources too, for the same reason
+    # and on the same evidence: `int_lyc_nops/_halt` are both $99 and
+    # `int_vblank1_nops/_halt` are both $42. This tree runs the WHOLE line
+    # boundary -- LY, the coincidence comparator, the vblank IF and the mode 1
+    # source -- on the line's last dot, which is the M-cycle's last dot, so the
+    # latch above cannot see them where they belong. An LY change in the tail is
+    # exactly that case, and it is the only one: the OAM source rises a whole
+    # M-cycle before the boundary (STAT_M2_LEAD) and the mode-0 source rises
+    # mid-line, so neither is ever in an M-cycle that changed LY.
+    if not result and gb.ppu.ly != ly0:
+      result = interrupt_ready(gb.interrupts)
 
 proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
   ## One step of STOP mode (stop_instr in memory.nim): the one halt where the
@@ -179,12 +458,24 @@ proc tick*(cpu: GbCpu; gb: GB) =
       if cpu.stopped: cpu_stop_tick(cpu, gb)
       else:           mem_tick_extra(gb.memory, gb, 4)
       return
-    mem_tick_extra(gb.memory, gb, 4)
     # handle_interrupts, opened up. The halt ends on IF & IE whether or not IME
     # lets an interrupt be taken, and that is the exact M-cycle the question
     # below has to be asked on -- asking it on every halted M-cycle instead
-    # costs a real 0.3% of a title that spends its main loop halted.
-    if interrupt_ready(gb.interrupts):
+    # costs a real 0.3% of a title that spends its main loop halted. WHERE in
+    # the M-cycle it is asked is HALT_IF_SAMPLE_T, above.
+    if cpu_halt_tick(gb):
+      when defined(gb_halt_trace):
+        # Diagnostic (tools only; compiled out of every shipping build). One
+        # line per halt EXIT, with the PPU dot the CPU resumed on. That dot is
+        # what every `halt/` row's expected value is a function of -- the ROMs
+        # read STAT or LY a fixed number of M-cycles after it -- and it is the
+        # only quantity in this file no other trace reports: `gb_irq_trace`
+        # prints the DISPATCH, which the IME = 0 members never reach.
+        if gb.fifo_ppu != nil:
+          echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+               " mode=", (gb.ppu.lcd_status and 3'u8),
+               " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+               " ime=", (if cpu.ime: 1 else: 0)
       # The CGB leaves this state LATER than the DMG does -- ten gambatte
       # `halt/` rows state it, one boundary each -- but not by spending time,
       # which is what 42 `tima/*` rows refuse. CGB_HALT_EXIT_MCYCLES in gb.nim
@@ -208,6 +499,14 @@ proc tick*(cpu: GbCpu; gb: GB) =
           ppu_step_hdma(gb.ppu, gb)
         else:
           gb.ppu.hdma_block_due = false
+      when CGB_HALT_PPU_LEAD_ANY:
+        # ...and the dots the head of this halt held back from the PPU, paid
+        # with no bus half, which is what makes the whole thing a phase and not
+        # a charge: no scheduler, no timer, no OAM DMA, no time.
+        if gb.cpu.halt_ppu_debt != 0:
+          mem_tick_ppu(gb.memory, gb, int(gb.cpu.halt_ppu_debt),
+                       ignore_speed = true)
+          gb.cpu.halt_ppu_debt = 0
       cpu.halted = false
       if cpu.ime: dispatch_interrupt(cpu, gb)
     return
