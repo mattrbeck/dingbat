@@ -1597,6 +1597,129 @@ its own. So the real standing cost of `LEAD=1` is `strikethrough-cgb`'s 7 pixels
 and `cgb-acid-hell`'s 2, against +4 `halt` rows, -4 `dma`, and daid
 `ppu_scanline_bgp`.
 
+#### 2026-08-14: the ROM's wake source is LYC, and the axis is DISPLACEMENT, not any one knob
+
+The entry above ends "it is not the glitch rule that is missing, it is 4 dots",
+and leaves one door open: a phase that separates an **LYC**-sourced STAT wake
+from a **mode-2**-sourced one would move `cgb-acid-hell` without moving the four
+mealybug `tile_sel` ROMs. That door is now measured shut, and measuring it
+turned the whole question into a better-posed one. Read this entry with the
+`f243151`/`d8ef3b1` pair, which refutes a uniform halt phase at every value: the
+spelling below is deliberately knob-independent because of that.
+
+**The ROM's wake source, from the ROM.** `-d:gb_stat_src_trace` (new, at
+`ppu_handle_stat_interrupt`) names which of the four terms takes the STAT line
+high on each rising edge, which `if=` cannot — all four share one IF bit. Over a
+whole `cgb-acid-hell` run:
+
+* **15233 STAT rising edges, every one of them LYC-sourced**
+  (`lyc=1 m2=0 m2v=0 m0=0 m1=0`). Not a majority — all of them.
+* STAT reads `$C6` on 15121 of them and `$C5` on the other 112, i.e. bit 6 (LYC)
+  enabled and **bit 5 (OAM/mode 2) clear for the entire frame**. The mode-2
+  source is not merely unused, it is disabled in the register.
+* Every halt exit is `ly=N dot=1 mode=2 ime=0`, off the LYC=N edge at `cc=0`,
+  with the handler rewriting LYC to the next line each time. That is
+  `halt/lycirq_m2stat`'s shape exactly, which is why that family is the one
+  that brackets this ROM's wake.
+
+So a mode-2-source phase cannot reach this ROM, and the measurement agrees with
+the reasoning to the pixel: `STAT_M2_LEAD=1` **alone** leaves `cgb-acid-hell`
+bit-identical at 23038 and takes the four mealybug rows to 21972 / 21591 /
+21706 / 21609 — because *they* are the mode-2-sourced ones. The two sides of
+this corpus sync on different STAT sources, and that asymmetry is the whole
+reason bucket 14 moves one and not the other.
+
+**What actually moves this ROM is DISPLACEMENT, and it is worth stating in those
+terms because no single knob owns it.** Write `D` for how far the CPU's write
+burst sits from the BG fetch lattice, in dots, and the entire axis collapses to
+three cases — measured, and each reached by more than one spelling:
+
+| `D` | where the LCDC.4 change lands | what hardware needs | `cgb-acid-hell` |
+|---|---|---|---|
+| **0** | ON the plane-1 read, a **SET** | `CGB_TDSEL_IDX_DOTS=8` | 23040 |
+| **±4** | in the tile-**MAP** slot, on no read at all | *nothing exists* | **23038** |
+| **±8** | ON the plane-1 read, a **RESET** | the plain mealybug rule, `IDX_DOTS=0` | 23040 |
+
+The middle row is the entry above: 4 dots is the dead zone, and it is dead
+whatever supplies the 4 dots. Confirmed from the other side today — in the
+parked bundle (`STAT_M2_LEAD=1 M3_PIPE_AHEAD=1 LY0_PIPE_MCYCLES=0
+HALT_IF_SAMPLE_T=2`) with **no halt phase at all**, line 68's fetch grid moves 4
+dots *earlier* (map read 174 → 170) while the write lattice stays put, the
+change lands at `mapoff = 0` again, `glitch=0` on both reads, the census is the
+same 408 cells (216 SET / 192 RESET, acid-hell contributing none), and the row
+is 23038 at `IDX_DOTS=8` and 23038 at `IDX_DOTS=0`. Same dead zone, opposite
+mechanism: there the halted CPU moved, here the pipeline did.
+
+**The algebra of the two-sided constraint.** With `N = M3_PIPE_AHEAD` (the fetch
+pipeline against the whole CPU timeline) and `M = STAT_M2_LEAD` (the mode-2
+dispatch the corpus ROMs sync on), and `cgb-acid-hell` syncing on LYC, which
+neither moves:
+
+* the four mealybug rows are unmoved **iff `N = M`** — their writes and their
+  fetch lattice shift together;
+* `cgb-acid-hell` sees `D = N` M-cycles, and it needs **`N = 2`**.
+
+So the bundle's `N = M = 1` is exactly one M-cycle short of what this ROM wants,
+which is why it lands in the dead zone rather than near it. Both halves verified
+rather than assumed:
+
+| build | `cgb-acid-hell` | the four mealybug `tile_sel` rows |
+|---|---|---|
+| bundle as parked (`N = M = 1`) | 23038 | 23040 × 4 |
+| `N = 2`, `M = 1` | **23040** | 21572 / 21515 / 22174 / 21499 |
+| `N = M = 2` | **23040** | 23024 / 23011 / 23024 / 23040 |
+
+`N = M = 2` is the only spelling on the whole axis that gives this ROM its 8
+dots while nearly holding the corpus (61 pixels residual, the same
+line-0 shape `LY0_PIPE_MCYCLES` fixes at `N = M = 1`) — **and it is refused by
+bucket 14's own bracket**, which pins `STAT_M2_LEAD` to one M-cycle from both
+sides. Re-measured here on the sled that is the bucket's own evidence, so the
+bracket is two-sided in one column rather than quoted:
+
+| `STAT_M2_LEAD` | `int_oam_nops` | `int_oam_incs` |
+|---|---|---|
+| 0 | `$94` vs `$93` — one M-cycle **over** | `$70` vs `$6F` — over |
+| **1** | **exact** | **exact** |
+| 2 | `$92` vs `$93` — one M-cycle **under** | `$6E` vs `$6F` — under |
+
+And the whole runner prices what `N = M = 2` costs to buy those two pixels:
+**726 / 981 and gambatte 3653 / 5005**, against 769 / 3850 shipping. The door is
+shut by the same measurement that opened the bucket.
+
+**The per-source LYC lead, built and refuted.** To ask the door's question
+cleanly rather than through `STAT_IRQ_LEAD` — which moves LYC, mode 0 and mode 1
+together while the OAM pulse rides the flag clock and stays put — this entry
+lands `STAT_LYC_LEAD` (gb.nim), the LYC-source-only twin of `STAT_M2_LEAD`. It
+ships at 0 and compiles out with the rest of the split domain. At 1 it does
+everything this axis could want and is refused anyway:
+
+* all five reference frames go green at once (`cgb-acid-hell` 23040 and the four
+  mealybug rows 23040) — the only single knob in the tree that does;
+* and **six GBMicrotest LYC sleds go exactly one M-cycle early**: `int_lyc_nops`
+  `$99 → $98`, `int_lyc_incs` `$70 → $6F`, `int_lyc_halt` `$99 → $98`,
+  `lcdon_to_lyc1/2/3_int` `$70 → $6F`, `$E2 → $E1`, `$54 → $53`. Every one is
+  exact at 0.
+* Whole runner 765 → 752, gambatte 3876 → 3599 (`sprites` 436 → 240, `ly0`
+  75 → 51, `lycEnable` 181 → 170, `m2enable` 94 → 76).
+
+Those six sleds are **rulers, not thresholds** — they count M-cycles from the
+source's rise to a fixed point — so they refuse a move in either direction, and
+the instrument's sensitivity to sign is itself demonstrated next door: the same
+family's OAM members read one M-cycle *over* (`int_oam_nops` `$94` vs `$93`),
+which is the evidence bucket 14 is built on. The LYC source reads exact where
+the OAM source reads over. That is the two-sided bracket, and it is why the LYC
+half of the wake has no M-cycle to give.
+
+**Where this leaves the axis.** `cgb-acid-hell` wants `D = ±8`; every
+independently-derived quantity in the tree supplies at most 4, and the two
+sources of a second 4 are each refused by their own ROMs — the halt phase by
+`hdma_late_disable` versus `lycirq_m2stat` (`d8ef3b1`), and `STAT_M2_LEAD=2` by
+GBMicrotest. The `D = ±4` world in between needs a substitution rule that the
+415-cell corpus proves does not exist. So `CGB_TDSEL_IDX_DOTS` is not merely
+still standing, it is *load-bearing for the bundle*: whoever lands
+`M3_PIPE_AHEAD=1` should know it moves this row to 23038 and that turning the
+constant off does not help, because at `D = 4` nothing fires either way.
+
 **`m3_lcdc_win_map_change`'s 34 pixels and `m3_lcdc_tile_sel_win_change`'s 98
 are one mechanism, and both are 0 as of 2026-08-09.** Both are one 8x8 block at
 `x = 0..7`, `y = 64..71` (tile_sel adds `x = 8..15`), which is band 8 — the one

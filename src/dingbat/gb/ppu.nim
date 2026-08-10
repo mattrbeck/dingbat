@@ -75,7 +75,12 @@ when STAT_IRQ_SPLIT:
   # LY and the coincidence BIT (gambatte lycint_lycflag), and the vblank
   # interrupt with the DMG OAM pulse measured to coincide with it (mooneye
   # vblank_stat_intr-GS).
-  template irq_mode_of(ppu: GbPpu): uint8 = ppu.irq_mode
+  # The MODE half of the domain is only what the mode terms read when the lead
+  # is theirs. With STAT_LYC_LEAD alone the domain still advances (it is one
+  # counter pair), but mode 0, mode 1 and the OAM pulse keep reading the flag
+  # clock, which is what makes the LYC source separable from them.
+  template irq_mode_of(ppu: GbPpu): uint8 =
+    when STAT_IRQ_LEAD != 0: ppu.irq_mode else: ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 = ppu.irq_ly
 else:
   template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
@@ -730,7 +735,7 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
   ## How far ahead of the mode flag the STAT interrupt line runs, in dots.
   ## STAT_IRQ_LEAD is in CPU M-cycles, and one M-cycle is 4 dots at normal
   ## speed and 2 in double speed (Pan Docs, "Dots").
-  when STAT_IRQ_SPLIT: int32(STAT_IRQ_LEAD) * int32(4 shr gb.memory.current_speed)
+  when STAT_IRQ_SPLIT: int32(STAT_DOMAIN_LEAD) * int32(4 shr gb.memory.current_speed)
   else: 0'i32
 
 # ---- Where STAT's mode bits are sampled ------------------------------------
@@ -900,6 +905,31 @@ const STAT_M2_PULSE* {.intdefine.} = 3
 # HALT_IF_SAMPLE_T nevertheless ships at 4, on ONE row it costs on its own --
 # mooneye `acceptance/ppu/hblank_ly_scx_timing-GS` -- so this pair is still
 # blocked, but on a stated and much smaller bucket. That constant carries it.
+# ---- The same question for the LYC source, asked and answered NO ------------
+#
+# `STAT_LYC_LEAD` (declared in gb.nim with STAT_IRQ_LEAD, whose split domain it
+# shares) is this constant's twin for the LYC source. It exists because
+# `cgb-acid-hell` and the four mealybug `tile_sel` ROMs sync on DIFFERENT STAT
+# sources -- LYC and mode 2 respectively, measured per edge with
+# `-d:gb_stat_src_trace`, 15233 edges and STAT bit 5 clear all frame on the
+# former -- so a per-source phase is the one shape that could move one and not
+# the other, and the acid-hell axis wants exactly that (2026-08-14 entry in
+# docs/gb-failure-triage.md).
+#
+# **It is refused, and by this constant's own instrument.** At 1 it is the only
+# single knob in the tree that takes all five CGB TILE_SEL reference frames
+# green at once -- and six GBMicrotest LYC sleds go exactly one M-cycle early
+# with it: `int_lyc_nops` $99 -> $98, `int_lyc_incs` $70 -> $6F, `int_lyc_halt`
+# $99 -> $98, `lcdon_to_lyc1/2/3_int` $70 -> $6F, $E2 -> $E1, $54 -> $53. All
+# six are exact at 0. Whole runner 765 -> 752, gambatte 3876 -> 3599.
+#
+# The sleds are RULERS, not thresholds -- they count M-cycles from the source's
+# rise to a fixed point -- so they refuse a move in either direction, and their
+# sensitivity to sign is demonstrated by the OAM members of the same family
+# reading one M-cycle OVER, which is the evidence this constant is built on.
+# The OAM source reads over and the LYC source reads exact, on one instrument.
+# That asymmetry is the whole of bucket 14, and it is why the LYC half has no
+# M-cycle to give.
 const STAT_M2_LEAD* {.intdefine.} = 0
   ## CPU M-cycles the OAM STAT source comes up before the line boundary.
   ## 0 is the boundary itself and compiles the whole mechanism out.
@@ -1254,6 +1284,25 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     when defined(gb_phase_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " t=", gb_phase, "/", gb_ticklen, " mode=", ppu.mode_flag
+    when defined(gb_stat_src_trace):
+      # Diagnostic (tools only). WHICH of the four terms above took the line
+      # high on this edge. `if=` alone cannot answer that -- all four share one
+      # IF bit -- and "which source woke this ROM's halt" is the question a
+      # per-source phase constant (STAT_M2_LEAD) can only be applied to once it
+      # is answered. Printed as a set, because a handover can raise two at once.
+      echo "STATSRC ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " lyc=", (if ppu.irq_ly_of == ppu.lyc and
+                        ppu.coincidence_interrupt_enabled and not settling: 1
+                     else: 0),
+           " m2=", (if ppu.m2_source(gb) and ppu.oam_interrupt_enabled: 1
+                    else: 0),
+           " m2v=", (if ppu.oam_interrupt_enabled and ppu.m2_line144(gb): 1
+                     else: 0),
+           " m0=", (if ppu.irq_mode_of == 0 and ppu.hblank_interrupt_enabled: 1
+                    else: 0),
+           " m1=", (if ppu.irq_mode_of == 1 and ppu.vblank_stat_enabled: 1
+                    else: 0),
+           " stat=", toHex(ppu.lcd_status, 2), " lycreg=", ppu.lyc
     gb.interrupts.lcd_stat_interrupt = true
   ppu.old_stat_flag = stat_flag
 

@@ -39,7 +39,26 @@ const LY_BLIND_SCOPE* {.intdefine.} = 1
 # STAT_IRQ_LEAD still ships at the value that needs no field and no branch, so
 # the shipping build is exactly the tree without it.
 const STAT_IRQ_LEAD* {.intdefine.} = 0
-const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0
+const STAT_LYC_LEAD* {.intdefine.} = 0
+  ## The same lead as STAT_IRQ_LEAD, applied to the **LYC source alone** --
+  ## the per-source split that STAT_M2_LEAD is for the OAM source. It exists
+  ## because STAT_IRQ_LEAD moves three sources at once (LYC, mode 0, mode 1;
+  ## the OAM pulse is on the flag clock and stays put either way), so it cannot
+  ## answer a question about one of them, and `cgb-acid-hell` asks exactly that
+  ## question: its halt is woken by the LYC source and nothing else, while the
+  ## four mealybug `tile_sel` ROMs are woken by the OAM one.
+  ##
+  ## **It ships at 0, and the reason is a two-sided bracket, not caution.** See
+  ## STAT_LYC_LEAD's write-up next to STAT_M2_LEAD in ppu.nim and the 2026-08-14
+  ## entry in docs/gb-failure-triage.md.
+const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0
+static:
+  # The two share one early-advancing domain (irq_ly / irq_mode), so they cannot
+  # ask for different amounts of lead at once. Either is free to be 0.
+  doAssert STAT_IRQ_LEAD == 0 or STAT_LYC_LEAD == 0 or
+           STAT_IRQ_LEAD == STAT_LYC_LEAD,
+    "STAT_IRQ_LEAD and STAT_LYC_LEAD drive one domain: set one, or set both equal"
+const STAT_DOMAIN_LEAD* = max(STAT_IRQ_LEAD, STAT_LYC_LEAD)
 
 # Where the mode bits a CPU STAT read returns are sampled: a read whose M-cycle
 # leaves the PPU dot counter at `cc` sees the mode the PPU changed to on dot X
