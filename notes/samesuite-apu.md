@@ -1,15 +1,15 @@
 # SameSuite APU: what its sources assert, and where dingbat stands
 
-Score: **64/70** (div 5/5, channel_1 18/21, channel_2 15/15, channel_3 15/16,
-channel_4 12/13), up from 10/70. With both blargg sound suites green (dmg_sound
-12/12, cgb_sound 12/12) the APU tally across all three is **88/94**, up from
+Score: **67/70** (div 5/5, channel_1 19/21, channel_2 15/15, channel_3 15/16,
+channel_4 13/13), up from 10/70. With both blargg sound suites green (dmg_sound
+12/12, cgb_sound 12/12) the APU tally across all three is **91/94**, up from
 29/94.
 
-Six rows are left, and every one of them is a byte or two short rather than a
-mechanism away: `channel_1_sweep_restart` 143/144 bytes,
-`channel_1_freq_change_timing-cgbDE` 15/16, `-cgb0BC` 14/16,
-`channel_3_extra_length_clocking-cgbB` 20/32, `channel_1_sweep_restart_2`
-95/128, `channel_4_freq_change` 46/64 (written off by its own author).
+Three rows are left, and **none of them is a shootout row**: two of the
+per-revision `channel_1_freq_change_timing` ROMs (`-cgbDE` 15/16, `-cgb0BC`
+14/16, and their remaining bytes are in the double-speed row the three ROMs
+disagree on, so at most one of them can ever pass on one machine) and
+`channel_3_extra_length_clocking-cgbB` 20/32.
 
 The nine per-revision ROMs are now scored on the revision their filename names
 (`--model=cgb0B` and friends), not on the default; see
@@ -107,7 +107,7 @@ none of the failures below was a granularity wall.
 What each source asserts, whether dingbat matches, and where the code is. Rows
 are shootout rows (SameSuite APU contributes 61). Sorted by channel.
 
-## Pulse channels (channel_1 17 rows, channel_2 14 rows) — 15/17 and 12/14
+## Pulse channels (channel_1 17 rows, channel_2 14 rows) — 17/17 and 14/14
 
 | source | assertion | dingbat |
 |---|---|---|
@@ -126,8 +126,8 @@ are shootout rows (SameSuite APU contributes 61). Sorted by channel.
 | `channel_1_volume` | "Attempts to change the volume of channel 1 without triggering the NRx2 write glitch" | **matches**, 128/128 bytes. Same mechanism |
 | `channel_1_stop_div` | "Channel 1 behave similarly to channel 3, but with a smaller length range. See channel_3_stop_div" | **matches**, and it came free with the DIV-APU work |
 | `channel_1_sweep` | *(no header, but see the annotation quoted below)* | **matches**, 144/144 |
-| `channel_1_sweep_restart` | "Several tests involving restarting the channel while sweep is active" | **does not match**, but only just: 143/144, up from 85. Rounds 2-5 and 6-9 are exact; the one bad byte is in round 1, where a duty step lands on the observing read's exact cycle |
-| `channel_1_sweep_restart_2` | "Part 2" | **does not match**, 95/128. See below |
+| `channel_1_sweep_restart` | "Several tests involving restarting the channel while sweep is active" | **matches**, 144/144, up from 85. The last byte was round 1's, and it was not a restart bug: the sweep's own frequency write races the timer reload. See below |
+| `channel_1_sweep_restart_2` | "Part 2" | **matches**, 128/128, up from 95 — the same one-M-cycle offset, and it came free |
 | `channel_1_extra_length_clocking-cgb0B` | quotes the extra-length-clocking rule in full, then: "On revisions <= CPU CGB B, the length counter only has to have been disabled before; the current length enable state doesn't matter… fixed on CPU CGB C" | **matches on `--model=cgb0B`** (`GbQuirks.length_clock_any_nrx4`), and correctly does NOT on the default. Not a shootout row |
 | `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | *(no header; three ROMs, three CPU revisions)* | `-A` **matches**, 16/16; `-cgbDE` 15/16 and `-cgb0BC` 14/16. See below. Not shootout rows |
 
@@ -163,8 +163,9 @@ nine more M-cycles, not eight.
 
 **`channel_1_sweep` (144/144) and `channel_1_sweep_restart` 85 -> 143/144.** The
 code is `GB_SWEEP_CHECK_DELAY`, `ch1_sweep_check_due` and the arm in `ch1_write`.
+The 144th byte took a different mechanism entirely; see two sections down.
 
-#### The trap this sets, and the one row it does not reach
+#### The trap this sets
 
 Making a lazily-evaluated check able to clear `enabled` broke
 `blargg/cgb_sound/07-len sweep period sync`, which had nothing to do with sweep
@@ -174,15 +175,20 @@ loop that polls NR52 waiting for a sweep overflow to disable the channel. It now
 runs the pending check on an NR52 read. **If anything else is ever made to
 change `enabled` off the register-write path, check every reader of it.**
 
-`channel_1_sweep_restart_2` (95/128) is the row left, and it is unfinished
-rather than blocked. What it measures is when a trigger's copy of NR13/NR14 into
-the sweep SHADOW register becomes visible to the sweep unit: its channel is
+`channel_1_sweep_restart_2` looked like the row left, at 95/128, and the
+diagnosis recorded here was that it measures when a trigger's copy of NR13/NR14
+into the sweep SHADOW register becomes visible to the sweep unit — its channel
 disabled only when the restart lands 3 or more M-cycles before the DIV-APU
-sweep, where dingbat disables whenever the restart lands at or before it. A
-3 M-cycle shadow-copy pipeline plus a 1 M-cycle latency on the first
-calculation's disable reproduces all 128 bytes — but both constants are visible
-only in this one ROM, there is no test to cross-validate them against, and
-fitting two numbers to one table is the thing this file exists to argue against.
+sweep, against dingbat disabling whenever the restart lands at or before it —
+and that a 3 M-cycle shadow-copy pipeline plus a 1 M-cycle latency on the first
+calculation's disable would reproduce all 128 bytes.
+
+**That was two constants fitted to one table, and it was wrong.** The row is
+now 128/128 with no new constant at all: the offset it was measuring is the
+one-M-cycle waveform shift in the section after next, and both ROMs were seeing
+the same bug from opposite ends. Declining to fit the pair is what left the
+right answer reachable — which is the argument this file exists to make, and
+this is the first time it has paid out.
 
 ### A register write and a timer reload on the same cycle: the write wins
 
@@ -210,12 +216,44 @@ SameSuite ships no `channel_2_freq_change_timing`, so that half is by symmetry
 and not by measurement; the channel_2 mirrors of every other pulse test still
 pass either way.
 
+**It is also mirrored onto the sweep unit**, which writes the same register pair
+from the one path that does not go through `ch1_write`. That was worth the last
+byte of `channel_1_sweep_restart` and all 33 of `channel_1_sweep_restart_2`; see
+the next section.
+
 **`-A` passes 16/16.** `-cgbDE` reaches 15/16 and `-cgb0BC` 14/16, and the
 remaining bytes are all in the DOUBLE-SPEED row — which is the only row the
 three ROMs disagree on, so at most one of them can ever pass on one machine.
 dingbat's double-speed duty phase currently matches what the ROMs say AGB does.
 Getting `-cgbDE` (the revision dingbat actually models) would mean a per-revision
 double-speed duty phase, and would cost `-A`.
+
+### The sweep writes NR13/NR14 too, and loses the same race
+
+`channel_1_sweep_restart`'s round 1 was the last byte in the pulse block, and
+the two previous readings of it were both about the RESTART: either the first
+duty step after a re-trigger at a sweep-modified frequency lands one M-cycle
+early, or the tie at a coincident PCM12 read goes the wrong way. Neither
+survives contact with the rest of the table. Flipping the `GB_OBS_CPU` tie costs
+45 rows, and round 2 of the same ROM reads PCM12 on the exact cycle of a duty
+step and needs that step INCLUDED. Making a restart cost two ticks instead of
+one when it coincides with a reload costs `channel_1_restart` and
+`channel_2_restart`, whose 64 restarts all coincide with one.
+
+The restart was never the problem. The sweep unit writes the frequency, and it
+had been exempt from the rule the section above derives for NR13/NR14 writes:
+land on the reload cycle and the reload takes the NEW value. Round 1 runs the
+channel at `$7ff` — one M-cycle per duty step — so its sweep tick ALWAYS lands
+on a reload, and without the rule the pending sample keeps the 1 M-cycle period
+it was armed with while the frequency has already become `$7f0`. Every step
+after the sweep then sits one M-cycle early, and the restart 16 M-cycles later
+lands on a duty step that should not be there. Round 2 runs the same code the
+other way round (`$7f0` up to `$7ff`, where a step coincides one M-cycle in
+sixteen) and does not move.
+
+One line in `sweep_step`, and the discriminator is `ch1_reload_is_now` — the
+predicate that already existed. **`channel_1_sweep_restart` 143 -> 144/144 and
+`channel_1_sweep_restart_2` 95 -> 128/128.**
 
 ### On "Zombie Mode" — it was never revision-dependent, and it is now fixed
 
@@ -273,7 +311,7 @@ first step of the waveform, **and the wave channel's sample buffer is reset to
 wave byte out of PCM34 for the whole of the startup delay, which looked like a
 delay bug and was not.
 
-## Channel 4 (12 shootout rows) — 11/12
+## Channel 4 (12 shootout rows) — 12/12
 
 | source | assertion | dingbat |
 |---|---|---|
@@ -285,16 +323,21 @@ delay bug and was not.
 | `channel_4_frequency_alignment` | *(no prose; the assertion is the annotation on its expected table)* | **matches**, 144/144. See below |
 | `channel_4_equivalent_frequencies` | "identical frequencies that are expressed differently generate the same output, other than a potential off-by-one sample caused by the start delay" | **matches**, 128/128, and it is the cross-check for the whole noise model: one encoding per rounding case, 512 nops deep into the LFSR sequence |
 | `channel_4_lfsr_restart` / `_restart_fast` | "the contents of the LFSR register are cleared on restart / even on a fast restart" | **match**, and NOT for the reason the header suggests: the LFSR was always being cleared. Their expected tables are `channel_4_lfsr`'s shifted by exactly one LFSR step, i.e. a RESTART's first sample takes a full period where a fresh trigger's takes half |
-| `channel_4_freq_change` | "what happens when changing the frequency of channel 4 while it's playing. **Unfortunately the logic behind it is still unclear**" | written off by its own author |
+| `channel_4_freq_change` | "what happens when changing the frequency of channel 4 while it's playing. **Unfortunately the logic behind it is still unclear**" | **matches**, 64/64, up from 46. Its author's "still unclear" is fair — it is the only test that can see the noise timer's two stages, and it needs all of them. See below |
 | `channel_4_extra_length_clocking-cgb0B` | per-revision | not a shootout row |
 
 ### The noise start delay: half a period, off a grid the trigger cannot reset
 
 The previous round's diagnosis — "the divisor and the shift need two real
-cascaded counters" — was wrong, and usefully so. `ch4_frequency_timer` still
-collapses NR43 into one scalar `divisor << shift`, and that is fine: the PERIOD
-really is a single number. What differs between two encodings of the same period
-is only the PHASE the trigger starts them at, and that is expressible exactly.
+cascaded counters" — was recorded here as wrong. **It was right, and this
+section was reading its own evidence as a special case.** Everything below is
+still true of a trigger, and every constant in it still holds; what changed is
+that the two rules it derives are not axioms, they are what the two counters do
+(see the section after next). It is left standing because the derivations are
+the evidence for the model, and because the reason it stopped one step short is
+worth having on the record: nothing that only ever TRIGGERS the channel can tell
+one counter from two, so a one-scalar period plus a startup phase rule fits
+twelve of the thirteen rows exactly.
 
 Two facts, both solved out of the expected tables rather than swept for:
 
@@ -342,13 +385,70 @@ out. **5 rows** (`delay`, `frequency_alignment`, `equivalent_frequencies`,
 `divisor_code` 5-7 are not exercised by any SameSuite test and follow the `>= 2`
 case because that is the only evidence there is.
 
-### What is left on channel 4
+### The noise timer is two counters, and an NR43 write re-reads both
 
-`channel_4_freq_change` (46/64 bytes) is the only red row, and its header says
-"Unfortunately the logic behind it is still unclear". It is the one test that
-changes NR43 mid-flight, i.e. it asks what happens to the divisor stage's
-in-progress count when the period changes under it — the question the model
-above deliberately does not answer, because nothing else asks it.
+`channel_4_freq_change` is the one test that changes NR43 mid-flight, and it is
+built so that a single-counter model cannot pass it. It plays one pair of
+periods — 4 and 16 M-cycles — through four different NR43 encodings of them
+(`$18`/`$09` for the short one, `$38`/`$1a` for the long), switches encoding
+mid-note at two trigger phases, and walks PCM34 an M-cycle at a time to find the
+next LFSR shift. One counter with one absolute deadline gives the same answer
+for all four; its 64 bytes want eight different ones. Its author's
+"Unfortunately the logic behind it is still unclear" is a fair report of that,
+and "written off" was the wrong conclusion to draw from it.
+
+Solving the eight rows for the first shift after the write gives a shape that is
+not a fit but a circuit:
+
+* a **divisor stage** that increments a counter every `4` T-cycles for divisor
+  code 0 and every `8 * code` otherwise — exactly HALF the "divisor" the period
+  formula quotes;
+* a free-running **counter** whose bit `clock_shift` clocks the LFSR on its
+  RISING edge, i.e. once every `2^(shift+1)` increments.
+
+They multiply back to the documented period exactly (`4 * 2^(shift+1)` =
+`8 << shift`; `8c * 2^(shift+1)` = `16c << shift`), and **the halving is the
+divisor-code-0 carve-out the section above derived from
+`channel_4_frequency_alignment`**: code 0 increments once per APU tick, every
+other code on the 512 kHz grid, which is the whole reason only code 0 escapes
+it. Two tables solved independently, four tests apart, describing the same
+divider — that is the cross-check this file asks for, and it is why the model
+below is not a third fit.
+
+An NR43 write then re-interprets both stages instead of restarting either:
+
+* the shift picks a different BIT of the count the channel has already reached,
+  so the next shift is however far THAT bit's next rising edge is — not half a
+  period, not a whole one. This is what makes `$18 -> $38` and `$09 -> $38` land
+  their next shift on different cycles even though both go from a 4 M-cycle
+  sample to a 16 M-cycle one;
+* the divisor stage's countdown is left running and reloads with the new divisor
+  only when it expires. The exception is a write on the exact cycle an increment
+  lands: that increment has consumed the countdown, so the reload is the new
+  divisor — **rounded UP onto the 512 kHz grid**, because a code != 0 stage can
+  only be reloaded on a grid edge. That rounding is the entire difference
+  between the test's two trigger phases on the rows switching into divisor code
+  2, and it is the same grid, anchored at the same `GbApu.noise_phase`, that the
+  trigger rule uses.
+
+The trigger keeps `gb_noise_deadline` as its single source of truth: both stages
+are reconstructed from the deadline it returns, so every one of the twelve rows
+that was already green is bit-for-bit where it was, and the fresh/restart split
+stops being a special case — a fresh trigger leaves the counter half a period
+from the next rising edge, a restart leaves it sitting ON the edge it just
+produced, and both put the first increment in the same place.
+
+**`channel_4_freq_change` 46 -> 64/64, channel_4 13/13.** The code is
+`GbChannel4.div_counter` / `div_next`, `ch4_steps_to_rise` and the NR43 arm of
+`ch4_write`.
+
+The catch-up stays closed-form. The divisor stage is not advanced on every batch
+of LFSR shifts — its increment period only changes at a trigger, an NR43 write
+or a speed switch, all three of which settle it, so the count in between is one
+division away whenever the NR43 path asks (`ch4_advance_divisor`). Doing it
+eagerly measured +0.14% of retired instructions on Pokemon Crystal for state
+nothing reads between writes; done lazily it is 0.0% on Crystal, Shantae and
+Link's Awakening DX.
 
 ## The DIV-APU family (5 shootout rows) — 5/5
 
@@ -449,7 +549,7 @@ gambatte is +20 overall.
 
 ## Unserialized state
 
-Ten fields have been added across the three rounds and none is in the save
+Twelve fields have been added across the four rounds and none is in the save
 state. Rounds one and two: `GbApu.tick_phase`, `GbApu.div_skip`,
 `GbChannel1/2.sample_bit`, `GbChannel3.wave_fetched`,
 `GbVolumeEnvChannel.env_extra_tick`. Round three adds four more:
@@ -466,16 +566,24 @@ state. Rounds one and two: `GbApu.tick_phase`, `GbApu.div_skip`,
   one sample. `apu_rebase` clears them rather than shifting them (they are in the
   past and would underflow); losing a tie on a frame boundary is not observable.
 
-**An eleventh joins them from outside the APU: `GB.revision`** (one byte, wanted next to
+Round four adds the noise channel's two-stage timer:
+
+* **`GbChannel4.div_counter` / `div_next`** — the divisor stage and the count
+  its tap reads. `gb_apply_state` re-derives both from the restored `next_step`
+  (`ch4_resync_divisor`), which reproduces the LFSR schedule exactly; the only
+  thing a state can lose is an NR43 write landing inside the first period after
+  a load.
+
+**A thirteenth joins them from outside the APU: `GB.revision`** (one byte, wanted next to
 `cgb_enabled` in `GB_SEC_MEM`, older states reading back the default) — see
 `docs/gb-hardware-revisions.md` §2.5 for what breaks until the bump. Each is
 refreshed within one duty period, one APU power cycle or one 512 Hz step of a
 state load; none is CPU-visible except through PCM12/PCM34; and each is written
 only by a register write or a power-on, so a rollback snapshot that replays that
 write reconstructs it exactly. Serializing them costs a GB payload revision
-bump, which is a decision to take once for a batch of fields rather than ten
+bump, which is a decision to take once for a batch of fields rather than twelve
 times; the field comments in `gb.nim` say so at each one. **If a GB payload bump
-happens for any other reason, add these ten.**
+happens for any other reason, add these twelve.**
 
 ## What full accuracy would cost
 
@@ -494,12 +602,11 @@ advance the APU to the exact cycle only when software observes it. It is the
 pattern the GBA core already uses for the bus (`catch_up`); the missing piece is
 sub-instruction cycle tracking in the GB core. Not built, not measured.
 
-Three rounds of source-reading have now confirmed the prediction that neither
-was needed: **every one of the 46 rows recovered so far was a phase, startup or
+Four rounds of source-reading have now confirmed the prediction that neither
+was needed: **every one of the 49 rows recovered so far was a phase, startup or
 model-axis bug at a resolution M-cycle stepping already reaches.** Round two
 guessed that the CH4 divisor/shift problem would be the first item to need finer
-structure. It did not: it needed a half-period start delay and a grid the
-trigger cannot reset, both of which land on whole M-cycles. Nothing left on the
-board argues for a per-cycle APU either — the three remaining reachable-looking
-rows want a 1-3 M-cycle pipeline on a register copy, which is state, not
-resolution.
+structure. It did not — it needed a second counter, and both stages land on
+whole M-cycles. What is left is two per-revision `freq_change_timing` ROMs whose
+remaining bytes are in a double-speed row the three of them disagree on, and
+`channel_3_extra_length_clocking-cgbB`; neither wants finer resolution.

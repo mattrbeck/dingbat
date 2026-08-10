@@ -137,6 +137,11 @@ SameBoy and CPU-CGB-D. Once understood, write a test ROM for CPU-CGB-D."* —
 i.e. the CGB-D behaviour has no ROM yet, so there is nothing to model even if
 someone wanted to.
 
+**Settled: all three sweep rows are green on the default**, and none of them
+needed a revision. `channel_1_sweep_restart_2` went 95 -> 128/128 as a side
+effect of the sweep unit obeying the same reload-race rule NR13/NR14 writes
+already did; see `notes/samesuite-apu.md`, "The sweep writes NR13/NR14 too".
+
 ## 1.4 SameSuite's per-revision ROMs — 5 local rows, 0 shootout rows
 
 Nine of the 70 APU ROMs carry a revision suffix. **None of the nine is a
