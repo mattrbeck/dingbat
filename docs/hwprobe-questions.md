@@ -152,6 +152,40 @@ VRAM-contention timer page, per-source IRQ latency, the LCD-on H-Blank
 count page) are the next build, best shaped after the first photo set
 shows where silicon actually disagrees.
 
+## v4 SHIPPED — the guessed-at-behavior pages (gbaedge 16-24)
+
+A survey of behaviors GBA emulators visibly guess at rather than measure
+(unhandled corners, hedged constants, copied rumors) produced the list
+below; each is now a gbaedge page.  Nothing in the field answers these
+from hardware — dingbat included — so whatever the photos say is new
+data for everyone.
+
+| open question | page |
+|---|---|
+| which CPSR/SPSR bits are actually writable; is SPSR bit4 forced high; what does mrs SPSR return in a mode with no SPSR | 17 CPSRBITS |
+| when are CPSR.I / the IRQ line sampled; IE/IF/IME written in the same cycle an IRQ asserts | 20 IRQWIN |
+| does Thumb `CMP r15, rX` load SPSR into CPSR; stored-PC offsets for str/stm/ldm forms | 18 THUMBPC |
+| SPSR read in the cycle after an ldm^ — OR'd with CPSR? user-list transfer with a banked base register | 19 LDMUSER |
+| MSR that alters the Thumb bit | 8 MSRTBIT (**silicon-answered: resume A+8, skip A+10**) |
+| do near-BX encodings execute as BX, fall through, or trap | 24 BXDECODE |
+| can a byte write of 0x80 enable a DMA via bus byte-mirroring; disable-while-starting | 21 DMAEDGE |
+| does video-capture DMA3 really run only every other frame | 22 CAPDMA |
+| write-only/unused IO reads: 0 or open bus, per register | 16 IORW |
+| sweep divider 0 / immediate trigger recalc / the unwritten second recalc / mid-note divider change | 23 SWEEPQ |
+| Thumb open-bus halfword composition ($+4 vs $+6 by alignment) | deferred (THUMBBUS) |
+| envelope timer mid-note reload | not CPU-visible on AGB; PCM12/34 makes it a **gbedge** (CGB) item |
+| backup-chip (EEPROM/flash/RTC) corner behaviors | unanswerable from a flashcart (the EverDrive emulates those chips) |
+| 17-bit VRAM fetch addresses, mid-line OAM remap, mosaic timing | pixel-only — the gbvis visual ROM |
+
+Building these found and fixed a dingbat CPU bug on the spot: Thumb
+hi-reg CMP with rd=pc never advanced the PC (thumb.nim step gate) — the
+THUMBPC pad hung dingbat until the `op == 0b01` arm was added.  Fresh
+dingbat baseline oddities the pages already exposed: CAPDMA fires exactly
+one Special-DMA3 trigger ever; CPSRBITS shows dingbat latching CPSR bits
+8-27 that ARM7TDMI probably doesn't have; BXDECODE shows the 12-bit
+decode LUT ignoring the SBO fields (0xE120FF11 taken as BX) and
+0xE12FFF31 routing into the MSR path mid-decode.
+
 ## v4 candidates — shaped by AGB hardware session 1 (2026-08-10)
 
 Session 1 (docs/hwprobe-results-agb.md) confirmed 9/16 GBA pages outright

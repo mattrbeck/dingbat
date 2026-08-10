@@ -224,7 +224,9 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
     else:
       cpu.cpsr.thumb = false
       discard cpu.set_reg(15, cpu.r[rs])
-  if rd != 15 and op != 0b11: cpu.step_thumb()
+  # CMP never writes rd, so rd==15 is not a branch there — the probe ROM's
+  # THUMBPC page (thumb `cmp pc, r0`) hung here without the op==0b01 arm.
+  if op == 0b01 or (rd != 15 and op != 0b11): cpu.step_thumb()
 
 proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   let rs = int(bits_range(instr, 3, 5))

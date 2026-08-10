@@ -37,10 +37,12 @@ GBA: BIOS checksum low half).
    matches a console already captured, the whole run is identical — done.
 3. On at least one console per distinct ALL value: photograph all pages.
 4. GB serial page (06 SERIAL): run with **no link cable attached**.
-5. GBA page 08 (MSRTBIT) runs only when you press **START on that page** —
-   it provokes architecturally UNPREDICTABLE behavior (MSR setting the T
-   bit from ARM state). A timer-IRQ watchdog attempts recovery, but a
-   power cycle may be needed. Photograph the page after it redraws.
+5. GBA pages 08 (MSRTBIT) and 18 (BXDECODE) run only when you press
+   **START on that page** — they provoke architecturally UNPREDICTABLE
+   behavior (MSR setting the T bit from ARM state; executing near-BX
+   encodings). A timer-IRQ watchdog attempts recovery, but a power cycle
+   may be needed, so run them LAST, after every other page is
+   photographed. Photograph each page after it redraws.
 6. Emulator side: the `-auto` builds flip pages every 64 frames for
    input-less harnesses; `tests/roms/hwprobe_ocr.py <shot.ppm>` reads a
    dingbat screenshot back as exact text (it matches the ROMs' own font).
@@ -50,9 +52,14 @@ GBA: BIOS checksum low half).
 
 ### AGB-only sessions (GBA console + EverDrive)
 
-All 16 gbaedge pages run natively — CONTEND and IRQLAT are entirely
-on-die, so the flashcart cannot influence them; WAITSTATE/PFPHASE and
-ROM open-bus bytes carry the flashcart caveat below.  gbedge.gb runs on
+All 25 gbaedge pages run natively — CONTEND, IRQLAT, and the nine
+guessed-at-behavior pages (16-24) are entirely on-die, so the flashcart cannot
+influence them; WAITSTATE/PFPHASE and ROM open-bus bytes carry the
+flashcart caveat below.  NOTE: growing the ROM to 25 pages changed the
+whole-run fingerprint and the address/phase-sensitive bytes of a few v1
+pages (IDENT/TIMERS/LDMSTM/PPUSTAT/IRQLAT) — session-1 photos and
+`tests/roms/expected/agb-sp-1/` correspond to the 16-page build at
+5b0db6b; a fresh session on the 25-page build re-covers everything.  gbedge.gb runs on
 the same console **only via a GB-slot flashcart** (the GBA's CGB
 compatibility mode; MODEL line reads 11 01 = AGB) — a GBA-slot cart
 running a GB emulator (Goomba etc.) is worthless here, it would measure
@@ -142,6 +149,15 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 | 0D | SWIREGION | Sqrt cycle counts at 4 inputs between the fit's calibration points; Div and CpuSet issued from IWRAM/EWRAM/ROM callers | SWI_HLE_BASE and the "S16-1" refill residual were calibrated against the suite's IWRAM column only; Sqrt is a 3-point piecewise guess |
 | 0E | CONTEND | timed PRAM/VRAM/OAM/EWRAM reads mid-line visible vs forced blank vs hblank vs vblank, plus VRAM writes | dingbat models ZERO PPU/CPU contention (constant access costs while rendering); every byte here is on-die, so the flashcart cannot touch it |
 | 0F | IRQLAT | trigger-vs-handler TM0 stamps for TM2-overflow / DMA3 / hblank / vblank IRQs | dingbat's two fitted synchronizer latencies (3 and 6, one suite row each); source-to-source deltas cancel the fixed dispatch cost.  (dingbat never delivers the TM2 IRQ at all — fresh divergence) |
+| 10 | IORW | 16 halfword reads of write-only (BG0HOFS, BG2X, WIN0H, MOSAIC, BLDY) and unused (0x4E, 0x56, 0x66, 0x6A, 0x78, 0x110, 0x12C, 0x136, 0x142, 0x206, 0x20A) IO, taken before anything writes IO | the zero-vs-open-bus IO read map — every emulator hand-picks it |
+| 11 | CPSRBITS | all-ones writes to each CPSR MSR field with mrs readback; SPSR_irq written 0xFFFFFFFF / 0 / 0x0F; mrs SPSR in system mode | which status bits physically exist; is SPSR bit4 forced high; what a nonexistent SPSR returns |
+| 12 | THUMBPC | stored-value deltas for `str pc` / `stm {pc}` / `stm {lr,pc}`; `ldm pc, {r1}`; Thumb `cmp pc, r0` with a loaded SPSR (flag word says normal-compare vs SPSR-load); Thumb `mov r0, pc` | settles the theory that Thumb CMP r15 loads SPSR into CPSR.  (Building this found a dingbat hang: Thumb hi-reg CMP rd=pc never advanced PC) |
+| 13 | LDMUSER | `stm {r13}^` value, `stm r4!, {r13}^` writeback, `stm r13!, {r13}^` with banked base (which bank gets the writeback), mrs SPSR immediately after an `ldm ^` | banked-base user-list transfers and the OR-with-CPSR theory for the post-ldm^ SPSR read — both unmeasured corners |
+| 14 | IRQWIN | a parked TM2 IF bit released through one gate at a time (IME write / CPSR.I clear / IE write) with an instruction sled behind the store — the handler records how far the sled ran; plus 16 IF-acks against a 16-cycle overflow loop | when IME / I / IE are actually sampled, in instructions — emulators use guessed constants here |
+| 15 | DMAEDGE | DMA3 primed, then byte writes 0x80 to 0xDF / 0xDE / 0xDD each followed by did-it-run + CNT_H readback; vblank DMA enabled then disabled before any vblank | the byte-mirroring DMA-enable rumor (and does it affect all bits?), plus disable-while-starting |
+| 16 | CAPDMA | DMA3 armed in Special timing with repeat; nonzero-word counts in the destination ring after frames 1/2/3 + CNT_H readback | the "capture DMA only runs every other frame" rumor; dingbat currently fires exactly ONE trigger ever (count stays 4) |
+| 17 | SWEEPQ | ch1 sweep death times (poll counts to the SOUNDCNT_X active-flag drop): period 0, immediate-trigger-recalc overflow, the unwritten second recalc, a mid-note period rewrite, plus a pure length-death control | three sweep-unit unknowns (divider 0 / immediate recalc / unwritten second recalc), CPU-visible on AGB without audio capture |
+| 18 | BXDECODE | **interactive (START)**: four encodings run from IWRAM with breadcrumbs — genuine BX r1, the ARMv5 BLX-r1 word 0xE12FFF31, BX with an SBO field violated (0xE120FF11), BX r15.  r7 verdict: 1 = took the BX, 6 = fell through, 4 = branched to $+8; phase byte 2 = watchdog recovered | do near-BX encodings execute as BX, fall through, or trap?  dingbat answers [1, 6, 1, 4] — its 12-bit decode LUT cannot see the SBO fields |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 

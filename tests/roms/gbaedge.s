@@ -5,12 +5,21 @@
 @ oracle — nothing here encodes an expected value.
 @
 @ Page/slot order (viewer order == slot index, run order differs so the
-@ BIOS open-bus probes execute before the first SWI dirties the latch):
+@ BIOS open-bus probes execute before the first SWI dirties the latch and
+@ IORW reads the write-only IO before any probe writes it):
 @   0 IDENT     1 OPENBUS   2 BIOSPROT  3 SWITIME  4 TIMERS   5 DMALATCH
 @   6 LDMSTM    7 MULFLAGS  8 MSRTBIT*  9 PPUSTAT 10 PSGSTAT 11 WAITSTATE
-@ (*interactive: runs when START is pressed on its page — it deliberately
-@  provokes UNPREDICTABLE MSR behavior and can require a power cycle,
-@  though a timer-IRQ watchdog tries to recover first)
+@  12 PFPHASE  13 SWIREGION 14 CONTEND 15 IRQLAT  16 IORW    17 CPSRBITS
+@  18 THUMBPC  19 LDMUSER  20 IRQWIN   21 DMAEDGE 22 CAPDMA  23 SWEEPQ
+@  24 BXDECODE*
+@ (*interactive: runs when START is pressed on its page — these two
+@  deliberately provoke UNPREDICTABLE behavior (MSR setting T from ARM /
+@  executing near-BX encodings) and can require a power cycle, though a
+@  timer-IRQ watchdog tries to recover first)
+@
+@ Pages 16-24 target behaviors emulators are known to guess at rather
+@ than measure (and dingbat's own v4 open questions) — the question list
+@ lives in docs/hwprobe-questions.md.
 @
 @ Build: python3 gbaedge.py   (as -> ld -Ttext=0x08000000 -> objcopy,
 @ then the Nintendo logo + complement are patched in)
@@ -95,6 +104,7 @@ main:
 
     bl  probe_openbus              @ MUST run before any SWI
     bl  probe_biosprot
+    bl  probe_iorw                 @ before any probe writes IO registers
     bl  probe_ident
     bl  probe_switime
     bl  probe_timers
@@ -108,14 +118,28 @@ main:
     bl  probe_swiregion
     bl  probe_contend
     bl  probe_irqlat
-    @ MSRTBIT: interactive only — mark the slot so the page says so
+    bl  probe_cpsrbits
+    bl  probe_thumbpc
+    bl  probe_ldmuser
+    bl  probe_irqwin
+    bl  probe_dmaedge
+    bl  probe_capdma
+    bl  probe_sweepq
+    @ MSRTBIT + BXDECODE: interactive only — mark the slots so the pages
+    @ say so
     ldr r8, =SLOTS + 8*SLOTSZ
     mov r0, #0x99
     strb r0, [r8, #0]
     mov r0, #0xEE
     strb r0, [r8, #31]
-.ifdef MSRBOOT                     @ debug builds: run it unattended
+    ldr r8, =SLOTS + 24*SLOTSZ
+    mov r0, #0x99
+    strb r0, [r8, #0]
+    mov r0, #0xEE
+    strb r0, [r8, #31]
+.ifdef MSRBOOT                     @ debug builds: run them unattended
     bl  run_msr_probe
+    bl  run_bxdecode
 .endif
 
 @ ─────────────────────────────── viewer ──────────────────────────────────
@@ -152,9 +176,13 @@ view_loop:
     bne page_prev
     tst r2, #0x08                  @ START
     beq view_loop
-    cmp r5, #8                     @ only meaningful on the MSRTBIT page
-    bne view_loop
+    cmp r5, #8                     @ meaningful on the interactive pages
+    bne 5f
     bl  run_msr_probe
+    b   page_redraw
+5:  cmp r5, #24
+    bne view_loop
+    bl  run_bxdecode
     b   page_redraw
 page_next:
     add r5, r5, #1
@@ -196,6 +224,8 @@ irq_handler:
     ldr r2, [r0, #0x4C]            @ only the FIRST entry since the flag
     cmp r2, #0                     @ was cleared gets recorded — repeat
     streqh r1, [r0, #0x48]         @ fires must not overwrite it
+    ldreq r3, [sp, #20]            @ the interrupted return address: tells
+    streq r3, [r0, #0x50]          @ IRQWIN which sled instruction was next
     moveq r2, #1
     streq r2, [r0, #0x4C]
     ldr r0, =0x04000200
@@ -216,9 +246,9 @@ irq_handler:
     bne 2f
     mov r3, #2                     @ mark "watchdog fired"
     str r3, [r2, #8]
-    ldr r3, =msr_recover
-    add r3, r3, #4
+    ldr r3, [r2, #20]              @ recovery address the probe deposited
     str r3, [sp, #20]              @ divert the IRQ return to recovery
+                                   @ (MSRTBIT or BXDECODE — whoever armed)
     mov r3, #0x9F                  @ system mode, ARM, IRQs masked
     msr SPSR_cxsf, r3
 2:  strh r1, [r0, #2]              @ ack everything we saw
@@ -1338,6 +1368,8 @@ run_msr_probe:
     mov r0, #0
     str r0, [r2, #0]               @ marker word
     str r0, [r2, #16]              @ phase = 0 (main run)
+    ldr r0, =msr_recover
+    str r0, [r2, #20]              @ where the watchdog should divert to
     mov r0, #1
     str r0, [r2, #8]               @ in-flight flag (watchdog looks at it)
     @ watchdog: TM3 overflow IRQ in 65536 cycles
@@ -1416,6 +1448,684 @@ msr_block:
     .hword 0x4728                  @ A+14: bx r5
     .word 0xE12FFF15               @ A+16: bx r5 (ARM safety net)
     .word 0xE12FFF15               @ A+20
+    .ltorg
+
+@ ═══════ pages 16-24: guessed-at-behavior probes (see hwprobe-questions) ═
+
+.equ CAPDST,   0x02008000          @ CAPDMA destination ring
+.equ BXBLOCK,  0x03000300          @ BXDECODE candidate block (IWRAM copy)
+
+@ ── slot 16: IORW — write-only / unused IO read map ──────────────────────
+@ Whether write-only and unused IO reads return zero or open bus is
+@ guessed differently across emulators.  16 halfword reads in table
+@ order, stored raw.  Runs BEFORE any probe writes IO, so
+@ write-only registers still hold boot values and the answer is purely
+@ "what does a read return".
+probe_iorw:
+    push {r4-r6, lr}
+    ldr r4, =SLOTS + 16*SLOTSZ
+    ldr r5, =iorw_offsets
+    mov r6, #16
+    ldr r3, =IOBASE
+1:  ldrh r0, [r5], #2
+    ldrh r0, [r3, r0]
+    strh r0, [r4], #2
+    subs r6, r6, #1
+    bne 1b
+    pop {r4-r6, pc}
+iorw_offsets:
+    .hword 0x010                   @ BG0HOFS   (write-only)
+    .hword 0x028                   @ BG2X_L    (write-only)
+    .hword 0x040                   @ WIN0H     (write-only)
+    .hword 0x04C                   @ MOSAIC    (write-only)
+    .hword 0x04E                   @ unused
+    .hword 0x054                   @ BLDY      (write-only)
+    .hword 0x056                   @ unused
+    .hword 0x066                   @ unused
+    .hword 0x06A                   @ unused
+    .hword 0x078                   @ unused
+    .hword 0x110                   @ unused (timer gap)
+    .hword 0x12C                   @ unused
+    .hword 0x136                   @ unused (lore: reads 0, not open bus)
+    .hword 0x142                   @ unused
+    .hword 0x206                   @ unused
+    .hword 0x20A                   @ unused
+    .ltorg
+
+@ ── slot 17: CPSRBITS — which CPSR/SPSR bits are actually writable ───────
+@ Which CPSR/SPSR bits are physically writable, and what an SPSR read
+@ returns in a mode that has none — no suite measures either.  All-ones
+@ writes per MSR field, raw mrs readback.
+@ +0  CPSR after msr CPSR_f, 0xFF000000
+@ +4  CPSR after msr CPSR_s, 0x00FF0000
+@ +8  CPSR after msr CPSR_x, 0x0000FF00
+@ +12 SPSR_irq after msr SPSR_cxsf, 0xFFFFFFFF
+@ +16 SPSR_irq after msr SPSR_cxsf, 0x00000000
+@ +20 SPSR_irq after msr SPSR_cxsf, 0x0000000F (is bit4 forced high?)
+@ +24 mrs SPSR in SYSTEM mode (no SPSR exists — what does it return?)
+probe_cpsrbits:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 17*SLOTSZ
+    mrs r7, CPSR                   @ saved state to restore
+    ldr r0, =0xFF000000
+    msr CPSR_f, r0
+    mrs r1, CPSR
+    str r1, [r8, #0]
+    ldr r0, =0x00FF0000
+    msr CPSR_s, r0
+    mrs r1, CPSR
+    str r1, [r8, #4]
+    ldr r0, =0x0000FF00
+    msr CPSR_x, r0
+    mrs r1, CPSR
+    str r1, [r8, #8]
+    msr CPSR_cxsf, r7              @ full restore, whatever latched above
+    bic r0, r7, #0x1F              @ -> IRQ mode, IRQs masked
+    orr r0, r0, #0x92
+    msr CPSR_c, r0
+    ldr r0, =0xFFFFFFFF
+    msr SPSR_cxsf, r0
+    mrs r1, SPSR
+    str r1, [r8, #12]
+    mov r0, #0
+    msr SPSR_cxsf, r0
+    mrs r1, SPSR
+    str r1, [r8, #16]
+    mov r0, #0x0F
+    msr SPSR_cxsf, r0
+    mrs r1, SPSR
+    str r1, [r8, #20]
+    msr CPSR_c, r7                 @ back to system mode
+    mrs r1, SPSR                   @ ARM7TDMI has no SPSR here
+    str r1, [r8, #24]
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 18: THUMBPC — r15 as operand: stored values + the CMP theory ────
+@ One emulator theory holds that Thumb CMP with rd=r15 loads SPSR into
+@ CPSR (like the ARM S-suffix r15 forms); plus the classic stored-PC
+@ offsets emulators disagree on.
+@ +0  byte: (value stored by `str pc`) - instruction address
+@ +1  byte: same for `stmia r4, {pc}`
+@ +2  byte: same for the pc entry of `stmia r4, {lr, pc}`
+@ +4  word: r1 after `ldmia pc, {r1}` (raw word tells the fetch offset)
+@ +8  word: CPSR flags after Thumb `cmp pc, r0` with r0=0 and SPSR set to
+@           a distinct flag pattern (0x20000000 = normal compare;
+@           the SPSR pattern = the SPSR-load theory)
+@ +12 word: SPSR after the same (did the CMP touch it?)
+@ +16 byte: Thumb `mov r0, pc` delta
+probe_thumbpc:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 18*SLOTSZ
+    ldr r4, =EWDST
+1:  str pc, [r4]
+    ldr r0, [r4]
+    adr r1, 1b
+    sub r0, r0, r1
+    strb r0, [r8, #0]
+2:  .word 0xE8848000               @ stmia r4, {pc}
+    ldr r0, [r4]
+    adr r1, 2b
+    sub r0, r0, r1
+    strb r0, [r8, #1]
+3:  .word 0xE884C000               @ stmia r4, {lr, pc}
+    ldr r0, [r4, #4]               @ pc is the second (ascending) entry
+    adr r1, 3b
+    sub r0, r0, r1
+    strb r0, [r8, #2]
+    mov r1, #0
+4:  .word 0xE89F0002               @ ldmia pc, {r1}
+    b   5f
+    .word 0xC0DEC0DE               @ sits at 4b+8
+5:  str r1, [r8, #4]
+    @ Thumb CMP pc, r0 with a loaded SPSR: IRQ mode, SPSR = CPSR pattern
+    @ with N|C flags (mode bits = IRQ so a "load" cannot wander off)
+    mrs r7, CPSR
+    bic r0, r7, #0x1F
+    orr r0, r0, #0x92              @ IRQ mode, I set
+    msr CPSR_c, r0
+    mrs r1, CPSR
+    bic r1, r1, #0xF0000000
+    orr r1, r1, #0xA0000000        @ N and C
+    msr SPSR_cxsf, r1
+    msr CPSR_f, #0                 @ flags cleared going in
+    mov r0, #0                     @ cmp operand
+    adr r3, 7f                     @ ARM return target for the pad's bx
+    adr r1, 6f
+    orr r1, r1, #1
+    bx  r1                         @ enter the Thumb pad
+    .thumb
+6:  .hword 0x4587                  @ cmp pc, r0  (hi-register CMP)
+    .hword 0x4718                  @ bx r3
+    .align 2
+    .arm
+7:  mrs r1, CPSR
+    str r1, [r8, #8]
+    mrs r1, SPSR
+    str r1, [r8, #12]
+    msr CPSR_c, r7                 @ back to system mode
+    msr CPSR_f, r7
+    @ Thumb mov r0, pc delta
+    adr r3, 9f
+    adr r1, 8f
+    orr r1, r1, #1
+    bx  r1
+    .thumb
+8:  .hword 0x4678                  @ mov r0, pc
+    .hword 0x4718                  @ bx r3
+    .align 2
+    .arm
+9:  adr r1, 8b
+    sub r0, r0, r1
+    strb r0, [r8, #16]
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 19: LDMUSER — user-bank transfers with banked bases ─────────────
+@ User-bank transfers with a banked base register, and the SPSR read in
+@ the cycle after an LDM^ (one theory: it comes back OR'd with CPSR) —
+@ both unmeasured corners.  All experiments from IRQ mode, IRQs masked,
+@ with sp_irq pointed at scratch; user r13 is parked on a marker value and
+@ restored afterwards (system mode shares the user bank).
+@ +0  word stored by `stmia r4, {r13}^`  (user r13 marker = CAFE0001?)
+@ +4  word: r4 writeback delta after `stmia r4!, {r13}^` (UNPREDICTABLE)
+@ +8  word: stored value of `stmia r13!, {r13}^` (banked base, user list)
+@ +12 word: r13_irq delta after that (did writeback hit the banked bank?)
+@ +16 word: user r13 delta after that (or the user bank?)
+@ +20 word: mrs SPSR executed IMMEDIATELY after `ldmia r4, {r1}^`
+@           (SPSR was pre-set to 0x600000D2; the OR-with-CPSR theory
+@           predicts a merge, plain silicon predicts it unchanged)
+@ +24 word: the r1 that ldm^ loaded (sanity: 0x12345678)
+probe_ldmuser:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 19*SLOTSZ
+    ldr r4, =EWDST
+    ldr r0, =0x12345678            @ ldm^ source value
+    str r0, [r4, #0x20]
+    mrs r7, CPSR
+    mov r9, sp                     @ park the user/system sp on a marker
+    ldr r0, =0xCAFE0001
+    mov sp, r0
+    bic r0, r7, #0x1F              @ -> IRQ mode, I set
+    orr r0, r0, #0x92
+    msr CPSR_c, r0
+    ldr sp, =SCRATCH + 0xF0        @ sp_irq: valid but unused scratch
+    @ 1: plain user-bank store
+    .word 0xE8C42000               @ stmia r4, {r13}^
+    ldr r0, [r4]
+    str r0, [r8, #0]
+    @ 2: writeback + user list, non-banked base
+    .word 0xE8E42000               @ stmia r4!, {r13}^   (UNPREDICTABLE)
+    ldr r1, =EWDST
+    sub r0, r4, r1
+    str r0, [r8, #4]
+    ldr r4, =EWDST                 @ restore r4 whatever happened
+    @ 3: banked base + user list + writeback
+    ldr r0, =EWDST + 0x40
+    mov sp, r0                     @ r13_irq = base
+    .word 0xE8ED2000               @ stmia r13!, {r13}^
+    ldr r1, =EWDST + 0x40
+    ldr r0, [r1]                   @ what got stored
+    str r0, [r8, #8]
+    sub r0, sp, r1                 @ banked writeback delta
+    str r0, [r8, #12]
+    @ 4: SPSR in the shadow of an ldm^
+    ldr r0, =0x600000D2            @ distinct-but-legal pattern (IRQ mode)
+    msr SPSR_cxsf, r0
+    add r4, r4, #0x20
+    .word 0xE8D40002               @ ldmia r4, {r1}^ (user-bank load)
+    mrs r2, SPSR                   @ THE read theorized to come back OR'd
+    str r2, [r8, #20]
+    str r1, [r8, #24]
+    sub r4, r4, #0x20
+    msr CPSR_c, r7                 @ back to system mode
+    ldr r0, =0xCAFE0001            @ user r13 delta from the marker
+    sub r0, sp, r0
+    str r0, [r8, #16]
+    mov sp, r9                     @ real stack back
+    pop {r4-r11, pc}
+    .ltorg
+
+@ ── slot 20: IRQWIN — when are IME / I-bit / IE sampled? ─────────────────
+@ What takes priority when an IRQ asserts in the same cycle IE/IF/IME
+@ are written, and when CPSR.I and the IRQ line are actually sampled —
+@ emulators model these with guessed constants.  A TM2 overflow is
+@ parked in IF, then one gate at a time is opened with an 8-instruction
+@ breadcrumb sled right behind the opening store; the IRQ handler records
+@ the interrupted return address, i.e. HOW MANY sled instructions ran
+@ before dispatch.
+@ +0  halfword: sled byte offset for the IME 0->1 store
+@ +2  halfword: sled byte offset for msr clearing CPSR.I
+@ +4  halfword: sled byte offset for the IE 0->0x20 store
+@ +6  halfword: of 16 back-to-back IF acks against a TM2 overflowing
+@               every 16 cycles, how many reads saw IF still/again set
+probe_irqwin:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 20*SLOTSZ
+    ldr r7, =SCRATCH
+    ldr r4, =0x04000200            @ r4 -> IE/IF, r4+8 -> IME
+.macro iw_prime                    @ park a TM2-overflow bit in IF
+    ldr r5, =0x04000108
+    mov r0, #0
+    str r0, [r5]
+    str r0, [r7, #0x4C]            @ handler first-entry flag
+    str r0, [r7, #0x50]            @ stale return address (0 = no dispatch)
+    ldr r0, =0x00C0FFFF            @ reload 0xFFFF, enable + IRQ: one tick
+    str r0, [r5]
+    mov r1, #0x10000               @ BOUNDED: an emulator that never sets
+1:  ldrh r0, [r4, #2]              @ IF here must not hang the whole ROM
+    tst r0, #0x20
+    bne 2f
+    subs r1, r1, #1
+    bne 1b
+2:  mov r0, #0
+    str r0, [r5]                   @ timer off again; IF stays parked
+.endm
+.macro iw_sled slot_off, base_lbl
+    ldr r0, [r7, #0x50]            @ return address the handler saw
+    adr r1, \base_lbl
+    sub r0, r0, r1
+    strh r0, [r8, #\slot_off]
+.endm
+    @ ── experiment 1: IME is the last gate to open ──
+    mov r0, #0
+    strh r0, [r4, #8]              @ IME off
+    mov r0, #0x20
+    strh r0, [r4]                  @ IE = timer2
+    iw_prime
+    mov r0, #1
+    strh r0, [r4, #8]              @ IME on — dispatch races the sled
+iw1:
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    iw_sled 0, iw1
+    mov r0, #0
+    strh r0, [r4, #8]
+    @ ── experiment 2: CPSR.I is the last gate ──
+    mrs r5, CPSR
+    orr r0, r5, #0x80
+    msr CPSR_c, r0                 @ I set
+    mov r0, #1
+    strh r0, [r4, #8]              @ IME already on
+    iw_prime
+    mrs r0, CPSR
+    bic r0, r0, #0x80
+    msr CPSR_c, r0                 @ I cleared — dispatch races the sled
+iw2:
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    iw_sled 2, iw2
+    @ ── experiment 3: IE is the last gate ──
+    mov r0, #0
+    strh r0, [r4]                  @ IE off, IME stays on
+    iw_prime
+    mov r0, #0x20
+    strh r0, [r4]                  @ IE on — dispatch races the sled
+iw3:
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    add r6, r6, #1
+    iw_sled 4, iw3
+    mov r0, #0
+    strh r0, [r4, #8]              @ IME off
+    strh r0, [r4]                  @ IE off
+    @ ── experiment 4: IF ack racing a fresh assertion ──
+    ldr r5, =0x04000108
+    str r0, [r5]
+    ldr r0, =0x00C0FFF0            @ overflow every 16 cycles, repeating
+    str r0, [r5]
+    mov r6, #0                     @ survivors
+    mov r2, #16
+    mov r1, #0x20
+1:  strh r1, [r4, #2]              @ ack timer2 IF
+    ldrh r0, [r4, #2]              @ ...did it stay/return?
+    tst r0, #0x20
+    addne r6, r6, #1
+    subs r2, r2, #1
+    bne 1b
+    strh r6, [r8, #6]
+    mov r0, #0
+    str r0, [r5]                   @ TM2 off
+    strh r0, [r4, #2]              @ nothing pending... (write 0 = no ack)
+    mov r0, #0x20
+    strh r0, [r4, #2]              @ ack the parked bit properly
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 21: DMAEDGE — byte writes to DMA3CNT and disable-before-start ───
+@ A byte-sized write of 0x80 to the wrong DMA3CNT byte allegedly can
+@ still enable the DMA (bus byte-mirroring rumor — and does it affect
+@ all bits?); disable-before-start behavior is equally unmeasured.  DMA3 is primed with valid
+@ src/dst/len before each poke; the destination marker says if it ran.
+@ +0  byte: transfer ran after strb 0x80 -> 0x040000DF (the enable byte)
+@ +2  halfword: DMA3CNT_H readback after that
+@ +4  byte: transfer ran after strb 0x80 -> 0x040000DE (LOW byte — enable
+@           lives in the OTHER byte; 1 here = the byte-mirroring rumor)
+@ +6  halfword: DMA3CNT_H readback after that
+@ +8  byte: transfer ran after strb 0x80 -> 0x040000DD (CNT_L high byte)
+@ +10 halfword: DMA3CNT_H readback after that
+@ +12 byte: transfer ran when a vblank DMA was enabled then disabled
+@           again before any vblank could trigger it
+@ +14 halfword: DMA3CNT_H readback after that
+probe_dmaedge:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 21*SLOTSZ
+    ldr r4, =0x040000D4            @ DMA3SAD
+.macro de_prime
+    ldr r0, =rom_pattern
+    str r0, [r4]                   @ SAD
+    ldr r5, =EWDST + 0x100
+    mov r0, #0
+    str r0, [r5]                   @ clear the marker
+    str r5, [r4, #4]               @ DAD
+    mov r0, #4
+    strh r0, [r4, #8]              @ CNT_L: 4 units
+    mov r0, #0
+    strh r0, [r4, #10]             @ CNT_H: fully disabled, plain config
+.endm
+.macro de_verdict slot_off
+    ldr r5, =EWDST + 0x100
+    ldr r0, [r5]
+    cmp r0, #0
+    movne r0, #1
+    strb r0, [r8, #\slot_off]
+    ldrh r0, [r4, #10]
+    strh r0, [r8, #\slot_off + 2]
+    mov r0, #0
+    strh r0, [r4, #10]             @ off again
+.endm
+    de_prime
+    mov r0, #0x80
+    ldr r1, =0x040000DF
+    strb r0, [r1]                  @ enable via its own byte
+    nop
+    nop
+    nop
+    nop
+    de_verdict 0
+    de_prime
+    mov r0, #0x80
+    ldr r1, =0x040000DE
+    strb r0, [r1]                  @ the OTHER byte — should not enable
+    nop
+    nop
+    nop
+    nop
+    de_verdict 4
+    de_prime
+    mov r0, #0x80
+    ldr r1, =0x040000DD
+    strb r0, [r1]                  @ CNT_L high byte
+    nop
+    nop
+    nop
+    nop
+    de_verdict 8
+    @ enable a vblank DMA, kill it before any vblank, then let one pass
+    de_prime
+    ldr r0, =0x9000                @ enable + vblank timing
+    strh r0, [r4, #10]
+    mov r0, #0
+    strh r0, [r4, #10]             @ disabled before it could start
+    bl  wait_vblank
+    bl  wait_vblank
+    de_verdict 12
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 22: CAPDMA — does video-capture DMA3 run every other frame? ─────
+@ Video-capture DMA3 allegedly runs only every other frame (screen
+@ polarity inversion?) — an unverified rumor emulators either copy or
+@ ignore.  DMA3 is armed in
+@ Special timing with repeat from a fixed ROM word into an incrementing
+@ EWRAM ring; the written-word count is snapshotted after each of three
+@ frames.  Per-frame deltas of ~160*4 mean every frame/line; alternating
+@ deltas mean the rumor is true; 0 means Special DMA3 needs something
+@ emulators don't model.
+@ +0/+4/+8  word counts after frames 1/2/3     +12  DMA3CNT_H readback
+probe_capdma:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 22*SLOTSZ
+    ldr r0, =CAPDST                @ zero the ring
+    mov r1, #0x1000
+    mov r2, #0
+1:  str r2, [r0], #4
+    subs r1, r1, #1
+    bne 1b
+    bl  wait_vblank                @ arm at a frame boundary
+    ldr r4, =0x040000D4
+    ldr r0, =rom_pattern           @ nonzero source, held fixed
+    str r0, [r4]
+    ldr r0, =CAPDST
+    str r0, [r4, #4]
+    mov r0, #4
+    strh r0, [r4, #8]              @ 4 words per trigger
+    ldr r0, =0xB700                @ enable+repeat+special+word+src-fixed
+    strh r0, [r4, #10]
+    mov r7, #0
+2:  bl  wait_vblank
+    bl  capdma_count
+    str r0, [r8, r7]
+    add r7, r7, #4
+    cmp r7, #12
+    blt 2b
+    ldrh r0, [r4, #10]             @ still armed? (StopVideoTransferDMA q)
+    strh r0, [r8, #12]
+    mov r0, #0
+    strh r0, [r4, #10]
+    pop {r4-r7, pc}
+capdma_count:                      @ -> r0 = nonzero words in the ring
+    ldr r1, =CAPDST
+    mov r2, #0x1000
+    mov r0, #0
+1:  ldr r3, [r1], #4
+    cmp r3, #0
+    addne r0, r0, #1
+    subs r2, r2, #1
+    bne 1b
+    bx  lr
+    .ltorg
+
+@ ── slot 23: SWEEPQ — PSG sweep-unit specifics, CPU-visible via the ch1
+@ active flag ─────────────────────────────────────────────────────────────
+@ Sweep-unit corners no suite pins: divider==0 behavior, the immediate
+@ recalc on trigger, the second not-written-back recalc, and mid-note
+@ divider changes.  Each row
+@ is "poll iterations until SOUNDCNT_X bit0 dropped" (word, capped) — the
+@ competing models predict different death times.
+@ +0  freq 1024, shift 1, period 0: period-0-acts-as-8 vs never-ticks
+@ +4  freq 1400, shift 1, period 2: the IMMEDIATE trigger recalc already
+@     overflows -> near-zero count if it exists
+@ +8  freq 1300, shift 1, period 2: immediate recalc survives; dies on a
+@     later tick (control for +4)
+@ +12 freq 1000, shift 1, period 2: first tick writes 1500, its unwritten
+@     SECOND check overflows -> dies tick 1 with the check, tick 2 without
+@ +16 freq 1024, shift 1, period 7 -> period rewritten to 1 mid-note:
+@     immediate reload vs next-reload
+@ +20 control: length-63 death, no sweep (cross-check with PSGSTAT)
+probe_sweepq:
+    push {r4-r7, lr}
+    ldr r8, =SLOTS + 23*SLOTSZ
+    ldr r4, =0x04000060            @ SOUND1CNT_L base
+    ldr r5, =0x04000080            @ SOUNDCNT_L/H/X
+    mov r0, #0x80
+    strh r0, [r5, #4]              @ master enable
+    ldr r0, =0x1177
+    strh r0, [r5]                  @ route ch1
+.macro sq_run sweep, freq, slot_off
+    ldr r0, =\sweep
+    strh r0, [r4]                  @ SOUND1CNT_L
+    ldr r0, =0xF000
+    strh r0, [r4, #2]              @ max envelope, no length
+    ldr r0, =0x8000 + \freq
+    strh r0, [r4, #4]              @ trigger, length disabled
+    mov r6, #0
+    ldr r7, =0x80000
+9:  ldrh r0, [r5, #4]
+    tst r0, #1
+    beq 8f
+    add r6, r6, #1
+    cmp r6, r7
+    blt 9b
+8:  str r6, [r8, #\slot_off]
+.endm
+    sq_run 0x01, 1024, 0           @ shift 1, period 0, up
+    sq_run 0x21, 1400, 4           @ shift 1, period 2, up
+    sq_run 0x21, 1300, 8
+    sq_run 0x21, 1000, 12
+    @ mid-note divider change: start slow (period 7), rewrite to 1
+    ldr r0, =0x71
+    strh r0, [r4]
+    ldr r0, =0xF000
+    strh r0, [r4, #2]
+    ldr r0, =0x8000 + 1024
+    strh r0, [r4, #4]
+    ldr r0, =20000                 @ ~1/8 of a period-7 tick
+1:  subs r0, r0, #1
+    bne 1b
+    ldr r0, =0x11
+    strh r0, [r4]                  @ period 7 -> 1 mid-note
+    mov r6, #0
+    ldr r7, =0x80000
+2:  ldrh r0, [r5, #4]
+    tst r0, #1
+    beq 3f
+    add r6, r6, #1
+    cmp r6, r7
+    blt 2b
+3:  str r6, [r8, #16]
+    @ control: pure length death
+    mov r0, #0
+    strh r0, [r4]                  @ sweep off
+    ldr r0, =0xF03F                @ length 63
+    strh r0, [r4, #2]
+    ldr r0, =0xC000 + 1024         @ trigger + length enable
+    strh r0, [r4, #4]
+    mov r6, #0
+    ldr r7, =0x80000
+4:  ldrh r0, [r5, #4]
+    tst r0, #1
+    beq 5f
+    add r6, r6, #1
+    cmp r6, r7
+    blt 4b
+5:  str r6, [r8, #20]
+    mov r0, #0
+    strh r0, [r5, #4]              @ master off — silence again
+    pop {r4-r7, pc}
+    .ltorg
+
+@ ── slot 24: BXDECODE — near-BX encodings: BX, no-op, or undefined? ──────
+@ Encodings NEAR BX (SBO fields violated, the ARMv5 BLX word, BX r15)
+@ may be falsely decoded as BX by table-driven emulators.  Interactive (START on this page): candidates run from IWRAM with
+@ the TM3 watchdog armed, breadcrumbs decide what actually executed.
+@ Block layout per candidate (copied to BXBLOCK):
+@   C+0  the candidate word, with r1 = thumb-pad address | 1
+@   C+4  ARM fallthrough:  add r7, #2
+@   C+8  ARM continuation: add r7, #4  (also the BX-r15 landing site)
+@   C+12 bx r5 (recover)
+@   pad  Thumb: add r7, #1 ; bx r5
+@ r7 afterwards: 2+4=6 fell through, 1 took the BX to r1, 4 means the
+@ candidate branched to $+8 (BX r15).  Watchdog phase byte 2 = it wedged
+@ and the timer diverted the return.
+@ +0..+3  r7 per candidate       +4..+7  phase byte per candidate
+@ +8  0xAA ran marker
+run_bxdecode:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 24*SLOTSZ
+    mov r0, #0
+    strb r0, [r8, #0]              @ clear the 0x99 "press start" marker
+    mov r10, #0                    @ candidate index
+bx_next:
+    ldr r0, =bx_candidates
+    ldr r9, [r0, r10, lsl #2]      @ candidate word
+    @ build the block in IWRAM
+    ldr r1, =BXBLOCK
+    str r9, [r1, #0]
+    ldr r0, =0xE2877002            @ add r7, r7, #2
+    str r0, [r1, #4]
+    ldr r0, =0xE2877004            @ add r7, r7, #4
+    str r0, [r1, #8]
+    ldr r0, =0xE12FFF15            @ bx r5
+    str r0, [r1, #12]
+    ldr r0, =0x47281C7F            @ thumb: adds r7, r7, #1 ; bx r5
+    str r0, [r1, #16]
+    ldr r2, =MARKER
+    str sp, [r2, #12]
+    mov r0, #0
+    str r0, [r2, #16]
+    ldr r0, =bx_recover
+    str r0, [r2, #20]              @ watchdog divert target for THIS probe
+    mrs r0, CPSR
+    str r0, [r2, #24]              @ known-good CPSR — a candidate that
+                                   @ decodes as a mode switch must not
+                                   @ poison the following candidates
+    mov r0, #1
+    str r0, [r2, #8]               @ in-flight flag for the watchdog
+    ldr r4, =0x0400010C            @ TM3 watchdog, 65536 cycles
+    mov r0, #0
+    str r0, [r4]
+    ldr r0, =0x00C00000
+    str r0, [r4]
+    ldr r4, =0x04000200
+    mov r0, #0x40
+    strh r0, [r4]
+    ldr r4, =0x04000208
+    mov r0, #1
+    strh r0, [r4]
+    ldr r5, =bx_recover
+    ldr r1, =BXBLOCK
+    add r0, r1, #16
+    orr r1, r0, #1                 @ r1 -> thumb pad (BX target)
+    mov r7, #0
+    ldr r0, =BXBLOCK
+    bx  r0
+bx_recover:
+    ldr r2, =MARKER                @ r0-r7 are unbanked in every mode, so
+    ldr r3, [r2, #24]              @ this sequence works even if the
+    msr CPSR_cxsf, r3              @ candidate switched mode (r8/r10 come
+    ldr sp, [r2, #12]              @ back with the mode restore)
+    mov r0, #0                     @ watchdog off
+    ldr r3, =0x04000208
+    strh r0, [r3]
+    ldr r3, =0x04000200
+    strh r0, [r3]
+    ldr r3, =0x0400010C
+    str r0, [r3]
+    strb r7, [r8, r10]             @ breadcrumb
+    ldr r3, [r2, #8]               @ 1 = clean, 2 = watchdog fired
+    add r0, r10, #4
+    strb r3, [r8, r0]
+    mov r0, #0
+    str r0, [r2, #8]
+    add r10, r10, #1
+    cmp r10, #4
+    blt bx_next
+    mov r0, #0xAA
+    strb r0, [r8, #8]
+    pop {r4-r11, pc}
+bx_candidates:
+    .word 0xE12FFF11               @ control: genuine BX r1
+    .word 0xE12FFF31               @ the BLX-r1 encoding (ARMv5, not v4T)
+    .word 0xE120FF11               @ BX with an SBO field violated
+    .word 0xE12FFF1F               @ BX r15
     .ltorg
 
 @ ═══════════════════════════ RENDERING ═══════════════════════════════════
@@ -1600,8 +2310,9 @@ dp_col:
     mov r1, #14
     and r2, r8, #0xFF
     bl  print_hex8
-    @ the MSRTBIT page carries its trigger hint
+    @ the interactive pages carry their trigger hint
     cmp r9, #8
+    cmpne r9, #24
     bne dp_model
     mov r0, #0
     mov r1, #15

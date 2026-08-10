@@ -1,4 +1,4 @@
-.equ NPAGES, 16
+.equ NPAGES, 25
 
 .global font_data
 font_data:
@@ -61,6 +61,15 @@ name_table:
     .byte 29,33,19,28,15,17,19,25,24,0   @ SWIREGION
     .byte 13,25,24,30,15,24,14,0,0,0   @ CONTEND
     .byte 19,28,27,22,11,30,0,0,0,0   @ IRQLAT
+    .byte 19,25,28,33,0,0,0,0,0,0   @ IORW
+    .byte 13,26,29,28,12,19,30,29,0,0   @ CPSRBITS
+    .byte 30,18,31,23,12,26,13,0,0,0   @ THUMBPC
+    .byte 22,14,23,31,29,15,28,0,0,0   @ LDMUSER
+    .byte 19,28,27,33,19,24,0,0,0,0   @ IRQWIN
+    .byte 14,23,11,15,14,17,15,0,0,0   @ DMAEDGE
+    .byte 13,11,26,14,23,11,0,0,0,0   @ CAPDMA
+    .byte 29,33,15,15,26,27,0,0,0,0   @ SWEEPQ
+    .byte 12,34,14,15,13,25,14,15,0,0   @ BXDECODE
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2
