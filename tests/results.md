@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-10 12:44:16*
+*Generated: 2026-08-10 15:37:30*
 
 ## Game Boy - Blargg
 
@@ -827,8 +827,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/speed-switch/spsw-tima-cgbBC | 👀 |
 | age/speed-switch/spsw-tima-cgbE | 👀 |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE | 👀 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE | 👀 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE | 👀 |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE | 👌 |
 | age/stat-mode-window/stat-mode-window-cgbBCE | 👀 |
 | age/stat-mode-window/stat-mode-window-dmgC | 👀 |
 | age/stat-mode-window/stat-mode-window-ds-cgbBCE | 👀 |
@@ -852,7 +852,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | scribbltests/statcount-auto | 👌 |
 | turtle-tests/window_y_trigger | 👌 |
 | turtle-tests/window_y_trigger_wx_offscreen | 👌 |
-| cgb-acid-hell/cgb-acid-hell | 👌 |
+| cgb-acid-hell/cgb-acid-hell | 👀 100.0% correct (23038/23040 pixels match) |
 | little-things-gb/firstwhite | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | 👀 94.4% correct (21760/23040 pixels match) |
 
@@ -1017,14 +1017,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | 👀 16/44 passed |
 | gambatte/display_startstate | 👀 10/14 passed |
 | gambatte/div | 👌 8/8 passed |
-| gambatte/dma | 👀 124/229 passed |
+| gambatte/dma | 👀 122/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 7/17 passed |
 | gambatte/enable_display | 👀 135/184 passed |
-| gambatte/halt | 👀 124/158 passed |
-| gambatte/irq_precedence | 👀 46/64 passed |
+| gambatte/halt | 👀 127/158 passed |
+| gambatte/irq_precedence | 👀 44/64 passed |
 | gambatte/lcd_offset | 👀 41/62 passed |
 | gambatte/lcdirq_precedence | 👀 60/62 passed |
-| gambatte/ly0 | 👀 75/96 passed |
+| gambatte/ly0 | 👀 74/96 passed |
 | gambatte/lyc0int_m0irq | 👀 3/6 passed |
 | gambatte/lyc153int_m2irq | 👀 12/16 passed |
 | gambatte/lycEnable | 👀 181/225 passed |
@@ -1032,38 +1032,38 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_lycflag | 👀 11/12 passed |
 | gambatte/lycint_lycirq | 👀 2/4 passed |
 | gambatte/lycint_m0stat | 👌 6/6 passed |
-| gambatte/lycm2int | 👀 10/18 passed |
+| gambatte/lycm2int | 👀 11/18 passed |
 | gambatte/lywrite | 👌 8/8 passed |
-| gambatte/m0enable | 👀 153/167 passed |
+| gambatte/m0enable | 👀 152/167 passed |
 | gambatte/m0int_m0irq | 👀 2/4 passed |
 | gambatte/m0int_m0stat | 👀 10/12 passed |
 | gambatte/m0int_m3stat | 👌 6/6 passed |
 | gambatte/m1 | 👀 124/170 passed |
 | gambatte/m2enable | 👀 94/120 passed |
-| gambatte/m2int_m0irq | 👀 45/72 passed |
-| gambatte/m2int_m0stat | 👀 3/6 passed |
+| gambatte/m2int_m0irq | 👀 47/72 passed |
+| gambatte/m2int_m0stat | 👀 5/6 passed |
 | gambatte/m2int_m2irq | 👀 15/18 passed |
-| gambatte/m2int_m2stat | 👀 4/8 passed |
-| gambatte/m2int_m3stat | 👀 22/44 passed |
+| gambatte/m2int_m2stat | 👀 7/8 passed |
+| gambatte/m2int_m3stat | 👀 39/44 passed |
 | gambatte/miscmstatirq | 👀 268/279 passed |
-| gambatte/oam_access | 👀 52/69 passed |
+| gambatte/oam_access | 👀 53/69 passed |
 | gambatte/oamdma | 👀 707/811 passed |
 | gambatte/scx_during_m3 | 👀 49/141 passed |
 | gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
-| gambatte/speedchange | 👀 109/208 passed |
-| gambatte/sprites | 👀 436/476 passed |
+| gambatte/speedchange | 👀 116/208 passed |
+| gambatte/sprites | 👀 437/476 passed |
 | gambatte/tima | 👀 218/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
-| gambatte/vram_m3 | 👀 35/50 passed |
+| gambatte/vram_m3 | 👀 37/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 293/476 passed |
+| gambatte/window | 👀 324/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 981
-- **Pass:** 769
-- **Fail:** 212
+- **Pass:** 770
+- **Fail:** 211
