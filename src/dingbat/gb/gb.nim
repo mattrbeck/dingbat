@@ -2059,6 +2059,21 @@ type
     clock_shift*:  uint8
     width_mode*:   uint8
     divisor_code*: uint8
+    # The noise channel's frequency timer is not one counter, it is two, and
+    # NR43 selects a different view of BOTH without restarting either. See
+    # ch4_steps_to_rise: `div_counter` is a free-running counter clocked by the
+    # divisor stage, and `clock_shift` picks which of its bits clocks the LFSR;
+    # `div_next` is the divisor stage itself, the absolute cycle of the next
+    # increment. `next_step` stays the derived "next LFSR shift" deadline so the
+    # catch-up guard is still one comparison.
+    #
+    # Deliberately NOT serialized, and joining the batch of GB fields already
+    # waiting on one payload-revision bump rather than spending a bump each.
+    # A state is loaded with both re-derived from `next_step` (gb_apply_state,
+    # ch4_resync_divisor), which reproduces the LFSR schedule exactly and can
+    # only differ if the game writes NR43 inside the first period after a load.
+    div_counter*:  uint16
+    div_next*:     CycleCount
 
   GbApu* = ref object
     sound_enabled*:       bool

@@ -1025,6 +1025,9 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   load_ppu_state(gb.ppu, r, rev)
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
+  # Derived, not serialized: channel 4's divisor stage, re-derived from the
+  # LFSR deadline the events above just restored. See ch4_resync_divisor.
+  ch4_resync_divisor(gb.apu.channel4, gb)
   load_mbc_state(gb.cartridge, r)
   # The SGB section is present only when the machine that WROTE the state had
   # an adapter, and the machine reading it may not: Super Game Boy is a
