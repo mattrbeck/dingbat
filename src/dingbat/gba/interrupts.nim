@@ -22,21 +22,19 @@ const IRQ_SYNC_DELAY* = 3
 
 # A REGISTER write opening the last gate on an already-parked IF bit (IME
 # 0->1, IE unmask, or an msr/SPSR-restore clearing CPSR.I) recognizes the
-# IRQ late. Hardware-verified (gbaedge IRQWIN/IRQWIN2 pages, AGB SP
-# sessions 2/3): with a parked TM2 IF, hardware runs 3 more single-cycle
+# IRQ late. Hardware-verified (gbaedge IRQWIN/IRQWIN2/IRQWIN3 pages, AGB SP
+# sessions 2-4): with a parked TM2 IF, hardware runs 3 more single-cycle
 # sled instructions after an IME/IE store (dingbat ran 1) but only 2 EWRAM
-# loads - the window is cycle-based, not instruction-based - and the
-# TM0-stamped store-to-handler-entry deltas are 0x81/0x81/0x84 where
-# dingbat measured 0x67/0x67/0x6C. The two constants split the ~24-cycle
-# total: GATE_DELAY cycles of continued execution before recognition (the
-# sled keeps running - this is what the sled counts pin), then an
-# ENTRY_STALL charged at the exception entry itself (the stamp deltas
-# exceed the extra sled execution by about this much). The peripheral
+# loads, 2 muls or 2 ROM loads - the window is cycle-based, not
+# instruction-based (IRQWIN3 matched byte-perfect with this constant).
+# GATE_DELAY is the continued-execution window before recognition; the
+# rest of the hardware store-to-handler-entry stamp deltas (0x81/0x81/
+# 0x84, matched) is the universal 8-cycle vector-entry cost in cpu.irq,
+# which every IRQ pays (gbaedge IRQLAT2, session 4). The peripheral
 # IF-rise path (IRQ_SYNC_DELAY above) is deliberately untouched: the mGBA
 # suite's Timer IRQ rows pin it.
 const
   IRQ_GATE_DELAY* = 12
-  IRQ_GATE_ENTRY_STALL* = 6
 
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
   intr.gba.scheduler.schedule(delay, etInterrupts)
@@ -46,18 +44,14 @@ proc irq_deliverable*(intr: Interrupts): bool {.inline.} =
 
 proc gate_opened*(intr: Interrupts) =
   ## A register write just made a parked interrupt deliverable: suppress the
-  ## already-recognized line, re-recognize IRQ_GATE_DELAY cycles out, and
-  ## have the entry pay the resynchronization stall.
+  ## already-recognized line and re-recognize IRQ_GATE_DELAY cycles out.
   intr.gba.cpu.irq_line = false
-  intr.gate_stall = true
   intr.gate_open_at = intr.gba.scheduler.cycles + CycleCount(IRQ_GATE_DELAY)
   intr.schedule_interrupt_check(IRQ_GATE_DELAY)
 
 proc check_interrupts*(intr: Interrupts) =
   let pending = uint16(intr.reg_ie) and uint16(intr.reg_if)
   intr.gba.cpu.irq_line = false
-  if pending == 0:
-    intr.gate_stall = false  # the parked bit went away before entry
   if pending != 0:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0:
       return  # Stop mode ignores other interrupt sources

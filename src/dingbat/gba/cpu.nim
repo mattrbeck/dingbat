@@ -100,13 +100,22 @@ proc irq*(cpu: CPU) =
     # exception_return_restore). Unconditional: this is the vector sequence
     # itself, so it does not vary with what the CPU was doing beforehand.
     cpu.gba.bus.add_cycles(2)
-    # An IRQ recognized through a register-written gate (IME/IE store,
-    # msr-I clear over a parked IF) enters late by a fixed resynchronization
-    # stall on hardware - the gbaedge IRQWIN2 stamp deltas exceed the extra
-    # sled execution by ~12 cycles (see interrupts.nim).
-    if cpu.gba.interrupts.gate_stall:
-      cpu.gba.interrupts.gate_stall = false
-      cpu.gba.bus.add_cycles(IRQ_GATE_ENTRY_STALL)
+    # An entry that interrupts code EXECUTING FROM THE GAMEPAK pays for the
+    # in-flight 32-bit gamepak fetch before the vector fetch can own the
+    # bus: +2*S16 cycles (6 at the boot waitstates). Hardware-anchored
+    # (gbaedge IRQLAT2 page, AGB SP session 4): every ROM-loop shape enters
+    # the handler exactly 6 cycles later than the bare 2S+1N accounting
+    # (deltas 0x39/0x143/0x143 on silicon), while the mGBA suite's Timer IRQ
+    # rows - whose interrupted sleds run from IWRAM - pin the no-stall case.
+    # The gbaedge IRQWIN2 stamps (0x81/0x81/0x84, hardware-matched, ROM
+    # sleds) used to carry this 6 as a gate-only entry stall; it is a
+    # context cost, not a gate cost, so it lives here now and the gate path
+    # pays the same total as before. A halt-wake entry fetches nothing from
+    # the gamepak (the halted core isn't executing), so it is exempt.
+    if not cpu.halt_wake:
+      let page = int(bits_range(lr, 24, 27))
+      if page in 8..13:
+        cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
 
 proc und*(cpu: CPU) =
   # ARM7TDMI Undefined Instruction trap: LR_und holds the address of the

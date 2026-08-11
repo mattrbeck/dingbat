@@ -11,7 +11,14 @@ proc exception_return_restore*(cpu: CPU) =
   # instruction sees is entry(2S+1N+1) + body + return(2S+1N-1) = the data
   # sheet's six cycles of overhead. Only IRQ: the SWI entry/return pair is
   # measured separately (mGBA suite BIOS timing tests) and splits evenly.
-  if cast[CpuMode](cpu.cpsr.mode) == modeIRQ:
+  # EXCEPT when the return refills from the gamepak: restarting the
+  # in-flight gamepak fetch stream costs the cycle back (hardware-anchored,
+  # gbaedge IRQLAT2 page, AGB SP session 4 - the cumulative trigger-stamp
+  # drift across the page's back-to-back IRQ rows is 7 cycles per round
+  # trip on silicon, 6 at the entry + 1 on the return, both
+  # gamepak-context costs; see cpu.irq).
+  if cast[CpuMode](cpu.cpsr.mode) == modeIRQ and
+     int(bits_range(cpu.r[15], 24, 27)) notin 8..13:
     cpu.gba.bus.add_cycles(-1)
   if cpu.spsr.thumb:
     cpu.r[15] -= 4

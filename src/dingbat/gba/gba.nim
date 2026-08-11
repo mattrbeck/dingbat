@@ -73,14 +73,11 @@ type
     reg_if*: InterruptReg
     ime*:    bool
     # A register write just opened the last gate on a parked IF: recognition
-    # (irq_line) is held off until gate_open_at and the next IRQ entry pays
-    # the gate resynchronization stall (see IRQ_GATE_DELAY /
-    # IRQ_GATE_ENTRY_STALL in interrupts.nim). Deliberately NOT serialized:
-    # the window is ~12 cycles (the recognizer event that closes it IS
-    # serialized), so a state load inside it costs at most one slightly-
-    # early IRQ entry. gate_open_at is rebased in end_frame with the other
-    # absolute-cycle anchors.
-    gate_stall*:   bool
+    # (irq_line) is held off until gate_open_at (see IRQ_GATE_DELAY in
+    # interrupts.nim). Deliberately NOT serialized: the window is ~12 cycles
+    # (the recognizer event that closes it IS serialized), so a state load
+    # inside it costs at most one slightly-early IRQ entry. gate_open_at is
+    # rebased in end_frame with the other absolute-cycle anchors.
     gate_open_at*: CycleCount
 
   Keypad* = ref object
