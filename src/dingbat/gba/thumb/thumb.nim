@@ -237,6 +237,7 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
           if mode_bank(cast[CpuMode](new_spsr and 0x1F'u32)) == 0:
             cpu.spsr = cpu.cpsr
           if was_irq_disabled and not cpu.cpsr.irq_disable:
+            # SPSR-restore path: no gate delay (see exception_return_restore)
             cpu.gba.interrupts.schedule_interrupt_check()
           if not cpu.cpsr.thumb:
             # The restore cleared T. On hardware execution resumes in ARM

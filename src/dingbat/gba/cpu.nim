@@ -96,6 +96,13 @@ proc irq*(cpu: CPU) =
     # exception_return_restore). Unconditional: this is the vector sequence
     # itself, so it does not vary with what the CPU was doing beforehand.
     cpu.gba.bus.add_cycles(2)
+    # An IRQ recognized through a register-written gate (IME/IE store,
+    # msr-I clear over a parked IF) enters late by a fixed resynchronization
+    # stall on hardware - the gbaedge IRQWIN2 stamp deltas exceed the extra
+    # sled execution by ~12 cycles (see interrupts.nim).
+    if cpu.gba.interrupts.gate_stall:
+      cpu.gba.interrupts.gate_stall = false
+      cpu.gba.bus.add_cycles(IRQ_GATE_ENTRY_STALL)
 
 proc und*(cpu: CPU) =
   # ARM7TDMI Undefined Instruction trap: LR_und holds the address of the
