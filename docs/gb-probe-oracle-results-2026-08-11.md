@@ -87,48 +87,67 @@ The table is the sweep step `N` at which each row first reads mode 0. Rows are
 store positions `M = 0..7`; row `$07` is the control that stores the value SCX
 **already holds**; row `none` is the control with no store at all.
 
-`BASE_M = 16`, i.e. the store's write cycle walks dots ≈ 79 → 107:
+`BASE_M = 16`, i.e. the store's write cycle walks dots ~= 79 -> 107:
 
 | engine | model | M0 | M1 | M2 | M3 | M4 | M5 | M6 | M7 | ctl `$07` | none |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| dingbat | DMG, CGB C/D/E | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
+| dingbat | DMG | 4 | 4 | 4 | 4 | **6** | 4 | 4 | 4 | 4 | 4 |
+| dingbat | CGB C/D/E | 4 | 4 | 4 | **6** | 4 | 4 | 4 | 4 | 4 | 4 |
 | SameBoy | DMG | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
 | SameBoy | CGB C/D/E | 3 | 3 | **5** | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
 | DocBoy | DMG | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
 | DocBoy | CGB | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
 
+(dingbat here is main at `64b445c`, "ship the live fine-scroll latch and the
+slot-counter wrap". That commit landed while this probe was being written, and
+it is what puts an extension in the dingbat rows at all: measured against the
+commit before it, every dingbat row is flat. So the probe's first job was
+already done -- it saw a mechanism ship.)
+
 The store window was then walked over the rest of the line by rebuilding at
 other `BASE_M` (the read dot is held fixed automatically, see the ROM's
-comment). Only SameBoy-CGB ever moves, and it moves in exactly one place:
+comment). Every engine that moves at all moves in exactly one place:
 
-| `BASE_M` | store write dots | SameBoy CGB C/D/E, rows M0..M7 |
-|---|---|---|
-| 8 | 47 → 75 | 3 3 3 3 3 3 3 3 |
-| 12 | 63 → 91 | 3 3 3 3 3 3 **5** 3 |
-| 16 | 79 → 107 | 3 3 **5** 3 3 3 3 3 |
-| 20 | 95 → 123 | 3 3 3 3 3 3 3 3 |
-| 24 | 111 → 139 | 3 3 3 3 3 3 3 3 |
+| `BASE_M` | store write dots | dingbat DMG | dingbat CGB | SameBoy CGB | others |
+|---|---|---|---|---|---|
+| 8 | 47 -> 75 | -- | -- | -- | -- |
+| 12 | 63 -> 91 | -- | **M7** | **M6** | -- |
+| 16 | 79 -> 107 | **M4** | **M3** | **M2** | -- |
+| 20 | 95 -> 123 | **M0** | -- | -- | -- |
+| 24 | 111 -> 139 | -- | -- | -- | -- |
 
-`BASE_M = 12, M = 6` and `BASE_M = 16, M = 2` are the *same dot* (≈ 87). So:
+Each engine's two hits are the *same dot* reached from two different builds,
+which is the check that the sweep is measuring a dot of the line and not an
+artefact of the slide: dingbat DMG at 95, dingbat CGB at 91, SameBoy CGB at 87.
 
 **Verdict.** The extension is not a growing function of how late the store
-lands. In SameBoy it is a **single one-M-cycle-wide window** at a store write
-dot of ≈ 87 — the eighth dot of mode 3, i.e. the dot the seven-dot fine-scroll
-discard is spent on — worth **+2 M-cycles = 8 dots**, on CGB only, identically
-on revisions C, D and E, and **only when the store changes the value**: the
-`$07 → $07` control never extends anything.
+lands. In every engine that has one it is a **single one-M-cycle-wide window**
+worth exactly **+2 M-cycles = 8 dots**, and it fires **only when the store
+changes the value** -- the `$07 -> $07` control never extends anything, in any
+engine, at any position. That is a far smaller and far more testable shape than
+"grows with how late the store lands", which is how the campaign's bracket
+described it.
 
-That 8 is inside gambatte's CGB bracket of 7–10 dots. It is *not* inside
-gambatte's DMG bracket of 11–14: SameBoy's DMG extends by zero everywhere in
-the swept range, as do dingbat and DocBoy on every machine. So the two rows the
-campaign could not explain do not agree with each other in the oracles, and the
-CGB one is the one that survives.
+Where the engines disagree is the window's POSITION and which machines have one:
 
-**What dingbat does at these points:** nothing, on any machine, at any store
-position — its mode 3 is 172 + fine-scroll dots and a store does not lengthen
-it. DocBoy agrees with dingbat exactly. The disagreement is one engine wide and
-one dot wide, which is the smallest and most testable form this question has
-ever been in.
+| | DMG | CGB C/D/E |
+|---|---|---|
+| dingbat | +8 dots at store dot 95 | +8 dots at store dot 91 |
+| SameBoy | none | +8 dots at store dot 87 |
+| DocBoy | none | none |
+
+So dingbat and SameBoy now agree on the magnitude and the shape and differ by
+**one M-cycle** on where the window sits on CGB, and dingbat has a DMG window
+SameBoy does not. The 8 dots sit inside gambatte's CGB bracket of 7-10. Neither
+oracle reaches gambatte's DMG bracket of 11-14, and DocBoy has no extension at
+all on either machine.
+
+**What dingbat does at these points, and what to do about it.** dingbat's live
+fine-scroll latch produces the right magnitude out of a derived mechanism
+rather than a fitted constant, which is the outcome the campaign wanted. The
+open quantity is now one M-cycle of position on CGB and the existence of the
+DMG window -- both of which this ROM measures directly on silicon, in one
+photograph, without any of the four rounds' machinery.
 
 ---
 
@@ -195,14 +214,16 @@ oracles have committed to a prediction before the answer arrives.
 |---|---|---|---|---|
 | (a) idiom | idiom matters, DMG @ SCX=3 only | idiom never matters | idiom never matters | whether `STAT_M0_FIELD_TAIL` survives at all |
 | (a) DMG/CGB boundary | same dot on both | CGB one M-cycle earlier | CGB one M-cycle earlier | a split dingbat does not model |
-| (b) SCX extension | 0 dots always | 0 on DMG; +8 dots on CGB, one dot wide, value-dependent | 0 dots always | whether the extension exists, and whether it is a window or a ramp |
+| (b) SCX extension | +8 dots, one dot wide, at store dot 95 (DMG) / 91 (CGB) | none on DMG; +8 dots at store dot 87 on CGB | none | where the window sits, and whether a DMG has one |
 | (c) arbitration | emission and fetch on one grid | same | same | whether the 4-dot split exists at all |
 
 Three things to carry forward whatever the photograph says. First, (a) and (b)
 each hand back a **DMG/CGB boundary split** that two oracles agree on and
 dingbat does not model — that is a separate, cheap, independently testable
-finding. Second, (b)'s extension is now a *one-dot window*, not a ramp, which
-is a far smaller thing to model than "grows with how late the store lands".
+finding. Second, (b)'s extension is now a *one-dot window* worth 8 dots, not a ramp,
+in both engines that have one -- a far smaller thing to model than "grows with
+how late the store lands", and the residual disagreement with SameBoy is one
+M-cycle of position rather than a mechanism.
 Third, (c) has been reduced from two irreconcilable reference frames to one
 photograph with one number on it.
 
