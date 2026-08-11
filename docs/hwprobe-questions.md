@@ -276,3 +276,15 @@ a stale stamp).
 | 35 | +12 cmp pc in System mode (flags preset N\|Z, unreachable by a compare) | C00000xx = "restore" writes CPSR-as-SPSR (no-op); 200000xx = plain compare; else garbage restore (phase byte flags a wander) | C000001F (no-op restore), clean |
 | 36 MSRTBIT2 | +0 immediate-form `msr CPSR_c,#0x3F` r7 | 04 = A+8-skip-A+10 quirk is form-independent; 15/14/12/08 = other resume points; 00 = continued as ARM | 04 (quirk holds), clean |
 | 36 | +8/+10 register form, T + IRQ->SYS in one write | r7 04 + recovery mode byte 1F = quirk unchanged AND the mode switch lands | 04 / 1F (both) |
+
+**ANSWERED 2026-08-11 (session 4, `tests/roms/expected/agb-sp-4.txt`,
+analysis in docs/hwprobe-results-agb.md):** every row above is settled.
+Hardware selected the dingbat baseline on all pages except three
+divergences: `stmia r15!` performs NO writeback (ldm-style — dingbat's
+base+8 is wrong), handler-entry latency runs +6 cycles later than
+dingbat in every IRQLAT2 shape, and the halfword-aligned `cmp pc`
+T-clearing restore resumes past BOTH overlay words (scratch=0, r6=0 —
+an outcome the prediction key did not list: resume at A+10/A+14, not
+(A+2)&~3).  Open follow-ups for a v7: one row discriminating A+10 vs
+A+14 (move the escape, capture r4), and the frame-sequencer phase
+family from earlier sessions.

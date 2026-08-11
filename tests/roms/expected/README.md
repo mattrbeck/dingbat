@@ -35,6 +35,9 @@ cart-influenced; each run's `.txt` header names the cart used.
 - `agb-sp-3/` — same console/cart, 2026-08-10 (the v5 pages of the
   28-page build @ 9b0ffc2; `ALL FDE5`; BXDECODE completed one press at
   a time — candidate 2 wedges the console and is marked DD).
+- `agb-sp-4/` — same console/cart, 2026-08-11 (the v6 isolation pages
+  28-36 of the 37-page build @ aaaa0eb; `ALL B473`; plain viewer run,
+  no interactive pages).
 
 gbedge (GB/GBC) runs land here the same way once a GB-slot cart run is
 transcribed; `hwprobe_expected.py` grows the 160x144 renderer then.
