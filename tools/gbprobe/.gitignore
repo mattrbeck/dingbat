@@ -1,0 +1,7 @@
+# Built engine runners: they link against out-of-tree SameBoy and DocBoy
+# checkouts under <worktree>/.scratch, which build.sh creates.
+bin/
+# Assembler intermediates and shot output. The probe .gb and .sym files
+# themselves ARE committed -- they are the artifact that goes to hardware.
+build/
+out/

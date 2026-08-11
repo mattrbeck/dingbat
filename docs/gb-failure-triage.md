@@ -4413,6 +4413,19 @@ from a DMG or a CGB that is itself the answer to a question this campaign asked
 (the DMG/CGB splits in `SCX_FINE_BORROW_DMG_LEAD`, `STAT_M0_FIELD_TAIL_CGB` and
 `STAT_MODE3_LAG_CGB`).
 
+**Status, 2026-08-11.** All three are written, as standalone `.gb` files in
+`tools/gbprobe/` rather than as pages of `gbedge.py` — they need their own LCDC,
+their own anchor and, for (c), a whole frame, none of which fits a paging viewer
+— and all three have been run in dingbat, SameBoy and DocBoy through one
+harness. The answer tables and a verdict per experiment are in
+`docs/gb-probe-oracle-results-2026-08-11.md`; the headline is that the oracles
+predict "no" for (a) and for (c), that (b)'s extension turns out to be a
+one-dot window rather than a ramp and exists in only one of the three engines,
+and that (a) and (b) both hand back a DMG/CGB mode-0 boundary split that two
+oracles agree on and dingbat does not model. The ROMs are the artifact for the
+cartridge: correct headers, raw values, on-screen hex, and the same reader
+script for a photograph as for a framebuffer.
+
 ### (a) Does the STAT mode field report differently to two read idioms?
 
 **Settles:** the three-suite disagreement that rounds 3 and 4 are built on, and
