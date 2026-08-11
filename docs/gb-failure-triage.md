@@ -4087,14 +4087,326 @@ Witness ladder byte-identical throughout (both acid2, both strikethrough,
 cgb-acid-hell at rev C and E, daid on DMG and on CGB at rev C and D); mealybug
 1863574 / 552960 unmoved on both devices.
 
-## The three hardware experiments this campaign leaves wanting
+## 2026-08-10: the DMG BGP transition pixel is a THREE-way split, and daid ships all three
+
+Chased from a lead outside the tree — TASVideos submission
+[9604S](https://tasvideos.org/9604S) — on the theory that a mid-pixel register
+write ORs old and new, and that this might be what `cgb-acid-hell`'s last two
+pixels are. The lead is **right about DMG BGP and cannot touch acid-hell**, and
+chasing it turned up something the tree did not know: daid's three accepted DMG
+references are the three outcomes the submission names, one dingbat build each.
+
+### What the source actually claims, and what it does not
+
+Submission 9604S is CasualPokePlayer's Pokémon Red arbitrary-code-execution
+playaround, submitted 2025-03-30. Its linked forum thread
+(`/Forum/Topics/26158`) was read too and adds nothing to the submission text.
+Three claims, quoted:
+
+* **The register is open.** "Unlike VRAM, the BGP register is never locked, and
+  may be freely modified during Mode 3."
+* **The three-way outcome.** "writing to BGP during rendering may result in the
+  old palette and new palette values being OR'd together for one pixel on some
+  Game Boys, or it might result in the old value still being used for a pixel,
+  or it might result in the new value just being used as you'd normally expect.
+  **This is dependent on the LCD revision used**."
+* **The device split.** "On the Game Boy Color luckily, this doesn't matter so
+  much, as the new color LCD used does not have this quirky behavior (the same
+  goes for the Super Game Boy and Game Boy Advance anyways)."
+
+**What it does not claim, and the negatives are load-bearing.** It says nothing
+about WX, WY or LCDC — the OR is BGP-specific, and nothing in the submission
+extends it to any other mid-line write. It names no unit count, no serial, no
+device revision number and shows no photograph: this is a TAS author's working
+note, not a capture, and it is treated below as a hypothesis with a specific
+shape rather than as evidence. It also never says what physically ORs with
+what. "the old palette and new palette values" is register-level wording, but
+"dependent on the LCD revision used" puts the cause in the LCD assembly, which
+sits *downstream* of the palette lookup. The source is internally in tension on
+mechanism, and the next section shows why that tension is unresolvable from
+pixels.
+
+### Corroboration: the effect is solid, the "LCD revision" attribution is not
+
+Searched for independent sources, with one clear negative result first.
+
+**Pan Docs does not cover this at all**, so it is not citable here. Its
+`Palettes.md` documents BGP only as a value-to-shade table; the single relevant
+sentence in `Rendering.md` treats mid-scanline BGP writes as a *timing
+instrument*, not a glitch ("mid-scanline writes to `BGP` allow observing this
+behavior precisely, as any delay shifts the write's effect to the left by that
+many dots"). `pixel_fifo.md` describes the per-pixel BGP read with no
+write-conflict discussion, and gbdev/pandocs#379 explicitly defers this class of
+material. Nothing in gbdev.gg8.se, GBEDG, gb-ctr or mGBA's gbdoc either.
+
+**The primary source is [SameBoy issue
+#65](https://github.com/LIJI32/SameBoy/issues/65)** (mattcurrie, 2018), filed
+with photographs of real DMGs, and it is where the OR was established:
+
+* LIJI32's first guess was the **opposite polarity** — "My guess is that the
+  value read by the PPU in that moment is the result of a bitwise **AND**
+  operation between the old and new version."
+* mattcurrie settled it empirically by sweeping every colour transition:
+  "**Shows that ORing the values is correct**, as you've done."
+* The device split was in the first post: "The effect isn't seen on my MGB or
+  CGB, **only on DMG**." Two DMGs (a DMG-CPU B and a blob) both showed it.
+* The one physical mechanism anyone has proposed is PinoBatch's, quoted there:
+  "When one component writes a value at the exact time something else reads it
+  the time for the value to rise may differ from the time for it to fall. **A 1
+  may linger longer than a 0 or vice versa.**" A lingering 1 in either operand
+  is *mechanically* a bitwise OR, which is why the operation is what it is.
+
+SameBoy implements it as `GB_write_memory(gb, addr, value | old_value)` for one
+T-cycle before writing the true value (`Core/sm83_cpu.c`,
+`GB_CONFLICT_PALETTE_DMG`) — the same shape dingbat arrived at independently.
+Its conflict maps corroborate the device half of the submission directly: SGB is
+`GB_CONFLICT_READ_NEW` and CGB/AGB write the new value.
+
+**The strongest independent statement is daid's own**, in
+[GBEmulatorShootout#9](https://github.com/gbdev/GBEmulatorShootout/issues/9),
+and it is stronger than the submission's:
+
+> "I'm quite sure this behavour is **instance depended**, so if you take 10 DMGs
+> they don't all act the same. My own DMG does 1 or 2 **depending on the
+> position in the scanline**. So even if the gambatte testrom shows something,
+> it might act different on a different scanline. There is also difference
+> between the **stock screen and modded screens**."
+
+and the suite's own description (`testroms/daid.py`): "Which case occurs seems
+to be **hardware and instance dependent** as some DMGs do not do a consistent
+single case."
+
+**So the submission's "This is dependent on the LCD revision used" is the
+author's own framing and is corroborated by nobody.** No source anywhere maps
+any of the three behaviours to a named DMG-CPU or panel revision; the total
+published sample across every source found is about four units. The community
+phrasing is "hardware and instance dependent", and daid's *intra-scanline*
+variation on a single unit is a materially different and stronger claim than a
+per-unit revision constant — it describes a metastable race, not a logic
+difference. The screen-mod dependence is the only thing pointing at the panel,
+and it is equally explained by a mod board re-sampling the shade lines on its
+own clock.
+
+**The ecosystem does not agree with itself**, which is worth knowing before
+treating any single reference as truth: gambatte's `dmgpalette_during_m3*`
+images encode the *clean-edge* behaviour, mealybug ships exactly **one** DMG
+reference per BGP ROM and canonises the *OR*, and BizHawk's
+`GambatteSuite.Cases.cs` carries the collision as ~20 permanent known-failures
+("`dmgpalette_during_m3_3 on DMG in SameBoy`"). Notably mealybug's own
+comprehensive PPU document, which details revision splits for `TILE_SEL` and
+`SCY`, **has no palette section at all** — the one person who systematically
+documented PPU revision differences never wrote this one up.
+
+### Analog or digital is not observable here, and that is provable
+
+OR is bitwise and a palette byte is four independent 2-bit fields, so for the
+one colour index `c` a pixel actually uses,
+
+    (old or new)[c]  ==  old[c] or new[c]
+
+ORing the two register bytes and then looking the shade up is **arithmetically
+identical** to looking the shade up in each palette and ORing the two 2-bit
+shades on the wire to the panel. So "a digital latch read on the dot it is
+written" and "an analog OR on the LCD drive lines" produce the same framebuffer
+for every possible input, and no reference frame — daid's, mealybug's, or one
+not yet captured — can separate them. dingbat implements the first spelling;
+the second would be a comment change, not a code change.
+
+**Where the distinction would bite, and it is the reason to keep it in mind.**
+An analog drive-line mechanism lives on the 2-bit shade bus between the PPU and
+the panel. It is downstream of every fetch, so it can perturb a *displayed
+shade* and can never perturb a *byte read out of VRAM*. That is what disposes
+of the acid-hell half of the lead below.
+
+### What dingbat does today: it already implements the OR, derived independently
+
+`MIXER_PALETTE_OR` (`gb/gb.nim`), applied at the FF47..FF49 write in
+`gb/ppu.nim`. On DMG only, the single oldest pixel a palette write still reaches
+(`MIXER_PALETTE_BACK` = 2 dots back) is recomposed as `old or new` on the packed
+byte and every nearer pixel takes the new value cleanly; on CGB the effect is
+suppressed, because that revision's own dot of write latency
+(`CGB_MIXER_LATENCY`) puts the pixel out of reach.
+
+It was derived on 2026-08-08 from **mealybug `m3_bgp_change`**, whose frame is
+BGP's low two bits sampled once per dot — not from daid, and not from this
+submission, which was not known here until today. The two derivations are
+therefore independent and they agree on all three of the things that can be
+checked: that the effect exists, that it lasts **exactly one pixel**, and that
+it is DMG-only. The code's note already records the device half by measurement:
+running the same two DMG carts on CGB hardware wants the clean edge
+(`m3_bgp_change` 22732 with it, 22321 with an OR pixel).
+
+### The new result: daid's three DMG references are the three outcomes
+
+`daid/ppu_scanline_bgp` ships `_0`, `_1` and `_2` as equally accepted DMG
+references and the runner passes on any of them. Scoring all three against
+three builds that differ only in how a palette write reaches the mixer tail:
+
+| build | `_0` | `_1` | `_2` |
+|---|---|---|---|
+| `MIXER_PALETTE_OR=1`, `BACK=2` — **shipping** | 22576 | **23040** | 22576 |
+| `MIXER_PALETTE_OR=0`, `BACK=2` | 22464 | 22576 | **23040** |
+| `MIXER_PALETTE_OR=0`, `BACK=1` | **23040** | 22576 | 22464 |
+
+Every row is pixel-exact on exactly one reference and 464-576 pixels out on the
+other two. There is no partial credit anywhere in the table, and the mapping
+onto the submission's three-way sentence is exact, in its own order:
+
+* **`_0` = "the old value still being used for a pixel"** — the write reaches
+  one pixel less deep, so the deepest pixel in the tail keeps the old palette.
+* **`_1` = "the old palette and new palette values being OR'd together"** —
+  what ships.
+* **`_2` = "the new value just being used as you'd normally expect"** — a clean
+  edge at full depth.
+
+This is the first thing in the tree that explains **why the shootout ships three
+accepted references for one ROM**. They are not three tolerances or three
+capture artefacts: they are the three documented outcomes, each reproducible
+here byte-for-byte by a one-constant change.
+
+**The suite's own commit history confirms the mapping independently, and it was
+not consulted until after the table was measured.** `_0` and `_1` were added
+together by daid on 2021-01-05 ("Allow two different results for the mid
+scanline BGP change"); `_2` was added by CasualPokePlayer in PR #10 on
+2022-04-05, whose issue #9 names the three cases with their emulator
+attributions — "1. Old BGP is read (**bgb** behavior), 2. Bitwise OR between old
+and new BGP is read (**SameBoy** behavior/what this test expects), 3. New BGP is
+read (**Gambatte** behavior/what Gambatte's test suite expects)". So `_2` is by
+construction the Gambatte/new-value case, which is exactly the reference the
+`MIXER_PALETTE_OR=0` build lands on, and `_1` is by construction the SameBoy/OR
+case, which is exactly where the shipping build lands. Three independent
+routes — dingbat's mealybug-derived constant, the reference set's provenance,
+and the submission's prose — agree on which image is which.
+
+`BACK=1` is a whole-frame configuration built only to see which reference it
+lands on. It is **not proposed for shipping** and was not scored past this
+frame; the claim is about the mapping, not about the constant.
+
+### What the instance-dependence claim does to the `_1` match
+
+The `_1` match stays derived truth, and the derivation is now *bounded*, which
+is the more useful state:
+
+* The OR does not depend on daid at all — it came off mealybug — so `_1` is a
+  **second, independent witness** that dingbat happens to match exactly.
+* But "on some Game Boys" means `_1` is **one unit**, not "the DMG". dingbat
+  cannot be right about all three references at once, and shipping `_1` is a
+  choice *among instances* — structurally like the CGB-C/D palette-latency split
+  the tree already makes runtime-selectable through `--cgb-rev`, except that
+  nobody has established which instances, so there is not even a name to give
+  the setting yet.
+* So the honest restatement: **`MIXER_PALETTE_OR` is not a correctness constant,
+  it is a revision constant that has no runtime selector yet.** If a DMG
+  revision axis is ever wanted, this is its first member, and daid's three
+  references are a ready-made scoring set for it — one build per revision, each
+  pixel-exact, already measured in the table above.
+* And the operational consequence for any future probe: **a DMG that shows a
+  clean edge has not refuted the OR.** Expecting one answer is the mistake the
+  claim is warning about.
+
+**The sharper version of the same worry, from daid.** If one unit really does
+"1 or 2 depending on the position in the scanline", then no per-frame constant
+of any value is right, and `MIXER_PALETTE_OR` is an approximation to a
+metastable race rather than a model of it. Two things bound how much that
+matters here. Against it: the effect would then be position-dependent and
+dingbat's is not. For it: dingbat is **23040/23040** against `_1` — a whole
+frame, every write site, every scanline — so whichever unit produced that
+capture behaved *consistently* across the line, and a position-dependent model
+would have to reduce to the constant one on this ROM anyway. The residual risk
+is that `_1` is one capture of a race and the tree has fitted a constant to it;
+that is exactly what the probe below is for, and it is why the probe is
+specified as **many units**, not one.
+
+### The acid-hell verdict: the OR cannot reach those two pixels, four ways
+
+The lead's second half — that an OR composite might explain `cgb-acid-hell`'s
+residue, where the glitched fetch delivers a byte that is neither the old nor
+the new one — is **refuted**, and each refutation is independent of the others.
+
+**1. Wrong device, by the source's own sentence.** acid-hell is a CGB ROM and
+the submission explicitly exempts the CGB LCD. The tree measured the same split
+from the other side (the CGB run of the DMG carts wants the clean edge).
+
+**2. Wrong data path.** acid-hell's failure is a *bitplane byte read out of
+VRAM by the fetcher*. Whether the BGP effect is the digital latch or the analog
+drive lines, both live at or after the shade lookup, which is downstream of
+every fetch. Nothing in the BGP mechanism has a wire that reaches a fetch.
+
+**3. The two pixels refute any fixed-polarity composite by disagreeing with each
+other.** Read straight out of the current tree's `-d:gb_px_trace`:
+
+| | HW | dingbat | `num` | `latch`/`uns`/`sgn` | `prevd` |
+|---|---|---|---|---|---|
+| `ly=68 lx=76 plane 1` | `$55` | `$5D` | `$55` | `$5D` | `$7F` |
+| `ly=69 lx=76 plane 1` | `$49` | `$41` | `$49` | `$41` | `$7F` |
+
+`ly = 68` needs `$5D and $55` — an **AND**. `ly = 69` needs `$41 or $49` — an
+**OR**. One frame, one ROM, two adjacent lines, and they demand opposite
+polarities, so no wired-OR and no wired-AND explains both. The only single
+source that explains both is `num`, the tile index, which is what the shipping
+`CGB_TDSEL_GLITCH` rule already delivers. (`num and prevd` matches both and is
+a decoy: `prevd` is `$7F` on both lines, so the AND is arithmetically just
+`num`, and it scores 136/192 on the corpus.)
+
+**4. There is no substitution event left to re-value.** In the shipping world
+neither disputed read is glitched at all — `glitch = 0` on both, the LCDC.4
+change lands 4 dots off the read dot, and `tdselcells.py` puts acid-hell's
+contribution to the corpus at **0 cells of 408**. A rule about *which byte* a
+glitched read returns, of any shape whatever, has nothing to fire on. The
+residue is a missing trigger, and the 2026-08-14 `tdselphase.py` table already
+brackets that door shut from both sides.
+
+### The composite hypothesis, priced on the whole corpus
+
+Worth a number rather than an argument, so the OR family was scored as a
+substitution source against all 408 cells (`tools/gbppu/tdselcells.py` rebuilt
+on this tree: 216 SET / 192 RESET, self-check 0 wrong on all four mealybug
+frames and exactly the 2 known planes wrong on acid-hell). Best of each kind:
+
+| branch | source | score |
+|---|---|---|
+| RESET | `num` — **shipping** | **192 / 192** |
+| RESET | `num or sgn` | 164 / 192 |
+| RESET | `num and prevd` | 136 / 192 |
+| RESET | `num and latch` | 134 / 192 |
+| SET | `latch` — **shipping** | **216 / 216** |
+| SET | `latch or prevd` | 202 / 216 |
+| SET | `latch or sgn` | 196 / 216 |
+| SET | `latch and uns` | 164 / 216 |
+
+**Twenty composites were scored** — each branch's shipping source combined with
+each of the five other candidate bytes, in both polarities — and **not one
+reaches the clean single source**. The sharp form of that, which is the part
+worth carrying: for **every one of the twenty**, the number of cells where the
+composite *differs* from the clean source and the number where it is *wrong* are
+the same integer — 20 and 20, 74 and 74, 157 and 157, 14 and 14, 180 and 180.
+**Every cell in the corpus that can tell a composite from a clean source votes
+for the clean source**, and the discriminating counts run from 14 to 180, so
+this is a refutation and not a degenerate tie. Hardware's substituted byte is
+one byte off one wire, on all 408 of them.
+
+The scorer is committed as `tools/gbppu/tdselor.py` (it takes
+`tdselcells.py`'s corpus JSON, and given the traced binary as a second argument
+also re-reads acid-hell's two disputed planes, which are the table above).
+
+### Nothing was built behind a `-d:` flag, and that is the finding
+
+The rule this lead would have wanted — a `CGB_TDSEL_OR`-shaped constant making
+a glitched read return `old or new` — was never compiled, because it died at
+two cheaper and stronger gates: the arithmetic of two pixels that demand
+opposite polarities, and a 408-cell corpus in which every discriminating cell
+refuses every composite. Building it would have cost a rebuild and bought a
+number already known from the corpus JSON. The refutation is the deliverable.
+
+## The four hardware experiments this campaign leaves wanting
 
 Written to be added to a probe ROM rather than to be argued about. The natural
 home for (a) and (b) is `tests/roms/gbedge.py`, which already has the paging
 viewer, the two-pass assembler and the determinism contract they need — each is
 one page, one 32-byte result slot, raw values and no baked-in expectation. (c)
-needs pixels and so belongs in the visual ROM (`gbvis.gb`, earmarked v3 in
-`docs/hwprobe-questions.md`).
+and (d) need pixels and so belong in the visual ROM (`gbvis.gb`, earmarked v3 in
+`docs/hwprobe-questions.md`); (d) is also the only one of the four that needs
+more than one console.
 
 An AGB in GB-compat mode is a valid GB revision for all three; where it differs
 from a DMG or a CGB that is itself the answer to a question this campaign asked
@@ -4199,6 +4511,62 @@ not supply. If they cannot both be true, one of the two reference frames this
 tree is scored against is not describing the machine in front of us, and the
 2-pixel residue is a reference question rather than a model one.
 
+### (d) The DMG BGP transition pixel, on as many DMGs as can be borrowed
+
+**Settles:** whether `MIXER_PALETTE_OR = 1` is a fact, a revision, or a coin
+flip — and it is the one experiment here whose *design* is dictated by the
+literature rather than by the tree. Every published source says the answer
+varies by unit ("if you take 10 DMGs they don't all act the same"), one says it
+varies *within a single scanline* on one unit, and the total published sample is
+about four consoles. So the experiment is not "photograph a DMG"; **the sample
+size is the experiment**, and a single unit cannot produce a usable result.
+
+This one needs pixels, so it belongs with (c) in the visual ROM (`gbvis.gb`,
+earmarked v3 in `docs/hwprobe-questions.md`).
+
+**Setup.** DMG. Flat background tiles so every pixel is the same colour index,
+which makes the frame a direct read-out of BGP — the `m3_bgp_change` trick, and
+the reason that ROM could derive the effect at all. Then, on one frame:
+
+* **A colour-transition sweep, because the operation is only pinned by one.**
+  The three outcomes coincide whenever `old or new` happens to equal `old` or
+  `new` — which is how the effect hid in this tree until 2026-08-08 — so the
+  probe must write BGP transitions where all three differ. `$E4 -> $1B` and
+  `$11 -> $12` are the useful shapes (`$11 or $12 = $13`, neither operand).
+  Sweep several transitions down the frame, one per band, and the band's colour
+  says which of the three cases that unit did. This is mattcurrie's method in
+  SameBoy #65 and it is what turned LIJI32's AND guess into the measured OR.
+* **The same transition repeated at many X positions**, because daid reports one
+  unit doing different cases at different points in a scanline. If a unit's
+  bands are uniform across X, that claim does not reproduce and the constant is
+  safe; if they are not, `MIXER_PALETTE_OR` is the wrong *shape* of model and no
+  value of it is right.
+* **A no-op control** — write BGP the value it already holds, at the same dot.
+  A transition pixel that appears there is measuring the write and not the
+  value.
+
+**What to record per unit**, and it must be recorded per unit rather than
+pooled: the mainboard and CPU markings (DMG-CPU-0x, and whether the die is
+blobbed), whether the screen is stock or modded, and the photograph. The point
+of the metadata is the one question every source leaves open — **nobody has ever
+mapped a behaviour to a named revision**, and a table of six units with their
+markings would be the first, whichever way it comes out.
+
+**What each outcome decides.**
+
+* Units split across the three cases: `MIXER_PALETTE_OR` is confirmed as a
+  *revision* constant, and the DMG needs a `--dmg-rev`-style selector the way
+  CGB already has `--cgb-rev`. daid's `_0`/`_1`/`_2` are then its scoring set
+  and the three builds in the table above are its three settings, already
+  measured and already pixel-exact.
+* Every unit ORs: the submission's "LCD revision" framing is wrong, mealybug's
+  single DMG reference is right, `MIXER_PALETTE_OR = 1` is a fact, and the
+  shootout's `_0`/`_2` are capture or panel artefacts rather than silicon.
+* Any unit varies **within** a scanline: the constant is the wrong shape, and
+  what needs modelling is a race whose bias depends on position — the first
+  thing in this tree that would be genuinely non-deterministic, and a good
+  reason to keep accepting all three references rather than pinning one.
+
 Two extra pages are nearly free and worth having: the same frame at `SCX and 7`
 of 0 and of 3, since the campaign's one solid new structural result
 (`SCX_FINE_BORROW`) says the fetch grid's column carries a borrow off the fine
@@ -4213,7 +4581,7 @@ aiming at two quarantined contradictions. It ran four rounds.
 
 **Headline: gambatte 3940 -> 4044, local runner 770 -> 779.** Two mechanisms
 shipped, two are parked with prices, five axes are refuted with both sides
-named, and three hardware experiments are specified above.
+named, and four hardware experiments are specified above.
 
 ### What shipped
 
