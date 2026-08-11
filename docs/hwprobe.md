@@ -203,6 +203,8 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 - **PCWB2**: r7 = 18/10/1F/1C/18 — dingbat generalizes as PC := writeback
   (+4 for ldr, load suppressed: r1 stays 0), EXCEPT `stmia r15!` lands
   base+8 (neither wb=base+4 nor the ldm-style no-wb).  No watchdog fires.
+  (Post-session-4 fix: the stm row now reads 1F — no writeback — and the
+  page is byte-perfect vs hardware, CRC A9AA.)
 - **DMABYTE2**: dingbat mirrors CNT_H bit7 on ALL FOUR channels (readback
   0080 after hi-strb 0x80, transfer runs); DMA3 hi 0xC0 -> 4080
   (bit7-only mirror), lo 0xC0 -> 0040 (bit6 stores, bit7 dropped),
@@ -217,7 +219,9 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
   two-write identical), and the 0xFFF0 row enters the handler BEFORE the
   trigger-side stamp (entry 0B4F < trigger 0C4F) — the overflow lands
   inside the arming code, as designed.  IRQLAT p0F's own TM2 pair reads
-  (00D4, 0103) after the fix.
+  (00D4, 0103) after the fix.  (Post-session-4 retune: the gamepak-context
+  entry/return cost lands the page byte-perfect vs hardware, CRC 0EE1 —
+  deltas 0x39/0x143/0x143, p0F TM2 pair (00D4, 0109).)
 - **IOBYTE2**: dingbat STORES the DISPSTAT lo-byte 0x38 (readback 0039)
   and the byte-clear (0001 after) — the "lo byte ignores byte writes"
   hardware model predicts 0001/0039 instead; hi-byte LYC and 16-bit
