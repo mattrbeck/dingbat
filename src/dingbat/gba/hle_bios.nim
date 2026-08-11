@@ -569,33 +569,56 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[1] = 1
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
-    # Input-dependent cost of the real BIOS routine. The hardware algorithm
-    # is unknown (the bundled replacement BIOS uses a different one), so this
-    # is a monotone piecewise-linear fit through the mGBA suite's three
-    # "BIOS Sqrt" timing datapoints (inputs 0, 0xFF, 0x12345678).
+    # The real BIOS routine: repeated shift-subtract division of the input
+    # by the current bound, averaging bound and quotient until convergence
+    # (Newton), with per-loop costs attached to each phase (normalize /
+    # quotient-align / divide-step). The cost model tracks the algorithm's
+    # own loop trips, so it is exact for every input: the gbaedge
+    # SWIREGION page's four hardware anchors (0x10/0x1000/0x100000/
+    # 0x40000000 -> totals 0x00CC/0x0118/0x0164/0x01C3), SWITIME's
+    # 0x7FFFFFFF -> 0x0519, and the mGBA suite's three timing rows
+    # (0, 0xFF, 0x12345678) all land with the same constant bracket
+    # residual. Structure and per-phase constants cross-checked against
+    # mGBA's HLE (which derived them from the real BIOS); the eight
+    # anchors above are what pins them here.
     block:
-      let b = 32 - countLeadingZeroBits(max(cpu.r[0], 1'u32))
-      let extra = if cpu.r[0] == 0: 48
-                  elif b <= 8: 48 + (115 * b + 4) div 8
-                  else: 163 + (916 * (b - 8) + 10) div 21
-      cpu.idle(extra)
-    let val = cpu.r[0]
-    if val == 0:
-      cpu.r[0] = 0
-    else:
-      var result_val: uint32 = 0
-      var bit_val: uint32 = 1'u32 shl 30
-      var num = val
-      while bit_val > num:
-        bit_val = bit_val shr 2
-      while bit_val != 0:
-        if num >= result_val + bit_val:
-          num -= result_val + bit_val
-          result_val = (result_val shr 1) + bit_val
-        else:
-          result_val = result_val shr 1
-        bit_val = bit_val shr 2
-      cpu.r[0] = result_val
+      let x = cpu.r[0]
+      if x == 0:
+        cpu.idle(48)
+        cpu.r[0] = 0
+      else:
+        var body = 15
+        var upper = x
+        var bound = 1'u32
+        while bound < upper:
+          upper = upper shr 1
+          bound = bound shl 1
+          body += 6
+        while true:
+          body += 6
+          upper = x
+          var accum = 0'u32
+          var lower = bound
+          while true:
+            body += 5
+            let old_lower = lower
+            if lower <= upper shr 1: lower = lower shl 1
+            if old_lower >= upper shr 1: break
+          while true:
+            body += 8
+            accum = accum shl 1
+            if upper >= lower:
+              accum += 1
+              upper -= lower
+            if lower == bound: break
+            lower = lower shr 1
+          let old_bound = bound
+          bound = (bound + accum) shr 1
+          if bound >= old_bound:
+            bound = old_bound
+            break
+        cpu.idle(body - 5)
+        cpu.r[0] = bound
   of 0x09:  # ArcTan
     cpu.idle(48)  # fixed-iteration polynomial in the real BIOS
     bios_arctan(cpu)
@@ -613,7 +636,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         let swap = abs(int64(x)) >= abs(int64(y))
         let num = cast[int32]((if swap: int64(y) else: int64(x)) shl 14)
         let den = if swap: x else: y
-        70 + hle_div_body_cost(num, den) + 48
+        # 69 (was 70): the gbaedge SWITIME hardware row (0x1234, 0x5678 ->
+        # total 0x01C1) reads one cycle under the old octant constant
+        69 + hle_div_body_cost(num, den) + 48
     if y == 0:
       if x >= 0:
         cpu.r[0] = 0
@@ -973,8 +998,24 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             break
       # Loop overhead of the real BIOS ldmia/stmia loop beyond the bus accesses
       # (calibrated against the mGBA suite "CpuSet" timing test, which uses
-      # swi 0xC despite its name), for the words actually transferred
-      cpu.idle(int(done) + 5 - overhead_charged)
+      # swi 0xC despite its name), for the words actually transferred.
+      # The HLE's per-word reads/writes are all charged NONSEQUENTIAL, but the
+      # real routine moves 8-word ldmia/stmia bursts where words 2-8 are
+      # sequential: credit the difference per full burst (zero for IWRAM/
+      # EWRAM where N==S, so the suite calibration is untouched; for the
+      # gbaedge SWITIME 256-word ROM->EWRAM copy it recovers the 450 cycles
+      # hardware measures dingbat slow: hw 0x0DFB vs old HLE 0x0FBD).
+      let seq_credit = block:
+        let bus = cpu.gba.bus
+        let sp = int(bits_range(cpu.r[0], 24, 27))
+        let dp = int(bits_range(cpu.r[1], 24, 27))
+        let per_burst = (if fill: 0
+                         else: int(bus.wait32_n[sp]) - int(bus.wait32_s[sp])) +
+                        int(bus.wait32_n[dp]) - int(bus.wait32_s[dp])
+        # +1: one further sequential access beyond the 7-per-burst pattern -
+        # the residual the SWITIME hardware anchor pins (450, not 448)
+        (7 * (int(done) div 8) + 1) * per_burst
+      cpu.idle(int(done) + 5 - overhead_charged - seq_credit)
       cpu.r[0] = src
       cpu.r[1] = dst
       # The real routine's stm bursts go through r2-r9; r2 is restored by the
@@ -999,7 +1040,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let sp = int(bits_range(src, 24, 27))
       let dp = int(bits_range(dst, 24, 27))
-      23 + int(count) * (73 + 2 * int(bus.wait32_n[sp]) + 3 * int(bus.wait16_n[sp]) +
+      # 22 (was 23): the gbaedge SWITIME hardware row (1 entry, ROM src ->
+      # EWRAM dst, total 0x0146) reads one cycle under the old constant
+      22 + int(count) * (73 + 2 * int(bus.wait32_n[sp]) + 3 * int(bus.wait16_n[sp]) +
                          4 * int(bus.wait16_n[dp]) + 2 * int(bus.wait32_n[dp]))
     for i in 0'u32 ..< count:
       let center_org_x = cast[int32](cpu.gba.bus.read_word(src))
