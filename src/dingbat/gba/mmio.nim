@@ -3,6 +3,7 @@
 proc new_mmio*(gba: GBA): MMIO =
   result = MMIO(gba: gba)
   result.waitcnt = WAITCNT()
+  result.memctrl = 0x0D000020'u32  # documented reset default (IDENT page)
 
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
@@ -16,7 +17,11 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr]
   of 0x204..0x205: read(mmio.waitcnt, io_addr and 1)
   of 0x206..0x207, 0x20A..0x20B, 0x302..0x303: 0'u8
+  of 0x300: mmio.postflg
   else:
+    # Internal memory control: 0x04000800, mirrored every 64K of IO space
+    if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
+      return read(mmio.memctrl, io_addr and 3)
     when defined(test_harness):
       if mmio.gba.test_output != nil and mmio.gba.test_output.mgba_debug_enable == 0xC0DE'u16:
         if io_addr == 0xFFF780'u32: return 0xEA'u8  # low byte of 0x1DEA
@@ -36,6 +41,8 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x204..0x205:
     write(mmio.waitcnt, value, io_addr and 1)
     mmio.gba.bus.update_waitcnt(mmio.waitcnt)
+  of 0x300:
+    mmio.postflg = value and 1
   of 0x301:
     mmio.gba.cpu.halted = true
     mmio.gba.cpu.stopped = bit(value, 7)  # Stop wakes only on keypad/cartridge/SIO
@@ -45,6 +52,10 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     # Wake immediately if an enabled interrupt is already pending
     mmio.gba.interrupts.schedule_interrupt_check()
   else:
+    if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
+      # Internal memory control: stored for readback; effects unimplemented
+      write(mmio.memctrl, value, io_addr and 3)
+      return
     when defined(test_harness):
       if mmio.gba.test_output != nil:
         if io_addr == 0xFFF780'u32:

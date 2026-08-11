@@ -92,6 +92,16 @@ type
   MMIO* = ref object
     gba* {.cursor.}:     GBA
     waitcnt*: WAITCNT
+    # POSTFLG (0x04000300): R/W bit0; the BIOS sets it to 1 at first boot.
+    # Hardware-verified boot value 01 at ROM entry (gbaedge IDENT page).
+    postflg*: uint8
+    # Internal memory control (0x04000800, mirrored every 64K): stored for
+    # readback only - the waitstate/WRAM-disable effects are deliberately
+    # unimplemented. Reset value 0x0D000020 (hardware-verified, IDENT page;
+    # dingbat previously returned open bus). Neither field is serialized:
+    # postflg is effectively constant after boot and memctrl is write-rare;
+    # a state load resets them to the boot values.
+    memctrl*: uint32
 
   Timer* = ref object
     gba* {.cursor.}:          GBA
