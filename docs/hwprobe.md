@@ -1,7 +1,7 @@
 # hwprobe: gbedge.gb + gbaedge.gba — hardware edge-case probe ROMs
 
-**Date:** 2026-08-10 (v6)  **ROMs:** `tests/roms/gbedge.gb` (26 pages,
-DMG+CGB), `tests/roms/gbaedge.gba` (37 pages).  v2 added six pages aimed at
+**Date:** 2026-08-11 (v6 + GB SWEEP)  **ROMs:** `tests/roms/gbedge.gb`
+(27 pages, DMG+CGB), `tests/roms/gbaedge.gba` (37 pages).  v2 added six pages aimed at
 the highest-leverage open questions in docs/gb-failure-triage.md and the
 GBA bus/HLE calibrations; v4/v5 added the guessed-at-behavior pages; v6
 (gbaedge 28-36) adds nine DISCRIMINATION pages that isolate the model
@@ -117,6 +117,7 @@ via `--mode=microtest --list=...` (scored "PASS" == ROM healthy).
 | 17 | WYLATCH | mode-0-IRQ timestamp of the window-start line while the WY write time is swept across line 39, four 4-dot-spaced timestamp grids + early-armed and never-hits controls | the late_wy anomaly: CGB samples WY SOONER than DMG (the only backwards CGB latency); ~26 late_wy rows + the 51-row WY-LATCH pipeline sub-bucket |
 | 18 | CGBWRAM | $D000-window banking under every SVBK value with alias sentinels, incl. the exact SVBK=2 configuration | bucket 16's 64 rows, "Declined pending hardware": byte 0A reads 77 on a console where $D000 aliases $C000, 5C where banking is real |
 | 19 | DIVTAPS | phase staircases: serial-completion poll counts at 8 DIV-reset phases, APU length-expiry poll counts at 8 phases | the mechanism page — DIV/timer/serial/frame-sequencer are supposed to be taps off ONE counter; the staircase periods ARE the tap bits.  (dingbat's length-expiry flag only clears at 1 of 8 phases — already suspicious) |
+| 1A | SWEEP | ch1 trigger overflow checks at the AGB anchor frequencies: NR52-bit0 poll counts for freq 1300/940/1024/1000 shift 1 (sweep period 2) + a divider-0 cap row | AGB silicon (AGS-001 SWEEPQ/SWEEP2) runs a SECOND linear trigger check (shadow + 2*(shadow>>s), kills strictly above $800); blargg dmg/cgb_sound CRCs say GB silicon does not (8 rows regressed when ported, 2026-08-11) — this re-anchors the divergence on CGB with raw values.  0 polls at +0 = CGB runs the AGB check; ~1 tick (~$440) = single check; +8 must cap at $2000 |
 
 CGB-only pages show `EE` at offset 1F on DMG-class hardware.  (CGBWRAM
 runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
