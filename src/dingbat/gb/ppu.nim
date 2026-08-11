@@ -1134,11 +1134,38 @@ const STAT_M2_LEAD_CGB* {.intdefine.} = 1
   ## prejudge it.
 const STAT_M2_EARLY* = STAT_M2_LEAD != 0 or STAT_M2_LEAD_CGB != 0
 
+template m2_lead_console_cgb*(gb: GB): bool =
+  ## Is a CGB in front of us? The console, and it must be the same console
+  ## `CGB_PIPE_MCYCLES` gates on, or the mode-2-anchored corpus is scored
+  ## against a pipeline that moved for a different set of frames.
+  ##
+  ## **Asked of `GB`, not of `fifo_ppu`, and that is load-bearing.** The
+  ## readers below are on the SHARED PPU base, so the SCANLINE renderer reaches
+  ## them too -- and `GB.fifo_ppu` is nil for the whole life of a `fifo = false`
+  ## core (post_init sets it so). `ppu_handle_stat_interrupt` is reached from
+  ## `mem_flush_deferred` during `skip_boot`, before either renderer has run a
+  ## dot, so reading the lead off `fifo_ppu.cgb` segfaulted while merely
+  ## CONSTRUCTING a scanline core, the moment `STAT_M2_LEAD_CGB` went nonzero.
+  ## The save-state cart-shape round-trips are the only thing that builds one,
+  ## and they are how it was found.
+  ##
+  ## `new_gb_fifo_ppu` copies this very field into `fifo_ppu.cgb`, and neither
+  ## is written again while a core runs, so the two agree by construction and
+  ## the shipping renderer's behaviour is unchanged -- the whole gambatte/
+  ## mooneye/GBMicrotest corpus is byte-identical across this change. Reading
+  ## it here is also one deref where `fifo_ppu.cgb` was two, and that is why the
+  ## nil check the obvious fix reaches for is NOT here: guarding the two-deref
+  ## form with `if gb.fifo_ppu != nil` costs **+0.67% of retired instructions on
+  ## cgb-acid-hell** (24.61e9 -> 24.77e9) for a branch the dot loop can never
+  ## take -- the same order as the field-latching form this proc's note below
+  ## rejects -- while this form measures **-0.2%** against it (24.56e9,
+  ## reproducing to 0.0004% over repeat runs, `cycles=` equal in every arm).
+  ## `m2_line144`, the other half of the OAM source, has always read the
+  ## console this way.
+  gb.cgb_enabled
+
 template m2_lead_mcycles*(gb: GB): int32 =
-  ## The lead this CONSOLE gets, in CPU M-cycles. `fifo_ppu.cgb` is the console
-  ## -- the same flag `CGB_PIPE_MCYCLES` gates on, and the two must agree or the
-  ## mode-2-anchored corpus is scored against a pipeline that moved for a
-  ## different set of frames.
+  ## The lead this CONSOLE gets, in CPU M-cycles.
   ##
   ## Read through `gb` rather than latched into a field on the PPU, and that is
   ## a MEASURED choice, not the obvious one. The field form looks strictly
@@ -1152,7 +1179,7 @@ template m2_lead_mcycles*(gb: GB): int32 =
     int32(STAT_M2_LEAD)
   else:
     int32(STAT_M2_LEAD) +
-      (if gb.fifo_ppu.cgb: int32(STAT_M2_LEAD_CGB) else: 0'i32)
+      (if m2_lead_console_cgb(gb): int32(STAT_M2_LEAD_CGB) else: 0'i32)
 
 template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
   ## The dot of the outgoing line the source comes up on.
@@ -1182,7 +1209,7 @@ template m2_lead_active*(gb: GB): bool =
   ## `mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS`, both DMG rows, on a
   ## change that is supposed to be CGB-only.
   when STAT_M2_LEAD != 0: true
-  elif STAT_M2_LEAD_CGB != 0: gb.fifo_ppu.cgb
+  elif STAT_M2_LEAD_CGB != 0: m2_lead_console_cgb(gb)
   else: false
 
 template m2_early_stop*(ppu: GbPpu; gb: GB): bool =
