@@ -343,7 +343,12 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
     if not (load and bit(list, 15)):
       user_bank = true
       saved_mode = cpu.cpsr.mode
-      cpu.switch_mode(modeUSR)
+  # The base address is read from the CURRENT mode's bank BEFORE any user-bank
+  # switch; the transfers - and a writeback, if any - then use the user bank.
+  # Hardware-verified (gbaedge LDMUSER page, AGB SP session 2): from IRQ mode,
+  # `stmia r13!, {r13}^` stores the USER r13 value at the address in the
+  # BANKED r13, and the writeback (base+4) lands in the USER bank's r13 with
+  # the banked r13 unchanged.
   var address  = cpu.r[rn]
   var bits_set = count_set_bits(list)
   if bits_set == 0:
@@ -352,6 +357,9 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
   let step       = when add: 4 else: -4
   # unread when up-counting without write-back
   let final_addr {.used.} = uint32(int(address) + bits_set * step)
+  when s_bit:
+    if user_bank:
+      cpu.switch_mode(modeUSR)
   when add:
     when pre_address: address += 4
   else:
