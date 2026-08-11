@@ -106,13 +106,39 @@ proc trigger_vdma*(dma: DMA) =
 
 proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## DMA3 special timing = video capture: one transfer per scanline for
-  ## VCOUNT 2..161, then the channel disables itself at line 162. The AGS
-  ## aging cartridge verifies this by capturing VCOUNT itself each line.
+  ## VCOUNT 2..161 of the ARMED frame - 160 triggers of the programmed unit
+  ## - then hardware clears the enable bit at line 162 regardless of
+  ## software; re-arming next vblank repeats this every armed frame, and
+  ## the enable edge reloads the internal dst from DAD (handled in `[]=`).
+  ## Hardware-verified (gbaedge CAPDMA page, AGB SP sessions 2/3: 640
+  ## nonzero words per armed frame, readback 0x3700 both for the
+  ## always-armed and the re-armed-per-vblank patterns). The internal
+  ## active latch makes a channel armed mid-frame (the normal case: games
+  ## arm during vblank) wait for the next frame's line 2 instead of
+  ## catching the current frame's tail and self-clearing 4 words in - the
+  ## bug that made dingbat fire exactly one trigger. The AGS aging
+  ## cartridge verifies the per-line cadence by capturing VCOUNT itself.
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
-    if vcount >= 2 and vcount < 162:
-      dma.request(3)
-    elif vcount == 162:
-      dma.dmacnt_h[3].enable = false
+    if vcount == 2:
+      dma.video_active = true
+    if dma.video_active:
+      if vcount >= 2 and vcount < 162:
+        # Each line's trigger re-reads the programmed source: the CAPDMA
+        # probe's fixed ROM source yields 160 lines x 4 NONZERO words, which
+        # is impossible if the internal src kept incrementing across lines
+        # (the pattern is followed by zero padding). Model: the per-line
+        # trigger reloads internal src from SAD (the gamepak-ROM
+        # always-increment rule still applies WITHIN each line's burst; a
+        # real camera source is address-fixed so the distinction is
+        # invisible to the intended use).
+        let align = if dma.dmacnt_h[3].xfer_type != 0: not 3'u32 else: not 1'u32
+        dma.src[3] = dma.dmasad[3] and align
+        dma.request(3)
+      elif vcount == 162:
+        dma.video_active = false
+        dma.dmacnt_h[3].enable = false
+  else:
+    dma.video_active = false
 
 proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1

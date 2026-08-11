@@ -172,6 +172,12 @@ type
     # run_pending call. Always 0/4 between instructions, so not serialized.
     pending*:          uint8
     current_priority*: int
+    # DMA3 video-capture "frame in progress" latch: set at the armed frame's
+    # line 2, cleared (with the enable bit) at line 162. A channel armed
+    # mid-frame waits for the NEXT frame's line 2 (gbaedge CAPDMA page).
+    # Not serialized: a state load mid-capture-frame drops the rest of that
+    # frame's triggers (capture DMA is rare and per-frame re-armed).
+    video_active*:     bool
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting
 
