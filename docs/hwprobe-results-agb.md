@@ -24,12 +24,22 @@ Byte-perfect matches — hardware confirms dingbat's model outright:
 
 Divergences (dingbat != hardware), ranked:
 
-1. **P0F IRQLAT**: dingbat never delivers the TM2-overflow IRQ armed as
-   reload-0 + enable+IRQ in one word (entry stamp 0000; hw FF8B). The other
-   sources fire but enter late-shifted: DMA3 entry hw 029A vs 0288 (+18),
-   hblank pair hw (046A,08DF) vs (0463,08C0), vblank hw (0AD4,4375) vs
-   (0AC8,4363). The one-row-fitted IRQ_SYNC_DELAY/HBLANK_IRQ_SYNC_DELAY
-   constants now have four real anchors.
+1. **P0F IRQLAT**: ~~dingbat never delivers the TM2-overflow IRQ armed as
+   reload-0 + enable+IRQ in one word (entry stamp 0000; hw FF8B).~~
+   **RETRACTED 2026-08-10: the TM2 row is a probe bug, not a divergence.**
+   The `irq_arm` macro clobbers r5 (it ends as 0x04000208), so the probe's
+   `str 0x00C00000, [r5]` arming word lands on IME - disabling it - and
+   TM2CNT is never written (byte-level bus trace on the committed ROM
+   confirms no TM2 arming with reload 0 ever reaches the timer). Both
+   machines then time out the spin and read a STALE `SCRATCH+0x48` stamp:
+   dingbat's EWRAM is zeroed (0000), the hardware value FF8B is EverDrive-
+   chainloader leftovers. A corrected micro-ROM (reload 0 + enable + IRQ in
+   one 32-bit write, full BIOS handler dispatch) delivers the one-shot IRQ
+   correctly on dingbat. A future gbaedge rev should reload r5 after
+   irq_arm and re-measure. The other sources fire but enter late-shifted:
+   DMA3 entry hw 029A vs 0288 (+18), hblank pair hw (046A,08DF) vs
+   (0463,08C0), vblank hw (0AD4,4375) vs (0AC8,4363). The one-row-fitted
+   IRQ_SYNC_DELAY/HBLANK_IRQ_SYNC_DELAY constants now have real anchors.
 2. **P07 MULFLAGS**: with C preset to 1, hardware CLEARS carry for operand
    pairs 0/1/2/5/6/7 where dingbat leaves it set (hw nibbles 04 00 00 02
    0A 04 08 08 vs dingbat 06 02 02 02 0A 06 0A 0A). C-preset-0 rows and

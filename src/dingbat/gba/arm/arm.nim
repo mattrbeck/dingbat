@@ -29,6 +29,11 @@ proc exception_return_restore*(cpu: CPU) =
   let bank = mode_bank(new_mode)
   cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
   if was_irq_disabled and not cpu.cpsr.irq_disable:
+    # NO gate delay here: an exception return's SPSR restore re-recognizes a
+    # pending IF fast - the mGBA suite's hardware-measured Timer count-up
+    # rows (multi-IRQ configs where the next overflow is already pending at
+    # handler return) fail by exactly the gate window if it is applied.
+    # The IRQWIN/IRQWIN2 gate evidence covers explicit IME/IE/msr writes.
     cpu.gba.interrupts.schedule_interrupt_check()
 
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
@@ -325,7 +330,12 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         cpu.pipeline.push(0x46C0'u32)  # Thumb nop (mov r8, r8)
         cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
       if was_irq_disabled and not cpu.cpsr.irq_disable:
-        cpu.gba.interrupts.schedule_interrupt_check()
+        if cpu.gba.interrupts.irq_deliverable:
+          # msr clearing CPSR.I over a parked IF: late recognition, like the
+          # IME/IE gate stores (gbaedge IRQWIN/IRQWIN2)
+          cpu.gba.interrupts.gate_opened()
+        else:
+          cpu.gba.interrupts.schedule_interrupt_check()
   else:  # MRS
     let rd = int(bits_range(instr, 12, 15))
     if spsr and has_spsr:

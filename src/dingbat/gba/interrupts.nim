@@ -20,12 +20,44 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 # Timer IRQ tests). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* = 3
 
+# A REGISTER write opening the last gate on an already-parked IF bit (IME
+# 0->1, IE unmask, or an msr/SPSR-restore clearing CPSR.I) recognizes the
+# IRQ late. Hardware-verified (gbaedge IRQWIN/IRQWIN2 pages, AGB SP
+# sessions 2/3): with a parked TM2 IF, hardware runs 3 more single-cycle
+# sled instructions after an IME/IE store (dingbat ran 1) but only 2 EWRAM
+# loads - the window is cycle-based, not instruction-based - and the
+# TM0-stamped store-to-handler-entry deltas are 0x81/0x81/0x84 where
+# dingbat measured 0x67/0x67/0x6C. The two constants split the ~24-cycle
+# total: GATE_DELAY cycles of continued execution before recognition (the
+# sled keeps running - this is what the sled counts pin), then an
+# ENTRY_STALL charged at the exception entry itself (the stamp deltas
+# exceed the extra sled execution by about this much). The peripheral
+# IF-rise path (IRQ_SYNC_DELAY above) is deliberately untouched: the mGBA
+# suite's Timer IRQ rows pin it.
+const
+  IRQ_GATE_DELAY* = 12
+  IRQ_GATE_ENTRY_STALL* = 6
+
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
   intr.gba.scheduler.schedule(delay, etInterrupts)
+
+proc irq_deliverable*(intr: Interrupts): bool {.inline.} =
+  intr.ime and (uint16(intr.reg_ie) and uint16(intr.reg_if)) != 0
+
+proc gate_opened*(intr: Interrupts) =
+  ## A register write just made a parked interrupt deliverable: suppress the
+  ## already-recognized line, re-recognize IRQ_GATE_DELAY cycles out, and
+  ## have the entry pay the resynchronization stall.
+  intr.gba.cpu.irq_line = false
+  intr.gate_stall = true
+  intr.gate_open_at = intr.gba.scheduler.cycles + CycleCount(IRQ_GATE_DELAY)
+  intr.schedule_interrupt_check(IRQ_GATE_DELAY)
 
 proc check_interrupts*(intr: Interrupts) =
   let pending = uint16(intr.reg_ie) and uint16(intr.reg_if)
   intr.gba.cpu.irq_line = false
+  if pending == 0:
+    intr.gate_stall = false  # the parked bit went away before entry
   if pending != 0:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0:
       return  # Stop mode ignores other interrupt sources
@@ -36,7 +68,7 @@ proc check_interrupts*(intr: Interrupts) =
       intr.gba.cpu.halt_wake = true
     intr.gba.cpu.stopped = false
     intr.gba.cpu.halted = false
-    if intr.ime:
+    if intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
@@ -48,6 +80,7 @@ proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
   else: raise newException(Exception, "Unimplemented interrupts read addr: " & hex_str(uint8(io_addr)))
 
 proc `[]=`*(intr: Interrupts; io_addr: uint32; value: uint8) =
+  let was_deliverable = intr.irq_deliverable
   case io_addr
   of 0x200..0x201: write(intr.reg_ie, value, io_addr and 1)
   of 0x202..0x203:
@@ -56,4 +89,17 @@ proc `[]=`*(intr: Interrupts; io_addr: uint32; value: uint8) =
   of 0x208: intr.ime = bit(value, 0)
   of 0x209: discard
   else: raise newException(Exception, "Unimplemented interrupts write addr: " & hex_str(uint8(io_addr)) & " val: " & hex_str(value))
-  intr.schedule_interrupt_check()
+  if intr.irq_deliverable and not was_deliverable and
+     not intr.gba.cpu.cpsr.irq_disable:
+    # Newly-opened gate with CPSR.I clear: the IRQ becomes immediately
+    # deliverable and recognizes late (hardware-verified). With I set (e.g.
+    # the libgba dispatcher restoring IME inside a handler) recognition
+    # waits on the exception return anyway, which re-recognizes fast - the
+    # mGBA suite's multi-IRQ Timer count-up rows pin that path.
+    intr.gate_opened()
+  else:
+    # Clears re-evaluate immediately. Within an open gate window this check
+    # cannot recognize early (check_interrupts holds irq_line off until
+    # gate_open_at), so the second byte of a halfword IME/IE store is
+    # harmless here.
+    intr.schedule_interrupt_check()
