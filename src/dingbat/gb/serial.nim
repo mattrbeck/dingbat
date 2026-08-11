@@ -86,9 +86,12 @@ proc set_serial_driver*(gb: GB; drv: GbSerialDriver) =
 # shift phase relative to that seed).
 
 proc serial_tap(gb: GB): uint16 {.inline.} =
-  ## DMG: 4 (mooneye boot_div + boot_sclk_align jointly). CGB: 2 (the
-  ## gambatte serial suite's plateau) — different SoC, different tap.
-  if gb.cgb_enabled: 2'u16 else: 4'u16
+  ## Both SoCs want the same M-cycle here: the DMG's old 4 was one M-cycle
+  ## high and cost three `serial` rows. Swept and bracketed on both sides at
+  ## SERIAL_TAP_DMG in gb.nim, where the plateau table lives; mooneye
+  ## boot_div-dmgABCmgb and boot_sclk_align-dmgABCmgb still pin the DMG seed
+  ## and shift phase jointly, and both stay green at 0.
+  if gb.cgb_enabled: uint16(SERIAL_TAP_CGB) else: uint16(SERIAL_TAP_DMG)
 
 proc serial_clock_level(serial: GbSerial; gb: GB): bool {.inline.} =
   ((gb.timer.tdiv + serial_tap(gb)) and serial.serial_clock_mask(gb)) != 0
@@ -101,8 +104,18 @@ proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
   ## serial.shifting.
   let current = serial.serial_clock_level(gb)
   let previous = (serial.clock_history and 1) != 0
-  serial.clock_history = if current: 1'u8 else: 0'u8
+  when SERIAL_START_ARM != 0:
+    serial.clock_history = (serial.clock_history and 2'u8) or
+                           (if current: 1'u8 else: 0'u8)
+  else:
+    serial.clock_history = if current: 1'u8 else: 0'u8
   if previous and not current and serial.bits_remaining > 0:  # falling edge
+    when SERIAL_START_ARM != 0:
+      # Experiment: the first falling edge after SC.7 rises does not shift, it
+      # only arms the shifter (clock_history bit 1 is the arm flag).
+      if (serial.clock_history and 2) != 0:
+        serial.clock_history = serial.clock_history and not 2'u8
+        return
     serial.sb = (serial.sb shl 1) or 1'u8  # a lone/disconnected line reads 1
     dec serial.bits_remaining
     if serial.bits_remaining == 0:
@@ -136,6 +149,8 @@ proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       serial.bits_remaining = 8
       # Watch the free-running serial clock for its next falling edge
       serial.serial_prime_history(gb)
+      when SERIAL_START_ARM != 0:
+        serial.clock_history = serial.clock_history or 2'u8
       serial.driver.serial_start(gb)
     else:
       # Rewrite while enabled (e.g. clock-select change mid-transfer):

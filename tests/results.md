@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-11 11:18:47*
+*Generated: 2026-08-11 11:37:30*
 
 ## Game Boy - Blargg
 
@@ -823,7 +823,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/speed-switch/spsw-ch2-lc-delay-cgbBCE | 👀 |
 | age/speed-switch/spsw-div-cgbBCE | 👌 |
 | age/speed-switch/spsw-mode0-cgbBCE | 👀 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE | 👀 |
+| age/speed-switch/spsw-stop-prefetch-cgbBCE | 👌 |
 | age/speed-switch/spsw-tima-cgbBC | 👀 |
 | age/speed-switch/spsw-tima-cgbE | 👀 |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE | 👀 |
@@ -1047,12 +1047,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m3stat | 👀 42/44 passed |
 | gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 53/69 passed |
-| gambatte/oamdma | 👀 707/811 passed |
+| gambatte/oamdma | 👀 771/811 passed |
 | gambatte/scx_during_m3 | 👀 121/141 passed |
 | gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
-| gambatte/speedchange | 👀 116/208 passed |
+| gambatte/speedchange | 👀 132/208 passed |
 | gambatte/sprites | 👀 437/476 passed |
 | gambatte/tima | 👀 218/232 passed |
 | gambatte/undef_ops | 👌 20/20 passed |
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 780
-- **Fail:** 201
+- **Pass:** 781
+- **Fail:** 200

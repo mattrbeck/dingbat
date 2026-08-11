@@ -4857,3 +4857,328 @@ them.
 
 Neither `Infinity` nor `Mr. Chin's Gourmet Paradise` could be checked: this
 worktree's ROM cache holds test suites only, with no commercial library.
+
+## 2026-08-11: the bus is wider than the data path, and the stall has two clocks
+
+A single triage pass over **all 47 gambatte buckets**, ranked by failing-row
+count, with the two best evidence-to-size buckets taken to two-sided and the
+rest written up below as ranked next-steps.
+
+**Headline: gambatte 4051 -> 4131, local runner 779 -> 780.** Two mechanisms
+shipped, three axes refuted with both sides named, and one standing "declined
+pending hardware" bucket resolved without hardware.
+
+### The ranking this pass started from
+
+954 failing rows, by bucket: `window` 115, `dma` 107, `oamdma` 104,
+`speedchange` 92, `enable_display` 50, `m1` 46, `lycEnable` 44, `sprites` 39,
+`serial` 32, `halt` 31, `cgbpal_m3` 28, `m2enable` 26, `m2int_m0irq` 25, `ly0`
+22, `lcd_offset` 21, `irq_precedence` 20, `scx_during_m3` 20, `oam_access` 16,
+`m0enable` 15, `tima` 14, `vram_m3` 13, `bgtilemap` 12, `miscmstatirq` 11,
+`dmgpalette_during_m3` 10, `lycm2int` 7, then eighteen buckets of <= 4.
+
+### What shipped
+
+| | what it says | worth |
+|---|---|---|
+| `OAMDMA_WRAM_A12` | on CGB the OAM DMA drives the **address** bus too: a non-colliding CPU access to `$C000-$FDFF` keeps its own A0-A11 and region decode but takes **A12 from the DMA's source** | gambatte **+64 / -0** |
+| `SPEED_SWITCH_STALL_CPU` + `SPEED_SWITCH_PPU_EXTRA_DOTS` + `..._RUNS_CPU_CLOCK` | the speed-switch stall is 2^17 cycles of the **new** CPU clock (not a fixed real time), it is a HALT so the timer/serial/OAM-DMA run through it, and the **PPU advances 12 dots further than the CPU clock does** | gambatte **+26 / -10**, AGE `spsw-stop-prefetch` |
+
+Whole-suite perf, interleaved retired-instruction A/B on blargg `01-special`
+with `cycles=` identical in every arm: **-0.00036%**, inside the 0.002%
+reproducibility floor. All nine witness frames (`acid2` x2, `acidhell` C and E,
+`daid` DMG/cgbC/cgbD, `strikethrough` x2) are **byte-identical** to a control
+build with all four constants off.
+
+#### `OAMDMA_WRAM_A12`, and why bucket 16 is now closed
+
+**Bucket 16 ("CGB `$D000` window aliases `$C000`", 64 rows) was declined pending
+a hardware dump. It should not have been a hardware question.** The old
+experiment forced `$D000-$DFFF -> wram[0]` unconditionally, measured +64/-2, and
+was refused because the ROMs' shared prologue writes `SVBK = 2` and two banking
+ROMs contradict the alias. That contradiction was an artefact of reading an
+**address-bus** effect as a **banking rule**.
+
+The real rule is conditional and symmetric: while an OAM DMA whose source is on
+the external bus is running, the WRAM half-select A12 comes from the DMA's
+address -- so `$D000` reads as `$C000` when the source's A12 is clear **and
+`$C000` reads as `$D000` when it is set**. Outside a DMA banking is untouched,
+which is why the two banking ROMs are unaffected.
+
+Proved by construction rather than fitted. gambatte ships two templates per
+(source, stem) pair -- one pre-loading the stack cells at their true addresses,
+one at those addresses with bit 12 flipped -- and emits the flipped form **iff
+`A12(source) != A12(CPU address)`**. Over all 314 `busy*` ROMs that predicate
+selects the failing set with **0 mismatches**, and resolving each store through
+the echo fold and comparing against `(cell and not $1000) or (A12(src) shl 12)`
+matches all 64 with **0 mismatches**. `src7F00_busypopDFFF` and
+`src0000_busypopDFFF` are the same stem with different source pages and expect
+the byte from different halves; only the source's A12 separates them.
+
+Bracketed on five sides, each by rows green today:
+
+1. *untouched* (this tree until now) -- refused by all 64.
+2. *WRAM conflicts like any same-bus access* -- refused by the 116 passing
+   external-source rows, and by the expected values themselves, which are the
+   live `$55`/`$AA` data and never the `$00` source filler or a latch `$FF`.
+3. *the whole address comes from the DMA* -- refused because the low bits are
+   the CPU's: with the DMA at `$7F9E` a read of `$DFFF` returns half-offset
+   `$FFF`, not `$F9E`.
+4. *any running DMA does it* -- refused by the 40 video-source and 40
+   WRAM-source rows, all green.
+5. *it happens on DMG too* -- refused by the perfect 312/312 DMG column; a DMG
+   folds WRAM into `dbExternal`, so the access collides outright and A12 is
+   never observable.
+
+#### The stall has two clocks, and daid's own three frames prove it
+
+The stall was modelled as a fixed **real time** (`SPEED_SWITCH_STALL_T`, 65548
+T), which pins the PPU to 65548 dots in *both* directions. Three independent
+gambatte observables refuse that:
+
+* **TIMA.** `speedchange_tima00_{1a,1b,2a,2b}` run TAC = $04 (one tick per 1024
+  CPU cycles) and want +0x80 = **128 ticks = 131072 CPU cycles**, bracketed to a
+  single M-cycle by the `1a`/`1b` pair. A frozen timer gives +0.
+* **The second switch is not the first.** `speedchange2_tima00_{2a,2b}` want
+  **+1**, not +256 -- the switch that ends in SINGLE speed also contributes 128
+  ticks, i.e. the same cycle count on a clock running half as fast, i.e. twice
+  the real time. This row refuses "fixed real time" outright.
+* **LY.** `speedchange2_..._ly_1` wants $25 = 37 where constant-dots answers
+  $2F = 47; 0x44 + 431 lines is 37 (mod 154), and 431 lines = 196536 dots =
+  65540 + 131080 -- the two directions, added.
+
+That the stall is a HALT and not a STOP is the same finding from the other side:
+only a **running** timer can produce those 128 ticks. Pan Docs' "`DIV` does not
+tick" belongs to the STOP leaves, where the machine's whole clock stops.
+
+**Then daid contradicted itself, and the contradiction was the measurement.**
+Under any single "the stall is N cycles" model its three speed-switch frames
+cannot all be pixel-exact:
+
+| | 131072 (2^17) | 131096 |
+|---|---|---|
+| `daid/speed_switch_timing_div` | **0 px** | 226 px |
+| `daid/speed_switch_timing_ly` | 452 px | **0 px** |
+| `daid/speed_switch_timing_stat` | 575 px | **0 px** |
+
+`div` reads DIV back, so it needs the CPU-domain stall to be a whole multiple of
+256; `ly`/`stat` need the PPU to advance **65548** dots into double speed. Two
+different quantities, and their difference is the 12 dots the PPU is clocked
+through a re-alignment the CPU clock is not yet counting -- exactly the
+mechanism `SPEED_SWITCH_STALL_T`'s own note named as unmodelled ("the 6-cycle
+switch countdown plus the PPU re-alignment freeze") and never had an instrument
+for. Split in two, **all three frames go pixel-exact** and the gambatte trade
+falls from -32 to -10.
+
+`SPEED_SWITCH_PPU_EXTRA_DOTS` is bracketed on both sides by those frames, one
+build per dot:
+
+```
+EXTRA_DOTS      11    *12*   13    14    15    16
+daid ly px     109     0      0     0     0    125
+daid stat px     0     0      0     0   233    233
+```
+
+[12,14] is the legal window; gambatte is flat across it (1138 / 1137 / 1138 rows
+of `speedchange`+`sound`+`dma`+`oamdma`), so it has no say, and 12 is picked
+because 65536 + 12 is exactly the 65548 the frames pin.
+
+### Refuted this pass, each with both sides named
+
+1. **"On CGB the mode-0 STAT boundary is one M-cycle EARLIER than on DMG"**
+   (SameBoy and DocBoy both model it; this pass was sent to arbitrate it off
+   gambatte's per-device filenames). **Refuted, 40 families / 40 EQUAL.** A
+   filename-derived expectation parser validated against the runner at **4670
+   rows / 0 mismatches** was used to read the DMG and CGB flip step of every
+   family probing the mode-3 -> 0 edge. Four independent instrument types --
+   VRAM unlock, OAM unlock, the STAT mode field, the IF flag -- each cover all
+   four M-cycle dot-phases of the edge, and every one says DMG == CGB.
+   `vramw_m3end_{1..6}` is the strongest single row: six steps, two flips at 3
+   and 5, byte-identical `_dmg08_cgb04c_out*` on all six, where a one-M-cycle
+   CGB shift would have moved both flips.
+   Suite-wide, 67 families DO flip one step earlier on CGB, and they classify
+   cleanly: **61 are a register WRITE racing an edge** (`late_wy_*`,
+   `late_scx_*`, `ff41_disable`, `late_ff45_enable`,
+   `tima/tc00_irq_late_retrigger`, `serial/start_wait_*`, ...), **6 are
+   halt-anchored**, and **0 are a pure read or interrupt-latency probe of a mode
+   boundary**. The residue signature is identical in both classes (delta = 2
+   dots, phase 2, `-1` at SCX = 0,3 mod 4; 19 rows, then 8 more), so it is one
+   CPU-side phase observed two ways.
+   It is also **the same quantity as the already-refuted `CGB_HALT_PPU_LEAD`**,
+   with a controlled dissociation to prove it: `halt/m0int_m0stat_scx3` is
+   `_dmg08_out0_cgb04c_out2` (a device split) while its halt-free twin
+   `m0int_m0stat/m0int_m0stat_scx3` is `_dmg08_cgb04c_out{0,2}` (one value for
+   both). `cmp -l` of the pair is **nine bytes**: the header title, `NOP` ->
+   `HALT`, and the print mask. Insert a halt and the split appears; remove it
+   and it vanishes.
+   Direction check: the one genuine device split gambatte names on an m3
+   boundary goes the *opposite* way -- `vram_m3/preread_2_dmg08_out3_cgb04c_out0`
+   says the CGB's VRAM lock at the mode-3 **start** begins one M-cycle **later**
+   (5 failing rows, unmodelled, and a candidate in its own right).
+   **Do not attempt this; it is settled without hardware.**
+
+2. **The serial shift-clock tap.** gambatte brackets the DMG tap two-sidedly and
+   wants it one M-cycle lower than it ships, for +3 / -0 over the whole suite
+   with no collateral in any other bucket:
+
+   ```
+   SERIAL_TAP_DMG   -8  -4  -2 | 0   1   2   3 | 4   5   6   8
+   serial rows      50  50  50 | 53  53  53  53| 50  50  50  50
+   ```
+
+   The plateau is exactly 4 T wide (the observable is quantised to the M-cycle,
+   which is what says the tap is a phase and not a duration), and the CGB column
+   has the same shape and already sits inside it -- so the two SoCs would want
+   the *same* tap. **`mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb`
+   refuses [0,3] and pins 4.** It is hardware-verified, so it wins and the three
+   gambatte rows stay red deliberately.
+   The obvious escape is closed too: re-partitioning 4 T between the tap and the
+   boot divider seed changes nothing, because `boot_div` reads `tdiv shr 8` and
+   cannot see the low bits at all, while both suites' ROMs start from the same
+   boot state and neither writes DIV before the transfer -- so each sees only
+   the **sum**. The disagreement is in something both ROMs traverse before the
+   SC.7 write, not in this constant. Both values stay swept as `SERIAL_TAP_DMG`
+   / `SERIAL_TAP_CGB`.
+
+3. **"The DMG refuses a window START on the line's last pixel"** -- the
+   pixel-path twin of `CGB_WIN_TAIL_LAST`, built as `DMG_WIN_START_LAST_PX` and
+   **shipped off**. It moves the DMG frames but *away* from their reference
+   (`wxA6_3 [dmg]` 10780 -> 10844 wrong pixels; whole suite +1). What survives
+   of it is item 1 below, where the oracle is unusually good.
+
+### The ranked remainder, with the question that blocks each
+
+Ordered by rows-per-unit-of-work, not by row count.
+
+**1. `window/on_screen` -- 15 rows, and the ROMs are their own oracle (no
+bracketing needed).** All 18 `on_screen` ROMs ship BOTH a `_dmg08` and a
+`_cgb04c` reference. The 4 whose references are pixel-identical all pass. The 14
+whose references differ are exactly the failing rows, and in every case the
+number of pixels dingbat gets wrong **equals the number by which the two
+references differ, to the pixel** (21816, 21657, 14624, 14468, 10992, 10780,
+8832, 7303, and 120/160 on the rest). So dingbat renders the **CGB** reference
+bit-exactly on the DMG rows. `CGB_WIN_TAIL_LAST` is consulted only in
+`mode3_busy` -- the WX = 166 device split was landed for mode-3 LENGTH and never
+for the shifter.
+*Blocking question:* refusing the start is falsified (above), so the rule is
+narrower -- the DMG presumably **does** start the window at WX = 166 (the trigger
+latches and the window's internal line counter advances, which later lines
+depend on) but its mode 3 ends with the last PIXEL, so the restart's first pixel
+is never shifted out. Separating "the window started" from "its first pixel
+reached the screen" is the whole job.
+
+**2. `oamdma`'s DMA-start latency -- 26 rows, one constant with a sign flip.**
+`late_sp{00,01,02,39}{x,y}_*`, `oamdma_late_halt_stat_1`,
+`oamdma_late_speedchange_stat_2`. dingbat flips one step **early** at single
+speed and one step **late** at double -- a wrong clock domain in `mem_dma_tick`
+/ `CGB_OAM_DMA_START_T`, not a constant offset (Tier-3 bucket 19, sign flip
+confirmed). Fails on DMG too. The speed-switch split above is the same shape of
+bug and hands over the method.
+
+**3. `tima/tc00_late_tc01` -- 8 rows, two-sided, one scoped constant.** The TAC
+00 -> 01 tap-change response is a **pure 1-step (4 T) shift**, identical on both
+devices: `exp FF,FF,FF,FF,00,FE,FF,FF` against `got FF,FF,FF,00,FE,FF,FF,00`.
+Being a shift, the family refuses both n-1 and n+1. Everything else in the write
+path (`tc00_late_div_write_*`, `tc01_*`, `tc00_tc01_late_tc00_of`) is green, so
+it must be scoped to the clock-select change in `timer_write`, not to writes
+generally.
+
+**4. `halt/ifandie_ei_halt_sra` -- 2 rows, a real missing rule.** On `EI; HALT`
+with `IF & IE != 0`, hardware arms the **halt bug** (at the `HALT` the `EI`'s IME
+has not landed yet), so the un-incremented PC runs `INC A` twice and the ROM
+prints `$0A`. dingbat prints `$09` because `EI` schedules its IME only 4 cycles
+out and that fires during the `HALT`'s own opcode fetch, so `cpu_halt` sees
+`ime = true` and takes the plain-halt branch. Fix: test the halt bug against the
+IME value as of the `HALT`'s fetch. `noime_ifandie_halt_sra` and
+`noime_ifandie_halt_lda_3c` pass, so the plain halt bug itself is correct.
+Falsifiable directly -- constant-wrong, no phase to bracket.
+
+**5. `sprites/late_sizechange_sp00` -- the sharpest unclaimed measurement in the
+suite.** A *four*-step ladder where hardware flips **twice**: `exp 0,3,3,0`
+against `got 0,0,3,3`. Both edges are off by exactly +1 M-cycle, identically on
+both devices -- a clean two-sided device-independent 4-dot bracket.
+`OBJ-LATE-SIZECHANGE` (24 rows) has had no measurement at all until now.
+*Blocking question:* its siblings (`late_sizechange`, `_sp01`, `_sp39`) also want
+a CGB delta of **-1 M-cycle** on LCDC.2, while `CGB_OBJ_SIZE_LATENCY` ships at
+**+3**, derived from mealybug bands. Same bit, opposite sign, two different
+readers -- resolve that before touching the device half. The device-independent
+half is landable on its own.
+
+**6. `enable_display` + `lcd_offset` -- 71 rows, and the filing is wrong.**
+`lcd_offset` **does not enable the LCD**: none of its 62 ROMs contains an
+LCDC-enable sequence, and every one instead runs 2-4 `LDH ($4D),A; STOP` speed
+switches in the preamble to offset the PPU's dot grid from the CPU's M-cycle
+boundary by a chosen number of dots. So it belongs with bucket 13, not bucket
+17, and -- now that the speed-switch stall is a derived quantity -- it is the
+tree's only **sub-M-cycle dot ruler**. Use it to price candidates for
+`enable_display`, not to score alongside it.
+The `*_count_*` families are also not interrupt counters: their loop period is
+exactly 456 dots and their `LDH ($0F),A` is tuned to coincide with the STAT
+IRQ's raise dot every line and suppress it, so the printed LY is the line where
+the coincidence breaks -- an IF-write-vs-IRQ-raise coincidence ruler calibrated
+by SCX at 1 dot per SCX unit. Read that way, dingbat's mode-0 STAT raise is a
+constant **1 dot early in steady state and 2 dots early in the LCD-enable
+frame**, so the LCD-on head start contributes exactly one dot on top of a defect
+that is not about the LCD at all. `frame0` and `frame1`/`frame2` are therefore
+*not* the homogeneous group of refusers `LCD_ON_LINE0_TRIM` treats them as.
+
+**7. `window/arg/late_wy_*`'s DMG half -- ~15 rows, a rule and not a constant.**
+The existing note frames the family as "dingbat models no device difference".
+But the DMG failures partition perfectly: **all 15 DMG failures are "arm the
+window late" ROMs** (`FFto0/1/2`, `10to0/1`, `late_scx_late_wy_FFto4`,
+`late_enable_afterVblank`), and **all three "disarm late" families pass on DMG
+exactly** (`late_wy`, `late_wy_1toFF`, `late_wy_2toFF`). A symmetric shift of one
+latch dot cannot produce that -- it would move both deadlines together and break
+the disarm ROMs. So the window-Y condition can be turned **on** by a write
+hardware refuses, but is turned **off** on exactly hardware's dot. Fixing only
+the CGB delta caps the family at ~34 of 49 rows, not 49. (Confirmed separately
+here: `CGB_WY_LATENCY = 4`, the one-M-cycle value the old sweep table never
+reached, having stopped at 2, buys **+1**. It is not a write latency.)
+
+**8. `dma`'s `hdma_start` -- 8 rows, bracketed at exactly 1 M-cycle.** The
+transferred byte becomes visible in VRAM one M-cycle too early; `_1`/`_2` bracket
+the latency at 1 (at 2 the `_2` members, green today, go red). Separable and
+safe. It is **not** `GDMA_SETUP_MCYCLES`, which charges time *after* the copy
+loop and so can never move when the bytes appear. The neighbouring
+`gdma_cycles`/`hdma_cycles` 20 rows are **not** separable: the recorded sweep
+wants 2 and still leaves the SCX-carrying `long_scx{2,3,5}_2` short, so that
+residual is genuinely SCX-dependent.
+
+**9. `serial`'s `start_wait_*` cluster -- 12 rows, both obvious readings
+refused.** Twelve rows report one defect through three registers: `_read_sb`
+(`exp 7F,FF got FF,FF` -- SB seeds at $00 and shifts in ones, so this counts the
+shifts directly), `_read_sc` (SC.7 still set) and `_read_if` all flip on the same
+M-cycle. So the eighth shift EDGE is early, not the interrupt's visibility.
+Refused from both sides: **not the tap** (these 12 do not move by a single
+verdict at any tap in [-8,+8], while `div_write_start_wait_read_if` next door
+flips cleanly at 0), and **not a whole missed period** (`SERIAL_START_ARM`, which
+spends the first falling edge on arming the shifter, lands step 1 right on all
+six families and takes step 2 out on all six -- the error changes sign; +24/-32).
+The quantity is strictly between 8 T and one bit period.
+*Blocking question:* the next instrument has to move the transfer's START against
+a stationary clock -- when SC.7's write commits relative to the divider -- which
+is a bus-side question, not a serial-side one.
+
+**10. Not landable, and worth saying so.** `halt`'s 31 rows: 11 are the refuted
+`CGB_HALT_PPU_LEAD` and 16 are **mixed-direction inside the same family on the
+same device** (`late_m0int...scx2_3a` wants earlier, `...scx3_2b` wants later),
+i.e. the SCX / mode-3 -> 0 residual seen through a halt. `sprites`' S2
+(`sprite_late_*_spx{18,19,1A,1B}`, 8 rows) is non-monotonic in X -- `disable`
+passes at `spx1A` and fails at 18/19/1B, `enable` passes at `spx19` -- an
+object-fetch-slot phase on an 8-dot grid, so `OBJ-LATE-DISABLE` will not fall to
+one constant. `window` W2 (`late_disable*`, 23 rows) still needs the CGB-only
+window fetcher abort.
+
+### Two instrument notes that cost time this pass
+
+* **`famflip.py` merges non-contiguous ladders.** `speedchange2_ly44_m3_stat_{1,2}`
+  read at ROM `$101F/$1020` but `_{3,4}` read at `$1052/$1053` -- 50 M-cycles
+  later, a *separate* bracket. famflip prints them as one 4-step ladder, which
+  makes a monotonically advancing clock look non-monotone. Always `cmp -l` a
+  pair before reading an offset off famflip.
+* **`speedchange`'s `div` and `tima0{1,2,3}` rows are structurally blind.** A
+  fully frozen timer passed 8 `div` rows and half the `tima01/02/03` rows,
+  because 131072 CPU cycles is 8192 / 2048 / 512 ticks and 512 DIV increments --
+  every one 0 (mod 256). Hardware and a frozen timer agree by arithmetic
+  accident. Those passes were never evidence the stall model was right;
+  `tima00` (128 ticks) is the only arm that can see the bug at all.

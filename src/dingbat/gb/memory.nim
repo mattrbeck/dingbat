@@ -489,6 +489,69 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
     return 0xFF'u8
   read_byte(mem, gb, idx)
 
+const OAMDMA_WRAM_A12* {.intdefine.} = 1
+  ## **On CGB the OAM DMA shares the ADDRESS bus, not just the data bus.**
+  ##
+  ## The CGB splits the data path so the CPU can keep using WRAM while the DMA
+  ## drives the external bus — that carve-out is `dma_bus_of` below and it is
+  ## right. What it misses is that the WRAM array's half-select still hangs off
+  ## the main address bus, and during the transfer the DMA controller is the one
+  ## driving that. So a *non-colliding* CPU access to `$C000-$FDFF` reaches real
+  ## memory with the CPU's own A0-A11 and region decode, but takes **A12 — the
+  ## "fixed bank 0 half" vs "SVBK-banked half" select — from the DMA's source
+  ## address**.
+  ##
+  ## The suite proves this by construction rather than by fitting. gambatte ships
+  ## two templates per (source, stem) pair: one that pre-loads the stack cells at
+  ## their true addresses, and one that pre-loads them at the true address **with
+  ## bit 12 flipped** — and it emits the flipped form exactly when
+  ## `A12(DMA source) != A12(the CPU's WRAM address)`. Over all 314 `busy*` ROMs
+  ## that predicate picks out the failing set with **0 mismatches**, and
+  ## resolving each store through the echo fold and comparing against
+  ## `(cell and not $1000) or (A12(src) shl 12)` matches all 64 with 0
+  ## mismatches. Two ROMs with the same stem and different source pages
+  ## (`src7F00_busypopDFFF` vs `src0000_busypopDFFF`) expect the byte from
+  ## different halves; only the source's A12 tells them apart.
+  ##
+  ## Bracketed on five sides, each by rows that pass today:
+  ##  * *untouched* (what this tree did): refused by all 64.
+  ##  * *WRAM conflicts like any same-bus access*: refused by the 116 passing
+  ##    external-source rows, and by the expected values themselves — they are
+  ##    the live `$55`/`$AA` data, never the `$00` source filler or the `$FF` a
+  ##    latch read would give.
+  ##  * *the whole address comes from the DMA*: refused because the low bits are
+  ##    the CPU's — with the DMA at `$7F9E` a read of `$DFFF` returns half-offset
+  ##    `$FFF`, not `$F9E`.
+  ##  * *any running DMA does it*: refused by the 40 video-source and 40
+  ##    WRAM-source rows, all green with the direct template.
+  ##  * *it happens on DMG too*: refused by the perfect 312/312 DMG column — a
+  ##    DMG folds WRAM into `dbExternal`, so the access collides outright and
+  ##    A12 never becomes observable.
+  ##
+  ## **This is the resolution of the parked `$D000` bucket** (triage bucket 16,
+  ## "CGB `$D000` window aliases `$C000`", 64 rows, declined pending hardware).
+  ## Forcing `$D000-$DFFF -> wram[0]` scored +64/-2 and contradicted the two
+  ## ROMs that pin banking, so it was rightly refused. The contradiction was an
+  ## artefact of reading an address-bus effect as a banking rule: the alias only
+  ## holds while an external-bus OAM DMA is running, and it goes the other way
+  ## too (a `$C000` access is pushed *up* to `$D000` when the source's A12 is
+  ## set). No hardware dump is needed.
+
+proc dma_wram_addr(mem: GbMemory; gb: GB; idx: int): int {.inline.} =
+  ## `idx` with the WRAM half-select taken from the running DMA, per
+  ## OAMDMA_WRAM_A12. Identity unless a CGB external-bus DMA is live and `idx`
+  ## is in the WRAM window; the echo is folded first, then A12 is substituted.
+  when OAMDMA_WRAM_A12 != 0:
+    if idx >= 0xC000 and idx <= 0xFDFF and
+       mem.dma_bus == uint8(dbExternal) and console_is_cgb(gb):
+      let folded = if idx >= 0xE000: idx - 0x2000 else: idx
+      # The RAW source A12, not the echo-folded one: an $E000 source goes out
+      # on the external bus unfolded (the carve-out at mem_dma_tick), so
+      # $E000 -> 0 and $F000 -> 1.
+      let a12 = (int(mem.current_dma_source) shr 12) and 1
+      return (folded and not 0x1000) or (a12 shl 12)
+  idx
+
 proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   ## Cold path: a CPU read issued while the OAM DMA unit is running. Kept out
   ## of line so the common case is a predictable not-taken branch over a call.
@@ -509,8 +572,9 @@ proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
     if mem.dma_drive == DriveZero:
       ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, 0'u8)
     return mem.dma_latch
-  # No collision, so this is an ordinary CPU read and still owes the PPU's lock.
-  mem_read_open(mem, gb, idx)
+  # No collision, so this is an ordinary CPU read and still owes the PPU's lock
+  # -- but on CGB the DMA is still driving A12 at the WRAM array.
+  mem_read_open(mem, gb, dma_wram_addr(mem, gb, idx))
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   mem_tick_components(mem, gb, 4)
@@ -622,8 +686,9 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
       mem.dma_latch = driven
       ppu_write(gb.ppu, gb, 0xFE00 + mem.dma_position - 1, driven)
     return
-  # No collision, so this is an ordinary CPU write and still owes both locks.
-  mem_write_open(mem, gb, idx, val)
+  # No collision, so this is an ordinary CPU write and still owes both locks --
+  # but on CGB the DMA is still driving A12 at the WRAM array.
+  mem_write_open(mem, gb, dma_wram_addr(mem, gb, idx), val)
 
 proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
   ## The end of a CPU write that left something for the M-cycle to finish: a
@@ -753,6 +818,105 @@ const SPEED_SWITCH_STALL_T* {.intdefine.} = 65548
   ## the 4.194304 MHz base clock, i.e. real time (~15.6 ms) — the CPU clock is
   ## what is stopped, so it cannot be the unit of its own stall.
   ##
+  ## **Superseded by `SPEED_SWITCH_STALL_CPU` when that is nonzero** (which is
+  ## the shipping configuration); kept so the real-time reading stays swept.
+
+const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
+  ## The stall measured in cycles of the CPU clock **at the speed being switched
+  ## TO**, which is the unit three independent gambatte observables agree on.
+  ## Nonzero replaces the real-time `SPEED_SWITCH_STALL_T` reading entirely.
+  ##
+  ## The old reading held the PPU to a constant 65548 dots in BOTH directions
+  ## (`SPEED_SWITCH_STALL_T shl current_speed` cycles, shifted straight back
+  ## down for the PPU). This one gives 65540 dots switching to double and
+  ## **131080** switching back to single — twice as long in real time, because
+  ## the stall is counted in the new CPU clock's own cycles.
+  ##
+  ## Derived three ways, all on the `speedchange` family, which runs N
+  ## back-to-back `STOP`/`LDH ($4D),A` pairs and then reads one observable:
+  ##
+  ##  * **TIMA.** `speedchange_tima00_{1a,1b,2a,2b}` run TAC = $04, one tick per
+  ##    1024 CPU cycles, and want `80,81,81,82` where a frozen timer gives
+  ##    `00,01,01,02`: **+0x80 = 128 ticks = 131072 CPU cycles**, and the
+  ##    `1a`/`1b` pair brackets it to a single M-cycle. 65540 would give 64.
+  ##  * **The second switch is not the first.** `speedchange2_tima00_{2a,2b}`
+  ##    want **+1**, not +256 — so the switch that ends in SINGLE speed also
+  ##    contributes 128 ticks, i.e. 131072 cycles of a clock running half as
+  ##    fast, i.e. twice the real time. This is the row that refuses "fixed real
+  ##    time" outright, and no setting of `SPEED_SWITCH_STALL_T` can satisfy it.
+  ##  * **LY.** `speedchange_ly44_m3_ly` passes at $39 (0x44 + 143 lines),
+  ##    confirming ~65540 dots for one to-double switch; `speedchange2_..._ly_1`
+  ##    wants $25 = 37 where the constant-dots model answers $2F = 47, exactly
+  ##    ten lines out. 0x44 + 431 lines is 37 (mod 154) and 431 lines is
+  ##    196536 dots = 65540 + 131080 — the two directions, added.
+  ##
+  ## The value is **2^17 exactly**. Swept over the 553 rows of
+  ## `speedchange` + `sound` + `dma`, one build per value, against a baseline of
+  ## 351:
+  ##
+  ##   STALL_CPU  131064 131068 *131072* 131076 131080 131084 131088 131096
+  ##   rows        348    351     367     355    364    352    362    347
+  ##
+  ## The surface is jagged rather than unimodal -- neighbouring values move
+  ## different sub-families, which is what the old `SPEED_SWITCH_STALL_T` note
+  ## already observed -- but 131072 is the maximum and is the only round number
+  ## in the range, so the +8 the old real-time constant carried over 65540 is
+  ## not a real part of the quantity.
+
+const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12
+  ## **The PPU advances further across the stall than the CPU clock does, and
+  ## daid's three speed-switch frames are what separate the two quantities.**
+  ##
+  ## They contradict each other under any single "the stall is N cycles" model,
+  ## and that contradiction is the measurement:
+  ##
+  ##  * `speed_switch_timing_div` is pixel-exact only when the CPU-domain stall
+  ##    is a whole multiple of 256, because it reads DIV back and the residue
+  ##    sets the divider's phase for everything after. 131072 = 2^17 gives 0;
+  ##    131096 leaves 24 and costs 226 pixels.
+  ##  * `speed_switch_timing_ly` and `_stat` are pixel-exact only when the PPU
+  ##    advances **65548** dots across a switch INTO double speed -- the count
+  ##    the old real-time `SPEED_SWITCH_STALL_T` happened to encode. At 65536
+  ##    (2^17 cycles shifted down) they cost 452 and 575 pixels.
+  ##
+  ## Both are native-CGB carts scored against captures, so neither is a
+  ## tolerance artefact, and no value of one constant satisfies both: 131072
+  ## gives div 0 / ly 452 / stat 575, 131096 gives div 226 / ly 0 / stat 0.
+  ## Two quantities, and this is the difference between them -- the PPU keeps
+  ## being clocked through a re-alignment the CPU clock is not yet counting,
+  ## which is the mechanism `SPEED_SWITCH_STALL_T`'s own note already named as
+  ## unmodelled ("the 6-cycle switch countdown plus the PPU re-alignment
+  ## freeze") and never had an instrument for.
+  ##
+  ## 12 dots is what closes the gap in the to-double direction: 65536 + 12 is
+  ## exactly the 65548 the two frames pin, which is why this is the derived
+  ## value and not a fitted one. The to-single direction has no pixel witness in
+  ## this tree, so it takes the same 12 rather than a second free constant.
+  ##
+  ## Bracketed on both sides by those same frames, one build per dot:
+  ##
+  ##   EXTRA_DOTS      11    *12*   13    14    15    16
+  ##   daid ly px     109     0      0     0     0    125
+  ##   daid stat px     0     0      0     0   233    233
+  ##
+  ## so [12,14] is the legal window and 11 and 15 close it from either end.
+  ## gambatte is flat across that window (1138 / 1137 / 1138 rows of
+  ## speedchange+sound+dma+oamdma), so it has no say between them and the dot
+  ## count is what picks 12.
+
+const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
+  ## Whether the timer/serial/OAM-DMA domain runs during the stall.
+  ##
+  ## It does, and the TIMA rows above are the proof: they can only see +128
+  ## ticks if the timer counted through the stall. This is not a contradiction
+  ## with Pan Docs' "`DIV` does not tick" — that sentence is about the STOP
+  ## leaves, where the whole machine's clock stops. The speed-switch leaf is a
+  ## HALT (Pan Docs' own chart calls it that), and in a halt the CPU clock
+  ## keeps running for everything except instruction fetch. So the rule is
+  ## simply: **the stall is an ordinary halt, and everything that runs during a
+  ## halt runs during it.** DIV is still reset at the switch itself, before the
+  ## stall starts, which is what makes the tick count come out round.
+  ##
   ## 65548 = 2^16 + 12. The nearby 65540 = 2^16 + 4 is a ripple-counter length,
   ## not a fitted number, and three independent sources land on it:
   ##
@@ -864,10 +1028,18 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   ## second running, which is what makes the PPU keep drawing (differently per
   ## mode, hence gambatte's speedchange/*_m3_* family) while the CPU is out.
   ##
-  ## So: no timer_tick (which also drives the serial shift clock) and no
-  ## mem_dma_tick; the scheduler and the PPU advance as usual.
+  ## **That reading of the split is wrong for the speed-switch leaf, and
+  ## `SPEED_SWITCH_STALL_RUNS_CPU_CLOCK` is where it is corrected.** Pan Docs'
+  ## "`DIV` does not tick" is about the STOP leaves, where the machine's whole
+  ## clock stops. The switch leaf is a HALT, and gambatte's
+  ## `speedchange_tima00_*` rows count 128 TIMA ticks across one switch — which
+  ## only a running timer can produce. So the CPU-clock domain runs here too,
+  ## and this proc is then just `mem_tick_components` with the fetch left out.
   gb.scheduler.tick(cycles)
-  let ppu_cycles = cycles shr mem.current_speed
+  when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
+    timer_tick(gb.timer, gb, cycles)
+    mem_dma_tick(mem, gb, cycles)
+  let ppu_cycles = (cycles shr mem.current_speed) + SPEED_SWITCH_PPU_EXTRA_DOTS
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
 
@@ -1006,12 +1178,23 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # still zero) divider afterwards, which is exactly Pan Docs' "`DIV` does
     # not tick, so *some* audio events are not processed".
     if not irq_pending:
-      gb.scheduler.clear(etAPUFrameSeq)
-      mem_tick_stalled(mem, gb, SPEED_SWITCH_STALL_T shl mem.current_speed)
-      gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+      # The stall, in cycles of the CPU clock the switch lands in — which is
+      # the domain the scheduler counts in, so no shift is needed. See
+      # SPEED_SWITCH_STALL_CPU for the three observables that pin the unit.
+      let stall_cycles =
+        when SPEED_SWITCH_STALL_CPU != 0: SPEED_SWITCH_STALL_CPU
+        else: SPEED_SWITCH_STALL_T shl mem.current_speed
+      when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
+        # The divider runs, so the DIV-APU tap needs no lifting: the frame
+        # sequencer is clocked by the same counter every other event is.
+        mem_tick_stalled(mem, gb, stall_cycles)
+      else:
+        gb.scheduler.clear(etAPUFrameSeq)
+        mem_tick_stalled(mem, gb, stall_cycles)
+        gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
       # The stall is not part of the STOP opcode's own 4 T-cycles: charge it to
       # the instruction so mem_tick_extra does not try to make it up again.
-      mem.cycle_tick_count += SPEED_SWITCH_STALL_T shl mem.current_speed
+      mem.cycle_tick_count += stall_cycles
     return
 
   # No button, no speed switch: the two STOP-mode leaves. DIV is reset on both.

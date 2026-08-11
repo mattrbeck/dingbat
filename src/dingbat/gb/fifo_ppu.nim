@@ -2505,6 +2505,52 @@ proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
     ppu.lx + 8 == int32(ppu.sprites[0].x) and
     ppu.lx < int32(GB_WIDTH) - 1
 
+proc win_start_reaches_pixels(ppu: GbFifoPpu): bool {.inline.} =
+  ## **The pixel-path twin of `CGB_WIN_TAIL_LAST`, and the reason 15
+  ## `window/on_screen` rows render the wrong device's reference exactly.**
+  ##
+  ## `CGB_WIN_TAIL_LAST` already says the devices part on a window restart
+  ## issued on the line's LAST pixel: the CGB waits for that fetch and the DMG
+  ## does not. That split was landed for mode-3 LENGTH only -- it is read in
+  ## `fetch_work_pending` and nowhere else -- so the shifter took the restart on
+  ## both devices and the DMG drew a window it never draws.
+  ##
+  ## Only WX = 166 can put a window START on x = 159, which is why the whole
+  ## affected set is `window/on_screen/wxA6_*`.
+  ##
+  ## The oracle here needs no bracketing, because every one of these ROMs ships
+  ## BOTH a `_dmg08` and a `_cgb04c` reference and the two differ. Of the 18
+  ## `on_screen` ROMs, the 4 whose references are pixel-identical all passed;
+  ## the 14 whose references differ were exactly the failing rows, and in every
+  ## case the count of pixels dingbat got wrong equalled the count by which the
+  ## two references differ -- to the pixel, on all 14 (21816, 21657, 14624,
+  ## 14468, 10992, 10780, 8832, 7303, and 120/160 on the rest). dingbat was
+  ## rendering the CGB reference bit-exactly on the DMG rows. So the frames
+  ## themselves say the behaviour is right for one device and applied to both.
+  ##
+  ## **What is refuted: refusing the START is not the DMG's rule.** Turning this
+  ## on moves the DMG frames, but not onto their reference -- `wxA6_3 [dmg]`
+  ## goes 10780 -> 10844 wrong pixels, i.e. further away, and the whole suite
+  ## nets +1. So the DMG does not simply decline the match.
+  ##
+  ## What the two facts together leave is a narrower rule, and it is the obvious
+  ## reading of `CGB_WIN_TAIL_LAST` transposed: the DMG **does** start the
+  ## window at WX = 166 -- the trigger latches and the window's internal line
+  ## counter advances, which is what the later lines of these ROMs depend on --
+  ## but its mode 3 ends with the last PIXEL, so the restart's first pixel is
+  ## never shifted out. The CGB waits for that fetch and shows it. Separating
+  ## "the window started" from "the window's first pixel reached the screen" is
+  ## the next step here; this flag conflates them, which is why it is off.
+  ## The reference pair makes the result checkable to the pixel with no
+  ## bracketing, so this is cheap for whoever takes it.
+  ## Keyed on WX rather than on `lx`: the comparator sits one slot LEFT of the
+  ## window's first pixel (WIN_START_PRE_PIXEL), so the start that would put
+  ## that first pixel on x = 159 is matched at lx = 158, and WX = 166 names it
+  ## without depending on which of the pre-pixel rules is in force.
+  when DMG_WIN_START_LAST_PX == 0: true
+  else:
+    ppu.cgb or ppu.fetching_window or int(ppu.wx) != GB_WIDTH + 6
+
 proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
                x: int32): uint16 {.inline.} =
   ## The mixer: one BG FIFO entry and one OBJ FIFO entry in, one panel colour
@@ -3006,7 +3052,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     #    Measured on the fixed fetcher, counter 0 against 1: gambatte 3587 ->
     #    3609 (window +22) and mealybug DMG +361 pixels, against one GBMicrotest
     #    row (win10_scx3_b, which is one M-cycle from its boundary).
-    if ppu.lx == ppu.win_lx:
+    if ppu.lx == ppu.win_lx and win_start_reaches_pixels(ppu):
       when defined(gb_m3_trace):
         # Diagnostic only. Every dot the window's WX equality is reached, with
         # the fetcher position and FIFO depth that decide whether the re-trigger

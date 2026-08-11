@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-11 11:18:47*
+*Generated: 2026-08-11 11:37:30*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4051/5005 passed.**
+**4131/5005 passed.**
 
 ## bgen
 
@@ -195,7 +195,7 @@ All 8 tests passed.
 | dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
-| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 6B, expected 71 |
+| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got A0, expected 71 |
 | dma/hdma_vs_m0int_pc_scx1_1_cgb04c_out1033 [cgb] | got 1034, expected 1033 |
 | dma/hdma_vs_m0int_pc_scx1_2_cgb04c_out1033 [cgb] | got 1034, expected 1033 |
 | dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |
@@ -758,9 +758,9 @@ All 6 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (707/811 passed)
+## oamdma (771/811 passed)
 
-707/811 tests passed, 104 failed:
+771/811 tests passed, 40 failed:
 
 | Test | Result |
 |------|--------|
@@ -792,82 +792,18 @@ All 6 tests passed.
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
-| oamdma/oamdma_src0000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_src0000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
-| oamdma/oamdma_src0000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [cgb] | got 657600FF, expected 657655FF |
-| oamdma/oamdma_src0000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
-| oamdma/oamdma_src0000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
-| oamdma/oamdma_src0000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
-| oamdma/oamdma_src7F00_busypopBFFF_2_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
-| oamdma/oamdma_src7F00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
-| oamdma/oamdma_src7F00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
-| oamdma/oamdma_src7F00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_src7F00_busypushC001_2_dmg08_out55AAFF34_cgb04c_out65AAFF55 [cgb] | got 65AAFF34, expected 65AAFF55 |
-| oamdma/oamdma_src7F00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
-| oamdma/oamdma_src7F00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
-| oamdma/oamdma_src7F00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oamdma/oamdma_srcA000_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_srcA000_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
-| oamdma/oamdma_srcA000_busypopFDFF_dmg08_out657665FF_cgb04c_out657655FF [cgb] | got 657600FF, expected 657655FF |
-| oamdma/oamdma_srcA000_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
-| oamdma/oamdma_srcA000_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
-| oamdma/oamdma_srcA000_busypushFE01_dmg08_out65AA1298_cgb04c_out6576AA98 [cgb] | got 65761298, expected 6576AA98 |
-| oamdma/oamdma_srcBF00_busypopBFFF_2_dmg08_outFFFFFFFF_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcBF00_busypopBFFF_dmg08_out65766576_cgb04c_out657665AA [cgb] | got 65766500, expected 657665AA |
-| oamdma/oamdma_srcBF00_busypopDFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 65765500, expected 657655AA |
-| oamdma/oamdma_srcBF00_busypopEFFF_dmg08_out65766576_cgb04c_out657655AA [cgb] | got 657600AA, expected 657655AA |
-| oamdma/oamdma_srcBF00_busypushC001_2_dmg08_out55AAFF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcBF00_busypushC001_dmg08_out55AA1234_cgb04c_out65AA1255 [cgb] | got 65AA1234, expected 65AA1255 |
-| oamdma/oamdma_srcBF00_busypushE001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 6576AA34, expected 6576AA55 |
-| oamdma/oamdma_srcBF00_busypushF001_dmg08_out55AA1234_cgb04c_out6576AA55 [cgb] | got 65761255, expected 6576AA55 |
-| oamdma/oamdma_srcE000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcE000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcE000_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
-| oamdma/oamdma_srcE000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcE000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcE000_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcEF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcEF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcEF00_busypopFDFF_dmg08_out657665FF_cgb04c_outFFFF55FF [cgb] | got FFFF00FF, expected FFFF55FF |
-| oamdma/oamdma_srcEF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcEF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcEF00_busypushFE01_dmg08_out65221298_cgb04c_outFFFFAAFF [cgb] | got FFFF12FF, expected FFFFAAFF |
-| oamdma/oamdma_srcF000_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcF000_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcF000_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcF000_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcF000_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcF000_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcF000_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcF000_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
-| oamdma/oamdma_srcFE00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFE00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFE00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcFE00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcFE00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcFE00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcFE00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcFE00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
 | oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank [dmg] | got 1, expected 0 |
 | oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| oamdma/oamdma_srcFF00_busypopBFFF_2_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFF00_busypopBFFF_dmg08_out65766576_cgb04c_outFFFFFFAA [cgb] | got FFFFFF00, expected FFFFFFAA |
-| oamdma/oamdma_srcFF00_busypopDFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF5500, expected FFFF55AA |
-| oamdma/oamdma_srcFF00_busypopEFFF_dmg08_out65766576_cgb04c_outFFFF55AA [cgb] | got FFFF00AA, expected FFFF55AA |
-| oamdma/oamdma_srcFF00_busypushC001_2_dmg08_out4522FF34_cgb04c_outFFAAFF55 [cgb] | got FFAAFF34, expected FFAAFF55 |
-| oamdma/oamdma_srcFF00_busypushC001_dmg08_out45221234_cgb04c_outFFAA1255 [cgb] | got FFAA1234, expected FFAA1255 |
-| oamdma/oamdma_srcFF00_busypushE001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFFAA34, expected FFFFAA55 |
-| oamdma/oamdma_srcFF00_busypushF001_dmg08_out45221234_cgb04c_outFFFFAA55 [cgb] | got FFFF1255, expected FFFFAA55 |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [dmg] | got A0, expected 81 |
 | oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [cgb] | got A0, expected 81 |
 | oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [dmg] | got 2B, expected 81 |
 | oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [cgb] | got 2B, expected 81 |
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
-| oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 10, expected 11 |
+| oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
 ## scx_during_m3 (121/141 passed)
 
@@ -949,21 +885,19 @@ All 67 tests passed.
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## speedchange (116/208 passed)
+## speedchange (132/208 passed)
 
-116/208 tests passed, 92 failed:
+132/208 tests passed, 76 failed:
 
 | Test | Result |
 |------|--------|
-| speedchange/speedchange2_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange2_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange2_ch2_nr52_ds_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
+| speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange2_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange2_frame1_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | speedchange/speedchange2_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | speedchange/speedchange2_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | speedchange/speedchange2_lcdoff_nopx2_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| speedchange/speedchange2_ly44_m3_ly_1_cgb04c_out25 [cgb] | got 2F, expected 25 |
 | speedchange/speedchange2_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange2_ly44_m3_m3stat_scx3_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange2_ly44_m3_nop_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
@@ -971,8 +905,7 @@ All 67 tests passed.
 | speedchange/speedchange2_ly44_m3_nopx2_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange2_ly44_m3_nopx2_m3stat_scx3_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange2_ly44_m3_stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
-| speedchange/speedchange2_ly44_m3_stat_3_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange2_ly44_m3_stat_4_cgb04c_outC2 [cgb] | got C3, expected C2 |
+| speedchange/speedchange2_ly44_m3_stat_3_cgb04c_outC0 [cgb] | got C2, expected C0 |
 | speedchange/speedchange2_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | speedchange/speedchange2_nop_lcdoff_m2int_m3stat_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | speedchange/speedchange2_nop_lcdoff_nop_m2int_m3stat_scx1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -992,7 +925,6 @@ All 67 tests passed.
 | speedchange/speedchange2_tima02_2b_cgb04c_out04 [cgb] | got 03, expected 04 |
 | speedchange/speedchange2_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange2_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
-| speedchange/speedchange3_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange3_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange3_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange3_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
@@ -1000,32 +932,24 @@ All 67 tests passed.
 | speedchange/speedchange3_ly44_m3_nop_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange3_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange3_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
-| speedchange/speedchange4_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange4_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange4_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange4_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange4_ly44_m3_nop_m3stat_scx4_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange4_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_nop_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C2, expected C3 |
-| speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
+| speedchange/speedchange4_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange4_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange4_ly44_m3_nop_m3stat_scx3_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange4_ly44_m3_nop_m3stat_scx4_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange4_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange4_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange5_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_ly44_m3_nop_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx1_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange5_nop_ly44_m3_m3stat_scx2_2_cgb04c_outC0 [cgb] | got C3, expected C0 |
-| speedchange/speedchange_ch2_nr52_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
+| speedchange/speedchange5_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_ly44_m3_nop_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_ly44_m3_nop_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_nop_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange5_nop_ly44_m3_m3stat_scx2_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
+| speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange_ch2_nr52_ds_1b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange_lcdoff_tima00_1_cgb04c_out80 [cgb] | got 00, expected 80 |
 | speedchange/speedchange_ly44_m3_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange_ly44_m3_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange_ly44_m3_nop_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
@@ -1037,10 +961,6 @@ All 67 tests passed.
 | speedchange/speedchange_ly44_m3_nopx4_m3stat_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange_ly44_m3_nopx4_m3stat_scx1_1_cgb04c_outC3 [cgb] | got C0, expected C3 |
 | speedchange/speedchange_ly44_m3_stat_1_cgb04c_outC0 [cgb] | got C2, expected C0 |
-| speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 00, expected 80 |
-| speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 01, expected 81 |
-| speedchange/speedchange_tima00_2a_cgb04c_out81 [cgb] | got 01, expected 81 |
-| speedchange/speedchange_tima00_2b_cgb04c_out82 [cgb] | got 02, expected 82 |
 | speedchange/speedchange_tima01_nop_1_cgb04c_out07 [cgb] | got 06, expected 07 |
 | speedchange/speedchange_tima01_nop_2_cgb04c_out08 [cgb] | got 07, expected 08 |
 | speedchange/speedchange_tima02_2a_cgb04c_out03 [cgb] | got 02, expected 03 |

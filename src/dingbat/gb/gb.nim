@@ -276,6 +276,77 @@ const STAT_NO_HOLD* = -1024'i32
 # pass today; that is fitting, not measuring.
 const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 
+# ---- The serial shift clock's tap offset, per device -------------------------
+#
+# The serial unit watches a bit of (divider + tap); its falling edge shifts one
+# bit. The tap exists because the serial unit's copy of the divider sits a few
+# T-cycles ahead of the value a DIV read returns, so it is a phase, in T-cycles,
+# on a free-running counter -- not a countdown started by SC.
+#
+# Raising the tap makes every edge land EARLIER in real time (the sum reaches
+# the bit boundary sooner); lowering it makes them land later.
+# **A two-sided contradiction, quarantined at the DMG value gambatte refuses.**
+#
+# Swept against the 82-row gambatte `serial` bucket, whole suite rebuilt per
+# value, CGB held at 2:
+#
+#   SERIAL_TAP_DMG   -8  -4  -2 | 0   1   2   3 | 4   5   6   8
+#   serial rows      50  50  50 | 53  53  53  53| 50  50  50  50
+#
+# so gambatte puts the DMG tap in [0,3]: a strict local maximum bracketed on
+# BOTH sides, worth +3 / -0 over the whole 5,005-row suite with no collateral
+# row in any of the other 46 buckets. The plateau is exactly 4 T wide, which is
+# what says the tap is a phase quantised to the M-cycle and not a duration. The
+# CGB column has the same shape and already sits inside it (-4/-2 -> 49,
+# {0,2} -> 53, 4/6 -> 49), so the two SoCs would want the SAME tap.
+#
+# **`mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb` refuses [0,3] and pins
+# 4.** It is hardware-verified on DMG/MGB, so it wins and the tap ships at 4 --
+# the three gambatte rows stay red deliberately.
+#
+# The two cannot be reconciled by re-partitioning the tap against the boot
+# divider seed, and that is worth stating because it is the obvious next idea:
+# `boot_div-dmgABCmgb` reads DIV, which is `tdiv shr 8`, so it cannot see a 4 T
+# change in the seed at all -- the seed's low bits are pinned ONLY through the
+# serial tap. But both suites' ROMs start from that same boot state and neither
+# writes DIV before the transfer, so each sees only the SUM (seed + tap); moving
+# 4 T from one into the other leaves both verdicts exactly where they were.
+# Confirmed rather than assumed. The disagreement is therefore in something both
+# ROMs traverse before the SC.7 write, not in this constant.
+const SERIAL_TAP_DMG* {.intdefine.} = 4
+const SERIAL_TAP_CGB* {.intdefine.} = 2
+
+# ---- The residual `start_wait_*` cluster, and what it is NOT -----------------
+#
+# Twelve rows (`start_wait_read_if`, `_read_sb`, `_read_sc`,
+# `start_wait_clear_if_read_if` and their `_ds` arms) report the SAME defect
+# through three different registers: at family step 1 hardware has done seven
+# shifts and dingbat has done eight. `_read_sb` is the clearest -- SB seeds at
+# $00 and shifts in ones, so `exp=7F,FF got=FF,FF` counts the shifts directly --
+# and `_read_sc` (SC.7 still set) and `_read_if` (the serial IF) flip on the
+# same M-cycle. So it is the eighth shift EDGE that is early, not the interrupt
+# becoming visible: all three observables move together.
+#
+# Two candidates are measured and both are refused, from opposite sides:
+#
+#  * **It is not the tap.** These twelve rows do not move by a single verdict at
+#    ANY tap in [-8, +8] (checked at -8, -4, -2, 0, 4), while
+#    `div_write_start_wait_read_if` next door flips cleanly at 0. So the cluster
+#    is more than 8 T early and the shift clock's phase does not reach it.
+#  * **It is not a whole missed period.** `SERIAL_START_ARM` below spends the
+#    first falling edge after SC.7 rises on arming the shifter rather than
+#    shifting, which is +512 T. That lands step 1 right on all six families
+#    (`7F`, `E0`, `FF`/`FD`) and takes step 2 out on all six -- the error changes
+#    sign. Whole suite +24 / -32.
+#
+# The quantity is therefore strictly between 8 T and one bit period, and no
+# single edge-phase constant expresses that: a tap moves the start sample with
+# the edges, so the count of edges after the write is invariant under it. The
+# next instrument has to move the START against a stationary clock -- i.e. when
+# SC.7's write commits relative to the divider -- which is a bus-side question,
+# not a serial-side one. Ships off.
+const SERIAL_START_ARM* {.intdefine.} = 0
+
 # ---- The M-cycle a CGB spends leaving HALT that a DMG does not ---------------
 #
 # Charged once, on the M-cycle the pending interrupt is seen, before the CPU is
@@ -1396,6 +1467,17 @@ const WIN_TAIL_FETCH*         {.intdefine.} = 1
   ## early -- and green on both with it. See CGB_WIN_TAIL_LAST for WX = 166,
   ## which needs this AND the device split before either device's rows are
   ## right, and `fetch_work_pending` in gb/fifo_ppu.nim for the code.
+const DMG_WIN_START_LAST_PX* {.intdefine.} = 0
+  ## The same device split as `CGB_WIN_TAIL_LAST` next door, carried to the
+  ## SHIFTER instead of to mode 3's length: on a DMG a window START on the
+  ## line's last pixel (only WX = 166 can produce one) does not happen at all.
+  ##
+  ## **Ships OFF: this exact spelling is refused by the frames.** See
+  ## `win_start_reaches_pixels` in fifo_ppu.nim for the oracle, which is
+  ## unusually strong -- 14 ROMs whose two device references differ, where
+  ## dingbat's DMG output matches the CGB reference to the pixel -- and for
+  ## which half of the rule survives.
+
 const CGB_WIN_TAIL_LAST*      {.intdefine.} = 1
   ## Whether a window restart issued on the LINE'S LAST PIXEL holds mode 3
   ## open, which only the CGB does. 1 ships; 0 is the control build, where
