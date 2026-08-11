@@ -810,6 +810,34 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
 # cancelling four dots of dispatch error on those rows, which is why moving
 # either alone looks like a regression.
 
+proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
+  ## The 3 -> 0 field tail (`STAT_M0_FIELD_TAIL`), as this particular read sees
+  ## it. Charged at the READ and not at the mode change, because two of the
+  ## three things that decide it are properties of the reader: an object fetch
+  ## on this line consumes the tail, and so does an IO cycle that falls later
+  ## than `STAT_M0_TAIL_MAX_MC` in its own instruction.
+  ##
+  ## `{.noinline.}` on purpose. `stat_read_mode` is `{.inline.}` and sits in the
+  ## register-read switch; letting this body inline into it measured +0.25% of
+  ## retired instructions on blargg cpu_instrs, which is the same codegen cliff
+  ## `win_lx` and `win_hold` record from the data side.
+  if (ppu.lcd_status and 3'u8) != 0'u8 or ppu.stat_prev_mode != 3'u8:
+    return 0'i32
+  var tail = if gb.cgb_enabled: int32(STAT_M0_FIELD_TAIL_CGB)
+             else: int32(STAT_M0_FIELD_TAIL)
+  when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
+    if gb.fifo_ppu != nil:
+      tail = max(0'i32, tail - gb.fifo_ppu.obj_dots_line)
+  when STAT_M0_TAIL_MAX_MC != 0:
+    # Which M-cycle of its own instruction this read is. Only the forms that
+    # can address $FF41 need distinguishing; nothing else can be reading STAT.
+    let io_mc = case gb.cpu.cur_opcode
+                of 0xF0'u8: 3'i32          # LDH A,(n)
+                of 0xFA'u8: 4'i32          # LD  A,(nn)
+                else:       2'i32          # LD A,(C) / LD A,(HL)
+    if io_mc > int32(STAT_M0_TAIL_MAX_MC): return 0'i32
+  tail
+
 proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## The mode bits a CPU read of STAT returns: the mode in effect on the dot
   ## STAT_READ_SAMPLE back from where the read's M-cycle leaves the dot counter.
@@ -818,10 +846,13 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## as a sampled dot, because nothing per-dot or per-M-cycle then has to
   ## maintain it: `mode_flag=` stamps the change's dot three times a line and
   ## the line wrap rebases it.
-  let t = int32(STAT_READ_SAMPLE) +
+  var t = int32(STAT_READ_SAMPLE) +
           int32(STAT_READ_SAMPLE_DS_ADD) * int32(gb.memory.current_speed)
+  when STAT_M0_TAIL_ANY:
+    t += stat_m0_tail(ppu, gb)
   if ppu.cycle_counter - ppu.stat_chg_dot < t: ppu.stat_prev_mode
   else: ppu.lcd_status and 3'u8
+
 
 # The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
@@ -1666,22 +1697,13 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     # loop is processing, i.e. the FIRST dot of the new mode, which is what
     # stat_read_mode's threshold is measured from.
     ppu.stat_prev_mode = prev_mode
-    when STAT_MODE_LAG_ANY:
-      # The mode FIELD may reach a reader later than the mode itself reaches
-      # everything else -- see STAT_MODE0_LAG. Spent here, on the field's own
-      # timestamp, so no interrupt source, no HDMA trigger and no part of the
-      # pixel pipeline can see it.
+    when STAT_MODE3_LAG != 0 or STAT_MODE3_LAG_CGB != 0:
+      # The 2 -> 3 half is spent on the field's own timestamp; the 3 -> 0 half
+      # is spent at the READ instead (stat_read_mode), because only the read
+      # knows which instruction is making it. Neither can be seen by an
+      # interrupt source, an HDMA trigger or any part of the pixel pipeline.
       ppu.stat_chg_dot = ppu.cycle_counter +
-        (if mode == 0:
-           (block:
-              let base = if gb.cgb_enabled: int32(STAT_M0_FIELD_TAIL_CGB)
-                         else: int32(STAT_M0_FIELD_TAIL)
-              when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
-                (if gb.fifo_ppu != nil:
-                   max(0'i32, base - gb.fifo_ppu.obj_dots_line)
-                 else: base)
-              else: base)
-         elif mode == 3:
+        (if mode == 3:
            int32(STAT_MODE3_LAG) +
            (if gb.cgb_enabled: int32(STAT_MODE3_LAG_CGB) else: 0'i32)
          else: 0'i32)

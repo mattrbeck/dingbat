@@ -4005,3 +4005,308 @@ gambatte's `m2int_*`, and `STAT_READ_SAMPLE` is one shared constant for all of
 them. A per-instruction or per-bus-cycle read phase is the one axis this round
 did not touch, and it is the only one left that can be keyed on something all
 three witnesses actually differ in.
+
+## 2026-08-10 (round 4): the three suites read STAT with different instructions
+
+Round 3 ended with one quantity and three suites that would not agree about it,
+and named the last untested axis: they might sample the field through different
+CPU read paths. **They do, the correlation is exact, and gating on it lands the
+whole thing.** Local runner **773 -> 779**, gambatte **4004 -> 4044**, and no row
+anywhere goes the other way.
+
+### The idioms, read off the ROMs
+
+`tools/gbscx/readidiom.py` finds every instruction in a ROM that can address
+`$FF41` and reports which M-cycle of its own instruction performs the IO read.
+Run over a representative of each party:
+
+| party | ROM | idiom | IO cycle | wants the tail? |
+|---|---|---|---|---|
+| GBMicrotest | `win0_{a,b}`, `ppu_sprite0_scx1_b` | `LDH A,($41)` | **M3 of 3** | **no** (24 rows) |
+| gambatte | `m2int_scx3_m3stat_1`, the `window` set | `LD A,(C)` | **M2 of 2** | **yes** (45 rows) |
+| mooneye-wilbertpol | `intr_2_mode0_scx1_timing_nops` | `LD A,(HL)` | **M2 of 2** | **yes** (6 rows) |
+
+That is three independent suites, written by three different authors, and the
+one thing that predicts which side of the disagreement a row falls on is the
+addressing form of its read. Cross-tabulated over every row the field tail moves
+(`tools/gbscx/idiomtab.sh`), gambatte's own moved rows are 45 gained / 5 lost on
+`LD A,(C)` and exactly 1 gained / 1 lost on `LDH A,($41)` -- and those two are
+the rows the gate then stops moving.
+
+### The rule, and its bracket
+
+> **An IO read sees the mode-0 field tail only if its IO cycle is its
+> instruction's second M-cycle.** A read on the third (`LDH A,(n)`) or fourth
+> (`LD A,(nn)`) does not.
+
+`STAT_M0_TAIL_MAX_MC`, and it is bracketed on the structural quantity rather
+than on an opcode list. Full local runner, one build per value:
+
+| `MAX_MC` | what sees the tail | runner | gambatte |
+|---|---|---|---|
+| 1 | nothing — mechanism off | 773 | 4004 |
+| **2** | `LD A,(C)`, `LD A,(HL)` | **779** | **4044** |
+| 3 | + `LDH A,(n)` | 755 | 4044 |
+| 4 | + `LD A,(nn)` | 755 | 4044 |
+
+The boundary sits strictly between an IO read on its instruction's second
+M-cycle and one on its third: at 3 GBMicrotest's 24 `LDH` rows go red, at 1 the
+45 gambatte and 6 wilbertpol rows never go green. `K` re-bracketed in the new
+geometry is still a strict local maximum — 2 is 777/4030, **3 is 779/4044**,
+4 is 777/4035.
+
+The term also had to move from the mode CHANGE to the READ, because two of the
+three things that decide it are properties of the reader (the object absorption
+and now the idiom). That move is behaviour-neutral on its own, measured +0/-0.
+
+### What this does and does not claim
+
+It is a fact about the ROMs before it is one about silicon: the parties really
+do use different instructions, and gating on that reconciles 75 rows across
+three suites with zero losses. Whether hardware's field is genuinely sampled at
+a different point for a 3-M-cycle read, or whether the two idioms differ in
+something else that happens to track the M-cycle index, **this evidence cannot
+say** — every `LD A,(C)` witness in the tree is gambatte's and every
+`LDH A,($41)` witness is GBMicrotest's, so idiom and suite are perfectly
+confounded. That is exactly what hardware experiment (a) below is for, and it is
+cheap: the same frame, the same dot, read twice with the two idioms back to
+back.
+
+### Perf
+
+`+0.31%` of retired instructions, and it does not touch the mode 3 dot loop.
+blargg cpu_instrs, 2400 frames after 300 warmup, four interleaved runs,
+`cycles=` identical throughout: off is 27,888,682,794 (the same build as main,
+to 0.001%) and on is 27,973,905,259. Attribution, since it was chased: ~0.25% is
+the tail itself and ~0.05% the per-instruction opcode capture the gate needs;
+moving `stat_m0_tail` out of line and moving `obj_dots_line` into the cold
+block were both tried and neither recovers it. One `-d:STAT_M0_FIELD_TAIL=0`
+reverts the whole mechanism at no cost.
+
+Witness ladder byte-identical throughout (both acid2, both strikethrough,
+cgb-acid-hell at rev C and E, daid on DMG and on CGB at rev C and D); mealybug
+1863574 / 552960 unmoved on both devices.
+
+## The three hardware experiments this campaign leaves wanting
+
+Written to be added to a probe ROM rather than to be argued about. The natural
+home for (a) and (b) is `tests/roms/gbedge.py`, which already has the paging
+viewer, the two-pass assembler and the determinism contract they need — each is
+one page, one 32-byte result slot, raw values and no baked-in expectation. (c)
+needs pixels and so belongs in the visual ROM (`gbvis.gb`, earmarked v3 in
+`docs/hwprobe-questions.md`).
+
+An AGB in GB-compat mode is a valid GB revision for all three; where it differs
+from a DMG or a CGB that is itself the answer to a question this campaign asked
+(the DMG/CGB splits in `SCX_FINE_BORROW_DMG_LEAD`, `STAT_M0_FIELD_TAIL_CGB` and
+`STAT_MODE3_LAG_CGB`).
+
+### (a) Does the STAT mode field report differently to two read idioms?
+
+**Settles:** the three-suite disagreement that rounds 3 and 4 are built on, and
+with it whether `STAT_M0_TAIL_MAX_MC` is a fact about silicon or an artefact of
+which suite wrote which ROM. Idiom and suite are perfectly confounded in every
+test ROM that exists — every `LD A,(C)` witness is gambatte's and every
+`LDH A,($41)` witness is GBMicrotest's — so no amount of re-reading the suites
+can separate them.
+
+**Setup.** LCD on, `LCDC = $91` (BG on, **OBJ off** — the tail is absorbed by an
+object fetch, so the line must be object-free), `SCY = 0`, `WX`/`WY` parked off
+screen, `SCX = 3`. Anchor on a mode-2 STAT interrupt so the slide starts on a
+known dot.
+
+**The one thing the probe must get right.** The two idioms have different
+lengths, so equalising the *instruction start* would compare different dots.
+Equalise the **IO cycle**: `LD A,(C)` (`F2`, 2 M-cycles, IO on M2) needs one
+more preceding NOP than `LDH A,($41)` (`F0 41`, 3 M-cycles, IO on M3) for the
+two reads to sample the same PPU dot. Build the slide as
+
+    <N NOPs> ; LD A,(C)      -> store          (C = $41 preloaded)
+    <N+1 NOPs> ; LDH A,($41) -> store
+
+as two separate runs from the same anchor, and sweep `N` over ±3 M-cycles about
+the mode-0 boundary, storing the two bytes per step — 14 bytes, one slot.
+
+**What each outcome decides.**
+
+* The two columns flip from `3` to `0` at the **same** `N`: the per-idiom rule is
+  refuted, `STAT_M0_TAIL_MAX_MC` should be deleted, and the field tail with it —
+  the three-suite disagreement is then something neither round found, and the
+  60-odd rows it currently reconciles go back to being open.
+* `LD A,(C)` flips one step **later** than `LDH A,($41)`: the rule is confirmed
+  as written and `STAT_M0_FIELD_TAIL = 3` is measured rather than fitted.
+* They flip at different `N` in the other order, or by more than one step: the
+  rule is real but the value is wrong, and the sweep reads the right one off
+  directly.
+
+Run it at `SCX = 0` as a control: with no fine scroll the ladder's own bracket
+(K solves against `172 + s`) predicts the flip moves by exactly `s`.
+
+### (b) How much does a mid-line SCX store lengthen mode 3?
+
+**Settles:** the `scx_m3_extend` bracket, which is the one measurement this
+campaign could not explain with any mechanism it built. dingbat extends mode 3
+by **0** dots; the two gambatte rows bracket hardware at **11–14** dots on DMG
+and **7–10** on CGB, and the extension grows with how late the store lands.
+Nothing derived in four rounds produces that.
+
+**Setup.** As (a): BG only, no objects, no window. `SCX = 7` written during
+mode 2 so the line latches a fine scroll of 7. Then, from the same anchor, a
+slide of `M` NOPs, `LD A,$05` / `LD (C),A` (the store that lowers `SCX and 7`),
+then a slide of `N` NOPs and `LDH A,($41)`; store the byte.
+
+**The measurement** is the smallest `N` at which the read returns mode 0, as a
+function of `M`. Sweep `M` over 0..7 M-cycles (the store walking across the head
+of mode 3, which is where round 2 showed the effect is store-position dependent)
+and for each `M` sweep `N` over the four M-cycles around the boundary — 32
+bytes, one slot, and the page reads out as the extension law directly.
+
+Include `M` large enough that the store lands after the discard is spent, and
+one row with `SCX` written to the SAME value (`$07 -> $07`) as the control: a
+store that does not change the fine scroll must not extend anything, and if it
+does, the mechanism is the store and not the value.
+
+### (c) acid-hell against daid, on one frame
+
+**Settles:** the shootout's 261st row, and the oldest pixel-level contradiction
+in the tree — `cgb-acid-hell` needs the CPU's writes aligned to the BG fetch
+grid where they are, while `daid/ppu_scanline_bgp` needs them four dots later
+relative to pixel EMISSION, on the same device, out of the same kind of anchor.
+dingbat cannot express both and ships the daid side, at a cost of exactly 2
+pixels of acid-hell (23038/23040).
+
+**Why one frame.** Both ROMs already share an anchor — `rSTAT = $40`, `rLYC = 0`,
+`halt`, then writes down a NOP slide — which is why the campaign kept finding
+they move together. Run on separate frames the two are two measurements of two
+things; run on ONE frame they arbitrate, because the fetch grid and the emission
+grid are then the same grid.
+
+**Setup.** CGB. One frame, one halt anchor, and a slide that does both jobs:
+
+* an `LCDC.4` toggle every 8 dots at the acid-hell phase (`$E3 <-> $F3`), over a
+  tile column whose MAP INDEX differs from its DATA at the row being drawn — the
+  glitched bitplane read then shows up as a tile that is unambiguously the index
+  and not the data, which is the whole of the acid-hell residue;
+* a `BGP` write on a fixed dot of the same line, against a background of flat
+  tiles, so the band edge's COLUMN reads out emission's phase — daid's ruler.
+
+Photograph the frame and read two numbers off it: the column of the BGP band
+edge, and whether the glitched column shows the index. **If the band edge sits
+where daid's `_1` reference puts it AND the glitched column shows the index,
+hardware really does separate emission from the fetch grid by four dots on one
+frame**, and the renderer needs the split that four rounds of constants could
+not supply. If they cannot both be true, one of the two reference frames this
+tree is scored against is not describing the machine in front of us, and the
+2-pixel residue is a reference question rather than a model one.
+
+Two extra pages are nearly free and worth having: the same frame at `SCX and 7`
+of 0 and of 3, since the campaign's one solid new structural result
+(`SCX_FINE_BORROW`) says the fetch grid's column carries a borrow off the fine
+scroll, and no reference frame in existence exercises that on a CGB.
+
+## The mode-3 structure campaign, four rounds: what to read first
+
+Written so the next session can start here rather than from the top of the file.
+The campaign was asked to derive the CGB's mode-3 internal structure, starting
+from `gambatte/scx_during_m3` (49/141, the tree's biggest open bucket) and
+aiming at two quarantined contradictions. It ran four rounds.
+
+**Headline: gambatte 3940 -> 4044, local runner 770 -> 779.** Two mechanisms
+shipped, two are parked with prices, five axes are refuted with both sides
+named, and three hardware experiments are specified above.
+
+### What shipped
+
+| | what it says | worth | cost |
+|---|---|---|---|
+| `SCX_FINE_BORROW` (+ `_DMG_LEAD`) | the BG fetcher's map column is `((SCX + 8k - F) >> 3)` -- a screen position plus the LIVE SCX, so SCX's low bits carry into the tile address; a mid-line store that LOWERS them borrows one tile | gambatte **+64**, AGE `m3-bg-scx` x3 exact | **-0.148%** (the dot loop got cheaper) |
+| `STAT_M0_FIELD_TAIL` (+ `_CGB`, `_ABSORB`, `STAT_M0_TAIL_MAX_MC`) | on a DMG the STAT mode FIELD reads 3 for three dots after the PPU enters mode 0 -- absorbed by an object fetch on that line, and visible only to a read whose IO cycle is its instruction's second M-cycle | gambatte **+40**, mooneye-wilbertpol **+6**, GBMicrotest **0** | +0.31% |
+
+Both were derived from a ruler rather than fitted, and both were confirmed by
+suites that had no part in deriving them -- AGE for the first, `window` (42
+rows) and mooneye-wilbertpol for the second.
+
+### What is parked, with its price
+
+* **`SCX_FINE_LATCH_LIVE`** -- the fine-scroll sample is a WINDOW, not a dot: a
+  store joins the discard for as long as the discard has pixels left. Derived
+  and two-sided (the window's length is `F` itself: at `F = 0` hardware refuses
+  a store that the `F = 1` and `F = 3` ROMs accept at the same dot), worth
+  **+6 / -1**, costs **+0.446%**. Off on price alone. Re-price it on a real
+  cartridge workload; this worktree has none.
+* **The `M3_END_EARLY` half of the K composition** -- paying the three dots at
+  the EDGE rather than at the field. Refused: **+41 / -138**, with object-free
+  interrupt rows (`m0enable`) leading the refusal.
+
+### Refuted axes, each with both sides named
+
+1. **A uniform STAT mode-field lag** (`STAT_MODE0_LAG`, round 2): **+16 / -98**,
+   and every one of the 98 is a `_2` member expecting `out0`.
+2. **A field lag at the 2 -> 3 edge** (`STAT_MODE3_LAG`): +1 / -4.
+3. **A CGB-only 2 -> 3 field LEAD** (`STAT_MODE3_LAG_CGB`), which turns
+   `halt/lycirq_m2stat_2 [cgb]` green: +3 / -6, refused by five rows on the same
+   device reading the same edge -- and round 3 showed the object split does not
+   separate them either, because `m2int_m2stat_1 [cgb]` is object-FREE and
+   refuses while `lycirq_m2stat_2 [cgb]` is object-free and demands.
+4. **Absorbing the field tail by any mode-3 excess** rather than by objects
+   specifically: 4008 against 4044, and it hands back all 42 `window` rows.
+5. **`lx < 0` as the fine-scroll window** (round 1): 3992, because the head's
+   throw-away fetch parks the shifter long after the discard is spent.
+
+Two more from the round-1 borrow, refuted on the frames themselves: *"the
+discard re-arms and throws 8 more pixels away"* (refused by the residue -- every
+measured span keeps the OLD fine offset, never the new one) and *"an extra tile
+is fetched"* (refused by sign -- the spans sit one tile LOWER, a borrow).
+
+### The two quarantined contradictions, as they now stand
+
+**Same-wake** (`halt/lycirq_m2stat_2 [cgb]` against `dma/hdma_late_disable_{1,2}`).
+Untouched by all four rounds, and now much better characterised: it can be
+stated without mentioning halt at all. On the same wake, same line, same dot, a
+DMG reads mode 2 and a CGB reads mode 3, and we read 2 on both; the motion
+needed is one M-cycle in the field. It is refused on the same device and the
+same edge by five other field readers, and the three axes that could have
+separated them -- observable, objects, device -- were each built and each fails.
+Everything in this family is object-free, `hdma_late_disable_1` included.
+
+**acid-hell against daid.** `cgb-acid-hell` is 23038/23040 and the shootout is
+260/261, unchanged. Nothing in four rounds could reach it, and that is now a
+positive statement rather than an absence: neither ROM writes SCX mid-line and
+neither reads the STAT mode field, so no mechanism this campaign built can see
+them. Every world built in all four rounds left both acid frames, both
+strikethrough frames, both acid2 frames and daid on three device/revision
+settings **byte-identical**. Hardware experiment (c) is the way to settle it.
+
+### The one bracket nothing explains
+
+`scx_m3_extend`: a mid-line SCX store that lowers `SCX and 7` lengthens mode 3
+by **11-14 dots on DMG and 7-10 on CGB**, and the extension grows with how late
+the store lands (1 dot after the latch: >= 1 dot; 5 dots after: >= 11). dingbat
+extends it by zero. The borrow's natural 8 does not reach it, the latch window
+does not touch it, and the field tail is the wrong observable. This is the
+campaign's largest single unexplained quantity, and hardware experiment (b) is
+specified to measure its law directly.
+
+### The instruments, and how to re-derive any of it
+
+Everything is in `tools/gbscx/`, and each tool exists because a question could
+not be answered without it:
+
+| tool | the question it answers |
+|---|---|
+| `disasm.py` | what does this suite ROM actually do |
+| `readidiom.py` | which instruction reads STAT, and on which M-cycle of it |
+| `scxread.py` / `scxmap.py` | where did hardware put each pixel's background coordinate |
+| `edgemap.sh` | what are the dots of the line a row actually scores |
+| `hasobj.sh` | does this ROM's mode 3 carry an object at all |
+| `idiomtab.sh` | cross-tabulate idiom against which side of a disagreement a row falls |
+| `writedots.py`, `handlers.sh`, `ladder.sh`, `scxladder.sh` | the families as M-cycle rulers |
+| `gamdiff.sh`, `sweep.sh`, `sweep2.sh`, `runsweep.sh` | attribute every moved row; one build per value, gambatte or the whole runner |
+| `witness.sh` + `witdiff.sh` | the nine-frame ladder, world against world |
+| `bench.sh` / `benchref.sh` | interleaved retired-instruction A/B, by flag or by git ref |
+| `mb.sh`, `dumpfam.sh`, `build.sh`, `r.sh`, `env.sh` | mealybug, frame dumps, builds, environment |
+
+The method that produced both shipped results is the same one twice: take a
+family whose verdict is one integer, find the property of the ROM that turns its
+frames or its dots into a **ruler**, read hardware's answer off it directly --
+and then bracket the derived quantity from both sides before believing it.

@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-10 16:53:20*
+*Generated: 2026-08-10 18:03:11*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4004/5005 passed.**
+**4044/5005 passed.**
 
 ## bgen
 
@@ -707,17 +707,14 @@ All 6 tests passed.
 |------|--------|
 | m2int_m2stat/m2int_m2stat_1_dmg08_cgb04c_out2 [dmg] | got 3, expected 2 |
 
-## m2int_m3stat (39/44 passed)
+## m2int_m3stat (42/44 passed)
 
-39/44 tests passed, 5 failed:
+42/44 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
 | m2int_m3stat/m2int_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | m2int_m3stat/scx/late_scx4_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| m2int_m3stat/scx/m2int_scx2_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| m2int_m3stat/scx/m2int_scx3_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| m2int_m3stat/scx/m2int_scx5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 
 ## miscmstatirq (268/279 passed)
 
@@ -1160,9 +1157,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (324/476 passed)
+## window (361/476 passed)
 
-324/476 tests passed, 152 failed:
+361/476 tests passed, 115 failed:
 
 | Test | Result |
 |------|--------|
@@ -1170,10 +1167,12 @@ All 20 tests passed.
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_scx_late_wy_FFto4_ly4_wx00_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wx_late_wy_FFto2_ly2_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -1185,6 +1184,7 @@ All 20 tests passed.
 | window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2toFF_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly0_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto0_ly0_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly0_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
@@ -1212,92 +1212,52 @@ All 20 tests passed.
 | window/arg/late_wy_FFto2_ly2_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx0f_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_wx0f_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx03_wx12_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_late_scx00_wx10_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_late_scx03_wx0f_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx10_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_late_scx03_wx10_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_late_scx03_wx10_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_late_scx03_wx11_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_late_scx03_wx11_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_late_scx03_wx11_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_late_scx03_wx12_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_scx2_0_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx2_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_scx2_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx2_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_scx3_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_scx3_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_scx3_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_disable_scx5_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_scx5_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_scx5_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_wx0f_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_disable_wx0f_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_reenable_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx2_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_scx2_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/late_reenable_scx3_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_reenable_scx5_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_reenable_wx0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_scx_late_disable_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_ff_07_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_ff_0f_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_scx2_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wx_scx3_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_scx5_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_wx03_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/late_wx_wx0f_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/late_wy_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_ds_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/m2int_wx00_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx03_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx03_scx2_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx03_scx3_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx03_scx5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx07_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wx07_scx2_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx07_scx3_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx07_scx5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wx17_wxA5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wxA5_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| window/m2int_wxA5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| window/m2int_wxA6_firstline_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wxA6_firstline_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_m0irq2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_m0irq_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | window/m2int_wxA6_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/m2int_wxA6_scx5_m3stat_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |

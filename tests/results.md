@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-10 16:53:20*
+*Generated: 2026-08-10 18:03:11*
 
 ## Game Boy - Blargg
 
@@ -910,13 +910,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_timing | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | 👀 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | 👀 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops | 👀 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | 👌 |
@@ -1044,7 +1044,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m0stat | 👀 5/6 passed |
 | gambatte/m2int_m2irq | 👀 15/18 passed |
 | gambatte/m2int_m2stat | 👀 7/8 passed |
-| gambatte/m2int_m3stat | 👀 39/44 passed |
+| gambatte/m2int_m3stat | 👀 42/44 passed |
 | gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 53/69 passed |
 | gambatte/oamdma | 👀 707/811 passed |
@@ -1058,12 +1058,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | 👌 20/20 passed |
 | gambatte/vram_m3 | 👀 37/50 passed |
 | gambatte/vramw_m3end | 👀 32/36 passed |
-| gambatte/window | 👀 324/476 passed |
+| gambatte/window | 👀 361/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
 ## Summary
 
 - **Total:** 981
-- **Pass:** 773
-- **Fail:** 208
+- **Pass:** 779
+- **Fail:** 202

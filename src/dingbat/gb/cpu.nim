@@ -537,6 +537,11 @@ proc tick*(cpu: GbCpu; gb: GB) =
     if gbfuzz_trace_hook != nil:
       gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
   let opcode = mem_read(gb.memory, gb, int(cpu.pc))
+  when STAT_M0_TAIL_MAX_MC != 0:
+    # The instruction an IO read belongs to, so stat_read_mode can tell a read
+    # on its instruction's second M-cycle from one on its third. Guarded, so a
+    # default build does not carry a store per instruction.
+    cpu.cur_opcode = opcode
   let cycles_taken = UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
   mem_tick_extra(gb.memory, gb, cycles_taken)

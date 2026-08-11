@@ -70,7 +70,7 @@ const STAT_READ_SAMPLE*     {.intdefine.} = 2
 # absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
 const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
 
-const STAT_M0_FIELD_TAIL* {.intdefine.} = 0
+const STAT_M0_FIELD_TAIL* {.intdefine.} = 3
   ## Dots by which the STAT register's MODE FIELD keeps reading 3 after the PPU
   ## has internally entered mode 0, on a DMG, on a line with no object fetch --
   ## and only the field. The mode-0 STAT source, the HBlank DMA trigger, the
@@ -127,27 +127,21 @@ const STAT_M0_FIELD_TAIL* {.intdefine.} = 0
   ## `intr_2_mode0_scx{1,2,3,5,6,7}_timing_nops` -- six rows, one per residue --
   ## all go from red to green.
   ##
-  ## ---- Why it ships at 0 anyway --------------------------------------------
+  ## ---- The wall, and what got over it --------------------------------------
   ##
-  ## **GBMicrotest refuses it from both sides, and its bracket is tighter than
-  ## this quantity.** `win{0..15}_{a,b}`, `win{0,10}_scx3_{a,b}` and
-  ## `ppu_sprite0_scx{1,2,3,5,6,7}_{a,b}` are pairs that bracket the same field
-  ## report to one M-cycle, and on the shipping tree BOTH sides of every pair
-  ## are green -- the report is pinned exactly where it is. At 3 the `_a` halves
-  ## stay green and all 24 `_b` halves go red with `actual = 0x83` against
-  ## `expected = 0x80`, i.e. mode 3 where hardware has already moved to mode 0.
-  ## Those rows are object-free field readers on window lines, which is the same
-  ## class as the 42 gambatte `window` rows that go GREEN, so no rule keyed on
-  ## the observable or on objects can separate them.
+  ## Charged at the mode CHANGE (round 3's spelling) this is refused outright.
+  ## GBMicrotest's `win{0..15}_{a,b}`, `win{0,10}_scx3_{a,b}` and
+  ## `ppu_sprite0_scx{1,2,3,5,6,7}_{a,b}` are PAIRS bracketing the same field
+  ## report to one M-cycle, both halves green on the pre-round-4 tree, and all
+  ## 24 `_b` halves go red with `actual = 0x83` against `expected = 0x80`.
+  ## Ledger then: gambatte +46 / -6, mooneye-wilbertpol +6 / -0, GBMicrotest
+  ## +0 / -24, local runner 773 -> 755.
   ##
-  ## The whole ledger, full runner: **gambatte +46 / -6, mooneye-wilbertpol
-  ## +6 / -0, GBMicrotest +0 / -24**, local runner 773 -> 755. Three suites,
-  ## one quantity, and they do not agree. This is the same two-sided wall
-  ## `M3_END_EARLY` records from the opposite direction -- that constant makes
-  ## GBMicrotest green and gambatte/mooneye red, this one makes gambatte/mooneye
-  ## green and GBMicrotest red -- and moving the payment from the EDGE to the
-  ## FIELD, which is what this round set out to test, changes which side is
-  ## satisfied without dissolving the contradiction.
+  ## What breaks the tie is that the three parties do not read STAT with the
+  ## same INSTRUCTION -- see `STAT_M0_TAIL_MAX_MC`, which is why this term is
+  ## charged at the read instead. With that gate the same K keeps every gain and
+  ## loses nothing: **local runner 773 -> 779, gambatte 4004 -> 4044, and no row
+  ## anywhere goes the other way.**
 
 const STAT_M0_FIELD_TAIL_CGB* {.intdefine.} = 0
   ## `STAT_M0_FIELD_TAIL` on a CGB. Zero is both the shipping value and the
@@ -159,6 +153,40 @@ const STAT_M0_FIELD_TAIL_CGB* {.intdefine.} = 0
   ## is independently predicted by the `scx_m3_extend` brackets, which are
   ## themselves device-split by one M-cycle ((269, 273] on DMG against
   ## (265, 269] on CGB).
+
+const STAT_M0_TAIL_MAX_MC* {.intdefine.} = 2
+  ## The last M-cycle OF ITS OWN INSTRUCTION on which an IO read still sees the
+  ## `STAT_M0_FIELD_TAIL`. 0 disables the gate entirely (every read sees the
+  ## tail, which is round 3's spelling); 2 ships.
+  ##
+  ## An SM83 IO read happens on a different M-cycle of its instruction
+  ## depending on the addressing form, and the reads in these suites are:
+  ##
+  ##   LD A,(C)     F2        2 M-cycles, IO on M2
+  ##   LD A,(HL)    7E        2 M-cycles, IO on M2
+  ##   LDH A,(n)    F0 nn     3 M-cycles, IO on M3
+  ##   LD A,(nn)    FA nn nn  4 M-cycles, IO on M4
+  ##
+  ## Round 4's hypothesis, and it is a hypothesis about the ROMS before it is
+  ## one about hardware. The three suites that disagree about the field report
+  ## do not read it with the same instruction (`tools/gbscx/readidiom.py`):
+  ##
+  ##   party                        idiom          IO cycle   wants the tail?
+  ##   GBMicrotest win*_{a,b} etc   LDH A,($41)    M3 of 3    NO  (24 rows)
+  ##   gambatte m3stat/window       LD A,(C)       M2 of 2    YES (45 rows)
+  ##   mooneye-wilbertpol intr_2_*  LD A,(HL)      M2 of 2    YES (6 rows)
+  ##
+  ## The correlation is exact ACROSS the parties, which is what makes it worth
+  ## building rather than dismissing -- and it holds up: at 2 the field tail
+  ## keeps all 45 gambatte gains and all 6 wilbertpol gains AND leaves every one
+  ## of GBMicrotest's 24 `LDH` rows green.
+  ##
+  ## Bracketed from both sides on the structural quantity rather than on an
+  ## opcode list. Local runner: 1 is 773 (nothing sees the tail, the mechanism
+  ## is off), **2 is 779**, 3 is 755 and 4 is 755 -- 3 is where `LDH A,(n)`
+  ## starts seeing it and where GBMicrotest's 24 rows go red. So the boundary
+  ## sits strictly between an IO read on its instruction's second M-cycle and
+  ## one on its third, which is the whole claim.
 
 const STAT_M0_FIELD_TAIL_ABSORB* {.booldefine.} = true
   ## Whether an object fetch ABSORBS the field's tail: the lag becomes
@@ -2215,6 +2243,11 @@ type
     # the single M-cycle between the HALT fetch and the first halted tick.
     halt_ppu_debt*: int32
     cached_hl*:  int   # -1 = invalid
+    # The opcode currently executing, kept only when STAT_M0_TAIL_IDIOM needs
+    # it: an IO read has to be able to say which M-cycle of its own instruction
+    # it is. Guarded so a default build carries neither the field nor the store.
+    when STAT_M0_TAIL_MAX_MC != 0:
+      cur_opcode*: uint8
 
   # ---- Interrupts ----
   GbInterrupts* = ref object
@@ -2497,12 +2530,6 @@ type
     # add it already was. It may be -1, which `and 0x1F` wraps to column 31,
     # which is what a borrow off column 0 means.
     scx_tile*:            int
-    # Dots of OBJ penalty charged on this line so far. Only the field tail
-    # reads it; per-line scratch, cleared at the mode 2 -> 3 edge. Present only
-    # when that mechanism is on, so the default build's object layout is
-    # untouched.
-    when STAT_M0_TAIL_ANY:
-      obj_dots_line*:     int32
     lx*:                  int32
     # The one `lx` on this line either window rule can fire on -- the start
     # (WX - 7) while the window is not running, the re-trigger edge (WX - 8,
@@ -2566,6 +2593,14 @@ type
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.
     obj_penalty*:         int32
     obj_tile_fx*:         int32
+    # Dots of OBJ penalty charged on this line so far. Only the field tail
+    # reads it; per-line scratch, cleared at the mode 2 -> 3 edge. Present only
+    # when that mechanism is on, and DOWN HERE with the rest of the object
+    # scratch rather than up beside `scx_tile`: a word between the fields the
+    # fetch reads costs more than the mechanism itself does, which is the same
+    # layout cliff `win_lx` and `win_hold` each record.
+    when STAT_M0_TAIL_ANY:
+      obj_dots_line*:     int32
     # ---- The object fetch's two bitplane reads, as dots ---------------------
     #
     # `sprite_fetch_merge` runs on one dot, but the fetch it stands for reads
