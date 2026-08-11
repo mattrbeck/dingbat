@@ -71,6 +71,129 @@ type ArmAluOp* = enum
   TST, TEQ, CMP, CMN,
   ORR, MOV, BIC, MVN
 
+####################
+# Exact ARM7TDMI Booth-multiplier carry model.
+#
+# The "meaningless" C flag after MULS/MLAS/UMULLS/UMLALS/SMULLS/SMLALS is
+# deterministic silicon behavior: it falls out of the multiplier's radix-4
+# Booth recoding + carry-save adder array and its early termination. This is
+# a port of zaydlang/multiplication-algorithm (zlib license), which was
+# fuzzed exhaustively against real ARM7TDMI hardware; it reproduces all 8
+# C-preset-1 MULS rows of the gbaedge MULFLAGS page (hardware nibbles
+# 04 00 00 02 0A 04 08 08, AGB SP session 1) and the UMULLS/SMULLS rows.
+# Only the carry is needed - the product itself is computed natively - and
+# the final carry depends only on the partial-carry accumulator, so the
+# concluding full-adder stage of the original is omitted.
+
+type
+  MulFlavor* = enum mfShort, mfLongSigned, mfLongUnsigned
+  MulCsa = object
+    output, carry: uint64
+  MulU128 = object
+    lo, hi: uint64
+
+proc mul_mask(lo, hi: int): uint64 {.inline.} =
+  ((1'u64 shl (hi - lo)) - 1) shl lo
+
+proc mul_sext(value: uint64; from_size, to_size: int): uint64 {.inline.} =
+  if bit(value, from_size - 1): value or mul_mask(from_size, to_size)
+  else: value
+
+proc mul_asr(value: uint64; shift, size: int): uint64 {.inline.} =
+  uint64(cast[int64](mul_sext(value, size, 64)) shr shift) and mul_mask(0, size)
+
+proc mul_ror128(input: MulU128; shift: int): MulU128 {.inline.} =
+  MulU128(lo: (input.lo shr shift) or (input.hi shl (64 - shift)),
+          hi: (input.hi shr shift) or (input.lo shl (64 - shift)))
+
+proc booth_recode(input: uint64; chunk: uint32): (uint64, uint64) {.inline.} =
+  ## -> (recoded addend masked to 34 bits, booth carry)
+  case chunk
+  of 1, 2: ((input) and 0x3FFFFFFFF'u64, 0'u64)
+  of 3:    ((2'u64 * input) and 0x3FFFFFFFF'u64, 0'u64)
+  of 4:    ((not (2'u64 * input)) and 0x3FFFFFFFF'u64, 1'u64)
+  of 5, 6: ((not input) and 0x3FFFFFFFF'u64, 1'u64)
+  else:    (0'u64, 0'u64)  # 0 and 7
+
+proc mul_booth_carry*(flavor: MulFlavor; multiplicand32, multiplier32: uint32;
+                      accumulator: uint64): bool =
+  let signed = flavor in {mfShort, mfLongSigned}
+  var multiplier =
+    if signed: mul_sext(uint64(multiplier32), 32, 34)
+    else:      uint64(multiplier32) and 0x1FFFFFFFF'u64
+  let multiplicand =
+    if signed: mul_sext(uint64(multiplicand32), 32, 34)
+    else:      uint64(multiplicand32) and 0x1FFFFFFFF'u64
+
+  var csa = MulCsa(
+    output: accumulator,
+    carry: (if bit(multiplier, 0): not multiplicand else: 0'u64))
+  var acc_shift_register = accumulator shr 34
+
+  var partial_sum   = MulU128(lo: csa.output and 1)
+  var partial_carry = MulU128(lo: csa.carry and 1)
+  csa.output = csa.output shr 1
+  csa.carry  = csa.carry shr 1
+  partial_sum   = mul_ror128(partial_sum, 1)
+  partial_carry = mul_ror128(partial_carry, 1)
+
+  var iterations = 0
+  while true:
+    # One multiplier cycle: 4 radix-4 booth chunks through the CSA array
+    var chunk_csa = csa
+    var cycle = MulCsa()
+    for i in 0 ..< 4:
+      chunk_csa.output = chunk_csa.output and 0x1FFFFFFFF'u64
+      chunk_csa.carry  = chunk_csa.carry and 0x1FFFFFFFF'u64
+      let (addend, booth_c) =
+        booth_recode(multiplicand, uint32((multiplier shr (2 * i)) and 0b111))
+      var res = MulCsa(
+        output: chunk_csa.output xor (addend and 0x1FFFFFFFF'u64) xor chunk_csa.carry,
+        carry: (chunk_csa.output and (addend and 0x1FFFFFFFF'u64)) or
+               ((addend and 0x1FFFFFFFF'u64) and chunk_csa.carry) or
+               (chunk_csa.carry and chunk_csa.output))
+      res.carry = (res.carry shl 1) or booth_c
+      cycle.output = cycle.output or ((res.output and 3) shl (2 * i))
+      cycle.carry  = cycle.carry or ((res.carry and 3) shl (2 * i))
+      res.output = res.output shr 2
+      res.carry  = res.carry shr 2
+      # TransH/High handling: acc_shift_register holds the upper acc bits
+      let magic = uint64(bit(acc_shift_register, 0)) +
+                  uint64(not bit(chunk_csa.carry, 32)) +
+                  uint64(not bit(addend, 33))
+      res.output = res.output or (magic shl 31)
+      res.carry  = res.carry or (uint64(not bit(acc_shift_register, 1)) shl 32)
+      acc_shift_register = acc_shift_register shr 2
+      chunk_csa = res
+    cycle.output = cycle.output or (chunk_csa.output shl 8)
+    cycle.carry  = cycle.carry or (chunk_csa.carry shl 8)
+    csa = cycle
+
+    partial_sum.lo   = partial_sum.lo or (csa.output and 0xFF)
+    partial_carry.lo = partial_carry.lo or (csa.carry and 0xFF)
+    csa.output = csa.output shr 8
+    csa.carry  = csa.carry shr 8
+    partial_sum   = mul_ror128(partial_sum, 8)
+    partial_carry = mul_ror128(partial_carry, 8)
+    multiplier = mul_asr(multiplier, 8, 33)
+    inc iterations
+    # Early termination on an exhausted (or all-ones, if signed) multiplier
+    if signed:
+      if multiplier == 0x1FFFFFFFF'u64 or multiplier == 0: break
+    else:
+      if multiplier == 0: break
+
+  partial_sum.lo   = partial_sum.lo or csa.output
+  partial_carry.lo = partial_carry.lo or csa.carry
+
+  const CORRECTION_ROR = [23, 15, 7, 31]
+  partial_carry = mul_ror128(partial_carry, CORRECTION_ROR[iterations - 1])
+
+  if flavor == mfShort and iterations == 4:
+    bit(partial_carry.hi, 31)
+  else:
+    bit(partial_carry.hi, 63)
+
 proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let rd  = int(bits_range(instr, 16, 19))
   let rn {.used.} = int(bits_range(instr, 12, 15))  # unread unless `accumulate`
@@ -78,6 +201,10 @@ proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let rm  = int(bits_range(instr, 0, 3))
   let acc = when accumulate: cpu.r[rn] else: 0'u32
   cpu.idle(mul_i_cycles(cpu.r[rs], true) + (when accumulate: 1 else: 0))
+  when set_cond:
+    # C after MULS/MLAS is the Booth multiplier's remainder carry
+    # (deterministic; MULFLAGS page, AGB SP session 1)
+    cpu.cpsr.carry = mul_booth_carry(mfShort, cpu.r[rm], cpu.r[rs], uint64(acc))
   discard cpu.set_reg(rd, cpu.r[rm] * cpu.r[rs] + acc)
   when set_cond: cpu.set_neg_and_zero_flags(cpu.r[rd])
   if rd != 15: cpu.step_arm()
@@ -87,39 +214,29 @@ proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; ins
   let rdlo = int(bits_range(instr, 12, 15))
   let rs   = int(bits_range(instr, 8, 11))
   let rm   = int(bits_range(instr, 0, 3))
+  let rm_val = cpu.r[rm]
+  let rs_val = cpu.r[rs]
+  let acc {.used.} =  # unread unless `accumulate`/`set_cond`
+    when accumulate: (uint64(cpu.r[rdhi]) shl 32) or uint64(cpu.r[rdlo])
+    else: 0'u64
   var res: uint64 =
     when signed:
-      cast[uint64](int64(cast[int32](cpu.r[rm])) * int64(cast[int32](cpu.r[rs])))
+      cast[uint64](int64(cast[int32](rm_val)) * int64(cast[int32](rs_val)))
     else:
-      uint64(cpu.r[rm]) * uint64(cpu.r[rs])
-  cpu.idle(mul_i_cycles(cpu.r[rs], signed) + (when accumulate: 2 else: 1))
+      uint64(rm_val) * uint64(rs_val)
+  cpu.idle(mul_i_cycles(rs_val, signed) + (when accumulate: 2 else: 1))
   when accumulate:
-    res += (uint64(cpu.r[rdhi]) shl 32) or uint64(cpu.r[rdlo])
+    res += acc
   discard cpu.set_reg(rdhi, uint32(res shr 32))
   discard cpu.set_reg(rdlo, uint32(res))
   when set_cond:
     cpu.cpsr.negative = bit(cpu.r[rdhi], 31)
     cpu.cpsr.zero     = (res == 0)
-    # ARM7TDMI "meaningless" carry flag: determined by the Booth multiplier internals.
-    # For long multiply, the carry depends on the number of Booth iterations and
-    # the interaction of Rm/Rs bit patterns in the carry-save adder.
-    block:
-      let rs_val = cpu.r[rs]
-      let rm_val = cpu.r[rm]
-      when signed:
-        var rs33 = uint64(rs_val)
-        if bit(rs_val, 31): rs33 = rs33 or 0x1_00000000'u64
-        let four_iters = not ((rs33 shr 8) == 0 or (rs33 shr 8) == 0x1FFFFFF'u64 or
-                              (rs33 shr 16) == 0 or (rs33 shr 16) == 0x1FFFF'u64 or
-                              (rs33 shr 24) == 0 or (rs33 shr 24) == 0x1FF'u64)
-        cpu.cpsr.carry = four_iters and (bit(rm_val, 31) xor bit(rs_val, 31))
-      else:
-        let four_iters = rs_val > 0xFFFFFF'u32
-        if four_iters and ((rs_val shr 29) == 7):
-          # Rs bits [31:29] all set: Booth chunk 15 cancels, carry from chunk 16
-          cpu.cpsr.carry = bit(rm_val, 30)
-        else:
-          cpu.cpsr.carry = four_iters and bit(rm_val, 31)
+    # ARM7TDMI "meaningless" carry: the exact Booth-multiplier model
+    # (replaces the earlier hand-fit heuristic; matches the gbaedge
+    # MULFLAGS UMULLS/SMULLS hardware rows and the mGBA suite)
+    cpu.cpsr.carry = mul_booth_carry(
+      (when signed: mfLongSigned else: mfLongUnsigned), rm_val, rs_val, acc)
   if rdhi != 15 and rdlo != 15: cpu.step_arm()
 
 proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) =

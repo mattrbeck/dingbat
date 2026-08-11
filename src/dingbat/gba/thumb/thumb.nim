@@ -294,6 +294,8 @@ proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   elif op == 0b1100: res = cpu.set_reg(rd, cpu.r[rd] or cpu.r[rs])
   elif op == 0b1101:
     cpu.idle(mul_i_cycles(cpu.r[rd], true))  # thumb mul: Rd is the multiplier
+    # Thumb MUL is MULS: C takes the Booth remainder carry (see arm.nim)
+    cpu.cpsr.carry = mul_booth_carry(mfShort, cpu.r[rs], cpu.r[rd], 0'u64)
     res = cpu.set_reg(rd, cpu.r[rs] * cpu.r[rd])
   elif op == 0b1110: res = cpu.set_reg(rd, cpu.r[rd] and not cpu.r[rs])
   else:              res = cpu.set_reg(rd, not cpu.r[rs])
