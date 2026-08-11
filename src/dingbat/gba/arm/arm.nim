@@ -391,11 +391,14 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
       address += 4
       when write_back:
-        # `ldmia r15!, {...}` performs NO writeback on hardware - it executes
-        # as a plain ldm and the PC continues normally (gbaedge THUMBPC2
-        # page, AGB SP session 3; dingbat previously landed at base+8)
+        # Block transfers with base r15 perform NO writeback on hardware, in
+        # BOTH directions: `ldmia r15!, {...}` executes as a plain ldm
+        # (gbaedge THUMBPC2 page, AGB SP session 3) and `stmia r15!, {r1}`
+        # stores normally and falls through to the next instruction (gbaedge
+        # PCWB2 page, AGB SP session 4, breadcrumb 1F; dingbat previously
+        # generalized the single-transfer str writeback into a base+8 branch)
         if not first_transfer and not (load and bit(list, rn)) and
-           not (load and rn == 15):
+           rn != 15:
           discard cpu.set_reg(rn, final_addr)
       first_transfer = true
   when load:
