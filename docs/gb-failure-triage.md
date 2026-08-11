@@ -3862,3 +3862,146 @@ that want the dots do not. **Base length up 3–4 and the OBJ penalty down 3–4
 the one composition that is still open**, and `tools/gbppu/objtab.py` against
 `ppu_spritex_vs_scx` is the instrument that prices it — it is 153/153 today, so
 it is a real constraint rather than a free parameter.
+
+## 2026-08-10 (round 3): the composition lands, three suites disagree, and it ships off
+
+Round 2 left one composition open: hardware's plain per-SCX mode-3 length solves
+to `172 + s + K` with K = 3–4, every row refusing a payment carried OBJECTS and
+the three demanding it carried none, so "base up by K, first-object penalty down
+by K" should separate them.
+
+**The composition is real and it works — and it is then refused by a suite that
+was not in the original argument.** It is derived, implemented, measured on
+three suites, and ships at 0. `STAT_M0_FIELD_TAIL` in `gb.nim` carries it.
+
+### The rule is not base-plus-OBJ, it is FIELD-plus-OBJ, and the data says which
+
+The rows were classified by whether their lines actually carry objects — run
+under `-d:gb_m3_len` and read the `objx=` list (`tools/gbscx/hasobj.sh`) —
+rather than by family name, which is what turned the two-way split into a
+three-way one:
+
+| observable | objects | rows | says our 3 → 0 edge is |
+|---|---|---|---|
+| interrupt | none | `m0enable/disable_scx{1,2,3,5,7}` ×10 | **right** |
+| field | none | `m2int_scx{2,3,5}_m3stat_1 [dmg]` ×3 | **3–4 dots early** |
+| field | **yes** | `sprites/*_m3stat_2` ×63 | **right** |
+
+Rows 1 and 2 differ only in the OBSERVABLE, so the dots cannot be paid by moving
+the edge: `M3_END_EARLY = -1` is **+41 / −138** with `m0enable` −24, and
+`m0enable` is object-free and reads the interrupt. Rows 2 and 3 differ only in
+the OBJECTS, so the field's payment has to be absorbed by an object fetch: an
+unabsorbed field lag is round 2's `STAT_MODE0_LAG`, **+16 / −98** with `sprites`
+−63. Both halves are two-sided, so the shape is forced:
+
+> **On a DMG the STAT register's mode FIELD keeps reading 3 for three dots after
+> the PPU has entered mode 0, and an object fetch on that line consumes those
+> dots.** The mode-0 STAT source, the HBlank DMA trigger, the VRAM/OAM unlock and
+> the whole pixel pipeline still turn on the PPU's own dot; only the field's own
+> timestamp moves.
+
+The absorption is by **objects specifically**, and that was measured rather than
+assumed. Absorbing by the whole excess over `172 + SCX and 7` — which also counts
+the window's penalty, and is the more obvious rule — scores **4008** against
+4044 and hands back all 42 `window` gains. Only the object fetch drains this
+tail, which is what `MIXER_TAIL_DOTS` already records about the mixer's tail one
+stage upstream.
+
+`K = 3` is a strict local maximum, swept whole-suite: 2 is +30 / −3, **3 is
++46 / −6**, 4 is +57 / −27. The CGB's value is **0**, bracketed from above —
+at 1 the whole `m2int_m3stat` ladder's `_2` members go red on CGB (4015) and at
+2 it is 3979. That the devices differ was predicted before it was measured, by
+round 2's `scx_m3_extend` brackets, which are themselves one M-cycle apart
+((269, 273] on DMG against (265, 269] on CGB).
+
+### What it buys, including from suites that had no say in deriving it
+
+* **gambatte 4004 → 4044**, +46 / −6. Four of the gains are the derivation's own
+  rows; **42 are `window`** (+42 / −5), which was not used at all.
+* **mooneye-wilbertpol +6 / −0**: `intr_2_mode0_scx{1,2,3,5,6,7}_timing_nops`,
+  one row per residue, all red → green.
+
+Two independent suites agreeing on a quantity derived from a third is as strong
+as this tree's evidence gets.
+
+### Why it ships at 0: GBMicrotest refuses it from both sides
+
+`win{0..15}_{a,b}`, `win{0,10}_scx3_{a,b}` and `ppu_sprite0_scx{1,2,3,5,6,7}_{a,b}`
+are PAIRS that bracket the same field report to one M-cycle. On the shipping
+tree **both halves of every pair are green** — the report is pinned exactly where
+it is, from both sides. At K = 3 the `_a` halves stay green and all **24 `_b`
+halves go red**, with `actual = 0x83` against `expected = 0x80`: mode 3 where
+hardware has already moved on.
+
+Those 24 are object-free field readers, 18 of them on WINDOW lines — the same
+class as the 42 gambatte `window` rows that go green. So no rule keyed on the
+observable, on objects, or on the window can separate them.
+
+The whole ledger: **gambatte +46 / −6, mooneye-wilbertpol +6 / −0, GBMicrotest
++0 / −24**, local runner 773 → 755. Three suites, one quantity, no agreement.
+
+This is the same wall `M3_END_EARLY` records from the opposite side — that
+constant makes GBMicrotest green and gambatte/mooneye red, this one makes
+gambatte/mooneye green and GBMicrotest red. **Moving the payment from the EDGE
+to the FIELD, which is exactly what this round set out to test, changes which
+side is satisfied without dissolving the contradiction.** That is the round's
+result, and it is a sharper statement of the tree's oldest open bucket than the
+one it replaces: the disagreement is not about interrupts versus reads, and not
+about objects, because the field/object split was built and it separates every
+pair except this one.
+
+### The same-wake pair in the new geometry (task 3)
+
+Unmoved, and now known not to be reachable this way either. The tail is DMG-only
+and `halt/lycirq_m2stat_2 [cgb]` and `dma/hdma_late_disable_*` are both CGB, so
+neither can see it — `hdma_late_disable` is byte-for-byte unchanged in every
+world built here.
+
+The round-3 question was whether the object split separates the five same-device
+refusers of `STAT_MODE3_LAG_CGB`. **It does not, and one row settles it:**
+`m2int_m2stat/m2int_m2stat_1 [cgb]` is object-FREE (`hasobj.sh`, zero object
+lines) and refuses the motion, while `halt/lycirq_m2stat_2 [cgb]` is object-free
+too and demands it. Same device, same edge, same observable, same object class —
+so no rule keyed on any of those four axes can hold one still and move the other.
+`dma/hdma_late_disable_1` is also object-free, which removes the last hope that
+the OBJ term could have shielded it.
+
+### `SCX_FINE_LATCH_LIVE`, re-priced again (task 4)
+
+Unchanged and still off. The field tail is DMG-only and per-line, the latch
+window is per-store and device-independent, and they compose almost additively:
+with both on the suite reads **4049** (+52 / −7) against 4044 and 4009
+separately, the two mechanisms' gains being disjoint and one extra row
+(`enable_display/ly0_late_scx7_m3stat_scx3_2 [dmg]`) falling out of the
+interaction. Neither reaches `scx_m3_extend`, which still wants the 11–14 dots
+nothing in this round supplies.
+
+### Perf
+
+Off is free and that took the round-1 lesson to get: the object accumulator
+`obj_dots_line` is declared inside `when STAT_M0_TAIL_ANY`, so a default build
+carries neither the field nor the add in the object-fetch path. blargg
+cpu_instrs, 2400 frames after 300 warmup, five interleaved runs, `cycles=`
+identical in all ten: the default build is 27,888,244,364 retired instructions
+against main's 27,888,4xx, i.e. the same build; **turning the tail on costs
++0.253%**.
+
+### The bracket handed forward
+
+The contradiction is now fully localised and it has exactly three parties, all
+reading the mode-0 boundary on object-free lines:
+
+* GBMicrotest `win*_{a,b}` + `ppu_sprite0_scx*_{a,b}` — the field report is HERE,
+  bracketed both sides, 24 rows.
+* gambatte `m2int_scx{2,3,5}_m3stat_1` + 42 `window` rows — the field report is
+  **3 dots later**.
+* mooneye-wilbertpol `intr_2_mode0_scx*_timing_nops` — agrees with gambatte,
+  6 rows.
+
+What has NOT been tried is the possibility that these three disagree because they
+sample the field through different CPU paths rather than because the field moves:
+GBMicrotest's `win*_b` read STAT with a different instruction sequence from
+gambatte's `m2int_*`, and `STAT_READ_SAMPLE` is one shared constant for all of
+them. A per-instruction or per-bus-cycle read phase is the one axis this round
+did not touch, and it is the only one left that can be keyed on something all
+three witnesses actually differ in.

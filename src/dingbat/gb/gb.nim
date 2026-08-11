@@ -70,46 +70,142 @@ const STAT_READ_SAMPLE*     {.intdefine.} = 2
 # absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
 const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
 
-const STAT_MODE0_LAG* {.intdefine.} = 0
+const STAT_M0_FIELD_TAIL* {.intdefine.} = 0
   ## Dots by which the STAT register's MODE FIELD keeps reading 3 after the PPU
-  ## has internally entered mode 0 -- and only the field. The mode-0 STAT
-  ## source, the HBlank DMA trigger, the VRAM/OAM unlock and the pixel pipeline
-  ## all still turn on the PPU's own dot; this is spent on `stat_chg_dot`, the
-  ## field's timestamp, and nothing else can see it.
+  ## has internally entered mode 0, on a DMG, on a line with no object fetch --
+  ## and only the field. The mode-0 STAT source, the HBlank DMA trigger, the
+  ## VRAM/OAM unlock and the pixel pipeline all still turn on the PPU's own dot.
+  ## Spent on `stat_chg_dot`, the field's own timestamp, and nothing else can
+  ## see it. `STAT_M0_FIELD_TAIL_CGB` is the same thing on a CGB, and
+  ## `STAT_M0_FIELD_TAIL_ABSORB` is what makes it survive.
   ##
-  ## Why the degree of freedom is worth having: the tree's oldest open bucket is
-  ## "a sub-M-cycle error in the mode 3 -> 0 edge AS THE CPU READS IT BACK", and
-  ## every constant tried for it so far (`M3_END_EARLY`, `LCD_ON_HEAD_START`,
-  ## `LCD_ON_LINE0_TRIM`) moves the edge itself, which the mode-0 interrupt and
-  ## HDMA families then refuse. A field-only lag is the one shape those
-  ## refutations do not reach.
+  ## ---- The three-way split that derives it ---------------------------------
   ##
-  ## `STAT_MODE3_LAG` is the same thing at the 2 -> 3 edge.
+  ## Three sets of rows measure the SAME 3 -> 0 edge and they do not agree, and
+  ## what separates them is (a) which observable they use and (b) whether their
+  ## line carries an object. Every row below is object-classified by running it
+  ## under `-d:gb_m3_len` and reading the `objx=` list (`tools/gbscx/hasobj.sh`),
+  ## not by its family name:
+  ##
+  ##   observable   objects   rows                              says our edge is
+  ##   interrupt    none      m0enable/disable_scx{1,2,3,5,7}   RIGHT
+  ##   field        none      m2int_scx{2,3,5}_m3stat_1 [dmg]   3-4 dots EARLY
+  ##   field        yes       sprites/*_m3stat_2 (63 rows)      RIGHT
+  ##
+  ## Rows 1 and 2 differ only in the observable, so the dots have to be paid at
+  ## the FIELD -- an edge move is refused by `m0enable`, which is object-free and
+  ## reads the interrupt (measured: `M3_END_EARLY = -1` is +41 / -138, with
+  ## `m0enable` -24). Rows 2 and 3 differ only in the objects, so the field's
+  ## payment has to be ABSORBED by an object fetch -- an unabsorbed field lag is
+  ## refused by `sprites` (measured, round 2: `STAT_MODE0_LAG = 1` was
+  ## +16 / -98, of which `sprites` was -63). Both halves are two-sided.
+  ##
+  ## ---- Where the number comes from -----------------------------------------
+  ##
+  ## Not fitted. `m2int_m3stat/scx/m2int_scxN_m3stat_{1,2}` brackets the edge to
+  ## one M-cycle per residue with no mid-line store at all, and the STAT read
+  ## samples at `cc - STAT_READ_SAMPLE`, so each pair is an inequality on the
+  ## length. On DMG:
+  ##
+  ##   SCX   our len   our edge   hardware's edge   hardware's length
+  ##    2      174       254       (255, 259]        (175, 179]
+  ##    3      175       255       (255, 259]        (175, 179]
+  ##    5      177       257       (259, 263]        (179, 183]
+  ##
+  ## Solving `172 + s + K` against all three leaves K = 3 or 4, and 3 is the
+  ## value that survives the rest of the suite: swept whole-suite, 2 is
+  ## +30 / -3, **3 is +46 / -6**, 4 is +57 / -27 -- a strict local maximum,
+  ## bracketed from both sides.
+  ##
+  ## ---- What it buys, and the shape of the confirmation ---------------------
+  ##
+  ## gambatte 4004 -> 4044. Four of the gains are the rows the constant was
+  ## derived from (`m2int_scx{2,3,5}_m3stat_1 [dmg]` and
+  ## `enable_display/ly0_late_scx7_m3stat_scx3_1 [dmg]`). **The other 42 are
+  ## `window`**, which was not used in the derivation at all and which moves
+  ## +42 / -5. A third suite agrees independently: mooneye-wilbertpol's
+  ## `intr_2_mode0_scx{1,2,3,5,6,7}_timing_nops` -- six rows, one per residue --
+  ## all go from red to green.
+  ##
+  ## ---- Why it ships at 0 anyway --------------------------------------------
+  ##
+  ## **GBMicrotest refuses it from both sides, and its bracket is tighter than
+  ## this quantity.** `win{0..15}_{a,b}`, `win{0,10}_scx3_{a,b}` and
+  ## `ppu_sprite0_scx{1,2,3,5,6,7}_{a,b}` are pairs that bracket the same field
+  ## report to one M-cycle, and on the shipping tree BOTH sides of every pair
+  ## are green -- the report is pinned exactly where it is. At 3 the `_a` halves
+  ## stay green and all 24 `_b` halves go red with `actual = 0x83` against
+  ## `expected = 0x80`, i.e. mode 3 where hardware has already moved to mode 0.
+  ## Those rows are object-free field readers on window lines, which is the same
+  ## class as the 42 gambatte `window` rows that go GREEN, so no rule keyed on
+  ## the observable or on objects can separate them.
+  ##
+  ## The whole ledger, full runner: **gambatte +46 / -6, mooneye-wilbertpol
+  ## +6 / -0, GBMicrotest +0 / -24**, local runner 773 -> 755. Three suites,
+  ## one quantity, and they do not agree. This is the same two-sided wall
+  ## `M3_END_EARLY` records from the opposite direction -- that constant makes
+  ## GBMicrotest green and gambatte/mooneye red, this one makes gambatte/mooneye
+  ## green and GBMicrotest red -- and moving the payment from the EDGE to the
+  ## FIELD, which is what this round set out to test, changes which side is
+  ## satisfied without dissolving the contradiction.
+
+const STAT_M0_FIELD_TAIL_CGB* {.intdefine.} = 0
+  ## `STAT_M0_FIELD_TAIL` on a CGB. Zero is both the shipping value and the
+  ## derived one -- read the note below as "if the DMG term is ever paid, the
+  ## CGB's is still zero". It is ZERO: the CGB's mode field owes
+  ## nothing. Bracketed from above rather than assumed -- at 1 the whole
+  ## `m2int_m3stat` ladder's `_2` members go red on CGB and the suite reads
+  ## 4015 against 4044, and at 2 it reads 3979. That the two devices differ here
+  ## is independently predicted by the `scx_m3_extend` brackets, which are
+  ## themselves device-split by one M-cycle ((269, 273] on DMG against
+  ## (265, 269] on CGB).
+
+const STAT_M0_FIELD_TAIL_ABSORB* {.booldefine.} = true
+  ## Whether an object fetch ABSORBS the field's tail: the lag becomes
+  ## `max(0, tail - the object dots charged on this line)`. `false` is the
+  ## round-2 spelling, which is refused by `sprites` at every value.
+  ##
+  ## The absorption is specifically by OBJECTS and not by "whatever made mode 3
+  ## longer", and that was measured rather than assumed: absorbing by the whole
+  ## excess over `172 + SCX and 7` -- which also counts the window's penalty --
+  ## scores **4008** against 4044 and gives back all 42 `window` rows. Only the
+  ## object fetch drains this tail, which is the same thing `MIXER_TAIL_DOTS`
+  ## records about the mixer's tail one stage upstream.
 
 const STAT_MODE3_LAG* {.intdefine.} = 0
   ## Dots by which the STAT mode field keeps reading 2 after the PPU has
-  ## entered mode 3. See STAT_MODE0_LAG. Device-independent, and it has to stay
-  ## 0: `m2int_m2stat/m2int_{,scx4_}m2stat_ds_2` read STAT expecting mode 3
-  ## immediately after that edge and refuse any positive value, while the row
-  ## that wants motion here wants it in the other direction and on one device
-  ## only -- see STAT_MODE3_LAG_CGB.
+  ## entered mode 3. Device-independent, and it has to stay 0:
+  ## `m2int_m2stat/m2int_{,scx4_}m2stat_ds_2` read STAT expecting mode 3
+  ## immediately after that edge and refuse any positive value (+1 / -4).
 
 const STAT_MODE3_LAG_CGB* {.intdefine.} = 0
-  ## Dots added to `STAT_MODE3_LAG` on a CGB only, and it is meant to be
-  ## NEGATIVE: on a CGB the mode field reports mode 3 EARLIER than the PPU's own
-  ## mode-3 dot.
+  ## Dots added to `STAT_MODE3_LAG` on a CGB only, meant to be NEGATIVE: the
+  ## CGB reporting mode 3 EARLIER than its own mode-3 dot.
   ##
   ## The witness is `halt/lycirq_m2stat_2`, whose filename splits the devices
-  ## outright (`dmg08_out2_cgb04c_out3`): out of the same halt wake, on the same
-  ## line, at the same dot, a DMG reads mode 2 and a CGB reads mode 3. dingbat
-  ## reads 2 on both, so the DMG arm is green and the CGB arm is the tree's
-  ## longest-standing open row. The split is one M-cycle and it is in the
-  ## register, not in the pipeline -- which is the whole point, because
-  ## `dma/hdma_late_disable_{1,2}` pins the 3 -> 0 edge of the SAME wake and
-  ## must not move.
+  ## outright (`dmg08_out2_cgb04c_out3`): out of the same halt wake, same line,
+  ## same dot, a DMG reads mode 2 and a CGB reads mode 3, and dingbat reads 2 on
+  ## both. At -1 that row goes green and `speedchange` gains two.
+  ##
+  ## **Refused, and the object split does not rescue it.** Five rows on the same
+  ## device read the same edge and want it where it is
+  ## (`m2int_m2stat/m2int_m2stat_1`, `sprites/10spritesPrLine_m2stat_1`,
+  ## `ly0/lycint152_m2stat_1`, `enable_display/nextstat_1`,
+  ## `enable_display/frame{0,1}_m3stat_count_1`), net +3 / -6. Round 3 asked
+  ## whether the object-absorption above separates them and it does not:
+  ## `m2int_m2stat_1` is object-FREE (`hasobj.sh`, 0 object lines) and refuses
+  ## anyway, so no rule keyed on objects can hold it still while moving
+  ## `lycirq_m2stat_2`, which is object-free too.
 
-const STAT_MODE_LAG_ANY* = STAT_MODE0_LAG != 0 or STAT_MODE3_LAG != 0 or
-                           STAT_MODE3_LAG_CGB != 0
+# True when any field tail is actually set. The object accumulator below and
+# the whole absorption path hang off this and not off
+# STAT_M0_FIELD_TAIL_ABSORB, so a default build carries neither the field nor
+# the add in the object-fetch path -- the object-layout cliff `win_lx` and
+# `win_hold` record is real and a disabled mechanism must not pay it.
+const STAT_M0_TAIL_ANY* = STAT_M0_FIELD_TAIL != 0 or STAT_M0_FIELD_TAIL_CGB != 0
+
+const STAT_MODE_LAG_ANY* = STAT_M0_TAIL_ANY or
+                           STAT_MODE3_LAG != 0 or STAT_MODE3_LAG_CGB != 0
 
 # `stat_chg_dot` for "no mode change is inside any read's sampling window".
 # A line is 456 dots and the counter is rebased at every wrap, so anything this
@@ -2401,6 +2497,12 @@ type
     # add it already was. It may be -1, which `and 0x1F` wraps to column 31,
     # which is what a borrow off column 0 means.
     scx_tile*:            int
+    # Dots of OBJ penalty charged on this line so far. Only the field tail
+    # reads it; per-line scratch, cleared at the mode 2 -> 3 edge. Present only
+    # when that mechanism is on, so the default build's object layout is
+    # untouched.
+    when STAT_M0_TAIL_ANY:
+      obj_dots_line*:     int32
     lx*:                  int32
     # The one `lx` on this line either window rule can fire on -- the start
     # (WX - 7) while the window is not running, the re-trigger edge (WX - 8,

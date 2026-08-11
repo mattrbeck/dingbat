@@ -2792,6 +2792,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
+      when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
+        ppu.obj_dots_line += pen
       # Which dot the fetch's HIGH bitplane reads LCDC.2 on. The two arms are
       # the two ends of the penalty -- see OBJ_PLANE1_LAG for the reference
       # frames that separate them -- and this is the only place both `idx` and
@@ -3554,6 +3556,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.m3_delay = uint8(int(ppu.m3_lead) - M3_END_EARLY)
             ppu.m3_hold = 0
           ppu.smooth_scroll_sampled = false
+          when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
+            ppu.obj_dots_line = 0'i32
           when SCX_FINE_LATCH_LIVE:
             ppu.scx_latch_until = -1'i32
           ppu.dropped_first_fetch = false

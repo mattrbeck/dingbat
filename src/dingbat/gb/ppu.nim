@@ -1672,7 +1672,15 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       # timestamp, so no interrupt source, no HDMA trigger and no part of the
       # pixel pipeline can see it.
       ppu.stat_chg_dot = ppu.cycle_counter +
-        (if mode == 0: int32(STAT_MODE0_LAG)
+        (if mode == 0:
+           (block:
+              let base = if gb.cgb_enabled: int32(STAT_M0_FIELD_TAIL_CGB)
+                         else: int32(STAT_M0_FIELD_TAIL)
+              when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
+                (if gb.fifo_ppu != nil:
+                   max(0'i32, base - gb.fifo_ppu.obj_dots_line)
+                 else: base)
+              else: base)
          elif mode == 3:
            int32(STAT_MODE3_LAG) +
            (if gb.cgb_enabled: int32(STAT_MODE3_LAG_CGB) else: 0'i32)
