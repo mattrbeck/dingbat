@@ -70,6 +70,47 @@ const STAT_READ_SAMPLE*     {.intdefine.} = 2
 # absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
 const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
 
+const STAT_MODE0_LAG* {.intdefine.} = 0
+  ## Dots by which the STAT register's MODE FIELD keeps reading 3 after the PPU
+  ## has internally entered mode 0 -- and only the field. The mode-0 STAT
+  ## source, the HBlank DMA trigger, the VRAM/OAM unlock and the pixel pipeline
+  ## all still turn on the PPU's own dot; this is spent on `stat_chg_dot`, the
+  ## field's timestamp, and nothing else can see it.
+  ##
+  ## Why the degree of freedom is worth having: the tree's oldest open bucket is
+  ## "a sub-M-cycle error in the mode 3 -> 0 edge AS THE CPU READS IT BACK", and
+  ## every constant tried for it so far (`M3_END_EARLY`, `LCD_ON_HEAD_START`,
+  ## `LCD_ON_LINE0_TRIM`) moves the edge itself, which the mode-0 interrupt and
+  ## HDMA families then refuse. A field-only lag is the one shape those
+  ## refutations do not reach.
+  ##
+  ## `STAT_MODE3_LAG` is the same thing at the 2 -> 3 edge.
+
+const STAT_MODE3_LAG* {.intdefine.} = 0
+  ## Dots by which the STAT mode field keeps reading 2 after the PPU has
+  ## entered mode 3. See STAT_MODE0_LAG. Device-independent, and it has to stay
+  ## 0: `m2int_m2stat/m2int_{,scx4_}m2stat_ds_2` read STAT expecting mode 3
+  ## immediately after that edge and refuse any positive value, while the row
+  ## that wants motion here wants it in the other direction and on one device
+  ## only -- see STAT_MODE3_LAG_CGB.
+
+const STAT_MODE3_LAG_CGB* {.intdefine.} = 0
+  ## Dots added to `STAT_MODE3_LAG` on a CGB only, and it is meant to be
+  ## NEGATIVE: on a CGB the mode field reports mode 3 EARLIER than the PPU's own
+  ## mode-3 dot.
+  ##
+  ## The witness is `halt/lycirq_m2stat_2`, whose filename splits the devices
+  ## outright (`dmg08_out2_cgb04c_out3`): out of the same halt wake, on the same
+  ## line, at the same dot, a DMG reads mode 2 and a CGB reads mode 3. dingbat
+  ## reads 2 on both, so the DMG arm is green and the CGB arm is the tree's
+  ## longest-standing open row. The split is one M-cycle and it is in the
+  ## register, not in the pipeline -- which is the whole point, because
+  ## `dma/hdma_late_disable_{1,2}` pins the 3 -> 0 edge of the SAME wake and
+  ## must not move.
+
+const STAT_MODE_LAG_ANY* = STAT_MODE0_LAG != 0 or STAT_MODE3_LAG != 0 or
+                           STAT_MODE3_LAG_CGB != 0
+
 # `stat_chg_dot` for "no mode change is inside any read's sampling window".
 # A line is 456 dots and the counter is rebased at every wrap, so anything this
 # far back can never come within STAT_READ_SAMPLE of the counter again.

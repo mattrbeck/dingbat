@@ -1666,7 +1666,19 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     # loop is processing, i.e. the FIRST dot of the new mode, which is what
     # stat_read_mode's threshold is measured from.
     ppu.stat_prev_mode = prev_mode
-    ppu.stat_chg_dot   = ppu.cycle_counter
+    when STAT_MODE_LAG_ANY:
+      # The mode FIELD may reach a reader later than the mode itself reaches
+      # everything else -- see STAT_MODE0_LAG. Spent here, on the field's own
+      # timestamp, so no interrupt source, no HDMA trigger and no part of the
+      # pixel pipeline can see it.
+      ppu.stat_chg_dot = ppu.cycle_counter +
+        (if mode == 0: int32(STAT_MODE0_LAG)
+         elif mode == 3:
+           int32(STAT_MODE3_LAG) +
+           (if gb.cgb_enabled: int32(STAT_MODE3_LAG_CGB) else: 0'i32)
+         else: 0'i32)
+    else:
+      ppu.stat_chg_dot   = ppu.cycle_counter
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
   when STAT_IRQ_SPLIT:
     # The irq domain should already be here (it led by STAT_IRQ_LEAD); this is

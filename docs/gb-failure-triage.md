@@ -3678,3 +3678,187 @@ ruler), `writedots.py`, `dumpfam.sh`, `gamdiff.sh` (attribute every moved row),
 `witness.sh` + `witdiff.sh` (the ladder, world against world),
 `bench.sh` / `benchref.sh` (interleaved retired-instruction A/B, by flag or by
 git ref), `mb.sh`, `handlers.sh`, `build.sh`, `r.sh`, `env.sh`.
+
+## 2026-08-10 (round 2): mode 3's END, and the STAT mode field as its own observable
+
+Round 1 handed forward one bracket — `scx_m3_extend` says hardware's mode-3 end
+is 11–14 dots later than ours on a line whose CONTENT we render exactly — and
+this round pulled it. The answer is **not** the one that was hoped for, and the
+falsification is worth more than the hope was: **the STAT mode FIELD is not a
+free observable.** It is pinned to the PPU's own dot, from both sides, by
+hundreds of rows.
+
+Nothing shipped. Two constants land at 0 carrying their refutations
+(`STAT_MODE0_LAG`, `STAT_MODE3_LAG` / `_CGB` in `gb.nim`), and three new dot
+brackets are established.
+
+### The instrument: three ladders, read as dots instead of verdicts
+
+`tools/gbscx/edgemap.sh` prints, for the line a ROM actually scores, every SCX
+store with its dot, the fine scroll the line latched, mode 3's length, the dot
+of the 3 → 0 edge, and the dot the ROM reads STAT on with the byte it got.
+State is reset at every line boundary rather than keyed to LY — a trace covers
+several frames and `ly = 0` recurs in each, so matching on LY alone silently
+reports a different frame's line, which is a trap worth naming because the first
+version of this tool fell in it.
+
+With that, three gambatte families stop being pass/fail and become rulers.
+
+### Bracket 1: `scx_m3_extend`, measured on both devices
+
+| device | latch | store | our len | our edge | reads | hardware's edge | our deficit |
+|---|---|---|---|---|---|---|---|
+| DMG | dot 88, `$07` | `$05` at dot **93** | 179 | 259 | 269 wants m3, 273 wants m0 | **(269, 273]** | 11–14 dots |
+| CGB | dot 88, `$07` | `$05` at dot **89** | 179 | 259 | 265 wants m3, 269 wants m0 | **(265, 269]** | 7–10 dots |
+
+Both devices, same ROM, same latch, and the store lands 5 dots after the latch
+on DMG and 1 dot after on CGB (`CGB_PIPE_MCYCLES` moves the CPU's stores 4 dots
+earlier in PPU time). **The later the store lands, the bigger the extension** —
+which is the shape any candidate rule has to reproduce, and it rules out a flat
+"a mid-line SCX store costs one tile" (that would be 8 on both).
+
+### Bracket 2: the `ly0_late_scx7` ladder is a LATCH-dot ruler
+
+`enable_display/ly0_late_scx7_m3stat_scx{0,1,3}_{1,2,3}` had been read as a
+mode-3-length family. It is not: each ROM sets SCX to its own initial value
+(`scx0`/`scx1`/`scx3` is that value, not the store), enables the LCD, stores
+`$07` at dot **81, 85 or 89**, and reads STAT at a dot fixed per ROM. What the
+ladder brackets is **whether the line's fine scroll still takes that store**,
+read out as mode 3 against mode 0.
+
+The CGB arm is the finding, and it is a clean confirmation of something derived
+elsewhere. On CGB the stores land 2 dots later again (`CGB_SCX_LATENCY`), and
+hardware's answer depends on the ROM's INITIAL fine scroll:
+
+| initial `F` | store at 85 | hardware | ours |
+|---|---|---|---|
+| 0 (`scx0_2`) | lands at 87 | **not** taken | not taken |
+| 1 (`scx1_1`) | lands at 87 | **taken** | not taken |
+| 3 (`scx3_1`) | lands at 87 | **taken** | not taken |
+
+Turned into lengths (the reads sample dots 255, 255 and 259 respectively),
+hardware's mode 3 on that line is `<= 175` at `F = 0`, `> 175` at `F = 1` and
+`> 179` at `F = 3`. The first two are what taking the store into the latch
+would give (`172 + 7 = 179`), and they agree with `SCX_FINE_LATCH_LIVE`'s rule
+that the window is the discard's own length — with `F = 0` there is no discard,
+so hardware refuses the store, which is the rule's sharpest prediction seen on a
+family that was not used to derive it.
+
+**The third does not fit any latch outcome**: `> 179` is longer than `172 + 7`,
+so no choice of which value was latched reaches it. Measured rather than
+inferred — with `SCX_FINE_LATCH_LIVE` on, `scx3_1` stays red on both devices
+and `scx1_1 [cgb]` stays red too. Whatever supplies the extension in bracket 1
+is needed here as well, and the window is not it.
+
+The DMG arm carries a second fact that no candidate explains. At `scx3_1` our
+latch DOES take `$07` — length 179, edge 259 — and the read at dot 261 samples
+dot 259, where we report mode 0 and hardware reports mode 3. So hardware's edge
+is past 259 and **hardware's mode 3 is longer than the plain `172 + F` whichever
+value it latched**: by ≥ 1 dot if it latched 7, by ≥ 5 if it latched 3.
+
+### Bracket 3: the plain per-SCX ladder, in dots
+
+`m2int_m3stat/scx/m2int_scxN_m3stat_{1,2}` has DMG arms at N = 2, 3, 5 and each
+pair brackets the 3 → 0 edge to one M-cycle with **no mid-line store at all**.
+The STAT read samples the mode bits at `cc − 2` (`STAT_READ_SAMPLE`), so:
+
+| SCX | our len | our edge | hardware's edge | hardware's length |
+|---|---|---|---|---|
+| 2 | 174 | 254 | (255, 259] | (175, 179] |
+| 3 | 175 | 255 | (255, 259] | (175, 179] |
+| 5 | 177 | 257 | (259, 263] | (179, 183] |
+
+Solving `172 + s + K` against all three leaves **K = 3 or 4**. So on DMG, as the
+STAT mode field reports it, mode 3 is three or four dots longer than this tree
+computes, uniformly in the residue.
+
+### The hypothesis this round was sent to test, and its refutation
+
+The proposal was that the STAT mode field might have its own placement rule,
+distinct from the pixel stream and from the interrupt sources — which would let
+the field pay those 3–4 dots where `M3_END_EARLY`, `LCD_ON_HEAD_START` and
+`LCD_ON_LINE0_TRIM` are each refused, and would give the same-wake pair the
+degree of freedom it needs.
+
+The seam exists and is clean: `stat_chg_dot` is the field's own timestamp and
+nothing else reads it, so `STAT_MODE0_LAG` and `STAT_MODE3_LAG` move the field
+and leave the mode-0 STAT source, the HBlank DMA trigger, the VRAM/OAM unlock
+and the whole pipeline exactly where they are. Both were built and swept.
+
+**`STAT_MODE0_LAG = 1` costs 98 rows and buys 16 — gambatte 4004 → 3922.**
+Every one of the 98 is a `_2` member expecting `out0`, i.e. the same brackets
+read from the other side: `sprites` alone loses 63. The field's 3 → 0 report is
+pinned to the dot by hundreds of rows, and the three SCX-residue rows that want
+it 3–4 dots later are outnumbered and contradicted rather than merely
+outvoted. **A uniform field lag is two-sided refused.**
+
+`STAT_MODE3_LAG = 1` (positive, the 2 → 3 edge) is +1 / −4, refused by
+`m2int_m2stat/m2int_{,scx4_}m2stat_ds_2`, which read mode 3 immediately after
+that edge.
+
+### What the round DID sharpen: the same-wake contradiction is a register question
+
+The old statement of it goes through the halt phase. It can now be stated
+without mentioning halt at all, on one device and one edge.
+
+`halt/lycirq_m2stat_2` splits its devices in the filename
+(`dmg08_out2_cgb04c_out3`): out of the same wake, on the same line, at the same
+dot, **a DMG reads mode 2 and a CGB reads mode 3**. dingbat reads 2 on both, so
+the DMG arm is green and the CGB arm is red. Expressed as the field's own
+placement it is one M-cycle: `STAT_MODE3_LAG_CGB = -1` makes the CGB field
+report mode 3 one dot sooner and the row goes green, and `speedchange` gains two
+more.
+
+It is refused, on the same device and the same edge, by six rows that read the
+field just as directly:
+
+| row | wants |
+|---|---|
+| `halt/lycirq_m2stat_2 [cgb]` | the CGB 2 → 3 field edge **earlier** |
+| `m2int_m2stat/m2int_m2stat_1 [cgb]` | where it is |
+| `sprites/10spritesPrLine_m2stat_1 [cgb]` | where it is |
+| `ly0/lycint152_m2stat_1 [cgb]` | where it is |
+| `enable_display/nextstat_1 [cgb]` | where it is |
+| `enable_display/frame{0,1}_m3stat_count_1 [cgb]` | where it is |
+
+Net at −1: **+3 / −6, gambatte 4004 → 4001.**
+
+The one structural difference between the row that wants motion and the five
+that refuse it is still the **halt** — so the contradiction has not moved, but
+it is now known to be *unreachable from the register side*: the refusers are
+themselves STAT-field readers, so no rule that places the field can separate
+them. That closes the door this round was sent to open, and it closes it with
+its own witnesses rather than by argument.
+
+### `SCX_FINE_LATCH_LIVE`, re-priced and still off
+
+Round 1 left it off at +6 / −1 for +0.446% of retired instructions, with the
+question of whether the mode-3-end structure was what it was missing. It is
+not: with the window on, `scx_m3_extend_{1,ds_1}` still read mode 0 where
+hardware reads mode 3, the totals are unchanged at 4009/5005 and the traded row
+is the same `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`, and the
+`ly0_late_scx7` rows that want mode 3 longer stay red with it on. The extension
+is a different mechanism from the sample window and the two do not compose.
+
+### The bracket handed forward
+
+Mode 3's length under a mid-line SCX store, which is now measured on four
+independent rows and fitted by nothing:
+
+* store 1 dot after the latch, `F = 3 → 7`: extension **≥ 1** dot over
+  `172 + 7`, or ≥ 5 over `172 + 3` (DMG `ly0_late_scx7_m3stat_scx3_1`)
+* store 1 dot after the latch, `F = 7 → 5`: extension **7–10** dots (CGB
+  `scx_m3_extend`)
+* store 5 dots after the latch, `F = 7 → 5`: extension **11–14** dots (DMG
+  `scx_m3_extend`)
+* no store at all: extension **3–4** dots, uniform in the residue (DMG
+  `m2int_scx{2,3,5}_m3stat`)
+
+The last line is the one to explain first, because it needs no store: three or
+four dots are owed on the plain per-SCX mode-3 length as the field reports it,
+and a field-only payment is now refused, so the payment has to be somewhere that
+`sprites`' 63 `_2` rows do not see. The `_2` rows all carry OBJECTS; the three
+that want the dots do not. **Base length up 3–4 and the OBJ penalty down 3–4 is
+the one composition that is still open**, and `tools/gbppu/objtab.py` against
+`ppu_spritex_vs_scx` is the instrument that prices it — it is 153/153 today, so
+it is a real constraint rather than a free parameter.
