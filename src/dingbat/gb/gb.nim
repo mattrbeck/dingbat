@@ -1872,6 +1872,24 @@ const SCX_FINE_LATCH_LIVE* {.booldefine.} = false
   ## The derivation, the two-sided evidence and the price are all at this
   ## constant's note in gb/fifo_ppu.nim.
 
+const SCX_FINE_LATCH_WRAP* {.intdefine.} = 0'i32
+  ## Dots the fine-scroll discard costs when a mid-line SCX store lands AFTER
+  ## the discard has already walked past the new `SCX and 7`. 0 is off; 8 is
+  ## one whole pass of the eight-slot window. Requires `SCX_FINE_LATCH_LIVE`,
+  ## whose window this rides inside, and grows a field of its own.
+  ##
+  ## The derivation is at this constant's note in gb/fifo_ppu.nim.
+
+const SCX_STORE_STALL_DOTS* {.intdefine.} = 0'i32
+  ## Dots the pixel pipeline stalls when a mid-line store to SCX LOWERS
+  ## `SCX and 7`. 0 is off. Declared here for the same reason as
+  ## `SCX_FINE_LATCH_LIVE`: `GbFifoPpu` grows a field only when it is on.
+  ##
+  ## The derivation is at this constant's note in gb/fifo_ppu.nim; the short
+  ## form is that `gambatte/scx_m3_extend` says hardware's mode 3 is longer
+  ## after such a store, and its `_ds` member -- twelve stores on one line,
+  ## which is what SCX "banging" means -- prices one store at 8 dots.
+
 # ==================== TYPE DECLARATIONS ====================
 # All GB types in one block for forward-reference support.
 
@@ -2588,6 +2606,21 @@ type
     # which is the object-layout cliff `win_lx` and `win_hold` both record.
     when SCX_FINE_LATCH_LIVE:
       scx_latch_until*:   int32
+    # The LOW THREE BITS of the dot the line latched its fine scroll on. The
+    # wrap needs how many of the window's eight slots the discard has already
+    # walked, and that is a slot index, so three bits are the whole of it --
+    # `scx_latch_until` cannot supply them once a store has moved the window's
+    # end. A byte because three bits is honestly all it is -- NOT for layout:
+    # as an `int32` it benches the same to within the noise (0.232% against
+    # 0.246%), so the mechanism's price is the branch in `fifo_arm_scx` and not
+    # this field, which is the one thing the `win_lx` layout cliff would have
+    # predicted and does not happen here.
+    when SCX_FINE_LATCH_WRAP != 0:
+      scx_latch_slot*:    uint8
+    # Dots left in the stall a mid-line SCX store armed. Same layout argument
+    # as the field above: it exists only when the mechanism is on.
+    when SCX_STORE_STALL_DOTS != 0:
+      scx_stall*:         int32
     # Dots left in the object fetch the shifter is stalled on, and which BG
     # tile last paid the "wait for the BG fetch" half of an object's penalty.
     # Both are the OBJ penalty algorithm's state; see tick_shifter's trigger.

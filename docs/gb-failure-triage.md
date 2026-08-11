@@ -4678,3 +4678,167 @@ The method that produced both shipped results is the same one twice: take a
 family whose verdict is one integer, find the property of the ROM that turns its
 frames or its dots into a **ruler**, read hardware's answer off it directly --
 and then bracket the derived quantity from both sides before believing it.
+
+## 2026-08-10 (round 5): the discard is a slot counter, and it wraps
+
+The campaign's four rounds ended with one bracket nothing explained --
+`scx_m3_extend`, a mid-line SCX store lengthening mode 3 by 11-14 dots on DMG
+and 7-10 on CGB, store-position-dependent -- and a pointer at SameBoy's
+changelog. This round pulled that bracket. **gambatte 4044 -> 4051**, and the
+mechanism is one sentence.
+
+The clue source is used as a clue source: what follows was read off SameBoy's
+COMMIT HISTORY as a statement about hardware, and every quantity below is then
+derived and bracketed against our own rows. No constant of theirs is adopted and
+no code of theirs is copied.
+
+### What the five changelog entries turned out to mean
+
+| entry | release | what it discovered |
+|---|---|---|
+| "Improved accuracy of mid-line SCX writes, fixes Infinity" | v0.14.6 | The BG fetcher has **no column counter**. The column is a live combinational sum, `(SCX + x) >> 3`, and the commit deletes the fetcher's `x` register outright. Dividing the two terms separately -- the older form -- **cannot borrow**. This is `SCX_FINE_BORROW`, independently arrived at here, confirmed with a date on it. |
+| "Correct emulation of how SCX prolongs mode 3", "including 'SCX banging'" | v0.15 | The fine-scroll discard is **not a countdown**. It is a three-bit slot counter compared each dot against the LIVE `SCX and 7`; equality ends the discard, and slot 7 without equality **wraps and runs the eight slots again**. A ROM that keeps moving the target faster than the counter can meet it prevents mode 3 from ever ending -- "banging" -- and SameBoy warns that this damages a real LCD. |
+| "More accurate emulation of SCX write conflicts on all models" | v1.0 | Per-model timing of *when in the write M-cycle* the new SCX becomes visible to the PPU: DMG/SGB/double-speed-CGB two T-cycles early, single-speed CGB at the normal point. Validated against mealybug `m3_scx_high_5_bits` on DMG. |
+| "More accurate PPU fetcher timings, fixes Mr. Chin's Gourmet Paradise" | v1.0 | Each fetcher stage is a **two-T-cycle VRAM access split T1/T2**: T1 latches the address, T2 performs the read. A register written between the two does not affect that access. |
+| (same commit) | v1.0 | A CGB-only **one-pixel** lead in the position the map column is taken from, suppressed during object fetches. |
+
+Two of those five we had already derived independently and one is the answer to
+the open bracket. The remaining two are recorded below as things this tree does
+not model and now knows it does not.
+
+### The mechanism, and our own derivation of it
+
+> **The discard is a slot counter that wraps.** It runs 0..7 from the latch dot
+> and compares its slot each dot against the live `SCX and 7`. A store landing at
+> a slot at or below the NEW value is matched on this pass (that is
+> `SCX_FINE_LATCH_LIVE`, already derived here). A store landing ABOVE the new
+> value but at or below the old one has already been walked past and cannot be
+> matched until the counter runs to 7, **wraps, and runs the eight slots again**
+> -- one whole extra pass. A store past the old value arrives after the match and
+> does nothing.
+
+Round 2's "the later the store lands, the bigger the extension" is exactly the
+boundary between the first two regimes sweeping as the store moves later, and it
+is the shape that ruled out a flat one-tile cost.
+
+`SCX_FINE_LATCH_WRAP` carries it. It is priced on our rows and not on theirs.
+
+### The banging ROM is the ruler, and it prices the wrap at 8
+
+`scx_m3_extend_{ds_1,ds_2}` is the whole derivation. Read with `edgemap.sh`, the
+pair writes SCX **twelve times on one line**, every six dots, cycling the low
+bits `4,2,0,6,4,2,0,6,4,2,0,6` against a latched fine scroll of 7 -- which is
+what "banging" means, and this tree had it in the suite the whole time without
+reading it as one. The pair brackets hardware's 3 -> 0 edge to **(329, 331]**
+where the shipping tree sits at **259**: seventy-one or seventy-two dots.
+
+Nine of those twelve stores lower the target against the value standing when
+they land and three raise it. `9 * 8 = 72`, and **no other division of that
+line's stores lands in the bracket** -- twelve stores would need six dots each,
+and the level predicate `SCX_FINE_BORROW` uses (every one of the twelve is below
+the latched 7, so it fires once) gives eight. The banging row separates a
+per-store EVENT from a level by a factor of nine.
+
+With the rule at 8, dingbat lands on **330** -- inside a two-dot window arrived
+at by twelve stores compounding. That is the round's strongest single number.
+
+**The mask is the mechanism.** Counting slots without `and 7` makes every store
+after the first wrap measure against an ever-growing number, all twelve wrap,
+and mode 3 runs to 355 and off the end of the line. Hardware stops because a
+store that RAISES the target above the current slot can still be met on the pass
+it lands in. The runaway is not a bug to suppress -- it is the behaviour the
+changelog names, and our own row says where hardware draws the line.
+
+### Bracketed from both sides
+
+Swept whole-suite, one build per value, `tools/gbscx/wrapsweep.sh`:
+
+| `SCX_FINE_LATCH_WRAP` | gambatte |
+|---|---|
+| 6 | 4049 |
+| 7 | 4050 |
+| **8** | **4051** |
+| 9 | 4050 |
+| 10 | 4050 |
+
+A strict local maximum, and 8 is one whole pass of an eight-slot window rather
+than a fitted number.
+
+The DMG arm needed one further thing, and it was already in the tree rather than
+invented for it: the comparison is made against the **lead-corrected** fine
+scroll, the same `SCX_FINE_BORROW_DMG_LEAD` quantity that constant's own sum
+uses. Same sum, same device term, and it is free on a CGB where the lead is
+zero.
+
+### The ledger
+
+* **gambatte 4044 -> 4051**, +8 / -1 with `SCX_FINE_LATCH_LIVE`; the wrap's own
+  share over that flag alone is **+2 / -0**. Both CGB arms of `scx_m3_extend`
+  and both halves of the banging pair go green, the `out0` partners holding --
+  so the length is bracketed to one M-cycle, not merely overshot.
+* The single red row is `SCX_FINE_LATCH_LIVE`'s own known cost,
+  `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`, unchanged.
+* Local runner **779**, unmoved. mealybug **1863574 / 552960**, unmoved on both
+  devices. All nine witness frames **byte-identical** (both acid2, both
+  strikethrough, `cgb-acid-hell` at rev C and E, daid on DMG and on CGB at rev C
+  and D).
+* Default arm **+0 / -0** against main and byte-identical in verdicts.
+
+### `SCX_FINE_LATCH_LIVE`'s price was stale by a factor of sixteen
+
+Worth stating on its own, because the flag has been parked on price for two
+rounds. The +0.446% in its note was measured before `STAT_M0_FIELD_TAIL`
+shipped, and that mechanism's `obj_dots_line` sits in the same object-scratch
+block whose layout the old figure was blaming. Re-benched in the tree that ships
+it -- blargg cpu_instrs, 2400 frames after 300 warmup, four interleaved runs,
+`cycles=` identical in all eight -- the same flag reads **+0.027%**.
+
+So the reason it is off no longer holds: +6 / -1 for a fortieth of the quoted
+cost. The wrap on top of it is **+0.232%**, and that is the branch in
+`fifo_arm_scx` rather than its field -- carrying the latch slot as an `int32`
+instead of a byte benches the same to within the noise, which is the one place
+the `win_lx` layout cliff would have predicted a difference and does not give
+one.
+
+Both still ship at 0 here. The re-pricing is the finding; the flip is one build
+and belongs to whoever wants to spend 0.23%.
+
+### The residual, much smaller than the bracket it replaces
+
+`scx_m3_extend_1 [dmg]`, one row. It wants its 3 -> 0 edge 3-6 dots further
+still, and no wrap supplies that -- a second one is 8 and overshoots. It cannot
+be paid by `STAT_M0_FIELD_TAIL` either, and that is **settled rather than
+assumed**: `readidiom.py` says this ROM reads STAT with `LDH A,($41)`, IO on its
+third M-cycle, so round 4's `STAT_M0_TAIL_MAX_MC` rule excludes it by
+construction. What is left is a DMG-only, single-row, sub-M-cycle question about
+where that device's SCX store lands against the latch -- where round 4 handed
+forward an 11-14 dot bracket over the whole family.
+
+### Refuted on the way: the extension is not a stall
+
+Charging the eight dots as a blunt pipeline stall -- freeze fetcher and shifter,
+which is content-equivalent to the borrow in magnitude -- is **+2 / -65**. It
+turns the same two CGB rows green and breaks 65 PNG rows, because a stall
+displaces the pixel stream from the STORE's dot where `SCX_FINE_BORROW`
+displaces it from the next fetch boundary. The quantity was right and the
+currency was wrong, which is what sent this round at the discard comparator
+instead. `SCX_STORE_STALL_DOTS` keeps that experiment and its refutation.
+
+### What the archaeology says we do NOT model
+
+Neither is touched here; both are named so the next session does not rediscover
+them.
+
+* **The fetcher's T1/T2 split.** Each stage is two T-cycles, the address latched
+  in the first and the read performed in the second, so a register written
+  between them does not affect that access. This is the Mr. Chin's / Turrican
+  finding, and it is a statement about LCDC's tileset and map bits as much as
+  about SCX. This tree's fetcher stages are whole dots.
+* **Per-model SCX write-visibility inside the write M-cycle.** DMG, SGB and
+  double-speed CGB see the new value two T-cycles earlier than single-speed CGB
+  does. We carry `CGB_SCX_LATENCY = 2` in the other direction, and the DMG
+  residual above is a sub-M-cycle question in exactly this area, so the two are
+  probably one question.
+
+Neither `Infinity` nor `Mr. Chin's Gourmet Paradise` could be checked: this
+worktree's ROM cache holds test suites only, with no commercial library.

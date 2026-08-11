@@ -389,6 +389,12 @@ proc fifo_arm_window*(ppu: GbFifoPpu)
 # SCX_FINE_BORROW). Forward declared here for the reason above.
 proc fifo_arm_scx*(ppu: GbFifoPpu)
 
+# The same store can also STALL the pipeline; see SCX_STORE_STALL_DOTS. It
+# needs the value SCX held before the store, so it is a second call rather than
+# part of the arm above. Forward declared for the same reason.
+when SCX_STORE_STALL_DOTS != 0:
+  proc fifo_scx_store_stall*(ppu: GbFifoPpu; old_scx: uint8)
+
 # The mixer stage runs one dot behind the FIFO pop, so a mid-mode-3 write to a
 # register the MIXER reads still reaches the pixel already emitted. Forward
 # declaration for the same reason as the line above; the body and the
@@ -1887,13 +1893,18 @@ proc ppu_store_scy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.scy = val
 
 proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  when SCX_STORE_STALL_DOTS != 0:
+    let old_scx = ppu.scx
   ppu.scx = val
   # The fetcher's SCX term carries a borrow off the line's latched fine scroll
   # (SCX_FINE_BORROW in fifo_ppu), and this is one of the two events that can
   # change it. Decided here rather than at the fetch for the reason
   # `fifo_arm_window` is called from ppu_store_wx: SCX is written a handful of
   # times a line and read at every tile-map fetch.
-  if gb.fifo_ppu != nil: fifo_arm_scx(gb.fifo_ppu)
+  if gb.fifo_ppu != nil:
+    fifo_arm_scx(gb.fifo_ppu)
+    when SCX_STORE_STALL_DOTS != 0:
+      fifo_scx_store_stall(gb.fifo_ppu, old_scx)
 
 proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.wx = val

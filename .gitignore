@@ -62,6 +62,13 @@ web/rom.gbc
 # Local investigation scratch dirs — never commit
 /scratch-repro/
 /.scratch/
+# The mode-3 campaign's environment (tools/gbscx/env.sh) and its outputs: the
+# ROM cache it copies in, the shard/row files every gamall.sh pass writes, and
+# the witness ladder's frames. `.cache/` above is already covered. Listed
+# because a `git add -A` in this worktree otherwise sweeps in ~325 files.
+/.romcache/
+/.tmp/
+/.shots/
 
 # Generated SRAM backing for test ROMs (created at runtime, not a fixture)
 tests/roms/*.sav

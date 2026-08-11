@@ -212,6 +212,10 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.scx_fine = 0
   when SCX_FINE_LATCH_LIVE:
     ppu.scx_latch_until = -1'i32
+  when SCX_STORE_STALL_DOTS != 0:
+    # Per-line, like the object penalty below: a stall armed near the end of
+    # one line must not hold the next one's head.
+    ppu.scx_stall = 0'i32
   fifo_arm_scx(ppu)
   ppu.lx = 0
   ppu.smooth_scroll_sampled = false
@@ -436,6 +440,80 @@ const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
 # eleven `scx_during_m3` rows to buy the one back. So line 0's latch is
 # early by something that is not simply this window's length, and the row
 # is left red with its cause named rather than papered over.
+#
+# ---- The price, re-measured, and it is not the one above ----------------
+#
+# The +0.446% this note was parked on is STALE. Re-benched in the tree that
+# ships `STAT_M0_FIELD_TAIL` -- whose `obj_dots_line` sits in the same
+# object-scratch block and moved the layout the old figure was blaming --
+# the same flag on the same ROM reads **+0.027%**: blargg cpu_instrs, 2400
+# frames after 300 warmup, four interleaved runs, `cycles=` identical in all
+# eight. So the reason this is off no longer holds, and the +6 / -1 it buys
+# costs about a fortieth of what the note above says it does.
+
+# ---- SCX_FINE_LATCH_WRAP -------------------------------------------------
+#
+# The window above is not the whole comparator. `gambatte/scx_m3_extend` --
+# the one bracket four rounds of the mode-3 campaign could not reach, and
+# which the window explicitly did NOT touch -- says a mid-line store can
+# make mode 3 LONGER, and this is the missing half.
+#
+# ---- The shape ----------------------------------------------------------
+#
+# The discard is a three-bit SLOT COUNTER, not a countdown. It runs 0..7 from
+# the latch dot, and on each dot it compares its slot against the LIVE
+# `SCX and 7`. Equal -> the discard ends, which is the classic penalty and is
+# what the window above already models. Slot 7 with no match -> it WRAPS and
+# runs the eight slots again. So a store's effect depends on where it lands
+# against BOTH the old value and the new one:
+#
+#   store's slot <= new F        the counter has not passed the new target,
+#                                it matches it -- the window above
+#   new F < slot <= old F        the counter has already walked past the new
+#                                target and can no longer match the old one:
+#                                it runs to 7, wraps, and matches on the
+#                                SECOND pass. Eight dots, and this constant
+#   slot > old F                 the match already happened; no effect
+#
+# "The later the store, the bigger the extension" -- round 2's phrasing of
+# the bracket -- is the boundary between the first two regimes sweeping as
+# the store moves later.
+#
+# ---- What prices it, from our own rows ----------------------------------
+#
+# `tools/gbscx/edgemap.sh` on the family, and the `_ds` pair is the whole of
+# it. Those two write SCX **twelve times on one line**, every six dots,
+# cycling the low bits 4,2,0,6,4,2,0,6,4,2,0,6 against a latched 7. They
+# bracket hardware's 3 -> 0 edge to (329, 331] where the shipping tree is at
+# 259 -- **71 or 72 dots** -- and with this rule at 8 dingbat lands on
+# **330**, inside a two-dot window arrived at by twelve stores compounding.
+# Nine of the twelve wrap and three do not, which is what the mask is:
+#
+#   * WITHOUT `and 7` every store after the first wrap measures against an
+#     ever-growing count, all twelve wrap, and mode 3 runs to 355 and off
+#     the end of the line. That is not a bug to hide -- it is exactly the
+#     runaway SameBoy's changelog calls "SCX banging", and hardware stops
+#     because a store that RAISES the target above the current slot can
+#     still be matched on the pass it lands in.
+#
+# The single-store members then agree, and they are what brackets 8 rather
+# than merely admitting it. Swept whole-suite, one build per value:
+# 6 -> 4049, 7 -> 4050, **8 -> 4051**, 9 -> 4050, 10 -> 4050. A strict local
+# maximum, and 8 is one whole pass of an eight-slot window rather than a
+# fitted number.
+#
+# ---- The one row it does not reach --------------------------------------
+#
+# `scx_m3_extend_1 [dmg]`. Both CGB arms and the banging pair go green; the
+# DMG arm wants its 3 -> 0 edge 3-6 dots further still, and no wrap can
+# supply that (a second one is 8 and overshoots the bracket). It cannot be
+# paid by `STAT_M0_FIELD_TAIL` either, and that is settled rather than
+# assumed: `tools/gbscx/readidiom.py` says this ROM reads STAT with
+# `LDH A,($41)`, IO on its third M-cycle, so round 4's `STAT_M0_TAIL_MAX_MC`
+# rule excludes it by construction. The residual is therefore a DMG-only,
+# single-row, sub-M-cycle question about where that device's SCX store lands
+# against the latch -- which is a much smaller thing than the 11-14 dot
+# whole-family bracket it replaces.
 
 proc fifo_arm_scx*(ppu: GbFifoPpu) =
   ## Recompute the fetcher's SCX term. Called from the one place SCX is stored
@@ -448,10 +526,80 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
     if ppu.scx_latch_until >= 0'i32 and ppu.cycle_counter <= ppu.scx_latch_until:
       let want = int(ppu.scx and 7) -
                  (if ppu.cgb: 0 else: SCX_FINE_BORROW_DMG_LEAD)
-      ppu.lx -= int32(want - ppu.scx_fine)
+      var extra = 0'i32
+      when SCX_FINE_LATCH_WRAP != 0:
+        # The discard is a slot counter, not a countdown: it has already walked
+        # `consumed` of its eight slots, and a store that puts the target BELOW
+        # that cannot be matched on this pass. The window runs to its end, wraps
+        # and matches on the next one, which is the whole of the extension.
+        # `and 7` and not a plain subtraction: the counter is three bits wide
+        # and every pass is eight slots, so what a store is measured against is
+        # the slot of the CURRENT pass. Without the mask a line that has already
+        # wrapped once measures every later store against an ever-growing
+        # number, every one of them wraps, and mode 3 never ends -- which is
+        # the runaway the `_ds` banging row catches (it reads 355 against
+        # hardware's 331, where the masked form reads 331).
+        let consumed = (ppu.cycle_counter - int32(ppu.scx_latch_slot)) and 7'i32
+        # `want` and not the raw `SCX and 7`, so the comparison carries the
+        # DMG's one-pixel lead exactly as SCX_FINE_BORROW's does -- same sum,
+        # same device term. It is what the DMG arm of scx_m3_extend needs and
+        # it costs nothing on a CGB, where the lead is zero.
+        if int32(want) < consumed:
+          extra = SCX_FINE_LATCH_WRAP
+          ppu.scx_latch_until += SCX_FINE_LATCH_WRAP
+      ppu.lx -= int32(want - ppu.scx_fine) + extra
       ppu.scx_fine = want
   ppu.scx_tile = (int(ppu.scx) shr 3) -
                  SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
+
+# ---- SCX_STORE_STALL_DOTS ------------------------------------------------
+#
+# `gambatte/scx_m3_extend` is the family, and it is the one bracket four
+# rounds of the mode-3 campaign left unexplained: a mid-line store to SCX
+# lengthens mode 3, and dingbat lengthened it by nothing.
+#
+# ---- What prices it, and why it is a per-STORE event ----------------------
+#
+# The family has four members and the `_ds` pair is the whole derivation.
+# Read with `tools/gbscx/edgemap.sh`, `_ds_1`/`_ds_2` write SCX TWELVE times
+# on one line, every six dots, cycling the low bits 4,2,0,6,4,2,0,6,4,2,0,6
+# against a latched fine scroll of 7 -- which is what "SCX banging" names.
+# The pair brackets hardware's 3 -> 0 edge to (329, 331] where ours is at
+# 259, so hardware's mode 3 is **71 or 72 dots longer** on that one line.
+#
+# Nine of those twelve stores lower `SCX and 7` against the value standing
+# when they land; three raise it (0 -> 6). `9 * 8 = 72`, and no other
+# division of that line's stores lands in the bracket: twelve stores would
+# need 6 dots each, and the LEVEL predicate the borrow above uses -- every
+# one of the twelve is below the latched 7, so it fires once -- gives 8.
+# **The banging ROM is what separates a per-store EVENT from a level, and it
+# separates them by a factor of nine.**
+#
+# The single-store members then agree, once the field tail is taken off the
+# DMG's reading. `_1`/`_2` bracket hardware's edge at (267, 271] on DMG with
+# ours at 259 and `STAT_M0_FIELD_TAIL` already paying 3 of it, and at
+# (263, 267] on CGB with ours at 259 and no tail. As extensions those are
+# 6..9 dots and 5..8 dots, and **8 is the only value in both** -- so one
+# store costs one BG fetch, on both devices, and the DMG/CGB difference
+# round 2 measured (11-14 against 7-10) was the field tail all along rather
+# than anything about SCX.
+#
+# ---- Why it is a STALL and not a longer line -----------------------------
+#
+# A stall of exactly one fetch is content-identical to the borrow above.
+# Hold the fetcher and the shifter for 8 dots and no pixel is emitted, so
+# every pixel after the stall lands 8 screen columns later -- i.e. screen x
+# shows what x - 8 would have shown, the background one tile LOWER. That is
+# the same displacement `SCX_FINE_BORROW` produces by subtracting one from
+# the map column, and it is why that constant scored +64 on pixels while
+# leaving mode 3's length alone: it is the right displacement charged in the
+# wrong currency. The two must therefore not both be on -- together they
+# displace by two tiles -- which is what `SCX_FINE_BORROW=0` is for here.
+proc fifo_scx_store_stall*(ppu: GbFifoPpu; old_scx: uint8) =
+  when SCX_STORE_STALL_DOTS != 0:
+    if ppu.mode_flag == 3'u8 and ppu.smooth_scroll_sampled and
+       (int(ppu.scx) and 7) < (int(old_scx) and 7):
+      ppu.scx_stall += SCX_STORE_STALL_DOTS
 
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
@@ -482,6 +630,8 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     # negative long after the discard is spent, and that spelling opens the
     # window on the `_4` steps hardware shuts it on (measured, 3992/5005).
     ppu.scx_latch_until = ppu.cycle_counter + int32(ppu.scx and 7)
+    when SCX_FINE_LATCH_WRAP != 0:
+      ppu.scx_latch_slot = uint8(ppu.cycle_counter and 7'i32)
   if ppu.fetching_window:
     # ---- A line that STARTS as a window line still pays SCX & 7 ------------
     #
@@ -3057,6 +3207,12 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
            " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
            " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
            " tn=", toHex(ppu.tile_num, 2), " mode=", ppu.mode_flag
+  when SCX_STORE_STALL_DOTS != 0:
+    # A mid-line SCX store holds the whole pipeline, fetcher and shifter both,
+    # for one BG fetch. See SCX_STORE_STALL_DOTS above.
+    if ppu.scx_stall > 0:
+      dec ppu.scx_stall
+      return
   # One call site for tick_shifter, deliberately: it is this loop's body, and a
   # second one costs the inlining (see tick_sprite_fetcher's result). The
   # object's tail dot is the only way through here with neither fetcher run.
