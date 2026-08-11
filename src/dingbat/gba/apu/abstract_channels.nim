@@ -65,6 +65,27 @@ template gba_steps_due*(d, period: CycleCount; arm_delay: uint32;
 proc new_sound_channel*(gba: GBA): SoundChannel =
   SoundChannel(gba: gba, enabled: false, dac_enabled: false, length_counter: 0, length_enable: false)
 
+proc agb_length_on_nrx4*(ch: SoundChannel; length_enable, triggered: bool;
+                         max_len: int) =
+  ## AGB NRx4 length semantics (hardware-verified, gbaedge SWEEPQ/PSGSTAT
+  ## pages, AGB SP sessions 2/3): the trigger's reload-if-zero happens
+  ## FIRST, then a RISING length-enable clocks length once if the frame
+  ## sequencer is in the length half. A trigger+enable write with one
+  ## length tick remaining therefore kills the note immediately (the
+  ## SWEEPQ length-63 control dies at poll 0), where the DMG order - the
+  ## rising-edge clock before the trigger - lets the trigger reload it to
+  ## a full note. The GB core keeps the DMG order; this helper is
+  ## GBA-only.
+  let rising = length_enable and not ch.length_enable
+  ch.length_enable = length_enable
+  if triggered and ch.length_counter == 0:
+    ch.length_counter = max_len
+    if length_enable and not rising and ch.gba.apu.first_half_of_length_period:
+      ch.length_counter -= 1
+  if rising and ch.gba.apu.first_half_of_length_period and ch.length_counter > 0:
+    ch.length_counter -= 1
+    if ch.length_counter == 0: ch.enabled = false
+
 proc length_step*(ch: SoundChannel) =
   if ch.length_enable and ch.length_counter > 0:
     ch.length_counter -= 1
