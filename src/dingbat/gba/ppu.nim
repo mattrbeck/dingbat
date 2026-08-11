@@ -113,8 +113,10 @@ proc end_hblank*(ppu: PPU) =
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
   ppu.gba.dma.trigger_video_capture(ppu.vcount)
   ppu.dispstat.vcounter = (ppu.vcount == uint16(ppu.dispstat.vcount_setting))
+  var raised_if = false
   if ppu.dispstat.vcounter_irq_enable and ppu.dispstat.vcounter:
     ppu.gba.interrupts.reg_if.vcounter = true
+    raised_if = true
   if ppu.vcount == 227:
     ppu.dispstat.vblank = false
   elif ppu.vcount == 160:
@@ -122,11 +124,26 @@ proc end_hblank*(ppu: PPU) =
     ppu.gba.dma.trigger_vdma()
     if ppu.dispstat.vblank_irq_enable:
       ppu.gba.interrupts.reg_if.vblank = true
+      raised_if = true
     for bg_num in 0..1:
       for ref_num in 0..1:
         ppu.bgref_int[bg_num][ref_num] = ppu.bgref[bg_num][ref_num].num
     ppu.draw()
-  ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+  # Only a flag that actually rose here reaches the interrupt controller. A
+  # scheduled etInterrupts event re-evaluates the WHOLE of IE&IF at the cycle
+  # it lands, so scheduling one unconditionally — 228 times a frame, on lines
+  # where the video controller asserted nothing — hands whatever bit another
+  # peripheral raised in the preceding IRQ_SYNC_DELAY window a recognition it
+  # never gets on hardware, at rise+1 instead of that peripheral's own rise+3.
+  # (GBATEK: IF bits 0-2 are driven by the DISPSTAT conditions and their
+  # enables; there is no periodic re-evaluation of the controller.) Every IF
+  # writer schedules its own check, so dropping this one can only ever restore
+  # a flag to its proper delay, never lengthen it. Pinned by the mGBA suite's
+  # Timer count-up "0b, 0x000C 1xv 1d 4i": the stale check pulled that cell's
+  # handler entry one cycle early and the four rigid 121-cycle ISR rounds
+  # carried it to the disable write, reading FFFE for hardware's FFFF.
+  if raised_if:
+    ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc draw*(ppu: PPU) =
   inc ppu.frame

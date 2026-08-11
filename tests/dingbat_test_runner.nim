@@ -1510,10 +1510,11 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   # is exact-match, so a stale key serves the OLD ROM from cache and the change
   # looks like a no-op.
   #
-  # Note the Misc "H-blank bit start" rows are calibrated against the compiler
-  # that built the ROM: they compare measurements against constants upstream
-  # re-measured for one specific codegen, so a rebuild with a different
-  # toolchain can make them unpassable for any emulator. See tests/README.md.
+  # Note the Misc "H-blank bit start" Flip rows measure dingbat's idle-loop
+  # SKIP RESOLUTION, not its PPU timing: they spin on DISPSTAT and the waitloop
+  # fast-forward resolves the edge at whatever bound it was given, so they move
+  # by a whole quantum whenever anything shifts the loop's phase. The "Hblank"
+  # row is different and is a real defect — see docs/mgba-suite-verdicts.md.
   const MgbaSuiteSha1 = "00480cf1d95de6236ddcbf7026fc6e11c384528a"
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
@@ -1573,8 +1574,16 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
         if reason.startsWith("Got ") and reason.contains(" vs "):
           let inner = reason[4 .. ^1]  # strip "Got "
           let vs_pos = inner.find(" vs ")
-          current_tests[^1].actual = inner[0 ..< vs_pos]
-          current_tests[^1].expected = inner[vs_pos + 4 .. ^1]
+          # misc-edge.c is the one suite source whose doResult call passes
+          # (expected, value) where every other file passes (value, expected),
+          # so for this section alone the ROM's own constant is printed as
+          # "Got" and OUR measurement as "vs". Un-swap it here rather than
+          # print the table backwards (see docs/mgba-suite-verdicts.md).
+          let swapped = current_suite.startsWith("Misc")
+          current_tests[^1].actual =
+            if swapped: inner[vs_pos + 4 .. ^1] else: inner[0 ..< vs_pos]
+          current_tests[^1].expected =
+            if swapped: inner[0 ..< vs_pos] else: inner[vs_pos + 4 .. ^1]
         else:
           current_tests[^1].actual = reason
       pending_fail = false

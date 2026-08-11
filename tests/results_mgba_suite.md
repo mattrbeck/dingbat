@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-08-10 21:14:43*
+*Generated: 2026-08-11 11:13:56*
 
 ## Memory tests
 
@@ -49,13 +49,9 @@ All tests passed.
 | Short DMA (32/ROM to ROM) ARM/ROM P.S | 137 | 138 |
 | Short DMA (32/ROM to ROM) ARM/ROM PNS | 136 | 137 |
 
-## Timer count-up tests (935/936 passed)
+## Timer count-up tests
 
-935/936 tests passed, 1 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| 0b, 0x000C 1xv 1d 4i | FFFE | FFFF |
+All tests passed.
 
 ## Timer IRQ tests
 
@@ -95,17 +91,17 @@ All tests passed.
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| DMA Prefetch Break | 0x10002A94 | 0x10002478 |
-| H-blank bit start Hblank | 0x000004D0 | 0x000004D3 |
-| H-blank bit start Flip 1 | 0x00000087 | 0x00000092 |
-| H-blank bit start Flip 2 | 0x000003EC | 0x000003DD |
-| H-blank bit start Flip 3 | 0x000000E5 | 0x000000E4 |
-| H-blank bit start Flip 4 | 0x000003EB | 0x000003EC |
-| H-blank bit start Flip 5 | 0x000000E3 | 0x000000F4 |
-| H-blank bit start Flip 6 | 0x000003F3 | 0x000003E0 |
+| DMA Prefetch Break | 0x1000257C | 0x10002A94 |
+| H-blank bit start Hblank | 0x000004D3 | 0x000004D0 |
+| H-blank bit start Flip 1 | 0x0000009D | 0x00000087 |
+| H-blank bit start Flip 2 | 0x000003D2 | 0x000003EC |
+| H-blank bit start Flip 3 | 0x000000EF | 0x000000E5 |
+| H-blank bit start Flip 4 | 0x000003E1 | 0x000003EB |
+| H-blank bit start Flip 5 | 0x000000FF | 0x000000E3 |
+| H-blank bit start Flip 6 | 0x000003E0 | 0x000003F3 |
 
 ## Summary
 
 - **Total:** 6998
-- **Pass:** 6957
-- **Fail:** 41
+- **Pass:** 6958
+- **Fail:** 40
