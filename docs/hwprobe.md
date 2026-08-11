@@ -175,7 +175,7 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 | 20 | IRQWIN3 | the IME-gate sled re-run with 4-I-cycle muls, waitstated ROM loads, and a mixed nop/ldr sled; plus the ack-race sweep re-run at 4-cycle steps (reload 0xFFF8-4k) straddling the ack | is the post-store dispatch window cycle-counted (instructions x cost triangulates the constant); the previous 2-cycle ack sweep landed entirely before the ack on both machines |
 | 21 | IRQLAT2 | the TM2 IRQ-latency row with the irq_arm r5-clobber FIXED (session 1's row armed IME by mistake): reload 0 one-word, reload 0xFF00 one-word, 0xFF00 two-halfword arming, reload 0xFFF0 (overflow inside the arming code) | the retracted IRQLAT divergence re-measured for real, plus arming-shape and overflow-proximity variants |
 | 22 | IOBYTE2 | DISPSTAT lo-byte strb 0x38 (bits 3-5 are REAL IRQ enables), hi-byte strb 0x38 (LYC), 16-bit control, 16-bit-then-byte-clear | session 3's 0x44 probe was unfalsifiable (only bit6); 0x39 readback = byte writes store, 0x01 = lo byte ignores byte writes |
-| 23 | THUMBPC3 | Thumb `cmp pc, r0` at A%4==2 with a T-CLEARING SPSR (overlaid Thumb/ARM block: scratch-store breadcrumb at W, escape at W+4); plus the same cmp in System mode (no SPSR) with flags preset N\|Z | where ARM execution resumes after the restore at a halfword boundary (A&~3 vs (A+2)&~3), and what a mode with no SPSR restores |
+| 23 | THUMBPC3 | Thumb `cmp pc, r0` at A%4==2 with a T-CLEARING SPSR (overlaid Thumb/ARM block: scratch-store breadcrumb at W, escape at W+4); plus the same cmp in System mode (no SPSR) with flags preset N\|Z.  **v7 row (c)**: the same halfword-aligned cmp with the resume ladder extended — distinct breadcrumb adds at W+8/W+12/W+16 (A+6/A+10/A+14), r4 captured to show whether the W+4 ARM word ran, escape at W+20, safety at W+24 | where ARM execution resumes after the restore at a halfword boundary.  Session 4 answered (a) with an unlisted outcome — resumed past BOTH overlay words (A+10 or A+14, the old block's escape and safety were identical) — and (c) is the discriminator |
 | 24 | MSRTBIT2 | the MSRTBIT breadcrumb block boot-run twice under the watchdog: immediate-form `msr CPSR_c,#0x3F` from System, and register-form setting T AND switching IRQ->System in one write | does the A+8-skip-A+10 quirk hold for the immediate form and across a simultaneous mode switch (recovery CPSR byte says whether the switch landed) |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
@@ -225,7 +225,13 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 - **THUMBPC3**: (a) CPSR 80000012, scratch 0, r6=02 — dingbat performs
   the full restore and resumes ARM at (A+2)&~3, clean; (b) CPSR
   C000001F — the System-mode "restore" writes CPSR-as-SPSR back (no-op),
-  flags preset survives, clean.
+  flags preset survives, clean.  **v7 row (c)** (post-session-4 build,
+  HLE == real BIOS, page CRC 2333): +17 phase 01, +18 r6 = 07, +20 r4 =
+  0x02A01080, +24 scratch = 0, +28 CPSR = 0x80000012 — dingbat resumes
+  at (A+2)&~3 and executes the W+4 orr plus all three ladder adds.
+  Hardware (session 4, old block) resumed past both overlay words, so
+  the silicon prediction is r4 = 0xC0DEC0DE with r6 = 06 (A+10) or
+  04 (A+14).
 - **MSRTBIT2**: r7=04 / phase 01 / recovery mode 1F on BOTH rows — the
   A+8-skip-A+10 quirk holds for the immediate form and across the
   IRQ->System mode switch (which lands) in dingbat's model.

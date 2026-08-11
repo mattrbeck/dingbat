@@ -281,10 +281,35 @@ a stale stamp).
 analysis in docs/hwprobe-results-agb.md):** every row above is settled.
 Hardware selected the dingbat baseline on all pages except three
 divergences: `stmia r15!` performs NO writeback (ldm-style — dingbat's
-base+8 is wrong), handler-entry latency runs +6 cycles later than
-dingbat in every IRQLAT2 shape, and the halfword-aligned `cmp pc`
-T-clearing restore resumes past BOTH overlay words (scratch=0, r6=0 —
-an outcome the prediction key did not list: resume at A+10/A+14, not
-(A+2)&~3).  Open follow-ups for a v7: one row discriminating A+10 vs
-A+14 (move the escape, capture r4), and the frame-sequencer phase
-family from earlier sessions.
+base+8 is wrong; **fixed**, PCWB2 now byte-perfect), handler-entry
+latency runs +6 cycles later than dingbat in every IRQLAT2 shape
+(**fixed** as a gamepak-execution-context entry cost — IRQLAT2 now
+byte-perfect, mGBA suite unmoved at 6957/6998), and the
+halfword-aligned `cmp pc` T-clearing restore resumes past BOTH overlay
+words (scratch=0, r6=0 — an outcome the prediction key did not list:
+resume at A+10/A+14, not (A+2)&~3).  Open follow-up for a later rev:
+the frame-sequencer phase family from earlier sessions.
+
+## v7 SHIPPED — the THUMBPC3 resume-ladder row (page 35 extended)
+
+One follow-up row, appended to slot 35 as experiment (c): the
+halfword-aligned T-clearing `cmp pc` again, with the overlay block's
+resume ladder extended so session 4's "past both overlay words" outcome
+splits.  Distinct breadcrumb adds sit at W+8/W+12/W+16 (= A+6/A+10/
+A+14), the bx-r5 escape moves to W+20 (A+18) with a safety at W+24, and
+r4 is captured after recovery to show whether the ARM word at W+4
+(`orr r4, r7, #0xA00000` — the (A+2)&~3 resume dingbat models)
+executed.  Dingbat baseline from the v7 build (HLE and real BIOS
+`--bios tests/roms/gba_bios.bin` identical; page CRC 2333, ALL 2446
+HLE / FAF0 real-BIOS):
+
+| pg | row | outcome -> model | dingbat baseline |
+|---|---|---|---|
+| 35 THUMBPC3 | +18 r6 ladder key | 07 = resumed W+8 (A+6); 06 = W+12 (**A+10** — the session-4 escape slot); 04 = W+16 (**A+14** — the session-4 safety slot); 00 = W+20 or stayed Thumb | 07 (but see r4: dingbat resumes earlier and runs the whole ladder) |
+| 35 | +20 r4 | 0xC0DEC0DE = W+4 never executed; 0x02A01080 = the W+4 orr ran -> resumed (A+2)&~3 | 0x02A01080 ((A+2)&~3 model) |
+| 35 | +24 scratch / +28 CPSR / +17 phase | 0xC0DEC0DE = resumed A&~3 (strmi ran); CPSR 0x800000xx = full restore happened; phase 01 = clean | 0 / 0x80000012 / 01 |
+
+Silicon prediction from session 4's old-block outcome: r4 untouched,
+scratch 0, r6 = 06 or 04 — whichever comes back pins the resume at
+A+10 vs A+14 and finally licenses the model change (dingbat's
+(A+2)&~3 resume is already known wrong at halfword alignment).

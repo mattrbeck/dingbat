@@ -3176,6 +3176,14 @@ probe_iobyte2:
 @ scratch=0 & r6=2 -> resumed ARM at W+4 ((A+2)&~3); scratch=0 & r6=0 ->
 @ stayed Thumb (no restore — dingbat's model); CPSR word confirms which
 @ (0x800000xx = restored SPSR, 0x200000xx = compare flags).  Watchdogged.
+@ Session 4 answered (a) with an outcome the key did not list: scratch=0
+@ AND r6=0 with a clean phase — hardware resumed ARM past BOTH overlay
+@ words, at A+10 (the bx escape) or A+14 (the safety), which that block
+@ could not tell apart.  (c) reruns the experiment with the ladder
+@ extended: distinct breadcrumb adds at W+8/W+12/W+16 separate A+6 vs
+@ A+10 vs A+14, r4 is captured to show whether the ARM word at W+4 (the
+@ (A+2)&~3 resume — dingbat's model, `orr r4, r7, #0xA00000`) executed,
+@ and the bx-r5 escape moves to W+20 with a safety at W+24.
 @ +0  word: CPSR captured at recovery, row (a)
 @ +4  word: the scratch word (0 or 0xC0DEC0DE)
 @ +8  byte: r6      +9 byte: watchdog phase (1 clean / 2 fired)
@@ -3185,6 +3193,15 @@ probe_iobyte2:
 @       (no-op), 0x200000xx -> plain compare; anything else = garbage
 @       restore (watchdog phase says if it wandered)
 @ +16 byte: watchdog phase for (b)
+@ +17 byte: watchdog phase for (c)
+@ +18 byte: r6 for (c) — the resume-point ladder key: 07 = resumed at
+@       W+8 (A+6), 06 = W+12 (A+10), 04 = W+16 (A+14), 00 = W+20 (A+18)
+@       or stayed Thumb (r4/CPSR split those)
+@ +20 word: r4 for (c) — 0xC0DEC0DE untouched; 0x02A01080 = the W+4 ARM
+@       word ran, i.e. resumed at (A+2)&~3 (dingbat's model)
+@ +24 word: the scratch word for (c) (0xC0DEC0DE = the strmi at W ran,
+@       i.e. resumed at A&~3)
+@ +28 word: CPSR captured at recovery, row (c)
 probe_thumbpc3:
     push {r4-r11, lr}
     ldr r8, =SLOTS + 35*SLOTSZ
@@ -3247,6 +3264,37 @@ tp3b_rec:                          @ watchdog divert target (fallthrough
     strb r0, [r8, #16]
     mov r0, #0
     str r0, [r2, #8]
+    @ ── (c) the halfword-aligned cmp pc again, resume ladder extended ──
+    ldr r7, =SCRATCH + 0x80
+    mov r0, #0
+    str r0, [r7]                   @ clear the store-breadcrumb word
+    bic r0, r9, #0x1F
+    orr r0, r0, #0x12              @ IRQ mode, I CLEAR (watchdog reachable)
+    msr CPSR_c, r0
+    ldr sp, =SCRATCH + 0xF0
+    ldr r1, =0x80000012            @ SPSR: N set, T CLEAR, IRQ mode, I clear
+    msr SPSR_cxsf, r1
+    wdg_arm tp3c_rec
+    ldr r4, =0xC0DEC0DE            @ strmi payload / untouched-r4 sentinel
+    mov r6, #0
+    mov r0, #0                     @ cmp operand
+    ldr r5, =tp3c_rec
+    ldr r1, =tp3c_blk + 3          @ W+2, Thumb
+    bx  r1
+tp3c_rec:
+    mrs r10, CPSR                  @ capture BEFORE restoring
+    msr CPSR_cxsf, r9
+    wdg_disarm
+    strb r6, [r8, #18]
+    str r4, [r8, #20]
+    ldr r0, [r7]
+    str r0, [r8, #24]
+    str r10, [r8, #28]
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    strb r0, [r8, #17]
+    mov r0, #0
+    str r0, [r2, #8]
     pop {r4-r11, pc}
     .ltorg
     .align 2
@@ -3258,6 +3306,17 @@ tp3_blk:                           @ W (word-aligned)
     .word 0xE2866002               @ W+8:  add r6, r6, #2
     .word 0xE12FFF15               @ W+12: bx r5
     .word 0xE12FFF15               @ W+16: safety
+    .align 2
+tp3c_blk:                          @ W (word-aligned), the (c) ladder
+    .hword 0x4000                  @ W+0: ARM-overlay low half (strmi)
+    .hword 0x4587                  @ W+2: Thumb cmp pc, r0  <- entry (A)
+    .hword 0x4728                  @ W+4: Thumb bx r5 / ARM-overlay low half
+    .hword 0xE387                  @ W+6: ARM word W+4 = orr r4, r7, #0xA00000
+    .word 0xE2866001               @ W+8:  add r6, r6, #1  (A+6)
+    .word 0xE2866002               @ W+12: add r6, r6, #2  (A+10)
+    .word 0xE2866004               @ W+16: add r6, r6, #4  (A+14)
+    .word 0xE12FFF15               @ W+20: bx r5           (A+18)
+    .word 0xE12FFF15               @ W+24: safety
 
 @ ── slot 36: MSRTBIT2 — the T-bit quirk: immediate form, and mode+T ──────
 @ Session 1 verified the register-form `msr CPSR_c, r0` T-set quirk
