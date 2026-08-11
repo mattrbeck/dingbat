@@ -71,6 +71,24 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     write_reg_byte16(dma.dmacnt_l[channel], reg - 8, value, DMA_LEN_MASK[channel])
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
+    # Genuinely BYTE-sized stores to CNT_H are quirky on hardware around
+    # bit7 of the written byte (gbaedge DMAEDGE/IOBYTE pages, measured on
+    # DMA3, modeled for all channels):
+    # - strb 0x80 to the UPPER byte ran the DMA AND left bit7 of the LOW
+    #   byte set (readback 0x0080), while strb 0x44 to the upper byte left
+    #   the low byte alone (readback 0x4400): the upper-byte store also
+    #   copies ITS bit7 into the low byte's bit7.
+    # - strb 0x80 to the LOW byte stored nothing, yet strb 0x44 stores
+    #   normally: a low-byte store drops bit7.
+    # Halfword/word writes are entirely normal.
+    if dma.gba.bus.byte_io_write:
+      if (io_addr and 1) == 1:
+        let lo = read(dma.dmacnt_h[channel], 0)
+        write(dma.dmacnt_h[channel], (lo and 0x7F'u8) or (value and 0x80'u8), 0)
+      else:
+        # Low-byte store: bit7 dropped, enable (upper byte) unreachable
+        write(dma.dmacnt_h[channel], value and 0x7F'u8, 0)
+        return
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
       # Hardware force-aligns DMA addresses to the transfer size

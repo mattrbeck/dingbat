@@ -245,6 +245,13 @@ type
     # The HLE SWI paths that jump into stub code check this so they stay
     # inert when a real BIOS image is mapped (hle_after_bios mode).
     stub_bios*:  bool
+    # True only for the duration of a genuinely BYTE-sized store (CPU strb /
+    # DMA byte transfer). Halfword/word IO writes decompose into byte writes
+    # internally, and a few registers treat real byte stores specially
+    # (DISPSTAT's low byte ignores them; DMA CNT_H byte writes have quirks -
+    # gbaedge IOBYTE/DMAEDGE pages). Transient within one store, never
+    # serialized.
+    byte_io_write*: bool
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
     gpio*:       GPIO

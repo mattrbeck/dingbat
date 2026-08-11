@@ -915,7 +915,9 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
   if (bus_page(address) == 0x4 or bus.dma_pending) and not bus.dma_active: bus.catch_up()
+  bus.byte_io_write = true
   bus.write_byte_internal(address, value)
+  bus.byte_io_write = false
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.rom_cool()
