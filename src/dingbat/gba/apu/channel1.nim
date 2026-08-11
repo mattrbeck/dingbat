@@ -119,16 +119,10 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
   of 0x65:
     ch.frequency_ch1 = (ch.frequency_ch1 and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
     let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    let triggered = (value and 0x80) > 0
+    if triggered and ch.dac_enabled: ch.enabled = true
+    ch.agb_length_on_nrx4(length_enable, triggered, 0x40)
+    if triggered:
       # Same as the old clear(etAPUChannel1) + schedule(period): re-arm a full
       # period from now. The duty POSITION deliberately carries across a trigger
       # (hardware only resets it when the APU is powered off) — which is why the
@@ -142,6 +136,19 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
       ch.sweep_enabled        = ch.sweep_period > 0 or ch.shift_ch1 > 0
       ch.negate_has_been_used = false
       if ch.shift_ch1 > 0:
-        discard ch.ch1_frequency_calculation()
+        # Hardware runs the overflow check TWICE at trigger (gbaedge SWEEPQ
+        # page): the first is the usual shadow + (shadow >> shift); the
+        # second applies the SAME offset to that result WITHOUT writing it
+        # back, and kills the channel iff it exceeds 2048 STRICTLY.
+        # Anchors: freq 1400 dies on the first (2100 > 2047); 1300 dies on
+        # the second (1950 ok, 2600 > 2048); 1000 survives both (1500,
+        # 2000) and dies at its first sweep tick; 1024 survives on the
+        # knife edge (1536, 2048 - NOT strictly greater).
+        let offset = int(ch.frequency_shadow shr ch.shift_ch1)
+        let signed_off = if ch.negate: -offset else: offset
+        if ch.negate: ch.negate_has_been_used = true
+        let first = int(ch.frequency_shadow) + signed_off
+        if first > 0x7FF or first + signed_off > 2048:
+          ch.enabled = false
   of 0x66, 0x67: discard
   else: echo "Writing to invalid Channel1 register: ", hex_str(uint16(address))

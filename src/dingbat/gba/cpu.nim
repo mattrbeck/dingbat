@@ -48,6 +48,10 @@ proc skip_bios*(cpu: CPU) =
   cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
   cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
   cpu.r[15] = 0x08000000'u32
+  # Boot handoff I/O state (hardware-verified, gbaedge IDENT page, AGB SP):
+  # the BIOS leaves the display force-blanked and POSTFLG set at ROM entry
+  cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)
+  cpu.gba.mmio.postflg = 1
   # BIOS open-bus latch after boot (GBATEK: 0xE129F000, the msr at the end
   # of the boot sequence)
   cpu.gba.bus.bios_latch = 0xE129F000'u32

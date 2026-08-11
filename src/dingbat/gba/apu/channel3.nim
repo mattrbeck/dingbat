@@ -130,16 +130,10 @@ proc ch3_write*(ch: Channel3; address: uint32; value: uint8) =
   of 0x75:
     ch.frequency_ch3 = (ch.frequency_ch3 and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
     let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x100
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    let triggered = (value and 0x80) > 0
+    if triggered and ch.dac_enabled: ch.enabled = true
+    ch.agb_length_on_nrx4(length_enable, triggered, 0x100)  # AGB order; see abstract_channels
+    if triggered:
       # Same as clear(etAPUChannel3) + schedule(period + 6). The +6 stays
       # exactly where it was (outside the *4 in ch3_frequency_timer).
       let arm3 = ch.ch3_frequency_timer() + 6

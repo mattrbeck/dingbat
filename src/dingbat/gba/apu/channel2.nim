@@ -79,16 +79,10 @@ proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
   of 0x6D:
     ch.frequency_ch2 = (ch.frequency_ch2 and 0x00FF'u16) or ((uint16(value) and 0x07'u16) shl 8)
     let length_enable = (value and 0x40) > 0
-    if ch.gba.apu.first_half_of_length_period and not ch.length_enable and length_enable and ch.length_counter > 0:
-      ch.length_counter -= 1
-      if ch.length_counter == 0: ch.enabled = false
-    ch.length_enable = length_enable
-    if (value and 0x80) > 0:
-      if ch.dac_enabled: ch.enabled = true
-      if ch.length_counter == 0:
-        ch.length_counter = 0x40
-        if ch.length_enable and ch.gba.apu.first_half_of_length_period:
-          ch.length_counter -= 1
+    let triggered = (value and 0x80) > 0
+    if triggered and ch.dac_enabled: ch.enabled = true
+    ch.agb_length_on_nrx4(length_enable, triggered, 0x40)  # AGB order; see abstract_channels
+    if triggered:
       # Same as clear(etAPUChannel2) + schedule(period); see ch1_write.
       let arm2 = ch.ch2_frequency_timer()
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm2)

@@ -71,6 +71,24 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     write_reg_byte16(dma.dmacnt_l[channel], reg - 8, value, DMA_LEN_MASK[channel])
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
+    # Genuinely BYTE-sized stores to CNT_H are quirky on hardware around
+    # bit7 of the written byte (gbaedge DMAEDGE/IOBYTE pages, measured on
+    # DMA3, modeled for all channels):
+    # - strb 0x80 to the UPPER byte ran the DMA AND left bit7 of the LOW
+    #   byte set (readback 0x0080), while strb 0x44 to the upper byte left
+    #   the low byte alone (readback 0x4400): the upper-byte store also
+    #   copies ITS bit7 into the low byte's bit7.
+    # - strb 0x80 to the LOW byte stored nothing, yet strb 0x44 stores
+    #   normally: a low-byte store drops bit7.
+    # Halfword/word writes are entirely normal.
+    if dma.gba.bus.byte_io_write:
+      if (io_addr and 1) == 1:
+        let lo = read(dma.dmacnt_h[channel], 0)
+        write(dma.dmacnt_h[channel], (lo and 0x7F'u8) or (value and 0x80'u8), 0)
+      else:
+        # Low-byte store: bit7 dropped, enable (upper byte) unreachable
+        write(dma.dmacnt_h[channel], value and 0x7F'u8, 0)
+        return
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
       # Hardware force-aligns DMA addresses to the transfer size
@@ -106,13 +124,39 @@ proc trigger_vdma*(dma: DMA) =
 
 proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## DMA3 special timing = video capture: one transfer per scanline for
-  ## VCOUNT 2..161, then the channel disables itself at line 162. The AGS
-  ## aging cartridge verifies this by capturing VCOUNT itself each line.
+  ## VCOUNT 2..161 of the ARMED frame - 160 triggers of the programmed unit
+  ## - then hardware clears the enable bit at line 162 regardless of
+  ## software; re-arming next vblank repeats this every armed frame, and
+  ## the enable edge reloads the internal dst from DAD (handled in `[]=`).
+  ## Hardware-verified (gbaedge CAPDMA page, AGB SP sessions 2/3: 640
+  ## nonzero words per armed frame, readback 0x3700 both for the
+  ## always-armed and the re-armed-per-vblank patterns). The internal
+  ## active latch makes a channel armed mid-frame (the normal case: games
+  ## arm during vblank) wait for the next frame's line 2 instead of
+  ## catching the current frame's tail and self-clearing 4 words in - the
+  ## bug that made dingbat fire exactly one trigger. The AGS aging
+  ## cartridge verifies the per-line cadence by capturing VCOUNT itself.
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
-    if vcount >= 2 and vcount < 162:
-      dma.request(3)
-    elif vcount == 162:
-      dma.dmacnt_h[3].enable = false
+    if vcount == 2:
+      dma.video_active = true
+    if dma.video_active:
+      if vcount >= 2 and vcount < 162:
+        # Each line's trigger re-reads the programmed source: the CAPDMA
+        # probe's fixed ROM source yields 160 lines x 4 NONZERO words, which
+        # is impossible if the internal src kept incrementing across lines
+        # (the pattern is followed by zero padding). Model: the per-line
+        # trigger reloads internal src from SAD (the gamepak-ROM
+        # always-increment rule still applies WITHIN each line's burst; a
+        # real camera source is address-fixed so the distinction is
+        # invisible to the intended use).
+        let align = if dma.dmacnt_h[3].xfer_type != 0: not 3'u32 else: not 1'u32
+        dma.src[3] = dma.dmasad[3] and align
+        dma.request(3)
+      elif vcount == 162:
+        dma.video_active = false
+        dma.dmacnt_h[3].enable = false
+  else:
+    dma.video_active = false
 
 proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1

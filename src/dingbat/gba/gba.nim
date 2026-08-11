@@ -92,6 +92,16 @@ type
   MMIO* = ref object
     gba* {.cursor.}:     GBA
     waitcnt*: WAITCNT
+    # POSTFLG (0x04000300): R/W bit0; the BIOS sets it to 1 at first boot.
+    # Hardware-verified boot value 01 at ROM entry (gbaedge IDENT page).
+    postflg*: uint8
+    # Internal memory control (0x04000800, mirrored every 64K): stored for
+    # readback only - the waitstate/WRAM-disable effects are deliberately
+    # unimplemented. Reset value 0x0D000020 (hardware-verified, IDENT page;
+    # dingbat previously returned open bus). Neither field is serialized:
+    # postflg is effectively constant after boot and memctrl is write-rare;
+    # a state load resets them to the boot values.
+    memctrl*: uint32
 
   Timer* = ref object
     gba* {.cursor.}:          GBA
@@ -162,6 +172,12 @@ type
     # run_pending call. Always 0/4 between instructions, so not serialized.
     pending*:          uint8
     current_priority*: int
+    # DMA3 video-capture "frame in progress" latch: set at the armed frame's
+    # line 2, cleared (with the enable bit) at line 162. A channel armed
+    # mid-frame waits for the NEXT frame's line 2 (gbaedge CAPDMA page).
+    # Not serialized: a state load mid-capture-frame drops the rest of that
+    # frame's triggers (capture DMA is rare and per-frame re-armed).
+    video_active*:     bool
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting
 
@@ -229,6 +245,13 @@ type
     # The HLE SWI paths that jump into stub code check this so they stay
     # inert when a real BIOS image is mapped (hle_after_bios mode).
     stub_bios*:  bool
+    # True only for the duration of a genuinely BYTE-sized store (CPU strb /
+    # DMA byte transfer). Halfword/word IO writes decompose into byte writes
+    # internally, and a few registers treat real byte stores specially
+    # (DISPSTAT's low byte ignores them; DMA CNT_H byte writes have quirks -
+    # gbaedge IOBYTE/DMAEDGE pages). Transient within one store, never
+    # serialized.
+    byte_io_write*: bool
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
     gpio*:       GPIO

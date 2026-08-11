@@ -1435,8 +1435,12 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
   of 0x002..0x003: discard  # green swap
   of 0x004:
+    # Writable low-byte bits are 3-5 (the IRQ enables) only: bits 0-2 are
+    # the live flags and bits 6-7 do not latch on hardware - the gbaedge
+    # IOBYTE page's strb 0x44 (bits 2+6) reads back as just the flags,
+    # while dingbat's old 0xF8 mask stored bit 6 (readback 0x0041).
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
-    write(ppu.dispstat, (value and 0xF8'u8) or preserved, 0)
+    write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
   of 0x005: write(ppu.dispstat, value, 1)
   of 0x006..0x007: discard  # vcount
   of 0x008..0x00F: write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
