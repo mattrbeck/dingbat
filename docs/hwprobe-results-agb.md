@@ -36,7 +36,8 @@ Divergences (dingbat != hardware), ranked:
    chainloader leftovers. A corrected micro-ROM (reload 0 + enable + IRQ in
    one 32-bit write, full BIOS handler dispatch) delivers the one-shot IRQ
    correctly on dingbat. A future gbaedge rev should reload r5 after
-   irq_arm and re-measure. The other sources fire but enter late-shifted:
+   irq_arm and re-measure — **done in v6**: IRQLAT's call site reloads r5
+   and page 33 IRQLAT2 re-measures the row plus arming-shape variants. The other sources fire but enter late-shifted:
    DMA3 entry hw 029A vs 0288 (+18), hblank pair hw (046A,08DF) vs
    (0463,08C0), vblank hw (0AD4,4375) vs (0AC8,4363). The one-row-fitted
    IRQ_SYNC_DELAY/HBLANK_IRQ_SYNC_DELAY constants now have real anchors.

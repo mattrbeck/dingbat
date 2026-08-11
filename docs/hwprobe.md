@@ -1,9 +1,12 @@
 # hwprobe: gbedge.gb + gbaedge.gba — hardware edge-case probe ROMs
 
-**Date:** 2026-08-10 (v2)  **ROMs:** `tests/roms/gbedge.gb` (25 pages,
-DMG+CGB), `tests/roms/gbaedge.gba` (14 pages).  v2 adds six pages aimed at
+**Date:** 2026-08-10 (v6)  **ROMs:** `tests/roms/gbedge.gb` (26 pages,
+DMG+CGB), `tests/roms/gbaedge.gba` (37 pages).  v2 added six pages aimed at
 the highest-leverage open questions in docs/gb-failure-triage.md and the
-GBA bus/HLE calibrations; the full research catalog behind them is
+GBA bus/HLE calibrations; v4/v5 added the guessed-at-behavior pages; v6
+(gbaedge 28-36) adds nine DISCRIMINATION pages that isolate the model
+splits the three AGS-001 sessions could not separate, plus the IRQLAT
+irq_arm r5-clobber fix.  The full research catalog behind them is
 docs/hwprobe-questions.md.  Both built from committed sources
 (`gbedge.py` hand-assembles; `gbaedge.py` drives arm-none-eabi-as/ld).
 
@@ -56,7 +59,7 @@ GBA: BIOS checksum low half).
 
 ### AGB-only sessions (GBA console + EverDrive)
 
-All 28 gbaedge pages run natively — CONTEND, IRQLAT, and the nine
+All 37 gbaedge pages run natively — CONTEND, IRQLAT, and the nine
 guessed-at-behavior pages (16-24) are entirely on-die, so the flashcart cannot
 influence them; WAITSTATE/PFPHASE and ROM open-bus bytes carry the
 flashcart caveat below.  NOTE: growing the ROM to 25 pages changed the
@@ -165,6 +168,15 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 | 19 | THUMBPC2 | Thumb `cmp/add/mov pc, r0` with SPSR = 0x9000009F (a DIFFERENT mode than current) — CPSR-after words say whether the r15 SPSR-load is full-CPSR or flags-only, breadcrumbs say whether add/mov still branch; plus `ldm/str/ldr r15` base-writeback rows under the timer watchdog with distinct-breadcrumb sleds | scopes session 2's SPSR-load discovery, and the last untested r15 corners |
 | 1A | IRQWIN2 | the IRQWIN gates again but TM0-timestamped (pre-store stamp vs handler entry stamp) + an EWRAM-load sled for the IME gate + a one-shot TM2 overflow swept in 2-cycle steps across an IF-ack write (bit0 = IF right after, bit1 = 8 nops later) | converts the gate windows from instructions to cycles, and extracts the same-cycle ack-vs-assert priority |
 | 1B | IOBYTE | byte-writes 0x44 to the low then high byte of eight readable registers (DISPCNT, DISPSTAT, BG0CNT, WININ, BLDCNT, SOUND1CNT_L w/ master forced on, IE, DMA3CNT_H sans enable), halfword readback after each, original restored | is DMAEDGE's byte-mirroring asymmetry bus-wide or DMA-specific — one byte, both bytes, or ignored, per register |
+| 1C | LDMUSER2 | `ldmia r0,{r1-r7}^` in IRQ mode with SPSR flags N\|V and CPSR flags Z\|C (DISJOINT), mrs SPSR in the shadow (next instruction / one nop later / no-ldm control / CPSR sanity) | session 2's OR-with-CPSR row was unfalsifiable (CPSR bits ⊆ SPSR); readback 0x90000092 = unchanged, 0xF0000092 = OR'd, 0x60000092 = returns CPSR |
+| 1D | PCWB2 | five r15-writeback candidates run from EWRAM in a breadcrumb block with pads before AND after (str ±8/-4 post-indexed, str pre-indexed, ldr +8, stm), identity store payloads, watchdogged | pins the FUNCTIONAL FORM: "PC := writeback address (+4 for ldr)" vs "PC := base+4/base+8 fixed" — session 3 measured only offset +4, where the two models coincide |
+| 1E | DMABYTE2 | upper-byte strb 0x80 on DMA0/1/2 (immediate EWRAM copy primed via 16-bit writes; ran + CNT_H readback), DMA3 upper 0xC0 / lower 0xC0 / upper 0x40 | generalizes the DMA3CNT_H bit7 anomaly: which channels mirror, whole-value vs bit7-only (40C0 vs 4080), and whether a lo-byte 0xC0 is fully dropped or bit6 still stores |
+| 1F | SWEEP2 | four ch1 sweep rows (freq 512 s1, 2018 s7, 940 s1, 2033 s7 — the s7 rows put the second trigger check / first calc EXACTLY at 2048), poll counts | pins trigger-recalc writeback (death tick 2/3/4 on the 512 row), the >2048-vs->=2048 boundary (single-anchor today), and same-offset vs recalculated second check (940 row) |
+| 20 | IRQWIN3 | the IME-gate sled re-run with 4-I-cycle muls, waitstated ROM loads, and a mixed nop/ldr sled; plus the ack-race sweep re-run at 4-cycle steps (reload 0xFFF8-4k) straddling the ack | is the post-store dispatch window cycle-counted (instructions x cost triangulates the constant); the previous 2-cycle ack sweep landed entirely before the ack on both machines |
+| 21 | IRQLAT2 | the TM2 IRQ-latency row with the irq_arm r5-clobber FIXED (session 1's row armed IME by mistake): reload 0 one-word, reload 0xFF00 one-word, 0xFF00 two-halfword arming, reload 0xFFF0 (overflow inside the arming code) | the retracted IRQLAT divergence re-measured for real, plus arming-shape and overflow-proximity variants |
+| 22 | IOBYTE2 | DISPSTAT lo-byte strb 0x38 (bits 3-5 are REAL IRQ enables), hi-byte strb 0x38 (LYC), 16-bit control, 16-bit-then-byte-clear | session 3's 0x44 probe was unfalsifiable (only bit6); 0x39 readback = byte writes store, 0x01 = lo byte ignores byte writes |
+| 23 | THUMBPC3 | Thumb `cmp pc, r0` at A%4==2 with a T-CLEARING SPSR (overlaid Thumb/ARM block: scratch-store breadcrumb at W, escape at W+4); plus the same cmp in System mode (no SPSR) with flags preset N\|Z | where ARM execution resumes after the restore at a halfword boundary (A&~3 vs (A+2)&~3), and what a mode with no SPSR restores |
+| 24 | MSRTBIT2 | the MSRTBIT breadcrumb block boot-run twice under the watchdog: immediate-form `msr CPSR_c,#0x3F` from System, and register-form setting T AND switching IRQ->System in one write | does the A+8-skip-A+10 quirk hold for the immediate form and across a simultaneous mode switch (recovery CPSR byte says whether the switch landed) |
 
 ### dingbat baseline (main @ today) — flagged while bringing the ROM up
 
@@ -183,6 +195,40 @@ runs everywhere; a DMG shows the flat B7 no-banking pattern as control.)
 - **MSRTBIT**: r7=04 (resume at A+8, skip A+10), watchdog not needed.
   **Confirmed on AGB silicon** (session 1): identical breadcrumb, clean
   run, valid control.
+
+### dingbat baseline — the v6 pages (37-page build, HLE == real BIOS on all nine)
+
+- **LDMUSER2**: post-ldm^ SPSR reads back 0x90000092 (unchanged) at both
+  distances; control and CPSR sanity rows exact.
+- **PCWB2**: r7 = 18/10/1F/1C/18 — dingbat generalizes as PC := writeback
+  (+4 for ldr, load suppressed: r1 stays 0), EXCEPT `stmia r15!` lands
+  base+8 (neither wb=base+4 nor the ldm-style no-wb).  No watchdog fires.
+- **DMABYTE2**: dingbat mirrors CNT_H bit7 on ALL FOUR channels (readback
+  0080 after hi-strb 0x80, transfer runs); DMA3 hi 0xC0 -> 4080
+  (bit7-only mirror), lo 0xC0 -> 0040 (bit6 stores, bit7 dropped),
+  hi 0x40 -> 4000 control exact.
+- **SWEEP2**: polls 3532 / 09D8 / 109D / 0000 — the 512 row dies ~tick 3,
+  2018 and 940 die ~tick 1, 2033 dies at trigger.
+- **IRQWIN3**: dispatch after 2 muls / 2 ROM-ldrs / 3 mixed-sled
+  instructions (8/8/C bytes); ack-race k=0..5 -> 00, k=6..7 -> 03 — the
+  coarser sweep straddles the ack point in dingbat.
+- **IRQLAT2**: TM2 delivers on every arming shape now that r5 is
+  reloaded: deltas 0x33 (reload 0), 0x13D (0xFF00, one-word AND
+  two-write identical), and the 0xFFF0 row enters the handler BEFORE the
+  trigger-side stamp (entry 0B4F < trigger 0C4F) — the overflow lands
+  inside the arming code, as designed.  IRQLAT p0F's own TM2 pair reads
+  (00D4, 0103) after the fix.
+- **IOBYTE2**: dingbat STORES the DISPSTAT lo-byte 0x38 (readback 0039)
+  and the byte-clear (0001 after) — the "lo byte ignores byte writes"
+  hardware model predicts 0001/0039 instead; hi-byte LYC and 16-bit
+  control exact (3801/0039).
+- **THUMBPC3**: (a) CPSR 80000012, scratch 0, r6=02 — dingbat performs
+  the full restore and resumes ARM at (A+2)&~3, clean; (b) CPSR
+  C000001F — the System-mode "restore" writes CPSR-as-SPSR back (no-op),
+  flags preset survives, clean.
+- **MSRTBIT2**: r7=04 / phase 01 / recovery mode 1F on BOTH rows — the
+  A+8-skip-A+10 quirk holds for the immediate form and across the
+  IRQ->System mode switch (which lands) in dingbat's model.
 
 **Hardware session 1 (AGB SP + EverDrive, 2026-08-10) is transcribed and
 diffed in `docs/hwprobe-results-agb.md`** — 9/16 pages byte-perfect

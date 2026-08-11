@@ -1,4 +1,4 @@
-.equ NPAGES, 28
+.equ NPAGES, 37
 
 .global font_data
 font_data:
@@ -73,6 +73,15 @@ name_table:
     .byte 30,18,31,23,12,26,13,3,0,0   @ THUMBPC2
     .byte 19,28,27,33,19,24,3,0,0,0   @ IRQWIN2
     .byte 19,25,12,35,30,15,0,0,0,0   @ IOBYTE
+    .byte 22,14,23,31,29,15,28,3,0,0   @ LDMUSER2
+    .byte 26,13,33,12,3,0,0,0,0,0   @ PCWB2
+    .byte 14,23,11,12,35,30,15,3,0,0   @ DMABYTE2
+    .byte 29,33,15,15,26,3,0,0,0,0   @ SWEEP2
+    .byte 19,28,27,33,19,24,4,0,0,0   @ IRQWIN3
+    .byte 19,28,27,22,11,30,3,0,0,0   @ IRQLAT2
+    .byte 19,25,12,35,30,15,3,0,0,0   @ IOBYTE2
+    .byte 30,18,31,23,12,26,13,4,0,0   @ THUMBPC3
+    .byte 23,29,28,30,12,19,30,3,0,0   @ MSRTBIT2
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2

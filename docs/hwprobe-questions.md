@@ -236,3 +236,43 @@ every other GBA-family console available (AGB-001, micro, DS/DS Lite in
 GBA mode).  Page 0's ALL CRC instantly reports whether any probe differs
 across silicon revisions; MODEL separates the BIOS families (DS reads
 `18 80`).  Divergent consoles get their own expected/ directory.
+
+## v6 SHIPPED — the discrimination pages (gbaedge 28-36, 37-page build)
+
+Sessions 1-3 left a handful of measurements that a single anchor could
+not turn into a model (the 2026-08-10 amendments in
+docs/hwprobe-results-agb.md list them).  v6 adds one page per ambiguity;
+every row below states which hardware outcome selects which model, and
+the **dingbat baseline** (37-page build; HLE and real BIOS agree on all
+nine pages).  v6 also fixes the `irq_arm` r5 clobber that invalidated
+session 1's IRQLAT TM2 row (the arming word hit IME; both machines read
+a stale stamp).
+
+| pg | row | outcome -> model | dingbat baseline |
+|---|---|---|---|
+| 28 LDMUSER2 | +0 SPSR read in the ldm^ shadow (SPSR flags N\|V, CPSR flags Z\|C — disjoint at last) | 0x90000092 unchanged; 0xF0000092 OR'd with CPSR; 0x60000092 read returns CPSR | 0x90000092 (unchanged), same at +4 (one nop later); control/sanity exact |
+| 29 PCWB2 | +0 `str r1,[r15],#8` r7 | 18 = PC:=writeback (base+8); 1C = fixed base+4 | 18 (writeback model) |
+| 29 | +1 `ldr r1,[r15],#8` r7, +8 loaded r1 | 10 = wb+4 (base+12); 18 = fixed base+8; r1 0 = load suppressed | 10, r1=0 (wb+4, suppressed) |
+| 29 | +2 `str r1,[r15],#-4` r7 | 1F = wb (base-4); 1C = fixed base+4 | 1F (writeback model) |
+| 29 | +3 `str r1,[r15,#4]!` r7 | 1C = pre-indexed wb reaches PC (= base+4 under both post-models); 18 = fixed base+8 | 1C |
+| 29 | +4 `stmia r15!,{r1}` r7, +12/+16 block words, +20 r1 | 1C = wb base+4; 1F = no-wb (ldm-style); 18 = base+8 | 18 (base+8 — matches neither pure model) |
+| 30 DMABYTE2 | +0..+10 DMA1/DMA2/DMA0 hi-strb 0x80 | ran + readback 0080 = bit7 mirror on that channel too; ran + 0000 = normal byte write, no mirror | all three: ran=1, 0080 (mirror modeled bus-wide) |
+| 30 | +12 DMA3 hi-strb 0xC0 | 40C0 = WHOLE-VALUE mirror; 4080 = bit7-only mirror; 4000 = no mirror | 4080 (bit7-only) |
+| 30 | +16 DMA3 lo-strb 0xC0 | 0000 = fully dropped; 0040 = bit6 stores, bit7 dropped; 00C0 = full store | 0040 (partial) |
+| 30 | +20 DMA3 hi-strb 0x40 control | 4000 + no run = normal store | 4000, no run |
+| 31 SWEEP2 | +0 freq 512 s1 (~0xF75 polls/tick) | die tick 2 = writeback-at-trigger + tick-2nd-check; tick 3 = (no-wb + check) or (wb + no-check); tick 4 = no-wb + no-check | 3532 (~tick 3) |
+| 31 | +4 freq 2018 s7 (trigger calc2 = exactly 2048) | 0 polls = trigger 2nd check >=2048 (re-anchors the single 1024-anchor strictness); ~1 tick = tick 2nd check >=2048; ~2 ticks = tick primary kills 2048 (documented >2047); ~3 ticks = 2048 writes back, boundary >2048 everywhere | 09D8 (~tick 1) |
+| 31 | +8 freq 940 s1 (same-offset 2nd = 1880, recalc'd = 2115) | 0 polls = the trigger 2nd check RECALCULATES; survives trigger = same-offset (extra anchor) | 109D (~tick 1: survives trigger) |
+| 31 | +12 freq 2033 s7 (calc1 = exactly 2048) | 0 polls under either strictness (calc2 2063 kills what calc1 spares); surviving to a tick falsifies the two-check model | 0000 |
+| 31 | (note) | the task-spec "freq 2046/2047 shift 10" rows are unencodable (shift is 3 bits); 2018/2033 shift 7 preserve the 2048 discriminators exactly | — |
+| 32 IRQWIN3 | +0/+2/+4 IME-gate sled offsets (mul / ROM-ldr / mixed) | a cycle-window W predicts ceil(W/cost) instructions per sled; identical counts across sleds = instruction-counted | 8 / 8 / C bytes (2 muls / 2 ldrs / 3 mixed — cycle-shaped) |
+| 32 | +8..+15 ack-race, overflow (8+4k)+latency cycles after enable | the k where bit0 flips is the ack instant; bit0=1 beyond it = assert-beats-ack in the same cycle | 00 x6 then 03 03 (flip between k=5 and k=6) |
+| 33 IRQLAT2 | +0/+2 TM2 reload-0 one-word (r5 fixed) | delta = synchronizer latency + arming offset, mod 2^16 | 0116-00E3 = 0x33 |
+| 33 | +4..+10 reload 0xFF00 one-word vs two-write arming | equal deltas = arming shape irrelevant | both 0x13D (equal) |
+| 33 | +12/+14 reload 0xFFF0 (overflow ~16 cy out) | entry stamp BEFORE trigger stamp = overflow landed inside the arming code | entry 0B4F < trigger 0C4F (inside) |
+| 34 IOBYTE2 | +0 DISPSTAT lo-strb 0x38 (real IRQ-enable bits — falsifiable, unlike 0x44) | 0039 = byte writes store; 0001 = lo byte ignores byte writes (session 3's hardware hint) | 0039 (stores) |
+| 34 | +2 hi-strb 0x38 (LYC) / +4 16-bit control / +6 byte-clear after 16-bit 0x0038 | 3801 stores; 0039 control; +6: 0001 = byte-clear stores, 0039 = ignored | 3801 / 0039 / 0001 |
+| 35 THUMBPC3 | +0/+4/+8 cmp pc at A%4==2, SPSR.T=0 (N set) | scratch=C0DEC0DE & r6=2 -> resumed ARM at A&~3; scratch=0 & r6=2 -> (A+2)&~3; scratch=0 & r6=0 & CPSR 0x200000xx -> stayed Thumb (no restore) | 80000012 / 0 / 02: full restore, resumes (A+2)&~3 |
+| 35 | +12 cmp pc in System mode (flags preset N\|Z, unreachable by a compare) | C00000xx = "restore" writes CPSR-as-SPSR (no-op); 200000xx = plain compare; else garbage restore (phase byte flags a wander) | C000001F (no-op restore), clean |
+| 36 MSRTBIT2 | +0 immediate-form `msr CPSR_c,#0x3F` r7 | 04 = A+8-skip-A+10 quirk is form-independent; 15/14/12/08 = other resume points; 00 = continued as ARM | 04 (quirk holds), clean |
+| 36 | +8/+10 register form, T + IRQ->SYS in one write | r7 04 + recovery mode byte 1F = quirk unchanged AND the mode switch lands | 04 / 1F (both) |
