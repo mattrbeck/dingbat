@@ -1861,22 +1861,33 @@ const LCD_ON_LINE0_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_LINE1_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_TRIM_ANY* = LCD_ON_LINE0_TRIM != 0 or LCD_ON_LINE1_TRIM != 0
 
-const SCX_FINE_LATCH_LIVE* {.booldefine.} = false
+const SCX_FINE_LATCH_LIVE* {.booldefine.} = true
   ## A store to SCX joins the line's fine-scroll discard for as long as the
   ## discard still has pixels to throw away, instead of being measured against
   ## a value sampled on one dot. Declared here, with the other pipeline
   ## constants, because `GbFifoPpu` below grows a field only when it is on --
   ## the field costs 0.21% of retired instructions on its own through object
   ## layout, so `false` has to be byte-identical to not having built it.
+  ## Ships ON since 2026-08-11: its original -0.446% price was remeasured at
+  ## +0.027% in the tree that ships STAT_M0_FIELD_TAIL, which removed the
+  ## reason it was parked; +6/-1 on the suite, and SCX_FINE_LATCH_WRAP below
+  ## rides inside its window for +7 more.
   ##
   ## The derivation, the two-sided evidence and the price are all at this
   ## constant's note in gb/fifo_ppu.nim.
 
-const SCX_FINE_LATCH_WRAP* {.intdefine.} = 0'i32
+const SCX_FINE_LATCH_WRAP* {.intdefine.} = 8'i32
   ## Dots the fine-scroll discard costs when a mid-line SCX store lands AFTER
   ## the discard has already walked past the new `SCX and 7`. 0 is off; 8 is
   ## one whole pass of the eight-slot window. Requires `SCX_FINE_LATCH_LIVE`,
   ## whose window this rides inside, and grows a field of its own.
+  ## Ships at 8 since 2026-08-11: the discard is a three-bit SLOT COUNTER
+  ## compared each dot against the live `SCX and 7`, and a slot-7 miss wraps
+  ## into a whole further pass -- which is what "SCX banging" abuses. Bracketed
+  ## as a strict local maximum by whole-suite sweep (6/7/8/9/10 ->
+  ## 4049/4050/4051/4050/4050) and by scx_m3_extend's `_ds` pair, a
+  ## twelve-store banging ROM whose 3->0 edge lands in (329, 331] with this
+  ## rule producing 330.
   ##
   ## The derivation is at this constant's note in gb/fifo_ppu.nim.
 

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-10 18:05:43*
+*Generated: 2026-08-10 21:14:43*
 
 ## Game Boy - Blargg
 
@@ -1019,7 +1019,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/div | 👌 8/8 passed |
 | gambatte/dma | 👀 122/229 passed |
 | gambatte/dmgpalette_during_m3 | 👀 7/17 passed |
-| gambatte/enable_display | 👀 135/184 passed |
+| gambatte/enable_display | 👀 134/184 passed |
 | gambatte/halt | 👀 127/158 passed |
 | gambatte/irq_precedence | 👀 44/64 passed |
 | gambatte/lcd_offset | 👀 41/62 passed |
@@ -1048,7 +1048,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/miscmstatirq | 👀 268/279 passed |
 | gambatte/oam_access | 👀 53/69 passed |
 | gambatte/oamdma | 👀 707/811 passed |
-| gambatte/scx_during_m3 | 👀 113/141 passed |
+| gambatte/scx_during_m3 | 👀 121/141 passed |
 | gambatte/scy | 👌 67/67 passed |
 | gambatte/serial | 👀 50/82 passed |
 | gambatte/sound | 👀 113/116 passed |
