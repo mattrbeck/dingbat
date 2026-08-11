@@ -620,6 +620,25 @@ Not in tasks but in CI: the link-acceptance battery (`linktest`,
 `speclink`, `netlink`, `rollback` modes over `tests/roms/*.gba`) — copy the
 exact invocations from `.github/workflows/test.yml`.
 
+## `tests/roms/hwverified/` — self-judging hardware proof ROMs
+
+Eleven single-behavior GBA ROMs distilled from the AGS-001 gbaedge
+sessions, each carrying its hardware-verified expected values: wrong
+cells render inverted and a verdict block lands in the bottom-right
+corner — green pass, red fail, white means it hung before finishing.
+
+```
+python3 tests/roms/hwverified/run.py
+```
+
+runs the committed `.gba`s through `dingbat_test --mode=screenshot` and
+samples pixel (239,159) per ROM. `--color` is load-bearing there: the
+default greyscale PPM folds green and red to the same grey. Jittery
+poll-count cells are range-checked, not exact, so real hardware cannot
+false-fail. Local runner only, not in CI. Details and per-ROM notes in
+`tests/roms/hwverified/README.md`; the sparse-comment PR-facing copies
+of the same ROMs live on the NBA fork's `hwprobe-test-roms` branch.
+
 ## Where test ROMs come from
 
 - `tests/roms/` — committed homebrew ROMs **with their sources**: GBA `.s`
