@@ -1,8 +1,9 @@
 # hwverified — self-judging hardware proof ROMs
 
 One minimal GBA ROM per hardware-verified behavior from the AGS-001
-probe sessions (gbaedge pages 8 and 16-27; raw transcriptions in
-`../expected/agb-sp-*.txt`, analysis in `docs/hwprobe-results-agb.md`).
+probe sessions (gbaedge pages 8, 16-27 and the session-4 v6 pages
+28-36; raw transcriptions in `../expected/agb-sp-*.txt`, analysis in
+`docs/hwprobe-results-agb.md`).
 Each ROM runs a single experiment at boot, prints the raw observed
 bytes as hex and loops forever, so a photo of real hardware and an
 emulator screenshot are directly comparable.
@@ -52,10 +53,10 @@ only — deliberately not wired into CI.
 | psrmask | PSR write mask is 0xF00000FF, bit4 reads as one | all exact |
 | thumbcmp | Thumb hi-reg CMP pc = full SPSR restore; ADD/MOV pc don't touch CPSR | all exact |
 | ldmuser | stm^ banked base: banked address, user value, writeback to user bank; post-ldm^ SPSR unchanged | all exact |
-| pcwb | r15 base writeback: ldm none, str base+4, ldr base+8 + load suppressed | all exact |
+| pcwb | r15 base writeback: PC := the writeback address (+4 for ldr, load suppressed) for str/ldr at offsets +4/+8/-4/pre-indexed; NO writeback for ldm AND stm (stm falls through) | all exact |
 | bxdecode | ARMv5 BLX word executes as BX; BX r15 branches $+8 | all exact |
-| irqwin | 3 instructions run after IME/IE stores, 2 after msr, 2 EWRAM loads | ack-survivors word range 6..10 |
-| dmabyte | DMA3CNT_H bit7 byte-write anomaly (mirror up, drop low) | all exact |
+| irqwin | 3 instructions run after IME/IE stores, 2 after msr; sled composition: 2 EWRAM loads / 2 muls / 2 ROM loads / 3 mixed nop+ldr — the window is cycle-counted | ack-survivors word range 6..10 |
+| dmabyte | DMA CNT_H bit7 byte-write anomaly, bit7-granular on all four channels: hi 0x80 mirrors down (0080), hi 0xC0 -> 4080, lo 0xC0 -> 0040, lo 0x80 drops | all exact |
 | capdma | capture DMA runs every line of every armed frame, enable self-clears | all exact |
 | sweep | trigger runs the overflow check twice; divider 0 never ticks | tick-1 poll count range 0x800..0x1800 |
 | iomap | unused/write-only IO: which registers read zero vs open bus | all exact (open-bus cells are the ROM's own prefetch, deterministic) |

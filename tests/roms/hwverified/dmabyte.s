@@ -1,14 +1,18 @@
-@ dmabyte.s — WHAT: the DMA3CNT_H byte-write anomaly.  Rumor said a
+@ dmabyte.s — WHAT: the DMA CNT_H byte-write anomaly.  Rumor said a
 @ byte write of 0x80 to the WRONG byte of DMA3CNT_H can still enable
-@ the DMA (bus byte-mirroring); hardware says the truth is stranger.
+@ the DMA (bus byte-mirroring); hardware says the truth is stranger:
+@ the anomaly is BIT7-GRANULAR, not a byte-lane mirror, and session 4
+@ confirmed it on ALL FOUR channels (DMA0/1/2/3 alike).
 @
 @ HOW: before each poke DMA3 is primed with a valid ROM source, an
 @ EWRAM destination whose first word is cleared as a marker, and a
 @ 4-unit length (de_prime).  After the byte write and a few nops, the
 @ marker says whether a transfer ran and DMA3CNT_H is read back
-@ (de_verdict).  Four pokes: 0x80 to the upper byte (0x040000DF, where
-@ the enable bit lives), 0x80 to the lower byte (0x040000DE), then
-@ 0x44 to each byte as bit7-clear controls.
+@ (de_verdict).  Seven pokes: 0x80 to the upper byte (0x040000DF,
+@ where the enable bit lives), 0x80 to the lower byte (0x040000DE),
+@ 0x44 to each byte as bit7-clear controls, then the session-4
+@ discriminators: 0xC0 to the upper byte, 0xC0 to the lower byte, and
+@ 0x40 to the upper byte as a bit7-clear control.
 @
 @ WHY the expected values: `strb 0x80` to the UPPER byte lands in BOTH
 @ bytes — the DMA runs (marker = 1) and after the immediate transfer
@@ -16,11 +20,20 @@
 @ bit7 of the LOW byte (a src-control bit) stuck.  `strb 0x80` to the
 @ LOWER byte stores NOTHING (readback 0x0000 — not even the bit7 it
 @ named).  The 0x44 controls store normally under the register's bit
-@ mask: 0x0040 low (dst-control bits) and 0x4400 high.  So the anomaly
-@ is bit7-specific, not a general byte-lane mirror.
+@ mask: 0x0040 low (dst-control bits) and 0x4400 high.  The 0xC0 rows
+@ pin the granularity: upper-byte 0xC0 runs the DMA and reads back
+@ 0x4080 — ONLY bit7 mirrored into the low byte (a whole-value mirror
+@ would read 0x40C0); lower-byte 0xC0 reads back 0x0040 — bit7 is
+@ dropped but bit6 stores (a whole-write drop would read 0x0000).
+@ Upper-byte 0x40 stores normally (0x4000, no run).  So bit7 of a
+@ CNT_H byte write mirrors into the other byte's bit7 when written
+@ high-side and is dropped when written low-side; every other bit
+@ behaves like a normal masked byte write.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2+3, gbaedge pages
-@ 21 DMAEDGE and 27 IOBYTE); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2-4, gbaedge pages
+@ 21 DMAEDGE, 27 IOBYTE and 30 DMABYTE2 — session 4's DMABYTE2 ran the
+@ 0x80 row on DMA0/1/2 and the 0xC0/0x40 rows on DMA3, byte-perfect
+@ against dingbat); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start
@@ -99,6 +112,33 @@ probe:
     nop
     nop
     de_verdict 12
+    de_prime
+    mov r0, #0xC0
+    ldr r1, =0x040000DF
+    strb r0, [r1]                  @ high byte, bit7+bit6: enable + IRQ-off
+    nop                            @ granularity probe — 0x4080 = bit7-only
+    nop                            @ mirror, 0x40C0 = whole-value mirror
+    nop
+    nop
+    de_verdict 16
+    de_prime
+    mov r0, #0xC0
+    ldr r1, =0x040000DE
+    strb r0, [r1]                  @ low byte, bit7+bit6 — 0x0040 = bit6
+    nop                            @ stores + bit7 dropped, 0x0000 = whole
+    nop                            @ write dropped
+    nop
+    nop
+    de_verdict 20
+    de_prime
+    mov r0, #0x40
+    ldr r1, =0x040000DF
+    strb r0, [r1]                  @ high byte, bit6 only (control: 0x4000,
+    nop                            @ no run)
+    nop
+    nop
+    nop
+    de_verdict 24
     pop {r4-r7, pc}
     .ltorg
 rom_pattern:
@@ -111,8 +151,8 @@ rom_pattern:
 expected:
     .byte 0x01,0x00,0x80,0x00,0x00,0x00,0x00,0x00
     .byte 0x00,0x00,0x40,0x00,0x00,0x00,0x00,0x44
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    .byte 0x01,0x00,0x80,0x40,0x00,0x00,0x40,0x00
+    .byte 0x00,0x00,0x00,0x40,0x00,0x00,0x00,0x00
 classes:
     .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
     .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
