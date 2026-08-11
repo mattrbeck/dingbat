@@ -128,6 +128,19 @@ proc ch1_sweep_run(ch: GbChannel1; gb: GB) =
       # period -- and it has to be the shift, because a trigger arms this check
       # with sweep period 0 (blargg's cgb_sound 06-overflow on trigger).
       if ch.sweep_enabled and ch.shift > 0:
+        # One calculation, whether the check was armed by a trigger or by a
+        # sweep writeback. AGB silicon runs a SECOND one at its trigger
+        # check -- shadow + 2*(shadow >> shift), linear, killing strictly
+        # above 0x800; measured on AGB (AGS-001, gbaedge SWEEPQ/SWEEP2) --
+        # and porting it to this core was tried on 2026-08-11 and REVERTED:
+        # blargg's 06-overflow-on-trigger triggers at every shift's boundary
+        # frequency ($556 shift 1, $667 shift 2, ... $7E2 shift 7, each just
+        # under the first check's limit but far over the second's) and its
+        # DMG- and CGB-derived CRCs both say those channels live. Eight rows
+        # regressed (blargg dmg_sound + cgb_sound 04/05/06, SameSuite
+        # channel_1_sweep + channel_1_sweep_restart), so the second trigger
+        # check is AGB-only. See docs/hwprobe-questions.md (GB SWEEP page)
+        # for the raw-value probe that re-anchors this on CGB directly.
         discard ch1_frequency_calc(ch, gb, at)
   if ch.sweep_check_at < ch.sweep_load_at:
     do_check(); do_load()

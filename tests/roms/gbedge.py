@@ -2267,6 +2267,83 @@ def t_divtaps(a, slot, p):
     a.ldh_n_a(0x26)                    # APU off
 
 
+@test("SWEEP")
+def t_sweep(a, slot, p):
+    """The ch1 sweep unit's TRIGGER checks — does CGB run the AGB second one?
+
+    AGB silicon (AGS-001, gbaedge SWEEPQ/SWEEP2) runs the trigger's overflow
+    check twice: the familiar shadow + (shadow >> s), then the LINEAR
+    shadow + 2*(shadow >> s), which kills strictly above $800.  blargg's
+    dmg_sound/cgb_sound 04-06 CRCs say GB silicon does NOT (porting the
+    second check regressed 8 suite rows, 2026-08-11) — this page is the
+    raw-value re-anchor at the exact AGB anchor frequencies.  All rows:
+    ch1, increment, vol F, duty 2, no length; the page cycles the APU OFF
+    then ON (resetting the frame-sequencer step) and a DIV reset just
+    before each trigger anchors the tap phase, so the counts do not depend
+    on which page ran before.  Each row stores the 16-bit
+    count (lo,hi) of NR52-bit0 polls (15 M-cycles each) until the channel
+    died, capped at $2000.  Sweep period 2 => one sweep tick is <= 2/128 s,
+    so "~1 tick" is roughly $400-$500 polls.
+    00-01  freq 1300 ($514) shift 1: calc1 1950 passes; AGB's second check
+           1300+2*650=2600 kills AT TRIGGER.  0 polls = CGB runs the AGB
+           second check; ~1 tick = single check (tick recalc 2925 kills) —
+           the emulated/blargg-derived expectation
+    02-03  freq 940 ($3AC) shift 1: linear second = 1880 survives, but a
+           RECALCULATED second (1410+705=2115) kills at trigger.  0 polls =
+           recalculated second check; ~1 tick = linear-or-none (tick recalc
+           2115 kills), which both AGB and the single-check model predict
+    04-05  freq 1024 ($400) shift 1: second = exactly 2048.  0 polls = a
+           NON-strict (>=2048) second check; ~1 tick under both AGB's
+           strict check and the single-check model (tick recalc 2304)
+    06-07  freq 1000 ($3E8) shift 1: survives every trigger model (1500,
+           2000); dies at tick 1 (recalc 2250) — poll-rate calibration row
+    08-09  freq 1000 shift 1, sweep DIVIDER 0: the divider never ticks, so
+           the channel never dies — every model predicts the $2000 cap
+    0A     NR52 after the last row (ch1 bit still set = cap was real)
+    """
+    a.xor_r("a")
+    a.ldh_n_a(0x26)                    # APU off: clears the sequencer step
+    a.ld_r_n("a", 0x80)
+    a.ldh_n_a(0x26)                    # NR52 on
+    a.ld_r_n("a", 0x11)
+    a.ldh_n_a(0x25)                    # NR51: ch1 both sides
+    a.ld_r_n("a", 0x77)
+    a.ldh_n_a(0x24)                    # NR50
+    for k, (nr10, freq) in enumerate(
+            ((0x21, 1300), (0x21, 940), (0x21, 1024), (0x21, 1000),
+             (0x01, 1000))):
+        a.ld_r_n("a", nr10)
+        a.ldh_n_a(0x10)                # NR10: add, shift 1, period 2 (or 0)
+        a.ld_r_n("a", 0x80)
+        a.ldh_n_a(0x11)                # NR11 duty 2, length 0
+        a.ld_r_n("a", 0xF0)
+        a.ldh_n_a(0x12)                # NR12 vol 15, no envelope
+        a.ld_r_n("a", freq & 0xFF)
+        a.ldh_n_a(0x13)
+        a.xor_r("a")
+        a.ldh_n_a(DIV)                 # phase anchor
+        a.ld_r_n("a", 0x80 | (freq >> 8))
+        a.ldh_n_a(0x14)                # trigger, length disabled
+        a.ld_rr_nn("bc", 0)
+        a.label(f"{p}_sw{k}")
+        a.ldh_a_n(0x26)
+        a.and_n(0x01)
+        a.jr(f"{p}_sd{k}", "z")
+        a.inc_rr("bc")
+        a.ld_r_r("a", "b")
+        a.cp_n(0x20)                   # cap $2000 iterations (~7 ticks)
+        a.jr(f"{p}_sw{k}", "c")
+        a.label(f"{p}_sd{k}")
+        a.ld_r_r("a", "c")
+        a.ld_nn_a(slot + 2 * k)
+        a.ld_r_r("a", "b")
+        a.ld_nn_a(slot + 2 * k + 1)
+    a.ldh_a_n(0x26)
+    a.ld_nn_a(slot + 10)
+    a.xor_r("a")
+    a.ldh_n_a(0x26)                    # APU off
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # program assembly
 # ═══════════════════════════════════════════════════════════════════════════
