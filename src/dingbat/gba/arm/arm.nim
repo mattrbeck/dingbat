@@ -308,6 +308,12 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
   when pre_addressing:
     when add_offset: address += offset
     else:            address -= offset
+  # Base-writeback with rn=15 is UNPREDICTABLE architecturally; silicon does
+  # three distinct things (gbaedge THUMBPC2 page, AGB SP session 3, probed
+  # with post-indexed offset 4): `str r1, [r15], #4` writes PC := base+4 (the
+  # post-indexed address), `ldr r1, [r15], #4` writes PC := base+8 AND
+  # suppresses the load (rd keeps its old value; the bus read still happens).
+  const pc_writeback = write_back or not pre_addressing
   when load:
     let value =
       when byte_quantity:
@@ -315,7 +321,11 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
       else:
         cpu.gba.bus.read_word_rotate(address)
     cpu.idle(1)
-    discard cpu.set_reg(rd, value)
+    when pc_writeback:
+      if rn != 15:
+        discard cpu.set_reg(rd, value)
+    else:
+      discard cpu.set_reg(rd, value)
   else:
     when byte_quantity:
       cpu.gba.bus[address] = uint8(cpu.r[rd])
@@ -326,7 +336,10 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
   when not pre_addressing:
     when add_offset: address += offset
     else:            address -= offset
-  when write_back or not pre_addressing:
+  when pc_writeback:
+    if rn == 15:
+      discard cpu.set_reg(15, when load: address + 4 else: address)
+      return
     if rd != rn or not load:
       discard cpu.set_reg(rn, address)
   if not (load and rd == 15): cpu.step_arm()
@@ -378,7 +391,11 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
       address += 4
       when write_back:
-        if not first_transfer and not (load and bit(list, rn)):
+        # `ldmia r15!, {...}` performs NO writeback on hardware - it executes
+        # as a plain ldm and the PC continues normally (gbaedge THUMBPC2
+        # page, AGB SP session 3; dingbat previously landed at base+8)
+        if not first_transfer and not (load and bit(list, rn)) and
+           not (load and rn == 15):
           discard cpu.set_reg(rn, final_addr)
       first_transfer = true
   when load:
