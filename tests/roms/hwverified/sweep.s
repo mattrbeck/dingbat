@@ -24,8 +24,34 @@
 @     sessions), so it is RANGE-checked 0x800..0x1800: below the band
 @     means wrongly dead at trigger, above means dead too late.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2+3, gbaedge page 23
-@ SWEEPQ); see docs/hwprobe-results-agb.md.
+@ WHY the session-4 discriminator rows (+16..+28, all sweep period 2;
+@ each row is preceded by a full APU reset — master off clears every
+@ PSG register — so the sweep divider phase at trigger is deterministic;
+@ all four are RANGE-checked, with the bands set at the midpoints
+@ between adjacent death-tick buckets, which sit one full sweep tick
+@ (~0x12F7 polls in dingbat) apart):
+@   freq 512, shift 1: dies at the THIRD tick — the trigger checks do
+@     NOT write back and the tick path DOES run a recalculated second
+@     check (write-back-at-trigger predicts death at tick 2, a tick
+@     path without the second check predicts tick 4; hw 0x35CD = tick 3).
+@   freq 2018, shift 7: the trigger's second check lands EXACTLY on
+@     2048 and the channel SURVIVES the trigger — re-anchors the
+@     strictly-greater-than-2048 boundary of the trigger checks — then
+@     dies at tick 1 (hw 0x0A75): the tick-path second check fails at
+@     >= 2048.
+@   freq 940, shift 1: survives the trigger — a trigger second check
+@     that RECALCULATED the offset would compute 1410+705 = 2115 and
+@     kill it; the same-offset form computes 1410+470 = 1880 and spares
+@     it (third anchor for session 2's same-offset conclusion) — then
+@     dies at tick 1 (hw 0x1138).
+@   freq 2033, shift 7: the FIRST trigger calc is exactly 2048 — dies
+@     at the trigger under either strictness (consistency row; the band
+@     is near-zero, hardware counted 0x0002 before the flag read clear).
+@
+@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2-4, gbaedge pages
+@ 23 SWEEPQ and 31 SWEEP2 — session 4's SWEEP2 carried the four
+@ discriminator rows and bucket-matched dingbat on all of them); see
+@ docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start
@@ -67,10 +93,26 @@ probe:
     blt 9b
 8:  str r6, [r8, #\slot_off]
 .endm
+.macro sq_reset                    @ full APU reset between rows: master
+    mov r0, #0                     @ off clears every PSG register, so
+    strh r0, [r5, #4]              @ each row's sweep phase starts fresh
+    mov r0, #0x80
+    strh r0, [r5, #4]              @ master on again
+    ldr r0, =0x1177
+    strh r0, [r5]                  @ route ch1 again
+.endm
     sq_run 0x01, 1024, 0           @ shift 1, period 0, up
     sq_run 0x21, 1400, 4           @ shift 1, period 2, up
     sq_run 0x21, 1300, 8
     sq_run 0x21, 1000, 12
+    sq_reset
+    sq_run 0x21, 512, 16           @ shift 1, period 2, up
+    sq_reset
+    sq_run 0x27, 2018, 20          @ shift 7, period 2, up
+    sq_reset
+    sq_run 0x21, 940, 24           @ shift 1, period 2, up
+    sq_reset
+    sq_run 0x27, 2033, 28          @ shift 7, period 2, up
     mov r0, #0
     strh r0, [r5, #4]              @ master off — silence again
     pop {r4-r7, pc}
@@ -82,15 +124,19 @@ probe:
 expected:
     .byte 0x00,0x00,0x08,0x00,0x00,0x00,0x00,0x00
     .byte 0x00,0x00,0x00,0x00,0x9A,0x0F,0x00,0x00
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    .byte 0xCD,0x35,0x00,0x00,0x75,0x0A,0x00,0x00
+    .byte 0x38,0x11,0x00,0x00,0x02,0x00,0x00,0x00
 classes:
     .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
     .byte 0x00,0x00,0x00,0x00,0x02,0x02,0x02,0x02
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    .byte 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    .byte 0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02
+    .byte 0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02
     .align 2
 ranges:
     .word 12, 0x800, 0x1800
+    .word 16, 0x2A00, 0x4000
+    .word 20, 0x400, 0x1A00
+    .word 24, 0x400, 0x1A00
+    .word 28, 0, 0x200
     .word 0xFFFFFFFF
     .include "runtime.inc"

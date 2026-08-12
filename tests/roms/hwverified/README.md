@@ -58,7 +58,7 @@ only — deliberately not wired into CI.
 | irqwin | 3 instructions run after IME/IE stores, 2 after msr; sled composition: 2 EWRAM loads / 2 muls / 2 ROM loads / 3 mixed nop+ldr — the window is cycle-counted | ack-survivors word range 6..10 |
 | dmabyte | DMA CNT_H bit7 byte-write anomaly, bit7-granular on all four channels: hi 0x80 mirrors down (0080), hi 0xC0 -> 4080, lo 0xC0 -> 0040, lo 0x80 drops | all exact |
 | capdma | capture DMA runs every line of every armed frame, enable self-clears | all exact |
-| sweep | trigger runs the overflow check twice; divider 0 never ticks | tick-1 poll count range 0x800..0x1800 |
+| sweep | trigger runs the overflow check twice (same offset, strictly >2048) with NO write-back; the tick path writes back and re-checks a recalculated value at >=2048; divider 0 never ticks | tick-1 poll count range 0x800..0x1800; the four session-4 discriminator rows (freq 512/s1 tick-3, 2018/s7 survives-trigger + tick-1, 940/s1 tick-1, 2033/s7 at-trigger) range-checked at tick-bucket midpoints |
 | iomap | unused/write-only IO: which registers read zero vs open bus | all exact (open-bus cells are the ROM's own prefetch, deterministic) |
 
 The wedge encoding 0xE120FF11 (locks up a real console) is
