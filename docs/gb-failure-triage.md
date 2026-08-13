@@ -35,15 +35,19 @@ is wrong. They must come out before anything is ranked.
 
 | rows | what | evidence |
 |---|---|---|
-| **31** GBMicrotest | The ROM **never writes `$FF82`**, the byte `--mode=microtest` scores, so the harness reads uninitialised HRAM forever | Scanned all 513 bundled ROMs for `E0 82` (`ldh ($82),a`) and `EA 82 FF`. 482 contain one; **31 do not — and those 31 are exactly 31 of the failing rows, with none of them passing.** Verified independently of the agent that found it |
+| **31** GBMicrotest | The ROM **never writes `$FF82`**, the byte `--mode=microtest` scores, so the harness reads uninitialised HRAM forever | Scanned all 513 bundled ROMs for `E0 82` (`ldh ($82),a`) and `EA 82 FF`. 482 contain one; **31 do not — and those 31 are exactly 31 of the failing rows, with none of them passing.** Verified independently of the agent that found it. **Shipped 2026-08-13**: `build_gbmicrotest_tests` skips them through the named `MicrotestNoVerdict` list (re-derived by a fresh scan, cross-checked row by row against `results.md`), so the suite now reports out of 482 and the 31 red rows are gone; listed in `NotScored` |
 | 3 | AGE revision-locked pairs | `lcd-align-ly-cgbBC`/`-cgbE`, `spsw-tima-cgbBC`/`-cgbE`, `spsw-interrupts-cgbBC`/`-cgbE` are CGB-only pairs differing only in SoC revision. dingbat has one CGB boot model (`bmCgbABCDE`), so at most one of each pair can ever be green. **2026-08-13**: `build_age_tests` now passes each row's own token through as `--model=`, so the two halves are at least scored on the revisions they name (`grCgbC` vs `grCgbE`); measured, all six still fail, i.e. nothing modelled yet distinguishes C from E here |
 | 1 | `mooneye/utils/bootrom_dumper` | A tool, not a test — dumps the boot ROM over serial and has no verdict. `build_wilbertpol_tests` already skips `utils/`; the Gekkio path does not. **Fixed 2026-08-13**: `build_mooneye_tests` now skips `utils/` too, which also drops `dump_boot_hwio` — a green row that could not fail, since `quit_dump_mem` sets the success byte unconditionally. Both are listed in `NotScored` |
 | 1 | mGBA `DMA Prefetch Break` | Expects `0x10000000 + 4 × iterations` where the count depends on where gcc put the loop; already documented as unscoreable |
 | 1 | `bully/bully` at 0.6% | A whole-machine torture test whose single reference is a CGB capture the author's own DMG-C fails. One row standing for dozens of independent checks; not triageable as a bucket |
 
 `ppu_spritex_vs_scx` was already known to be in the first group; **the other 30
-were not**, and GBMicrotest's headline therefore reads 403/513 when the honest
+were not**, and GBMicrotest's headline therefore read 403/513 when the honest
 figure is 403/482. The recoverable total is **1,674 − 37 = 1,637**.
+
+**2026-08-13**: the 31 are now out of the denominator for real — the runner
+skips them by name, so the suite reports `n/482` and 31 rows that could never
+go green no longer sit in `results.md`.
 
 ## Two cross-cuts that reframe the problem
 

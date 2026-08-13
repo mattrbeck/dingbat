@@ -278,7 +278,7 @@ a `--cgb`/model flag here.
 | Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `tmMooneye`; `manual-only/sprite_priority` is a screenshot |
 | Mooneye (wilbertpol fork) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/` and `logic-analysis/` have no verdict and are skipped |
 | AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
-| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`) |
+| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`); 31 of the 513 ROMs never write `$FF82` and are skipped (`MicrotestNoVerdict`), so the suite is scored out of 482 |
 | Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
 | SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `tmMooneye`; `--cgb` except `sgb/`, which runs `--sgb`; `apu/` is also reachable alone via `--apu` |
 | rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | downloaded from the gbdev shootout, scored with **its** tolerance — see below |

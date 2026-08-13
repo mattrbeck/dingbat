@@ -814,6 +814,54 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
     ))
   tests
 
+const MicrotestNoVerdict = [
+  # The 31 bundled GBMicrotest ROMs that never write $FF82 at all — the byte
+  # `--mode=microtest` scores. With nothing written, the harness reads
+  # uninitialised HRAM and the row can only ever be red: they are not failures
+  # of this emulator, they are ROMs with no verdict to read.
+  #
+  # Method (docs/gb-failure-triage.md, "First, shrink the denominator"): every
+  # one of the 513 bundled ROMs was scanned for the two encodings that can
+  # write that address with an immediate operand — `E0 82` (`ldh ($82),a`) and
+  # `EA 82 FF` (`ld ($ff82),a`). 482 contain one, these 31 contain neither, and
+  # all 31 were already failing rows (no passing row is in this list, so the
+  # scan is not hiding a green one). Listed by name rather than re-scanned at
+  # runtime so the skip stays reviewable in the diff.
+  #
+  # Honest suite denominator: 482, not 513. Recorded in NotScored.
+  "000-oam_lock",
+  "000-write_to_x8000",
+  "001-vram_unlocked",
+  "002-vram_locked",
+  "004-tima_boot_phase",
+  "004-tima_cycle_timer",
+  "007-lcd_on_stat",
+  "400-dma",
+  "500-scx-timing",
+  "800-ppu-latch-scx",
+  "801-ppu-latch-scy",
+  "802-ppu-latch-tileselect",
+  "803-ppu-latch-bgdisplay",
+  "audio_testbench",
+  "cpu_bus_1",
+  "dma_basic",
+  "flood_vram",
+  "lcdon_write_timing",
+  "ly_while_lcd_off",
+  "minimal",
+  "mode2_stat_int_to_oam_unlock",
+  "oam_sprite_trashing",
+  "poweron",
+  "ppu_scx_vs_bgp",
+  "ppu_sprite_testbench",
+  "ppu_spritex_vs_scx",
+  "ppu_win_vs_wx",
+  "ppu_wx_early",
+  "temp",
+  "toggle_lcdc",
+  "wave_write_to_0xC003",
+]
+
 proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
   ## aappleby's GBMicrotest: 500+ tiny DMG timing probes. Per the suite's howto
   ## each writes its verdict into HRAM — $FF80 actual, $FF81 expected, $FF82
@@ -830,6 +878,9 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
     return tests
   for rom in find_roms(dir, ".gb"):
     let name = rom.splitFile().name
+    # ROMs with no verdict byte to read — see MicrotestNoVerdict above.
+    if name in MicrotestNoVerdict:
+      continue
     tests.add(TestDef(
       name: "gbmicrotest/" & name,
       rom_path: rom,
@@ -1467,7 +1518,7 @@ proc build_magen_tests(): seq[TestDef] =
     ))
   tests
 
-const NotScored: array[15, (string, string)] = [
+const NotScored: array[16, (string, string)] = [
   # The page's own record of every deliberate skip, so "why isn't X here?"
   # is answerable from the page itself instead of from runner comments.
   # Keep in sync with the skip sites (each entry names its builder).
@@ -1499,6 +1550,12 @@ const NotScored: array[15, (string, string)] = [
   ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
     "sampling and the AGB device are not scored; see results_gambatte.md's " &
     "source notes. (build_gambatte_rows)"),
+  ("gbmicrotest: 31 ROMs that never write the $FF82 verdict byte", "scanned " &
+    "all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one " &
+    "and these 31 contain neither, so the harness would be scoring " &
+    "uninitialised HRAM rather than a result. All 31 were failing rows before " &
+    "the skip. The honest suite denominator is 482. " &
+    "(build_gbmicrotest_tests)"),
   ("scribbltests/fairylake, scribbltests/winpos", "ship no reference " &
     "image. (build_small_screenshot_tests)"),
   ("little-things-gb/tellinglys", "needs scripted joypad input mid-run. " &
