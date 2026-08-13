@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-13 15:44:37*
+*Generated: 2026-08-13 15:53:11*
 
 ## Game Boy - Blargg
 
@@ -27,11 +27,11 @@
 | blargg/oam_bug/4-scanline_timing | 👌 |
 | blargg/oam_bug/5-timing_bug | 👌 |
 | blargg/oam_bug/6-timing_no_bug | 👌 |
-| blargg/oam_bug/7-timing_effect | 👀 |
 | blargg/oam_bug/8-instr_effect | 👌 |
 | blargg/mem_timing-2/01-read_timing | 👌 |
 | blargg/mem_timing-2/02-write_timing | 👌 |
 | blargg/mem_timing-2/03-modify_timing | 👌 |
+| blargg/oam_bug/combined | 👌 |
 | blargg/halt_bug | 👌 |
 | blargg/interrupt_time | 👌 |
 
@@ -1065,5 +1065,5 @@ Each row is one gambatte subdirectory. See [detailed results](results_gambatte.m
 ## Summary
 
 - **Total:** 981
-- **Pass:** 785
-- **Fail:** 196
+- **Pass:** 786
+- **Fail:** 195

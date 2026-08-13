@@ -477,6 +477,18 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
     let singles = repo_dir / subdir / "rom_singles"
     if not dirExists(singles): continue
     for rom in find_roms(singles, ".gb"):
+      # Standalone 7-timing_effect is a broken BUILD, not a hard test: its
+      # verbose per-timing output overruns the $A004..$BFFF text window into
+      # the $C000 copy of its own code (the standalone builds copy themselves
+      # to WRAM; the combined ROM runs from ROM and is immune), so it blanks
+      # out before ever writing a result block. Confirmed unreportable on a
+      # real DMG (Docheinstein/docboy#33, Everdrive X7: "stucks with a blank
+      # screen there as well"), and the shootout's blargg.py comments it out
+      # as "This test is broken." The same test logic is scored through the
+      # combined oam_bug.gb row below, which reports 07:ok against the same
+      # $7D792E7C CRC.
+      if subdir == "oam_bug" and rom.splitFile().name == "7-timing_effect":
+        continue
       tests.add(TestDef(
         name: "blargg/" & subdir & "/" & rom.splitFile().name,
         rom_path: rom,
@@ -484,6 +496,18 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         timeout: max(1800, secs * 70),
         dmg: subdir == "oam_bug",
       ))
+  # The combined oam_bug.gb: same eight tests, but built NO_COPY (runs from
+  # ROM), which is what makes test 7 reportable at all — see the skip above.
+  # Runs in well under its budget because tmSram stops on the status byte.
+  let oam_bug_all = repo_dir / "oam_bug" / "oam_bug.gb"
+  if fileExists(oam_bug_all):
+    tests.add(TestDef(
+      name: "blargg/oam_bug/combined",
+      rom_path: oam_bug_all,
+      mode: tmSram,
+      timeout: 4200,
+      dmg: true,
+    ))
   let halt_bug = repo_dir / "halt_bug.gb"
   if fileExists(halt_bug):
     tests.add(TestDef(

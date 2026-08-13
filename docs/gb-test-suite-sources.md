@@ -526,14 +526,18 @@ with `delay 114` and `delay 114*143+18`.
   `cp_oam` only checks that OAM changed, so whatever hardware does at row 0, it
   is not a no-op.
 
-**Negative result worth recording (§4.1):** blargg documents no corruption
+**Negative result, since retracted (§4.1):** blargg documents no corruption
 *pattern*. "Causes several bytes of OAM to be copied from one place to another"
 is the entire statement. Every row/increment/read/write pattern in circulation
 comes from Pan Docs and AntonioND's *Cycle-Accurate GB Docs*, not from anything
-blargg shipped. Worse, **`oam_bug.inc` is absent from the repository** — all
-eight tests `.include` it and `find . -iname 'oam_bug*'` finds only the directory
-and the built ROM — so the OAM **fill pattern the CRCs are taken over is not
-recoverable from source**.
+blargg shipped. `oam_bug.inc` is absent from `retrio/gb-test-roms` — all eight
+tests `.include` it and `find . -iname 'oam_bug*'` finds only the directory and
+the built ROM — but it **is** in `crzysdrs/blarggs-test-roms`
+(`oam_bug/common/oam_bug.inc`), whose tree rebuilds `7-timing_effect.gb`
+byte-identically (md5 `c71e334a…` matches the bundle), so the fill pattern is
+recoverable after all: `oam_fill = $0C`, `fill_oam` writes `$FE00..$FE9F` with
+`$0C,$0D,$0E,…`, and `print_oam` prints `"-- "` for unchanged bytes and
+`value − $0C` for changed ones.
 
 **Where each row landed:**
 
@@ -545,16 +549,25 @@ recoverable from source**.
   `$B3693CEE` PUSH, `$06BE41A4` `LD A,(HL±)`) over a fill pattern that is not
   recoverable from source, so the three Pan Docs patterns and the
   per-instruction M-cycle assignment are pinned by it and not by a reading.
-* `7-timing_effect` — **red, and it is the ROM.** The shootout has it commented
-  out (`# This test is broken.`), so it is not one of the 261. Standalone on a
-  DMG it never writes a result block at all — 20,000 frames tried, against the
-  8.5 s the shootout allots it — while the *same* test inside the combined
-  `oam_bug.gb` reports `07:ok` (all eight do: `01:ok … 08:ok`), so its
-  `$7D792E7C` over 116 consecutive trigger positions is met. That row read
-  green for one run here on nothing but silence: `tmSram` latches its status
-  byte only out of a valid `DEB061` block, so a ROM that never reports leaves
-  the 0 initializer, which is blargg's PASS code. `dingbat_test.nim` now
-  requires `test_out.finished` as well.
+* `7-timing_effect` — **skipped, and it is the ROM: a broken build.** The
+  standalone builds copy themselves to WRAM (`copy_to_wram_then_run`,
+  `$1400` bytes to `$C000`) and stream verbose per-timing output through the
+  unbounded `write_text_out` into the `$A004..$BFFF` cart-RAM window — 8,188
+  bytes of address space. Test 7 prints a ~525-byte block for each of the
+  ~19–21 corrupting timings in its 116-timing sweep, ≈10,000 bytes, so around
+  block 15 the text pointer crosses `$C000` and overwrites the executing code;
+  it never reaches `check_crc`. The combined `oam_bug.gb` is a `NO_COPY` build
+  running from ROM, which is why the *same* test logic reports `07:ok` there
+  (all eight do: `01:ok … 08:ok`), meeting the same `$7D792E7C` CRC over 116
+  consecutive trigger positions. Real hardware agrees the standalone is
+  unreportable — Docheinstein/docboy#33, on a DMG with an Everdrive X7: "the
+  test stucks with a blank screen there as well" — and the shootout has it
+  commented out (`# This test is broken.`), so it is not one of the 261. The
+  runner now skips the standalone and scores `blargg/oam_bug/combined`
+  instead. Historical note: before the `test_out.finished` fix in
+  `dingbat_test.nim`, this row read green for one run on nothing but silence
+  (`tmSram` latches its status byte only out of a valid `DEB061` block, so a
+  ROM that never reports leaves the 0 initializer — blargg's PASS code).
 
 ## 1.5 `daid/stop_instr_gbc_mode3` is a discriminating row, and dingbat skips it as if it were not
 
@@ -925,25 +938,30 @@ and the two models stopped disagreeing.
 
 Recorded so nobody repeats the dig.
 
-## 4.1 blargg documents no OAM corruption pattern, and the include file is missing
+## 4.1 blargg documents no OAM corruption pattern, and the include file is only in a mirror
 
 See §1.4. `readme.txt`'s entire statement of the mechanism is *"Causes several
 bytes of OAM to be copied from one place to another."* No row structure, no
 increment/read/write patterns, no `((a ^ c) & (b ^ c)) ^ c`. All of that comes
-from Pan Docs and AntonioND. And **`oam_bug.inc` — which defines `fill_oam`,
-`cp_oam`, `corrupt_oam`, `delay_a_20_cycles` — is not in the repository**, so the
-OAM fill pattern that `7-timing_effect` and `8-instr_effect` CRC over cannot be
-reconstructed from source. `source/readme.txt` admits the family is incomplete
-("Building such a multi-test is complex and the necessary files aren't included")
-but does not name this file. Practical consequence: the two CRC rows can only be
-closed by matching a reference implementation bit-for-bit, not by reading a spec.
+from Pan Docs and AntonioND. `oam_bug.inc` — which defines `fill_oam`,
+`cp_oam`, `corrupt_oam`, `delay_a_20_cycles` — is not in `retrio/gb-test-roms`
+(`source/readme.txt` admits the family is incomplete: "Building such a
+multi-test is complex and the necessary files aren't included") but **is** in
+`crzysdrs/blarggs-test-roms`, which rebuilds the ROMs byte-identically, so the
+fill (`$0C,$0D,$0E,…` over `$FE00..$FE9F`) is recoverable from source (§1.4).
+Useful for anyone re-deriving the CRCs: the ROMs store the **complement** of
+the target (`check_crc` compares each word against `crc ~ $FFFF` — e.g.
+`ld bc,$10F3 / ld de,$D995` ⇒ `$10F3D995 ^ $FFFFFFFF = $EF0C266A`), and the
+CRC'd stream is not the printed text — `print_hex` CRCs the raw byte, while
+`print_str "-- "` CRCs all three literal chars and `print_char_nocrc`'s
+spaces/newlines are excluded.
 
 **Both CRC rows are met, and neither needed the include file** — Pan Docs'
 three patterns, plus the row/window assignment blargg's *other* ROMs pin, hash
-correctly over whatever fill the missing file writes. `8-instr_effect` passes
-standalone and `07:ok` comes out of the combined `oam_bug.gb`; only the
-standalone `7-timing_effect` stays red, and that is the ROM never reporting
-rather than a CRC mismatch (§1.4).
+correctly over the fill. `8-instr_effect` passes standalone and `07:ok` comes
+out of the combined `oam_bug.gb`; only the standalone `7-timing_effect` cannot
+report, and that is a broken build (self-destructing text overrun, §1.4), not a
+CRC mismatch — the runner scores the combined ROM and skips the standalone.
 
 ## 4.2 The other blargg suites ship no per-test rationale
 
