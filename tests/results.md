@@ -1,34 +1,34 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-13 16:32:58 · commit 669264a · game-boy-test-roms v7.0*
+*Generated: 2026-08-13 16:45:17 · commit 8d3e900 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
-- **Total:** 1075
-- **Pass:** 877
-- **Fail:** 198
+- **Total:** 1077
+- **Pass:** 880
+- **Fail:** 197
 
 | Suite | Pass | Total |
 |-------|------|-------|
 | Game Boy - Blargg | 28 | 28 |
 | Game Boy - Blargg dmg_sound | 12 | 12 |
 | Game Boy - Blargg cgb_sound | 12 | 12 |
-| Game Boy - Mooneye | 113 | 115 |
+| Game Boy - Mooneye | 112 | 113 |
 | GBA - mGBA Test Suite | 11 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
-| Game Boy - Mealybug Tearoom | 47 | 51 |
+| Game Boy - Mealybug Tearoom | 49 | 54 |
 | Game Boy - GBMicrotest | 430 | 513 |
 | Game Boy - AGE | 12 | 37 |
 | Game Boy - Screenshot suites | 9 | 13 |
 | Game Boy - SameSuite | 7 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
-| Game Boy - Shootout ROMs | 9 | 11 |
-| Game Boy - Mooneye (wilbertpol) | 84 | 117 |
+| Game Boy - Shootout ROMs | 10 | 12 |
+| Game Boy - Mooneye (wilbertpol) | 85 | 117 |
 | Game Boy - gambatte | 9 | 48 |
 
 ## Game Boy - Blargg (28/28)
@@ -98,7 +98,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | blargg/cgb_sound/11-regs after power | CGB | 👌 |
 | blargg/cgb_sound/12-wave | CGB | 👌 |
 
-## Game Boy - Mooneye (113/115)
+## Game Boy - Mooneye (112/113)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -205,7 +205,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | mooneye/emulator-only/mbc5/rom_512kb | cart | 👌 |
 | mooneye/emulator-only/mbc5/rom_64Mb | cart | 👌 |
 | mooneye/emulator-only/mbc5/rom_8Mb | cart | 👌 |
-| mooneye/madness/mgb_oam_dma_halt_sprites | cart | 👀 Mooneye: FAIL; TIMEOUT after 1800 frames |
+| mooneye/madness/mgb_oam_dma_halt_sprites | DMG mgb | 👀 50.0% correct (11517/23040 pixels match) |
 | mooneye/manual-only/sprite_priority | DMG | 👌 |
 | mooneye/misc/bits/unused_hwio-C | CGB | 👌 |
 | mooneye/misc/boot_div-A | CGB agb | 👌 |
@@ -215,8 +215,6 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | mooneye/misc/boot_regs-A | CGB agb | 👌 |
 | mooneye/misc/boot_regs-cgb | CGB | 👌 |
 | mooneye/misc/ppu/vblank_stat_intr-C | CGB | 👌 |
-| mooneye/utils/bootrom_dumper | cart | 👀 Mooneye: FAIL; TIMEOUT after 1800 frames |
-| mooneye/utils/dump_boot_hwio | cart | 👌 |
 
 ## GBA - mGBA Test Suite (11/13)
 
@@ -285,7 +283,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | magen/ppu_disabled_state | cart | 👌 |
 | magen/bg_oam_priority | cart | 👌 |
 
-## Game Boy - Mealybug Tearoom (47/51)
+## Game Boy - Mealybug Tearoom (49/54)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -340,6 +338,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_wx_4_change_sprites | CGB | 👌 |
 | mealybug/m3_wx_5_change | DMG | 👌 |
 | mealybug/m3_wx_6_change | DMG | 👌 |
+| mealybug/dma/hdma_during_halt-C | CGB | 👌 |
+| mealybug/dma/hdma_timing-C | CGB | 👀 Mooneye: FAIL |
+| mealybug/mbc/mbc3_rtc | cart | 👌 |
 
 ## Game Boy - GBMicrotest (430/513)
 
@@ -866,40 +867,40 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/halt/ei-halt-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
 | age/halt/halt-m0-interrupt-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
 | age/halt/halt-prefetch-dmgC-cgbBCE | cart | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC | CGB | 👀 Mooneye: FAIL |
-| age/lcd-align-ly/lcd-align-ly-cgbE | CGB | 👀 Mooneye: FAIL |
-| age/ly/ly-cgbE | CGB | 👌 |
+| age/lcd-align-ly/lcd-align-ly-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
+| age/lcd-align-ly/lcd-align-ly-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
+| age/ly/ly-cgbE | CGB cgbE | 👌 |
 | age/ly/ly-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
-| age/m3-bg-bgp/m3-bg-bgp-dmgC | DMG | 👀 100.0% correct (23038/23040 pixels match) |
+| age/m3-bg-bgp/m3-bg-bgp-dmgC | DMG dmgC | 👀 100.0% correct (23038/23040 pixels match) |
 | age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | CGB | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | CGB | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | DMG | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | DMG dmgC | 👌 |
 | age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | CGB | 👌 |
 | age/m3-bg-scx/m3-bg-scx-cgbBCE | CGB | 👌 |
-| age/m3-bg-scx/m3-bg-scx-dmgC | DMG | 👌 |
-| age/oam/oam-read-cgbE | CGB | 👀 Mooneye: FAIL |
+| age/m3-bg-scx/m3-bg-scx-dmgC | DMG dmgC | 👌 |
+| age/oam/oam-read-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
 | age/oam/oam-read-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
 | age/oam/oam-write-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/oam/oam-write-dmgC | cart | 👀 Mooneye: FAIL |
-| age/speed-switch/caution/spsw-interrupts-cgbBC | CGB | 👀 Mooneye: FAIL |
-| age/speed-switch/caution/spsw-interrupts-cgbE | CGB | 👀 Mooneye: FAIL |
+| age/oam/oam-write-dmgC | cart dmgC | 👀 Mooneye: FAIL |
+| age/speed-switch/caution/spsw-interrupts-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
+| age/speed-switch/caution/spsw-interrupts-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
 | age/speed-switch/spsw-ch2-lc-delay-cgbBCE | CGB | 👀 Mooneye: FAIL |
 | age/speed-switch/spsw-div-cgbBCE | CGB | 👌 |
 | age/speed-switch/spsw-mode0-cgbBCE | CGB | 👀 Mooneye: FAIL |
 | age/speed-switch/spsw-stop-prefetch-cgbBCE | CGB | 👌 |
-| age/speed-switch/spsw-tima-cgbBC | CGB | 👀 Mooneye: FAIL |
-| age/speed-switch/spsw-tima-cgbE | CGB | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-tima-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-tima-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE | cart | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE | CGB | 👌 |
 | age/stat-mode-window/stat-mode-window-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/stat-mode-window/stat-mode-window-dmgC | cart | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-dmgC | cart dmgC | 👀 Mooneye: FAIL |
 | age/stat-mode-window/stat-mode-window-ds-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/stat-mode/stat-mode-cgbE | CGB | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
 | age/stat-mode/stat-mode-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
 | age/stat-mode/stat-mode-ds-cgbBCE | CGB | 👀 Mooneye: FAIL |
 | age/vram/vram-read-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/vram/vram-read-dmgC | cart | 👀 Mooneye: FAIL |
+| age/vram/vram-read-dmgC | cart dmgC | 👀 Mooneye: FAIL |
 
 ## Game Boy - Screenshot suites (9/13)
 
@@ -1007,7 +1008,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | same-suite/apu/div_write_trigger_volume | CGB | 👌 |
 | same-suite/apu/div_write_trigger_volume_10 | CGB | 👌 |
 
-## Game Boy - Shootout ROMs (9/11)
+## Game Boy - Shootout ROMs (10/12)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -1019,11 +1020,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | cpp/ramg-mbc3-test | DMG | 👌 |
 | daid/ppu_scanline_bgp-dmg | DMG | 👌 |
 | daid/stop_instr-dmg | DMG | 👌 |
+| daid/stop_instr_gbc_mode3 | CGB | 👌 |
 | daid/speed_switch_timing_div | CGB | 👌 |
 | daid/speed_switch_timing_ly | CGB | 👌 |
 | daid/speed_switch_timing_stat | CGB | 👌 |
 
-## Game Boy - Mooneye (wilbertpol) (84/117)
+## Game Boy - Mooneye (wilbertpol) (85/117)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -1137,12 +1139,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/manual-only/sprite_priority | DMG | 👌 |
 | mooneye-wilbertpol/misc/bits/unused_hwio-C | CGB | 👌 |
 | mooneye-wilbertpol/misc/boot_hwio-C | CGB | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/misc/boot_hwio-S | CGB sgb | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/misc/boot_hwio-S | cart sgb | 👌 |
 | mooneye-wilbertpol/misc/boot_regs-A | CGB agb | 👌 |
 | mooneye-wilbertpol/misc/boot_regs-cgb | CGB | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-mgb | CGB mgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb | CGB sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb2 | CGB sgb2 | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-mgb | cart mgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb | cart sgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb2 | cart sgb2 | 👌 |
 | mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C | CGB | 👌 |
 
 ## Game Boy - gambatte (9/48)
@@ -1207,7 +1209,6 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **blargg/oam_bug/7-timing_effect** — broken standalone build: its verbose output overruns the $A004..$BFFF text window into the $C000 copy of its own code, so it never reports — on real DMG hardware too (docboy#33). Test 7 is scored through `blargg/oam_bug/combined` instead. (build_blargg_tests)
 - **daid/ppu_scanline_bgp (GBC)** — its reference captures a CGB-D-or-later palette-write dot; the tree deliberately scores CPU CGB C, which mealybug's 27 compat-mode rows pin from the other side. (build_shootout_tests)
 - **daid/stop_instr (GBC)** — reference is an all-black frame, which a blanked panel matches however STOP got there — a gate that cannot fail. (build_shootout_tests)
-- **daid/stop_instr_gbc_mode3 (GBC)** — not yet wired; unlike the two rows above its reference has real content, so it IS scoreable — see docs/gb-test-suite-sources.md §1.5. (build_shootout_tests)
 - **daid/rom_and_ram, acid/which** — ship no reference image; the shootout classes them INFO, not pass/fail. (build_shootout_tests)
 - **cpp/sgb-ext-test** — SGB packet-protocol test the shootout scores on an SGB; not covered by dingbat's SGB adapter model. (build_shootout_tests)
 - **magen/oam_internal_priority** — its only stated criterion is prose ("2 pairs of rectangles connected or touching"); nothing machine-checkable to score against. (build_magen_tests)
@@ -1217,5 +1218,6 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **scribbltests/fairylake, scribbltests/winpos** — ship no reference image. (build_small_screenshot_tests)
 - **little-things-gb/tellinglys** — needs scripted joypad input mid-run. (build_small_screenshot_tests)
 - **mbc3-tester CGB reference** — a CGB compat-mode capture; only the DMG row is scored. (build_small_screenshot_tests)
+- **mooneye/utils/ (bootrom_dumper, dump_boot_hwio)** — tools, not pass/fail tests. bootrom_dumper waits for a boot ROM to dump and can only time out (docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends in quit_dump_mem, which sets the success byte unconditionally, so its green row was a gate that could not fail. (build_mooneye_tests)
 - **mooneye-wilbertpol utils/, logic-analysis/** — tools and analysis captures, not pass/fail tests. (build_wilbertpol_tests)
 - **rtc3test upstream single ROM** — needs menu input to select a sub-test; the shootout's three pre-split builds are scored instead. (build_shootout_tests)

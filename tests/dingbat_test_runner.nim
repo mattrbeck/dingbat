@@ -679,6 +679,14 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(mooneye_dir, ".gb"):
     let rel = rom.relativePath(mooneye_dir)
     let name = "mooneye/" & rel.changeFileExt("")
+    # utils/ holds tools, not tests — the same skip the wilbertpol builder
+    # makes. `bootrom_dumper` waits for a boot ROM to dump and can only ever
+    # time out (docs/gb-failure-triage.md calls it unrecoverable), and
+    # `dump_boot_hwio` is the opposite trap: it ends in `quit_dump_mem`, which
+    # sets the success byte `ld d, $00` unconditionally, so its green row was
+    # a gate that could not fail. Both are recorded in NotScored.
+    if rel.startsWith("utils"):
+      continue
     # manual-only/sprite_priority has no serial pass/fail signal — mooneye
     # ships a reference image instead. Run it as a screenshot comparison
     # against the bundled DMG reference (same convention as mealybug/acid2).
@@ -689,6 +697,23 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         mode: tmScreenshot,
         timeout: 120,
         expected_png: rom.parentDir / "sprite_priority-dmg.png",
+      ))
+      continue
+    # madness/mgb_oam_dma_halt_sprites is the suite's other screenshot ROM: it
+    # ships `mgb_oam_dma_halt_sprites_expected.png` beside it and targets an
+    # MGB, so scoring it as a serial test on a default DMG was wrong twice and
+    # produced nothing but a 1800-frame timeout. Same treatment as the
+    # wilbertpol fork's row of the same name — the two bundles' ROMs are NOT
+    # byte-identical (md5s differ), though their expected PNGs are, so both
+    # rows are legitimate and they happen to agree today.
+    if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
+      tests.add(TestDef(
+        name: name,
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 120,
+        expected_png: rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png",
+        model: "mgb",
       ))
       continue
     let model = mooneye_model_for(rom.splitFile().name)
@@ -760,6 +785,33 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
         cgb: true,
         no_save: true,
       ))
+  # The bundle's other two mealybug directories, `dma/` and `mbc/`, ship no
+  # reference image and upstream ships none either (its `expected/` tree is
+  # ppu-only, and so is `photos/`) — which is why they were never scored. They
+  # do not need one: unlike the ppu ROMs they are built WITHOUT
+  # DISPLAY_RESULTS_ONLY, so `inc/base.asm` runs CompareResults against the
+  # `CorrectResults` table each one carries and then falls into `Quit`, which
+  # sets mooneye's Fibonacci registers (3/5/8/13/21/34) on a pass, $42 across
+  # the board on a failure, and ends on LD B,B. That is exactly what tmMooneye
+  # reads, so these are self-checking rows in the plainest sense.
+  #
+  # Both `dma/` ROMs declare REQUIRES_CGB and bail out with "CGB Required"
+  # otherwise; `mbc/mbc3_rtc` is device-independent. All three run --nosave:
+  # mbc3_rtc is battery-backed with an RTC, so without it the next run starts
+  # from the previous run's clock, and it costs the other two nothing.
+  for (group, name, cgb) in [("dma", "hdma_during_halt-C", true),
+                             ("dma", "hdma_timing-C", true),
+                             ("mbc", "mbc3_rtc", false)]:
+    let rom = mealybug_dir / group / (name & ".gb")
+    if not fileExists(rom): continue
+    tests.add(TestDef(
+      name: "mealybug/" & group & "/" & name,
+      rom_path: rom,
+      mode: tmMooneye,
+      timeout: 1800,
+      cgb: cgb,
+      no_save: true,
+    ))
   tests
 
 proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
@@ -897,6 +949,33 @@ proc age_device_tokens(base: string): seq[string] =
     else:
       break
 
+proc age_model_for(device: string): string =
+  ## The `--model=` token for one AGE device token, or "" to leave the row on
+  ## the default revision.
+  ##
+  ## AGE names the devices a test was verified on, and some of those names are
+  ## a single revision family (`-cgbE`, `-cgbBC`, `-dmgC`) that the emulator
+  ## can actually be set to. Passing it through means a row named `cgbE` is
+  ## scored on a CPU CGB E instead of on whatever the default happens to be —
+  ## which is CPU CGB C, so today the Device column was claiming a machine the
+  ## row's own name contradicts.
+  ##
+  ## MEASURED 2026-08-13: this changes no verdict anywhere in the suite (the
+  ## five failing `-cgbE` rows still fail under `--model=cgbE`, `ly-cgbE` still
+  ## passes, and the three `-dmgC` screenshot rows are pixel-identical either
+  ## way). It is a labelling fix that pre-positions the rows for the day the
+  ## C-vs-E differences are modelled.
+  ##
+  ## The accepted set mirrors gb_revision_from_name (src/dingbat/gb/gb.nim) and
+  ## must stay a subset of it: dingbat_test *quits* on a token it cannot parse,
+  ## so a name like `cgbBCE` — a span with no single revision behind it — is
+  ## deliberately left empty rather than guessed at.
+  case device.toLowerAscii()
+  of "dmg0", "dmg", "dmga", "dmgb", "dmgc", "dmgabc", "mgb",
+     "cgb0", "cgb0b", "cgba", "cgbab", "cgbb", "cgbc", "cgb0bc", "cgbbc",
+     "cgbd", "cgbcd", "cgb", "cgbe", "cgbde", "cgbcde", "cgbabcde": device
+  else: ""
+
 proc build_age_tests(age_dir: string): seq[TestDef] =
   ## c-sp's own AGE test roms. Two verdicts, both already implemented here:
   ## most ROMs end on LD B,B with the mooneye Fibonacci registers (tmMooneye),
@@ -924,8 +1003,10 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
       for (device, png) in shots:
         if device.startsWith("ncm"): continue   # device not modeled
         let cgb = device.startsWith("cgb")
-        tests.add(shot("age/" & rel & "-" & device, rom, png,
-                       timeout = 120, color = cgb, cgb = cgb))
+        var t = shot("age/" & rel & "-" & device, rom, png,
+                     timeout = 120, color = cgb, cgb = cgb)
+        t.model = age_model_for(device)
+        tests.add(t)
       continue
     let devices = age_device_tokens(base)
     let dmg = devices.anyIt(it.startsWith("dmg"))
@@ -938,6 +1019,11 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
       mode: tmMooneye,
       timeout: 1800,
       cgb: not dmg,   # prefer DMG when the ROM is verified on both
+      # ...and then run the revision the name declares, when it names exactly
+      # one family. A multi-device name (`-dmgC-cgbBCE`) gets no token: the row
+      # already picked DMG above, and inventing a revision for the other half
+      # would be a claim the filename does not make.
+      model: (if devices.len == 1: age_model_for(devices[0]) else: ""),
       # AGE signals failure with "any register values other than the Fibonacci
       # ones", not with a dedicated failure signature, so LD B,B has to end the
       # run unconditionally. Without this a failing ROM never stops and burns
@@ -982,14 +1068,23 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
       continue
     let base = rom.splitFile().name
     # Device suffix after the last '-': -C/-A are CGB/AGB tests, -G/-S/-GS are
-    # DMG/SGB. misc/ is the CGB-hardware directory, same convention as Gekkio's.
+    # DMG/SGB.
+    #
+    # The suffix is the ONLY thing that picks the device, including under misc/.
+    # Gekkio's misc/ really is a CGB-only directory, but this fork's is not: it
+    # also holds `boot_hwio-S`, `boot_regs-mgb`, `boot_regs-sgb` and
+    # `boot_regs-sgb2`. Blanketing the directory with --cgb ran those four as a
+    # CGB wearing an SGB/MGB boot table — a machine that does not exist, and it
+    # printed as such in the Device column ("CGB sgb"). `boot_hwio-S` failed
+    # purely because of it (the Gekkio builder passes the same ROM name with
+    # model=sgb and no --cgb, and it passes there).
     let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
     tests.add(TestDef(
       name: name,
       rom_path: rom,
       mode: tmMooneye,
       timeout: 1800,
-      cgb: rel.startsWith("misc") or suffix in ["C", "cgb", "cgb0", "A"],
+      cgb: suffix in ["C", "cgb", "cgb0", "A"],
       model: mooneye_model_for(base),
       ed_breakpoint: true,
     ))
@@ -1125,11 +1220,12 @@ proc build_shootout_tests(): seq[TestDef] =
   # all three carts are DMG-flagged ($143 = $00), so that is a CGB in
   # **compatibility mode** — the same mode the mealybug `_cgb_c` references
   # capture. That mode IS modelled here (see `cgb_native` in gb.nim, and
-  # build_mealybug_tests, which scores 27 rows against it), so these three are
+  # build_mealybug_tests, which scores 27 rows against it), so the first two are
   # skipped as redundant rather than as unmodellable: mealybug covers the same
   # machine far more precisely. `ppu_scanline_bgp.gbc.png` is visibly a compat
   # capture — its only colours are #0063C6/#7BFF31/#FFFFFF, straight out of the
-  # compat background palette.
+  # compat background palette. The third, `stop_instr_gbc_mode3`, IS wired —
+  # see below.
   #
   # "The same machine" was measured in 2026-08-09 and it is NOT the same
   # machine, which is the better reason for leaving `ppu_scanline_bgp` "(GBC)"
@@ -1174,6 +1270,27 @@ proc build_shootout_tests(): seq[TestDef] =
     grey_tolerance: ShootoutTolerance,
     timeout: 30,
     expected_png: ensure_shootout_file("daid/stop_instr.dmg.png"),
+  ))
+  # The mode-3 sibling is the one GBC daid row that IS worth gating on, and the
+  # exception to the paragraph above. Same DMG-flagged cart on a CGB, but its
+  # reference is not a blank panel: the ROM prints "LCD on: PASS" and only then
+  # spins until STAT reads mode 3 before executing STOP, and daid's own note
+  # says a mode-3 STOP on a CGB "will keep the screen displaying the same data,
+  # as the PPU keeps running, and during mode3 it can access VRAM". So the
+  # reference is the text still on screen, and an implementation that blanks the
+  # panel — the DMG behaviour, and the one `stop_instr.gbc.png` cannot tell
+  # apart — scores 1.1% against it. Measured 2026-08-13: dingbat is pixel-exact
+  # here even at tolerance 0, so unlike `ppu_scanline_bgp` (GBC) there is no
+  # CGB-revision split hiding in it. See docs/gb-test-suite-sources.md §1.5.
+  tests.add(TestDef(
+    name: "daid/stop_instr_gbc_mode3",
+    rom_path: ensure_shootout_file("daid/stop_instr_gbc_mode3.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: 30,
+    expected_png: ensure_shootout_file("daid/stop_instr_gbc_mode3.png"),
+    color: true,
+    cgb: true,
   ))
   # The speed-switch trio: a STOP-driven double-speed switch must reset DIV,
   # and must land LY and STAT where hardware does. These three ARE native CGB
@@ -1366,9 +1483,6 @@ const NotScored: array[15, (string, string)] = [
   ("daid/stop_instr (GBC)", "reference is an all-black frame, which a " &
     "blanked panel matches however STOP got there — a gate that cannot " &
     "fail. (build_shootout_tests)"),
-  ("daid/stop_instr_gbc_mode3 (GBC)", "not yet wired; unlike the two rows " &
-    "above its reference has real content, so it IS scoreable — see " &
-    "docs/gb-test-suite-sources.md \xC2\xA71.5. (build_shootout_tests)"),
   ("daid/rom_and_ram, acid/which", "ship no reference image; the shootout " &
     "classes them INFO, not pass/fail. (build_shootout_tests)"),
   ("cpp/sgb-ext-test", "SGB packet-protocol test the shootout scores on an " &
@@ -1391,6 +1505,11 @@ const NotScored: array[15, (string, string)] = [
     "(build_small_screenshot_tests)"),
   ("mbc3-tester CGB reference", "a CGB compat-mode capture; only the DMG " &
     "row is scored. (build_small_screenshot_tests)"),
+  ("mooneye/utils/ (bootrom_dumper, dump_boot_hwio)", "tools, not pass/fail " &
+    "tests. bootrom_dumper waits for a boot ROM to dump and can only time out " &
+    "(docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends " &
+    "in quit_dump_mem, which sets the success byte unconditionally, so its " &
+    "green row was a gate that could not fail. (build_mooneye_tests)"),
   ("mooneye-wilbertpol utils/, logic-analysis/", "tools and analysis " &
     "captures, not pass/fail tests. (build_wilbertpol_tests)"),
   ("rtc3test upstream single ROM", "needs menu input to select a sub-test; " &

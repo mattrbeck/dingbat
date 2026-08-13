@@ -734,11 +734,20 @@ A negative result, so the next person does not dig:
   is not scored**; it postdates the snapshot the harness uses.
 * **`src/dma/hdma_timing-C.asm`, `hdma_during_halt-C.asm`,
   `src/mbc/mbc3_rtc.asm`** — CGB/MBC, self-checking (they carry a
-  `CorrectResults` table rather than a reference image), and not in the scored
-  set. Two facts worth having anyway: HDMA **does not run during halt** — "the
-  HDMA transfer occurs after exiting from halt" — and HDMA is **delayed by a
-  longer mode 3** (the ROM's own two SCX cases, 1 and 2, differ only in that).
-  Both are already dingbat's behaviour.
+  `CorrectResults` table rather than a reference image). **Now scored
+  (2026-08-13), as three `tmMooneye` rows.** They were left out on the
+  assumption that a mealybug ROM needs a reference capture, and neither this
+  bundle nor upstream ships one for them (upstream's `expected/` and `photos/`
+  trees are ppu-only) — but they never needed one. Built without
+  `DISPLAY_RESULTS_ONLY`, `inc/base.asm` runs `CompareResults` against the
+  table and falls into `Quit`, which sets mooneye's Fibonacci registers
+  (3/5/8/13/21/34) on a pass, `$42` across the board on a failure, and ends on
+  `LD B,B` — the exact protocol `--mode=mooneye` already reads. First run:
+  `hdma_during_halt-C` and `mbc3_rtc` **pass**, `hdma_timing-C` **fails** (a
+  genuine `Failed` verdict, not a timeout). Two facts worth having anyway:
+  HDMA **does not run during halt** — "the HDMA transfer occurs after exiting
+  from halt" — and HDMA is **delayed by a longer mode 3** (the ROM's own two
+  SCX cases, 1 and 2, differ only in that).
 * **`inc/old_skool_outline_thick.asm`** is font data.
 
 ---

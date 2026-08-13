@@ -33,7 +33,7 @@ down until the cost column stops being worth it.
 | **1.6 / 10.1** | bully's reference is 22893 white + 147 black and dingbat matches **exactly the 147 black** — it renders a solid black frame, because `skip_boot` seeds CGB palette RAM only on the DMG-compat path | **1-2** | ~4 lines | high |
 | **9.1** | "The RAMB register for MBC3+RTC is a **4 bit register**" — `mbc3.nim` stores all 8 | **1** | one token | certain |
 | **9.2** | The RTC latch is a **1-bit** register; dingbat requires the full byte `$00` then `$01`, so it never re-latches against random writes | **1** | one line (+ decode the PNG first) | high |
-| **1.5** | `stop_instr_gbc_mode3`'s reference **has content** (unlike `stop_instr (GBC)`'s black frame), so it discriminates; dingbat skips it as if it did not | **1** | one `TestDef` | high |
+| **1.5** | ~~`stop_instr_gbc_mode3`'s reference **has content** (unlike `stop_instr (GBC)`'s black frame), so it discriminates; dingbat skips it as if it did not~~ **CLOSED 2026-08-13.** Wired as `daid/stop_instr_gbc_mode3` and **pixel-exact** — the behaviour was already right, the row was simply missing | **1** | done | certain |
 | **1.1** | "When the window is disabled during mode 3, the tile fetcher will read from the background tiles… at the start of the next tile fetcher cycle" — on **DMG**. dingbat has no path that clears `fetching_window` mid-line, and files the behaviour as CGB-only | **2** (+1 local) | small code, medium risk | high |
 | **7.2** | "starting the APU while bit 4 of DIV is set causes the APU to **skip the first DIV-APU event**" — dingbat's NR52 power-on never reads the tap | **3** | low | high |
 | **1.2** | daid's mid-scanline BGP: the three legitimate hardware outcomes differ by **464-576 px**; dingbat is **6180 px** wrong. Not an ambiguity, a phase error | **1** (+2 mealybug) | medium | high |
@@ -162,7 +162,7 @@ Diffing the 261 against dingbat's row names:
 
 | shootout row | dingbat | note |
 |---|---|---|
-| `daid/stop_instr_gbc_mode3.gb` | not run | **see 1.5 — its reference discriminates, unlike `stop_instr (GBC)`** |
+| `daid/stop_instr_gbc_mode3.gb` | **now run** (`daid/stop_instr_gbc_mode3`, green) | wired 2026-08-13, see 1.5 — its reference discriminates, unlike `stop_instr (GBC)` |
 | `daid/ppu_scanline_bgp.gb (GBC)` | not run | deliberate, and **the reason is now measured**: it is 92.50%, a uniform 3 pixels early, and the 3 = one M-cycle at the halt-woken handler entry MINUS one dot of the CGB-C→CGB-D palette step. Its reference is a **later device** than the `_cgb_c` set the 27 mealybug CGB rows score against. See gb-failure-triage.md and `CGB_HALT_EXIT_MCYCLES` |
 | `daid/stop_instr.gb (GBC)` | not run | deliberate and correct: reference is a uniform black frame (147-byte PNG), so the row cannot fail |
 | `ashiepaws/bully.gb (GBC)` | one `bully` row only | dingbat runs the cart CGB (flag `$80`), so its single row is the CGB one |
@@ -571,7 +571,9 @@ recoverable after all: `oam_fill = $0C`, `fill_oam` writes `$FE00..$FE9F` with
 
 ## 1.5 `daid/stop_instr_gbc_mode3` is a discriminating row, and dingbat skips it as if it were not
 
-**Row: `daid/stop_instr_gbc_mode3.gb` — 1 shootout row. Confidence: high.**
+**Row: `daid/stop_instr_gbc_mode3.gb` — 1 shootout row. Confidence: high.
+CLOSED 2026-08-13 — wired in `build_shootout_tests` and green on the first
+run.**
 
 `tests/dingbat_test_runner.nim:1012-1027` skips three daid GBC rows together, and
 gives a good reason for two of them and a wrong one for the third:
@@ -614,6 +616,15 @@ siblings, which is the runner's other stated reason for skipping — but unlike
 them, this one can only be passed by getting the behaviour right.
 
 **Cost:** one `TestDef`. The behaviour may already be correct.
+
+**Outcome (2026-08-13).** It was. The row is `daid/stop_instr_gbc_mode3`,
+scored `--cgb --color` against `daid/stop_instr_gbc_mode3.png` after the
+shootout's own 0.5 s, and it comes back **23040/23040 pixels — pixel-exact even
+at tolerance 0**, so nothing here rides on the ±50 luma rule. The gate is real,
+not vacuous: the same capture scored against `stop_instr.dmg.png` (the
+blank-the-panel outcome) is **1.1%**, which is what a DMG-style STOP would have
+produced. And unlike `ppu_scanline_bgp` (GBC) there is no CGB-revision split
+hiding in this reference — an exact match on the default CPU CGB C settles it.
 
 ## 1.6 `bully` does not fail a hundred checks — dingbat renders a uniform black frame
 
