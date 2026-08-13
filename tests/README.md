@@ -258,9 +258,10 @@ the repo root right after `nimble test_build`, or it quits with
   `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
   the run; the cache key must be bumped when a URL/version changes.
 - Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
-  -table only in this harness), `--apu` / `--suite=apu` (opt-in Blargg
-  dmg_sound/cgb_sound + SameSuite APU; deliberately outside the default run
-  and it does NOT rewrite results files).
+  -table only in this harness), `--apu` / `--suite=apu` (fast-iteration
+  filter: runs ONLY Blargg dmg_sound/cgb_sound + SameSuite APU and prints
+  tallies without rewriting results files; the same three suites are also in
+  the default run and in `results.md`).
 
 ### Which suites run, and how each one is scored
 
@@ -279,7 +280,7 @@ a `--cgb`/model flag here.
 | AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
 | GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`) |
 | Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
-| SameSuite `dma`, `ppu`, `interrupt` | `LD B,B` + Fibonacci regs | `tmMooneye`, all `--cgb`; `sgb/` needs an SGB device, `apu/` stays behind `--apu` |
+| SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `tmMooneye`; `--cgb` except `sgb/`, which runs `--sgb`; `apu/` is also reachable alone via `--apu` |
 | rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | downloaded from the gbdev shootout, scored with **its** tolerance — see below |
 | MagenTests | screen colour | `--mode=magen-green` / `--mode=magen-nored`, see above |
 | gambatte | glyph OCR of the on-screen result | batched via `--mode=gambatte --list=`; aggregated one row per subdirectory, see below |
@@ -344,22 +345,20 @@ Screenshot notes:
   `#000000/#943939/#FF8484/#FFFFFF`, which makes such an image identifiable on
   sight.
 
-  **Mealybug's `_cgb_c` / `_cgb_d` references are exactly this**, which is the
-  single most tempting mistake in this directory: 47 unused reference images
-  sitting in a bundle we already download, apparently the only way to arbitrate
-  a CGB-side mid-scanline question, and only DMG wired up. Every mealybug cart
-  is DMG-flagged (`$143 = $00`), so those captures are a CGB in compatibility
-  mode, and measured 2026-08-03 **all 47 images across both revisions contain
-  only the six compat colours above and not one native-CGB colour**. Scoring
-  them adds 27 permanently-red rows about a device this tree does not model:
-  a DMG-flagged cart forced to CGB here renders an entirely black panel,
-  because nothing installs the compatibility palettes the CGB boot ROM writes,
-  so the rows score 0-48% for a reason that has nothing to do with the PPU.
-  The same trap kills three of daid's rows — see `build_shootout_tests`, where
-  one of them would have gone in **green** while asserting nothing.
+  **Mealybug's `_cgb_c` / `_cgb_d` references are exactly this**: every
+  mealybug cart is DMG-flagged (`$143 = $00`), so those captures are a CGB in
+  compatibility mode — measured 2026-08-03, all 47 images across both
+  revisions contain only the six compat colours above and not one native-CGB
+  colour. Compat mode IS modelled now, and the 27 `_cgb_c` rows are wired as
+  `mealybug-cgb/*` (see `build_mealybug_tests`); the `_cgb_d` set stays held
+  out — it captures a later CGB revision, measured 17/20 pixel-exact under
+  `--cgb-rev=D` (see the builder comment and `results.md`'s "Deliberately not
+  scored"). The compat trap still kills two of daid's "GBC" rows — see
+  `build_shootout_tests`, where one of them would have gone in **green**
+  while asserting nothing.
 
-  dingbat's CGB PPU is not unmeasured: gambatte's `cgb04c` rows are native-CGB
-  and there are thousands of them.
+  dingbat's CGB PPU is also measured natively: gambatte's `cgb04c` rows are
+  native-CGB and there are thousands of them.
 - `strikethrough` and `bully` are `$80` CGB-capable carts. They used to boot CGB
   from the header alone, so their `-dmg` references were unreachable; since
   `--mode=screenshot` reads the *absence* of `--cgb` as "run it on a DMG" the
@@ -399,17 +398,19 @@ Everything else in the tree stays exact, because everything else ships raw
 dumps. Note the consequence when reading `results.md`: a shootout row's
 percentage is *not* comparable to a mealybug or gambatte row's.
 
-Skipped from the shootout, each for a stated reason in the code: `acid/which.gb`
-and `daid/rom_and_ram.gb` ship no reference at all (the shootout itself scores
-them INFO, not pass/fail); `cpp/sgb-ext-test` and SameSuite's `sgb/` pair need
-an SGB device; and the three daid rows whose "GBC" half is really CGB
+Skipped from the shootout, each for a stated reason in the code AND in
+`results.md`'s "Deliberately not scored" section: `acid/which.gb` and
+`daid/rom_and_ram.gb` ship no reference at all (the shootout itself scores
+them INFO, not pass/fail); `cpp/sgb-ext-test` needs SGB packet coverage the
+adapter model does not have; and the daid rows whose "GBC" half is really CGB
 compatibility mode, discussed above.
 
 **Exit-code pitfall:** the runner exits non-zero only on *regressions* —
 tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
 **not** mean everything passed: the baseline carries a lot of known failures
-(Total 951, Pass 678 as of the current committed `results.md`, most of them the
-PPU-timing suites added on purpose to measure them). 48 of those rows are
+(see the Summary table at the top of the committed `results.md` for the
+current per-suite tallies; most failures are the PPU-timing suites added on
+purpose to measure them). 48 of those rows are
 aggregated gambatte subdirectories, standing for 2,632/5,005 individual tests
 passing — and those 48 gate on the pass COUNT, not just the pass/fail bit. All 13 jsmolka rows, all 5 FuzzARM rows
 and 6 of the 7 MagenTests rows are green in it, so any of them going red *is* a
@@ -439,6 +440,14 @@ case tests" from 1/10 to 4/12 — a row-count change, in a GBA suite, in a commi
 that touched only GB code. Set a private `DINGBAT_ROM_CACHE` before generating
 a baseline you intend to commit, and check `git diff tests/results.md` for rows
 your change has no business touching.
+
+**Results-file shape:** `results.md` opens with a provenance line (timestamp,
+commit, ROM-bundle version), a Summary (global tallies + a per-suite table),
+then one section per suite with `| Test | Device | Result |` rows — the Device
+column names the hardware the row is scored on (`cart` = the header picks;
+see the legend in the file) — and closes with a "Deliberately not scored"
+section listing every intentional skip with its reason. Failing rows always
+carry their harness output in the Result cell.
 
 **Results-file caveat:** `tests/results.md`, `tests/results_mgba_suite.md` and
 `tests/results_gambatte.md` are committed baselines, and every run **rewrites

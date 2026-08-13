@@ -71,6 +71,9 @@ type
     always_detail: bool  # keep `output` in results.md even when the row passes
                          # (aggregated rows carry their pass COUNT there, and
                          # the count is what the regression gate compares)
+    device: string       # what lands in the results.md Device column: the
+                         # hardware the row was scored on ("" renders as an
+                         # em-dash, used for the GBA suites)
 
   SuiteResults = object
     suite_name: string
@@ -114,6 +117,10 @@ proc download_file(url, path: string) =
     echo &"Failed to download {url} (curl exit {code}): ", output
     quit(1)
 
+# The GB ROM bundle release. Referenced by the download URL AND by
+# results.md's provenance line, so bumping it updates both.
+const GbBundleVersion = "v7.0"
+
 proc ensure_gameboy_test_roms(): string =
   let dir = RomCacheDir / "game-boy-test-roms"
   if dirExists(dir) and has_rom_files(dir):
@@ -123,7 +130,8 @@ proc ensure_gameboy_test_roms(): string =
     removeDir(dir)
   echo "Downloading game-boy-test-roms release..."
   createDir(RomCacheDir)
-  let url = "https://github.com/c-sp/game-boy-test-roms/releases/download/v7.0/game-boy-test-roms-v7.0.zip"
+  let url = "https://github.com/c-sp/game-boy-test-roms/releases/download/" &
+    GbBundleVersion & "/game-boy-test-roms-" & GbBundleVersion & ".zip"
   let zipfile = RomCacheDir / "gb-roms.zip"
   download_file(url, zipfile)
   try:
@@ -537,7 +545,9 @@ proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef]
   ## framework's SRAM protocol ($A000 status byte + "DEB061" signature + text),
   ## which is what tmSram reads. cgb_sound asserts CGB APU behavior from a
   ## DMG-flagged cart, so it needs the CGB boot state (cgb = true); dmg_sound is
-  ## DMG-only. Opt-in, see --apu in main().
+  ## DMG-only, and forced (`dmg = true`) rather than left to the cart header
+  ## after the oam_bug lesson: the suite names the hardware, the header does
+  ## not. Part of the default run; --apu runs only the APU suites.
   var tests: seq[TestDef]
   let singles = sound_dir / "rom_singles"
   if not dirExists(singles):
@@ -549,6 +559,7 @@ proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef]
       name: "blargg/" & suite & "/" & name,
       rom_path: rom,
       mode: tmSram,
+      dmg: not cgb,
       timeout: 1800,
       cgb: cgb,
     ))
@@ -1339,39 +1350,132 @@ proc build_magen_tests(): seq[TestDef] =
     ))
   tests
 
+const NotScored: array[15, (string, string)] = [
+  # The page's own record of every deliberate skip, so "why isn't X here?"
+  # is answerable from the page itself instead of from runner comments.
+  # Keep in sync with the skip sites (each entry names its builder).
+  ("blargg/oam_bug/7-timing_effect", "broken standalone build: its verbose " &
+    "output overruns the $A004..$BFFF text window into the $C000 copy of its " &
+    "own code, so it never reports — on real DMG hardware too (docboy#33). " &
+    "Test 7 is scored through `blargg/oam_bug/combined` instead. " &
+    "(build_blargg_tests)"),
+  ("daid/ppu_scanline_bgp (GBC)", "its reference captures a CGB-D-or-later " &
+    "palette-write dot; the tree deliberately scores CPU CGB C, which " &
+    "mealybug's 27 compat-mode rows pin from the other side. " &
+    "(build_shootout_tests)"),
+  ("daid/stop_instr (GBC)", "reference is an all-black frame, which a " &
+    "blanked panel matches however STOP got there — a gate that cannot " &
+    "fail. (build_shootout_tests)"),
+  ("daid/stop_instr_gbc_mode3 (GBC)", "not yet wired; unlike the two rows " &
+    "above its reference has real content, so it IS scoreable — see " &
+    "docs/gb-test-suite-sources.md \xC2\xA71.5. (build_shootout_tests)"),
+  ("daid/rom_and_ram, acid/which", "ship no reference image; the shootout " &
+    "classes them INFO, not pass/fail. (build_shootout_tests)"),
+  ("cpp/sgb-ext-test", "SGB packet-protocol test the shootout scores on an " &
+    "SGB; not covered by dingbat's SGB adapter model. " &
+    "(build_shootout_tests)"),
+  ("magen/oam_internal_priority", "its only stated criterion is prose (\"2 " &
+    "pairs of rectangles connected or touching\"); nothing machine-checkable " &
+    "to score against. (build_magen_tests)"),
+  ("mealybug `*_cgb_d` references (~20)", "a CGB-D-or-later machine; " &
+    "measured 17/20 pixel-exact under --cgb-rev=D and held out pending " &
+    "per-revision rows. (build_mealybug_tests)"),
+  ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
+    "does not model. (build_age_tests)"),
+  ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
+    "sampling and the AGB device are not scored; see results_gambatte.md's " &
+    "source notes. (build_gambatte_rows)"),
+  ("scribbltests/fairylake, scribbltests/winpos", "ship no reference " &
+    "image. (build_small_screenshot_tests)"),
+  ("little-things-gb/tellinglys", "needs scripted joypad input mid-run. " &
+    "(build_small_screenshot_tests)"),
+  ("mbc3-tester CGB reference", "a CGB compat-mode capture; only the DMG " &
+    "row is scored. (build_small_screenshot_tests)"),
+  ("mooneye-wilbertpol utils/, logic-analysis/", "tools and analysis " &
+    "captures, not pass/fail tests. (build_wilbertpol_tests)"),
+  ("rtc3test upstream single ROM", "needs menu input to select a sub-test; " &
+    "the shootout's three pre-split builds are scored instead. " &
+    "(build_shootout_tests)"),
+]
+
+proc provenance_line(): string =
+  ## One line of "what produced this file": timestamp, the commit the runner
+  ## ran at (best-effort — absent outside a git checkout), and the ROM-bundle
+  ## version, so a stale page is recognizable as stale.
+  result = "*Generated: " & now().format("yyyy-MM-dd HH:mm:ss")
+  let (sha, code) = execCmdEx("git rev-parse --short HEAD", options = {poUsePath})
+  if code == 0 and sha.strip().len > 0:
+    result.add(" \xC2\xB7 commit " & sha.strip())
+  result.add(" \xC2\xB7 game-boy-test-roms " & GbBundleVersion & "*")
+
+proc row_detail(r: TestResult): string =
+  ## The Result-cell text after the emoji. Aggregated rows always carry their
+  ## pass count (the regression gate compares it); every other failing row
+  ## carries its harness output — flattened to one bounded line so the table
+  ## survives — because a bare eyes-emoji row gives a reader nothing to act
+  ## on, and output that used to be silently dropped ("size mismatch: ...")
+  ## made a failing row look no different from a healthy one.
+  if r.always_detail:
+    return " " & r.output
+  if r.passed:
+    return ""
+  var d = r.output.strip().splitLines().join("; ").replace("|", "/")
+  if d.len == 0:
+    d = "(no output)"
+  elif d.len > 160:
+    d = d[0 ..< 157] & "..."
+  " " & d
+
 proc generate_results_md(suites: seq[SuiteResults]): string =
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
   lines.add("")
-  lines.add("*Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "*")
+  lines.add(provenance_line())
+  lines.add("")
+  lines.add("Device column: the hardware the row is scored on. `cart` = the " &
+    "cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a " &
+    "CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific " &
+    "boot table/revision (`--model`); `\xE2\x80\x94` = GBA, which has no " &
+    "device axis here.")
   lines.add("")
 
   var total = 0
   var pass_count = 0
-  var fail_count = 0
+  for suite in suites:
+    for r in suite.results:
+      inc total
+      if r.passed: inc pass_count
+
+  lines.add("## Summary")
+  lines.add("")
+  lines.add("- **Total:** " & $total)
+  lines.add("- **Pass:** " & $pass_count)
+  lines.add("- **Fail:** " & $(total - pass_count))
+  lines.add("")
+  lines.add("| Suite | Pass | Total |")
+  lines.add("|-------|------|-------|")
+  for suite in suites:
+    let p = suite.results.countIt(it.passed)
+    lines.add("| " & suite.suite_name & " | " & $p & " | " &
+      $suite.results.len & " |")
+  lines.add("")
 
   for suite in suites:
-    lines.add("## " & suite.suite_name)
+    let p = suite.results.countIt(it.passed)
+    lines.add("## " & suite.suite_name & " (" & $p & "/" &
+      $suite.results.len & ")")
     lines.add("")
-    lines.add("| Test | Result |")
-    lines.add("|------|--------|")
+    lines.add("| Test | Device | Result |")
+    lines.add("|------|--------|--------|")
     for r in suite.results:
       let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
-      var detail = ""
-      if r.always_detail:
-        detail = " " & r.output
-      elif not r.passed:
-        if r.output.contains("% correct") or r.output.contains("passed") or
-           r.output.contains("timed out") or r.output.contains("verdict=0x"):
-          detail = " " & r.output
+      let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
       # The row name is the FULL test name, suite prefix included. It is the
       # key the regression comparison reads back (load_previous_results), and
       # with ~20 suites in here — several of them forks of each other, e.g.
       # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
       # anything shorter collides across suites and silently mis-keys the gate.
-      lines.add("| " & r.name & " | " & emoji & detail & " |")
-      inc total
-      if r.passed: inc pass_count else: inc fail_count
+      lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
       lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
@@ -1381,11 +1485,15 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
         "[detailed results](results_gambatte.md) for individual test outcomes.")
     lines.add("")
 
-  lines.add("## Summary")
+  # Bullets, not a table: the baseline parsers treat every "| x | y |" line
+  # as a potential result row, and these must never be keyed by the gate.
+  lines.add("## Deliberately not scored")
   lines.add("")
-  lines.add("- **Total:** " & $total)
-  lines.add("- **Pass:** " & $pass_count)
-  lines.add("- **Fail:** " & $fail_count)
+  lines.add("Everything skipped on purpose, with the reason and the builder " &
+    "that skips it. If a suite's row count looks short, the answer is here.")
+  lines.add("")
+  for (what, why) in NotScored:
+    lines.add("- **" & what & "** \xE2\x80\x94 " & why)
   lines.add("")
   lines.join("\n")
 
@@ -1399,11 +1507,19 @@ proc load_previous_results(path: string): Table[string, bool] =
     return
   let content = readFile(path)
   for line in content.splitLines():
-    if line.startsWith("| ") and not line.startsWith("| Test") and not line.startsWith("|---"):
+    if line.startsWith("| ") and not line.startsWith("| Test") and not line.startsWith("|---") and
+       not line.startsWith("| Suite"):
       let parts = line.split("|").mapIt(it.strip())
       if parts.len >= 3:
         let name = parts[1]
-        let passed = parts[2].contains("\xF0\x9F\x91\x8C")
+        # The verdict cell is found by content, not position: the table grew a
+        # Device column between name and verdict, and the first run after any
+        # such change still reads a baseline in the OLD shape.
+        var passed = false
+        for cell in parts[2 .. ^1]:
+          if cell.contains("\xF0\x9F\x91\x8C"):
+            passed = true
+            break
         result[name] = passed
 
 proc load_previous_counts(path: string): Table[string, int] =
@@ -1420,21 +1536,48 @@ proc load_previous_counts(path: string): Table[string, int] =
       continue
     let parts = line.split("|").mapIt(it.strip())
     if parts.len < 3: continue
-    let words = parts[2].splitWhitespace()
-    for i, w in words:
-      if w == "passed" and i > 0 and '/' in words[i - 1]:
-        let halves = words[i - 1].split('/')
-        try:
-          result[parts[1]] = parseInt(halves[0])
-        except ValueError: discard
-        break
+    # Scan every cell after the name: the count sits in the verdict cell,
+    # whose column index depends on whether the baseline predates the
+    # Device column.
+    block cells:
+      for cell in parts[2 .. ^1]:
+        let words = cell.splitWhitespace()
+        for i, w in words:
+          if w == "passed" and i > 0 and '/' in words[i - 1]:
+            let halves = words[i - 1].split('/')
+            try:
+              result[parts[1]] = parseInt(halves[0])
+            except ValueError: discard
+            break cells
+
+proc device_label(t: TestDef): string =
+  ## The results.md Device column: which hardware the row is scored on.
+  ## "cart" means no override — the cart header picks the device, which
+  ## resolves to DMG-ABC for a DMG cart and CPU CGB C for a CGB one (see
+  ## gb_set_revision). A --model token rides along after the base, so the
+  ## column also exposes contradictions (a row asking for --cgb AND an SGB
+  ## boot table prints as "CGB sgb"). GBA rows have no device axis.
+  if t.mode in {tmMgba, tmMgbaSuite, tmJsmolka, tmFuzzArm}:
+    return ""
+  result =
+    if t.sgb: "SGB"
+    elif t.dmg: "DMG"
+    elif t.cgb: "CGB"
+    # Screenshot rows are the one mode where the harness takes the absence of
+    # --cgb as "force a DMG" instead of letting the header decide (see
+    # force_dmg in dingbat_test.nim), so "cart" would be a lie there.
+    elif t.mode == tmScreenshot: "DMG"
+    else: "cart"
+  if t.model.len > 0:
+    result.add(" " & t.model)
 
 proc run_suite(name: string; tests: seq[TestDef]; harness: string;
                previous: Table[string, bool]; regressions: var seq[string]): SuiteResults =
   echo &"\n=== {name} ==="
   var results: seq[TestResult]
   for test in tests:
-    let r = run_test(test, harness)
+    var r = run_test(test, harness)
+    r.device = device_label(test)
     let status = if r.passed: "PASS" else: "FAIL"
     if test.mode in {tmScreenshot, tmFuzzArm, tmMagenGreen, tmMagenNoRed, tmMicrotest}:
       echo &"  [{status}] {test.name} - {r.output}"
@@ -1531,7 +1674,8 @@ proc run_microtest_suite(name: string; tests: seq[TestDef]; harness: string;
   for i, t in tests:
     let (passed, detail) = split_verdict(verdicts[i])
     echo &"  [{(if passed: \"PASS\" else: \"FAIL\")}] {t.name} - {detail}"
-    results.add(TestResult(name: t.name, passed: passed, output: detail))
+    results.add(TestResult(name: t.name, passed: passed, output: detail,
+                           device: device_label(t)))
     if previous.getOrDefault(t.name) and not passed:
       regressions.add(t.name)
   SuiteResults(suite_name: name, results: results)
@@ -1845,6 +1989,9 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
       passed: all_pass,
       output: &"{g.passes}/{g.total} passed",
       always_detail: true,
+      # Each gambatte subdirectory mixes DMG and CGB rows (the device is in
+      # each ROM's own filename), so the aggregate has no single device.
+      device: "per-ROM",
     ))
     # Regression on either bit: a group that used to be all-green going red, or
     # a group whose pass COUNT dropped. Key on `short_name`, the FULL row name:
@@ -1924,11 +2071,11 @@ proc main() =
           quit(1)
       else: discard
 
-  # The GB APU suites are opt-in (--apu, or --suite=apu). They are deliberately
-  # NOT part of the default run: most of SameSuite's sample-accurate tests fail
-  # today, and folding them in would change both the headline case count and
-  # tests/results.md. So --apu runs only them and prints its tallies rather than
-  # rewriting any results file.
+  # --apu (or --suite=apu) is a fast-iteration filter: it runs ONLY the GB APU
+  # suites and prints tallies without touching any results file. The same
+  # three suites are also part of the default run below — they used to be
+  # opt-in-only, which meant 94 cases (blargg dmg_sound/cgb_sound, SameSuite
+  # apu/) never ran in CI and had no written record at all.
   if apu_only:
     let gb_roms = ensure_gameboy_test_roms()
     let no_previous = initTable[string, bool]()
@@ -1967,6 +2114,14 @@ proc main() =
   # Blargg tests
   let blargg_tests = build_blargg_tests(gb_test_roms_dir / "blargg")
   all_suites.add(run_suite("Game Boy - Blargg", blargg_tests, harness, previous, regressions))
+
+  # Blargg APU suites (also reachable alone via --apu)
+  all_suites.add(run_suite("Game Boy - Blargg dmg_sound",
+    build_blargg_sound_tests(gb_test_roms_dir / "blargg" / "dmg_sound", "dmg_sound", cgb = false),
+    harness, previous, regressions))
+  all_suites.add(run_suite("Game Boy - Blargg cgb_sound",
+    build_blargg_sound_tests(gb_test_roms_dir / "blargg" / "cgb_sound", "cgb_sound", cgb = true),
+    harness, previous, regressions))
 
   # Mooneye tests
   let mooneye_tests = build_mooneye_tests(gb_test_roms_dir)
@@ -2017,10 +2172,15 @@ proc main() =
   all_suites.add(run_suite("Game Boy - Screenshot suites",
     build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
 
-  # SameSuite dma/ppu/interrupt (mooneye-style verdict). The apu/ half of the
-  # same suite stays behind --apu; these do not need the audio path at all.
+  # SameSuite dma/ppu/interrupt (mooneye-style verdict); these do not need
+  # the audio path at all.
   all_suites.add(run_suite("Game Boy - SameSuite",
     build_samesuite_core_tests(gb_test_roms_dir / "same-suite"),
+    harness, previous, regressions))
+
+  # SameSuite apu/ — sample-accurate APU tests (also reachable alone via --apu)
+  all_suites.add(run_suite("Game Boy - SameSuite APU",
+    build_samesuite_apu_tests(gb_test_roms_dir / "same-suite"),
     harness, previous, regressions))
 
   # The gbdev shootout's own ROMs: rtc3test, CasualPokePlayer's MBC3 tests and

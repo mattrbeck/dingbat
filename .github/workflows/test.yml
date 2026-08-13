@@ -325,3 +325,4 @@ jobs:
           path: |
             tests/results.md
             tests/results_mgba_suite.md
+            tests/results_gambatte.md
