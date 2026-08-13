@@ -41,7 +41,7 @@ down until the cost column stops being worth it.
 | **7.4, 7.5** | channel 3 and the channel-4 LFSR rows already match the sources — expect ~16 free passes on first run. **Do not "fix" the LFSR polarity** | **~16** | wire them up | high |
 | **1.7** | mooneye `intr_2_mode0_timing_sprites`: dingbat's OBJ table matches all 90 testcases; the residual is one dot of mode-3 end phase, with **zero slack** and a known conflict against GBMicrotest | **1** | measurement | high |
 | **1.3** | `m3_wx_6_change` is 60% wrong; gambatte pins only WX 0 and 7, so **nothing outside mealybug constrains WX 4/5/6** and the three references are structurally unrelated | **1** | a sweep | med |
-| **1.4** | dingbat has **no OAM-bug emulation at all** (zero hits). 3 of the 4 rows only assert *that* OAM changed and *when* | **3** + 1 | small+medium / large | certain |
+| **1.4** | ~~dingbat has **no OAM-bug emulation at all**~~ **CLOSED, all 4.** The mechanism landed in `2a571aa`; the rows stayed red because the harness ran these DMG-only ROMs on a **CGB**, which is the one machine that cannot corrupt | **4** | done | certain |
 | **7.7, 10.6** | SGB `MLT_REQ` and the packet protocol — no SGB state anywhere in `src/dingbat/gb/` | **3** | high (new subsystem) | high |
 | **10.2** | strikethrough: dingbat models the CPU side of OAM-DMA conflict thoroughly and the **PPU side not at all** (`dma_busy` has 0 hits in the PPU files) | **1** | medium-high | high |
 | — | the mealybug tail: 8 DMG rows wrong by ≤106 px out of 23040 | **8** | unknown | — |
@@ -50,8 +50,10 @@ down until the cost column stops being worth it.
 its own `500-scx-timing.s` header backs dingbat), §8.6 (`halt_op_dupe_delay`'s
 expected `$55` is physically unattainable and dingbat's `$01` is right), §8.7
 (`dma_basic` / `400-dma` / `cpu_bus_1` have no verdict by construction),
-§4.1's two blargg CRC rows (the fill pattern they hash is not recoverable from
-the shipped source). `samesuite/apu/channel_4/channel_4_freq_change` used to be
+and §4.1's two blargg CRC rows, whose fill pattern is not recoverable from the
+shipped source — that last one was wrong twice over: both CRCs are now met
+without it (§1.4), and the row that still reads red is the one the shootout
+itself does not score. `samesuite/apu/channel_4/channel_4_freq_change` used to be
 on this list — SameBoy fails it and its own header says the logic is unknown —
 and it was wrong to be: the header is an honest report that one test needs a
 mechanism no other test can see, not that the mechanism does not exist. It is
@@ -435,21 +437,35 @@ the restart", i.e. a third case rather than a threshold move.
 **Cost:** one afternoon of sweeping, one row, low risk of collateral damage
 because the evidence base for the region is empty.
 
-## 1.4 dingbat has no OAM-bug emulation at all
+## 1.4 The OAM bug is emulated; what was left was running blargg's ROMs on a DMG
 
 **Rows: `blargg/oam_bug/{2-causes, 4-scanline_timing, 5-timing_bug,
-8-instr_effect}` — 4 shootout rows. Confidence: certain.**
+8-instr_effect}` — 4 shootout rows. CLOSED.**
 
-`grep -rniE 'oam.?bug|corrupt' src/dingbat/gb/` returns six hits, none of them an
-OAM bug: three are about CH3 wave RAM, the header logo and a link desync, and
-three are save-state comments. There is no 16-bit inc/dec hook and no OAM row
-corruption anywhere in the tree. `docs/gb-derivations.md:1284` already says so in
-passing: *"Blargg was only partially wired — `oam_bug` (8 ROMs, and we had ZERO
-OAM-bug coverage)"*.
+This section used to open "dingbat has no OAM-bug emulation at all", and that
+was true when it was written. `2a571aa` (2026-08-07) landed the mechanism: the
+IDU on the address bus, `oam_bug_if` / `oam_bug_access` in
+`src/dingbat/gb/ppu.nim`, hooked at every 16-bit inc/dec site in `opcodes.nim`
+and at the interrupt/`rst` pushes in `cpu.nim`, with all three Pan Docs
+corruption patterns and the row/window edges the ROMs below pin.
 
-This explains the row split exactly: `1-lcd_sync` is pure LCD-on timing, and
-`3-non_causes` / `6-timing_no_bug` assert that OAM is **unchanged**, so all three
-pass trivially on a no-op. `2/4/5/7/8` assert that OAM **did** change.
+**The four rows stayed red anyway, for a reason that is not in the emulator.**
+All eight oam_bug carts carry `$0143 = $80`, and outside `--mode=screenshot` /
+`--mode=gambatte` dingbat's harness lets the cart header pick the device — so
+they ran on a **CGB**, where dingbat correctly refuses to corrupt at all (Pan
+Docs: "Game Boy Color and Advance are not affected by this bug, even when
+running monochrome software", which `oam_bug_access` gates on `boot_model`).
+The suite names the hardware rather than the cart, in three places: blargg's
+`readme.txt` opens *"Verifies OAM corruption bug on DMG"*, the bundle's
+`blargg/game-boy-test-roms-howto.md` lists `oam_bug` in its **DMG-C** table and
+in neither CGB one, and the shootout's `blargg.py` annotates only
+`interrupt_time` with `model=CGB`. `TestDef.dmg` (→ `--dmg`) on the oam_bug rows
+is the whole fix; the emulator is unchanged.
+
+The row split had a second half that reads the same way from either side:
+`1-lcd_sync` is pure LCD-on timing, and `3-non_causes` / `6-timing_no_bug`
+assert that OAM is **unchanged**, so all three passed trivially on the no-op
+core and still pass on the real one. `2/4/5/7/8` assert that OAM **did** change.
 
 `oam_bug/readme.txt`, in full on the mechanism:
 
@@ -519,21 +535,26 @@ eight tests `.include` it and `find . -iname 'oam_bug*'` finds only the director
 and the built ROM — so the OAM **fill pattern the CRCs are taken over is not
 recoverable from source**.
 
-**Cost, split by row:**
+**Where each row landed:**
 
-* `2-causes`, `4-scanline_timing`, `5-timing_bug` — **small to medium, 3 rows.**
-  These assert only *whether* OAM changed and *when*. A hook on the M-cycle of a
-  16-bit inc/dec whose pre-increment operand is in `$FE00-$FEFF`, gated on DMG +
-  LCD on + a 19-M-cycle window at the head of lines 0..143, writing *anything*
-  deterministic, passes all three without regressing `3-non_causes` /
-  `6-timing_no_bug`.
-* `8-instr_effect` — **large, 1 row.** Needs the exact per-instruction patterns
-  bit-for-bit against a CRC whose input fill is unrecoverable. Its four CRCs:
-  `$EF0C266A` (INC/DEC rp), `$8C62EE7D` (POP), `$B3693CEE` (PUSH), `$06BE41A4`
-  (`LD A,(HL±)`).
-* `7-timing_effect` — **skip.** The shootout has it commented out (`# This test
-  is broken.`), so it is not one of the 261; its CRC `$7D792E7C` sweeps 116
-  timings and compounds the same unrecoverable-fill problem.
+* `2-causes`, `4-scanline_timing`, `5-timing_bug` — **green.** They assert only
+  *whether* OAM changed and *when*, so the window edges above are the whole of
+  what they measure.
+* `8-instr_effect` — **green**, which is the stronger result: it is
+  bit-for-bit against four CRCs (`$EF0C266A` INC/DEC rp, `$8C62EE7D` POP,
+  `$B3693CEE` PUSH, `$06BE41A4` `LD A,(HL±)`) over a fill pattern that is not
+  recoverable from source, so the three Pan Docs patterns and the
+  per-instruction M-cycle assignment are pinned by it and not by a reading.
+* `7-timing_effect` — **red, and it is the ROM.** The shootout has it commented
+  out (`# This test is broken.`), so it is not one of the 261. Standalone on a
+  DMG it never writes a result block at all — 20,000 frames tried, against the
+  8.5 s the shootout allots it — while the *same* test inside the combined
+  `oam_bug.gb` reports `07:ok` (all eight do: `01:ok … 08:ok`), so its
+  `$7D792E7C` over 116 consecutive trigger positions is met. That row read
+  green for one run here on nothing but silence: `tmSram` latches its status
+  byte only out of a valid `DEB061` block, so a ROM that never reports leaves
+  the 0 initializer, which is blargg's PASS code. `dingbat_test.nim` now
+  requires `test_out.finished` as well.
 
 ## 1.5 `daid/stop_instr_gbc_mode3` is a discriminating row, and dingbat skips it as if it were not
 
@@ -916,6 +937,13 @@ reconstructed from source. `source/readme.txt` admits the family is incomplete
 ("Building such a multi-test is complex and the necessary files aren't included")
 but does not name this file. Practical consequence: the two CRC rows can only be
 closed by matching a reference implementation bit-for-bit, not by reading a spec.
+
+**Both CRC rows are met, and neither needed the include file** — Pan Docs'
+three patterns, plus the row/window assignment blargg's *other* ROMs pin, hash
+correctly over whatever fill the missing file writes. `8-instr_effect` passes
+standalone and `07:ok` comes out of the combined `oam_bug.gb`; only the
+standalone `7-timing_effect` stays red, and that is the ROM never reporting
+rather than a CRC mismatch (§1.4).
 
 ## 4.2 The other blargg suites ship no per-test rationale
 

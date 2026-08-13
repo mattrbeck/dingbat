@@ -2127,7 +2127,16 @@ proc main() =
     passed = output.contains("Passed")
   of tmSram:
     output = test_out.sram_text
-    passed = test_out.sram_status == 0
+    # `finished` is what says the ROM actually reported: the status byte is only
+    # ever latched out of a valid "DEB061" block, so a run that never got one
+    # leaves sram_status at its 0 initializer -- which is blargg's PASS code.
+    # Without this term a tmSram ROM that hangs, or that outruns its frame
+    # budget, exits 0 and scores as a pass on having said nothing at all.
+    # blargg's own `7-timing_effect` is the one that reaches it: the gbdev
+    # shootout has that ROM commented out as "This test is broken", and on a DMG
+    # it never writes a result block however long it runs (20,000 frames tried),
+    # while the same test inside the combined `oam_bug.gb` reports `07:ok`.
+    passed = test_out.finished and test_out.sram_status == 0
   of tmMooneye:
     passed = test_out.mooneye_result == 0
     output = if passed: "Mooneye: PASS" else: "Mooneye: FAIL"

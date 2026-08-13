@@ -48,6 +48,11 @@ type
                           # suite's own tolerance is the mechanism to copy.
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
+    dmg: bool             # force DMG mode (--dmg) for a row whose cart carries a
+                          # CGB header but whose suite verified it on a DMG. The
+                          # cart header is the default device everywhere else;
+                          # this is the per-row override for the rows where the
+                          # suite's own howto names the hardware instead.
     sgb: bool             # run the cart in a Super Game Boy (--sgb)
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
@@ -224,6 +229,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --color")
     if test.cgb:
       cmd.add(" --cgb")
+    if test.dmg:
+      cmd.add(" --dmg")
     if test.sgb:
       cmd.add(" --sgb")
     if test.model.len > 0:
@@ -357,6 +364,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode={mode_str} --timeout={test.timeout}"
     if test.cgb:
       cmd.add(" --cgb")
+    if test.dmg:
+      cmd.add(" --dmg")
     if test.sgb:
       cmd.add(" --sgb")
     if test.model.len > 0:
@@ -452,6 +461,18 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
   # oam_bug wants ~21 emulated seconds per the suite howto (~1260 frames) —
   # hence the larger timeout. It only costs anything for a ROM that never
   # reports, since tmSram stops the moment the status byte lands.
+  #
+  # oam_bug also has to run on a DMG, and its carts do not say so: all eight
+  # carry $0143 = $80, so the header-picks-the-device default runs them on a
+  # CGB. The suite names the hardware instead — blargg's `readme.txt` opens
+  # with "Verifies OAM corruption bug on DMG", the bundle's
+  # `blargg/game-boy-test-roms-howto.md` lists `oam_bug` in its DMG-C table and
+  # in NEITHER CGB one, and the shootout's `blargg.py` marks only
+  # `interrupt_time` as `model=CGB`, so every other blargg row there is a DMG
+  # row. The bug is DMG silicon (Pan Docs: "Game Boy Color and Advance are not
+  # affected by this bug, even when running monochrome software"), which the
+  # core models by gating on the console, so on the CGB these rows were being
+  # scored against hardware that cannot pass them.
   for (subdir, secs) in [("oam_bug", 21), ("mem_timing-2", 4)]:
     let singles = repo_dir / subdir / "rom_singles"
     if not dirExists(singles): continue
@@ -461,6 +482,7 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         rom_path: rom,
         mode: tmSram,
         timeout: max(1800, secs * 70),
+        dmg: subdir == "oam_bug",
       ))
   let halt_bug = repo_dir / "halt_bug.gb"
   if fileExists(halt_bug):
