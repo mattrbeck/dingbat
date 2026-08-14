@@ -32,9 +32,10 @@ proc render*(v: VideoWidget) =
   igSameLine(0, -1)
   help_marker("One look for the picture, GPU-drawn either way. hq4x, xBR and " &
               "xBRZ are clean-room implementations of the well-known " &
-              "edge-directed smoothers; Scanlines and RGB subpixels draw the " &
-              "screen's own structure instead of smoothing (RGB subpixels " &
-              "imitates the GBC/GBA TFT's stripe triads — a DMG panel has no " &
+              "edge-directed smoothers; LCD grid and RGB subpixels draw the " &
+              "screen's own structure instead of smoothing (the grid is the " &
+              "pixel matrix every Game Boy LCD shows; RGB subpixels imitates " &
+              "the GBC/GBA TFT's stripe triads — a DMG panel has no " &
               "subpixels, so there it is a stylised look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(106)
@@ -45,7 +46,7 @@ proc render*(v: VideoWidget) =
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
   discard igRadioButton_IntPtr("xBRZ", addr v.filter, 3)
-  discard igRadioButton_IntPtr("Scanlines", addr v.filter, 4)
+  discard igRadioButton_IntPtr("LCD grid", addr v.filter, 4)
   discard igRadioButton_IntPtr("RGB subpixels", addr v.filter, 5)
   igEndDisabled()
   igUnindent(106)

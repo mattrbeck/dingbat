@@ -255,10 +255,12 @@ type
     # every option is a way to draw the picture and exactly one can be active,
     # which is what retired the separate Scanlines toggle (it used to be
     # suspended whenever a smoothing filter was on — the selector makes that
-    # exclusivity structural). They are NOT filter_mode values in the shader;
-    # the frontends translate them to their own uniforms.
-    vfScanlines = "scanlines"
-    vfSubpixel  = "rgb"
+    # exclusivity structural). The LCD grid is that toggle's successor: seams
+    # on both axes, the way the real panels look, instead of CRT-style rows.
+    # They are NOT filter_mode values in the shader; the frontends translate
+    # them to their own uniforms.
+    vfGrid     = "grid"
+    vfSubpixel = "rgb"
 
   Config* = ref object
     explorer_dir*:      string
@@ -350,12 +352,14 @@ proc parse_config(j: JsonNode): Config =
     except ValueError:
       cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
-    # Scanlines used to be their own toggle; they are a Filter-selector choice
-    # now. A config that had them on becomes that choice — unless it ALSO
-    # named a smoothing filter, which the old UI made win by suspending
-    # scanlines, so the filter keeps winning here.
+    # Scanlines grew into the LCD grid. A config that had the old toggle on
+    # becomes that Filter choice — unless it ALSO named a smoothing filter,
+    # which the old UI made win by suspending scanlines, so the filter keeps
+    # winning here. (A briefly-stored video_filter of "scanlines" fails
+    # parseEnum above and lands on vfNone, where this migration catches a
+    # still-set legacy toggle; that transitional value never shipped.)
     if j["scanlines"].getBool(false) and cfg.video_filter == vfNone:
-      cfg.video_filter = vfScanlines
+      cfg.video_filter = vfGrid
   if j.hasKey("lcd_response"):
     # Two generations of stored value land here. The key held a panel name
     # while the setting was a six-way picker (off/auto/dmg/cgb/agb/ags), and

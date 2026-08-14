@@ -68,9 +68,9 @@ test("a video record written before either setting existed stays off", async () 
   eq(calls(app), [0]);
   // ...and the neighbours in the same record still load, i.e. this did not
   // just swallow the whole record. The old scanlines toggle migrates into the
-  // Filter selector's own option.
+  // Filter selector's LCD-grid option (its successor).
   assert.equal(app.runIn("integerScale"), true);
-  assert.equal(app.runIn("upscaleFilter"), "scanlines");
+  assert.equal(app.runIn("upscaleFilter"), "grid");
 });
 
 test("a legacy scanlines toggle loses to a stored smoothing filter", async () => {

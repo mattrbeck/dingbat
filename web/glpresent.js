@@ -11,7 +11,7 @@
 // the core's native pixel size; log(msg) reports GL errors.
 function createGlRenderer(canvasEl, nativeRes, log) {
   let gl = null, prog = null, tex = null, btex = null, lost = false;
-  let uColorCorrect, uPanelGbc, uScanlines, uScanHeight, uTexSize, uFilter;
+  let uColorCorrect, uPanelGbc, uGrid, uScanHeight, uTexSize, uFilter;
   let uScanWidth, uSubpixel;
   let uDmgRemap, uDmgPal, uBorderTex, uSgbBorder, uSgbBackdrop;
   let lastW = 0, lastH = 0;
@@ -52,14 +52,12 @@ out vec4 frag_color;
 uniform usampler2D u_tex;       // R16UI: raw BGR555 pixels
 uniform bool u_color_correct;
 uniform bool u_panel_gbc;       // CGB color model vs AGB
-uniform bool u_scanlines;
-// The pixel-row pitch the scanline effect uses. This is the OUTPUT height, not
-// the game texture's: with an SGB border the picture is 224 native rows and
-// both layers live in it, so feeding the 144-row game height here would put
-// Game Boy scanlines over SNES border art.
+uniform bool u_grid;
+// The pixel pitches the LCD-grid and RGB-subpixel looks use. These are the
+// OUTPUT dimensions, not the game texture's: with an SGB border the picture
+// is 256x224 native pixels and both layers live in it, so feeding the game's
+// 160x144 here would draw a Game Boy grid over SNES border art.
 uniform float u_scan_height;
-// Pixel-column pitch for the RGB-subpixel mask; the OUTPUT width, for the
-// same reason u_scan_height is the output height.
 uniform float u_scan_width;
 uniform bool u_subpixel;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
@@ -295,22 +293,29 @@ void main() {
   } else {
     rgb = shade(upscale(v_uv));
   }
-  if (u_scanlines && fract(v_uv.y * u_scan_height) < 0.3) {
-    rgb *= 0.72;
+  // "LCD grid": a thin dark seam between every pixel, on BOTH axes — the
+  // pixel matrix a reflective Game Boy LCD really shows (scanlines were a CRT
+  // idiom; no handheld panel has them). The seam is the trailing quarter of
+  // each cell, one whole backing pixel at the web's 4x store, and it darkens
+  // gently so the grid reads as texture rather than as bars.
+  if (u_grid &&
+      (fract(v_uv.x * u_scan_width) > 0.75 ||
+       fract(v_uv.y * u_scan_height) > 0.75)) {
+    rgb *= 0.85;
   }
   // "RGB subpixels": draw the display's own structure — each emulated pixel
   // splits into three vertical R/G/B stripes over a darkened row gap, the way
   // a GBC/GBA TFT's subpixel triad looks up close (a DMG panel has no
   // subpixels, so there this is a stylised look, not a simulation). The
-  // off-stripes keep 35% and a 1.55 gain rebalances overall brightness;
+  // off-stripes keep half and a 1.35 gain rebalances overall brightness;
   // min() stops the gain pushing whites into hue shifts.
   if (u_subpixel) {
     int stripe = int(fract(v_uv.x * u_scan_width) * 3.0);
-    vec3 m = stripe == 0 ? vec3(1.0, 0.35, 0.35)
-           : stripe == 1 ? vec3(0.35, 1.0, 0.35)
-           :               vec3(0.35, 0.35, 1.0);
-    rgb = min(rgb * m * 1.55, vec3(1.0));
-    if (fract(v_uv.y * u_scan_height) > 0.82) rgb *= 0.6;
+    vec3 m = stripe == 0 ? vec3(1.0, 0.5, 0.5)
+           : stripe == 1 ? vec3(0.5, 1.0, 0.5)
+           :               vec3(0.5, 0.5, 1.0);
+    rgb = min(rgb * m * 1.35, vec3(1.0));
+    if (fract(v_uv.y * u_scan_height) > 0.85) rgb *= 0.7;
   }
   frag_color = vec4(rgb, 1.0);
 }`;
@@ -341,7 +346,7 @@ void main() {
     }
     uColorCorrect = gl.getUniformLocation(prog, "u_color_correct");
     uPanelGbc = gl.getUniformLocation(prog, "u_panel_gbc");
-    uScanlines = gl.getUniformLocation(prog, "u_scanlines");
+    uGrid = gl.getUniformLocation(prog, "u_grid");
     uScanHeight = gl.getUniformLocation(prog, "u_scan_height");
     uScanWidth = gl.getUniformLocation(prog, "u_scan_width");
     uSubpixel = gl.getUniformLocation(prog, "u_subpixel");
@@ -448,9 +453,9 @@ void main() {
       gl.useProgram(prog);
       gl.uniform1i(uColorCorrect, opts.colorCorrect ? 1 : 0);
       gl.uniform1i(uPanelGbc, opts.panelGbc ? 1 : 0);
-      gl.uniform1i(uScanlines, opts.scanlines ? 1 : 0);
+      gl.uniform1i(uGrid, opts.grid ? 1 : 0);
       gl.uniform1i(uSubpixel, opts.subpixel ? 1 : 0);
-      // Scanline/subpixel pitch follows the OUTPUT size, the game texture
+      // Grid/subpixel pitch follows the OUTPUT size, the game texture
       // does not.
       gl.uniform1f(uScanHeight, oh);
       gl.uniform1f(uScanWidth, ow);

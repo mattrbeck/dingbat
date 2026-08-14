@@ -35,7 +35,7 @@ var currentOriginalName = null;
 // visible #canvas; SDL was pointed at the hidden #sdl-canvas. Same presenter as
 // the main page — see web/glpresent.js. The embed exposes no video toggles, so
 // the uniforms are fixed at the defaults index.js ships with (LCD color
-// correction on, no scanlines, no upscale filter).
+// correction on, no screen look, no upscale filter).
 const GL_SCALE = 4; // #canvas backing store = native resolution * GL_SCALE
 
 const isGbc = () =>
@@ -73,7 +73,7 @@ const drawGame = () => {
   glRenderer.draw({
     colorCorrect: true,
     panelGbc: isGbc(),
-    scanlines: false,
+    grid: false,
     filter: "none",
   });
 };

@@ -29,8 +29,8 @@ import { readShaders } from "../../web/glshaders.mjs";
 const requireWeb = createRequire(new URL("../../web/package.json", import.meta.url));
 const { chromium } = requireWeb("playwright");
 
-// The default set; FILTERSHOT_FILTERS="scanlines,rgb" overrides. "scanlines"
-// and "rgb" are the screen-structure looks — their own uniforms, u_filter 0,
+// The default set; FILTERSHOT_FILTERS="grid,rgb" overrides. "grid" and
+// "rgb" are the screen-structure looks — their own uniforms, u_filter 0,
 // exactly as index.js drives them.
 const FILTERS = (process.env.FILTERSHOT_FILTERS || "none,hq4x,xbr,xbrz")
   .split(",").map((s) => s.trim()).filter(Boolean);
@@ -71,7 +71,7 @@ function renderInPage({ VERT, FRAG, w, h, scale, pixels, ghostPixels, filter }) 
   const u1i = (n, v) => gl.uniform1i(gl.getUniformLocation(prog, n), v);
   u1i("u_color_correct", 0);
   u1i("u_panel_gbc", 0);
-  u1i("u_scanlines", filter === "scanlines" ? 1 : 0);
+  u1i("u_grid", filter === "grid" ? 1 : 0);
   u1i("u_subpixel", filter === "rgb" ? 1 : 0);
   u1i("u_dmg_remap", 0);
   u1i("u_sgb_border", 0);

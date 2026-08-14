@@ -89,16 +89,15 @@ uniform sampler2D input_texture;
 uniform sampler2D border_texture;
 uniform bool color_correct;
 uniform bool panel_gbc;
-uniform bool scanlines;
+uniform bool lcd_grid;
 uniform float tex_width;
 uniform float tex_height;
-// The pixel-row pitch the scanline effect uses. Equal to tex_height without a
-// border; with one it is the OUTPUT height (224), because the SGB border and
-// the Game Boy window are both native rows of the same 224-row picture. Feed
-// tex_height here instead and the border gets 144-row scanlines over 224 rows.
+// The pixel pitches the LCD-grid and RGB-subpixel looks use. Equal to the
+// game texture's dims without a border; with one they are the OUTPUT dims
+// (256x224), because the SGB border and the Game Boy window are both native
+// pixels of the same picture. Feed tex_width/tex_height here instead and the
+// border gets a 160x144 grid stretched over 256x224.
 uniform float scan_height;
-// Pixel-column pitch for the RGB-subpixel mask; the OUTPUT width, for the
-// same reason scan_height is the output height.
 uniform float scan_width;
 uniform bool subpixel;
 // SGB border: a 256x224 RGB5_A1 layer drawn over the whole quad, with the
@@ -279,23 +278,29 @@ void main() {
   } else {
     rgb = gb_layer(tex_coord);
   }
-  if (scanlines && fract(tex_coord.y * scan_height) < 0.3) {
-    rgb *= 0.72;
+  // "LCD grid": a thin dark seam between every pixel, on BOTH axes — the
+  // pixel matrix a reflective Game Boy LCD really shows (scanlines were a CRT
+  // idiom; no handheld panel has them). The seam is the trailing quarter of
+  // each cell and darkens gently, so the grid reads as texture rather than as
+  // bars. fract() of the negative tex_coord.y still lands in [0,1).
+  if (lcd_grid &&
+      (fract(tex_coord.x * scan_width) > 0.75 ||
+       fract(tex_coord.y * scan_height) > 0.75)) {
+    rgb *= 0.85;
   }
   // "RGB subpixels": draw the display's own structure — each emulated pixel
   // splits into three vertical R/G/B stripes over a darkened row gap, the way
   // a GBC/GBA TFT's subpixel triad looks up close (a DMG panel has no
   // subpixels, so there this is a stylised look, not a simulation). The
-  // off-stripes keep 35% and a 1.55 gain rebalances overall brightness;
-  // min() stops the gain pushing whites into hue shifts. fract() of the
-  // negative tex_coord.y still lands in [0,1), same as the scanline test.
+  // off-stripes keep half and a 1.35 gain rebalances overall brightness;
+  // min() stops the gain pushing whites into hue shifts.
   if (subpixel) {
     int stripe = int(fract(tex_coord.x * scan_width) * 3.0);
-    vec3 m = stripe == 0 ? vec3(1.0, 0.35, 0.35)
-           : stripe == 1 ? vec3(0.35, 1.0, 0.35)
-           :               vec3(0.35, 0.35, 1.0);
-    rgb = min(rgb * m * 1.55, vec3(1.0));
-    if (fract(tex_coord.y * scan_height) > 0.82) rgb *= 0.6;
+    vec3 m = stripe == 0 ? vec3(1.0, 0.5, 0.5)
+           : stripe == 1 ? vec3(0.5, 1.0, 0.5)
+           :               vec3(0.5, 0.5, 1.0);
+    rgb = min(rgb * m * 1.35, vec3(1.0));
+    if (fract(tex_coord.y * scan_height) > 0.85) rgb *= 0.7;
   }
   frag_color = vec4(rgb, 1.0);
 }
@@ -1133,7 +1138,7 @@ when defined(gputime):
         of 2: app.cfg.video_filter = vfHq4x
         of 3: app.cfg.video_filter = vfXbr
         of 4: app.cfg.video_filter = vfXbrz
-        of 5: app.cfg.video_filter = vfScanlines
+        of 5: app.cfg.video_filter = vfGrid
         of 6: app.cfg.video_filter = vfSubpixel
         of 7: app.cfg.video_filter = vfNone;   app.cfg.color_correction = false
         of 8: app.cfg.color_correction = true; app.cfg.lcd_response = true
@@ -1146,15 +1151,15 @@ proc render_game() =
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
     # Pushed every present (like the logo uniforms): the Settings window's
     # Apply has no callback into this module, so a cached value could go stale.
-    # Scanlines and the RGB-subpixel mask are choices of the same Filter
+    # The LCD grid and the RGB-subpixel mask are choices of the same Filter
     # selector now (mutually exclusive with the smoothing filters by
     # construction), but they stay separate shader stages: filter_mode only
     # carries the smoothing algorithms. Speed mode suspends the whole
     # selector — smoothing and screen looks alike (xBR measured +1.01 ms GPU
     # at 2160p); the choice keeps its state for when the mode turns off.
     let vf = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
-    glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
-                GLint(if vf == vfScanlines: 1 else: 0))
+    glUniform1i(glGetUniformLocation(app.game_shader, "lcd_grid"),
+                GLint(if vf == vfGrid: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "subpixel"),
                 GLint(if vf == vfSubpixel: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),

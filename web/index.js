@@ -6385,11 +6385,13 @@ const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
                        "ags", "ags101", "sp"];
 var ambientGlow = false;
 // The Filter selector: one look for the picture. The smoothing filters
-// ("hq4x" | "xbr" | "xbrz") and the screen-structure looks ("scanlines" |
-// "rgb") live in the same select because exactly one can be active — that is
-// what retired the separate Scanlines toggle and its suspend/grey-out dance.
-// The screen looks are not u_filter values in the shader; drawGame translates
-// them to their own uniforms. Integer scaling composes with all of them.
+// ("hq4x" | "xbr" | "xbrz") and the screen-structure looks ("grid" | "rgb")
+// live in the same select because exactly one can be active — that is what
+// retired the separate Scanlines toggle and its suspend/grey-out dance ("LCD
+// grid" is that toggle's successor: seams on both axes, the way the real
+// panels look, instead of CRT-style rows). The screen looks are not u_filter
+// values in the shader; drawGame translates them to their own uniforms.
+// Integer scaling composes with all of them.
 var upscaleFilter = "none";
 // Speed mode suspends the whole Filter selector — smoothing filters and
 // screen looks alike (hq4x +0.16 ms / xBR +0.58 ms per present even on a
@@ -6658,7 +6660,7 @@ const drawGame = () => {
     // uniforms in the shader; the smoothing values pass through as-is and
     // glpresent maps anything else to u_filter 0. All of it reads the
     // effective filter, so speed mode suspends the whole selector at once.
-    scanlines: effectiveFilter() === "scanlines",
+    grid: effectiveFilter() === "grid",
     subpixel: effectiveFilter() === "rgb",
     filter: effectiveFilter(),
   });
@@ -6719,11 +6721,12 @@ const loadVideoSettings = async () => {
     else lcdResponse = !!v.motionBlur;
     ambientGlow = !!v.ambientGlow;
     if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
-    // Scanlines used to be their own toggle; they are a Filter choice now. A
-    // record that had them on becomes that choice — unless it ALSO named a
-    // smoothing filter, which the old UI made win by suspending scanlines,
-    // so the filter keeps winning here.
-    if (v.scanlines && upscaleFilter === "none") upscaleFilter = "scanlines";
+    // Scanlines grew into the LCD grid: the old boolean toggle AND the
+    // short-lived "scanlines" dropdown value both land on "grid". The old
+    // toggle only migrates when no smoothing filter was stored — the old UI
+    // made the filter win by suspending scanlines, so it keeps winning here.
+    if (upscaleFilter === "scanlines") upscaleFilter = "grid";
+    if (v.scanlines && upscaleFilter === "none") upscaleFilter = "grid";
   }
   integerScaleToggle.checked = integerScale;
   lcdResponseToggle.checked = lcdResponse;

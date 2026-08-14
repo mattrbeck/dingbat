@@ -111,7 +111,7 @@ function renderInPage(cfg) {
   gl.useProgram(prog);
   gl.uniform1i(gl.getUniformLocation(prog, "u_color_correct"), opts.colorCorrect ? 1 : 0);
   gl.uniform1i(gl.getUniformLocation(prog, "u_panel_gbc"), opts.panelGbc ? 1 : 0);
-  gl.uniform1i(gl.getUniformLocation(prog, "u_scanlines"), opts.scanlines ? 1 : 0);
+  gl.uniform1i(gl.getUniformLocation(prog, "u_grid"), opts.grid ? 1 : 0);
   gl.uniform1i(gl.getUniformLocation(prog, "u_subpixel"), opts.subpixel ? 1 : 0);
   gl.uniform1f(gl.getUniformLocation(prog, "u_scan_width"), nw);
   gl.uniform1f(gl.getUniformLocation(prog, "u_tex_height"), nh);
@@ -166,10 +166,10 @@ async function run() {
       { VERT, FRAG, cw: CW, ch: CH, nw: NW, nh: NH, pattern, opts, wantPng });
 
   try {
-    // 1) The core guard: filter=none, color-correct OFF, scanlines OFF -> the
+    // 1) The core guard: filter=none, color-correct OFF, grid OFF -> the
     //    mapping is pure, so corners must be EXACTLY the source corners.
     console.log("filter=none, plain: canvas corners map 1:1 to source corners:");
-    const base = await render({ colorCorrect: false, scanlines: false, filter: "none" }, true);
+    const base = await render({ colorCorrect: false, grid: false, filter: "none" }, true);
     assert(!base.error, `WebGL2 context created${base.error ? " -- " + base.error : ""}`);
     if (base.error) throw new Error(base.error);
     assert(isRed(base.topLeft), `canvas TOP-LEFT is RED  (${base.topLeft})`);
@@ -209,13 +209,13 @@ async function run() {
       assert(allDistinct, `${label}: four corners are mutually distinct`);
       assert(nonBlack(r.center), `${label}: center non-black`);
     };
-    await structural("color-correct ON (AGB)", { colorCorrect: true, panelGbc: false, scanlines: false, filter: "none" });
-    await structural("color-correct ON (GBC)", { colorCorrect: true, panelGbc: true, scanlines: false, filter: "none" });
-    await structural("scanlines ON", { colorCorrect: false, scanlines: true, filter: "none" });
-    await structural("RGB-subpixel mask ON", { colorCorrect: false, scanlines: false, subpixel: true, filter: "none" });
-    await structural("filter=hq4x", { colorCorrect: false, scanlines: false, filter: "hq4x" });
-    await structural("filter=xBR", { colorCorrect: false, scanlines: false, filter: "xbr" });
-    await structural("filter=xBRZ", { colorCorrect: false, scanlines: false, filter: "xbrz" });
+    await structural("color-correct ON (AGB)", { colorCorrect: true, panelGbc: false, grid: false, filter: "none" });
+    await structural("color-correct ON (GBC)", { colorCorrect: true, panelGbc: true, grid: false, filter: "none" });
+    await structural("LCD grid ON", { colorCorrect: false, grid: true, filter: "none" });
+    await structural("RGB-subpixel mask ON", { colorCorrect: false, grid: false, subpixel: true, filter: "none" });
+    await structural("filter=hq4x", { colorCorrect: false, grid: false, filter: "hq4x" });
+    await structural("filter=xBR", { colorCorrect: false, grid: false, filter: "xbr" });
+    await structural("filter=xBRZ", { colorCorrect: false, grid: false, filter: "xbrz" });
   } finally {
     await browser.close();
   }
