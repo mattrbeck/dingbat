@@ -9,8 +9,14 @@
 // like "no history yet".
 //
 // So these drive the real modal against a stubbed wasm ring: open it, move the
-// markers the way the sliders and presets do, and assert on the two numbers
-// that actually reach _clip_begin.
+// markers every way the UI can — the two knobs of the range slider, a press on
+// its track, the presets — and assert on the two numbers that actually reach
+// _clip_begin.
+//
+// The slider is one track with two knobs (two <input type="range"> stacked on
+// one rail), so it brings its own failure mode along: two knobs sitting on top
+// of each other, one of which can no longer be grabbed. That has its own test
+// below.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -57,6 +63,32 @@ const sizeStrip = (app, width, height = 44) => {
     app.document.getElementById(id).getBoundingClientRect = () => rect;
   }
 };
+
+// Same problem for the range slider's track: its width is what routes a press
+// to one knob or the other, and 0 would route every press to knob 0. `left` is
+// 0, so a clientX is just an offset into the box — and the knobs' travel is
+// inset by half a knob (CLIP_KNOB_W / 2 = 11px) at each end, exactly as a
+// native range input insets its thumb.
+const KNOB_PAD = 11;
+const sizeTrack = (app, width) => {
+  const rect = { width, height: 44, top: 0, left: 0, right: width, bottom: 44,
+                 x: 0, y: 0 };
+  app.document.getElementById("clip-range").getBoundingClientRect = () => rect;
+};
+
+// A press/drag on the track, at `x` px into it (past the knob inset).
+const track = (app, x, type = "pointerdown") =>
+  app.document.getElementById("clip-range")
+     .dispatch(type, { clientX: KNOB_PAD + x, pointerId: 1 });
+
+const knob = (app, which) =>
+  app.document.getElementById("clip-slider-" + which);
+
+// Which knob the picker is following — the preview caption is the readout of
+// exactly that, so asserting on it also proves the caption tracks the knob.
+const following = (app) =>
+  app.document.getElementById("clip-preview-label").textContent
+    .startsWith("first") ? "start" : "end";
 
 const open = async (n = 40, width = 0) => {
   const app = await loadApp();
@@ -111,15 +143,15 @@ test("the markers cannot cross: dragging the in point past the out point pins it
     assert.ok(range(app).len > 0, "an inverted range would make len 0 and look like no history");
   });
 
-test("the sliders and the strip are one state, not two", async () => {
+test("the knobs and the strip are one state, not two", async () => {
   const app = await open();
-  const startSlider = app.document.getElementById("clip-slider-start");
-  const endSlider = app.document.getElementById("clip-slider-end");
-  // Slider values run the other way from sample indices (right = newer), which
+  const startSlider = knob(app, "start");
+  const endSlider = knob(app, "end");
+  // Knob values run the other way from sample indices (right = newer), which
   // is the mapping most likely to be written backwards.
   startSlider.value = String(app.runIn("clipStrip.samples") - 1 - 25);
   await startSlider.dispatch("input");
-  assert.equal(markers(app)[0], 25, "the strip must follow the slider");
+  assert.equal(markers(app)[0], 25, "the strip must follow the knob");
   // ...and back: moving the strip re-writes the slider rather than leaving it
   // showing a moment that is no longer selected.
   app.runIn("clipStrip.setValue(0, 7, true, { min: clipStrip.at(1) + 1 }); clipRefresh()");
@@ -232,23 +264,127 @@ for (const [device, width] of [["a 320pt phone", 208], ["a 393pt phone", 277],
   });
 }
 
-test("a slider takes the view with it, whatever the last drag grabbed", async () => {
+test("a knob takes the view with it, whatever the last drag grabbed", async () => {
   const app = await open(40, 277);
   // A drag on the "now" bracket leaves it as the marker the strip follows.
   app.runIn("clipStrip.setActive(1)");
   // Now pull the in point back to a selection far longer than the strip can
-  // show, from the keyboard/AT path. The marker the SLIDER moved is the one
-  // the player is looking for, so the strip has to scroll to it — otherwise
-  // the slider is nudging something that is not on screen.
-  const slider = app.document.getElementById("clip-slider-start");
+  // show, from the keyboard/AT path. The marker the KNOB moved is the one the
+  // player is looking for, so the strip has to scroll to it — otherwise the
+  // knob is nudging something that is not on screen.
+  const slider = knob(app, "start");
   slider.value = "9";                       // sample 30 of 40, i.e. 30s back
   await slider.dispatch("input");
   assert.equal(app.runIn("clipStrip.at(0)"), 30);
   assert.equal(offscreen(app, "start"), false,
                "the strip stayed on the marker the last drag grabbed");
+  assert.equal(following(app), "start");
   assert.equal(app.document.getElementById("clip-preview-label").textContent,
                "first frame of the clip");
 });
+
+// --- One track, two knobs --------------------------------------------------
+// The picker used to carry two full-width sliders labelled "Start" and "End".
+// It is one track with two knobs now, which buys the shape of the selection
+// back (it is the same span the two brackets above enclose) and costs two
+// things that have to be tested for: a press has to reach the knob the player
+// aimed at, and a pair of knobs pushed together must still come apart.
+
+test("a press on the track grabs the NEARER knob, and moves only that one",
+  async () => {
+    // 40 samples over a 277px track: the knobs travel 255px, 6.54px a slot.
+    // The picker opens with start on slot 29 (sample 10) and end on slot 39.
+    const app = await open(40, 277);
+    sizeTrack(app, 277);
+    await track(app, 250);                  // 5px from the end knob at 255
+    assert.equal(markers(app)[1], 1, "the press should have moved the end knob");
+    assert.equal(markers(app)[0], 10, "...and left the start knob alone");
+    assert.equal(following(app), "end", "the grabbed knob is the one to follow");
+
+    const app2 = await open(40, 277);
+    sizeTrack(app2, 277);
+    await track(app2, 180);                 // 10px from the start knob at 190
+    assert.equal(markers(app2)[0], 11, "the press should have moved the start knob");
+    assert.equal(markers(app2)[1], 0, "...and left the end knob alone");
+    assert.equal(following(app2), "start");
+  });
+
+// Blocking, not pushing: a knob driven into its neighbour stops one frame
+// short of it. Pushing would silently rewrite the end of a range that was
+// already chosen, and an inverted range reaches the core as a length of 0 and
+// looks exactly like "no history yet".
+test("a knob cannot cross its neighbour, and snaps back when it is stopped",
+  async () => {
+    const app = await open();
+    const endSlider = knob(app, "end");
+    // Drag the end (newer) knob left, past the start knob's own slot 29.
+    endSlider.value = "20";
+    await endSlider.dispatch("input");
+    const [inPt, outPt] = markers(app);
+    assert.equal(inPt, 10, "the neighbour must not be pushed along");
+    assert.equal(outPt, 9, "it pins one frame short, it does not invert");
+    // The knob asked to go to slot 20 and was refused. Leaving it there would
+    // show a selection that is not the one the strip and the readout describe.
+    assert.equal(Number(endSlider.value), 30,
+                 "a move clamped away has to snap the knob back");
+    assert.ok(range(app).len > 0);
+  });
+
+// The classic dual-slider failure: with two inputs stacked on one track, the
+// one on top swallows every press where they overlap and the knob underneath
+// is unreachable forever. Presses here are routed by distance instead, and an
+// exact tie goes to whichever knob still has somewhere to go.
+test("two knobs pushed together can still be pulled apart", async () => {
+  // 178px track = 156px of travel over 39 slots = exactly 4px a slot, so the
+  // midpoint between two adjacent knobs is an exact tie rather than a near one.
+  const app = await open(40, 178);
+  sizeTrack(app, 178);
+  // Pin the pair against the "now" end: end on slot 39, start one short of it.
+  app.runIn("clipStrip.setValue(1, 0, true); " +
+            "clipStrip.setValue(0, 1, true, { min: 1 }); clipRefresh()");
+  assert.deepEqual([Number(knob(app, "start").value), Number(knob(app, "end").value)],
+                   [38, 39], "the knobs should be one slot apart");
+  // Press exactly between them. The end knob is jammed against the top of its
+  // range, so the start knob is the only one that can go anywhere.
+  await track(app, 154);
+  assert.equal(following(app), "start", "the tie must go to the knob with room");
+  assert.deepEqual(markers(app), [1, 0], "the press itself moves nothing");
+  // ...and it drags, which is the whole point: the pair comes apart.
+  await track(app, 100, "pointermove");
+  assert.deepEqual(markers(app), [14, 0]);
+  await track(app, 100, "pointerup");
+});
+
+// A slot index read aloud is meaningless. aria-valuetext is where the moment
+// goes, in words — "8.4s" is read out as a letter.
+test("each knob announces its moment in words", async () => {
+  const app = await open();
+  const said = (which) => knob(app, which).getAttribute("aria-valuetext");
+  assert.equal(said("start"), "10 seconds ago");
+  assert.equal(said("end"), "now", "the newest sample is 'now', as everywhere else");
+  app.runIn("clipStrip.setValue(1, 3, true); clipRefresh()");
+  assert.equal(said("end"), "3 seconds ago");
+
+  const long = await open(100);
+  await long.document.getElementById("clip-preset-all").dispatch("click");
+  assert.equal(long.document.getElementById("clip-slider-start")
+                   .getAttribute("aria-valuetext"), "1 minute 39 seconds ago");
+});
+
+test("the highlighted span runs between the two knobs, and the moving knob is on top",
+  async () => {
+    const app = await open();
+    const fill = app.document.getElementById("clip-range-fill");
+    // Percentages of the knobs' travel, not of the box: the rail is inset by
+    // half a knob at each end, so anything else drifts off them at the edges.
+    assert.equal(fill.style.left, (29 / 39) * 100 + "%");
+    assert.equal(fill.style.right, "0%", "the end knob is pinned to 'now'");
+    assert.equal(knob(app, "start").classList.contains("on-top"), true);
+    assert.equal(knob(app, "end").classList.contains("on-top"), false);
+    app.runIn("clipSetActive(1); clipRefresh()");
+    assert.equal(knob(app, "end").classList.contains("on-top"), true,
+                 "the knob being moved has to be the visible one");
+  });
 
 // --- Menu visibility -------------------------------------------------------
 // Both clip menu items are governed by the same four rules — shown once a game

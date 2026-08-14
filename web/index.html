@@ -563,8 +563,8 @@
             <span id="clip-when" class="report-when" aria-live="polite">the last 10s</span>
           </div>
           <!-- aria-hidden: the canvases are pictures of the moment named in
-               #clip-when, and the two range inputs below are the controls a
-               screen reader drives. -->
+               #clip-when, and the two knobs of the range slider below are the
+               controls a screen reader drives. -->
           <canvas id="clip-preview" class="report-preview film-preview" width="120" height="80" aria-hidden="true"></canvas>
           <!-- One preview, two markers: without this it is not knowable which
                end of the range the picture belongs to. -->
@@ -578,12 +578,23 @@
             <span id="clip-oldest" class="film-scale-end">oldest</span>
             <span class="film-scale-end">now</span>
           </div>
-          <label class="clip-slider-row"><span>Start</span>
-            <input type="range" id="clip-slider-start" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Clip start" />
-          </label>
-          <label class="clip-slider-row"><span>End</span>
-            <input type="range" id="clip-slider-end" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Clip end" />
-          </label>
+          <!-- One track, two knobs: the same range the two brackets above
+               enclose, read as a single span instead of as a "Start" bar and
+               an "End" bar that have to be held in your head together.
+               A native range input has one thumb, so this is the standard
+               two-overlaid-inputs pattern - each knob keeps its own focus and
+               its own arrow keys for free, and the rail plus the highlighted
+               span between them are drawn underneath (.dual-range in
+               styles.css). Pointer presses are routed by #clip-range itself,
+               to the NEARER knob, which is why the inputs take no pointer
+               events of their own: see clipGrabKnob in index.js. -->
+          <div class="dual-range" id="clip-range">
+            <div class="dual-range-rail" aria-hidden="true">
+              <span class="dual-range-fill" id="clip-range-fill"></span>
+            </div>
+            <input type="range" id="clip-slider-start" class="dual-range-knob" min="0" max="0" step="1" value="0" aria-label="Clip start" aria-valuetext="now" />
+            <input type="range" id="clip-slider-end" class="dual-range-knob" min="0" max="0" step="1" value="0" aria-label="Clip end" aria-valuetext="now" />
+          </div>
         </div>
         <div class="clip-presets">
           <button type="button" class="button button-sm" id="clip-preset-10">Last 10s</button>

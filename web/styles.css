@@ -2902,26 +2902,128 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* The two range sliders (the keyboard/screen-reader path onto the markers).
-   Labelled, because "start" and "end" are not guessable from two identical
-   bars, and stacked rather than side by side so each keeps a full-width
-   travel — a 100px range input on a phone quantises to ~2s per pixel. */
-.clip-slider-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+/* The clip range slider: ONE track, TWO knobs (#clip-range). It is the same
+   selection the two brackets on the film strip above enclose, so it is drawn
+   as one span — a "Start" bar and an "End" bar make you hold two numbers in
+   your head to see a range that is right there on the strip.
+
+   Mechanically it is two <input type="range"> stacked on one rail. A native
+   range has exactly one thumb, and two real inputs is what buys each knob its
+   own tab stop, its own arrow keys and its own aria-valuetext for free. The
+   inputs contribute nothing but their thumbs: their own tracks are
+   transparent, and the rail plus the highlighted span between the knobs are
+   the two elements underneath them.
+
+   pointer-events: none on the inputs is deliberate, and is the whole fix for
+   the classic dual-slider failure — with two live inputs over one track,
+   whichever is stacked on top swallows every press where they overlap and the
+   knob underneath becomes unreachable. Here the wrapper does the hit-testing
+   (clipGrabKnob, nearest knob by distance — the same rule the film strip
+   uses), so the stacking order is only ever about what you can SEE. */
+.dual-range {
+  position: relative;
+  height: 44px;         /* a comfortable touch target, and the WHOLE box is it */
+  margin: 10px 0 2px;
+  touch-action: none;   /* the drag is ours; it must not scroll the modal */
 }
 
-.clip-slider-row > span {
-  flex: 0 0 34px;
-  font-size: 11.5px;
-  color: var(--text-faint);
+/* Inset by one knob radius at each end, because that is the only stretch a
+   native thumb's centre can travel. Without the inset the highlighted span's
+   ends drift off the knobs at the extremes, which is exactly where the
+   picker opens. */
+.dual-range-rail {
+  position: absolute;
+  top: 50%;
+  left: 11px;           /* half a knob — keep in step with CLIP_KNOB_W */
+  right: 11px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
 }
 
-.clip-slider-row > input {
-  flex: 1 1 auto;
-  min-width: 0;
+/* The selected span, positioned in % of the rail — i.e. of the knob travel. */
+.dual-range-fill {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+}
+
+.dual-range-knob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: none; /* see the block comment above */
+  z-index: 1;
+}
+
+/* The knob being moved is drawn over its neighbour, so an overlapped pair
+   still shows the one that is going somewhere. */
+.dual-range-knob.on-top {
+  z-index: 2;
+}
+.dual-range-knob:focus-visible {
+  z-index: 3;
+}
+
+.dual-range-knob::-webkit-slider-runnable-track {
+  height: 44px;
+  background: none;
+  border: none;
+}
+
+.dual-range-knob::-moz-range-track {
+  height: 44px;
+  background: none;
+  border: none;
+}
+
+.dual-range-knob::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 11px;     /* (44 - 22) / 2 — WebKit centres nothing for you */
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: rgb(var(--hi-rgb));
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.dual-range-knob::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: rgb(var(--hi-rgb));
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* The inputs clear the native outline, so keyboard focus needs the ring the
+   switches and the other sliders use: a focused knob that looks identical to
+   an unfocused one makes the keyboard path unusable. */
+.dual-range-knob:focus {
+  outline: none;
+}
+
+.dual-range-knob:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.dual-range-knob:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 /* Length presets. The picker opens on the last 10 seconds, so the reflex use

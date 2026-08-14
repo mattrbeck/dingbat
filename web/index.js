@@ -8580,6 +8580,9 @@ const clipStartSlider =
   /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-start"));
 const clipEndSlider =
   /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-end"));
+// The knobs' shared track, and the highlighted span drawn between them.
+const clipRangeWrap = document.getElementById("clip-range");
+const clipRangeFill = document.getElementById("clip-range-fill");
 const clipSaveBtn =
   /** @type {HTMLButtonElement} */ (document.getElementById("clip-save"));
 
@@ -8618,10 +8621,10 @@ const clipStrip = createFilmStrip({
   paint: (ctx, g) => clipStrip.shadeBetween(ctx, g, g.xs[0], g.xs[1]),
   onChange: (i) => {
     // The strip scrolls to follow its ACTIVE marker, and a drag is the only
-    // path that sets that itself. Sliders and presets move a marker from the
-    // outside, so adopt whichever one just moved here — otherwise the view
-    // keeps following the marker the last drag happened to grab and a slider
-    // ends up nudging something that is off-screen.
+    // path that sets that itself. The slider knobs and the presets move a
+    // marker from the outside, so adopt whichever one just moved here —
+    // otherwise the view keeps following the marker the last drag happened to
+    // grab and a knob ends up nudging something that is off-screen.
     clipSetActive(i);
     clipRefresh();
   },
@@ -8635,10 +8638,15 @@ const clipSetActive = (i) => {
   clipActiveMarker = i;
   clipStrip.setActive(i);
 };
-// A marker may never cross its neighbour: dragging the in point past the out
-// point pins it one frame short instead of inverting the range.
-clipStrip.attach((i) =>
-  i === 0 ? { min: clipStrip.at(1) + 1 } : { max: clipStrip.at(0) - 1 });
+// A marker may never cross its neighbour. BLOCKING, not pushing: dragging the
+// in point past the out point pins it one frame short of it, rather than
+// shoving the out point along ahead of it. Pushing would silently rewrite the
+// end of a range that had already been chosen, and it is not what the strip's
+// brackets do — one rule, written once, used by the strip, the knobs and the
+// presets alike.
+const clipBoundsFor = (i) =>
+  i === 0 ? { min: clipStrip.at(1) + 1 } : { max: clipStrip.at(0) - 1 };
+clipStrip.attach(clipBoundsFor);
 
 // Frames-ago of a marker. Sample 0 is special: it is the newest ANCHOR, which
 // is up to a second old, and treating it as the out point would silently drop
@@ -8655,6 +8663,71 @@ const clipRangeFrames = () => {
   return { start, end, len: Math.max(0, start - end) };
 };
 
+// --- The range slider: one track, two knobs --------------------------------
+// #clip-range is two <input type="range"> stacked on one rail (.dual-range in
+// styles.css), because a native range has exactly one thumb and the selection
+// here is a span — the same span the two brackets on the strip above enclose.
+// Two REAL inputs rather than a hand-rolled widget: that is what makes each
+// knob a tab stop with working arrow keys, Home/End and an announceable value,
+// none of which is worth reimplementing.
+//
+// They are not a second source of truth. Every move goes through the same
+// clipStrip.setValue a drag does, and clipRefresh writes them back from the
+// strip afterwards — so a move clamped away against the other knob snaps back
+// to where the marker really is.
+const clipKnobs = [clipStartSlider, clipEndSlider];
+
+// Must match .dual-range-rail's inset (half a knob at each end) in styles.css:
+// a native thumb's centre travels the rail, not the full width of the box.
+const CLIP_KNOB_W = 22;
+
+// Where knob i sits, as a fraction of its travel. Start is the LEFT knob — its
+// slot counts up towards "now" — so start is always below end. With no history
+// there is no travel and both knobs sit at the left, which is where a native
+// range puts a thumb whose min equals its max; the span between them is then
+// empty, and an empty selection is the truth in that state.
+const clipKnobPct = (i) => {
+  const max = Number(clipKnobs[i].max) || 0;
+  return max > 0 ? Number(clipKnobs[i].value) / max : 0;
+};
+
+// How much travel a knob has left AWAY from its neighbour: the start knob runs
+// left towards the oldest frame, the end knob right towards "now".
+const clipKnobRoom = (i) => {
+  const max = Number(clipKnobs[i].max) || 0;
+  return i === 0 ? Number(clipKnobs[i].value) : max - Number(clipKnobs[i].value);
+};
+
+const clipTrackGeom = () => {
+  const rect = clipRangeWrap.getBoundingClientRect();
+  return { left: rect.left + CLIP_KNOB_W / 2,
+           span: Math.max(1, rect.width - CLIP_KNOB_W) };
+};
+
+// The highlighted span, and which knob is drawn on top. Positioned in % of the
+// RAIL — i.e. of the knobs' own travel — so the ends of the fill stay under the
+// knob centres at both extremes, where an un-inset track would drift off them.
+const clipPaintTrack = () => {
+  clipRangeFill.style.left = clipKnobPct(0) * 100 + "%";
+  clipRangeFill.style.right = 100 - clipKnobPct(1) * 100 + "%";
+  // The knob being moved goes over its neighbour, so an overlapped pair still
+  // shows the one that is going somewhere. Stacking order is presentation
+  // ONLY: which knob a press grabs is decided by distance in clipGrabKnob.
+  clipKnobs.forEach((el, i) => el.classList.toggle("on-top", i === clipActiveMarker));
+};
+
+// What a screen reader says in place of a slot index. Spelled out in words:
+// the visible readouts say "8.4s", and a lone "s" is read as a letter.
+const clipSpokenAgo = (frames) => {
+  if (frames <= 0) return "now";
+  const s = Math.max(1, Math.round(frames / 60));
+  if (s < 60) return s + (s === 1 ? " second ago" : " seconds ago");
+  const m = Math.floor(s / 60);
+  const r = s - m * 60;
+  return m + (m === 1 ? " minute" : " minutes") +
+         (r ? " " + r + (r === 1 ? " second" : " seconds") : "") + " ago";
+};
+
 const clipRefresh = () => {
   const { start, end, len } = clipRangeFrames();
   const tenths = (f) => Math.round((f * 10) / 60);
@@ -8667,6 +8740,9 @@ const clipRefresh = () => {
   const endSlot = String(clipStrip.samples - 1 - clipStrip.at(1));
   if (clipStartSlider.value !== startSlot) clipStartSlider.value = startSlot;
   if (clipEndSlider.value !== endSlot) clipEndSlider.value = endSlot;
+  clipStartSlider.setAttribute("aria-valuetext", clipSpokenAgo(start));
+  clipEndSlider.setAttribute("aria-valuetext", clipSpokenAgo(end));
+  clipPaintTrack();
   clipStrip.draw();
   clipStrip.preview(clipPreviewCanvas, clipStrip.at(clipActiveMarker));
   clipPreviewLabel.textContent =
@@ -8683,24 +8759,73 @@ const clipRefresh = () => {
   clipSaveBtn.disabled = len <= 0;
 };
 
-// The two range inputs are the keyboard and screen-reader path onto the same
-// markers; they are not a second source of truth. Each is clamped against the
-// other exactly as the drag is.
-clipStartSlider.addEventListener("input", () => {
-  // Claim the marker first: the strip scrolls to follow it, so a slider that
+// Move marker i to the slot knob i is asking for. The one funnel: the keyboard
+// path (an input event) and the pointer path below both land here.
+const clipKnobMove = (i, slot) => {
+  // Claim the marker first: the strip scrolls to follow it, so a knob that
   // moved one without claiming it would act on a marker that is off screen.
-  clipSetActive(0);
-  // setValue only reports back when the value actually moved, and the slider
-  // has to redraw either way — the active marker changed, and a move clamped
-  // away against the other marker still has to snap the input back.
-  if (!clipStrip.setValue(0, clipStrip.samples - 1 - Number(clipStartSlider.value),
-                          true, { min: clipStrip.at(1) + 1 })) clipRefresh();
+  clipSetActive(i);
+  // setValue only reports back when the value actually moved, and the knob has
+  // to redraw either way — the active marker changed, and a move clamped away
+  // against the other knob still has to snap the input back.
+  if (!clipStrip.setValue(i, clipStrip.samples - 1 - slot, true, clipBoundsFor(i)))
+    clipRefresh();
+};
+clipKnobs.forEach((el, i) =>
+  el.addEventListener("input", () => clipKnobMove(i, Number(el.value))));
+
+// Pointer and touch are handled by the TRACK, not by the inputs (which are
+// pointer-events: none). That is the fix for the failure every stacked-inputs
+// dual slider eventually hits: once the two knobs overlap, whichever input is
+// stacked on top swallows the press and the knob underneath can never be
+// grabbed again. Routing the press by distance instead — the film strip's own
+// rule, so the two halves of this modal behave alike — makes the overlap a
+// non-event, and leaves stacking order free to be purely about visibility.
+const clipGrabKnob = (clientX) => {
+  const { left, span } = clipTrackGeom();
+  const px = clientX - left;
+  const d = clipKnobs.map((_, i) => Math.abs(clipKnobPct(i) * span - px));
+  // A dead heat means the two knobs are exactly on top of each other. Take the
+  // one with somewhere to go, so a pair pinned together — which is what the
+  // no-cross clamp leaves you at either end of the track — can always be
+  // pulled back apart.
+  if (d[0] === d[1]) return clipKnobRoom(0) >= clipKnobRoom(1) ? 0 : 1;
+  return d[0] < d[1] ? 0 : 1;
+};
+
+// The slot under the pointer, on the knobs' own travel.
+const clipTrackSlot = (clientX) => {
+  const { left, span } = clipTrackGeom();
+  return Math.round(((clientX - left) / span) * (Number(clipKnobs[0].max) || 0));
+};
+
+let clipDragKnob = -1;
+clipRangeWrap.addEventListener("pointerdown", (e) => {
+  if (clipStrip.samples <= 0) return;
+  e.preventDefault();
+  clipDragKnob = clipGrabKnob(e.clientX);
+  clipRangeWrap.setPointerCapture?.(e.pointerId);
+  // The inputs take no pointer events of their own, so focus has to be moved
+  // by hand — otherwise a tap on one knob would leave the arrow keys driving
+  // whichever knob happened to be focused last.
+  clipKnobs[clipDragKnob].focus();
+  clipKnobMove(clipDragKnob, clipTrackSlot(e.clientX));
 });
-clipEndSlider.addEventListener("input", () => {
-  clipSetActive(1);
-  if (!clipStrip.setValue(1, clipStrip.samples - 1 - Number(clipEndSlider.value),
-                          true, { max: clipStrip.at(0) - 1 })) clipRefresh();
+clipRangeWrap.addEventListener("pointermove", (e) => {
+  if (clipDragKnob >= 0) clipKnobMove(clipDragKnob, clipTrackSlot(e.clientX));
 });
+// Named, not inline: an inline listener registered through a `string` event
+// name is contextually typed as taking a bare Event, and `e.pointerId` then
+// fails the JSDoc typecheck.
+const clipEndKnobDrag = (e) => {
+  if (clipDragKnob < 0) return;
+  if (clipRangeWrap.hasPointerCapture?.(e.pointerId))
+    clipRangeWrap.releasePointerCapture(e.pointerId);
+  clipDragKnob = -1;
+};
+for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+  clipRangeWrap.addEventListener(ev, clipEndKnobDrag);
+}
 
 // The sample whose age is closest to `seconds` back. Searched rather than
 // computed as `seconds` samples: the strip is a sampled view of the ring, so
@@ -8765,11 +8890,11 @@ const openClipScrubber = () => {
   clipStrip.values[0] = Math.max(1, Math.min(n - 1, clipNearestSample(CLIP_QUICK_SECONDS)));
   clipSetActive(0);
   const slotMax = String(Math.max(0, n - 1));
-  clipStartSlider.max = slotMax;
-  clipEndSlider.max = slotMax;
+  for (const el of clipKnobs) el.max = slotMax;
   clipScrubHint.textContent =
     n > 1
-      ? "Drag either marker, or use the sliders. Everything between them is saved."
+      ? "Drag either marker, or either knob on the slider. " +
+        "Everything between them is saved."
       : "No gameplay history yet — it builds up as you play.";
   clipOldest.textContent =
     n > 1 ? fmtDuration(Math.round((clipAgo[n - 1] * 10) / 60)) + " ago" : "";
