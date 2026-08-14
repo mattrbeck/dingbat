@@ -509,7 +509,7 @@ exists for it).
 | 6 | **GDMA/HDMA block duration one M-cycle short** — famflip is *uniform* `exp=3,0 got=3,3` across every SCX and both speeds, which is what says it is the DMA's duration and not the mode-3 edge | **21** (`gdma_cycles*` 14, `gdma_weird` 1, `hdma_cycles*` 6) | famflip, uniform | 1 constant + sweep (`tools/gbdiff/gdma_sweep.sh` exists) | cold | — |
 | 7 | **Serial transfer-complete IF one M-cycle early** | **28** (`serial`) | famflip `exp=E0,E8 got=E8,E8`, both devices, both speeds | small | cold | — |
 | 8 | **CGB APU frame-sequencer/DIV-APU tap one step early** — every row is `dmg PASS / cgb FAIL` | **39** (`sound` 25, `speedchange` `ch2_nr52` 14) | famflip, per-device | small | cold | — |
-| 9 | **HDMA start one M-cycle early** — opposite sign to #6, so either the block is 2 M-cycles wide where hardware is 1, or the two edges are separately wrong | **7** (`hdma_start*`) | famflip `exp=0,1 got=1,1` | small | cold | #6 |
+| 9 | ~~**HDMA start one M-cycle early**~~ — **done 2026-08-13, +6 / −0.** Not the block's start (that reading scores −5) and not an M-cycle: the transferred BYTES appear 4 dots late, `HDMA_VISIBLE_DOTS`. The 7th row is the SCX residual, bucket 15 | **7** (`hdma_start*`) | famflip `exp=0,1 got=1,1`, then `-d:gb_dma_trace` VRAMRD-vs-HDMABLOCK dots | small | cold (+0.13%) | — |
 | 10 | **`FF55` / HDMA1-4 latch phase** — `ppu_write_machinery`'s M-cycle boundary rule | **11** (`hdma_late_enable/disable` 8, `destl`/`length`/`wrambank` 3) | famflip | small | cold | — |
 | 11 | **Serial restart / `trigger_int8` ordering** — different shape from #7, do not fold | **6** | famflip, opposite direction | small | cold | #7 |
 
@@ -5158,14 +5158,43 @@ the CGB delta caps the family at ~34 of 49 rows, not 49. (Confirmed separately
 here: `CGB_WY_LATENCY = 4`, the one-M-cycle value the old sweep table never
 reached, having stopped at 2, buys **+1**. It is not a write latency.)
 
-**8. `dma`'s `hdma_start` -- 8 rows, bracketed at exactly 1 M-cycle.** The
-transferred byte becomes visible in VRAM one M-cycle too early; `_1`/`_2` bracket
-the latency at 1 (at 2 the `_2` members, green today, go red). Separable and
-safe. It is **not** `GDMA_SETUP_MCYCLES`, which charges time *after* the copy
-loop and so can never move when the bytes appear. The neighbouring
-`gdma_cycles`/`hdma_cycles` 20 rows are **not** separable: the recorded sweep
-wants 2 and still leaves the SCX-carrying `long_scx{2,3,5}_2` short, so that
-residual is genuinely SCX-dependent.
+**8. `dma`'s `hdma_start` -- SHIPPED 2026-08-13, +6 / -0** (`HDMA_VISIBLE_DOTS`
+in `gb.nim`, gambatte 4131 -> 4137). The reading in this item was right about
+the defect and wrong about the units, and both corrections came from putting
+each ROM's `HDMABLOCK` dot next to its `VRAMRD` dot under `-d:gb_dma_trace`
+(a new trace line, added for this):
+
+* It is the **bytes** and not the block. Delaying the whole block one M-cycle --
+  copy, dots and register writes together -- scores **4131 -> 4126**:
+  `hdma_late_disable_2`, `_scx2_2`, `_scx3_2` break and the whole
+  `hdma_late_m3speedchange_*` ladder slides a step. Those rows read FF55, LY and
+  TIMA, i.e. the block's *bus occupancy*, and they say it starts where it does
+  today. Holding only the transferred data moves nothing outside `hdma_start`.
+* The delay is **4 dots, not 1 M-cycle**. Bus M-cycles and dots agree only at
+  normal speed and only when a block starts on an M-cycle boundary;
+  `hdma_start_ds_1` (double speed) and `hdma_start_scx5_2` (block starting 1 dot
+  into its M-cycle) are the two rows that separate them, and an M-cycle-counting
+  version of the same fix scores 4135 and misses one of the two whichever way it
+  rounds. The seven measurable rows give seven inequalities that intersect at
+  exactly one value (table at the constant); the sweep is a strict two-sided
+  maximum, 7/9/11/**13**/11/8/6 of 14 at 0/2/3/4/5/6/8 dots.
+* The hold is taken only for a block the **mode-0 edge** starts, which is the
+  one copied inside a CPU access still in flight. Extending it to the blocks an
+  FF55 write starts costs `hdma_disabled_display_1` and gains nothing.
+* Landing the bytes is **lazy** -- looked for at a CPU VRAM read or write and at
+  the next mode change, not counted down per tick. Per-tick costs **+1.36% of
+  retired instructions** on Pokemon Crystal; lazy costs **+0.13%**.
+
+One row is left, `hdma_start_scx5_1`, and it is not this constant: it reads VRAM
+4 dots *before* its block and gets `$FF`, so it is refused by the mode-3 lock
+rather than answered early -- the SCX residual on the mode 3 -> 0 edge (bucket
+15) seen through this family. It is also why the item's "8 rows" was really 7 +
+one row that belongs elsewhere.
+
+The neighbouring `gdma_cycles`/`hdma_cycles` 20 rows are still **not**
+separable and did not move: the recorded sweep wants 2 and still leaves the
+SCX-carrying `long_scx{2,3,5}_2` short, so that residual is genuinely
+SCX-dependent. `GDMA_SETUP_MCYCLES` was never a candidate for either.
 
 **9. `serial`'s `start_wait_*` cluster -- 12 rows, both obvious readings
 refused.** Twelve rows report one defect through three registers: `_read_sb`

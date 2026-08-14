@@ -14,6 +14,11 @@
 #   MODE       every PPU mode change (ppu.nim `mode_flag=`)
 #   FF55       every write to FF55, with the mode and `hdma_active` at that dot
 #   HDMABLOCK  every HBlank or general-purpose block copy
+#   VRAMRD     every CPU read of $8000-$9FFF, with the dot it is answered on,
+#              both halves of the lock and the byte underneath it — which is
+#              what the `hdma_start` family reads, and the line that measured
+#              HDMA_VISIBLE_DOTS (gb.nim) by putting each ROM's read dot next to
+#              its HDMABLOCK dot
 #
 # Written for the 2026-08-10 CGB_HALT_PPU_LEAD measurement, where the question
 # was where a post-halt handler's OAM DMA and FF55 write land against the PPU's
@@ -485,8 +490,21 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
   ##
   ## OAM has no counterpart here because its read lock sits inside ppu_read,
   ## where cpu_oam_open's read/write asymmetry is already handled.
-  if (idx and 0xE000) == 0x8000 and not cpu_vram_open(gb.ppu, is_write = false):
-    return 0xFF'u8
+  when defined(gb_dma_trace):
+    if (idx and 0xE000) == 0x8000:
+      echo "VRAMRD ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
+           " idx=", toHex(idx, 4), " latch=", gb.ppu.read_mode and 3'u8,
+           " live=", gb.ppu.lcd_status and 3'u8,
+           " open=", (if cpu_vram_open(gb.ppu, is_write = false): 1 else: 0),
+           " val=", toHex(read_byte(mem, gb, idx), 2)
+  if (idx and 0xE000) == 0x8000:
+    # This read samples after its M-cycle's dots, so it is one of the two points
+    # a held HBlank DMA block can become visible at -- see HDMA_VISIBLE_DOTS,
+    # and ppu_land_hdma_if_due for why the landing is looked for here rather
+    # than counted out on every tick.
+    when HDMA_VISIBLE_DOTS != 0:
+      if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
+    if not cpu_vram_open(gb.ppu, is_write = false): return 0xFF'u8
   read_byte(mem, gb, idx)
 
 const OAMDMA_WRAM_A12* {.intdefine.} = 1
@@ -653,6 +671,13 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
   ## OAM lock of its own (a write samples the latched mode, a read the live one
   ## — see cpu_oam_open).
   if (idx and 0xE000) == 0x8000:
+    # The other point a held block can land at, and the reason it is looked for
+    # here at all: this write is about to change VRAM, and a block still in the
+    # holding buffer would land on top of it afterwards. A write commits BEFORE
+    # its M-cycle's dots, so a block whose dots have not run yet still waits --
+    # and then loses that race, which is the one ordering this model gives up.
+    when HDMA_VISIBLE_DOTS != 0:
+      if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
     if not cpu_vram_open(gb.ppu, is_write = true): return
   elif idx >= 0xFE00 and idx <= 0xFE9F:
     if not cpu_oam_open(gb.ppu, is_write = true,

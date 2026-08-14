@@ -276,6 +276,78 @@ const STAT_NO_HOLD* = -1024'i32
 # pass today; that is fitting, not measuring.
 const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 
+# How long an HBlank DMA block's BYTES take to appear in VRAM after its last one
+# is transferred, in DOTS. Only the data moves: the 8 M-cycles per $10 bytes are
+# charged where they always were, and so are the address counters and the FF55
+# length the CPU reads back. This is therefore neither GDMA_SETUP_MCYCLES (time
+# charged after the copy loop, which cannot move when bytes appear) nor a delay
+# on the block itself -- deferring the whole block is measured and refused
+# below. Held bytes are landed lazily, at the points VRAM can be observed; see
+# ppu_land_hdma_if_due for that and for what it costs.
+#
+# **Where the ROMs put it.** gambatte's 14 `hdma_start` rows are the only ones in
+# the suite that read the transferred DATA. Each `_1` and its `_2` partner differ
+# by one inserted NOP ahead of the `LD A,(HL)` that reads the destination
+# (`cmp -l hdma_start_1 hdma_start_2` is a one-byte $00 insertion at $1033), so
+# each pair samples it one M-cycle apart, and the expected values -- 0 then 1 --
+# bracket the arrival between the two reads. `-d:gb_dma_trace` prints each ROM's
+# HDMABLOCK dot next to its VRAMRD dot, which turns the family into seven
+# inequalities on one number; they intersect at exactly one value:
+#
+#   ROM              block at   read answered on   byte visible?
+#   hdma_start_1        252            285              no      -> K > 33
+#   hdma_start_2        252            289              yes     -> K <= 37
+#   hdma_start_ds_1     252            287              no      -> K > 35
+#   hdma_start_ds_2     252            289              yes     -> K <= 37
+#   hdma_start_scx5_2   257            293              yes     -> K <= 36
+#   hdma_start_scx5_ds_1 257           291              no      -> K > 34
+#   hdma_start_scx5_ds_2 257           293              yes     -> K <= 36
+#
+# K is dots from the START of the block, and a block is 32 dots long at either
+# speed, so K = 36 is this constant at 4. Swept anyway, whole suite rebuilt per
+# value (tools/gbppu/gamall.sh, `hdma_start` rows / gambatte total):
+#
+#     0   7/14   4131   every `_1` member sees the byte early
+#     2   9/14   4133
+#     3  11/14   4135   `_ds_1` and `_scx2_1` still early
+#     4  13/14   4137   <- ships
+#     5  11/14   4135   the `_2` members start going short
+#     6   8/14   4132
+#     8   6/14   4130   every `_2` member short -- worse than not modelling it
+#
+# A strict two-sided maximum. **Dots and not bus M-cycles**: the two are the same
+# thing only at normal speed and only when a block starts on an M-cycle boundary,
+# and `hdma_start_ds_1` (double speed, where an M-cycle is 2 dots) and
+# `hdma_start_scx5_2` (a block starting 1 dot into its M-cycle) are the rows that
+# separate them -- an M-cycle-counting version of this same fix scores 4135 and
+# misses one of the two whichever way it rounds. The transfer being dot-clocked
+# is the same thing `ignore_speed` says in ppu_copy_hdma_block.
+#
+# The one row left is `hdma_start_scx5_1`, and it is not this: it reads VRAM 4
+# dots BEFORE the block, gets $FF where hardware gets a byte, and so is refused
+# by the mode-3 lock rather than answered early. That is the SCX residual on the
+# mode 3 -> 0 edge (bucket 15 of docs/gb-failure-triage.md) seen through this
+# family, and no setting of a visibility delay can reach it.
+#
+# **Why the bytes and not the block.** Delaying the block itself by one M-cycle
+# (the copy, its dots and its register writes together) was tried first and the
+# neighbours refuse it: gambatte goes 4131 -> 4126, with `hdma_late_disable_2`,
+# `_scx2_2` and `_scx3_2` breaking and the whole `hdma_late_m3speedchange_*`
+# ladder sliding one step. Those rows read FF55, LY and TIMA rather than the
+# destination, so they time the block's BUS OCCUPANCY, and they say it starts
+# exactly where it does today.
+#
+# The read that sees the old bytes is inside the block's own dots -- the copy
+# ticks the PPU 8 M-cycles while the CPU access that triggered it is still in
+# flight -- which is also why that access finds VRAM unlocked even though its
+# M-cycle began in mode 3: by the time its strobe lands, mode 0 is 8 M-cycles
+# old. Both halves are the same picture of a stretched CPU cycle, which is why
+# the hold is only taken for a block the mode-0 edge starts (`in_cpu_cycle`).
+# Extending it to the blocks an FF55 write starts costs `hdma_disabled_display_1`
+# and gains nothing: that write's own byte has already committed, so there is no
+# access in flight for the hold to protect.
+const HDMA_VISIBLE_DOTS* {.intdefine.} = 4
+
 # ---- The serial shift clock's tap offset, per device -------------------------
 #
 # The serial unit watches a bit of (divider + tap); its falling edge shifts one
@@ -2540,6 +2612,18 @@ type
     # of mode 0, so it is never set at a frame boundary — where every state,
     # rewind snapshot and rollback snapshot is captured — and is not serialized.
     hdma_block_due*: bool
+    # A copied block whose bytes have not reached VRAM yet: they land
+    # HDMA_VISIBLE_DOTS dots after the block's last byte (see that constant).
+    # The window is 4 dots inside an HBlank and the next PPU tick closes it, so
+    # like hdma_block_due none of this can be live at a frame boundary — where
+    # every state, rewind snapshot and rollback snapshot is captured — and none
+    # of it is serialized.
+    hdma_bytes_held*: bool
+    hdma_hold_from*:  int32   # dot the hold was armed on (a smaller dot = the
+                              # line wrapped, i.e. the hold is long expired)
+    hdma_hold_until*: int32   # dot the bytes land on
+    hdma_held_dst*:   int32   # VRAM address the held block starts at
+    hdma_held*:       array[16, uint8]
     # window state
     window_trigger*:     bool
     current_window_line*: int
