@@ -63,6 +63,7 @@ type
     outbox*:      seq[seq[uint8]]  # finished strips (shade rows, w=160)
     log*:         seq[uint16]    # RX<<8|TX ring of the last exchanges
     muted*:       bool        # clip replay: reply 0, mutate nothing
+    idle_frames:  int         # frames since the last serial byte (timeout)
 
   GbPrinterDriver* = ref object of GbSerialDriver
     printer*: GbPrinter
@@ -99,8 +100,23 @@ proc emit_strip(prn: GbPrinter) =
 
 # ---- per-frame time -------------------------------------------------------
 
+const PRN_TIMEOUT_FRAMES = 6  # 100 ms at 59.7 fps
+
 proc tick_frame*(prn: GbPrinter) =
   ## Advance the print countdown; call once per emulated frame.
+  # Pan Docs: "The printer has a timeout of 100ms for packets. If no packet
+  # is received within that time, the printer will return to an initialized
+  # state (meaning the link and graphics buffers are reset)." An aborted
+  # mid-packet stream self-heals here, and graphics buffered longer than the
+  # window are dropped. An ACTIVE print is deliberately left to finish: the
+  # game is only polling status while the motor runs, and aborting a print on
+  # a slow poll would re-break the Hello Kitty case documented below.
+  inc prn.idle_frames
+  if prn.idle_frames >= PRN_TIMEOUT_FRAMES and prn.print_left == 0 and
+     (prn.state != psMagic1 or prn.buffer.len > 0):
+    prn.state = psMagic1
+    prn.buffer.setLen(0)
+    prn.status = 0
   if prn.print_left > 0:
     dec prn.print_left
     if prn.print_left == 0:
@@ -187,6 +203,7 @@ proc log_pair(prn: GbPrinter; rx, tx: uint8) =
 
 proc feed*(prn: GbPrinter; b: uint8): uint8 =
   ## Consume one byte from the GB, return the printer's reply for this slot.
+  prn.idle_frames = 0   # any traffic re-arms the 100 ms timeout (tick_frame)
   case prn.state
   of psMagic1:
     result = 0
@@ -280,6 +297,7 @@ proc copy_into*(src, dst: GbPrinter) =
   dst.feed_after = src.feed_after
   dst.outbox = src.outbox
   dst.muted = src.muted
+  dst.idle_frames = src.idle_frames
 
 proc clone*(prn: GbPrinter): GbPrinter =
   result = new_gb_printer()

@@ -86,6 +86,18 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
   t.tima = t.tma
 
 proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
+  ## `on_write` = the edge came from a register write (DIV reset, TAC change)
+  ## rather than the divider counting. Hardware puts a glitch overflow through
+  ## the same one-M-cycle reload window as a natural one (Pan Docs "Timer
+  ## Obscure Behaviour"; SameBoy increase_tima, DocBoy inc_tima) — and the
+  ## immediate reload here IS that window, expressed at dingbat's commit
+  ## point: the write lands AFTER its M-cycle's ticks, so "reload now" sits
+  ## exactly one M-cycle after the edge the instruction caused. Arming the
+  ## 4-T countdown instead double-counts the delay: measured 2026-08-14, it
+  ## fails mooneye acceptance/timer/rapid_toggle on BOTH runners. What this
+  ## phase cannot express is the window's INTERIOR (TIMA reading $00, the
+  ## cycle-B TIMA-write-ignore/TMA-follow rules, for the glitch case) —
+  ## flashcart material, see docs/pandocs-audit.md A6.
   let current_bit = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
   if t.previous_bit and not current_bit:
     t.tima = t.tima + 1

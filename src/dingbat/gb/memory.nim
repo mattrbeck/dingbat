@@ -28,7 +28,7 @@
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
   # DMG-family models, 0x00 on CGB (Pan Docs power-up sequence).
-  result = GbMemory(wram_bank: 1, dma_position: 0xA1,
+  result = GbMemory(wram_bank: 1, svbk_raw: 1, dma_position: 0xA1,
                     dma: if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
   for i in 0 ..< 8:
     result.wram[i] = newSeq[uint8](0x1000)
@@ -407,7 +407,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF51..0xFF55: ppu_read(gb.ppu, gb, idx)
   of 0xFF68..0xFF6B: ppu_read(gb.ppu, gb, idx)
   of 0xFF70:
-    if gb.cgb_native: 0xF8'u8 or mem.wram_bank else: 0xFF'u8
+    if gb.cgb_native: 0xF8'u8 or mem.svbk_raw else: 0xFF'u8
   # FF72-FF77 only exist on CGB/AGB hardware (present even in DMG-compat
   # mode, unlike FF74 — mooneye misc/bits/unused_hwio-C); on DMG they are
   # unmapped and read 0xFF (acceptance/bits/unused_hwio-GS).
@@ -652,6 +652,7 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF68..0xFF6B: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF70:
     if gb.cgb_native:
+      mem.svbk_raw = val and 0x7
       mem.wram_bank = val and 0x7
       if mem.wram_bank == 0: mem.wram_bank = 1
   of 0xFF72: mem.ff72 = val

@@ -1,5 +1,17 @@
 # pandocs-audit: where dingbat disagrees with Pan Docs
 
+> **Status 2026-08-14 (second pass):** SHIPPED — A1, A2 (mbc3-tester now a
+> full pass), A3 (as `cpu_cram_open`, cgbpal_m3 16→33/44), A4, A11
+> (firstwhite now a full pass), A15, A16, A17, A18, A20, A21, A22, A23, A25,
+> plus the A7 HDMA double-speed bus charge (hdma_late TIMA rows move 2
+> closer). TRIED AND REVERTED with the evidence recorded in-code: A6 (the
+> commit-phase already supplies the delay — mooneye rapid_toggle), A13 (real
+> mechanism, phase swaps gambatte oamdma/late_sp — see fifo_ppu.nim).
+> NOT TAKEN, cross-checked against SameBoy+DocBoy and moved to
+> **docs/pandocs-upstream.md**: A5, A8 (deferred, needs call-site design),
+> A9, A10, A12, A14, A19 (frontend plumbing), A24. Suite 882 → 884 with
+> zero rows lost.
+
 **Date:** 2026-08-14. A full sweep of Pan Docs (all 75 pages, gbdev/pandocs
 master) against `src/dingbat/gb/`, run as seven parallel section audits
 (PPU/rendering; OAM DMA + interrupts + halt; timer/serial/joypad; APU;

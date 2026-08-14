@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-14 15:06:40*
+*Generated: 2026-08-14 15:28:13*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4183/5005 passed.**
+**4201/5005 passed.**
 
 ## bgen
 
@@ -36,40 +36,23 @@ All 34 tests passed.
 | bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 128/23040 pixels differ |
 | bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 128/23040 pixels differ |
 
-## cgbpal_m3 (16/44 passed)
+## cgbpal_m3 (33/44 passed)
 
-16/44 tests passed, 28 failed:
+33/44 tests passed, 11 failed:
 
 | Test | Result |
 |------|--------|
-| cgbpal_m3/cgbpal_m3end_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| cgbpal_m3/cgbpal_m3end_1_cgb04c_out7 [cgb] | got 0, expected 7 |
 | cgbpal_m3/cgbpal_m3end_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_ds_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| cgbpal_m3/cgbpal_m3end_ds_1_cgb04c_out7 [cgb] | got 0, expected 7 |
 | cgbpal_m3/cgbpal_m3end_ds_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx2_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_scx2_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx2_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx3_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_scx3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx3_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx5_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_scx5_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx5_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3end_scx5_ds_1_cgb04c_out7 [cgb] | got 1, expected 7 |
-| cgbpal_m3/cgbpal_m3end_scx5_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+| cgbpal_m3/cgbpal_m3end_scx5_ds_1_cgb04c_out7 [cgb] | got 0, expected 7 |
 | cgbpal_m3/cgbpal_m3end_scx5_ds_3_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3start_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_m3start_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| cgbpal_m3/cgbpal_read_m3start_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| cgbpal_m3/cgbpal_read_m3start_ds_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| cgbpal_m3/cgbpal_read_m3start_ds_lcdoffset1_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| cgbpal_m3/cgbpal_read_m3start_lcdoffset1_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| cgbpal_m3/cgbpal_write_m3start_2_cgb04c_out00 [cgb] | got 01, expected 00 |
-| cgbpal_m3/cgbpal_write_m3start_ds_2_cgb04c_out00 [cgb] | got 01, expected 00 |
-| cgbpal_m3/cgbpal_write_m3start_ds_lcdoffset1_2_cgb04c_out00 [cgb] | got 01, expected 00 |
-| cgbpal_m3/cgbpal_write_m3start_lcdoffset1_2_cgb04c_out00 [cgb] | got 01, expected 00 |
+| cgbpal_m3/cgbpal_m3start_ds_1_cgb04c_out1 [cgb] | got 0, expected 1 |
+| cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00 [cgb] | got FF, expected 00 |
+| cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1_cgb04c_out00 [cgb] | got FF, expected 00 |
+| cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01 [cgb] | got 00, expected 01 |
+| cgbpal_m3/cgbpal_write_m3start_lcdoffset1_1_cgb04c_out01 [cgb] | got 00, expected 01 |
 
 ## display_startstate (10/14 passed)
 
@@ -161,8 +144,8 @@ All 8 tests passed.
 | dma/hdma_late_m3speedchange_tima_scx1_ds_1_cgb04c_outF3 [cgb] | got F4, expected F3 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_2_cgb04c_outF4 [cgb] | got F5, expected F4 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7 [cgb] | got F6, expected F7 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_5_cgb04c_outF8 [cgb] | got F5, expected F8 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_6_cgb04c_outF9 [cgb] | got F6, expected F9 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_5_cgb04c_outF8 [cgb] | got F7, expected F8 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_6_cgb04c_outF9 [cgb] | got F8, expected F9 |
 | dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_late_wrambank_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_m0halt_late_m3unhalt_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
@@ -211,9 +194,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (134/184 passed)
+## enable_display (135/184 passed)
 
-134/184 tests passed, 50 failed:
+135/184 tests passed, 49 failed:
 
 | Test | Result |
 |------|--------|
@@ -266,7 +249,6 @@ All 8 tests passed.
 | enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | enable_display/ly0_m0irq_scx1_1_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| enable_display/ly1_late_cgbpw_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 
 ## halt (129/158 passed)
 
@@ -585,10 +567,10 @@ All 6 tests passed.
 | m1/lycint143_m1irq_late_retrigger_1_dmg08_cgb04c_out3 [dmg] | got 1, expected 3 |
 | m1/lycint143_m1irq_late_retrigger_1_dmg08_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/lycint143_m1irq_late_retrigger_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/lycint_m1intirq_1_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| m1/lycint_m1intirq_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| m1/lycint_m1intirq_2_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
-| m1/lycint_m1intirq_2_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
+| m1/lycint_m1intirq_1_dmg08_cgb04c_out3 [dmg] | got ?, expected 3 |
+| m1/lycint_m1intirq_1_dmg08_cgb04c_out3 [cgb] | got ?, expected 3 |
+| m1/lycint_m1intirq_2_dmg08_cgb04c_out1 [dmg] | got ?, expected 1 |
+| m1/lycint_m1intirq_2_dmg08_cgb04c_out1 [cgb] | got ?, expected 1 |
 | m1/lycint_vblankirq_1_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | m1/lycint_vblankirq_1_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 | m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |

@@ -373,7 +373,15 @@ proc lcd_off_frame*(ppu: GbPpu; gb: GB) {.inline.} =
   ## with the LCD off, never returns at all.
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
     when defined(gb_dot_counter): inc gb_frame_lcd_off
-    ppu_blank_frame(ppu, gb)
+    if gb.sgb != nil:
+      # SGB: the ICD/SNES side freezes the picture automatically whenever the
+      # GB LCD turns off (Pan Docs, SGB_Command_System MASK_EN tip) — the
+      # display is a TV, not the handheld panel. Keep presenting the last
+      # drawn frame instead of white.
+      ppu.frame = true
+      ppu.dots_since_frame = 0
+    else:
+      ppu_blank_frame(ppu, gb)
 proc window_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x40
 proc window_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x20) != 0
 
@@ -500,6 +508,57 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
   if (ppu.read_mode and 3'u8) == 3: return false
   if ppu.first_line: return true
   (ppu.lcd_status and 3'u8) != 3
+
+const CRAM_LOCK_R {.intdefine.} = 3
+const CRAM_LOCK_W {.intdefine.} = 0
+  ## Which edges the CGB palette-RAM (BCPD/OCPD) mode-3 lock asks on.
+  ## Scored by gambatte's cgbpal_m3 family (44 rows) plus enable_display's
+  ## ly0_late_cgbp* (8): no lock at all = 16+4, the VRAM lock's edges (R=0)
+  ## = 31+4, latched mode only (R=1) = 33+4 but it swaps which ly0 phases
+  ## pass, R=2 (live only) = 28. **R=3 ships**: R=1's latched edge — one
+  ## M-cycle later than the VRAM lock on the read side — plus the OAM/VRAM
+  ## locks' line-0 exemption on BOTH sides, which keeps every previously
+  ## green ly0 row green (33 + 4, nothing traded). The write knob is inert
+  ## across all cgbpal write rows (latched and live agree at every commit
+  ## there). The 11 cgbpal rows still red are the m3end_{1,3} and
+  ## ds/lcdoffset boundary phases, which sit on the same sub-M-cycle grid
+  ## the CGB per-register write latency study parked (see CGB_WX_LATENCY):
+  ## not expressible until that machinery ships.
+
+proc cpu_cram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+  ## CGB palette RAM belongs to the PPU during mode 3 (Pan Docs Palettes;
+  ## SameBoy cgb_palettes_blocked): reads answer $FF, writes are dropped with
+  ## the auto-increment still firing (it lives in the index port, not CRAM).
+  ## The lock's EDGES are not the VRAM lock's — gambatte's cgbpal_m3 boundary
+  ## rows place both the close and the open one M-cycle later than VRAM's
+  ## (the *_1 phases still answer open at mode-3 entry, and the m3end rows
+  ## reopen a cycle before the VRAM lock would).
+  if not lcd_enabled(ppu): return true
+  if is_write:
+    when CRAM_LOCK_W == 0:
+      # Line 0 after LCD-on does not lock (same exemption as the read side;
+      # enable_display ly0_late_cgbpw_1 lands its write there).
+      if ppu.first_line: return true
+      return (ppu.lcd_status and 3'u8) != 3
+    elif CRAM_LOCK_W == 1:
+      return (ppu.read_mode and 3'u8) != 3
+    else:
+      return not ((ppu.read_mode and 3'u8) == 3 and
+                  (ppu.lcd_status and 3'u8) == 3)
+  when CRAM_LOCK_R == 0:
+    if (ppu.read_mode and 3'u8) == 3: return false
+    if ppu.first_line: return true
+    return (ppu.lcd_status and 3'u8) != 3
+  elif CRAM_LOCK_R == 1:
+    return (ppu.read_mode and 3'u8) != 3
+  elif CRAM_LOCK_R == 3:
+    # R=1's latched edge plus R=0's first-line exemption: the line the LCD
+    # was switched on in does not lock (the enable_display ly0_late_cgbp*
+    # rows sit there; same rule the OAM and VRAM locks carry).
+    if ppu.first_line: return true
+    return (ppu.read_mode and 3'u8) != 3
+  else:
+    return (ppu.lcd_status and 3'u8) != 3
 
 const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## Whether an OAM write is still admitted on the M-cycle mode 2 ends in.
@@ -1709,7 +1768,17 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false): bool =
     let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
     if hold: ppu.hdma_held[byte] = val
     else:    gb.memory.write_byte(gb, dst_base + byte, val)
-    mem_tick_components(gb.memory, gb, 2, from_cpu = false, ignore_speed = true)
+    # Two DOTS per byte on the PPU axis at either speed (gambatte
+    # hdma_start_ds_* pin that), which in double speed is FOUR cycles of the
+    # CPU-clock domain, not two: a $10 block stalls 8 M-cycles in normal
+    # speed and 16 fast M-cycles in double (Pan Docs CGB_Registers; SameBoy
+    # GB_hdma_run advances double_speed ? 4 : 2 per byte, DocBoy one byte
+    # per even/odd T pair). The old combined call charged the bus half
+    # unscaled, so the timer/serial/OAM-DMA domain ran a factor-two slow
+    # against the PPU across every double-speed block.
+    mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
+                 from_cpu = false)
+    mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
   if hold:
     # Armed only now that the block's own dots have run, so the deadline is
     # measured from the LAST transferred byte and the ticks above cannot spend
@@ -2219,12 +2288,20 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.auto_increment: 0x80'u8 else: 0'u8) or ppu.palette_index
     else: 0xFF'u8
-  of 0xFF69: (if gb.cgb_native: ppu.pram[ppu.palette_index] else: 0xFF'u8)
+  of 0xFF69:
+    # CGB palette RAM belongs to the PPU during mode 3: reads answer $FF
+    # (Pan Docs Palettes; SameBoy cgb_palettes_blocked). Same sample points
+    # as the VRAM lock. The index ports (FF68/FF6A) stay open throughout.
+    if gb.cgb_native and cpu_cram_open(ppu, false): ppu.pram[ppu.palette_index]
+    else: 0xFF'u8
   of 0xFF6A:
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.obj_auto_increment: 0x80'u8 else: 0'u8) or ppu.obj_palette_index
     else: 0xFF'u8
-  of 0xFF6B: (if gb.cgb_native: ppu.obj_pram[ppu.obj_palette_index] else: 0xFF'u8)
+  of 0xFF6B:
+    if gb.cgb_native and cpu_cram_open(ppu, false):
+      ppu.obj_pram[ppu.obj_palette_index]
+    else: 0xFF'u8
   else: 0xFF'u8
 
 proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -2241,7 +2318,12 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # this is a pacing rule rather than a hardware one.
       if ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
         when defined(gb_dot_counter): inc gb_frame_lcd_on
-        ppu_blank_frame(ppu, gb)
+        if gb.sgb != nil:
+          # SGB freeze, same as lcd_off_frame: re-present the held picture.
+          ppu.frame = true
+          ppu.dots_since_frame = 0
+        else:
+          ppu_blank_frame(ppu, gb)
       ppu.ly = 0
       # The re-enabled PPU is already part-way into its first line by the time
       # the LCDC write retires -- it does not start at dot 0 there. This seed is
@@ -2301,6 +2383,9 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.stat_chg_dot = STAT_NO_HOLD
       ppu.`mode_flag=`(2'u8, gb)
       ppu.first_line = true
+      # See GbPpu.lcd_on_first_frame: the frame this restart draws stays blank
+      # on a handheld panel; the SGB's TV shows the frozen picture instead.
+      if gb.sgb == nil: ppu.lcd_on_first_frame = true
       when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 2
     when defined(gb_m3_trace):
       if gb_traced(ppu.ly) and (ppu.lcd_status and 3) == 3:
@@ -2509,7 +2594,11 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.auto_increment = (val and 0x80) != 0
   of 0xFF69:
     if gb.cgb_native:
-      ppu.pram[ppu.palette_index] = val
+      # A mode-3 write is DROPPED but the auto-increment still fires — the
+      # increment lives in the index port, not in CRAM (Pan Docs Palettes;
+      # SameBoy drops the byte and bumps the index the same way).
+      if cpu_cram_open(ppu, true):
+        ppu.pram[ppu.palette_index] = val
       if ppu.auto_increment:
         ppu.palette_index = (ppu.palette_index + 1) and 0x3F
   of 0xFF6A:
@@ -2518,7 +2607,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.obj_auto_increment = (val and 0x80) != 0
   of 0xFF6B:
     if gb.cgb_native:
-      ppu.obj_pram[ppu.obj_palette_index] = val
+      if cpu_cram_open(ppu, true):
+        ppu.obj_pram[ppu.obj_palette_index] = val
       if ppu.obj_auto_increment:
         ppu.obj_palette_index = (ppu.obj_palette_index + 1) and 0x3F
   else: discard

@@ -179,6 +179,7 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   # real machine could have produced.
   mem.wram_bank = r.read_u8() and 0x7'u8
   if mem.wram_bank == 0: mem.wram_bank = 1
+  mem.svbk_raw = mem.wram_bank  # readback reconstruction; see GbMemory.svbk_raw
   r.read_bytes(mem.hram)
   mem.bootrom = r.read_seq_u8()
   mem.ff72 = r.read_u8()

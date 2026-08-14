@@ -3341,7 +3341,19 @@ proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
-    # Check for sprite at current pixel BEFORE popping/rendering
+    # Check for sprite at current pixel BEFORE popping/rendering.
+    #
+    # NOT taken (2026-08-14): on CGB the LCDC.1 gate is said to move to the
+    # pixel pop — the fetch happens and mode 3 pays even with objects
+    # disabled (Pan Docs pixel_fifo "ignored on CGB"; SameBoy display.c
+    # fetches on CGB and gates at the pop). Adding `or ppu.cgb` here (with
+    # the emit's sprite_enabled already gating display) gains gambatte
+    # sprites 461->463 and enable_display +1 — but PHASE-SWAPS the
+    # oamdma/late_sp family: every previously-green *_ds_2 / *_4 row trades
+    # places with its red *_ds_1 / *_3 sibling, and
+    # oamdma_late_speedchange_stat_1 goes red outright (771->770). The
+    # mechanism is likely real and the phase off by one fast M-cycle;
+    # docs/pandocs-upstream.md section 2 holds the flashcart question.
     if sprite_enabled(ppu) and ppu.sprites.len > 0 and
        int(ppu.lx) + 8 >= int(ppu.sprites[0].x) and
        # Last, and only reachable once the three tests above have already
@@ -4389,6 +4401,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0
             ppu.current_window_line = -1
+            if ppu.lcd_on_first_frame:
+              # This frame was drawn but is not displayed — see
+              # GbPpu.lcd_on_first_frame. ppu_blank_frame re-marks the same
+              # present, so pacing is untouched.
+              ppu.lcd_on_first_frame = false
+              ppu_blank_frame(ppu, gb)
           else:
             when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
             else:                     ppu.`mode_flag=`(2'u8, gb)

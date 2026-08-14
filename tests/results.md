@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-14 15:06:40 · commit d8dbbeb · game-boy-test-roms v7.0*
+*Generated: 2026-08-14 15:28:13 · commit d91a223 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
 - **Total:** 1046
-- **Pass:** 883
-- **Fail:** 163
+- **Pass:** 884
+- **Fail:** 162
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -24,7 +24,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mealybug Tearoom | 49 | 54 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 13 | 37 |
-| Game Boy - Screenshot suites | 10 | 13 |
+| Game Boy - Screenshot suites | 11 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 10 | 12 |
@@ -871,7 +871,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/vram/vram-read-cgbBCE | CGB | 👀 Mooneye: FAIL |
 | age/vram/vram-read-dmgC | cart dmgC | 👀 Mooneye: FAIL |
 
-## Game Boy - Screenshot suites (10/13)
+## Game Boy - Screenshot suites (11/13)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -886,7 +886,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | turtle-tests/window_y_trigger | DMG | 👌 |
 | turtle-tests/window_y_trigger_wx_offscreen | DMG | 👌 |
 | cgb-acid-hell/cgb-acid-hell | CGB | 👀 100.0% correct (23038/23040 pixels match) |
-| little-things-gb/firstwhite | DMG | 👀 89.2% correct (20552/23040 pixels match) |
+| little-things-gb/firstwhite | DMG | 👌 |
 | mbc3-tester/mbc3-tester | DMG | 👌 |
 
 ## Game Boy - SameSuite (8/8)
@@ -1123,12 +1123,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/bgen | per-ROM | 👌 2/2 passed |
 | gambatte/bgtiledata | per-ROM | 👌 34/34 passed |
 | gambatte/bgtilemap | per-ROM | 👀 28/40 passed |
-| gambatte/cgbpal_m3 | per-ROM | 👀 16/44 passed |
+| gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
 | gambatte/display_startstate | per-ROM | 👀 10/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👀 128/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 7/17 passed |
-| gambatte/enable_display | per-ROM | 👀 134/184 passed |
+| gambatte/enable_display | per-ROM | 👀 135/184 passed |
 | gambatte/halt | per-ROM | 👀 129/158 passed |
 | gambatte/irq_precedence | per-ROM | 👀 44/64 passed |
 | gambatte/lcd_offset | per-ROM | 👀 41/62 passed |

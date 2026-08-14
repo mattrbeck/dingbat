@@ -35,12 +35,18 @@ proc scanline_get_sprites*(ppu: GbScanlinePpu; gb: GB): seq[GbSprite] =
     )
     if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
       if not gb.cgb_native:
-        # DMG (and DMG-compatibility mode): sort by X (ascending), so first in array = lowest X = drawn last (on top)
+        # DMG (and DMG-compatibility mode): sort by X ascending, ties keep OAM
+        # order — the array is PRIORITY order, highest first. do_scanline walks
+        # it front to back and the first opaque sprite pixel CLAIMS its column
+        # (Pan Docs, OAM "Drawing priority": smaller X wins; the claim also
+        # masks lower-priority sprites even when the winner hides behind the
+        # background). The fifo PPU's sprite_merge_planes is the reference.
         var idx = 0
         while idx < result.len and s.x >= result[idx].x:
           inc idx
         result.insert(s, idx)
       else:
+        # CGB: OAM order IS priority order, highest first.
         result.add(s)
       if result.len >= 10: break
     sprite_addr += 4
@@ -55,8 +61,10 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
   let tile_row      = (int(ppu.ly) + int(ppu.scy)) and 7
 
   for x in 0 ..< GB_WIDTH:
-    if window_enabled(ppu) and int(ppu.ly) >= int(ppu.wy) and
-       x + 7 >= int(ppu.wx) and ppu.window_trigger:
+    # No live `ly >= wy` term: the WY comparator is a per-frame LATCH
+    # (window_trigger) and a later WY write cannot retract it — the fifo
+    # PPU's fetcher_retired documents the gambatte late_wy_1toFF_* evidence.
+    if window_enabled(ppu) and x + 7 >= int(ppu.wx) and ppu.window_trigger:
       should_increment_window_line = true
       let tn_addr = window_map + ((x + 7 - int(ppu.wx)) shr 3) +
                     ((ppu.current_window_line shr 3) * 32)
@@ -123,6 +131,10 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
   if should_increment_window_line: inc ppu.current_window_line
 
   if sprite_enabled(ppu):
+    # First opaque pixel in priority order claims the column; a claim sticks
+    # even when the winner loses to the background, which is what masks
+    # lower-priority sprites behind a BG-over-OBJ one (see the list builder).
+    var claimed: array[GB_WIDTH, bool]
     for s in scanline_get_sprites(ppu, gb):
       let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
       let bank = if gb.cgb_native: int(sprite_bank_num(s)) else: 0
@@ -134,6 +146,8 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
         let msb = (ppu.vram[bank][b_hi] shr shift) and 0x1
         let color = uint8((msb shl 1) or lsb)
         if color > 0:
+          if claimed[x]: continue
+          claimed[x] = true
           if gb.cgb_native:
             if not bg_display(ppu) or ppu.scanline_color_vals[x].color == 0 or
                (not ppu.scanline_color_vals[x].priority and sprite_priority(s) == 0):
@@ -210,6 +224,11 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           ppu.frame = true
           when defined(gb_dot_counter): inc gb_frame_normal
           ppu.dots_since_frame = 0
+          if ppu.lcd_on_first_frame:
+            # Same rule as the fifo renderer: the first drawn frame after
+            # LCD-on is not displayed. See GbPpu.lcd_on_first_frame.
+            ppu.lcd_on_first_frame = false
+            ppu_blank_frame(ppu, gb)
         else:
           ly_advance_line(ppu, gb)
     elif ppu.mode_flag == 1:     # V-Blank

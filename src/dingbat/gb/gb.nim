@@ -2791,6 +2791,12 @@ type
     hdma_hold_until*: int32   # dot the bytes land on
     hdma_held_dst*:   int32   # VRAM address the held block starts at
     hdma_held*:       array[16, uint8]
+    # The frame the PPU draws right after LCDC.7 goes high is not shown: the
+    # panel stays blank until the first vblank (Pan Docs LCDC; SameBoy
+    # GB_FRAMESKIP_LCD_TURNED_ON paints it white). Not on SGB, where the TV
+    # keeps showing the frozen picture instead. Transient (one frame), not
+    # serialized.
+    lcd_on_first_frame*: bool
     # window state
     window_trigger*:     bool
     window_trigger_en*:  bool # window_trigger's stricter sibling: a WY match
@@ -3397,6 +3403,14 @@ type
   GbMemory* = ref object
     wram*:                 array[8, seq[uint8]]
     wram_bank*:            uint8
+    svbk_raw*:             uint8 # the bits the SVBK write actually carried:
+                                 # readback is raw, only the MAPPING aliases
+                                 # 0 -> 1 (SameBoy stores `value | ~7`, DocBoy
+                                 # reads the stored bank; a written 0 reads
+                                 # back $F8, not $F9). Not serialized — the
+                                 # payload keeps wram_bank, and a post-load
+                                 # readback of an explicitly-written 0 is the
+                                 # only divergence.
     hram*:                 array[0x7F, uint8]
     # $FEA0-$FEFF, the "prohibited" tail of the OAM page. On CGB revisions 0-D
     # it is real RAM (Pan Docs, "FEA0-FEFF range": "On CGB revisions 0-D, this
@@ -4434,6 +4448,8 @@ include joypad
 # Video: shared PPU base + the two interchangeable renderers
 # Forward declarations needed by ppu.nim (defined in memory.nim included later)
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
+proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true)
+proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false)
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
