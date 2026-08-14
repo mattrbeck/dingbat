@@ -319,15 +319,19 @@ proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
       b = b xor 0x04'u8
   if b != 0: 16 else: 8
 
-proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
+proc fifo_scan_lcdc2_live(ppu: GbFifoPpu): bool {.inline.} =
+  ## Did LCDC.2 move during THIS line's mode 2? One test for the whole scan:
+  ## if it did not, every object's sample is the register as it stands and the
+  ## loop below is the one it always was. `lcdc2_flip[1]` is older than `[0]`,
+  ## so `[0]` alone decides it -- a `[0]` from the previous line cannot be
+  ## sitting above a `[1]` from this one.
+  ppu.lcdc2_flip[0] >= 0'i32 and ppu.lcdc2_flip[0] < OAM_SCAN_DOTS
+
+proc fifo_scan_sprites_lcdc2(ppu: GbFifoPpu; gb: GB): seq[GbSprite] {.noinline.} =
+  ## The scan with a per-object LCDC.2 sample. Split out and NOT inlined: the
+  ## fast scan next door is on every rendered line of every frame and a mid-mode
+  ## 2 LCDC.2 write is a test ROM, so the two share nothing but the shape.
   result = @[]
-  # One test for the whole line: unless LCDC.2 actually moved during THIS mode
-  # 2, every object's sample is the register as it stands and the scan is the
-  # loop it always was. `lcdc2_flip[1]` is older than `[0]`, so `[0]` alone
-  # decides it -- a `[0]` from the previous line cannot be sitting above a `[1]`
-  # from this one.
-  let live = ppu.lcdc2_flip[0] >= 0'i32 and ppu.lcdc2_flip[0] < OAM_SCAN_DOTS
-  let h_line = sprite_height(ppu)
   var sprite_addr = 0
   while sprite_addr <= 0x9C:
     let s = GbSprite(
@@ -337,25 +341,41 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
       attributes: ppu.sprite_table[sprite_addr + 3],
       oam_idx:    uint8(sprite_addr),
     )
-    var on: bool
-    if likely(not live):
-      on = sprite_on_line(s, ppu.ly, h_line)
-    else:
-      # `sprite_addr shr 1` is 2N: four bytes per object, two dots per object.
-      let d = int32(sprite_addr shr 1) + OBJ_SCAN_DOT_ADJ
-      on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d))
-      when CGB_OBJ_SCAN_LEAD != 0:
-        if gb.cgb_enabled:
-          const L = int32(CGB_OBJ_SCAN_LEAD)
-          if gb.memory.current_speed == 0:
-            # The bit arrives L dots late and the comparator glitches for the
-            # dots in between: either height may keep the object.
-            on = on or sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d - L))
-          else:
-            # A double-speed M-cycle spends the whole of it inside itself and
-            # then some: no glitch, and the arrival is L dots EARLY.
-            on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d + L))
+    # `sprite_addr shr 1` is 2N: four bytes per object, two dots per object.
+    let d = int32(sprite_addr shr 1) + OBJ_SCAN_DOT_ADJ
+    var on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d))
+    when CGB_OBJ_SCAN_LEAD != 0:
+      if gb.cgb_enabled:
+        const L = int32(CGB_OBJ_SCAN_LEAD)
+        if gb.memory.current_speed == 0:
+          # The bit arrives L dots late and the comparator glitches for the
+          # dots in between: either height may keep the object.
+          on = on or sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d - L))
+        else:
+          # A double-speed M-cycle spends the whole of it inside itself and
+          # then some: no glitch, and the arrival is L dots EARLY.
+          on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d + L))
     if on:
+      var idx = 0
+      while idx < result.len and s.x >= result[idx].x: inc idx
+      result.insert(s, idx)
+      if result.len >= 10: break
+    sprite_addr += 4
+
+proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
+  if unlikely(fifo_scan_lcdc2_live(ppu)):
+    return fifo_scan_sprites_lcdc2(ppu, gb)
+  result = @[]
+  var sprite_addr = 0
+  while sprite_addr <= 0x9C:
+    let s = GbSprite(
+      y:          ppu.sprite_table[sprite_addr],
+      x:          ppu.sprite_table[sprite_addr + 1],
+      tile_num:   ppu.sprite_table[sprite_addr + 2],
+      attributes: ppu.sprite_table[sprite_addr + 3],
+      oam_idx:    uint8(sprite_addr),
+    )
+    if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
       # Sort ascending by X
       var idx = 0
       while idx < result.len and s.x >= result[idx].x: inc idx
