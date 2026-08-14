@@ -103,6 +103,31 @@ uniform float scan_height;
 uniform bool sgb_border;
 uniform vec3 sgb_backdrop;
 uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
+// --- LCD ghosting, re-applied on the GPU as a per-cell delta ---------------
+// The panel-response model (src/dingbat/common/lcd_response.nim) still runs
+// on the CPU: it advances each native cell's state once per emulated frame
+// and produces the frame a real panel would DISPLAY. But the upscale filters
+// must not see that frame — their edge detectors classify the in-between
+// colours of settling pixels as edges, and moving edges shimmer. So
+// input_texture carries the CLEAN frame (the filters sample only clean
+// pixels), ghost_texture carries the responded frame, and the ghost is put
+// back after filtering as a per-cell offset:
+//
+//   out = clamp(filtered + (responded[cell] - clean[cell]), 0, 1)
+//
+// Identities that make this exact where it matters:
+//   * filter off      -> filtered == clean[cell], so out == responded[cell]:
+//     pixel-identical to the old upload-the-responded-frame path.
+//   * settled cell    -> responded == clean, delta 0: filter output untouched.
+//   * settling cell in a flat region -> filtered == clean[cell], so out is
+//     exactly the panel's displayed value.
+// Only fragments inside a filtered edge band of a *settling* cell are an
+// approximation: they take their own cell's settle offset, so the trail moves
+// smoothly while the edge itself stays cleanly drawn.
+// docs/lcd_ghost_delta.md is the long-form writeup; the web twin lives in
+// web/glpresent.js.
+uniform sampler2D ghost_texture;
+uniform bool lcd_ghost;
 
 vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
 
@@ -248,9 +273,20 @@ vec3 correct(vec3 c) {
     vec3(1.0 / outGamma));
 }
 
+// The colour a fragment shows before colour-correction: the upscale filter
+// over the clean frame, plus this cell's settle offset (see the ghost_texture
+// comment block for why it is a delta and when it is exact). Both samplers
+// are NEAREST, so srctex/ghost at the same uv read the fragment's own cell.
+vec3 game_color(vec2 uv, vec2 tsz) {
+  vec3 col = upscale(uv, tsz);
+  if (lcd_ghost)
+    col = clamp(col + texture(ghost_texture, uv).rgb - srctex(uv), 0.0, 1.0);
+  return col;
+}
+
 // The Game Boy layer, with every filter the no-border path applies.
 vec3 gb_layer(vec2 uv) {
-  vec3 raw = upscale(uv, vec2(tex_width, tex_height));
+  vec3 raw = game_color(uv, vec2(tex_width, tex_height));
   return color_correct ? correct(raw) : raw;
 }
 
@@ -430,6 +466,17 @@ proc setup_border_texture(): GLuint =
                0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
   glActiveTexture(GL_TEXTURE0)
 
+proc setup_ghost_texture(): GLuint =
+  ## The LCD-ghost layer on texture unit 2: same format and filtering as the
+  ## game texture (NEAREST + the default REPEAT wrap the negative-V vertex
+  ## shader needs), storage allocated per ROM load alongside the game texture.
+  glGenTextures(1, addr result)
+  glActiveTexture(GL_TEXTURE2)
+  glBindTexture(GL_TEXTURE_2D, result)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
+  glActiveTexture(GL_TEXTURE0)
+
 proc setup_vao() =
   var vao: GLuint
   glGenVertexArrays(1, addr vao)
@@ -457,6 +504,12 @@ type AppState = ref object
   # sampled) while the loaded cart is running as a Super Game Boy and has
   # actually transferred a border.
   border_texture:  GLuint
+  # LCD-ghost layer: the RESPONDED frame, uploaded alongside the clean one in
+  # upload_frame while the panel model is on. The shader re-applies it after
+  # the upscale filter as a per-cell delta — see the ghost_texture comment in
+  # FRAG_SRC and docs/lcd_ghost_delta.md.
+  ghost_texture:   GLuint
+  lcd_ghost_on:    bool     # what upload_frame last decided; drives the uniform
   border_shown:    bool     # what the last present decided; drives window sizing
   border_gen:      uint32   # last border generation uploaded to the texture
   logo_texture:    GLuint
@@ -633,6 +686,7 @@ proc apply_panel_uniforms() =
   # border, which reads as "the border is a smeared copy of the game".
   glUniform1i(glGetUniformLocation(app.game_shader, "input_texture"), 0)
   glUniform1i(glGetUniformLocation(app.game_shader, "border_texture"), 1)
+  glUniform1i(glGetUniformLocation(app.game_shader, "ghost_texture"), 2)
 
 proc apply_master_volume() =
   if app.gba_emu != nil:
@@ -754,6 +808,14 @@ proc load_rom(path: string) =
   let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
                GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  # The LCD-ghost layer gets the same storage; upload_frame fills it only
+  # while the panel model is on.
+  glActiveTexture(GL_TEXTURE2)
+  glBindTexture(GL_TEXTURE_2D, app.ghost_texture)
+  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
+               GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D, app.game_texture)
   # Update recents
   var recs = app.cfg.recents
   let idx = recs.find(path)
@@ -1044,10 +1106,12 @@ proc render_logo() =
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
 proc upload_frame(fb: ptr uint16; w, h: int) =
-  ## Upload the frame texture, running it through the panel model first when
-  ## the LCD response is on. The model advances once per uploaded frame — i.e.
-  ## in emulated time, not in display refreshes — so the screen settles the
-  ## same way whatever the window's refresh rate is.
+  ## Upload this frame's textures. The panel model still advances on the CPU,
+  ## once per uploaded frame — i.e. in emulated time, not in display refreshes
+  ## — but the SHADER is what re-applies its output now: the clean frame goes
+  ## to unit 0 (what the upscale filters sample) and, with the response on,
+  ## the responded frame goes to unit 2 for the per-cell ghost delta. See the
+  ## ghost_texture comment in FRAG_SRC and docs/lcd_ghost_delta.md.
   let src = cast[ptr UncheckedArray[uint16]](fb)
   let gb = app.emu_kind == ekGB and app.gb_emu != nil
   # Speed mode suspends the panel model — per-pixel CPU work every frame
@@ -1055,9 +1119,22 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
     gba = app.emu_kind == ekGBA,
     cgb = gb and app.gb_emu.cgb_enabled,
     sgb = gb and app.gb_emu.sgb_active()))
-  let upload = cast[pointer](lcd_resp.apply(src, w * h))
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
-                  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
+                  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, fb)
+  # apply() is also the state advance, so it runs every frame the model is
+  # active; it returns `src` itself (zero-copy) when the model is off, and
+  # that pointer equality is the ghost on/off signal — same contract as the
+  # web presenter (wasm_game_fb_raw_ptr vs wasm_game_fb_ptr).
+  let responded = lcd_resp.apply(src, w * h)
+  app.lcd_ghost_on = cast[pointer](responded) != cast[pointer](src)
+  if app.lcd_ghost_on:
+    glActiveTexture(GL_TEXTURE2)
+    glBindTexture(GL_TEXTURE_2D, app.ghost_texture)
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
+                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+                    cast[pointer](responded))
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, app.game_texture)
 
 when defined(gputime):
   # Throwaway instrument (-d:gputime): GL_TIME_ELAPSED around the game quad,
@@ -1136,6 +1213,8 @@ proc render_game() =
                 GLint(if scan: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
                 GLint(ord(eff_filter)))
+    glUniform1i(glGetUniformLocation(app.game_shader, "lcd_ghost"),
+                GLint(if app.lcd_ghost_on: 1 else: 0))
   # The letterboxed rect this present draws into. Computed before the case so
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.
@@ -2260,6 +2339,7 @@ proc main() =
   glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
   let game_tex = setup_game_texture()
   let border_tex = setup_border_texture()
+  let ghost_tex = setup_ghost_texture()
   setup_vao()
   let game_shader = create_shader_program()
   let logo_shader = create_logo_shader_program()
@@ -2297,6 +2377,7 @@ proc main() =
     io:              io_ptr,
     game_texture:    game_tex,
     border_texture:  border_tex,
+    ghost_texture:   ghost_tex,
     logo_texture:    logo_tex,
     canvas_aspect:   canvas_aspect,
     logo_shader:     logo_shader,

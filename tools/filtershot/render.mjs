@@ -5,12 +5,21 @@
 // extract-and-readback method as web/render.test.mjs, so what these PNGs show
 // is exactly what ships.
 //
-//   node tools/filtershot/render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base>
+//   node tools/filtershot/render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base> [ghost.rgb555]
 //
 // writes <outdir>/<base>.<filter>.png for none / hq4x / xbr / xbrz.
 // Colour correction and scanlines are left OFF: both apply uniformly after the
 // upscale stage, so they would shift every image identically without changing
 // the comparison.
+//
+// With a ghost dump (the responded frame dump_frames writes for a shot when a
+// panel is named), each filter renders TWICE instead:
+//   <base>.old.<filter>.png — the pre-fix pipeline: the RESPONDED frame is
+//     what the filter samples (u_tex = ghost, delta off). This is what
+//     shipped before the ghost-delta change.
+//   <base>.new.<filter>.png — the fixed pipeline: the filter samples the
+//     CLEAN frame and the shader re-applies the ghost as a per-cell delta
+//     (u_tex = clean, u_ghost = ghost, u_lcd_ghost on).
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -22,7 +31,7 @@ const { chromium } = requireWeb("playwright");
 
 const FILTERS = ["none", "hq4x", "xbr", "xbrz"];
 
-function renderInPage({ VERT, FRAG, w, h, scale, pixels, filter }) {
+function renderInPage({ VERT, FRAG, w, h, scale, pixels, ghostPixels, filter }) {
   const canvas = document.getElementById("c");
   canvas.width = w * scale;
   canvas.height = h * scale;
@@ -65,32 +74,62 @@ function renderInPage({ VERT, FRAG, w, h, scale, pixels, filter }) {
   gl.uniform2f(gl.getUniformLocation(prog, "u_tex_size"), w, h);
   u1i("u_filter", filter === "hq4x" ? 1 : filter === "xbr" ? 2
     : filter === "xbrz" ? 3 : 0);
+  if (ghostPixels) {
+    const gt = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, gt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
+      gl.RED_INTEGER, gl.UNSIGNED_SHORT, new Uint16Array(ghostPixels));
+    gl.activeTexture(gl.TEXTURE0);
+    u1i("u_ghost", 2);
+    u1i("u_lcd_ghost", 1);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   return { png: canvas.toDataURL("image/png") };
 }
 
 async function main() {
-  const [dump, wS, hS, scaleS, outdir, base] = process.argv.slice(2);
+  const [dump, wS, hS, scaleS, outdir, base, ghostDump] = process.argv.slice(2);
   if (!base) {
-    console.error("usage: render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base>");
+    console.error("usage: render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base> [ghost.rgb555]");
     process.exit(2);
   }
   const w = Number(wS), h = Number(hS), scale = Number(scaleS);
-  const raw = readFileSync(dump);
-  const pixels = Array.from(new Uint16Array(raw.buffer, raw.byteOffset, w * h));
+  const loadDump = (p) => {
+    const raw = readFileSync(p);
+    return Array.from(new Uint16Array(raw.buffer, raw.byteOffset, w * h));
+  };
+  const pixels = loadDump(dump);
+  const ghost = ghostDump ? loadDump(ghostDump) : null;
   const { VERT, FRAG } = readShaders();
   mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader"] });
   const page = await browser.newPage();
   await page.setContent("<!doctype html><canvas id=c></canvas>");
+  const shoot = async (cfg, name) => {
+    const r = await page.evaluate(renderInPage, cfg);
+    if (r.error) throw new Error(r.error);
+    const out = join(outdir, name);
+    writeFileSync(out, Buffer.from(r.png.split(",")[1], "base64"));
+    console.log(out);
+  };
   try {
     for (const filter of FILTERS) {
-      const r = await page.evaluate(renderInPage,
-        { VERT, FRAG, w, h, scale, pixels, filter });
-      if (r.error) throw new Error(r.error);
-      const out = join(outdir, `${base}.${filter}.png`);
-      writeFileSync(out, Buffer.from(r.png.split(",")[1], "base64"));
-      console.log(out);
+      if (!ghost) {
+        await shoot({ VERT, FRAG, w, h, scale, pixels, filter },
+          `${base}.${filter}.png`);
+      } else {
+        // old order = the responded frame IS the source the filter samples
+        await shoot({ VERT, FRAG, w, h, scale, pixels: ghost, filter },
+          `${base}.old.${filter}.png`);
+        // new order = clean source + the ghost re-applied as a delta
+        await shoot({ VERT, FRAG, w, h, scale, pixels, ghostPixels: ghost, filter },
+          `${base}.new.${filter}.png`);
+      }
     }
   } finally {
     await browser.close();

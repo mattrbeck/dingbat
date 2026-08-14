@@ -10,10 +10,12 @@
 // (SDL must render to a different, hidden canvas); nativeRes() -> [w,h] gives
 // the core's native pixel size; log(msg) reports GL errors.
 function createGlRenderer(canvasEl, nativeRes, log) {
-  let gl = null, prog = null, tex = null, btex = null, lost = false;
+  let gl = null, prog = null, tex = null, btex = null, gtex = null, lost = false;
   let uColorCorrect, uPanelGbc, uScanlines, uScanHeight, uTexSize, uFilter;
   let uDmgRemap, uDmgPal, uBorderTex, uSgbBorder, uSgbBackdrop;
+  let uGhostTex, uLcdGhost;
   let lastW = 0, lastH = 0;
+  let lastGW = 0, lastGH = 0;    // ghost-texture storage dims (unit 2)
   // Last SGB border generation uploaded. The image changes a handful of times
   // in a session and is 112 KiB, so it is re-uploaded only when it moves.
   let lastBorderGen = -1;
@@ -59,6 +61,32 @@ uniform bool u_scanlines;
 uniform float u_scan_height;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
 uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
+// --- LCD ghosting, re-applied on the GPU as a per-cell delta ---------------
+// The panel-response model (src/dingbat/common/lcd_response.nim) still runs
+// on the CPU: it advances each native cell's state once per emulated frame
+// and produces the frame a real panel would DISPLAY. But the upscale filters
+// must not see that frame — their edge detectors classify the in-between
+// colours of settling pixels as edges, and moving edges shimmer. So u_tex
+// carries the CLEAN frame (the filters sample only clean pixels) and u_ghost
+// carries the responded frame, and the ghost is put back after filtering as a
+// per-cell offset:
+//
+//   out = clamp(filtered + (responded[cell] - clean[cell]), 0, 1)
+//
+// Identities that make this exact where it matters:
+//   * filter off      -> filtered == clean[cell], so out == responded[cell]:
+//     pixel-identical to the old upload-the-responded-frame path.
+//   * settled cell    -> responded == clean, delta 0: filter output untouched.
+//   * settling cell in a flat region -> filtered == clean[cell], so out is
+//     exactly the panel's displayed value.
+// Only fragments inside a filtered edge band of a *settling* cell are an
+// approximation: they take their own cell's settle offset, so the trail moves
+// smoothly while the edge itself stays cleanly drawn. With the DMG shade
+// palette active the delta is computed on the remapped colours, so the ghost
+// plays out in the user's palette rather than in panel green.
+// docs/lcd_ghost_delta.md is the long-form writeup.
+uniform usampler2D u_ghost;     // responded frame, same packing as u_tex
+uniform bool u_lcd_ghost;       // response on AND the two frames differ
 // --- Super Game Boy border ---------------------------------------------
 // A 256x224 second layer in the same BGR555 packing as the game framebuffer,
 // with bit 15 = opaque (SNES colour 0 is transparent). The Game Boy window is
@@ -96,11 +124,11 @@ const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 30.0, 26.0),   // 0x6BDF
                                   vec3(15.0,  7.0, 11.0));  // 0x2CEF
 
 ivec2 g_max;
-vec3 fetchRGB(ivec2 p) {
-  uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu;
-  vec3 c = vec3(float(packed & 31u),
-                float((packed >> 5) & 31u),
-                float((packed >> 10) & 31u));
+// Map a raw colour (5-bit channels, 0..31) to its display colour: the DMG
+// shade-palette substitution when active, else the plain 0..1 normalisation.
+// Shared by the clean and the ghost fetch so the ghost delta is computed in
+// the same colour space the picture is drawn in.
+vec3 present555(vec3 c) {
   if (u_dmg_remap) {
     for (int i = 0; i < 3; i++) {
       vec3 a = DMG_SHADE[i], b = DMG_SHADE[i + 1];
@@ -115,6 +143,17 @@ vec3 fetchRGB(ivec2 p) {
     }
   }
   return c / 31.0;
+}
+vec3 raw5(uint packed) {
+  return vec3(float(packed & 31u),
+              float((packed >> 5) & 31u),
+              float((packed >> 10) & 31u));
+}
+vec3 fetchRGB(ivec2 p) {
+  return present555(raw5(texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu));
+}
+vec3 ghostRGB(ivec2 p) {
+  return present555(raw5(texelFetch(u_ghost, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu));
 }
 vec3 yuv(vec3 c) {
   return vec3(dot(c, vec3( 0.299,  0.587,  0.114)),
@@ -242,6 +281,18 @@ vec3 upscale(vec2 uv) {
   return E;
 }
 
+// The colour a fragment shows before the panel colour model: the upscale
+// filter over the clean frame, plus this cell's settle offset (see the
+// u_ghost comment block for why it is a delta and when it is exact).
+vec3 game_color(vec2 uv) {
+  vec3 col = upscale(uv);          // also sets g_max for the cell fetches
+  if (u_lcd_ghost) {
+    ivec2 cell = ivec2(floor(uv * u_tex_size));
+    col = clamp(col + ghostRGB(cell) - fetchRGB(cell), 0.0, 1.0);
+  }
+  return col;
+}
+
 // The panel colour model, applied to the Game Boy layer only.
 vec3 shade(vec3 c) {
   float outGamma = 2.2;
@@ -285,10 +336,10 @@ void main() {
     } else {
       vec2 guv = (v_uv * vec2(256.0, 224.0) - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
       rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
-            ? shade(upscale(guv)) : u_sgb_backdrop;
+            ? shade(game_color(guv)) : u_sgb_backdrop;
     }
   } else {
-    rgb = shade(upscale(v_uv));
+    rgb = shade(game_color(v_uv));
   }
   if (u_scanlines && fract(v_uv.y * u_scan_height) < 0.3) {
     rgb *= 0.72;
@@ -332,6 +383,8 @@ void main() {
     uBorderTex = gl.getUniformLocation(prog, "u_border");
     uSgbBorder = gl.getUniformLocation(prog, "u_sgb_border");
     uSgbBackdrop = gl.getUniformLocation(prog, "u_sgb_backdrop");
+    uGhostTex = gl.getUniformLocation(prog, "u_ghost");
+    uLcdGhost = gl.getUniformLocation(prog, "u_lcd_ghost");
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     // Integer textures must use NEAREST filtering.
@@ -350,8 +403,20 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, 256, 224, 0,
       gl.RED_INTEGER, gl.UNSIGNED_SHORT, null);
+    // The LCD-ghost layer (the RESPONDED frame), on texture unit 2. Storage
+    // is (re)allocated on the first ghosted frame of each game size; the 1x1
+    // placeholder keeps the sampler complete while the response is off.
+    gtex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, gtex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, 1, 1, 0,
+      gl.RED_INTEGER, gl.UNSIGNED_SHORT, new Uint16Array(1));
     gl.activeTexture(gl.TEXTURE0);
-    lastW = 0; lastH = 0; lastBorderGen = -1;
+    lastW = 0; lastH = 0; lastGW = 0; lastGH = 0; lastBorderGen = -1;
     return true;
   };
 
@@ -366,7 +431,7 @@ void main() {
       // Mobile Safari can drop the context under memory pressure; recover.
       canvasEl.addEventListener("webglcontextlost", (e) => {
         e.preventDefault();
-        lost = true; prog = null; tex = null;
+        lost = true; prog = null; tex = null; gtex = null;
         log("gl context lost");
       });
       canvasEl.addEventListener("webglcontextrestored", () => {
@@ -384,8 +449,19 @@ void main() {
     // Draw the current wasm game frame. opts drives the color/scanline uniforms.
     draw(opts) {
       if (!ensure()) return;
-      const ptr = Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
-      if (!ptr) return;
+      // Two frames per present (see the u_ghost comment in the shader and
+      // docs/lcd_ghost_delta.md): the CLEAN frame feeds u_tex — the upscale
+      // filters must sample clean pixels — and the RESPONDED frame feeds
+      // u_ghost, re-applied after filtering as a per-cell delta. The core
+      // returns the SAME pointer for both while the LCD response is off, so
+      // pointer inequality is the ghost on/off signal. A stale em.js without
+      // the raw export degrades to the old behaviour (responded frame as
+      // u_tex, ghost off).
+      const respPtr = Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
+      if (!respPtr) return;
+      const rawPtr = Module._wasm_game_fb_raw_ptr && Module._wasm_game_fb_raw_ptr();
+      const ptr = rawPtr || respPtr;
+      const ghost = !!rawPtr && rawPtr !== respPtr;
       // nativeRes() is the OUTPUT size, which an SGB border makes 256x224.
       // The game texture is always the console's own framebuffer.
       const border = !!(Module._wasm_sgb_border && Module._wasm_sgb_border());
@@ -403,6 +479,20 @@ void main() {
       } else {
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
           gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+      }
+      if (ghost) {
+        const gview = new Uint16Array(Module.memory.buffer, respPtr, w * h);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, gtex);
+        if (w !== lastGW || h !== lastGH) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, gview);
+          lastGW = w; lastGH = h;
+        } else {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, gview);
+        }
+        gl.activeTexture(gl.TEXTURE0);
       }
       // --- SGB border layer ---
       if (border) {
@@ -440,6 +530,8 @@ void main() {
       }
       gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2
         : opts.filter === "xbrz" ? 3 : 0);
+      gl.uniform1i(uGhostTex, 2);
+      gl.uniform1i(uLcdGhost, ghost ? 1 : 0);
       // opts.dmgPalette: four "#rrggbb" strings (shade 0 -> 3) or null/absent.
       const pal = opts.dmgPalette;
       const remap = !!(pal && pal.length === 4);

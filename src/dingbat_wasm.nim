@@ -300,25 +300,53 @@ proc wasm_hle_audio_active(): cint {.exportc.} =
 # LUTs above survive only for the low-rate consumers of wasm_fb_ptr (ambient
 # glow, paused-game thumbnail).
 #
-# The LCD response stays on the CPU and works on the raw 5-bit channels
-# (cheap, and only when enabled); the responded raw frame is what gets
-# uploaded. It runs once per EMULATED frame here rather than per present, so
-# the panel advances in emulated time — a 120 Hz display or a dropped present
-# cannot change how the screen settles.
-var gamePtr: pointer = nil       # pointer JS uploads this frame
+# The LCD response's STATE stays on the CPU: lcdResp.apply advances each
+# native cell once per EMULATED frame here rather than per present, so the
+# panel settles in emulated time — a 120 Hz display or a dropped present
+# cannot change how the screen settles — and fast-forward, rewind and the
+# link/rollback blit paths need no special cases.
+#
+# What changed for the GPU (docs/lcd_ghost_delta.md has the full story): the
+# presenter now gets TWO frames instead of the responded one alone —
+#
+#   wasm_game_fb_raw_ptr  the CLEAN frame, what the upscale filters sample.
+#                         Filters must never see mid-settle colours: their
+#                         edge detectors classify those transients as edges
+#                         and moving edges shimmer.
+#   wasm_game_fb_ptr      the RESPONDED frame, what a real panel would show.
+#                         The shader re-applies it after filtering as a
+#                         per-cell delta (filtered + responded − clean),
+#                         which is pixel-identical to the old path when no
+#                         filter is on.
+#
+# The two pointers are EQUAL whenever the response is off (apply is zero-copy
+# then) — that equality is the presenter's on/off signal, so no extra export
+# is needed. wasm_game_fb_ptr keeps its old meaning for every other consumer
+# (thumbnails, the paused card, the bug-report preview): they still see the
+# panel's output.
+var gamePtr: pointer = nil       # responded frame (== raw when response off)
+var gameRawPtr: pointer = nil    # clean frame, straight from the core
 
 proc prepare_game_frame(fb: ptr UncheckedArray[uint16]; pixels: int) =
-  ## Point gamePtr at the pixels JS should upload this frame: the core's raw
-  ## framebuffer directly (zero-copy) or, with the LCD response on, the panel's
-  ## own output. No color conversion happens here — that is the shader's job.
+  ## Point the upload pointers at this frame: gameRawPtr at the core's own
+  ## framebuffer (zero-copy), gamePtr at the panel model's output (or the same
+  ## buffer when the response is off). No color conversion happens here — that
+  ## is the shader's job.
   if lcdOn: sync_lcd_panel()
+  gameRawPtr = cast[pointer](fb)
   gamePtr = cast[pointer](lcdResp.apply(fb, pixels))
 
 proc wasm_game_fb_ptr(): pointer {.exportc.} =
-  ## Pointer to this frame's raw BGR555 framebuffer for the WebGL2 uploader
-  ## (16-bit little-endian; the shader masks 0x7FFF). Valid after the last
-  ## loop_tick/netlink_tick/rewind of the RAF turn.
+  ## Pointer to this frame's RESPONDED BGR555 framebuffer (16-bit
+  ## little-endian; the shader masks 0x7FFF). Valid after the last
+  ## loop_tick/netlink_tick/rewind of the RAF turn. Equal to
+  ## wasm_game_fb_raw_ptr when the LCD response is off.
   gamePtr
+
+proc wasm_game_fb_raw_ptr(): pointer {.exportc.} =
+  ## Pointer to the same frame BEFORE the LCD response — the clean framebuffer
+  ## the upscale filters must sample. See the comment block above.
+  gameRawPtr
 
 # --- Super Game Boy ---------------------------------------------------------
 # The border is a second layer, not a bigger framebuffer: the core keeps

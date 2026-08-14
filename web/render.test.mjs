@@ -117,6 +117,26 @@ function renderInPage(cfg) {
   gl.uniform1i(gl.getUniformLocation(prog, "u_filter"),
     opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2
       : opts.filter === "xbrz" ? 3 : 0);
+  // LCD-ghost delta paths. ghostSame: enable the delta with u_ghost left on
+  // unit 0 — it samples the SAME texture, so the delta must be exactly zero.
+  // ghostSolid: upload a solid responded frame on unit 2; with filter=none the
+  // delta identity says the output must BE that frame.
+  if (opts.ghostSame) {
+    gl.uniform1i(gl.getUniformLocation(prog, "u_lcd_ghost"), 1);
+  } else if (opts.ghostSolid) {
+    const gt = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, gt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, nw, nh, 0, gl.RED_INTEGER,
+      gl.UNSIGNED_SHORT, new Uint16Array(nw * nh).fill(opts.ghostSolid));
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_ghost"), 2);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_lcd_ghost"), 1);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // Read the whole framebuffer. readPixels row 0 is the BOTTOM row, so convert
@@ -213,6 +233,22 @@ async function run() {
     await structural("filter=hq4x", { colorCorrect: false, scanlines: false, filter: "hq4x" });
     await structural("filter=xBR", { colorCorrect: false, scanlines: false, filter: "xbr" });
     await structural("filter=xBRZ", { colorCorrect: false, scanlines: false, filter: "xbrz" });
+
+    // 3) LCD-ghost delta identities (see the u_ghost comment in glpresent.js).
+    //    ghost == clean -> zero delta: the render must be pixel-identical to
+    //    the base render at every sampled point.
+    console.log("ghost delta, ghost==clean: output identical to base:");
+    const gid = await render({ colorCorrect: false, scanlines: false, filter: "none", ghostSame: true });
+    for (const k of ["topLeft", "topRight", "bottomLeft", "bottomRight", "center"])
+      assert(JSON.stringify(gid[k]) === JSON.stringify(base[k]),
+        `ghost-same ${k} == base ${k}  (${gid[k]} vs ${base[k]})`);
+    //    filter=none -> the delta identity collapses to "output IS the
+    //    responded frame": a solid green responded frame must come out solid
+    //    green everywhere, regardless of what the clean pattern held.
+    console.log("ghost delta, filter=none: output IS the responded frame:");
+    const gp = await render({ colorCorrect: false, scanlines: false, filter: "none", ghostSolid: GREEN });
+    for (const k of ["topLeft", "topRight", "bottomLeft", "bottomRight", "center"])
+      assert(isGreen(gp[k]), `ghost-solid ${k} is the responded GREEN  (${gp[k]})`);
   } finally {
     await browser.close();
   }
