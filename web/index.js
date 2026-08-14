@@ -5450,6 +5450,27 @@ const loadNowPlayingArt = async () => {
 // below is free when nothing changed.
 let nowPlayingKey = null;
 
+// Declare (or clear) the timeline. A running game has no timeline: there is
+// nothing to seek through and nothing to count down. The spec says a `duration`
+// of +Infinity means an indefinite / live stream, and the visible effect on an
+// iOS lock screen is the card dropping its "0:00 / 0:00" scrubber and presenting
+// as live media — which is exactly what a running emulator is. Without this the
+// card shows the timeline of whatever media element WebKit hung the session off
+// (our silent backing element), i.e. a meaningless frozen 0:00 / 0:00.
+//
+// Guarded twice: setPositionState is newer than mediaSession itself, and an
+// engine is entitled to reject a non-finite duration. If one does, clear instead
+// — no timeline beats a wrong one, and clearing also drops any stale state.
+const setNowPlayingLive = (ms, live) => {
+  if (typeof ms.setPositionState !== "function") return;
+  try {
+    if (live) ms.setPositionState({ duration: Infinity, playbackRate: 1, position: 0 });
+    else ms.setPositionState();
+  } catch {
+    try { ms.setPositionState(); } catch {}
+  }
+};
+
 const publishNowPlaying = () => {
   const game = gameDisplayName();
   const running = !!(currentRomName || linkMode);
@@ -5460,8 +5481,10 @@ const publishNowPlaying = () => {
     if (!running) {
       ms.metadata = null;
       ms.playbackState = "none";
+      setNowPlayingLive(ms, false);
       return;
     }
+    setNowPlayingLive(ms, true);
     if (typeof MediaMetadata === "function") {
       ms.metadata = new MediaMetadata({
         title: game || "Game Boy",
@@ -5486,6 +5509,34 @@ const syncNowPlaying = () => {
   if (key === nowPlayingKey) return;
   nowPlayingKey = key;
   publishNowPlaying();
+};
+
+// Snapshot artwork goes stale. When the library has no box art for this game the
+// lock-screen image is a capture of the screen, frozen at whatever moment it was
+// published — which is ~5 s after load, so a player an hour in is still looking
+// at the title screen. Re-publish periodically so the picture tracks play.
+//
+// Three conditions, all necessary:
+//   * only when the artwork IS the snapshot. Box art is a stable object URL, so
+//     re-publishing would rebuild MediaMetadata for an identical result.
+//   * only while a game is running.
+//   * never while paused — a frozen frame is then the CORRECT picture, and the
+//     capture would cost a canvas readback per interval for nothing.
+// The counter is driven from the 1 Hz poll below and NOT from syncNowPlaying
+// itself, which is also called from a dozen event paths (any of which would
+// otherwise shorten the interval to nothing).
+const NOWPLAYING_SNAPSHOT_TICKS = 30;   // ~30 s at the 1 Hz poll
+let nowPlayingSnapTicks = 0;
+
+const nowPlayingPoll = () => {
+  const snapshotOnly = !nowPlayingArtURL && !paused && !!(currentRomName || linkMode);
+  if (!snapshotOnly) {
+    nowPlayingSnapTicks = 0;
+  } else if (++nowPlayingSnapTicks >= NOWPLAYING_SNAPSHOT_TICKS) {
+    nowPlayingSnapTicks = 0;
+    nowPlayingKey = null;              // invalidate, so the reconcile republishes
+  }
+  syncNowPlaying();
 };
 
 // Force a republish even though nothing about the game changed. Used when the
@@ -5522,7 +5573,110 @@ const initMediaSession = () => {
 
 initMediaSession();
 publishNowPlaying();          // plain "dingbat" until a game loads
-setInterval(syncNowPlaying, 1000);
+setInterval(nowPlayingPoll, 1000);
+
+// The Now Playing backing element (iOS only). TWO unrelated reasons, either of
+// which is enough:
+//
+//  1. Pre-audioSession iOS (≤16): Web Audio output obeys the ringer (silent)
+//     switch unless an <audio> element is actively playing, which promotes the
+//     whole session to "playback". A one-shot blip isn't enough — the promotion
+//     only lasts while the element plays. Modern iOS gets this from
+//     navigator.audioSession in initAudio instead.
+//  2. Now Playing (lock screen / Control Center). WebKit populates it from a
+//     *media element*; a page whose only output is an AudioContext — as this
+//     emulator's is — sets navigator.mediaSession.metadata and gets nothing on
+//     the lock screen. A playing silent element is the standard workaround: it
+//     gives WebKit a media session to hang the metadata that publishNowPlaying()
+//     sets on.
+//
+// It is a separate HTMLMediaElement and touches NOTHING in the pushAudio path —
+// no node it feeds, no scheduling, no game audio tapped into it (the stream
+// below is silent by construction; the game is heard through the AudioContext's
+// own destination, exactly as before). It also stays playing while the emulator
+// is paused: pause is expressed through mediaSession.playbackState, because
+// stopping and restarting the element would tear the iOS audio session down and
+// back up (a real risk of a glitch in the AudioContext output) for a cosmetic
+// gain.
+//
+// Deliberately iOS-only. Other platforms get the metadata and the action
+// handlers with no element at all: they need no ringer promotion, and a
+// permanent "this tab is playing audio" indicator on desktop would be a
+// regression for the many sessions where nobody looks at a lock screen.
+let silentLoopEl = null;
+const iosFamily = () =>
+  /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const needsSilentLoop = () =>
+  iosFamily() && (!navigator.audioSession || !!navigator.mediaSession);
+const silentWavURL = () => {
+  // 0.25 s of 8 kHz mono 8-bit silence (0x80), built inline — looping a
+  // microscopic file (like the 1-sample one-shot elsewhere) would be churn.
+  const n = 2000;
+  const buf = new Uint8Array(44 + n).fill(0x80, 44);
+  const dv = new DataView(buf.buffer);
+  const tag = (off, s) => { for (let i = 0; i < s.length; i++) buf[off + i] = s.charCodeAt(i); };
+  tag(0, "RIFF"); dv.setUint32(4, 36 + n, true); tag(8, "WAVE");
+  tag(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, 1, true); dv.setUint32(24, 8000, true);
+  dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true);
+  dv.setUint16(34, 8, true); tag(36, "data"); dv.setUint32(40, n, true);
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+};
+
+// Build the element. Preferred backing is a silent MediaStream off the
+// already-unlocked AudioContext, NOT a file: a stream-backed media element has
+// an infinite intrinsic duration, and that is what makes iOS render the live
+// card style. Backed by the 0.25 s WAV instead, the lock screen reports the
+// file's duration and shows a dead "0:00 / 0:00" scrubber over a game that has
+// no timeline at all. (publishNowPlaying also declares duration: Infinity via
+// setPositionState — the two agree, and neither alone is reliably enough.)
+//
+// The stream carries a ConstantSourceNode through a gain pinned at 0, so it is
+// silent by construction and no game audio is ever routed into the element —
+// the game is already audible through the context's destination, and doubling
+// it there would be an echo. Deliberately NOT muted: iOS has historically
+// declined to count a muted element towards Now Playing.
+//
+// Probed and fail-soft: any engine without createMediaStreamDestination or
+// srcObject falls back to the WAV loop, which is the previous behaviour exactly.
+const makeSilentLoopEl = (ctx) => {
+  const el = new Audio();
+  // No effect on the stream path (a live stream never ends); required by the
+  // WAV fallback, so it is set once here for both.
+  el.loop = true;
+  try {
+    if (ctx && typeof ctx.createMediaStreamDestination === "function" &&
+        "srcObject" in el) {
+      const dest = ctx.createMediaStreamDestination();
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      mute.connect(dest);
+      const src = ctx.createConstantSource();
+      src.connect(mute);
+      src.start(0);
+      el.srcObject = dest.stream;
+      if (el.srcObject) return el;
+    }
+  } catch {}
+  el.src = silentWavURL();
+  return el;
+};
+
+// Start (or restart) the element and, once it is actually playing, republish the
+// Now Playing metadata — WebKit only has a media session to hang it off from
+// that moment on. Old WebKit returns undefined from play() instead of a promise,
+// hence the shape check.
+const playSilentLoop = () => {
+  try {
+    const p = silentLoopEl.play();
+    if (p && typeof p.then === "function") {
+      p.then(republishNowPlaying).catch(() => {});
+    } else {
+      republishNowPlaying();
+    }
+  } catch {}
+};
 
 // Save the running core into a slot (state blob + thumbnail/timestamp meta).
 const saveToSlot = async (slot) => {
@@ -11373,66 +11527,6 @@ var Module = {
     // On iOS Safari, we also play a brief silent buffer through the AudioContext
     // and an <audio> element to ensure the audio session is fully activated.
     let audioUnlocked = false;
-    // A silent WAV looping in an <audio> element, for the life of the page,
-    // on iOS only. TWO unrelated reasons, either of which is enough:
-    //
-    //  1. Pre-audioSession iOS (≤16): Web Audio output obeys the ringer
-    //     (silent) switch unless an <audio> element is actively playing, which
-    //     promotes the whole session to "playback". A one-shot blip isn't
-    //     enough — the promotion only lasts while the element plays. Modern
-    //     iOS gets this from navigator.audioSession in initAudio instead.
-    //  2. Now Playing (lock screen / Control Center). WebKit populates it from
-    //     a *media element*; a page whose only output is an AudioContext — as
-    //     this emulator's is — sets navigator.mediaSession.metadata and gets
-    //     nothing on the lock screen. A playing silent element is the standard
-    //     workaround: it gives WebKit a media session to hang the metadata
-    //     that publishNowPlaying() sets on.
-    //
-    // It is a separate HTMLMediaElement and touches NOTHING in the pushAudio
-    // path — no node, no context, no scheduling. It also stays playing while
-    // the emulator is paused: pause is expressed through
-    // mediaSession.playbackState, because stopping and restarting the element
-    // would tear the iOS audio session down and back up (a real risk of a
-    // glitch in the AudioContext output) for a cosmetic gain.
-    //
-    // Deliberately iOS-only. Other platforms get the metadata and the action
-    // handlers with no element at all: they need no ringer promotion, and a
-    // permanent "this tab is playing audio" indicator on desktop would be a
-    // regression for the many sessions where nobody looks at a lock screen.
-    let silentLoopEl = null;
-    const iosFamily = () =>
-      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const needsSilentLoop = () =>
-      iosFamily() && (!navigator.audioSession || !!navigator.mediaSession);
-    const silentWavURL = () => {
-      // 0.25 s of 8 kHz mono 8-bit silence (0x80), built inline — looping a
-      // microscopic file (like the 1-sample one-shot below) would be churn.
-      const n = 2000;
-      const buf = new Uint8Array(44 + n).fill(0x80, 44);
-      const dv = new DataView(buf.buffer);
-      const tag = (off, s) => { for (let i = 0; i < s.length; i++) buf[off + i] = s.charCodeAt(i); };
-      tag(0, "RIFF"); dv.setUint32(4, 36 + n, true); tag(8, "WAVE");
-      tag(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
-      dv.setUint16(22, 1, true); dv.setUint32(24, 8000, true);
-      dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true);
-      dv.setUint16(34, 8, true); tag(36, "data"); dv.setUint32(40, n, true);
-      return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-    };
-    // Start (or restart) the loop and, once it is actually playing, republish
-    // the Now Playing metadata — WebKit only has a media session to hang it off
-    // from that moment on. Old WebKit returns undefined from play() instead of
-    // a promise, hence the shape check.
-    const playSilentLoop = () => {
-      try {
-        const p = silentLoopEl.play();
-        if (p && typeof p.then === "function") {
-          p.then(republishNowPlaying).catch(() => {});
-        } else {
-          republishNowPlaying();
-        }
-      } catch {}
-    };
     const resumeAudio = () => {
       initAudio();
       // Not just "suspended": iOS Safari parks the context in a non-standard
@@ -11454,8 +11548,7 @@ var Module = {
         src.start(0);
         // Also play through an <audio> element to activate the audio session
         if (needsSilentLoop()) {
-          silentLoopEl = new Audio(silentWavURL());
-          silentLoopEl.loop = true;
+          silentLoopEl = makeSilentLoopEl(audioCtx);
           playSilentLoop();
         } else {
           let a = new Audio("data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==");

@@ -85,10 +85,18 @@ these** — nothing here is a perf measurement.
 
 iPhone Safari is the one that matters and the one most likely to be wrong:
 WebKit builds Now Playing from a *media element*, and this emulator's only
-output is an AudioContext. The workaround shipped here is the silent looping
+output is an AudioContext. The workaround shipped here is the silent
 `<audio>` element that already existed for iOS ≤16's ringer switch, now also
-created on modern iOS (`needsSilentLoop`). If items 3-5 fail, that is the
+created on modern iOS (`needsSilentLoop`). If items 2-6 fail, that is the
 mechanism to suspect — not the metadata.
+
+That element is backed by a silent `MediaStream` off the AudioContext
+(`makeSilentLoopEl`) rather than a 0.25 s WAV: a stream-backed element has an
+infinite intrinsic duration, which — together with
+`setPositionState({ duration: Infinity })` — is what makes iOS render the
+*live* card with no scrubber instead of a dead "0:00 / 0:00" timeline. Engines
+without `createMediaStreamDestination` or `srcObject` fall back to the WAV,
+so the fallback shape is what a non-iOS or old-WebKit device gets.
 
 - [ ] **Page title.** Desktop or phone: load a game, confirm the tab/window
       says "<Game> — dingbat"; close the game (home → close) and confirm it
@@ -100,6 +108,18 @@ mechanism to suspect — not the metadata.
       audio must be audible first), lock the phone. Expect the game's name
       with "dingbat" underneath, and a screen/box-art image. Box art only
       appears for games that have it in the library.
+- [ ] **Live presentation, no timeline.** On that same lock screen and in
+      Control Center, the card must show the *live* style: no "0:00 / 0:00"
+      scrubber, no elapsed/remaining counters, no seek bar to drag. Seeing a
+      stuck 0:00 / 0:00 means the element fell back to the WAV or the engine
+      rejected the infinite duration.
+- [ ] **Snapshot artwork advances.** Load a game that has NO box art in the
+      library (so the artwork is a screen capture), play past the title screen
+      into gameplay, then lock the phone and watch the card for a minute: the
+      image must catch up to roughly what is on screen, lagging by at most
+      ~30 s. Then pause with the in-app ⏸ button — the picture must stop
+      moving (a frozen game is correctly a frozen frame). A game WITH box art
+      must keep showing the box art throughout, never a screen capture.
 - [ ] **iPhone Control Center.** Swipe down from the top-right during play:
       the audio card should name the game, not "Safari" / the page URL.
 - [ ] **Lock-screen pause/resume.** From the lock screen, hit pause: the
@@ -107,12 +127,16 @@ mechanism to suspect — not the metadata.
       and the widget must show paused. Hit play: it resumes. Then pause with
       the in-app ⏸ button and re-lock — the lock screen must already show
       "paused" (it reconciles within a second).
-- [ ] **No audio regression.** The silent element is new on iOS 17+. Play for
-      a few minutes with the ringer switch BOTH ways, take a phone call or
-      trigger Siri mid-game and come back, and confirm the emulator audio is
-      unchanged: no crackle, no drift, no dropout, no stuck silence. This is
-      the check that would veto the feature — the pushAudio lead servo is
-      tuned and the element must be invisible to it.
+- [ ] **No audio regression.** The silent element is new on iOS 17+, and it
+      now hangs a `ConstantSourceNode` → zero gain → MediaStreamDestination
+      off the SAME AudioContext the game plays through (nothing is tapped from
+      the game; the stream carries silence by construction). Play for a few
+      minutes with the ringer switch BOTH ways, take a phone call or trigger
+      Siri mid-game and come back, and confirm the emulator audio is
+      unchanged: no crackle, no drift, no dropout, no stuck silence, and no
+      doubled/echoed audio. This is the check that would veto the feature —
+      the pushAudio lead servo is tuned and the element must be invisible to
+      it.
 - [ ] **Android Chrome / desktop.** No silent element is created there, so
       the notification/media-key surface may simply not appear. Confirm the
       page title still works and nothing is broken; media keys working at all

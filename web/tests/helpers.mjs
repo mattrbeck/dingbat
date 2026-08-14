@@ -439,6 +439,16 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
         metadata: null,
         playbackState: "none",
         setActionHandler(name, fn) { state.mediaActions[name] = fn; },
+        // Position state. index.js declares the game as live media by passing
+        // duration: +Infinity, and clears with no argument at all — so the last
+        // call is recorded verbatim (`null` for the clearing form) plus a count,
+        // which is how a test tells "cleared" from "never called".
+        positionState: null,
+        positionCalls: 0,
+        setPositionState(init) {
+          this.positionCalls++;
+          this.positionState = init === undefined ? null : init;
+        },
       },
       storage: {
         estimate: async () => ({ usage: 12345 }),
@@ -484,12 +494,18 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // MediaMetadata copies the init dict onto itself, so a plain assign is a
     // faithful stand-in for what a test reads back.
     MediaMetadata: class { constructor(init = {}) { Object.assign(this, init); } },
-    // The silent looping <audio> that gives WebKit a media session to hang Now
-    // Playing off (see needsSilentLoop in index.js). Only ever constructed
-    // inside resumeAudio, which no test reaches — but a missing global here
-    // would be a landmine for the first one that does.
+    // The silent <audio> that gives WebKit a media session to hang Now Playing
+    // off (see makeSilentLoopEl in index.js). `srcObject` is initialised to null
+    // rather than left off: index.js probes `"srcObject" in el` to decide
+    // whether it can back the element with a MediaStream, and a real
+    // HTMLMediaElement always has the property.
     Audio: class {
-      constructor(src) { this.src = src; this.loop = false; this.paused = true; }
+      constructor(src) {
+        this.src = src;
+        this.srcObject = null;
+        this.loop = false;
+        this.paused = true;
+      }
       play() { this.paused = false; return Promise.resolve(); }
       pause() { this.paused = true; }
     },
@@ -613,6 +629,10 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     looksLikeValidRom, closeRomWarnModal,
     romHeaderTitle, headerTitleAt, readFsRomHeader,
     gameDisplayName, syncNowPlaying, publishNowPlaying, republishNowPlaying,
+    nowPlayingPoll, NOWPLAYING_SNAPSHOT_TICKS,
+    makeSilentLoopEl, needsSilentLoop, silentWavURL,
+    get nowPlayingArtURL() { return nowPlayingArtURL; },
+    set nowPlayingArtURL(v) { nowPlayingArtURL = v; },
     get currentHeaderTitle() { return currentHeaderTitle; },
     set currentHeaderTitle(v) { currentHeaderTitle = v; },
     get paused() { return paused; },
