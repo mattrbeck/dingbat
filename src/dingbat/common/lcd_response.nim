@@ -134,8 +134,14 @@ const
     PanelSpec(tau_drive: 12.0, drive_knee: 2.0, tau_relax: 61.0, gamma: 2.2),
     # lpCgb  reflective TFT — active matrix, the quick one of the two STN-era
     PanelSpec(tau_drive:  6.0, drive_knee: 1.5, tau_relax: 24.0, gamma: 2.2),
-    # lpAgb  AGB-001 reflective TFT, the smeary one
-    PanelSpec(tau_drive:  9.0, drive_knee: 1.8, tau_relax: 42.0, gamma: 2.2),
+    # lpAgb  AGB-001 reflective TFT, the smeary one. Softened from an earlier
+    # 9/1.8/42 fit after side-by-side evaluation: that tuning dimmed a full
+    # scrolling screen enough to read as a brightness drop rather than as
+    # ghosting (dense textures like Emerald's dot-grass measured ~14% darker
+    # in linear light mid-scroll). These taus keep the directional trail and
+    # halve that cost. tau_relax must stay clear of the CGB's 24 ms so the
+    # panel ordering (dmg > agb > cgb > ags) holds — 28 ms ties it.
+    PanelSpec(tau_drive: 12.0, drive_knee: 1.5, tau_relax: 32.0, gamma: 2.2),
     # lpAgs  AGS-101 backlit TFT
     PanelSpec(tau_drive:  3.5, drive_knee: 1.0, tau_relax: 12.0, gamma: 2.2),
   ]
