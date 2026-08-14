@@ -494,8 +494,9 @@ thing to settle here, and `tools/gbppu` has no instrument for it yet.
 Beyond bucket 0, the pipeline pool's 555 rows resolve as: `M3-EDGE-BANDS` 72 (all
 144 lines but only `x ≤ 31` / `x ≥ 133`, hot), `WY-LATCH device delta` 51 (cold),
 `OBJ-MODE0-EDGE` 45, `LOCK-EDGES` 46, `FINE-SCROLL-MIDLINE` 42 (hot), `WX166-TAIL`
-37 (blocked on STAT), `WIN-FETCH-ABORT` 29 (hot, blocked), `OBJ-LATE-SIZECHANGE`
-24, `top ≤16 lines` 22, `window/on_screen` 18, `CGBPAL-M3END` 18 (a missing
+37 (blocked on STAT), `WIN-FETCH-ABORT` 29 (hot, blocked), ~~`OBJ-LATE-SIZECHANGE`
+24~~ (**SHIPPED 2026-08-13, all 24; and it was never a mode-3 row at all — see
+item 5 of the ranked remainder**), `top ≤16 lines` 22, `window/on_screen` 18, `CGBPAL-M3END` 18 (a missing
 mechanism, not a phase), `BGP-SHIFTER-PHASE` 15 + mealybug (hot — **and it must
 not be fixed by raising the pipeline lead**), `OBJ-LATE-DISABLE` 11
 (unimplemented), `m0enable` 14, the SCX-residue rows 12, and `WIN-REACT-WX6` 1 ROM
@@ -5116,16 +5117,51 @@ letting the bug reach the handler mis-decodes the handler's own `CB 2F` (`$EF`).
 SameSuite's `interrupt/ei_delay_halt` flips to PASS with this too. Whole-suite
 A/B: gambatte +2 and nothing else, mooneye and GBMicrotest byte-identical.
 
-**5. `sprites/late_sizechange_sp00` -- the sharpest unclaimed measurement in the
-suite.** A *four*-step ladder where hardware flips **twice**: `exp 0,3,3,0`
-against `got 0,0,3,3`. Both edges are off by exactly +1 M-cycle, identically on
-both devices -- a clean two-sided device-independent 4-dot bracket.
-`OBJ-LATE-SIZECHANGE` (24 rows) has had no measurement at all until now.
-*Blocking question:* its siblings (`late_sizechange`, `_sp01`, `_sp39`) also want
-a CGB delta of **-1 M-cycle** on LCDC.2, while `CGB_OBJ_SIZE_LATENCY` ships at
-**+3**, derived from mealybug bands. Same bit, opposite sign, two different
-readers -- resolve that before touching the device half. The device-independent
-half is landable on its own.
+**5. `OBJ-LATE-SIZECHANGE` -- SHIPPED 2026-08-13, +24 / -0 (gambatte 4145 ->
+4169, `sprites` 437 -> 461/476, the whole bucket).** The family is not an object
+FETCH measurement at all: it is the **OAM SCAN**, and the reason no knob at the
+fetch would move it is that none of these ROMs writes LCDC.2 during mode 3. Every
+one of the 38 ROMs sets up an object that is on the line at 8x16 and off it at
+8x8, moves LCDC.2 **once, during mode 2 of line 8**, and prints 3 if the scan
+kept the object and 0 if it did not. Under a new `-d:gb_lcdc2_trace` the write
+dots come straight out, and the filename names the object -- `_sp00`, `_sp01`,
+`_sp02`, `_sp39` -- so the family is a **ruler over the scan**, not one boundary:
+
+* **The device-independent half (+14 on its own): object N's Y-range test reads
+  LCDC.2 on dot 2N of the line.** dingbat ran the whole 40-object scan in one go
+  on the dot mode 2 ENDS, so every object saw the register as of dot 80. The four
+  brackets (`obj 0` at dots 453/1, `obj 1` at 1/5, `obj 2` at 1/5, `obj 9` at
+  13/17/21, `obj 39` at 73/77/81) intersect to `{2N - 1, 2N}` and nothing else;
+  `OBJ_SCAN_DOT_ADJ` in `fifo_ppu.nim` expresses the pair and is two-sided
+  (`sprites`: -2 -> 446, **-1 -> 461, 0 -> 461**, +1 -> 445, +2 -> 445).
+* **The CGB half (+10): `CGB_OBJ_SCAN_LEAD = 2`** (`gb.nim`). Three CGB cells --
+  obj 1 at dot 1, obj 9 at 17, obj 39 at 77, each `2N - 1` -- come out **8x16
+  whichever way the write moved the bit** (`late_sizechange_sp01_2` says a CLEAR
+  there is not seen, `late_sizechange2_sp01_1` says a SET there is), which no
+  single sample dot can produce. The CGB tests the object against the DMG's dot
+  **and** the dot one M-cycle earlier and keeps it if either says it is on the
+  line -- `sprite_on_line` is monotone in the height, so that is exactly a
+  glitching comparator whose LCDC.2 input is mid-transition. Two-sided on
+  `sprites`: 0 -> 451, 1 -> 458, **2 -> 461**, 3 -> 456, 4 -> 455.
+* **Double speed inverts the lead and kills the glitch.** The seven `_ds` rows
+  are unambiguous: at double speed every cell is a clean single boundary and the
+  arrival is `CGB_OBJ_SCAN_LEAD` dots **early** instead of late. Getting this
+  wrong is not free -- the first cut, which shipped the single-speed rule at both
+  speeds, took those seven previously-passing rows down (53/60 instead of 60/60).
+
+*The blocking question is answered, and the answer is that it was the wrong
+question.* The "-1 M-cycle on CGB" the siblings were read as wanting is a
+**scan** measurement, and read as one its sign **agrees** with
+`CGB_OBJ_SIZE_LATENCY = +3`: both say LCDC.2 reaches the object logic LATER on a
+CGB. There was never a conflict, only two readers -- the mode-2 range comparator
+and the mode-3 bitplane read -- filed under one constant. `CGB_OBJ_SIZE_LATENCY`
+and `OBJ_PLANE1_LAG`/`OBJ_PLANE1_HEAD` were not touched, and sweeping either of
+them across the whole family moves **zero** rows, which is the direct proof that
+the fetch reader is not what these ROMs see.
+Guards, all byte-identical before/after: mealybug DMG 552960/552960 and CGB
+1863574 (`m3_lcdc_obj_size_change` and its `_scx` sibling both still 100%),
+GBMicrotest 429/513 row for row, mooneye 183 row for row, and the dmg-acid2 /
+cgb-acid2 / cgb-acid-hell / strikethrough frames pixel-identical.
 
 **6. `enable_display` + `lcd_offset` -- 71 rows, and the filing is wrong.**
 `lcd_offset` **does not enable the LCD**: none of its 62 ROMs contains an

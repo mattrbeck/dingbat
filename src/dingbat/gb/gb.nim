@@ -943,6 +943,18 @@ const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
   ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
   ## references on which bands come out mixed, and the disagreement is a clean
   ## three dots in the same direction on all six bands that separate them.
+const CGB_OBJ_SCAN_LEAD*      {.intdefine.} = 2
+  ## Dots before its own sample dot that a CGB's OAM SCAN takes a SECOND look at
+  ## LCDC.2, keeping the object if either look puts it on the line. A different
+  ## reader from CGB_OBJ_SIZE_LATENCY above -- that one is the object FETCH in
+  ## mode 3, this one is the mode-2 range comparator -- and the two are measured
+  ## by different families. Derived at fifo_get_sprites in fifo_ppu.nim off
+  ## gambatte's `sprites/late_sizechange*`, where three objects (1, 9 and 39)
+  ## each have a CGB cell that comes out 8x16 whichever way the write moved the
+  ## bit, which no single sample dot can produce.
+  ##
+  ## Its SIGN agrees with CGB_OBJ_SIZE_LATENCY: both say the bit reaches the
+  ## object logic later on a CGB than on a DMG.
 const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ## Dots LCDC.4 takes to reach the BACKGROUND FETCHER on CGB over the DMG --
   ## the same shape as CGB_OBJ_SIZE_LATENCY above, for the one bit of LCDC a

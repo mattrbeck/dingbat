@@ -2043,6 +2043,10 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # is one compare that never takes.
   let moved = ppu.lcd_control xor val
   let flip2 = (moved and 0x04'u8) != 0
+  when defined(gb_lcdc2_trace):
+    if flip2:
+      echo "LCDC2 ly=", ppu.ly, " dot=", ppu.cycle_counter,
+           " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)

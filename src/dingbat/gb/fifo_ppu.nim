@@ -248,8 +248,86 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.tail_dot0 = TAIL_DOT0_OFF
   ppu.sprites = @[]
 
+# ---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
+#
+# The scan is run in one go on the dot mode 2 ends, which is fine for OAM
+# itself (the CPU cannot reach OAM during mode 2) but is NOT fine for LCDC.2:
+# the height is not in OAM, it is a register the CPU can move under the scan,
+# and hardware compares each object's Y against the height as it stands in
+# THAT object's own two-dot slot. gambatte's `sprites/late_sizechange*` is
+# thirty-eight ROMs of exactly that measurement and it names the object in the
+# filename -- `_sp00`, `_sp01`, `_sp02`, `_sp39` -- which is what makes it a
+# ruler rather than a single boundary.
+#
+# Every one of them sets up an object that is on the line at 8x16 and off it at
+# 8x8, moves LCDC.2 once at a chosen dot of line 8, and prints 3 if the object
+# was scanned in and 0 if it was not. Under `-d:gb_lcdc2_trace` the write dots
+# come out as (the ROMs run at 4 dots per M-cycle, so each family brackets its
+# boundary to one M-cycle and no finer):
+#
+#   family / object   write dots        DMG says            CGB says
+#   _sp00   obj 0     453 of ly 7, 1    seen, NOT seen      same as DMG
+#   _sp01   obj 1     453, 1, 5         seen, seen, not     seen, MIXED, not
+#   _sp02   obj 2     1, 5              seen, not           same as DMG
+#   (none)  obj 9     13, 17, 21        seen, seen, not     seen, MIXED, not
+#   _sp39   obj 39    73, 77, 81        seen, seen, not     seen, MIXED, not
+#
+# so the DMG's sample dot for object N is bracketed into `(2N - 4, 2N]` by the
+# `_sizechange` half and into `[2N - 3, 2N + 2)` by the `_sizechange2` half --
+# an intersection of `{2N - 1, 2N}`, i.e. the object's own slot and nothing
+# else. 2N is the structural one (the first dot of the slot, and the dot the
+# scan's first OAM read is on) and OBJ_SCAN_DOT_ADJ expresses the other.
+#
+# The whole ladder collapses to a single dot per object because a write dot and
+# a sample dot are compared directly -- there is no latency here to fit. That is
+# the device-INDEPENDENT half, and it is 24 gambatte rows on its own.
+#
+# ---- MIXED, and why the CGB half is not a shifted sample dot ---------------
+#
+# The three CGB cells above cannot be one sample dot at all. Object 1's write
+# at dot 1 is `not seen` when it CLEARS the bit (late_sizechange_sp01_2,
+# cgb04c_out3 -- the object stays 8x16) and `seen` when it SETS it
+# (late_sizechange2_sp01_1, out3 -- the object becomes 8x16). Same object, same
+# dot, opposite conclusions: what is actually constant is the ANSWER, 8x16.
+# The same pair holds at object 9 (dot 17) and object 39 (dot 77), and in every
+# one of them the dot in question is `2N - 1`, one M-cycle before the DMG's.
+#
+# So the CGB scans each object against BOTH the dot the DMG uses and the dot one
+# M-cycle earlier, and keeps the object if either says it is on the line -- and
+# `sprite_on_line` is monotone in the height (8x16's window contains 8x8's), so
+# "either says on the line" is exactly "either sample says 8x16". Read as a
+# latency that is the bit arriving at the scan LATER on CGB, the SAME direction
+# as CGB_OBJ_SIZE_LATENCY at the object fetch; the "opposite sign" this family
+# used to be filed under came from reading it as a fetch measurement, which it
+# is not. See CGB_OBJ_SCAN_LEAD in gb.nim.
+const OAM_SCAN_DOTS = 80'i32
+  ## Dots of mode 2, which is also the discriminator below: `lcdc2_flip` is
+  ## cleared on the dot this scan runs on, so an entry still in it BELOW this
+  ## is one of this line's mode-2 writes and one at or above it belongs to the
+  ## previous line and is already folded into `lcd_control`.
+const OBJ_SCAN_DOT_ADJ {.intdefine.} = 0'i32
+  ## Dots to shift every object's scan sample by. 0 ships (object N samples on
+  ## dot 2N); -1 is the other cell the ROMs above cannot separate from it.
+
+proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
+  ## `sprite_height` as the OAM scan's comparator saw it on `dot`. The same walk
+  ## back over `lcdc2_flip` as obj_height_at, restricted to this line's mode 2.
+  var b = ppu.lcd_control and 0x04'u8
+  if ppu.lcdc2_flip[0] > dot and ppu.lcdc2_flip[0] < OAM_SCAN_DOTS:
+    b = b xor 0x04'u8
+    if ppu.lcdc2_flip[1] > dot and ppu.lcdc2_flip[1] < OAM_SCAN_DOTS:
+      b = b xor 0x04'u8
+  if b != 0: 16 else: 8
+
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
   result = @[]
+  # One test for the whole line: unless LCDC.2 actually moved during THIS mode
+  # 2, every object's sample is the register as it stands and the scan is the
+  # loop it always was. `lcdc2_flip[1]` is older than `[0]`, so `[0]` alone
+  # decides it -- a `[0]` from the previous line cannot be sitting above a `[1]`
+  # from this one.
+  let live = ppu.lcdc2_flip[0] >= 0'i32 and ppu.lcdc2_flip[0] < OAM_SCAN_DOTS
+  let h_line = sprite_height(ppu)
   var sprite_addr = 0
   while sprite_addr <= 0x9C:
     let s = GbSprite(
@@ -259,7 +337,25 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
       attributes: ppu.sprite_table[sprite_addr + 3],
       oam_idx:    uint8(sprite_addr),
     )
-    if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
+    var on: bool
+    if likely(not live):
+      on = sprite_on_line(s, ppu.ly, h_line)
+    else:
+      # `sprite_addr shr 1` is 2N: four bytes per object, two dots per object.
+      let d = int32(sprite_addr shr 1) + OBJ_SCAN_DOT_ADJ
+      on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d))
+      when CGB_OBJ_SCAN_LEAD != 0:
+        if gb.cgb_enabled:
+          const L = int32(CGB_OBJ_SCAN_LEAD)
+          if gb.memory.current_speed == 0:
+            # The bit arrives L dots late and the comparator glitches for the
+            # dots in between: either height may keep the object.
+            on = on or sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d - L))
+          else:
+            # A double-speed M-cycle spends the whole of it inside itself and
+            # then some: no glitch, and the arrival is L dots EARLY.
+            on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d + L))
+    if on:
       # Sort ascending by X
       var idx = 0
       while idx < result.len and s.x >= result[idx].x: inc idx
@@ -3713,6 +3809,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # mode bits. Nothing else about the boundary moves.
           if ppu.cycle_counter == 80 - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
         if ppu.cycle_counter == 80:
+          # FIRST, because it is the only thing in this block that reads mode
+          # 2's dots: it asks what LCDC.2 was on each object's own scan dot and
+          # `fifo_reset_sprite` below is what clears that history. See
+          # fifo_get_sprites.
+          ppu.sprites = fifo_get_sprites(ppu, gb)
           ppu.`mode_flag=`(3'u8, gb)
           # WX below 7 puts the window's first pixel LEFT of the screen, where
           # the shifter's equality above can never reach it (lx starts at
@@ -3763,7 +3864,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when SCX_FINE_LATCH_LIVE:
             ppu.scx_latch_until = -1'i32
           ppu.dropped_first_fetch = false
-          ppu.sprites = fifo_get_sprites(ppu, gb)
           when LY0_PIPE_ANY:
             # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
             # where every other line's does (and M3_PIPE_AHEAD, if it is on,
