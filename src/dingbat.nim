@@ -606,6 +606,10 @@ proc apply_speed_mode() =
   if app.gba_emu != nil:
     app.gba_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
     app.gba_emu.set_underclock(if app.cfg.speed_mode: 1 else: 0)
+  if app.gb_emu != nil:
+    # Honored only by the scanline renderer (forced at the next ROM load
+    # while the mode is on); the FIFO renderer ignores the field.
+    app.gb_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
   # The audio niceties read speed_mode through their own apply procs
   apply_mp2k_hle()
   apply_fifo_interp()

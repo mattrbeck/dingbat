@@ -179,7 +179,23 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
       if ppu.cycle_counter >= 172:
         ppu.cycle_counter -= 172
         ppu.`mode_flag=`(0'u8, gb)
-        do_scanline(ppu, gb)
+        # Speed-mode frameskip: decide once per frame at LY 0 (fs_counter == 0
+        # renders, so the first frame after enabling paints), then skip the
+        # whole frame's do_scanline calls. Everything CPU-visible — the mode
+        # transition above, LY/STAT/IRQs, HDMA — already happened or lives
+        # elsewhere in this proc, and do_scanline's only cross-line state
+        # (current_window_line) resets at its own LY-0 call, so a skipped
+        # frame leaves nothing stale for the next rendered one.
+        if ppu.ly == 0:
+          if ppu.frameskip > 0:
+            ppu.forced_skip = ppu.fs_counter != 0
+            inc ppu.fs_counter
+            if ppu.fs_counter > ppu.frameskip:
+              ppu.fs_counter = 0
+          else:
+            ppu.forced_skip = false
+        if not ppu.forced_skip:
+          do_scanline(ppu, gb)
     elif ppu.mode_flag == 0:     # H-Blank
       if ppu.cycle_counter >= 204:
         ppu.cycle_counter -= 204

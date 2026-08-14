@@ -2852,6 +2852,16 @@ type
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool
     ran_bios*:      bool
+    # Speed-mode frameskip: render only every (frameskip+1)th frame. Honored
+    # ONLY by the scanline renderer — its mode/LY/STAT timing is analytic, so
+    # skipping do_scanline's pixel work is timing-neutral by construction. The
+    # FIFO renderer ignores these: its mode-3 length comes from actually
+    # running the pixel pipeline, so its rendering cannot be skipped. Decided
+    # once per frame at LY 0 (whole frames only — do_scanline's cross-line
+    # window state resets there); not serialized (render scratch). 0 = off.
+    frameskip*:     int
+    fs_counter*:    int
+    forced_skip*:   bool
 
   GbScanlinePpu* = ref object of GbPpu
     scanline_color_vals*: array[160, tuple[color: uint8, priority: bool]]

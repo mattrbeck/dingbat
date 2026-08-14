@@ -369,6 +369,9 @@ proc main() =
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
+    # Speed-mode knob (scanline renderer only — the FIFO PPU ignores it)
+    if getEnv("DINGBAT_BENCH_FRAMESKIP").len > 0:
+      emu.ppu.frameskip = parseInt(getEnv("DINGBAT_BENCH_FRAMESKIP"))
 
     # The GB core emits frames while the LCD is off (see lcd_off_frame), so a
     # fixed frame count is NOT a fixed amount of work: a build that changes

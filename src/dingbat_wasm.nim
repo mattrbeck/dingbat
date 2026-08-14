@@ -188,6 +188,11 @@ proc apply_speed_mode_gba(g: GBA) =
   g.ppu.frameskip = if optSpeedMode: 1 else: 0
   g.set_underclock(if optSpeedMode: 1 else: 0)
 
+proc apply_speed_mode_gb(g: GB) =
+  # Honored only by the scanline renderer (which speed mode forces at load);
+  # the FIFO renderer ignores the field — see GbPpu.frameskip.
+  g.ppu.frameskip = if optSpeedMode: 1 else: 0
+
 proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
   optGbFifo = fifo != 0
 
@@ -259,12 +264,15 @@ proc wasm_set_fifo_interp(on: cint) {.exportc.} =
     stateGba.apu.set_fifo_interp(optFifoInterp)
 
 proc wasm_set_speed_mode(on: cint) {.exportc.} =
-  ## Speed mode for low-end devices: remembered for cores created later
-  ## (make_gba) AND applied to the live GBA core. The GB core needs no core
-  ## knob — index.js forces the (construction-time) scanline renderer instead.
+  ## Speed mode for low-end devices: remembered for cores created later AND
+  ## applied to the live solo core. On GB the frameskip only bites when the
+  ## scanline renderer is running (forced at the next load); the renderer
+  ## choice itself is construction-time.
   optSpeedMode = on != 0
   if stateKind == ekGBA and stateGba != nil:
     apply_speed_mode_gba(stateGba)
+  elif stateKind == ekGB and stateGb != nil:
+    apply_speed_mode_gb(stateGb)
 
 proc wasm_mp2k_available(): cint {.exportc.} =
   ## 1 when the loaded ROM's MP2K engine was detected (HLE can do something).
@@ -1809,6 +1817,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
                      bootrom.len > 0)
     stateGb.sgb_requested = sgbRequested
     stateGb.post_init()
+    stateGb.apply_speed_mode_gb()  # solo cores only, see make_gba
     printer_attach()  # a printer is always plugged in on solo GB
     stateTexture = stateRenderer.createTexture(
       SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)

@@ -1010,15 +1010,18 @@
                 <!-- Speed mode: the low-end-device preset. One switch instead of
                      asking a struggling phone's owner to hunt five settings: the
                      GBA skips every other rendered frame and underclocks the
-                     emulated CPU 2x, a GB game loads the cheaper scanline
-                     renderer, and rewind / HLE audio / audio interpolation /
+                     emulated CPU 2x; a GB game loads the cheaper scanline
+                     renderer and skips every other rendered frame too (the
+                     scanline PPU's mode/LY/STAT timing is analytic, so the skip
+                     is timing-neutral); rewind / HLE audio / audio interpolation /
                      ambient glow / run-ahead are suspended (their stored
                      preferences come back when this goes off). Honestly labeled
-                     as less accurate: CPU-heavy games drop internal frames. -->
+                     as less accurate: CPU-heavy games drop internal frames, and
+                     the 30 Hz output breaks flicker-based transparency. -->
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Speed mode</span>
-                    <span class="modal-toggle-sub">Runs games much faster on slow devices by cutting accuracy: skips frames, underclocks the emulated CPU, and turns off rewind and audio extras. Some games may lag or misbehave.</span>
+                    <span class="modal-toggle-sub">Runs games much faster on slow devices by cutting accuracy: shows every other frame, underclocks the emulated CPU, and turns off rewind and audio extras. Games may lag, effects that rely on flicker may look wrong, and some games can misbehave.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="speed-mode-toggle" />

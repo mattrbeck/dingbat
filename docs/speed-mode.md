@@ -25,10 +25,29 @@ Core knobs (new, runtime, GBA):
   speed against an unchanged video/timer clock: idle-bound games are
   unaffected, CPU-bound games drop internal frames.
 
+Core knob (new, runtime, GB/GBC):
+
+- **GB frameskip** (`gb.ppu.frameskip = 1`, honored only by the scanline
+  renderer): `do_scanline`'s pixel work is skipped for every other frame,
+  decided once per frame at LY 0. The scanline PPU's mode/LY/STAT/HDMA timing
+  is analytic and lives entirely in its `tick` — mode 3 is a fixed 172 dots —
+  so the skip is **timing-neutral by construction**, verified: total emulated
+  cycles are bit-identical with the knob on and off (`cycles=84268800` both
+  ways over 1200 Crystal frames), and rendered frames match an unskipped
+  run's even frames byte-for-byte. The FIFO renderer ignores the field (its
+  mode-3 length comes from actually running the pixel pipeline, so its
+  rendering cannot be skipped); speed mode forces the scanline renderer at
+  load anyway. Measured: **−20.8% instructions (Crystal attract) / −22.1%
+  (Blue)** on top of the renderer swap, bringing whole-mode GB savings vs the
+  stock FIFO baseline to **−35% (CGB) / −42% (DMG) ≈ 1.5–1.7x throughput**.
+  Off-cost gate: old-vs-new binary interleaved A/B measured −0.87% (scanline)
+  / −0.03% (FIFO) — i.e. no regression, within layout luck; GBA arm ±0.005%.
+
 Preset behavior (suspends, never overwrites, stored preferences):
 
 - GB/GBC: next ROM load uses the **scanline renderer** (FIFO preference
-  remembered and restored when the mode goes off).
+  remembered and restored when the mode goes off) and frameskip=1 applies
+  live via `apply_speed_mode_gb` / native `apply_speed_mode`.
 - Rewind, MP2K HLE, FIFO interpolation, ambient glow, run-ahead: suspended
   while the mode is on (web `applySystemSettings` computes effective values;
   native apply procs do the same).
@@ -89,8 +108,11 @@ set `frame_static`, saving present/upload work where frontends honor it.
   bookkeeping, and a runtime flag there re-rolls the `mem_read`/`mem_write`
   inline cliff (docs/gb_oam_dma_cost.md). Compile-time only → second wasm
   bundle → service-worker precache split. Parked.
-- **GB frameskip/underclock**: the scanline renderer already buys 17–24% and
-  the GB CPU interpreter is only ~8% of GB time; not worth new knobs yet.
+- **GB underclock**: the SM83 interpreter is only ~8% of GB time and the
+  dominant per-cycle stepping (`mem_tick_components` + PPU/timer ticks ≈ 40%)
+  scales with the fixed 70,224 dots per frame, not with instruction count —
+  slowing the emulated CPU would buy almost nothing. (GB *frameskip* was
+  worth it and shipped; see above.)
 - **`-d:danger` native** (+17%): previously rejected — bounds checks have
   caught real OOB on hostile ROMs; unchanged by this work.
 
