@@ -1220,8 +1220,16 @@ proc post_init*(gba: GBA) =
   # probe, see mp2k.nim); nothing runs unless gba.mp2k_hle is set.
   gba.mp2k = new_mp2k(gba)
   gba.mp2k.init_mp2k()
-  gba.gs_bon = new_gs_bon(gba)
-  gba.gs_bon.init_gs_bon()
+  # Camelot "Bon" HLE (Golden Sun) is compiled-in but DORMANT unless built
+  # with -d:gsbon: its shadow mixer nails the tones (peaks to 0.1 Hz) but
+  # frame-quantizes note attacks, which reads as "crinkly" on percussion —
+  # a net negative for listening until note events are captured at sub-frame
+  # precision. Every consumer site nil-checks gs_bon, so skipping creation
+  # is the whole off-switch; the module still compiles (no bitrot) and the
+  # "Enhanced music synthesis" setting then governs only the m4a MP2K HLE.
+  when defined(gsbon):
+    gba.gs_bon = new_gs_bon(gba)
+    gba.gs_bon.init_gs_bon()
   if not gba.run_bios:
     gba.cpu.skip_bios()
 

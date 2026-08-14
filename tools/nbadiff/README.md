@@ -89,6 +89,10 @@ Ruled out in the same session:
       DINGBAT_GBA_AUDIO_DUMP=cubic.s16 ./gba_audiodump gba_bios.bin rom.gba 5400
       DINGBAT_GBA_AUDIO_DUMP=zoh.s16   ./gba_audiodump gba_bios.bin rom.gba 5400 zoh
 
+- gs_bon (Golden Sun HLE) is dormant unless the emulator is built with
+  `-d:gsbon` (compile-time gate, default off — its frame-quantized note
+  attacks read as "crinkly"); `mp2k` mode on a default build affects only
+  m4a/MP2K titles.
 - NBA side: uncommitted `NBA_AUDIO_DUMP=<path>` patch in
   `~/code/NanoBoyAdvance` (`src/nba/src/hw/apu/apu.cpp`,
   `MaybeDumpAudioSample`) dumps the core mix pre-resampler as f32le stereo
