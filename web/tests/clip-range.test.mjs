@@ -14,6 +14,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { loadApp, settle, eq } from "./helpers.mjs";
 
 // A clip ring holding `n` anchors one second apart, newest first — the shape
@@ -45,15 +46,31 @@ const withRing = (app, n) =>
     canvasEl.captureStream = () => ({ addTrack() {}, getAudioTracks: () => [] });
     0`);
 
-const open = async (n = 40) => {
+// The fake DOM measures everything as 0x0, which the strip floors at 120px —
+// wide enough to hide exactly the bug these width tests are about. Give the
+// strip a real width instead; `width` is the CSS px the wrap gets on the
+// device being modelled (a 393pt phone leaves the modal's strip 277px).
+const sizeStrip = (app, width, height = 44) => {
+  const rect = { width, height, top: 0, left: 0, right: width, bottom: height,
+                 x: 0, y: 0 };
+  for (const id of ["clip-strip-wrap", "clip-strip"]) {
+    app.document.getElementById(id).getBoundingClientRect = () => rect;
+  }
+};
+
+const open = async (n = 40, width = 0) => {
   const app = await loadApp();
   withRing(app, n);
   app.api.currentRomName = "rom.gba";
   app.api.currentOriginalName = "Game.gba";
+  if (width) sizeStrip(app, width);
   app.runIn("openClipScrubber()");
   await settle();
   return app;
 };
+
+const offscreen = (app, which) =>
+  app.document.getElementById("clip-marker-" + which).classList.contains("offscreen");
 
 const range = (app) => app.runIn("clipRangeFrames()");
 const markers = (app) => [app.runIn("clipStrip.at(0)"), app.runIn("clipStrip.at(1)")];
@@ -191,4 +208,82 @@ test("no history yet: the picker says so instead of offering an empty clip", asy
   assert.equal(app.document.getElementById("clip-save").disabled, true);
   await app.document.getElementById("clip-save").dispatch("click");
   eq(app.runIn("clipBeginCalls"), [], "a disabled Save must not fire a replay");
+});
+
+// --- Framing ---------------------------------------------------------------
+// The picker opens on the last ten seconds, so BOTH brackets have to be on the
+// strip when it opens or the control does not read as a range at all — and a
+// bracket the strip drops (`.offscreen`, the marker's line hidden) is the
+// picker saying "the clip carries on past here", which is a lie about the very
+// selection it opened with. Frame width is what has to give on a narrow wrap,
+// not the framing: the preview above the strip is what a frame is identified
+// from, and it is full size regardless.
+for (const [device, width] of [["a 320pt phone", 208], ["a 393pt phone", 277],
+                               ["a desktop panel", 400]]) {
+  test(`the default selection fits the strip on ${device}`, async () => {
+    const app = await open(40, width);
+    assert.equal(offscreen(app, "start"), false, "the in point opened off-strip");
+    assert.equal(offscreen(app, "end"), false, "the 'now' bracket opened off-strip");
+    // The span the two brackets enclose, which is what actually has to fit:
+    // ten one-second anchors, plus the pitch between the outer edges of the
+    // two end frames.
+    assert.ok(app.runIn("clipStrip.pitch") * 11 <= width,
+              "the ten-second selection is wider than the strip");
+  });
+}
+
+test("a slider takes the view with it, whatever the last drag grabbed", async () => {
+  const app = await open(40, 277);
+  // A drag on the "now" bracket leaves it as the marker the strip follows.
+  app.runIn("clipStrip.setActive(1)");
+  // Now pull the in point back to a selection far longer than the strip can
+  // show, from the keyboard/AT path. The marker the SLIDER moved is the one
+  // the player is looking for, so the strip has to scroll to it — otherwise
+  // the slider is nudging something that is not on screen.
+  const slider = app.document.getElementById("clip-slider-start");
+  slider.value = "9";                       // sample 30 of 40, i.e. 30s back
+  await slider.dispatch("input");
+  assert.equal(app.runIn("clipStrip.at(0)"), 30);
+  assert.equal(offscreen(app, "start"), false,
+               "the strip stayed on the marker the last drag grabbed");
+  assert.equal(app.document.getElementById("clip-preview-label").textContent,
+               "first frame of the clip");
+});
+
+// --- Menu visibility -------------------------------------------------------
+// Both clip menu items are governed by the same four rules — shown once a game
+// is running, hidden in every linked mode (a retroactive replay rewinds the
+// core, and a forward recording outlives the link) — and #record-clip once
+// missed all four because each of its selectors was written `body.has-game
+// body.has-game #record-clip`. A body inside a body matches nothing, so the
+// item was invisible in single-player and would have been visible in link,
+// rollback and net modes the moment the first one was fixed on its own.
+const css = () => readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+test("#record-clip is governed by every rule #clip-last is", () => {
+  const src = css();
+  const misses = [];
+  // Selector lists, stripped of their declaration blocks and comments.
+  for (const m of src.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{[^{}]*\}/g)) {
+    const sels = m[1].split(",").map((s) => s.trim()).filter(Boolean);
+    for (const sel of sels) {
+      if (!sel.endsWith("#clip-last")) continue;
+      const ctx = sel.slice(0, -"#clip-last".length);
+      if (!sels.includes(ctx + "#record-clip")) misses.push(sel);
+    }
+  }
+  assert.deepEqual(misses, [],
+    "these rules reach #clip-last but not #record-clip:\n  " + misses.join("\n  "));
+});
+
+test("no selector repeats `body.<mode>` inside itself", () => {
+  const src = css().replace(/\/\*[\s\S]*?\*\//g, "");
+  const dead = [];
+  for (const m of src.matchAll(/([^{}]+)\{[^{}]*\}/g)) {
+    for (const sel of m[1].split(",").map((s) => s.trim())) {
+      // `body.x body.y` can never match: a document has one body element.
+      if (/\bbody\b[^,{]*\s\bbody\b/.test(sel)) dead.push(sel);
+    }
+  }
+  assert.deepEqual(dead, [], "dead selectors (a body inside a body matches nothing)");
 });

@@ -5736,9 +5736,20 @@ const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a 
 // frame size for span. That is the right way round there: the strip is what
 // you navigate with, and the preview above it is what you identify the chosen
 // frame from.
+//
+// One thing frameWMin cannot do is make a SELECTION fit. It is a floor, so on
+// a narrow wrap it makes frames bigger, i.e. it pushes a range picker's second
+// bracket further off the end — and "visible frames" is counted in frames, not
+// in pitches, so even the unclamped width is a gap per frame short of the span
+// it implies. A caller that must show a whole range at once therefore states
+// the span it needs (`fitFrames`, counted in pitches) and the fit wins, down
+// to STRIP_FRAME_W_FLOOR.
 const STRIP_VISIBLE_FRAMES = 5.5;
 const STRIP_FRAME_W_MIN = 38;
 const STRIP_FRAME_W_MAX = 72;
+// Below this a thumbnail stops being a picture at all, so the fit rule gives
+// up rather than shrinking further and the bracket goes off-strip honestly.
+const STRIP_FRAME_W_FLOOR = 16;
 
 /**
  * @param {object} opts
@@ -5753,12 +5764,16 @@ const STRIP_FRAME_W_MAX = 72;
  * @param {number} [opts.visibleFrames]  frames across the strip's width
  * @param {number} [opts.frameWMin]      px floor on a frame's width
  * @param {number} [opts.frameWMax]      px ceiling on a frame's width
+ * @param {number} [opts.fitFrames]      frame pitches that MUST fit the width
+ * @param {number} [opts.frameWFloor]    px floor the fit rule may shrink to
  */
 const createFilmStrip = ({
   canvas, wrap, markers, paint, onChange,
   visibleFrames = STRIP_VISIBLE_FRAMES,
   frameWMin = STRIP_FRAME_W_MIN,
   frameWMax = STRIP_FRAME_W_MAX,
+  fitFrames = 0,
+  frameWFloor = STRIP_FRAME_W_FLOOR,
 }) => {
   let samples = 0;
   let thumbs = null;      // packed BGR555, copied out of wasm at open
@@ -5775,6 +5790,15 @@ const createFilmStrip = ({
     let tw = Math.round(
       Math.min(frameWMax, Math.max(frameWMin, stripW / visibleFrames))
     );
+    // `fitFrames` pitches have to land inside the strip's width. A bracket
+    // that opens off the end reads as "the clip ends here", which is the one
+    // thing this control must not lie about — so on a narrow wrap the fit
+    // beats frameWMin. A smaller frame is still a picture, and the preview
+    // above the strip is what the chosen frame is identified from anyway.
+    if (fitFrames > 0) {
+      tw = Math.max(frameWFloor,
+                    Math.min(tw, Math.floor(stripW / fitFrames) - STRIP_GAP));
+    }
     let th = Math.round((tw * thumbH) / thumbW);
     if (th > maxH) {
       th = maxH;
@@ -8576,23 +8600,41 @@ let clipActiveMarker = 0;     // which marker the preview is showing
 const clipStrip = createFilmStrip({
   canvas: clipStripCanvas,
   wrap: clipStripWrap,
-  // Twice the rewind strip's span at roughly half the frame width: the default
-  // ten-second selection then fits between the brackets on a 320pt phone as
-  // well as on a desktop panel, which is what makes it read as a range rather
-  // than as a line with a stray arrow stuck at the edge.
+  // Twice the rewind strip's span at roughly half the frame width, and — the
+  // part that actually decides it — a hard requirement that the DEFAULT
+  // selection fit. The anchors are one a second, and the brackets sit on the
+  // outer edges of the end frames, so the quick range is one pitch wider than
+  // its seconds. Without fitFrames the strip sizes frames to a floor instead
+  // and the "now" bracket opens off the end of a phone-width wrap, which reads
+  // as a line with a stray arrow stuck at the edge rather than as a range.
   visibleFrames: 11,
   frameWMin: 26,
   frameWMax: 40,
+  fitFrames: CLIP_QUICK_SECONDS + 1,
   markers: [
     { el: document.getElementById("clip-marker-start"), edge: "lead" },
     { el: document.getElementById("clip-marker-end"), edge: "trail" },
   ],
   paint: (ctx, g) => clipStrip.shadeBetween(ctx, g, g.xs[0], g.xs[1]),
   onChange: (i) => {
-    clipActiveMarker = i;
+    // The strip scrolls to follow its ACTIVE marker, and a drag is the only
+    // path that sets that itself. Sliders and presets move a marker from the
+    // outside, so adopt whichever one just moved here — otherwise the view
+    // keeps following the marker the last drag happened to grab and a slider
+    // ends up nudging something that is off-screen.
+    clipSetActive(i);
     clipRefresh();
   },
 });
+
+// The preview shows one marker and the strip scrolls to follow one marker, and
+// they are the same marker: whichever the player last acted on. Every path
+// that acts on one from outside a drag goes through here so the two cannot
+// drift apart.
+const clipSetActive = (i) => {
+  clipActiveMarker = i;
+  clipStrip.setActive(i);
+};
 // A marker may never cross its neighbour: dragging the in point past the out
 // point pins it one frame short instead of inverting the range.
 clipStrip.attach((i) =>
@@ -8645,14 +8687,19 @@ const clipRefresh = () => {
 // markers; they are not a second source of truth. Each is clamped against the
 // other exactly as the drag is.
 clipStartSlider.addEventListener("input", () => {
-  clipActiveMarker = 0;
-  clipStrip.setValue(0, clipStrip.samples - 1 - Number(clipStartSlider.value), true,
-                     { min: clipStrip.at(1) + 1 });
+  // Claim the marker first: the strip scrolls to follow it, so a slider that
+  // moved one without claiming it would act on a marker that is off screen.
+  clipSetActive(0);
+  // setValue only reports back when the value actually moved, and the slider
+  // has to redraw either way — the active marker changed, and a move clamped
+  // away against the other marker still has to snap the input back.
+  if (!clipStrip.setValue(0, clipStrip.samples - 1 - Number(clipStartSlider.value),
+                          true, { min: clipStrip.at(1) + 1 })) clipRefresh();
 });
 clipEndSlider.addEventListener("input", () => {
-  clipActiveMarker = 1;
-  clipStrip.setValue(1, clipStrip.samples - 1 - Number(clipEndSlider.value), true,
-                     { max: clipStrip.at(0) - 1 });
+  clipSetActive(1);
+  if (!clipStrip.setValue(1, clipStrip.samples - 1 - Number(clipEndSlider.value),
+                          true, { max: clipStrip.at(0) - 1 })) clipRefresh();
 });
 
 // The sample whose age is closest to `seconds` back. Searched rather than
@@ -8676,7 +8723,7 @@ const clipSetPreset = (seconds) => {
   if (clipStrip.samples <= 0) return;
   clipStrip.setValue(1, 0, true);
   clipStrip.setValue(0, Math.max(1, clipNearestSample(seconds)), true, { min: 1 });
-  clipActiveMarker = 0;
+  clipSetActive(0);
   clipRefresh();
 };
 document.getElementById("clip-preset-10").addEventListener("click", () => clipSetPreset(10));
@@ -8686,7 +8733,16 @@ document.getElementById("clip-preset-all").addEventListener("click", () => clipS
 const openClipScrubber = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !speedControlsOk()) return;
-  if (typeof Module === "undefined" || !Module._clip_scrub_generate) return;
+  // A build whose EXPORTED_FUNCTIONS list is missing the scrub API cannot
+  // open the picker — and this exact guard once shipped, so the menu item did
+  // nothing at all and said nothing about it. Say it: silence here is a build
+  // bug, never a state the player can be in.
+  if (typeof Module === "undefined" || !Module._clip_scrub_generate) {
+    console.error("clip: the scrub API is missing from this build " +
+                  "(check EXPORTED_FUNCTIONS in src/dingbat_wasm.nims)");
+    showToast("Clips aren't available in this build");
+    return;
+  }
   if (clipReplayActive) return;
   clipWasPaused = paused;
   // Freeze the core while the picker is open: the ring is still rolling, and
@@ -8707,7 +8763,7 @@ const openClipScrubber = () => {
   // gives the same clip the one-tap item would have.
   clipStrip.values[1] = 0;
   clipStrip.values[0] = Math.max(1, Math.min(n - 1, clipNearestSample(CLIP_QUICK_SECONDS)));
-  clipActiveMarker = 0;
+  clipSetActive(0);
   const slotMax = String(Math.max(0, n - 1));
   clipStartSlider.max = slotMax;
   clipEndSlider.max = slotMax;
