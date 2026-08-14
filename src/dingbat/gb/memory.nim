@@ -898,9 +898,15 @@ const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
   ## in the range, so the +8 the old real-time constant carried over 65540 is
   ## not a real part of the quantity.
 
-const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12
+const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12 - 4 * CGB_HALT_PPU_LEAD
   ## **The PPU advances further across the stall than the CPU clock does, and
   ## daid's three speed-switch frames are what separate the two quantities.**
+  ##
+  ## The default is tied to `CGB_HALT_PPU_LEAD` (gb.nim) because the two are one
+  ## measurement split between two files -- see the 2026-08-13 section at the
+  ## bottom. At the shipping `CGB_HALT_PPU_LEAD = 0` this is 12 and nothing
+  ## below changes; turn the lead on and it is 8, which is the value the switch
+  ## itself measures once the halt stops being charged to it.
   ##
   ## They contradict each other under any single "the stall is N cycles" model,
   ## and that contradiction is the measurement:
@@ -927,6 +933,9 @@ const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12
   ## exactly the 65548 the two frames pin, which is why this is the derived
   ## value and not a fitted one. The to-single direction has no pixel witness in
   ## this tree, so it takes the same 12 rather than a second free constant.
+  ## (**Both of those sentences are superseded below.** The 12 is the to-double
+  ## 8 plus a halt M-cycle these two frames also carry, and the to-single
+  ## direction does have a witness — it just is not a pixel one.)
   ##
   ## Bracketed on both sides by those same frames, one build per dot:
   ##
@@ -938,6 +947,113 @@ const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12
   ## gambatte is flat across that window (1138 / 1137 / 1138 rows of
   ## speedchange+sound+dma+oamdma), so it has no say between them and the dot
   ## count is what picks 12.
+  ##
+  ## ---- gambatte is NOT flat across it, and the direction splits (2026-08-13)
+  ##
+  ## The sentence above is true of the four subdirectories as a TOTAL and false
+  ## of the family that measures this quantity, which is why nobody had seen it.
+  ##
+  ## `speedchange{,2..5}[_nop]_ly44_m3[_nopxK]_m3stat[_scxS]_{1,2}` is a ladder
+  ## in SWITCH COUNT: N back-to-back `LDH ($4D),A ; STOP` pairs and then one
+  ## STAT read, with `_1` and `_2` one CPU M-cycle apart across the mode 3 -> 0
+  ## edge. A per-switch error of d dots therefore shows up as N*d, so the ladder
+  ## divides the residual by N -- and none of these ROMs halts, which is what
+  ## makes them the only witness in the tree that sees the switch on its own.
+  ## Swept one build per dot over all 55 rows (`tools/gbppu/sssweep.sh`, full
+  ## table in docs/gb-failure-triage.md bucket 13), the value of THIS constant
+  ## at which each rung's `_1` and `_2` are both green is
+  ##
+  ##       N  ends in  1 M-cyc  green at    => total PPU lead over N switches
+  ##       1  double    2 dots  8, 9         8
+  ##       2  single    4 dots  5, 6        11
+  ##       3  double    2 dots  6           19
+  ##       4  single    4 dots  5 / 6       22
+  ##       5  double    2 dots  6           30
+  ##
+  ## and the totals in the last column are the measurement: their successive
+  ## differences are **+3, +8, +3, +8**, alternating exactly with the direction
+  ## each switch ends in. One constant cannot produce that (N=1 wants 8 per
+  ## switch and N=5 wants 6, and every window above is narrower than the 2 dots
+  ## that would take); two constants produce it with nothing left over. See
+  ## `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`.
+  ##
+  ## The 8 is not a new quantity. **It is this 12 minus the CGB halt-exit
+  ## M-cycle that `CGB_HALT_PPU_LEAD` (gb.nim) owns**, and that constant's own
+  ## note already recorded, from the other side, that the daid window moves to
+  ## 65544..65545 -- i.e. to exactly this 8 -- when it is turned on. daid's two
+  ## ROMs each take one halt before their STOP (`halt` at $019B in
+  ## `speed_switch_timing_ly.gbc`, IME clear, waiting for the first vblank after
+  ## an LCD enable) and everything they sample hangs off that wake, so what they
+  ## pin is halt-lead + switch-extra; the `ly44_m3` ladder pins switch-extra
+  ## alone. 4 + 8 = 12, and the two instruments never disagree by a dot.
+  ##
+  ## The halt is also the ONLY carrier those 4 dots can have, which is a
+  ## measurement and not an assumption: `LCD_ON_HEAD_START` = 1 and = 9 (the
+  ## `1 mod 4` neighbours of the shipping 5) move daid's `_ly` and `_stat` by
+  ## **zero** pixels each, because a halt re-anchors the CPU to a PPU event and
+  ## a whole-M-cycle shift of the PPU before it cancels out. Only something that
+  ## moves the PPU relative to the CPU ACROSS the wake survives, and that is
+  ## what `CGB_HALT_PPU_LEAD` is.
+  ##
+  ## **What the pair is worth, whole gambatte suite, baseline 4183/5005:**
+  ##
+  ##   A=8 B=3 alone                   4228   daid ly/stat 109 px each -- refused
+  ##   A=8 B=3 + CGB_HALT_PPU_LEAD=1   4224   daid green; +75 / -34
+  ##   A=12 B=-1 (sum kept, split not) 4205   daid green; +33 / -11 -- a fit
+  ##
+  ## so it ships OFF, tied to the lead, and lands the day bucket 22 does.
+
+const SS_EXTRA_SINGLE_SAME* = -9999
+  ## Sentinel for `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`: a value well outside any
+  ## legal dot count, so the constant below stays free to take a NEGATIVE one
+  ## (which is a reading the sweep has to be able to express — see its note).
+
+const SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE* {.intdefine.} =
+  when CGB_HALT_PPU_LEAD != 0: 3 else: SS_EXTRA_SINGLE_SAME
+  ## The same quantity for a switch that ends in SINGLE speed. The sentinel
+  ## means "use `SPEED_SWITCH_PPU_EXTRA_DOTS` for both directions", which is
+  ## what the shipping build does and what every reading before 2026-08-13
+  ## assumed; it is the default only while `CGB_HALT_PPU_LEAD` is 0, because the
+  ## split is not expressible without the lead (see the neighbour's note).
+  ##
+  ## **The two directions do not cost the same, and the `ly44_m3` switch-count
+  ## ladder is what separates them.** With A the to-double extra and B the
+  ## to-single one, N switches alternate A, B, A, B, ... from single speed, so
+  ## the ladder's five rungs measure A, A+B, 2A+B, 2A+2B and 3A+2B. Measured
+  ## (the neighbour's table): 8, 11, 19, 22, 30 -- five equations, two unknowns,
+  ## over-determined, consistent, and solving to
+  ##
+  ##       A = 8   and   B = 3
+  ##
+  ## Two of the five rungs are enough (N=1 gives A, N=5 then gives B); the other
+  ## three are predictions and all three hold. Swept directly as well, one build
+  ## per dot, on the four speed-switch-carrying subdirectories (1310 rows,
+  ## baseline 1072), which is a strict two-sided maximum on each axis:
+  ##
+  ##       A (B=3)   6     7   *8*    9    10          ...12 = 1072
+  ##       rows    1078  1085  1116  1092  1077
+  ##
+  ##       B (A=8)   0     1     2   *3*    4     5     6     7     8
+  ##       rows    1088  1084  1091  1116  1096  1082  1083  1086  1083
+  ##
+  ## and at (8, 3) **all 55 `ly44_m3` rows are green and none is lost** -- the
+  ## family goes from 14/55 to 55/55, on every rung, at every SCX and every NOP
+  ## count. B = 4 breaks 20 of them and B = 2 breaks 14, so the odd value is
+  ## pinned by the ROMs and not chosen.
+  ##
+  ## B being ODD is the substantive part: a to-single switch leaves the PPU's
+  ## dot grid 3 dots -- not a whole M-cycle -- from where the CPU's resumes, so
+  ## the machine really does come out of a switch on a sub-M-cycle offset. That
+  ## is what `lcd_offset` exists to measure and where this model's one open
+  ## residual is: those ROMs want A+B congruent to 0 mod 4 where the ladder says
+  ## 11, and 11 rows of them (plus their `lcdoffset1` grafts in `window`,
+  ## `m2enable` and `lycEnable`) are the cost of the pair. The `lcd_offset`
+  ## ruler cannot arbitrate, because it contradicts ITSELF at that resolution:
+  ## `offset1_lyc99int_m0stat_count_scx1_ds` wants A+B odd and
+  ## `offset1_lyc99int_m0irq_count_scx1_ds` -- same offset, same SCX, same
+  ## device, the STAT flag and the IRQ of the same mode-0 edge -- wants it even.
+  ## That is the known "mode-0 STAT raise is one dot early" defect (finding 6 in
+  ## docs/gb-failure-triage.md) seen from inside the instrument.
 
 const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
   ## Whether the timer/serial/OAM-DMA domain runs during the stall.
@@ -1074,7 +1190,15 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
     timer_tick(gb.timer, gb, cycles)
     mem_dma_tick(mem, gb, cycles)
-  let ppu_cycles = (cycles shr mem.current_speed) + SPEED_SWITCH_PPU_EXTRA_DOTS
+  # `current_speed` is already the speed being switched TO, so this picks the
+  # extra by DIRECTION: 1 is a switch that ended in double speed.
+  const extra_single =
+    when SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE != SS_EXTRA_SINGLE_SAME:
+      SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE
+    else: SPEED_SWITCH_PPU_EXTRA_DOTS
+  let extra =
+    if mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
+  let ppu_cycles = (cycles shr mem.current_speed) + extra
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
 
