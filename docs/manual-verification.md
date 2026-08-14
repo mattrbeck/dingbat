@@ -41,6 +41,37 @@ FILE is unproven, and so is the strip as a touch control.
 - [ ] **The rewind scrubber still behaves.** It was refactored onto the shared
       film-strip component; re-check the drag, the tap, the two-stage confirm
       and the save-loss warning.
+## Input display overlay (2026-08-14)
+
+Settings → Controls → "Show inputs on screen" (or the `I` key): a DOM
+controller pinned to the bottom-left of the stage that lights each button
+while it is held. Every input path is unit-tested at the chokepoint
+(`web/tests/input-display.test.mjs`, 16 tests) and the layout was screenshot
+in headless Chromium across three themes plus a touch viewport; what no
+harness can answer is how it looks and feels on real hardware and in a real
+capture.
+
+- [ ] **iPhone LAN test** (the standing rule for any mobile/PWA UI change).
+      Serve the worktree's `web/` over the LAN and load it on the phone.
+      Portrait and landscape, with the touch controls up: the overlay must be
+      completely absent — no reserved space, no seam, and the touch buttons
+      unchanged in size and spacing. Then pair a Bluetooth controller (which
+      hides the touch controls) and confirm the overlay appears bottom-left,
+      inside the safe area, and does not sit under the notch/home indicator.
+- [ ] **OBS capture.** Add the browser tab as a Window Capture / Browser
+      Source and confirm the overlay is in the captured image (it should be),
+      then record a clip from the app's own Record Clip and confirm the
+      overlay is NOT in the clip (canvas.captureStream — deliberate).
+- [ ] **Legibility at stream size.** At 1080p downscaled to a typical stream
+      view, check the SELECT/START lettering is still readable and the lit
+      state is obvious at a glance over both a bright and a dark game.
+- [ ] **Device themes.** The overlay borrows the `--pad-*` / `--btn-ab-*` /
+      `--pill-*` tokens, so device themes (Famicom, atomic purple, daiei…)
+      recolour it for free — spot-check two of the loudest ones for a pressed
+      state that still reads.
+- [ ] **A real GBA vs GB game.** L/R must be present for a `.gba` title and
+      gone for GB/GBC (`body.gb-mode`), with the overlay getting shorter
+      rather than leaving a gap.
 
 ## Drive sync: renames (2026-08-14, `3f9370a`)
 

@@ -1312,6 +1312,11 @@ const openSettingsModal = () => {
   // One entry for the list level, so a back gesture closes the sheet.
   if (settingsIsSheet()) settingsHistPush();
   settingsModal.classList.add("open");
+  // Both input handlers stand down while this modal is up (gameKeyHandler
+  // returns early, pollGamepads diverts to settingsGamepadNav and absorbs the
+  // edges), so a button held across the open would never see its release —
+  // put the input-display lights out rather than leave one stuck on.
+  clearInputDisplay();
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
 };
@@ -7135,10 +7140,81 @@ const noteLocalButton = (inputId, down) => {
   else localButtons &= ~(1 << inputId);
 };
 
+// --- Input display overlay (stream aid / debugging) -------------------------
+// A DOM controller pinned over the stage that lights each button while it is
+// held. Two rules keep it honest:
+//
+//  1. ONE notify chokepoint. Every LOCAL input source funnels through
+//     noteInputDisplay: routeP1Input covers keyboard and touch (and the
+//     tilt-cart d-pad, which is still a real press), pollGamepads calls it on
+//     each edge it detects. So keyboard, gamepad and touch light the overlay
+//     identically and it cannot drift from what the core was told.
+//  2. LOCAL input only. A netplay peer's buttons arrive as a rollback input
+//     word, never through here — the overlay is "what this player is doing",
+//     which is what a stream viewer is watching for. 2P local link is the one
+//     ambiguous case (two consoles, one overlay), so CSS hides it there.
+//
+// It is deliberately DOM and not painted on #canvas: clip recording is
+// canvas.captureStream, so clips stay clean while OBS window / browser-source
+// capture — the actual use case — picks the overlay up.
+const inputOverlay = document.getElementById("input-overlay");
+const inputDisplayToggle = /** @type {HTMLInputElement} */ (document.getElementById("input-display-toggle"));
+// Indexed by core input id, in the order setInput uses (see PRESET_DEFAULT):
+// 0-3 Up/Down/Left/Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R.
+const IO_CELLS = ["io-up", "io-down", "io-left", "io-right", "io-a", "io-b",
+                  "io-select", "io-start", "io-l", "io-r"]
+  .map((id) => document.getElementById(id));
+var inputDisplay = false;
+// Held buttons as a bitmask. Tracked even while the overlay is OFF so that
+// switching it on mid-hold cannot leave a cell wrong, and so a repeat keydown
+// (the browser fires those while a game key is held) costs no DOM work.
+var inputDisplayHeld = 0;
+
+const noteInputDisplay = (inputId, down) => {
+  const bit = 1 << inputId;
+  if (!!down === !!(inputDisplayHeld & bit)) return;
+  if (down) inputDisplayHeld |= bit;
+  else inputDisplayHeld &= ~bit;
+  if (inputDisplay) IO_CELLS[inputId]?.classList.toggle("io-on", !!down);
+};
+
+// Nothing may stay lit through a toggle, a game unload, or a window blur that
+// swallowed the keyup (the same reason releaseKbHolds exists).
+const clearInputDisplay = () => {
+  inputDisplayHeld = 0;
+  for (const el of IO_CELLS) el?.classList.remove("io-on");
+};
+
+const applyInputDisplay = (on) => {
+  inputDisplay = on;
+  inputDisplayToggle.checked = on;
+  // CSS decides where it may actually appear (running games only, never in 2P
+  // link, never while the touch controls are on screen — see styles.css).
+  inputOverlay.classList.toggle("on", on);
+  clearInputDisplay();
+};
+
+// The switch and the I shortcut are one setting, so both go through here and
+// neither can skip the persist.
+const setInputDisplay = async (on) => {
+  applyInputDisplay(on);
+  await dbPut("input-display", on);
+};
+
+inputDisplayToggle.addEventListener("change", () =>
+  setInputDisplay(inputDisplayToggle.checked));
+
+const toggleInputDisplay = () => { setInputDisplay(!inputDisplay); };
+
+const loadInputDisplayFromStorage = async () => {
+  applyInputDisplay(!!(await dbGet("input-display")));
+};
+
 // Route player-1 input (keyboard, touch controls) to the right core: the
 // single running core normally, core 0 in 2P link mode, or — in online
 // rollback mode — captured into localButtons (the RAF loop feeds the core).
 const routeP1Input = (inputId, down) => {
+  noteInputDisplay(inputId, down);
   // Tilt cart: the D-pad (keyboard or touch) doubles as a tilt source — the
   // held directions become the tilt target, smoothed toward in updateTilt so
   // digital input still gives controllable analog motion. The real D-pad
@@ -7676,7 +7752,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead", "gb-palette",
+  "runahead", "gb-palette", "input-display",
 ];
 
 const resetAllSettings = async () => {
@@ -7735,6 +7811,7 @@ const resetAllSettings = async () => {
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
+  applyInputDisplay(false);
 
   // Run-ahead -> off
   applyRunahead(0);
@@ -9215,6 +9292,9 @@ const endKbFastForward = () => {
 };
 const releaseKbHolds = () => {
   endKbFastForward();
+  // A blur eats the keyup, so every lit cell would stick on. (The core has the
+  // same hole for game keys; this at least stops the overlay lying about it.)
+  clearInputDisplay();
   if (kbRewindHeld) {
     kbRewindHeld = false;
     setRewindHeld(false);
@@ -9325,6 +9405,12 @@ const shortcutKeyHandler = (e, down) => {
     case "KeyM":
       if (e.shiftKey) break;
       if (!e.repeat) toggleMute();
+      handled = true;
+      break;
+    case "KeyI": // input display on/off (free in both keyboard presets; a
+      // custom binding still wins via the codeLookup guard at the top)
+      if (e.shiftKey) break;
+      if (!e.repeat) toggleInputDisplay();
       handled = true;
       break;
     case "F5": // save state (F5 default is reload — must be swallowed)
@@ -9668,6 +9754,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
+  clearInputDisplay();   // no cart, no held buttons
   // No cart, no sensor: drop the camera rather than leaving the recording
   // light on — and the button with it, since "Enable camera" over the home
   // screen would enable it for nothing.
@@ -9836,6 +9923,10 @@ const pollGamepads = () => {
   }
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
+      // Input display: the gamepad does not pass through routeP1Input, so it
+      // notifies the overlay itself. Skipped in 2P link mode, where the pad is
+      // the OTHER console's controller (the overlay is hidden there anyway).
+      if (!linkMode) noteInputDisplay(i, want[i]);
       // In 2P link mode the gamepad is player 2's controller; in online
       // rollback it is this player's controller (captured into localButtons).
       if (rollbackMode) {
@@ -10835,6 +10926,7 @@ const initStorage = async () => {
   await loadLargeControlsFromStorage();
   await loadOpaqueControlsFromStorage();
   await loadHideTouchOnGamepadFromStorage();
+  await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
   await loadRunaheadFromStorage();
   await loadAudioSettings();

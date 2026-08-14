@@ -1672,6 +1672,194 @@ body.running #canvas {
 /* Scanlines are now drawn by the WebGL2 fragment shader (uniform-gated), not a
    DOM overlay — the old #scanline-overlay element and its sizing are gone. */
 
+/*
+ * ==========================================================
+ * Input display overlay (Settings -> Controls, or the I key)
+ * ----------------------------------------------------------
+ * A miniature controller pinned to the bottom-left of the stage that lights
+ * each button while it is held — for stream viewers, and as a debugging aid.
+ *
+ * Themes: this borrows the SAME --pad-* / --btn-ab-* / --pill-* tokens the
+ * on-screen touch controls use, and the same accent pressed treatment, so
+ * every chrome AND device theme colours it correctly with no new per-theme
+ * rules. Do not introduce literals here.
+ *
+ * Sizing is in --io-u (one "unit"), so the whole thing scales from one number.
+ * ========================================================== */
+#input-overlay {
+  --io-u: 11px;
+  position: absolute;
+  z-index: 2;                  /* above #canvas (1), below the chrome */
+  left: calc(14px + var(--safe-l));
+  bottom: calc(14px + var(--safe-b));
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--io-u) * 0.55);
+  /* A mirror of input the user just made — never a control. */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Legible over both a bright and a dark game frame without hiding it. */
+  padding: calc(var(--io-u) * 0.9);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--stage-rgb), 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--frame-line);
+}
+
+/* Only ever visible with the setting on AND a game running. 2P local link is
+   two consoles behind one overlay, so it stays hidden there. */
+body.running #input-overlay.on {
+  display: flex;
+}
+body.link-mode #input-overlay.on {
+  display: none;
+}
+
+/* On touch layouts the on-screen buttons ALREADY show every press, and in
+   landscape they are drawn over the stage — so the overlay stands down
+   whenever the touch controls are actually on screen. A connected controller
+   takes those away again (gamepad-hides-touch, the default), and that is
+   exactly when the overlay earns its keep. Mirrors the #controls display
+   rules so the two can never both claim the corner. */
+@media (pointer: coarse) {
+  body.running #input-overlay.on {
+    display: none;
+  }
+  body.running.gamepad-hides-touch #input-overlay.on {
+    display: flex;
+  }
+}
+
+#io-main {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--io-u) * 0.9);
+}
+
+/* Shared look, straight off the touch-pad tokens. */
+#input-overlay .io-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  color: var(--pad-label);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  line-height: 1;
+  background: linear-gradient(180deg, var(--pad-top), var(--pad-bottom));
+  border: 1px solid var(--pad-border);
+  /* Instant: an input display that eases is an input display that lies. */
+  transition: none;
+}
+
+#input-overlay .io-btn.io-on {
+  color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-tint-top), var(--pad-pressed-bottom));
+  border-color: rgba(var(--accent-rgb), 0.7);
+  box-shadow: 0 0 calc(var(--io-u) * 1.3) rgba(var(--accent-rgb), 0.5);
+}
+
+/* --- Shoulders. GB/GBC has none: the same body.gb-mode gate the touch
+   strip's #lr row uses drops the row entirely. --- */
+#io-shoulders {
+  display: flex;
+  gap: calc(var(--io-u) * 0.6);
+  width: 100%;
+}
+#input-overlay .io-sh {
+  flex: 1 1 0;
+  height: calc(var(--io-u) * 1.5);
+  font-size: calc(var(--io-u) * 0.95);
+  letter-spacing: 0.1em;
+  border-radius: calc(var(--io-u) * 0.5) calc(var(--io-u) * 0.5)
+    calc(var(--io-u) * 0.25) calc(var(--io-u) * 0.25);
+}
+body.gb-mode #io-shoulders,
+body.link-gb #io-shoulders {
+  display: none;
+}
+
+/* --- D-pad: a 3x3 grid with only the four arms + a hub, so the cross reads
+   as a cross and each arm can light on its own. --- */
+#io-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, calc(var(--io-u) * 1.5));
+  grid-template-rows: repeat(3, calc(var(--io-u) * 1.5));
+}
+/* A theme may outline its d-pad separately from the other pads (the Famicom's
+   red cross); follow the same token the touch d-pad does. */
+#input-overlay .io-dir {
+  border-color: var(--dpad-border, var(--pad-border));
+}
+#io-up { grid-area: 1 / 2; border-radius: 25% 25% 0 0; border-bottom: none; }
+#io-left { grid-area: 2 / 1; border-radius: 25% 0 0 25%; border-right: none; }
+#io-right { grid-area: 2 / 3; border-radius: 0 25% 25% 0; border-left: none; }
+#io-down { grid-area: 3 / 2; border-radius: 0 0 25% 25%; border-top: none; }
+/* Centre of the cross: fills the join so the four arms read as one piece.
+   Not a button — it never lights. */
+#input-overlay .io-dpad-hub {
+  grid-area: 2 / 2;
+  background: linear-gradient(180deg, var(--pad-top), var(--pad-bottom));
+  border-top: 1px solid var(--dpad-border, var(--pad-border));
+  border-bottom: 1px solid var(--dpad-border, var(--pad-border));
+}
+
+/* --- Select / Start pills, stacked so the cluster stays short --- */
+#io-pills {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--io-u) * 0.45);
+}
+#input-overlay .io-pill {
+  width: calc(var(--io-u) * 4.4);
+  height: calc(var(--io-u) * 1.3);
+  border-radius: calc(var(--io-u) * 0.65);
+  font-size: calc(var(--io-u) * 0.72);
+  letter-spacing: 0.08em;
+  color: var(--pill-label);
+  background: linear-gradient(180deg, var(--pill-top), var(--pill-bottom));
+}
+#input-overlay .io-pill.io-on {
+  color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-tint-top), var(--pad-pressed-bottom));
+}
+
+/* --- A / B, offset the way the real faceplate sits them --- */
+#io-face {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--io-u) * 0.5);
+}
+#input-overlay .io-round {
+  width: calc(var(--io-u) * 2.1);
+  height: calc(var(--io-u) * 2.1);
+  border-radius: 50%;
+  font-size: calc(var(--io-u) * 1);
+  color: var(--btn-ab-label);
+  background: linear-gradient(180deg, var(--btn-ab-top), var(--btn-ab-bottom));
+  border: var(--btn-ab-border-w) solid var(--btn-ab-border);
+}
+#input-overlay .io-round.io-on {
+  color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-tint-top), var(--pad-pressed-bottom));
+  border-color: rgba(var(--accent-rgb), 0.7);
+}
+/* A sits above B and to the right, the way the faceplate stages them. */
+#io-a {
+  transform: translateY(calc(var(--io-u) * -0.26));
+}
+#io-b {
+  transform: translateY(calc(var(--io-u) * 0.26));
+}
+
+/* Fullscreen is the streaming case: give it a little more presence. */
+body.fs #input-overlay {
+  --io-u: 14px;
+}
+
 /* MBC5 rumble: a small transform-only jitter on the game screen while the
    cart's motor runs (body.rumbling, set by the RAF loop). Width/height are
    deliberately untouched — integer scaling pins those. */

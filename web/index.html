@@ -311,6 +311,40 @@
            tab order, so keyboard traversal of the chrome is unchanged. -->
       <canvas id="canvas" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
 
+      <!-- Input display (Settings -> Controls -> "Show inputs on screen", or
+           the I shortcut). A DOM overlay pinned to the bottom-left of the
+           stage that lights each button as it is pressed, for stream viewers
+           and for debugging. Deliberately NOT drawn on #canvas: clip capture
+           is canvas.captureStream, so clips stay clean while an OBS window /
+           browser-source capture picks the overlay up.
+           aria-hidden + pointer-events:none — it is a mirror of input the user
+           just made, never a control and never news to a screen reader.
+           The shoulder row is dropped for GB/GBC by body.gb-mode, the same
+           class the touch strip's #lr row uses. -->
+      <div id="input-overlay" aria-hidden="true">
+        <div id="io-shoulders">
+          <span class="io-btn io-sh" id="io-l">L</span>
+          <span class="io-btn io-sh" id="io-r">R</span>
+        </div>
+        <div id="io-main">
+          <div id="io-dpad">
+            <span class="io-btn io-dir" id="io-up"></span>
+            <span class="io-btn io-dir" id="io-left"></span>
+            <span class="io-dpad-hub"></span>
+            <span class="io-btn io-dir" id="io-right"></span>
+            <span class="io-btn io-dir" id="io-down"></span>
+          </div>
+          <div id="io-pills">
+            <span class="io-btn io-pill" id="io-select">SELECT</span>
+            <span class="io-btn io-pill" id="io-start">START</span>
+          </div>
+          <div id="io-face">
+            <span class="io-btn io-round" id="io-b">B</span>
+            <span class="io-btn io-round" id="io-a">A</span>
+          </div>
+        </div>
+      </div>
+
       <!-- SDL still owns a (now invisible) WebGL context for its window/renderer
            init; we point Module.canvas here so #canvas is free for our own
            WebGL2 game-presentation context. Nothing is ever shown on it —
@@ -810,6 +844,16 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Show inputs on screen</span>
+                    <span class="modal-toggle-sub">Light up a small controller over the game as you press buttons &mdash; for streams, or for watching your own inputs. Recorded clips never include it.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="input-display-toggle" />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
                 <div id="kb-section">
                   <div class="modal-subhead">Keyboard</div>
                   <div class="modal-row">
@@ -832,6 +876,7 @@
                     <div class="kb-shortcut"><span>Pause &amp; step one frame</span><kbd>.</kbd></div>
                     <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
                     <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
+                    <div class="kb-shortcut"><span>Show inputs on screen</span><kbd>I</kbd></div>
                     <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
                     <div class="kb-shortcut"><span>Load state</span><kbd>F8</kbd></div>
                     <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
