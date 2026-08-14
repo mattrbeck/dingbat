@@ -24,6 +24,20 @@ interface SDPCodecT {
 }
 declare var SDPCodec: SDPCodecT;
 
+// saveimport.js (classic script, sets window.SaveImport; not in
+// tsconfig.main's files because its UMD-style closure is checked by the node
+// test runner instead)
+declare var SaveImport: {
+  unwrap(bytes: Uint8Array, fileName: string): {
+    ok: boolean;
+    format?: string | null;
+    bytes?: Uint8Array;
+    title?: string | null;
+    warning?: string | null;
+    error?: string;
+  };
+};
+
 // sdputil.js's UMD footer probes `module.exports` for the Node test runner;
 // in the browser (and for tsc) it is undefined.
 declare var module: { exports: unknown } | undefined;
