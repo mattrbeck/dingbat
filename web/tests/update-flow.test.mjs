@@ -79,6 +79,16 @@ test("another tab's update reloads this tab too, even after an initial claim", a
   assert.equal(app.state.reloads, 1);
 });
 
+test("clicking Update shows the busy state while the install runs", async () => {
+  const app = await loadApp({ serviceWorker: { controlled: true } });
+  await settle();
+  await clickUpdateWithWaiting(app);
+  const btn = app.elements.get("update-btn");
+  assert.equal(btn.disabled, true); // no double-click racing a second update
+  assert.ok(btn.classList.contains("updating")); // CSS hides the pulsating dot
+  assert.equal(app.elements.get("update-label").textContent, "Updating…");
+});
+
 test("failed install (redundant worker) falls back to the clean-slate reset", async () => {
   const app = await loadApp({ serviceWorker: { controlled: true } });
   await settle();

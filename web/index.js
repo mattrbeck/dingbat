@@ -125,7 +125,7 @@ if (new URLSearchParams(location.search).has("2p")) {
 
 const UPDATE_CHECK_KEY = "dingbat_last_update_check";
 const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
-const updateBtn = document.getElementById("update-btn");
+const updateBtn = /** @type {HTMLButtonElement} */ (document.getElementById("update-btn"));
 const updateModal = document.getElementById("update-modal");
 let updateAvailable = false;
 
@@ -205,6 +205,14 @@ var appUpdating = false;
 
 const applyUpdate = async () => {
   appUpdating = true;
+  // Busy state until the reload lands: the new worker's install downloads
+  // every asset (em.wasm included), which can take seconds on a slow
+  // connection — without feedback the click looks inert, and a second click
+  // would race a competing update. Never un-set: every path out of here ends
+  // in a reload.
+  updateBtn.disabled = true;
+  updateBtn.classList.add("updating");
+  document.getElementById("update-label").textContent = "Updating…";
   closeUpdateModal();
   // Use the same service worker update flow
   if (swRegistration) {

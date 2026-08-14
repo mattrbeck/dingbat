@@ -1534,6 +1534,19 @@ body.running #status {
   border-color: rgba(var(--accent-rgb), 0.55);
 }
 
+/* Busy while the new version installs (applyUpdate): label reads
+   "Updating…", the pulsating dot goes away, and the button stops inviting
+   clicks. Same specificity as :hover — must come after it to win. */
+#update-btn:disabled {
+  cursor: default;
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.32);
+}
+
+#update-btn.updating .update-dot {
+  display: none;
+}
+
 #update-btn .update-dot {
   width: 7px;
   height: 7px;
