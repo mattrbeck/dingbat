@@ -5079,23 +5079,42 @@ speed and one step **late** at double -- a wrong clock domain in `mem_dma_tick`
 confirmed). Fails on DMG too. The speed-switch split above is the same shape of
 bug and hands over the method.
 
-**3. `tima/tc00_late_tc01` -- 8 rows, two-sided, one scoped constant.** The TAC
-00 -> 01 tap-change response is a **pure 1-step (4 T) shift**, identical on both
-devices: `exp FF,FF,FF,FF,00,FE,FF,FF` against `got FF,FF,FF,00,FE,FF,FF,00`.
-Being a shift, the family refuses both n-1 and n+1. Everything else in the write
-path (`tc00_late_div_write_*`, `tc01_*`, `tc00_tc01_late_tc00_of`) is green, so
-it must be scoped to the clock-select change in `timer_write`, not to writes
-generally.
+**3. `tima/tc00_late_tc01` -- 6 of the 8 rows LANDED 2026-08-13
+(`TAC_SELECT_LEAD_T = 4`, timer.nim).** The tap-change response was a pure
+1-step (4 T) shift on both devices (`exp FF,FF,FF,FF,00,FE,FF,FF` against `got
+FF,FF,FF,00,FE,FF,FF,00`), and the shift is in ONE half of the multiplexer
+glitch: the **newly selected** divider bit is read one M-cycle before the byte
+lands (i.e. at the start of the write's M-cycle), while the bit being LEFT stays
+the value latched at the end of it. Both halves are pinned, in opposite
+directions, by two families -- `tc00_late_tc01` lands right where bit 9 rises
+($B600) and wants the arriving tap early; `tc00_tc01_late_tc00_of_2` switches
+back across a bit-3 edge ($B528) and wants the departing tap late, and a uniform
+4 T lead on both halves takes it down. Two-sided: 0 fails 8 rows, 4 fails 2, 8
+fails 4 (`_7` goes red while `_5` is still red). Replaying the rewound cycles
+under the new tap is also refused (`_4`'s `FF`).
+*What is left:* `_5` (2 rows) is **not** the tap. Its second increment is an
+ordinary bit-3 edge at $B610 and the ROM reads TIMA at $B614 -- exactly where
+dingbat's 4-cycle reload countdown expires -- so it reads `FE` where hardware
+still reads `00`. That is a reload-vs-read phase question shared with the rest
+of `tima/`; arming the countdown at 5 instead is refused outright (the family
+goes 14/16 -> 8/16).
 
-**4. `halt/ifandie_ei_halt_sra` -- 2 rows, a real missing rule.** On `EI; HALT`
-with `IF & IE != 0`, hardware arms the **halt bug** (at the `HALT` the `EI`'s IME
-has not landed yet), so the un-incremented PC runs `INC A` twice and the ROM
-prints `$0A`. dingbat prints `$09` because `EI` schedules its IME only 4 cycles
-out and that fires during the `HALT`'s own opcode fetch, so `cpu_halt` sees
-`ime = true` and takes the plain-halt branch. Fix: test the halt bug against the
-IME value as of the `HALT`'s fetch. `noime_ifandie_halt_sra` and
-`noime_ifandie_halt_lda_3c` pass, so the plain halt bug itself is correct.
-Falsifiable directly -- constant-wrong, no phase to bracket.
+**4. `halt/ifandie_ei_halt_sra` -- 2 rows, LANDED 2026-08-13 (cpu.nim).** On
+`EI; HALT` with `IF & IE != 0`, hardware arms the **halt bug**: at the `HALT`'s
+FETCH the `EI`'s IME has not landed yet. dingbat printed `$09` because `EI`
+schedules its IME 4 cycles out and that fires inside the `HALT`'s own opcode
+fetch, so `cpu_halt` saw `ime = true` and halted plainly. The fix is two
+pieces: `GbCpu.ime_set_cycle` (scratch, not serialized) stamps the cycle etIME
+raises IME on, and `cpu_halt` tests the IME as of the fetch; and the dispatch
+that follows **spends** the armed bug by pushing the HALT's own address, so the
+`RET` lands back on the HALT (IME 0 again, joypad still pending), the plain bug
+arms and `INC A` runs twice for the ROM's `$0A`.
+That second half is what the neighbouring rows arbitrate: holding the dispatch
+off for the doubled instruction instead also prints `$0A`, but it moves
+`ifandie_ei_halt_m2int_m0stat_1` a whole M-cycle and takes its CGB row down, and
+letting the bug reach the handler mis-decodes the handler's own `CB 2F` (`$EF`).
+SameSuite's `interrupt/ei_delay_halt` flips to PASS with this too. Whole-suite
+A/B: gambatte +2 and nothing else, mooneye and GBMicrotest byte-identical.
 
 **5. `sprites/late_sizechange_sp00` -- the sharpest unclaimed measurement in the
 suite.** A *four*-step ladder where hardware flips **twice**: `exp 0,3,3,0`

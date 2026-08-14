@@ -40,6 +40,45 @@ proc skip_boot*(t: GbTimer; gb: GB) =
     of bmCgbABCDE:
       if native: 0x1E9C'u16 else: 0x2674'u16  # misc/boot_div-cgbABCDE
 
+const TAC_SELECT_LEAD_T* {.intdefine.} = 4
+  ## How many T-cycles BEFORE the end of a TAC write's M-cycle the NEWLY
+  ## selected divider bit is read, when TAC.1-0 changes which bit TIMA is
+  ## tapped off.
+  ##
+  ## Writing a different clock select can tick TIMA on its own: the multiplexer
+  ## output falls if the bit being left is high and the bit being taken is low,
+  ## and the falling-edge detector counts that as an edge (Pan Docs, "Timer
+  ## Obscure Behaviour": "changing the value of TAC ... can increase TIMA once,
+  ## and can also reset the counter to 0"). dingbat commits a write's byte after
+  ## that M-cycle's bus tick (mem_write), so both halves of the comparison used
+  ## to be read at the END of the M-cycle. Two gambatte families disagree about
+  ## which half that is right for, and between them they pin one lead on one
+  ## half:
+  ##
+  ## * `tima/tc00_late_tc01_1..8` switches $04 -> $05 (bit 9 -> bit 3) one NOP
+  ##   later per member and reads TIMA a fixed 20 T after the write. The write
+  ##   lands right where bit 9 RISES ($B600), so the family is a ruler of when
+  ##   the arriving tap is read against a bit that only the write's own M-cycle
+  ##   moves. Hardware `FF,FF,FF,FF,00,FE,FF,FF`; reading the new tap at the end
+  ##   of the M-cycle gave `FF,FF,FF,00,FE,FF,FF,00` -- the same ladder one
+  ##   member early.
+  ## * `tima/tc00_tc01_late_tc00_of_{1,2}` switches back, $05 -> $04, on the
+  ##   other side of a bit-3 edge, and `_2`'s `F0` needs the tap being LEFT read
+  ##   at the end of the M-cycle ($B528, bit 3 high): read 4 T earlier it is
+  ##   low, no edge is generated, and the row goes red.
+  ##
+  ## So only the arriving tap is early; the departing one stays the latched
+  ## `previous_bit` the tick left behind. Two-sided on the family that measures
+  ## it: 0 (the old behaviour) fails 8 rows, 4 fails 2, 8 fails 4 -- at 8 the
+  ## ladder overshoots and takes `_7` down while `_5` is still red.
+  ##
+  ## `tc00_late_tc01_5` is the one member this does not reach, and it is not
+  ## about the tap: its second increment comes from an ordinary bit-3 edge at
+  ## $B610 and the ROM reads TIMA at $B614, exactly where dingbat's 4-cycle
+  ## reload countdown expires, so it sees `FE` where hardware still reads `00`.
+  ## That is a reload-vs-read phase question, and the countdown is not free to
+  ## move for it: arming it at 5 takes the whole family from 14/16 to 8/16.
+
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   when defined(gb_phase_trace):
     echo "TIMIRQ t=", gb_phase, "/", gb_ticklen
@@ -189,12 +228,34 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
     t.tma = val
     if t.countdown == 0: t.tima = t.tma
   of 0xFF07:
-    t.enabled      = (val and 0b100) != 0
-    t.clock_select = val and 0b011
-    t.bit_for_tima = case t.clock_select
+    let select = val and 0b011
+    let bit = case select
       of 0b00: 9
       of 0b01: 3
       of 0b10: 5
       else:    7
+    when TAC_SELECT_LEAD_T != 0:
+      if bit != t.bit_for_tima:
+        # The NEWLY selected tap is read TAC_SELECT_LEAD_T T-cycles before the
+        # byte lands here; the tap being left is the latched one dingbat
+        # already carries (previous_bit, as of the end of this M-cycle). Rewind
+        # the divider for the check to get the new tap's early sample...
+        let now = t.tdiv
+        t.tdiv         = now - uint16(TAC_SELECT_LEAD_T)
+        t.enabled      = (val and 0b100) != 0
+        t.clock_select = select
+        t.bit_for_tima = bit
+        timer_check_edge(t, gb, on_write = true)
+        # ...then hand the counter back at the divider it really sits on, with
+        # the new tap's output latched there. Only the mux's own edge moves:
+        # REPLAYING the rewound cycles under the new tap as well is refused
+        # (`tc00_late_tc01_4` switches at $B600 with bit 3 falling right there,
+        # and hardware's `FF` says that fall is not counted).
+        t.tdiv         = now
+        t.previous_bit = t.enabled and ((now and (1'u16 shl bit)) != 0)
+        return
+    t.enabled      = (val and 0b100) != 0
+    t.clock_select = select
+    t.bit_for_tima = bit
     timer_check_edge(t, gb, on_write = true)
   else: discard

@@ -52,7 +52,30 @@ proc cpu_inc_pc*(cpu: GbCpu) =
     cpu.pc = cpu.pc + 1
 
 proc cpu_halt*(cpu: GbCpu; gb: GB) =
-  if not cpu.ime and interrupt_ready(gb.interrupts):
+  ## Pan Docs, "Halt Bug": with IME = 0 and `IF & IE != 0` the CPU does not
+  ## halt, and the PC fails to increment for the instruction after the HALT.
+  ##
+  ## The IME that decides it is the one the HALT was FETCHED with, not the one
+  ## it retires with. `EI` raises IME 4 T-cycles later (etIME), and for a
+  ## one-M-cycle instruction that lands inside the next opcode's own fetch -- so
+  ## on `EI; HALT` with an interrupt already pending the flag goes up during the
+  ## HALT's fetch, and dingbat, reading it here, took the plain-halt branch.
+  ## gambatte's `halt/ifandie_ei_halt_sra` reads the difference out directly: it
+  ## sets IF = IE = $11 (VBlank + joypad), runs `EI; HALT; INC A` and prints A,
+  ## with the VBlank vector `SRA A; RET`. Hardware prints $0A. Reading `ime` as
+  ## it stands here halts plainly and prints $09; with the bug armed the run is
+  ## the ROM's: the VBlank is dispatched (IME is up by then) and spends the bug
+  ## by pushing the HALT's own address (dispatch_interrupt), `SRA A` makes A
+  ## $08, and the `RET` lands back ON the HALT -- where IME is 0 again and the
+  ## joypad bit is still pending, so the plain halt bug arms and runs `INC A`
+  ## twice: $0A. SameSuite's `interrupt/ei_delay_halt` agrees and also passes
+  ## only with this.
+  ##
+  ## The IME = 0 members (`noime_ifandie_halt_sra`, `noime_ifandie_halt_lda_3c`)
+  ## never had a pending EI and are unmoved by the distinction.
+  let ime_at_fetch = cpu.ime and
+    cpu.ime_set_cycle + CycleCount(4) <= gb.scheduler.cycles
+  if not ime_at_fetch and interrupt_ready(gb.interrupts):
     cpu.halt_bug = true
     cpu.halted   = false
   else:
@@ -154,6 +177,18 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## both a DMG and a CGB title, from a path that does nothing. Keeping the hot
   ## half a leaf is worth ~1% against `main` on both.
   cpu.ime = false
+  # An armed halt bug is spent HERE when the dispatch is what follows the HALT
+  # (`EI; HALT` with `IF & IE != 0`, cpu_halt): the CPU has not got past the
+  # HALT, so the address pushed is the HALT's own and the bug happens again on
+  # the RET rather than inside the handler. gambatte
+  # `halt/ifandie_ei_halt_sra`'s $0A is the whole of the evidence -- see
+  # cpu_halt -- and it is the reading that leaves the dispatch's TIMING alone:
+  # holding the dispatch off for the doubled instruction instead prints the
+  # same $0A but moves `ifandie_ei_halt_m2int_m0stat_1` a whole M-cycle and
+  # takes its CGB row down.
+  if cpu.halt_bug:
+    cpu.halt_bug = false
+    cpu.pc = cpu.pc - 1
   when defined(gb_irq_trace):
     # Diagnostic (tools only; compiled out of every shipping build). One line
     # per interrupt the CPU actually TAKES, with the PPU dot it was taken on --

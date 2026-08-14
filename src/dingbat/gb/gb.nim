@@ -2353,6 +2353,14 @@ type
     # the speed, which is exact for every state a halt can be captured in bar
     # the single M-cycle between the HALT fetch and the first halted tick.
     halt_ppu_debt*: int32
+    # Scheduler cycle EI's delayed IME actually landed on (etIME), so an
+    # instruction can ask what IME was at its own fetch rather than what it is
+    # now. Only HALT reads it (cpu_halt) and only over the 4 T-cycles of that
+    # fetch, so like `cached_hl` it is scratch: it is NOT serialized, and a
+    # state loaded with it at 0 answers "IME was not set during this fetch",
+    # which is the right answer for every instruction boundary a state can be
+    # captured on.
+    ime_set_cycle*: CycleCount
     cached_hl*:  int   # -1 = invalid
     # The opcode currently executing, kept only when STAT_M0_TAIL_IDIOM needs
     # it: an IO read has to be able to say which M-cycle of its own instruction
@@ -4317,7 +4325,14 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
     # ever slips through, dropping it is strictly better than restarting a
     # 4-cycle event chain that nothing reads.
     of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: discard
-    of etIME:          gb.cpu.ime = true
+    of etIME:
+      # Stamp the cycle a delayed EI actually raises IME on, so the instruction
+      # it lands inside can still see the IME it was fetched with (cpu_halt).
+      # Only a false -> true transition is stamped: a second EI while IME is
+      # already set changes nothing an instruction could observe.
+      if not gb.cpu.ime:
+        gb.cpu.ime = true
+        gb.cpu.ime_set_cycle = gb.scheduler.cycles
     of etSaves:        gb.handle_saves()
     of etRtcSecond:
       if gb.cartridge of Mbc3: Mbc3(gb.cartridge).rtc_tick()

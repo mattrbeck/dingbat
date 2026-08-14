@@ -60,6 +60,7 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   # missing field means "not locked".
   cpu.locked = if rev >= 4: r.read_bool() else: false
   cpu.cached_hl = -1  # per-instruction scratch
+  cpu.ime_set_cycle = 0  # ditto; see the field in gb.nim
 
 # ---- Interrupts / Timer / Joypad ----
 
