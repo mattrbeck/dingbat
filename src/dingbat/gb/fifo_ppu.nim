@@ -120,6 +120,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
     sprites: @[],
+    scan_line: -1,
     cgb: gb.cgb_enabled,
   )
   when STAT_IRQ_SPLIT:
@@ -256,6 +257,72 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.mix = default(array[MIX_HOLD, GbMixHold])
   ppu.tail_dot0 = TAIL_DOT0_OFF
   ppu.sprites = @[]
+  # The scan's own progress goes with the list it fills: a load onto a running
+  # core must not leave it half way through some other line.
+  ppu.scan_next = 0
+  ppu.scan_line = -1
+
+const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
+  ## An OAM DMA owns OAM for the whole of its transfer, and the mode-2 OAM scan
+  ## gets nothing out of the entries it reaches while that lasts.
+  ##
+  ## **MEASURED AND DERIVED 2026-08-13, and it ships OFF at 0** -- the previous
+  ## model, which is the scan as one burst at dot 80 against whatever OAM holds
+  ## by then, with the transfer ignored. What it is worth and what refuses it
+  ## are both below; the whole derivation is in docs/gb-failure-triage.md.
+  ##
+  ## ---- The mechanism ---------------------------------------------------------
+  ##
+  ## Mode 2 is 80 dots and there are 40 OAM entries: the scan reads one entry
+  ## every two dots. Which dot inside mode 2 an entry is read on is normally
+  ## unobservable -- the CPU is locked out of OAM for all of mode 2 and nothing
+  ## else writes it -- so the burst is exact. **An OAM DMA is the exception**: it
+  ## owns OAM from the CPU clock domain, one byte per CPU M-cycle, straight
+  ## through mode 2. That is a clock crossing, and it is why no constant offset
+  ## could ever have fixed the `oamdma/late_sp*` families: the transfer advances
+  ## one entry per 16 dots at normal speed and one per 8 in double, against a
+  ## scan that always does one per 2, so the entry the lock opens or closes on
+  ## moves with the speed. (The triage doc had these 27 rows down as a wrong
+  ## clock domain in `CGB_OAM_DMA_START_T`. That is falsified: sweeping the start
+  ## latency from 4 T to 40 T moves the whole `late_sp*` set by exactly zero
+  ## rows while moving the rest of `oamdma` by hundreds.)
+  ##
+  ## ---- What pins it ----------------------------------------------------------
+  ##
+  ## Eight families, sixteen one-M-cycle brackets, both devices. The `x` half
+  ## steps the transfer's START across one named entry's dot and the `y` half
+  ## steps its END across the same one, and both halves put the same entry at
+  ## the same dot: `sp00` in [-3, 1), `sp01` and `sp02` in [1, 5), `sp39` in
+  ## [77, 81) -- which is `2n` for n = 0, 1, 2, 39, to two dots. See
+  ## OBJ_SCAN_DOT_ADJ, which is the SAME per-object dot the `sprites/
+  ## late_sizechange*` ladder derives through LCDC.2 instead of through a
+  ## transfer -- two suites, two mechanisms, and the same two surviving cells.
+  ## Turned on: gambatte 4183 -> **4199, +16 / -0**, all sixteen of them
+  ## `late_sp*` (4145 -> 4161 when it was derived, before the LCDC.2 scan and
+  ## the window carry landed -- composing with those changed the total and not
+  ## one of the sixteen); mooneye `oam_dma/*`, `oam_dma_{restart,start,timing}`
+  ## and all twelve `acceptance/ppu` rows byte-identical; dmg-acid2 and
+  ## cgb-acid2 byte-identical.
+  ##
+  ## ---- What refuses it, and it is one ROM ------------------------------------
+  ##
+  ## `strikethrough` -- the one screenshot ROM in the bundle that runs an OAM DMA
+  ## mid-picture -- goes from pixel-exact to **23033/23040 on both devices**. Its
+  ## LY 68 has a transfer covering the WHOLE of that line's mode 2, and its
+  ## reference still draws OAM entry 39 (Y = $54, X = $4F, so screen x 71..78 --
+  ## exactly the 7 pixels that go missing). A lock that lasts the whole transfer
+  ## cannot leave that entry readable, so the lock's DURATION is wrong even
+  ## though its two edges are pinned to the dot by the sixteen brackets above.
+  ## Two narrower durations were built and measured and both are worse: blocking
+  ## only the entry the transfer's write port is on scores 28/52 on the families
+  ## (against 42 for this one and 26 for the burst), and blocking only the two
+  ## M-cycles the OAM bus changes hands on scores 38/52 -- and NEITHER saves
+  ## `strikethrough`, because the progressive read they both need is what
+  ## displaces entry 39 out of the ten-object cap on its own.
+  ##
+  ## So the shape is right and the duration is not, and the ROM that says so is
+  ## a pixel oracle the triage doc already uses to arbitrate three other knobs.
+  ## Left at 0 until the duration is derived rather than fitted.
 
 # ---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
 #
@@ -314,9 +381,23 @@ const OAM_SCAN_DOTS = 80'i32
   ## cleared on the dot this scan runs on, so an entry still in it BELOW this
   ## is one of this line's mode-2 writes and one at or above it belongs to the
   ## previous line and is already folded into `lcd_control`.
-const OBJ_SCAN_DOT_ADJ {.intdefine.} = 0'i32
+const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
   ## Dots to shift every object's scan sample by. 0 ships (object N samples on
   ## dot 2N); -1 is the other cell the ROMs above cannot separate from it.
+  ##
+  ## **Derived a second time, independently, from a different suite, and it
+  ## lands on the same two cells** (2026-08-13). `oamdma/late_sp{00,01,02,39}
+  ## {x,y}` measures the same `2N` through an OAM DMA rather than through
+  ## LCDC.2: the `x` half of each family steps the transfer's START across one
+  ## named object's scan dot in one-M-cycle steps and the `y` half steps its END
+  ## across the same dot two lines later, so the two halves are independent
+  ## instruments on the same quantity. They put object 0's dot in `[-3, 1)`,
+  ## objects 1 and 2 in `[1, 5)` and object 39 in `[77, 81)` -- `2N + adj` for
+  ## `adj` in `{-1, 0}`, exactly the cell the `_sizechange` ladder above cannot
+  ## split either. Swept over those families with OAM_SCAN_DMA_LOCK on, `adj` of
+  ## -3 / -2 / **-1 / 0** / 1 / 2 / 3 scores 34 / 34 / **42 / 42** / 34 / 30 /
+  ## 26 of 52 -- a two-value plateau with both sides falling off it. Two suites,
+  ## two mechanisms, one answer; see docs/gb-failure-triage.md (2026-08-13).
 
 proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
   ## `sprite_height` as the OAM scan's comparator saw it on `dot`. The same walk
@@ -327,6 +408,24 @@ proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
     if ppu.lcdc2_flip[1] > dot and ppu.lcdc2_flip[1] < OAM_SCAN_DOTS:
       b = b xor 0x04'u8
   if b != 0: 16 else: 8
+
+proc obj_scan_on_line(ppu: GbFifoPpu; gb: GB; s: GbSprite; d: int32): bool {.inline.} =
+  ## Did the OAM scan's comparator keep object `s` when it read it, on the
+  ## object's own dot `d`? Shared by the two scans that have to ask per object
+  ## -- the LCDC.2 one below and `oam_scan_advance`, which walks the same dots
+  ## for a different reason -- so the CGB rule lives in exactly one place.
+  result = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d))
+  when CGB_OBJ_SCAN_LEAD != 0:
+    if gb.cgb_enabled:
+      const L = int32(CGB_OBJ_SCAN_LEAD)
+      if gb.memory.current_speed == 0:
+        # The bit arrives L dots late and the comparator glitches for the
+        # dots in between: either height may keep the object.
+        result = result or sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d - L))
+      else:
+        # A double-speed M-cycle spends the whole of it inside itself and
+        # then some: no glitch, and the arrival is L dots EARLY.
+        result = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d + L))
 
 proc fifo_scan_lcdc2_live(ppu: GbFifoPpu): bool {.inline.} =
   ## Did LCDC.2 move during THIS line's mode 2? One test for the whole scan:
@@ -352,19 +451,7 @@ proc fifo_scan_sprites_lcdc2(ppu: GbFifoPpu; gb: GB): seq[GbSprite] {.noinline.}
     )
     # `sprite_addr shr 1` is 2N: four bytes per object, two dots per object.
     let d = int32(sprite_addr shr 1) + OBJ_SCAN_DOT_ADJ
-    var on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d))
-    when CGB_OBJ_SCAN_LEAD != 0:
-      if gb.cgb_enabled:
-        const L = int32(CGB_OBJ_SCAN_LEAD)
-        if gb.memory.current_speed == 0:
-          # The bit arrives L dots late and the comparator glitches for the
-          # dots in between: either height may keep the object.
-          on = on or sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d - L))
-        else:
-          # A double-speed M-cycle spends the whole of it inside itself and
-          # then some: no glitch, and the arrival is L dots EARLY.
-          on = sprite_on_line(s, ppu.ly, obj_scan_height(ppu, d + L))
-    if on:
+    if obj_scan_on_line(ppu, gb, s, d):
       var idx = 0
       while idx < result.len and s.x >= result[idx].x: inc idx
       result.insert(s, idx)
@@ -374,6 +461,24 @@ proc fifo_scan_sprites_lcdc2(ppu: GbFifoPpu; gb: GB): seq[GbSprite] {.noinline.}
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
 
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
+  ## The scan as ONE burst on the dot mode 2 ends, which is what ships. Nothing
+  ## can write OAM while it runs (the CPU is locked out of OAM for all of mode
+  ## 2), so where inside mode 2 each entry is READ is unobservable and the whole
+  ## thing may as well happen here. The two things that DO make an entry's own
+  ## dot observable each have their own body: LCDC.2 moving under the scan
+  ## (fifo_scan_sprites_lcdc2, below the block above) and an OAM DMA holding OAM
+  ## (oam_scan_advance, next door, compiled in only with OAM_SCAN_DMA_LOCK).
+  ##
+  ## Keeping this burst rather than routing it through `oam_scan_advance(ppu,
+  ## gb, OAM_SCAN_DOTS)`, which it is exactly equivalent to, is a measured
+  ## decision: this is the ~17,500-M-cycle-a-frame path and the two differ by an
+  ## allocation pattern -- this builds a fresh seq the caller moves into place,
+  ## the incremental one refills the field's own buffer entry by entry across
+  ## several calls. On dmg-acid2 with DINGBAT_BENCH_COUNTERS (min of five,
+  ## `cycles=` equal on both arms) routing the shipping path through the
+  ## incremental body costs **+2.07% of retired instructions** (23,817,092,336
+  ## -> 24,310,605,440) against a +0.13% precedent for accepted work here.
+  ##
   ## Called on the dot mode 2 ends, and the LAST reader of this line's mode-2
   ## LCDC.2 history -- so it is also what retires it, in place of
   ## fifo_reset_sprite a few statements earlier on the same dot. Moving the CALL
@@ -403,6 +508,84 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
       result.insert(s, idx)
       if result.len >= 10: break
     sprite_addr += 4
+
+proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = false) =
+  ## Run the mode-2 OAM scan forward through every entry whose own dot is
+  ## before `upto`, against OAM as it stands NOW. `blocked` is for the span an
+  ## OAM DMA has the OAM bus off the scan: the entries it covers are stepped
+  ## over rather than read.
+  ##
+  ## Called on the two dots either input can change on -- the dot a transfer
+  ## takes OAM and the dot it gives it back, so an entry the scan has already
+  ## read keeps what it read -- and once at the mode 2 -> 3 edge, which
+  ## finishes the line. Between those dots neither input moves, so walking the
+  ## entries in one go there is exact.
+  ##
+  ## Compiled in only with OAM_SCAN_DMA_LOCK on; the shipping scan is
+  ## fifo_get_sprites, and that proc's comment says why the two bodies are not
+  ## one. The per-object dot and the per-object comparator are NOT a second
+  ## copy: `OBJ_SCAN_DOT_ADJ` and `obj_scan_on_line` are the LCDC.2 scan's, and
+  ## the two suites that pin them are cross-checks on each other.
+  if ppu.scan_line != int32(ppu.ly):
+    # A fresh line: the partial result belongs to some earlier one.
+    ppu.sprites.setLen(0)
+    ppu.scan_next = 0
+    ppu.scan_line = int32(ppu.ly)
+  while ppu.scan_next < 40 and 2 * ppu.scan_next + OBJ_SCAN_DOT_ADJ < upto:
+    let sprite_addr = int(ppu.scan_next) * 4
+    let dot = 2 * ppu.scan_next + OBJ_SCAN_DOT_ADJ
+    inc ppu.scan_next
+    # An entry read while the bus is off the scan is not read at all. Modelled
+    # as "not considered" rather than as a read of $FF: for every line the scan
+    # runs on, a Y of $FF puts the object at lines 239..246 and is not on it, so
+    # the two are the same rule and this one does not have to claim a value it
+    # cannot measure.
+    if blocked: continue
+    let s = GbSprite(
+      y:          ppu.sprite_table[sprite_addr],
+      x:          ppu.sprite_table[sprite_addr + 1],
+      tile_num:   ppu.sprite_table[sprite_addr + 2],
+      attributes: ppu.sprite_table[sprite_addr + 3],
+      oam_idx:    uint8(sprite_addr),
+    )
+    if obj_scan_on_line(ppu, gb, s, dot):
+      # Sort ascending by X
+      var idx = 0
+      while idx < ppu.sprites.len and s.x >= ppu.sprites[idx].x: inc idx
+      ppu.sprites.insert(s, idx)
+      if ppu.sprites.len >= 10:
+        # Ten is the line's limit; the scan stops considering entries here
+        # exactly as the burst's `break` did.
+        ppu.scan_next = 40
+  if upto >= OAM_SCAN_DOTS:
+    # End of the line's mode 2. This is the last reader of the LCDC.2 history,
+    # so it retires it -- the same job, on the same dot, that fifo_get_sprites
+    # does on the arm where the lock is off.
+    ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
+    ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  when defined(gb_dma_trace):
+    if upto >= OAM_SCAN_DOTS:
+      echo "OAMSCAN ly=", ppu.ly, " dot=", ppu.cycle_counter,
+           " n=", ppu.sprites.len,
+           " lcdc=", toHex(ppu.lcd_control, 2),
+           " b0=", toHex(ppu.sprite_table[0], 2), toHex(ppu.sprite_table[1], 2),
+           toHex(ppu.sprite_table[2], 2), toHex(ppu.sprite_table[3], 2),
+           " b9c=", toHex(ppu.sprite_table[0x9C], 2), toHex(ppu.sprite_table[0x9D], 2),
+           toHex(ppu.sprite_table[0x9E], 2), toHex(ppu.sprite_table[0x9F], 2)
+
+proc fifo_oam_lock_change*(ppu: GbFifoPpu; gb: GB; taking: bool) =
+  ## An OAM DMA has just taken OAM, or is about to give it back, on this dot.
+  ## If a mode-2 scan is in progress, walk it up to here under the OLD state
+  ## first: everything before this dot was read (or missed) under that, and
+  ## everything after it belongs to the new one.
+  ##
+  ## `cycle_counter` is the dot the M-cycle carrying the edge STARTS on: the
+  ## bus half of an M-cycle (where mem_dma_tick lives) runs before the PPU's
+  ## dots for the same M-cycle.
+  ##
+  ## Cold -- twice per transfer, and it does nothing at all outside a mode 2.
+  if ppu.mode_flag == 2:
+    oam_scan_advance(ppu, gb, ppu.cycle_counter, blocked = not taking)
 
 const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
@@ -3987,7 +4170,16 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when SCX_FINE_LATCH_LIVE:
             ppu.scx_latch_until = -1'i32
           ppu.dropped_first_fetch = false
-          ppu.sprites = fifo_get_sprites(ppu, gb)
+          # Finishes the line's OAM scan at the dot mode 2 ends on. With the
+          # lock off that is the whole scan, in one burst; with it on, every
+          # entry a transfer's edge has not already forced it past -- and a
+          # transfer still in flight has held OAM off the scan since that edge,
+          # so the tail of the line is blind.
+          when OAM_SCAN_DMA_LOCK != 0:
+            oam_scan_advance(ppu, gb, OAM_SCAN_DOTS,
+                             blocked = gb.memory.dma_busy)
+          else:
+            ppu.sprites = fifo_get_sprites(ppu, gb)
           when LY0_PIPE_ANY:
             # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
             # where every other line's does (and M3_PIPE_AHEAD, if it is on,

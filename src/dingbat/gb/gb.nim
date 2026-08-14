@@ -3075,6 +3075,17 @@ type
     # is two.
     mix_run*:             int32
     sprites*:             seq[GbSprite]
+    # The mode-2 OAM scan's progress: the index of the next OAM entry the scan
+    # will examine, and the line the partial result in `sprites` belongs to.
+    # The scan normally runs as one burst at the end of mode 2 (nothing can
+    # change OAM while it is in progress, so where in mode 2 it runs is
+    # unobservable) -- these two only carry it when an OAM DMA *is* changing
+    # OAM underneath it, and the scan then has to be walked forward to the
+    # dot of each transferred byte. See oam_scan_advance in fifo_ppu.nim.
+    # Per-line scratch like everything above: not serialized, and rebuilt by
+    # the burst on the next mode 2 -> 3 transition.
+    scan_next*:           int32
+    scan_line*:           int32
 
   # ---- APU Channels (base types) ----
   GbSoundChannel* = ref object of RootObj

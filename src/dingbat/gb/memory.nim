@@ -794,6 +794,12 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
             echo "DMASTART ly=", gb.fifo_ppu.ly,
                  " dot=", gb.fifo_ppu.cycle_counter,
                  " src=", toHex(uint16(mem.dma) shl 8, 4)
+        when OAM_SCAN_DMA_LOCK != 0:
+          # The transfer takes OAM on this dot. A mode-2 scan that is still
+          # running has read everything up to here for real, and reads nothing
+          # after it until the transfer gives OAM back.
+          if gb.fifo_ppu != nil:
+            fifo_oam_lock_change(gb.fifo_ppu, gb, taking = true)
         mem.requested_oam_dma  = false
         mem.current_dma_source = uint16(mem.dma) shl 8
         mem.dma_position       = 0
@@ -835,6 +841,10 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         inc mem.dma_position
         # dma_position is now >= 1, so this is exactly the old
         # `dma_position > 0 and dma_position <= 0xA0` predicate.
+        when OAM_SCAN_DMA_LOCK != 0:
+          if mem.dma_position > 0xA0 and mem.dma_busy and gb.fifo_ppu != nil:
+            # The transfer gives OAM back on this dot. See fifo_oam_lock_change.
+            fifo_oam_lock_change(gb.fifo_ppu, gb, taking = false)
         mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
