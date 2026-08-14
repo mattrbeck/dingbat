@@ -22,7 +22,11 @@
 //   u32  checksum — NOT validated here, deliberately: VBA's importer never
 //        checks it, and VBA's own writer computes it over *signed* chars
 //        (implementation-defined sign extension), so files from other writers
-//        legitimately disagree. Rejecting on it would refuse working files.
+//        legitimately disagree. Confirmed on a 13-file corpus of real forum
+//        downloads: 9 carry the signed-char sum and 4 the unsigned one (each
+//        matches exactly one variant, so the split is writer builds differing
+//        in char signedness, not corruption). Validating with either variant
+//        would refuse a third of working files.
 //
 // GameShark SP snapshot (.gsv, VBA-M's CPUReadGSASPSnapshot): fixed offsets —
 //   0x0C..0x18   12 bytes of ROM internal name
