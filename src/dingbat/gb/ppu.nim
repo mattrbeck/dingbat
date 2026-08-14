@@ -1765,7 +1765,9 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       echo "MODE ", prev_mode, "->", mode, " ly=", ppu.ly,
            " dot=", ppu.cycle_counter
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
-  if mode == 1: ppu.window_trigger = false
+  if mode == 1:
+    ppu.window_trigger = false
+    ppu.window_trigger_en = false
   # The WY condition, half of it: Pan Docs says the window is drawn once
   # "WY == LY at any point in the frame", so the comparator is a level and the
   # latch it feeds is per frame -- cleared entering V-Blank above, set here at
@@ -1781,6 +1783,9 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
+    # The stricter sibling takes the enable bit AT the match — see
+    # window_trigger_en's declaration (gb.nim) for why the two are split.
+    if window_enabled(ppu): ppu.window_trigger_en = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
   if mode != prev_mode:
     # The one write the STAT readback needs. `cycle_counter` is the dot the dot
@@ -2020,6 +2025,7 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ## it lands on, not the one the byte was written on.
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
     ppu.window_trigger = true
+    if window_enabled(ppu): ppu.window_trigger_en = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
 proc ppu_store_lcdc_tdsel*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
@@ -2048,6 +2054,12 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
       echo "LCDC2 ly=", ppu.ly, " dot=", ppu.cycle_counter,
            " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
+  # LCDC.5 turning ON is the third event that can make "WY match while
+  # enabled" newly true (SameBoy schedules a fresh wy_check after every LCDC
+  # write). The enable-free window_trigger cannot move here — no LY or WY did.
+  if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
+     (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
+    ppu.window_trigger_en = true
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
     when CGB_TDSEL_ANY:

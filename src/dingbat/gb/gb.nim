@@ -1440,6 +1440,20 @@ const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
   ## Costs nothing: the entry is replaced rather than dropped, so the shifter
   ## does not stall and mode 3 does not move. Worth 2 wrong pixels; no other
   ## mealybug row and no gambatte row has a refused match on a push dot.
+  ##
+  ## Gated on `window_trigger_en` (a WY match seen while LCDC.5 was SET this
+  ## frame): a game that never enables its window must not glitch. Pokemon
+  ## Blue rests at WX = 7 / WY = 0 with the window off, its refused match
+  ## lands on the line's initial fill (also `size == 8`) every line, and
+  ## silicon draws no white column through its intro. This is the well-known
+  ## Star Trek 25th Anniversary insertion glitch (Pan Docs "Window", SameBoy
+  ## issue #278): nitro2k01's SGB logic traces condition it on the window
+  ## having been activated first, and SameBoy (wy_check) and DocBoy
+  ## (w.active_for_frame) both put the enable term inside the frame latch.
+  ## Where this model still differs from both of them — a hardware question
+  ## for the flashcart, see docs/hwprobe-questions.md: they INSERT the pixel
+  ## into an empty FIFO and delay the line by a dot; the mealybug reference
+  ## reads back unshifted either side, so this model REPLACES.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in
@@ -2774,6 +2788,17 @@ type
     hdma_held*:       array[16, uint8]
     # window state
     window_trigger*:     bool
+    window_trigger_en*:  bool # window_trigger's stricter sibling: a WY match
+                              # SEEN WITH LCDC.5 SET this frame. Gates the
+                              # WIN_EN_HOLD_ZERO pixel void only — a frame whose
+                              # window was never enabled must not glitch (WX=7 +
+                              # window-off is Pokemon Blue's resting state, and
+                              # its intro proves silicon draws nothing).
+                              # SameBoy wy_check / DocBoy w.active_for_frame
+                              # carry the same enable term. Not serialized:
+                              # cleared every VBlank, and a mid-frame load only
+                              # re-arms it a frame late in the rare
+                              # window-then-disabled scene.
     current_window_line*: int
     old_stat_flag*:      bool
     # A CPU write to LCDC/STAT/LYC changed one of the STAT interrupt line's

@@ -109,6 +109,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     hdma_src: base.hdma_src, hdma_dst: base.hdma_dst,
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
+    window_trigger_en: base.window_trigger_en,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
     stat_chg_dot: STAT_NO_HOLD,
@@ -2705,11 +2706,14 @@ proc window_refuse_start(ppu: GbFifoPpu) =
   elif ppu.win_hold == 0'u8:
     when WIN_EN_HOLD_ZERO != 0:
       # The refused match and the fetcher's PUSH on the same dot. `size == 8`
-      # is that collision and only that: the FIFO is full for exactly the dot
-      # the push filled it on, and the shifter has not taken from it yet. The
-      # MATCH's own dot, not the hold's retries -- a retry is a comparator that
-      # has already fired. See WIN_EN_HOLD_ZERO.
-      if ppu.fifo.size == 8:
+      # is that collision -- but the line's INITIAL fill satisfies it too, so
+      # the frame must additionally have seen a WY match with the window
+      # ENABLED (`window_trigger_en`): a never-enabled window must not glitch,
+      # or Pokemon Blue (parked at WX = 7, window off) draws a white column at
+      # x = 0 through every frame. See WIN_EN_HOLD_ZERO. The MATCH's own dot,
+      # not the hold's retries -- a retry is a comparator that has already
+      # fired.
+      if ppu.fifo.size == 8 and ppu.window_trigger_en:
         ppu.fifo.data[ppu.fifo.head] =
           GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
     ppu.win_hold = hold
