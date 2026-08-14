@@ -530,7 +530,7 @@ test("pullSync migrates local records when another device renamed the game", asy
     "Drive is exactly as the renaming device left it");
 });
 
-test("pullSync defers the migration while the game is loaded, without resurrecting old names", async () => {
+test("pullSync migrates a game that is OPEN right now, live, session and all", async () => {
   const app = await loadApp();
   const drive = makeDrive({
     "rom:B.gba": u8(65),
@@ -547,24 +547,63 @@ test("pullSync defers the migration while the game is loaded, without resurrecti
   app.idb.set("save:A.gba", u8(66));
   app.api.currentRomName = "rom.gba";
   app.api.currentOriginalName = "A.gba"; // being played right now
+  app.sandbox.FS.files.set("rom.sav", u8(66, 67)); // in-memory progress
 
   await app.api.pullSync();
   await settle();
 
-  assert.ok(app.idb.get("rom:A.gba"), "nothing is moved out from under the running game");
-  assert.ok(!app.api.syncState.queueUp.some((n) => n.includes("A.gba")),
-    "…and its old-name files are NOT queued back up to Drive");
-  eq(app.api.syncState.ren.map((r) => r.from), ["A.gba"],
-     "the marker is kept, so the next sync (game closed) migrates");
+  // Same dance renameGame does for its own live rename: pending save flushed
+  // under the old name first, then everything moves, then the session
+  // reattaches to the new name.
+  assert.equal(app.idb.get("rom:A.gba"), undefined);
+  eq(app.idb.get("rom:B.gba").data, u8(65));
+  eq(app.idb.get("save:B.gba"), u8(66, 67), "the in-memory progress moved too");
+  assert.equal(app.api.currentOriginalName, "B.gba",
+    "the open game now answers to its new name");
+  eq((app.idb.get("recent") || []).map((r) => r.name), ["B.gba"]);
+});
 
-  // The game closes; the next pull completes the rename.
-  app.api.currentRomName = null;
-  app.api.currentOriginalName = null;
+test("a link session defers the migration AND the grid keeps the old name meanwhile", async () => {
+  const app = await loadApp();
+  const drive = makeDrive({
+    "rom:B.gba": u8(65),
+    library: new TextEncoder().encode(JSON.stringify({
+      recents: [{ name: "B.gba", ts: 200 }],
+      tomb: [],
+      ren: [{ from: "A.gba", to: "B.gba", ts: 150 }],
+    })),
+  });
+  app.setFetch(drive.fetch);
+  signIn(app);
+  app.idb.set("recent", [{ name: "A.gba", ts: 100 }]);
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(65) });
+  app.idb.set("save:A.gba", u8(66));
+  app.api.linkMode = true;
+  app.api.linkRomEntry = { name: "A.gba" }; // a second core is writing these saves
+
+  await app.api.pullSync();
+  await settle();
+
+  assert.ok(app.idb.get("rom:A.gba"), "nothing is moved out from under the link session");
+  // THE regression: the grid must not adopt the new name while the data still
+  // sits under the old one — that renders an "on Drive only" tile for a game
+  // that is right here, whose download affordance then forks the library.
+  eq((app.idb.get("recent") || []).map((r) => r.name), ["A.gba"],
+     "the local grid keeps the old, installed name until the migration lands");
+  assert.ok(app.idb.get("recent")[0].ts < 150,
+     "…pinned older than the marker so it can never supersede the rename");
+  assert.ok(!app.api.syncState.queueUp.some((n) => n.includes("A.gba")),
+    "and old-name files are NOT queued back up to Drive");
+
+  // The link session ends; the next pull completes the rename.
+  app.api.linkMode = false;
+  app.api.linkRomEntry = null;
   await app.api.pullSync();
   await settle();
   assert.equal(app.idb.get("rom:A.gba"), undefined);
   eq(app.idb.get("rom:B.gba").data, u8(65));
   eq(app.idb.get("save:B.gba"), u8(66));
+  eq((app.idb.get("recent") || []).map((r) => r.name), ["B.gba"]);
 });
 
 test("two devices: a Drive-only rename on one lands whole on the other", async () => {
@@ -624,4 +663,140 @@ test("a dirty save queued before the rename arrives still uploads, under the new
   await settle();
   eq(drive.byName.get("save:B.gba").bytes, u8(77, 77),
      "the offline progress reached Drive under the new name");
+});
+
+// The field repro (2026-08-15): install + quick save in browser 1, rename the
+// game from browser 2 where it was never downloaded, come back to browser 1.
+// Browser 1's game is still OPEN and its quick save is still in the upload
+// queue when the visibilitychange flush+pull fires. It must end with one game,
+// under the new name, quick save intact locally AND on Drive — not an
+// "uninstalled" tile over stranded old-name data.
+test("field repro: rename elsewhere while installed+open here with a queued quick save", async () => {
+  const drive = makeDrive();
+
+  // Browser 1: install, sync up, quick save (queued, not yet flushed), game open.
+  const b1 = await loadApp();
+  b1.setFetch(drive.fetch);
+  signIn(b1);
+  b1.idb.set("recent", [{ name: "A.gba", ts: 100 }]);
+  b1.idb.set("rom:A.gba", { name: "A.gba", data: u8(65, 65) });
+  b1.idb.set("save:A.gba", u8(66));
+  b1.api.markUpload("rom:A.gba");
+  b1.api.markUpload("save:A.gba");
+  await b1.api.flushSync();
+  await settle();
+  b1.idb.set("state:A.gba", u8(70, 70)); // the quick save
+  b1.api.markUpload("state:A.gba");      // …queued, flush hasn't run yet
+  b1.api.currentRomName = "rom.gba";
+  b1.api.currentOriginalName = "A.gba";
+
+  // Browser 2: game not installed; rename it; sync.
+  const b2 = await loadApp();
+  b2.setFetch(drive.fetch);
+  signIn(b2);
+  await b2.api.pullSync();
+  await settle();
+  assert.equal((await b2.api.renameGame("A.gba", "B.gba")).ok, true);
+  await b2.api.flushSync();
+  await settle();
+  assert.ok(drive.byName.has("rom:B.gba") && !drive.byName.has("rom:A.gba"));
+
+  // Back to browser 1: visibilitychange runs flush (uploads the queued quick
+  // save — under the OLD name, racing the rename) and then the pull.
+  await b1.api.flushSync();
+  await settle();
+  assert.ok(drive.byName.has("state:A.gba"), "the raced upload landed old-named");
+  await b1.api.pullSync();
+  await settle();
+
+  eq(b1.idb.get("rom:B.gba").data, u8(65, 65), "installed, under the new name");
+  eq(b1.idb.get("state:B.gba"), u8(70, 70), "the quick save survived");
+  assert.equal(b1.idb.get("rom:A.gba"), undefined);
+  assert.equal(b1.idb.get("state:A.gba"), undefined);
+  assert.equal(b1.api.currentOriginalName, "B.gba");
+  eq((b1.idb.get("recent") || []).map((r) => r.name), ["B.gba"]);
+
+  // The pull queued the remote stray's rename; the next flush converges Drive.
+  await b1.api.flushSync();
+  await settle();
+  assert.ok(!drive.byName.has("state:A.gba"), "no old-name orphan left on Drive");
+  eq(drive.byName.get("state:B.gba").bytes, u8(70, 70));
+});
+
+// The fork this hardening exists for: the new-name copies were downloaded
+// BEFORE the migration could run. The old all-or-nothing move aborted on the
+// first collision forever, stranding the quick save invisibly under the old
+// name — the exact "my quick save is gone" report.
+test("a forked library heals per key: the quick save is rescued, duplicates deduped", async () => {
+  const app = await loadApp();
+  const drive = makeDrive({
+    "rom:B.gba": u8(65, 65),
+    "save:B.gba": u8(66),
+    library: new TextEncoder().encode(JSON.stringify({
+      recents: [{ name: "B.gba", ts: 200 }],
+      tomb: [],
+      ren: [{ from: "A.gba", to: "B.gba", ts: 150 }],
+    })),
+  });
+  app.setFetch(drive.fetch);
+  signIn(app);
+  app.idb.set("recent", [{ name: "B.gba", ts: 200 }]);
+  // Old-name data from before the rename…
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(65, 65) });
+  app.idb.set("save:A.gba", u8(66));
+  app.idb.set("state:A.gba", u8(70, 70)); // the quick save — no B copy exists
+  // …and freshly downloaded new-name copies (identical content).
+  app.idb.set("rom:B.gba", { name: "B.gba", data: u8(65, 65) });
+  app.idb.set("save:B.gba", u8(66));
+
+  await app.api.pullSync();
+  await settle();
+
+  eq(app.idb.get("state:B.gba"), u8(70, 70),
+     "the non-colliding quick save moved instead of being stranded");
+  assert.equal(app.idb.get("rom:A.gba"), undefined,
+    "the identical old-name ROM was dropped as a duplicate");
+  assert.equal(app.idb.get("save:A.gba"), undefined);
+  eq(app.idb.get("rom:B.gba").data, u8(65, 65));
+});
+
+test("a genuinely different colliding save is kept, visibly, under the old name", async () => {
+  const app = await loadApp();
+  const drive = makeDrive({
+    "rom:B.gba": u8(65),
+    library: new TextEncoder().encode(JSON.stringify({
+      recents: [{ name: "B.gba", ts: 200 }],
+      tomb: [],
+      ren: [{ from: "A.gba", to: "B.gba", ts: 150 }],
+    })),
+  });
+  app.setFetch(drive.fetch);
+  signIn(app);
+  app.idb.set("recent", [{ name: "B.gba", ts: 200 }]);
+  app.idb.set("save:A.gba", u8(1, 1, 1)); // progress the fork left behind
+  app.idb.set("rom:B.gba", { name: "B.gba", data: u8(65) });
+  app.idb.set("save:B.gba", u8(2, 2, 2)); // different progress under the new name
+
+  await app.api.pullSync();
+  await settle();
+
+  eq(app.idb.get("save:A.gba"), u8(1, 1, 1),
+     "neither copy is silently lost — the old-name save stays as a visible orphan");
+  eq(app.idb.get("save:B.gba"), u8(2, 2, 2));
+});
+
+test("relaunching a renamed-away game does not cancel the rename; a re-import does", async () => {
+  const app = await loadApp();
+  signIn(app, { ren: [{ from: "A.gba", to: "B.gba", ts: 5000 }] });
+  app.idb.set("recent", [{ name: "A.gba", ts: 100 }]);
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(65) });
+
+  // Relaunch (touchRecent): recency pins just under the marker, so the merge
+  // still folds this entry forward instead of reading it as a new claim.
+  await app.api.touchRecent("A.gba");
+  assert.equal(app.idb.get("recent")[0].ts, 4999);
+
+  // A real re-import IS a new claim on the freed-up name and supersedes.
+  await app.api.addRecentRom("A.gba", u8(9, 9));
+  assert.ok(app.idb.get("recent")[0].ts > 5000);
 });

@@ -662,15 +662,20 @@ const dbKeys = () => new Promise((resolve, reject) => {
 // which can still be interrupted between its phases.
 //
 // `pairs` is [[from, to], ...]; a `from` that holds nothing is skipped (the
-// per-game key list is a superset of what any one game actually stores), and a
+// per-game key list is a superset of what any one game actually stores). A
 // `to` that already holds something aborts the whole transaction rather than
-// overwriting it — collisions are refused, never merged. `puts` is
-// [[key, value], ...] applied in the same transaction. Resolves with the list
-// of [from, to] pairs that actually moved.
-const dbMoveKeys = (pairs, puts = []) => new Promise((resolve, reject) => {
+// overwriting it — collisions are refused, never merged — unless
+// `skipCollisions` is set, in which case that one pair is left in place (both
+// copies kept) and reported instead: the caller applying a rename it didn't
+// initiate must salvage every key it can, not strand them all behind the one
+// that collided. `puts` is [[key, value], ...] applied in the same
+// transaction. Resolves { moved, skipped }, each a list of [from, to] pairs.
+const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
+  new Promise((resolve, reject) => {
   let tx = db.transaction("blobs", "readwrite");
   let store = tx.objectStore("blobs");
   let moved = [];
+  let skipped = [];
   let failure = null;
   const fail = (msg) => {
     if (failure) return;
@@ -684,7 +689,17 @@ const dbMoveKeys = (pairs, puts = []) => new Promise((resolve, reject) => {
     dest.onsuccess = () => {
       if (failure) return;
       if (dest.result !== undefined && dest.result !== null) {
-        fail("Something is already stored under that name (" + to + ").");
+        if (!skipCollisions) {
+          fail("Something is already stored under that name (" + to + ").");
+          return;
+        }
+        // Only a real collision (both sides occupied) is worth reporting.
+        let src = store.get(from);
+        src.onsuccess = () => {
+          if (!failure && src.result !== undefined && src.result !== null) {
+            skipped.push([from, to]);
+          }
+        };
         return;
       }
       // Issued from a request callback, so it is still inside this
@@ -700,7 +715,7 @@ const dbMoveKeys = (pairs, puts = []) => new Promise((resolve, reject) => {
     };
   }
   for (let [k, v] of puts) store.put(v, k);
-  tx.oncomplete = () => resolve(moved);
+  tx.oncomplete = () => resolve({ moved, skipped });
   tx.onabort = () => reject(failure || tx.error || new Error("The move was rolled back."));
   tx.onerror = () => reject(failure || tx.error || new Error("The move failed."));
 });
@@ -3064,14 +3079,37 @@ const flushSyncInner = async () => {
 
 // Apply a rename that happened on ANOTHER device to this device's records:
 // the local half of renameGame, driven by a ren marker out of the merged
-// library. Nothing is queued for Drive — the device that renamed already
-// renamed the remote files — so the whole job is moving every local record
-// in one transaction and letting the sync bookkeeping (sigs/rmt) follow its
-// files to their new names. A collision aborts the move (dbMoveKeys refuses
-// to overwrite) and this returns false rather than merging two games' data.
+// library. Nothing here uploads or deletes on Drive — the device that renamed
+// already renamed the remote files — so the job is moving every local record
+// and letting the sync bookkeeping (sigs/rmt) follow its files to their new
+// names.
+//
+// Collisions are handled per key, unlike renameGame's all-or-nothing refusal:
+// this rename already happened, the user isn't here to pick a different name,
+// and refusing wholesale would strand every record under the old name (the
+// exact shape of "the quick save vanished": a new-name copy gets downloaded,
+// then the migration aborts forever). So each key that CAN move does; a
+// colliding key keeps both copies, and when they hold identical bytes the
+// old-name one is dropped as the duplicate it is. Anything genuinely
+// different stays put, visible in Manage ROMs as an old-name row rather than
+// silently lost. Returns { moved, leftover } counts, or null when the
+// transaction itself failed.
 const applyRemoteRename = async (from, to) => {
   let fromKeys = allPerGameKeys(from);
   let toKeys = allPerGameKeys(to);
+  // The game may be open right now — this pull often fires on the tab
+  // becoming visible again, seconds after the rename happened elsewhere. Do
+  // what renameGame does for its own live rename: flush the pending save
+  // under the old name, detach the session so no write path recreates an old
+  // key behind the move, and reattach under the new name after. Only a
+  // link/online session can't be migrated under (a second core and a peer
+  // hold the name); the caller defers that case.
+  if (isRomLoaded(from) && (linkMode || rollbackMode || netActive())) return null;
+  let loaded = isRomLoaded(from) && !!currentRomName;
+  if (loaded) {
+    await persistSave(currentRomName, from);
+    currentOriginalName = null;
+  }
   let puts = [];
   let prints = await dbGet(PRINTER_PHOTOS_KEY);
   if (Array.isArray(prints) && prints.some((p) => p?.game === from)) {
@@ -3103,11 +3141,14 @@ const applyRemoteRename = async (from, to) => {
     queueRen: syncState.queueRen.map((r) => ({ from: mapKey(r.from), to: r.to })),
   };
   puts.push(["gdrive_sync", nextSync]);
+  let res;
   try {
-    await dbMoveKeys(fromKeys.map((k, i) => [k, toKeys[i]]), puts);
+    res = await dbMoveKeys(fromKeys.map((k, i) => [k, toKeys[i]]), puts,
+                           { skipCollisions: true });
   } catch (e) {
+    if (loaded) currentOriginalName = from;
     console.warn("Rename from another device not applied here:", from, "→", to, e);
-    return false;
+    return null;
   }
   syncState = nextSync;
   if (Array.isArray(printerPhotos)) {
@@ -3115,7 +3156,23 @@ const applyRemoteRename = async (from, to) => {
   }
   if (stateUndoName === from) stateUndoName = to;
   if (rwUndoName === from) rwUndoName = to;
-  return true;
+  if (loaded) {
+    currentOriginalName = to;
+    if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
+  }
+  // Collided pairs: identical bytes mean the same file twice, so the old-name
+  // copy goes; anything else is kept (and counted, so the caller knows the
+  // migration has a remainder). Compared by content signature — the kinds
+  // readSyncBytes can't serialize (art, cheats, the resume snapshot) just
+  // stay put.
+  let leftover = 0;
+  for (let [f, t] of res.skipped) {
+    let a = await readSyncBytes(f);
+    let b = await readSyncBytes(t);
+    if (a && b && sigOfBytes(a) === sigOfBytes(b)) await dbDelete(f);
+    else leftover++;
+  }
+  return { moved: res.moved.length, leftover };
 };
 
 // --- Pull (down-sync): merged library, tombstones, saves for local games ---
@@ -3138,18 +3195,36 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // new name BEFORE the tombstone pass, so anything still sitting under an
     // old name is genuinely deleted data and never a just-renamed game.
     // Oldest-first, so a chain of renames replays in the order it happened.
+    // A game merely open right now migrates live (applyRemoteRename does the
+    // same session dance renameGame does); only a link/online session, or a
+    // failed transaction, defers to a later sync.
     let renPending = new Set();
     for (let r of [...(lib.ren || [])].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
       if (!(await hasAnyLocalRecord(r.from))) continue;
-      // The running game can't have its keys moved out from under it, and a
-      // collision must not merge two games — both wait for a later sync.
-      if (isRomLoaded(r.from) || !(await applyRemoteRename(r.from, r.to))) {
+      let applied = await applyRemoteRename(r.from, r.to);
+      if (!applied) {
         renPending.add(r.from);
         continue;
       }
+      // Old-name files still on Drive are uploads that raced the rename
+      // (this device's own pre-rename flush, typically): queue their
+      // in-place renames so the remote side converges too — the same rule
+      // as everywhere else, the flush deletes one only if the renamed copy
+      // already exists.
+      let fk = allPerGameKeys(r.from);
+      let tk = allPerGameKeys(r.to);
+      for (let i = 0; i < fk.length; i++) {
+        if (remote.has(fk[i]) && !!parseDriveFileName(fk[i]) &&
+            !syncState.queueRen.some((q) => q.from === fk[i])) {
+          syncState.queueRen.push({ from: fk[i], to: tk[i] });
+          queuedMissing = true;
+        }
+      }
       gridDirty = true;
-      showToast("“" + displayName(r.from) + "” is now “" + displayName(r.to) +
-                "” — renamed on another device");
+      if (applied.moved) {
+        showToast("“" + displayName(r.from) + "” is now “" + displayName(r.to) +
+                  "” — renamed on another device");
+      }
     }
 
     // Tombstones: anything deleted elsewhere that this device still holds.
@@ -3217,11 +3292,28 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // Adopt the merged library locally.
     syncState.tomb = lib.tomb;
     syncState.ren = lib.ren;
+    // A rename this device could not apply yet keeps its OLD name on the
+    // local grid: the tile must keep pointing at the data actually held here.
+    // Adopting the new name early would render an "on Drive only" tile for a
+    // game sitting right on this device — which reads as uninstalled, and
+    // whose download affordance forks the library. The shared library keeps
+    // the new name; only this device's copy of the index is held back, with
+    // ts pinned under the marker so the entry still folds forward (and can
+    // never supersede the rename) on the next merge.
+    let recents = lib.recents;
+    if (renPending.size) {
+      let back = new Map();
+      for (let m of lib.ren) if (renPending.has(m.from)) back.set(m.to, m);
+      recents = recents.map((e) => {
+        let m = back.get(e.name);
+        return m ? { name: m.from, ts: Math.min(e.ts || 0, (m.ts || 1) - 1) } : e;
+      });
+    }
     // The merged library is the grid — do NOT cap it at MAX_RECENT, or every
     // game past the 20th silently vanishes with no way to see or download it.
     // MAX_RECENT still bounds how many ROMs this device keeps bytes for
     // (bumpRecentIndex), which just turns the rest into Drive-only tiles.
-    await dbPut("recent", lib.recents);
+    await dbPut("recent", recents);
     await writeDriveLibrary(lib, remote);
     await saveSyncState();
     gridDirty = true;
@@ -3599,7 +3691,7 @@ const renameGame = async (oldName, newName) => {
 
   let moved;
   try {
-    moved = await dbMoveKeys(pairs, puts);
+    ({ moved } = await dbMoveKeys(pairs, puts));
   } catch (e) {
     // Nothing moved: the transaction either committed whole or rolled back
     // whole, so the game is exactly as it was. Put the session back on it.
@@ -4486,9 +4578,21 @@ const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
 // Move `name` to the front of the metadata index (adding it if new) and
 // evict past the cap — an evicted game loses its stored ROM + art records,
 // but never its saves (romsForManagement still lists it for cleanup).
-const bumpRecentIndex = async (name) => {
+const bumpRecentIndex = async (name, { fresh = false } = {}) => {
   let list = (await getRecentMeta()).filter((r) => r.name !== name);
-  list.unshift({ name, ts: Date.now() });
+  let ts = Date.now();
+  // Relaunching a game whose name a not-yet-applied rename marker points away
+  // from must not stamp the entry newer than the marker: the library merge
+  // reads a newer entry under an old name as "a different game claimed this
+  // name" and cancels the rename for every device. Playing the old-name copy
+  // is not that — so its recency pins just under the marker until the
+  // migration lands. A genuine re-import (addRecentRom, fresh: true) is
+  // exactly the claim-the-name case and keeps its full timestamp.
+  if (!fresh) {
+    let m = syncState.ren.find((r) => r?.from === name);
+    if (m?.ts && ts >= m.ts) ts = m.ts - 1;
+  }
+  list.unshift({ name, ts });
   // Past MAX_RECENT this device stops holding ROM bytes. Signed in, the entry
   // stays in the index and simply becomes a Drive-only tile — the bytes are
   // re-downloadable, so the library stays whole. Signed out there'd be nothing
@@ -4521,7 +4625,7 @@ const addRecentRom = async (name, bytes, art) => {
   // rom: record, never an index entry pointing at nothing.
   await dbPut(romKey(name), { name, data: new Uint8Array(bytes) });
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
-  await bumpRecentIndex(name);
+  await bumpRecentIndex(name, { fresh: true });
   refreshHomeRecent();
   requestPersistentStorage();
   // Back the freshly-imported game up to Drive soon (no-op unless it syncs).

@@ -24,10 +24,17 @@ is the real Drive API + two real devices.
 - [ ] **No re-upload.** Rename a large downloaded ROM and watch the sync
       indicator: the flush should be near-instant (metadata PATCHes only),
       not a multi-MB upload.
-- [ ] **Rename while playing elsewhere.** Rename on A while B is mid-game on
-      the same title. B's pull should defer (game keeps running under the old
-      name) and complete the migration on the first sync after the game is
-      closed.
+- [ ] **Rename while playing elsewhere** (hardened 2026-08-15 after the first
+      field test failed). Rename on A while B is mid-game on the same title,
+      then switch back to B's tab. B's very next sync should migrate live:
+      the game keeps running and now answers to the new name, the grid shows
+      one installed tile, and the quick save survives — never an
+      "uninstalled" tile over stranded old-name data.
+- [ ] **The failed field flow, re-run.** Install + quick save in browser 1
+      (leave the game open), rename from browser 2 where it was never
+      downloaded, return to browser 1 and sync/reload. Expect one installed
+      game under the new name with the quick save present, and no old-name
+      files left on Drive afterwards.
 
 ## Drive sync: original ship (2026-07-23, `a023c79`) — still open
 
