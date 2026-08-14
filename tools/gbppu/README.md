@@ -274,6 +274,46 @@ boot ROM both sides. `tests/README.md` explains why this, and not a glyph
 check, is the gate after a GB timing change. Needs `sameboy_runner` from
 `tools/gbfuzz/build.sh` and a boot-ROM directory; neither is in the repo.
 
+## The speed-switch pixel gate
+
+    tools/gbppu/daidswitch.sh [<dingbat_test>]
+
+daid's `speed_switch_timing_{div,ly,stat}` and both `strikethrough` frames as
+wrong-pixel counts, ~20 s, against any binary. Those five are the pixel witnesses
+that gate every speed-switch or halt-phase change — the only ones in the tree
+that see the PPU's advance across a KEY1 switch, and the row `CGB_HALT_PPU_LEAD`
+is held back by — and they are otherwise reachable only through a full runner
+pass. It uses `pngdiff.py` (reference PNG vs `--screenshot` PPM, masked to 0xF8
+per channel, pure stdlib), which is worth knowing about on its own for any
+one-row screenshot comparison.
+
+## One build per constant, scored
+
+    tools/gbppu/sssweep.sh <outprefix> "<defines>" [subdir ...]
+    tools/gbppu/sssweep.sh /tmp/x/a8 "-d:SPEED_SWITCH_PPU_EXTRA_DOTS=8"
+    tools/gbppu/sssweep.sh /tmp/x/full "" '*'          # the whole suite
+
+Builds one `dingbat_test` per define set, shards it, and writes a row file in
+`gamall.sh`'s exact shape, so `famflip.py` and the usual `diff <(cut -f1,2 ...)`
+recipe read it unchanged. ~12 s per point for the four speed-switch
+subdirectories (the default), ~25 s for all 5005 rows. Everything is keyed off
+`<outprefix>` — binary included — so two sessions can sweep at once, which
+`gamscore.sh`'s fixed `/tmp` paths do not allow.
+
+This is the loop for a constant only a handful of families can see: score the
+families, not the total. Bucket 13's two constants were derived this way after a
+whole-subdirectory total called the same sweep "flat".
+
+## Reading a gambatte ROM
+
+    python3 tools/gbppu/sm83dis.py <rom> [start_hex] [len_hex]
+
+Enough SM83 to read a test ROM's straight-line body — which for the
+`speedchange` and `lcd_offset` families IS the specification: how many
+`LDH ($4D),A ; STOP` switches, in which direction, and what sits between them.
+`lcd_offset`'s `offsetN` numbering was read off this and is not what the name
+suggests (`offset1` = 2 switches, `offset2` = 4, `offset3` = 2 plus a NOP).
+
 ## The bytes behind a pixel
 
     nim c -d:test_harness -d:release -d:gb_m3_trace -d:gb_px_trace \
