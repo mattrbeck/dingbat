@@ -388,6 +388,13 @@ var Module = {
     document.addEventListener("touchstart", resumeAudio, { once: false });
 
     const MAX_AUDIO_LEAD = 0.04; // max seconds audio can be scheduled ahead
+    // Scheduling-lead servo, mirroring index.js pushAudio: a small floor
+    // restored after a hitch spends the cushion, and a target the micro
+    // playback-rate servo holds the lead near (both directions, ±0.4% —
+    // pitch-inaudible). Kills the click at every cushion spend and the
+    // audio silently deleted at the MAX_AUDIO_LEAD drop.
+    const AUDIO_LEAD_FLOOR = 0.008;
+    const AUDIO_TARGET_LEAD = 0.020;
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") {
@@ -405,7 +412,7 @@ var Module = {
       const ptr = Module._getAudioBufferPtr();
       if (!ptr) return;
       const now = audioCtx.currentTime;
-      if (playTime < now) playTime = now;
+      if (playTime < now + AUDIO_LEAD_FLOOR) playTime = now + AUDIO_LEAD_FLOOR;
       // Drop audio if we've scheduled too far ahead (e.g. RAF throttled in iframe)
       if (playTime - now > MAX_AUDIO_LEAD) {
         Module._clearAudioBuffer();
@@ -425,8 +432,11 @@ var Module = {
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
+      const excess = playTime - now - AUDIO_TARGET_LEAD;
+      const rate = 1 + Math.max(-0.004, Math.min(0.004, excess * 0.15));
+      source.playbackRate.value = rate;
       source.start(playTime);
-      playTime += buffer.duration;
+      playTime += buffer.duration / rate;
     };
 
     // --- Demo ROM auto-load ---
@@ -474,7 +484,9 @@ var Module = {
           accumulator -= FRAME_TIME;
           framesRun++;
         }
-        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        // Keep (bounded) debt instead of zeroing it: zeroing deleted the
+        // audio for the missed frames — the click at every big hitch.
+        if (accumulator > FRAME_TIME * 2) accumulator = FRAME_TIME * 2;
       }
       // Present once per RAF (SDL no longer paints — see the WebGL2 section
       // above). Paused returns early, so the last frame stays on the canvas.

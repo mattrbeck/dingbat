@@ -10011,6 +10011,10 @@ var Module = {
     // killed. Generous vs FF_MAX_AUDIO_LEAD so 2x/catch-up bursts (which
     // legitimately schedule a few frames at once) are never clipped.
     const MAX_AUDIO_LEAD = 0.25;
+    // Audio scheduling-lead servo (see pushAudio): immediate floor restored
+    // after a spend, and the target the micro-rate servo holds the lead near.
+    const AUDIO_LEAD_FLOOR = 0.008;
+    const AUDIO_TARGET_LEAD = 0.030;
 
     const initAudio = () => {
       if (audioCtx) return;
@@ -10123,10 +10127,19 @@ var Module = {
       const ptr = Module._getAudioBufferPtr();
       if (!ptr) return;
       const now = audioCtx.currentTime;
-      if (playTime < now) playTime = now;
+      // A spent cushion means a gap already happened (nothing was scheduled
+      // to cover this instant). Restore a small floor immediately so the very
+      // next hitch doesn't click too — 6 ms is enough to absorb jitter and
+      // costs 6 ms of audio latency only right after a spend; the rate servo
+      // below then walks the lead back to its target gradually.
+      // (docs/research_web_audio_gaps.md: the naive 12 ms floor alone cost
+      // ~18 ms because nothing contained the upward drift; the servo does.)
+      if (playTime < now + AUDIO_LEAD_FLOOR) playTime = now + AUDIO_LEAD_FLOOR;
       // Scheduled too far ahead (the audio clock stalled): drop this frame's
       // samples — same pattern embed.js uses — instead of stacking source
-      // nodes without bound.
+      // nodes without bound. With the rate servo containing the lead this is
+      // a should-never-fire backstop, not the steady-state resync it was
+      // (reaching it dropped a whole audible frame every 3-4 minutes).
       if (playTime - now > MAX_AUDIO_LEAD) {
         Module._clearAudioBuffer();
         return;
@@ -10148,8 +10161,20 @@ var Module = {
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
+      // Micro playback-rate servo: hold the scheduling lead near its target
+      // from BOTH directions. Above target the buffer plays marginally fast
+      // (drains the ~1.1 ms/s production drift that used to climb to
+      // MAX_AUDIO_LEAD and drop a frame); below target it plays marginally
+      // slow, stretching real audio to rebuild the cushion a hitch spent —
+      // no samples are ever skipped or dropped. Clamped to ±0.4% (±7 cents),
+      // and the steady-state correction is ~0.1% (~2 cents): inaudible.
+      // Consecutive buffers stay gapless because the cursor advances by the
+      // buffer's *consumed* duration (duration / rate).
+      const excess = playTime - now - AUDIO_TARGET_LEAD;
+      const rate = 1 + Math.max(-0.004, Math.min(0.004, excess * 0.15));
+      source.playbackRate.value = rate;
       source.start(playTime);
-      playTime += buffer.duration;
+      playTime += buffer.duration / rate;
     };
 
     const fpsDiv = document.getElementById("fps");
@@ -10465,8 +10490,12 @@ var Module = {
           accumulator -= step;
           framesRun++;
         }
-        // Prevent accumulator from growing unbounded if tab was backgrounded
-        if (accumulator > step * 2) accumulator = 0;
+        // Bound the debt if the tab was backgrounded or a long hitch struck —
+        // but KEEP two frames of it rather than zeroing: zeroing silently
+        // deleted the audio for those frames (the click at every big hitch,
+        // docs/research_web_audio_gaps.md); a clamped debt is produced over
+        // the next ticks instead, and two frames of catch-up is imperceptible.
+        if (accumulator > step * 2) accumulator = step * 2;
         // Emulation is 60 fps but RAF follows the display: on a 120 Hz screen
         // every other tick steps zero frames, and re-presenting the identical
         // frame would double the texture-upload + shader cost (noticeable
