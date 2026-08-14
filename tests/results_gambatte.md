@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-13 16:45:17*
+*Generated: 2026-08-13 17:35:06*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4131/5005 passed.**
+**4145/5005 passed.**
 
 ## bgen
 
@@ -86,9 +86,9 @@ All 34 tests passed.
 
 All 8 tests passed.
 
-## dma (122/229 passed)
+## dma (128/229 passed)
 
-122/229 tests passed, 107 failed:
+128/229 tests passed, 101 failed:
 
 | Test | Result |
 |------|--------|
@@ -171,13 +171,7 @@ All 8 tests passed.
 | dma/hdma_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_m3speedchange_late_m0wakeup_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_pc_7ffe_cgb04c_out02 [cgb] | got 80, expected 02 |
-| dma/hdma_start_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_start_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_start_ly0_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_start_scx2_1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_start_scx3_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_start_scx5_1_cgb04c_out0 [cgb] | got 7, expected 0 |
-| dma/hdma_start_scx5_ds_1_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01 [cgb] | got 00, expected 01 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
@@ -274,15 +268,13 @@ All 8 tests passed.
 | enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | enable_display/ly1_late_cgbpw_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 
-## halt (127/158 passed)
+## halt (129/158 passed)
 
-127/158 tests passed, 31 failed:
+129/158 tests passed, 29 failed:
 
 | Test | Result |
 |------|--------|
 | halt/ifandie_ei_halt_m2int_m0stat_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| halt/ifandie_ei_halt_sra_dmg08_cgb04c_out0A [dmg] | got 09, expected 0A |
-| halt/ifandie_ei_halt_sra_dmg08_cgb04c_out0A [cgb] | got 09, expected 0A |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_4a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
@@ -1014,9 +1006,9 @@ All 67 tests passed.
 | sprites/sprite_late_late_disable_spx18_2_dmg08_out3 [dmg] | got 0, expected 3 |
 | sprites/sprite_late_late_disable_spx19_2_dmg08_out3 [dmg] | got 0, expected 3 |
 
-## tima (218/232 passed)
+## tima (224/232 passed)
 
-218/232 tests passed, 14 failed:
+224/232 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
@@ -1026,14 +1018,8 @@ All 67 tests passed.
 | tima/tc00_irq_ifw_ds_1_cgb04c_outE4 [cgb] | got E0, expected E4 |
 | tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_irq_late_retrigger_ds_2_cgb04c_outE0 [cgb] | got E4, expected E0 |
-| tima/tc00_late_tc01_4_dmg08_cgb04c_outFF [dmg] | got 00, expected FF |
-| tima/tc00_late_tc01_4_dmg08_cgb04c_outFF [cgb] | got 00, expected FF |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [dmg] | got FE, expected 00 |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [cgb] | got FE, expected 00 |
-| tima/tc00_late_tc01_6_dmg08_cgb04c_outFE [dmg] | got FF, expected FE |
-| tima/tc00_late_tc01_6_dmg08_cgb04c_outFE [cgb] | got FF, expected FE |
-| tima/tc00_late_tc01_8_dmg08_cgb04c_outFF [dmg] | got 00, expected FF |
-| tima/tc00_late_tc01_8_dmg08_cgb04c_outFF [cgb] | got 00, expected FF |
 
 ## undef_ops
 

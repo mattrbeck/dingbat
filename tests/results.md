@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-13 16:45:17 · commit 8d3e900 · game-boy-test-roms v7.0*
+*Generated: 2026-08-13 17:35:05 · commit f54eac3 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
-- **Total:** 1077
-- **Pass:** 880
-- **Fail:** 197
+- **Total:** 1046
+- **Pass:** 882
+- **Fail:** 164
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,10 +22,10 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 49 | 54 |
-| Game Boy - GBMicrotest | 430 | 513 |
-| Game Boy - AGE | 12 | 37 |
+| Game Boy - GBMicrotest | 430 | 482 |
+| Game Boy - AGE | 13 | 37 |
 | Game Boy - Screenshot suites | 9 | 13 |
-| Game Boy - SameSuite | 7 | 8 |
+| Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 10 | 12 |
 | Game Boy - Mooneye (wilbertpol) | 85 | 117 |
@@ -342,25 +342,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/dma/hdma_timing-C | CGB | 👀 Mooneye: FAIL |
 | mealybug/mbc/mbc3_rtc | cart | 👌 |
 
-## Game Boy - GBMicrotest (430/513)
+## Game Boy - GBMicrotest (430/482)
 
 | Test | Device | Result |
 |------|--------|--------|
-| gbmicrotest/000-oam_lock | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/000-write_to_x8000 | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/001-vram_unlocked | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/002-vram_locked | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/004-tima_boot_phase | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/004-tima_cycle_timer | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/007-lcd_on_stat | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/400-dma | cart | 👀 actual=0xE0 expected=0x46 verdict=0x00 |
-| gbmicrotest/500-scx-timing | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/800-ppu-latch-scx | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/801-ppu-latch-scy | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/802-ppu-latch-tileselect | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/803-ppu-latch-bgdisplay | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/audio_testbench | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/cpu_bus_1 | cart | 👀 actual=0x55 expected=0x00 verdict=0x00 |
 | gbmicrotest/div_inc_timing_a | cart | 👌 |
 | gbmicrotest/div_inc_timing_b | cart | 👌 |
 | gbmicrotest/dma_0x1000 | cart | 👌 |
@@ -368,9 +353,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/dma_0xA000 | cart | 👌 |
 | gbmicrotest/dma_0xC000 | cart | 👌 |
 | gbmicrotest/dma_0xE000 | cart | 👌 |
-| gbmicrotest/dma_basic | cart | 👀 actual=0xE0 expected=0x46 verdict=0x18 |
 | gbmicrotest/dma_timing_a | cart | 👌 |
-| gbmicrotest/flood_vram | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/halt_bug | cart | 👌 |
 | gbmicrotest/halt_op_dupe | cart | 👌 |
 | gbmicrotest/halt_op_dupe_delay | cart | 👀 actual=0x01 expected=0x55 verdict=0xFF |
@@ -527,7 +510,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_stat3_b | cart | 👌 |
 | gbmicrotest/lcdon_to_stat3_c | cart | 👌 |
 | gbmicrotest/lcdon_to_stat3_d | cart | 👌 |
-| gbmicrotest/lcdon_write_timing | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/line_144_oam_int_a | cart | 👌 |
 | gbmicrotest/line_144_oam_int_b | cart | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
 | gbmicrotest/line_144_oam_int_c | cart | 👀 actual=0xE3 expected=0xE2 verdict=0xFF |
@@ -565,7 +547,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_153_lyc_int_a | cart | 👌 |
 | gbmicrotest/line_153_lyc_int_b | cart | 👌 |
 | gbmicrotest/line_65_ly | cart | 👌 |
-| gbmicrotest/ly_while_lcd_off | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/lyc1_int_halt_a | cart | 👌 |
 | gbmicrotest/lyc1_int_halt_b | cart | 👌 |
 | gbmicrotest/lyc1_int_if_edge_a | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
@@ -584,8 +565,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lyc_int_halt_b | cart | 👌 |
 | gbmicrotest/mbc1_ram_banks | cart | 👌 |
 | gbmicrotest/mbc1_rom_banks | cart | 👌 |
-| gbmicrotest/minimal | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/mode2_stat_int_to_oam_unlock | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/oam_int_halt_a | cart | 👌 |
 | gbmicrotest/oam_int_halt_b | cart | 👌 |
 | gbmicrotest/oam_int_if_edge_a | cart | 👌 |
@@ -607,7 +586,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/oam_read_l1_d | cart | 👌 |
 | gbmicrotest/oam_read_l1_e | cart | 👌 |
 | gbmicrotest/oam_read_l1_f | cart | 👌 |
-| gbmicrotest/oam_sprite_trashing | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/oam_write_l0_a | cart | 👌 |
 | gbmicrotest/oam_write_l0_b | cart | 👌 |
 | gbmicrotest/oam_write_l0_c | cart | 👌 |
@@ -619,7 +597,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/oam_write_l1_d | cart | 👌 |
 | gbmicrotest/oam_write_l1_e | cart | 👌 |
 | gbmicrotest/oam_write_l1_f | cart | 👌 |
-| gbmicrotest/poweron | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/poweron_bgp_000 | cart | 👌 |
 | gbmicrotest/poweron_div_000 | cart | 👌 |
 | gbmicrotest/poweron_div_004 | cart | 👌 |
@@ -684,7 +661,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/poweron_vram_184 | cart | 👌 |
 | gbmicrotest/poweron_wx_000 | cart | 👌 |
 | gbmicrotest/poweron_wy_000 | cart | 👌 |
-| gbmicrotest/ppu_scx_vs_bgp | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/ppu_sprite0_scx0_a | cart | 👌 |
 | gbmicrotest/ppu_sprite0_scx0_b | cart | 👌 |
 | gbmicrotest/ppu_sprite0_scx1_a | cart | 👌 |
@@ -701,10 +677,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/ppu_sprite0_scx6_b | cart | 👌 |
 | gbmicrotest/ppu_sprite0_scx7_a | cart | 👌 |
 | gbmicrotest/ppu_sprite0_scx7_b | cart | 👌 |
-| gbmicrotest/ppu_sprite_testbench | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/ppu_spritex_vs_scx | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/ppu_win_vs_wx | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
-| gbmicrotest/ppu_wx_early | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/sprite4_0_a | cart | 👌 |
 | gbmicrotest/sprite4_0_b | cart | 👌 |
 | gbmicrotest/sprite4_1_a | cart | 👌 |
@@ -740,7 +712,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/stat_write_glitch_l1_b | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l1_c | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l1_d | cart | 👌 |
-| gbmicrotest/temp | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/timer_div_phase_c | cart | 👌 |
 | gbmicrotest/timer_div_phase_d | cart | 👌 |
 | gbmicrotest/timer_tima_inc_256k_a | cart | 👌 |
@@ -787,7 +758,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/timer_tima_write_f | cart | 👌 |
 | gbmicrotest/timer_tma_write_a | cart | 👌 |
 | gbmicrotest/timer_tma_write_b | cart | 👌 |
-| gbmicrotest/toggle_lcdc | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/vblank2_int_halt_a | cart | 👌 |
 | gbmicrotest/vblank2_int_halt_b | cart | 👌 |
 | gbmicrotest/vblank2_int_if_a | cart | 👀 actual=0xE1 expected=0xE0 verdict=0xFF |
@@ -822,7 +792,6 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/vram_write_l1_b | cart | 👌 |
 | gbmicrotest/vram_write_l1_c | cart | 👌 |
 | gbmicrotest/vram_write_l1_d | cart | 👌 |
-| gbmicrotest/wave_write_to_0xC003 | cart | 👀 actual=0x00 expected=0x00 verdict=0x00 |
 | gbmicrotest/win0_a | cart | 👌 |
 | gbmicrotest/win0_b | cart | 👌 |
 | gbmicrotest/win0_scx3_a | cart | 👌 |
@@ -860,11 +829,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win9_a | cart | 👌 |
 | gbmicrotest/win9_b | cart | 👌 |
 
-## Game Boy - AGE (12/37)
+## Game Boy - AGE (13/37)
 
 | Test | Device | Result |
 |------|--------|--------|
-| age/halt/ei-halt-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
+| age/halt/ei-halt-dmgC-cgbBCE | cart | 👌 |
 | age/halt/halt-m0-interrupt-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
 | age/halt/halt-prefetch-dmgC-cgbBCE | cart | 👌 |
 | age/lcd-align-ly/lcd-align-ly-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
@@ -920,7 +889,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | little-things-gb/firstwhite | DMG | 👀 89.2% correct (20552/23040 pixels match) |
 | mbc3-tester/mbc3-tester | DMG | 👀 94.4% correct (21760/23040 pixels match) |
 
-## Game Boy - SameSuite (7/8)
+## Game Boy - SameSuite (8/8)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -929,7 +898,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | same-suite/dma/hdma_lcd_off | CGB | 👌 |
 | same-suite/dma/hdma_mode0 | CGB | 👌 |
 | same-suite/ppu/blocking_bgpi_increase | CGB | 👌 |
-| same-suite/interrupt/ei_delay_halt | CGB | 👀 Mooneye: FAIL |
+| same-suite/interrupt/ei_delay_halt | CGB | 👌 |
 | same-suite/sgb/command_mlt_req | SGB | 👌 |
 | same-suite/sgb/command_mlt_req_1_incrementing | SGB | 👌 |
 
@@ -1157,10 +1126,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | per-ROM | 👀 16/44 passed |
 | gambatte/display_startstate | per-ROM | 👀 10/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
-| gambatte/dma | per-ROM | 👀 122/229 passed |
+| gambatte/dma | per-ROM | 👀 128/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 7/17 passed |
 | gambatte/enable_display | per-ROM | 👀 134/184 passed |
-| gambatte/halt | per-ROM | 👀 127/158 passed |
+| gambatte/halt | per-ROM | 👀 129/158 passed |
 | gambatte/irq_precedence | per-ROM | 👀 44/64 passed |
 | gambatte/lcd_offset | per-ROM | 👀 41/62 passed |
 | gambatte/lcdirq_precedence | per-ROM | 👀 60/62 passed |
@@ -1194,7 +1163,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/sound | per-ROM | 👀 113/116 passed |
 | gambatte/speedchange | per-ROM | 👀 132/208 passed |
 | gambatte/sprites | per-ROM | 👀 437/476 passed |
-| gambatte/tima | per-ROM | 👀 218/232 passed |
+| gambatte/tima | per-ROM | 👀 224/232 passed |
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 37/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 32/36 passed |
@@ -1215,6 +1184,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mealybug `*_cgb_d` references (~20)** — a CGB-D-or-later machine; measured 17/20 pixel-exact under --cgb-rev=D and held out pending per-revision rows. (build_mealybug_tests)
 - **age `ncm*` rows** — CGB running in non-CGB mode, a device this harness does not model. (build_age_tests)
 - **gambatte `_outaudio0/1` rows (220) + the AGB column** — audio-register sampling and the AGB device are not scored; see results_gambatte.md's source notes. (build_gambatte_rows)
+- **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)
 - **scribbltests/fairylake, scribbltests/winpos** — ship no reference image. (build_small_screenshot_tests)
 - **little-things-gb/tellinglys** — needs scripted joypad input mid-run. (build_small_screenshot_tests)
 - **mbc3-tester CGB reference** — a CGB compat-mode capture; only the DMG row is scored. (build_small_screenshot_tests)
