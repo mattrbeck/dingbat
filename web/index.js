@@ -3779,19 +3779,17 @@ const openRenameModal = async (oldName) => {
         ul.appendChild(li);
       }
       body.appendChild(ul);
-    } else {
-      para(body, "modal-toggle-sub", driveLinked()
-        ? "Nothing is stored on this device — this game's files live on " +
-          "Google Drive and are renamed there."
-        : "This game has no saved data on this device yet — only its place in your library moves.");
+    } else if (!driveLinked()) {
+      para(body, "modal-toggle-sub",
+        "This game has no saved data on this device yet — only its place in your library moves.");
     }
 
+    // One line covers the whole remote story, including the Drive-only case
+    // (where the list above is empty and this is the only thing that moves).
     if (driveLinked()) {
       para(body, "modal-toggle-sub",
-        "Google Drive: its files there are renamed in place on the next sync — " +
-        "nothing is deleted or re-uploaded. Your other devices switch to " +
-        "“" + displayName(newName) + "”, keeping everything saved with it, " +
-        "the next time they sync.");
+        "Copies on Google Drive are renamed on the next sync, and your other " +
+        "devices follow.");
     }
     if (wasLoaded) {
       para(body, "modal-toggle-sub",
