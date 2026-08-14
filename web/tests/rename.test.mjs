@@ -65,7 +65,7 @@ const seedTypicalGame = (app, name, ts = 100) => {
 
 const signIn = (app, extra = {}) => {
   app.api.syncState = {
-    queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {},
+    queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {},
     connected: true, ...extra,
   };
 };
@@ -237,7 +237,7 @@ test("a failed rename leaves the library index and the sync queue alone", async 
 
 // ── Drive ───────────────────────────────────────────────────────────────────
 
-test("signed in, a rename queues the old names for deletion and the new ones for upload", async () => {
+test("signed in, a rename queues in-place remote renames — no delete, no re-upload", async () => {
   const app = await loadApp();
   seedGame(app, OLD);
   signIn(app, {
@@ -248,15 +248,19 @@ test("signed in, a rename queues the old names for deletion and the new ones for
   await app.api.renameGame(OLD, NEW);
   const s = app.api.syncState;
 
-  eq(s.queueDel.sort(), syncableKeys(OLD).sort(),
-     "every remote file under the old name is queued for deletion");
-  eq(s.queueUp.sort(), syncableKeys(NEW).sort(),
-     "every remote file under the new name is queued for upload");
-  eq(s.sigs, {}, "signatures recorded for the old names die with them");
-  eq(s.rmt, {});
-  assert.equal(s.tomb.length, 1);
-  assert.equal(s.tomb[0].name, OLD,
-               "the old name is tombstoned so other devices drop it");
+  eq(s.queueRen.map((r) => r.from).sort(), syncableKeys(OLD).sort(),
+     "every remote file under the old name is queued for an in-place rename");
+  eq(s.queueRen.map((r) => r.to).sort(), syncableKeys(NEW).sort());
+  eq(s.queueDel, [], "nothing is deleted from Drive");
+  eq(s.queueUp, [], "nothing is re-uploaded — the files only change name");
+  eq(s.sigs, { ["rom:" + NEW]: "sig", ["save:" + NEW]: "sig" },
+     "signatures follow their files to the new names");
+  eq(s.rmt, { ["save:" + NEW]: "2026-01-01T00:00:00Z" });
+  eq(s.tomb, [], "a rename is not a delete: no tombstone");
+  assert.equal(s.ren.length, 1);
+  assert.equal(s.ren[0].from, OLD);
+  assert.equal(s.ren[0].to, NEW,
+               "the ren marker is what tells other devices to migrate their copies");
 });
 
 test("the queue survives the tab: it is written in the same transaction as the move", async () => {
@@ -268,14 +272,14 @@ test("the queue survives the tab: it is written in the same transaction as the m
 
   // Not "the in-memory object was updated" — what a reload will find on disk.
   const persisted = app.idb.get("gdrive_sync");
-  assert.ok(persisted.queueDel.includes("save:" + OLD));
-  assert.ok(persisted.queueUp.includes("save:" + NEW));
-  assert.equal(persisted.tomb[0].name, OLD);
+  assert.ok(persisted.queueRen.some(
+    (r) => r.from === "save:" + OLD && r.to === "save:" + NEW));
+  assert.equal(persisted.ren[0].from, OLD);
   assert.deepEqual(app.idb.get("save:" + NEW), u8(9, 9),
                    "…and the data it describes is there too");
 });
 
-test("only files this device holds are queued for remote deletion", async () => {
+test("files this device does not hold still get their remote rename", async () => {
   const app = await loadApp();
   seedTypicalGame(app, OLD); // no P2 save, no slot-7 state, …
   signIn(app);
@@ -283,30 +287,47 @@ test("only files this device holds are queued for remote deletion", async () => 
   await app.api.renameGame(OLD, NEW);
   const s = app.api.syncState;
 
-  const held = (n) => ["rom:" + n, "save:" + n, "state:" + n, "statemeta:" + n,
-                       "state:" + n + ":slot3", "statemeta:" + n + ":slot3"].sort();
-  eq(s.queueDel.sort(), held(OLD),
-     "a remote file with no local copy (the P2 save, the eight empty slots) is " +
-     "left alone — deleting it would take the only copy, since there is " +
-     "nothing here to re-upload under the new name");
-  eq(s.queueUp.sort(), held(NEW));
+  // Every syncable key is offered, held here or not: the rename is an
+  // in-place metadata change on Drive, so a remote file with no local copy
+  // renames instead of being stranded under the old name (the flush skips
+  // the names Drive doesn't hold).
+  eq(s.queueRen.map((r) => r.from).sort(), syncableKeys(OLD).sort());
+  eq(s.queueDel, []);
+  eq(s.queueUp, []);
 });
 
-test("a Drive-only game refuses the rename instead of deleting its only copy", async () => {
+test("a Drive-only game renames without its bytes ever being here", async () => {
   const app = await loadApp();
   // The shape "Remove from this device" leaves behind: saves here, ROM only on
-  // Drive. Renaming would queue rom:<old> for deletion with nothing to upload.
+  // Drive. The remote ROM renames in place, so its only copy is never touched.
   app.idb.set("recent", [{ name: OLD, ts: 100 }]);
   app.idb.set("save:" + OLD, u8(9, 9));
   signIn(app, { sigs: { ["rom:" + OLD]: "s" } });
 
   const res = await app.api.renameGame(OLD, NEW);
 
-  assert.equal(res.ok, false);
-  assert.match(res.error, /Sync .* to this device/);
-  eq(app.api.syncState.queueDel, []);
-  eq(app.api.syncState.tomb, []);
-  assert.deepEqual(app.idb.get("save:" + OLD), u8(9, 9));
+  assert.equal(res.ok, true);
+  assert.deepEqual(app.idb.get("save:" + NEW), u8(9, 9), "the local save moved");
+  assert.ok(app.api.syncState.queueRen.some(
+    (r) => r.from === "rom:" + OLD && r.to === "rom:" + NEW),
+    "the ROM this device never held is renamed on Drive");
+  eq(app.api.syncState.sigs, { ["rom:" + NEW]: "s" });
+  eq(app.api.syncState.queueDel, [], "its only copy is never queued for deletion");
+  eq(app.idb.get("recent").map((r) => r.name), [NEW]);
+});
+
+test("a key already queued for remote deletion is not renamed back to life", async () => {
+  const app = await loadApp();
+  seedTypicalGame(app, OLD);
+  signIn(app, { queueDel: ["state:" + OLD] });
+
+  await app.api.renameGame(OLD, NEW);
+  const s = app.api.syncState;
+
+  assert.ok(s.queueDel.includes("state:" + OLD),
+            "the condemned file keeps its fate, under its old name");
+  assert.ok(!s.queueRen.some((r) => r.from === "state:" + OLD),
+            "renaming it would resurrect it under the new name");
 });
 
 test("signed out, that same game renames — there is no remote copy to lose", async () => {
@@ -319,7 +340,7 @@ test("signed out, that same game renames — there is no remote copy to lose", a
   assert.deepEqual(app.idb.get("save:" + NEW), u8(9, 9));
 });
 
-test("the pencil is disabled on a Drive-only row", async () => {
+test("the pencil is enabled on a Drive-only row", async () => {
   const app = await loadApp();
   app.idb.set("recent", [{ name: OLD, ts: 100 }]);
   app.idb.set("save:" + OLD, u8(9, 9)); // saves here, ROM only on Drive
@@ -327,8 +348,9 @@ test("the pencil is disabled on a Drive-only row", async () => {
   await openManageList(app);
 
   const btn = renameButtonFor(app, OLD);
-  assert.equal(btn.disabled, true);
-  assert.match(btn.title, /Sync this game to this device/);
+  assert.equal(btn.disabled, false,
+    "Drive renames its files in place, so the bytes never need to be here");
+  assert.match(btn.title, /Rename this game/);
 });
 
 test("a stale tombstone on the new name is cleared, not left to delete the game", async () => {
@@ -341,10 +363,10 @@ test("a stale tombstone on the new name is cleared, not left to delete the game"
 
   await app.api.renameGame(OLD, NEW);
 
-  eq(app.api.syncState.tomb.map((t) => t.name), [OLD]);
+  eq(app.api.syncState.tomb, [], "…and no tombstone is raised: a rename is not a delete");
 });
 
-test("a delete queued for the new name is dropped, so the fresh upload is not deleted", async () => {
+test("a delete queued for the new name is dropped, and a pending upload follows the rename", async () => {
   const app = await loadApp();
   seedTypicalGame(app, OLD);
   signIn(app, { queueDel: ["save:" + NEW], queueUp: ["save:" + OLD] });
@@ -355,8 +377,8 @@ test("a delete queued for the new name is dropped, so the fresh upload is not de
   assert.equal(s.queueDel.includes("save:" + NEW), false);
   assert.equal(s.queueUp.includes("save:" + OLD), false,
                "an upload of a key that no longer exists is dropped");
-  assert.ok(s.queueUp.includes("save:" + NEW));
-  assert.ok(s.queueDel.includes("save:" + OLD));
+  assert.ok(s.queueUp.includes("save:" + NEW),
+            "…its unsent bytes deliver under the new name instead");
 });
 
 test("signed out, a rename is purely local", async () => {

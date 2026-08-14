@@ -9,7 +9,7 @@ import { loadApp, jsonRes, bytesRes, u8, settle } from "./helpers.mjs";
 
 const signIn = (app) => {
   app.api.gdriveToken = "test-token";
-  app.api.syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {}, connected: true };
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {}, connected: true };
 };
 
 const tileCount = (app) =>

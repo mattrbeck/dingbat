@@ -117,7 +117,7 @@ const makeDrive = (seed = {}) => {
 const signIn = (app, sigs = {}) => {
   app.api.gdriveToken = "test-token";
   app.api.syncState =
-    { queueUp: [], queueDel: [], tomb: [], sigs, rmt: {}, connected: true };
+    { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs, rmt: {}, connected: true };
 };
 
 // ── index.js agrees with the inventory above ────────────────────────────────

@@ -276,7 +276,7 @@ test("the first connection carries no hint — the user picks the account", asyn
 test("the account outlives the token: loadSyncState restores the hint", async () => {
   const app = await loadApp();
   await app.api.dbPut("gdrive_sync", {
-    queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {},
+    queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {},
     connected: true, token: null, tokenExp: 0, email: "player@example.com",
   });
   await app.api.loadSyncState();

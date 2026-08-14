@@ -1943,17 +1943,11 @@ const refreshRomsManageList = async () => {
     // which game it belongs to, since a list of them is otherwise identical.
     renameBtn.setAttribute("aria-label", "Rename " + displayName(name));
     renameBtn.innerHTML = PENCIL_ICON;
-    // A game whose bytes are only on Drive can't be renamed here: the rename
-    // would have to delete the remote files and re-upload them under the new
-    // name, and this device has nothing to re-upload. Sync it down first —
-    // which is the button sitting on this very row.
-    let romHere = localRoms.has(name);
+    // Drive-only rows rename too: Drive renames its files in place (a
+    // metadata PATCH), so the bytes never need to be on this device.
     if (linkRunning) {
       renameBtn.disabled = true;
       renameBtn.title = "Exit link mode to rename this game";
-    } else if (driveLinked() && !romHere) {
-      renameBtn.disabled = true;
-      renameBtn.title = "Sync this game to this device before renaming it";
     } else {
       renameBtn.title = "Rename this game and everything saved with it";
       renameBtn.addEventListener("click", () => openRenameModal(name));
@@ -2558,13 +2552,19 @@ const renderGdriveSection = () => {
 // Signing in IS turning sync on — there is no mode, no opt-in prompt. Signed
 // out, none of this runs and the app behaves exactly as it always has.
 //
-// The library (which games exist, and which were deleted) lives in ONE Drive
-// file, "library":
-//     { recents: [{ name, ts }], tomb: [{ name, ts }] }
+// The library (which games exist, which were deleted, which were renamed)
+// lives in ONE Drive file, "library":
+//     { recents: [{ name, ts }], tomb: [{ name, ts }], ren: [{ from, to, ts }] }
 // `recents` is the merged cross-device play history — it drives the home grid,
 // so the grid is your library across every device. `tomb` are tombstones:
 // games explicitly deleted, recorded so a plain union-merge can't resurrect
 // them. Re-uploading a game clears its tombstone (re-upload supersedes).
+// `ren` are rename markers, the tombstone's constructive sibling: a rename on
+// one device records { from, to, ts } so every other device migrates its own
+// records for `from` over to `to` on its next sync — instead of a tombstone
+// deleting them and the old name re-uploading from whoever still holds it.
+// A newer recents entry under `from` supersedes the marker (a fresh import
+// legitimately re-using the freed-up name must never be renamed after it).
 //
 // ROMs are NEVER bulk-downloaded. A merged-recents entry whose rom: record is
 // missing locally renders as a "Drive-only" tile with a download affordance;
@@ -2582,10 +2582,15 @@ const SYNC_DEBOUNCE_MS = 2000;   // quiet period before a flush
 const SYNC_MAX_WAIT_MS = 10000;  // ...but never sit on changes longer than this
 const SYNC_POLL_MS = 3 * 60 * 1000;
 
-// Persisted under "gdrive_sync". queueUp/queueDel/tomb survive reloads so an
-// offline edit still reaches Drive later. sigs = last agreed content signature
-// per Drive file; rmt = the remote modifiedTime we last saw for it.
-let syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {}, email: null };
+// Persisted under "gdrive_sync". queueUp/queueDel/queueRen/tomb/ren survive
+// reloads so an offline edit still reaches Drive later. sigs = last agreed
+// content signature per Drive file; rmt = the remote modifiedTime we last saw
+// for it. queueRen = pending remote file renames [{ from, to }]; ren = this
+// device's game-rename markers [{ from, to, ts }], the rename counterpart of
+// tombstones (published through the shared library so other devices migrate
+// their local records instead of re-uploading the old name).
+let syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                  sigs: {}, rmt: {}, email: null };
 let syncBusy = false;
 let syncTimer = null;
 let syncCapTimer = null;
@@ -2600,7 +2605,9 @@ const loadSyncState = async () => {
     syncState = {
       queueUp: Array.isArray(s.queueUp) ? s.queueUp : [],
       queueDel: Array.isArray(s.queueDel) ? s.queueDel : [],
+      queueRen: Array.isArray(s.queueRen) ? s.queueRen : [],
       tomb: Array.isArray(s.tomb) ? s.tomb : [],
+      ren: Array.isArray(s.ren) ? s.ren : [],
       sigs: s.sigs && typeof s.sigs === "object" ? s.sigs : {},
       rmt: s.rmt && typeof s.rmt === "object" ? s.rmt : {},
       connected: !!s.connected,
@@ -2667,6 +2674,13 @@ const localFilesForGame = async (game) => {
 const hasLocalRom = async (game) => !!(await dbGet(romKey(game)))?.data?.length;
 // Any local trace of a game at all (ROM or save data)?
 const hasLocalData = async (game) => (await localFilesForGame(game)).length > 0;
+// Same question, but over EVERY per-game record — including the ones Drive
+// never mirrors (box art, cheats, the resume snapshot), which a rename
+// arriving from another device must still migrate.
+const hasAnyLocalRecord = async (game) => {
+  for (let k of allPerGameKeys(game)) if ((await dbGet(k)) != null) return true;
+  return false;
+};
 
 const readSyncBytes = async (key) => {
   let v = await dbGet(key);
@@ -2701,35 +2715,74 @@ const writeSyncBytes = async (name, bytes) => {
 const driveDelete = (fileId) =>
   driveFetch(GDRIVE_FILES + "/" + fileId, { method: "DELETE" });
 
+// Rename one Drive file in place — a metadata-only PATCH, no content
+// transfer, which is what lets a whole game rename without its bytes ever
+// being on this device. Asks for modifiedTime back so rmt can track the bump
+// the rename itself causes (otherwise the next pull re-downloads the file
+// once just to learn its content didn't change).
+const driveRenameFile = (fileId, newName) =>
+  driveFetch(GDRIVE_FILES + "/" + fileId +
+             "?fields=" + encodeURIComponent("id,name,modifiedTime"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+
 const driveListMap = async () =>
   new Map((await driveListAll()).map((f) => [f.name, f]));
 
-// --- The shared library file (merged recents + tombstones) ----------------
+// --- The shared library file (merged recents + tombstones + renames) ------
 const readDriveLibrary = async (remote) => {
   let f = remote.get(LIBRARY_FILE);
-  if (!f) return { recents: [], tomb: [] };
+  if (!f) return { recents: [], tomb: [], ren: [] };
   try {
     let bytes = await driveDownload(f.id);
     let o = JSON.parse(new TextDecoder().decode(bytes));
     return {
       recents: Array.isArray(o.recents) ? o.recents : [],
       tomb: Array.isArray(o.tomb) ? o.tomb : [],
+      ren: Array.isArray(o.ren) ? o.ren : [],
     };
-  } catch { return { recents: [], tomb: [] }; }
+  } catch { return { recents: [], tomb: [], ren: [] }; }
 };
 const writeDriveLibrary = async (lib, remote) => {
   let bytes = new TextEncoder().encode(JSON.stringify(lib));
   await driveUploadFile(LIBRARY_FILE, bytes, remote.get(LIBRARY_FILE)?.id);
 };
 
-// Union by name keeping the newest timestamp, then drop anything tombstoned
-// more recently than the entry itself (a re-upload bumps ts, so it wins).
+// Union by name keeping the newest timestamp, carry rename markers across the
+// entries they name, then drop anything tombstoned more recently than the
+// entry itself (a re-upload bumps ts, so it wins).
 const mergeLibrary = (a, b) => {
   let byName = new Map();
   for (let e of [...(a.recents || []), ...(b.recents || [])]) {
     if (!e?.name) continue;
     let prev = byName.get(e.name);
     if (!prev || (e.ts || 0) > (prev.ts || 0)) byName.set(e.name, { name: e.name, ts: e.ts || 0 });
+  }
+  // Rename markers: tombstone-like, newest marker per old name wins.
+  let ren = new Map();
+  for (let r of [...(a.ren || []), ...(b.ren || [])]) {
+    if (!r?.from || !r?.to || r.from === r.to) continue;
+    let prev = ren.get(r.from);
+    if (!prev || (r.ts || 0) > (prev.ts || 0)) {
+      ren.set(r.from, { from: r.from, to: r.to, ts: r.ts || 0 });
+    }
+  }
+  // Apply them to the merged entries oldest-first, so a chain (A→B, then
+  // B→C) lands on C. An entry moves only when the marker is newer than it; a
+  // renamed entry keeps its own recency (a rename is not a play).
+  for (let r of [...ren.values()].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
+    let e = byName.get(r.from);
+    if (e && (e.ts || 0) < r.ts) {
+      byName.delete(r.from);
+      let t = byName.get(r.to);
+      if (!t || (t.ts || 0) < (e.ts || 0)) byName.set(r.to, { name: r.to, ts: e.ts || 0 });
+    }
+    // Any entry still standing under the old name is newer than the marker: a
+    // fresh import re-using the freed-up name. The marker is spent — drop it,
+    // or it would rename the newcomer on every device that syncs.
+    if (byName.has(r.from)) ren.delete(r.from);
   }
   let tomb = new Map();
   for (let t of [...(a.tomb || []), ...(b.tomb || [])]) {
@@ -2745,12 +2798,14 @@ const mergeLibrary = (a, b) => {
   return {
     recents: [...byName.values()].sort((x, y) => (y.ts || 0) - (x.ts || 0)),
     tomb: [...tomb.values()],
+    ren: [...ren.values()],
   };
 };
 
 const localLibrary = async () => ({
   recents: (await getRecentMeta()).filter((r) => r?.name),
   tomb: syncState.tomb.slice(),
+  ren: syncState.ren.slice(),
 });
 
 // --- Sync status indicator (lives in the retired status-LED slot) ---------
@@ -2820,7 +2875,8 @@ if (syncIndicator) {
     if (syncStatus !== "idle") showToast(SYNC_DESCS[syncStatus]);
   });
 }
-const pendingCount = () => syncState.queueUp.length + syncState.queueDel.length;
+const pendingCount = () =>
+  syncState.queueUp.length + syncState.queueDel.length + syncState.queueRen.length;
 // Pending and in-flight both read as "Syncing" — a bare number confuses more
 // than it informs, especially icon-only on a phone.
 const refreshSyncStatus = () => {
@@ -2906,11 +2962,41 @@ const flushSync = (...a) => {
 };
 const flushSyncInner = async () => {
   if (!syncActive()) return;
-  if (!pendingCount() && !syncState.tomb.length) { refreshSyncStatus(); return; }
+  if (!pendingCount() && !syncState.tomb.length && !syncState.ren.length) {
+    refreshSyncStatus();
+    return;
+  }
   syncBusy = true;
   setSyncStatus("syncing");
   try {
     let remote = await driveListMap();
+    // Renames first: every later step (the deletes, the uploads, the library
+    // publish) speaks in new names, so the remote files must answer to them
+    // before any of it runs.
+    for (let r of syncState.queueRen.slice()) {
+      let f = remote.get(r.from);
+      if (f && !remote.has(r.to)) {
+        let meta = await (await driveRenameFile(f.id, r.to)).json().catch(() => null);
+        remote.delete(r.from);
+        remote.set(r.to, { ...f, name: r.to,
+                           modifiedTime: meta?.modifiedTime || f.modifiedTime });
+        if (meta?.modifiedTime && syncState.rmt[r.to]) {
+          syncState.rmt[r.to] = meta.modifiedTime;
+        }
+      } else if (f) {
+        // The renamed file already exists (another device raced us with the
+        // same rename): the old file is a duplicate now, not the only copy.
+        await driveDelete(f.id);
+        remote.delete(r.from);
+      } else if (!remote.has(r.to) && !syncState.queueUp.includes(r.to) &&
+                 (await readSyncBytes(r.to))) {
+        // Drive holds neither name, but this device holds the bytes (the
+        // rename got here before the first upload ever did): upload rather
+        // than quietly leaving the file off Drive.
+        syncState.queueUp.push(r.to);
+      }
+      syncState.queueRen = syncState.queueRen.filter((x) => x !== r);
+    }
     for (let name of syncState.queueDel.slice()) {
       let r = remote.get(name);
       if (r) await driveDelete(r.id);
@@ -2936,10 +3022,12 @@ const flushSyncInner = async () => {
       }
       syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
     }
-    // Publish the library (recents + any tombstones raised locally).
+    // Publish the library (recents + any tombstones or rename markers raised
+    // locally).
     let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
     await writeDriveLibrary(lib, await driveListMap());
     syncState.tomb = lib.tomb;
+    syncState.ren = lib.ren;
     await saveSyncState();
     syncBusy = false;
     setSyncStatus("done");
@@ -2949,6 +3037,62 @@ const flushSyncInner = async () => {
     setSyncStatus("offline");
     console.warn("Drive sync flush failed:", e);
   }
+};
+
+// Apply a rename that happened on ANOTHER device to this device's records:
+// the local half of renameGame, driven by a ren marker out of the merged
+// library. Nothing is queued for Drive — the device that renamed already
+// renamed the remote files — so the whole job is moving every local record
+// in one transaction and letting the sync bookkeeping (sigs/rmt) follow its
+// files to their new names. A collision aborts the move (dbMoveKeys refuses
+// to overwrite) and this returns false rather than merging two games' data.
+const applyRemoteRename = async (from, to) => {
+  let fromKeys = allPerGameKeys(from);
+  let toKeys = allPerGameKeys(to);
+  let puts = [];
+  let prints = await dbGet(PRINTER_PHOTOS_KEY);
+  if (Array.isArray(prints) && prints.some((p) => p?.game === from)) {
+    puts.push([PRINTER_PHOTOS_KEY,
+               prints.map((p) => (p?.game === from ? { ...p, game: to } : p))]);
+  }
+  let sigs = { ...syncState.sigs };
+  let rmt = { ...syncState.rmt };
+  fromKeys.forEach((f, i) => {
+    let t = toKeys[i];
+    if (f in sigs) { sigs[t] = sigs[f]; delete sigs[f]; }
+    if (f in rmt) { rmt[t] = rmt[f]; delete rmt[f]; }
+  });
+  // Work queued under the old names keeps its intent under the new ones: a
+  // dirty save made offline still uploads (as the new name), a pending
+  // delete still deletes (the file it aimed at was renamed remotely too).
+  // Without this the flush would look the old keys up, find nothing, and
+  // silently drop the work.
+  let mapKey = (k) => {
+    let i = fromKeys.indexOf(k);
+    return i >= 0 ? toKeys[i] : k;
+  };
+  let nextSync = {
+    ...syncState,
+    sigs,
+    rmt,
+    queueUp: [...new Set(syncState.queueUp.map(mapKey))],
+    queueDel: [...new Set(syncState.queueDel.map(mapKey))],
+    queueRen: syncState.queueRen.map((r) => ({ from: mapKey(r.from), to: r.to })),
+  };
+  puts.push(["gdrive_sync", nextSync]);
+  try {
+    await dbMoveKeys(fromKeys.map((k, i) => [k, toKeys[i]]), puts);
+  } catch (e) {
+    console.warn("Rename from another device not applied here:", from, "→", to, e);
+    return false;
+  }
+  syncState = nextSync;
+  if (Array.isArray(printerPhotos)) {
+    for (let p of printerPhotos) if (p?.game === from) p.game = to;
+  }
+  if (stateUndoName === from) stateUndoName = to;
+  if (rwUndoName === from) rwUndoName = to;
+  return true;
 };
 
 // --- Pull (down-sync): merged library, tombstones, saves for local games ---
@@ -2966,6 +3110,24 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   try {
     let remote = await driveListMap();
     let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
+
+    // Renames made on another device — migrate this device's records to the
+    // new name BEFORE the tombstone pass, so anything still sitting under an
+    // old name is genuinely deleted data and never a just-renamed game.
+    // Oldest-first, so a chain of renames replays in the order it happened.
+    let renPending = new Set();
+    for (let r of [...(lib.ren || [])].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
+      if (!(await hasAnyLocalRecord(r.from))) continue;
+      // The running game can't have its keys moved out from under it, and a
+      // collision must not merge two games — both wait for a later sync.
+      if (isRomLoaded(r.from) || !(await applyRemoteRename(r.from, r.to))) {
+        renPending.add(r.from);
+        continue;
+      }
+      gridDirty = true;
+      showToast("“" + displayName(r.from) + "” is now “" + displayName(r.to) +
+                "” — renamed on another device");
+    }
 
     // Tombstones: anything deleted elsewhere that this device still holds.
     let pending = [];
@@ -3019,6 +3181,10 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     for (let [name, p] of local) {
       if (remote.has(name)) continue;
       if (lib.tomb.some((t) => t.name === p.game)) continue;
+      // A game whose rename couldn't be applied yet still holds files under
+      // the OLD name; re-uploading those would resurrect the names the
+      // renaming device just retired.
+      if (renPending.has(p.game)) continue;
       if (!syncState.queueUp.includes(name)) {
         syncState.queueUp.push(name);
         queuedMissing = true;
@@ -3027,6 +3193,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
 
     // Adopt the merged library locally.
     syncState.tomb = lib.tomb;
+    syncState.ren = lib.ren;
     // The merged library is the grid — do NOT cap it at MAX_RECENT, or every
     // game past the 20th silently vanishes with no way to see or download it.
     // MAX_RECENT still bounds how many ROMs this device keeps bytes for
@@ -3292,17 +3459,6 @@ const renameGame = async (oldName, newName) => {
   if (isRomLoaded(oldName) && (linkMode || rollbackMode || netActive())) {
     return { ok: false, error: "Close the link or online session before renaming this game." };
   }
-  // A game whose bytes live only on Drive cannot be renamed from here, and this
-  // is the guard that stops a rename from being a delete. The remote files are
-  // named by the OLD key; renaming would have to delete them and upload the
-  // same content under the new one — but with nothing stored on this device
-  // there is nothing to upload, so the delete would take the only copy. Sync
-  // the game down first (the same row offers it) and the rename is safe.
-  if (driveLinked() && !(await hasLocalRom(oldName))) {
-    return { ok: false, error: "Sync “" + displayName(oldName) +
-             "” to this device before renaming it — its files are only on Drive." };
-  }
-
   // Collisions are refused, never merged. Two questions, both asked: is the
   // name in the library, and does ANY record already sit under it?
   let existing = new Set((await dbKeys()).filter((k) => typeof k === "string"));
@@ -3358,57 +3514,61 @@ const renameGame = async (oldName, newName) => {
   let toKeys = allPerGameKeys(newName);
   let pairs = fromKeys.map((k, i) => [k, toKeys[i]]);
 
-  // Drive. The remote file names ARE these keys, and Drive has no rename we
-  // could mirror, so the correct remote consequence of a local rename is
-  // exactly: delete the files under the old names, upload the files under the
-  // new ones, and tombstone the old game name so the other devices drop it
-  // (their library entry for the old name would otherwise come back on the
-  // next merge and re-download a game that no longer exists here).
+  // Drive. The remote file names ARE these keys, and Drive renames a file in
+  // place with a metadata PATCH — no content moves — so the remote
+  // consequence of a local rename is exactly: rename the files, whether or
+  // not this device holds their bytes. That is what lets a Drive-only game
+  // rename from here, and it is why nothing is deleted or re-uploaded: the
+  // only copy is never touched, only re-addressed.
   //
-  // Both queues are written INSIDE the move transaction. That is what makes a
-  // tab closed mid-rename safe: the bytes and the record of what still has to
-  // happen to them commit together, so there is no instant where the data has
-  // moved and Drive doesn't know, or vice versa. Nothing is ever deleted
-  // remotely before the local copy is durable under its new name, and a
-  // failed flush leaves both queue entries in place for the next attempt.
+  // The queue is written INSIDE the move transaction. That is what makes a
+  // tab closed mid-rename safe: the records and the list of what still has to
+  // happen on Drive commit together, so there is no instant where the data
+  // has moved and Drive doesn't know, or vice versa. A failed flush leaves
+  // the queue entries in place for the next attempt.
   let nextSync = null;
   if (driveLinked()) {
-    // Only files this device actually holds. A remote file with no local
-    // counterpart cannot be re-uploaded under the new name, so queueing its
-    // deletion would destroy the only copy — the one asymmetry that matters
-    // here. Erring the other way merely orphans a file on Drive, and pullSync's
-    // reconcile-upward pass re-queues any upload this misses.
-    let mirrored = pairs.filter(([f]) => !!parseDriveFileName(f) && existing.has(f));
+    // Every syncable key is offered, held locally or not — the flush skips
+    // any name Drive doesn't hold. The exception is a key already queued for
+    // remote deletion: its remote file is condemned, and renaming it would
+    // resurrect it under the new name.
+    let mirrored = pairs.filter(([f]) => !!parseDriveFileName(f) &&
+                                         !syncState.queueDel.includes(f));
     let oldKeys = mirrored.map(([f]) => f);
     let newKeys = mirrored.map(([, t]) => t);
+    // What Drive holds under the old names it will hold, unchanged, under the
+    // new ones — the signatures and modified-times follow their files.
     let sigs = { ...syncState.sigs };
     let rmt = { ...syncState.rmt };
-    // These record what Drive holds under the OLD names; they die with them.
-    // Nothing is copied to the new names — Drive has never seen those, and
-    // claiming otherwise is how an upload gets skipped.
-    for (let k of oldKeys) { delete sigs[k]; delete rmt[k]; }
+    for (let [f, t] of mirrored) {
+      if (f in sigs) { sigs[t] = sigs[f]; delete sigs[f]; }
+      if (f in rmt) { rmt[t] = rmt[f]; delete rmt[f]; }
+    }
     nextSync = {
       ...syncState,
       sigs,
       rmt,
-      // Old names out, new names in. The flush deletes before it uploads, and
-      // that is safe here precisely because every queued delete has a local
-      // copy behind it: the bytes are already durable under the new name
-      // before the first request goes out.
-      queueDel: [
-        ...syncState.queueDel.filter((n) => !newKeys.includes(n)),
-        ...oldKeys.filter((n) => !syncState.queueDel.includes(n)),
-      ],
-      queueUp: [
-        ...syncState.queueUp.filter((n) => !oldKeys.includes(n)),
-        ...newKeys.filter((n) => !syncState.queueUp.includes(n)),
-      ],
-      // Tombstone the old name; clear any stale tombstone on the new one (the
-      // same rule the fresh recents timestamp above enforces on the remote
-      // side — this game exists now, whatever some older delete said).
-      tomb: [
-        ...syncState.tomb.filter((t) => t?.name !== oldName && t?.name !== newName),
-        { name: oldName, ts: Date.now() },
+      // A pending upload under an old name still has bytes to deliver; they
+      // deliver under the new name now (its sig moved with it, so a truly
+      // dirty save still uploads, and a clean one still doesn't).
+      queueUp: [...new Set(syncState.queueUp.map((n) => {
+        let i = oldKeys.indexOf(n);
+        return i >= 0 ? newKeys[i] : n;
+      }))],
+      // A delete aimed at a NEW name is stale by definition — see the
+      // tombstone rule below: this game exists now.
+      queueDel: syncState.queueDel.filter((n) => !newKeys.includes(n)),
+      queueRen: [...syncState.queueRen,
+                 ...mirrored.map(([from, to]) => ({ from, to }))],
+      // No tombstone for the old name: the ren marker is what tells the other
+      // devices, and unlike a tombstone it migrates their local records to
+      // the new name instead of deleting them. Stale markers and tombstones
+      // on either name are cleared — this game exists here, now, whatever
+      // some older delete or rename said.
+      tomb: syncState.tomb.filter((t) => t?.name !== oldName && t?.name !== newName),
+      ren: [
+        ...syncState.ren.filter((r) => r?.from !== oldName && r?.from !== newName),
+        { from: oldName, to: newName, ts: Date.now() },
       ],
     };
     puts.push(["gdrive_sync", nextSync]);
@@ -3605,15 +3765,18 @@ const openRenameModal = async (oldName) => {
       }
       body.appendChild(ul);
     } else {
-      para(body, "modal-toggle-sub",
-        "This game has no saved data on this device yet — only its place in your library moves.");
+      para(body, "modal-toggle-sub", driveLinked()
+        ? "Nothing is stored on this device — this game's files live on " +
+          "Google Drive and are renamed there."
+        : "This game has no saved data on this device yet — only its place in your library moves.");
     }
 
     if (driveLinked()) {
       para(body, "modal-toggle-sub",
-        "Google Drive: the copies filed under the old name are deleted and the " +
-        "renamed copies uploaded on the next sync. Your other devices drop " +
-        "“" + displayName(oldName) + "” and pick up “" + displayName(newName) + "”.");
+        "Google Drive: its files there are renamed in place on the next sync — " +
+        "nothing is deleted or re-uploaded. Your other devices switch to " +
+        "“" + displayName(newName) + "”, keeping everything saved with it, " +
+        "the next time they sync.");
     }
     if (wasLoaded) {
       para(body, "modal-toggle-sub",

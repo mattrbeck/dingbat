@@ -35,7 +35,7 @@ const makeDrive = (names = []) => {
 const signIn = (app, sigs = {}) => {
   app.api.gdriveToken = "test-token";
   app.api.syncState =
-    { queueUp: [], queueDel: [], tomb: [], sigs, rmt: {}, connected: true };
+    { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs, rmt: {}, connected: true };
 };
 
 // One local game: ROM bytes, box art, a battery save and a save state.
@@ -282,7 +282,7 @@ test("Sync to device pulls a Drive-only game's files onto this device", async ()
 test("signed out, a Drive-only residue row offers Delete alone", async () => {
   const app = await loadApp();
   app.api.gdriveToken = null;
-  app.api.syncState = { queueUp: [], queueDel: [], tomb: [], sigs: {}, rmt: {} };
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {} };
   app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
 
   await openManageList(app);
@@ -313,7 +313,7 @@ test("signed out, no row offers Remove", async () => {
   const app = await loadApp();
   app.api.gdriveToken = null;
   app.api.syncState =
-    { queueUp: [], queueDel: [], tomb: [], sigs: { "rom:A.gba": "sig" }, rmt: {} };
+    { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: { "rom:A.gba": "sig" }, rmt: {} };
   app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
