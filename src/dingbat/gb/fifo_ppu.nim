@@ -131,6 +131,12 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
   ## from every write that can move one of the four inputs (LCDC, WX, the WY
   ## latch) and from fifo_reset_bg, which is where the fourth (fetching_window)
   ## moves. Nothing here is on a per-dot path.
+  when DMG_WIN_LAST_PX_CARRY != 0:
+    # LCDC.5 low DEACTIVATES the window, and an owed start (win_carry) that has
+    # to reactivate it costs the window line counter one more than one that
+    # never lost it. See WIN_CARRY_REACT_LINES; this is the only place that
+    # every write which can clear the bit passes through.
+    if not ppu.cgb and not window_enabled(ppu): ppu.win_carry_gap = true
   when WIN_EN_HOLD > 0:
     # A refused match owns the comparator until its hold runs out: `win_lx` is
     # the dot it is waiting on, not a function of WX any more, and the LCDC
@@ -223,6 +229,9 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.head_cycle = false
   ppu.fetching_window = false
   ppu.fetching_sprite = false
+  when DMG_WIN_LAST_PX_CARRY != 0:
+    ppu.win_carry = false
+    ppu.win_carry_gap = false
   ppu.win_lx = WIN_LX_OFF
   ppu.win_hold = 0'u8
   ppu.obj_penalty = 0
@@ -963,6 +972,30 @@ proc fifo_head_window(ppu: GbFifoPpu) =
   ## how many of the window startup fetch's six dots are left over once its
   ## fine-scroll discard has taken its share. Called once per line, from the
   ## dot the throw-away fetch ends on.
+  when DMG_WIN_LAST_PX_CARRY != 0:
+    # A start the previous line could not draw, owed to this one. Same dot as
+    # the WX latch below because the same ROM family brackets both to it
+    # (`wxA6_late_we_reenable_1..4`, LCDC.5 back on at dots 77/81/85/89: the
+    # first three are taken here and the fourth is not) -- and it is asked
+    # FIRST, because the carried start is not a WX match and does not want the
+    # WX < 7 head absorb underneath it. LCDC.5 clear does not cancel it, it just
+    # does not get to spend it: the latch is still owed on the next line, and on
+    # `wxA6_wy01_weoff_ly02` it waits out the whole rest of the frame.
+    if ppu.win_carry and window_enabled(ppu):
+      ppu.win_carry = false
+      ppu.fetching_window = true
+      # The counter moves on a carried start exactly as it does on the WX < 7
+      # head start below. The FIFO is already empty and fetch_counter has just
+      # been rewound by the caller, so there is nothing else of fifo_reset_bg to
+      # repeat -- except fetcher_x, which is the one thing a carried start does
+      # NOT put back to zero.
+      inc ppu.current_window_line
+      when WIN_CARRY_REACT_LINES != 0:
+        if ppu.win_carry_gap: ppu.current_window_line += WIN_CARRY_REACT_LINES
+      ppu.win_carry_gap = false
+      ppu.fetcher_x = WIN_CARRY_TILE
+      fifo_arm_window(ppu)
+      return
   when WIN_LINE_START_LATCH != 0:
     if not ppu.fetching_window and window_enabled(ppu) and ppu.window_trigger and
        ppu.wx < uint8(WIN_LINE_START_WX):
@@ -2541,8 +2574,13 @@ proc win_start_reaches_pixels(ppu: GbFifoPpu): bool {.inline.} =
   ## never shifted out. The CGB waits for that fetch and shows it. Separating
   ## "the window started" from "the window's first pixel reached the screen" is
   ## the next step here; this flag conflates them, which is why it is off.
-  ## The reference pair makes the result checkable to the pixel with no
-  ## bracketing, so this is cheap for whoever takes it.
+  ##
+  ## **That next step landed 2026-08-13 as `DMG_WIN_LAST_PX_CARRY`, and it is
+  ## bigger than the sentence above.** Keeping the pixel is only one of its
+  ## three halves, and on its own it is worth ONE row: the start is not merely
+  ## undrawn, it is still OWED, and the next line the window is enabled on
+  ## renders from the window map end to end. 13 of the 14 rows are that. This
+  ## flag stays at 0 and stays here as the falsified reading it was.
   ## Keyed on WX rather than on `lx`: the comparator sits one slot LEFT of the
   ## window's first pixel (WIN_START_PRE_PIXEL), so the start that would put
   ## that first pixel on x = 159 is matched at lx = 158, and WX = 166 names it
@@ -2936,6 +2974,54 @@ proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
             ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] =
               fifo_mix(ppu, gb, held.bg, held.sp, x)
 
+template fifo_emit_pixel(ppu: GbFifoPpu; gb: GB) =
+  ## One pixel out of the shifter: pop the two FIFOs, mix, store, advance `lx`.
+  ##
+  ## Split out of tick_shifter for its SECOND caller, the DMG's window start on
+  ## the line's last pixel (DMG_WIN_LAST_PX_CARRY), which has to emit the pixel
+  ## the BG FIFO is already holding BEFORE the restart empties it -- everywhere
+  ## else the restart happens instead of the pixel and the refetch supplies it.
+  ##
+  ## A TEMPLATE and not an `{.inline.}` proc, which is not a free choice: as a
+  ## proc with two call sites clang stopped inlining it into the mode 3 dot
+  ## loop and cgb-acid-hell measured **+3.63% of retired instructions** -- the
+  ## inline cliff docs/gb_oam_dma_cost.md describes, on a change that emulates
+  ## nothing new on a CGB at all. Expanded at both sites the WHOLE of
+  ## DMG_WIN_LAST_PX_CARRY is +0.29% there and +0.20% on blargg cpu_instrs.
+  let bg_px = fifo_shift(ppu.fifo)
+  let has_sprite = ppu.fifo_sprite.size > 0
+  let sp_px = if has_sprite: fifo_shift(ppu.fifo_sprite) else: GbPixel()
+  if ppu.lx >= 0:
+    when defined(gb_px_trace):
+      if gb_traced(ppu.ly):
+        echo "PX ly=", ppu.ly, " lx=", ppu.lx, " dot=", ppu.cycle_counter,
+             " bg=", bg_px.color, "/", bg_px.palette, "/", bg_px.obj_to_bg,
+             " hs=", has_sprite, " sp=", sp_px.color, "/", sp_px.palette,
+             "/", sp_px.obj_to_bg, " lcdc=", toHex(ppu.lcd_control, 2),
+             " fc=", ppu.fetch_counter, " fx=", ppu.fetcher_x,
+             " fifo=", ppu.fifo.size
+    # Held for the mixer's extra dot -- see fifo_recompose_last. `has_sprite`
+    # is deliberately not kept with them: an empty OBJ FIFO leaves sp_px at
+    # colour 0, and sprite_wins already refuses colour 0, so the flag is
+    # redundant inside the mix. This and the two guards in ppu_write are the
+    # WHOLE cost of the mixer's dot on the shipping build, which is what
+    # `-d:MIXER_DOT_LAG=0` exists to A/B against.
+    when MIXER_DOT_LAG != 0:
+      # Indexed by the pixel's own low bits rather than shifted down, so
+      # MIX_HOLD dots of history cost the dot loop the same one store that a
+      # single dot of it does.
+      ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
+    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
+      fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
+  inc ppu.lx
+
+proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
+  ## Is this window START the one a DMG cannot draw -- the match on the line's
+  ## LAST pixel? See DMG_WIN_LAST_PX_CARRY. Only WX = 166 reaches x = 159, and
+  ## only on a DMG, whose mode 3 ends with that pixel.
+  when DMG_WIN_LAST_PX_CARRY == 0: false
+  else: not ppu.cgb and ppu.lx == int32(GB_WIDTH) - 1
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -3085,10 +3171,28 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               # framebuffer as background; the window's own first push writes
               # over it. See WIN_EN_HOLD_BACK.
               if ppu.win_hold > 0'u8: dec ppu.lx
+            # The DMG's start on the LAST pixel keeps that pixel: mode 3 ends
+            # with it, so the restart's own first pixel never reaches the panel
+            # and the background entry the FIFO is already holding is what is
+            # shown. Emitted BEFORE the restart because the restart empties the
+            # FIFO it comes out of. See DMG_WIN_LAST_PX_CARRY; everything else
+            # about the start is unchanged, including the window line counter.
+            if win_start_carries(ppu):
+              fifo_emit_pixel(ppu, gb)
+              # fifo_reset_bg and not win_start_reset: the pre-pixel clamp that
+              # one reads back off `lx` would see the pixel just emitted and
+              # rewind the shifter onto it, painting the window over the
+              # background entry this whole branch exists to keep.
+              fifo_reset_bg(ppu, true)
+              return
             # fifo_reset_bg clears the hold on its way through.
             win_start_reset(ppu)
             return
         else:
+          if win_start_carries(ppu):
+            fifo_emit_pixel(ppu, gb)
+            fifo_reset_bg(ppu, true)
+            return
           win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
@@ -3097,32 +3201,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # to emit rather than behind the one it just emitted -- the same
         # displacement, one dot earlier, so it can share the compare above.
         window_reactivate(ppu)
-    let bg_px = fifo_shift(ppu.fifo)
-    let has_sprite = ppu.fifo_sprite.size > 0
-    let sp_px = if has_sprite: fifo_shift(ppu.fifo_sprite) else: GbPixel()
-    if ppu.lx >= 0:
-      when defined(gb_px_trace):
-        if gb_traced(ppu.ly):
-          echo "PX ly=", ppu.ly, " lx=", ppu.lx, " dot=", ppu.cycle_counter,
-               " bg=", bg_px.color, "/", bg_px.palette, "/", bg_px.obj_to_bg,
-               " hs=", has_sprite, " sp=", sp_px.color, "/", sp_px.palette,
-               "/", sp_px.obj_to_bg, " lcdc=", toHex(ppu.lcd_control, 2),
-               " fc=", ppu.fetch_counter, " fx=", ppu.fetcher_x,
-               " fifo=", ppu.fifo.size
-      # Held for the mixer's extra dot -- see fifo_recompose_last. `has_sprite`
-      # is deliberately not kept with them: an empty OBJ FIFO leaves sp_px at
-      # colour 0, and sprite_wins already refuses colour 0, so the flag is
-      # redundant inside the mix. This and the two guards in ppu_write are the
-      # WHOLE cost of the mixer's dot on the shipping build, which is what
-      # `-d:MIXER_DOT_LAG=0` exists to A/B against.
-      when MIXER_DOT_LAG != 0:
-        # Indexed by the pixel's own low bits rather than shifted down, so
-        # MIX_HOLD dots of history cost the dot loop the same one store that a
-        # single dot of it does.
-        ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
-      ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
-        fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
-    inc ppu.lx
+    fifo_emit_pixel(ppu, gb)
 
 proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
   ## What the fetcher still owes for the last `m3_lead` pixels of a line,
@@ -3160,6 +3239,22 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
       return true
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
      int(ppu.wx) <= GB_WIDTH + 6: return true
+  when DMG_WIN_LAST_PX_CARRY != 0:
+    # A match the window being ALREADY the fetch source does not excuse. The
+    # term above is written `not fetching_window` because everywhere else a
+    # window that has started has consumed its match -- but a DMG line carried
+    # out of the previous one (DMG_WIN_LAST_PX_CARRY) starts with the window
+    # already fetching and its WX = 166 match still ahead of the shifter, and
+    # the fetcher owes that restart exactly as it owes an ordinary one. Without
+    # this the carried line retires `m3_lead` pixels early and reads 172 dots
+    # where hardware reads 174, which is what `window/m2int_wxA6_m3stat_1`,
+    # `_spxA7_m3stat_1`, `_oambusyread_1` and `_vrambusyread_1` measure: their
+    # frame is 144 consecutive carried lines and they sample one of them.
+    if not ppu.cgb and ppu.fetching_window and
+       (ppu.lx < int32(GB_WIDTH) - 1 or
+        (ppu.obj_last_px and ppu.lx < int32(GB_WIDTH))) and
+       ppu.window_trigger and window_enabled(ppu) and
+       int(ppu.wx) == GB_WIDTH + 6: return true
   false
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
@@ -3858,6 +3953,28 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # Bursting them costs no dots (the lead was already paid at the head
             # of mode 3) and keeps the fetcher out of H-Blank entirely.
             fifo_burst_tail(ppu, gb)
+          when DMG_WIN_LAST_PX_CARRY != 0:
+            # The end of the line, which is where hardware clears "the window
+            # has started" -- and on a DMG that is the same dot the comparator
+            # can still match on, so a match on the LAST pixel survives into the
+            # next line. Asked here, once a line, rather than at the match:
+            # the match is not reachable at all once the window is already the
+            # fetch source, and the whole point is that a carried line carries
+            # again (`wxA6_wy00` is a window line from LY 0 to LY 143 off one
+            # match per line). The WY latch is what separates it from "the
+            # window happens to be on": `wxA6_wy01` draws LY 0 as a window line
+            # from LY 143's match and does NOT carry out of it, because on LY 0
+            # the latch is clear again.
+            #
+            # LCDC.5 is deliberately NOT in here, and that is measured, not an
+            # omission: `wxA6_weoff_at_xposA6` clears the bit at x = 96 of every
+            # line and still draws the NEXT line as a window line, so the
+            # comparator sets the latch with the bit low. The bit gates spending
+            # the latch (fifo_head_window), not owing it. See
+            # DMG_WIN_LAST_PX_CARRY.
+            if not ppu.cgb and int(ppu.wx) == GB_WIDTH + 6 and
+               ppu.window_trigger:
+              ppu.win_carry = true
           # A line whose pipeline started early (LY0_PIPE_MCYCLES) retires that
           # many dots early too; the FLAG still leaves mode 3 on the dot every
           # other line does. The burst above is on the retire dot deliberately

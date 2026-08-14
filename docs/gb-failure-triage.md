@@ -5054,22 +5054,80 @@ because 65536 + 12 is exactly the 65548 the frames pin.
 
 Ordered by rows-per-unit-of-work, not by row count.
 
-**1. `window/on_screen` -- 15 rows, and the ROMs are their own oracle (no
-bracketing needed).** All 18 `on_screen` ROMs ship BOTH a `_dmg08` and a
-`_cgb04c` reference. The 4 whose references are pixel-identical all pass. The 14
-whose references differ are exactly the failing rows, and in every case the
-number of pixels dingbat gets wrong **equals the number by which the two
-references differ, to the pixel** (21816, 21657, 14624, 14468, 10992, 10780,
-8832, 7303, and 120/160 on the rest). So dingbat renders the **CGB** reference
-bit-exactly on the DMG rows. `CGB_WIN_TAIL_LAST` is consulted only in
-`mode3_busy` -- the WX = 166 device split was landed for mode-3 LENGTH and never
-for the shifter.
-*Blocking question:* refusing the start is falsified (above), so the rule is
-narrower -- the DMG presumably **does** start the window at WX = 166 (the trigger
-latches and the window's internal line counter advances, which later lines
-depend on) but its mode 3 ends with the last PIXEL, so the restart's first pixel
-is never shifted out. Separating "the window started" from "its first pixel
-reached the screen" is the whole job.
+**1. `window/on_screen` -- 14 rows, LANDED 2026-08-13 (`DMG_WIN_LAST_PX_CARRY`,
+gb.nim + fifo_ppu.nim). gambatte 4145 -> 4159, +14 GAINED and 0 LOST.**
+`window` 361/476 -> 375/476, `on_screen` 21/36 -> 34/36.
+
+**The DMG's window start on the line's last pixel is not lost -- it is owed to
+the next line.** `CGB_WIN_TAIL_LAST` already said the DMG's mode 3 ends with the
+last PIXEL and the CGB's with the last FETCH; read that as a statement about
+when the line's end-of-line cleanup runs and the rest follows. Hardware's "the
+window has started" latch is set by the WX comparator and cleared when the line
+ends, so on a DMG a match on x = 159 lands on the same dot as the clear and
+survives it. The next line the window is ENABLED on then begins with the window
+already the fetch source and draws the window map end to end, with no WX match of
+its own. Three consequences, each isolated by one ROM:
+
+* the restart's first pixel is never shifted out, so x = 159 keeps the
+  background entry the FIFO was holding. `wxA6_late_we_reenable_4` is that alone
+  -- 120 lines, one pixel each. **On its own this is worth ONE row**, which is
+  why the old reading below only looked right;
+* the latch survives into the next line and across the FRAME boundary.
+  `wxA6_wy8F`'s only match is on LY 143 and its only wrong line was LY 0 of the
+  frame after;
+* the latch is spent at the head of a line only if LCDC.5 is set THERE, and is
+  NOT cleared if it is not. `wxA6_wy01_weoff_ly02` sets it on LY 1, spends the
+  rest of the frame with the bit clear, and still draws LY 0 of the next frame
+  as a window line. Conversely LCDC.5 does not gate SETTING it:
+  `wxA6_weoff_at_xposA6` clears the bit at x = 96 of every line and still
+  carries.
+
+Three numbers came out of the reference pairs and each is two-sided:
+
+* **where the head spends it** -- `wxA6_late_we_reenable_1..4` put LCDC.5 back
+  at dots 77, 81, 85 and 89 of the same line, every line. 77/81/85 are spent and
+  89 is not, which puts the read at `fifo_head_window`'s own dot (86, the end of
+  the throw-away fetch) -- the same dot `WIN_LINE_START_LATCH` reads WX on;
+* **the tile column** (`WIN_CARRY_TILE = 1`) -- the carried line starts at
+  window map column 1, not 0, because the aborted start already ran column 0's
+  map read. The `on_screen` window maps are a diagonal, so this is a whole tile
+  of the staircase;
+* **the extra window LINE on a reactivation** (`WIN_CARRY_REACT_LINES = 1`) --
+  a carry that has to bring LCDC.5 back counts one more window line than one
+  that never lost it. `wxA6_wy00`/`wxA6_wy01` never touch the bit and want their
+  window rows every EIGHT lines; `late_we_reenable_1..3` and
+  `weoff_at_xposA6` toggle it once a line and want them every FOUR.
+
+Mode 3's LENGTH needed one term with it (`fetch_work_pending`): a carried line
+begins with the window already fetching and its WX = 166 match still ahead of
+the shifter, and the fetcher owes that restart just as it owes an ordinary one.
+Without it the carried line reads 172 dots where hardware reads 174 and
+`m2int_wxA6_{m3stat,oambusyread,vrambusyread}_1` and `_spxA7_m3stat_1` go red.
+The object-on-the-last-pixel arm of that term must be DMG-gated or four
+`m0enable/enable_wxA6_2x_spxA7*` CGB rows go with it.
+
+*Guards, all byte-identical to the control build:* mealybug DMG 27 rows at
+100.0%, mealybug CGB identical, GBMicrotest 429/84 (`win*` 36/36), mooneye
+97/18, AGE unchanged. `-d:DMG_WIN_LAST_PX_CARRY=0` reproduces the 4145 baseline
+row for row. *Cost:* +0.29% of retired instructions on cgb-acid-hell, +0.20% on
+blargg cpu_instrs -- but only in the template spelling: the same code with the
+pixel emit factored into an `{.inline.}` proc fell off clang's inline cliff at
+**+3.63%**.
+
+*What is left (1 row):* `wxA6_late_we_reenable_3 [dmg]`, 916 wrong pixels. Its
+window rows are one line early for the whole frame -- ONE extra window line
+across 127 of them -- and its only difference from `_1`/`_2` is that it puts
+LCDC.5 back at dot 85 rather than 77 or 81. Denying it the
+`WIN_CARRY_REACT_LINES` credit wholesale is refused (916 -> 6520), so the credit
+is right on 126 lines and wrong on one: the rule that is missing is about the
+FIRST reactivated line, not about the dot. (`wx17_weoff_wxA5_weon [cgb]`, 960
+pixels, is the family's other red row and is a CGB row that predates all of
+this.)
+
+*The falsified reading this replaces,* kept because it is exactly half right:
+"the DMG does start the window at WX = 166 but its mode 3 ends with the last
+PIXEL, so the restart's first pixel is never shifted out." True, and worth one
+row. What it misses is that the start is still owed afterwards.
 
 **2. `oamdma`'s DMA-start latency -- 26 rows, one constant with a sign flip.**
 `late_sp{00,01,02,39}{x,y}_*`, `oamdma_late_halt_stat_1`,
