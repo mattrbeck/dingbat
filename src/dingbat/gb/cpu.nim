@@ -13,10 +13,15 @@ proc skip_boot*(cpu: GbCpu; gb: GB) =
   case gb.boot_model
   of bmDmg0:
     cpu.af = 0x0100; cpu.bc = 0xFF13; cpu.de = 0x00C1; cpu.hl = 0x8403
-  of bmDmgABC:
-    cpu.af = 0x01B0; cpu.bc = 0x0013; cpu.de = 0x00D8; cpu.hl = 0x014D
-  of bmMgb:
-    cpu.af = 0xFFB0; cpu.bc = 0x0013; cpu.de = 0x00D8; cpu.hl = 0x014D
+  of bmDmgABC, bmMgb:
+    # H and C at handoff carry the header-checksum compare's result: both set
+    # unless $014D is $00 (Pan Docs Power-Up Sequence, [^dmg_c]). Every test
+    # ROM has a nonzero checksum, so the suites only ever see $B0.
+    let rom = gb.cartridge.rom
+    let f = 0x80'u16 or (if rom.len > 0x014D and rom[0x014D] == 0: 0'u16
+                         else: 0x30'u16)
+    cpu.af = (if gb.boot_model == bmMgb: 0xFF00'u16 else: 0x0100'u16) or f
+    cpu.bc = 0x0013; cpu.de = 0x00D8; cpu.hl = 0x014D
   of bmSgb:
     cpu.af = 0x0100; cpu.bc = 0x0014; cpu.de = 0x0000; cpu.hl = 0xC060
   of bmSgb2:
@@ -27,14 +32,38 @@ proc skip_boot*(cpu: GbCpu; gb: GB) =
     # CGB's B=0x00 / F=0x80. D/E/H/L depend on whether a native CGB cart or a
     # DMG-compatibility cart is inserted (mooneye misc/boot_regs-cgb vs -A run
     # a DMG-flagged cart on CGB/AGB hardware).
-    if gb.boot_model == bmAgb:
-      cpu.af = 0x1100; cpu.bc = 0x0100
-    else:
-      cpu.af = 0x1180; cpu.bc = 0x0000
     if gb.cgb_flag != cgbNone:
-      cpu.de = 0xFF56; cpu.hl = 0x000D   # native CGB cart
+      # Native CGB cart: fixed values.
+      if gb.boot_model == bmAgb:
+        cpu.af = 0x1100; cpu.bc = 0x0100
+      else:
+        cpu.af = 0x1180; cpu.bc = 0x0000
+      cpu.de = 0xFF56; cpu.hl = 0x000D
     else:
-      cpu.de = 0x0008; cpu.hl = 0x007C   # DMG cart on CGB/AGB hardware
+      # DMG cart on CGB/AGB hardware: B, F and HL come from the HEADER (Pan
+      # Docs Power-Up Sequence [^cgbdmg_b]/[^cgbdmg_hl]/[^agbdmg_f]). For a
+      # Nintendo-licensee cart B is the 16 title bytes summed (the same value
+      # the boot ROM's colorization hash leaves behind); the AGB's extra
+      # `inc b` follows, and its Z/H land in F. HL = $991A marks the two
+      # logo-animation palette IDs. Homebrew/test ROMs are non-Nintendo, so
+      # the suites see the old fixed B=0/HL=$007C either way.
+      let rom = gb.cartridge.rom
+      var b = 0'u8
+      if rom.len > 0x0145 and
+         (rom[0x014B] == 0x01 or
+          (rom[0x014B] == 0x33 and rom[0x0144] == 0x30 and rom[0x0145] == 0x31)):
+        for i in 0x0134 .. 0x0143: b = b + rom[i]
+      if gb.boot_model == bmAgb:
+        let half = (b and 0x0F) == 0x0F
+        b = b + 1
+        cpu.af = 0x1100'u16 or (if b == 0: 0x80'u16 else: 0'u16) or
+                               (if half:   0x20'u16 else: 0'u16)
+        cpu.hl = if b in [0x44'u8, 0x59'u8]: 0x991A'u16 else: 0x007C'u16
+      else:
+        cpu.af = 0x1180
+        cpu.hl = if b in [0x43'u8, 0x58'u8]: 0x991A'u16 else: 0x007C'u16
+      cpu.bc = uint16(b) shl 8
+      cpu.de = 0x0008
 
 proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8 =
   if cpu.cached_hl < 0:

@@ -31,11 +31,16 @@ template check(label: string; cond: untyped) =
 
 echo "== GB GameShark =="
 block:
-  # Pokemon Red/Blue money: write 0x99 to 0xD347. Verified vector.
+  # Pokemon Red/Blue money: write 0x99 to 0xD347. Verified vector. The
+  # leading digits are the SRAM bank (Pan Docs), carried in address bits
+  # 16-23; only an $A000-BFFF target consults them (gb.nim apply_cheats).
   let (ops, err) = parse_cheat(cpGB, "019947D3")
   check "parses", err.len == 0 and ops.len == 1
   check "action write8", ops[0].action == caWrite8
-  check &"address 0xD347 (got {ops[0].address:04X})", ops[0].address == 0xD347
+  check &"address 0xD347 (got {ops[0].address and 0xFFFF:04X})",
+    (ops[0].address and 0xFFFF) == 0xD347
+  check &"bank 0x01 (got {ops[0].address shr 16:02X})",
+    (ops[0].address shr 16) == 0x01
   check &"value 0x99 (got {ops[0].value:02X})", ops[0].value == 0x99
 
 echo "== GB Game Genie =="

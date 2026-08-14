@@ -10,7 +10,7 @@ method mbc_read*(cart: Mbc2; idx: int): uint8 =
     cart.rom[mbc_rom_bank_offset(cart, int(cart.rom_bank)) + mbc_rom_offset(idx)]
   of 0xA000..0xBFFF:
     if cart.ram_enabled:
-      (cart.ram[mbc_ram_offset(idx) mod 0x0200]) or 0xF0'u8
+      (cart.ram[mbc_ram_offset(cart, idx) mod 0x0200]) or 0xF0'u8
     else: 0xFF'u8
   else: 0xFF'u8
 
@@ -27,5 +27,5 @@ method mbc_write*(cart: Mbc2; idx: int; val: uint8) =
   of 0xA000..0xBFFF:
     if cart.ram_enabled:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_offset(idx) mod 0x0200] = val and 0x0F
+      cart.ram[mbc_ram_offset(cart, idx) mod 0x0200] = val and 0x0F
   else: discard

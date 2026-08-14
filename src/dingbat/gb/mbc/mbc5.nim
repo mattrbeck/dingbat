@@ -11,14 +11,18 @@ method mbc_read*(cart: Mbc5; idx: int): uint8 =
     cart.rom[mbc_rom_bank_offset(cart, int(cart.rom_bank_num)) + mbc_rom_offset(idx)]
   of 0xA000..0xBFFF:
     if cart.ram_enabled and cart.ram.len > 0:
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)]
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8
 
 method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
   case idx
   of 0x0000..0x1FFF:
-    let enabling = (val and 0xFF) == 0x0A
+    # Low nibble decides, like every other MBC here: Pan Docs (MBC5) says
+    # "actual MBCs actually enable RAM when writing any value whose bottom 4
+    # bits equal $A". The exact-$0A compare this used to carry matched an
+    # older revision of that page.
+    let enabling = (val and 0x0F) == 0x0A
     if cart.ram_enabled and not enabling: mbc_save(cart)
     cart.ram_enabled = enabling
   of 0x2000..0x2FFF:
@@ -38,7 +42,7 @@ method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
   of 0xA000..0xBFFF:
     if cart.ram_enabled and cart.ram.len > 0:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)] = val
   else: discard
 
 method mbc_rumble*(cart: Mbc5Rumble): bool = cart.rumble

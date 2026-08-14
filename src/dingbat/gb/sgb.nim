@@ -329,7 +329,10 @@ proc sgb_execute(gb: GB; d: openArray[uint8]) =
     for i in 0 ..< 16: hex.add(" " & toHex(d[i], 2))
     let nm = if int(cmd) < SGB_CMD_NAMES.len: SGB_CMD_NAMES[int(cmd)] else: "?"
     echo "SGB cmd $" & toHex(cmd, 2) & " " & nm & " len " & $(d[0] and 7) & hex
+  if s.packets_locked: return       # ICON_EN bit 2 latched — see SgbState
   case cmd
+  of 0x0E:                          # ICON_EN
+    if (d[1] and 0x04) != 0: s.packets_locked = true
   of 0x00: s.sgb_cmd_pal(d, 0, 1)   # PAL01
   of 0x01: s.sgb_cmd_pal(d, 2, 3)   # PAL23
   of 0x02: s.sgb_cmd_pal(d, 0, 3)   # PAL03

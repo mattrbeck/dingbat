@@ -117,7 +117,7 @@ method mbc_read*(cart: Mmm01; idx: int): uint8 =
     # unmapped mode." Nothing gates it here beyond the enable, since the only
     # MMM01 cartridge with RAM at all is a mapped-mode game.
     if cart.ram_enabled and cart.ram.len > 0:
-      cart.ram[mbc_ram_bank_offset(cart, mmm01_ram_bank(cart)) + mbc_ram_offset(idx)]
+      cart.ram[mbc_ram_bank_offset(cart, mmm01_ram_bank(cart)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8
 
@@ -163,5 +163,5 @@ method mbc_write*(cart: Mmm01; idx: int; val: uint8) =
   of 0xA000..0xBFFF:
     if cart.ram_enabled and cart.ram.len > 0:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_bank_offset(cart, mmm01_ram_bank(cart)) + mbc_ram_offset(idx)] = val
+      cart.ram[mbc_ram_bank_offset(cart, mmm01_ram_bank(cart)) + mbc_ram_offset(cart, idx)] = val
   else: discard

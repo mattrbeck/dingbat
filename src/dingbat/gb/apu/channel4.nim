@@ -49,6 +49,17 @@ proc new_channel4*(gb: GB): GbChannel4 =
 # the grid and the first shift lands an M-cycle later.
 # ---------------------------------------------------------------------------
 
+proc ch4_lfsr_frozen(ch: GbChannel4): bool {.inline.} =
+  ## NR43 clock shifts 14 and 15 tap a counter bit the divisor stage does not
+  ## have: the LFSR receives no clocks at all (Pan Docs NR43, "shift being
+  ## equal to 14 or 15 stops the channel from being clocked entirely") and the
+  ## output holds whatever bit it was on. Modelled by parking `next_step` at
+  ## GB_NO_STEP while the divisor stage keeps counting, so a later NR43 write
+  ## that lowers the shift resumes from the count the hardware would hold.
+  ## Caveat shared with ch4_resync_divisor: a state saved while frozen loses
+  ## the divisor count, so the resume phase after a load is a reconstruction.
+  ch.clock_shift >= 14'u8
+
 proc ch4_frequency_timer(ch: GbChannel4): uint32 =
   ## The full LFSR period in T-cycles: 2^(shift+1) increments of the stage
   ## below.
@@ -215,7 +226,10 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       if on_reload:
         ch.div_next = ch4_grid_up(gb, gb.scheduler.cycles + ch4_inc_period(ch, gb),
                                   ch.divisor_code)
-      ch.next_step = ch4_next_shift(ch, gb)
+      # A shift of 14/15 freezes the LFSR chain (see ch4_lfsr_frozen); the
+      # divisor stage above keeps running so a later write can thaw it.
+      ch.next_step = if ch4_lfsr_frozen(ch): GB_NO_STEP
+                     else: ch4_next_shift(ch, gb)
   of 0xFF23:
     let len_enable = (val and 0x40) != 0
     # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
@@ -238,8 +252,11 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       # of a half one when the channel was already running. All three parts, and
       # the reason the tests' own "sample length + 3 M-cycles" is a special case
       # of the first, are derived at gb_noise_deadline.
-      ch.next_step = gb_noise_deadline(gb, ch4_period(ch, gb),
+      let deadline = gb_noise_deadline(gb, ch4_period(ch, gb),
                                        ch.divisor_code, was_enabled)
+      # A trigger with shift 14/15 starts the divisor stage but the LFSR tap
+      # never fires (ch4_lfsr_frozen): output holds the reset LFSR's bit.
+      ch.next_step = if ch4_lfsr_frozen(ch): GB_NO_STEP else: deadline
       # Split that one deadline back into the two stages it is the product of.
       # The counter is what carries the trigger's two cases: a fresh start
       # leaves it at 0, half a period from the next rising edge, and a restart
@@ -249,7 +266,7 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       # instead of as a special case. Both put the first increment at the same
       # place, so the subtraction below is exact and cannot underflow.
       ch.div_counter = (if was_enabled: 1'u16 shl int(ch.clock_shift) else: 0'u16)
-      ch.div_next = ch.next_step -
+      ch.div_next = deadline -
         CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
         ch4_inc_period(ch, gb)
       init_volume_envelope(ch)

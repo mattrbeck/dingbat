@@ -33,7 +33,7 @@ method mbc_read*(cart: Huc1; idx: int): uint8 =
       # dingbat has no IR peer to see light from, so this is a constant.
       0xC0'u8
     elif cart.ram.len > 0:
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.bank_high)) + mbc_ram_offset(idx)]
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.bank_high)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8
 
@@ -48,5 +48,5 @@ method mbc_write*(cart: Huc1; idx: int; val: uint8) =
       cart.cart_ir = (val and 1) != 0   # 0x01 emitter on, 0x00 off
     elif cart.ram.len > 0:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.bank_high)) + mbc_ram_offset(idx)] = val
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.bank_high)) + mbc_ram_offset(cart, idx)] = val
   else: discard

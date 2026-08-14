@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-13 20:57:49 · commit f426688 · game-boy-test-roms v7.0*
+*Generated: 2026-08-14 15:06:40 · commit d8dbbeb · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
 - **Total:** 1046
-- **Pass:** 882
-- **Fail:** 164
+- **Pass:** 883
+- **Fail:** 163
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -24,7 +24,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mealybug Tearoom | 49 | 54 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 13 | 37 |
-| Game Boy - Screenshot suites | 9 | 13 |
+| Game Boy - Screenshot suites | 10 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 10 | 12 |
@@ -871,7 +871,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/vram/vram-read-cgbBCE | CGB | 👀 Mooneye: FAIL |
 | age/vram/vram-read-dmgC | cart dmgC | 👀 Mooneye: FAIL |
 
-## Game Boy - Screenshot suites (9/13)
+## Game Boy - Screenshot suites (10/13)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -887,7 +887,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | turtle-tests/window_y_trigger_wx_offscreen | DMG | 👌 |
 | cgb-acid-hell/cgb-acid-hell | CGB | 👀 100.0% correct (23038/23040 pixels match) |
 | little-things-gb/firstwhite | DMG | 👀 89.2% correct (20552/23040 pixels match) |
-| mbc3-tester/mbc3-tester | DMG | 👀 94.4% correct (21760/23040 pixels match) |
+| mbc3-tester/mbc3-tester | DMG | 👌 |
 
 ## Game Boy - SameSuite (8/8)
 

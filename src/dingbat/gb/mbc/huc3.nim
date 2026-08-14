@@ -99,7 +99,7 @@ proc huc3_window_read(cart: Huc3; idx: int): uint8 =
   of 0x0E: 0xC0'u8  # IR, as HuC1: no light seen, and nothing here to see it from
   of 0x00, 0x0A:
     if cart.ram.len > 0:
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)]
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8   # 0xB is write-only, and every other mode reads back open bus
 
@@ -148,5 +148,5 @@ method mbc_write*(cart: Huc3; idx: int; val: uint8) =
     if huc3_window_write(cart, val): return
     if cart.mode == 0x0A and cart.ram.len > 0:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)] = val
   else: discard

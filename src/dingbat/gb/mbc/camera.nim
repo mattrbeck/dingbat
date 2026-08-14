@@ -302,7 +302,7 @@ method mbc_read*(cart: PocketCamera; idx: int): uint8 =
     elif cart.ram.len > 0:
       # Note the missing ram_enabled test: "Reading from RAM or registers is
       # always enabled."
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)]
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8
 
@@ -322,5 +322,5 @@ method mbc_write*(cart: PocketCamera; idx: int; val: uint8) =
       camera_reg_write(cart, idx, val)   # "Writing to registers is always enabled"
     elif (cart.regs[0] and 1) == 0 and cart.ram_enabled and cart.ram.len > 0:
       cart.ram_dirty = true
-      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
+      cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)] = val
   else: discard

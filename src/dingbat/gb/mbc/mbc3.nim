@@ -26,6 +26,21 @@ proc rtc_write(cart: Mbc3; reg: int; val: uint8) =
     cart.rtc_live[4] = val and 0xC1
   else: discard
 
+proc mbc3_ram_bank_top(cart: Mbc3): uint8 {.inline.} =
+  ## MBC30 is an MBC3 with one more RAM address line: banks 0-7 all map RAM.
+  ## Pan Docs (cartridge header): "MBC3 with 64 KiB of SRAM refers to MBC30"
+  ## — the header's RAM size is the only signal the cart gives, and JP Pokemon
+  ## Crystal (the one retail MBC30 title) is exactly the $10 type + $05 RAM
+  ## combination. Its PC boxes live in banks 4-7. Plain MBC3 keeps the
+  ## measured 0-3-else-open-bus map (rtc-invalid-banks capture, mbc_write).
+  if cart.ram.len >= 0x2000 * 8: 0x07'u8 else: 0x03'u8
+
+proc mbc3_rom_mask(cart: Mbc3): uint8 {.inline.} =
+  ## Same line count on the ROM side: MBC30 drives 8 ROM-bank bits (4 MiB)
+  ## where MBC3 drives 7. Keyed off the actual image so a 2 MiB MBC30 cart
+  ## (JP Crystal) behaves identically either way.
+  if cart.rom.len > 0x4000 * 128: 0xFF'u8 else: 0x7F'u8
+
 method mbc_rom_map*(cart: Mbc3): (int, int) =
   ## The RTC lives behind 0xA000-0xBFFF and never moves the ROM window.
   (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
@@ -36,9 +51,9 @@ method mbc_read*(cart: Mbc3; idx: int): uint8 =
   of 0x4000..0x7FFF:
     cart.rom[mbc_rom_bank_offset(cart, int(cart.rom_bank_num)) + mbc_rom_offset(idx)]
   of 0xA000..0xBFFF:
-    if cart.ram_bank_num <= 3:
+    if cart.ram_bank_num <= cart.mbc3_ram_bank_top():
       if cart.ram_enabled and cart.ram.len > 0:
-        cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)]
+        cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)]
       else: 0xFF'u8
     elif cart.ram_bank_num >= 0x08 and cart.ram_bank_num <= 0x0C:
       if cart.has_rtc and cart.ram_enabled:
@@ -56,7 +71,7 @@ method mbc_write*(cart: Mbc3; idx: int; val: uint8) =
     if cart.ram_enabled and not enabling: mbc_save(cart)
     cart.ram_enabled = enabling
   of 0x2000..0x3FFF:
-    cart.rom_bank_num = val and 0x7F
+    cart.rom_bank_num = val and cart.mbc3_rom_mask()
     if cart.rom_bank_num == 0: cart.rom_bank_num = 1
   of 0x4000..0x5FFF:
     # RAMB is FOUR bits wide, not eight. CasualPokePlayer's rtc-invalid-banks
@@ -92,10 +107,10 @@ method mbc_write*(cart: Mbc3; idx: int; val: uint8) =
       # it any more (see GB.Mbc3.rtc_latch_prev).
       cart.rtc_latch_prev = val and 1
   of 0xA000..0xBFFF:
-    if cart.ram_bank_num <= 0x03:
+    if cart.ram_bank_num <= cart.mbc3_ram_bank_top():
       if cart.ram_enabled and cart.ram.len > 0:
         cart.ram_dirty = true
-        cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(idx)] = val
+        cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)] = val
     elif cart.ram_bank_num >= 0x08 and cart.ram_bank_num <= 0x0C:
       if cart.has_rtc and cart.ram_enabled:
         cart.rtc_write(int(cart.ram_bank_num) - 8, val)

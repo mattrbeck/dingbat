@@ -2696,6 +2696,11 @@ type
     # MASK_EN, and the frame it freezes
     mask*:        uint8
     frozen*:      seq[uint16]
+    # ICON_EN bit 2: "suppress all further packets/commands" (Pan Docs,
+    # SGB_Command_System). Multi-game paks set it before chain-loading so a
+    # game's stray P1 traffic cannot re-program the SNES side. Nothing in the
+    # documented command set clears it.
+    packets_locked*: bool
     # MLT_REQ
     players*:     uint8
     cur_player*:  uint8
@@ -3859,7 +3864,13 @@ proc mbc_ram_bank_offset*(cart: Mbc; bank_num: int): int =
   if cart.ram.len == 0: return 0
   (bank_num * 0x2000) mod cart.ram.len
 
-proc mbc_ram_offset*(idx: int): int = idx - 0xA000
+proc mbc_ram_offset*(cart: Mbc; idx: int): int =
+  ## Offset inside the selected 8 KiB RAM window. RAM smaller than the window
+  ## (header code $01, 2 KiB — "PD" ROMs use it) has its high address lines
+  ## unwired, so the window mirrors the array (Pan Docs, MBCs: accesses wrap)
+  ## instead of indexing past it.
+  if cart.ram.len >= 0x2000 or cart.ram.len == 0: idx - 0xA000
+  else: (idx - 0xA000) mod cart.ram.len
 
 const
   RTC_SECOND_CYCLES* = 4194304  # one RTC tick per emulated second
@@ -4720,7 +4731,19 @@ proc apply_cheats*(gb: GB) =
           v = v or (uint32(read_byte(mem, gb, int((a + i) and 0xFFFF))) shl (i * 8))
         v,
       write8: proc(a: uint32; v: uint8) =
-        write_byte(mem, gb, int(a and 0xFFFF), v),
+        # A GameShark code's SRAM bank rides bits 16-23 (parse_gb_gameshark).
+        # An external-RAM target writes THAT bank's storage directly: going
+        # through the MBC would need the bank latch flipped mid-frame, which
+        # the game would observe. The MBC's own modular bank math reproduces
+        # the hardware masking (a $91 code lands in bank 1 on any cart).
+        let idx = int(a and 0xFFFF)
+        let cart = gb.cartridge
+        if idx in 0xA000..0xBFFF and cart != nil and cart.ram.len > 0:
+          cart.ram[mbc_ram_bank_offset(cart, int((a shr 16) and 0xFF)) +
+                   mbc_ram_offset(cart, idx)] = v
+          cart.ram_dirty = true
+        else:
+          write_byte(mem, gb, idx, v),
       write16: proc(a: uint32; v: uint16) =
         write_byte(mem, gb, int(a and 0xFFFF), uint8(v))
         write_byte(mem, gb, int((a + 1) and 0xFFFF), uint8(v shr 8)),

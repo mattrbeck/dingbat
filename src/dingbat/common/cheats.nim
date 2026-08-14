@@ -162,8 +162,14 @@ proc parse_gb_gameshark(code: string; op: var CheatOp): string =
   let raw = parse_hex_exact(code, 8, ok)
   if not ok: return "GameShark code must be 8 hex digits (TTDDAAAA)"
   # Address bytes are stored little-endian in the code, then byte-swapped.
+  # The leading two digits are the SRAM bank (Pan Docs, Shark Cheats:
+  # `010238CD` = bank $01, value $02, address $CD38). GB addresses are 16-bit,
+  # so the bank rides bits 16-23 of `address` for the core's write hook to
+  # decode — only an $A000-BFFF target consults it. mGBA drops the byte
+  # entirely; Pan Docs is the spec here.
   op.action = caWrite8
-  op.address = ((raw and 0xFF) shl 8) or ((raw shr 8) and 0xFF)
+  op.address = ((raw and 0xFF) shl 8) or ((raw shr 8) and 0xFF) or
+               (((raw shr 24) and 0xFF) shl 16)
   op.value = (raw shr 16) and 0xFF
   op.compare = -1
   return ""
