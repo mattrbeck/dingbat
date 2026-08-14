@@ -52,16 +52,19 @@ Preset behavior (suspends, never overwrites, stored preferences):
   interpolation, analog low-pass, pitch-correct fast-forward — are suspended
   while the mode is on (web `applySystemSettings` computes effective values;
   native apply procs do the same).
-- Video costs above the ~1% bar are suspended too: the GPU upscale filter
-  (hq4x +0.16 ms / xBR +0.58 ms per present @960×640 web, xBR +1.01 ms
-  @2160p native — several percent of frame budget on weak GPUs), ambient
-  glow (sampler + canvas fully off, canvas hidden), and LCD response (the
-  per-pixel CPU panel model). Deliberately NOT suspended, measured below the
-  bar: color correction (+0.033 ms GPU ≈ 0.2%, a shader bool in a pass that
-  runs anyway), scanlines (same), integer scaling (layout only), volume/mute.
-  The UI reflects every lock: affected web toggles/selects and native menu
-  items / video-widget rows gray out while the mode is on, keeping their
-  stored values.
+- Video costs above the ~1% bar are suspended too: the WHOLE Filter selector
+  — the smoothing filters (hq4x +0.16 ms / xBR +0.58 ms per present @960×640
+  web, xBR +1.01 ms @2160p native) and the screen looks (LCD grid, RGB
+  subpixels; the RGB look also inflates the backing store 4×→6× per axis,
+  which speed mode reverts) — plus ambient glow (sampler + canvas fully off,
+  canvas hidden) and LCD response (the per-pixel CPU panel model). Web
+  routes every filter consumer through `effectiveFilter()`; native through
+  the `vf` effective value in `render_game`. Deliberately NOT suspended,
+  measured below the bar: color correction (+0.033 ms GPU ≈ 0.2%, a shader
+  bool in a pass that runs anyway), integer scaling (layout only),
+  volume/mute. The UI reflects every lock: affected web toggles/selects and
+  native menu items / video-widget rows gray out while the mode is on,
+  keeping their stored values.
 - Link/rollback/netlink cores are **exempt** — they keep faithful timing, or
   two peers with different settings would desync (`make_gba` comment).
 
