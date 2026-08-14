@@ -44,6 +44,11 @@ The browser build at [dingbat.gg](https://dingbat.gg) is the default way to play
   cart's synthetic test pattern
 - Game Boy Printer: always connected, with hardware-matched print timing. Finished
   prints land in a Printed Photos gallery and save as PNGs
+- Now playing: the page title names the running game, and the phone's lock screen
+  and Control Center show it (with box art or a screen snapshot) with working
+  play/pause. The game's name comes from the library, falling back to the
+  cartridge header title when the filename doesn't say — a ROM out of a `.zip`,
+  or one named by serial
 - Toasts stack rather than replacing one another, wrap on narrow screens, and are
   individually dismissible
 - Tabbed settings panel: key rebinding, GB renderer choice, GBA BIOS/HLE modes, color
@@ -92,6 +97,8 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 - Fast forward and 2x speed (pitch-preserving via WSOLA, opt-in)
 - Pause and frame advance
 - Screenshots
+- The window title names the running game (filename, falling back to the
+  cartridge header title) alongside the fps / PAUSED / SLEEPING readout
 - Volume and per-channel audio controls
 - A refused save state says why (wrong ROM, written by a newer build, corrupt)
   rather than failing silently

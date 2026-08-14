@@ -64,6 +64,9 @@ task test_clipreplay, "Run the clip-capture replay determinism tests":
 task test_printer, "Run the Game Boy Printer protocol unit tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_printer_test tests/gb_printer_test.nim"
 
+task test_romtitle, "Run the cartridge header-title parse tests":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_romtitle_test tests/romtitle_test.nim"
+
 task test_lcdresponse, "Run the LCD panel-response model invariants":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_lcdresponse_test tests/lcdresponse_test.nim"
 

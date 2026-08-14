@@ -799,6 +799,30 @@ proc current_rom_path(): string =
   of ekGB:  (if app.gb_emu != nil: app.gb_emu.rom_path else: "")
   of ekNone: ""
 
+proc header_game_name(): string =
+  ## The cartridge header title of whatever is loaded, or "" (headerless
+  ## homebrew, no game). Parsed once at load time by each core; see
+  ## src/dingbat/common/romtitle.nim.
+  case app.emu_kind
+  of ekGBA: (if app.gba_emu != nil: app.gba_emu.cartridge.rom_title() else: "")
+  of ekGB:  (if app.gb_emu != nil: app.gb_emu.rom_title else: "")
+  of ekNone: ""
+
+proc window_game_name(): string =
+  ## What the window title calls the running game, or "" for none.
+  ##
+  ## PRECEDENCE — filename stem first, header title second. The header field is
+  ## a truncated, uppercased 11/12/16-byte identifier ("POKEMON EMER",
+  ## "ZELDAMC"), while the file on disk is normally the name a human already
+  ## chose and can read ("Pokemon Emerald.gba"). So the nicer string wins and
+  ## the header is the fallback for the cases the filename cannot serve:
+  ## a ROM launched from a .zip (whose stem is the archive's inner temp name)
+  ## or one with a hash/serial for a filename. The same rule, for the same
+  ## reason, governs the web UI — see `gameDisplayName` in web/index.js, where
+  ## "the filename" is the library's display name.
+  let stem = current_rom_path().extractFilename().changeFileExt("")
+  if stem.len > 0: stem else: header_game_name()
+
 # ──────────────────────────── Cheats ────────────────────────────
 
 proc cheat_file_path(): string =
@@ -1857,12 +1881,14 @@ proc update_fps_title(emulated: bool) =
   if cur_sec != fps_second:
     let fps = if fps_us > 0: fps_frames.float * 1_000_000.0 / fps_us.float else: 0.0
     emu_fps = fps
-    let title = if app.emu_kind == ekNone: "dingbat"
+    let state = if app.emu_kind == ekNone: "dingbat"
                 elif app.paused: "dingbat - PAUSED"
                 elif app.emu_kind == ekGBA and app.gba_emu != nil and
                      app.gba_emu.cpu.stopped: "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
-    setTitle(app.window, cstring(title))
+    let game = window_game_name()
+    setTitle(app.window,
+             cstring(if game.len > 0: game & " — " & state else: state))
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec

@@ -125,6 +125,7 @@ declare var FS: {
   open(path: string, flags: string): object;
   write(stream: object, buf: Uint8Array, offset: number, length: number, position?: number): number;
   close(stream: object): void;
+  read(stream: object, buf: Uint8Array, offset: number, length: number, position?: number): number;
   readFile(path: string): Uint8Array;
   unlink(path: string): void;
 };

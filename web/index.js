@@ -4978,6 +4978,91 @@ const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 // stays in tooltips). Falls back to the raw name if there's no extension.
 const displayName = (name) => stripExt(name) || name;
 
+// --- Cartridge header title ------------------------------------------------
+// Every shipped cart writes a short ASCII name into its header. It is the only
+// thing that knows what a game is called when the filename doesn't (a ROM
+// pulled out of a .zip, a file named by serial or hash), so it is parsed here
+// and used as the fallback for the page title and the lock-screen metadata.
+//
+// This mirrors src/dingbat/common/romtitle.nim byte for byte — same windows,
+// same sanitizing, so the native window title and the web page agree on what a
+// cart is called. Doing it in JS (rather than exporting the cores' parse) is
+// deliberate: the bytes are already in hand here, and it keeps the wasm export
+// table and the generated web/types/em.d.ts out of this feature entirely. The
+// header-sniffing precedent is looksLikeValidRom further down.
+//
+// Rules: stop at the first NUL (the field is a NUL-padded fixed-width buffer),
+// keep only printable ASCII, trim. Garbage in yields "" or a short fragment —
+// never a control character in a window title — and "" is what tells callers
+// to use the filename instead.
+const headerTitleAt = (bytes, first, limit) => {
+  let s = "";
+  for (let i = first; i < limit && i < bytes.length; i++) {
+    const c = bytes[i];
+    if (c === 0) break;
+    if (c >= 0x20 && c <= 0x7e) s += String.fromCharCode(c);
+  }
+  return s.trim();
+};
+
+const romHeaderTitle = (bytes, ext) => {
+  if (!bytes) return "";
+  if (ext === ".gba") {
+    // 12 bytes at 0xA0, uppercase ASCII (GBATEK, "The Cartridge Header").
+    // The game code at 0xAC is a separate field and is never folded in.
+    return bytes.length < 0xac ? "" : headerTitleAt(bytes, 0xa0, 0xac);
+  }
+  // .gb / .gbc — 0x134.., originally 16 bytes. The CGB era carved the tail up:
+  // 0x13F-0x142 is the manufacturer code and 0x143 the CGB flag ($80/$C0), so
+  // a CGB-aware cart gets 11 bytes and everything else the full 16. Reading 16
+  // unconditionally appends the manufacturer code to every CGB game's name
+  // ("POKEMON CRYSAXVE"). Pan Docs, "The Cartridge Header".
+  if (bytes.length < 0x144) return "";
+  const cgb = bytes[0x143] === 0x80 || bytes[0x143] === 0xc0;
+  return headerTitleAt(bytes, 0x134, cgb ? 0x13f : 0x144);
+};
+
+// Read just the header off a ROM already written into the emscripten FS.
+// FS.readFile would copy the whole cart (up to 32 MB) to look at 0x150 bytes.
+const FS_HEADER_BYTES = 0x150;
+const readFsRomHeader = (fsName) => {
+  if (typeof FS === "undefined") return null;
+  let stream = null;
+  try {
+    const buf = new Uint8Array(FS_HEADER_BYTES);
+    stream = FS.open(fsName, "r");
+    const n = FS.read(stream, buf, 0, FS_HEADER_BYTES, 0);
+    return n > 0 ? buf.subarray(0, n) : null;
+  } catch {
+    return null;
+  } finally {
+    if (stream) { try { FS.close(stream); } catch {} }
+  }
+};
+
+// Header title of the game currently loaded, "" if none/unreadable. Set once
+// per load by loadRom (the ROM bytes never change under it — the cheat engine
+// patches the wasm-side copy, and renaming the game on a code toggle would be
+// absurd anyway).
+let currentHeaderTitle = "";
+
+// THE NAME A HUMAN SEES, everywhere outside the library grid: page title,
+// lock screen, Control Center.
+//
+// PRECEDENCE — library display name first, header title second, "" for "no
+// game". The header field is a truncated, uppercased 11/12/16-byte identifier
+// ("POKEMON EMER", "ZELDAMC"); the library name is the filename a human
+// already chose and can read ("Pokemon Emerald"). So the nicer string wins,
+// and the header covers what the filename cannot: a ROM launched out of a .zip
+// or one named by serial/hash. src/dingbat.nim's `window_game_name` applies
+// the identical rule to the native window title (filename stem, header
+// fallback) so the two frontends never disagree about a cart's name.
+const gameDisplayName = () => {
+  if (linkMode && linkRomEntry) return displayName(linkRomEntry.name);
+  if (currentOriginalName) return displayName(currentOriginalName);
+  return currentHeaderTitle;
+};
+
 // Overwrite the current game's battery save with imported bytes (with the
 // same name-mismatch guard as the "Import save file" button), then reboot the
 // core so the game reloads from it. Shared by that button and by a dropped
@@ -5299,6 +5384,145 @@ const captureThumbnail = () => {
     return small.toDataURL("image/png");
   }
 };
+
+// --- Now playing: page title + Media Session ------------------------------
+// Two surfaces, one source of truth (gameDisplayName above):
+//   * document.title, so a pinned tab / window list says which game is open
+//     and reverts to plain "dingbat" back at the library;
+//   * navigator.mediaSession, so the phone's lock screen and Control Center
+//     (and desktop media keys) show the game and can pause/resume it.
+//
+// Everything here is fail-soft. mediaSession, MediaMetadata and the artwork
+// capture are each probed before use, an older browser simply gets the page
+// title, and no failure in this block can reach the emulator.
+//
+// NOT wired, deliberately: seekbackward / seekforward / nexttrack /
+// previoustrack. There is no timeline and no playlist to move through, and an
+// unhandled action just doesn't render a button.
+const BASE_TITLE = "dingbat";
+const hasMediaSession = () =>
+  typeof navigator !== "undefined" && !!navigator.mediaSession;
+
+// Artwork for the lock screen: the game's box art if the library has one,
+// otherwise a snapshot of the screen. Box art is a Blob, so its object URL is
+// held until it's replaced (revoking it while the OS still references it blanks
+// the lock-screen image).
+let nowPlayingArtURL = null;
+let nowPlayingArtFor = null; // library name the held URL belongs to
+
+const releaseNowPlayingArt = () => {
+  if (nowPlayingArtURL) URL.revokeObjectURL(nowPlayingArtURL);
+  nowPlayingArtURL = null;
+  nowPlayingArtFor = null;
+};
+
+const nowPlayingArtwork = () => {
+  const out = [];
+  // No `sizes` on the box art: it's a user-supplied image of unknown
+  // dimensions, and a wrong hint is worse than none (the OS picks by it).
+  if (nowPlayingArtURL) out.push({ src: nowPlayingArtURL });
+  const shot = (() => { try { return captureThumbnail(); } catch { return null; } })();
+  if (shot) {
+    const [w, h] = gameRes();
+    out.push({ src: shot, sizes: "160x" + Math.round((160 * h) / w),
+               type: shot.startsWith("data:image/webp") ? "image/webp" : "image/png" });
+  }
+  return out;
+};
+
+// Fetch box art for the running game once, then re-publish the metadata with
+// it. Async and best-effort: the metadata is always set synchronously first.
+const loadNowPlayingArt = async () => {
+  const name = currentOriginalName;
+  if (!name || nowPlayingArtFor === name) return;
+  let art = null;
+  try { art = await getRomArt(name); } catch {}
+  if (currentOriginalName !== name) return; // game switched under us
+  releaseNowPlayingArt();
+  nowPlayingArtFor = name;
+  if (art) {  // the stored record IS the Blob (see the home grid's art tile)
+    try { nowPlayingArtURL = URL.createObjectURL(art); } catch {}
+  }
+  if (nowPlayingArtURL) publishNowPlaying();
+};
+
+// What the last publish put on the lock screen, so the once-a-second reconcile
+// below is free when nothing changed.
+let nowPlayingKey = null;
+
+const publishNowPlaying = () => {
+  const game = gameDisplayName();
+  const running = !!(currentRomName || linkMode);
+  document.title = running && game ? game + " — " + BASE_TITLE : BASE_TITLE;
+  if (!hasMediaSession()) return;
+  const ms = navigator.mediaSession;
+  try {
+    if (!running) {
+      ms.metadata = null;
+      ms.playbackState = "none";
+      return;
+    }
+    if (typeof MediaMetadata === "function") {
+      ms.metadata = new MediaMetadata({
+        title: game || "Game Boy",
+        artist: BASE_TITLE,
+        artwork: nowPlayingArtwork(),
+      });
+    }
+    ms.playbackState = paused ? "paused" : "playing";
+  } catch {}
+};
+
+// Idempotent: publishes only when the game or the run/pause state moved. Wired
+// into the obvious transitions (load, unload, pause button, main menu) AND
+// polled once a second, because `paused` is written from a dozen places — the
+// rewind scrubber, the bug-report scrubber, replays, link setup — and a lock
+// screen that lies about whether the game is running is worse than one that
+// takes up to a second to catch up. The early-out makes the poll free.
+const syncNowPlaying = () => {
+  const key = (currentRomName || "") + " " + (currentOriginalName || "") +
+              " " + currentHeaderTitle + " " + (linkMode ? "L" : "") +
+              " " + (paused ? "P" : "R");
+  if (key === nowPlayingKey) return;
+  nowPlayingKey = key;
+  publishNowPlaying();
+};
+
+// Force a republish even though nothing about the game changed. Used when the
+// silent-loop element starts on iOS: the media session WebKit hangs Now Playing
+// off didn't exist a moment ago, so metadata set before it is not guaranteed to
+// have landed.
+const republishNowPlaying = () => {
+  nowPlayingKey = null;
+  syncNowPlaying();
+};
+
+// One-time handler wiring. Play/Pause map onto the emulator's own pause state
+// through togglePause, so the lock screen, the on-screen #pause button and the
+// keyboard shortcut all drive exactly one thing.
+const initMediaSession = () => {
+  if (!hasMediaSession()) return;
+  const ms = navigator.mediaSession;
+  const setAction = (name, fn) => {
+    try { ms.setActionHandler(name, fn); } catch {}  // unsupported action: skip
+  };
+  setAction("play", () => {
+    if (paused && (currentRomName || linkMode)) togglePause();
+    syncNowPlaying();
+  });
+  setAction("pause", () => {
+    if (!paused && (currentRomName || linkMode)) togglePause();
+    syncNowPlaying();
+  });
+  setAction("stop", () => {
+    if (!paused && (currentRomName || linkMode)) togglePause();
+    syncNowPlaying();
+  });
+};
+
+initMediaSession();
+publishNowPlaying();          // plain "dingbat" until a game loads
+setInterval(syncNowPlaying, 1000);
 
 // Save the running core into a slot (state blob + thumbnail/timestamp meta).
 const saveToSlot = async (slot) => {
@@ -8036,6 +8260,22 @@ const loadRom = async (romName, originalName, opts = {}) => {
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
   detectMonoPanel(romName); // DMG (4-shade) vs colour screen — palette gate
+  // Name this game for the page title and the lock screen. The header is the
+  // fallback behind the library name (see gameDisplayName), so it is read even
+  // when currentOriginalName looks fine — a later rename mustn't need a reload.
+  currentHeaderTitle = romHeaderTitle(readFsRomHeader(romName), extOf(romName));
+  releaseNowPlayingArt();
+  syncNowPlaying();
+  loadNowPlayingArt();    // box art, if the library has any (async, optional)
+  // The framebuffer is blank this instant, so the screen-snapshot fallback
+  // would publish a black square. Re-publish once the game has drawn a few
+  // seconds of itself — unless it's already been swapped out.
+  {
+    const artFor = currentOriginalName;
+    setTimeout(() => {
+      if (currentOriginalName === artFor) republishNowPlaying();
+    }, 5000);
+  }
   applyGbPalette();       // fresh core: push the shade palette (or drop it)
   stateUndoBytes = null;  // undo buffer belongs to the previous game
   rwUndoBytes = null;     // ...as does the rewind-commit undo
@@ -8357,6 +8597,7 @@ const togglePause = (fromRemote) => {
   if (!fromRemote && rollbackMode && typeof window.rbSendPause === "function") {
     window.rbSendPause(paused);
   }
+  syncNowPlaying(); // lock screen / Control Center follows the button
 };
 // The peer paused/resumed; match it without echoing back.
 window.applyRemotePause = (on) => {
@@ -9669,6 +9910,7 @@ const showMainMenu = () => {
   document.body.classList.add("paused");
   document.body.classList.remove("running");
   updatePausedCard();
+  syncNowPlaying();
   refreshHomeRecent();
   updateCanvasScaling();
 };
@@ -9680,6 +9922,7 @@ const resumeGame = () => {
   pauseButton.title = "Pause";
   document.body.classList.remove("paused");
   document.body.classList.add("running");
+  syncNowPlaying();
   updateCanvasScaling();
 };
 
@@ -9761,6 +10004,11 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   stopWebcam();
   camNoticeShown = null;
   homePausedCard.hidden = true;
+  // Back at the library: the page is "dingbat" again and the lock screen has
+  // nothing to show.
+  currentHeaderTitle = "";
+  releaseNowPlayingArt();
+  syncNowPlaying();
   refreshHomeRecent();
   updateCanvasScaling();
   return true;
@@ -11125,17 +11373,38 @@ var Module = {
     // On iOS Safari, we also play a brief silent buffer through the AudioContext
     // and an <audio> element to ensure the audio session is fully activated.
     let audioUnlocked = false;
-    // Pre-audioSession iOS (≤16): Web Audio output obeys the ringer (silent)
-    // switch unless an <audio> element is actively playing, which promotes
-    // the whole session to "playback". A one-shot blip isn't enough — the
-    // promotion only lasts while the element plays — so those devices keep a
-    // silent element looping for the life of the page. Modern iOS is handled
-    // by navigator.audioSession in initAudio; nobody else needs any of this.
+    // A silent WAV looping in an <audio> element, for the life of the page,
+    // on iOS only. TWO unrelated reasons, either of which is enough:
+    //
+    //  1. Pre-audioSession iOS (≤16): Web Audio output obeys the ringer
+    //     (silent) switch unless an <audio> element is actively playing, which
+    //     promotes the whole session to "playback". A one-shot blip isn't
+    //     enough — the promotion only lasts while the element plays. Modern
+    //     iOS gets this from navigator.audioSession in initAudio instead.
+    //  2. Now Playing (lock screen / Control Center). WebKit populates it from
+    //     a *media element*; a page whose only output is an AudioContext — as
+    //     this emulator's is — sets navigator.mediaSession.metadata and gets
+    //     nothing on the lock screen. A playing silent element is the standard
+    //     workaround: it gives WebKit a media session to hang the metadata
+    //     that publishNowPlaying() sets on.
+    //
+    // It is a separate HTMLMediaElement and touches NOTHING in the pushAudio
+    // path — no node, no context, no scheduling. It also stays playing while
+    // the emulator is paused: pause is expressed through
+    // mediaSession.playbackState, because stopping and restarting the element
+    // would tear the iOS audio session down and back up (a real risk of a
+    // glitch in the AudioContext output) for a cosmetic gain.
+    //
+    // Deliberately iOS-only. Other platforms get the metadata and the action
+    // handlers with no element at all: they need no ringer promotion, and a
+    // permanent "this tab is playing audio" indicator on desktop would be a
+    // regression for the many sessions where nobody looks at a lock screen.
     let silentLoopEl = null;
+    const iosFamily = () =>
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const needsSilentLoop = () =>
-      !navigator.audioSession &&
-      (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
-        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+      iosFamily() && (!navigator.audioSession || !!navigator.mediaSession);
     const silentWavURL = () => {
       // 0.25 s of 8 kHz mono 8-bit silence (0x80), built inline — looping a
       // microscopic file (like the 1-sample one-shot below) would be churn.
@@ -11150,6 +11419,20 @@ var Module = {
       dv.setUint16(34, 8, true); tag(36, "data"); dv.setUint32(40, n, true);
       return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
     };
+    // Start (or restart) the loop and, once it is actually playing, republish
+    // the Now Playing metadata — WebKit only has a media session to hang it off
+    // from that moment on. Old WebKit returns undefined from play() instead of
+    // a promise, hence the shape check.
+    const playSilentLoop = () => {
+      try {
+        const p = silentLoopEl.play();
+        if (p && typeof p.then === "function") {
+          p.then(republishNowPlaying).catch(() => {});
+        } else {
+          republishNowPlaying();
+        }
+      } catch {}
+    };
     const resumeAudio = () => {
       initAudio();
       // Not just "suspended": iOS Safari parks the context in a non-standard
@@ -11160,7 +11443,7 @@ var Module = {
       // iOS the touchstart listener runs this first and its play() is refused
       // (see the touchend note below); pagehide also pauses the loop, and
       // pageshow funnels back through here.
-      if (silentLoopEl && silentLoopEl.paused) silentLoopEl.play().catch(() => {});
+      if (silentLoopEl && silentLoopEl.paused) playSilentLoop();
       if (!audioUnlocked) {
         audioUnlocked = true;
         // Play a silent buffer through the AudioContext to fully unlock it
@@ -11173,7 +11456,7 @@ var Module = {
         if (needsSilentLoop()) {
           silentLoopEl = new Audio(silentWavURL());
           silentLoopEl.loop = true;
-          silentLoopEl.play().catch(() => {});
+          playSilentLoop();
         } else {
           let a = new Audio("data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==");
           a.play().catch(() => {});

@@ -58,9 +58,9 @@ jobs:
             sleep 10
           done
           exit 1
-      - name: Build test binaries (all nine, in parallel)
-        # The harness, the runner, and the seven standalone unit tests are nine
-        # independent `nim c` runs over the same tree. They used to be seven
+      - name: Build test binaries (all eleven, in parallel)
+        # The harness, the runner, and the nine standalone unit tests are
+        # eleven independent `nim c` runs over the same tree. They used to be
         # sequential steps — ~145s of a ~250s Windows job spent with three of
         # the four cores idle, because Nim's semantic pass is single-threaded
         # per invocation. Building them together cuts that roughly in half
@@ -189,6 +189,16 @@ jobs:
         # vacuously. Committed ROMs only; needs no download.
         shell: bash
         run: ./dingbat_clipreplay_test
+      - name: Cartridge header titles
+        # The name the native window title and the web lock screen show. Every
+        # way it breaks is invisible to the ROM suites: a window one byte too
+        # wide appends a CGB cart's manufacturer code to its name, one too
+        # narrow truncates every DMG title, and an unsanitized field puts
+        # control bytes into a window title. Enumerates both header layouts and
+        # the sanitizer; web/tests/nowplaying.test.mjs mirrors the same cases
+        # against the JS copy of the parse. Needs no ROMs.
+        shell: bash
+        run: ./dingbat_romtitle_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status

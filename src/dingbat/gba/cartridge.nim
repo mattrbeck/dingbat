@@ -53,9 +53,22 @@ proc rom_open_bus*(address: uint32): uint8 {.inline.} =
   uint8((0xFFFF'u32 and (address shr 1)) shr (8 * (address and 1)))
 
 proc title*(cart: Cartridge): string =
+  ## The raw 12 header bytes, NULs and all. Callers that want something to put
+  ## in front of a human use `rom_title` below.
   result = newString(12)
   for i in 0 ..< 12:
     result[i] = char(cart.rom[0x0A0 + i])
+
+proc rom_title*(cart: Cartridge): string =
+  ## The header title as a display name: NUL-terminated, printable-ASCII only,
+  ## trimmed (common/romtitle.nim, shared with the GB core). Empty for the
+  ## headerless homebrew and test ROMs this emulator also runs, which is what
+  ## tells a frontend to fall back to the filename.
+  ##
+  ## Not cached and not serialized: it is derived from ROM bytes, and the one
+  ## thing that rewrites `rom` in place (the cheat engine) has no business
+  ## renaming the game. Callers read it once at load time.
+  gba_header_title(cart.rom)
 
 proc game_code*(cart: Cartridge): string =
   ## The 4-character game code at header offset 0xAC (e.g. "KYGE"). Used to

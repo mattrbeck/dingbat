@@ -241,6 +241,16 @@ const makeFakeFS = () => {
       if (!files.has(name)) throw new Error("ENOENT: " + name);
       return files.get(name);
     },
+    // Positional read, as emscripten's MEMFS provides it. index.js uses it to
+    // pull just the 0x150-byte cartridge header off a ROM instead of copying
+    // a 32 MB file (readFsRomHeader).
+    read(stream, buffer, offset, length, position) {
+      const data = files.get(stream.name);
+      if (!data) throw new Error("ENOENT: " + stream.name);
+      const slice = data.subarray(position, Math.min(data.length, position + length));
+      buffer.set(slice, offset);
+      return slice.length;
+    },
     unlink(name) { files.delete(name); },
   };
 };
@@ -276,6 +286,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // Body of registration.update() in the fake SW container; tests replace
     // it to plant a waiting/installing worker before it resolves.
     swUpdateImpl: async () => {},
+    // navigator.mediaSession.setActionHandler(name, fn) calls, by action name.
+    // Firing one is how a test plays the lock-screen play/pause button.
+    mediaActions: {},
   };
 
   // --- Fake service worker container (opt-in: loadApp({ serviceWorker })) ---
@@ -367,6 +380,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // initStorage — tests drive openDB/migrations/refreshHomeRecent
     // explicitly, and an auto-boot racing them would be nondeterministic.
     readyState: "loading",
+    // index.js retitles the page with the running game (publishNowPlaying) and
+    // reverts it at the library, so this is an observation point, not decor.
+    title: "dingbat",
     body: new FakeElement("body"),
     head: new FakeElement("head"),
     documentElement: new FakeElement("html"),
@@ -414,6 +430,16 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       // a popup. Tests default to "a gesture is live"; flip isActive to false
       // to model the background-timer case.
       userActivation: { get isActive() { return state.userActivation !== false; } },
+      // Media Session (lock screen / Control Center "now playing"). Always
+      // present so every test exercises the real publish path; index.js guards
+      // on `!!navigator.mediaSession`, so deleting this key models a browser
+      // without the API. Handlers land in state.mediaActions for tests to fire
+      // (that is how a lock-screen play/pause button arrives).
+      mediaSession: {
+        metadata: null,
+        playbackState: "none",
+        setActionHandler(name, fn) { state.mediaActions[name] = fn; },
+      },
       storage: {
         estimate: async () => ({ usage: 12345 }),
         persisted: async () => state.persisted,
@@ -454,6 +480,19 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // the fake DOM anyway).
     MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
     FileReader: FakeFileReader,
+    // The metadata object index.js hands to navigator.mediaSession. Real
+    // MediaMetadata copies the init dict onto itself, so a plain assign is a
+    // faithful stand-in for what a test reads back.
+    MediaMetadata: class { constructor(init = {}) { Object.assign(this, init); } },
+    // The silent looping <audio> that gives WebKit a media session to hang Now
+    // Playing off (see needsSilentLoop in index.js). Only ever constructed
+    // inside resumeAudio, which no test reaches — but a missing global here
+    // would be a landmine for the first one that does.
+    Audio: class {
+      constructor(src) { this.src = src; this.loop = false; this.paused = true; }
+      play() { this.paused = false; return Promise.resolve(); }
+      pause() { this.paused = true; }
+    },
     requestAnimationFrame: () => 0,
     cancelAnimationFrame() {},
     alert: (msg) => alerts.push(String(msg)),
@@ -572,6 +611,13 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     applyImportedState, applyStateBytes, stateRejectMessage, looksLikeStateFile,
     refreshHomeRecent, handleRomFile, loadRom,
     looksLikeValidRom, closeRomWarnModal,
+    romHeaderTitle, headerTitleAt, readFsRomHeader,
+    gameDisplayName, syncNowPlaying, publishNowPlaying, republishNowPlaying,
+    get currentHeaderTitle() { return currentHeaderTitle; },
+    set currentHeaderTitle(v) { currentHeaderTitle = v; },
+    get paused() { return paused; },
+    set paused(v) { paused = v; },
+    togglePause, unloadGame, showMainMenu, resumeGame,
     serializeCheats, parseCheats, validateCheat, applyCheats, restoreCheats,
     renderCheatList,
     get cheatList() { return cheatList; },

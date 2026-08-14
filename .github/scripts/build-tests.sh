@@ -57,6 +57,7 @@ build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
 build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
+build romtitle        dingbat_romtitle_test         tests/romtitle_test.nim
 
 # Wait on every build even after one fails, so a run reports ALL the broken
 # targets rather than whichever happened to be waited on first.

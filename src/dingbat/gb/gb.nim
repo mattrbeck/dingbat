@@ -3,6 +3,7 @@
 
 import std/[bitops, os, strutils, times]
 import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats]
+import ../common/romtitle
 import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
@@ -4587,12 +4588,11 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
   # `stat_irq_blocking.s` reads "pass: DMG ABC, MGB, CGB, AGB, AGS / fail:
   # DMG 0".
   result.gb_set_revision(if result.cgb_enabled: grCgbC else: grDmgABC)
-  result.rom_title = block:
-    var s = ""
-    for i in 0x0134 ..< 0x013F:
-      let ch = result.cartridge.rom[i]
-      if ch >= 0x20'u8 and ch <= 0x7E'u8: s.add(char(ch))
-    s.strip()
+  # The name the frontends show for this cart. Sanitizing (and the 11-vs-16
+  # byte window, which depends on the CGB flag) lives in common/romtitle.nim
+  # so the GBA core parses its own header the same way. Empty for a headerless
+  # homebrew/test ROM, which is the frontends' signal to use the filename.
+  result.rom_title = gb_header_title(result.cartridge.rom)
   result.rom_size = 0x8000'u32 shl result.cartridge.rom[0x0148]
   result.ram_size = case result.cartridge.rom[0x0149]
     of 0x01: 0x0800

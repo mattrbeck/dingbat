@@ -73,6 +73,54 @@ capture.
       gone for GB/GBC (`body.gb-mode`), with the overlay getting shorter
       rather than leaving a gap.
 
+## Now playing: page title + Media Session (2026-08-14)
+
+The web UI names the running game in `document.title` and publishes it to
+`navigator.mediaSession` (title, artist "dingbat", artwork), with play/pause
+action handlers wired to the emulator's own pause state. Parsing, precedence
+and the handlers are unit-tested (`web/tests/nowplaying.test.mjs`,
+`tests/romtitle_test.nim`); what no harness can see is whether the OS
+actually surfaces any of it. **Plain-http over the LAN is fine for all of
+these** — nothing here is a perf measurement.
+
+iPhone Safari is the one that matters and the one most likely to be wrong:
+WebKit builds Now Playing from a *media element*, and this emulator's only
+output is an AudioContext. The workaround shipped here is the silent looping
+`<audio>` element that already existed for iOS ≤16's ringer switch, now also
+created on modern iOS (`needsSilentLoop`). If items 3-5 fail, that is the
+mechanism to suspect — not the metadata.
+
+- [ ] **Page title.** Desktop or phone: load a game, confirm the tab/window
+      says "<Game> — dingbat"; close the game (home → close) and confirm it
+      goes back to plain "dingbat". Load a game out of a `.zip`, or one whose
+      filename is a serial/hash, and confirm the title falls back to the
+      cartridge header name (e.g. "POKEMON EMER") rather than showing the
+      archive's inner temp name.
+- [ ] **iPhone lock screen.** Start a game (tap something so audio unlocks —
+      audio must be audible first), lock the phone. Expect the game's name
+      with "dingbat" underneath, and a screen/box-art image. Box art only
+      appears for games that have it in the library.
+- [ ] **iPhone Control Center.** Swipe down from the top-right during play:
+      the audio card should name the game, not "Safari" / the page URL.
+- [ ] **Lock-screen pause/resume.** From the lock screen, hit pause: the
+      emulator must actually freeze (unlock and check — not just go silent),
+      and the widget must show paused. Hit play: it resumes. Then pause with
+      the in-app ⏸ button and re-lock — the lock screen must already show
+      "paused" (it reconciles within a second).
+- [ ] **No audio regression.** The silent element is new on iOS 17+. Play for
+      a few minutes with the ringer switch BOTH ways, take a phone call or
+      trigger Siri mid-game and come back, and confirm the emulator audio is
+      unchanged: no crackle, no drift, no dropout, no stuck silence. This is
+      the check that would veto the feature — the pushAudio lead servo is
+      tuned and the element must be invisible to it.
+- [ ] **Android Chrome / desktop.** No silent element is created there, so
+      the notification/media-key surface may simply not appear. Confirm the
+      page title still works and nothing is broken; media keys working at all
+      is a bonus, not a requirement.
+- [ ] **Library, not a phantom.** Close the game and re-lock the phone: the
+      Now Playing card must be gone (or at least empty), not stuck on the
+      last game.
+
 ## Drive sync: renames (2026-08-14, `3f9370a`)
 
 Renames now mirror to Drive as in-place metadata renames, and a `ren` marker
