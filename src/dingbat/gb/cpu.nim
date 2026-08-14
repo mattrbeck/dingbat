@@ -517,6 +517,10 @@ proc tick*(cpu: GbCpu; gb: GB) =
       # Only if the HBlank that owed it is still running, though -- the debt is
       # to a mode 0, not to the transfer. Waking outside one drops it, and the
       # next mode 0 arms the flag again.
+      #
+      # Copied at the boundary rather than inside a CPU access's dots (the wake
+      # is not one), so nothing here holds the bytes back: see
+      # HDMA_VISIBLE_DOTS and `in_cpu_cycle`.
       if gb.ppu.hdma_block_due:
         if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
           ppu_step_hdma(gb.ppu, gb)

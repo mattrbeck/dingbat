@@ -1633,10 +1633,45 @@ proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
     ppu.stat_write_pending = false
     ppu_handle_stat_interrupt(ppu, gb)
 
-proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB): bool =
+proc ppu_flush_hdma_bytes*(ppu: GbPpu; gb: GB) =
+  ## Land a block whose bytes were held back (see HDMA_VISIBLE_DOTS), whether or
+  ## not its dots have run: the callers that do not check are the ones that are
+  ## about to make the buffer unobservable anyway (a new block, a mode change).
+  if not ppu.hdma_bytes_held: return
+  ppu.hdma_bytes_held = false
+  for byte in 0 ..< 0x10:
+    gb.memory.write_byte(gb, int(ppu.hdma_held_dst) + byte, ppu.hdma_held[byte])
+
+proc ppu_land_hdma_if_due*(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## Land a held block IF its dots have run.
+  ##
+  ## The landing is looked for at the few points VRAM can be observed -- a CPU
+  ## read or write of $8000-$9FFF, and the next mode change -- rather than
+  ## counted down on every tick. It is the same instant either way, because
+  ## nothing else can see VRAM in between: the block is copied at the head of a
+  ## mode 0, the hold is HDMA_VISIBLE_DOTS dots long, and the pixel pipeline
+  ## does not fetch again until mode 3 of the next line. Counting it out on the
+  ## tick instead costs a test per M-cycle of every memory access, which
+  ## measures **+1.36% of retired instructions** on Pokemon Crystal (2 per
+  ## M-cycle, DINGBAT_BENCH_COUNTERS, min of 3) -- far more than six rows are
+  ## worth on a path this hot.
+  let cc = ppu.cycle_counter
+  # `cc < hold_from` is the line having wrapped underneath the hold, which no
+  # HBlank block can reach (mode 0 is at least 87 dots long) but which must
+  # expire the hold rather than strand it if some other path ever does.
+  if cc >= ppu.hdma_hold_until or cc < ppu.hdma_hold_from:
+    ppu_flush_hdma_bytes(ppu, gb)
+
+proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false): bool =
   ## One $10-byte block, from wherever the address counters currently stand.
   ## Returns false if the transfer cannot go on, i.e. the destination counter
   ## overflowed off the top of the address space.
+  ##
+  ## `in_cpu_cycle` says the copy is running INSIDE the dots of a CPU access
+  ## that has not sampled its byte yet, which is what holds the block's bytes
+  ## back HDMA_VISIBLE_DOTS dots (see that constant in gb.nim). Nothing else
+  ## about the block moves with them: the 8 M-cycles are charged here, and so
+  ## are the address counters and the FF55 length the CPU reads back.
   #
   # "Only bits 12-4 are respected; others are ignored" and "the upper 3 bits are
   # ignored (destination is always in VRAM)" -- Pan Docs, FF53-FF54. That is a
@@ -1666,10 +1701,26 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB): bool =
   # per byte: HDMA2 masks the low nibble away, so a block is 16 aligned bytes and
   # cannot straddle a region boundary.
   let src_legal = src_base < 0x8000 or (src_base >= 0xA000 and src_base < 0xE000)
+  let hold = HDMA_VISIBLE_DOTS != 0 and in_cpu_cycle
+  # Never two blocks in the buffer at once: one is landed HDMA_VISIBLE_DOTS dots
+  # into an HBlank and the next is a whole line away. Defensive only.
+  if hold: ppu_flush_hdma_bytes(ppu, gb)
   for byte in 0 ..< 0x10:
-    gb.memory.write_byte(gb, dst_base + byte,
-      if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8)
+    let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
+    if hold: ppu.hdma_held[byte] = val
+    else:    gb.memory.write_byte(gb, dst_base + byte, val)
     mem_tick_components(gb.memory, gb, 2, from_cpu = false, ignore_speed = true)
+  if hold:
+    # Armed only now that the block's own dots have run, so the deadline is
+    # measured from the LAST transferred byte and the ticks above cannot spend
+    # it. A dot on the PPU's own counter, not a count of bus M-cycles: those two
+    # are the same thing only at normal speed and only when a block starts on an
+    # M-cycle boundary, and hdma_start_ds_1 / hdma_start_scx5_2 are the rows
+    # where they part company.
+    ppu.hdma_held_dst   = int32(dst_base)
+    ppu.hdma_hold_from  = ppu.cycle_counter
+    ppu.hdma_hold_until = ppu.cycle_counter + HDMA_VISIBLE_DOTS
+    ppu.hdma_bytes_held = true
   # The source is the one that wraps rather than stops (dma/dma_src_wrap copies
   # its second block from $0000 after the first read $FFF0).
   ppu.hdma_src = ppu.hdma_src + 0x10
@@ -1678,7 +1729,7 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB): bool =
   ppu.hdma5 = ppu.hdma5 - 1
   not dst_overflow
 
-proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
+proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false) =
   # The block copy ticks the PPU, which can drive another mode change; without
   # this guard a nested transition back into mode 0 re-enters the copy and
   # recurses until the stack overflows.
@@ -1688,7 +1739,7 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB) =
          " mode=", (ppu.lcd_status and 3'u8), " hdma5=", toHex(ppu.hdma5, 2)
   ppu.hdma_copying   = true
   ppu.hdma_block_due = false
-  let may_continue = ppu_copy_hdma_block(ppu, gb)
+  let may_continue = ppu_copy_hdma_block(ppu, gb, in_cpu_cycle)
   if ppu.hdma5 == 0xFF or not may_continue: ppu.hdma_active = false
   ppu.hdma_copying = false
 
@@ -1703,6 +1754,12 @@ when STAT_IRQ_SPLIT:
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
+  # The backstop for a held HBlank DMA block (HDMA_VISIBLE_DOTS): a mode change
+  # is always at least a whole mode 0 later than the hold, and it is what the
+  # pixel pipeline's next VRAM fetch is on the other side of, so nothing can
+  # ever see the buffer past this line.
+  when HDMA_VISIBLE_DOTS != 0:
+    if ppu.hdma_bytes_held: ppu_flush_hdma_bytes(ppu, gb)
   when defined(gb_dma_trace):
     if prev_mode != mode:
       echo "MODE ", prev_mode, "->", mode, " ly=", ppu.ly,
@@ -1777,9 +1834,13 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # which is the same rule -- every mode 0 entered in the meantime would have
   # re-armed the flag anyway -- and keeps this line, which every mode change in
   # the machine runs through, exactly the shape it was.
+  #
+  # `in_cpu_cycle`: this edge lands inside the dots of a CPU access that is
+  # still on the bus, so the block's BYTES are held back HDMA_VISIBLE_DOTS dots.
+  # Everything else about the block, its 8 M-cycles included, happens here.
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
     if gb.cpu.halted: ppu.hdma_block_due = true
-    else:             ppu_step_hdma(ppu, gb)
+    else:             ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
 
 proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## A rendered line starting, with the comparator's blind window around it:
@@ -1857,7 +1918,9 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
         mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
     else:
       # Terminating an armed HBlank transfer: the block this HBlank owed it is
-      # owed no longer.
+      # owed no longer. A block already COPIED is not undone by this -- its
+      # bytes are on their way to VRAM (ppu_flush_hdma_bytes) and its length is
+      # already spent.
       ppu.hdma_block_due = false
     ppu.hdma_active = false
 
