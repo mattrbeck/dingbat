@@ -4116,10 +4116,12 @@ const applySystemSettings = () => {
   // "takes effect next launch" note is owed here. Speed mode suspends it.
   if (Module._setRewindEnabled) Module._setRewindEnabled((rewindOn && !speedMode) ? 1 : 0);
   if (Module._wasm_set_speed_mode) Module._wasm_set_speed_mode(speedMode ? 1 : 0);
-  // Speed mode suspends the two costly audio niceties; re-push their
+  // Speed mode suspends every perf-relevant audio nicety; re-push their
   // effective values whenever it flips (their own appliers factor it in too).
   applyMp2kHle();
   applyFifoInterp();
+  applyPitchCorrectFF();
+  applyAudioLowpass();
 };
 
 const syncSystemSettingsUI = () => {
@@ -4139,10 +4141,20 @@ const syncSystemSettingsUI = () => {
   if (sgbBorderRow) sgbBorderRow.classList.toggle("row-disabled", !sgbEnable);
   const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
   if (sm) sm.checked = speedMode;
-  // Rewind is suspended while speed mode is on; show that rather than a
-  // live-looking toggle that does nothing.
+  // Rewind and run-ahead are suspended while speed mode is on (the frame
+  // loop gates useRunahead on !speedMode); show that rather than
+  // live-looking controls that do nothing. Stored preferences are untouched.
   rewindToggle.checked = rewindOn;
   rewindToggle.disabled = speedMode;
+  const ra = /** @type {HTMLSelectElement} */ (document.getElementById("runahead-select"));
+  if (ra) ra.disabled = speedMode;
+  // Same for the audio settings the mode suspends: interpolation, HLE,
+  // analog filter, pitch-correct fast-forward. Volume/mute stay live.
+  for (const id of ["fifo-interp-toggle", "mp2k-hle-toggle",
+                    "audio-lowpass-toggle", "pitch-correct-ff-toggle"]) {
+    const el = /** @type {HTMLInputElement} */ (document.getElementById(id));
+    if (el) el.disabled = speedMode;
+  }
   applyRewindUI();
 };
 
@@ -5970,7 +5982,8 @@ const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pit
 
 const applyPitchCorrectFF = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_pitch_correct_ff) {
-    Module._wasm_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0);
+    // Suspended (not overwritten) while speed mode is on
+    Module._wasm_set_pitch_correct_ff((pitchCorrectFF && !speedMode) ? 1 : 0);
   }
 };
 
@@ -10026,7 +10039,7 @@ var Module = {
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
       try { gainNode.disconnect(); } catch (e) {}
-      if (typeof audioLowpass !== "undefined" && audioLowpass) {
+      if (typeof audioLowpass !== "undefined" && audioLowpass && !speedMode) {
         if (!lowpassNode) {
           lowpassNode = audioCtx.createBiquadFilter();
           lowpassNode.type = "lowpass";

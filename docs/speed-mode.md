@@ -48,9 +48,12 @@ Preset behavior (suspends, never overwrites, stored preferences):
 - GB/GBC: next ROM load uses the **scanline renderer** (FIFO preference
   remembered and restored when the mode goes off) and frameskip=1 applies
   live via `apply_speed_mode_gb` / native `apply_speed_mode`.
-- Rewind, MP2K HLE, FIFO interpolation, ambient glow, run-ahead: suspended
-  while the mode is on (web `applySystemSettings` computes effective values;
-  native apply procs do the same).
+- Rewind, run-ahead, ambient glow, and ALL perf-relevant audio niceties —
+  MP2K HLE, FIFO interpolation, analog low-pass, pitch-correct fast-forward —
+  are suspended while the mode is on (web `applySystemSettings` computes
+  effective values; native apply procs do the same). Volume/mute stay live.
+  The UI reflects the lock: the affected web toggles/select and native menu
+  items gray out while the mode is on, keeping their stored values.
 - Link/rollback/netlink cores are **exempt** — they keep faithful timing, or
   two peers with different settings would desync (`make_gba` comment).
 

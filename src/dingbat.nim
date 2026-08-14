@@ -572,16 +572,20 @@ proc apply_master_volume() =
     app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
 
 proc apply_pitch_correct_ff() =
+  # Suspended (not overwritten) while speed mode is on
+  let eff = app.cfg.pitch_correct_ff and not app.cfg.speed_mode
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
+    app.gba_emu.apu.set_pitch_correct_ff(eff)
   if app.gb_emu != nil:
-    app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
+    app.gb_emu.apu.set_pitch_correct_ff(eff)
 
 proc apply_audio_lowpass() =
   # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
-  # GBA DirectSound path has the FIFO imaging it targets.
+  # GBA DirectSound path has the FIFO imaging it targets. Suspended (not
+  # overwritten) while speed mode is on.
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass)
+    app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass and
+                                      not app.cfg.speed_mode)
 
 proc apply_mp2k_hle() =
   # Experimental MP2K sound-engine HLE. Arming the flag costs nothing on its
@@ -613,6 +617,8 @@ proc apply_speed_mode() =
   # The audio niceties read speed_mode through their own apply procs
   apply_mp2k_hle()
   apply_fifo_interp()
+  apply_pitch_correct_ff()
+  apply_audio_lowpass()
 
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
@@ -1265,7 +1271,8 @@ proc render_imgui() =
         if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
                            nil, false, app.paused and app.emu_kind != ekNone):
           app.pending_step = true
-        if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind, true):
+        if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind,
+                              not app.cfg.speed_mode):
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
           save_config(app.cfg)
@@ -1330,22 +1337,28 @@ proc render_imgui() =
           save_config(app.cfg)
         # WSOLA time-stretch keeps 2x audio at normal pitch (instead of the
         # classic octave-up). Off by default; slightly more CPU at 2x.
+        # All the audio niceties below (and Rewind above) gray out while
+        # speed mode is on: the mode suspends them, and a live-looking
+        # control that does nothing is worse than a disabled one.
         if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
-                              addr app.cfg.pitch_correct_ff, true):
+                              addr app.cfg.pitch_correct_ff,
+                              not app.cfg.speed_mode):
           apply_pitch_correct_ff()
           save_config(app.cfg)
         # DirectSound FIFO interpolation. ON (default): reconstructs the
         # waveform between hardware samples (cleaner treble). OFF: bit-true
         # GBA DAC output, including its characteristic grit. GBA only.
         if igMenuItem_BoolPtr("Audio interpolation", nil,
-                              addr app.cfg.fifo_interp, app.emu_kind == ekGBA):
+                              addr app.cfg.fifo_interp,
+                              app.emu_kind == ekGBA and not app.cfg.speed_mode):
           apply_fifo_interp()
           save_config(app.cfg)
         # Gentle analog-output low-pass modeling the GBA's output filter.
         # Pair with interpolation off for the closest real-hardware sound.
         # Off by default → output bit-identical to unfiltered. GBA only.
         if igMenuItem_BoolPtr("Analog filter", nil,
-                              addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
+                              addr app.cfg.audio_lowpass,
+                              app.emu_kind == ekGBA and not app.cfg.speed_mode):
           apply_audio_lowpass()
           save_config(app.cfg)
         # Sound-engine HLE: re-renders supported games' music engines at
@@ -1353,7 +1366,7 @@ proc render_imgui() =
         # interpolation for the music stream when engaged. Auto-engages
         # per-game on detection, other games unaffected. Off by default.
         if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
-                              addr app.cfg.mp2k_hle, true):
+                              addr app.cfg.mp2k_hle, not app.cfg.speed_mode):
           apply_mp2k_hle()
           save_config(app.cfg)
         igSeparator()
