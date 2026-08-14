@@ -83,6 +83,13 @@ block:
 # ─────────────────────────── the asymmetry ───────────────────────────
 echo "=== asymmetry: relaxing toward light is the slow direction ==="
 block:
+  # Datasheet-style: a transition counts as arrived when the displayed value
+  # crosses 90% of the step in LINEAR LIGHT (TR/TF are specified 10%-90%).
+  # Waiting for the exact 5-bit code instead would let gamma hide the tail —
+  # near white one code spans ~14% of linear light, so a correctly-rounded
+  # display snaps the last code early in both directions and the exact-code
+  # frame counts collapse to a tie on the fast panels.
+  proc lum(c: uint16): float = pow(float(c and 31) / 31.0, 2.2)
   for panel in [lpDmg, lpCgb, lpAgb, lpAgs]:
     var r: LcdResponse
     r.set_panel(panel)
@@ -92,16 +99,16 @@ block:
     r.reset()
     discard r.push(white)
     var to_dark = 0
-    while to_dark < 400 and r.push(black) != 0'u16: to_dark.inc
+    while to_dark < 400 and lum(r.push(black)) > 0.1: to_dark.inc
 
     r.reset()
     discard r.push(black)
     var to_light = 0
-    while to_light < 400 and r.push(white) != rgb(31, 31, 31): to_light.inc
+    while to_light < 400 and lum(r.push(white)) < 0.9: to_light.inc
 
     check(to_light > to_dark,
-          &"{panel}: black->white ({to_light} frames) is slower than " &
-          &"white->black ({to_dark} frames)")
+          &"{panel}: black->white ({to_light} frames to 90% light) is " &
+          &"slower than white->black ({to_dark} frames to 10%)")
 
 echo "=== panel ordering: DMG slowest, AGS-101 quickest ==="
 block:

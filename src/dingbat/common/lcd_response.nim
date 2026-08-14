@@ -165,8 +165,12 @@ proc build_lut(p: LcdPanel): seq[uint16] =
       # while the cell moves, which for an exponential is closed form.
       let l_avg = lt + (ls - lt) * tau * a
       var nxt = int32(round(pow(clamp(l_end, 0.0, 1.0), inv_g) * 31.0 * 8.0))
-      let dsp = int32(round(pow(clamp(l_avg, 0.0, 1.0), inv_g) * 31.0 * 8.0))
-                  .clamp(0'i32, STATE_MAX)
+      # The displayed value leaves apply() as a 5-bit code (`shr 3`), so round
+      # to 5 bits HERE and pre-shift; flooring the 5.3 state precision instead
+      # dims every settling pixel by an average of 0.44 codes per frame —
+      # measured as a third of the screen-wide darkening during scroll.
+      let dsp = int32(round(pow(clamp(l_avg, 0.0, 1.0), inv_g) * 31.0))
+                  .clamp(0'i32, 31'i32) shl 3
       nxt = nxt.clamp(0'i32, STATE_MAX)
       # Never stall short of the target: an exponential that rounds to a zero
       # step would leave a permanent fractional ghost on static content.
