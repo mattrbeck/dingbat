@@ -1,11 +1,11 @@
 # LCD ghosting × upscale filters: the per-cell delta
 
-**Status:** PARKED — prototyped in commit `06a583f`, then reverted by
+**Status:** PARKED — prototyped in commit `0698994`, then reverted by
 decision (the combined look needs another pass); re-apply that commit to
 bring the implementation back. The design below is the record for the
 revisit. The `tools/filtershot` ghost-pair dumping and old/new-order
 rendering survive the revert (the tool's "new" mode needs the delta shader
-from `06a583f` to mean anything).
+from `0698994` to mean anything).
 **Code:** `web/glpresent.js` (`u_ghost` / `game_color`), `src/dingbat.nim`
 (`ghost_texture` / `game_color`, `upload_frame`), `src/dingbat_wasm.nim`
 (`wasm_game_fb_raw_ptr`), unchanged model in
