@@ -41,6 +41,7 @@ interface EmscriptenModule {
   _wasm_set_lcd_response?(on: number): void;
   _wasm_set_mp2k_hle?(on: number): void;
   _wasm_set_fifo_interp?(on: number): void;
+  _wasm_set_speed_mode?(on: number): void;
   _wasm_mp2k_available?(): number;
   _wasm_hle_audio_active?(): number;
   _wasm_game_fb_ptr?(): number;

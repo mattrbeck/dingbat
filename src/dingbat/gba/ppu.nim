@@ -149,8 +149,8 @@ proc draw*(ppu: PPU) =
   inc ppu.frame
   # True only when every scanline of this frame was skipped: the framebuffer
   # is bit-identical to the previous frame, so frontends can skip the
-  # texture upload as well
-  ppu.frame_static = ppu.skip_render
+  # texture upload as well. A force-skipped speed-mode frame qualifies too.
+  ppu.frame_static = ppu.skip_render or ppu.forced_skip
 
 proc se_address*(ppu: PPU; tx, ty, screen_size: int): int {.inline.} =
   var n = tx + ty * 32
@@ -1338,13 +1338,28 @@ proc scanline*(ppu: PPU) =
   # changes. A mid-frame change only affects lines from that point down;
   # the untouched lines above still hold correct (identical) pixels.
   if ppu.vcount == 0:
-    ppu.skip_render = not ppu.render_dirty
-    ppu.render_dirty = false
+    # Speed-mode frameskip: force-skip whole frames on a fixed cadence,
+    # regardless of dirtiness. render_dirty is NOT consumed on a skipped
+    # frame, so the next rendered frame repaints everything that changed.
+    if ppu.frameskip > 0:
+      # fs_counter == 0 renders (so the first frame after enabling paints),
+      # the next `frameskip` frames are skipped.
+      ppu.forced_skip = ppu.fs_counter != 0
+      inc ppu.fs_counter
+      if ppu.fs_counter > ppu.frameskip:
+        ppu.fs_counter = 0
+    else:
+      ppu.forced_skip = false
+    if not ppu.forced_skip:
+      ppu.skip_render = not ppu.render_dirty
+      ppu.render_dirty = false
     # New frame: the OBJ list's rebuild budget comes back, plus one forced
     # rebuild as the missed-oam_touched backstop (see oam_touched; cost
     # measurements at OBJ_LIST_REBUILD_LIMIT).
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
+  if ppu.forced_skip:
+    return
   if ppu.skip_render:
     if ppu.render_dirty:
       ppu.skip_render = false

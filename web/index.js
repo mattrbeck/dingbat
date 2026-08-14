@@ -4064,6 +4064,15 @@ var gbRumble = true;
 // the Good Boy Galaxy demo — see the bench note in the settings markup.
 var rewindOn = true;
 
+// Speed mode, off by default: a low-end-device preset that trades accuracy
+// and quality for host CPU. Core side (wasm_set_speed_mode): the GBA renders
+// every other frame and the emulated CPU runs at half its real clock, and a
+// GB game loaded while it is on uses the cheaper scanline renderer. JS side:
+// rewind, MP2K HLE, FIFO interpolation, ambient glow and run-ahead are
+// SUSPENDED (not overwritten — the stored preferences return untouched when
+// it is switched off). Advertised as less accurate/compatible on purpose.
+var speedMode = false;
+
 const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
 const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
 const rewindToggle = /** @type {HTMLInputElement} */ (document.getElementById("rewind-toggle"));
@@ -4104,8 +4113,13 @@ const applySystemSettings = () => {
   if (Module._wasm_sgb_border_show) Module._wasm_sgb_border_show(sgbBorder ? 1 : 0);
   // Live in both directions: off drops the ring now, on allocates a fresh
   // (empty) one for the session already running. No reload, so no
-  // "takes effect next launch" note is owed here.
-  if (Module._setRewindEnabled) Module._setRewindEnabled(rewindOn ? 1 : 0);
+  // "takes effect next launch" note is owed here. Speed mode suspends it.
+  if (Module._setRewindEnabled) Module._setRewindEnabled((rewindOn && !speedMode) ? 1 : 0);
+  if (Module._wasm_set_speed_mode) Module._wasm_set_speed_mode(speedMode ? 1 : 0);
+  // Speed mode suspends the two costly audio niceties; re-push their
+  // effective values whenever it flips (their own appliers factor it in too).
+  applyMp2kHle();
+  applyFifoInterp();
 };
 
 const syncSystemSettingsUI = () => {
@@ -4123,7 +4137,12 @@ const syncSystemSettingsUI = () => {
     sgbBorderToggle.disabled = !sgbEnable;
   }
   if (sgbBorderRow) sgbBorderRow.classList.toggle("row-disabled", !sgbEnable);
+  const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
+  if (sm) sm.checked = speedMode;
+  // Rewind is suspended while speed mode is on; show that rather than a
+  // live-looking toggle that does nothing.
   rewindToggle.checked = rewindOn;
+  rewindToggle.disabled = speedMode;
   applyRewindUI();
 };
 
@@ -4131,7 +4150,8 @@ const saveSystemSettings = () => {
   applySystemSettings();
   applyRewindUI();
   if (db) dbPut("system",
-    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
+    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder,
+      speedMode });
 };
 
 for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
@@ -4183,6 +4203,18 @@ rewindToggle.addEventListener("change", () => {
   saveSystemSettings();
 });
 
+{
+  const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
+  if (sm) sm.addEventListener("change", () => {
+    speedMode = sm.checked;
+    saveSystemSettings();
+    syncSystemSettingsUI();
+    if (speedMode && currentRomName) {
+      showToast("Speed mode is on — a running Game Boy game switches renderer at the next load");
+    }
+  });
+}
+
 const loadSystemSettings = async () => {
   let s = await dbGet("system");
   if (s) {
@@ -4196,6 +4228,7 @@ const loadSystemSettings = async () => {
     // setting existed leaves rewindOn at its `true` default instead of
     // becoming undefined, so upgrading never silently turns rewind off.
     if (typeof s.rewindOn === "boolean") rewindOn = s.rewindOn;
+    if (typeof s.speedMode === "boolean") speedMode = s.speedMode;
   }
   syncSystemSettingsUI();
   applySystemSettings();
@@ -5961,7 +5994,8 @@ const fifoInterpToggle = /** @type {HTMLInputElement} */ (document.getElementByI
 
 const applyFifoInterp = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_fifo_interp) {
-    Module._wasm_set_fifo_interp(fifoInterp ? 1 : 0);
+    // Suspended (not overwritten) while speed mode is on
+    Module._wasm_set_fifo_interp((fifoInterp && !speedMode) ? 1 : 0);
   }
 };
 
@@ -5984,7 +6018,8 @@ const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("
 
 const applyMp2kHle = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
-    Module._wasm_set_mp2k_hle(mp2kHle ? 1 : 0);
+    // Suspended (not overwritten) while speed mode is on
+    Module._wasm_set_mp2k_hle((mp2kHle && !speedMode) ? 1 : 0);
   }
 };
 
@@ -6177,7 +6212,7 @@ const glowPackHex = (c) => {
 };
 
 const updateGlow = () => {
-  if (glowCanvas.hidden || !currentRomName) return;
+  if (glowCanvas.hidden || !currentRomName || speedMode) return;
   if (typeof Module === "undefined" || !Module._wasm_glow_sample) return;
   if (glowTick++ % 6 !== 0) return;
   const gw = glowCanvas.width;
@@ -7139,6 +7174,7 @@ const resetAllSettings = async () => {
   // System (GB renderer / GBA BIOS mode + intro / rumble)
   gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
   rewindOn = true;
+  speedMode = false;
   syncSystemSettingsUI();   // also re-applies the rewind-off body class
   applySystemSettings();
 
@@ -10500,7 +10536,7 @@ var Module = {
         // change itself), and with it off this line picks the identical
         // loop_tick call that predates the feature — zero cost while off.
         const useRunahead = runaheadFrames > 0 && !speed2x && !slowMotion &&
-          typeof Module._runahead_tick === "function";
+          !speedMode && typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
           if (useRunahead) Module._runahead_tick(runaheadFrames);

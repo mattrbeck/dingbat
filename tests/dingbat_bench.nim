@@ -200,6 +200,11 @@ proc main() =
     # this on both builds to A/B a scheduler change with that variable held.
     if getEnv("DINGBAT_NO_WAITLOOP") == "1":
       emu.cpu.attempt_waitloop_detection = false
+    # Speed-mode knobs, for bucket-by-bucket A/B measurement
+    if getEnv("DINGBAT_BENCH_FRAMESKIP").len > 0:
+      emu.ppu.frameskip = parseInt(getEnv("DINGBAT_BENCH_FRAMESKIP"))
+    if getEnv("DINGBAT_BENCH_UNDERCLOCK").len > 0:
+      emu.set_underclock(parseInt(getEnv("DINGBAT_BENCH_UNDERCLOCK")))
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
     if getEnv("DINGBAT_MP2K_SKIP") == "1":

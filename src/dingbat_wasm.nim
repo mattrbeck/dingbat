@@ -177,6 +177,16 @@ var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE
 var optGbaRunBios = true
 var optMp2kHle = false        # MP2K sound-engine HLE (opt-in, engages on detection)
 var optFifoInterp = true      # GBA FIFO interpolation (off = bit-true DAC output)
+# Speed mode (low-end devices): GBA renders every other frame and the emulated
+# CPU is charged double cycles (half effective clock). Deliberately less
+# faithful — CPU-heavy games drop internal frames — in exchange for roughly a
+# third less host work. index.js additionally suspends rewind, HLE audio and
+# FIFO interpolation while this is on.
+var optSpeedMode = false
+
+proc apply_speed_mode_gba(g: GBA) =
+  g.ppu.frameskip = if optSpeedMode: 1 else: 0
+  g.set_underclock(if optSpeedMode: 1 else: 0)
 
 proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
   optGbFifo = fifo != 0
@@ -200,6 +210,10 @@ proc make_gba(rom_path: string): GBA =
                    hle_after_bios = mode == 2)
   result.mp2k_hle = optMp2kHle
   result.apu.set_fifo_interp(optFifoInterp)
+  # Speed mode is applied by the SOLO load site only (initFromEmscripten):
+  # link/rollback/netlink cores must keep faithful timing, or two peers with
+  # different settings would desync (and local 2P would diverge from a
+  # recorded solo run).
 
 # LCD response (common/lcd_response.nim): a per-pixel model of how the real
 # panel settles, replacing the old "average the last two frames" blend. Some
@@ -243,6 +257,14 @@ proc wasm_set_fifo_interp(on: cint) {.exportc.} =
   optFifoInterp = on != 0
   if stateKind == ekGBA and stateGba != nil:
     stateGba.apu.set_fifo_interp(optFifoInterp)
+
+proc wasm_set_speed_mode(on: cint) {.exportc.} =
+  ## Speed mode for low-end devices: remembered for cores created later
+  ## (make_gba) AND applied to the live GBA core. The GB core needs no core
+  ## knob — index.js forces the (construction-time) scanline renderer instead.
+  optSpeedMode = on != 0
+  if stateKind == ekGBA and stateGba != nil:
+    apply_speed_mode_gba(stateGba)
 
 proc wasm_mp2k_available(): cint {.exportc.} =
   ## 1 when the loaded ROM's MP2K engine was detected (HLE can do something).
@@ -1781,7 +1803,10 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateKind = ekGB
     curRomCrcValid = false  # the cached CRC belongs to a GBA cart
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
-    stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    # Speed mode forces the ~20% cheaper scanline renderer (construction-time
+    # choice; the FIFO preference is remembered and returns when it is off).
+    stateGb = new_gb(bootrom, path, optGbFifo and not optSpeedMode, false,
+                     bootrom.len > 0)
     stateGb.sgb_requested = sgbRequested
     stateGb.post_init()
     printer_attach()  # a printer is always plugged in on solo GB
@@ -1798,6 +1823,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
     stateGba = make_gba(path)
     stateGba.post_init()
+    stateGba.apply_speed_mode_gba()  # solo cores only, see make_gba
     # Hash the cartridge buffer over its true (unpadded) length — the same
     # bytes a peer gets from hashing the file, so the wire value is unchanged.
     let cart = stateGba.cartridge

@@ -287,6 +287,10 @@ type
     # the hardware-accurate mode — bit-true DAC output including its grit.
     fifo_interp*:       bool
     mp2k_hle*:          bool     # experimental MP2K sound-engine HLE (auto-engages on detection)
+    # Speed mode for low-end devices: GBA frameskip + 2x emulated-CPU
+    # underclock, GB scanline renderer at next load. Deliberately less
+    # accurate/compatible; other expensive niceties are suspended while on.
+    speed_mode*:        bool
 
 proc new_config*(): Config =
   Config(
@@ -315,6 +319,7 @@ proc new_config*(): Config =
     audio_lowpass:   false,
     fifo_interp:     true,
     mp2k_hle:        false,
+    speed_mode:      false,
   )
 
 proc parse_config(j: JsonNode): Config =
@@ -366,6 +371,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.fifo_interp = j["fifo_interp"].getBool(true)
   if j.hasKey("mp2k_hle"):
     cfg.mp2k_hle = j["mp2k_hle"].getBool(false)
+  if j.hasKey("speed_mode"):
+    cfg.speed_mode = j["speed_mode"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -475,6 +482,7 @@ proc save_config*(cfg: Config) =
   lines.add("audio_lowpass: " & $cfg.audio_lowpass)
   lines.add("fifo_interp: " & $cfg.fifo_interp)
   lines.add("mp2k_hle: " & $cfg.mp2k_hle)
+  lines.add("speed_mode: " & $cfg.speed_mode)
   lines.add("gba:")
   if cfg.bios_path.len > 0:
     lines.add("  bios: " & yaml_str(cfg.bios_path))

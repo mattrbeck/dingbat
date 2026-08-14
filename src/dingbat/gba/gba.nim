@@ -505,6 +505,12 @@ type
     render_dirty*: bool
     skip_render*:  bool
     frame_static*: bool
+    # Speed mode: render only every (frameskip+1)th frame. A force-skipped
+    # frame leaves render_dirty accumulated so the next rendered frame
+    # repaints everything that changed meanwhile. 0 = off.
+    frameskip*:    int
+    fs_counter*:   int
+    forced_skip*:  bool
     # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown).
     # ANDed into the per-scanline enable computation only, so the per-pixel
     # compositing hot path is untouched.
@@ -959,6 +965,13 @@ type
     mp2k_hle*:   bool
     # Camelot "Bon" driver HLE (Golden Sun). See gs_bon.nim.
     gs_bon*:     GsBonHle
+    # Speed mode (low-end devices): every memory access costs 2^underclock
+    # times its real cycles (the scaling lives in the bus waitstate tables —
+    # see update_waitcnt — so the hot path pays nothing). The emulated CPU
+    # runs at roughly 1/2 (1) or 1/4 (2) speed against an unchanged
+    # video/timer clock; CPU-bound games drop internal frames, idle-bound
+    # games are unaffected. Set via set_underclock, 0 = off.
+    underclock*: int
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine

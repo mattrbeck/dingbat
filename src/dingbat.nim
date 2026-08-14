@@ -588,13 +588,27 @@ proc apply_mp2k_hle() =
   # own — the HLE only engages when the runtime detection recognizes the
   # engine in the loaded game (mp2k.nim), so this is safe to leave on.
   if app.gba_emu != nil:
-    app.gba_emu.mp2k_hle = app.cfg.mp2k_hle
+    # Suspended (not overwritten) while speed mode is on
+    app.gba_emu.mp2k_hle = app.cfg.mp2k_hle and not app.cfg.speed_mode
 
 proc apply_fifo_interp() =
   # DirectSound FIFO interpolation (true-phase cubic reconstruction). Off is
   # the hardware-accurate mode — bit-true DAC output including its grit.
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp)
+    # Suspended (not overwritten) while speed mode is on
+    app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp and
+                                    not app.cfg.speed_mode)
+
+proc apply_speed_mode() =
+  # Speed mode (low-end devices): GBA renders every other frame and the
+  # emulated CPU is charged double cycles. Live on the running GBA core; the
+  # GB renderer choice (scanline while on) applies at the next ROM load.
+  if app.gba_emu != nil:
+    app.gba_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
+    app.gba_emu.set_underclock(if app.cfg.speed_mode: 1 else: 0)
+  # The audio niceties read speed_mode through their own apply procs
+  apply_mp2k_hle()
+  apply_fifo_interp()
 
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
@@ -611,7 +625,10 @@ proc load_rom(path: string) =
   flush_gb_save()
   let ext = rom_path.splitFile().ext.toLowerAscii()
   if ext in [".gb", ".gbc"]:
-    app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path, app.cfg.gb_fifo,
+    # Speed mode forces the cheaper scanline renderer; the FIFO preference
+    # is remembered and returns when it is switched off.
+    app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path,
+                        app.cfg.gb_fifo and not app.cfg.speed_mode,
                         app.cfg.headless, app.cfg.run_bios)
     # Super Game Boy is opt-in from config but header-gated in the core: a
     # cart without the SGB flag, or one that is CGB-capable, gets nothing.
@@ -644,6 +661,7 @@ proc load_rom(path: string) =
   apply_audio_lowpass()
   apply_fifo_interp()
   apply_mp2k_hle()
+  apply_speed_mode()
   apply_panel_uniforms()
   lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
@@ -1246,6 +1264,15 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind, true):
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
+          save_config(app.cfg)
+        # Speed mode: the low-end preset — GBA frameskip + 2x emulated-CPU
+        # underclock, GB scanline renderer at next load, rewind suspended.
+        # Advertised as less accurate on purpose.
+        if igMenuItem_BoolPtr("Speed mode (less accurate)", nil,
+                              addr app.cfg.speed_mode, true):
+          if app.cfg.speed_mode:
+            app.rewind.clear()  # suspended while on; history would go stale
+          apply_speed_mode()
           save_config(app.cfg)
         # 2x Speed stays audio-paced (at double rate); Fast Forward is
         # inverted audio sync — unsynced emulation runs uncapped, so
@@ -2421,7 +2448,8 @@ proc main() =
       of ekNone: discard
       if emulated and is_paced():
         scheduler_frame_ran()
-      if emulated and app.cfg.rewind and app.netlink == nil:
+      if emulated and app.cfg.rewind and not app.cfg.speed_mode and
+         app.netlink == nil:
         case app.emu_kind
         of ekGBA:
           discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())
