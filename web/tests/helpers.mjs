@@ -220,7 +220,8 @@ const makeFakeFS = () => {
 // Evaluates web/index.js in a fresh vm context and returns handles to the real
 // functions plus the fakes backing it.
 export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
-                                touch = false, mediaDevices = true } = {}) => {
+                                touch = false, mediaDevices = true,
+                                serviceWorker = false } = {}) => {
   const idb = new Map();          // the fake IndexedDB "blobs" store
   const fetchCalls = [];          // every fetch: { url, opts, method }
   const alerts = [];
@@ -239,7 +240,72 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // matchMedia() queries that should report matches:true (e.g.
     // "(display-mode: standalone)"). Everything else reports false.
     mediaMatches: {},
+    // location.reload() call count — the observable "the update actually
+    // landed" signal for the service-worker update-flow tests.
+    reloads: 0,
+    // Body of registration.update() in the fake SW container; tests replace
+    // it to plant a waiting/installing worker before it resolves.
+    swUpdateImpl: async () => {},
   };
+
+  // --- Fake service worker container (opt-in: loadApp({ serviceWorker })) ---
+  // index.js guards its whole SW block with `"serviceWorker" in navigator`,
+  // so the key is only present when a test asks for it and every other test
+  // keeps skipping that block. `serviceWorker: true` boots the page
+  // UNCONTROLLED (first visit / shift-reload shape);
+  // `serviceWorker: { controlled: true }` boots it controlled (the everyday
+  // returning-visitor shape). Workers are inert records: tests flip `.state`
+  // and fire events themselves, mirroring what a real browser would do.
+  const makeSWWorker = (state0 = "installed") => {
+    const listeners = {};
+    return {
+      state: state0,
+      messages: [], // every postMessage payload, e.g. {type:"skipWaiting"}
+      postMessage(msg) { this.messages.push(msg); },
+      addEventListener(type, fn) { (listeners[type] ??= []).push(fn); },
+      removeEventListener(type, fn) {
+        listeners[type] = (listeners[type] || []).filter((f) => f !== fn);
+      },
+      dispatch(type, ev = {}) { for (const f of (listeners[type] || []).slice()) f(ev); },
+    };
+  };
+  let sw = null;
+  if (serviceWorker) {
+    const regListeners = {};
+    const registration = {
+      waiting: null,
+      installing: null,
+      unregisterCalls: 0,
+      updateCalls: 0,
+      addEventListener(type, fn) { (regListeners[type] ??= []).push(fn); },
+      removeEventListener(type, fn) {
+        regListeners[type] = (regListeners[type] || []).filter((f) => f !== fn);
+      },
+      dispatch(type, ev = {}) { for (const f of (regListeners[type] || []).slice()) f(ev); },
+      async update() { this.updateCalls++; await state.swUpdateImpl(); },
+      async unregister() { this.unregisterCalls++; return true; },
+    };
+    const containerListeners = {};
+    const container = {
+      controller: serviceWorker.controlled ? makeSWWorker("activated") : null,
+      register: async () => registration,
+      getRegistrations: async () => [registration],
+      addEventListener(type, fn) { (containerListeners[type] ??= []).push(fn); },
+      removeEventListener(type, fn) {
+        containerListeners[type] = (containerListeners[type] || []).filter((f) => f !== fn);
+      },
+      dispatch(type, ev = {}) { for (const f of (containerListeners[type] || []).slice()) f(ev); },
+    };
+    // What a real handover looks like from the page: the new worker becomes
+    // the controller, then controllerchange fires on the container.
+    sw = {
+      registration, container, makeWorker: makeSWWorker,
+      takeControl(worker = makeSWWorker("activated")) {
+        container.controller = worker;
+        container.dispatch("controllerchange");
+      },
+    };
+  }
 
   const lsMap = new Map(Object.entries(localStorageSeed));
   const localStorage = {
@@ -294,9 +360,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       fetchCalls.push({ url: String(url), opts, method: opts.method || "GET" });
       return state.fetchImpl(url, opts);
     },
-    location: { search: "", reload() {} },
-    // No `serviceWorker` key: index.js guards with `"serviceWorker" in navigator`.
+    location: { search: "", reload() { state.reloads++; } },
+    // `serviceWorker` key only when opted in: index.js guards its whole SW
+    // block with `"serviceWorker" in navigator`.
     navigator: {
+      ...(sw ? { serviceWorker: sw.container } : {}),
       platform: "TestPlatform",
       // `touch` flips the module-scope `touchDevice` const (and the tilt
       // code's own touch test), which decides whether phone-only affordances
@@ -544,7 +612,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
 
   return {
     api, context, idb, fetchCalls, alerts, confirms, toasts, liveToasts, toastEl,
-    document, elements, localStorage, lsMap, sandbox, state,
+    sw, document, elements, localStorage, lsMap, sandbox, state,
     docListeners, dispatchDoc, winListeners, dispatchWin,
     setFetch: (fn) => { state.fetchImpl = fn; },
     setConfirmResult: (v) => { state.confirmResult = v; },

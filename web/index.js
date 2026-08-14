@@ -94,13 +94,23 @@ if ("serviceWorker" in navigator) {
   // in-flight em.wasm fetch, and on a slow connection can land after the user
   // already started a game and kill it. An uncontrolled page simply starts
   // using the new SW without a reload.
-  const hadController = !!navigator.serviceWorker.controller;
+  //
+  // hadController can't be a load-time constant: a session that begins
+  // uncontrolled (first visit, shift-reload, the load after a Re-download
+  // reset) becomes controlled by the first claim, and a later Update click
+  // must still reload — the old latch made that click silently activate the
+  // new worker and visibly do nothing. So it flips to true after any
+  // controllerchange (the page is controlled from then on), and appUpdating
+  // covers the shift-reload shape where the update handover IS the first
+  // claim this page ever sees.
+  let hadController = !!navigator.serviceWorker.controller;
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (hadController && !refreshing) {
+    if ((hadController || appUpdating) && !refreshing) {
       refreshing = true;
       location.reload();
     }
+    hadController = true;
   });
 }
 
@@ -212,6 +222,11 @@ const applyUpdate = async () => {
         installing.addEventListener("statechange", () => {
           if (installing.state === "installed") {
             installing.postMessage({ type: "skipWaiting" });
+          } else if (installing.state === "redundant") {
+            // Install failed (one bad asset fetch fails the whole install by
+            // design) — without this the click dies silently and the button
+            // never does anything again. Recover with the clean-slate path.
+            fullResetReload();
           }
         });
         return;
