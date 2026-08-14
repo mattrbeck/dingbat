@@ -37,9 +37,13 @@ proc render*(v: VideoWidget) =
               "still applies on top; scanlines are suspended while a filter " &
               "is active.")
   igIndent(106)
+  # Grayed while speed mode is on — the mode suspends the GPU filter; the
+  # choice keeps its state for when the mode turns off.
+  igBeginDisabled(v.cfg.speed_mode)
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
+  igEndDisabled()
   igUnindent(106)
   igSeparator()
   # Grayed while a filter is active — same as the web settings modal. The
@@ -55,7 +59,11 @@ proc render*(v: VideoWidget) =
   help_marker("Letterbox the picture instead of stretching it to fill the " &
               "window. Only visible when the window is not an exact multiple " &
               "of the console's resolution — fullscreen, or after a manual resize.")
+  # Grayed while speed mode is on — the panel model is per-pixel CPU work
+  # on every presented frame, which the mode suspends.
+  igBeginDisabled(v.cfg.speed_mode)
   discard igCheckbox("LCD response", addr v.lcd_resp)
+  igEndDisabled()
   igSameLine(0, -1)
   help_marker("Emulate how slowly the real screen's pixels settle: quick to " &
               "darken, slow to fade back to light, which is why a moving dark " &

@@ -4298,6 +4298,7 @@ const applySystemSettings = () => {
   applyFifoInterp();
   applyPitchCorrectFF();
   applyAudioLowpass();
+  applyLcdResponse();
 };
 
 const syncSystemSettingsUI = () => {
@@ -4324,10 +4325,14 @@ const syncSystemSettingsUI = () => {
   rewindToggle.disabled = speedMode;
   const ra = /** @type {HTMLSelectElement} */ (document.getElementById("runahead-select"));
   if (ra) ra.disabled = speedMode;
-  // Same for the audio settings the mode suspends: interpolation, HLE,
-  // analog filter, pitch-correct fast-forward. Volume/mute stay live.
+  // Same for the audio settings the mode suspends (interpolation, HLE,
+  // analog filter, pitch-correct fast-forward) and the video costs it
+  // suspends (upscale filter, ambient glow, LCD response). Volume/mute,
+  // scanlines and color correction stay live — measured free or ~0.2%.
   for (const id of ["fifo-interp-toggle", "mp2k-hle-toggle",
-                    "audio-lowpass-toggle", "pitch-correct-ff-toggle"]) {
+                    "audio-lowpass-toggle", "pitch-correct-ff-toggle",
+                    "upscale-filter-select", "ambient-glow-toggle",
+                    "lcd-response-toggle"]) {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(id));
     if (el) el.disabled = speedMode;
   }
@@ -4397,6 +4402,12 @@ rewindToggle.addEventListener("change", () => {
     speedMode = sm.checked;
     saveSystemSettings();
     syncSystemSettingsUI();
+    // The video stack reads speedMode live (filterActive, glow, LCD
+    // response) — refresh layout, the suspended-row graying and the frame
+    // so the flip shows immediately.
+    if (typeof updateSuspendedVideoToggles === "function") updateSuspendedVideoToggles();
+    if (typeof updateCanvasScaling === "function") updateCanvasScaling();
+    if (typeof drawGame === "function") drawGame();
     if (speedMode && currentRomName) {
       showToast("Speed mode is on — a running Game Boy game switches renderer at the next load");
     }
@@ -6266,7 +6277,10 @@ var ambientGlow = false;
 var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" — GPU upscale filter
 // A smoothing filter and integer-scale pinning fight (integer pinning throws
 // away the fractional smoothing), so a filter suspends integer-scale layout.
-const filterActive = () => upscaleFilter !== "none";
+// Speed mode suspends the GPU upscale filter (hq4x +0.16 ms / xBR +0.58 ms
+// per present even on a fast GPU — several percent of the frame budget on
+// the low-end GPUs the mode targets). The stored preference is untouched.
+const filterActive = () => upscaleFilter !== "none" && !speedMode;
 
 // #canvas backing store = native resolution * GL_SCALE. The game texture is
 // sampled NEAREST, so this is a crisp integer upscale (identical pixels to the
@@ -6370,7 +6384,9 @@ const updateCanvasScaling = () => {
   // Scanlines are now drawn by the WebGL2 shader (uniform-gated), not a DOM
   // overlay — nothing to position here. Ambient glow stays a separate blurred
   // canvas behind the game; keep it pinned to the canvas rect.
-  const singleCore = running && !linkMode && !rollbackMode;
+  // Speed mode suspends the glow entirely (sampler + canvas), so hide it —
+  // a visible canvas would show a stale, never-repainted glow.
+  const singleCore = running && !linkMode && !rollbackMode && !speedMode;
   if (ambientGlow && singleCore) {
     const c = canvasEl.getBoundingClientRect();
     const s = stageEl.getBoundingClientRect();
@@ -6523,7 +6539,7 @@ const drawGame = () => {
     // An upscale filter suspends scanlines (smoothing + row-darkening fight
     // each other); the toggle keeps its state for when the filter turns off.
     scanlines: scanlines && !filterActive(),
-    filter: upscaleFilter,
+    filter: speedMode ? "none" : upscaleFilter,
   });
 };
 
@@ -6546,7 +6562,9 @@ const saveVideoSettings = () => {
 
 const applyLcdResponse = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
-    Module._wasm_set_lcd_response(lcdResponse ? 1 : 0);
+    // Suspended (not overwritten) while speed mode is on — the panel model
+    // is per-pixel CPU work on every presented frame.
+    Module._wasm_set_lcd_response((lcdResponse && !speedMode) ? 1 : 0);
   }
 };
 

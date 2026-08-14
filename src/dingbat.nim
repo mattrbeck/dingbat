@@ -981,7 +981,8 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   ## same way whatever the window's refresh rate is.
   let src = cast[ptr UncheckedArray[uint16]](fb)
   let gb = app.emu_kind == ekGB and app.gb_emu != nil
-  lcd_resp.set_panel(app.cfg.lcd_response.resolve(
+  # Speed mode suspends the panel model — per-pixel CPU work every frame
+  lcd_resp.set_panel((app.cfg.lcd_response and not app.cfg.speed_mode).resolve(
     gba = app.emu_kind == ekGBA,
     cgb = gb and app.gb_emu.cgb_enabled,
     sgb = gb and app.gb_emu.sgb_active()))
@@ -1057,12 +1058,14 @@ proc render_game() =
     # Pushed every present (like the logo uniforms): the Settings window's
     # Apply has no callback into this module, so a cached value could go stale.
     # An active upscale filter suspends scanlines (smoothing + row-darkening
-    # fight each other) — same behavior as the web frontend.
-    let scan = app.cfg.scanlines and app.cfg.video_filter == vfNone
+    # fight each other) — same behavior as the web frontend. Speed mode
+    # suspends the filter itself (xBR measured +1.01 ms GPU at 2160p).
+    let eff_filter = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
+    let scan = app.cfg.scanlines and eff_filter == vfNone
     glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
                 GLint(if scan: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
-                GLint(ord(app.cfg.video_filter)))
+                GLint(ord(eff_filter)))
   # The letterboxed rect this present draws into. Computed before the case so
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.
@@ -1080,7 +1083,8 @@ proc render_game() =
                 GLfloat(GBA_H))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
-    if app.cfg.lcd_response or not app.gba_emu.ppu.frame_static:
+    if (app.cfg.lcd_response and not app.cfg.speed_mode) or
+       not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)

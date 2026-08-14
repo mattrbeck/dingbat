@@ -48,12 +48,20 @@ Preset behavior (suspends, never overwrites, stored preferences):
 - GB/GBC: next ROM load uses the **scanline renderer** (FIFO preference
   remembered and restored when the mode goes off) and frameskip=1 applies
   live via `apply_speed_mode_gb` / native `apply_speed_mode`.
-- Rewind, run-ahead, ambient glow, and ALL perf-relevant audio niceties —
-  MP2K HLE, FIFO interpolation, analog low-pass, pitch-correct fast-forward —
-  are suspended while the mode is on (web `applySystemSettings` computes
-  effective values; native apply procs do the same). Volume/mute stay live.
-  The UI reflects the lock: the affected web toggles/select and native menu
-  items gray out while the mode is on, keeping their stored values.
+- Rewind, run-ahead, and ALL perf-relevant audio niceties — MP2K HLE, FIFO
+  interpolation, analog low-pass, pitch-correct fast-forward — are suspended
+  while the mode is on (web `applySystemSettings` computes effective values;
+  native apply procs do the same).
+- Video costs above the ~1% bar are suspended too: the GPU upscale filter
+  (hq4x +0.16 ms / xBR +0.58 ms per present @960×640 web, xBR +1.01 ms
+  @2160p native — several percent of frame budget on weak GPUs), ambient
+  glow (sampler + canvas fully off, canvas hidden), and LCD response (the
+  per-pixel CPU panel model). Deliberately NOT suspended, measured below the
+  bar: color correction (+0.033 ms GPU ≈ 0.2%, a shader bool in a pass that
+  runs anyway), scanlines (same), integer scaling (layout only), volume/mute.
+  The UI reflects every lock: affected web toggles/selects and native menu
+  items / video-widget rows gray out while the mode is on, keeping their
+  stored values.
 - Link/rollback/netlink cores are **exempt** — they keep faithful timing, or
   two peers with different settings would desync (`make_gba` comment).
 
