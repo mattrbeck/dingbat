@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-13 17:35:06*
+*Generated: 2026-08-13 20:57:49*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4145/5005 passed.**
+**4183/5005 passed.**
 
 ## bgen
 
@@ -960,9 +960,9 @@ All 67 tests passed.
 | speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
 
-## sprites (437/476 passed)
+## sprites (461/476 passed)
 
-437/476 tests passed, 39 failed:
+461/476 tests passed, 15 failed:
 
 | Test | Result |
 |------|--------|
@@ -972,30 +972,6 @@ All 67 tests passed.
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_2_dmg08_out3 [dmg] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| sprites/late_sizechange2_sp00_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange2_sp00_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange2_sp01_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| sprites/late_sizechange2_sp01_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange2_sp01_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange2_sp02_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| sprites/late_sizechange2_sp02_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| sprites/late_sizechange_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| sprites/late_sizechange_sp00_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| sprites/late_sizechange_sp00_4_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/late_sizechange_sp00_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp01_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/sprite_late_disable_spx18_2_dmg08_out3 [dmg] | got 0, expected 3 |
 | sprites/sprite_late_disable_spx19_2_dmg08_out3 [dmg] | got 0, expected 3 |
@@ -1056,9 +1032,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (361/476 passed)
+## window (375/476 passed)
 
-361/476 tests passed, 115 failed:
+375/476 tests passed, 101 failed:
 
 | Test | Result |
 |------|--------|
@@ -1156,24 +1132,10 @@ All 20 tests passed.
 | window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5 [cgb] | got 0, expected 5 |
 | window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |
-| window/on_screen/wxA6_3 [dmg, png] | 10780/23040 pixels differ |
-| window/on_screen/wxA6_late_we_reenable_1 [dmg, png] | 14624/23040 pixels differ |
-| window/on_screen/wxA6_late_we_reenable_2 [dmg, png] | 14624/23040 pixels differ |
-| window/on_screen/wxA6_late_we_reenable_3 [dmg, png] | 14468/23040 pixels differ |
-| window/on_screen/wxA6_late_we_reenable_4 [dmg, png] | 120/23040 pixels differ |
-| window/on_screen/wxA6_scx7 [dmg, png] | 10992/23040 pixels differ |
-| window/on_screen/wxA6_weoff_at_xposA6 [dmg, png] | 8832/23040 pixels differ |
-| window/on_screen/wxA6_wy00 [dmg, png] | 21816/23040 pixels differ |
-| window/on_screen/wxA6_wy01 [dmg, png] | 21657/23040 pixels differ |
-| window/on_screen/wxA6_wy01_weoff_ly02 [dmg, png] | 160/23040 pixels differ |
-| window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60 [dmg, png] | 7303/23040 pixels differ |
-| window/on_screen/wxA6_wy01_wxA5_ly02 [dmg, png] | 160/23040 pixels differ |
-| window/on_screen/wxA6_wy01_wxA7_ly02 [dmg, png] | 160/23040 pixels differ |
-| window/on_screen/wxA6_wy8F [dmg, png] | 160/23040 pixels differ |
+| window/on_screen/wxA6_late_we_reenable_3 [dmg, png] | 916/23040 pixels differ |

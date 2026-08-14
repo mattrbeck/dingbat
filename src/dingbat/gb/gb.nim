@@ -943,6 +943,18 @@ const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
   ## `m3_lcdc_obj_size_change` ROMs disagree between their DMG and their CGB
   ## references on which bands come out mixed, and the disagreement is a clean
   ## three dots in the same direction on all six bands that separate them.
+const CGB_OBJ_SCAN_LEAD*      {.intdefine.} = 2
+  ## Dots before its own sample dot that a CGB's OAM SCAN takes a SECOND look at
+  ## LCDC.2, keeping the object if either look puts it on the line. A different
+  ## reader from CGB_OBJ_SIZE_LATENCY above -- that one is the object FETCH in
+  ## mode 3, this one is the mode-2 range comparator -- and the two are measured
+  ## by different families. Derived at fifo_get_sprites in fifo_ppu.nim off
+  ## gambatte's `sprites/late_sizechange*`, where three objects (1, 9 and 39)
+  ## each have a CGB cell that comes out 8x16 whichever way the write moved the
+  ## bit, which no single sample dot can produce.
+  ##
+  ## Its SIGN agrees with CGB_OBJ_SIZE_LATENCY: both say the bit reaches the
+  ## object logic later on a CGB than on a DMG.
 const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ## Dots LCDC.4 takes to reach the BACKGROUND FETCHER on CGB over the DMG --
   ## the same shape as CGB_OBJ_SIZE_LATENCY above, for the one bit of LCDC a
@@ -1549,6 +1561,119 @@ const DMG_WIN_START_LAST_PX* {.intdefine.} = 0
   ## unusually strong -- 14 ROMs whose two device references differ, where
   ## dingbat's DMG output matches the CGB reference to the pixel -- and for
   ## which half of the rule survives.
+  ##
+  ## Superseded by `DMG_WIN_LAST_PX_CARRY` below, which is the half that DOES
+  ## survive: the start happens, its first pixel does not reach the screen, and
+  ## the start is still owed on the NEXT line.
+
+const DMG_WIN_LAST_PX_CARRY* {.intdefine.} = 1
+  ## **The DMG's window start on the line's LAST pixel is not lost -- it is
+  ## owed to the next line.** The pixel-path half of `CGB_WIN_TAIL_LAST`, and
+  ## the whole of `window/on_screen`. 1 ships; 0 is the control build and the
+  ## pre-2026-08-13 behaviour, where the restart's tile was shifted out on the
+  ## last pixel of the same line and nothing carried.
+  ##
+  ## `CGB_WIN_TAIL_LAST` says the DMG's mode 3 ends with the last PIXEL and the
+  ## CGB's with the last FETCH. Read that as a statement about WHEN the line's
+  ## end-of-line cleanup runs and the rest follows on its own: hardware's
+  ## "the window has started" latch is set by the WX comparator and cleared when
+  ## the line ends, so on a DMG a match on the last pixel lands on the same dot
+  ## as the clear and survives it, while on a CGB the extra fetch pushes the
+  ## clear past the match and it does not. Only WX = 166 can put a match there,
+  ## which is why the whole affected set is `window/on_screen/wxA6_*`.
+  ##
+  ## Three consequences, all measured against gambatte's reference PAIRS (every
+  ## `on_screen` ROM ships a `_dmg08` and a `_cgb04c` PNG, and the 14 whose two
+  ## references differ were exactly the 14 failing rows):
+  ##
+  ##   * the restart's first pixel is never shifted out, so x = 159 keeps the
+  ##     BACKGROUND pixel the FIFO was already holding. `wxA6_late_we_reenable_4`
+  ##     is that alone -- 120 lines, one pixel each, at x = 159;
+  ##   * the latch is still set at the head of the NEXT line, so that line is a
+  ##     window line from x = 0 with no WX match of its own. `wxA6_wy8F` is that
+  ##     alone: its only window match is on LY 143 and its only wrong line is
+  ##     LY 0 of the frame after, so the latch crosses the frame boundary;
+  ##   * the latch is consumed at the head only if LCDC.5 is set THERE, and it
+  ##     is not cleared if it is not -- `wxA6_wy01_weoff_ly02` sets it on LY 1,
+  ##     spends the rest of the frame with LCDC.5 clear, and still draws LY 0 of
+  ##     the next frame as a window line.
+  ##
+  ## ---- Where the head consumes it, bracketed to one dot ---------------------
+  ##
+  ## `wxA6_late_we_reenable_1..4` clear LCDC.5 in mode 2 and set it again at dot
+  ## 77, 81, 85 and 89 of the same line, every line. 77/81/85 are consumed (the
+  ## next line is a window line, ~14.5k wrong pixels without this) and 89 is not
+  ## (120 wrong pixels, the x = 159 half alone). Mode 3 starts at dot 80 and the
+  ## throw-away fetch at its head ends at dot 86, which is where
+  ## `fifo_head_window` already reads WX for `WIN_LINE_START_LATCH` -- the same
+  ## dot, from the same ROM family shape. So the carry is consumed there and
+  ## nowhere else.
+  ##
+  ## ---- What the carried line draws -----------------------------------------
+  ##
+  ## The window's own line counter is not special-cased: the head consumption
+  ## counts as a start and increments it exactly as `fifo_head_window`'s WX < 7
+  ## case does, and the aborted start on the previous line incremented it too.
+  ## That makes it equal to LY on `wxA6_wy00` (a match on every line) and LY on
+  ## `wxA6_wy01` as well (LY 1's aborted start, then one per carried line),
+  ## which is what both references want to the pixel.
+  ##
+  ## The tile COLUMN is where the carried line differs from an ordinary window
+  ## line: it starts at `WIN_CARRY_TILE`, not at 0. See that constant.
+  ##
+  ## ---- What it costs ------------------------------------------------------
+  ##
+  ## +0.29% of retired instructions on cgb-acid-hell and +0.20% on blargg
+  ## cpu_instrs, against `-d:DMG_WIN_LAST_PX_CARRY=0` (which reproduces the
+  ## pre-2026-08-13 gambatte score row for row, 4145/5005). Every per-dot term
+  ## it adds is behind `not ppu.cgb`, so a CGB pays the branch and nothing else;
+  ## the rest is once a line. The shape matters far more than the terms do --
+  ## see the inline-cliff note on `fifo_emit_pixel` in fifo_ppu.nim, where the
+  ## same rule written with an `{.inline.}` proc instead of a template measured
+  ## **+3.63%**.
+  ##
+  ## ---- What is still red --------------------------------------------------
+  ##
+  ## `window/on_screen` is 34 of its 36 rows with this. What is left is
+  ## `wxA6_late_we_reenable_3 [dmg]` (916 wrong pixels): its rows are one line
+  ## early for the whole frame, i.e. ONE window line too many across 127 lines,
+  ## and its only difference from `_1`/`_2` (both green) is that it puts LCDC.5
+  ## back at dot 85 instead of 77 or 81. Suppressing the WIN_CARRY_REACT_LINES
+  ## credit for it wholesale is refused -- that takes it to 6520 -- so the extra
+  ## line is being taken on ONE line and not on all of them, which is a rule
+  ## about the first reactivated line that this constant does not carry. (The
+  ## other red row, `wx17_weoff_wxA5_weon [cgb]`, is a CGB row and predates all
+  ## of this.)
+
+const WIN_CARRY_TILE*        {.intdefine.} = 1
+  ## The window tile column a carried start (DMG_WIN_LAST_PX_CARRY) draws first.
+  ##
+  ## 1, not 0: the aborted start on the previous line ran the map read for
+  ## column 0 and the counter moved with it, so the first column the carried
+  ## line can push is column 1. The `on_screen` window maps are a DIAGONAL --
+  ## row `r` holds the one black tile at column `r` -- so this is worth a whole
+  ## tile of the staircase, and every one of `wxA6_wy00`, `wxA6_wy01` and
+  ## `wxA6_weoff_at_xposA6` puts the black tile one column LEFT of where the
+  ## window row index alone would: LY 8..15 draw window row 1 with its black
+  ## tile at screen x 0..7, not at 8..15. (A diagonal cannot tell a column shift
+  ## from a row shift on its own; what fixes it as the column is that the row
+  ## index is `current_window_line shr 3` and that counter is pinned
+  ## independently by the CGB references, which draw window row 0 on LY 0..7.)
+
+const WIN_CARRY_REACT_LINES* {.intdefine.} = 1
+  ## Extra window LINES a carried start (DMG_WIN_LAST_PX_CARRY) counts when it
+  ## has to REACTIVATE the window -- i.e. when LCDC.5 went low between the match
+  ## that owed the start and the head that spends it. 0 is the control build.
+  ##
+  ## The counter is otherwise one per line the window draws, which is what
+  ## `wxA6_wy00` and `wxA6_wy01` want (LCDC.5 never moves in either, and their
+  ## window rows change every EIGHT lines). The two families that do move it
+  ## want the rows every FOUR: `wxA6_late_we_reenable_1..3` clear LCDC.5 in
+  ## mode 2 and set it again before the head, and `wxA6_weoff_at_xposA6` clears
+  ## it mid-line at x = 96 and sets it again in H-Blank -- both once per line,
+  ## both twice the counter. `wxA6_wy01_weoff_ly02_weon_ly60` is the same rule
+  ## with ONE toggle in the frame instead of 144: its rows are one line late
+  ## without this and exact with it.
 
 const CGB_WIN_TAIL_LAST*      {.intdefine.} = 1
   ## Whether a window restart issued on the LINE'S LAST PIXEL holds mode 3
@@ -2771,6 +2896,23 @@ type
     # window restart on that pixel and an object's fetch on it are one fetch
     # slot and not two -- see CGB_WIN_TAIL_LAST.
     obj_last_px*:         bool
+    # A window START is owed to the next line: the WX comparator matched on the
+    # line's LAST pixel, where a DMG's end-of-line cleanup cannot clear it
+    # (DMG_WIN_LAST_PX_CARRY). Set at the end of mode 3, consumed at the head of
+    # the next line whose LCDC.5 is set -- which may be several lines later, or
+    # in the next FRAME, so unlike its neighbours here it is NOT per-line
+    # scratch. Cleared with the rest of the render scratch, and never set on a
+    # CGB.
+    #
+    # NOT serialized: see the deferred-payload note on the GB save state. A
+    # state captured at vblank can only carry this from LY 143's own match, and
+    # loading one without it costs at most the first line of one frame.
+    win_carry*:           bool
+    # LCDC.5 has been low since the carry above was owed, so spending it has to
+    # REACTIVATE the window and not merely continue it -- worth
+    # WIN_CARRY_REACT_LINES on the window line counter. Same lifetime as
+    # win_carry and not serialized for the same reason.
+    win_carry_gap*:       bool
     # Dots of WIN_EN_HOLD left on a WX match that LCDC.5 refused. Zero means
     # no match is waiting, which is every dot of almost every line; while it is
     # nonzero `win_lx` is the hold's own retry pixel and fifo_arm_window leaves
@@ -2933,6 +3075,17 @@ type
     # is two.
     mix_run*:             int32
     sprites*:             seq[GbSprite]
+    # The mode-2 OAM scan's progress: the index of the next OAM entry the scan
+    # will examine, and the line the partial result in `sprites` belongs to.
+    # The scan normally runs as one burst at the end of mode 2 (nothing can
+    # change OAM while it is in progress, so where in mode 2 it runs is
+    # unobservable) -- these two only carry it when an OAM DMA *is* changing
+    # OAM underneath it, and the scan then has to be walked forward to the
+    # dot of each transferred byte. See oam_scan_advance in fifo_ppu.nim.
+    # Per-line scratch like everything above: not serialized, and rebuilt by
+    # the burst on the next mode 2 -> 3 transition.
+    scan_next*:           int32
+    scan_line*:           int32
 
   # ---- APU Channels (base types) ----
   GbSoundChannel* = ref object of RootObj

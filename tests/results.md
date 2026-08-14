@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-13 17:35:05 · commit f54eac3 · game-boy-test-roms v7.0*
+*Generated: 2026-08-13 20:57:49 · commit f426688 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
@@ -1162,12 +1162,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | per-ROM | 👀 50/82 passed |
 | gambatte/sound | per-ROM | 👀 113/116 passed |
 | gambatte/speedchange | per-ROM | 👀 132/208 passed |
-| gambatte/sprites | per-ROM | 👀 437/476 passed |
+| gambatte/sprites | per-ROM | 👀 461/476 passed |
 | gambatte/tima | per-ROM | 👀 224/232 passed |
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 37/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 32/36 passed |
-| gambatte/window | per-ROM | 👀 361/476 passed |
+| gambatte/window | per-ROM | 👀 375/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 

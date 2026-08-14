@@ -494,8 +494,9 @@ thing to settle here, and `tools/gbppu` has no instrument for it yet.
 Beyond bucket 0, the pipeline pool's 555 rows resolve as: `M3-EDGE-BANDS` 72 (all
 144 lines but only `x ≤ 31` / `x ≥ 133`, hot), `WY-LATCH device delta` 51 (cold),
 `OBJ-MODE0-EDGE` 45, `LOCK-EDGES` 46, `FINE-SCROLL-MIDLINE` 42 (hot), `WX166-TAIL`
-37 (blocked on STAT), `WIN-FETCH-ABORT` 29 (hot, blocked), `OBJ-LATE-SIZECHANGE`
-24, `top ≤16 lines` 22, `window/on_screen` 18, `CGBPAL-M3END` 18 (a missing
+37 (blocked on STAT), `WIN-FETCH-ABORT` 29 (hot, blocked), ~~`OBJ-LATE-SIZECHANGE`
+24~~ (**SHIPPED 2026-08-13, all 24; and it was never a mode-3 row at all — see
+item 5 of the ranked remainder**), `top ≤16 lines` 22, `window/on_screen` 18, `CGBPAL-M3END` 18 (a missing
 mechanism, not a phase), `BGP-SHIFTER-PHASE` 15 + mealybug (hot — **and it must
 not be fixed by raising the pipeline lead**), `OBJ-LATE-DISABLE` 11
 (unimplemented), `m0enable` 14, the SCX-residue rows 12, and `WIN-REACT-WX6` 1 ROM
@@ -524,7 +525,7 @@ exists for it).
 | 16 | **CGB `$D000` window aliases `$C000`** | **64** (`oamdma`) | Forcing `$D000-$DFFF → wram[0]` measures **+64 / −2**, and the −2 are exactly the two ROMs that pin banking. But the ROMs' shared prologue writes `SVBK = 2`, so the 64 expectations assert that bank 2 *is* bank 0 — which contradicts the two banking ROMs. **Declined pending hardware**: dump WRAM on a real CGB-C after `LDH ($70),$02`; if `$CFFF ≠ $DFFF` these rows are permanently unreachable |
 | 17 | **LCD-on / boot dot phase** | **75** (`enable_display` 49, `lcd_offset` 22, `display_startstate` 4) | Already written up at `LCD_ON_HEAD_START` / `CGB_BOOT_PHASE`; `lcd_offset` is 100% CGB-only |
 | 18 | **Mode-1 / vblank STAT source values** | **42** (`m1`) | A *value* question (`exp=0,3 got=1,1`), not a phase one: whether the mode-1 STAT source asserts at all on entering vblank, and how it overlaps the vblank IF bit. Untouched by every STAT phase experiment run |
-| 19 | **OAM-DMA start off-by-one whose sign flips with speed** | **27** | Single speed is 1 M-cycle early, `_ds` is 1 M-cycle late — so it is not a constant offset but a wrong clock domain. No single ±4 T constant can fix it |
+| 19 | ~~**OAM-DMA start off-by-one whose sign flips with speed**~~ — it is not the DMA's start at all, it is the **mode-2 OAM scan against the transfer**, and the clock crossing is real | **27** | **DERIVED 2026-08-13, +16 / −0 gambatte, and it ships OFF** (`OAM_SCAN_DMA_LOCK` in `gb/fifo_ppu.nim`). The start-latency reading is **falsified**: sweeping `CGB_OAM_DMA_START_T` from 4 T to 40 T moves the whole `late_sp*` set by exactly **zero** rows while moving the rest of `oamdma` by hundreds (771 → 426 / 408 / 174). What the families actually measure is the scan reading OAM entry `n` on dot `2n` of mode 2 while an OAM DMA holds OAM — the `x` half steps the transfer's START across that entry's dot, the `y` half steps its END across the same dot, and both halves land on `2n` to two dots. The single thing still wrong is the lock's DURATION: `strikethrough` (23040 → 23033 on both devices) draws entry 39 on a line whose whole mode 2 is inside a transfer. Full account in the 2026-08-13 section |
 | 20 | ~~**Line-153 LY vs the LYC comparator**~~ | **21** (`ly0`) | ~~Readable LY and the comparator's copy need separate line-153 phases.~~ **Closed 2026-08-09** — and the reading above was right in kind and wrong in scale. The comparator's copy of LY did not need a *phase*: the snapback ran no edge detector at all, so the LYC=0 STAT interrupt fired at the top of line 0 (451 dots late) and a LYC=153 match was never taken back down. Restoring the edge plus the read path's own one-M-cycle blind window (`LYC_SETTLE_DOTS` in `gb/ppu.nim`) takes `ly0` 66 → 74, `lycEnable` 172 → 179, `lycm2int` 8 → 10, the whole GBMicrotest `line_153_*` set to 23/24, and `daid/ppu_scanline_bgp-dmg` from 68.8% to **pixel-exact**. Still **not** the snapback dot, which stays where it was |
 | 21 | `lycEnable` residual (49), `m2enable` CGB-vs-DMG window (12), misc `oamdma` singletons (14) | **75** | Not one quantity each; need their own pass |
 
@@ -5054,30 +5055,92 @@ because 65536 + 12 is exactly the 65548 the frames pin.
 
 Ordered by rows-per-unit-of-work, not by row count.
 
-**1. `window/on_screen` -- 15 rows, and the ROMs are their own oracle (no
-bracketing needed).** All 18 `on_screen` ROMs ship BOTH a `_dmg08` and a
-`_cgb04c` reference. The 4 whose references are pixel-identical all pass. The 14
-whose references differ are exactly the failing rows, and in every case the
-number of pixels dingbat gets wrong **equals the number by which the two
-references differ, to the pixel** (21816, 21657, 14624, 14468, 10992, 10780,
-8832, 7303, and 120/160 on the rest). So dingbat renders the **CGB** reference
-bit-exactly on the DMG rows. `CGB_WIN_TAIL_LAST` is consulted only in
-`mode3_busy` -- the WX = 166 device split was landed for mode-3 LENGTH and never
-for the shifter.
-*Blocking question:* refusing the start is falsified (above), so the rule is
-narrower -- the DMG presumably **does** start the window at WX = 166 (the trigger
-latches and the window's internal line counter advances, which later lines
-depend on) but its mode 3 ends with the last PIXEL, so the restart's first pixel
-is never shifted out. Separating "the window started" from "its first pixel
-reached the screen" is the whole job.
+**1. `window/on_screen` -- 14 rows, LANDED 2026-08-13 (`DMG_WIN_LAST_PX_CARRY`,
+gb.nim + fifo_ppu.nim). gambatte 4145 -> 4159, +14 GAINED and 0 LOST.**
+`window` 361/476 -> 375/476, `on_screen` 21/36 -> 34/36.
 
-**2. `oamdma`'s DMA-start latency -- 26 rows, one constant with a sign flip.**
-`late_sp{00,01,02,39}{x,y}_*`, `oamdma_late_halt_stat_1`,
-`oamdma_late_speedchange_stat_2`. dingbat flips one step **early** at single
-speed and one step **late** at double -- a wrong clock domain in `mem_dma_tick`
-/ `CGB_OAM_DMA_START_T`, not a constant offset (Tier-3 bucket 19, sign flip
-confirmed). Fails on DMG too. The speed-switch split above is the same shape of
-bug and hands over the method.
+**The DMG's window start on the line's last pixel is not lost -- it is owed to
+the next line.** `CGB_WIN_TAIL_LAST` already said the DMG's mode 3 ends with the
+last PIXEL and the CGB's with the last FETCH; read that as a statement about
+when the line's end-of-line cleanup runs and the rest follows. Hardware's "the
+window has started" latch is set by the WX comparator and cleared when the line
+ends, so on a DMG a match on x = 159 lands on the same dot as the clear and
+survives it. The next line the window is ENABLED on then begins with the window
+already the fetch source and draws the window map end to end, with no WX match of
+its own. Three consequences, each isolated by one ROM:
+
+* the restart's first pixel is never shifted out, so x = 159 keeps the
+  background entry the FIFO was holding. `wxA6_late_we_reenable_4` is that alone
+  -- 120 lines, one pixel each. **On its own this is worth ONE row**, which is
+  why the old reading below only looked right;
+* the latch survives into the next line and across the FRAME boundary.
+  `wxA6_wy8F`'s only match is on LY 143 and its only wrong line was LY 0 of the
+  frame after;
+* the latch is spent at the head of a line only if LCDC.5 is set THERE, and is
+  NOT cleared if it is not. `wxA6_wy01_weoff_ly02` sets it on LY 1, spends the
+  rest of the frame with the bit clear, and still draws LY 0 of the next frame
+  as a window line. Conversely LCDC.5 does not gate SETTING it:
+  `wxA6_weoff_at_xposA6` clears the bit at x = 96 of every line and still
+  carries.
+
+Three numbers came out of the reference pairs and each is two-sided:
+
+* **where the head spends it** -- `wxA6_late_we_reenable_1..4` put LCDC.5 back
+  at dots 77, 81, 85 and 89 of the same line, every line. 77/81/85 are spent and
+  89 is not, which puts the read at `fifo_head_window`'s own dot (86, the end of
+  the throw-away fetch) -- the same dot `WIN_LINE_START_LATCH` reads WX on;
+* **the tile column** (`WIN_CARRY_TILE = 1`) -- the carried line starts at
+  window map column 1, not 0, because the aborted start already ran column 0's
+  map read. The `on_screen` window maps are a diagonal, so this is a whole tile
+  of the staircase;
+* **the extra window LINE on a reactivation** (`WIN_CARRY_REACT_LINES = 1`) --
+  a carry that has to bring LCDC.5 back counts one more window line than one
+  that never lost it. `wxA6_wy00`/`wxA6_wy01` never touch the bit and want their
+  window rows every EIGHT lines; `late_we_reenable_1..3` and
+  `weoff_at_xposA6` toggle it once a line and want them every FOUR.
+
+Mode 3's LENGTH needed one term with it (`fetch_work_pending`): a carried line
+begins with the window already fetching and its WX = 166 match still ahead of
+the shifter, and the fetcher owes that restart just as it owes an ordinary one.
+Without it the carried line reads 172 dots where hardware reads 174 and
+`m2int_wxA6_{m3stat,oambusyread,vrambusyread}_1` and `_spxA7_m3stat_1` go red.
+The object-on-the-last-pixel arm of that term must be DMG-gated or four
+`m0enable/enable_wxA6_2x_spxA7*` CGB rows go with it.
+
+*Guards, all byte-identical to the control build:* mealybug DMG 27 rows at
+100.0%, mealybug CGB identical, GBMicrotest 429/84 (`win*` 36/36), mooneye
+97/18, AGE unchanged. `-d:DMG_WIN_LAST_PX_CARRY=0` reproduces the 4145 baseline
+row for row. *Cost:* +0.29% of retired instructions on cgb-acid-hell, +0.20% on
+blargg cpu_instrs -- but only in the template spelling: the same code with the
+pixel emit factored into an `{.inline.}` proc fell off clang's inline cliff at
+**+3.63%**.
+
+*What is left (1 row):* `wxA6_late_we_reenable_3 [dmg]`, 916 wrong pixels. Its
+window rows are one line early for the whole frame -- ONE extra window line
+across 127 of them -- and its only difference from `_1`/`_2` is that it puts
+LCDC.5 back at dot 85 rather than 77 or 81. Denying it the
+`WIN_CARRY_REACT_LINES` credit wholesale is refused (916 -> 6520), so the credit
+is right on 126 lines and wrong on one: the rule that is missing is about the
+FIRST reactivated line, not about the dot. (`wx17_weoff_wxA5_weon [cgb]`, 960
+pixels, is the family's other red row and is a CGB row that predates all of
+this.)
+
+*The falsified reading this replaces,* kept because it is exactly half right:
+"the DMG does start the window at WX = 166 but its mode 3 ends with the last
+PIXEL, so the restart's first pixel is never shifted out." True, and worth one
+row. What it misses is that the start is still owed afterwards.
+
+**2. `oamdma`'s DMA-start latency -- 26 rows. NOT the DMA's start: it is the
+mode-2 OAM scan against the transfer, DERIVED 2026-08-13, +16 / −0, SHIPS OFF.**
+See the 2026-08-13 section below and `OAM_SCAN_DMA_LOCK` in `gb/fifo_ppu.nim`.
+The start-latency reading this entry used to carry is falsified outright -- the
+`late_sp*` set does not move by a single row anywhere between
+`CGB_OAM_DMA_START_T` = 4 and 40. What is left of the 26 is 7 rows in ROMs that
+run with **objects disabled** (`LCDC = $91`: the six `_ds` ones and
+`late_sp39x_4`), where no sprite-list model can reach the mode 3 they want, plus
+`oamdma_late_halt_stat_1` and `oamdma_late_speedchange_stat_2`. The `_ds` seven
+carry bucket 13's exact signature (`exp=C3,C0 got=C0,C0` with the sibling
+passing) and belong to it, not here.
 
 **3. `tima/tc00_late_tc01` -- 6 of the 8 rows LANDED 2026-08-13
 (`TAC_SELECT_LEAD_T = 4`, timer.nim).** The tap-change response was a pure
@@ -5116,16 +5179,63 @@ letting the bug reach the handler mis-decodes the handler's own `CB 2F` (`$EF`).
 SameSuite's `interrupt/ei_delay_halt` flips to PASS with this too. Whole-suite
 A/B: gambatte +2 and nothing else, mooneye and GBMicrotest byte-identical.
 
-**5. `sprites/late_sizechange_sp00` -- the sharpest unclaimed measurement in the
-suite.** A *four*-step ladder where hardware flips **twice**: `exp 0,3,3,0`
-against `got 0,0,3,3`. Both edges are off by exactly +1 M-cycle, identically on
-both devices -- a clean two-sided device-independent 4-dot bracket.
-`OBJ-LATE-SIZECHANGE` (24 rows) has had no measurement at all until now.
-*Blocking question:* its siblings (`late_sizechange`, `_sp01`, `_sp39`) also want
-a CGB delta of **-1 M-cycle** on LCDC.2, while `CGB_OBJ_SIZE_LATENCY` ships at
-**+3**, derived from mealybug bands. Same bit, opposite sign, two different
-readers -- resolve that before touching the device half. The device-independent
-half is landable on its own.
+**5. `OBJ-LATE-SIZECHANGE` -- SHIPPED 2026-08-13, +24 / -0 (gambatte 4145 ->
+4169, `sprites` 437 -> 461/476, the whole bucket).** The family is not an object
+FETCH measurement at all: it is the **OAM SCAN**, and the reason no knob at the
+fetch would move it is that none of these ROMs writes LCDC.2 during mode 3. Every
+one of the 38 ROMs sets up an object that is on the line at 8x16 and off it at
+8x8, moves LCDC.2 **once, during mode 2 of line 8**, and prints 3 if the scan
+kept the object and 0 if it did not. Under a new `-d:gb_lcdc2_trace` the write
+dots come straight out, and the filename names the object -- `_sp00`, `_sp01`,
+`_sp02`, `_sp39` -- so the family is a **ruler over the scan**, not one boundary:
+
+* **The device-independent half (+14 on its own): object N's Y-range test reads
+  LCDC.2 on dot 2N of the line.** dingbat ran the whole 40-object scan in one go
+  on the dot mode 2 ENDS, so every object saw the register as of dot 80. The four
+  brackets (`obj 0` at dots 453/1, `obj 1` at 1/5, `obj 2` at 1/5, `obj 9` at
+  13/17/21, `obj 39` at 73/77/81) intersect to `{2N - 1, 2N}` and nothing else;
+  `OBJ_SCAN_DOT_ADJ` in `fifo_ppu.nim` expresses the pair and is two-sided
+  (`sprites`: -2 -> 446, **-1 -> 461, 0 -> 461**, +1 -> 445, +2 -> 445).
+* **The CGB half (+10): `CGB_OBJ_SCAN_LEAD = 2`** (`gb.nim`). Three CGB cells --
+  obj 1 at dot 1, obj 9 at 17, obj 39 at 77, each `2N - 1` -- come out **8x16
+  whichever way the write moved the bit** (`late_sizechange_sp01_2` says a CLEAR
+  there is not seen, `late_sizechange2_sp01_1` says a SET there is), which no
+  single sample dot can produce. The CGB tests the object against the DMG's dot
+  **and** the dot one M-cycle earlier and keeps it if either says it is on the
+  line -- `sprite_on_line` is monotone in the height, so that is exactly a
+  glitching comparator whose LCDC.2 input is mid-transition. Two-sided on
+  `sprites`: 0 -> 451, 1 -> 458, **2 -> 461**, 3 -> 456, 4 -> 455.
+* **Double speed inverts the lead and kills the glitch.** The seven `_ds` rows
+  are unambiguous: at double speed every cell is a clean single boundary and the
+  arrival is `CGB_OBJ_SCAN_LEAD` dots **early** instead of late. Getting this
+  wrong is not free -- the first cut, which shipped the single-speed rule at both
+  speeds, took those seven previously-passing rows down (53/60 instead of 60/60).
+
+*The blocking question is answered, and the answer is that it was the wrong
+question.* The "-1 M-cycle on CGB" the siblings were read as wanting is a
+**scan** measurement, and read as one its sign **agrees** with
+`CGB_OBJ_SIZE_LATENCY = +3`: both say LCDC.2 reaches the object logic LATER on a
+CGB. There was never a conflict, only two readers -- the mode-2 range comparator
+and the mode-3 bitplane read -- filed under one constant. `CGB_OBJ_SIZE_LATENCY`
+and `OBJ_PLANE1_LAG`/`OBJ_PLANE1_HEAD` were not touched, and sweeping either of
+them across the whole family moves **zero** rows, which is the direct proof that
+the fetch reader is not what these ROMs see.
+Guards, all byte-identical before/after: mealybug DMG 552960/552960 and CGB
+1863574 (`m3_lcdc_obj_size_change` and its `_scx` sibling both still 100%),
+GBMicrotest 429/513 row for row, mooneye 183 row for row, and the dmg-acid2 /
+cgb-acid2 / cgb-acid-hell / strikethrough frames pixel-identical.
+*Perf, and a trap worth keeping:* the scan is mode-2 hot, so the per-object
+sample lives in a `{.noinline.}` proc behind one test and the old loop is
+untouched -- **+0.011%** retired instructions on Pokemon Blue and +0.013% on
+Crystal. Two earlier spellings were not free. Testing the flag *inside* the loop
+costs **+1.20%**. More surprisingly, moving the `fifo_get_sprites` CALL up to sit
+before `fifo_reset_sprite` (which is where the LCDC.2 history it reads used to be
+cleared) costs **+1.11%** on its own, for no change of work at all -- it is
+purely where clang then places the proc relative to the mode 2 -> 3 block. The
+fix is to leave the call where it was and let the scan retire the history on its
+way out. Another instance of the inline cliff in `docs/perf-measurement`: a
+call-site move is not a no-op here, and the counters find it while wall clock
+would not.
 
 **6. `enable_display` + `lcd_offset` -- 71 rows, and the filing is wrong.**
 `lcd_offset` **does not enable the LCD**: none of its 62 ROMs contains an
@@ -5234,3 +5344,173 @@ window fetcher abort.
   every one 0 (mod 256). Hardware and a frozen timer agree by arithmetic
   accident. Those passes were never evidence the stall model was right;
   `tima00` (128 ticks) is the only arm that can see the bug at all.
+
+## 2026-08-13: bucket 19 is the mode-2 OAM scan, not the DMA's start — derived, +16 / −0, and it ships off
+
+Tier-3 bucket 19 and item 2 of the ranked remainder both read the 27
+`oamdma/late_*` rows as "the OAM DMA's start latency is in the wrong clock
+domain, `CGB_OAM_DMA_START_T`". That reading is **falsified**, the real
+mechanism is derived and bracketed on both sides at both speeds, and it is
+built and left **off** because one pixel-exact screenshot ROM refuses its
+duration. Everything below is measured on this tree at `e4c04e6`.
+
+### 1. The start latency is not it, and the sweep says so outright
+
+`CGB_OAM_DMA_START_T` was swept over 4, 6, 8, 10, 12, 16 and 40 T with the
+whole `oamdma` group scored each time:
+
+| start T | whole `oamdma` | the `late_sp*` families |
+|---|---|---|
+| 4 | 426/811 | **26/52** |
+| 8 (ships) | **771/811** | **26/52** |
+| 12 | 408/811 | **26/52** |
+| 40 | 174/811 | **26/52** |
+
+The constant is pinned to 8 by hundreds of `busypush`/`busypop` rows and moves
+the target families by **exactly zero verdicts anywhere**, including at 40 T
+(ten M-cycles late). Whatever these ROMs measure, it is not when the transfer
+takes the bus relative to the `$FF46` write.
+
+### 2. What they do measure
+
+Each `late_sp{NN}{x,y}` ROM seeds OAM with **one** on-line object at entry `NN`
+(`Y = $10`, everything else `$A0`), triggers a transfer whose source is `$10`
+everywhere, and reads `STAT & 3` at a fixed dot late in a line. `out0` is mode 0
+(the object was not on the line, mode 3 stayed 172 dots) and `out3` is mode 3
+(it was). The `_1`/`_2` pair inserts one `NOP` before the `LDH ($46),A` and
+removes one after the delay loop, so the read dot is identical in both and only
+the transfer moves — one M-cycle, 4 dots at normal speed and 2 in double.
+
+Tracing dingbat's own DMA start dot and STAT read dot for all 34 ROMs
+(`-d:gb_dma_trace`) turns the sixteen normal-speed verdicts into sixteen
+one-M-cycle brackets on a single quantity: **the dot the scan reads OAM entry
+`n` on**. Writing that dot `D(n)`, and with `S` the dot the transfer takes OAM
+and `E` the dot it gives it back (`S + 640`, i.e. 160 CPU M-cycles):
+
+| family | side | verdicts | what it says |
+|---|---|---|---|
+| `sp00x` | start | `S = −3` → spoiled, `S = +1` → not | `D(0) ∈ [−3, 1)` |
+| `sp01x` | start | `S = 1` → spoiled, `S = 5` → not | `D(1) ∈ [1, 5)` |
+| `sp02x` | start | `S = 1` → spoiled, `S = 5` → not | `D(2) ∈ [1, 5)` |
+| `sp39x` | start | `S = 77` → spoiled, `S = 81` → not | `D(39) ∈ [77, 81)` |
+| `sp00y` | end | `E = −3` → not, `E = 1` → spoiled | `D(0) ∈ [−3, 1)` |
+| `sp01y` | end | `E = 1` → not, `E = 5` → spoiled | `D(1) ∈ [1, 5)` |
+| `sp02y` | end | `E = 1` → not, `E = 5` → spoiled | `D(2) ∈ [1, 5)` |
+| `sp39y` | end | `E = 77` → not, `E = 81` → spoiled | `D(39) ∈ [77, 81)` |
+
+The two halves are independent instruments — the `x` ROMs move the transfer's
+first byte, the `y` ROMs its 160th, two whole lines apart — and they agree on
+every one of the four entries. `D(n) = 2n` satisfies all eight windows: **mode
+2's 80 dots are 40 entries at two dots each, and the scan reads entry `n` on dot
+`2n`.** That is also the direct measurement of a fact mode 2's *length* has
+always implied and nothing in the tree had ever used.
+
+**And it was derived twice on the same day, from different suites, by two
+sessions that did not share a line of reasoning.** The `sprites/late_sizechange*`
+work (`OBJ_SCAN_DOT_ADJ`, same file) reaches `2N` by moving **LCDC.2** under the
+scan and asking which objects changed height; this reaches it by moving an **OAM
+DMA** under the scan and asking which objects vanished. Different register,
+different suite, different failure mode — same forty two-dot slots, and the same
+irreducible `{2N − 1, 2N}` cell at the end of it. The two knobs are now one
+(`OBJ_SCAN_DOT_ADJ`) and the per-object comparator is one proc
+(`obj_scan_on_line`), so the CGB scan rule cannot drift between them.
+
+**The clock crossing is why no constant could have worked.** The transfer walks
+OAM at one entry per 16 dots at normal speed and one per 8 in double; the scan
+walks it at one per 2 dots at both. The entry the lock opens or closes on is a
+function of both rates, so the same ±4 T moves different entries at the two
+speeds — which is exactly the "sign flip" bucket 19 recorded.
+
+### 3. The knob, and its two-sided bracket
+
+`OBJ_SCAN_DOT_ADJ` (`gb/fifo_ppu.nim`) is the dot over and above `2n` — the
+LCDC.2 scan's knob, which this work reuses rather than duplicating. Swept with
+the lock on, over the 52 `late_*` rows:
+
+| phase | −3 | −2 | −1 | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|---|---|---|
+| rows | 34 | 34 | **42** | **42** | 34 | 30 | 26 |
+
+A two-value plateau with both sides falling off it, which is the same
+`{−1, 0}` the eight windows above allow: `D(2) ∈ [1,5)` refuses +1 and
+`D(1) ∈ [1,5)` refuses −2.
+
+### 4. What it is worth, and what refuses it
+
+`OAM_SCAN_DMA_LOCK = 1` (an entry the scan reaches while a transfer holds OAM is
+not read at all):
+
+* **gambatte 4183 → 4199, +16 / −0**, all sixteen `late_sp*`. The 771 passing
+  `oamdma` rows are untouched — `busypush`/`busypop` stay 312/312 on DMG.
+  (Derived standalone against 4145 → 4161; re-measured on the composed tree at
+  `8ec0a7d`, where the per-object LCDC.2 scan and the DMG window carry had
+  landed. The total moved, the sixteen rows did not, and the shipping arm is
+  row-for-row identical to a plain build of `8ec0a7d` across all 5005.)
+* mooneye `acceptance/oam_dma/{basic,reg_read,sources-GS}`,
+  `oam_dma_{restart,start,timing}` and all twelve `acceptance/ppu` rows:
+  **byte-identical and green** on both arms.
+* dmg-acid2 and cgb-acid2: byte-identical framebuffers.
+* **`strikethrough` goes 23040 → 23033 on BOTH devices.** This is what stops it
+  shipping. Its LY 68 has a transfer covering the whole of that line's mode 2,
+  and its reference still draws OAM entry 39 — `Y = $54`, `X = $4F`, i.e. screen
+  x 71..78, which is the diff's bounding box to the pixel. A lock that lasts the
+  whole transfer cannot leave that entry readable.
+
+Two narrower durations were built and measured and both are worse:
+
+| duration | `late_*` rows | `strikethrough` |
+|---|---|---|
+| burst at dot 80, no lock (ships) | 26/52 | 23040 |
+| only the entry the write port is on | 28/52 | 23033 |
+| only the two M-cycles the bus changes hands | 38/52 | 23033 |
+| the whole transfer | **42/52** | 23033 |
+
+Neither narrow one saves `strikethrough`, and the reason is instructive: the
+**progressive read** both of them need is enough to break it on its own. At LY 68
+entries 0..5 have been overwritten by the transfer by dot 80 but not yet at their
+own dots `0..10`, so a progressive scan reads their pre-transfer values, three of
+which are on-line, and entry 39 falls out of the ten-object cap. The burst reads
+the overwritten values there and matches the reference. So `strikethrough` says
+the scan is **not** progressive and the eight families say it is, on the same
+console, and that contradiction is the open question — not a tuning range.
+
+### 5. What is left of the 27 rows even with the lock on
+
+Ten of the 52 stay red and **seven of them are not reachable by any sprite-list
+model**: the six `_ds` ROMs and `late_sp39x_4` run with `LCDC = $91`, i.e.
+**objects disabled**, so their mode 3 is 172 dots whatever the scan finds. Their
+signature (`exp 3, got 0`, sibling passing) is bucket 13's, and they belong
+there. The other three are `oamdma_late_halt_stat_1` (both devices) and
+`oamdma_late_speedchange_stat_2`, whose transfers are long finished before the
+line they read.
+
+### 6. Cost
+
+Free at the shipping default and **not free if the incremental walk is left on
+the common path**. Routing the shipping burst through the incremental body costs
+**+2.07% of retired instructions** on dmg-acid2 (23,817,092,336 →
+24,310,605,440, min of five per arm, `cycles=` equal), against a +0.13%
+precedent for accepted work here. So `fifo_get_sprites` keeps its own burst body
+and `oam_scan_advance` is compiled in only with the lock: the shipping arm
+measured 23,817,493,384 against that tree's 23,817,235,813, **+0.0011%**, inside
+the 0.002% reproducibility floor.
+
+Re-measured after composing onto `8ec0a7d` (same ROM, min of five, `cycles=`
+equal, load average ~4): 23,769,242,372 against a plain `8ec0a7d`'s
+23,765,126,580, **+0.017%**. The shipping code path is the same statements it
+always was — what is left is two `int32` scratch fields on `GbFifoPpu` and two
+procs the shipping arm never calls, i.e. struct layout, two orders of magnitude
+below the +0.13% precedent. Whole-gambatte at the default is row-for-row
+identical to a plain build of `8ec0a7d`, and `strikethrough`, dmg-acid2 and
+cgb-acid2 are byte-identical to it.
+
+### 7. Where it merged
+
+Rebased onto `8ec0a7d`, which carries the `sprites/late_sizechange*` work that
+derived the SAME per-object scan dot from LCDC.2. The two are unified rather
+than duplicated: this side dropped its own `OAM_SCAN_ENTRY_PHASE` in favour of
+`OBJ_SCAN_DOT_ADJ`, the CGB scan rule moved into one `obj_scan_on_line` both
+scans call, and `oam_scan_advance` retires the LCDC.2 history at the end of
+mode 2 exactly as `fifo_get_sprites` does on the arm where the lock is off. The
+lock's `strikethrough` cost is unchanged by the composition — the same 7 pixels
+in the same bounding box.
