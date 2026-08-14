@@ -510,6 +510,7 @@ exists for it).
 | 6 | **GDMA/HDMA block duration one M-cycle short** — famflip is *uniform* `exp=3,0 got=3,3` across every SCX and both speeds, which is what says it is the DMA's duration and not the mode-3 edge | **21** (`gdma_cycles*` 14, `gdma_weird` 1, `hdma_cycles*` 6) | famflip, uniform | 1 constant + sweep (`tools/gbdiff/gdma_sweep.sh` exists) | cold | — |
 | 7 | **Serial transfer-complete IF one M-cycle early** | **28** (`serial`) | famflip `exp=E0,E8 got=E8,E8`, both devices, both speeds | small | cold | — |
 | 8 | **CGB APU frame-sequencer/DIV-APU tap one step early** — every row is `dmg PASS / cgb FAIL` | **39** (`sound` 25, `speedchange` `ch2_nr52` 14) | famflip, per-device | small | cold | — |
+| | *(the `ch2_nr52` half, 2026-08-13: **not** the stall length and **not** the PPU phase. Swept `SPEED_SWITCH_STALL_CPU`, every `_1a`/`_2a` wants ≤ 131075 and every `_2b` wants ≥ 131076 — two-sided and empty. It is the tap's phase across the switch)* | | | | | |
 | 9 | ~~**HDMA start one M-cycle early**~~ — **done 2026-08-13, +6 / −0.** Not the block's start (that reading scores −5) and not an M-cycle: the transferred BYTES appear 4 dots late, `HDMA_VISIBLE_DOTS`. The 7th row is the SCX residual, bucket 15 | **7** (`hdma_start*`) | famflip `exp=0,1 got=1,1`, then `-d:gb_dma_trace` VRAMRD-vs-HDMABLOCK dots | small | cold (+0.13%) | — |
 | 10 | **`FF55` / HDMA1-4 latch phase** — `ppu_write_machinery`'s M-cycle boundary rule | **11** (`hdma_late_enable/disable` 8, `destl`/`length`/`wrambank` 3) | famflip | small | cold | — |
 | 11 | **Serial restart / `trigger_int8` ordering** — different shape from #7, do not fold | **6** | famflip, opposite direction | small | cold | #7 |
@@ -518,8 +519,8 @@ exists for it).
 
 | # | bucket | rows | why it is not cheap |
 |---|---|---|---|
-| 12 | **HDMA block owed to a CPU that is off the bus** (halted, or stalled by a speed switch) | **61** (`dma` 30 + speed-switch 31) | The rule — a CPU off the bus stalls the block — is already in the tree for HALT (`eb75393`) and is right *in kind*. Built for the speed-switch half: **+11 / −10**. It fixes every `_1` family member and breaks every `_2`/`_3`, because hardware still delivers the **one block already owed** at the instant of the STOP. That last block's phase is set by the mode-0 edge, i.e. bucket 15 |
-| 13 | **PPU dot phase coming out of a speed switch** | **55** (`speedchange*_ly44_m3_*m3stat*`) | Uniform `exp=C3,C0 got=C0,C0`. Sweeping `SPEED_SWITCH_STALL_T` is jagged (+0/+6/+6/+11/+6/+12/+12/+8) and **65544's +11 are all the single→double variants and none of the `speedchange2..5_` ones**, so it is not one stall length. 65540 is SameBoy's ripple counter and is pinned by the blargg canary. The derivable route is the mechanism the existing comment already names as unmodelled: the 6-cycle switch countdown plus the PPU re-alignment freeze |
+| 12 | **HDMA block owed to a CPU that is off the bus** (halted, or stalled by a speed switch) | **61** (`dma` 30 + speed-switch 31) | The rule — a CPU off the bus stalls the block — is already in the tree for HALT (`eb75393`) and is right *in kind*. Built for the speed-switch half: **+11 / −10**. It fixes every `_1` family member and breaks every `_2`/`_3`, because hardware still delivers the **one block already owed** at the instant of the STOP. That last block's phase is set by the mode-0 edge, i.e. bucket 15. **Retry this after bucket 13's pair lands** (2026-08-13, second section): the owed block's phase is measured against a PPU that was 4 to 13 dots out of place across every switch in these ROMs' preambles |
+| 13 | ~~**PPU dot phase coming out of a speed switch**~~ | **55** (`speedchange*_ly44_m3_*m3stat*`), all 55 green in the derived build | **DERIVED 2026-08-13, and it ships OFF** — see the 2026-08-13 (second) section. It is **two** constants, not one: the PPU comes out of a switch **8** dots ahead of the CPU clock into double speed and **3** back into single, and the shipped 12 is the 8 with `CGB_HALT_PPU_LEAD`'s halt-exit M-cycle folded in. The instrument is the family read as a **ladder in switch count** (rung N measures A, A+B, 2A+B, 2A+2B, 3A+2B; measured 8, 11, 19, 22, 30, differences +3/+8/+3/+8). `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE` in `gb/memory.nim`; both defaults are tied to `CGB_HALT_PPU_LEAD`, so the bucket lands the day bucket 22 does, with no further edit |
 | 14 | ~~**OAM STAT source rises one M-cycle late**~~ — and *only* that source | **+228 / −114 gambatte, +8 / −4 GBMicrotest, runner 765 → 773** | **MEASURED AND DERIVED 2026-08-09, and it ships OFF** — `STAT_M2_LEAD` + `M3_PIPE_AHEAD`, both `intdefine`s at 0, derivation at `STAT_M2_LEAD` in `gb/ppu.nim`. The source rises **one CPU M-cycle** (not a fixed dot count: the 75-row `_ds_`-only delta is the proof) before the line whose OAM scan it belongs to, on every line except line 0, whose predecessor is vblank. The cancellation this bucket named is real and is resolved: moving the dispatch alone costs `scy` 67/67 → 0/67, and one M-cycle of `M3_PIPE_AHEAD` gives **every** one of those pixel rows back, `scx_during_m3` and `bgtiledata` and `bgtilemap` included, with `LY0_PIPE_MCYCLES` going to 0 because line 0's four dots ARE this lead. Two-sided on both axes; GBMicrotest pins the lead alone (429 / 433 / 425 at 0 / 1 / 2). **What blocks it is a different bucket:** all 17 rows it costs are ROMs that wait with `EI; HALT`, and the twelve wilbertpol `*_timing_nops` rows — the same measurements with the halt replaced by a sled — are among the rows it *wins*. See bucket 15's halt rows. **The halt quantity is measured 2026-08-09** — `HALT_IF_SAMPLE_T` in `gb/cpu.nim`, the T-cycle of the M-cycle a halted CPU latches the interrupt line on, which is the MIDPOINT where a running CPU's is the end. With it, this bucket lands: runner **765 → 786**, gambatte 3972, GBMicrotest 439, fifteen of the seventeen back including all five mooneye `intr_2_*` and their wilbertpol copies. The pair is still off, on ONE row the latch costs by itself — `mooneye acceptance/ppu/hblank_ly_scx_timing-GS`, bucket 24 below |
 | 15 | ~~**The sub-M-cycle error at the mode 3 → 0 edge**~~ | **≥ 21 GBMicrotest + the `NspritesPrLine` family + 20 `halt` + ~13 SCX-residue rows** | **The readback half is CLOSED 2026-08-09** — see the section above. The unexplained dot was the `read_mode` latch being taken one dot before the M-cycle's first, so `STAT_READ_LAG`'s documented meaning and its implementation disagreed by a dot and the `4D + L = 4` grid was solved a dot out. The sample point is `cc − 2` at normal speed and `cc − 3` in double, bracketed both sides at both speeds by ROMs that take no interrupt. Runner 743 → 765, GBMicrotest 404 → 430, mooneye acceptance 66/66, gambatte 3856 → 3818 with all 102 traded rows owned by bucket 14. Still open here: the SCX-residue rows. **The 20 `halt` rows are CLOSED 2026-08-09** by `HALT_IF_SAMPLE_T` (bucket 14): gambatte `halt` 124 → 136 in the composed build, and GBMicrotest's `int_hblank_halt_scx0/3/4/7` — the four SCX steps whose mode-0 edge lands in the M-cycle's second half — go green with the latch alone |
 | 16 | **CGB `$D000` window aliases `$C000`** | **64** (`oamdma`) | Forcing `$D000-$DFFF → wram[0]` measures **+64 / −2**, and the −2 are exactly the two ROMs that pin banking. But the ROMs' shared prologue writes `SVBK = 2`, so the 64 expectations assert that bank 2 *is* bank 0 — which contradicts the two banking ROMs. **Declined pending hardware**: dump WRAM on a real CGB-C after `LDH ($70),$02`; if `$CFFF ≠ $DFFF` these rows are permanently unreachable |
@@ -5245,6 +5246,15 @@ boundary by a chosen number of dots. So it belongs with bucket 13, not bucket
 17, and -- now that the speed-switch stall is a derived quantity -- it is the
 tree's only **sub-M-cycle dot ruler**. Use it to price candidates for
 `enable_display`, not to score alongside it.
+**Amended 2026-08-13 (second):** the ruler is currently miscalibrated by one dot
+and it says so itself -- `offset1_lyc99int_m0stat_count_scx1_ds` and
+`offset1_lyc99int_m0irq_count_scx1_ds` are the STAT flag and the IRQ of the same
+mode-0 edge at the same offset, SCX and device, and they demand opposite
+parities of the switch's dot offset. That is the "1 dot early" defect below,
+seen from inside the instrument, so read `lcd_offset` to +/-1 dot and no better
+until it is fixed. The switch counts are also exact rather than "2-4":
+`offset1` = 2 switches, `offset2` = 4, `offset3` = 2 with a NOP between the
+second `LDH ($4D),A` and its `STOP`, and every `_ds` member carries one more.
 The `*_count_*` families are also not interrupt counters: their loop period is
 exactly 456 dots and their `LDH ($0F),A` is tuned to coincide with the STAT
 IRQ's raise dot every line and suppress it, so the printed LY is the line where
@@ -5514,3 +5524,210 @@ scans call, and `oam_scan_advance` retires the LCDC.2 history at the end of
 mode 2 exactly as `fifo_get_sprites` does on the arm where the lock is off. The
 lock's `strikethrough` cost is unchanged by the composition — the same 7 pixels
 in the same bounding box.
+
+## 2026-08-13 (second): bucket 13 is TWO constants, and the ladder in switch count derives both
+
+Bucket 13 — "PPU dot phase coming out of a speed switch", 55 rows — is closed as
+a **derivation**. It does not ship, and what blocks it is not this bucket.
+
+**The answer, in one line: a KEY1 switch leaves the PPU 8 dots ahead of the CPU
+clock when it ends in double speed and 3 dots ahead when it ends in single, and
+the tree's single `SPEED_SWITCH_PPU_EXTRA_DOTS = 12` is the to-double 8 with the
+CGB halt-exit M-cycle (`CGB_HALT_PPU_LEAD`, 4 dots) folded into it.**
+
+### The switch timeline, as a timeline
+
+At the `STOP` fetch, with a switch armed, no button held and no IRQ pending
+(`stop_instr`, `gb/memory.nim`):
+
+| T | unit | what happens |
+|---|---|---|
+| 0 | DIV | reset through the `FF04` write path, at the OLD speed, so the APU frame-sequencer tap, a shifting serial byte and a TIMA edge all see the reset |
+| 0 | CPU clock | `current_speed ^= 1`; the scheduler and the APU channels' `next_step` deadlines are rescaled |
+| 0 → S | CPU fetch | **stopped**. `S = 131072` cycles of the NEW CPU clock — 2^17, three-ways derived at `SPEED_SWITCH_STALL_CPU`, and it is a HALT, not a STOP leaf |
+| 0 → S | timer / serial / OAM DMA | **run**, at the new CPU clock (`SPEED_SWITCH_STALL_RUNS_CPU_CLOCK`); this is what lets `speedchange_tima00_*` count 128 ticks |
+| 0 → S | PPU / HDMA / APU length | **run**, at real time: `S >> new_speed` dots |
+| S | PPU only | **+A more dots, with no CPU time**: `A = 8` into double speed, `A = 3` back into single. This is the re-alignment the CPU clock is not yet counting, and it is the whole of bucket 13 |
+| S+ | CPU | resumes; its M-cycle grid is now `A mod 4` dots out of phase with the PPU's |
+
+The 3 is the interesting number: it is not a whole M-cycle, so a machine really
+does come out of a to-single switch on a **sub-M-cycle** offset — which is what
+the `lcd_offset` family was built to measure, and where this model's one
+residual is (below).
+
+### The instrument: `ly44_m3` is a ladder in SWITCH COUNT
+
+`speedchange{,2,3,4,5}[_nop]_ly44_m3[_nopxK]_m3stat[_scxS]_{1,2}` runs N
+back-to-back `LDH ($4D),A ; STOP` pairs and then reads STAT once, with `_1` and
+`_2` one CPU M-cycle apart across the mode 3 → 0 edge. Three properties make it
+the best instrument in the tree for this quantity:
+
+* **N multiplies the error.** A per-switch error of `d` dots shows up as `N*d`,
+  so the family's own window (one M-cycle: 2 dots in double speed, 4 in single)
+  divides down to `m_N / N` — 0.4 dots at N = 5.
+* **N alternates the direction.** N switches from single speed go
+  double, single, double, … so rung N measures `A`, `A+B`, `2A+B`, `2A+2B`,
+  `3A+2B`. Five equations, two unknowns.
+* **None of these ROMs halts**, so unlike daid's pixel pair they see the switch
+  with nothing else folded in. (Verified: turning `CGB_HALT_PPU_LEAD` on moves
+  zero rows of this family.)
+
+Swept one build per dot with `tools/gbppu/sssweep.sh` (new; builds one
+`dingbat_test` per define set, shards it, writes a `gamall.sh`-shaped row file
+under a caller-chosen prefix so two sessions can sweep at once). Reading the
+value of `SPEED_SWITCH_PPU_EXTRA_DOTS` at which each rung is green:
+
+| N | ends in | 1 M-cycle | green at | ⇒ total PPU lead over N switches |
+|---|---------|-----------|----------|----------------------------------|
+| 1 | double  | 2 dots    | 8, 9     | **8** |
+| 2 | single  | 4 dots    | 5, 6     | **11** |
+| 3 | double  | 2 dots    | 6        | **19** |
+| 4 | single  | 4 dots    | 5 / 6    | **22** |
+| 5 | double  | 2 dots    | 6        | **30** |
+
+The successive differences of the last column are **+3, +8, +3, +8** — they
+alternate exactly with the direction each switch ends in. One constant cannot
+produce that; two produce it with nothing left over.
+
+### Two-sided, on both axes, and exact
+
+With the direction split implemented (`SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`,
+`gb/memory.nim`), on the four speed-switch-carrying subdirectories
+(`speedchange lcd_offset dma oamdma`, 1310 rows, baseline 1072):
+
+```
+A (B=3)    6     7    *8*    9    10    ...12 = 1072
+rows     1078  1085  1116  1092  1077
+
+B (A=8)    0     1     2    *3*    4     5     6     7     8    ...12 = 1072
+rows     1088  1084  1091  1116  1096  1082  1083  1086  1083
+```
+
+At (8, 3) **all 55 `ly44_m3` rows are green and none is lost** — 14/55 → 55/55,
+every rung, every SCX, every NOP count. B = 4 breaks 20 of them, B = 2 breaks
+14. Whole gambatte suite: **4183 → 4228, +57 / −12.**
+
+### Why it does not ship: the 12 was 8 + the CGB halt-exit M-cycle
+
+`A = 8` puts daid's `speed_switch_timing_ly` and `_stat` 109 wrong pixels each
+(one sample early), and those are top-level GREEN `results.md` rows. That is not
+a refutation — it is the second half of the decomposition:
+
+* daid's two ROMs each take **one halt** before their `STOP`
+  (`speed_switch_timing_ly.gbc`, `halt` at `$019B`, IME clear, waiting for the
+  first vblank after an LCD enable) and every one of their 128 `ldh a,[rLY]`
+  samples hangs off that wake. So they pin **halt-lead + switch-extra**.
+* The `ly44_m3` ladder pins **switch-extra alone**.
+* `CGB_HALT_PPU_LEAD`'s own note (written 2026-08-10, from the other side)
+  already recorded that turning the lead on slides daid's window to
+  65544..65545 — i.e. to exactly this 8.
+* 4 + 8 = 12, and the two instruments never disagree by a dot. **Composed:
+  `-d:CGB_HALT_PPU_LEAD=1 -d:SPEED_SWITCH_PPU_EXTRA_DOTS=8
+  -d:SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE=3` scores 4224 with all three daid
+  frames back at 0 wrong pixels.**
+
+The halt is the **only** carrier those 4 dots can have, and that is measured,
+not assumed: `LCD_ON_HEAD_START` at 1 and at 9 (the `1 mod 4` neighbours of the
+shipping 5) move daid's `_ly` and `_stat` by **zero** pixels each. A halt
+re-anchors the CPU to a PPU event, so any whole-M-cycle shift of the PPU *before*
+the wake cancels out; only something that moves the PPU relative to the CPU
+*across* the wake survives, and `CGB_HALT_PPU_LEAD` is the only such thing in the
+tree.
+
+So the ledger for the three ways to spend this measurement, whole gambatte,
+baseline 4183/5005:
+
+| candidate | gambatte | daid ly/stat | `strikethrough-cgb` | verdict |
+|---|---|---|---|---|
+| `A=8 B=3` | **4228** (+57/−12) | 109 px each | 0 px | refused — two green rows lost |
+| `A=8 B=3` + `CGB_HALT_PPU_LEAD=1` | 4224 (+75/−34) | 0 px | **7 px** | the derived model; blocked on bucket 22's one row |
+| `A=12 B=−1` (sum kept, split not) | 4205 (+33/−11) | 0 px | 0 px | a fit, not a derivation — refused |
+
+`CGB_HALT_PPU_LEAD=1` alone is **4180** today (−3), so it is only worth turning
+on together with this; the pair is what makes it +41.
+
+**What landed:** the direction-split constant, with both defaults *tied to*
+`CGB_HALT_PPU_LEAD` — `SPEED_SWITCH_PPU_EXTRA_DOTS = 12 - 4*CGB_HALT_PPU_LEAD`
+and `..._SINGLE = 3` when the lead is on, "same as the other" when it is off. At
+the shipping `CGB_HALT_PPU_LEAD = 0` the build is **row-for-row identical** on
+all 5005 gambatte rows and pixel-identical on daid's three frames and both
+`strikethrough` frames. The day bucket 22 unblocks, bucket 13 lands with it and
+no further edit.
+
+### The residual: `lcd_offset` contradicts itself at this resolution
+
+The 12 rows the pair costs are all `lcd_offset` or an `lcdoffset1` graft in
+`window` / `m2enable` / `lycEnable`. They want `A+B ≡ 0 (mod 4)`; the ladder says
+11. **The ruler cannot arbitrate, because it disagrees with itself by one dot:**
+sweeping B at A = 8,
+
+* `offset1_lyc99int_m0stat_count_scx1_ds` is green only at **odd** `A+B`,
+* `offset1_lyc99int_m0irq_count_scx1_ds` is green only at **even** `A+B`,
+
+and those are the same offset, the same SCX, the same device, the STAT flag and
+the IRQ of the *same* mode-0 edge. That is finding 6's "dingbat's mode-0 STAT
+raise is a constant 1 dot early in steady state", seen from inside the
+instrument. Until that dot is fixed, `lcd_offset` prices candidates to ±1 dot
+and no better — **amend finding 6 accordingly: it is the tree's only
+sub-M-cycle dot ruler and it is currently miscalibrated by one dot, in a way
+that shows up as an internal contradiction rather than as a failing row.**
+
+Also worth recording about that family, since finding 6 left the count vague:
+`offsetN` is not "2–4 switches" uniformly. Disassembled (`tools/gbppu/sm83dis.py`,
+new): **`offset1` = 2 switches, `offset2` = 4 switches, `offset3` = 2 switches
+with one NOP between the second `LDH ($4D),A` and its `STOP`** — and the `_ds`
+members carry one more switch, which is why they respond with period 2 in B
+where the rest respond with period 4.
+
+### Refused this pass, each with both sides named
+
+* **One constant for both directions.** N=1 wants 8 per switch and N=5 wants 6;
+  every window in the table above is narrower than the 2 dots that would take.
+* **`A = 12` with a compensating `B = −1`.** Keeps the sum the even rungs
+  measure (11) and scores +33/−11 with every pixel row green, but leaves the
+  odd rungs (N = 1, 3, 5 — 17 rows) red by construction, and −1 has no
+  derivation: it is `8 + 3 − 12`, the halt M-cycle pushed into the other
+  direction to hide it. This is the shape the tree calls fitting a constant to
+  a suite past the ROM that measures it.
+* **`LCD_ON_HEAD_START` as the carrier of the missing 4 dots.** 0 pixels moved
+  at 1 and at 9. See above.
+* **`OAM_SCAN_DMA_LOCK` cancelling the lead's `strikethrough` cost.** Composed
+  (`A=8 B=3` + lead + lock) it scores 4240 but `strikethrough` goes 7 px wrong on
+  **both** devices, where the lead alone costs only the CGB one. Not a
+  cancellation.
+* **`HALT_IF_SAMPLE_T = 2` alongside the lead.** 4204, and `strikethrough-cgb`
+  still red. It is not the missing piece of this composition.
+
+### The other two speedchange families, characterised and NOT this bucket
+
+* **`tima0x` (20 rows).** Unmoved by every PPU-phase experiment, as expected —
+  the CPU-clock stall is untouched. Swept `SPEED_SWITCH_STALL_CPU` instead
+  (131072 / 131074 / 131075 / 131076 / 131080 / 131088 on `speedchange`,
+  132/135/138/122/122/119): the family is **internally unsatisfiable**.
+  `speedchange_tima02_1a` is green only at ≤ 131074, `speedchange_tima02_2a`
+  only at ≥ 131076, and `speedchange_tima02_2b` at none of them. All the
+  failures are one tick LOW, so the defect is in *which cycles the timer sees*
+  around the `FF04` reset and the switch, not in the stall's length.
+* **`ch2_nr52` (11 rows).** Also unmoved by any PPU-phase value, and the same
+  shape under the stall sweep: every `_1a`/`_2a` member is green only at
+  ≤ 131075 and every `_2b` member only at ≥ 131076, with no value satisfying
+  both. Two-sided and empty, so it is the DIV-APU tap's phase across the switch
+  (bucket 8's speedchange half), not the stall. Note the odd stall 131075 scores
+  **138/208** on `speedchange` — the best any single constant reaches — entirely
+  through PPU-phase side effects that `A=8, B=3` does better and cleanly.
+
+### Instruments added
+
+* `tools/gbppu/sssweep.sh` — build one `dingbat_test` per define set, shard it,
+  write a `gamall.sh`-shaped row file under a caller-given prefix. ~12 s per
+  point for four subdirectories, ~25 s for the whole suite. This is the loop for
+  any constant that only a handful of families can see.
+* `tools/gbppu/daidswitch.sh` — daid's three speed-switch frames plus both
+  `strikethrough` frames as wrong-pixel counts, against one binary, in ~20 s.
+  These five are the pixel gate every speed-switch or halt-phase change has to
+  pass, and they are otherwise only reachable through a full runner.
+* `tools/gbppu/pngdiff.py` — reference PNG vs `--screenshot` PPM, masked to
+  0xF8 per channel, pure stdlib. What the two scripts above are built on.
+* `tools/gbppu/sm83dis.py` — enough SM83 to read a gambatte ROM's straight-line
+  body. Written because bucket 13's whole geometry (how many switches, in which
+  direction, with what between them) is in the ROMs and in nothing else.

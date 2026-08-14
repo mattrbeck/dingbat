@@ -639,6 +639,29 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
   ## better setting of this same knob than the 4 that `=1` spells: gambatte
   ## 3860 against 3853. It is not shippable either -- it loses daid.**
   ##
+  ## ---- 2026-08-13: a sixth witness, and it costs this flag nothing ------
+  ##
+  ## The 4 dots are now measured a way that does not go through `halt/` at all.
+  ## gambatte's `speedchange{,2..5}_ly44_m3_*` family is a ladder in SWITCH
+  ## COUNT and **none of its ROMs halts**, so it sees a KEY1 switch's PPU
+  ## re-alignment on its own: it derives 8 dots into double speed and 3 back
+  ## into single, two-sided and exact (55/55 rows). daid's `speed_switch_timing`
+  ## pair DOES halt -- once each, `halt` at `$019B`, waiting for the first
+  ## vblank after an LCD enable -- and pins halt-lead + switch-extra together at
+  ## 12. 12 - 8 = 4, i.e. **exactly this constant, from a family that shares no
+  ## ROM, no register and no edge with the five witnesses above.** And the halt
+  ## is the only carrier those 4 dots can have: `LCD_ON_HEAD_START` at 1 and at
+  ## 9 moves daid by zero pixels, because a halt re-anchors the CPU to a PPU
+  ## event and a whole-M-cycle shift of the PPU before the wake cancels out.
+  ##
+  ## That does not unblock `strikethrough`, but it changes what this flag is
+  ## worth: composed with the pair (`-d:SPEED_SWITCH_PPU_EXTRA_DOTS=8
+  ## -d:SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE=3`) it is gambatte **4183 -> 4224**
+  ## with all three daid frames green, where this flag ALONE is 4180 today. Both
+  ## speed-switch constants default off this one (memory.nim), so flipping this
+  ## to 1 is the whole change. See docs/gb-failure-triage.md, 2026-08-13
+  ## (second).
+  ##
   ## ---- What it does NOT close, which is why it was written ---------------
   ##
   ## `acid/cgb-acid-hell` needs the CPU's write burst TWO M-cycles later against
