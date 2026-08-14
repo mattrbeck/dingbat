@@ -45,6 +45,26 @@ window.addEventListener("keydown", (e) => {
   }
 }
 
+// Browser-chord escape hatch: on the home screen (body lacks `running`)
+// modifier chords belong to the browser — Cmd/Ctrl+R must reload, Alt+Left
+// must navigate back. Once a core has run, the SDL runtime preventDefaults
+// keydown app-wide and gameKeyHandler swallows bound keys without checking
+// modifiers, so those chords stayed dead even after returning to the menu.
+// Window capture runs before every app handler (document-capture and
+// window-bubble alike); stopping propagation hides the chord from all of
+// them while the browser's default action still fires — no preventDefault
+// here. Text fields are left alone so their own listeners keep working;
+// typingGuard already shields them from SDL. In the running-game view the
+// guard stands down: swallowing chords there is deliberate (an accidental
+// Cmd+R mid-game would drop unsaved progress).
+window.addEventListener("keydown", (e) => {
+  if (!e.metaKey && !e.ctrlKey && !e.altKey) return;
+  if (document.body.classList.contains("running")) return;
+  const t = /** @type {HTMLElement} */ (e.target);
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  e.stopImmediatePropagation();
+}, true);
+
 // --- Service Worker ---
 
 let swRegistration = null;

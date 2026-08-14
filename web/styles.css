@@ -3226,7 +3226,7 @@ body.debug-2p .home-tile-link {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  padding: 24px;
+  padding: 18px 24px 24px;
 }
 
 /* Section swap: a 120ms cross-fade of the pane only. Toggling [hidden]
@@ -3259,7 +3259,7 @@ body.debug-2p .home-tile-link {
   grid-template-rows: auto auto;
   column-gap: 28px;
   align-items: start;
-  margin: 0 0 26px;
+  margin: 0 0 14px;
 }
 
 .settings-pane .modal-toggle-row > .modal-row-label,
@@ -3317,13 +3317,13 @@ body.debug-2p .home-tile-link {
 /* Hairline between consecutive rows. Sibling selector, not :has(), so it
    also works where :has() does not; a hidden row contributes nothing. */
 .settings-pane .modal-toggle-row + .modal-toggle-row {
-  padding-top: 26px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 
 .settings-pane .settings-reset-row {
-  margin-top: 26px;
-  padding-top: 26px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 
