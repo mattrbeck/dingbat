@@ -16,6 +16,8 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
     result.latches[ch]   = 0
     result.hist[ch]      = [0'i16, 0, 0, 0]
     result.samples_since[ch]   = 0
+    result.last_update_cycle[ch] = 0
+    result.inv_period[ch]        = 0.0'f32
     # Seed the phase denominator with the typical FIFO/output ratio
     # (32768 / ~13379 Hz) so the very first update period interpolates
     # sanely before a real interval has been measured.
@@ -24,6 +26,7 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
   # DMAChannels comment). DINGBAT_FIFO_INTERP=0 forces the legacy zero-order-
   # hold read, used for before/after A/B captures on a single binary.
   result.fifo_interp = true
+  result.interp_mode = 1
   when not defined(test_harness) and not defined(emscripten):
     if getEnv("DINGBAT_FIFO_INTERP") == "0":
       result.fifo_interp = false
@@ -64,6 +67,13 @@ proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
   dc.hist[channel][3] = sample
   dc.update_interval[channel] = max(1.0'f32, float32(dc.samples_since[channel]))
   dc.samples_since[channel] = 0
+  # True-phase period measurement: the delta between overflow event times is
+  # the FIFO period in CPU cycles, exact — no output-read quantization.
+  let now = int64(dc.gba.scheduler.cycles)
+  let delta = now - dc.last_update_cycle[channel]
+  if delta > 0 and delta < 1 shl 20:
+    dc.inv_period[channel] = 1.0'f32 / float32(delta)
+  dc.last_update_cycle[channel] = now
 
 proc timer_overflow*(dc: DMAChannels; timer: int) =
   for channel in 0..1:
@@ -116,17 +126,39 @@ proc dma_channels_get_amplitude*(dc: DMAChannels): tuple[a: int16, b: int16] =
   if not dc.fifo_interp:
     return (dc.latches[0], dc.latches[1])
   var res: array[2, int16]
-  for ch in 0..1:
-    # Phase within the current update period. samples_since is advanced AFTER
-    # sampling so the read immediately following an update sits at phase 0.
-    let denom = dc.update_interval[ch]
-    if denom <= 1.0'f32:
-      # FIFO updating at or above the output rate: nothing to reconstruct
-      # between updates, so hold the latest latch.
-      res[ch] = dc.latches[ch]
-    else:
-      let mu = clamp(float32(dc.samples_since[ch]) / denom, 0.0'f32, 1.0'f32)
-      res[ch] = catmull_rom(dc.hist[ch][0], dc.hist[ch][1],
-                            dc.hist[ch][2], dc.hist[ch][3], mu)
-    dc.samples_since[ch] += 1
+  case dc.interp_mode
+  of 2, 3:
+    # True-phase modes: fractional position between latch updates computed
+    # from the timer-overflow cycle timestamps, exact at any FIFO rate.
+    let now = int64(dc.gba.scheduler.cycles)
+    for ch in 0..1:
+      if dc.inv_period[ch] == 0.0'f32:
+        res[ch] = dc.latches[ch]
+      else:
+        let mu = clamp(float32(now - dc.last_update_cycle[ch]) *
+                       dc.inv_period[ch], 0.0'f32, 1.0'f32)
+        if dc.interp_mode == 2:
+          res[ch] = catmull_rom(dc.hist[ch][0], dc.hist[ch][1],
+                                dc.hist[ch][2], dc.hist[ch][3], mu)
+        else:
+          # Linear ramp from the previous latch to the newest one (mGBA-style;
+          # ~1 period group delay, no look-ahead).
+          let v = float32(dc.hist[ch][2]) +
+                  (float32(dc.hist[ch][3]) - float32(dc.hist[ch][2])) * mu
+          res[ch] = int16(clamp(v, -32768.0'f32, 32767.0'f32))
+      dc.samples_since[ch] += 1
+  else:
+    for ch in 0..1:
+      # Phase within the current update period. samples_since is advanced AFTER
+      # sampling so the read immediately following an update sits at phase 0.
+      let denom = dc.update_interval[ch]
+      if denom <= 1.0'f32:
+        # FIFO updating at or above the output rate: nothing to reconstruct
+        # between updates, so hold the latest latch.
+        res[ch] = dc.latches[ch]
+      else:
+        let mu = clamp(float32(dc.samples_since[ch]) / denom, 0.0'f32, 1.0'f32)
+        res[ch] = catmull_rom(dc.hist[ch][0], dc.hist[ch][1],
+                              dc.hist[ch][2], dc.hist[ch][3], mu)
+      dc.samples_since[ch] += 1
   (res[0], res[1])

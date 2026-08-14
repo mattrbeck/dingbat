@@ -31,6 +31,32 @@ ZOH — i.e. the filter is fine, the phase estimate is the bug. Fix direction:
 compute phase from the FIFO timer's actual period/cycle position instead of
 counting output reads.
 
+## Fix candidates (implemented on this branch, 2026-08-13 session 2)
+
+`DMAChannels.interp_mode` selects the reconstruction (1 = legacy shipping,
+2 = true-phase cubic, 3 = true-phase linear); the phase now comes from
+timer-overflow cycle timestamps (`last_update_cycle`/`inv_period`, measured
+exactly, rebased with the frame in `apu_rebase`, reset with the FIFO).
+Legacy and ZOH outputs stay byte-identical to main (verified with `cmp`
+against pre-change dumps). Welch band powers, same 20 s of the Golden Sun
+intro, dB:
+
+| mode              | 5–8k | 8–10.5k | 10.5–16.4k (imaging only) |
+|-------------------|------|---------|---------------------------|
+| legacy (shipping) |  6.3 |     7.6 |   4.1                     |
+| true-phase cubic  |  0.1 |    −6.8 | −12.4                     |
+| true-phase linear | −2.3 |    −9.4 | −14.3                     |
+| ZOH (interp off)  |  0.0 |    −2.4 |  −2.2                     |
+| gs_bon HLE        |  1.6 |    −3.3 |  −6.7                     |
+
+True-phase cubic: −14 dB vs shipping in the imaging bands and 4–10 dB below
+ZOH, at +0.21% retired instructions on Golden Sun (32.488G vs 32.420G per
+2000 frames, hw cycles equal within noise — legacy early-outs to a plain
+latch read about half the time at 21 kHz, true-phase always interpolates).
+Linear is ~2 dB quieter still up top but rolls off real 5–8 kHz content
+(sinc² response) — audibly duller. Recommendation: ship mode 2 as the only
+path, delete the legacy estimator.
+
 Ruled out in the same session:
 
 - **FIFO underruns/drops**: `-d:mp2kwav` counters over the same 90 s run:
