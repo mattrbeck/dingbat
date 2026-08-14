@@ -93,6 +93,7 @@ type
     ## Owned by each frontend; module-scope instances must stay unallocated
     ## until a JS-invoked proc touches them (the wasm global-teardown rule).
     panel*:  LcdPanel
+    disp_gamma: float      ## code->photon exponent the table was built for
     lut:     seq[uint16]   ## 256*32 fused (next_state8 shl 8) or displayed8
     state:   seq[uint32]   ## per-pixel packed 8-bit cell state (r, g, b)
     outbuf:  seq[uint16]   ## BGR555 handed to the uploader
@@ -141,19 +142,23 @@ const
 
   STATE_MAX = 248'i32   ## 31 * 8: the settled state of a full-scale code
 
-proc build_lut(p: LcdPanel): seq[uint16] =
+proc build_lut(p: LcdPanel; gamma: float): seq[uint16] =
   ## Precompute the (state, target) -> (next state, displayed) table.
+  ## `gamma` is the code->photon exponent of the whole chain downstream of the
+  ## model, not necessarily the spec's plain-display 2.2: the settle physics
+  ## must run in the light the viewer actually receives, or every in-between
+  ## code the table emits lands at the wrong brightness.
   let s = SPECS[p]
   # Into frame units: the model advances exactly one frame per call.
   let tau_drive = s.tau_drive / FRAME_MS
   let tau_relax = s.tau_relax / FRAME_MS
-  let inv_g = 1.0 / s.gamma
+  let inv_g = 1.0 / gamma
   result = newSeq[uint16](256 * 32)
   for st in 0 .. 255:
     let s_code = clamp(float(st) / 8.0, 0.0, 31.0)   # 5.3 fixed point -> 0..31
-    let ls = pow(s_code / 31.0, s.gamma)             # cell transmittance now
+    let ls = pow(s_code / 31.0, gamma)               # cell transmittance now
     for tg in 0 .. 31:
-      let lt = pow(float(tg) / 31.0, s.gamma)        # transmittance asked for
+      let lt = pow(float(tg) / 31.0, gamma)          # transmittance asked for
       # Darkening is driven and its speed is set by how hard it is driven,
       # i.e. by the target; lightening is a free elastic relaxation with one
       # time constant. That asymmetry is the whole model.
@@ -179,17 +184,30 @@ proc build_lut(p: LcdPanel): seq[uint16] =
         nxt += (if goal > nxt: 1'i32 else: -1'i32)
       result[st * 32 + tg] = uint16((nxt shl 8) or dsp)
 
-proc set_panel*(r: var LcdResponse; p: LcdPanel) =
+proc set_panel*(r: var LcdResponse; p: LcdPanel; display_gamma = 0.0) =
   ## Select the panel (or lpOff). Rebuilding drops the cell state, so a live
   ## switch starts clean rather than carrying the old panel's ghost.
-  if r.panel == p and (p == lpOff or r.lut.len > 0): return
+  ##
+  ## `display_gamma` is the code->photon exponent of whatever the displayed
+  ## codes pass through AFTER this model; 0 keeps the spec's plain-display
+  ## 2.2. The GBA color-correction shader linearizes with lcdGamma 4.0, so
+  ## while it is active the AGB table must be built at 4.0 — at 2.2 the
+  ## correction's convex curve lands every settling code darker than the
+  ## physics computed, which measured as a ~2x amplification of the
+  ## screen-wide dimming during scroll. A gamma change is a rebuild like a
+  ## panel change (the ghost restarts clean; the correction toggle repaints
+  ## the whole picture anyway).
+  let g = if display_gamma > 0.0: display_gamma else: SPECS[p].gamma
+  if r.panel == p and r.disp_gamma == g and (p == lpOff or r.lut.len > 0):
+    return
   r.panel = p
+  r.disp_gamma = g
   r.state.setLen(0)
   if p == lpOff:
     r.lut.setLen(0)
     r.outbuf.setLen(0)
   else:
-    r.lut = build_lut(p)
+    r.lut = build_lut(p, g)
 
 proc reset*(r: var LcdResponse) =
   ## Drop the cell state, so the next frame seeds the cells directly instead of

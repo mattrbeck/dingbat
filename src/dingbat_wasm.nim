@@ -155,11 +155,16 @@ proc build_color_luts(correct: bool) =
     colorLutGba[i] = 0xFF000000'u32 or (gba[2] shl 16) or (gba[1] shl 8) or gba[0]
     colorLutGbc[i] = 0xFF000000'u32 or (gbc[2] shl 16) or (gbc[1] shl 8) or gbc[0]
 
+proc sync_lcd_panel()   # defined with the LCD-response state below
+
 proc wasm_set_color_correction(on: cint) {.exportc.} =
   ## Toggle LCD color correction from JS (parity with the desktop menu item).
-  ## Rebuilds the shared color LUTs; the next presented frame uses them.
+  ## Rebuilds the shared color LUTs; the next presented frame uses them. The
+  ## LCD response model re-syncs too — its table is built for the code->photon
+  ## curve of the chain after it, which this toggle just changed.
   colorCorrect = on != 0
   build_color_luts(colorCorrect)
+  sync_lcd_panel()
 
 # --- Core-construction settings (web Settings panel) ---
 # Mirrors the desktop config: these take effect at the NEXT core construction
@@ -232,12 +237,17 @@ var lcdResp: LcdResponse
 
 proc sync_lcd_panel() =
   ## Resolve the switch against whatever core is running. Cheap when nothing
-  ## changed (set_panel early-outs); rebuilds the table on a core switch.
+  ## changed (set_panel early-outs); rebuilds the table on a core switch or a
+  ## color-correction flip. The GBA correction shader (the u_panel_gbc=0
+  ## branch of glpresent's shade()) linearizes with lcdGamma 4.0, so the AGB
+  ## table must be built for that chain; GB's correction branch keeps the
+  ## plain 2.2 input curve, so only the GBA case passes a gamma.
   let gb = stateKind == ekGB and stateGb != nil
   lcdResp.set_panel(lcdOn.resolve(
     gba = stateKind == ekGBA,
     cgb = gb and stateGb.cgb_enabled,
-    sgb = gb and stateGb.sgb_active()))
+    sgb = gb and stateGb.sgb_active()),
+    display_gamma = if stateKind == ekGBA and colorCorrect: 4.0 else: 0.0)
 
 proc wasm_set_lcd_response(on: cint) {.exportc.} =
   ## 0 = off, anything else = on. Which panel the model then uses is not the

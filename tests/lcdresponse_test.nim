@@ -180,6 +180,54 @@ block:
   check(abs(dark_done - light_done) > 0.2,
         "the two directions of a cut do not land in the same place")
 
+echo "=== display gamma follows the correction chain ==="
+block:
+  # With GBA color correction on, everything after the model raises codes to
+  # the 4th power instead of 2.2, so the AGB table is built at gamma 4.0.
+  # Same guarantees as the default table:
+  var r: LcdResponse
+  r.set_panel(lpAgb, display_gamma = 4.0)
+  var exact = true
+  for code in 0 .. 31:
+    var f = mk(rgb(code, code, code))
+    discard r.push(f)
+    for _ in 0 ..< 8:
+      if r.push(f) != rgb(code, code, code): exact = false
+    r.reset()
+  check(exact, "agb@4.0: a static frame is bit-exact for all 32 codes")
+  var stuck = false
+  for a in 0 .. 31:
+    for b in 0 .. 31:
+      if a == b: continue
+      r.reset()
+      var fa = mk(rgb(a, a, a))
+      discard r.push(fa)
+      var fb = mk(rgb(b, b, b))
+      var n = 0
+      while n < 400 and r.push(fb) != rgb(b, b, b): n.inc
+      if n >= 400: stuck = true
+  check(not stuck, "agb@4.0: every code-to-code transition reaches its target")
+
+  # The point of the parameter: both tables must deliver the same PHOTONS.
+  # Map each table's displayed code through its own chain's code->photon
+  # curve and compare the black->white settle trajectories. They can only
+  # disagree by quantization, which is coarsest at the top of the gamma-4
+  # curve (one code there spans ~12% of full light).
+  var r22: LcdResponse
+  r22.set_panel(lpAgb)
+  var white = mk(rgb(31, 31, 31))
+  var black = mk(rgb(0, 0, 0))
+  r.reset(); r22.reset()
+  discard r.push(black); discard r22.push(black)
+  var worst = 0.0
+  for _ in 0 ..< 12:
+    let p40 = pow(float(r.push(white) and 31) / 31.0, 4.0)
+    let p22 = pow(float(r22.push(white) and 31) / 31.0, 2.2)
+    worst = max(worst, abs(p40 - p22))
+  check(worst < 0.13,
+        &"agb@4.0 and agb@2.2 deliver the same photons (worst gap " &
+        &"{int(worst * 100)}% <= one top-end gamma-4 code)")
+
 echo ""
 if failures == 0:
   echo "lcd_response: all checks passed"

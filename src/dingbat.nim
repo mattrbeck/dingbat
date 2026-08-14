@@ -1075,10 +1075,14 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   let src = cast[ptr UncheckedArray[uint16]](fb)
   let gb = app.emu_kind == ekGB and app.gb_emu != nil
   # Speed mode suspends the panel model — per-pixel CPU work every frame
+  # The GBA color-correction shader linearizes with lcdGamma 4.0, so while it
+  # is on, the AGB table must be built for that chain (see set_panel).
   lcd_resp.set_panel((app.cfg.lcd_response and not app.cfg.speed_mode).resolve(
     gba = app.emu_kind == ekGBA,
     cgb = gb and app.gb_emu.cgb_enabled,
-    sgb = gb and app.gb_emu.sgb_active()))
+    sgb = gb and app.gb_emu.sgb_active()),
+    display_gamma = if app.emu_kind == ekGBA and app.cfg.color_correction: 4.0
+                    else: 0.0)
   let upload = cast[pointer](lcd_resp.apply(src, w * h))
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
