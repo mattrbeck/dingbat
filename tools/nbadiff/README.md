@@ -31,14 +31,15 @@ ZOH — i.e. the filter is fine, the phase estimate is the bug. Fix direction:
 compute phase from the FIFO timer's actual period/cycle position instead of
 counting output reads.
 
-## Fix candidates (implemented on this branch, 2026-08-13 session 2)
+## Fix (SHIPPED from this branch): true-phase cubic
 
-`DMAChannels.interp_mode` selects the reconstruction (1 = legacy shipping,
-2 = true-phase cubic, 3 = true-phase linear); the phase now comes from
-timer-overflow cycle timestamps (`last_update_cycle`/`inv_period`, measured
-exactly, rebased with the frame in `apu_rebase`, reset with the FIFO).
-Legacy and ZOH outputs stay byte-identical to main (verified with `cmp`
-against pre-change dumps). Welch band powers, same 20 s of the Golden Sun
+The phase now comes from timer-overflow cycle timestamps
+(`last_update_cycle`/`inv_period`, measured exactly, rebased with the frame
+in `apu_rebase`, reset with the FIFO); the read-counting estimator is gone.
+`fifo_interp=false` (config key / Audio settings "hardware-accurate" mode)
+bypasses reconstruction entirely — bit-true DAC output. During evaluation
+the modes below were compared (legacy/linear existed as `interp_mode` 1/3 in
+branch history at 8365910); Welch band powers, same 20 s of the Golden Sun
 intro, dB:
 
 | mode              | 5–8k | 8–10.5k | 10.5–16.4k (imaging only) |
@@ -54,8 +55,17 @@ ZOH, at +0.21% retired instructions on Golden Sun (32.488G vs 32.420G per
 2000 frames, hw cycles equal within noise — legacy early-outs to a plain
 latch read about half the time at 21 kHz, true-phase always interpolates).
 Linear is ~2 dB quieter still up top but rolls off real 5–8 kHz content
-(sinc² response) — audibly duller. Recommendation: ship mode 2 as the only
-path, delete the legacy estimator.
+(sinc² response) — audibly duller.
+
+Emerald cross-check (m4a at 13379 Hz, Nyquist ~6.7 kHz; imaging bands
+6.7–10k / 10–16.4k dB): legacy 2.9/−0.7, true-phase cubic 0.6/−1.6, ZOH
+4.7/3.8, MP2K HLE 1.6/−0.8. Two takeaways: the legacy bug was mild at
+typical MP2K rates (2↔3 interval flap) — why Emerald never sounded staticy —
+and **ZOH is the worst mode at low FIFO rates**, which is why "just remove
+interpolation" was rejected: it would trade Golden Sun's static for aliasing
+grit across the ~13 kHz majority of the library. True-phase cubic wins both
+regimes; shipped as the default with interp-off as the hardware-accurate
+option.
 
 Ruled out in the same session:
 

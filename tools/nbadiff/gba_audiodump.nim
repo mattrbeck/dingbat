@@ -27,21 +27,15 @@ proc main() =
   let emu = new_gba(args[0], args[1], run_bios = true, use_hle = false)
   emu.test_output = new_test_output()
   emu.post_init()
-  # Mode arg selects the FIFO reconstruction under test (the
-  # DINGBAT_FIFO_INTERP=0 escape hatch is compiled out under test_harness, so
-  # poke the fields directly):
-  #   zoh     zero-order hold (interpolation off)
-  #   legacy  shipping read-counted cubic (default)
-  #   cubic   true-phase Catmull-Rom (timer-cycle phase)
-  #   linear  true-phase linear
-  #   mp2k    enable the MP2K/Bon HLE (Golden Sun -> gs_bon shadow mixer)
+  # Mode arg (the DINGBAT_FIFO_INTERP=0 escape hatch is compiled out under
+  # test_harness, so poke the fields directly):
+  #   (none)  shipping default: true-phase cubic FIFO reconstruction
+  #   zoh     interpolation off — bit-true hardware DAC output
+  #   mp2k    enable the MP2K/Bon HLE (Emerald -> mp2k, Golden Sun -> gs_bon)
   if args.len > 3:
     case args[3]
-    of "zoh":    emu.apu.dma_channels.fifo_interp = false
-    of "legacy": emu.apu.dma_channels.interp_mode = 1
-    of "cubic":  emu.apu.dma_channels.interp_mode = 2
-    of "linear": emu.apu.dma_channels.interp_mode = 3
-    of "mp2k":   emu.mp2k_hle = true
+    of "zoh":  emu.apu.dma_channels.fifo_interp = false
+    of "mp2k": emu.mp2k_hle = true
     else:
       echo "unknown mode: ", args[3]
       quit(1)

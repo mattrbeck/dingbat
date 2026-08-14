@@ -590,6 +590,12 @@ proc apply_mp2k_hle() =
   if app.gba_emu != nil:
     app.gba_emu.mp2k_hle = app.cfg.mp2k_hle
 
+proc apply_fifo_interp() =
+  # DirectSound FIFO interpolation (true-phase cubic reconstruction). Off is
+  # the hardware-accurate mode — bit-true DAC output including its grit.
+  if app.gba_emu != nil:
+    app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp)
+
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
@@ -636,6 +642,7 @@ proc load_rom(path: string) =
   apply_master_volume()
   apply_pitch_correct_ff()
   apply_audio_lowpass()
+  apply_fifo_interp()
   apply_mp2k_hle()
   apply_panel_uniforms()
   lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
@@ -1296,15 +1303,25 @@ proc render_imgui() =
                               addr app.cfg.pitch_correct_ff, true):
           apply_pitch_correct_ff()
           save_config(app.cfg)
-        # Gentle analog-output low-pass (cap/speaker smoothing). Off by default
-        # → output bit-identical to unfiltered. GBA only.
-        if igMenuItem_BoolPtr("Analog low-pass filter", nil,
+        # DirectSound FIFO interpolation. ON (default): reconstructs the
+        # waveform between hardware samples (cleaner treble). OFF: bit-true
+        # GBA DAC output, including its characteristic grit. GBA only.
+        if igMenuItem_BoolPtr("Audio interpolation", nil,
+                              addr app.cfg.fifo_interp, app.emu_kind == ekGBA):
+          apply_fifo_interp()
+          save_config(app.cfg)
+        # Gentle analog-output low-pass modeling the GBA's output filter.
+        # Pair with interpolation off for the closest real-hardware sound.
+        # Off by default → output bit-identical to unfiltered. GBA only.
+        if igMenuItem_BoolPtr("Analog filter", nil,
                               addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
           apply_audio_lowpass()
           save_config(app.cfg)
-        # Experimental MP2K sound-engine HLE; auto-engages per-game when the
-        # engine is detected, other games are unaffected. Off by default.
-        if igMenuItem_BoolPtr("Improve audio quality (experimental)", nil,
+        # Sound-engine HLE: re-renders supported games' music engines at
+        # higher quality; changes the mix character, and supersedes
+        # interpolation for the music stream when engaged. Auto-engages
+        # per-game on detection, other games unaffected. Off by default.
+        if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
                               addr app.cfg.mp2k_hle, true):
           apply_mp2k_hle()
           save_config(app.cfg)
@@ -2151,6 +2168,7 @@ proc main() =
     apply_master_volume()
     apply_pitch_correct_ff()
     apply_audio_lowpass()
+    apply_fifo_interp()
     apply_mp2k_hle()
 
   app = AppState(

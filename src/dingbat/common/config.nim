@@ -282,6 +282,10 @@ type
     rewind*:            bool     # keep rewind history (hold ` to rewind)
     pitch_correct_ff*:  bool     # WSOLA pitch-preserving 2x fast-forward (off = octave-up)
     audio_lowpass*:     bool     # analog-output low-pass on the GBA mix (cap/speaker smoothing)
+    # GBA DirectSound FIFO interpolation (true-phase cubic). ON by default:
+    # strictly removes reconstruction noise, touches nothing musical. OFF is
+    # the hardware-accurate mode — bit-true DAC output including its grit.
+    fifo_interp*:       bool
     mp2k_hle*:          bool     # experimental MP2K sound-engine HLE (auto-engages on detection)
 
 proc new_config*(): Config =
@@ -309,6 +313,7 @@ proc new_config*(): Config =
     rewind:          true,
     pitch_correct_ff: false,
     audio_lowpass:   false,
+    fifo_interp:     true,
     mp2k_hle:        false,
   )
 
@@ -357,6 +362,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.pitch_correct_ff = j["pitch_correct_ff"].getBool(false)
   if j.hasKey("audio_lowpass"):
     cfg.audio_lowpass = j["audio_lowpass"].getBool(false)
+  if j.hasKey("fifo_interp"):
+    cfg.fifo_interp = j["fifo_interp"].getBool(true)
   if j.hasKey("mp2k_hle"):
     cfg.mp2k_hle = j["mp2k_hle"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
@@ -466,6 +473,7 @@ proc save_config*(cfg: Config) =
   lines.add("rewind: " & $cfg.rewind)
   lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)
   lines.add("audio_lowpass: " & $cfg.audio_lowpass)
+  lines.add("fifo_interp: " & $cfg.fifo_interp)
   lines.add("mp2k_hle: " & $cfg.mp2k_hle)
   lines.add("gba:")
   if cfg.bios_path.len > 0:

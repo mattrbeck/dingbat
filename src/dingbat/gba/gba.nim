@@ -600,23 +600,18 @@ type
     # hold images into the audible band as hiss. We reconstruct the band-
     # limited signal between timer-driven FIFO updates with a causal
     # Catmull-Rom cubic (Paul Bourke, "Cubic Interpolation"). hist[ch] holds
-    # the last four latched samples (index 0 oldest .. 3 newest);
-    # samples_since counts 32768 Hz reads since the last FIFO update, and
-    # update_interval is the read count spanning the previous update period
-    # (the phase denominator).
+    # the last four latched samples (index 0 oldest .. 3 newest).
+    # last_update_cycle is the scheduler-cycle timestamp of the newest latch
+    # and inv_period the reciprocal of the measured update period in cycles —
+    # together the exact fractional phase between updates at any FIFO rate.
+    # inv_period 0 means "no period measured yet" (fresh boot / FIFO reset)
+    # and falls back to the held latch. int64 timestamp so the per-frame
+    # rebase subtraction can transiently go negative without wrap.
+    # fifo_interp=false (the "hardware-accurate" setting) bypasses all of it
+    # and emits the raw held latch — bit-true to the DAC's electrical output.
     hist*:            array[2, array[4, int16]]
-    # True-phase reconstruction (experimental A/B, see dma_channels.nim):
-    # cycle timestamp of the last latch update and 1/period in cycles, both
-    # measured exactly from the timer-overflow event times. inv_period 0 means
-    # "no period measured yet" and falls back to the held latch. int64 so the
-    # per-frame rebase subtraction can transiently go negative without wrap.
     last_update_cycle*: array[2, int64]
     inv_period*:        array[2, float32]
-    # 1 = legacy read-counted cubic (shipping), 2 = true-phase cubic,
-    # 3 = true-phase linear. fifo_interp=false overrides all (ZOH).
-    interp_mode*:     int
-    samples_since*:   array[2, int32]
-    update_interval*: array[2, float32]
     fifo_interp*:     bool   # cubic FIFO reconstruction (default on)
 
   APU* = ref object

@@ -176,6 +176,7 @@ var sgbBorderWanted = true
 var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
 var optGbaRunBios = true
 var optMp2kHle = false        # MP2K sound-engine HLE (opt-in, engages on detection)
+var optFifoInterp = true      # GBA FIFO interpolation (off = bit-true DAC output)
 
 proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
   optGbFifo = fifo != 0
@@ -198,6 +199,7 @@ proc make_gba(rom_path: string): GBA =
                    use_hle = mode == 0,
                    hle_after_bios = mode == 2)
   result.mp2k_hle = optMp2kHle
+  result.apu.set_fifo_interp(optFifoInterp)
 
 # LCD response (common/lcd_response.nim): a per-pixel model of how the real
 # panel settles, replacing the old "average the last two frames" blend. Some
@@ -233,6 +235,14 @@ proc wasm_set_mp2k_hle(on: cint) {.exportc.} =
   optMp2kHle = on != 0
   if stateKind == ekGBA and stateGba != nil:
     stateGba.mp2k_hle = optMp2kHle
+
+proc wasm_set_fifo_interp(on: cint) {.exportc.} =
+  ## Toggle GBA DirectSound FIFO interpolation ("Audio interpolation"):
+  ## remembered for cores created later (make_gba) AND applied to the live
+  ## core, so the settings switch works mid-game. Off = bit-true DAC output.
+  optFifoInterp = on != 0
+  if stateKind == ekGBA and stateGba != nil:
+    stateGba.apu.set_fifo_interp(optFifoInterp)
 
 proc wasm_mp2k_available(): cint {.exportc.} =
   ## 1 when the loaded ROM's MP2K engine was detected (HLE can do something).

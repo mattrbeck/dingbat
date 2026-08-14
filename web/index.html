@@ -938,8 +938,18 @@
               <div class="settings-pane" id="settings-pane-audio" role="tabpanel" aria-labelledby="settings-tab-audio" hidden>
                 <div class="modal-toggle-row">
                   <div>
-                    <span class="modal-row-label">Improve audio quality in supported titles</span>
-                    <span class="modal-toggle-sub">Experimental. Plays the music at higher quality in most GBA games. Switches itself on only where it works.</span>
+                    <span class="modal-row-label">Audio interpolation</span>
+                    <span class="modal-toggle-sub">Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="fifo-interp-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Enhanced music synthesis</span>
+                    <span class="modal-toggle-sub">Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="mp2k-hle-toggle" />
@@ -958,8 +968,8 @@
                 </div>
                 <div class="modal-toggle-row">
                   <div>
-                    <span class="modal-row-label">Analog low-pass filter</span>
-                    <span class="modal-toggle-sub">Soften the treble the way the GBA's own speaker did. GBA games only.</span>
+                    <span class="modal-row-label">Analog filter</span>
+                    <span class="modal-toggle-sub">Soften the treble the way the GBA's own output filter and speaker did. Pair with interpolation off for the closest real-hardware sound. GBA games only.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="audio-lowpass-toggle" />

@@ -182,6 +182,13 @@ proc set_audio_lowpass*(apu: APU; on: bool) =
     apu.lp_right = 0
   apu.audio_lowpass = on
 
+proc set_fifo_interp*(apu: APU; on: bool) =
+  ## Toggle DirectSound FIFO reconstruction (true-phase cubic). Off is the
+  ## hardware-accurate mode: the raw held latch, bit-true to the DAC output.
+  ## The phase state keeps updating either way (push_fifo_sample), so
+  ## re-enabling mid-game is seamless.
+  apu.dma_channels.fifo_interp = on
+
 proc set_pitch_correct_ff*(apu: APU; on: bool) =
   ## Toggle WSOLA pitch-preserving 2x. The stretcher itself resets on the
   ## stretch-path rising edge in get_sample, so this only flips the flag.
@@ -646,7 +653,6 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.dma_channels.sizes[0] = 0
         apu.dma_channels.latches[0] = 0
         apu.dma_channels.hist[0] = [0'i16, 0, 0, 0]
-        apu.dma_channels.samples_since[0] = 0
         apu.dma_channels.inv_period[0] = 0.0'f32
       if bit(value, 7):  # FIFO B reset
         for i in 0..31: apu.dma_channels.fifos[1][i] = 0
@@ -654,7 +660,6 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.dma_channels.sizes[1] = 0
         apu.dma_channels.latches[1] = 0
         apu.dma_channels.hist[1] = [0'i16, 0, 0, 0]
-        apu.dma_channels.samples_since[1] = 0
         apu.dma_channels.inv_period[1] = 0.0'f32
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))
     of 0x84:
