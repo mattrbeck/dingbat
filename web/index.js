@@ -6386,9 +6386,11 @@ const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
                        "dmg", "cgb", "gbc", "agb", "agb001", "gba",
                        "ags", "ags101", "sp"];
 var ambientGlow = false;
-var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" — GPU upscale filter
-// A smoothing filter and integer-scale pinning fight (integer pinning throws
-// away the fractional smoothing), so a filter suspends integer-scale layout.
+var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" | "xbrz" — GPU upscale filter
+// An active filter suspends scanlines (smoothing + row-darkening fight each
+// other). Integer scaling is NOT suspended: the filter runs at the backing
+// store's resolution either way, and pinning the CSS box to a whole multiple
+// is a size restriction the user may still want on top of the smoothing.
 // Speed mode suspends the GPU upscale filter (hq4x +0.16 ms / xBR +0.58 ms
 // per present even on a fast GPU — several percent of the frame budget on
 // the low-end GPUs the mode targets). The stored preference is untouched.
@@ -6479,7 +6481,7 @@ const updateCanvasScaling = () => {
   const availH =
     stageEl.clientHeight -
     parseFloat(stageCS.paddingTop) - parseFloat(stageCS.paddingBottom);
-  if (integerScale && running && !filterActive()) {
+  if (integerScale && running) {
     const [w, h] = nativeRes();
     const k = Math.max(1, Math.floor(Math.min(availW / w, availH / h)));
     canvasEl.style.width = k * w + "px";
@@ -6655,17 +6657,12 @@ const drawGame = () => {
   });
 };
 
-// Gray out the toggles an active upscale filter suspends (integer scaling and
-// scanlines) so the modal shows they're not in effect right now.
+// Gray out the toggles an active upscale filter suspends (scanlines) so the
+// modal shows they're not in effect right now.
 const updateSuspendedVideoToggles = () => {
   const sus = filterActive();
-  for (const [rowId, input] of /** @type {[string, HTMLInputElement][]} */ ([
-    ["integer-scale-row", integerScaleToggle],
-    ["scanlines-row", scanlinesToggle],
-  ])) {
-    document.getElementById(rowId)?.classList.toggle("suspended", sus);
-    input.disabled = sus;
-  }
+  document.getElementById("scanlines-row")?.classList.toggle("suspended", sus);
+  scanlinesToggle.disabled = sus;
 };
 
 const saveVideoSettings = () => {
@@ -6710,7 +6707,6 @@ ambientGlowToggle.addEventListener("change", () => {
 upscaleFilterSelect.addEventListener("change", () => {
   upscaleFilter = upscaleFilterSelect.value;
   updateSuspendedVideoToggles();
-  updateCanvasScaling();  // filter suspends integer-scale layout pinning
   drawGame();             // filter is a shader uniform — redraw to show it live
   saveVideoSettings();
 });

@@ -33,10 +33,14 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-  // The hq4x / xBR branches are CLEAN-ROOM implementations from published
-  // algorithm descriptions (Hyllian's xBR tutorial: YUV 48:7:6 distance and the
-  // wd_red<wd_blue edge rule; ubitux's "Butchering HQX" write-up + Wikipedia for
-  // the hqx per-channel YUV threshold). No GPL/LGPL shader source was copied.
+  // The hq4x / xBR / xBRZ branches are CLEAN-ROOM implementations from
+  // published algorithm descriptions (Hyllian's xBR tutorial: YUV 48:7:6
+  // distance and the wd_red<wd_blue edge rule; ubitux's "Butchering HQX"
+  // write-up + Wikipedia for the hqx per-channel YUV threshold; Zenju's forum
+  // posts describing xBRZ's rules: the 4x4 corner-dominance test with the
+  // checkerboard guard, equal-colour tolerance 30, dominant-gradient threshold
+  // 3.6, and the 2.2-threshold shallow/steep line classification). No GPL/LGPL
+  // shader or scaler source was copied.
   // Same math as the desktop GL 3.3 shader (src/dingbat.nim FRAG_SRC).
   const FRAG = `#version 300 es
 precision highp float;
@@ -54,7 +58,7 @@ uniform bool u_scanlines;
 // Game Boy scanlines over SNES border art.
 uniform float u_scan_height;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
-uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
+uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
 // --- Super Game Boy border ---------------------------------------------
 // A 256x224 second layer in the same BGR555 packing as the game framebuffer,
 // with bit 15 = opaque (SNES colour 0 is transparent). The Game Boy window is
@@ -125,6 +129,32 @@ bool similar(vec3 a, vec3 b) {       // hqx per-channel YUV threshold (48,7,6)
   vec3 d = abs(yuv(a) - yuv(b));
   return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
 }
+// xBRZ colour distance: Euclidean in YCbCr, kept in 8-bit units so the
+// published constants (equal-colour tolerance 30) apply directly.
+float dz(vec3 a, vec3 b) { return length((yuv(a) - yuv(b)) * 255.0); }
+bool eqz(vec3 a, vec3 b) { return dz(a, b) < 30.0; }
+// The xBRZ corner decision for the (dx,dy) corner of the texel at b: weighted
+// distance sums along the two diagonals of the 2x2 corner quad, taken over the
+// surrounding 4x4 block, with the quad's own diagonals weighted 4x. Returns
+// (own-corner diagonal, crossing diagonal); x < y means an edge runs across
+// this corner and it should blend.
+vec2 corner_dz(ivec2 b, int dx, int dy) {
+  vec3 f = fetchRGB(b);
+  vec3 g = fetchRGB(b + ivec2(dx, 0));
+  vec3 j = fetchRGB(b + ivec2(0, dy));
+  vec3 k = fetchRGB(b + ivec2(dx, dy));
+  float jg = dz(fetchRGB(b + ivec2(-dx, dy)), f)
+           + dz(f, fetchRGB(b + ivec2(dx, -dy)))
+           + dz(fetchRGB(b + ivec2(0, 2 * dy)), k)
+           + dz(k, fetchRGB(b + ivec2(2 * dx, 0)))
+           + 4.0 * dz(j, g);
+  float fk = dz(fetchRGB(b + ivec2(-dx, 0)), j)
+           + dz(j, fetchRGB(b + ivec2(dx, 2 * dy)))
+           + dz(fetchRGB(b + ivec2(0, -dy)), g)
+           + dz(g, fetchRGB(b + ivec2(2 * dx, dy)))
+           + 4.0 * dz(f, k);
+  return vec2(jg, fk);
+}
 
 vec3 unpack555(uint packed) {
   return vec3(float(packed & 31u),
@@ -152,6 +182,47 @@ vec3 upscale(vec2 uv) {
     if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
       return mix(E, 0.5 * (Ph + Pv), w);
     return E;
+  }
+  if (u_filter == 3) {               // xBRZ-style
+    vec2 cd = corner_dz(base, sx, sy);
+    if (cd.x >= cd.y) return E;      // no edge across this corner
+    vec3 C = fetchRGB(base + ivec2( sx, -sy));
+    vec3 G = fetchRGB(base + ivec2(-sx,  sy));
+    vec3 B = fetchRGB(base + ivec2( 0, -sy));
+    vec3 D = fetchRGB(base + ivec2(-sx,  0));
+    // Checkerboard guard: both diagonals of the corner quad are same-colour
+    // pairs — that is a fine pattern, not an edge, and blending dissolves it.
+    if ((eqz(E, Ph) && eqz(Pv, X)) || (eqz(E, Pv) && eqz(Ph, X))) return E;
+    bool line_blend = true;
+    if (cd.y <= 3.6 * cd.x) {        // not a dominant gradient: extra guards
+      // A cut in an adjacent corner of this texel means the line ends here;
+      // full wedge blending would eat insular pixels (sprite eyes), so only
+      // the corner nib is rounded. Same for a solid L-shape around the quad.
+      vec2 tr = corner_dz(base, sx, -sy);
+      vec2 bl = corner_dz(base, -sx, sy);
+      if (tr.x < tr.y && !eqz(E, G)) line_blend = false;
+      else if (bl.x < bl.y && !eqz(E, C)) line_blend = false;
+      else if (eqz(G, Pv) && eqz(Pv, X) && eqz(X, Ph) && eqz(Ph, C) &&
+               !eqz(E, X)) line_blend = false;
+    }
+    vec3 px = dz(E, Ph) <= dz(E, Pv) ? Ph : Pv;
+    if (line_blend) {
+      float fg = dz(Ph, G), hc = dz(Pv, C);
+      bool shallow = 2.2 * fg <= hc && !eqz(E, G) && !eqz(D, G);
+      bool steep   = 2.2 * hc <= fg && !eqz(E, C) && !eqz(B, C);
+      // Signed distance from the fragment to the cut line, per candidate
+      // slope, as the AA ramp — this is what replaces the reference scaler's
+      // per-scale-factor subpixel fill tables and makes the filter work at
+      // any magnification.
+      float wz = smoothstep(-0.18, 0.18, (lx + ly - 1.5) / sqrt(2.0));
+      if (shallow)
+        wz = max(wz, smoothstep(-0.18, 0.18, (lx + 2.0 * ly - 2.0) / sqrt(5.0)));
+      if (steep)
+        wz = max(wz, smoothstep(-0.18, 0.18, (2.0 * lx + ly - 2.0) / sqrt(5.0)));
+      return mix(E, px, wz);
+    }
+    float r = length(vec2(1.0 - lx, 1.0 - ly));   // corner nib only
+    return mix(E, px, 0.45 * (1.0 - smoothstep(0.15, 0.45, r)));
   }
   // u_filter == 2: xBR-lv2
   vec3 C  = fetchRGB(base + ivec2( sx, -sy));
@@ -367,7 +438,8 @@ void main() {
         gl.uniform3f(uSgbBackdrop, (bd & 31) / 31,
           ((bd >> 5) & 31) / 31, ((bd >> 10) & 31) / 31);
       }
-      gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
+      gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2
+        : opts.filter === "xbrz" ? 3 : 0);
       // opts.dmgPalette: four "#rrggbb" strings (shade 0 -> 3) or null/absent.
       const pal = opts.dmgPalette;
       const remap = !!(pal && pal.length === 4);

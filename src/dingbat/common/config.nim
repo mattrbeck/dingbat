@@ -250,6 +250,7 @@ type
     vfNone = "none"
     vfHq4x = "hq4x"
     vfXbr  = "xbr"
+    vfXbrz = "xbrz"
 
   Config* = ref object
     explorer_dir*:      string
@@ -268,7 +269,7 @@ type
     volume*:            int      # master volume 0..100
     mute*:              bool     # mute audio output
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
-    video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr)
+    video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr/xbrz)
     scanlines*:         bool     # darken a strip across each emulated pixel row
     lcd_response*:      bool     # panel-response model; the panel follows the machine
     preserve_aspect*:   bool     # letterbox instead of stretching to the window

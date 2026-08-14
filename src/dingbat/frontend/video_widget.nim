@@ -6,7 +6,7 @@ type
   VideoWidget* = ref object
     cfg*:         Config
     gb_renderer*: cint   # 0 = FIFO, 1 = scanline
-    filter*:      cint   # 0 = None, 1 = hq4x, 2 = xBR (VideoFilter ordinal)
+    filter*:      cint   # 0 = None, 1 = hq4x, 2 = xBR, 3 = xBRZ (VideoFilter ordinal)
     scanlines*:   bool
     lcd_resp*:    bool   # panel-response model on/off (the panel itself is
                          # resolved from the running machine, not chosen here)
@@ -43,6 +43,7 @@ proc render*(v: VideoWidget) =
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
+  discard igRadioButton_IntPtr("xBRZ", addr v.filter, 3)
   igEndDisabled()
   igUnindent(106)
   igSeparator()

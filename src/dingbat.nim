@@ -72,12 +72,15 @@ void main() {
 #    crush its colors. Both match the wasm build's LUTs and the screenshot
 #    path (bgr555_to_rgb) exactly.
 #
-# The upscale filters (hq4x / xBR) below are CLEAN-ROOM implementations written
-# from published ALGORITHM DESCRIPTIONS — Hyllian's xBR tutorial (the weighted
-# YUV 48:7:6 distance and the wd_red<wd_blue edge rule), the ubitux "Butchering
-# HQX" write-up, and Wikipedia's hqx/pixel-art-scaling pages. No GPL/LGPL shader
-# source was copied; the math is reimplemented in fragment form. The same code
-# is mirrored in web/index.js's GLSL ES 300 shader.
+# The upscale filters (hq4x / xBR / xBRZ) below are CLEAN-ROOM implementations
+# written from published ALGORITHM DESCRIPTIONS — Hyllian's xBR tutorial (the
+# weighted YUV 48:7:6 distance and the wd_red<wd_blue edge rule), the ubitux
+# "Butchering HQX" write-up, Wikipedia's hqx/pixel-art-scaling pages, and
+# Zenju's forum posts describing xBRZ's rules (4x4 corner-dominance test with
+# the checkerboard guard, equal-colour tolerance 30, dominant-gradient
+# threshold 3.6, shallow/steep line threshold 2.2). No GPL/LGPL shader or
+# scaler source was copied; the math is reimplemented in fragment form. The
+# same code is mirrored in web/glpresent.js's GLSL ES 300 shader.
 const FRAG_SRC = """
 #version 330 core
 in vec2 tex_coord;
@@ -99,7 +102,7 @@ uniform float scan_height;
 // SNES colour 0 -- transparent, so the window (or the backdrop) shows through.
 uniform bool sgb_border;
 uniform vec3 sgb_backdrop;
-uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR
+uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
 
 vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
 
@@ -118,6 +121,32 @@ float df(vec3 a, vec3 b) {
 bool similar(vec3 a, vec3 b) {
   vec3 d = abs(yuv(a) - yuv(b));
   return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
+}
+// xBRZ colour distance: Euclidean in YCbCr, kept in 8-bit units so the
+// published constants (equal-colour tolerance 30) apply directly.
+float dz(vec3 a, vec3 b) { return length((yuv(a) - yuv(b)) * 255.0); }
+bool eqz(vec3 a, vec3 b) { return dz(a, b) < 30.0; }
+// The xBRZ corner decision for the (d.x,d.y) corner of the texel at uv:
+// weighted distance sums along the two diagonals of the 2x2 corner quad,
+// taken over the surrounding 4x4 block, with the quad's own diagonals
+// weighted 4x. Returns (own-corner diagonal, crossing diagonal); x < y means
+// an edge runs across this corner and it should blend.
+vec2 corner_dz(vec2 uv, vec2 t, vec2 d) {
+  vec3 f = srctex(uv);
+  vec3 g = srctex(uv + t * vec2(d.x, 0.0));
+  vec3 j = srctex(uv + t * vec2(0.0, d.y));
+  vec3 k = srctex(uv + t * d);
+  float jg = dz(srctex(uv + t * vec2(-d.x, d.y)), f)
+           + dz(f, srctex(uv + t * vec2(d.x, -d.y)))
+           + dz(srctex(uv + t * vec2(0.0, 2.0 * d.y)), k)
+           + dz(k, srctex(uv + t * vec2(2.0 * d.x, 0.0)))
+           + 4.0 * dz(j, g);
+  float fk = dz(srctex(uv + t * vec2(-d.x, 0.0)), j)
+           + dz(j, srctex(uv + t * vec2(d.x, 2.0 * d.y)))
+           + dz(srctex(uv + t * vec2(0.0, -d.y)), g)
+           + dz(g, srctex(uv + t * vec2(2.0 * d.x, d.y)))
+           + 4.0 * dz(f, k);
+  return vec2(jg, fk);
 }
 
 // Sample the source texel-neighborhood around uv and smooth the pixel-art edge
@@ -141,6 +170,46 @@ vec3 upscale(vec2 uv, vec2 tsz) {
     if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
       return mix(E, 0.5 * (Ph + Pv), w);
     return E;
+  }
+  if (filter_mode == 3) {                    // xBRZ-style
+    vec2 cd = corner_dz(uv, t, vec2(sx, sy));
+    if (cd.x >= cd.y) return E;              // no edge across this corner
+    vec3 C = srctex(uv + t * vec2( sx, -sy));
+    vec3 G = srctex(uv + t * vec2(-sx,  sy));
+    vec3 B = srctex(uv + t * vec2(0.0, -sy));
+    vec3 D = srctex(uv + t * vec2(-sx, 0.0));
+    // Checkerboard guard: both diagonals of the corner quad are same-colour
+    // pairs — that is a fine pattern, not an edge, and blending dissolves it.
+    if ((eqz(E, Ph) && eqz(Pv, X)) || (eqz(E, Pv) && eqz(Ph, X))) return E;
+    bool line_blend = true;
+    if (cd.y <= 3.6 * cd.x) {                // not a dominant gradient: guards
+      // A cut in an adjacent corner of this texel means the line ends here;
+      // full wedge blending would eat insular pixels (sprite eyes), so only
+      // the corner nib is rounded. Same for a solid L-shape around the quad.
+      vec2 tr = corner_dz(uv, t, vec2(sx, -sy));
+      vec2 bl = corner_dz(uv, t, vec2(-sx, sy));
+      if (tr.x < tr.y && !eqz(E, G)) line_blend = false;
+      else if (bl.x < bl.y && !eqz(E, C)) line_blend = false;
+      else if (eqz(G, Pv) && eqz(Pv, X) && eqz(X, Ph) && eqz(Ph, C) &&
+               !eqz(E, X)) line_blend = false;
+    }
+    vec3 px = dz(E, Ph) <= dz(E, Pv) ? Ph : Pv;
+    if (line_blend) {
+      float fg = dz(Ph, G), hc = dz(Pv, C);
+      bool shallow = 2.2 * fg <= hc && !eqz(E, G) && !eqz(D, G);
+      bool steep   = 2.2 * hc <= fg && !eqz(E, C) && !eqz(B, C);
+      // Signed distance from the fragment to the cut line, per candidate
+      // slope, as the AA ramp — this replaces the reference scaler's
+      // per-scale-factor subpixel fill tables and works at any magnification.
+      float wz = smoothstep(-0.18, 0.18, (lx + ly - 1.5) / sqrt(2.0));
+      if (shallow)
+        wz = max(wz, smoothstep(-0.18, 0.18, (lx + 2.0 * ly - 2.0) / sqrt(5.0)));
+      if (steep)
+        wz = max(wz, smoothstep(-0.18, 0.18, (2.0 * lx + ly - 2.0) / sqrt(5.0)));
+      return mix(E, px, wz);
+    }
+    float r = length(vec2(1.0 - lx, 1.0 - ly));   // corner nib only
+    return mix(E, px, 0.45 * (1.0 - smoothstep(0.15, 0.45, r)));
   }
   // filter_mode == 2: xBR-lv2 edge-directed interpolation
   vec3 C  = srctex(uv + t * vec2( sx, -sy));
@@ -1045,10 +1114,11 @@ when defined(gputime):
         of 1: app.cfg.video_filter = vfNone;  app.cfg.scanlines = false
         of 2: app.cfg.video_filter = vfHq4x
         of 3: app.cfg.video_filter = vfXbr
-        of 4: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
-        of 5: app.cfg.scanlines = false;      app.cfg.color_correction = false
-        of 6: app.cfg.color_correction = true; app.cfg.lcd_response = true
-        of 7: app.cfg.lcd_response = false
+        of 4: app.cfg.video_filter = vfXbrz
+        of 5: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
+        of 6: app.cfg.scanlines = false;      app.cfg.color_correction = false
+        of 7: app.cfg.color_correction = true; app.cfg.lcd_response = true
+        of 8: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
 proc render_game() =
