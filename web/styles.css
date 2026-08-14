@@ -1180,7 +1180,7 @@ body.has-game #manage-saves,
 body.has-game #screenshot,
 body.has-game #slow-motion,
 body.has-game #clip-last,
-body.has-game #record-clip,
+body.has-game body.has-game #record-clip,
 body.has-game #capture-toggle,
 body.has-game #open-states,
 body.has-game #net-connect {
@@ -2755,24 +2755,29 @@ body.debug-2p .home-tile-link {
   border-color: rgba(255, 80, 80, 0.9);
 }
 
-/* ---- Rewind scrubber ---- */
+/* ---- Film-strip scrubber (Rewind, Save a Clip) ---- */
 /* An ordinary .modal-overlay/.modal, and the box inside it is the Report-a-Bug
    scrubber's .report-scrub — so everything below is only what a film strip
    adds to that component. Nothing about the strip's geometry lives in CSS: the
    canvas sizes itself from its own client rect, which is what lets one drawing
-   path serve a 320pt phone and a desktop panel. */
+   path serve a 320pt phone and a desktop panel.
 
-.modal-rewind {
+   Two features wear this: Rewind (one marker, "cut here") and Save a Clip (two,
+   "record from here to here"). They share the markup and the JS component
+   (createFilmStrip in index.js); .film-marker.range is the only thing the
+   two-marker case adds. */
+
+.modal-scrub {
   max-width: 460px;
 }
 
-/* .report-preview hardcodes aspect-ratio: 3/2 for the GBA panel. The rewind
+/* .report-preview hardcodes aspect-ratio: 3/2 for the GBA panel. A scrubber
    preview draws whichever core is running, and a GB frame is 10:9, so the
    ratio has to come from the canvas's own width/height instead of being
    imposed. Everything else is inherited from .report-preview.
-   Qualified by .modal-rewind on purpose: .report-preview is declared further
+   Qualified by .modal-scrub on purpose: .report-preview is declared further
    down this file, so at equal specificity it would win. */
-.modal-rewind .rewind-preview {
+.modal-scrub .film-preview {
   width: 200px;
   aspect-ratio: auto;
   margin-bottom: 10px;
@@ -2781,7 +2786,7 @@ body.debug-2p .home-tile-link {
 /* The strip's own scroll containment: the drag handler is pointer-based (no
    native scrolling, so no momentum — the frame under the finger is the point),
    and these stop a horizontal drag from chaining out to the page behind. */
-.rewind-strip-wrap {
+.film-strip-wrap {
   position: relative;
   height: 72px;
   border-radius: var(--radius-sm);
@@ -2796,7 +2801,17 @@ body.debug-2p .home-tile-link {
   cursor: ew-resize;
 }
 
-.rewind-strip {
+/* The range picker's strip shows twice as many frames (visibleFrames: 11), so
+   each one is about half as wide — and at a fixed 3:2 the default height then
+   letterboxes them into a black band with a row of stamps in the middle. Shrink
+   the strip to fit the frames rather than the other way round; it stays a
+   comfortable drag target, and the picture you are actually judging is the
+   200px preview above it. */
+.film-strip-wrap.compact {
+  height: 40px;
+}
+
+.film-strip {
   display: block;
   width: 100%;
   height: 100%;
@@ -2805,10 +2820,10 @@ body.debug-2p .home-tile-link {
 
 /* A hairline the eye can align against, inside a 44px pointer target (the
    whole strip is draggable, so this only has to be visually findable — but it
-   stays wide enough to grab on its own). `left` is set from JS: the playhead
-   rides the centre while the film can scroll under it, and slides out to the
-   ends when the film has run out of slack (see rwDrawStrip). */
-.rewind-playhead {
+   stays wide enough to grab on its own). `left` is set from JS: the active
+   marker rides the centre while the film can scroll under it, and slides out to
+   the ends when the film has run out of slack (see createFilmStrip). */
+.film-marker {
   position: absolute;
   top: -1px;
   bottom: -1px;
@@ -2827,8 +2842,8 @@ body.debug-2p .home-tile-link {
   );
 }
 
-.rewind-playhead::before,
-.rewind-playhead::after {
+.film-marker::before,
+.film-marker::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -2838,13 +2853,101 @@ body.debug-2p .home-tile-link {
   background: var(--accent);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
-.rewind-playhead::before { top: 0; }
-.rewind-playhead::after { bottom: 0; transform: rotate(180deg); }
+.film-marker::before { top: 0; }
+.film-marker::after { bottom: 0; transform: rotate(180deg); }
+
+/* Range markers (Save a Clip). Two lines instead of one, and each one has to
+   say which SIDE of itself is being kept — with a symmetric marker at each end
+   of a selection there is nothing to tell you whether you are looking at the
+   in point or the out point, and getting that backwards means exporting the
+   wrong ten seconds. The arrowheads point INTO the selection, so the pair reads
+   as brackets around it. */
+.film-marker.range::before,
+.film-marker.range::after {
+  width: 9px;
+  height: 9px;
+  margin-left: 0;
+}
+/* In point: chevrons on the marker's right, pointing right (forward, into the
+   clip). Out point: mirrored. */
+.film-marker.range-in::before,
+.film-marker.range-in::after {
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  margin-left: 1.5px;
+}
+.film-marker.range-out::before,
+.film-marker.range-out::after {
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+  margin-left: -10.5px;
+}
+.film-marker.range::after { transform: none; }
+
+/* Scrolled out of view: the selection really does continue past the edge, so
+   showing nothing there is the honest rendering — the colour running off the
+   strip says "more of this" on its own. Set from JS (createFilmStrip's draw). */
+.film-marker.offscreen {
+  background: none;
+}
+.film-marker.offscreen::before,
+.film-marker.offscreen::after {
+  display: none;
+}
+
+/* Which end of the range the preview above is showing. Muted and small: it is
+   a caption, and the picture is the thing. */
+.clip-preview-label {
+  margin: -4px 0 10px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+/* The two range sliders (the keyboard/screen-reader path onto the markers).
+   Labelled, because "start" and "end" are not guessable from two identical
+   bars, and stacked rather than side by side so each keeps a full-width
+   travel — a 100px range input on a phone quantises to ~2s per pixel. */
+.clip-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.clip-slider-row > span {
+  flex: 0 0 34px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.clip-slider-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Length presets. The picker opens on the last 10 seconds, so the reflex use
+   never touches these — they are here so the other common lengths do not need
+   a drag either. */
+.clip-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Estimated size / length readout under the presets — a clip is a video file
+   the browser hands straight to the downloads folder, and 60 seconds of it is
+   not a small one. */
+.clip-estimate {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
 
 /* The two ends of the film, under the strip. The selected moment is NOT here —
    it goes in .report-scrub-head, the slot the bug-report scrubber already uses
    for exactly that readout. */
-.rewind-scale {
+.film-scale {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -5366,7 +5469,7 @@ body.link-mode #fast-forward,
 body.link-mode #frame-step,
 body.link-mode #slow-motion,
 body.link-mode #clip-last,
-body.link-mode #record-clip,
+body.link-mode body.link-mode #record-clip,
 body.link-mode #capture-toggle,
 body.link-mode #capture-sub,
 body.link-mode #save-state,
@@ -5379,7 +5482,7 @@ body.rollback-mode #fast-forward,
 body.rollback-mode #frame-step,
 body.rollback-mode #slow-motion,
 body.rollback-mode #clip-last,
-body.rollback-mode #record-clip,
+body.rollback-mode body.rollback-mode #record-clip,
 body.rollback-mode #capture-toggle,
 body.rollback-mode #capture-sub,
 body.rollback-mode #reset,
@@ -5401,7 +5504,7 @@ body.rollback-mode #save-sep {
 
    The list, and what each one is:
      #rewind             top-bar hold-to-rewind (and its double-tap)
-     #open-rewind-scrub  the menu's film-strip quick action
+     #open-rewind-scrub  the menu's rewind-scrubber quick action
      #kb-shortcut-rewind the "Rewind (hold) `" row in the shortcuts list
      #report-slider      Report-a-Bug's timeline, which can only address
                          snapshots the ring would have held (its hint stays,
@@ -6023,7 +6126,7 @@ body.net-mode #fast-forward,
 body.net-mode #frame-step,
 body.net-mode #slow-motion,
 body.net-mode #clip-last,
-body.net-mode #record-clip,
+body.net-mode body.net-mode #record-clip,
 body.net-mode #capture-toggle,
 body.net-mode #capture-sub,
 body.net-mode #reset,
@@ -6676,11 +6779,15 @@ body.clip-replaying #controls {
  * strip and a hairline range thumb are fine with a mouse and not with a thumb.
  */
 @media (pointer: coarse) {
-  .rewind-strip-wrap {
+  .film-strip-wrap {
     height: 76px;
   }
 
-  .modal-rewind .report-slider {
+  .film-strip-wrap.compact {
+    height: 48px;
+  }
+
+  .modal-scrub .report-slider {
     height: 34px;
   }
 }
@@ -6690,7 +6797,7 @@ body.clip-replaying #controls {
    it is the same picture the strip already shows at the playhead, just bigger,
    so trading its size keeps the confirm row above the fold for longer. */
 @media (max-height: 700px) {
-  .modal-rewind .rewind-preview {
+  .modal-scrub .film-preview {
     width: 140px;
   }
 }

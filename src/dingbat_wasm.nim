@@ -1,5 +1,6 @@
 import std/[os, strutils, math]
 import sdl2 except init, quit
+import zippy  # clip anchors + their strip thumbnails are stored deflated
 import dingbat/common/input
 import dingbat/common/rewind
 import dingbat/common/serialize
@@ -707,19 +708,71 @@ proc wasm_cart_has_tilt(): cint {.exportc.} =
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gyro_present: 2
   else: 0
 
-# --- Retroactive clip capture (prototype) ---
-# "Save the last N seconds" without recording video: a rolling ring of state
-# snapshots (one per second) plus a per-frame input log (2 bytes/frame).
-# Deterministic replay from the nearest anchor reconstructs the exact frames
-# the player saw — the same state+inputs determinism rollback netplay relies
-# on. JS drives clip_tick once per RAF at realtime while a MediaRecorder
-# captures the canvas + audio; the live game state is stashed and restored
-# around the replay. Single-core only. Presentation-only, never serialized.
+# Strip thumbnails are captured at snapshot time, while the framebuffer that
+# belongs to the state is still the one on screen. Same 120-wide geometry (and
+# BGR555 layout) as the save-state thumbnail trailer — see gba_thumbnail /
+# gb_thumbnail in the two savestate.nim files. Shared by the rewind ring's
+# strip (gba_rewind_thumb, below) and the clip ring's (clip_capture_thumb), so
+# one JS decoder and one strip renderer serve both.
+const SCRUB_THUMB_W = 120
+const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * GBA_H div GBA_W  # 3:2  -> 120x80
+const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
+
+# --- Retroactive clip capture ---
+# "Save what just happened" without recording video the whole time: a rolling
+# ring of state anchors (one per second) plus a per-frame input log (2
+# bytes/frame). Deterministic replay from the anchor at or before the chosen
+# start reconstructs the exact frames the player saw — the same state+inputs
+# determinism rollback netplay relies on. JS drives clip_tick once per RAF at
+# realtime while a MediaRecorder captures the canvas + audio; the live game
+# state is stashed and restored around the replay. Single-core only.
+# Presentation-only, never serialized.
+#
+# Three things separate this from the rewind ring, which is why it is its own
+# store rather than a second reader of that one:
+#   * Rewind can be OFF (it is the expensive default, and speed mode suspends
+#     it) while clip capture is on, so nothing here may depend on it.
+#   * Rewind steps BACKWARD from the newest state; a clip replays FORWARD
+#     through an arbitrary interior range, which wants whole anchors at known
+#     frames, not a delta chain read from the newest end.
+#   * A clip needs the inputs, not just the states — the frames between
+#     anchors are re-emulated, not interpolated.
+#
+# Memory: anchors are zlib'd whole payloads (BestSpeed), the same trade the
+# rewind ring makes for its keyframes. Measured over the 15 anchors of a
+# 15-second window: Pokemon 604 KB -> 73 KB (12%), Golden Sun 539 KB -> 39 KB
+# (7%), GB 96 KB -> 4 KB. So a full 60-second window costs ~4.4 MB on the
+# worst GBA game measured and well under 1 MB on GB, and the byte cap below
+# is what actually bounds it — a game that compresses badly loses window
+# length rather than the budget. Compressing one anchor costs 0.17-0.56 ms
+# natively (~2.5x that under wasm, per the rewind codec bake-off), once a
+# second: far below the 1-2% bar that would make this a speed-mode casualty.
+#
 # (Known divergence: the GBA RTC reads wall clock, so an RTC game's replayed
 # clock can differ by up to the clip length — cosmetic.)
-const CLIP_SNAP_INTERVAL = 60          # anchor snapshot cadence (frames)
-const CLIP_MAX_FRAMES = 12 * 60        # rolling history window (~12 s)
-var clipSnaps: seq[tuple[frame: int, payload: string]] = @[]
+
+# Anchors double as the scrubber's film-strip frames, so one cadence serves
+# both: a 1 s anchor bounds the silent pre-roll before a range starts, and
+# gives the strip ~1 thumbnail per second (what the rewind strip shows too).
+const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
+const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
+const CLIP_CAP_BYTES = 12 * 1024 * 1024
+  ## Byte budget for the anchor ring. A separate, much smaller budget than
+  ## rewind's 64 MB because this window is bounded in TIME (60 s) as well —
+  ## the cap only bites on a game whose states compress unusually badly, and
+  ## then it shortens the window instead of growing the footprint. JS lowers
+  ## it on iOS, where process-level memory pressure gets the wasm JIT demoted
+  ## (same reason rewind drops to 16 MB there).
+
+type ClipAnchor = object
+  frame: int          # canonical frame index this state is the start of
+  packed: string      # zlib'd state payload
+  thumb: seq[byte]    # zlib'd BGR555 thumbnail (may be empty)
+  tw, th: int
+
+var clipCapBytes = CLIP_CAP_BYTES
+var clipAnchors: seq[ClipAnchor] = @[]
+var clipAnchorBytes = 0                # packed + thumb across clipAnchors
 var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
 var clipInputsStart = 0                # absolute frame of clipInputs[0]
 var clipFrameIndex = 0                 # canonical frames since core init
@@ -729,8 +782,14 @@ var clipCursor = 0
 var clipEnd = 0
 var clipReplaying = false
 
+proc setClipCapBytes(n: cint) {.exportc.} =
+  ## Byte budget for the clip anchor ring; JS lowers it on iOS. Takes effect
+  ## on the next anchor (the ring trims itself down to the new cap then).
+  if n > 0: clipCapBytes = int(n)
+
 proc clip_reset() =
-  clipSnaps.setLen(0)
+  clipAnchors.setLen(0)
+  clipAnchorBytes = 0
   clipInputs.setLen(0)
   clipInputsStart = 0
   clipFrameIndex = 0
@@ -738,9 +797,26 @@ proc clip_reset() =
   clipLiveStash = ""
   clipReplaying = false
 
+proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
+
+proc clip_capture_thumb(): tuple[pixels: seq[byte], w, h: int] =
+  ## The frame that belongs to the anchor about to be stored, downscaled to
+  ## the same 120-wide BGR555 geometry the rewind strip and the save-state
+  ## thumbnail trailer use — so the JS decoder is shared with both.
+  case stateKind
+  of ekGBA:
+    (downscale_bgr555(stateGba.ppu.framebuffer, GBA_W, GBA_H,
+                      SCRUB_THUMB_W, GBA_SCRUB_THUMB_H),
+     SCRUB_THUMB_W, GBA_SCRUB_THUMB_H)
+  of ekGB:
+    (downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H,
+                      SCRUB_THUMB_W, GB_SCRUB_THUMB_H),
+     SCRUB_THUMB_W, GB_SCRUB_THUMB_H)
+  of ekNone: (newSeq[byte](), 0, 0)
+
 proc clip_note_frame() =
   ## Called once per canonical frame BEFORE it steps: log the held buttons
-  ## and drop history that has aged out of the window.
+  ## and drop history that has aged out of the window (or out of the budget).
   if clipReplaying: return
   if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
     let payload = case stateKind
@@ -748,16 +824,30 @@ proc clip_note_frame() =
       of ekGB:  stateGb.state_payload()
       of ekNone: ""
     if payload.len > 0:
-      clipSnaps.add((clipFrameIndex, payload))
+      let t = clip_capture_thumb()
+      var a = ClipAnchor(frame: clipFrameIndex,
+                         packed: compress(payload, BestSpeed, dfZlib),
+                         tw: t.w, th: t.h)
+      if t.pixels.len > 0:
+        a.thumb = compress(t.pixels, BestSpeed, dfZlib)
+      clipAnchors.add(a)
+      clipAnchorBytes += clip_anchor_size(a)
   clipInputs.add(clipCurButtons)
   inc clipFrameIndex
+  # Two independent bounds, both evicting from the front. The time bound is
+  # the product decision ("the last minute"); the byte bound is the safety
+  # one, and on a game that compresses badly it is what actually holds.
   let oldest = clipFrameIndex - CLIP_MAX_FRAMES
-  while clipSnaps.len > 1 and clipSnaps[1].frame <= oldest:
-    clipSnaps.delete(0)
-  if clipSnaps.len > 0 and clipInputsStart < clipSnaps[0].frame:
-    let drop = clipSnaps[0].frame - clipInputsStart
+  while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
+    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
+    clipAnchors.delete(0)
+  while clipAnchors.len > 1 and clipAnchorBytes > clipCapBytes:
+    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
+    clipAnchors.delete(0)
+  if clipAnchors.len > 0 and clipInputsStart < clipAnchors[0].frame:
+    let drop = clipAnchors[0].frame - clipInputsStart
     if drop > 0 and drop <= clipInputs.len:
-      clipInputs = clipInputs[drop .. ^1]  # ≤720 u16s, copying is trivial
+      clipInputs = clipInputs[drop .. ^1]  # ≤3600 u16s, copying is trivial
       clipInputsStart += drop
 
 proc clip_apply_payload(payload: string): bool =
@@ -779,36 +869,135 @@ proc clip_set_buttons(mask: uint16) =
     of ekGB:  stateGb.handle_input(Input(i), down)
     of ekNone: discard
 
-proc clip_begin(seconds: cint): cint {.exportc.} =
-  ## Arm a replay of roughly the last `seconds`. Stashes the live state and
-  ## rewinds the core to the best anchor. Returns the number of frames the
-  ## replay will run (JS steps them via clip_tick), or 0 if there is no
-  ## usable history / a linked mode is active.
-  if stateNet != nil or stateLink != nil or stateGbLink != nil: return 0
-  if stateRollback != nil or stateGbRollback != nil: return 0
-  if clipReplaying or clipSnaps.len == 0: return 0
-  let want = clipFrameIndex - int(seconds) * 60
+proc clip_available(): bool =
+  ## A clip can only be replayed from a live single core: every linked mode
+  ## is frame-synced with a peer, and rewinding one side desyncs the pair.
+  stateKind != ekNone and stateNet == nil and stateLink == nil and
+    stateGbLink == nil and stateRollback == nil and stateGbRollback == nil
+
+proc clip_history_frames(): cint {.exportc.} =
+  ## How far back the range picker may reach, in frames. Measured from the
+  ## OLDEST anchor (not the oldest logged input): a start before it has
+  ## nothing to replay from.
+  if not clip_available() or clipAnchors.len == 0: return 0
+  cint(clipFrameIndex - clipAnchors[0].frame)
+
+# --- Clip scrubber strip ---------------------------------------------------
+# Same shape as the rewind scrubber's strip API (wasm_rewind_scrub_*), and
+# deliberately a separate one: the two rings hold different moments at
+# different cadences, and rewind may not be running at all.
+
+var clipStripThumbs: seq[byte] = @[]  # packed BGR555, newest sample first
+var clipStripAgo: seq[int] = @[]      # frames-ago of each sample
+var clipStripW = 0
+var clipStripH = 0
+
+proc clip_scrub_generate(maxSamples: cint): cint {.exportc.} =
+  ## Inflate up to maxSamples anchor thumbnails, sampled evenly across the
+  ## whole window (newest first). Returns the sample count. O(samples).
+  clipStripThumbs = @[]
+  clipStripAgo = @[]
+  if not clip_available(): return 0
+  # Newest-first ordering, and only anchors that carry a picture.
+  var usable: seq[int] = @[]
+  for i in countdown(clipAnchors.high, 0):
+    if clipAnchors[i].thumb.len > 0: usable.add(i)
+  if usable.len == 0: return 0
+  let n = min(max(1, int(maxSamples)), usable.len)
+  for s in 0 ..< n:
+    # Evenly spaced picks spanning the WHOLE strip — first the newest, last
+    # the oldest. A fixed stride leaves a ragged tail and never reaches the
+    # oldest frame when the count doesn't divide.
+    let i = usable[if n == 1: 0 else: s * (usable.len - 1) div (n - 1)]
+    var pixels: seq[byte]
+    try:
+      pixels = uncompress(clipAnchors[i].thumb, dfZlib)
+    except CatchableError:
+      continue  # in-process bytes; unreachable
+    clipStripW = clipAnchors[i].tw
+    clipStripH = clipAnchors[i].th
+    clipStripThumbs.add pixels
+    clipStripAgo.add(clipFrameIndex - clipAnchors[i].frame)
+  cint(clipStripAgo.len)
+
+proc clip_scrub_count(): cint {.exportc.} = cint(clipStripAgo.len)
+proc clip_scrub_thumb_w(): cint {.exportc.} = cint(clipStripW)
+proc clip_scrub_thumb_h(): cint {.exportc.} = cint(clipStripH)
+proc clip_scrub_thumbs_ptr(): pointer {.exportc.} =
+  if clipStripThumbs.len > 0: addr clipStripThumbs[0] else: nil
+
+proc clip_scrub_frames_ago(sample: cint): cint {.exportc.} =
+  ## How far back sample `i` sits, in frames (0 = the live moment).
+  if sample < 0 or sample >= clipStripAgo.len: return 0
+  cint(clipStripAgo[int(sample)])
+
+proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
+  ## Arm a replay of the range [startAgo, endAgo) measured in frames before
+  ## now — e.g. (600, 0) is the classic "last ten seconds". Stashes the live
+  ## state, rewinds to the anchor at or before the start, and silently
+  ## re-emulates the pre-roll up to the start frame so the FIRST recorded
+  ## frame is the one the user picked. The start frame is presented before
+  ## returning, so the canvas the recorder attaches to already shows it.
+  ##
+  ## Returns the number of frames the replay will run (JS steps them via
+  ## clip_tick), or 0 if there is no usable history / a linked mode is active.
+  if not clip_available(): return 0
+  if clipReplaying or clipAnchors.len == 0: return 0
+  var startFrame = clipFrameIndex - max(0, int(startAgo))
+  let endFrame = clipFrameIndex - max(0, int(endAgo))
+  # Clamp into what history actually covers. A start before the oldest anchor
+  # is not an error — a short clip beats no clip.
+  if startFrame < clipAnchors[0].frame: startFrame = clipAnchors[0].frame
+  if startFrame < clipInputsStart: startFrame = clipInputsStart
+  if endFrame <= startFrame: return 0
   var pick = 0
-  for i in 0 ..< clipSnaps.len:
-    if clipSnaps[i].frame <= want: pick = i
+  for i in 0 ..< clipAnchors.len:
+    if clipAnchors[i].frame <= startFrame: pick = i
     else: break
-  # Prefer covering the full window: if even the oldest anchor is newer than
-  # `want`, use it anyway (short clip beats no clip).
-  let anchor = clipSnaps[pick]
+  var anchorPayload: string
+  try:
+    anchorPayload = uncompress(clipAnchors[pick].packed, dfZlib)
+  except CatchableError:
+    return 0
   clipLiveStash = case stateKind
     of ekGBA: stateGba.state_payload()
     of ekGB:  stateGb.state_payload()
     of ekNone: ""
   if clipLiveStash.len == 0: return 0
-  if not clip_apply_payload(anchor.payload):
+  if not clip_apply_payload(anchorPayload):
     clipLiveStash = ""
     return 0
-  clipCursor = anchor.frame
-  clipEnd = clipFrameIndex
+  clipCursor = clipAnchors[pick].frame
+  clipEnd = endFrame
   clipReplaying = true
   # A replay re-sends serial bytes the printer already processed live —
   # mute it (reply 0, mutate nothing) for the duration.
   if statePrinter != nil: statePrinter.muted = true
+  # Silent pre-roll: ≤ CLIP_SNAP_INTERVAL-1 frames of emulation with the audio
+  # thrown away and nothing presented, so a range that starts mid-second still
+  # begins on exactly the frame the user chose rather than up to a second
+  # early. Bounded by the anchor cadence, so this is ~1 s of catch-up at most.
+  audioSuppressed = true
+  while clipCursor < startFrame:
+    let idx = clipCursor - clipInputsStart
+    if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+    case stateKind
+    of ekGBA: stateGba.step_frame()
+    of ekGB:  stateGb.step_frame()
+    of ekNone: break
+    inc clipCursor
+  audioSuppressed = false
+  # Present the start frame now: the recorder attaches to the canvas AFTER
+  # this returns, and without this the first captured frames would be the
+  # live moment the player was actually looking at.
+  case stateKind
+  of ekGBA:
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                       GBA_W * GBA_H)
+  of ekGB:
+    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                       GB_W * GB_H)
+  of ekNone: discard
   cint(clipEnd - clipCursor)
 
 proc clip_tick(): cint {.exportc.} =
@@ -1014,14 +1203,6 @@ proc setRewindEnabled(on: cint) {.exportc.} =
     # and they tear the single-core session down (stateKind = ekNone) or hold
     # stateNet, so both are excluded here rather than by a mode flag.
     rewindHistory = new_rewind(rewindCapBytes)
-
-# Scrubber thumbnails are captured at push time, while the framebuffer that
-# belongs to the snapshot is still the one on screen. Same 120-wide geometry
-# (and BGR555 layout) as the save-state thumbnail trailer — see gba_thumbnail
-# / gb_thumbnail in the two savestate.nim files.
-const SCRUB_THUMB_W = 120
-const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * GBA_H div GBA_W  # 3:2  -> 120x80
-const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
 
 proc gba_rewind_thumb(g: GBA): RewindThumb =
   RewindThumb(w: SCRUB_THUMB_W, h: GBA_SCRUB_THUMB_H,

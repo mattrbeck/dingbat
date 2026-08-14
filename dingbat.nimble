@@ -57,6 +57,10 @@ task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_rewind_test tests/rewind_test.nim"
 
+task test_clipreplay, "Run the clip-capture replay determinism tests":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_clipreplay_test tests/clip_replay_test.nim"
+
 task test_printer, "Run the Game Boy Printer protocol unit tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_printer_test tests/gb_printer_test.nim"
 

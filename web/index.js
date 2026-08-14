@@ -4899,6 +4899,7 @@ document.addEventListener("keydown", (e) => {
     closeCheatsModal();
     closeReportModal();
     closeRewindScrubber();
+    closeClipScrubber();
     closeRomWarnModal();
   }
 });
@@ -5697,6 +5698,378 @@ document.getElementById("report-download").addEventListener("click", async () =>
   closeReportModal();
 });
 
+// --- Film strip (shared scrubber component) --------------------------------
+// One draggable strip of thumbnails with N markers on it. Two features use it:
+// Rewind (one marker — "cut here") and Save a Clip (two — "record from here to
+// here"). They were one implementation with the second one's needs bolted on
+// for about an hour, which is how it became this: the differences between them
+// are exactly two callbacks, and everything else — frame sizing, rasterising
+// the strip, the scroll/clamp rule, the drag, the tap, DPR handling — is the
+// same code or it is two subtly different scrubbers.
+//
+// What a caller supplies: the canvas + wrapper elements, one element per
+// marker, and a `paint` callback that says how the strip is shaded around
+// those markers (Rewind greys everything the cut discards; Clip greys
+// everything outside the selection). What it gets back: marker values in
+// "samples back from newest", already clamped, ordered and snapped.
+//
+// Thumbnails come from wasm as packed little-endian BGR555 (the same layout
+// the save-state trailer uses), newest sample first.
+
+const STRIP_GAP = 2;             // px between frames in the strip
+const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
+
+// Frames keep their native aspect, but the size is driven by how many should
+// be VISIBLE rather than by the strip's height: a GBA frame is 3:2, so filling
+// a 76px strip makes each one ~110px and a phone shows three — a peephole, and
+// half a minute of history then takes ten swipes to cross.
+//
+// Sizing from the strip's own width instead of a fixed pixel target is what
+// makes one rule serve a 208px strip inside a modal on a 320pt phone and a
+// 400px one on desktop: both show the same amount of history, the phone just
+// shows it smaller. The clamp keeps frames recognisable at the low end and
+// stops them ballooning at the high end.
+//
+// The default suits picking ONE moment. A range picker wants a wider view —
+// both of its markers have to be on screen at once for the control to read as
+// a selection at all — so it overrides these (see the clip strip), trading
+// frame size for span. That is the right way round there: the strip is what
+// you navigate with, and the preview above it is what you identify the chosen
+// frame from.
+const STRIP_VISIBLE_FRAMES = 5.5;
+const STRIP_FRAME_W_MIN = 38;
+const STRIP_FRAME_W_MAX = 72;
+
+/**
+ * @param {object} opts
+ * @param {HTMLCanvasElement} opts.canvas   the strip canvas
+ * @param {HTMLElement} opts.wrap           its clipping wrapper (the drag target)
+ * @param {{el: HTMLElement, edge: string}[]} opts.markers
+ *        `edge` is which side of the selected FRAME the marker sits on:
+ *        "trail" = its right-hand edge (the frame is on the left of the line),
+ *        "lead"  = its left-hand edge (the frame is on the right).
+ * @param {(ctx: CanvasRenderingContext2D, g: object) => void} opts.paint
+ * @param {(marker: number) => void} opts.onChange  fired after a marker moves
+ * @param {number} [opts.visibleFrames]  frames across the strip's width
+ * @param {number} [opts.frameWMin]      px floor on a frame's width
+ * @param {number} [opts.frameWMax]      px ceiling on a frame's width
+ */
+const createFilmStrip = ({
+  canvas, wrap, markers, paint, onChange,
+  visibleFrames = STRIP_VISIBLE_FRAMES,
+  frameWMin = STRIP_FRAME_W_MIN,
+  frameWMax = STRIP_FRAME_W_MAX,
+}) => {
+  let samples = 0;
+  let thumbs = null;      // packed BGR555, copied out of wasm at open
+  let thumbW = 0;
+  let thumbH = 0;
+  let stripColor = null;  // offscreen: the whole strip, in colour
+  let stripDim = null;    // ...and desaturated
+  let pitch = 0;          // px per sample along the strip
+  let values = markers.map(() => 0);
+  let active = 0;         // which marker the view follows / a drag moves
+
+  const frameSize = (stripW, stripH) => {
+    const maxH = Math.max(8, stripH - 6);
+    let tw = Math.round(
+      Math.min(frameWMax, Math.max(frameWMin, stripW / visibleFrames))
+    );
+    let th = Math.round((tw * thumbH) / thumbW);
+    if (th > maxH) {
+      th = maxH;
+      tw = Math.max(12, Math.round((th * thumbW) / thumbH));
+    }
+    return { tw, th };
+  };
+
+  // Both strips are built once per open. Painting the greyed region by
+  // filtering at draw time would be the obvious approach, but
+  // CanvasRenderingContext2D.filter only arrived in Safari 17 and this app
+  // still supports iOS 15 — so the desaturated copy is baked here instead, and
+  // drawing is two clipped blits.
+  const build = () => {
+    stripColor = null;
+    stripDim = null;
+    if (!thumbs || samples <= 0) return;
+    const rect = wrap.getBoundingClientRect();
+    const stripH = Math.max(24, Math.round(rect.height) - 2);
+    const { tw, th } = frameSize(Math.max(120, Math.round(rect.width)), stripH);
+    pitch = tw + STRIP_GAP;
+    const total = samples * pitch;
+
+    const scratch = document.createElement("canvas");
+    scratch.width = thumbW;
+    scratch.height = thumbH;
+    const sctx = scratch.getContext("2d");
+
+    stripColor = document.createElement("canvas");
+    stripColor.width = total;
+    stripColor.height = stripH;
+    const cctx = stripColor.getContext("2d");
+    const stride = thumbW * thumbH * 2;
+    const top = Math.round((stripH - th) / 2);
+    for (let s = 0; s < samples; s++) {
+      sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
+      // Newest on the RIGHT — same direction as the report slider, and the
+      // direction a film strip runs.
+      const x = (samples - 1 - s) * pitch + Math.floor(STRIP_GAP / 2);
+      cctx.drawImage(scratch, 0, 0, thumbW, thumbH, x, top, tw, th);
+    }
+
+    stripDim = document.createElement("canvas");
+    stripDim.width = total;
+    stripDim.height = stripH;
+    const dctx = stripDim.getContext("2d");
+    dctx.drawImage(stripColor, 0, 0);
+    const img = dctx.getImageData(0, 0, total, stripH);
+    const px = img.data;
+    for (let i = 0; i < px.length; i += 4) {
+      // Rec.601 luma, then halved: the greyed frames must stay readable as
+      // pictures (you are choosing where to cut, so you need to see what goes)
+      // while never being mistaken for the live side of a marker.
+      const y = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 9;
+      px[i] = px[i + 1] = px[i + 2] = y;
+    }
+    dctx.putImageData(img, 0, 0);
+  };
+
+  // Where a marker falls, in strip-bitmap pixels. "trail" is the right-hand
+  // edge of the selected frame — the selected moment is the last one kept, so
+  // it belongs entirely on the colour side of the line, and a marker through
+  // its middle would show the frame you are keeping as half-discarded. "lead"
+  // is the mirror of that for a marker whose frame is the FIRST one kept.
+  const edgeX = (index, edge) =>
+    edge === "lead" ? (samples - 1 - index) * pitch : (samples - index) * pitch;
+
+  // Where the film sits and where the markers sit, for the current selection.
+  //
+  // The focus rides the middle and the film scrolls under it — until the film
+  // runs out of slack at either end, at which point the film stops and the
+  // markers travel the rest of the way. Without that clamp the newest frame can
+  // only ever reach the middle, so half the strip is permanently empty at the
+  // "now" end — which is where these modals open, so the control's first
+  // impression is of being broken. The cost is that inside those end regions
+  // the markers move opposite the finger for a few dozen pixels; the film
+  // staying put is the stronger cue, and it is what a video timeline does.
+  //
+  // The focus is the whole selection whenever it fits on screen, and the
+  // dragged marker when it does not. With one marker those are the same thing
+  // (lo === hi), so this is exactly the rewind rule; with two it is what keeps
+  // BOTH brackets visible for a normal-length clip. A bracket pinned to the
+  // strip's edge because it is really off-screen reads as "the clip ends
+  // here", which is the one thing this control must not lie about.
+  const placement = (cssW) => {
+    const filmW = samples * pitch;
+    const xsFilm = markers.map((m, i) => edgeX(values[i], m.edge));
+    const lo = Math.min(...xsFilm);
+    const hi = Math.max(...xsFilm);
+    const focus = hi - lo <= cssW ? (lo + hi) / 2 : xsFilm[active];
+    const off = filmW <= cssW
+      ? (cssW - filmW) / 2               // short film: centred, markers move
+      : Math.min(0, Math.max(cssW - filmW, cssW / 2 - focus));
+    return { off, xs: xsFilm.map((x) => x + off) };
+  };
+
+  const draw = () => {
+    const rect = canvas.getBoundingClientRect();
+    const cssW = Math.max(1, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
+      canvas.width = cssW * dpr;
+      canvas.height = cssH * dpr;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!stripColor) return;
+    const { off, xs } = placement(cssW);
+    // A marker can legitimately land on the film's outer edge (nothing
+    // discarded at "now"), where its own width would put half of it outside
+    // the clipped wrapper and leave it looking like a border. Nudge it just
+    // inside.
+    //
+    // A marker that is genuinely off-screen — a range longer than the strip
+    // can show — is a different case, and pinning it to the edge would claim
+    // the selection stops there. Mark it and let the CSS drop the line
+    // entirely: the coloured region then simply runs off the edge, which is
+    // what is actually true.
+    markers.forEach((m, i) => {
+      m.el.style.left = Math.min(Math.max(xs[i], 2), cssW - 2) + "px";
+      m.el.classList.toggle("offscreen", xs[i] < -1 || xs[i] > cssW + 1);
+    });
+    paint(ctx, { cssW, cssH, off, xs, color: stripColor, dim: stripDim });
+  };
+
+  // Colour inside [x0, x1), greyed-and-darkened outside it. Both callers'
+  // shading is this with different bounds, so it lives here rather than being
+  // written twice against the raw context.
+  const shadeBetween = (ctx, g, x0, x1) => {
+    const bands = [[0, x0], [x1, g.cssW]];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, 0, Math.max(0, x1 - x0), g.cssH);
+    ctx.clip();
+    ctx.drawImage(g.color, g.off, 0);
+    ctx.restore();
+    for (const [a, b] of bands) {
+      if (b <= a) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(a, 0, b - a, g.cssH);
+      ctx.clip();
+      ctx.drawImage(g.dim, g.off, 0);
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(a, 0, b - a, g.cssH);
+      ctx.restore();
+    }
+  };
+
+  // Every path that moves a marker goes through here, so callers can't forget
+  // to disarm a confirm or re-render. `snap` settles onto a whole frame (drag
+  // end, tap, slider); a live drag passes false so motion stays smooth.
+  //
+  // `bounds` keeps a two-marker selection from crossing over: each marker is
+  // clamped against its neighbours, so dragging the start past the end pushes
+  // it up against the end instead of inverting the range.
+  const setValue = (i, v, snap, bounds) => {
+    let lo = 0;
+    let hi = Math.max(0, samples - 1);
+    if (bounds) {
+      if (bounds.min !== undefined) lo = Math.max(lo, bounds.min);
+      if (bounds.max !== undefined) hi = Math.min(hi, bounds.max);
+    }
+    if (hi < lo) hi = lo;
+    const clamped = Math.min(Math.max(v, lo), hi);
+    const next = snap ? Math.round(clamped) : clamped;
+    if (next === values[i]) return false;
+    values[i] = next;
+    return true;
+  };
+
+  // Pointer-driven, not a scroll container: native horizontal scrolling on iOS
+  // carries momentum, and a scrubber that keeps gliding after the finger lifts
+  // selects a frame the player never chose.
+  let dragging = false;
+  let lastX = 0;
+  let travel = 0;
+
+  // Which marker a press grabs: the nearest one on screen. With one marker
+  // this is unconditional (the whole strip drags it, as it always did); with
+  // two it is what makes each handle reachable without drawing hit targets
+  // people have to aim at.
+  const grabNearest = (clientX) => {
+    if (markers.length === 1) return 0;
+    const rect = wrap.getBoundingClientRect();
+    const { xs } = placement(rect.width);
+    const px = clientX - rect.left;
+    let best = 0;
+    for (let i = 1; i < xs.length; i++) {
+      if (Math.abs(xs[i] - px) < Math.abs(xs[best] - px)) best = i;
+    }
+    return best;
+  };
+
+  const api = {
+    get samples() { return samples; },
+    get pitch() { return pitch; },
+    get thumbW() { return thumbW; },
+    get thumbH() { return thumbH; },
+    get thumbs() { return thumbs; },
+    values,
+    /** Whole-frame value of marker `i` (the values array may hold a fraction
+     *  mid-drag). */
+    at(i) { return Math.round(values[i]); },
+    /** Adopt a freshly captured strip. `data` is a copy — the wasm heap it
+     *  came from can move under us on the next allocation. */
+    load(data, w, h, n) {
+      thumbs = data;
+      thumbW = w;
+      thumbH = h;
+      samples = n;
+      stripColor = null;
+      stripDim = null;
+    },
+    /** Drop everything on close: a strip is tens of thumbnails, and on the
+     *  phones that run the small caps that is real memory to hold onto for a
+     *  modal nobody has open. */
+    release() {
+      thumbs = null;
+      stripColor = null;
+      stripDim = null;
+      samples = 0;
+    },
+    setValue(i, v, snap, bounds) {
+      const moved = setValue(i, v, snap, bounds);
+      if (moved) onChange(i);
+      return moved;
+    },
+    setActive(i) { active = i; },
+    build,
+    draw,
+    shadeBetween,
+    /** Paint one thumbnail into a preview canvas at native size. */
+    preview(el, sample) {
+      if (!thumbs || samples <= 0) return;
+      const stride = thumbW * thumbH * 2;
+      const s = Math.min(Math.max(sample, 0), samples - 1);
+      el.width = thumbW;
+      el.height = thumbH;
+      el.getContext("2d").putImageData(
+        bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
+    },
+    /** Bind the drag/tap gesture. `bounds(i)` (optional) returns the clamp for
+     *  marker i at the moment of the move. */
+    attach(bounds) {
+      const boundsFor = (i) => (bounds ? bounds(i) : undefined);
+      wrap.addEventListener("pointerdown", (e) => {
+        if (samples <= 0) return;
+        e.preventDefault();
+        dragging = true;
+        travel = 0;
+        lastX = e.clientX;
+        active = grabNearest(e.clientX);
+        wrap.setPointerCapture(e.pointerId);
+        draw();  // the view follows the newly active marker
+      });
+      wrap.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        lastX = e.clientX;
+        travel += Math.abs(dx);
+        // Dragging the film to the RIGHT pulls older frames under the marker,
+        // which is the same gesture as physically winding a reel back.
+        api.setValue(active, values[active] + dx / pitch, false, boundsFor(active));
+      });
+      const endDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        if (wrap.hasPointerCapture?.(e.pointerId)) wrap.releasePointerCapture(e.pointerId);
+        if (travel <= STRIP_TAP_SLOP && e.type === "pointerup") {
+          // A tap moves the nearest marker to the frame literally under the
+          // finger — resolved through the same placement the draw used, so it
+          // stays correct in the clamped region where the film is not centred
+          // on the marker.
+          const rect = wrap.getBoundingClientRect();
+          const { off } = placement(rect.width);
+          const filmX = e.clientX - rect.left - off;
+          api.setValue(active, samples - 1 - Math.floor(filmX / pitch), true,
+                       boundsFor(active));
+        } else {
+          api.setValue(active, values[active], true, boundsFor(active)); // settle
+        }
+        onChange(active);
+      };
+      for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+        wrap.addEventListener(ev, endDrag);
+      }
+    },
+  };
+  return api;
+};
+
 // --- Rewind scrubber -------------------------------------------------------
 // Hold-to-rewind is fine for a second and useless for a minute; this is the
 // map. Same preview-cheap / reconstruct-once split as the bug-report scrubber
@@ -5710,6 +6083,7 @@ document.getElementById("report-download").addEventListener("click", async () =>
 // It presents as an ordinary modal — same overlay, panel, close button, focus
 // trap and Escape handling as Save States or Report a Bug — and it reuses that
 // scrubber's .report-scrub box outright rather than a private variant of it.
+// The strip itself is the shared film-strip component above, with one marker.
 
 const rewindModal = document.getElementById("rewind-modal");
 const rwStripCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("rewind-strip"));
@@ -5731,27 +6105,15 @@ const rwHint = document.getElementById("rewind-scrub-hint");
 // that run the 16 MB ring; 96 covers a minute and a half at the ring's one
 // thumbnail per second and costs ~2.5 MB transiently.
 const RW_MAX_SAMPLES = 96;
-const RW_GAP = 2;             // px between frames in the strip
-const RW_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
 
-let rwSamples = 0;
-let rwThumbs = null;          // packed BGR555, copied out of wasm at open
-let rwThumbW = 0;
-let rwThumbH = 0;
-let rwStripColor = null;      // offscreen: the whole strip, in colour
-let rwStripDim = null;        // ...and desaturated, for the discarded future
-let rwPitch = 0;              // px per sample along the strip
-let rwIndex = 0;              // playhead position, in samples back from now
 let rwStage = 0;              // 0 pick, 1 confirm discard, 2 confirm save loss
 let rwWasPaused = false;
 let rwUndoBytes = null;
 let rwUndoName = null;
 
-const rwSelected = () => Math.round(rwIndex);
-
 // "2m 14s" / "8.4s". Sub-minute keeps a decimal because at the shallow end a
 // whole second is a big fraction of what is being discarded.
-const rwFmtDuration = (tenths) => {
+const fmtDuration = (tenths) => {
   const s = tenths / 10;
   if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + "s";
   const m = Math.floor(s / 60);
@@ -5763,165 +6125,31 @@ const rwTenthsAt = (sample) =>
     ? Module._wasm_rewind_scrub_seconds_ago(sample)
     : 0;
 
-// Strip geometry. Frames keep their native aspect, but the size is driven by
-// how many should be VISIBLE rather than by the strip's height: a GBA frame is
-// 3:2, so filling a 76px strip makes each one ~110px and a phone shows three —
-// a peephole, and half a minute of history then takes ten swipes to cross.
-//
-// Sizing from the strip's own width instead of a fixed pixel target is what
-// makes one rule serve a 208px strip inside a modal on a 320pt phone and a
-// 400px one on desktop: both show the same amount of history, the phone just
-// shows it smaller. The clamp keeps frames recognisable at the low end and
-// stops them ballooning at the high end.
-const RW_VISIBLE_FRAMES = 5.5;
-const RW_FRAME_W_MIN = 38;
-const RW_FRAME_W_MAX = 72;
+const rwStrip = createFilmStrip({
+  canvas: rwStripCanvas,
+  wrap: rwStripWrap,
+  markers: [{ el: rwPlayhead, edge: "trail" }],
+  // Past and present in colour up to the cut; the discarded future greyed
+  // beyond it. The boundary is the marker by construction, so the doomed
+  // region grows as the strip is dragged back without anything having to
+  // track how much of it there is.
+  paint: (ctx, g) => rwStrip.shadeBetween(ctx, g, 0, g.xs[0]),
+  onChange: () => {
+    // The confirm has to be about the moment the player is looking at, so any
+    // movement of the playhead disarms it.
+    rwStage = 0;
+    rwRefresh();
+  },
+});
+rwStrip.attach();
 
-const rwFrameSize = (stripW, stripH) => {
-  const maxH = Math.max(8, stripH - 6);
-  let tw = Math.round(
-    Math.min(RW_FRAME_W_MAX, Math.max(RW_FRAME_W_MIN, stripW / RW_VISIBLE_FRAMES))
-  );
-  let th = Math.round((tw * rwThumbH) / rwThumbW);
-  if (th > maxH) {
-    th = maxH;
-    tw = Math.max(12, Math.round((th * rwThumbW) / rwThumbH));
-  }
-  return { tw, th };
-};
-
-// Both strips are built once per open. Painting the discarded future by
-// filtering at draw time would be the obvious approach, but CanvasRenderingContext2D.filter
-// only arrived in Safari 17 and this app still supports iOS 15 — so the
-// desaturated copy is baked here instead, and drawing is two clipped blits.
-const rwBuildStrips = () => {
-  rwStripColor = null;
-  rwStripDim = null;
-  if (!rwThumbs || rwSamples <= 0) return;
-  const wrap = rwStripWrap.getBoundingClientRect();
-  const stripH = Math.max(24, Math.round(wrap.height) - 2);
-  const { tw, th } = rwFrameSize(Math.max(120, Math.round(wrap.width)), stripH);
-  rwPitch = tw + RW_GAP;
-  const total = rwSamples * rwPitch;
-
-  const scratch = document.createElement("canvas");
-  scratch.width = rwThumbW;
-  scratch.height = rwThumbH;
-  const sctx = scratch.getContext("2d");
-
-  rwStripColor = document.createElement("canvas");
-  rwStripColor.width = total;
-  rwStripColor.height = stripH;
-  const cctx = rwStripColor.getContext("2d");
-  const stride = rwThumbW * rwThumbH * 2;
-  const top = Math.round((stripH - th) / 2);
-  for (let s = 0; s < rwSamples; s++) {
-    sctx.putImageData(bgr555ToImageData(rwThumbs, s * stride, rwThumbW, rwThumbH), 0, 0);
-    // Newest on the RIGHT — same direction as the report slider, and the
-    // direction a film strip runs.
-    const x = (rwSamples - 1 - s) * rwPitch + Math.floor(RW_GAP / 2);
-    cctx.drawImage(scratch, 0, 0, rwThumbW, rwThumbH, x, top, tw, th);
-  }
-
-  rwStripDim = document.createElement("canvas");
-  rwStripDim.width = total;
-  rwStripDim.height = stripH;
-  const dctx = rwStripDim.getContext("2d");
-  dctx.drawImage(rwStripColor, 0, 0);
-  const img = dctx.getImageData(0, 0, total, stripH);
-  const px = img.data;
-  for (let i = 0; i < px.length; i += 4) {
-    // Rec.601 luma, then halved: the discarded frames must stay readable as
-    // pictures (you are choosing where to cut, so you need to see what goes)
-    // while never being mistaken for the live side of the playhead.
-    const y = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 9;
-    px[i] = px[i + 1] = px[i + 2] = y;
-  }
-  dctx.putImageData(img, 0, 0);
-};
-
-// Where the cut falls, in strip-bitmap pixels: the TRAILING edge of the
-// selected frame, not its centre. The selected moment is the last one kept, so
-// it belongs entirely on the colour side of the line — a playhead through its
-// middle would show the frame you are keeping as half-discarded.
-const rwCutX = (index) => (rwSamples - index) * rwPitch;
-
-// Where the film sits and where the playhead sits, for the current selection.
-//
-// The playhead rides the middle and the film scrolls under it — until the film
-// runs out of slack at either end, at which point the film stops and the
-// playhead travels the rest of the way. Without that clamp the newest frame
-// can only ever reach the middle, so half the strip is permanently empty at
-// the "now" end — which is where the modal opens, so the control's first
-// impression is of being broken. The cost is that inside those end regions the
-// playhead moves opposite the finger for a few dozen pixels; the film staying
-// put is the stronger cue, and it is what a video timeline does.
-const rwPlacement = (cssW) => {
-  const filmW = rwSamples * rwPitch;
-  const x = rwCutX(rwIndex);
-  if (filmW <= cssW) {
-    const off = (cssW - filmW) / 2; // short film: centred, playhead moves
-    return { off, head: off + x };
-  }
-  const off = Math.min(0, Math.max(cssW - filmW, cssW / 2 - x));
-  return { off, head: x + off };
-};
-
-const rwDrawStrip = () => {
-  const rect = rwStripCanvas.getBoundingClientRect();
-  const cssW = Math.max(1, Math.round(rect.width));
-  const cssH = Math.max(1, Math.round(rect.height));
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (rwStripCanvas.width !== cssW * dpr || rwStripCanvas.height !== cssH * dpr) {
-    rwStripCanvas.width = cssW * dpr;
-    rwStripCanvas.height = cssH * dpr;
-  }
-  const ctx = rwStripCanvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-  if (!rwStripColor) return;
-  const { off, head } = rwPlacement(cssW);
-  // The cut can legitimately land on the film's outer edge (nothing discarded
-  // at "now"), where the marker's own width would put half of it outside the
-  // clipped wrapper and leave it looking like a border. Nudge it just inside.
-  rwPlayhead.style.left = Math.min(Math.max(head, 2), cssW - 2) + "px";
-  // Past and present in colour up to the playhead; the discarded future
-  // desaturated beyond it. The boundary is the playhead by construction, so
-  // the doomed region grows as the strip is dragged back without anything
-  // having to track how much of it there is.
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, head, cssH);
-  ctx.clip();
-  ctx.drawImage(rwStripColor, off, 0);
-  ctx.restore();
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(head, 0, cssW - head, cssH);
-  ctx.clip();
-  ctx.drawImage(rwStripDim, off, 0);
-  ctx.globalAlpha = 0.35;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(head, 0, cssW - head, cssH);
-  ctx.restore();
-};
-
-const rwDrawPreview = () => {
-  if (!rwThumbs || rwSamples <= 0) return;
-  const stride = rwThumbW * rwThumbH * 2;
-  rwPreview.width = rwThumbW;
-  rwPreview.height = rwThumbH;
-  rwPreview
-    .getContext("2d")
-    .putImageData(bgr555ToImageData(rwThumbs, rwSelected() * stride, rwThumbW, rwThumbH), 0, 0);
-};
+const rwSelected = () => rwStrip.at(0);
 
 // Stages 1 and 2 are the two confirmations, each stated in terms of what it
-// costs. Any movement of the playhead disarms back to stage 0 — the confirm
-// has to be about the moment the player is looking at.
+// costs.
 const rwRefreshActions = () => {
   const sel = rwSelected();
-  const cost = rwFmtDuration(rwTenthsAt(sel));
+  const cost = fmtDuration(rwTenthsAt(sel));
   rwCommitBtn.classList.toggle("armed", rwStage > 0);
   rwWarn.classList.toggle("save-loss", rwStage === 2);
   if (sel === 0) {
@@ -5950,78 +6178,19 @@ const rwRefreshActions = () => {
 
 const rwRefresh = () => {
   const sel = rwSelected();
-  rwWhen.textContent = sel === 0 ? "now" : rwFmtDuration(rwTenthsAt(sel)) + " ago";
-  if (rwSlider.value !== String(rwSamples - 1 - sel)) {
-    rwSlider.value = String(rwSamples - 1 - sel);
+  rwWhen.textContent = sel === 0 ? "now" : fmtDuration(rwTenthsAt(sel)) + " ago";
+  if (rwSlider.value !== String(rwStrip.samples - 1 - sel)) {
+    rwSlider.value = String(rwStrip.samples - 1 - sel);
   }
-  rwDrawStrip();
-  rwDrawPreview();
+  rwStrip.draw();
+  rwStrip.preview(rwPreview, sel);
   rwRefreshActions();
 };
-
-// Every path that moves the playhead goes through here, so disarming the
-// confirm can't be forgotten by one of them.
-const rwSetIndex = (v, snap) => {
-  const clamped = Math.min(Math.max(v, 0), Math.max(0, rwSamples - 1));
-  const next = snap ? Math.round(clamped) : clamped;
-  if (next === rwIndex) return;
-  if (Math.round(next) !== rwSelected()) rwStage = 0;
-  rwIndex = next;
-  rwRefresh();
-};
-
-// Pointer-driven, not a scroll container: native horizontal scrolling on iOS
-// carries momentum, and a scrubber that keeps gliding after the finger lifts
-// selects a frame the player never chose.
-{
-  let dragging = false;
-  let lastX = 0;
-  let travel = 0;
-  rwStripWrap.addEventListener("pointerdown", (e) => {
-    if (rwSamples <= 0) return;
-    e.preventDefault();
-    dragging = true;
-    travel = 0;
-    lastX = e.clientX;
-    rwStripWrap.setPointerCapture(e.pointerId);
-  });
-  rwStripWrap.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - lastX;
-    lastX = e.clientX;
-    travel += Math.abs(dx);
-    // Dragging the film to the RIGHT pulls older frames under the playhead,
-    // which is the same gesture as physically winding a reel back.
-    rwSetIndex(rwIndex + dx / rwPitch, false);
-  });
-  const endDrag = (e) => {
-    if (!dragging) return;
-    dragging = false;
-    if (rwStripWrap.hasPointerCapture?.(e.pointerId)) {
-      rwStripWrap.releasePointerCapture(e.pointerId);
-    }
-    if (travel <= RW_TAP_SLOP && e.type === "pointerup") {
-      // A tap selects the frame that is literally under the finger — resolved
-      // through the same placement the draw used, so it stays correct in the
-      // clamped region where the film is not centred on the playhead.
-      const rect = rwStripWrap.getBoundingClientRect();
-      const { off } = rwPlacement(rect.width);
-      const filmX = e.clientX - rect.left - off;
-      rwSetIndex(rwSamples - 1 - Math.floor(filmX / rwPitch), true);
-    } else {
-      rwSetIndex(rwIndex, true); // settle on a whole frame
-    }
-    rwRefresh();
-  };
-  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
-    rwStripWrap.addEventListener(ev, endDrag);
-  }
-}
 
 // The coarse range input is the keyboard and screen-reader path onto the same
 // state; it is not a second source of truth.
 rwSlider.addEventListener("input", () => {
-  rwSetIndex(rwSamples - 1 - Number(rwSlider.value), true);
+  rwStrip.setValue(0, rwStrip.samples - 1 - Number(rwSlider.value), true);
 });
 
 const openRewindScrubber = () => {
@@ -6034,31 +6203,27 @@ const openRewindScrubber = () => {
   // it is being read, and a running game would push new snapshots (and evict
   // old ones) out from under the playhead.
   paused = true;
-  rwSamples = 0;
-  rwThumbs = null;
-  rwStripColor = null;
-  rwStripDim = null;
-  rwIndex = 0;
   rwStage = 0;
-  rwSamples = Module._wasm_rewind_scrub_generate(RW_MAX_SAMPLES);
-  if (rwSamples > 0) {
-    rwThumbW = Module._wasm_rewind_scrub_thumb_w();
-    rwThumbH = Module._wasm_rewind_scrub_thumb_h();
+  rwStrip.release();
+  rwStrip.values[0] = 0;
+  const n = Module._wasm_rewind_scrub_generate(RW_MAX_SAMPLES);
+  if (n > 0) {
+    const w = Module._wasm_rewind_scrub_thumb_w();
+    const h = Module._wasm_rewind_scrub_thumb_h();
     const ptr = Module._wasm_rewind_scrub_thumbs_ptr();
-    const len = rwSamples * rwThumbW * rwThumbH * 2;
-    rwThumbs = new Uint8Array(Module.memory.buffer, ptr, len).slice();
+    rwStrip.load(new Uint8Array(Module.memory.buffer, ptr, n * w * h * 2).slice(), w, h, n);
   }
-  rwSlider.max = String(Math.max(0, rwSamples - 1));
-  rwSlider.value = String(Math.max(0, rwSamples - 1));
+  rwSlider.max = String(Math.max(0, n - 1));
+  rwSlider.value = String(Math.max(0, n - 1));
   rwHint.textContent =
-    rwSamples > 1
+    n > 1
       ? "Drag the strip, or the bar for longer jumps. Everything right of the line is discarded."
       : "No rewind history yet — it builds up as you play.";
-  rwOldest.textContent = rwSamples > 1 ? rwFmtDuration(rwTenthsAt(rwSamples - 1)) + " ago" : "";
+  rwOldest.textContent = n > 1 ? fmtDuration(rwTenthsAt(n - 1)) + " ago" : "";
   rewindModal.classList.add("open");
   trapFocus(rewindModal);
   // After .open, so the strip has a laid-out height to size frames against.
-  rwBuildStrips();
+  rwStrip.build();
   rwRefresh();
 };
 
@@ -6069,9 +6234,7 @@ const closeRewindScrubber = () => {
   if (!rewindModal.classList.contains("open")) return;
   rewindModal.classList.remove("open");
   releaseFocus(rewindModal);
-  rwThumbs = null;
-  rwStripColor = null;
-  rwStripDim = null;
+  rwStrip.release();
   rwStage = 0;
   paused = rwWasPaused;
 };
@@ -6091,7 +6254,7 @@ const rwUndoCommit = () => {
 const rwCommit = () => {
   const sel = rwSelected();
   if (sel <= 0) return;
-  const cost = rwFmtDuration(rwTenthsAt(sel));
+  const cost = fmtDuration(rwTenthsAt(sel));
   const undo = captureStateBytes(); // where the game is NOW, pre-commit
   if (Module._wasm_rewind_commit(sel) !== 1) {
     showToast("That moment is no longer in the rewind history");
@@ -6145,7 +6308,7 @@ document.getElementById("open-rewind-scrub").addEventListener("click", openRewin
 // the modal open would otherwise scale a stale bitmap.
 window.addEventListener("resize", () => {
   if (!rewindModal.classList.contains("open")) return;
-  rwBuildStrips();
+  rwStrip.build();
   rwRefresh();
 });
 
@@ -7744,6 +7907,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   // it restores the paused state it captured — which must land on the OLD
   // session's value and then be overwritten, not the other way round.
   closeRewindScrubber();
+  closeClipScrubber();
   paused = false;
   document.body.classList.remove("paused");
   fastForward = false;
@@ -8241,13 +8405,14 @@ const frameAdvance = () => {
   drawGame();
 };
 
-// --- Retroactive clip capture ("Save Last 10s") ---
+// --- Retroactive clip capture ("Clip that!") ---
 // The wasm side keeps a rolling window: one state anchor per second plus a
 // 2-byte-per-frame input log (see the clip_* block in dingbat_wasm.nim).
-// clip_begin rewinds the core to the best anchor; the tick loop then steps
+// clip_begin rewinds the core to the anchor before the range you picked and
+// silently re-emulates up to its first frame; the tick loop then steps
 // clip_tick at realtime — a deterministic replay of what the player just
 // did — while a MediaRecorder captures the canvas and the master-gain audio
-// tap. When the log runs out the live state is restored and the file saves.
+// tap. At the range's end the live state is restored and the file saves.
 var clipReplayActive = false;
 var clipRecorder = null;
 var clipChunks = [];
@@ -8281,26 +8446,43 @@ const abortRetroClip = () => {
 };
 
 var clipTotalFrames = 0;
+var clipBannerLabel = "";
 const clipBanner = document.getElementById("clip-banner");
 const updateClipBanner = (left) => {
   const pct = clipTotalFrames > 0
     ? Math.min(100, Math.round(100 * (clipTotalFrames - left) / clipTotalFrames)) : 0;
-  clipBanner.textContent = `Capturing the last ${Math.round(clipTotalFrames / 60)}s… ${pct}%`;
+  clipBanner.textContent = `${clipBannerLabel}… ${pct}%`;
 };
 
-const startRetroClip = () => {
-  if (clipReplayActive || !currentRomName || !speedControlsOk()) return;
+/**
+ * Replay [startAgo, endAgo) — both in FRAMES before now — into a video file.
+ * The one export path: the ten-second menu item and the range picker differ
+ * only in where the two numbers come from.
+ * @param {number} startAgo
+ * @param {number} endAgo
+ * @param {string} slug   filename infix, e.g. "last10s"
+ * @param {string} label  banner wording, e.g. "Capturing the last 10s"
+ * @returns {boolean} true once the replay is armed and recording
+ */
+const startClipExport = (startAgo, endAgo, slug, label) => {
+  if (clipReplayActive || !currentRomName || !speedControlsOk()) return false;
   const mime = clipMimeType();
-  if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
-  const frames = Module._clip_begin ? Module._clip_begin(10) : 0;
-  if (frames <= 0) { showToast("Not enough gameplay history yet"); return; }
+  if (!mime) { showToast("Video recording isn't supported in this browser"); return false; }
+  const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
+  if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
+  // clip_begin has already wound the core back and re-emulated the pre-roll,
+  // so the framebuffer now holds the clip's FIRST frame. Push it to the canvas
+  // before captureStream attaches: without this the recorder's opening frames
+  // are the live moment the player was looking at, which is the end of the
+  // clip, spliced onto the front of it.
+  drawGame();
   let stream;
   try {
     stream = canvasEl.captureStream(60);
   } catch {
     Module._clip_abort();
     showToast("Couldn't capture the game canvas");
-    return;
+    return false;
   }
   const audio = typeof window.acquireClipAudio === "function"
     ? window.acquireClipAudio() : null;
@@ -8312,7 +8494,7 @@ const startRetroClip = () => {
     Module._clip_abort();
     if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
     showToast("Couldn't start the recorder");
-    return;
+    return false;
   }
   clipRecorder.ondataavailable = (e) => { if (e.data && e.data.size) clipChunks.push(e.data); };
   clipRecorder.onstop = () => {
@@ -8326,7 +8508,7 @@ const startRetroClip = () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${base}-last10s-${stamp}.${ext}`;
+    a.download = `${base}-${slug}-${stamp}.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
     showToast("Clip saved");
@@ -8334,22 +8516,256 @@ const startRetroClip = () => {
   clipRecorder.start(500);
   clipReplayActive = true;
   clipTotalFrames = frames;
+  clipBannerLabel = label;
   document.body.classList.add("clip-replaying");
   clipBanner.hidden = false;
   updateClipBanner(frames);
   paused = false; // the replay must run even if the game was paused
+  return true;
 };
 
-clipLastItem.addEventListener("click", () => {
+// What the picker opens on, and what the reflex use of the feature gets: the
+// last ten seconds, ending now. Anything else is a drag away, but nothing has
+// to be dragged to get the common answer.
+const CLIP_QUICK_SECONDS = 10;
+
+// --- Clip range picker -----------------------------------------------------
+// The same export with an in/out point in front of it, on the same film strip
+// the rewind scrubber uses (createFilmStrip, above) — two markers instead of
+// one, because a clip is a range and a rewind is a point.
+//
+// The strip's thumbnails come from the CLIP ring, not the rewind ring. That is
+// the whole reason the clip ring carries pictures at all: rewind is the app's
+// one expensive default and can be switched off (speed mode suspends it
+// outright), and a clip picker that went blank whenever it was would be a
+// feature that quietly stops working for the people most likely to be
+// recording something.
+
+const clipModal = document.getElementById("clip-modal");
+const clipStripCanvas =
+  /** @type {HTMLCanvasElement} */ (document.getElementById("clip-strip"));
+const clipStripWrap = document.getElementById("clip-strip-wrap");
+const clipPreviewCanvas =
+  /** @type {HTMLCanvasElement} */ (document.getElementById("clip-preview"));
+const clipWhen = document.getElementById("clip-when");
+const clipOldest = document.getElementById("clip-oldest");
+const clipEstimate = document.getElementById("clip-estimate");
+const clipScrubHint = document.getElementById("clip-scrub-hint");
+const clipPreviewLabel = document.getElementById("clip-preview-label");
+const clipStartSlider =
+  /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-start"));
+const clipEndSlider =
+  /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-end"));
+const clipSaveBtn =
+  /** @type {HTMLButtonElement} */ (document.getElementById("clip-save"));
+
+// Same budget as the rewind strip: each thumbnail is a full BGR555 copy
+// (19 KB GBA / 26 KB GB) held in JS while the modal is open, and the clip ring
+// stores one per second — so 96 covers the whole window with room to spare.
+const CLIP_MAX_SAMPLES = 96;
+
+let clipAgo = [];             // frames-ago of each strip sample, newest first
+let clipWasPaused = false;
+let clipActiveMarker = 0;     // which marker the preview is showing
+
+// Markers, in strip samples back from the newest: [0] is the IN point (older),
+// [1] the OUT point (newer). Their `edge` differs because the in point's frame
+// is the first one KEPT (line on its left) and the out point's is the last one
+// kept (line on its right) — the pair has to bracket the selection, not sit in
+// the middle of the two end frames.
+const clipStrip = createFilmStrip({
+  canvas: clipStripCanvas,
+  wrap: clipStripWrap,
+  // Twice the rewind strip's span at roughly half the frame width: the default
+  // ten-second selection then fits between the brackets on a 320pt phone as
+  // well as on a desktop panel, which is what makes it read as a range rather
+  // than as a line with a stray arrow stuck at the edge.
+  visibleFrames: 11,
+  frameWMin: 26,
+  frameWMax: 40,
+  markers: [
+    { el: document.getElementById("clip-marker-start"), edge: "lead" },
+    { el: document.getElementById("clip-marker-end"), edge: "trail" },
+  ],
+  paint: (ctx, g) => clipStrip.shadeBetween(ctx, g, g.xs[0], g.xs[1]),
+  onChange: (i) => {
+    clipActiveMarker = i;
+    clipRefresh();
+  },
+});
+// A marker may never cross its neighbour: dragging the in point past the out
+// point pins it one frame short instead of inverting the range.
+clipStrip.attach((i) =>
+  i === 0 ? { min: clipStrip.at(1) + 1 } : { max: clipStrip.at(0) - 1 });
+
+// Frames-ago of a marker. Sample 0 is special: it is the newest ANCHOR, which
+// is up to a second old, and treating it as the out point would silently drop
+// the most recent second — the part you most likely wanted. At the newest
+// sample the out point means "now".
+const clipAgoAt = (sample, isOut) => {
+  if (isOut && sample <= 0) return 0;
+  return clipAgo[Math.min(Math.max(sample, 0), clipAgo.length - 1)] || 0;
+};
+
+const clipRangeFrames = () => {
+  const start = clipAgoAt(clipStrip.at(0), false);
+  const end = clipAgoAt(clipStrip.at(1), true);
+  return { start, end, len: Math.max(0, start - end) };
+};
+
+const clipRefresh = () => {
+  const { start, end, len } = clipRangeFrames();
+  const tenths = (f) => Math.round((f * 10) / 60);
+  clipWhen.textContent =
+    end === 0
+      ? "the last " + fmtDuration(tenths(len))
+      : fmtDuration(tenths(start)) + " to " + fmtDuration(tenths(end)) +
+        " ago · " + fmtDuration(tenths(len));
+  const startSlot = String(clipStrip.samples - 1 - clipStrip.at(0));
+  const endSlot = String(clipStrip.samples - 1 - clipStrip.at(1));
+  if (clipStartSlider.value !== startSlot) clipStartSlider.value = startSlot;
+  if (clipEndSlider.value !== endSlot) clipEndSlider.value = endSlot;
+  clipStrip.draw();
+  clipStrip.preview(clipPreviewCanvas, clipStrip.at(clipActiveMarker));
+  clipPreviewLabel.textContent =
+    clipActiveMarker === 0 ? "first frame of the clip" : "last frame of the clip";
+  // A minute of 8 Mbit/s video is ~60 MB, and the browser puts it straight in
+  // the downloads folder with no further prompt — worth saying out loud before
+  // the button is pressed rather than after.
+  const seconds = len / 60;
+  clipEstimate.textContent =
+    len > 0
+      ? `${seconds.toFixed(1)}s of video, roughly ${Math.max(1, Math.round(seconds))} MB. ` +
+        "The clip is re-played at normal speed while it records, so it takes that long."
+      : "";
+  clipSaveBtn.disabled = len <= 0;
+};
+
+// The two range inputs are the keyboard and screen-reader path onto the same
+// markers; they are not a second source of truth. Each is clamped against the
+// other exactly as the drag is.
+clipStartSlider.addEventListener("input", () => {
+  clipActiveMarker = 0;
+  clipStrip.setValue(0, clipStrip.samples - 1 - Number(clipStartSlider.value), true,
+                     { min: clipStrip.at(1) + 1 });
+});
+clipEndSlider.addEventListener("input", () => {
+  clipActiveMarker = 1;
+  clipStrip.setValue(1, clipStrip.samples - 1 - Number(clipEndSlider.value), true,
+                     { max: clipStrip.at(0) - 1 });
+});
+
+// The sample whose age is closest to `seconds` back. Searched rather than
+// computed as `seconds` samples: the strip is a sampled view of the ring, so
+// one sample only equals one second while the ring holds fewer anchors than
+// the strip shows.
+const clipNearestSample = (seconds) => {
+  if (clipAgo.length === 0) return 0;
+  if (seconds <= 0) return clipAgo.length - 1;   // "everything"
+  const want = seconds * 60;
+  let best = 0;
+  for (let i = 1; i < clipAgo.length; i++) {
+    if (Math.abs(clipAgo[i] - want) < Math.abs(clipAgo[best] - want)) best = i;
+  }
+  return best;
+};
+
+// Presets set the in point to that sample and pin the out point to now — the
+// common shapes, without a drag.
+const clipSetPreset = (seconds) => {
+  if (clipStrip.samples <= 0) return;
+  clipStrip.setValue(1, 0, true);
+  clipStrip.setValue(0, Math.max(1, clipNearestSample(seconds)), true, { min: 1 });
+  clipActiveMarker = 0;
+  clipRefresh();
+};
+document.getElementById("clip-preset-10").addEventListener("click", () => clipSetPreset(10));
+document.getElementById("clip-preset-30").addEventListener("click", () => clipSetPreset(30));
+document.getElementById("clip-preset-all").addEventListener("click", () => clipSetPreset(0));
+
+const openClipScrubber = () => {
   menuDropdown.hidden = true;
-  startRetroClip();
+  if (!currentRomName || !speedControlsOk()) return;
+  if (typeof Module === "undefined" || !Module._clip_scrub_generate) return;
+  if (clipReplayActive) return;
+  clipWasPaused = paused;
+  // Freeze the core while the picker is open: the ring is still rolling, and
+  // a strip captured a second ago would point at anchors that have since aged
+  // out from under the markers.
+  paused = true;
+  clipStrip.release();
+  clipAgo = [];
+  const n = Module._clip_scrub_generate(CLIP_MAX_SAMPLES);
+  if (n > 0) {
+    const w = Module._clip_scrub_thumb_w();
+    const h = Module._clip_scrub_thumb_h();
+    const ptr = Module._clip_scrub_thumbs_ptr();
+    clipStrip.load(new Uint8Array(Module.memory.buffer, ptr, n * w * h * 2).slice(), w, h, n);
+    for (let i = 0; i < n; i++) clipAgo.push(Module._clip_scrub_frames_ago(i));
+  }
+  // Open on the quick action's range, so confirming without touching anything
+  // gives the same clip the one-tap item would have.
+  clipStrip.values[1] = 0;
+  clipStrip.values[0] = Math.max(1, Math.min(n - 1, clipNearestSample(CLIP_QUICK_SECONDS)));
+  clipActiveMarker = 0;
+  const slotMax = String(Math.max(0, n - 1));
+  clipStartSlider.max = slotMax;
+  clipEndSlider.max = slotMax;
+  clipScrubHint.textContent =
+    n > 1
+      ? "Drag either marker, or use the sliders. Everything between them is saved."
+      : "No gameplay history yet — it builds up as you play.";
+  clipOldest.textContent =
+    n > 1 ? fmtDuration(Math.round((clipAgo[n - 1] * 10) / 60)) + " ago" : "";
+  clipModal.classList.add("open");
+  trapFocus(clipModal);
+  // After .open, so the strip has a laid-out height to size frames against.
+  clipStrip.build();
+  clipRefresh();
+};
+
+const closeClipScrubber = () => {
+  // Guard: the global Escape handler calls every closer blindly and this one
+  // has side effects — restoring `paused` from a stale clipWasPaused would
+  // silently unpause a game the user paused later.
+  if (!clipModal.classList.contains("open")) return;
+  clipModal.classList.remove("open");
+  releaseFocus(clipModal);
+  clipStrip.release();
+  paused = clipWasPaused;
+};
+
+clipSaveBtn.addEventListener("click", () => {
+  const { start, end, len } = clipRangeFrames();
+  if (len <= 0) return;
+  const seconds = Math.max(1, Math.round(len / 60));
+  closeClipScrubber();
+  startClipExport(start, end, `clip${seconds}s`,
+                  end === 0 ? `Capturing the last ${seconds}s`
+                            : `Capturing ${seconds}s of gameplay`);
+});
+
+document.getElementById("clip-scrub-close").addEventListener("click", closeClipScrubber);
+document.getElementById("clip-scrub-cancel").addEventListener("click", closeClipScrubber);
+clipModal.addEventListener("click", (e) => {
+  if (e.target === clipModal) closeClipScrubber();
+});
+clipLastItem.addEventListener("click", openClipScrubber);
+
+// Same reason as the rewind strip's: the bitmaps are rasterised for one strip
+// height and one frame size, both of which change across the phone/desktop
+// breakpoint, so a rotation with the modal open would scale a stale bitmap.
+window.addEventListener("resize", () => {
+  if (!clipModal.classList.contains("open")) return;
+  clipStrip.build();
+  clipRefresh();
 });
 
 // Frame-step is fully pointer-driven: tap = one frame, press-and-hold
 // repeats at 10/s (the touch analogue of holding "."). Pointer events, not
 // click — iOS won't synthesize click for a second finger while a game
 // button is held, and stepping WHILE holding a button is the whole point.
-// --- Forward clip recording (Record Clip menu item) ---
+// --- Forward clip recording (the Record menu item) ---
 // MediaRecorder over the game canvas (shader output included) plus the
 // master-gain audio tap; saves .webm (.mp4 where that's what the browser
 // records — Safari). Single-core modes only (CSS hides the item elsewhere).
@@ -8361,7 +8777,7 @@ const REC_MAX_MS = 5 * 60 * 1000; // a forgotten recorder stops itself
 
 const setRecMenuState = (recording) => {
   recordClipItem.querySelector("span").textContent =
-    recording ? "Stop Recording" : "Record Clip";
+    recording ? "Stop Recording" : "Record";
   recordClipItem.classList.toggle("recording", recording);
 };
 
@@ -8422,7 +8838,7 @@ recordClipItem.addEventListener("click", () => {
   else startClipRecording();
 });
 
-// Capture accordion: Screenshot / Record Clip / Save Last 10s live under
+// Capture accordion: Screenshot / Record / Clip that! live under
 // one expandable "Capture" entry so the menu's top level stays short.
 const captureToggle = document.getElementById("capture-toggle");
 const captureSub = document.getElementById("capture-sub");
@@ -10301,6 +10717,14 @@ var Module = {
     // covers every session.
     if (IS_IOS && Module._setRewindCapBytes) {
       Module._setRewindCapBytes(16 * 1024 * 1024);
+    }
+    // Same reasoning for the clip ring's separate, much smaller budget (12 MB;
+    // see CLIP_CAP_BYTES). It is bounded in time as well as bytes, so on the
+    // phone the cap only bites on a game whose states compress unusually badly
+    // — and then it shortens the minute of history rather than growing the
+    // footprint, which is the right way round on iOS.
+    if (IS_IOS && Module._setClipCapBytes) {
+      Module._setClipCapBytes(6 * 1024 * 1024);
     }
     // Storage boot (openDB, migrations, settings, home grid) started at
     // DOMContentLoaded so the library rendered without waiting on this

@@ -18,6 +18,17 @@ API), then harvests the app's top-level functions from the context's shared
 global lexical scope — so tests exercise the actual app code and break when its
 behavior changes.
 
+### Canvas and `ImageData`
+
+The fake 2D context is a permissive no-op Proxy, with two exceptions:
+`getImageData` and `createImageData` return a real `FakeImageData` whose
+`.data` is a zeroed `Uint8ClampedArray`. Those two are *read from* rather than
+drawn into — the film-strip scrubber bakes its desaturated copy by reading
+pixels back out — so returning `undefined` there is not "nothing happens", it
+is `undefined.data` at module-eval time, which takes every test in the suite
+down with it. `ImageData` itself is stubbed in the sandbox for the same reason
+(`bgr555ToImageData` constructs one directly).
+
 ### Observing toasts
 
 `app.toasts` is every message the app has shown, `app.liveToasts()` only the

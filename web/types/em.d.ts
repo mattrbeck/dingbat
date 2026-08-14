@@ -74,7 +74,15 @@ interface EmscriptenModule {
   _wasm_rumble?(): number;
   _wasm_set_tilt?(x: number, y: number): void;
   _wasm_cart_has_tilt?(): number;
-  _clip_begin?(seconds: number): number;
+  _setClipCapBytes?(n: number): void;
+  _clip_history_frames?(): number;
+  _clip_scrub_generate?(maxSamples: number): number;
+  _clip_scrub_count?(): number;
+  _clip_scrub_thumb_w?(): number;
+  _clip_scrub_thumb_h?(): number;
+  _clip_scrub_thumbs_ptr?(): number;
+  _clip_scrub_frames_ago?(sample: number): number;
+  _clip_begin?(startAgo: number, endAgo: number): number;
   _clip_tick?(): number;
   _clip_abort?(): void;
   _printer_log_len?(): number;

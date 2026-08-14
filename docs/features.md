@@ -20,8 +20,10 @@ The browser build at [dingbat.gg](https://dingbat.gg) is the default way to play
   warns separately when it would also roll back an in-game save, and offers Undo
 - Run-ahead (opt-in, 1-2 frames) to cut input latency, disabled automatically
   while linked
-- Save Last 10s: retroactive clip capture, replayed deterministically from state
-  anchors plus a per-frame input log rather than recorded video
+- "Clip that!": retroactive clip capture over the last minute of play, replayed
+  deterministically from state anchors plus a per-frame input log rather than
+  recorded video. Opens the same film-strip scrubber the rewind modal uses, with
+  an in and an out point, pre-set to the last 10 seconds
 - Cheats (Game Genie, GameShark, Action Replay / CodeBreaker)
 - Per-ROM save files kept in IndexedDB, with a "Manage ROMs and Saves" modal for
   resetting save data or deleting a game outright

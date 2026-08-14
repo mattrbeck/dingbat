@@ -624,6 +624,12 @@ also a CI step with a rationale comment in `.github/workflows/test.yml`):
   k-th chain walk at every depth (through eviction and across a pop/push
   seam), keyframe seeks reproducing the walk, thumbnails evicted in lockstep
   with their snapshots, `mem_used` covering the side tables. No ROMs.
+- `test_clipreplay` — clip-capture replay determinism: run a core live,
+  hash every frame's whole serialized state, then rebuild an interior range
+  out of a compressed anchor + the input log and assert every frame matches.
+  Three committed ROMs, chosen so the two negative controls (wrong anchor,
+  one wrong button bit) both bite. This is the gate on "the clip is of what
+  actually happened"; nothing else in the suite would notice a divergence.
 
 Not in tasks but in CI: the link-acceptance battery (`linktest`,
 `speclink`, `netlink`, `rollback` modes over `tests/roms/*.gba`) — copy the

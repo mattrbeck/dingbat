@@ -31,6 +31,16 @@ class FakeClassList {
   contains(c) { return this._set.has(c); }
 }
 
+// The shape `new ImageData(data, w, h)` produces, which index.js constructs
+// directly (bgr555ToImageData) and reads back from a 2D context.
+class FakeImageData {
+  constructor(data, width, height) {
+    this.data = data;
+    this.width = width;
+    this.height = height;
+  }
+}
+
 class FakeElement {
   constructor(tag = "div") {
     this.tagName = tag.toUpperCase();
@@ -87,8 +97,26 @@ class FakeElement {
     return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0 };
   }
   getContext() {
-    // Permissive 2D-context stand-in: any method call is a no-op.
-    return new Proxy({}, { get: (_t, p) => (p === "canvas" ? this : () => undefined) });
+    // Permissive 2D-context stand-in: any method call is a no-op, EXCEPT the
+    // two that are read from rather than drawn into. The film-strip scrubber
+    // bakes its desaturated copy by reading pixels back out
+    // (getImageData().data), so a no-op there is not "nothing happens" — it is
+    // `undefined.data`, which takes the whole module eval down with it.
+    const self = this;
+    return new Proxy({}, {
+      get: (_t, p) => {
+        if (p === "canvas") return self;
+        if (p === "getImageData" || p === "createImageData") {
+          return (...args) => {
+            const w = args.length >= 4 ? args[2] : args[0];
+            const h = args.length >= 4 ? args[3] : args[1];
+            return new FakeImageData(new Uint8ClampedArray(Math.max(0, w * h) * 4),
+                                     w, h);
+          };
+        }
+        return () => undefined;
+      },
+    });
   }
   set innerHTML(v) { this._innerHTML = v; if (v === "") this.children = []; }
   get innerHTML() { return this._innerHTML; }
@@ -349,6 +377,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     // inside the vm matches bytes created by tests and by host Blob/Response.
     Uint8Array, ArrayBuffer, Blob, TextDecoder, TextEncoder,
     URLSearchParams, Response,
+    Uint8ClampedArray, ImageData: FakeImageData,
     atob, btoa, performance,
     setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; },
     clearTimeout, // host

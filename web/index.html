@@ -133,11 +133,17 @@
             </button>
             <button type="button" class="menu-item menu-subitem" id="record-clip">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
-              <span>Record Clip</span>
+              <span>Record</span>
             </button>
+            <!-- Retroactive capture: the thing already happened, and this pulls
+                 it back out of the rolling history rather than asking you to
+                 have been recording. Opens the range picker pre-set to the last
+                 10 seconds, so the reflex use is still two taps and the picker
+                 is there for when the moment was longer, or a few seconds ago.
+                 Named for what you say, not for what it does. -->
             <button type="button" class="menu-item menu-subitem" id="clip-last">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l-3 2"/><path d="M5 3l-2 2M19 3l2 2"/></svg>
-              <span>Save Last 10s</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M9 6v12M15 6v12"/></svg>
+              <span>Clip that!</span>
             </button>
             <!-- Printed Photos moved in here from the menu's top level, and
                  starts hidden: the Game Boy Printer is emulated for every solo
@@ -281,7 +287,7 @@
       </button>
     </header>
 
-    <!-- Retroactive-capture status: while Save Last 10s replays, controls are
+    <!-- Retroactive-capture status: while a clip replays, controls are
          inert and this banner is the only live UI. Deliberately a sibling of
          the top bar, NOT a child: mobile landscape gives #topbar a transform,
          and a transformed ancestor becomes the containing block for its
@@ -506,7 +512,7 @@
          elements, drawn from thumbnails the rewind ring captured at push
          time. -->
     <div id="rewind-modal" class="modal-overlay">
-      <div class="modal modal-rewind" role="dialog" aria-modal="true" aria-labelledby="rewind-modal-title">
+      <div class="modal modal-scrub" role="dialog" aria-modal="true" aria-labelledby="rewind-modal-title">
         <button type="button" class="modal-close" id="rewind-scrub-close" aria-label="Close">&times;</button>
         <h2 id="rewind-modal-title">Rewind</h2>
         <p class="modal-hint" id="rewind-scrub-hint">Drag the film strip to pick a moment. Everything to the right of the line is discarded.</p>
@@ -518,16 +524,16 @@
           <!-- aria-hidden: both canvases are pictures of the moment named in
                #rewind-when, and the range input below is the control a screen
                reader drives. Announcing two unlabelled canvases adds nothing.
-               .rewind-preview only drops .report-preview's hardcoded 3:2 —
+               .film-preview only drops .report-preview's hardcoded 3:2 —
                GB/GBC frames are 10:9 and would otherwise stretch. -->
-          <canvas id="rewind-preview" class="report-preview rewind-preview" width="120" height="80" aria-hidden="true"></canvas>
-          <div class="rewind-strip-wrap" id="rewind-strip-wrap" aria-hidden="true">
-            <canvas id="rewind-strip" class="rewind-strip"></canvas>
-            <div class="rewind-playhead" id="rewind-playhead" aria-hidden="true"></div>
+          <canvas id="rewind-preview" class="report-preview film-preview" width="120" height="80" aria-hidden="true"></canvas>
+          <div class="film-strip-wrap" id="rewind-strip-wrap" aria-hidden="true">
+            <canvas id="rewind-strip" class="film-strip"></canvas>
+            <div class="film-marker" id="rewind-playhead" aria-hidden="true"></div>
           </div>
-          <div class="rewind-scale">
-            <span id="rewind-oldest" class="rewind-scale-end">oldest</span>
-            <span class="rewind-scale-end">now</span>
+          <div class="film-scale">
+            <span id="rewind-oldest" class="film-scale-end">oldest</span>
+            <span class="film-scale-end">now</span>
           </div>
           <input type="range" id="rewind-slider" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Rewind timeline" />
         </div>
@@ -535,6 +541,59 @@
         <div class="states-actions rewind-actions">
           <button type="button" class="button button-sm" id="rewind-scrub-cancel">Cancel</button>
           <button type="button" class="button button-sm button-primary rewind-commit" id="rewind-commit">Rewind to this point</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save a Clip. The SAME modal shape and the SAME film strip as Rewind
+         above (.modal-scrub / .report-scrub / .film-strip-wrap, driven by
+         createFilmStrip in index.js) — the only difference is that this one
+         hangs two markers on the strip instead of one, because a clip is a
+         range and a rewind is a point. Its history is the clip ring's, not the
+         rewind ring's: rewind can be switched off (and speed mode suspends it)
+         while clip capture keeps running. -->
+    <div id="clip-modal" class="modal-overlay">
+      <div class="modal modal-scrub" role="dialog" aria-modal="true" aria-labelledby="clip-modal-title">
+        <button type="button" class="modal-close" id="clip-scrub-close" aria-label="Close">&times;</button>
+        <h2 id="clip-modal-title">Save a Clip</h2>
+        <p class="modal-hint" id="clip-scrub-hint">Drag the two markers to pick the moment. Everything between them is saved as a video.</p>
+        <div class="report-scrub">
+          <div class="report-scrub-head">
+            <span class="report-label">Clip</span>
+            <span id="clip-when" class="report-when" aria-live="polite">the last 10s</span>
+          </div>
+          <!-- aria-hidden: the canvases are pictures of the moment named in
+               #clip-when, and the two range inputs below are the controls a
+               screen reader drives. -->
+          <canvas id="clip-preview" class="report-preview film-preview" width="120" height="80" aria-hidden="true"></canvas>
+          <!-- One preview, two markers: without this it is not knowable which
+               end of the range the picture belongs to. -->
+          <p class="clip-preview-label" id="clip-preview-label" aria-live="polite">first frame of the clip</p>
+          <div class="film-strip-wrap compact" id="clip-strip-wrap" aria-hidden="true">
+            <canvas id="clip-strip" class="film-strip"></canvas>
+            <div class="film-marker range range-in" id="clip-marker-start" aria-hidden="true"></div>
+            <div class="film-marker range range-out" id="clip-marker-end" aria-hidden="true"></div>
+          </div>
+          <div class="film-scale">
+            <span id="clip-oldest" class="film-scale-end">oldest</span>
+            <span class="film-scale-end">now</span>
+          </div>
+          <label class="clip-slider-row"><span>Start</span>
+            <input type="range" id="clip-slider-start" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Clip start" />
+          </label>
+          <label class="clip-slider-row"><span>End</span>
+            <input type="range" id="clip-slider-end" class="report-slider" min="0" max="0" step="1" value="0" aria-label="Clip end" />
+          </label>
+        </div>
+        <div class="clip-presets">
+          <button type="button" class="button button-sm" id="clip-preset-10">Last 10s</button>
+          <button type="button" class="button button-sm" id="clip-preset-30">Last 30s</button>
+          <button type="button" class="button button-sm" id="clip-preset-all">Everything</button>
+        </div>
+        <p class="clip-estimate" id="clip-estimate"></p>
+        <div class="states-actions rewind-actions">
+          <button type="button" class="button button-sm" id="clip-scrub-cancel">Cancel</button>
+          <button type="button" class="button button-sm button-primary" id="clip-save">Save this clip</button>
         </div>
       </div>
     </div>
