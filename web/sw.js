@@ -7,6 +7,7 @@ const ASSETS = [
   "./index.html",
   "./index.js",
   "./glpresent.js",
+  "./saveimport.js",
   "./sdputil.js",
   "./netplay.js",
   "./styles.css",

@@ -3933,17 +3933,28 @@ proc rtc_footer(cart: Mbc3): string =
   for i in 0 .. 7: result.add(char((ts shr (8 * i)) and 0xFF))
 
 proc rtc_load_footer(cart: Mbc3; data: string) =
+  ## BGB, mGBA and 64-bit VBA builds all write exactly RAM + 48 bytes, and old
+  ## 32-bit VBA builds RAM + 44 (32-bit timestamp). Any other tail is NOT a
+  ## clock — typically a forum download padded out to a power of two — and
+  ## parsing padding as a footer scrambles the RTC (an all-zero tail reads as
+  ## "saved January 1970" and catch-up then walks the day counter through five
+  ## decades), so only the two exact lengths are accepted.
   proc get_u32(data: string; off: int): uint32 =
     for i in 0 .. 3: result = result or (uint32(data[off + i]) shl (8 * i))
   let base = cart.ram.len
   let extra = data.len - base
-  if extra < 44: return  # no footer
+  if extra != 44 and extra != 48: return  # no footer, or a tail that isn't one
   for i in 0 .. 4: cart.rtc_live[i]    = uint8(get_u32(data, base + i * 4) and 0xFF)
   for i in 0 .. 4: cart.rtc_latched[i] = uint8(get_u32(data, base + 20 + i * 4) and 0xFF)
   var ts: int64 = int64(get_u32(data, base + 40))
-  if extra >= 48:
+  if extra == 48:
     ts = ts or (int64(get_u32(data, base + 44)) shl 32)
-  cart.rtc_catch_up(gb_rtc_now() - ts)
+  # A timestamp before 2000 cannot be a real dump time (the footer format and
+  # every RTC cartridge postdate it): the field is zeroed or garbage. Keep the
+  # register values the footer states, but skip the decades of "catch-up" the
+  # bogus timestamp implies. Future timestamps already no-op inside catch-up.
+  if ts >= 946684800:
+    cart.rtc_catch_up(gb_rtc_now() - ts)
 
 # HuC3's clock lives inside the cartridge's microcontroller, in the same nibble
 # window its other registers do: a minute-of-day counter at 0x10-0x12 and a day
@@ -4018,7 +4029,9 @@ proc huc3_footer(cart: Huc3): string =
 
 proc huc3_load_footer(cart: Huc3; data: string) =
   let base = cart.ram.len
-  if data.len - base < HUC3_FOOTER_LEN: return  # RAM-only save: keep the power-on clock
+  # Exact length only: this is dingbat's own layout, so any other tail is a
+  # padded download or another emulator's footer, not this one.
+  if data.len - base != HUC3_FOOTER_LEN: return  # RAM-only save: keep the power-on clock
   var ts: int64 = 0
   for i in 0 .. 7: ts = ts or (int64(uint8(data[base + i])) shl (8 * i))
   for i in 0 ..< 128:
@@ -4225,7 +4238,9 @@ proc tama5_footer(cart: Tama5): string =
 
 proc tama5_load_footer(cart: Tama5; data: string) =
   let base = cart.ram.len
-  if data.len - base < TAMA5_FOOTER_LEN: return  # RAM-only save: keep the seeded clock
+  # Exact length only: FlashGBX and mGBA write exactly this and nothing more,
+  # so a longer tail is padding, not a footer with extras.
+  if data.len - base != TAMA5_FOOTER_LEN: return  # RAM-only save: keep the seeded clock
   for p in 0 .. 3:
     for i in 0 .. 7:
       let b = uint8(data[base + p * 8 + i])
@@ -4256,7 +4271,9 @@ proc mbc6_footer(cart: Mbc6): string =
 
 proc mbc6_load_footer(cart: Mbc6; data: string) =
   let base = cart.ram.len
-  if data.len - base < MBC6_FOOTER_LEN: return  # RAM-only save: keep blank flash
+  # Exact length only, same reasoning as the RTC footers: nobody else writes
+  # an MBC6 footer at all, so any other tail length is not this layout.
+  if data.len - base != MBC6_FOOTER_LEN: return  # RAM-only save: keep blank flash
   for i in 0 ..< cart.flash.len: cart.flash[i] = uint8(data[base + i])
   for i in 0 ..< cart.flash_hidden.len:
     cart.flash_hidden[i] = uint8(data[base + cart.flash.len + i])

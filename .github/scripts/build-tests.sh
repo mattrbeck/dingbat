@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build every test binary at once instead of one after another.
 #
-# These are eight independent `nim c` invocations over the same tree, and CI
+# These are nine independent `nim c` invocations over the same tree, and CI
 # used to run them in series as separate steps. On the Windows runner that was
 # ~145s of a ~250s job with three of the four cores idle the whole time: Nim's
 # semantic pass is single-threaded per invocation, so the only way to use the
@@ -55,6 +55,7 @@ build ppuobjlist      dingbat_ppuobjlist_test       tests/ppuobjlist_test.nim
 build savestatecompat dingbat_savestate_compat_test tests/savestate_compat_test.nim
 build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
+build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
 
 # Wait on every build even after one fails, so a run reports ALL the broken
 # targets rather than whichever happened to be waited on first.

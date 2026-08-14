@@ -4972,18 +4972,31 @@ const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 // stays in tooltips). Falls back to the raw name if there's no extension.
 const displayName = (name) => stripExt(name) || name;
 
-// Overwrite the current game's battery save with imported .sav bytes (with the
+// Overwrite the current game's battery save with imported bytes (with the
 // same name-mismatch guard as the "Import save file" button), then reboot the
 // core so the game reloads from it. Shared by that button and by a dropped
-// .sav file. Assumes a game is loaded (callers check currentOriginalName).
+// save file. Assumes a game is loaded (callers check currentOriginalName).
+// GameShark-family containers (.sps/.xps/.gsv — see saveimport.js) are
+// unwrapped to their raw save bytes first; .srm and .sav are already raw.
 const applyImportedSave = async (bytes, fileName) => {
-  if (!confirm("This will overwrite any existing save file for the current game. Continue?")) return;
+  const unwrapped = SaveImport.unwrap(bytes, fileName);
+  if (!unwrapped.ok) {
+    alert(unwrapped.error);
+    return;
+  }
+  let overwriteAsk = "This will overwrite any existing save file for the current game.";
+  if (unwrapped.warning) overwriteAsk += ` Note: ${unwrapped.warning}.`;
+  if (!confirm(overwriteAsk + " Continue?")) return;
   if (stripExt(fileName) !== stripExt(currentOriginalName)) {
     if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
   }
+  bytes = unwrapped.bytes;
   let savName = currentRomName.substring(0, currentRomName.lastIndexOf(".")) + ".sav";
   writeToFS(savName, bytes);
   await dbPut("save:" + currentOriginalName, new Uint8Array(bytes));
+  if (unwrapped.format)
+    showToast(`Imported ${unwrapped.format} save` +
+      (unwrapped.title ? ` — ${unwrapped.title}` : ""));
   loadRom(currentRomName, currentOriginalName);
 };
 
@@ -4997,7 +5010,7 @@ document.getElementById("load-save").addEventListener("click", () => {
   // preceding confirm()/alert() consumes the transient user activation, so
   // input.click() no longer opens the file picker. Do the overwrite prompts
   // AFTER a file is chosen (inside the callback), not before opening the picker.
-  pickFile(".sav", (bytes, fileName) => applyImportedSave(bytes, fileName));
+  pickFile(".sav,.srm,.sps,.xps,.gsv", (bytes, fileName) => applyImportedSave(bytes, fileName));
 });
 
 // --- Save states ---
@@ -7988,15 +8001,17 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
-// A dropped file is usually a ROM/zip to load, but a dropped .sav or .state is
-// imported into the running game instead — the same flows as the Manage Saves
-// "Import save file" / "Import state" buttons. A save/state can only target a
-// running single-player game, so reject it with a specific reason otherwise
-// (rather than falling through to the ROM loader's generic "unsupported file").
+// A dropped file is usually a ROM/zip to load, but a dropped save (raw .sav/
+// .srm or a GameShark-family container) or .state is imported into the running
+// game instead — the same flows as the Manage Saves "Import save file" /
+// "Import state" buttons. A save/state can only target a running single-player
+// game, so reject it with a specific reason otherwise (rather than falling
+// through to the ROM loader's generic "unsupported file").
+const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv"]);
 const handleDroppedFile = (file) => {
   let ext = extOf(file.name);
-  if (ext === ".sav" || ext === ".state") {
-    let kind = ext === ".sav" ? "save file" : "save state";
+  if (SAVE_IMPORT_EXTS.has(ext) || ext === ".state") {
+    let kind = ext === ".state" ? "save state" : "save file";
     if (linkMode || rollbackMode || netActive()) {
       alert(`Can't import a ${kind} while a link cable is connected. Disconnect first, then try again.`);
       return;
@@ -8008,8 +8023,8 @@ const handleDroppedFile = (file) => {
     let reader = new FileReader();
     reader.addEventListener("load", () => {
       let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
-      if (ext === ".sav") applyImportedSave(bytes, file.name);
-      else applyImportedState(bytes);
+      if (ext === ".state") applyImportedState(bytes);
+      else applyImportedSave(bytes, file.name);
     });
     reader.readAsArrayBuffer(file);
     return;

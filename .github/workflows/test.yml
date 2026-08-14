@@ -164,6 +164,16 @@ jobs:
         # relied on for it. Needs no ROMs.
         shell: bash
         run: ./dingbat_lcdresponse_test
+      - name: GB battery-save RTC/mapper footers
+        # Round-trips dingbat's own MBC3 footer (the BGB/VBA/mGBA-shared
+        # layout) with wall-clock catch-up, and proves that a forum save
+        # padded to a power of two — or any other unknown tail — is NOT
+        # parsed as a clock. The failure mode being guarded: an all-zero
+        # tail reads as "saved January 1970" and catch-up then walks the day
+        # counter through five decades and sets the sticky overflow flag.
+        # Builds its own synthetic ROMs/saves; needs no ROM fixtures.
+        shell: bash
+        run: ./dingbat_savefooter_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
         # ticks the PPU from inside the mode 3->0 transition; if lcd_status
