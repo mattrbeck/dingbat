@@ -361,10 +361,22 @@ proc fifo_scan_sprites_lcdc2(ppu: GbFifoPpu; gb: GB): seq[GbSprite] {.noinline.}
       result.insert(s, idx)
       if result.len >= 10: break
     sprite_addr += 4
+  ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
+  ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
 
 proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
+  ## Called on the dot mode 2 ends, and the LAST reader of this line's mode-2
+  ## LCDC.2 history -- so it is also what retires it, in place of
+  ## fifo_reset_sprite a few statements earlier on the same dot. Moving the CALL
+  ## up to sit before that reset instead is what the history wants and it is not
+  ## free: it costs +1.11% of retired instructions on Pokemon Blue (24.28e9 ->
+  ## 24.55e9) for no change of work at all, purely from where clang then puts
+  ## this proc relative to the mode 2 -> 3 block. Retiring the history here costs
+  ## nothing and says the same thing.
   if unlikely(fifo_scan_lcdc2_live(ppu)):
-    return fifo_scan_sprites_lcdc2(ppu, gb)
+    return fifo_scan_sprites_lcdc2(ppu, gb)   # retires the history itself
+  ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
+  ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
   result = @[]
   var sprite_addr = 0
   while sprite_addr <= 0x9C:
@@ -925,12 +937,13 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetching_sprite = false
   ppu.obj_penalty = 0
-  # Both halves of the object fetch's LCDC.2 read are per-line: no object fetch
-  # is in flight across a mode 2 -> 3 edge, and a change of the bit on an
-  # earlier line is already folded into `lcd_control`. See obj_height_at.
+  # The object fetch's LCDC.2 read is per-line: no object fetch is in flight
+  # across a mode 2 -> 3 edge. See obj_height_at.
   ppu.obj_fix_from = OBJ_FIX_OFF
-  ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
-  ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
+  # `lcdc2_flip` itself is NOT cleared here. It has a second reader now -- the
+  # OAM scan, which asks what the bit was on each object's own mode-2 dot -- and
+  # that reader runs a few statements after this one on the same dot 80. It
+  # clears the history on its way out instead; see fifo_get_sprites.
   # LCDC.4's is per-line for the same reason: it only ever answers a fetch on
   # THIS line's dots. The ADDRESS latch is not reset with it -- see
   # CGB_TDSEL_GLITCH in gb.nim: it is a bus register, and the first glitched
@@ -3829,11 +3842,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # mode bits. Nothing else about the boundary moves.
           if ppu.cycle_counter == 80 - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
         if ppu.cycle_counter == 80:
-          # FIRST, because it is the only thing in this block that reads mode
-          # 2's dots: it asks what LCDC.2 was on each object's own scan dot and
-          # `fifo_reset_sprite` below is what clears that history. See
-          # fifo_get_sprites.
-          ppu.sprites = fifo_get_sprites(ppu, gb)
           ppu.`mode_flag=`(3'u8, gb)
           # WX below 7 puts the window's first pixel LEFT of the screen, where
           # the shifter's equality above can never reach it (lx starts at
@@ -3884,6 +3892,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when SCX_FINE_LATCH_LIVE:
             ppu.scx_latch_until = -1'i32
           ppu.dropped_first_fetch = false
+          ppu.sprites = fifo_get_sprites(ppu, gb)
           when LY0_PIPE_ANY:
             # Line 0's pipeline runs LY0_PIPE_MCYCLES CPU M-cycles ahead of
             # where every other line's does (and M3_PIPE_AHEAD, if it is on,

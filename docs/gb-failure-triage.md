@@ -5162,6 +5162,18 @@ Guards, all byte-identical before/after: mealybug DMG 552960/552960 and CGB
 1863574 (`m3_lcdc_obj_size_change` and its `_scx` sibling both still 100%),
 GBMicrotest 429/513 row for row, mooneye 183 row for row, and the dmg-acid2 /
 cgb-acid2 / cgb-acid-hell / strikethrough frames pixel-identical.
+*Perf, and a trap worth keeping:* the scan is mode-2 hot, so the per-object
+sample lives in a `{.noinline.}` proc behind one test and the old loop is
+untouched -- **+0.011%** retired instructions on Pokemon Blue and +0.013% on
+Crystal. Two earlier spellings were not free. Testing the flag *inside* the loop
+costs **+1.20%**. More surprisingly, moving the `fifo_get_sprites` CALL up to sit
+before `fifo_reset_sprite` (which is where the LCDC.2 history it reads used to be
+cleared) costs **+1.11%** on its own, for no change of work at all -- it is
+purely where clang then places the proc relative to the mode 2 -> 3 block. The
+fix is to leave the call where it was and let the scan retire the history on its
+way out. Another instance of the inline cliff in `docs/perf-measurement`: a
+call-site move is not a no-op here, and the counters find it while wall clock
+would not.
 
 **6. `enable_display` + `lcd_offset` -- 71 rows, and the filing is wrong.**
 `lcd_offset` **does not enable the LCD**: none of its 62 ROMs contains an
