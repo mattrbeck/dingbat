@@ -112,6 +112,8 @@ function renderInPage(cfg) {
   gl.uniform1i(gl.getUniformLocation(prog, "u_color_correct"), opts.colorCorrect ? 1 : 0);
   gl.uniform1i(gl.getUniformLocation(prog, "u_panel_gbc"), opts.panelGbc ? 1 : 0);
   gl.uniform1i(gl.getUniformLocation(prog, "u_scanlines"), opts.scanlines ? 1 : 0);
+  gl.uniform1i(gl.getUniformLocation(prog, "u_subpixel"), opts.subpixel ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(prog, "u_scan_width"), nw);
   gl.uniform1f(gl.getUniformLocation(prog, "u_tex_height"), nh);
   gl.uniform2f(gl.getUniformLocation(prog, "u_tex_size"), nw, nh);
   gl.uniform1i(gl.getUniformLocation(prog, "u_filter"),
@@ -210,6 +212,7 @@ async function run() {
     await structural("color-correct ON (AGB)", { colorCorrect: true, panelGbc: false, scanlines: false, filter: "none" });
     await structural("color-correct ON (GBC)", { colorCorrect: true, panelGbc: true, scanlines: false, filter: "none" });
     await structural("scanlines ON", { colorCorrect: false, scanlines: true, filter: "none" });
+    await structural("RGB-subpixel mask ON", { colorCorrect: false, scanlines: false, subpixel: true, filter: "none" });
     await structural("filter=hq4x", { colorCorrect: false, scanlines: false, filter: "hq4x" });
     await structural("filter=xBR", { colorCorrect: false, scanlines: false, filter: "xbr" });
     await structural("filter=xBRZ", { colorCorrect: false, scanlines: false, filter: "xbrz" });

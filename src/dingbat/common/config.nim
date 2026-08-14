@@ -251,6 +251,14 @@ type
     vfHq4x = "hq4x"
     vfXbr  = "xbr"
     vfXbrz = "xbrz"
+    # Screen-structure looks, in the same selector as the smoothing filters:
+    # every option is a way to draw the picture and exactly one can be active,
+    # which is what retired the separate Scanlines toggle (it used to be
+    # suspended whenever a smoothing filter was on — the selector makes that
+    # exclusivity structural). They are NOT filter_mode values in the shader;
+    # the frontends translate them to their own uniforms.
+    vfScanlines = "scanlines"
+    vfSubpixel  = "rgb"
 
   Config* = ref object
     explorer_dir*:      string
@@ -269,8 +277,7 @@ type
     volume*:            int      # master volume 0..100
     mute*:              bool     # mute audio output
     color_correction*:  bool     # GBA LCD color-correction shader (default on)
-    video_filter*:      VideoFilter  # GPU upscale filter (none/hq4x/xbr/xbrz)
-    scanlines*:         bool     # darken a strip across each emulated pixel row
+    video_filter*:      VideoFilter  # GPU filter/screen look (VideoFilter)
     lcd_response*:      bool     # panel-response model; the panel follows the machine
     preserve_aspect*:   bool     # letterbox instead of stretching to the window
     # Super Game Boy. sgb_enable is OFF by default: a fresh install plays
@@ -310,7 +317,6 @@ proc new_config*(): Config =
     mute:            false,
     color_correction: true,
     video_filter:    vfNone,
-    scanlines:       false,
     lcd_response:    false,
     preserve_aspect: true,
     sgb_enable:      false,
@@ -344,7 +350,12 @@ proc parse_config(j: JsonNode): Config =
     except ValueError:
       cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
-    cfg.scanlines = j["scanlines"].getBool(false)
+    # Scanlines used to be their own toggle; they are a Filter-selector choice
+    # now. A config that had them on becomes that choice — unless it ALSO
+    # named a smoothing filter, which the old UI made win by suspending
+    # scanlines, so the filter keeps winning here.
+    if j["scanlines"].getBool(false) and cfg.video_filter == vfNone:
+      cfg.video_filter = vfScanlines
   if j.hasKey("lcd_response"):
     # Two generations of stored value land here. The key held a panel name
     # while the setting was a six-way picker (off/auto/dmg/cgb/agb/ags), and
@@ -475,7 +486,6 @@ proc save_config*(cfg: Config) =
   lines.add("mute: " & $cfg.mute)
   lines.add("color_correction: " & $cfg.color_correction)
   lines.add("video_filter: " & $cfg.video_filter)
-  lines.add("scanlines: " & $cfg.scanlines)
   lines.add("lcd_response: " & $cfg.lcd_response)
   lines.add("preserve_aspect: " & $cfg.preserve_aspect)
   lines.add("rewind: " & $cfg.rewind)

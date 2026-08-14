@@ -97,6 +97,10 @@ uniform float tex_height;
 // the Game Boy window are both native rows of the same 224-row picture. Feed
 // tex_height here instead and the border gets 144-row scanlines over 224 rows.
 uniform float scan_height;
+// Pixel-column pitch for the RGB-subpixel mask; the OUTPUT width, for the
+// same reason scan_height is the output height.
+uniform float scan_width;
+uniform bool subpixel;
 // SGB border: a 256x224 RGB5_A1 layer drawn over the whole quad, with the
 // Game Boy window composited into the 160x144 rect at (48, 40). Alpha 0 is
 // SNES colour 0 -- transparent, so the window (or the backdrop) shows through.
@@ -277,6 +281,21 @@ void main() {
   }
   if (scanlines && fract(tex_coord.y * scan_height) < 0.3) {
     rgb *= 0.72;
+  }
+  // "RGB subpixels": draw the display's own structure — each emulated pixel
+  // splits into three vertical R/G/B stripes over a darkened row gap, the way
+  // a GBC/GBA TFT's subpixel triad looks up close (a DMG panel has no
+  // subpixels, so there this is a stylised look, not a simulation). The
+  // off-stripes keep 35% and a 1.55 gain rebalances overall brightness;
+  // min() stops the gain pushing whites into hue shifts. fract() of the
+  // negative tex_coord.y still lands in [0,1), same as the scanline test.
+  if (subpixel) {
+    int stripe = int(fract(tex_coord.x * scan_width) * 3.0);
+    vec3 m = stripe == 0 ? vec3(1.0, 0.35, 0.35)
+           : stripe == 1 ? vec3(0.35, 1.0, 0.35)
+           :               vec3(0.35, 0.35, 1.0);
+    rgb = min(rgb * m * 1.55, vec3(1.0));
+    if (fract(tex_coord.y * scan_height) > 0.82) rgb *= 0.6;
   }
   frag_color = vec4(rgb, 1.0);
 }
@@ -1097,7 +1116,6 @@ when defined(gputime):
       getSize(app.window, w, h)
       echo "GPUTIME viewport=", w, "x", h,
            " filter=", $app.cfg.video_filter,
-           " scanlines=", app.cfg.scanlines,
            " colorcorrect=", app.cfg.color_correction,
            " lcdresponse=", $app.cfg.lcd_response,
            " n=", v.len,
@@ -1111,14 +1129,15 @@ when defined(gputime):
       if getEnv("DINGBAT_GPUTIME_SWEEP") == "1":
         gpu_sweep_step.inc
         case gpu_sweep_step
-        of 1: app.cfg.video_filter = vfNone;  app.cfg.scanlines = false
+        of 1: app.cfg.video_filter = vfNone
         of 2: app.cfg.video_filter = vfHq4x
         of 3: app.cfg.video_filter = vfXbr
         of 4: app.cfg.video_filter = vfXbrz
-        of 5: app.cfg.video_filter = vfNone;  app.cfg.scanlines = true
-        of 6: app.cfg.scanlines = false;      app.cfg.color_correction = false
-        of 7: app.cfg.color_correction = true; app.cfg.lcd_response = true
-        of 8: app.cfg.lcd_response = false
+        of 5: app.cfg.video_filter = vfScanlines
+        of 6: app.cfg.video_filter = vfSubpixel
+        of 7: app.cfg.video_filter = vfNone;   app.cfg.color_correction = false
+        of 8: app.cfg.color_correction = true; app.cfg.lcd_response = true
+        of 9: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
 proc render_game() =
@@ -1127,15 +1146,19 @@ proc render_game() =
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
     # Pushed every present (like the logo uniforms): the Settings window's
     # Apply has no callback into this module, so a cached value could go stale.
-    # An active upscale filter suspends scanlines (smoothing + row-darkening
-    # fight each other) — same behavior as the web frontend. Speed mode
-    # suspends the filter itself (xBR measured +1.01 ms GPU at 2160p).
-    let eff_filter = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
-    let scan = app.cfg.scanlines and eff_filter == vfNone
+    # Scanlines and the RGB-subpixel mask are choices of the same Filter
+    # selector now (mutually exclusive with the smoothing filters by
+    # construction), but they stay separate shader stages: filter_mode only
+    # carries the smoothing algorithms. Speed mode suspends the whole
+    # selector — smoothing and screen looks alike (xBR measured +1.01 ms GPU
+    # at 2160p); the choice keeps its state for when the mode turns off.
+    let vf = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
     glUniform1i(glGetUniformLocation(app.game_shader, "scanlines"),
-                GLint(if scan: 1 else: 0))
+                GLint(if vf == vfScanlines: 1 else: 0))
+    glUniform1i(glGetUniformLocation(app.game_shader, "subpixel"),
+                GLint(if vf == vfSubpixel: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
-                GLint(ord(eff_filter)))
+                GLint(if vf in {vfHq4x, vfXbr, vfXbrz}: ord(vf) else: 0))
   # The letterboxed rect this present draws into. Computed before the case so
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.
@@ -1151,6 +1174,8 @@ proc render_game() =
     glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
                 GLfloat(GBA_H))
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
+                GLfloat(GBA_W))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
     if (app.cfg.lcd_response and not app.cfg.speed_mode) or
@@ -1169,6 +1194,8 @@ proc render_game() =
     # border the picture is 224 native rows and both layers live in it.
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
                 if border: GLfloat(SGB_BORDER_H) else: GLfloat(GB_H))
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
+                if border: GLfloat(SGB_BORDER_W) else: GLfloat(GB_W))
     if border:
       let bd = app.gb_emu.sgb_backdrop()
       glUniform3f(glGetUniformLocation(app.game_shader, "sgb_backdrop"),

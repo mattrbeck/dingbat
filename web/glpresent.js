@@ -12,6 +12,7 @@
 function createGlRenderer(canvasEl, nativeRes, log) {
   let gl = null, prog = null, tex = null, btex = null, lost = false;
   let uColorCorrect, uPanelGbc, uScanlines, uScanHeight, uTexSize, uFilter;
+  let uScanWidth, uSubpixel;
   let uDmgRemap, uDmgPal, uBorderTex, uSgbBorder, uSgbBackdrop;
   let lastW = 0, lastH = 0;
   // Last SGB border generation uploaded. The image changes a handful of times
@@ -57,6 +58,10 @@ uniform bool u_scanlines;
 // both layers live in it, so feeding the 144-row game height here would put
 // Game Boy scanlines over SNES border art.
 uniform float u_scan_height;
+// Pixel-column pitch for the RGB-subpixel mask; the OUTPUT width, for the
+// same reason u_scan_height is the output height.
+uniform float u_scan_width;
+uniform bool u_subpixel;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
 uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
 // --- Super Game Boy border ---------------------------------------------
@@ -293,6 +298,20 @@ void main() {
   if (u_scanlines && fract(v_uv.y * u_scan_height) < 0.3) {
     rgb *= 0.72;
   }
+  // "RGB subpixels": draw the display's own structure — each emulated pixel
+  // splits into three vertical R/G/B stripes over a darkened row gap, the way
+  // a GBC/GBA TFT's subpixel triad looks up close (a DMG panel has no
+  // subpixels, so there this is a stylised look, not a simulation). The
+  // off-stripes keep 35% and a 1.55 gain rebalances overall brightness;
+  // min() stops the gain pushing whites into hue shifts.
+  if (u_subpixel) {
+    int stripe = int(fract(v_uv.x * u_scan_width) * 3.0);
+    vec3 m = stripe == 0 ? vec3(1.0, 0.35, 0.35)
+           : stripe == 1 ? vec3(0.35, 1.0, 0.35)
+           :               vec3(0.35, 0.35, 1.0);
+    rgb = min(rgb * m * 1.55, vec3(1.0));
+    if (fract(v_uv.y * u_scan_height) > 0.82) rgb *= 0.6;
+  }
   frag_color = vec4(rgb, 1.0);
 }`;
 
@@ -324,6 +343,8 @@ void main() {
     uPanelGbc = gl.getUniformLocation(prog, "u_panel_gbc");
     uScanlines = gl.getUniformLocation(prog, "u_scanlines");
     uScanHeight = gl.getUniformLocation(prog, "u_scan_height");
+    uScanWidth = gl.getUniformLocation(prog, "u_scan_width");
+    uSubpixel = gl.getUniformLocation(prog, "u_subpixel");
     uTexSize = gl.getUniformLocation(prog, "u_tex_size");
     uFilter = gl.getUniformLocation(prog, "u_filter");
     uDmgRemap = gl.getUniformLocation(prog, "u_dmg_remap");
@@ -428,8 +449,11 @@ void main() {
       gl.uniform1i(uColorCorrect, opts.colorCorrect ? 1 : 0);
       gl.uniform1i(uPanelGbc, opts.panelGbc ? 1 : 0);
       gl.uniform1i(uScanlines, opts.scanlines ? 1 : 0);
-      // Scanline pitch follows the OUTPUT height, the game texture does not.
+      gl.uniform1i(uSubpixel, opts.subpixel ? 1 : 0);
+      // Scanline/subpixel pitch follows the OUTPUT size, the game texture
+      // does not.
       gl.uniform1f(uScanHeight, oh);
+      gl.uniform1f(uScanWidth, ow);
       gl.uniform2f(uTexSize, w, h);
       gl.uniform1i(uBorderTex, 1);
       gl.uniform1i(uSgbBorder, border ? 1 : 0);

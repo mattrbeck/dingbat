@@ -4502,10 +4502,9 @@ rewindToggle.addEventListener("change", () => {
     speedMode = sm.checked;
     saveSystemSettings();
     syncSystemSettingsUI();
-    // The video stack reads speedMode live (filterActive, glow, LCD
-    // response) — refresh layout, the suspended-row graying and the frame
-    // so the flip shows immediately.
-    if (typeof updateSuspendedVideoToggles === "function") updateSuspendedVideoToggles();
+    // The video stack reads speedMode live (effectiveFilter, glow, LCD
+    // response) — refresh layout (the RGB look changes the backing-store
+    // scale) and the frame so the flip shows immediately.
     if (typeof updateCanvasScaling === "function") updateCanvasScaling();
     if (typeof drawGame === "function") drawGame();
     if (speedMode && currentRomName) {
@@ -6369,7 +6368,6 @@ if (lowpassToggle) {
 // background-size set so one line lands on each emulated pixel row.
 
 var integerScale = false;
-var scanlines = false;
 // LCD response: a plain on/off switch over the panel-response model in
 // src/dingbat/common/lcd_response.nim. On, the core resolves the panel from
 // the machine it is running (DMG / CGB / AGB-001, and nothing under a Super
@@ -6386,27 +6384,32 @@ const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
                        "dmg", "cgb", "gbc", "agb", "agb001", "gba",
                        "ags", "ags101", "sp"];
 var ambientGlow = false;
-var upscaleFilter = "none";  // "none" | "hq4x" | "xbr" | "xbrz" — GPU upscale filter
-// An active filter suspends scanlines (smoothing + row-darkening fight each
-// other). Integer scaling is NOT suspended: the filter runs at the backing
-// store's resolution either way, and pinning the CSS box to a whole multiple
-// is a size restriction the user may still want on top of the smoothing.
-// Speed mode suspends the GPU upscale filter (hq4x +0.16 ms / xBR +0.58 ms
-// per present even on a fast GPU — several percent of the frame budget on
-// the low-end GPUs the mode targets). The stored preference is untouched.
-const filterActive = () => upscaleFilter !== "none" && !speedMode;
+// The Filter selector: one look for the picture. The smoothing filters
+// ("hq4x" | "xbr" | "xbrz") and the screen-structure looks ("scanlines" |
+// "rgb") live in the same select because exactly one can be active — that is
+// what retired the separate Scanlines toggle and its suspend/grey-out dance.
+// The screen looks are not u_filter values in the shader; drawGame translates
+// them to their own uniforms. Integer scaling composes with all of them.
+var upscaleFilter = "none";
+// Speed mode suspends the whole Filter selector — smoothing filters and
+// screen looks alike (hq4x +0.16 ms / xBR +0.58 ms per present even on a
+// fast GPU, and the RGB look additionally inflates the backing store).
+// Every consumer goes through this; the stored preference is untouched.
+const effectiveFilter = () => (speedMode ? "none" : upscaleFilter);
 
-// #canvas backing store = native resolution * GL_SCALE. The game texture is
+// #canvas backing store = native resolution * glScale(). The game texture is
 // sampled NEAREST, so this is a crisp integer upscale (identical pixels to the
-// old SDL logical-size scaling) that also keeps screenshots at their prior size.
-const GL_SCALE = 4;
+// old SDL logical-size scaling) that also keeps screenshots at their prior
+// size. The RGB-subpixel look bumps the multiple to 6: each native pixel then
+// gets two whole backing pixels per stripe, where the default 4 would give
+// 4/3 px per stripe and alias into moiré.
+const glScale = () => (effectiveFilter() === "rgb" ? 6 : 4);
 
 const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
 const stageEl = document.getElementById("stage");
 const glowCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("glow-canvas"));
 const glowCtx = glowCanvas.getContext("2d");
 const integerScaleToggle = /** @type {HTMLInputElement} */ (document.getElementById("integer-scale-toggle"));
-const scanlinesToggle = /** @type {HTMLInputElement} */ (document.getElementById("scanlines-toggle"));
 const lcdResponseToggle = /** @type {HTMLInputElement} */ (document.getElementById("lcd-response-toggle"));
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
 const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
@@ -6442,7 +6445,7 @@ const sgbActive = () =>
 
 const updateCanvasScaling = () => {
   // WebGL2 present: WE own the #canvas backing store now (SDL renders to the
-  // hidden #sdl-canvas). Pin it to the native resolution * GL_SCALE — NEAREST
+  // hidden #sdl-canvas). Pin it to the native resolution * glScale() — NEAREST
   // texture sampling makes that a crisp integer upscale, and the extra pixels
   // keep screenshots at their previous size. Only touch it when it actually
   // changes: assigning canvas.width/height resets the GL drawing buffer.
@@ -6451,7 +6454,8 @@ const updateCanvasScaling = () => {
     document.body.classList.contains("running") && !!currentRomName;
   if (running0 && !linkMode && !rollbackMode) {
     const [nw, nh] = nativeRes();
-    const bw = nw * GL_SCALE, bh = nh * GL_SCALE;
+    const s = glScale();
+    const bw = nw * s, bh = nh * s;
     if (canvasEl.width !== bw) canvasEl.width = bw;
     if (canvasEl.height !== bh) canvasEl.height = bh;
   }
@@ -6650,23 +6654,18 @@ const drawGame = () => {
     panelGbc: Module._wasm_panel_gbc
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
-    // An upscale filter suspends scanlines (smoothing + row-darkening fight
-    // each other); the toggle keeps its state for when the filter turns off.
-    scanlines: scanlines && !filterActive(),
-    filter: speedMode ? "none" : upscaleFilter,
+    // The screen-structure looks are Filter choices in the UI but their own
+    // uniforms in the shader; the smoothing values pass through as-is and
+    // glpresent maps anything else to u_filter 0. All of it reads the
+    // effective filter, so speed mode suspends the whole selector at once.
+    scanlines: effectiveFilter() === "scanlines",
+    subpixel: effectiveFilter() === "rgb",
+    filter: effectiveFilter(),
   });
 };
 
-// Gray out the toggles an active upscale filter suspends (scanlines) so the
-// modal shows they're not in effect right now.
-const updateSuspendedVideoToggles = () => {
-  const sus = filterActive();
-  document.getElementById("scanlines-row")?.classList.toggle("suspended", sus);
-  scanlinesToggle.disabled = sus;
-};
-
 const saveVideoSettings = () => {
-  if (db) dbPut("video", { integerScale, scanlines, lcdResponse, ambientGlow, upscaleFilter });
+  if (db) dbPut("video", { integerScale, lcdResponse, ambientGlow, upscaleFilter });
 };
 
 const applyLcdResponse = () => {
@@ -6680,13 +6679,6 @@ const applyLcdResponse = () => {
 integerScaleToggle.addEventListener("change", () => {
   integerScale = integerScaleToggle.checked;
   updateCanvasScaling();
-  saveVideoSettings();
-});
-
-scanlinesToggle.addEventListener("change", () => {
-  scanlines = scanlinesToggle.checked;
-  updateCanvasScaling();
-  drawGame();  // scanlines are a shader uniform now — redraw to show it live
   saveVideoSettings();
 });
 
@@ -6706,8 +6698,8 @@ ambientGlowToggle.addEventListener("change", () => {
 
 upscaleFilterSelect.addEventListener("change", () => {
   upscaleFilter = upscaleFilterSelect.value;
-  updateSuspendedVideoToggles();
-  drawGame();             // filter is a shader uniform — redraw to show it live
+  updateCanvasScaling();  // the RGB-subpixel look changes the backing scale
+  drawGame();             // the rest is shader uniforms — redraw to show it live
   saveVideoSettings();
 });
 
@@ -6715,7 +6707,6 @@ const loadVideoSettings = async () => {
   let v = await dbGet("video");
   if (v) {
     integerScale = !!v.integerScale;
-    scanlines = !!v.scanlines;
     // Two migrations, oldest first. "Motion blur" (a 50/50 interframe blend)
     // became the LCD response model; anyone who had it on wanted panel
     // ghosting, so the feature stays on for them rather than vanishing. The
@@ -6728,13 +6719,16 @@ const loadVideoSettings = async () => {
     else lcdResponse = !!v.motionBlur;
     ambientGlow = !!v.ambientGlow;
     if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
+    // Scanlines used to be their own toggle; they are a Filter choice now. A
+    // record that had them on becomes that choice — unless it ALSO named a
+    // smoothing filter, which the old UI made win by suspending scanlines,
+    // so the filter keeps winning here.
+    if (v.scanlines && upscaleFilter === "none") upscaleFilter = "scanlines";
   }
   integerScaleToggle.checked = integerScale;
-  scanlinesToggle.checked = scanlines;
   lcdResponseToggle.checked = lcdResponse;
   ambientGlowToggle.checked = ambientGlow;
   upscaleFilterSelect.value = upscaleFilter;
-  updateSuspendedVideoToggles();
   applyLcdResponse();
   updateCanvasScaling();
 };
@@ -7516,14 +7510,12 @@ const resetAllSettings = async () => {
   applyColorCorrect();
 
   // Video effects
-  integerScale = false; scanlines = false; lcdResponse = false; ambientGlow = false;
+  integerScale = false; lcdResponse = false; ambientGlow = false;
   upscaleFilter = "none";
   integerScaleToggle.checked = false;
-  scanlinesToggle.checked = false;
   lcdResponseToggle.checked = false;
   ambientGlowToggle.checked = false;
   upscaleFilterSelect.value = "none";
-  updateSuspendedVideoToggles();
   glowFresh = true;
   applyLcdResponse();
   updateCanvasScaling();

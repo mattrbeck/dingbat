@@ -67,9 +67,17 @@ test("a video record written before either setting existed stays off", async () 
   assert.equal(mode(app), false);
   eq(calls(app), [0]);
   // ...and the neighbours in the same record still load, i.e. this did not
-  // just swallow the whole record.
+  // just swallow the whole record. The old scanlines toggle migrates into the
+  // Filter selector's own option.
   assert.equal(app.runIn("integerScale"), true);
-  assert.equal(app.runIn("scanlines"), true);
+  assert.equal(app.runIn("upscaleFilter"), "scanlines");
+});
+
+test("a legacy scanlines toggle loses to a stored smoothing filter", async () => {
+  // The old UI suspended scanlines whenever a filter was on, so a record with
+  // both means the user was seeing the filter — that is what must survive.
+  const app = await bootWith({ scanlines: true, upscaleFilter: "xbr" });
+  assert.equal(app.runIn("upscaleFilter"), "xbr");
 });
 
 test("every panel name the old picker could store migrates to on", async () => {
