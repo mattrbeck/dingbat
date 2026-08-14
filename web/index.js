@@ -5831,7 +5831,7 @@ const saveAudioSettings = () => {
   if (!db) return;
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
-    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass, mp2kHle }), 250);
+    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass, mp2kHle, fifoInterp }), 250);
 };
 
 const setVolume = (v) => {
@@ -5867,6 +5867,9 @@ const loadAudioSettings = async () => {
   if (s && typeof s.mp2kHle === "boolean") mp2kHle = s.mp2kHle;
   if (mp2kHleToggle) mp2kHleToggle.checked = mp2kHle;
   applyMp2kHle();
+  if (s && typeof s.fifoInterp === "boolean") fifoInterp = s.fifoInterp;
+  if (fifoInterpToggle) fifoInterpToggle.checked = fifoInterp;
+  applyFifoInterp();
 };
 
 for (let s of volSliders) {
@@ -5922,6 +5925,30 @@ if (pcffToggle) {
   pcffToggle.addEventListener("change", () => {
     pitchCorrectFF = pcffToggle.checked;
     applyPitchCorrectFF();
+    saveAudioSettings();
+  });
+}
+
+// --- GBA audio interpolation ("Audio interpolation") ---
+// True-phase cubic reconstruction of the DirectSound FIFO stream, on by
+// default: strictly removes the noise point-sampling the held DAC latch
+// manufactures, touches nothing musical. Off is the hardware-accurate mode —
+// bit-true DAC output, including the grit real hardware has on headphones.
+// The wasm side remembers the preference for future cores and applies it to
+// the live core. Persisted in the "audio" IDB record.
+var fifoInterp = true;
+const fifoInterpToggle = /** @type {HTMLInputElement} */ (document.getElementById("fifo-interp-toggle"));
+
+const applyFifoInterp = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_fifo_interp) {
+    Module._wasm_set_fifo_interp(fifoInterp ? 1 : 0);
+  }
+};
+
+if (fifoInterpToggle) {
+  fifoInterpToggle.addEventListener("change", () => {
+    fifoInterp = fifoInterpToggle.checked;
+    applyFifoInterp();
     saveAudioSettings();
   });
 }
@@ -7105,6 +7132,9 @@ const resetAllSettings = async () => {
   mp2kHle = false;
   if (mp2kHleToggle) mp2kHleToggle.checked = false;
   applyMp2kHle();
+  fifoInterp = true;
+  if (fifoInterpToggle) fifoInterpToggle.checked = true;
+  applyFifoInterp();
   audioLowpass = false;   // (was previously missed by reset)
   if (lowpassToggle) lowpassToggle.checked = false;
   applyAudioLowpass();

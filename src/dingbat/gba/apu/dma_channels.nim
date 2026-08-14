@@ -15,14 +15,11 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
     result.sizes[ch]     = 0
     result.latches[ch]   = 0
     result.hist[ch]      = [0'i16, 0, 0, 0]
-    result.samples_since[ch]   = 0
-    # Seed the phase denominator with the typical FIFO/output ratio
-    # (32768 / ~13379 Hz) so the very first update period interpolates
-    # sanely before a real interval has been measured.
-    result.update_interval[ch] = 2.45'f32
-  # Cubic FIFO reconstruction defaults ON (hardware faithfulness — see the
-  # DMAChannels comment). DINGBAT_FIFO_INTERP=0 forces the legacy zero-order-
-  # hold read, used for before/after A/B captures on a single binary.
+    result.last_update_cycle[ch] = 0
+    result.inv_period[ch]        = 0.0'f32
+  # Cubic FIFO reconstruction defaults ON (see the DMAChannels comment). Off =
+  # the raw held latch, which is bit-true to the hardware DAC's output.
+  # DINGBAT_FIFO_INTERP=0 forces it off for A/B captures on a single binary.
   result.fifo_interp = true
   when not defined(test_harness) and not defined(emscripten):
     if getEnv("DINGBAT_FIFO_INTERP") == "0":
@@ -55,15 +52,21 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
 proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
   ## Record a newly latched FIFO sample for cubic reconstruction. Called on
   ## every timer overflow that advances the DAC (including empty-FIFO 0s), so
-  ## the history reflects the true update cadence. update_interval captures
-  ## how many 32768 Hz reads spanned the period just ended — the denominator
-  ## for the fractional phase between updates.
+  ## the history reflects the true update cadence. The delta between overflow
+  ## event times is the FIFO period in CPU cycles, exact at any rate — this is
+  ## the phase denominator for the reconstruction. (An earlier version counted
+  ## integer 32768 Hz reads instead; at FIFO rates near or above the output
+  ## rate that count degenerates and the interpolator injects broadband noise
+  ## — see tools/nbadiff/README.md.)
   dc.hist[channel][0] = dc.hist[channel][1]
   dc.hist[channel][1] = dc.hist[channel][2]
   dc.hist[channel][2] = dc.hist[channel][3]
   dc.hist[channel][3] = sample
-  dc.update_interval[channel] = max(1.0'f32, float32(dc.samples_since[channel]))
-  dc.samples_since[channel] = 0
+  let now = int64(dc.gba.scheduler.cycles)
+  let delta = now - dc.last_update_cycle[channel]
+  if delta > 0 and delta < 1 shl 20:
+    dc.inv_period[channel] = 1.0'f32 / float32(delta)
+  dc.last_update_cycle[channel] = now
 
 proc timer_overflow*(dc: DMAChannels; timer: int) =
   for channel in 0..1:
@@ -116,17 +119,16 @@ proc dma_channels_get_amplitude*(dc: DMAChannels): tuple[a: int16, b: int16] =
   if not dc.fifo_interp:
     return (dc.latches[0], dc.latches[1])
   var res: array[2, int16]
+  # Fractional position between latch updates, from the timer-overflow cycle
+  # timestamps — exact at any FIFO rate.
+  let now = int64(dc.gba.scheduler.cycles)
   for ch in 0..1:
-    # Phase within the current update period. samples_since is advanced AFTER
-    # sampling so the read immediately following an update sits at phase 0.
-    let denom = dc.update_interval[ch]
-    if denom <= 1.0'f32:
-      # FIFO updating at or above the output rate: nothing to reconstruct
-      # between updates, so hold the latest latch.
+    if dc.inv_period[ch] == 0.0'f32:
+      # No period measured yet (fresh boot / FIFO reset): hold the latch.
       res[ch] = dc.latches[ch]
     else:
-      let mu = clamp(float32(dc.samples_since[ch]) / denom, 0.0'f32, 1.0'f32)
+      let mu = clamp(float32(now - dc.last_update_cycle[ch]) *
+                     dc.inv_period[ch], 0.0'f32, 1.0'f32)
       res[ch] = catmull_rom(dc.hist[ch][0], dc.hist[ch][1],
                             dc.hist[ch][2], dc.hist[ch][3], mu)
-    dc.samples_since[ch] += 1
   (res[0], res[1])
