@@ -153,3 +153,4 @@ web/_serve8781.py
 # minutes, not seconds.
 /statefuzz
 /statefuzz_dbg
+flashcart-kit/
