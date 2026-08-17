@@ -136,9 +136,15 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     # set; mooneye misc/boot_hwio-C).
     mem.write_byte(gb, 0xFF68, 0xC8)
     mem.write_byte(gb, 0xFF6A, 0xD0)
-  # DMG-family boot ROMs leave both joypad select lines active (P1 reads
-  # 0xCF); SGB/CGB/AGB hand off with neither selected (P1 reads 0xFF).
-  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb}:
+  # Joypad select lines at handoff are a PER-BOOT-ROM split, measured from
+  # both sides: DMG-family boot ROMs leave both lines active (P1 reads $CF),
+  # and so does the AGB's CGB-mode boot ROM — gbedge p00 IDENT byte 10 = CF
+  # on a real MGB and a real AGS, 2026-08-17 (tests/roms/expected/gb-*.txt).
+  # The CGB's and SGB's own boot ROMs hand off DESELECTED ($FF): mooneye
+  # boot_hwio-C / boot_hwio-S are hardware-verified and fail with $CF there.
+  # One more AGB boot-ROM deviation, alongside its `inc b`. Pan Docs' table
+  # ("$C7 or $CF" for CGB/AGB) is right only for the AGB column.
+  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb, bmAgb}:
     gb.joypad.button_keys = true
     gb.joypad.direction_keys = true
   mem.write_byte(gb, 0xFFFF, 0x00)
@@ -406,6 +412,10 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF4F:         ppu_read(gb.ppu, gb, idx)
   of 0xFF51..0xFF55: ppu_read(gb.ppu, gb, idx)
   of 0xFF68..0xFF6B: ppu_read(gb.ppu, gb, idx)
+  of 0xFF56:
+    # Infrared port, CGB mode only. Bits 0/6/7 R/W; bit 1 reads 1 (no IR
+    # signal is ever modeled); bits 2-5 read set. Silicon: $3E at handoff.
+    if gb.cgb_native: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
   of 0xFF70:
     if gb.cgb_native: 0xF8'u8 or mem.svbk_raw else: 0xFF'u8
   # FF72-FF77 only exist on CGB/AGB hardware (present even in DMG-compat
@@ -650,6 +660,8 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF4F:         ppu_write(gb.ppu, gb, idx, val)
   of 0xFF51..0xFF55: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF68..0xFF6B: ppu_write(gb.ppu, gb, idx, val)
+  of 0xFF56:
+    if gb.cgb_native: mem.rp = val and 0xC1
   of 0xFF70:
     if gb.cgb_native:
       mem.svbk_raw = val and 0x7

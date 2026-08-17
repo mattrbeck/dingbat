@@ -3403,6 +3403,14 @@ type
   GbMemory* = ref object
     wram*:                 array[8, seq[uint8]]
     wram_bank*:            uint8
+    rp*:                   uint8 # RP ($FF56) stored bits 0/6/7 — the LED and
+                                 # the read-enable pair. Readback ORs $3E:
+                                 # bits 2-5 read set and bit 1 is "no IR
+                                 # signal", which is all this models (no IR
+                                 # link). An AGS with no IR window still
+                                 # carries the register and reads $3E at boot
+                                 # (gbedge p00, 2026-08-17). Not serialized —
+                                 # cosmetic readback state.
     svbk_raw*:             uint8 # the bits the SVBK write actually carried:
                                  # readback is raw, only the MAPPING aliases
                                  # 0 -> 1 (SameBoy stores `value | ~7`, DocBoy
