@@ -177,11 +177,10 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
 # to build. macOS, iOS and the emscripten web build are all clang, so the
 # measured win lands where the shipping builds are; if the wasm toolchain is
 # not detected as clang it simply falls back with nothing lost.
-when defined(clang):
-  {.pragma: hot_bus_inline,
-    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
-else:
-  {.pragma: hot_bus_inline, inline.}
+#
+# The when-block defining hot_bus_inline lives in gb.nim, just above the
+# forward declarations of these procs: on the gcc side the pragma expands to
+# `inline`, which Nim requires on the forward declaration as well.
 
 proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.} =
   ## Everything an M-cycle advances EXCEPT the PPU: the scheduler, the timer

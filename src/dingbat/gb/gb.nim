@@ -4454,10 +4454,21 @@ include timer
 include sgb
 include joypad
 # Video: shared PPU base + the two interchangeable renderers
-# Forward declarations needed by ppu.nim (defined in memory.nim included later)
+# Forward declarations needed by ppu.nim (defined in memory.nim included later).
+# hot_bus_inline is defined here rather than in memory.nim because the forward
+# declarations below must carry the same pragma as their implementations: on
+# non-clang targets it expands to `inline`, and Nim rejects an implementation
+# whose pragmas the forward declaration lacks (the clang codegenDecl form
+# happens to slip through, which is why only the gcc/mingw CI builds broke).
+# The rationale for the pragma itself lives with mem_tick_bus in memory.nim.
+when defined(clang):
+  {.pragma: hot_bus_inline,
+    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+else:
+  {.pragma: hot_bus_inline, inline.}
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
-proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true)
-proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false)
+proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.}
+proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.}
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
