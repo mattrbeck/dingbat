@@ -42,6 +42,19 @@ cp "$CACHE"/gambatte/oamdma/late_sp00*.gbc "$CACHE"/gambatte/oamdma/late_sp01*.g
    "$CACHE"/gambatte/oamdma/late_sp39*.gbc \
    "$CACHE"/gambatte/oamdma/oamdma_late_speedchange_stat_*.gbc            "$KIT/6-oamdma-phase/"
 
+# 8 — the shootout's 261st row (see docs/gb-hardware-session-runbook.md,
+#     experiment (c)): acid-hell itself, daid's band-edge ROM, and the
+#     committed probe rig — the probes are DMG carts on purpose (BGP is inert
+#     in native-CGB mode) so the SP's compat mode runs them today.
+mkdir -p "$KIT"/8-shootout-261
+cp "$CACHE"/cgb-acid-hell/cgb-acid-hell.gbc                               "$KIT/8-shootout-261/"
+cp tools/gbprobe/probe_c_arbitrate.gb tools/gbprobe/probe_c_arbitrate_scx3.gb \
+   tools/gbprobe/probe_c_arbitrate_scx7.gb tools/gbprobe/probe_a_statidiom.gb \
+   tools/gbprobe/probe_b_scxm3.gb                                         "$KIT/8-shootout-261/"
+DAID="$HOME/code/GBEmulatorShootout/testroms/daid/ppu_scanline_bgp.gb"
+[ -f "$DAID" ] && cp "$DAID" "$KIT/8-shootout-261/" || \
+  echo "note: $DAID not found — daid ROM skipped (clone GBEmulatorShootout)"
+
 # 7 — APU: CH3 buffer-on-DAC-off (three-way emulator split) + sweep restarts
 cp "$CACHE"/same-suite/apu/channel_3/channel_3_restart_stop_delay.gb      "$KIT/7-apu/"
 cp "$CACHE"/same-suite/apu/channel_1/channel_1_sweep_restart.gb \
