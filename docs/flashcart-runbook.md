@@ -130,6 +130,49 @@ ship; if any differ, that's a revision split worth every photo.
   silence recorded on GBP vs GBC vs GBA is enough to fit the two
   constants. Otherwise skip.
 
+## Session 1 results — 2026-08-17, GBP (MGB) + GBA SP, gbedge.gb complete
+
+All 27 pages photographed on both consoles; transcribed to
+`tests/roms/expected/gb-mgb-1.txt` / `gb-agbsp-1.txt`, every page verified
+against its on-screen CRC-16/CCITT (init $FFFF) — zero read errors. gbedge
+is a CGB-flagged cart, so the SP ran CGB-NATIVE mode (MODEL 11 01, ALL
+052C); the MGB ran DMG-family (MODEL FF 00, ALL 3FE7). No menu pollution:
+both P00 pages carry clean boot-handoff values.
+
+**MGB vs dingbat (`--model mgb`): 22 of 26 content pages byte-identical.**
+The four mismatches, all small and coherent:
+- **P06 SERIAL** bytes 00/02/03 (hw 64/63/46 vs 5D/64/40) — the parked
+  serial start-phase cluster's raw counts (gb.nim `start_wait_*`).
+- **P0F UNUSED** bytes 1C/1D read 50, dingbat 51 — one LSB.
+- **P15 M1STAT** byte 08 reads mode 0 (hw E0, dingbat E3) and byte 1B mode
+  2 (hw E2, dingbat E3) — the 42-row m1 bucket's exact signal, and the SP
+  shows the IDENTICAL bytes (F5C8 both consoles): one model truth.
+- **P19 DIVTAPS** bytes 08/09 (hw 88 00, dingbat 00 20) — also identical
+  across both consoles.
+Two worries in the known-divergences list above DISSOLVED: P03 TIMARELOAD
+and P05 IEPUSH match hardware byte-for-byte on both consoles.
+
+**AGB-native new data (no dingbat reference yet — the gbedge viewer white-
+screens under `--model cgb/agb`, a dingbat bug to fix first):**
+- **P00 IDENT**: P1 = $CF (dingbat's AGB table hands off $FF — fix),
+  SC = $7C (dingbat/DocBoy right; Pan Docs $7F and SameBoy $7E wrong),
+  SVBK = $F8 (the 45a2d0f raw-readback fix is what silicon does),
+  RP = $3E on an SP with no IR window (dingbat leaves it unmapped → $FF),
+  VBK $FE / KEY1 $7E / FF75 $8F / OPRI $FE / DIV $1F / LY $91 / STAT $81.
+- **P18 CGBWRAM**: byte 0A = **5C — the $D000 window really BANKS** on
+  AGB (banks 2-7 all distinct, SVBK 0→1 alias only). hwprobe row 1's
+  64-row alias assumption is refuted on this silicon; the CGB arm still
+  wants the GBC run.
+- **P1A SWEEP**: byte-identical to the MGB page — **no second overflow
+  check in the GB-slot APU on AGS hardware**; row 17 closes (the reverted
+  GB port stays reverted, the GBA-mode check is GBA-native-only).
+- Model splits, one page each, for later decode: P02 TIMAGLITCH (bytes
+  10-13 — the A5 TAC-disable family), P06 SERIAL (bytes 02/05/06),
+  P0B STATWBUG (DMG-only glitch absent, as documented), P0D OAMDMA (CGB
+  bus conflicts), P0F (FEA0 echo pattern AA..FF), P10 VRAMLOCK,
+  P13 DSTAT / P14 SPEED (double-speed pages ran for real), P16 HALTPHASE,
+  P17 WYLATCH (row 4's CGB-samples-WY data).
+
 ## Getting results back
 
 Photograph everything into one folder per console. For gbedge pages,
