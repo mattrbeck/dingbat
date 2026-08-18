@@ -492,6 +492,14 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
        gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed) and
        (when CGB_HALT_LEAD_SKIP_LYC0 != 0:
           not (gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8)
+        else: true) and
+       (when CGB_HALT_LEAD_LYC_ONLY != 0:
+          # EXPERIMENT, not a shipped rule: is the lead a property of the LYC
+          # comparator's own wake, absent when a MODE-sourced STAT edge raises
+          # it? gambatte's `halt/m0*_m0stat_scx*` read mode 2 where hardware
+          # reads mode 0 under the flat lead, which is what that would look
+          # like. STAT bit 6 is LYC, bits 3/4/5 are modes 0/1/2.
+          (gb.ppu.lcd_status and 0x38'u8) == 0'u8
         else: true):
       let mdots = int32(4 shr gb.memory.current_speed)
       let lead  = int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)

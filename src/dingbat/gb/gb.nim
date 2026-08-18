@@ -492,6 +492,9 @@ const SERIAL_START_ARM* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
+const CGB_HALT_LEAD_LYC_ONLY* {.intdefine.} = 0
+  ## EXPERIMENT. Restrict CGB_HALT_PPU_LEAD to halts where the LYC comparator is
+  ## the only armed STAT source. 0 ships; see the test it gates in cpu.nim.
 const CGB_HALT_LEAD_SKIP_LYC0* {.intdefine.} = 1
   ## Whether a halt that the LY 153 -> 0 snapback's `LYC = 0` match will wake is
   ## exempt from CGB_HALT_PPU_LEAD below. 1 ships (and is inert while the lead

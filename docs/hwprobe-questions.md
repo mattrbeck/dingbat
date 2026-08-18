@@ -316,3 +316,121 @@ Silicon prediction from session 4's old-block outcome: r4 untouched,
 scratch 0, r6 = 06 or 04 — whichever comes back pins the resume at
 A+10 vs A+14 and finally licenses the model change (dingbat's
 (A+2)&~3 resume is already known wrong at halfword alignment).
+
+## v8 candidates — the CGB phase constants, and how to stop fitting them (2026-08-18)
+
+`cgb-acid-hell` closed at 261/261 on a new constant
+(`CGB_HALT_PPU_LEAD = 1`, gated by `CGB_HALT_LEAD_SKIP_LYC0`), and the way it
+was derived is worth generalising, because it is the first one in this tree
+derived from **the test ROM's own source** rather than from a knob sweep:
+
+1. Get the ROM's source (both `cgb-acid-hell` and daid's set are published;
+   daid's ships *inside* the shootout at `testroms/daid/`).
+2. Rebuild it **byte-exact** — verify the md5. Both need pre-0.6 rgbds
+   spellings fixed, and both need a `nop` after every `halt` that old rgbasm
+   inserted for you. Miss that and you have introduced the very M-cycle you
+   are trying to measure.
+3. Change **one parameter** and re-run both dingbat and SameBoy on the result.
+   A model error and a phase error look identical on the shipped ROM; they
+   separate the moment the parameter moves.
+
+That is what turned "acid-hell and daid demand opposite phases" into "the
+advance is present on a normal-line LYC wake and absent on the LY 153->0
+snapback" — a LYC sweep of daid, same ROM and same entry, only the wake line
+changing (`tools/gbppu/daidsweep.py`).
+
+**The point of the table below is that suite agreement is not evidence.** Each
+of these constants currently rests on one ROM, one emulator, or a plateau
+midpoint. A photograph settles them.
+
+| # | constant | what it rests on now | ROM that would settle it | status |
+|---|---|---|---|---|
+| g1 | `CGB_HALT_PPU_LEAD` + `CGB_HALT_LEAD_SKIP_LYC0` | daid + acid-hell + shootout 261/261 — **and probe (e) DISSENTS, see below** | **probe (e) already takes `-DANCHOR_LINE=n`.** Photograph the band column at n = 16 and compare against the two builds' predictions, which differ by exactly one 4-dot step there. Also shoot n = 0, where the two builds agree — that pair is the control | **one build away, and it is now the most important shot in this file** |
+| g2 | the same, by STAT source | refuted by suite only (`CGB_HALT_LEAD_LYC_ONLY=1`: gambatte 4246 -> 4240) | probe (e) with the anchor's `rSTAT` source as a second parameter — LYC vs mode 0 vs mode 2, same line, same code | needs a 3-line ROM edit |
+| g3 | `OBJ_DMA_BUS_LEAD` (and its new `CGB_HALT_PPU_LEAD` term) | `strikethrough` alone, two consoles | a ROM that arms OAM DMA a settable number of M-cycles after a halt wake and draws an object over the transfer — the lead is the offset at which the object's byte changes | open |
+| g4 | `HDMA_VISIBLE_DOTS` (+ lead term) | gambatte `dma`, bracketed 4/8/12 but only a partial account — seven `hdma_late_disable_*` still red | HDMA one block per line with the disable write swept in M-cycles; read back the destination | open |
+| g5 | `CGB_TDSEL_LATENCY` / `CGB_TDSEL_IDX_DOTS` (H1) | the 8..15-dot window is populated by `cgb-acid-hell` **alone** | probe (d) already toggles LCDC.4; add a second toggle at a settable distance so the "back-to-back glitched fetch" bucket has a ROM other than acid-hell | probe (d) exists, needs the second toggle |
+| g6 | `STAT_M0_FIELD_TAIL` + `STAT_M0_TAIL_MAX_MC` | its own note admits idiom and suite are **perfectly confounded** in every existing ROM | probe (a) is exactly this and is **already built** — it was specced for a session that has not happened | **built, unrun** |
+| g7 | `CGB_SCY_LATENCY` / `CGB_SCX_LATENCY` / `CGB_OBJ_SIZE_LATENCY` / `CGB_MIXER_LATENCY` | mealybug `_cgb_c` captures, i.e. one revision of one console | a single paged ROM that writes each register at a swept dot and draws the boundary — one page per register, same reader | open |
+
+Ordering, if only one sitting is available: **g1 then g6**. g1 is one `rgbasm`
+invocation away and it is the newest and least independently supported constant
+in the tree; g6 is already built and would delete two constants and reopen ~60
+rows if the answer is "the read idiom never mattered".
+
+### The open contradiction g1 has to resolve
+
+Two instruments in this tree, both scored against the same oracle, disagree
+about the shipped constant. Scored by BASE equivalence
+(`tools/gbprobe/probe_f_base.sh --plain`, which sweeps the probe's write
+position in dingbat and holds SameBoy at the shipping BASE 26):
+
+| probe (e) anchor | `CGB_HALT_PPU_LEAD=0` | `=1` (shipping) |
+|---|---|---|
+| `-DANCHOR_LINE=0` | BASE 23 | BASE 23 (the gate suppresses it — as designed) |
+| `-DANCHOR_LINE=16` | BASE **24** | BASE **23** |
+
+A build that matches at a LOWER base needs its write EARLIER, i.e. is further
+from "no compensation needed". So probe (e) says the lead moves dingbat AWAY
+from SameBoy on a normal line — while daid's LYC sweep says SameBoy has the
+lead at LYC = 1, 8, 40 and 100. Both are SameBoy comparisons. They cannot both
+be right.
+
+The shipped model follows daid and `cgb-acid-hell`: two published ROMs, both
+rebuilt byte-exact, both understood line by line, one of which SameBoy
+reproduces pixel-exactly — against probe (e), which is ours, has a frame loop
+with joypad reads and in-VBlank header drawing around the measurement, and
+carries an unexplained **2–3 M** baseline offset from the oracle that predates
+this work entirely. An instrument whose zero is 2–3 M out is not a fit arbiter
+of a 1 M effect, so it does not get a vote until that offset is explained.
+
+**But it is not dismissed, and it is why g1 is the shot to take.** Either
+probe (e) has a bug, in which case its BASE numbers have been misleading this
+work for weeks and several earlier conclusions drawn from them need re-reading;
+or it is right, and `CGB_HALT_PPU_LEAD` is fitted to two ROMs that happen to
+agree. Hardware is the only thing that separates those.
+
+### g1, ready to shoot: the ROM, the settings and all three predictions
+
+`tools/gbprobe/mk.sh probe_e_objgrid -DSCX_DEFAULT=n -DOBJX_DEFAULT='$FF'` —
+the shipping anchor (line 16), objects off. Read the band columns with
+`tools/gbprobe/read_probe_e.py`, which measures each bar against the parameter
+header inside the same frame, so a photograph needs no registration.
+
+Two photographs, SCX 0 and SCX 4. The three candidates are **8 dots apart**,
+which is a whole tile and unmistakable on a phone camera:
+
+| SCX | `CGB_HALT_PPU_LEAD=0` | `=1` (shipping) | SameBoy |
+|---|---|---|---|
+| 0 | `32 40 40 48 48 56 …` | `40 40 48 48 56 56 …` | `24 32 32 40 40 48 …` |
+| 4 | `28 36 36 44 44 52 …` | `36 36 44 44 52 52 …` | `20 28 28 36 36 44 …` |
+
+Note what this shot actually covers: **neither dingbat build agrees with
+SameBoy here even at lead 0** — that is the unexplained 2 M baseline offset, and
+it is 8 dots wide in this reading. So the photograph answers two questions at
+once, and the third outcome is the interesting one:
+
+* lands on **24 / 20** — SameBoy is right, BOTH dingbat builds are wrong on this
+  probe, and the thing to chase is probe (e)'s baseline offset, not the lead.
+* lands on **32 / 28** — lead 0 is right on this instrument, which contradicts
+  daid and puts `CGB_HALT_PPU_LEAD` back in question.
+* lands on **40 / 36** — the shipping build is right and probe (e)'s
+  disagreement with SameBoy is SameBoy's, which would be the first time in this
+  work the oracle has been wrong about anything.
+
+### What a negative result would mean, stated in advance
+
+Worth writing down before the photographs exist, because it is the only
+protection against reading them the way we want to:
+
+* **g1, column does not move between n = 0 and n > 0.** Then the snapback
+  exemption is fitted, `daid` and `cgb-acid-hell` are being reconciled by a
+  rule silicon does not have, and the honest response is to revert
+  `CGB_HALT_PPU_LEAD` to 0 and take `cgb-acid-hell` back to 2 px. 261/261 is
+  not worth a constant hardware refuses.
+* **g1, column moves but by something other than 4 dots.** The quantity is real
+  and the size is wrong, which points at the repayment path in `cpu_halt_tick`
+  rather than at the gate.
+* **g6, the two idioms read the same.** `STAT_M0_FIELD_TAIL` and
+  `STAT_M0_TAIL_MAX_MC` both go, and the ~60 rows they currently buy have to be
+  re-derived from something else.
