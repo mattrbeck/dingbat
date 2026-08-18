@@ -1279,17 +1279,25 @@ proc build_shootout_tests(): seq[TestDef] =
   # see below.
   #
   # "The same machine" was measured in 2026-08-09 and it is NOT the same
-  # machine, which is the better reason for leaving `ppu_scanline_bgp` "(GBC)"
-  # out. Run it `--cgb --color` and every band of the frame is exactly 3 pixels
+  # machine, which was the reason for leaving `ppu_scanline_bgp` "(GBC)" out.
+  # Run it `--cgb --color` and every band of the frame is exactly 3 pixels
   # early against that PNG (92.50%), and the 3 decompose as one M-cycle at the
   # handler's entry MINUS one dot of palette write step — and that one dot is
   # the CGB-C/CGB-D revision split, which mealybug ships both sides of:
   # `CGB_MIXER_LATENCY=1` is pixel-exact on `m3_bgp_change_cgb_c.png` and `=0`
-  # is pixel-exact on `_cgb_d.png`, and only `=0` can reach daid's capture. So
-  # this row scores a LATER CGB than the 27 mealybug rows do, and wiring it
-  # would put two references for the same register on opposite sides of a
-  # revision the tree deliberately picks one side of. See
-  # docs/gb-failure-triage.md and CGB_HALT_EXIT_MCYCLES in gb.nim.
+  # is pixel-exact on `_cgb_d.png`, and only `=0` can reach daid's capture.
+  #
+  # **That reason expired when the revision axis landed, and the row is wired
+  # now (2026-08-18).** It does not put two references for one register on
+  # opposite sides of a revision any more, because the row NAMES its revision:
+  # `--cgb --model=cgbe` is exactly what the shootout's adapter passes, and at
+  # it the frame is pixel-exact while the 27 mealybug rows keep scoring the
+  # default CGB-C. Leaving it out had a cost that showed up the day it
+  # mattered: `CGB_HALT_PPU_LEAD=1` was measured, run through the whole local
+  # suite with NO regressions, committed and pushed — and it takes this row
+  # from 0 px to 2304 at every one of the six revisions. It is a silicon
+  # reference the shootout scores and nothing here gated it. See
+  # docs/gb-failure-triage.md and CGB_HALT_PPU_LEAD in gb.nim.
   #
   # `stop_instr` "(GBC)" is the trap worth naming, because it would have gone
   # in GREEN for the wrong reason. Its reference is an all-black frame, which is
@@ -1312,6 +1320,23 @@ proc build_shootout_tests(): seq[TestDef] =
     expected_png: ensure_shootout_file("daid/ppu_scanline_bgp_0.dmg.png"),
     alt_pngs: @[ensure_shootout_file("daid/ppu_scanline_bgp_1.dmg.png"),
                 ensure_shootout_file("daid/ppu_scanline_bgp_2.dmg.png")],
+  ))
+  # The same ROM on a CGB in compatibility mode, at the revision its capture is
+  # of. One reference, no alternates: unlike the DMG arm this frame has a single
+  # legitimate outcome. `model: "cgbe"` is the passthrough and `--cgb --model=
+  # cgbe` is what the shootout adapter runs; the row is pixel-exact there and
+  # nowhere else (2304 px at every other revision). See the note above for why
+  # it was held out until 2026-08-18 and what leaving it out cost.
+  tests.add(TestDef(
+    name: "daid/ppu_scanline_bgp-gbc",
+    rom_path: ensure_shootout_file("daid/ppu_scanline_bgp.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: 30,
+    expected_png: ensure_shootout_file("daid/ppu_scanline_bgp.gbc.png"),
+    color: true,
+    cgb: true,
+    model: "cgbe",
   ))
   # STOP blanks the DMG panel, because the PPU stops with it.
   tests.add(TestDef(

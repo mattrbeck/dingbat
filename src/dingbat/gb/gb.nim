@@ -491,15 +491,47 @@ const SERIAL_START_ARM* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
-const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
+const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
   ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
   ## as time -- which is the shape the two halves of that measurement demand.
   ##
-  ## ---- 2026-08-18: turned ON, and `cgb-acid-hell` is what turned it ---------
+  ## ---- 2026-08-18: turned on, then turned BACK OFF -- read both halves ------
   ##
-  ## This shipped at 0 for one reason: `strikethrough-cgb` went 7 pixels wrong
-  ## under it, and no ROM measured the phase from the other side, so the row was
-  ## read as a refutation. Both halves of that have now changed.
+  ## **It ships at 0 again.** Turning it on takes `cgb-acid-hell` to 0 px and
+  ## `daid/ppu_scanline_bgp` "(GBC)" from 0 px to **2304**, at every one of the
+  ## six CGB revisions. That row is a silicon reference the shootout scores and
+  ## the local runner did NOT (it does now -- see dingbat_test_runner.nim), which
+  ## is the only reason the first pass looked clean.
+  ##
+  ## The MEASUREMENT below stands and is worth keeping; what it does not
+  ## establish is that the halt is where the M-cycle lives. Three instruments
+  ## now bracket it, and all three are STAT-LYC `halt` anchors on CGB:
+  ##
+  ##   cgb-acid-hell            wants the advance   (144 halts/frame, one/line)
+  ##   daid ppu_scanline_bgp    refuses it          (1 halt/frame, LYC=0 snapback)
+  ##   probe (e)/(f) plain arm  refuses it          (1 halt/frame, LYC=16)
+  ##
+  ## and SameBoy -- which reproduces all three, and is 16/16 against Matt's GBA
+  ## SP -- carries no halt-wake PPU lead at all. So the M-cycle acid-hell
+  ## measures is real and this is the wrong home for it: same category as
+  ## CGB_TDSEL_LATENCY=5, a compensation that happens to land on one ROM. The
+  ## thing that separates acid-hell from the other two is still open; the
+  ## obvious candidate (IME set / a vector taken) is REFUTED -- acid-hell's
+  ## blocks continue inline after `halt`, so IME is 0 and no vector is taken,
+  ## the same as the probe, while daid's IS dispatched.
+  ##
+  ## For the record, the cost of turning it on: runner 884 -> 886 but with the
+  ## daid row unwired (885 with it wired), gambatte 4201 -> 4241 (+40, mostly
+  ## bucket 13's speed-switch model, whose defaults are tied to this knob),
+  ## against gambatte dma -12 and lcd_offset -6 -- which are the same signal as
+  ## daid, all of them things measured across a halt wake.
+  ##
+  ## ---- The measurement, which stands -----------------------------------------
+  ##
+  ## Until 2026-08-18 the only thing pointed at this quantity was
+  ## `strikethrough-cgb` going 7 pixels wrong under it, with no ROM measuring it
+  ## from the other side. There is now a measurement, and separately that
+  ## strikethrough objection turns out not to have been one.
   ##
   ## `cgb-acid-hell` measures it, and does so on the ROM's own source rather
   ## than by knob-fitting. The ROM is fully unrolled -- one block per scanline,
@@ -520,12 +552,9 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## CGB_PIPE_MCYCLES already was -- at which point BOTH strikethrough frames
   ## are byte-identical across the change and acid-hell is 0.
   ##
-  ## Ledger, whole runner: 884 -> 886 rows, gambatte 4201 -> 4241 (+40), NO
-  ## regressions; objtab held at 0/153, probe (e) 68 -> 113/136, acid-hell
-  ## 2 px -> 0. The gambatte gain is not this constant alone: the speed-switch
-  ## model of bucket 13 has its defaults tied to this knob
-  ## (SPEED_SWITCH_PPU_EXTRA_DOTS = 12 - 4*CGB_HALT_PPU_LEAD), so turning it on
-  ## lands that model with it, which is what it was parked waiting for.
+  ## The advance is summed into that lead unconditionally (it is a no-op at the
+  ## shipping 0), so if this knob is ever turned on, strikethrough comes with it
+  ## for free and only the daid row above is in the way.
   ## **It ships at 0 as well**, and for a narrower reason than the charge does:
   ## the quantity is now bracketed from both sides and the mechanism is settled,
   ## and what is left between it and shipping is ONE ROW. See the last section.

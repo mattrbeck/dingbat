@@ -930,7 +930,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
 | `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left were all LY = 0, i.e. bucket 0, and are **0 as of 2026-08-09** |
-| `acid/cgb-acid-hell` (CGB) | 2 | **0** | **CLOSED 2026-08-18 — 23040/23040.** The last 2 px were one CPU-vs-PPU M-cycle at a STAT/LYC halt wake, measured off the ROM's own source and landed as `CGB_HALT_PPU_LEAD = 1`; see the 2026-08-18 section |
+| `acid/cgb-acid-hell` (CGB) | 2 | 2 | **MEASURED 2026-08-18, not closed.** The 2 px are one CPU-vs-PPU M-cycle, proven frame-wide off the ROM's own source. `CGB_HALT_PPU_LEAD = 1` spends it and takes this row to 0 — and takes `daid/ppu_scanline_bgp` (GBC) from 0 to 2304, so it is the wrong home and ships at 0. See the 2026-08-18 sections |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
@@ -1360,15 +1360,51 @@ itself, which GBMicrotest and mooneye pin directly), and
 `CGB_OAM_DMA_START_T=4` as the compensator (recovers strikethrough but costs 117
 `oamdma` rows, confirming the 8 T start).
 
-**Left open, and it is a real tension:** the probe (e)/(f) plain arm, which is
-also anchored on a STAT-LYC `halt`, now wants BASE 23 where it wanted 24 --
-i.e. that instrument says the advance moved dingbat one M-cycle FURTHER from
-SameBoy, while acid-hell says it landed exactly on it. Both are halt-anchored
-CGB ROMs and they should not disagree. The most likely discriminator is the one
-`docs/gb-failure-triage.md` already names elsewhere: whether IME is set and a
-vector is taken. acid-hell does `xor a / ldh [rIF], a / halt`; the probe's
-anchor should be re-read against that before the probe's BASE numbers are
-trusted again.
+#### 2026-08-18, third pass: the lead is REVERTED, and why
+
+The section above shipped `CGB_HALT_PPU_LEAD = 1` on a full runner pass with no
+regressions. **That pass was blind.** `daid/ppu_scanline_bgp` "(GBC)" is a
+silicon reference the shootout scores and the local runner did not: the lead
+takes it from **0 px to 2304**, at every one of the six CGB revisions. The knob
+is back at 0 and the row is now wired (`daid/ppu_scanline_bgp-gbc`,
+`--cgb --model=cgbe`, which is exactly what the shootout adapter passes), so
+the gap cannot reopen.
+
+That makes three instruments, all STAT-LYC `halt` anchors on CGB, and they do
+not agree:
+
+| instrument | halts per frame | wants the advance? |
+|---|---|---|
+| `cgb-acid-hell` | 144 (one per line, LYC = the line) | **yes** |
+| `daid ppu_scanline_bgp` (GBC) | 1 (LYC = 0, the 153→0 snapback) | no |
+| probe (e)/(f), plain arm | 1 (LYC = 16) | no |
+
+and **SameBoy reproduces all three** — including acid-hell pixel-exactly — while
+carrying no halt-wake PPU lead at all. So the M-cycle acid-hell measures is
+real, and the halt is not where it lives: this is the same category as
+`CGB_TDSEL_LATENCY = 5`, a compensation that happens to land on one ROM.
+
+The obvious discriminator is **refuted**: it is not IME / whether a vector is
+taken. acid-hell's per-line blocks continue inline after `halt`, so IME is 0 and
+no vector is dispatched — the same as the probe, which disagrees with it — while
+daid's handler *is* entered (it "pops its return address and never returns").
+So IME cannot separate the yes from the nos.
+
+What is left to try, in order: the count and spacing of halts (acid-hell is the
+only one of the three that re-halts every line, so anything that decays within a
+line or accumulates per halt would separate it); the LYC value itself (0 on the
+snapback vs a normal line); and the possibility that the M-cycle is not at the
+wake at all but in a per-line quantity acid-hell alone rewrites every line
+(`rSCY`, `rLYC`, `rIF`). The `hellsrc.py` harness can test the first two
+directly, since the ROM's anchor is source-editable — that is the next move,
+not another knob sweep.
+
+The regressions the lead also caused are worth recording as the same signal
+rather than as separate problems: gambatte `dma` −12 and `lcd_offset` −6 are
+both measured across a halt wake, and they line up with daid, not with
+acid-hell. Its gains — `speedchange` +50 and `age/spsw-mode0-cgbBCE` — are
+bucket 13's speed-switch model, whose defaults are tied to this knob; they are
+real and they are still waiting on the same one row.
 
 #### 2026-08-12: H1 holds, and `cgb-acid-hell` is 0
 
