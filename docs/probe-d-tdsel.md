@@ -154,18 +154,47 @@ Three things fall out, two of them new:
 3. **The fetch grid's phase against the CPU is right at SCX ≡ 0, 3 and 7**
    — the bar columns match, not just the shades.
 
-### What is left, and the next measurement
+### The fine-scroll sweep (photos IMG_3815-3819) — also clean
 
-`cgb-acid-hell` runs at **SCX = 180, i.e. SCX & 7 = 4** — a fine-scroll
-phase this round did not cover. The three tested phases all agree with
-dingbat, so the surviving hypothesis is narrow and testable: dingbat's
-fetch-grid position is wrong specifically at some fine-scroll phase, and
-acid-hell sits on one of them while mealybug's `change2` does not.
+`cgb-acid-hell` runs at SCX = 180, i.e. **SCX & 7 = 4**, which the first
+round had not covered, so the remaining phases were built and run. Photos
+identified by their first bar's column, which the fine scroll shifts one
+pixel per residue (dingbat: SCX 0 → x=48, 1 → 47, … 7 → 41):
 
-`probe_d_tdsel_scx{1,2,4,5,6}.gb` complete the sweep. dingbat predicts
-`#2#2#2#2#2#2#2#2` at **every** phase 0-7, so any hardware frame that
-alternates the other way names the phase where the grid is off — and
-SCX 4 is the one acid-hell actually uses.
+| photo | first bar | build | hardware |
+|---|---|---|---|
+| IMG_3815 | x=44 | **SCX 4** — acid-hell's own phase | `#2#2#2#2#2#2#2#2` |
+| IMG_3816 | x=47 | SCX 1 | `#2#2#2#2#2#2#2#2` |
+| IMG_3817 | x=45 | SCX 2-3 | `#2#2#2#2#2#2#2#2` |
+| IMG_3818 | x=43 | SCX 5 | `#2#2#2#2#2#2#2#2` |
+| IMG_3819 | x=42 | SCX 6 | `#2#2#2#2#2#2#2#2` |
+
+**All eight fine-scroll phases now agree with dingbat**, so the hypothesis
+that the fetch grid is misplaced at some SCX residue is refuted along with
+the latency one. For a line with no objects and no window, dingbat's model
+of when an LCDC.4 write reaches the fetcher, and of what a glitched read
+returns, is confirmed on silicon end to end.
+
+### What is left
+
+Tracing acid-hell's line 68 for what probe (d) does NOT contain turned up
+the candidate: **an object at OAM X = 1, triggering at dot 90, inside the
+fine-scroll discard** (`OBJTRIG ly=68 dot=90 x=1 lx=-4 … pen=5`). probe (d)
+puts nothing on its lines, so no amount of sweeping it can speak to this.
+
+An object that triggers left of the first on-screen pixel is exactly where
+Pan Docs contradicts itself — `Rendering.md` says a flat 11-dot penalty
+regardless of SCX, `pixel_fifo.md` says the penalty is SCX's low bits — and
+dingbat applies the flat 11 only at X = 0 exactly, because GBMicrotest's
+`ppu_spritex_vs_scx` table (the source of the flat 11) only ever places the
+object at 0. acid-hell's object is at 1.
+
+Tried and refuted this session, so the next person does not repeat it:
+widening that exception to X ≤ 1 and to X ≤ 7 leaves acid-hell at the same
+2 px. So the penalty's X gate is not the whole story either; the next
+instrument is a probe (e) that puts one object at a swept small X on the
+line and reads the fetch grid's phase after it — probe (d)'s bar, with an
+object added ahead of it.
 
 ## Does a cheap flash cartridge invalidate this?
 
