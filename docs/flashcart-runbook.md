@@ -173,6 +173,35 @@ screens under `--model cgb/agb`, a dingbat bug to fix first):**
   P13 DSTAT / P14 SPEED (double-speed pages ran for real), P16 HALTPHASE,
   P17 WYLATCH (row 4's CGB-samples-WY data).
 
+## Session 2 results — 2026-08-17, GBA SP: the 261st row's arbitration
+
+Photos IMG_3803-3808 (acid-hell, probe_c ×3, daid, probe_b), all on the SP.
+
+**cgb-acid-hell (IMG_3803): THE REFERENCE IS HARDWARE-CORRECT ON AGS, and
+dingbat's 2 pixels are a genuine model defect on this silicon.** The
+ROM's pass state is the near-blank screen with the yellow smiley; the two
+disputed pixels are the smiley's mouth — reference draws a "∨" (dark at
+(79,68),(81,68),(80,69)), dingbat a flat bar (dark at (79-81,68)). A
+grid-fit of the photo (controls: both eyes DARK, cheek YELLOW, fit
+validated) reads the verdict cell (80,68) as YELLOW and (80,69) as
+dark — the reference's values, not dingbat's. The "reference question"
+escape hatch is CLOSED for AGS-class silicon: 261/261 requires the model
+world the SCX campaign named (acid-hell's grid alignment restored while
+daid's emission term stays — the P-bracket co-derivation in
+docs/gb-failure-triage.md). Verified en route: dingbat's shipped world
+reproduces exactly 2 wrong pixels against the reference at rev C AND rev
+E (the runner passes `--color`; without it the capture is the compat-grey
+view and the smiley reads grey).
+
+**probe_c ×3 / probe_b / daid photos (IMG_3804-3806, 3807, 3808):**
+captured and archived, not yet machine-read. tools/gbprobe/photowarp.py
+(experimental, this session) finds the SP's letterbox panel quad but its
+registration is a few pixels too coarse for the 4-dot phase reading; the
+fix is adapting gbphoto/photogrid.py's NCC refinement to the letterbox
+geometry. These photos hold the quantitative version of what acid-hell
+already answered qualitatively, so read them when the tool is finished —
+before the GBC session at the latest (same tool reads those photos).
+
 ## Getting results back
 
 Photograph everything into one folder per console. For gbedge pages,
