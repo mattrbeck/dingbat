@@ -346,7 +346,8 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 # Extending it to the blocks an FF55 write starts costs `hdma_disabled_display_1`
 # and gains nothing: that write's own byte has already committed, so there is no
 # access in flight for the hold to protect.
-const HDMA_VISIBLE_DOTS* {.intdefine.} = 4
+# HDMA_VISIBLE_DOTS is declared further down, next to CGB_HALT_PPU_LEAD, whose
+# value it carries a term of -- a const cannot be read before it is declared.
 
 # ---- The serial shift clock's tap offset, per device -------------------------
 #
@@ -491,42 +492,60 @@ const SERIAL_START_ARM* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
-const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
+const CGB_HALT_LEAD_SKIP_LYC0* {.intdefine.} = 1
+  ## Whether a halt that the LY 153 -> 0 snapback's `LYC = 0` match will wake is
+  ## exempt from CGB_HALT_PPU_LEAD below. 1 ships (and is inert while the lead
+  ## is 0); 0 is the control build, i.e. the lead applied to every wake alike.
+  ## The derivation -- a LYC sweep of daid's `ppu_scanline_bgp` against SameBoy,
+  ## same ROM and same entry with only the wake line changing -- is at the test
+  ## in cpu.nim, next to the code it gates.
+const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
   ## as time -- which is the shape the two halves of that measurement demand.
   ##
-  ## ---- 2026-08-18: turned on, then turned BACK OFF -- read both halves ------
+  ## ---- 2026-08-18: ON, with the snapback exempt ------------------------------
   ##
-  ## **It ships at 0 again.** Turning it on takes `cgb-acid-hell` to 0 px and
-  ## `daid/ppu_scanline_bgp` "(GBC)" from 0 px to **2304**, at every one of the
-  ## six CGB revisions. That row is a silicon reference the shootout scores and
-  ## the local runner did NOT (it does now -- see dingbat_test_runner.nim), which
-  ## is the only reason the first pass looked clean.
+  ## It took three passes to get here and the middle one was wrong, so both the
+  ## result and the correction are worth having.
   ##
-  ## The MEASUREMENT below stands and is worth keeping; what it does not
-  ## establish is that the halt is where the M-cycle lives. Three instruments
-  ## now bracket it, and all three are STAT-LYC `halt` anchors on CGB:
+  ## Turning it on flat takes `cgb-acid-hell` to 0 px and `daid/ppu_scanline_bgp`
+  ## "(GBC)" from 0 px to **2304** at every one of the six CGB revisions. That
+  ## row is a silicon reference the GBEmulatorShootout scores and this tree did
+  ## not gate, so the first attempt passed a clean local suite and still broke
+  ## it. It is wired now (`daid/ppu_scanline_bgp-gbc`).
   ##
-  ##   cgb-acid-hell            wants the advance   (144 halts/frame, one/line)
-  ##   daid ppu_scanline_bgp    refuses it          (1 halt/frame, LYC=0 snapback)
-  ##   probe (e)/(f) plain arm  refuses it          (1 halt/frame, LYC=16)
+  ## The two ROMs are not actually in conflict. daid's is the ideal instrument
+  ## for saying so: 91 lines of source, ONE STAT LYC interrupt out of `halt`,
+  ## then a 114-M loop of BGP writes that stays scanline-locked for the frame.
+  ## Rebuilt byte-exact and swept over the LYC value ALONE -- same ROM, same
+  ## entry in VBlank, same IME, same vector, only the line the wake lands on
+  ## changing -- against SameBoy in CGB compatibility mode, which reproduces
+  ## daid's own reference pixel-exactly:
   ##
-  ## and SameBoy -- which reproduces all three, and is 16/16 against Matt's GBA
-  ## SP -- carries no halt-wake PPU lead at all. So the M-cycle acid-hell
-  ## measures is real and this is the wrong home for it: same category as
-  ## CGB_TDSEL_LATENCY=5, a compensation that happens to land on one ROM. The
-  ## thing that separates acid-hell from the other two is still open; the
-  ## obvious candidate (IME set / a vector taken) is REFUTED -- acid-hell's
-  ## blocks continue inline after `halt`, so IME is 0 and no vector is taken,
-  ## the same as the probe, while daid's IS dispatched.
+  ##   LYC = 0  (the LY 153 -> 0 snapback)   without the lead exact, with it 2304 px
+  ##   LYC = 1, 8, 40, 100 (normal lines)    WITH the lead exact, without it 1920-2304
   ##
-  ## For the record, the cost of turning it on: runner 884 -> 886 but with the
-  ## daid row unwired (885 with it wired), gambatte 4201 -> 4241 (+40, mostly
-  ## bucket 13's speed-switch model, whose defaults are tied to this knob),
-  ## against gambatte dma -12 and lcd_offset -6 -- which are the same signal as
-  ## daid, all of them things measured across a halt wake.
+  ## So the M-cycle is real on every normal-line wake and absent on the
+  ## snapback, and `cgb-acid-hell`'s disputed pixels are on lines 68 and 69 --
+  ## normal lines. See CGB_HALT_LEAD_SKIP_LYC0, which is the gate that falls out
+  ## of it, and tools/gbppu/daidsweep.py, which is the sweep.
   ##
-  ## ---- The measurement, which stands -----------------------------------------
+  ## Refuted on the way, so nobody re-runs them: it is NOT IME or whether a
+  ## vector is taken (acid-hell continues inline after `halt`, IME 0, no vector;
+  ## daid's handler IS entered -- and the LYC sweep above holds both constant
+  ## while separating the cases), and NOT LY0_PIPE_MCYCLES (0/2/3 against the
+  ## lead, daid unmoved at 2304).
+  ##
+  ## Ledger: runner 885 -> 887, gambatte 4201 -> 4246, and `cgb-acid-hell`,
+  ## both `strikethrough` frames and both `daid/ppu_scanline_bgp` frames are all
+  ## 23040/23040. Every one of the shootout's 260 ROMs was rendered under the
+  ## old and new builds in both device modes: the ONLY one whose frame moves is
+  ## cgb-acid-hell. What is still red and unexplained: gambatte `dma` -7 (seven
+  ## `hdma_late_disable_*`), `lcd_offset` -6 and `window` -1, against +54
+  ## elsewhere, most of it bucket 13's speed-switch model, whose defaults are
+  ## tied to this knob and which lands with it.
+  ##
+  ## ---- The measurement that started it ---------------------------------------
   ##
   ## Until 2026-08-18 the only thing pointed at this quantity was
   ## `strikethrough-cgb` going 7 pixels wrong under it, with no ROM measuring it
@@ -756,6 +775,21 @@ const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## CGB_HALT_PPU_LEAD wants exactly 4 T taken out of here, and it is worth
   ## having the row that refuses it on record. See docs/gb-failure-triage.md
   ## (2026-08-10).
+const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
+  ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
+  ##
+  ## The `4 * CGB_HALT_PPU_LEAD` term is the same argument OBJ_DMA_BUS_LEAD
+  ## makes for the OAM DMA unit, and it is here for the same reason: the DMA
+  ## engine runs on machine time and this window is measured against the
+  ## pipeline, so advancing the pipeline by an M-cycle moves the window with it.
+  ## Inert at the shipping `CGB_HALT_PPU_LEAD = 0`, which is why the constant is
+  ## declared down here rather than up with the other memory timings.
+  ##
+  ## Measured, whole gambatte suite, with the lead on: `dma` is 116/229 at 4,
+  ## **121 at 8**, and 116 again at 12 -- a local maximum bracketed on both
+  ## sides, and 8 is exactly 4 plus the advance. It is only a PARTIAL account:
+  ## seven `hdma_late_disable_*` rows stay red and this term does not explain
+  ## them, so the bracket is not the whole story.
 const CGB_HALT_PPU_LEAD_DOTS* {.intdefine.} = 4 * CGB_HALT_PPU_LEAD
   ## The same lag in DOTS rather than in M-cycles, which is the unit the
   ## measurement above never actually had. `CGB_HALT_PPU_LEAD` sets it in whole

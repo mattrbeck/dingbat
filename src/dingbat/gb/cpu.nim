@@ -455,7 +455,37 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     # titles that idle hardest in HALT are the ones that get nothing back.
     # Neither ordering is free, which is the thing to know before the flip:
     # this is not a CGB-only cost, it is a cost on every HALT-idling title.
-    if gb.cgb_enabled and
+    # ---- The LY 153 -> 0 snapback does NOT carry the lead --------------------
+    #
+    # Measured on daid's `ppu_scanline_bgp`, which is the ideal instrument for
+    # it: 91 lines of source, ONE STAT LYC interrupt taken out of `halt`, and
+    # then a 114-M loop of BGP writes that stays scanline-locked for the whole
+    # frame, so a single M-cycle at that wake moves all 1440 of its band edges.
+    # Rebuilt byte-exact and swept over the LYC value alone -- same ROM, same
+    # entry (in VBlank), same IME, same vector, only the line the wake lands on
+    # changing -- against SameBoy in CGB compatibility mode, which reproduces
+    # daid's own reference pixel-exactly (tools/gbppu/daidsweep.py):
+    #
+    #   LYC = 0   (the snapback)   dingbat WITHOUT the lead is exact; with it, 2304 px
+    #   LYC = 1, 8, 40, 100        dingbat WITH the lead is exact; without it, 1920-2304 px
+    #
+    # So the quantity is real on every normal-line wake and absent on the
+    # snapback, and that is what reconciles daid with `cgb-acid-hell` -- whose
+    # own disputed pixels are on lines 68 and 69, both normal lines, and whose
+    # line-0 block is insensitive either way. It is not IME, not whether a
+    # vector is taken, and not LY0_PIPE_MCYCLES (swept 0/2/3 against the lead,
+    # daid unmoved at 2304).
+    #
+    # Spelled at the HEAD rather than at the wake, because that is where the
+    # dots are withheld: a halt that the snapback's LYC=0 match will wake must
+    # never hold the PPU back in the first place, and asking here keeps the
+    # repayment path exactly as conservative as it was.
+    let lyc0_wake =
+      when CGB_HALT_LEAD_SKIP_LYC0 != 0:
+        gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8
+      else:
+        false
+    if gb.cgb_enabled and not lyc0_wake and
        gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed):
       let mdots = int32(4 shr gb.memory.current_speed)
       let lead  = int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)

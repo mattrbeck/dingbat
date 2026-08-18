@@ -177,6 +177,20 @@ int main(int argc, char** argv) {
   if (got < sizeof hdr) { fprintf(stderr, "rom too small: %s\n", rom); return 3; }
   int is_cgb = (hdr[0x143] & 0x80) != 0;
 
+  /* GBFUZZ_MODEL=cgb|dmg overrides that. Needed for the one case the header
+   * cannot express: a DMG-FLAGGED cart on a CGB, i.e. CGB COMPATIBILITY MODE.
+   * daid's ppu_scanline_bgp is exactly that -- $143 = $00, and its .gbc.png
+   * reference is a compat capture (its only colours come from the compat
+   * background palette) -- so without this the oracle runs it as a DMG and
+   * answers a different machine's question. Setting the CGB flag in the header
+   * instead would NOT do: that boots CGB-native, which is a third machine. */
+  const char* mdl = getenv("GBFUZZ_MODEL");
+  if (mdl) {
+    if (!strcmp(mdl, "cgb")) is_cgb = 1;
+    else if (!strcmp(mdl, "dmg")) is_cgb = 0;
+    else { fprintf(stderr, "GBFUZZ_MODEL must be cgb or dmg\n"); return 3; }
+  }
+
   /* Determinism, and it has to come first: GB_init seeds RAM, OAM and the CGB
    * palettes through GB_random(), whose generator is seeded from time(NULL) by
    * a library constructor. Disabling it afterwards leaves that one power-up

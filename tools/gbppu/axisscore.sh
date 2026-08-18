@@ -17,6 +17,7 @@ T=${TMPDIR:-/tmp}
 C=${DINGBAT_ROM_CACHE:-/tmp/dingbat-test-roms}/game-boy-test-roms
 HELL=$C/cgb-acid-hell/cgb-acid-hell
 ST=$C/strikethrough/strikethrough
+DAID=$(dirname "$C")/shootout-38b926b/daid/ppu_scanline_bgp
 
 px() {  # $1 = ppm, $2 = reference png
   python3 tools/gbprobe/ppmdiff.py "$1" "$2" \
@@ -33,10 +34,19 @@ for KV in "$@"; do
       --screenshot=$T/ax_h.ppm >/dev/null 2>&1
   $T/dt_axis "$ST.gb" --mode=screenshot --cgb --color --timeout=120 \
       --screenshot=$T/ax_c.ppm >/dev/null 2>&1
+  # daid's ppu_scanline_bgp on a CGB in COMPATIBILITY mode -- a DMG-flagged cart
+  # forced to --cgb, at the revision its capture is of. It is the third side of
+  # this axis and the one the local runner missed until 2026-08-18: it takes ONE
+  # STAT LYC=0 interrupt out of `halt` on the LY 153->0 snapback and then
+  # free-runs a scanline-locked loop of BGP writes, so a single M-cycle at that
+  # wake moves all 1440 of its band edges.
+  $T/dt_axis "$DAID.gb" --mode=screenshot --cgb --model=cgbe --color \
+      --timeout=600 --screenshot=$T/ax_g.ppm >/dev/null 2>&1
   # CGB only. The DMG arm of strikethrough needs the runner's own device/palette
   # handling to score at all (rendered here it differs in all 23040 pixels,
   # which is a colour-pipeline artefact and not a result), and the phase under
   # test is CGB-specific anyway.
-  printf '%-46s acid-hell %4s px   strike-cgb %4s px\n' \
-    "$KV" "$(px $T/ax_h.ppm $HELL.png)" "$(px $T/ax_c.ppm $ST-cgb.png)"
+  printf '%-46s acid-hell %4s px   strike-cgb %4s px   daid-gbc %5s px\n' \
+    "$KV" "$(px $T/ax_h.ppm $HELL.png)" "$(px $T/ax_c.ppm $ST-cgb.png)" \
+    "$(px $T/ax_g.ppm $DAID.gbc.png)"
 done
