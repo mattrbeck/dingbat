@@ -154,6 +154,60 @@ rejected: a full runner pass with it shows gambatte `sprites` 461 → 239,
 dozen more. It moves the anchor rather than the thing the anchor is
 measuring, so it buys this one column by mispricing every other STAT row.
 
+## The penalty law, swept over all 136 settings
+
+This is what the probe was built to answer, and with the oracle in place it
+costs four minutes instead of a hardware session.
+`tools/gbprobe/probe_e_penalty.sh` sweeps SCX 0-7 against object X = 0..15
+and prints each setting's column shift against that SCX's own objects-off
+baseline:
+
+```
+SCX   baseline  00  01  02  03  04  05  06  07  08  09  0A  0B  0C  0D  0E  0F
+0     24         0   7   8   8   8   8   8   8   0   7   8   8   8   8   8   8
+1     23         0   8   8   8   8   8   8   0   7   8   8   8   8   8   8   0
+2     22         0   8   8   8   8   8   0   7   8   8   8   8   8   8   0   7
+3     21         0   8   8   8   8   0   7   8   8   8   8   8   8   0   7   8
+4     20         0   8   8   8   0   7   8   8   8   8   8   8   0   7   8   8
+5     19         0   8   8   0   7   8   8   8   8   8   8   0   7   8   8   8
+6     18         0   8   0   7   8   8   8   8   8   8   0   7   8   8   8   8
+7     17         0   0   7   8   8   8   8   8   8   0   7   8   8   8   8   8
+```
+
+Every cell is one of three values, and which one is fixed by a single rule:
+
+    shift = 0   if X = 0
+    shift = 0   if (X + SCX) mod 8 = 0
+    shift = 7   if (X + SCX) mod 8 = 1
+    shift = 8   otherwise
+
+The 7s sit immediately after each 0 and are almost certainly an 8 whose
+bar has one column clipped, which would leave the law as: **an object
+displaces the fetch grid by a whole tile unless it lands exactly on a tile
+boundary, and X = 0 is a special case that never displaces it at all.**
+
+Two things follow, and the second is the one worth upstreaming.
+
+1. **The X = 0 exception is real.** dingbat models one (`sub = 0` when
+   `sprites[0].x == 0`) and GBMicrotest's `ppu_spritex_vs_scx` only ever
+   places an object there, so the exception has never been separable from
+   the general rule before. It is separable now, and it exists.
+2. **The general penalty is not flat, and not simply `SCX & 7` either.**
+   `Rendering.md` says an object at X = 0 "always incurs an 11-dot penalty,
+   regardless of SCX"; `pixel_fifo.md` says the penalty is "whatever the
+   lower 3 bits of SCX are" once `SCX & 7 > 0`. Neither states the term
+   that actually decides it, which is **`(X + SCX) mod 8`** — the object's
+   position relative to the *fetch grid*, not to the screen or to SCX
+   alone. Both docs are describing the two ends of that one expression.
+
+**One thing is deliberately not claimed here: the sign.** A stall ought to
+push the grid later and move the bar LEFT, and the measured shift is to the
+RIGHT. Either the bar marks the fetch after the disturbance rather than the
+one under it, or the object does something other than stall — an abort and
+re-sync would also produce this. The *structure* above does not depend on
+resolving that; a dots-of-penalty figure does, so none is quoted. Settling
+it needs one more probe, not one more photograph.
+
 ## How to shoot it
 
 1. Boot the ROM once. It comes up at `00 FF` (SCX 0, objects off).
