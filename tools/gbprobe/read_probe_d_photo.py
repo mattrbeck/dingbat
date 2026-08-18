@@ -55,6 +55,11 @@ def blobs(path):
 
 
 bl, bg, dark = blobs(sys.argv[1])
+# probe (e) prints a parameter header in the top two tile rows; its glyphs are
+# blobs too. --skip-top N drops everything above scanline N.
+if '--skip-top' in sys.argv:
+    n = int(sys.argv[sys.argv.index('--skip-top') + 1])
+    bl = [b for b in bl if b['y'] >= n]
 print(f'{len(bl)} bars found   background={bg}  darkest={dark}')
 if not bl:
     raise SystemExit(1)

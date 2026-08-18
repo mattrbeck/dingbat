@@ -62,6 +62,11 @@ cp tools/gbprobe/probe_cart.gb "$KIT/0-cart-check/"
 # registered predictions are in docs/probe-d-tdsel.md.
 cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx*.gb \
    tools/gbprobe/probe_d_tdsel_compat.gb                                  "$KIT/8-shootout-261/"
+# probe (e): ONE paged ROM -- D-pad picks SCX (left/right) and the object's X
+# (up/down), so a whole sweep is one flashcart boot instead of thirteen. It
+# subsumes probe (d): set the object to OFF and it IS probe (d).
+cp tools/gbprobe/probe_e_objgrid.gb                                       "$KIT/8-shootout-261/"
+
 DAID="$HOME/code/GBEmulatorShootout/testroms/daid/ppu_scanline_bgp.gb"
 [ -f "$DAID" ] && cp "$DAID" "$KIT/8-shootout-261/" || \
   echo "note: $DAID not found — daid ROM skipped (clone GBEmulatorShootout)"
