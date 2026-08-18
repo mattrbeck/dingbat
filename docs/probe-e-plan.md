@@ -352,6 +352,58 @@ dingbat's, one band later. The whole `R=1` discrepancy is the same one-band
 phase shift as the rest of the table, not a sub-tile mechanism, so it does
 not explain acid-hell's single pixel either.
 
+## `CGB_TDSEL_LATENCY = 5`: the old flag, and what it actually was
+
+The constant that used to make acid-hell pixel-exact, and was given up when
+probe (d) measured the latency on silicon, turns out to move **all three**
+silicon-anchored instruments the right way at once:
+
+```
+knobs: -d:CGB_TDSEL_LATENCY=5
+  objtab (mode 3 length, hardware `cp` operands) : 0/153      (held)
+  probe (e) (fetch grid, SameBoy = GBA SP)       : 113/136    (from 68)
+  cgb-acid-hell (vs reference)                   : 0 px       (from 2)
+```
+
+45 probe (e) cells and the 261st shootout row, with the hardware-pinned
+penalty length untouched. A full runner pass costs **six rows**: the four
+mealybug-cgb `tile_sel` rows, two `age/m3-bg-lcdc`, one gambatte —
+884 → 878.
+
+**It is still not the mechanism, and the reason is now two-sided.** Latency
+is exactly what mealybug's `tile_sel` family measures, and *every* value
+other than 1 moves those rows — 2, 3, 4 and 5 alike, and 5 paired with
+`CGB_TDSEL_IDX_DOTS` at 0, 4, 12 or 16. The damage is not a line-0 artifact
+either: at latency 5 `m3_lcdc_tile_sel_change` differs from the shipping
+frame on **all 144 scanlines**, 16 px at x=8..23 on each. So a hardware
+capture brackets latency = 1 from both sides, probe (d) measured it as 1 on
+the GBA SP, and the two agree.
+
+Which makes the reading unambiguous: **`CGB_TDSEL_LATENCY = 5` is four dots
+of compensation parked in the one path that must not carry them.** acid-hell
+and probe (e) genuinely want those four dots; `tile_sel` and probe (d)
+genuinely forbid them here. The mechanism that supplies them has to be
+something acid-hell and probe (e) exercise and `tile_sel` does not.
+
+`LY0_PIPE_MCYCLES` was the obvious candidate for that and is refuted: at 0,
+2 and 3 alongside latency 5 the `tile_sel` rows still move, and 2 and 3 take
+`m3_lcdc_bg_map_change` and `m3_scy_change` with them.
+
+### What acid-hell has that `tile_sel` does not
+
+From the ly=68 trace: the window is **live** from x=26 (`WINHIT dot=126`),
+and the LCDC pulses toggle **window-enable and tile-select in the same
+write** ($E1/$80/$E3/$F3 every eight dots). `m3_lcdc_tile_sel_change` moves
+tile-select alone; `m3_lcdc_tile_sel_win_change` has a window but does not
+pulse both bits together. That corner — two LCDC bits whose fetcher-side
+effects have different latencies, changed on one dot, with the window's
+re-fetch in flight — is the narrowest description of what is left, and it is
+not covered by any existing row.
+
+`tools/gbppu/hwscore.sh` and `atrisk.sh`'s frame-equality check (stock passes
+these rows, so a byte-identical frame still passes — no colour correction
+needed) are what make this search cheap enough to run per candidate.
+
 `STAT_LYC_LEAD=2` reproduces the hardware column exactly and must still be
 rejected: a full runner pass with it shows gambatte `sprites` 461 → 239,
 `m2enable` 94 → 62, `m2int_m3stat` 42 → 25, `scx_during_m3` 121 → 77 and a
