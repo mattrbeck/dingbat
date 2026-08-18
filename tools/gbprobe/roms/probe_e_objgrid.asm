@@ -49,6 +49,17 @@
 INCLUDE "hw.inc"
 
 DEF HEADER_LINES EQU 16          ; two tile rows for the parameter readout
+
+; Which line the halt anchor parks on. 16 is the shipping value (the bands
+; start below the header). ANCHOR_LINE=0 exists to separate two things probe
+; (d) and probe (e) confounded: probe (d) anchors on LINE 0, which dingbat
+; special-cases (LY0_PIPE_MCYCLES, the 153->0 snapback, first_line), and its
+; columns matched hardware exactly; probe (e) anchors on a normal line and its
+; baseline sits 8 dots off. If dingbat's own column moves between the two
+; anchors, the difference lives in the wake, not in the object path.
+IF !DEF(ANCHOR_LINE)
+DEF ANCHOR_LINE EQU HEADER_LINES
+ENDC
 DEF BANDS        EQU 14          ; 14 * 9 = 126 lines, ending at 141
 DEF BANDLINES    EQU 8
 
@@ -127,7 +138,11 @@ Start:
     ; fetch and draw nothing.
     ld hl, $FE00
     ld b, 8
+IF DEF(PARK_OAM)
+    ld c, 0                      ; every Y off-screen: nothing to select at all
+ELSE
     ld c, 32                     ; first Y: screen line 16
+ENDC
 .oam:
     ld a, c
     ld [hl+], a                  ; Y
@@ -182,7 +197,7 @@ Frame:
     ld d, a
     ld a, [wLcdcB]
     ld e, a
-    ANCHOR HEADER_LINES          ; park on the first line below the header
+    ANCHOR ANCHOR_LINE           ; park on the first line below the header
 
     ld b, BANDLINES
 FOR K, BANDS
@@ -238,7 +253,11 @@ ApplyParams:
 
     ; The two LCDC values the pulse toggles between. OBJ enable and 8x16 ride
     ; along, so the pulse never disturbs them.
+IF DEF(NO_OBJ16)
+    ld a, LCDCF_ON | LCDCF_BGON
+ELSE
     ld a, LCDCF_ON | LCDCF_BGON | LCDCF_OBJ16
+ENDC
     ld b, a
     ld a, [wObjX]
     cp OBJ_OFF
@@ -253,6 +272,10 @@ ApplyParams:
     ld [wLcdcB], a               ; BG at $8000 -- the resting value
 
     ; Header: the two parameters as hex, so the photo names its own setting.
+    ; NOHEADER builds omit it, so a band can be anchored on line 0 without the
+    ; glyphs sitting on top of it (used to separate the wake from the object
+    ; path -- see ANCHOR_LINE).
+IF !DEF(NOHEADER)
     ld d, 0
     ld e, 0
     ld a, [wScx]
@@ -260,6 +283,7 @@ ApplyParams:
     ld e, 3
     ld a, [wObjX]
     call PutByte
+ENDC
 
     ld a, [wLcdcB]               ; LCDC.7 is already set; this only moves the
     ldh [rLCDC], a               ; BG/OBJ bits to match the new setting

@@ -82,15 +82,77 @@ each machine against **its own** objects-off baseline:
    structure becomes right but it still sits 8 dots left of its own
    baseline. So the exception is not simply spurious.
 
-**Caveat that has to be settled before the 8 dots are quantified.** probe
-(e)'s objects-off baseline itself sits 8 px left of dingbat's on all three
-SCX values, and probe (d) showed no such offset (its bar columns matched
-hardware exactly). probe (e) differs from probe (d) in two ways — it
-anchors at LY = 16 instead of LY = 0, and it sets LCDC.2 (8x16 objects)
-even when objects are disabled. One of those moves the baseline, and until
-it is known which, only the *relative* readings above are safe. The
-relative readings are enough for the finding in (2), because that
-comparison is internal to each machine.
+**The objects-off baseline also disagrees**, on all three SCX values, by
+the same 8 dots — and probe (d) showed no such offset. That was the one
+thing standing between these readings and a quantified answer, so it was
+chased down separately; see below.
+
+## The baseline offset is real, and SameBoy settles the whole table
+
+Three independent checks, in order.
+
+**1. The registration is sound.** `tools/gbprobe/read_probe_e.py` measures
+each bar against the *parameter header inside the same frame* rather than
+against the frame's left edge. The header's glyphs always begin at GB
+x = 0, so any translation the warp introduced cancels in the subtraction.
+The header's own left edge reads 0, 1 and 3 at SCX 4, 0 and 7 — matching
+dingbat's 0, 1 and 3 exactly — so the frames are aligned and the 8 px is
+not a warp artifact. (A left-clipped warp, the failure mode that would
+mimic this, would have driven all three to 0.)
+
+**2. The anchor line, not the object path, is what probe (d) and probe (e)
+do differently.** Rebuilt with `ANCHOR_LINE` free (and `NOHEADER` so a band
+can sit on line 0), dingbat gives the same column at lines 16, 25 and 40
+and a different one at line 0. probe (d) anchors on line 0 — a line dingbat
+special-cases (`LY0_PIPE_MCYCLES`, the 153→0 snapback) and one where the
+LYC = 0 compare happens during line 153 rather than at a line start. So
+probe (d) never measured the normal-line phase at all, and its agreement
+with hardware does not vouch for it. `LCDC.2` and OAM's contents were ruled
+out directly: with `LCDC.1` clear, parking OAM off-screen and dropping
+`LCDC.2` each leave dingbat's column bit-identical.
+
+**3. SameBoy reproduces the hardware photographs on all eight settings.**
+Built headless from `tools/gbfuzz/sameboy_runner.c` against the prebuilt
+`libsameboy.a`. Five of the eight are byte-for-byte identical to the photo
+reading; the other three differ only in the final band, where the
+photograph's own perspective drift is worth a pixel. It agrees with silicon
+at every point where dingbat does not — including `OBJ 00`, where it also
+shows no displacement.
+
+Two consequences:
+
+* **The findings above stand, and the baseline offset is dingbat's alone.**
+  Being 8 dots out on a line with *no objects on it* is the larger of the
+  two errors, and it is the one to fix first: the object readings are
+  measured against that baseline.
+* **This probe no longer needs a hardware session.** SameBoy is validated
+  against the GBA SP at eight points, so it can stand in for the rest of
+  the sweep. `tools/gbprobe/probe_e_compare.sh` runs both emulators over
+  the setting matrix and prints only the disagreements. A setting they
+  disagree on is worth a photograph; one they agree on is not.
+
+## What the sweep says, with SameBoy as the oracle
+
+Sweeping object X = OFF, 0..7 at SCX 4 on **both** models, stock dingbat
+agrees on **0 of 9** either way, and the error is a single continuous
+quantity: dingbat's LCDC.4 write lands **4 dots late on DMG and 8 dots late
+on CGB**, relative to the fetch grid. On DMG that shows up as the staircase
+stepping one band later (`28 28 36 36` where SameBoy has `28 36 36 44`);
+on CGB as the whole staircase sitting one tile right, with the same
+stepping phase.
+
+The 4-dot gap between the two models is exactly one CPU M-cycle, which is
+the size of both `CGB_PIPE_MCYCLES` and `CGB_TDSEL_LATENCY`. That splits
+the problem in two: a term both models share, and a CGB-only term on top.
+Mode 3's *length* is not the culprit — GBMicrotest's `hblank_int_scx` family
+and mooneye's mode-0 timing rows pin it and they pass; this is the grid's
+*phase* against the CPU.
+
+`STAT_LYC_LEAD=2` reproduces the hardware column exactly and must still be
+rejected: a full runner pass with it shows gambatte `sprites` 461 → 239,
+`m2enable` 94 → 62, `m2int_m3stat` 42 → 25, `scx_during_m3` 121 → 77 and a
+dozen more. It moves the anchor rather than the thing the anchor is
+measuring, so it buys this one column by mispricing every other STAT row.
 
 ## How to shoot it
 
