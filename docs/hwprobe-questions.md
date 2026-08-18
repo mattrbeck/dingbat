@@ -574,6 +574,47 @@ Fixed while proving that: `ppmdiff.py` rejected 1-bit greyscale PNGs outright
 (`ctype=0 depth=1`), which is how several mealybug CGB references ship -- so
 those rows were unscorable by every tool here except the runner itself.
 
+#### The revision axis has a real defect in it: `m3_scy_change` (2026-08-18)
+
+Prompted by the observation that Beaten Dying Moon, `cgb-acid-hell` and
+mealybug all share one author (BDM is `mattcurrie.com`), so his emulator's
+revision handling and his test ROMs' per-revision captures are the same
+statement made twice. The captures are the stronger form, and they are on disk.
+
+Seven mealybug ROMs ship `_cgb_c` and `_cgb_d` references that actually DIFFER
+(the other thirteen pairs are byte-identical, so they carry no revision axis).
+Scored with `tools/gbppu/mbrevcheck.sh`:
+
+| ROM | refs differ | rev C vs `_cgb_c` | rev D vs `_cgb_d` | |
+|---|---|---|---|---|
+| `m3_bgp_change` | 864 px | 0 | 0 | ok |
+| `m3_bgp_change_sprites` | 716 px | 0 | 0 | ok |
+| `m3_lcdc_obj_en_change_variant` | 144 px | 0 | 0 | ok |
+| `m3_obp0_change` | 42 px | 0 | 0 | ok |
+| **`m3_scy_change`** | **6217 px** | **0** | **6217** | **MISMATCH** |
+| `m3_window_timing` | 138 px | 0 | 0 | ok |
+| `m3_window_timing_wx_0` | 144 px | 0 | 0 | ok |
+
+dingbat switches correctly on six of seven. On `m3_scy_change` it produces the
+CGB-C picture at **every** revision -- C, D and E -- and misses `_cgb_d` by the
+entire 6217-pixel difference. There is no partial credit here: the revision
+behaviour for a mid-line SCY write is simply not modelled.
+
+**Nothing in the tree could see it.** The local runner wires the 27 `_cgb_c`
+rows and no `_cgb_d` row at all; the shootout defines RevC/RevD mealybug
+variants in `testroms/mealybug.py` but they are not in its active list -- its
+recorded dingbat run contains zero of them. So `_cgb_d` is scored by no harness,
+and a 6217-pixel revision defect sat behind that gap.
+
+It also matters for how dingbat is scored today: the shootout runs it at
+`--cgb-rev=E`, and for SCY that is currently the CGB-C machine.
+
+Two things worth doing, neither of them large: wire the seven revision-carrying
+`_cgb_d` rows into the runner so this class of defect is visible, and find out
+what CGB-D changed about mid-line SCY. The `m3_scy_change` pair is a 6217-pixel
+difference over 142 scanlines -- a whole-frame behavioural change, not a phase
+nudge, so it should be tractable to characterise from the two references alone.
+
 #### Refuted this pass
 
 * **probe (e)'s 8 px is its VBlank header drawing.** Built with `-DNOHEADER`
