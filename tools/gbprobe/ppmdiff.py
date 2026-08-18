@@ -55,6 +55,12 @@ def read_png(path):
         bpp, stride = 3, w * 3
     elif ctype == 3:
         bpp, stride = 1, (w * depth + 7) // 8
+    elif ctype == 0:
+        # Greyscale, any sub-byte depth. mealybug ships several CGB references
+        # as 1-bit greyscale (`m3_lcdc_bg_map_change_cgb_c.png` and friends) and
+        # this reader used to reject them outright, which quietly made those
+        # rows unscorable by every tool here except the runner itself.
+        bpp, stride = 1, (w * depth + 7) // 8
     else:
         raise SystemExit(f'{path}: unsupported PNG (ctype={ctype} depth={depth})')
 
@@ -82,6 +88,12 @@ def read_png(path):
             for x in range(w):
                 idx = (line[x // per] >> (8 - depth * (x % per + 1))) & mask
                 out += plte[idx * 3:idx * 3 + 3]
+        elif ctype == 0:
+            per, mask = 8 // depth, (1 << depth) - 1
+            scale = 255 // mask
+            for x in range(w):
+                v = ((line[x // per] >> (8 - depth * (x % per + 1))) & mask) * scale
+                out += bytes((v, v, v))
         else:
             out += line
         prev = bytes(line)

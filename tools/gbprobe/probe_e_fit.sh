@@ -19,10 +19,16 @@
 # a knob sweep re-runs only the emulator.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
+# to CGB-C. Every comparison here must therefore force rev E or it is
+# measuring the CGB-C/CGB-D palette-step split on top of whatever it
+# meant to measure -- which is exactly what happened, unnoticed, to every
+# probe number in this tree until 2026-08-18. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
 
-MODEL=cgb; DBFLAG=--cgb; CGBFLAG=1; VERBOSE=
+MODEL=cgb; DBFLAG="--cgb $SB_REV"; CGBFLAG=1; VERBOSE=
 while :; do
   case "${1:-}" in
     --dmg)     MODEL=dmg; DBFLAG=--dmg; CGBFLAG=0; shift ;;

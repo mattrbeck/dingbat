@@ -13,6 +13,12 @@
 #   tools/gbppu/mbvsoracle.sh <binary> <rom-basename> [<rom-basename> ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
+# to CGB-C. Every comparison here must therefore force rev E or it is
+# measuring the CGB-C/CGB-D palette-step split on top of whatever it
+# meant to measure -- which is exactly what happened, unnoticed, to every
+# probe number in this tree until 2026-08-18. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}
 C=$T/romcache/game-boy-test-roms/mealybug-tearoom-tests/ppu
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
@@ -22,7 +28,7 @@ BIN=$1; shift
 for N in "$@"; do
   R=$C/$N.gb
   [ -f "$R" ] || { echo "$N: no ROM at $R"; continue; }
-  $BIN "$R" --mode=screenshot --cgb --timeout=120 --screenshot=$T/mb_d.ppm \
+  $BIN "$R" --mode=screenshot --cgb $SB_REV --timeout=120 --screenshot=$T/mb_d.ppm \
       >/dev/null 2>&1
   $SB "$R" "$BR" "$T/mb_o" "" 240 >/dev/null 2>&1
   D=$(python3 tools/gbprobe/ppmdiff.py $T/mb_d.ppm $T/mb_o.f0240.ppm \

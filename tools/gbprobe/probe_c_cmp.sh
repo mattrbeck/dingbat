@@ -19,6 +19,9 @@
 #   tools/gbprobe/probe_c_cmp.sh [SCXVAL] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
+# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}
 SCXV=${1:-0}; shift || true
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
@@ -30,7 +33,7 @@ nim c --nimcache:$T/nc-pc -d:test_harness -d:release --path:src "$@" \
 
 GBPROBE_CGB=0 GBPROBE_OUT=pc_cmp ./tools/gbprobe/mk.sh probe_c_arbitrate \
     -DSCXVAL=$SCXV >/dev/null 2>&1
-$T/dt_pc tools/gbprobe/pc_cmp.gb --mode=screenshot --cgb --timeout=400 \
+$T/dt_pc tools/gbprobe/pc_cmp.gb --mode=screenshot --cgb $SB_REV --timeout=400 \
     --screenshot=$T/pc_d.ppm >/dev/null 2>&1
 GBFUZZ_MODEL=cgb $SB tools/gbprobe/pc_cmp.gb "$BR" $T/pc_o "" 400 >/dev/null 2>&1
 

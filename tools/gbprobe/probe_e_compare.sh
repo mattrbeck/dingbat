@@ -19,6 +19,12 @@
 # under test first; this script only reads it.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
+# to CGB-C. Every comparison here must therefore force rev E or it is
+# measuring the CGB-C/CGB-D palette-step split on top of whatever it
+# meant to measure -- which is exactly what happened, unnoticed, to every
+# probe number in this tree until 2026-08-18. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_e_cmp
 mkdir -p "$T"
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
@@ -29,7 +35,7 @@ if [ ! -x "$SB" ]; then
   exit 1
 fi
 
-MODEL=--cgb
+MODEL="--cgb $SB_REV"
 CGBFLAG=1
 QUIET=
 while :; do

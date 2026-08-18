@@ -10,6 +10,12 @@
 #   tools/gbprobe/probe_f_fit.sh [--verbose]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
+# to CGB-C. Every comparison here must therefore force rev E or it is
+# measuring the CGB-C/CGB-D palette-step split on top of whatever it
+# meant to measure -- which is exactly what happened, unnoticed, to every
+# probe number in this tree until 2026-08-18. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit
 mkdir -p "$T"
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
@@ -40,7 +46,7 @@ hit=0; miss=0
 for S in 0 1 2 3 4 5 6 7; do
   want=$(grep "^$S|" "$ORACLE" | cut -d'|' -f2)
   rom $S
-  ./dingbat_test tools/gbprobe/probe_f_fit.gb --mode=screenshot --cgb \
+  ./dingbat_test tools/gbprobe/probe_f_fit.gb --mode=screenshot --cgb $SB_REV \
       --timeout=30 --screenshot=$T/d.ppm >/dev/null 2>&1
   got=$(cols $T/d.ppm)
   if [ "$want" = "$got" ]; then hit=$((hit+1)); else miss=$((miss+1)); fi

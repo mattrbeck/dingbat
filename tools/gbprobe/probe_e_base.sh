@@ -17,10 +17,13 @@
 #   tools/gbprobe/probe_e_base.sh [--dmg] [--base N] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
+# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
 
-MODEL=cgb; DBFLAG=--cgb; CGBFLAG=1; BASE=24
+MODEL=cgb; DBFLAG="--cgb $SB_REV"; CGBFLAG=1; BASE=24
 while :; do
   case "${1:-}" in
     --dmg)  MODEL=dmg; DBFLAG=--dmg; CGBFLAG=0; BASE=27; shift ;;

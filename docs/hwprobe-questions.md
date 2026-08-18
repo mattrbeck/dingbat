@@ -539,6 +539,48 @@ pixel-exact, which this hypothesis does not yet explain. Its observable is which
 FETCH gets split rather than which COLUMN changes, and those need not have the
 same sensitivity -- but that is an assertion, not a result.
 
+#### The revision mismatch: what it did and did not cost (2026-08-18)
+
+`tools/gbfuzz/sameboy_runner.c` hardcodes `GB_MODEL_CGB_E`; dingbat defaults to
+**CGB-C**. Every CGB comparison in this investigation ran C against E. All ten
+SameBoy-comparison harnesses now force `--cgb-rev=E` (`SB_REV`, overridable).
+
+Scope of the damage, measured rather than assumed:
+
+| instrument | rev C vs rev E | verdict |
+|---|---|---|
+| probe (c) — BGP band edge (EMISSION) | band 6 vs **5** | **wrong conclusion drawn**; corrected |
+| probe (c) — glitched column (FETCH) | identical | unaffected |
+| probe (e)/(f) plain arm | identical (8/8, BASE 24 both) | unaffected |
+| probe (f) windowed arm | identical (2/8, no common BASE both) | unaffected |
+| g1 hardware columns | identical | unaffected |
+| mealybug `*map_change*` rows (the 4 failing) | identical at C, D and E | unaffected |
+
+The pattern is coherent rather than lucky: `CGB_MIXER_LATENCY` **is** the
+CGB-C/CGB-D split, and it sits on the palette/mixer step. probe (c)'s emission
+ruler is a BGP write, so it moves with the revision; everything else here
+measures the LCDC.4 fetch-grid path, which does not. So exactly one conclusion
+was wrong -- the one drawn from the one instrument that reads the mixer -- and
+it is the one that has been corrected.
+
+**It closes no open question and resolves no test row.** The four failing
+mealybug `map_change` rows are byte-identical at C, D and E, and their shipped
+`_cgb_c` and `_cgb_d` references are identical to each other, so they are
+genuine model defects and not mis-scored silicon. Worth stating plainly rather
+than hoping: finding a systematic methodology error is not the same as finding
+rows it was hiding.
+
+Fixed while proving that: `ppmdiff.py` rejected 1-bit greyscale PNGs outright
+(`ctype=0 depth=1`), which is how several mealybug CGB references ship -- so
+those rows were unscorable by every tool here except the runner itself.
+
+#### Refuted this pass
+
+* **probe (e)'s 8 px is its VBlank header drawing.** Built with `-DNOHEADER`
+  and compared by absolute bar-0 column: delta unchanged at every SCX. Not the
+  header. What is left of the VBlank difference is the joypad read and
+  `ApplyParams`' register writes.
+
 #### Reading the ARCHIVED photos: blocked, and the fix is a ROM change
 
 IMG_3803-3808 (session 2) are on disk in `hwphotos/`. IMG_3804-3806 are probe

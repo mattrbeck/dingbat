@@ -24,13 +24,16 @@
 #   tools/gbprobe/probe_f_base.sh [--dmg] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
+# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit          # share probe_f_fit's ROM/oracle cache
 mkdir -p "$T"
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
 BASES=${PROBE_F_BASES:-"22 23 24 25 26 27 28 29 30"}
 
-MODEL=--cgb; SUF=cgb; CGBFLAG=1; WIN=-DWIN_LIVE=1
+MODEL="--cgb $SB_REV"; SUF=cgb; CGBFLAG=1; WIN=-DWIN_LIVE=1
 while :; do
   case "${1:-}" in
     --dmg)   MODEL=--dmg; SUF=dmg; CGBFLAG=0; shift ;;
@@ -39,7 +42,7 @@ while :; do
     # (CGB native), and it is the one daid's ppu_scanline_bgp runs on -- so it
     # is what separates that ROM from this probe. SameBoy needs GBFUZZ_MODEL to
     # be told, since it otherwise picks its model off the cart flag.
-    --compat) MODEL=--cgb; SUF=compat; CGBFLAG=0; export GBFUZZ_MODEL=cgb; shift ;;
+    --compat) MODEL="--cgb $SB_REV"; SUF=compat; CGBFLAG=0; export GBFUZZ_MODEL=cgb; shift ;;
     # The CONTROL arm: same ROM, same anchor, same bands, no window. Whatever
     # uniform offset this reports is not the window's, and only the difference
     # between the two arms is.

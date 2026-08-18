@@ -21,12 +21,18 @@
 #   tools/gbprobe/probe_f_shape.sh [--dmg] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
+# to CGB-C. Every comparison here must therefore force rev E or it is
+# measuring the CGB-C/CGB-D palette-step split on top of whatever it
+# meant to measure -- which is exactly what happened, unnoticed, to every
+# probe number in this tree until 2026-08-18. SB_REV overrides.
+SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit          # share probe_f_fit's ROM/oracle cache
 mkdir -p "$T"
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
 
-MODEL=--cgb; SUF=cgb; CGBFLAG=1
+MODEL="--cgb $SB_REV"; SUF=cgb; CGBFLAG=1
 if [ "${1:-}" = "--dmg" ]; then MODEL=--dmg; SUF=dmg; CGBFLAG=0; shift; fi
 ORACLE=$T/oracle-$SUF.txt
 
