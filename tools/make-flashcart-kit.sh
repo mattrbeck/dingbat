@@ -51,6 +51,12 @@ cp "$CACHE"/cgb-acid-hell/cgb-acid-hell.gbc                               "$KIT/
 cp tools/gbprobe/probe_c_arbitrate.gb tools/gbprobe/probe_c_arbitrate_scx3.gb \
    tools/gbprobe/probe_c_arbitrate_scx7.gb tools/gbprobe/probe_a_statidiom.gb \
    tools/gbprobe/probe_b_scxm3.gb                                         "$KIT/8-shootout-261/"
+# probe_cart: run this FIRST. It checks the flash cartridge is returning the
+# ROM's real bytes (three access orders + an address-line hammer), so every
+# other reading in the session rests on something checked rather than assumed.
+mkdir -p "$KIT"/0-cart-check
+cp tools/gbprobe/probe_cart.gb "$KIT/0-cart-check/"
+
 # probe (d): the tile-select latency measurement that decides the 261st row.
 # Read it by eye (sixteen bands, light vs dark) or with read_probe_d.py; the
 # registered predictions are in docs/probe-d-tdsel.md.

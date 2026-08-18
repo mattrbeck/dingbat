@@ -92,6 +92,54 @@ HIGH plane and reaching both planes as the offset steps one M-cycle; on DMG
 it always reaches both.** That DMG/CGB difference *is* `CGB_TDSEL_LATENCY`,
 and the CGB alternation's phase is the quantity under test.
 
+## Does a cheap flash cartridge invalidate this?
+
+Short answer: it cannot skew the measurement, only corrupt it visibly — and
+`probe_cart.gb` checks for that directly.
+
+The architectural reason is that **the Game Boy bus has no wait states**.
+A cartridge cannot stretch an M-cycle; the CPU latches whatever is on the
+bus when the cycle ends. So slow or marginal flash cannot move an
+instruction's timing, which is the entire quantity these probes measure —
+it can only return the *wrong byte*. That failure mode is loud here rather
+than quiet: a wrong opcode inside the timed loop breaks the band structure
+(a bar in the wrong place, or a missing blank separator line), and the
+eight identical scanlines per band mean a single bad read shows up as one
+odd line against seven agreeing ones, not as a shifted answer.
+
+Audited mechanically across all five probes (`probe_a`, `probe_b`,
+`probe_c`, `probe_d`, `probe_cart`) — every one is clean on each axis:
+
+| axis | why it would matter | status |
+|---|---|---|
+| writes into $0000-$7FFF | a flashcart's mapper registers live there; a stray write can remap the ROM mid-measurement | **none**, direct or via HL |
+| cart RAM $A000-$BFFF | save-RAM emulation is where cheap carts are flakiest | **never touched** |
+| KEY1 / double speed | doubles the ROM read rate — the classic marginal-flash failure | **never entered** |
+| open-bus reads | the answer is the cart's, not the console's | **none**; only ROM fetch and VRAM |
+| banking | a mis-mapped bank is undetectable from inside | **no MBC** (`rgbfix -m 0x00`, 32 KiB flat) |
+
+Two residual caveats worth knowing rather than papering over:
+
+* If the flashcart **soft-launches from a menu** instead of hard-resetting,
+  `probe_cart`'s row 04 shows the loader's A, not the boot ROM's. The other
+  rows, and every measurement in probe (d), are unaffected — they set up
+  their own PPU state from scratch.
+* `probe_cart` proves the ROM's bytes survive sequential, reverse and
+  long-jump access. A cart that fails only under some pattern it does not
+  use remains possible; nothing short of a logic analyser rules that out.
+
+Run `probe_cart.gb` first. Expected on a healthy cart, and identical on
+every device (it is the same ROM):
+
+    00 6971      forward sum
+    01 6971      reverse sum
+    02 6971      stride sum      <- all three MUST agree
+    03 00        read disagreements: must be 00
+    04 01 or 11  boot A: $01 DMG-family, $11 CGB-family
+
+If rows 00-02 agree and row 03 is `00`, the cart is feeding the CPU
+correctly and every other probe's reading stands.
+
 ## How to run it, and what each outcome decides
 
 Flash all three builds; photograph each on the **GBA SP** (CGB silicon,
