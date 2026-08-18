@@ -60,9 +60,8 @@ cp tools/gbprobe/probe_cart.gb "$KIT/0-cart-check/"
 # probe (d): the tile-select latency measurement that decides the 261st row.
 # Read it by eye (sixteen bands, light vs dark) or with read_probe_d.py; the
 # registered predictions are in docs/probe-d-tdsel.md.
-cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx3.gb \
-   tools/gbprobe/probe_d_tdsel_scx7.gb tools/gbprobe/probe_d_tdsel_compat.gb \
-                                                                          "$KIT/8-shootout-261/"
+cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx*.gb \
+   tools/gbprobe/probe_d_tdsel_compat.gb                                  "$KIT/8-shootout-261/"
 DAID="$HOME/code/GBEmulatorShootout/testroms/daid/ppu_scanline_bgp.gb"
 [ -f "$DAID" ] && cp "$DAID" "$KIT/8-shootout-261/" || \
   echo "note: $DAID not found — daid ROM skipped (clone GBEmulatorShootout)"

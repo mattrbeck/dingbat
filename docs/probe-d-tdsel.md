@@ -115,6 +115,58 @@ the hardware shows names the latency**, with no interpretation in between.
 That is also the instrument's own calibration check; a probe that could not
 tell the two worlds apart would be measuring something else.
 
+## RESULT — 2026-08-17, GBA SP (photos IMG_3810-3814)
+
+**`CGB_TDSEL_LATENCY = 1`, the shipping value, is confirmed on silicon.
+Latency 5 is refuted, and with it the world that made `cgb-acid-hell`
+pixel-exact.**
+
+The cart was verified first: `probe_cart` read `00 6971 / 01 6971 /
+02 6971 / 03 00 / 04 11` — all three access orders agreeing with this
+tree, zero read disagreements, so the bytes reaching the CPU are the
+ROM's.
+
+All four probe (d) builds then read **`#2#2#2#2#2#2#2#2`**, matching the
+shipping prediction exactly. Registration was by `photowarp.py`, and the
+bars were located as blobs rather than by assuming band boundaries (a warp
+a row or two out otherwise catches the neighbouring band's bar — the first
+reading of IMG_3812 did exactly that and had to be discarded). Sixteen bars
+per frame, on the designed 9-row pitch:
+
+| photo | build (by bar column) | hardware | dingbat | bar column |
+|---|---|---|---|---|
+| IMG_3811 | `probe_d_tdsel` (SCX 0) | `#2#2#2#2#2#2#2#2` | same | 96-103 / 96-103 |
+| IMG_3812 | `_scx3` | `#2#2#2#2#2#2#2#2` | same | 93-100 / 93-100 |
+| IMG_3813 | `_scx7` | `#2#2#2#2#2#2#2#2` | same | 97-104 / 97-104 |
+| IMG_3814 | `_compat` | `#2#2#2#2#2#2#2#2` | same | 95-102 / 96-103 |
+
+Three things fall out, two of them new:
+
+1. **The write-to-fetcher latency is 1**, so acid-hell's two pixels are not
+   a latency error. The `latency = 5` world — the only one that made
+   acid-hell exact — is dead, and the four mealybug `tile_sel` rows it
+   would have cost stay green on the value silicon actually shows.
+2. **The latency is not mode-dependent.** `_compat` (no CGB flag, so
+   DMG-compatibility mode on the same silicon) reads identically to the
+   CGB-flagged builds. dingbat gates `CGB_TDSEL_LATENCY` on the hardware
+   being a CGB rather than on the mode, and nothing in the tree had ever
+   tested that; it is now measured.
+3. **The fetch grid's phase against the CPU is right at SCX ≡ 0, 3 and 7**
+   — the bar columns match, not just the shades.
+
+### What is left, and the next measurement
+
+`cgb-acid-hell` runs at **SCX = 180, i.e. SCX & 7 = 4** — a fine-scroll
+phase this round did not cover. The three tested phases all agree with
+dingbat, so the surviving hypothesis is narrow and testable: dingbat's
+fetch-grid position is wrong specifically at some fine-scroll phase, and
+acid-hell sits on one of them while mealybug's `change2` does not.
+
+`probe_d_tdsel_scx{1,2,4,5,6}.gb` complete the sweep. dingbat predicts
+`#2#2#2#2#2#2#2#2` at **every** phase 0-7, so any hardware frame that
+alternates the other way names the phase where the grid is off — and
+SCX 4 is the one acid-hell actually uses.
+
 ## Does a cheap flash cartridge invalidate this?
 
 Short answer: it cannot skew the measurement, only corrupt it visibly — and
