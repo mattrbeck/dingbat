@@ -455,12 +455,26 @@ place — which would be the third time in this investigation that a constant
 landed next to the defect rather than on it (`CGB_TDSEL_LATENCY=5`,
 `CGB_WIN_RESTART_COUNTER=1`, and possibly this).
 
-What separates probe (e) from acid-hell and daid, and is therefore where to
-look: it halts ONCE per frame and then free-runs 144 lines of unrolled bands
-through a `jp` loop, with `call ApplyParams` and a joypad read in VBlank
-between frames. acid-hell re-halts every line; daid halts once and free-runs a
-114-M loop with no VBlank work at all. The `ApplyParams`/joypad path is the
-obvious suspect and is the one thing here that is ours rather than published.
+**And it is a dingbat bug, not a probe bug — that distinction matters and the
+first draft of this section got it wrong.** "probe (e) is ours, so it may be the
+probe's fault" does not survive the photograph: hardware and SameBoy agree on
+what this ROM does, to the pixel. Only dingbat disagrees. Whatever the ROM does,
+dingbat emulates it 2 M wrong. That also makes it a pure emulator-debugging
+task with a validated oracle and no further hardware needed.
+
+**Measured straight after, and it redirects the hunt: it is NOT the halt.**
+Building the same probe with `-DANCHOR_POLL`, which reaches the anchor line by
+polling `rLY` and contains no `halt` in the measurement path at all, dingbat is
+still **3 M** from SameBoy (BASE 23 against the shipping 26) with the lead off.
+So the defect survives the removal of the very mechanism the whole
+`CGB_HALT_PPU_LEAD` argument is about. Whatever the 2-3 M is, it lives in
+something both the halted and polled builds share -- mode 3's own timing on this
+ROM's settings, the LCDC.4 write path, or the free-running band loop -- and not
+in the wake.
+
+That is worth stating plainly because it cuts the other way too: if the halt is
+not where probe (e)'s error lives, probe (e)'s dissent was never really evidence
+about the halt constant in the first place.
 
 ### What a negative result would mean, stated in advance
 
