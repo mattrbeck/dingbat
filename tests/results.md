@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-18 13:57:04 · commit 760ef88 · game-boy-test-roms v7.0*
+*Generated: 2026-08-18 14:09:25 · commit bc9afb1 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 

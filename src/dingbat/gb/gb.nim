@@ -536,6 +536,22 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## while separating the cases), and NOT LY0_PIPE_MCYCLES (0/2/3 against the
   ## lead, daid unmoved at 2304).
   ##
+  ## **Confirmed by the shootout itself, not just by this tree: 261 scored, 261
+  ## PASS, 0 FAIL** (2026-08-18, `main.py --emulator dingbat`).
+  ##
+  ## ---- What turning it on COSTS ----------------------------------------------
+  ##
+  ## The block in `cpu_halt_tick` no longer compiles out, so every HALT-idling
+  ## title pays for it -- including DMG ones, which pay the `cgb_enabled` test
+  ## and nothing else. Measured here, retired instructions, min of 3, on
+  ## `cgb-acid-hell` (144 halts per frame, i.e. about the worst case there is):
+  ## **6.0804 G -> 6.1610 G, +1.33%**. The numbers in the ordering note further
+  ## down are the ones for real titles and are smaller (+0.44% Pokemon Blue,
+  ## +0.56..0.77% Crystal). If that ever needs paying back, the shape is to
+  ## decide at halt ENTRY rather than per halted M-cycle -- the debt field is
+  ## already the per-halt latch, so what is left on the inner path is one bool
+  ## test that a two-loop entry split would remove.
+  ##
   ## Ledger: runner 885 -> 887, gambatte 4201 -> 4246, and `cgb-acid-hell`,
   ## both `strikethrough` frames and both `daid/ppu_scanline_bgp` frames are all
   ## 23040/23040. Every one of the shootout's 260 ROMs was rendered under the

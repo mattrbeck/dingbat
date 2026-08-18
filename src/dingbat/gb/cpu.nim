@@ -480,13 +480,19 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     # dots are withheld: a halt that the snapback's LYC=0 match will wake must
     # never hold the PPU back in the first place, and asking here keeps the
     # repayment path exactly as conservative as it was.
-    let lyc0_wake =
-      when CGB_HALT_LEAD_SKIP_LYC0 != 0:
-        gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8
-      else:
-        false
-    if gb.cgb_enabled and not lyc0_wake and
-       gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed):
+    #
+    # It is the LAST term of the conjunction on purpose, and that is the same
+    # measurement the paragraph above is about: the debt test in front of it is
+    # false for all but the first M-cycle of a halt, so these two extra loads
+    # run once per halt rather than once per halted M-cycle. Put in front of
+    # `cgb_enabled` -- where it was first written -- every DMG title idling in
+    # HALT would pay them forever, which is exactly the +1.30% on Pokemon Blue
+    # recorded above.
+    if gb.cgb_enabled and
+       gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed) and
+       (when CGB_HALT_LEAD_SKIP_LYC0 != 0:
+          not (gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8)
+        else: true):
       let mdots = int32(4 shr gb.memory.current_speed)
       let lead  = int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)
       # A lag of a whole M-cycle takes the PPU half entirely; a lag of 1..3
