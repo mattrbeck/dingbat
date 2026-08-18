@@ -208,6 +208,103 @@ the place hardware does — and the one knob that reproduces the column
 (`STAT_LYC_LEAD=2`) is measured to cost hundreds of gambatte rows, which is
 what spending it in the wrong place looks like.
 
+## Fitting the cost model: what is eliminated, and why
+
+`tools/gbprobe/probe_e_fit.sh` scores a build against the oracle over the
+whole matrix — 8 SCX × 17 object settings = **136 cells**, in *absolute*
+columns rather than per-SCX shifts. Absolute matters: at SCX 0 both
+emulators only ever emit column 24 or 32, and the objects-off cell is the
+oracle's 24 against dingbat's 32. Read as shifts that inverts the sign of
+every object cell and looks like two unrelated bugs; read absolutely it is
+one table with cells in the wrong places. **Stock dingbat fits 68/136.**
+
+### Where we cost too much
+
+The two laws, with `R = (X + SCX) mod 8` and LOW/HIGH the tile under the
+write and the one after it:
+
+* **oracle** — OFF → LOW; X=0 → LOW; R=0 → LOW; R=1 → HIGH−1; R≥2 → HIGH
+* **dingbat** — OFF → **HIGH**; R∈{0..4} → LOW; R∈{5,6,7} → HIGH
+
+dingbat's "free" window is **three residues wide**, and that is not a
+coincidence: the penalty is
+`(OBJ_FETCH_DOTS-1) + max(0, (7-R) - (OBJ_WAIT_SUB-1))`, so the window's
+width *is* `OBJ_WAIT_SUB = 3`. Hardware's window is one residue wide.
+Setting `OBJ_WAIT_SUB = 6` gives the oracle's shape exactly and takes the
+fit **68 → 113/136** — and is rejected: the full runner goes 884 → 842 and
+gambatte 4201 → 3947.
+
+### Why no knob can fix it
+
+That rejection is the finding, not a setback. Two instruments read the same
+penalty and want different numbers, by more than either one's resolution:
+
+| instrument | reads | wants |
+|---|---|---|
+| GBMicrotest `ppu_spritex_vs_scx`, 153 cells | mode 3's **length** | `6 + max(0, 5-R)` |
+| probe (e), 136 cells | the fetch grid's **displacement** | `6 + max(0, 2-R)` |
+
+Both pass on hardware, so both are true, so **on silicon those are not the
+same quantity** — up to three dots of an object's penalty lengthen mode 3
+without moving the background fetch grid. In this tree they are one field,
+`obj_penalty`, held against the fetcher for every one of its dots.
+
+Three ways of spending the difference were tried and all are inert:
+
+1. **`OBJ_BG_RUN`** — the existing "which fetch does the object abandon"
+   axis, whose 2026-08-08 sweep concluded nothing in the tree separated its
+   four policies. probe (e) does not separate them either: all four, and
+   "freeze completely", score an identical **68/136**. They differ in
+   *which* background fetch dies next to the object, not in the grid's net
+   displacement.
+2. **A new head-of-penalty knob.** `OBJ_GRID_KEEP` was implemented — let the
+   BG fetcher run for the first up-to-3 wait dots, so the length term keeps
+   its dots and the displacement term loses them. **68/136 at every value
+   from 1 to 5**, i.e. provably inert, and the reason is already written down
+   at `OBJ_BG_RUN = 4`: while the shifter is stalled the FIFO never empties,
+   so the fetcher parks at `fetch_counter == 7` and ticking it does nothing.
+   *Displacement is identically the stall length by construction.* The knob
+   was reverted rather than shipped, since a constant that cannot change a
+   frame is not a finding, it is dead code.
+3. **`OBJ_FETCH_DOTS`** — moves the fit hard (4 → 98, 5 → 83, 7 → 23), which
+   only confirms the coupling: both halves of the penalty displace the grid
+   one dot per dot.
+
+So the change this needs is structural — a path by which stalled dots can be
+charged to mode 3 without being charged to the fetch grid — and not a
+constant. That is the one thing the 136-cell harness is now able to score.
+
+## cgb-acid-hell: the residual is not the object penalty
+
+Diffed against the reference with `tools/gbprobe/ppmdiff.py`, the two pixels
+are a **vertical swap**, not a shift: at x=80 dingbat has black on ly=68 and
+yellow on ly=69, the reference has them the other way round. Tracing ly=68:
+
+* x=80 is a **window** pixel — `WINHIT ly=68 dot=126 lx=26`, so the window
+  covers everything from x=26 rightwards.
+* acid-hell pulses LCDC every eight dots across the line ($E1/$80/$E3/$F3…),
+  toggling window-enable, object-enable and tile-select together. The failing
+  pixel sits inside the `$F3` pulse written at dot 177 (lx=77..85).
+* ly=68 carries **exactly one object, at X = 1**, i.e. `R = (1+180) mod 8 =
+  5` — a cell where dingbat and the oracle **agree**.
+
+Which is why `OBJ_WAIT_SUB = 6`, for all that it buys 45 cells of probe (e),
+leaves acid-hell at exactly 2 pixels. So does every other knob tried against
+it: `CGB_TDSEL_IDX_DOTS` 0/4/12, `CGB_TDSEL_LATENCY` 0/2, `WIN_REACT_PHASE`
+6/8, `CGB_WX_LATENCY`, `CGB_WIN_EN_HOLD` 1/2/3, `WIN_EN_HOLD` 1/3,
+`WIN_EN_ABORT`, `WIN_HEAD_ABSORB`, `WIN_EN_HOLD_BACK`, `WIN_EN_HOLD_ZERO` —
+**seventeen values across three families, every one of them 2 px.** The row
+is insensitive to the whole parameter space it plausibly lives in, which is
+consistent with the standing verdict in `docs/gb-failure-triage.md` that it
+needs a structural change rather than a constant.
+
+One tempting unification was checked and **refuted**: the `R=1` cells, where
+the oracle reads HIGH−1, are not hardware splitting a mid-fetch LCDC change
+inside a tile. Its bar there is nine pixels wide (`x=31-39`) — but so is
+dingbat's, one band later. The whole `R=1` discrepancy is the same one-band
+phase shift as the rest of the table, not a sub-tile mechanism, so it does
+not explain acid-hell's single pixel either.
+
 `STAT_LYC_LEAD=2` reproduces the hardware column exactly and must still be
 rejected: a full runner pass with it shows gambatte `sprites` 461 → 239,
 `m2enable` 94 → 62, `m2int_m3stat` 42 → 25, `scx_during_m3` 121 → 77 and a
