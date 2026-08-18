@@ -1568,6 +1568,36 @@ const WIN_PRE_PX_PHASE*       {.intdefine.} = 1
   ## same table, and the same conclusion -- the window's tile sits where its own
   ## first pixel is, and the clamp is only about which dot our shifter can
   ## notice it on.
+const WIN_RESTART_COUNTER*    {.intdefine.} = 0
+const CGB_WIN_RESTART_COUNTER* {.intdefine.} = 0
+  ## Which fetcher step a WINDOW start's restarted fetch resumes at, per model.
+  ## 0 is fetch_counter 0, the first of the two dots step 1 lasts, which makes
+  ## the startup fetch six dots and takes the early push (Pan Docs' "6 dots";
+  ## see fifo_reset_bg). 1 makes it five.
+  ##
+  ## Separate from the LINE-START reset, which shares fifo_reset_bg but is not
+  ## a restart at all -- it is the head cycle, and the discarded fetch it begins
+  ## has to start at 0 whatever these say. Probe (f) is the instrument that can
+  ## tell them apart: it brings the window up mid-line at WX = 15 and reads the
+  ## fetch grid after it, where the line-start path never runs.
+  ##
+  ## They are two knobs because probe (f) says the two models disagree, and it
+  ## says so on both sides of the same instrument. Scored by BASE equivalence
+  ## (tools/gbprobe/probe_f_base.sh: sweep the probe's write position in dingbat
+  ## and ask which single value reproduces the oracle's columns exactly):
+  ##
+  ##   DMG, counter 0 : 8/8 residues            <- already right, do not touch
+  ##   CGB, counter 0 : 2/8 residues, no common BASE
+  ##   CGB, counter 1 : 7/8 residues, ALL at BASE 24
+  ##
+  ## That last row is the shape of the claim: at counter 1 the CGB's windowed
+  ## staircase differs from silicon by ONE uniform phase offset and nothing
+  ## else, and that offset is the same 8 dots the window-less arm carries
+  ## (probe (e)), i.e. a bug this knob is not about. At counter 0 there is no
+  ## offset that works at all. The DMG column is why this is not the global
+  ## knob: counter 0 against 1 was worth mealybug DMG +361 pixels when the
+  ## fetcher's padding was moved in 2026-08-03, and probe (f) agrees with those
+  ## pixels -- the DMG's startup fetch really is six dots. The CGB's is five.
 const WIN_TAIL_FETCH*         {.intdefine.} = 1
   ## Whether a window START holds mode 3 open for the fetch it restarts, when
   ## the start lands inside the last pixels of the line. 1 ships; 0 is the

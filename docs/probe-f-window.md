@@ -104,6 +104,67 @@ homes for a one-unit SCX offset.
 acid-hell to 0 px and moves the windowed staircase **further** from silicon
 (SCX 1-3 gain another 8 dots). Whatever it compensates for, it is not this.
 
+## 2026-08-18, second pass: the scoring was wrong, and the grid is not
+
+Everything above scores ABSOLUTE columns, and that is why it reads as "the
+fetch grid is wrong at every residue". It is not. `probe_f_fit.sh` cannot rise
+above 0/8 while dingbat carries a uniform column offset, and subtracting a
+best-fit offset instead does not work either: the staircase is self-similar
+under shift (`24 24 32 32 …` against `24 32 32 40 …`), so a metric free to
+slide one against the other calls two different pairing phases a match. The
+first cut of `probe_f_shape.sh` did exactly that and scored a knob 8/8 that had
+plainly moved every column.
+
+`tools/gbprobe/probe_f_base.sh` scores it properly, by BASE EQUIVALENCE: sweep
+the probe's write position in DINGBAT, hold the oracle at the shipping BASE, and
+ask which value -- if any -- reproduces the oracle's columns EXACTLY. A pure
+phase error answers with one BASE at every SCX. A model error answers with none,
+or with a different one per SCX.
+
+**The control arm settles it.** Same ROM, same anchor, same bands, no window:
+
+| arm | anchor | result |
+|---|---|---|
+| plain, CGB | halt | **8/8, common BASE 24** |
+| plain, CGB | polled `rLY` | **8/8, common BASE 23** |
+| plain, DMG | halt | **8/8, common BASE 27** |
+| plain, DMG | polled `rLY` | **8/8, common BASE 27** |
+
+So with objects off dingbat reproduces silicon at **every fine-scroll residue on
+both models**, given one constant. The fetch grid is right; probe (e)'s 68/136
+was an absolute-column score reading a phase constant as a grid error.
+
+What the constants say, separated by anchor for the first time:
+
+* **DMG is 1 M early, and it is real** -- halt and poll agree exactly, so it is
+  not the anchor.
+* **CGB is 2 M late via halt and 3 M late via poll.** They disagree, so there are
+  *two* CGB bugs: a write/LY-visibility phase, and a halt-vs-poll difference of
+  one further M. `-d:STAT_LYC_LEAD=2` takes the CGB halt arm to **8/8 at the
+  shipping BASE 26** -- exact, with no compensation -- which is how large and how
+  clean that first one is. It remains rejected on cost (gambatte sprites
+  461 → 239), and it does **not** move `cgb-acid-hell`.
+
+The WINDOWED arm, scored the same way:
+
+| build | CGB windowed |
+|---|---|
+| stock | 2/8, **no common BASE** |
+| `-d:CGB_WIN_RESTART_COUNTER=1` | **7/8, all at BASE 24** -- the plain arm's own constant |
+| stock, DMG | 8/8 (BASE 27, two residues at 28) |
+
+That is the whole claim: at counter 1 the CGB's windowed staircase differs from
+silicon by the SAME single constant the window-less arm carries, and by nothing
+else. At counter 0 no offset works at all. The DMG column is why the knob is
+per-model -- the DMG's six-dot startup fetch is right and must not move.
+
+**It is the right diagnosis and the wrong spelling.** The full runner costs four
+rows (884 → 880, gambatte 4201 → 4191): `m3_window_timing` and both
+`m3_lcdc_tile_sel_win_change*`, all CGB silicon captures, plus `gambatte/bgen`.
+Those measure mode 3's LENGTH and this knob buys its DISPLACEMENT by shortening
+the fetch -- the same length-versus-displacement split the object penalty has
+(see `docs/probe-e-plan.md`). Both knobs therefore ship at 0, as control builds.
+
 ## What would help from hardware
 
 SameBoy has been validated against the GBA SP on all eight probe (e) settings

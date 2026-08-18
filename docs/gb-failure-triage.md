@@ -1244,6 +1244,61 @@ have no source. `cgb-acid-hell` stays at 2 pixels, `CGB_HALT_PPU_LEAD` ships at
 back-to-back-glitch SET rule scored over the 349-cell corpus — remains the only
 live candidate for the row.
 
+#### 2026-08-18: the 2 pixels are not a glitch-rule question at all
+
+H1 ships and `cgb-acid-hell` is 2, which on its own reads as "the rule regressed".
+It did not. Traced with `-d:gb_m3_trace -d:GB_TRACE_LY=68` on the SETTLED frame
+(the first traced frame is still filling and its tiles are all `$00` — reading
+that one is how this was mis-diagnosed once already), line 68 now looks like:
+
+    DOT 176 fsPushPixel        lx=76 fx=10 lcdc=E3
+    LCDC ly=68 dot=177 old=E3 new=F3   fc=0  lx=77 fx=11
+    DOT 178 fsGetTile          lx=78 fx=11 lcdc=F3
+    DOT 180 fsGetTileDataLow   lx=80 fx=11 lcdc=F3
+    DOT 182 fsGetTileDataHigh  lx=82 fx=11 lcdc=F3
+
+The write lands at **`fc = 0`, on the fetch BOUNDARY**: the whole of fetch 11 —
+map, plane 0 and plane 1 — happens with LCDC.4 already set. Nothing is
+mixed-tileset, so no glitch arms, so no glitch rule can reach these pixels.
+That is why seventeen knobs across the tile-select, window, object and (new
+here) WY, mixer and `CGB_TDSEL_IDX_DOTS` families all leave the residual at
+exactly 2 px: they are all rules about a split fetch, and there is no split
+fetch to apply them to.
+
+`m3_lcdc_tile_sel_change2` line 43, traced the same way, still splits:
+
+    DOT 140 fsGetTileDataLow   lx=36 fx=5 lcdc=C3
+    LCDC ly=43 dot=141 old=C3 new=D3   fc=4  lx=37 fx=5
+    DOT 142 fsGetTileDataHigh  lx=38 fx=5 lcdc=D3
+
+**`fc = 4`, between the two bitplane reads** — the split the row needs, which is
+why it passes. Both ROMs write LCDC at fixed CPU dots, and the 2026-08-10 entry
+above records acid-hell's line 68 splitting the same way (plane 0 at 176, write
+at 177, plane 1 at 178) back when it scored 0. So acid-hell's line has drifted
+**4 dots** against its own CPU and mealybug's has not.
+
+This is finally a complete account of `CGB_TDSEL_LATENCY=5`, which the entries
+above could only describe as "four dots parked in the wrong path". It delays
+every LCDC.4 arrival by 4 dots, which puts acid-hell's write back inside the
+fetch (`fc 0 → 4`) and takes the row to 0 — and by the same 4 dots takes
+mealybug's write *out* of its fetch (`fc 4 → 0`), which is exactly the four
+`tile_sel` rows it costs. One shift, both signs, and the reason the trade has
+never been winnable by that knob.
+
+So the open question is no longer "which glitch rule" but **where those 4 dots
+are**. Ruled out so far, by trace rather than by score: it is not the window
+start re-anchoring the grid (`-d:CGB_WIN_RESTART_COUNTER=1` perturbs the window
+by a dot and leaves the write at `fc = 0`), and not the object penalty
+(`OBJ_FETCH_DOTS` 5/7, `OBJ_WAIT_SUB` 2/4/6, `OBJ_BG_RUN=0` all leave it at
+2 px). The fetcher re-locks to the shifter, so `fc` is a function of `lx`: it is
+0 at `lx ≡ 5 (mod 8)` on acid-hell's line and 4 at the same residue on
+mealybug's. Line 68 carries `SCX = 180` (`&7 = 4`), one object at X = 1, and a
+window from `lx = 26`; mealybug's line carries none of those. The 4 dots are in
+one of them, and the next step is to find which by trace, not by sweep.
+
+Note for whoever runs this: `-d:gb_px_trace` on its own did not compile until
+2026-08-18 (`gb_traced` was guarded on `gb_m3_trace` alone).
+
 #### 2026-08-12: H1 holds, and `cgb-acid-hell` is 0
 
 The corpus was rebuilt from scratch (the previous pass's scorer was never

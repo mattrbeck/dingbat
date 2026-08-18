@@ -1070,7 +1070,17 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   # mode 3 entry parks the base over the top of this one).
   mixer_note_stop(ppu)
   ppu.fetcher_x = 0
-  ppu.fetch_counter = 0
+  # Spelled as a `when` so the shipping build is the single store it always was:
+  # both knobs are 0 there, and a per-restart `ppu.cgb` test on this path would
+  # be a branch bought for a control build nobody ships. See
+  # CGB_WIN_RESTART_COUNTER in gb.nim for what the control build is for.
+  when WIN_RESTART_COUNTER == 0 and CGB_WIN_RESTART_COUNTER == 0:
+    ppu.fetch_counter = 0
+  else:
+    ppu.fetch_counter =
+      if not fetching_window: 0
+      elif ppu.cgb: int32(CGB_WIN_RESTART_COUNTER)
+      else: int32(WIN_RESTART_COUNTER)
   # A restart is never the line's head cycle: either it IS the head (called at
   # the mode 2 -> 3 edge, before the discarded fetch has even started) or it is a
   # window start, whose own startup fetch is six dots and takes the early push
