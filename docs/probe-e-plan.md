@@ -141,12 +141,72 @@ stepping one band later (`28 28 36 36` where SameBoy has `28 36 36 44`);
 on CGB as the whole staircase sitting one tile right, with the same
 stepping phase.
 
-The 4-dot gap between the two models is exactly one CPU M-cycle, which is
-the size of both `CGB_PIPE_MCYCLES` and `CGB_TDSEL_LATENCY`. That splits
-the problem in two: a term both models share, and a CGB-only term on top.
-Mode 3's *length* is not the culprit — GBMicrotest's `hblank_int_scx` family
-and mooneye's mode-0 timing rows pin it and they pass; this is the grid's
-*phase* against the CPU.
+### It is a pure time offset, and here is its size
+
+Guessing knobs was the wrong instrument; the probe can measure the offset
+directly. `BASE` is the M-cycles between the anchor's wake and the LCDC.4
+write, so sweeping it in SameBoy asks "what delay would make SameBoy behave
+the way dingbat does?" — and if some `BASE` reproduces dingbat's staircase
+*exactly*, the two differ by a time offset and nothing else.
+
+One does, on each model, with all fourteen bands agreeing:
+
+| | dingbat at the shipping `BASE=26` | SameBoy reproduces it at | so dingbat is |
+|---|---|---|---|
+| CGB | `28 36 36 44 44 52 52 60 60 68 68 76 76 84` | `BASE=28` | **2 M-cycles late** |
+| DMG | `28 28 36 36 44 44 52 52 60 60 68 68 76 76` | `BASE=25` | **1 M-cycle early** |
+
+The staircase's *shape* is identical in every case — only its position
+moves. So the fetch grid's structure is not implicated, and neither is the
+fine-scroll discard: one number per model describes the whole disagreement.
+
+The two numbers are more interesting read the other way round. At the same
+`BASE`, SameBoy's CGB column sits 8 px left of its DMG column — **on
+silicon the CGB runs this path 2 M-cycles ahead of the DMG.** dingbat's two
+models produce the *same* column, so it models no difference here at all.
+That is very likely `CGB_TDSEL_LATENCY = 1` (which delays the LCDC.4 write
+on CGB by 1 M) cancelling `CGB_PIPE_MCYCLES = 1` (which advances the CGB
+pipeline by 1 M) to a net zero, where hardware wants a net −2.
+
+### Is it the halt, or the pipeline? Take the halt away and see
+
+mealybug's `m3_lcdc_tile_sel_change` is the same register written mid-mode-3
+and compared against a hardware capture, and it passes on both models — as
+do `_change2`, `_win_change` and the rest of that family. A uniform
+CPU-versus-PPU offset should have moved those frames too. The one thing
+probe (e) has that they do not is the **STAT-LYC halt anchor**, which is
+also the only path on which a 2-M-cycle error would explain
+`STAT_LYC_LEAD=2` reproducing the column exactly.
+
+So `ANCHOR_POLL` builds the same probe reaching the same line by polling
+`rLY` instead of halting on it. The poll's exit phase is not the halt's, so
+the absolute column moves — identically in every emulator running that
+build, which is why the comparison still holds. Running the `BASE`
+equivalence again on both anchors and both models:
+
+| | halt anchor | polled anchor |
+|---|---|---|
+| CGB | dingbat 2 M **late** | dingbat 3 M **late** |
+| DMG | dingbat 1 M **early** | dingbat 1 M **early** |
+
+That separates the problem cleanly, and neither half is what was guessed.
+
+**On DMG the offset is anchor-independent**, the same 1 M-cycle whether the
+line is reached by halting or by polling. It is therefore not the halt at
+all: dingbat's LCDC.4 write reaches the DMG fetcher one M-cycle early,
+full stop.
+
+**On CGB the two anchors disagree with each other by 1 M-cycle**, which
+means dingbat and SameBoy also differ over *when a new `LY` becomes visible
+to the CPU* on CGB — a second, independent disagreement that only the
+polled build can see, sitting on top of a 3-M-cycle write-phase error.
+
+No model change is made here. What a fix needs is now known: two separate
+terms, sized to the M-cycle, on a named side of the CPU/PPU boundary. What
+is still missing is a reason to believe any particular knob spends them in
+the place hardware does — and the one knob that reproduces the column
+(`STAT_LYC_LEAD=2`) is measured to cost hundreds of gambatte rows, which is
+what spending it in the wrong place looks like.
 
 `STAT_LYC_LEAD=2` reproduces the hardware column exactly and must still be
 rejected: a full runner pass with it shows gambatte `sprites` 461 → 239,

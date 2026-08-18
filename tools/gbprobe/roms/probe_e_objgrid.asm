@@ -197,7 +197,31 @@ Frame:
     ld d, a
     ld a, [wLcdcB]
     ld e, a
+IF DEF(ANCHOR_POLL)
+    ; The same line, reached WITHOUT the halt. The measured disagreement
+    ; between dingbat and SameBoy is a pure time offset -- 2 M-cycles on CGB,
+    ; 1 the other way on DMG -- and a time offset can live on either side of
+    ; the CPU/PPU boundary: in the STAT-LYC halt's wake, or in the pixel
+    ; pipeline's phase. Every mealybug `tile_sel` row passes, which argues
+    ; against the pipeline; this build is what separates them. If the offset
+    ; survives here it is the pipeline. If it vanishes, it is the halt.
+    ;
+    ; The poll's exit phase is not the halt's, so the bar's absolute column
+    ; moves -- but it moves the same way in every emulator running this build,
+    ; and what is being compared is the difference between two of them. Two
+    ; stages so the wait always crosses a line boundary rather than returning
+    ; instantly on a line it was already sitting on.
+.pollPrev:
+    ldh a, [rLY]
+    cp ANCHOR_LINE - 1
+    jr nz, .pollPrev
+.pollHit:
+    ldh a, [rLY]
+    cp ANCHOR_LINE
+    jr nz, .pollHit
+ELSE
     ANCHOR ANCHOR_LINE           ; park on the first line below the header
+ENDC
 
     ld b, BANDLINES
 FOR K, BANDS

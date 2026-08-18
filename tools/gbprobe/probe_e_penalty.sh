@@ -17,23 +17,52 @@
 # object X causes. A shift is negative (the bar moves LEFT) when the object
 # delays the fetcher, since a later grid means an earlier tile is under the
 # write.
+#
+#   tools/gbprobe/probe_e_penalty.sh [--dingbat] [--dmg]
+#
+# --dingbat reads the same table out of ./dingbat_test instead, so the two
+# laws can be compared as laws rather than setting by setting -- which is what
+# says whether a candidate model change has the right SHAPE before anyone
+# counts dots.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 T=${TMPDIR:-/tmp}/probe_e_pen
 mkdir -p "$T"
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
-[ -x "$SB" ] || { echo "no SameBoy runner at $SB (tools/gbfuzz/build.sh)" >&2; exit 1; }
+
+WHO=sameboy
+MODEL=--cgb
+CGBFLAG=1
+while :; do
+  case "${1:-}" in
+    --dingbat) WHO=dingbat; shift ;;
+    --dmg)     MODEL=--dmg; CGBFLAG=0; shift ;;
+    *) break ;;
+  esac
+done
+if [ $WHO = sameboy ]; then
+  [ -x "$SB" ] || { echo "no SameBoy runner at $SB (tools/gbfuzz/build.sh)" >&2; exit 1; }
+  [ $CGBFLAG = 1 ] || { echo "--dmg needs --dingbat: the runner picks its model from the cart flag" >&2; exit 1; }
+else
+  [ -x ./dingbat_test ] || { echo "no ./dingbat_test -- build it first" >&2; exit 1; }
+fi
 
 col0() {   # the first band's column, which is the staircase's phase
   python3 tools/gbprobe/read_probe_d_photo.py "$1" --skip-top 16 --bands 2>/dev/null \
     | sed -n 's/^  bar *0 .*x= *\([0-9]*\)-.*/\1/p' | head -1
 }
 shot() {
-  GBPROBE_OUT=probe_e_pen ./tools/gbprobe/mk.sh probe_e_objgrid \
+  GBPROBE_CGB=$CGBFLAG GBPROBE_OUT=probe_e_pen ./tools/gbprobe/mk.sh probe_e_objgrid \
       -DSCX_DEFAULT=$1 -DOBJX_DEFAULT="\$$2" >/dev/null 2>&1
-  $SB tools/gbprobe/probe_e_pen.gb "$BR" "$T/p" "" 240 >/dev/null 2>&1
-  col0 "$T/p.f0240.ppm"
+  if [ $WHO = sameboy ]; then
+    $SB tools/gbprobe/probe_e_pen.gb "$BR" "$T/p" "" 240 >/dev/null 2>&1
+    col0 "$T/p.f0240.ppm"
+  else
+    ./dingbat_test tools/gbprobe/probe_e_pen.gb --mode=screenshot $MODEL \
+        --timeout=200 --screenshot=$T/p.ppm >/dev/null 2>&1
+    col0 "$T/p.ppm"
+  fi
 }
 
 printf '%-5s %-8s' SCX baseline
