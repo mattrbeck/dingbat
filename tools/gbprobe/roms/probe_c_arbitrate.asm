@@ -51,6 +51,10 @@ IF !DEF(SCXVAL)
 DEF SCXVAL EQU 0
 ENDC
 
+IF !DEF(ANCHORLINE)
+DEF ANCHORLINE EQU 0
+ENDC
+
 ; The two BGP values. Identity, and its exact reverse, so EVERY colour index is
 ; distinguishable in both states -- which matters because a half-glitched fetch
 ; (one bitplane redirected, not both) lands on index 1 or 2, and that is itself
@@ -150,7 +154,14 @@ Frame:
     ld c, LOW(rBGP)
     ld d, LCDC_ON8800
     ld e, LCDC_ON8000
-    ANCHOR 0
+    ; ANCHORLINE is a build-time define (2026-08-18). 0 ships, and 0 is what
+    ; every reading before that date used -- but 0 is also the LY 153 -> 0
+    ; SNAPBACK, which is the one wake CGB_HALT_LEAD_SKIP_LYC0 exempts and which
+    ; dingbat special-cases in several other places. probe (c) at LYC 0
+    ; reproduces SameBoy exactly (both rulers) while probe (e) at LYC 16 is 8
+    ; pixels out, so the anchor line is the surviving difference between them
+    ; and it has to be a parameter before that can be tested.
+    ANCHOR ANCHORLINE
     ; ---- anchor: 4 M-cycles of lead-in, then the body, forever at 115 each
     ld b, LINES            ; 2 M
     ld a, BGP_B            ; 2 M
