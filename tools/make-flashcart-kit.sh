@@ -51,6 +51,11 @@ cp "$CACHE"/cgb-acid-hell/cgb-acid-hell.gbc                               "$KIT/
 cp tools/gbprobe/probe_c_arbitrate.gb tools/gbprobe/probe_c_arbitrate_scx3.gb \
    tools/gbprobe/probe_c_arbitrate_scx7.gb tools/gbprobe/probe_a_statidiom.gb \
    tools/gbprobe/probe_b_scxm3.gb                                         "$KIT/8-shootout-261/"
+# probe (d): the tile-select latency measurement that decides the 261st row.
+# Read it by eye (sixteen bands, light vs dark) or with read_probe_d.py; the
+# registered predictions are in docs/probe-d-tdsel.md.
+cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx3.gb \
+   tools/gbprobe/probe_d_tdsel_scx7.gb                                    "$KIT/8-shootout-261/"
 DAID="$HOME/code/GBEmulatorShootout/testroms/daid/ppu_scanline_bgp.gb"
 [ -f "$DAID" ] && cp "$DAID" "$KIT/8-shootout-261/" || \
   echo "note: $DAID not found — daid ROM skipped (clone GBEmulatorShootout)"
