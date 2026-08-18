@@ -48,13 +48,25 @@
 ; photograph. Between them they cover the 4-dot ambiguity the M-cycle grid
 ; leaves, which is precisely the gap acid-hell and change2 disagree across.
 ;
-; DEVICE. Built WITHOUT a CGB flag, like probe (c): the disputed constant is
-; `CGB_TDSEL_LATENCY`, i.e. CGB silicon, and a CGB running a cartridge with no
-; CGB flag is CGB silicon in DMG-compatibility mode -- which is also what
-; `cgb-acid-hell` measures through its own $FEA0 gate, and what daid's frames
-; are. The same cart runs on a DMG for free, and that column is a control: the
-; DMG has no such latency, so its first non-white band IS the zero point the
-; CGB's is measured against.
+; DEVICE, and it is not probe (c)'s answer. probe (c) has to run in
+; DMG-compatibility mode because BGP -- its emission ruler -- is dead in true
+; CGB mode. This probe has no such constraint: it reads SHADES, and
+; common.inc gives CGB palette 0 the same four greys as the DMG palette, so
+; the readout looks identical either way. That frees the flag to match the
+; EVIDENCE instead, and the evidence is native-mode: `cgb-acid-hell` is a
+; CGB-flagged cart that selects its CGB path through its own $FEA0 gate, and
+; mealybug's `tile_sel` CGB references are native-mode captures. So the main
+; builds carry the CGB flag.
+;
+; dingbat gates `CGB_TDSEL_LATENCY` on the HARDWARE being a CGB, not on the
+; mode, so it predicts the same latency either way -- an assumption no ROM in
+; the tree tests. `probe_d_tdsel_compat.gb` is the same source with the flag
+; off: if hardware answers differently there, the latency is mode-dependent
+; and dingbat's gating is wrong in kind, which is worth knowing on its own.
+;
+; A DMG runs every build (the flag is ignored) and is the control: it has no
+; such latency, so its pattern is the zero point the CGB's is measured
+; against.
 
 INCLUDE "hw.inc"
 

@@ -1,9 +1,9 @@
 # probe (d) — when does LCDC.4 reach the background fetcher?
 
 **Date:** 2026-08-17. The experiment that decides the GBEmulatorShootout's
-last failing row. Built as `tools/gbprobe/roms/probe_d_tdsel.asm`; three
-committed builds (`probe_d_tdsel.gb`, `_scx3`, `_scx7`); read with
-`tools/gbprobe/read_probe_d.py <frame.ppm> [--compact]`.
+last failing row. Built as `tools/gbprobe/roms/probe_d_tdsel.asm`; four
+committed builds (`probe_d_tdsel.gb`, `_scx3`, `_scx7`, `_compat`); read
+with `tools/gbprobe/read_probe_d.py <frame.ppm> [--compact]`, or by eye.
 
 ## Why it exists
 
@@ -67,30 +67,53 @@ Every band is one offset, the pattern repeats with the fetch cycle (8 dots
 built-in consistency checks on the photograph.
 
 `SCXVAL` shifts the fetch grid against the CPU's M-cycle grid (the campaign's
-`SCX_FINE_BORROW`), so the three builds cover the 4-dot ambiguity the CPU
-grid leaves — which is exactly the gap acid-hell and change2 disagree
-across. **The cart carries no CGB flag**, like probe (c): the disputed
-constant is CGB silicon in DMG-compatibility mode, which is what acid-hell
-measures through its own `$FEA0` gate and what daid's frames are. The same
-cart runs on a DMG for free, and that is the control.
+`SCX_FINE_BORROW`), so the three SCX builds cover the 4-dot ambiguity the
+CPU grid leaves — which is exactly the gap acid-hell and change2 disagree
+across.
 
-## Registered predictions (dingbat, shipping tree, before hardware)
+**The main builds carry the CGB flag**, unlike probe (c). Probe (c) has to
+run in DMG-compatibility mode because BGP — its emission ruler — is dead in
+true CGB mode; this probe reads SHADES, and `common.inc` gives CGB palette 0
+the same four greys as the DMG palette, so the readout looks identical
+either way. That frees the flag to match the EVIDENCE, and the evidence is
+native-mode: `cgb-acid-hell` is a CGB-flagged cart that selects its CGB path
+through its own `$FEA0` gate, and mealybug's `tile_sel` CGB references are
+native-mode captures.
 
-Per band 0..15, bar shade:
+`probe_d_tdsel_compat.gb` is the same source with the flag off. dingbat
+gates `CGB_TDSEL_LATENCY` on the HARDWARE being a CGB rather than on the
+mode, so it predicts the same answer for both — an assumption nothing in the
+tree tests, and one this build checks for free. A DMG runs every build (the
+flag is ignored) and is the control.
+
+## Registered predictions, and why this is a clean two-way test
+
+Per band 0..15, bar shade, from the shipping tree:
 
 | build | device | bands 0-15 |
 |---|---|---|
-| `probe_d_tdsel` | CGB | `2#2#2#2#2#2#2#2#` |
-| `probe_d_tdsel` | DMG | `################` |
-| `probe_d_tdsel_scx3` | CGB | `2#2#2#2#2#2#2#2#` |
-| `probe_d_tdsel_scx3` | DMG | `################` |
-| `probe_d_tdsel_scx7` | CGB | `2#2#2#2#2#2#2#2#` |
-| `probe_d_tdsel_scx7` | DMG | `################` |
+| `probe_d_tdsel` / `_scx3` / `_scx7` / `_compat` | CGB | `#2#2#2#2#2#2#2#2` |
+| `probe_d_tdsel` / `_scx3` / `_scx7` / `_compat` | DMG | `################` |
 
-So dingbat says: **on CGB the write alternates between reaching only the
-HIGH plane and reaching both planes as the offset steps one M-cycle; on DMG
-it always reaches both.** That DMG/CGB difference *is* `CGB_TDSEL_LATENCY`,
-and the CGB alternation's phase is the quantity under test.
+So dingbat says: **on CGB the write alternates between reaching both planes
+and reaching only the HIGH plane as the offset steps one M-cycle; on DMG it
+always reaches both.**
+
+The alternation's PHASE is the measurement, and the probe was checked
+against the two candidate worlds before being handed to hardware — same
+ROM, dingbat rebuilt at each value:
+
+| `CGB_TDSEL_LATENCY` | CGB reading | acid-hell | mealybug `tile_sel` ×4 |
+|---|---|---|---|
+| **1** (shipping) | `#2#2#2#2#2#2#2#2` | 2 px wrong | exact |
+| **5** | `2#2#2#2#2#2#2#2#` | **exact** | broken |
+
+One M-cycle of latency moves the pattern by exactly one band, and nothing
+else about the frame changes — the DMG control is `################` in
+both worlds. So the photograph picks a side directly: **whichever string
+the hardware shows names the latency**, with no interpretation in between.
+That is also the instrument's own calibration check; a probe that could not
+tell the two worlds apart would be measuring something else.
 
 ## Does a cheap flash cartridge invalidate this?
 
@@ -142,23 +165,26 @@ correctly and every other probe's reading stands.
 
 ## How to run it, and what each outcome decides
 
-Flash all three builds; photograph each on the **GBA SP** (CGB silicon,
-compat mode) and, if available, a **CGB** and the **Game Boy Pocket** (the
-DMG-family control). One photo per build per device, screen filling the
+Flash all four builds; photograph each on the **GBA SP** (CGB silicon)
+and, if available, a **CGB** and the **Game Boy Pocket** (the DMG-family
+control). Run `probe_cart.gb` first (see above). One photo per build per device, screen filling the
 frame. Read with `read_probe_d.py`, or straight off the photo by eye —
 counting sixteen bands and noting light/dark is the whole measurement.
 
-* **Hardware alternates in the same phase as dingbat's CGB column** — the
-  shipping latency is right, and acid-hell's two pixels are NOT a latency
-  error. The remaining suspect is then the fetch grid's own position for
-  acid-hell's line (SCX/mode-3-start), and the `_scx3`/`_scx7` columns say
-  which way it is off.
-* **Hardware alternates one band out of phase** — the latency is one
-  M-cycle longer than shipping, i.e. `CGB_TDSEL_LATENCY = 5`, which is
-  exactly what makes acid-hell pixel-exact. The four mealybug `tile_sel`
-  rows that break under it are then re-derived against this measurement
-  rather than against the shipping phase — the first time that family has
-  had an independent ruler.
+* **`#2#2…` — same phase as the shipping tree.** The latency is 1, and
+  acid-hell's two pixels are NOT a latency error. The remaining suspect is
+  the fetch grid's own position on acid-hell's line (SCX / mode-3 start),
+  and the `_scx3`/`_scx7` columns say which way it is off.
+* **`2#2#…` — one band out of phase.** The latency is 5, which is exactly
+  what makes acid-hell pixel-exact. The four mealybug `tile_sel` rows that
+  break under it are then re-derived against this measurement instead of
+  against the shipping phase — the first time that family has had a ruler
+  independent of itself.
+* **`_compat` disagrees with the CGB-flagged builds.** The latency is
+  mode-dependent, which dingbat does not model at all (it gates on the
+  hardware being a CGB, not on the mode) — a finding in its own right, and
+  it would mean acid-hell (native) and any compat-mode evidence must be
+  fitted separately.
 * **Hardware shows white bands anywhere** — the write misses the data reads
   entirely at that offset, which no dingbat build predicts, and the fetch
   cycle's shape (not its phase) is wrong.

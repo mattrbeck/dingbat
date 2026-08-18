@@ -42,10 +42,10 @@ cp "$CACHE"/gambatte/oamdma/late_sp00*.gbc "$CACHE"/gambatte/oamdma/late_sp01*.g
    "$CACHE"/gambatte/oamdma/late_sp39*.gbc \
    "$CACHE"/gambatte/oamdma/oamdma_late_speedchange_stat_*.gbc            "$KIT/6-oamdma-phase/"
 
-# 8 — the shootout's 261st row (see docs/gb-hardware-session-runbook.md,
-#     experiment (c)): acid-hell itself, daid's band-edge ROM, and the
-#     committed probe rig — the probes are DMG carts on purpose (BGP is inert
-#     in native-CGB mode) so the SP's compat mode runs them today.
+# 8 — the shootout's 261st row: acid-hell itself, daid's band-edge ROM, and
+#     the probe rig. probe (c) is a DMG cart on purpose (its BGP ruler is
+#     inert in native-CGB mode); probe (d) is CGB-flagged to match the
+#     native-mode evidence, with a _compat build as the control.
 mkdir -p "$KIT"/8-shootout-261
 cp "$CACHE"/cgb-acid-hell/cgb-acid-hell.gbc                               "$KIT/8-shootout-261/"
 cp tools/gbprobe/probe_c_arbitrate.gb tools/gbprobe/probe_c_arbitrate_scx3.gb \
@@ -61,7 +61,8 @@ cp tools/gbprobe/probe_cart.gb "$KIT/0-cart-check/"
 # Read it by eye (sixteen bands, light vs dark) or with read_probe_d.py; the
 # registered predictions are in docs/probe-d-tdsel.md.
 cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx3.gb \
-   tools/gbprobe/probe_d_tdsel_scx7.gb                                    "$KIT/8-shootout-261/"
+   tools/gbprobe/probe_d_tdsel_scx7.gb tools/gbprobe/probe_d_tdsel_compat.gb \
+                                                                          "$KIT/8-shootout-261/"
 DAID="$HOME/code/GBEmulatorShootout/testroms/daid/ppu_scanline_bgp.gb"
 [ -f "$DAID" ] && cp "$DAID" "$KIT/8-shootout-261/" || \
   echo "note: $DAID not found — daid ROM skipped (clone GBEmulatorShootout)"

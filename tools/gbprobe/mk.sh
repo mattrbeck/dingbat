@@ -21,13 +21,20 @@ NAME="$1"; shift
 OUT="${GBPROBE_OUT:-$NAME}"
 mkdir -p "$HERE/build"
 
-case "$NAME" in
-  # probe (c) must run the CGB's PPU in DMG-COMPATIBILITY mode, because BGP --
-  # daid's emission ruler -- is only live there. A cart with no CGB flag is
-  # what selects that mode, and the same cart runs natively on a DMG.
-  probe_c_*) CGBFLAG="" ;;
-  *)         CGBFLAG="-c" ;;
-esac
+# GBPROBE_CGB overrides the flag: 0 = no CGB flag (the cart runs a CGB in
+# DMG-COMPATIBILITY mode), 1 = CGB-aware. Which mode a probe wants is part of
+# its experiment, not a property of its name, so it is settable per build.
+if [ -n "$GBPROBE_CGB" ]; then
+  [ "$GBPROBE_CGB" = "0" ] && CGBFLAG="" || CGBFLAG="-c"
+else
+  case "$NAME" in
+    # probe (c) must run the CGB's PPU in DMG-COMPATIBILITY mode, because BGP --
+    # daid's emission ruler -- is only live there. A cart with no CGB flag is
+    # what selects that mode, and the same cart runs natively on a DMG.
+    probe_c_*) CGBFLAG="" ;;
+    *)         CGBFLAG="-c" ;;
+  esac
+fi
 
 "$RGBDS/rgbasm" -I "$HERE/roms" "$@" -o "$HERE/build/$OUT.o" "$HERE/roms/$NAME.asm"
 "$RGBDS/rgblink" -o "$HERE/build/$OUT.gb" -n "$HERE/build/$OUT.sym" \
