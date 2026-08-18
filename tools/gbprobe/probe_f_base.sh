@@ -34,6 +34,12 @@ MODEL=--cgb; SUF=cgb; CGBFLAG=1; WIN=-DWIN_LIVE=1
 while :; do
   case "${1:-}" in
     --dmg)   MODEL=--dmg; SUF=dmg; CGBFLAG=0; shift ;;
+    # CGB COMPATIBILITY mode: a cart with no CGB flag, run on a CGB. It is a
+    # third machine, distinct from both --dmg (DMG silicon) and the default
+    # (CGB native), and it is the one daid's ppu_scanline_bgp runs on -- so it
+    # is what separates that ROM from this probe. SameBoy needs GBFUZZ_MODEL to
+    # be told, since it otherwise picks its model off the cart flag.
+    --compat) MODEL=--cgb; SUF=compat; CGBFLAG=0; export GBFUZZ_MODEL=cgb; shift ;;
     # The CONTROL arm: same ROM, same anchor, same bands, no window. Whatever
     # uniform offset this reports is not the window's, and only the difference
     # between the two arms is.

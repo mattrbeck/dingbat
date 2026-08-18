@@ -500,10 +500,44 @@ itself rather than merely offset. That is its own small finding: the pipeline
 advance is load-bearing for SCX consistency, which is presumably why daid pins
 it so sharply.
 
-So: not the halt, not the tile-select arrival, not the pipeline advance. What
-is left is mode 3's own start dot on this ROM's settings, or something in the
-free-running band loop. Both are reachable with the same BASE-equivalence
-harness and no hardware.
+So: not the halt, not the tile-select arrival, not the pipeline advance.
+
+Then the machine axis, same probe, same harness (target 26 throughout):
+
+| machine | BASE | dingbat is |
+|---|---|---|
+| DMG (DMG silicon) | 27 | 1 M **early** |
+| CGB compatibility mode (DMG-flagged cart on a CGB) | 24 | 2 M **late** |
+| CGB native (CGB-flagged cart) | 24 | 2 M **late** |
+
+Two things fall out. **It is not a native/compat split** -- both CGB modes give
+24, so the third machine is not the discriminator, which was the obvious guess
+because daid's cart is DMG-flagged and this probe's is not. And **it is a clean
+3 M DMG-vs-CGB split**: dingbat has the CGB pipeline 1 M ahead of the DMG
+(`CGB_PIPE_MCYCLES = 1`) and this probe wants that relationship 3 M the other
+way.
+
+#### The leading hypothesis: emission versus the fetch grid
+
+daid's `ppu_scanline_bgp` runs on CGB compatibility mode -- the same machine as
+the middle row above -- and dingbat is pixel-exact on it. But daid's ruler is
+**BGP**, i.e. EMISSION, while probe (e)'s is **LCDC.4**, i.e. the FETCH GRID. So
+on one machine, at one time, dingbat's emission phase is right and its
+fetch-grid phase is 2 M out. That is not two bugs; that is a 2 M separation
+between emission and the fetch grid -- which is the oldest open axis in
+`docs/gb-failure-triage.md`, the one described there as "acid-hell needs the
+CPU's writes aligned to the BG fetch grid where they are; daid needs them four
+dots later relative to pixel emission".
+
+**And probe (c) is the instrument built to measure exactly that**, by putting
+both rulers on one frame so the separation is internal to a single photograph.
+Which is why the registration fix below is not a side quest: it is the next
+step of this hunt.
+
+The honest caveat: `cgb-acid-hell` is also a fetch-grid measurement and it is
+pixel-exact, which this hypothesis does not yet explain. Its observable is which
+FETCH gets split rather than which COLUMN changes, and those need not have the
+same sensitivity -- but that is an assertion, not a result.
 
 #### Reading the ARCHIVED photos: blocked, and the fix is a ROM change
 
