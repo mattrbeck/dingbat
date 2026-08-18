@@ -49,6 +49,49 @@ Two things in that table carry the experiment:
 predicts an all-black staircase, so it is obvious at a glance whether the
 ROM and the reading agree.
 
+## RESULT — 2026-08-17, GBA SP (photos IMG_3824-3831)
+
+Read with the `--bands` reader; every frame's own header confirmed its
+setting (IMG_3824 reads `04 FF`, and the `00 xx` group is legible in the
+OCR). Full staircases, one column per band:
+
+| setting | hardware | dingbat |
+|---|---|---|
+| 04 FF | 20 28 28 36 36 44 44 52 52 59 59 67 68 76 | 28 36 36 44 44 52 52 60 60 68 68 76 76 84 |
+| **04 01** | **28 35 36 43 44 51 52 59 60 67 68 75 76** | **28 35 36 43 44 51 52 59 60 67 68 75 76** |
+| 04 00 | 20 28 28 36 36 44 44 51 51 59 59 67 67 75 | 20 20 28 28 36 36 44 44 52 52 60 60 68 68 |
+| 00 FF | 24 32 32 40 40 48 48 56 56 64 64 72 72 80 | 32 40 40 48 48 56 56 64 64 72 72 80 80 88 |
+| 00 00 | 24 32 32 40 40 48 48 56 56 64 64 72 72 80 | 24 24 32 32 40 40 48 48 56 56 64 64 72 72 |
+| 07 FF | 17 25 25 33 33 41 41 49 49 57 57 65 65 73 | 25 33 33 41 41 49 49 57 57 65 65 73 73 81 |
+| 07 00 | 17 25 25 33 33 41 41 49 49 57 57 65 65 73 | 17 17 25 25 33 33 41 41 49 49 57 57 65 65 |
+
+Absolute columns are not comparable between machines, so the reading is
+each machine against **its own** objects-off baseline:
+
+1. **`04 01` — acid-hell's configuration — matches dingbat column for
+   column, all thirteen bands.** Whatever is wrong with acid-hell's two
+   pixels, an object at X = 1 displaces the fetch grid exactly as modelled.
+2. **An object at X = 0 does not move the grid on hardware at all.** At
+   SCX 0, 4 and 7 the `OBJ 00` staircase is identical to that SCX's
+   objects-off staircase (within a pixel of photo drift). dingbat displaces
+   it by 8 dots at all three, and its bands 0-1 collapse to one column
+   (`20 20`, `24 24`, `17 17`) where hardware keeps alternating. **This is
+   a real, reproducible model error, found three times independently.**
+3. Turning the X = 0 flat-11 exception off (`sub = idx and 7` for every X)
+   was measured and does NOT reproduce hardware either: the staircase's
+   structure becomes right but it still sits 8 dots left of its own
+   baseline. So the exception is not simply spurious.
+
+**Caveat that has to be settled before the 8 dots are quantified.** probe
+(e)'s objects-off baseline itself sits 8 px left of dingbat's on all three
+SCX values, and probe (d) showed no such offset (its bar columns matched
+hardware exactly). probe (e) differs from probe (d) in two ways — it
+anchors at LY = 16 instead of LY = 0, and it sets LCDC.2 (8x16 objects)
+even when objects are disabled. One of those moves the baseline, and until
+it is known which, only the *relative* readings above are safe. The
+relative readings are enough for the finding in (2), because that
+comparison is internal to each machine.
+
 ## How to shoot it
 
 1. Boot the ROM once. It comes up at `00 FF` (SCX 0, objects off).
