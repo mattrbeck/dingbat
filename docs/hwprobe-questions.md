@@ -476,6 +476,58 @@ That is worth stating plainly because it cuts the other way too: if the halt is
 not where probe (e)'s error lives, probe (e)'s dissent was never really evidence
 about the halt constant in the first place.
 
+#### Hunting the 2 M: three homes eliminated, all by the same argument
+
+Scored with `probe_f_base.sh --plain -d:CGB_HALT_PPU_LEAD=0`, where the target
+is the shipping BASE 26 and dingbat currently sits at 24:
+
+| knob | 0 | 1 (ships) | 2 | 5 | 9 | 13 |
+|---|---|---|---|---|---|---|
+| `CGB_TDSEL_LATENCY` | — | **24** | — | 23 | 22 | 22 |
+| `CGB_PIPE_MCYCLES` | none | **24** | 23 | — | — | — |
+
+**Every one of them moves BASE DOWN as it increases, and the target is UP.**
+dingbat's effect lands about 8 dots too far RIGHT for a given write time -- its
+fetcher is further along than hardware's -- so the fix has to RETARD the PPU
+against the CPU, and each of these knobs advances it. Reaching 26 would need
+`CGB_TDSEL_LATENCY` around -8 or `CGB_PIPE_MCYCLES` at -1/-2: unphysical, and
+`-1` is also pathological in practice (the PPU loop slows ~70x, so do not leave
+that sweep running).
+
+`CGB_PIPE_MCYCLES = 0` is the one non-monotone entry -- it produces NO common
+BASE across the eight SCX values, i.e. it makes the model inconsistent with
+itself rather than merely offset. That is its own small finding: the pipeline
+advance is load-bearing for SCX consistency, which is presumably why daid pins
+it so sharply.
+
+So: not the halt, not the tile-select arrival, not the pipeline advance. What
+is left is mode 3's own start dot on this ROM's settings, or something in the
+free-running band loop. Both are reachable with the same BASE-equivalence
+harness and no hardware.
+
+#### Reading the ARCHIVED photos: blocked, and the fix is a ROM change
+
+IMG_3803-3808 (session 2) are on disk in `hwphotos/`. IMG_3804-3806 are probe
+(c), the acid-hell-vs-daid arbitration, and they **cannot currently be
+registered**: probe (c) draws white bands on a BLACK background, so the 160x144
+frame has no visible border and photowarp's whole model -- "find the lit
+quadrilateral inside the letterbox" -- has nothing to lock onto. `find_panel.py`
+locks onto the couch instead. Computing the frame from the GBA SP's own
+240x160 panel geometry (the GB image sits at 40/240, 8/160) was tried and the
+LCD's corners cannot be eyeballed accurately enough either -- the warp comes out
+including the shell's "GAME BOY ADVANCE SP" legend.
+
+**The fix is four registration marks in the ROM**, and it costs the measurement
+nothing: put a white tile in each of the four map corners. The fetcher still
+fetches exactly one tile per eight pixels whatever the tile contains, so no
+timing changes at all -- only which bytes come back. probe (c)'s staircases live
+in the middle of the frame and never reach the corners. With those, photowarp's
+existing detector works on a black-background probe and every future session
+photo of one becomes readable.
+
+Until that lands, IMG_3804-3806 hold data we cannot extract, and the arbitration
+they were shot for needs a re-shoot rather than more tooling.
+
 ### What a negative result would mean, stated in advance
 
 Worth writing down before the photographs exist, because it is the only
