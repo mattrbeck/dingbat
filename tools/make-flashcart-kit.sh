@@ -76,6 +76,22 @@ cp "$CACHE"/same-suite/apu/channel_3/channel_3_restart_stop_delay.gb      "$KIT/
 cp "$CACHE"/same-suite/apu/channel_1/channel_1_sweep_restart.gb \
    "$CACHE"/same-suite/apu/channel_1/channel_1_sweep_restart_2.gb         "$KIT/7-apu/" 2>/dev/null || true
 
+# 9 — g1: the halt-wake PPU phase (docs/hwprobe-questions.md, v8 section).
+# TWO fixed builds rather than the paged ROM in folder 8, deliberately: the
+# whole question is a 4-dot phase and a wrong d-pad press would silently answer
+# a different one. Each ROM prints its own settings in the header, so the photo
+# is self-labelling. Predictions for all three candidate models are rendered
+# next to them, 3x, so the answer can be read by eye before any tooling runs.
+mkdir -p "$KIT/9-halt-lead"
+for S in 0 4; do
+  GBPROBE_CGB=1 GBPROBE_OUT=g1_scx$S ./tools/gbprobe/mk.sh probe_e_objgrid \
+      -DSCX_DEFAULT=$S -DOBJX_DEFAULT='$FF' >/dev/null
+  mv tools/gbprobe/g1_scx$S.gb "$KIT/9-halt-lead/"
+  rm -f tools/gbprobe/g1_scx$S.sym
+done
+cp tools/gbprobe/g1_README.md "$KIT/9-halt-lead/README.md"
+echo "note: folder 9's predicted-*.png are rendered by hand -- see its README"
+
 echo "kit assembled:"
 find "$KIT" -type f | sort | sed 's/^/  /'
 echo

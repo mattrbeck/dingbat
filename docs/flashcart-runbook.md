@@ -209,3 +209,25 @@ Photograph everything into one folder per console. For gbedge pages,
 for the diff side; hardware photos are compared by eye against those.
 File deltas as rows in docs/hwprobe-questions.md / pandocs-upstream.md §2
 — each entry there names the knob or model the answer moves.
+
+## 9. g1 — the halt-wake PPU phase (folder 9; hwprobe v8, HIGHEST VALUE NOW)
+
+Two fixed builds of probe (e), `g1_scx0.gb` and `g1_scx4.gb`. Boot each on the
+**GBA SP**, check the header reads `00 FF` / `04 FF`, photograph, done — no
+d-pad, no timing. Folder 9's README has the full story and the predicted
+screens rendered at 3x.
+
+It arbitrates `CGB_HALT_PPU_LEAD`, which is **shipping on main** (it is what
+took `cgb-acid-hell` to 0 px and the shootout to 261/261) and which two of our
+own instruments disagree about: `cgb-acid-hell` and daid's `ppu_scanline_bgp`
+want it, probe (e) scored against SameBoy does not. Three candidate readings,
+8 px apart:
+
+| SCX | lead 0 | lead 1 (ships) | SameBoy |
+|---|---|---|---|
+| 0 | `32 40 40 48 …` | `40 40 48 48 …` | `24 32 32 40 …` |
+| 4 | `28 36 36 44 …` | `36 36 44 44 …` | `20 28 28 36 …` |
+
+Neither dingbat build matches SameBoy even at lead 0 — that gap is probe (e)'s
+own unexplained 2-3 M baseline offset, so this shot tests the instrument as
+well as the constant. Read with `tools/gbprobe/read_probe_e.py <photo.jpg>`.
