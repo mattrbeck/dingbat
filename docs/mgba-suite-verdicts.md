@@ -179,6 +179,22 @@ PPU schedules the line as `960 + 272 = 1232` exactly (`ppu.start_line` /
 between the first and second halt-wake, not a drift. This row is a genuine, localized,
 unfixed defect. It is not codegen-calibrated and should not have been dismissed as such.
 
+#### 5b-i. `IRQ_GATE_DELAY` is not it (2026-08-18)
+
+The only halt/IRQ phase constant in the GBA core is `IRQ_GATE_DELAY` (12), which
+holds recognition off after a register write re-opens the gate on a parked IF --
+plausible for this row, because the first of the two halts has such a write
+behind it and the second does not, which is exactly the shape of a
+first-versus-second asymmetry. Swept 0 / 9 / 12 / 15 against the suite: the row
+reads `0x4D3` at **every** value. Not the gate.
+
+Also checked while here, because it would have inverted the whole entry: the
+raw suite line prints `Got 0x4D0 vs 0x4D3`, which reads as though dingbat were
+producing the GBATEK-exact 1232. It is not. `misc-edge.c` passes
+`(expected, value)` where every other suite file passes `(value, expected)`, and
+`dingbat_test_runner.nim` already un-swaps this section before writing the
+table. The direction in 5b stands: dingbat is three cycles LONG.
+
 ### 5c. Flip 1-6 measure the waitloop skip resolution
 
 The six `Flip` rows time the gaps between DISPSTAT bit-1 edges with a spin loop:
