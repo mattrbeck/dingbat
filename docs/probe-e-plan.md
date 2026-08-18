@@ -236,18 +236,65 @@ gambatte 4201 → 3947.
 
 ### Why no knob can fix it
 
-That rejection is the finding, not a setback. Two instruments read the same
-penalty and want different numbers, by more than either one's resolution:
+That rejection is the finding, not a setback — but the first reading of it
+here was wrong and is corrected below, because "it regresses rows" is not by
+itself evidence of anything. **Passing a row is evidence that the model
+matches whatever produced that row's expectation, which is not always
+hardware.** gambatte's 5,005 rows are gambatte's own output and this tree
+already disagrees with some 800 of them, so −254 of them is the loudest
+number in the rejection and the least probative. The rest of the list is
+what decides it:
 
-| instrument | reads | wants |
-|---|---|---|
-| GBMicrotest `ppu_spritex_vs_scx`, 153 cells | mode 3's **length** | `6 + max(0, 5-R)` |
-| probe (e), 136 cells | the fetch grid's **displacement** | `6 + max(0, 2-R)` |
+| what rejects `OBJ_WAIT_SUB=6` | where its expectations come from |
+|---|---|
+| 29 mealybug rows | **captures of real DMG/CGB silicon** |
+| 6 GBMicrotest `sprite*` rows | the ROMs' own hardware-derived self-checks |
+| mooneye `intr_2_mode0_timing_sprites`, 2 age rows, wilbertpol | hardware-derived |
+| 254 gambatte rows | gambatte |
 
-Both pass on hardware, so both are true, so **on silicon those are not the
-same quantity** — up to three dots of an object's penalty lengthen mode 3
-without moving the background fetch grid. In this tree they are one field,
-`obj_penalty`, held against the fetcher for every one of its dots.
+And the decisive one is not in the runner at all. `tools/gbppu/objtab.py`
+scores GBMicrotest `ppu_spritex_vs_scx` — 153 cells of OBJ penalty **in
+dots**, with the expected values transcribed from the ROM's own `cp`
+operands, i.e. measured on silicon and baked into the test:
+
+    stock              mismatched cells:  0/153
+    OBJ_WAIT_SUB=6     mismatched cells: 99/153
+
+**So the penalty's length is hardware-pinned, and this tree already has it
+exactly right.** `OBJ_WAIT_SUB=6` is refused by silicon, not by gambatte.
+
+### The correction that follows
+
+The earlier claim here — that probe (e) "wants `6 + max(0, 2-R)`" — assumed
+the fetch grid's displacement *is* the penalty's length, which is true in
+this tree and is precisely what is not true on hardware. Hardware satisfies
+`objtab`'s length law and probe (e)'s column table **at the same time**, so
+those are two different quantities on silicon, and the one this tree has
+wrong is the displacement, not the length. `OBJ_WAIT_SUB=6` fits 45 more
+probe (e) cells by breaking the length instead — the right target reached
+with the wrong lever, which is exactly what a 113/136 fit looks like when
+the fit is measuring the wrong thing.
+
+So the structural requirement is sharper than stated before: a path by which
+stalled dots reach mode 3's length **without** reaching the fetch grid,
+holding `objtab` at 0/153 while moving probe (e) off 68/136. In this
+architecture displacement is identically the stall length, because a stalled
+shifter never empties the FIFO and the fetcher parks — which is why the three
+knob families below cannot express it.
+
+### Scoring hardware separately from emulators
+
+`tools/gbppu/hwscore.sh` exists so this cannot be confused again. It reports
+only instruments anchored in silicon, for any set of knobs:
+
+    knobs: <stock>
+      objtab (mode 3 length, hardware `cp` operands) : 0/153
+      probe (e) (fetch grid, SameBoy = GBA SP)       : 68 / 136 cells [cgb]
+      cgb-acid-hell (vs reference)                   : 2 differing pixels
+
+mealybug is a fourth such instrument — its references are silicon captures —
+but only the full runner scores it colour-correctly, so it stays out of the
+triple and is read from the runner's mealybug rows instead.
 
 Three ways of spending the difference were tried and all are inert:
 
