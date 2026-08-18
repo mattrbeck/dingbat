@@ -930,7 +930,7 @@ weight even though they moved a long way here. Wrong pixels of 23040, `main` at
 | `m3_bgp_change` | 1508 | 820 | second mechanism, see below |
 | `m3_bgp_change_sprites` | 1044 | 536 | as above |
 | `m3_window_timing_wx_0` | 902 | **4** | the SCX discard on a window-start line (2026-08-07); the 4 left were all LY = 0, i.e. bucket 0, and are **0 as of 2026-08-09** |
-| `acid/cgb-acid-hell` (CGB) | 2 | 2 | see below — **0 as of 2026-08-12** (`CGB_TDSEL_IDX_DOTS`, the SET glitch behind a RESET one) |
+| `acid/cgb-acid-hell` (CGB) | 2 | **0** | **CLOSED 2026-08-18 — 23040/23040.** The last 2 px were one CPU-vs-PPU M-cycle at a STAT/LYC halt wake, measured off the ROM's own source and landed as `CGB_HALT_PPU_LEAD = 1`; see the 2026-08-18 section |
 | `m3_lcdc_obj_size_change_scx` | 30 | 30 | LCDC.2 is read once per BITPLANE — **0 as of 2026-08-09**, see below |
 | `m3_lcdc_win_map_change` | 34 | 34 | see below — **0 as of 2026-08-09** (`obj_yields_to_window`) |
 | `m3_lcdc_obj_size_change` | 57 | 57 | as above — **0 as of 2026-08-09** |
@@ -1298,6 +1298,77 @@ one of them, and the next step is to find which by trace, not by sweep.
 
 Note for whoever runs this: `-d:gb_px_trace` on its own did not compile until
 2026-08-18 (`gb_traced` was guarded on `gb_m3_trace` alone).
+
+#### 2026-08-18, same day: the 4 dots are `CGB_HALT_PPU_LEAD`, and it is 0 px
+
+The answer came from the ROM's own source rather than from another sweep.
+`cgb-acid-hell` is an mgbdis disassembly on GitHub, and it rebuilds byte-exact
+(md5 `cdf25d29ff8504d28a87bb8d20f7f698`) once four pre-0.6 rgbds spellings are
+fixed -- the fourth being **a `nop` after each of its 136 `halt`s**, which old
+rgbasm inserted for you. Miss that one and the ROM is a byte short per line,
+which on this ROM is 4 dots of phase: the quantity under study, introduced by
+the build. See `tools/gbppu/hellsrc.py` for the recipe.
+
+What the source shows is that the ROM is **fully unrolled, one block per
+scanline**, each block anchored by its own `halt` on the STAT LYC interrupt and
+then writing LCDC 16 times, two M-cycles apart, via `ld [hl], r` with `hl` =
+$ff40. Lines 67..70 are byte-identical apart from `rSCY` ($e0/$e8/$f0/$f8,
+stepping one tile row) -- so the LCDC write timing is not what distinguishes the
+failing lines from their neighbours, and `d,e,b,c` = `$80,$E1,$E3,$F3`
+reproduces the traced write sequence exactly.
+
+Because every line re-anchors on its own halt, one line can be perturbed with
+the other 143 as controls. ROM0 is exactly full and the disassembly carries 29
+raw-address jumps, so the perturbation has to preserve byte offsets: rewrite k
+of a block's 17 idle `nop`s ($00, 1 byte, 1 M) as `ld a, [hl]` ($7E, 1 byte,
+**2** M), which buys k M-cycles at identical size. Then (`tools/gbppu/hellall.py`):
+
+| | dingbat | oracle |
+|---|---|---|
+| every line delayed 0 M | — | 2 px on lines 68, 69 |
+| **every line delayed 1 M** | **0 px, all 23040** | — |
+
+**Delaying every line's writes by exactly one M-cycle makes dingbat reproduce
+SameBoy's undelayed frame pixel-perfectly on all 144 lines.** So the residual
+was one uniform CPU-vs-PPU M-cycle all along -- not a glitch rule, not the
+window, not the object -- invisible on 142 lines only because the ROM's writes
+sit on an 8-dot lattice and the phase is 4 dots. (Delaying the whole post-halt
+block including `rSCY` gives the same result, so this ROM cannot say whether the
+M-cycle is in the wake or in the write path; `strikethrough` can, and does.)
+
+That constant already existed: **`CGB_HALT_PPU_LEAD`**. It shipped at 0 because
+`strikethrough-cgb` went 7 px wrong under it and nothing measured it from the
+other side. Both halves are now resolved:
+
+* `cgb-acid-hell` measures it, above, and any lead ≥ **1 dot** takes it to 0 --
+  it is not a 4-dot threshold, the pixel flips immediately.
+* `strikethrough` was never refuting it. `OBJ_DMA_BUS_LEAD`'s own derivation in
+  `fifo_ppu.nim` says that frame witnesses the **SUM** of the pipeline's advance
+  and the object fetch's lead over the OAM DMA unit's bus. The advance is now
+  summed into that lead, CGB-only, exactly as `CGB_PIPE_MCYCLES` already was --
+  and both strikethrough frames are byte-identical across the change. Setting
+  `OBJ_DMA_BUS_LEAD=2` globally instead does fix the CGB arm and breaks the DMG
+  one by the same 7 px, which is the two-sided bracket the constant claims.
+
+Ledger: **884 → 886 rows, gambatte 4201 → 4241 (+40), no regressions**; objtab
+held 0/153, probe (e) 68 → 113/136, `cgb-acid-hell` **23040/23040**. The +40 is
+not this constant alone -- bucket 13's speed-switch model has its defaults tied
+to this knob, so turning it on lands that model with it, which is what it was
+parked waiting for. Refused on the way: `CGB_HALT_EXIT_MCYCLES=1` (882, gambatte
+4160), `STAT_LYC_LEAD=1` (866, gambatte 3905 -- it moves the LYC interrupt
+itself, which GBMicrotest and mooneye pin directly), and
+`CGB_OAM_DMA_START_T=4` as the compensator (recovers strikethrough but costs 117
+`oamdma` rows, confirming the 8 T start).
+
+**Left open, and it is a real tension:** the probe (e)/(f) plain arm, which is
+also anchored on a STAT-LYC `halt`, now wants BASE 23 where it wanted 24 --
+i.e. that instrument says the advance moved dingbat one M-cycle FURTHER from
+SameBoy, while acid-hell says it landed exactly on it. Both are halt-anchored
+CGB ROMs and they should not disagree. The most likely discriminator is the one
+`docs/gb-failure-triage.md` already names elsewhere: whether IME is set and a
+vector is taken. acid-hell does `xor a / ldh [rIF], a / halt`; the probe's
+anchor should be re-read against that before the probe's BASE numbers are
+trusted again.
 
 #### 2026-08-12: H1 holds, and `cgb-acid-hell` is 0
 

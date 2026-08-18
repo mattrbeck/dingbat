@@ -491,9 +491,41 @@ const SERIAL_START_ARM* {.intdefine.} = 0
 # M-cycle is what the 60 rows above refuse, and the palette step is what 27
 # mealybug CGB rows refuse. See docs/gb-failure-triage.md for the decomposition.
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
-const CGB_HALT_PPU_LEAD* {.intdefine.} = 0
+const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
   ## as time -- which is the shape the two halves of that measurement demand.
+  ##
+  ## ---- 2026-08-18: turned ON, and `cgb-acid-hell` is what turned it ---------
+  ##
+  ## This shipped at 0 for one reason: `strikethrough-cgb` went 7 pixels wrong
+  ## under it, and no ROM measured the phase from the other side, so the row was
+  ## read as a refutation. Both halves of that have now changed.
+  ##
+  ## `cgb-acid-hell` measures it, and does so on the ROM's own source rather
+  ## than by knob-fitting. The ROM is fully unrolled -- one block per scanline,
+  ## each anchored by its own `halt` on the STAT LYC interrupt, then 16 LCDC
+  ## writes two M-cycles apart -- so a byte-preserving delay can be inserted in
+  ## every block and the frame re-read (tools/gbppu/hellsrc.py, and the source
+  ## is rebuilt byte-exact: md5 cdf25d29ff8504d28a87bb8d20f7f698). Delay every
+  ## line's writes by exactly ONE M-cycle and dingbat reproduces SameBoy's
+  ## undelayed frame on all 144 lines, 23040/23040 pixels, where undelayed it is
+  ## 2 pixels out. The residual was never a glitch rule, a window or an object:
+  ## it is this M-cycle, invisible on 142 of the 144 lines only because the
+  ## ROM's writes sit on an 8-dot lattice and the phase is 4 dots.
+  ##
+  ## And `strikethrough` was never refuting it. See OBJ_DMA_BUS_LEAD in
+  ## fifo_ppu.nim: that frame witnesses the SUM of the pipeline's advance and
+  ## the object fetch's lead over the OAM DMA unit's bus, not the advance alone.
+  ## The advance is now summed into that lead, CGB-only, exactly as
+  ## CGB_PIPE_MCYCLES already was -- at which point BOTH strikethrough frames
+  ## are byte-identical across the change and acid-hell is 0.
+  ##
+  ## Ledger, whole runner: 884 -> 886 rows, gambatte 4201 -> 4241 (+40), NO
+  ## regressions; objtab held at 0/153, probe (e) 68 -> 113/136, acid-hell
+  ## 2 px -> 0. The gambatte gain is not this constant alone: the speed-switch
+  ## model of bucket 13 has its defaults tied to this knob
+  ## (SPEED_SWITCH_PPU_EXTRA_DOTS = 12 - 4*CGB_HALT_PPU_LEAD), so turning it on
+  ## lands that model with it, which is what it was parked waiting for.
   ## **It ships at 0 as well**, and for a narrower reason than the charge does:
   ## the quantity is now bracketed from both sides and the mechanism is settled,
   ## and what is left between it and shipping is ONE ROW. See the last section.

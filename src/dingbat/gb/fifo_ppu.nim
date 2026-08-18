@@ -1942,9 +1942,20 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # The lead moves with the pipeline's phase against the bus -- see the
     # constant. `CGB_PIPE_MCYCLES` is the pipeline's own advance and this is the
     # same M-cycle seen from the DMA unit's side.
+    #
+    # `CGB_HALT_PPU_LEAD` is the SECOND such advance and is summed here for the
+    # identical reason. It advances the PPU by an M-cycle at a STAT/LYC wake and
+    # never gives it back, so from the DMA unit -- which runs on machine time --
+    # the object fetch has moved an M-cycle earlier and has to look one further
+    # ahead to land on the same source byte. Leaving it out is precisely what
+    # made `strikethrough-cgb` look like a refutation of the advance: that frame
+    # witnesses the SUM, not the phase (see the constant's own derivation), and
+    # with the sum held it is byte-identical across the advance. The term is
+    # CGB-only because the DMG pipeline does not move -- charging the DMG the
+    # extra M-cycle breaks `strikethrough-dmg` by the same 7 pixels, measured.
     let lead = OBJ_DMA_BUS_LEAD +
-               (when CGB_PIPE_MCYCLES != 0:
-                  (if ppu.cgb: CGB_PIPE_MCYCLES else: 0)
+               (when CGB_PIPE_MCYCLES != 0 or CGB_HALT_PPU_LEAD != 0:
+                  (if ppu.cgb: CGB_PIPE_MCYCLES + CGB_HALT_PPU_LEAD else: 0)
                 else: 0)
     var src = int(mem.current_dma_source) +
               min(mem.dma_position + lead - 1, 0x9F)
