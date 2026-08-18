@@ -178,11 +178,39 @@ ENDC
     ldh [rBGP], a
     ldh [rOBP0], a
 
+    ; The window, for the acid-hell corner. WIN_LIVE brings it up part-way
+    ; across the line -- the same shape as acid-hell's ly 68, which has the
+    ; window live from x = 26 while the LCDC pulses run. WIN_PULSE then puts
+    ; WINDOW-ENABLE INTO THE PULSE ITSELF, so LCDC.4 and LCDC.5 change on one
+    ; dot. That pair is what is left unexplained: mealybug moves tile-select
+    ; alone (m3_lcdc_tile_sel_change) and has a window without pulsing both
+    ; bits (m3_lcdc_tile_sel_win_change), and acid-hell does both at once.
+    ;
+    ; The two builds are a DIFFERENTIAL: same anchor, same bands, same window,
+    ; differing only in whether bit 5 rides the pulse. Whatever probe (e)'s
+    ; STAT-LYC anchor contributes is therefore common to both and cancels --
+    ; which matters here, because the anchor is itself under suspicion.
+IF DEF(WIN_LIVE) || DEF(WIN_PULSE)
+    ; x = 8, i.e. LEFT of every band's bar, so each bar is measured INSIDE the
+    ; window rather than across its edge. acid-hell's failing pixel is at x = 80
+    ; against a window live from x = 26 -- deep inside it -- and a bar sitting on
+    ; the boundary measures the boundary instead, which is what the first cut of
+    ; this arm did.
+    ld a, 8 + 7                  ; window's leftmost pixel at x = 8
+    ldh [rWX], a
+    xor a
+    ldh [rWY], a                 ; live from the top of the frame
+ENDC
+
     ; Bring the LCD up once, here. ApplyParams runs in VBlank from now on and
     ; never touches LCDC.7: toggling the LCD off and on per frame would reset
     ; the PPU every frame, and a frame grabbed during the off period is blank
     ; -- which is exactly what the first cut of this ROM produced.
+IF DEF(WIN_LIVE) || DEF(WIN_PULSE)
+    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_OBJ16 | LCDCF_WINON
+ELSE
     ld a, LCDCF_ON | LCDCF_BGON | LCDCF_OBJ16
+ENDC
     ld [wLcdcA], a
     or LCDCF_BG8000
     ld [wLcdcB], a
@@ -282,6 +310,9 @@ IF DEF(NO_OBJ16)
 ELSE
     ld a, LCDCF_ON | LCDCF_BGON | LCDCF_OBJ16
 ENDC
+IF DEF(WIN_LIVE)
+    or LCDCF_WINON               ; window live in BOTH halves of the pulse
+ENDC
     ld b, a
     ld a, [wObjX]
     cp OBJ_OFF
@@ -291,9 +322,12 @@ ENDC
     ld b, a
 .noObj:
     ld a, b
-    ld [wLcdcA], a               ; BG at $8800
+    ld [wLcdcA], a               ; BG at $8800 (window off too, under WIN_PULSE)
     or LCDCF_BG8000
-    ld [wLcdcB], a               ; BG at $8000 -- the resting value
+IF DEF(WIN_PULSE)
+    or LCDCF_WINON               ; bit 5 rides the pulse with bit 4
+ENDC
+    ld [wLcdcB], a               ; the resting value
 
     ; Header: the two parameters as hex, so the photo names its own setting.
     ; NOHEADER builds omit it, so a band can be anchored on line 0 without the
