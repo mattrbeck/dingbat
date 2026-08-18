@@ -418,6 +418,50 @@ once, and the third outcome is the interesting one:
   disagreement with SameBoy is SameBoy's, which would be the first time in this
   work the oracle has been wrong about anything.
 
+### g1 RESULT — 2026-08-18, GBA SP: hardware reads the SameBoy column
+
+Both photographs, read with `tools/gbprobe/read_g1.sh` (find_panel + photowarp
++ read_probe_e):
+
+| | silicon | SameBoy | lead 0 | lead 1 (ships) |
+|---|---|---|---|---|
+| SCX 0 | `24 32 32 40 40 48 48 56 56 64 64 71 71 79` | `24 32 32 40 40 48 48 56 56 64 64 72 72 80` | `32 40 …` | `40 40 …` |
+| SCX 4 | `20 28 28 36 36 45 45 53 53 61 61 69 69 77` | `20 28 28 36 36 44 44 52 52 60 60 68 68 76` | `28 36 …` | `36 36 …` |
+
+(the trailing +1s are the photograph's own perspective drift at the far end,
+exactly as in the probe (e)/(f) sessions.) **The answer is the pre-registered
+"most likely" one: hardware = SameBoy, and BOTH dingbat builds are wrong here.**
+Lead 0 is 8 px (2 M) out; lead 1 is 16 px (4 M) out.
+
+Three things follow, and the first is the big one:
+
+1. **probe (e)'s 2-3 M baseline offset is a REAL dingbat defect, not an
+   instrument artifact.** It has been treated as suspect since it appeared and
+   that is now settled the other way: silicon agrees with SameBoy to the pixel,
+   so dingbat is genuinely 2 M wrong on this ROM's path even with the lead off.
+   That is a new, hardware-anchored bug with a photograph behind it.
+2. **On this instrument the lead makes things worse**, by a further 1 M.
+3. **It does not unship `CGB_HALT_PPU_LEAD`**, and that was decided before the
+   photographs existed. `cgb-acid-hell`'s reference was verified
+   hardware-correct on this same console (session 2, IMG_3803) and daid's is a
+   silicon capture; both are pixel-exact only with the lead, and both are
+   ordinary ROMs rather than an instrument with a known 2 M defect. A ROM that
+   is 2 M wrong before the question is asked cannot arbitrate a 1 M answer.
+
+So the open question is no longer "is the lead real" but **"what is probe (e)'s
+2 M, and does fixing it leave the lead needed?"** If the 2 M turns out to live
+in the same halt-wake path, the lead may be compensating for it in the wrong
+place — which would be the third time in this investigation that a constant
+landed next to the defect rather than on it (`CGB_TDSEL_LATENCY=5`,
+`CGB_WIN_RESTART_COUNTER=1`, and possibly this).
+
+What separates probe (e) from acid-hell and daid, and is therefore where to
+look: it halts ONCE per frame and then free-runs 144 lines of unrolled bands
+through a `jp` loop, with `call ApplyParams` and a joypad read in VBlank
+between frames. acid-hell re-halts every line; daid halts once and free-runs a
+114-M loop with no VBlank work at all. The `ApplyParams`/joypad path is the
+obvious suspect and is the one thing here that is ours rather than published.
+
 ### What a negative result would mean, stated in advance
 
 Worth writing down before the photographs exist, because it is the only

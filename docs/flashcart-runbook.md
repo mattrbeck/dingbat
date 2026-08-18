@@ -231,3 +231,28 @@ want it, probe (e) scored against SameBoy does not. Three candidate readings,
 Neither dingbat build matches SameBoy even at lead 0 — that gap is probe (e)'s
 own unexplained 2-3 M baseline offset, so this shot tests the instrument as
 well as the constant. Read with `tools/gbprobe/read_probe_e.py <photo.jpg>`.
+
+## Session 3 results — 2026-08-18, GBA SP: g1, the halt-wake phase
+
+Two photos (`flashcart-kit/9-halt-lead/IMG_g1_scx0.jpg`, `IMG_g1_scx4.jpg`),
+read with the new `tools/gbprobe/read_g1.sh`.
+
+**Hardware reads the SameBoy column on both.** SCX 0 gives
+`24 32 32 40 40 48 48 56 56 64 64 71 71 79` against SameBoy's
+`24 32 32 40 40 48 48 56 56 64 64 72 72 80`; SCX 4 gives
+`20 28 28 36 36 45 45 53 53 61 61 69 69 77` against `20 28 28 36 36 44 44 52
+52 60 60 68 68 76`. dingbat is 8 px (2 M) out with `CGB_HALT_PPU_LEAD=0` and
+16 px (4 M) out with it on.
+
+So **probe (e)'s long-standing 2-3 M offset from the oracle is a real defect in
+dingbat**, now with silicon behind it — and the shipped lead makes this
+particular instrument worse while remaining the only thing that makes
+`cgb-acid-hell` and daid's `ppu_scanline_bgp` exact. Full reasoning and what to
+chase next in docs/hwprobe-questions.md, g1 RESULT.
+
+Tooling note: photowarp's own detector still cannot find the panel in these SP
+shots. `tools/gbprobe/find_panel.py` (new) locates it as the largest connected
+bright region and fits a quad from the diagonal extremes, choosing the
+threshold by how close the result is to 160:144. The SCX 4 shot's LCD moire
+also defeats read_probe_e's global threshold; a per-row median read of the same
+warped frame recovers it.
