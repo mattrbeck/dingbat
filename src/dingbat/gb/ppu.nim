@@ -331,8 +331,12 @@ when defined(gb_dot_counter):
   var gb_frame_lcd_off*: uint64   # pushed by lcd_off_frame while LCD disabled
   var gb_frame_lcd_on*: uint64    # pushed by the LCDC-enable catch-up
 
-when defined(gb_m3_trace):
+when defined(gb_m3_trace) or defined(gb_px_trace):
   # Diagnostic mode-3 trace (tools only; compiled out of every shipping build).
+  # The guard names BOTH traces because `gb_traced` and GB_TRACE_LY are shared:
+  # gb_px_trace's own sites call it, so guarding this block on gb_m3_trace alone
+  # made `-d:gb_px_trace` on its own fail to compile with "undeclared identifier:
+  # 'gb_traced'". Neither is in a shipping build, so this costs nothing.
   # `-d:gb_m3_trace -d:GB_TRACE_LY=n` prints one line per mode-3 dot of line n
   # plus every LCDC write that lands inside that line's mode 3, which is what
   # turns a mid-scanline-write reference image into a solvable equation: the
