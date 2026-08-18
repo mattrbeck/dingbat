@@ -54,7 +54,54 @@ def blobs(path):
     return out, bg, dark
 
 
-bl, bg, dark = blobs(sys.argv[1])
+def by_band_grid(path, skip_top=0):
+    """Read one bar per band off a grid derived from the first bar.
+
+    Pure connected components merge a band's bar with its neighbour's
+    whenever the two overlap in x and touch across the separator, which is
+    common once an object shifts the columns (it collapsed 14 bars to 7).
+    Bands are exactly 9 rows apart, so anchoring that pitch on the topmost
+    bar found gives one reading per band and cannot merge."""
+    body, _ = (None, None)
+    if path.endswith('.ppm'):
+        d = open(path, 'rb').read()
+        body = d.split(b'\n', 3)[3]
+    else:
+        body, _ = P.warp(path, do_refine=True)
+    lum = [[(body[(y*W+x)*3]*77 + body[(y*W+x)*3+1]*151 + body[(y*W+x)*3+2]*28) >> 8
+            for x in range(W)] for y in range(H)]
+    flat = sorted(v for r in lum for v in r)
+    bg, darkest = flat[len(flat)*3//4], flat[len(flat)//100]
+    thr = bg - (bg - darkest) * 0.35
+    y0 = next((y for y in range(skip_top, H)
+               if sum(1 for x in range(W) if lum[y][x] < thr) >= 3), None)
+    if y0 is None:
+        return [], bg, darkest
+    out = []
+    for k in range(16):
+        top = y0 + 9*k
+        if top + 6 > H:
+            break
+        cells, xs = [], []
+        for y in range(top + 1, min(top + 7, H)):
+            for x in range(W):
+                if lum[y][x] < thr:
+                    cells.append(lum[y][x]); xs.append(x)
+        if not cells:
+            break
+        cells.sort()
+        out.append({'y': top, 'y1': top+7, 'x': min(xs), 'x1': max(xs),
+                    'med': cells[len(cells)//2], 'n': len(cells)})
+    return out, bg, darkest
+
+
+if '--bands' in sys.argv:
+    skip = 0
+    if '--skip-top' in sys.argv:
+        skip = int(sys.argv[sys.argv.index('--skip-top') + 1])
+    bl, bg, dark = by_band_grid(sys.argv[1], skip)
+else:
+    bl, bg, dark = blobs(sys.argv[1])
 # probe (e) prints a parameter header in the top two tile rows; its glyphs are
 # blobs too. --skip-top N drops everything above scanline N.
 if '--skip-top' in sys.argv:
