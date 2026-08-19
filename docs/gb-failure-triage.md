@@ -11,6 +11,32 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## NEW 2026-08-19: `mooneye/misc/boot_hwio-C` fails on AGB and passes on CGB
+
+The per-machine fan-out (`mooneye_machines_for`, added 2026-08-19) runs every
+machine a mooneye filename claims. `-C` is the suite's group token for
+**cgb+agb+ags**, so that ROM now scores on CGB-C and on AGB rather than only on
+whatever the default was — and the two arms disagree:
+
+    mooneye/misc/boot_hwio-C@cgbc   PASS
+    mooneye/misc/boot_hwio-C@agb    FAIL   (Mooneye: FAIL)
+
+This is the ONLY disagreement among 77 multi-arm tests, so it is a real, narrow
+defect rather than a class of them: dingbat's **AGB boot HWIO state** does not
+match what the ROM asserts, while its CGB state does. Note the ROM is the same
+bytes in both arms — only `--model` differs — so this is purely the boot table
+in `gb_set_revision`, not PPU or timing behaviour.
+
+Not to be confused with the wilbertpol `@agb` failures next to it in
+`tests/results.md`: those rows fail on their `@cgbc` arm too (that fork's
+`gpu/ly_lyc*` family is a known pre-existing bucket, below), so they carry no
+AGB-specific signal.
+
+Worth doing before anything else in this file that costs a hardware session:
+it is one boot table, the expected values are in the ROM, and it is currently
+the only row in the tree that says AGB and CGB differ where dingbat says they
+do not.
+
 ## The denominator
 
 `dingbat_test_runner` reports **Total 978 / Pass 691 / Fail 287**, but 45 of those

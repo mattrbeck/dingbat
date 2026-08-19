@@ -670,6 +670,69 @@ proc mooneye_model_for(base: string): string =
   of "cgb0": "cgb0"
   else: ""
 
+proc is_cgb_model(m: string): bool =
+  ## Which --model tokens name a machine that boots as a CGB. AGB/AGS are CGB
+  ## silicon in a different package (the suite's README says so outright), so
+  ## they run with --cgb like any other.
+  m.startsWith("cgb") or m == "agb" or m == "ags"
+
+proc mooneye_machines_for(base: string): seq[string] =
+  ## Every `--model` a mooneye/wilbertpol ROM's own filename says it should pass
+  ## on. Straight out of the suite's README.markdown, "Test naming":
+  ##
+  ##     G = dmg+mgb    S = sgb+sgb2    C = cgb+agb+ags    A = agb+ags
+  ##     "a test with GS in the name is expected to pass on dmg+mgb+sgb+sgb2"
+  ##
+  ## so a group token is the UNION of its letters and every member deserves a
+  ## run. Before this, all nine of Gekkio's `-GS` ROMs and all seventeen of
+  ## wilbertpol's scored on exactly one machine (the default DMG-ABC), and the
+  ## MGB/SGB/SGB2 thirds of the claim were never checked at all.
+  ##
+  ## Revisions fan out only where the FILENAME names revisions — `cgbABCDE`
+  ## becomes four rows, `dmgABCmgb` becomes two. A token that names only a
+  ## model (`cgb`, or the `C` group) gets ONE representative revision, the
+  ## default CGB-C, because the ROM is not making a per-revision claim for a
+  ## row to check. That line was drawn by measurement, not taste: fanning `C`
+  ## across all four modelled CGB revisions was tried on 2026-08-19 and every
+  ## one of the seventeen `-C` tests returned the same verdict on all four,
+  ## for 51 extra rows and no information — while the ONE thing that fan-out
+  ## did find (`misc/boot_hwio-C` passing on CGB and failing on AGB) is a
+  ## MODEL difference that the cgb+agb pair still catches.
+  ##
+  ## Revision 0 is never in a fan-out: the suite treats it as its own machine
+  ## and ships separate `-dmg0`/`-cgb0` ROMs precisely because it diverges.
+  ##
+  ## `ags` collapses into `agb` — same SoC in a different package, again per the
+  ## README — rather than inventing a machine dingbat does not model.
+  if '-' notin base:
+    return @[]
+  let tok = base.rsplit('-', maxsplit = 1)[1]
+  const CgbRevs = ["cgbab", "cgbc", "cgbd", "cgbe"]
+  var picked: seq[string]
+  if tok.len > 0 and tok.allIt(it in {'G', 'S', 'C', 'A'}):
+    for ch in tok:
+      case ch
+      of 'G': picked.add("dmgABC"); picked.add("mgb")
+      of 'S': picked.add("sgb"); picked.add("sgb2")
+      of 'C': picked.add("cgbc"); picked.add("agb")
+      of 'A': picked.add("agb")
+      else: discard
+  else:
+    case tok
+    of "dmg", "dmgABC": picked.add("dmgABC")
+    of "dmgABCmgb":     picked.add("dmgABC"); picked.add("mgb")
+    of "dmg0":          picked.add("dmg0")
+    of "mgb":           picked.add("mgb")
+    of "sgb":           picked.add("sgb")
+    of "sgb2":          picked.add("sgb2")
+    of "cgb":           picked.add("cgbc")
+    of "cgbABCDE":      (for r in CgbRevs: picked.add(r))
+    of "cgb0":          picked.add("cgb0")
+    else: return @[]
+  # Order-preserving dedupe: `GS`-style unions can name the same machine twice.
+  for m in picked:
+    if m notin result: result.add(m)
+
 proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   var tests: seq[TestDef]
   let mooneye_dir = roms_dir / "mooneye-test-suite"
@@ -716,17 +779,34 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         model: "mgb",
       ))
       continue
-    let model = mooneye_model_for(rom.splitFile().name)
-    tests.add(TestDef(
-      name: name,
-      rom_path: rom,
-      mode: tmMooneye,
-      timeout: 1800,
-      # misc/ holds the CGB/AGB-hardware tests (DMG-flagged carts that
-      # assert CGB boot state); run them as a DMG cart on CGB hardware
-      cgb: rel.startsWith("misc"),
-      model: model,
-    ))
+    let base = rom.splitFile().name
+    let machines = mooneye_machines_for(base)
+    if machines.len == 0:
+      tests.add(TestDef(
+        name: name,
+        rom_path: rom,
+        mode: tmMooneye,
+        timeout: 1800,
+        # misc/ holds the CGB/AGB-hardware tests (DMG-flagged carts that
+        # assert CGB boot state); run them as a DMG cart on CGB hardware
+        cgb: rel.startsWith("misc"),
+        model: mooneye_model_for(base),
+      ))
+    else:
+      # One row per machine the filename claims. The device comes from the
+      # TOKEN, not the directory: every ROM under Gekkio's misc/ carries a
+      # CGB/AGB suffix anyway, so this agrees with the old `startsWith("misc")`
+      # on all eight of them while also being right for the fork below, whose
+      # misc/ mixes SGB and MGB ROMs in with the CGB ones.
+      for m in machines:
+        tests.add(TestDef(
+          name: name & (if machines.len > 1: "@" & m else: ""),
+          rom_path: rom,
+          mode: tmMooneye,
+          timeout: 1800,
+          cgb: is_cgb_model(m),
+          model: m,
+        ))
   tests
 
 proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
@@ -749,10 +829,10 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   ## any more: as of 2026-08-10 the default was moved to CGB C partly because
   ## these references are what the tree is scored against.
   ##
-  ## `_cgb_d.png` (CPU CGB D) IS wired now, as of 2026-08-18 — but only for the
-  ## seven ROMs whose two captures differ in their decoded pixels. The other
-  ## thirteen `_cgb_d` files are pixel-identical to their `_cgb_c` twin and a
-  ## row for them could only restate what the `_cgb_c` row already says.
+  ## `_cgb_d.png` (CPU CGB D) is wired for ALL twenty ROMs that ship one, as of
+  ## 2026-08-19. Thirteen of those captures are pixel-identical to their
+  ## `_cgb_c` twin, and running them anyway is the point: "these two revisions
+  ## draw this the same" is a claim, and a row is how it gets checked.
   ##
   ## The old reason for holding all twenty out — "~20 rows for an axis no
   ## shipping frontend can reach" — was a bad trade and it cost something real.
@@ -790,30 +870,31 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
         expected_png: cgb_png,
         color: true,
         cgb: true,
+        # Pinned rather than left to the default. The default IS grCgbC today,
+        # so this changes no verdict — but a `_cgb_c` capture is a photograph of
+        # one specific revision, and a row scored against it should name that
+        # revision instead of inheriting whatever the default happens to be. It
+        # also makes the Device column say "CGB cgbc" rather than a bare "CGB".
+        model: "cgbc",
         no_save: true,
       ))
-    # ...and the CGB-D capture, at CGB-D, but ONLY where the two references
-    # actually differ.
+    # ...and the CGB-D capture, at CGB-D. ALL twenty of them, including the
+    # thirteen whose picture is identical to their `_cgb_c` twin.
     #
-    # Twenty ROMs ship a `_cgb_d.png` and thirteen of those are byte-identical
-    # to their `_cgb_c.png`: those carry no revision axis and a second row for
-    # them would be pure duplication. The other SEVEN are the whole per-revision
-    # story, and until 2026-08-18 NOTHING in this tree or the shootout scored a
-    # single one of them — the shootout defines RevC/RevD mealybug variants in
-    # its testroms/mealybug.py but they are not in its active list, so its
-    # recorded run contains zero. A revision defect was therefore invisible
-    # everywhere, and one was: `m3_scy_change` renders the CGB-C picture at C, D
-    # AND E, missing `_cgb_d` by all 6217 of its differing pixels.
+    # Those thirteen were held out until 2026-08-19 on the grounds that a row
+    # which can only restate what the `_cgb_c` row already says is pure
+    # duplication. That reasoning was about the REFERENCE and it should have
+    # been about the MACHINE: "CGB-C and CGB-D draw this identically" is a claim
+    # the suite is making, and the only way to have coverage of it is to run
+    # BOTH revisions and check. An identical capture is not a reason to skip the
+    # second run — it is the expected result OF the second run, and a revision
+    # that quietly stopped agreeing would otherwise go unnoticed. The seven
+    # differing pairs catch a defect by disagreeing; the thirteen matching ones
+    # catch a defect by ceasing to agree, and both need the row to exist.
     #
-    # Gated on the references themselves rather than a hardcoded list, so the
-    # set tracks the bundle if upstream adds or equalises a capture — but on
-    # the DECODED PIXELS, not the file bytes. Eleven of the twenty pairs are
-    # byte-different and pixel-identical (different encoder settings upstream),
-    # and comparing files adds eleven duplicate rows that can only ever restate
-    # what the `_cgb_c` row already said.
+    # Still gated on the reference file existing, so the set tracks the bundle.
     let cgb_d_png = ppu_dir / test_name & "_cgb_d.png"
-    if fileExists(cgb_png) and fileExists(cgb_d_png) and
-       read_png(cgb_png).pixels != read_png(cgb_d_png).pixels:
+    if fileExists(cgb_d_png):
       tests.add(TestDef(
         name: "mealybug-cgbd/" & test_name,
         rom_path: rom,
@@ -1226,15 +1307,31 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     # purely because of it (the Gekkio builder passes the same ROM name with
     # model=sgb and no --cgb, and it passes there).
     let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
-    tests.add(TestDef(
-      name: name,
-      rom_path: rom,
-      mode: tmMooneye,
-      timeout: 1800,
-      cgb: suffix in ["C", "cgb", "cgb0", "A"],
-      model: mooneye_model_for(base),
-      ed_breakpoint: true,
-    ))
+    let machines = mooneye_machines_for(base)
+    if machines.len == 0:
+      tests.add(TestDef(
+        name: name,
+        rom_path: rom,
+        mode: tmMooneye,
+        timeout: 1800,
+        cgb: suffix in ["C", "cgb", "cgb0", "A"],
+        model: mooneye_model_for(base),
+        ed_breakpoint: true,
+      ))
+    else:
+      # Same per-machine fan-out as the Gekkio builder above, and the same
+      # reason it belongs here in particular: this fork's misc/ is the one that
+      # mixes machines, so the suffix has to be what picks the device.
+      for m in machines:
+        tests.add(TestDef(
+          name: name & (if machines.len > 1: "@" & m else: ""),
+          rom_path: rom,
+          mode: tmMooneye,
+          timeout: 1800,
+          cgb: is_cgb_model(m),
+          model: m,
+          ed_breakpoint: true,
+        ))
   tests
 
 proc build_acid2_tests(): seq[TestDef] =
@@ -1666,20 +1763,16 @@ const NotScored: seq[(string, string)] = @[
   ("magen/oam_internal_priority", "its only stated criterion is prose (\"2 " &
     "pairs of rectangles connected or touching\"); nothing machine-checkable " &
     "to score against. (build_magen_tests)"),
-  ("mealybug `*_cgb_d` references (13 of 20)", "pixel-identical to their " &
-    "`_cgb_c` twin, so a second row could only restate what the CGB-C row " &
-    "already says. The OTHER SEVEN — the ones whose captures actually differ " &
-    "— ARE scored, as `mealybug-cgbd/*` at --model=cgbd; wiring them found a " &
-    "real defect (m3_scy_change rendered the CGB-C picture at every " &
-    "revision). (build_mealybug_tests)"),
-  ("mooneye/wilbertpol `-GS` rows, on three of their four machines (48 rows)",
-    "`-GS` is Gekkio's FAMILY token (DMG/MGB/SGB/SGB2), not a revision, and " &
-    "the harness runs the default DMG-ABC, which is inside it. Measured " &
-    "2026-08-19 rather than assumed: every one of the seven failing `-GS` " &
-    "rows returns the same verdict at dmgABC, mgb, sgb AND sgb2, so " &
-    "expanding all 48 into 192 rows would add wall clock and no information. " &
-    "Revisit if a GS row ever disagrees across the family. " &
-    "(build_mooneye_tests / build_wilbertpol_tests)"),
+  ("mooneye/wilbertpol `ags` arms", "`ags` is AGB silicon in a different " &
+    "package — the suite's own README says so — and dingbat models one AGB, " &
+    "so a `-C`/`-A` token's `ags` member folds into its `agb` arm rather " &
+    "than inventing a machine. Everything else those tokens name IS run: " &
+    "see mooneye_machines_for. (build_mooneye_tests / build_wilbertpol_tests)"),
+  ("mooneye/wilbertpol revision 0 inside a bare model token", "`-cgb` and " &
+    "`-dmg` fan out across the revisions dingbat models but deliberately " &
+    "stop short of revision 0, which the suite treats as its own machine and " &
+    "ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. " &
+    "Those separate ROMs ARE scored. (build_mooneye_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
   ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
@@ -1747,7 +1840,7 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     "cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a " &
     "CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific " &
     "boot table/revision (`--model`); `\xE2\x80\x94` = GBA, which has no " &
-    "device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: AGE writes the devices it was verified on into the filename (`ei-halt-dmgC-cgbBCE`), and each of those now gets its own row on its own revision rather than one row on whichever machine happened to be the default.")
+    "device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.")
   lines.add("")
 
   var total = 0
@@ -1776,17 +1869,33 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     lines.add("## " & suite.suite_name & " (" & $p & "/" &
       $suite.results.len & ")")
     lines.add("")
-    lines.add("| Test | Device | Result |")
-    lines.add("|------|--------|--------|")
-    for r in suite.results:
-      let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
-      let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
-      # The row name is the FULL test name, suite prefix included. It is the
-      # key the regression comparison reads back (load_previous_results), and
-      # with ~20 suites in here — several of them forks of each other, e.g.
-      # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
-      # anything shorter collides across suites and silently mis-keys the gate.
-      lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
+    # A section where everything passes says so in one line instead of
+    # hundreds of identical thumbs-up rows — most of this file was that.
+    #
+    # Nothing is lost to the regression gate. load_previous_results reads the
+    # `(<pass>/<total>)` in the header line directly above and records the
+    # section as all-passing, and run_suite treats "absent from the baseline
+    # but in a section that was all-passing" as "was passing" rather than as
+    # "new, therefore ungated". Aggregated rows are safe here too: they only
+    # ever pass at 100% (`67/67 passed`), so in an all-pass section every count
+    # is already at its maximum and any drop turns the row red, which the
+    # boolean gate catches even though the collapsed section carries no counts
+    # for load_previous_counts to read. The moment ONE row fails, the whole
+    # table comes back and every row is individually keyed again.
+    if suite.results.len > 0 and p == suite.results.len:
+      lines.add("**All " & $p & " tests passed.**")
+    else:
+      lines.add("| Test | Device | Result |")
+      lines.add("|------|--------|--------|")
+      for r in suite.results:
+        let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
+        let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
+        # The row name is the FULL test name, suite prefix included. It is the
+        # key the regression comparison reads back (load_previous_results), and
+        # with ~20 suites in here — several of them forks of each other, e.g.
+        # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
+        # anything shorter collides across suites and silently mis-keys the gate.
+        lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
       lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
@@ -1808,15 +1917,62 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
   lines.add("")
   lines.join("\n")
 
+proc suite_allpass_key(suite_name: string): string =
+  ## Key under which load_previous_results records "this whole section was
+  ## passing in the baseline". It lives in the same table as the per-test
+  ## entries rather than in a second one so that every existing run_suite call
+  ## site keeps working unchanged; the NUL prefix is what keeps it from ever
+  ## colliding with a real test name, which cannot contain one.
+  "\0suite-all-passed\0" & suite_name
+
+proc was_passing(previous: Table[string, bool];
+                 suite_name, test_name: string): bool =
+  ## Did the committed baseline have this row green?
+  ##
+  ## A name the baseline does not carry is normally ungated — that is how a
+  ## newly added suite avoids reporting every row as a regression on its first
+  ## run. The exception is a section the baseline COLLAPSED because everything
+  ## in it passed: there, absence means "was green", not "unknown".
+  ##
+  ## Every regression gate in this file must go through here. There are four of
+  ## them and they do NOT share a code path (run_suite, run_microtest_suite,
+  ## run_mgba_suite and the gambatte group loop each roll their own), so fixing
+  ## only the obvious one leaves the other three silently disarmed for exactly
+  ## the sections that collapse. That was the state this proc was written to
+  ## end, and it was caught by faking an all-pass GBMicrotest baseline and
+  ## watching 52 real failures come back as zero regressions.
+  if test_name in previous: previous[test_name]
+  else: previous.getOrDefault(suite_allpass_key(suite_name))
+
 proc load_previous_results(path: string): Table[string, bool] =
   ## The committed baseline, keyed by the full test name exactly as
   ## generate_results_md writes it. A name that is not in the table (a suite
   ## added since the baseline was committed) is simply not gated — which is why
   ## the baseline has to be regenerated and committed whenever suites are added.
+  ##
+  ## Sections that were entirely green are collapsed to "All N tests passed."
+  ## and have no rows to read, so their `## <name> (<pass>/<total>)` header is
+  ## the record instead: it is stored under suite_allpass_key and run_suite
+  ## falls back to it. Without that, collapsing a section would quietly turn
+  ## its regression gate off — the opposite of what a green section deserves.
   result = initTable[string, bool]()
   if not fileExists(path):
     return
   let content = readFile(path)
+  for line in content.splitLines():
+    if line.startsWith("## ") and line.endsWith(")"):
+      let open = line.rfind('(')
+      if open > 3:
+        let inner = line[open + 1 ..< line.high]
+        let halves = inner.split('/')
+        if halves.len == 2:
+          try:
+            let p = parseInt(halves[0].strip())
+            let t = parseInt(halves[1].strip())
+            if t > 0 and p == t:
+              result[suite_allpass_key(line[3 ..< open].strip())] = true
+          except ValueError: discard
+      continue
   for line in content.splitLines():
     if line.startsWith("| ") and not line.startsWith("| Test") and not line.startsWith("|---") and
        not line.startsWith("| Suite"):
@@ -1913,7 +2069,7 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
     else:
       echo &"  [{status}] {test.name}"
     results.add(r)
-    if previous.getOrDefault(test.name) and not r.passed:
+    if was_passing(previous, name, test.name) and not r.passed:
       regressions.add(test.name)
   SuiteResults(suite_name: name, results: results)
 
@@ -2005,7 +2161,7 @@ proc run_microtest_suite(name: string; tests: seq[TestDef]; harness: string;
     echo &"  [{(if passed: \"PASS\" else: \"FAIL\")}] {t.name} - {detail}"
     results.add(TestResult(name: t.name, passed: passed, output: detail,
                            device: device_label(t)))
-    if previous.getOrDefault(t.name) and not passed:
+    if was_passing(previous, name, t.name) and not passed:
       regressions.add(t.name)
   SuiteResults(suite_name: name, results: results)
 
@@ -2075,7 +2231,8 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
           name: current_suite, passes: passes, total: total,
           tests: current_tests,
         ))
-        if previous.getOrDefault("mgba-suite/" & current_suite) and not passed:
+        if was_passing(previous, "GBA - mGBA Test Suite",
+                       "mgba-suite/" & current_suite) and not passed:
           regressions.add("mgba-suite/" & current_suite)
         seen_suites.add(current_suite)
       pending_fail = false
@@ -2327,7 +2484,7 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
     # that is what generate_results_md writes and what load_previous_results /
     # load_previous_counts read back. Keying on the bare group name here reads
     # an empty table and silently ungates all 48 rows.
-    if previous.hasKey(short_name) and previous[short_name] and not all_pass:
+    if was_passing(previous, "Game Boy - gambatte", short_name) and not all_pass:
       regressions.add(short_name)
     elif previous_counts.hasKey(short_name) and g.passes < previous_counts[short_name]:
       regressions.add(&"{short_name} ({previous_counts[short_name]} -> {g.passes} passing)")
