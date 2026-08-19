@@ -794,6 +794,40 @@ const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## CGB_HALT_PPU_LEAD wants exactly 4 T taken out of here, and it is worth
   ## having the row that refuses it on record. See docs/gb-failure-triage.md
   ## (2026-08-10).
+const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 0
+  ## Fill WRAM with a fixed non-uniform pattern at power-up instead of zeroes.
+  ## Ships OFF, and the reason it exists at all is worth the paragraph.
+  ##
+  ## **It is the whole of what `bully/bully` needs.** BullyGB's InitRAMTest
+  ## walks $C000-$DFFF and reports "Uninitialized RAM not randomized" when every
+  ## byte is $00, which is exactly dingbat's power-up state; it is the FIRST of
+  ## that ROM's nine tests and the ROM prints only the first failure, so the
+  ## other eight never ran. Built with `-d:GB_POWERUP_WRAM_PATTERN=1` the ROM
+  ## renders **"All tests OK!"** — every one of bootreg, divtest,
+  ## dmabusconflict, echoram, initram, initvram_dmg, undoc_regs and unused_io
+  ## passes, and the row is pixel-exact against its reference.
+  ##
+  ## **What stops it shipping: gambatte `oamdma` 771 -> 766.** Nine
+  ## `oamdma_srcFE00_*` / `oamdma_srcFF00_*` rows stop producing a readable
+  ## verdict at all ("got ?"). Those sources are the ones that come back through
+  ## the echo region, so they read WRAM, and their expected values therefore
+  ## encode SOME power-up convention. Which one is not established here: real
+  ## WRAM is not zeroes, but it is not this xorshift either, and gambatte's
+  ## `dmg08`/`cgb04c` outputs were captured on hardware where a warm reset
+  ## leaves the previous contents behind. Trading 9 hardware-captured rows for 1
+  ## is the wrong way round on the evidence available.
+  ##
+  ## **What would settle it:** run gambatte's `oamdma_srcFE00_*` family against
+  ## SameBoy with ITS randomisation enabled (sameboy_runner disables it for
+  ## determinism — see GB_random_set_enabled there). If SameBoy passes both
+  ## those rows and bully, a correct pattern exists and both zeroes and this
+  ## xorshift are wrong. If it cannot pass both either, the two tests genuinely
+  ## disagree and bully is the one to leave red.
+  ##
+  ## Fixed xorshift, not a seeded RNG, so that turning it on costs no
+  ## determinism: the byte-identical screenshot gates, save-state round-trips
+  ## and the rollback netplay core all need two runs to start from the same
+  ## bytes.
 const HDMA_BLOCK_OVERHEAD_M* {.intdefine.} = 2
   ## Extra M-cycles an HBlank DMA block costs BEYOND its sixteen byte copies.
   ##

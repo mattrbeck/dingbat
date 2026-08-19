@@ -32,6 +32,27 @@ proc new_gb_memory*(gb: GB): GbMemory =
                     dma: if gb.cgb_enabled: 0x00'u8 else: 0xFF'u8)
   for i in 0 ..< 8:
     result.wram[i] = newSeq[uint8](0x1000)
+  when GB_POWERUP_WRAM_PATTERN != 0:
+    # Real WRAM does not power up as 8K of zeroes, and one test in the tree
+    # checks exactly that: BullyGB's InitRAMTest walks $C000-$DFFF and reports
+    # "Uninitialized RAM not randomized" if every byte is $00. It is the FIRST
+    # of that ROM's nine tests and the ROM prints only the first failure, so an
+    # all-zero fill did not merely cost that check — it hid the other eight
+    # (bootreg, divtest, dmabusconflict, echoram, initvram_dmg, undoc_regs,
+    # unused_io) behind it.
+    #
+    # A FIXED xorshift, not a seeded RNG: the point is to be non-uniform, not
+    # to be unpredictable, and every determinism guarantee in this tree — the
+    # byte-identical screenshot gates, save-state round-trips, the rollback
+    # netplay core — needs two runs of the same ROM to start from the same
+    # bytes. This is reproducible to the byte across runs, builds and hosts.
+    var s: uint32 = 0x1234_5678'u32
+    for b in 0 ..< 8:
+      for j in 0 ..< 0x1000:
+        s = s xor (s shl 13)
+        s = s xor (s shr 17)
+        s = s xor (s shl 5)
+        result.wram[b][j] = uint8(s and 0xFF'u32)
   result.bootrom = @[]
   if gb.bootrom_path.len > 0 and gb.run_bios and fileExists(gb.bootrom_path):
     let raw = readFile(gb.bootrom_path)
