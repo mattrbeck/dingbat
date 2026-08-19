@@ -24,6 +24,31 @@ open.
   testable this way (docs/hwprobe-questions.md tier 4 says the same for
   $FEA0). Those need real carts.
 
+## WARNING: boot-handoff bytes read through a flashcart menu are suspect
+
+Learned the expensive way on 2026-08-19. `gbedge`'s IDENT page reports P1 as
+part of its "boot handoff snapshot", and on the real AGS it read **$CF**. That
+number went into the emulator and was wrong: the AGB boot ROM writes **$FF** to
+P1 unconditionally just before handoff (it is the CGB boot ROM built with
+`DEF AGB = 1`; the `IF DEF(AGB)` block next to the handoff touches only AF and
+B), mooneye's `misc/boot_hwio-C` asserts $FF for cgb+agb+ags alike, and SameBoy
+at `GB_MODEL_AGB_A` with the real `agb_boot.bin` prints "Test OK" on it.
+
+**What went wrong:** an EverDrive-style menu runs before the game and restores
+the handoff REGISTERS (A/F/B/C/D/E/H/L — and it restores them per-model, which
+is why the AGS transcription correctly shows the AGB pair A=$11/B=$01 and not
+the MGB one) but it does NOT restore the I/O ports it used along the way. A
+menu polling "is any key held" writes $00 to P1, which leaves both select lines
+active — exactly $CF. On the MGB the contamination is invisible, because $CF is
+also the correct DMG-family answer there.
+
+**Rule:** a byte that (a) comes from an I/O port rather than a CPU register,
+(b) is "untouched since boot", and (c) the menu plausibly used, is NOT evidence
+on its own. Cross-check it against the boot ROM disassembly or SameBoy before
+shipping it. The registers are fine; the ports are not. This does not
+invalidate the timing pages — those measure behaviour after the ROM has taken
+over and set its own state — only the handoff snapshot's port bytes.
+
 ## 1. gbedge.gb — the bulk of the session (folder 1)
 
 Protocol in docs/hwprobe.md ("Hardware protocol"): page with LEFT/RIGHT,

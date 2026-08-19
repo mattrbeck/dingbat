@@ -184,11 +184,17 @@ int main(int argc, char** argv) {
    * background palette) -- so without this the oracle runs it as a DMG and
    * answers a different machine's question. Setting the CGB flag in the header
    * instead would NOT do: that boots CGB-native, which is a third machine. */
+  /* `agb` additionally selects GB_MODEL_AGB_A and the AGB boot ROM. The AGB
+   * boot ROM is the CGB one with a handful of conditionals (SameBoy builds it
+   * from cgb_boot.asm with DEF AGB=1), so it is a genuinely different handoff
+   * and the only way to ask this oracle an AGB-vs-CGB question. */
+  int is_agb = 0;
   const char* mdl = getenv("GBFUZZ_MODEL");
   if (mdl) {
     if (!strcmp(mdl, "cgb")) is_cgb = 1;
     else if (!strcmp(mdl, "dmg")) is_cgb = 0;
-    else { fprintf(stderr, "GBFUZZ_MODEL must be cgb or dmg\n"); return 3; }
+    else if (!strcmp(mdl, "agb")) { is_cgb = 1; is_agb = 1; }
+    else { fprintf(stderr, "GBFUZZ_MODEL must be cgb, dmg or agb\n"); return 3; }
   }
 
   /* Determinism, and it has to come first: GB_init seeds RAM, OAM and the CGB
@@ -201,12 +207,12 @@ int main(int argc, char** argv) {
   GB_random_set_enabled(false);
   GB_random_seed(0);
   GB_gameboy_t gb;
-  GB_init(&gb, is_cgb ? GB_MODEL_CGB_E : GB_MODEL_DMG_B);
+  GB_init(&gb, is_agb ? GB_MODEL_AGB_A : (is_cgb ? GB_MODEL_CGB_E : GB_MODEL_DMG_B));
   GB_set_log_callback(&gb, log_cb);
 
   char bootpath[1024];
   snprintf(bootpath, sizeof bootpath, "%s/%s", bootdir,
-           is_cgb ? "cgb_boot.bin" : "dmg_boot.bin");
+           is_agb ? "agb_boot.bin" : (is_cgb ? "cgb_boot.bin" : "dmg_boot.bin"));
   if (GB_load_boot_rom(&gb, bootpath)) {
     fprintf(stderr, "failed to load boot rom %s\n", bootpath);
     return 3;

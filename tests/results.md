@@ -1,21 +1,21 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-19 14:25:30 · commit aef833b · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 15:37:02 · commit 3ae2f13 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1012
-- **Fail:** 213
+- **Pass:** 1013
+- **Fail:** 212
 
 | Suite | Pass | Total |
 |-------|------|-------|
 | Game Boy - Blargg | 28 | 28 |
 | Game Boy - Blargg dmg_sound | 12 | 12 |
 | Game Boy - Blargg cgb_sound | 12 | 12 |
-| Game Boy - Mooneye | 150 | 152 |
+| Game Boy - Mooneye | 151 | 152 |
 | GBA - mGBA Test Suite | 12 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - FuzzARM | 5 | 5 |
@@ -43,7 +43,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 **All 12 tests passed.**
 
-## Game Boy - Mooneye (150/152)
+## Game Boy - Mooneye (151/152)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -194,7 +194,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | mooneye/misc/boot_div-cgbABCDE@cgbd | CGB cgbd | 👌 |
 | mooneye/misc/boot_div-cgbABCDE@cgbe | CGB cgbe | 👌 |
 | mooneye/misc/boot_hwio-C@cgbc | CGB cgbc | 👌 |
-| mooneye/misc/boot_hwio-C@agb | CGB agb | 👀 Mooneye: FAIL |
+| mooneye/misc/boot_hwio-C@agb | CGB agb | 👌 |
 | mooneye/misc/boot_regs-A | CGB agb | 👌 |
 | mooneye/misc/boot_regs-cgb | CGB cgbc | 👌 |
 | mooneye/misc/ppu/vblank_stat_intr-C@cgbc | CGB cgbc | 👌 |

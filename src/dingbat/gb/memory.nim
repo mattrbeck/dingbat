@@ -136,15 +136,35 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     # set; mooneye misc/boot_hwio-C).
     mem.write_byte(gb, 0xFF68, 0xC8)
     mem.write_byte(gb, 0xFF6A, 0xD0)
-  # Joypad select lines at handoff are a PER-BOOT-ROM split, measured from
-  # both sides: DMG-family boot ROMs leave both lines active (P1 reads $CF),
-  # and so does the AGB's CGB-mode boot ROM — gbedge p00 IDENT byte 10 = CF
-  # on a real MGB and a real AGS, 2026-08-17 (tests/roms/expected/gb-*.txt).
-  # The CGB's and SGB's own boot ROMs hand off DESELECTED ($FF): mooneye
-  # boot_hwio-C / boot_hwio-S are hardware-verified and fail with $CF there.
-  # One more AGB boot-ROM deviation, alongside its `inc b`. Pan Docs' table
-  # ("$C7 or $CF" for CGB/AGB) is right only for the AGB column.
-  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb, bmAgb}:
+  # Joypad select lines at handoff are a PER-BOOT-ROM split. DMG-family boot
+  # ROMs never touch P1 at all, so it is handed over in its reset state and
+  # reads $CF (both select lines active). The CGB's, the SGB's AND the AGB's
+  # hand off DESELECTED ($FF).
+  #
+  # **AGB was on the wrong side of this until 2026-08-19**, on the strength of
+  # `gbedge` p00 IDENT byte $10 reading CF on a real AGS. Three independent
+  # sources say $FF and that reading is the odd one out:
+  #
+  #   1. The boot ROM itself. The AGB boot ROM *is* the CGB boot ROM — SameBoy
+  #      assembles it from cgb_boot.asm with `DEF AGB = 1` — and the
+  #      `xor a / cpl / ldh [rJOYP], a` that writes $FF just before handoff is
+  #      UNCONDITIONAL. All three `IF DEF(AGB)` blocks in that file are
+  #      elsewhere, and the one next to the handoff changes only AF and B.
+  #   2. mooneye `misc/boot_hwio-C`. Its `-C` token is the suite's own group
+  #      for cgb+agb+ags, i.e. it asserts this register is the same on all
+  #      three, and P1 is the ONLY byte it disagreed with us about.
+  #   3. SameBoy at GB_MODEL_AGB_A with the real agb_boot.bin prints "Test OK"
+  #      on that ROM, pixel-identical to its CGB run.
+  #
+  # And the $CF reading has a mechanism: $CF is BOTH select lines active, which
+  # is not a state any boot ROM leaves — but it is exactly what a flashcart
+  # menu leaves after writing $00 to poll "is any key held". The handoff
+  # REGISTERS in that same probe are genuine (A=$11/B=$01 is the AGB pair, not
+  # the MGB one), so the menu restores A-L and does not restore P1. On the MGB
+  # the contamination is invisible because $CF is also the right answer there.
+  # See docs/flashcart-runbook.md — this applies to every boot-state byte read
+  # through a flashcart menu, not just this one.
+  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb}:
     gb.joypad.button_keys = true
     gb.joypad.direction_keys = true
   mem.write_byte(gb, 0xFFFF, 0x00)
