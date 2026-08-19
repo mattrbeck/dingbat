@@ -1,5 +1,65 @@
 # Prefetch-model rewrite: occupancy model to close the 46 Timing fails
 
+> ## CLOSED 2026-08-19 — all 32 rows pass. Timing is **2020/2020**.
+>
+> The 2026-08-03 proof below is **sound, and it was proving the right thing about
+> the wrong variable.** No occupancy rewrite was needed. What was needed was one
+> correct clock.
+>
+> ### The proof stands; its `elapsed` column does not
+>
+> The eight `(s, elapsed)` points really are unsatisfiable by any `(elapsed + k)
+> mod s` predicate — but `elapsed = now - rom_free_since` at a DMA's ROM access
+> is **not a physical quantity in dingbat**. A granted DMA runs inside a
+> scheduler dispatch, and `tick_slow` (common/scheduler.nim) sets `s.cycles` to
+> the due event's own cycle while still holding the rest of the CPU's tick quota
+> in a local. `bus_now()` therefore *lags the true bus position by however much
+> of that quota is outstanding* — measured at **-2, -1, 0 and +1 cycles across
+> four columns of the same test**. Two of the eight points were also **vacuous**:
+> the Thumb `P.S`/`PNS` from-ROM rows expect **2** (`timing.c` really does say 2 —
+> on hardware the burst lands after the `ldrh`, so the window measures nothing),
+> and dingbat already reproduces that, so no predicate evaluated there can move
+> them. Strip the skew and the vacuous rows and only four constraints remain, and
+> they are consistent.
+>
+> ### What actually fixed it
+>
+> Anchor the prefetch phase on the **grant**, not on a differenced clock. The DMA
+> captures `bus.dma_grant_now` when it takes the bus, and its first ROM access
+> uses `k = now - dma_grant_now` — the burst's *own* elapsed time, which no
+> dispatch skew can touch. `k` is then exactly 2 (start-up only) when the burst's
+> first access is its ROM read, and 3 (start-up + the IWRAM read) when it is a
+> ROM write; against `s = 2` and `s = 3` those four combinations split
+> stall/no-stall exactly on **`k mod s == 0`**, in ARM and Thumb alike.
+>
+> That is not a second rule. A burst asserts its request the cycle before the
+> access it wants, so the prefetch halfword it collides with is `k-1` cycles old,
+> and `(k-1) mod s == s-1` — the *same* "committed in its final cycle" predicate
+> the CPU hand-off already uses — is `k mod s == 0`. One arbitration rule, two
+> masters. It fires only on a burst's **first** ROM access (afterwards the
+> prefetcher has no bus to run on), which is why a 16-unit `Short DMA` is short by
+> the same single cycle as a 1-unit `Trivial DMA`.
+>
+> ~15 lines in `bus.rom_access_cycles` + 2 stores at the grant in `dma.nim`.
+> No new occupancy state, no `rom_free_since` replacement, no save-state change
+> (both fields are seeded at every grant and consumed inside the same burst),
+> no touch to `clear_pipeline` or the waitloop fast-forward. Perf: **+0.016%**
+> retired instructions (Superstar Saga, 600 frames, min of 3) — the two stores.
+>
+> ### How to re-derive it
+>
+> `-d:pftrace` prints the ROM bus's activity inside every TM0 measurement window
+> that contained a DMA grant, keyed by the burst's src/dst/len and the column's
+> WAITCNT. Cross-referenced against the `timingTests` table in the suite's own
+> `src/timing.c` (and the `Calibration` row, which *is* the per-column
+> subtrahend), that reproduces all 256 DMA/ROM Timing rows offline — 32 failing
+> before, 0 after. **mGBA is still not an oracle here and no hardware ROM was
+> needed:** the suite's expected table plus a non-lying clock was enough.
+>
+> Result: Timing **1988 -> 2020/2020**, suite 6958 -> **6990/6998**, every other
+> section byte-identical (DMA 1244/1244, Timer count-up 936/936, Memory
+> 1552/1552). Remaining 8 failures are all Misc (see mgba-suite-verdicts.md §5-6).
+
 > ## UPDATE 2026-08-03 — the remaining 32 DMA rows are **provably** out of reach of any `elapsed mod s` rule
 >
 > The previous update left the 32 DMA rows open with "not a function of

@@ -195,6 +195,51 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
     if commit:
       cost += 1
       new_free_since += 1
+  elif not fetch and bus.dma_active and bus.dma_first_rom:
+    # Prefetch hand-off to a DMA burst — the same arbitration as above, at the
+    # one access where a burst can meet the prefetcher: its FIRST touch of the
+    # ROM bus. From then on the prefetcher is stopped for the burst's duration
+    # (it has no bus to run on), so later accesses in the same burst never
+    # arbitrate again, which is why a 16-unit Short DMA is short by exactly the
+    # same one cycle as a 1-unit Trivial DMA.
+    #
+    # The phase is counted from the grant, NOT from `now - rom_free_since`: a
+    # granted DMA runs inside an event dispatch, where scheduler.tick_slow has
+    # rewound `sched.cycles` to the event's own cycle and still holds the rest
+    # of the CPU's tick quota back. That makes `now` lag the true bus position
+    # by 0..3 cycles, differently for each column of the same test — the reason
+    # the eight (s, elapsed) observations in docs/prefetch-model-rewrite.md came
+    # out mutually inconsistent and were read as "no modular rule can fit".
+    # Against the grant they are consistent: the burst's own elapsed time is
+    # exact, and the grant IS the cycle the ROM bus changed hands (the CPU's
+    # last ROM access had ended; only its next, non-ROM access has been charged
+    # ahead of the dispatch).
+    #
+    # The predicate is `k mod s == 0`, and it is the SAME arbitration as the
+    # CPU rule above, not a second one: a burst asserts its request the cycle
+    # before the access it is requesting, so the prefetch halfword it lands on
+    # is `k - 1` cycles old, and `(k-1) mod s == s-1` — "the halfword is in its
+    # final, uninterruptible cycle" — is exactly `k mod s == 0`. Off a boundary
+    # the prefetcher is still in a halfword's address phase and is dropped free.
+    # Derived from all 32 mGBA-suite DMA/ROM rows: k = 2 (start-up only) for a
+    # burst whose first access is the ROM read, k = 3 (start-up + the IWRAM
+    # read) for one writing to ROM, and those two against s = 2 and s = 3 split
+    # stall/no-stall exactly on this predicate, in both ARM and Thumb.
+    bus.dma_first_rom = false
+    if bus.prefetch_on and bus.fetch_page - 0x8 <= 5:
+      let s = int(bus.wait16_s[page])
+      let k = int(now - bus.dma_grant_now)
+      # Buffer full (8 halfwords) => nothing in flight to arbitrate against.
+      let idle = if now > bus.rom_free_since: int(now - bus.rom_free_since)
+                 else: 0
+      if k mod s == 0 and idle < 8 * s:
+        cost += 1
+        new_free_since += 1
+  when defined(pftrace):
+    pft("  RAC " & (if fetch: "fetch" else: "data ") & (if is32: "32" else: "16") &
+        " a=" & toHex(address, 8) & " now=" & $now & " rfs_in=" & $bus.rom_free_since &
+        " seq=" & $seq & " dma=" & $bus.dma_active & " cost=" & $cost &
+        " rfs_out=" & $new_free_since)
   bus.rom_next_addr = address + (if is32: 4'u32 else: 2'u32)
   bus.rom_free_since = new_free_since
   cost
@@ -261,6 +306,10 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   else:
     cost = int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
     new_free_since = now + CycleCount(cost)
+  when defined(pftrace):
+    pft("  RFC fetch" & (when is32: "32" else: "16") &
+        " a=" & toHex(address, 8) & " now=" & $now & " rfs_in=" & $bus.rom_free_since &
+        " cost=" & $cost & " rfs_out=" & $new_free_since)
   bus.rom_next_addr = address + (when is32: 4'u32 else: 2'u32)
   bus.rom_free_since = new_free_since
   cost
@@ -842,6 +891,9 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
         # absolute-time bookkeeping at all
         if bus.rom_hot and address == bus.rom_next_addr:
           when defined(fetchprof): fetchprof[0].inc
+          when defined(pftrace):
+            pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+                " cost=" & $int(bus.wait16_s[page]))
           bus.cycles += int(bus.wait16_s[page])
           bus.rom_next_addr = address + 2
         else:
@@ -871,6 +923,9 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
       else:
         if bus.rom_hot and address == bus.rom_next_addr:
           when defined(fetchprof): fetchprof[2].inc
+          when defined(pftrace):
+            pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+                " cost=" & $int(bus.wait32_s[page]))
           bus.cycles += int(bus.wait32_s[page])
           bus.rom_next_addr = address + 4
         else:

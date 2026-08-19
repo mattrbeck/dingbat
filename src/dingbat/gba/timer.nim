@@ -76,7 +76,12 @@ proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
   if bit(io_addr, 1):
     read(tim.tmcnt[num], io_addr and 1)
   else:
-    read(tim.get_current_tm(num), io_addr and 1)
+    let v = tim.get_current_tm(num)
+    when defined(pftrace):
+      if num == 0 and (io_addr and 1) == 0:
+        pft("TMREAD raw=" & $v & " sched=" & $tim.gba.scheduler.cycles &
+            " busc=" & $tim.gba.bus.cycles)
+    read(v, io_addr and 1)
 
 proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
   let num = int((io_addr and 0xF) div 4)
@@ -100,6 +105,23 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       # clears the event; a cold enable anchors TIMER_START_DELAY ahead,
       # while cascade->prescaler on an already-running timer anchors at the
       # current cycle.
+      when defined(pftrace):
+        if num == 0:
+          if tim.tmcnt[0].enable and not was_enabled:
+            pft_on = true
+            pft_dma = false
+            pft_lines.setLen(0)
+            pft_lines.add("ENABLE sched=" & $tim.gba.scheduler.cycles &
+              " busc=" & $tim.gba.bus.cycles &
+              " rfs=" & $tim.gba.bus.rom_free_since &
+              " hot=" & $tim.gba.bus.rom_hot &
+              " s16=" & $tim.gba.bus.wait16_s[8] & " n16=" & $tim.gba.bus.wait16_n[8] &
+              " pf=" & $tim.gba.bus.prefetch_on)
+          elif (not tim.tmcnt[0].enable) and was_enabled:
+            if pft_dma:
+              for l in pft_lines: echo "PFT ", l
+              echo "PFT ----"
+            pft_on = false
       if tim.tmcnt[num].enable:
         if not was_enabled:
           tim.tm[num] = tim.tmd[num]

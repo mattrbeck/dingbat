@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-19 08:29:34 · commit 81f03ae · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 08:37:35 · commit a75fb13 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: AGE writes the devices it was verified on into the filename (`ei-halt-dmgC-cgbBCE`), and each of those now gets its own row on its own revision rather than one row on whichever machine happened to be the default.
 
 ## Summary
 
 - **Total:** 1106
-- **Pass:** 924
-- **Fail:** 182
+- **Pass:** 925
+- **Fail:** 181
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -16,7 +16,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg dmg_sound | 12 | 12 |
 | Game Boy - Blargg cgb_sound | 12 | 12 |
 | Game Boy - Mooneye | 112 | 113 |
-| GBA - mGBA Test Suite | 11 | 13 |
+| GBA - mGBA Test Suite | 12 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
@@ -216,13 +216,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | mooneye/misc/boot_regs-cgb | CGB | 👌 |
 | mooneye/misc/ppu/vblank_stat_intr-C | CGB | 👌 |
 
-## GBA - mGBA Test Suite (11/13)
+## GBA - mGBA Test Suite (12/13)
 
 | Test | Device | Result |
 |------|--------|--------|
 | mgba-suite/Memory tests | — | 👌 |
 | mgba-suite/I/O read tests | — | 👌 |
-| mgba-suite/Timing tests | — | 👀 1988/2020 passed |
+| mgba-suite/Timing tests | — | 👌 |
 | mgba-suite/Timer count-up tests | — | 👌 |
 | mgba-suite/Timer IRQ tests | — | 👌 |
 | mgba-suite/Shifter tests | — | 👌 |

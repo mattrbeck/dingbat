@@ -56,6 +56,21 @@ byte-for-byte:
 | 7 | Misc — `H-blank bit start` Hblank + Flip 1-6 | **mostly measures dingbat's waitloop skip resolution, not its PPU timing**; one row is a real 3-cycle bug | §5 |
 | 1 | Misc — `DMA Prefetch Break` | not comparable across ROM builds by construction | §6 |
 
+## 3. The 32 DMA timing rows — **CLOSED 2026-08-19** (§3 below is the pre-fix state)
+
+All 32 now pass; Timing is **2020/2020** and the suite is **6990/6998**. The
+proof restated below is sound but its `elapsed` column was not physical:
+`now - rom_free_since` at a DMA's ROM access is read inside a scheduler dispatch,
+where `tick_slow` has rewound `sched.cycles` to the due event and holds the rest
+of the CPU's tick quota back — a skew measured at -2..+1 across four columns of
+the *same* test. Two more of the eight points were vacuous (the Thumb `P.S`/`PNS`
+from-ROM rows genuinely expect 2, and dingbat already returned 2). Anchoring the
+phase on the DMA grant instead — `k = now - dma_grant_now`, stall iff
+`k mod s == 0`, first ROM access of a burst only — satisfies every row. It is the
+CPU hand-off's own predicate one cycle earlier, not a second rule. ~15 lines in
+`bus.rom_access_cycles`, no occupancy state, no save-state change, +0.016% perf.
+Full write-up: `docs/prefetch-model-rewrite.md` (top).
+
 ## 3. The 32 DMA timing rows (blocked, and provably so)
 
 Fully analysed in `docs/prefetch-model-rewrite.md`. Summary of the standing proof, not

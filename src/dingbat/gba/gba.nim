@@ -8,6 +8,24 @@ when defined(test_harness):
   import ../common/test_output
 import ../common/lut_macros
 
+when defined(pftrace):
+  # MEASUREMENT PROBE (-d:pftrace): dump the ROM bus's activity inside each
+  # mGBA-suite Timing measurement window — the span between TM0's enable and
+  # disable writes, which is exactly what those tests report. Only windows that
+  # contained a DMA grant are printed, so a whole suite run emits ~300 short
+  # blocks: the DMA/ROM Timing rows, keyed by the burst's own src/dst/len and
+  # by the WAITCNT the column selected. That turns 32 opaque failures into a
+  # 256-row offline oracle, which is how the prefetch hand-off predicate in
+  # bus.rom_access_cycles was derived and is how to re-derive it. Costs nothing
+  # in a normal build; every call site is `when defined(pftrace)`.
+  var pft_on*: bool
+  var pft_dma*: bool
+  var pft_lines*: seq[string]
+  proc pft*(s: string) =
+    # A real game leaves TM0 running for whole frames; bound the buffer so the
+    # probe can be pointed at one without eating the heap.
+    if pft_on and pft_lines.len < 4096: pft_lines.add(s)
+
 # Include register definitions (provides PSR, DISPCNT, etc.)
 include reg
 
@@ -306,6 +324,18 @@ type
     # DMA sequentiality doesn't require back-to-back bus cycles
     rom_next_addr2*: uint32
     dma_active*:     bool
+    # Prefetch hand-off to a DMA burst. `rom_free_since` is on the CPU's bus
+    # clock while a granted DMA runs on the *event* clock, which tick_slow
+    # rewinds to the due event's cycle (scheduler.nim) — so `now - rom_free_since`
+    # at a DMA's ROM access is off by however much of the CPU's tick quota is
+    # still held back, a skew that swings -2..+1 between otherwise identical
+    # runs. The prefetcher's phase therefore cannot be read off that difference.
+    # What IS exact is the burst's own elapsed time, so the grant cycle is
+    # captured here and the phase counted forward from it.
+    # Both are seeded at every grant and consumed inside the same burst, so
+    # unlike the burst trackers above they need no serialization.
+    dma_grant_now*:  CycleCount
+    dma_first_rom*:  bool
     # True while the CPU fetch stream is unbroken: sequential ROM fetches
     # skip the absolute-time bookkeeping entirely. Any other cycle consumer
     # must "cool" the stream (recording rom_free_since) first.

@@ -194,6 +194,21 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
                      else: dma_addr_delta(source_control, word_size)
   let delta_dest   = dma_addr_delta(dest_ctrl,  word_size)
 
+  when defined(pftrace):
+    pft_dma = pft_dma or pft_on
+    pft("DMA" & $channel & " GRANT sched=" & $dma.gba.scheduler.cycles &
+        " busc=" & $dma.gba.bus.cycles & " rfs=" & $dma.gba.bus.rom_free_since &
+        " hot=" & $dma.gba.bus.rom_hot & " src=" & toHex(dma.src[channel], 8) &
+        " dst=" & toHex(dma.dst[channel], 8) & " len=" & $len & " ws=" & $word_size)
+
+  # The cycle the ROM bus changes hands, captured before any of the burst's own
+  # cycles are charged: the prefetch hand-off (bus.rom_access_cycles) counts the
+  # burst's elapsed time forward from here rather than differencing two clocks
+  # that are skewed against each other while an event is dispatching.
+  dma.gba.bus.dma_grant_now =
+    dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+  dma.gba.bus.dma_first_rom = true
+
   # DMA internal cycles for the CPU->DMA bus handoff (calibrated against the
   # mGBA suite DMA timing tests; ROM-to-ROM needs no extra I cycles once its
   # write is sequential-timed). A channel that preempts another mid-burst
@@ -325,5 +340,8 @@ proc run_pending*(dma: DMA) =
       # Bus handed back to the CPU: the first instruction it executes still
       # sees the DMA's last word on open-bus reads (cleared in cpu.tick)
       bus.dma_open_bus_armed = true
+    when defined(pftrace):
+      pft("DMA" & $ch & " END sched=" & $bus.sched.cycles & " busc=" & $bus.cycles &
+          " rfs=" & $bus.rom_free_since & " hot=" & $bus.rom_hot)
     bus.rom_next_addr = 1
     bus.rom_next_addr2 = 1

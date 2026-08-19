@@ -501,6 +501,9 @@ proc tick*(cpu: CPU) =
         gsProbeIn = inIw
     when defined(pcprofile):
       let prof_region = bits_range(cpu.r[15], 24, 27)
+    when defined(pftrace):
+      pft("INSTR pc=" & toHex(cpu.r[15], 8) & " t=" & $cpu.cpsr.thumb &
+          " sched=" & $cpu.gba.scheduler.cycles & " busc=" & $cpu.gba.bus.cycles)
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:
       cpu.thumb_execute(instr)
