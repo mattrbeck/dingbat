@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-19 15:37:02*
+*Generated: 2026-08-19 15:50:46*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4258/5005 passed.**
+**4263/5005 passed.**
 
 ## bgen
 
@@ -54,33 +54,28 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (121/229 passed)
+## dma (126/229 passed)
 
-121/229 tests passed, 108 failed:
+126/229 tests passed, 103 failed:
 
 | Test | Result |
 |------|--------|
-| dma/gdma_cycles_2xshort_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_2xshort_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_scx3_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_scx5_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_long_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_short_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_short_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| dma/gdma_cycles_long_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| dma/gdma_cycles_long_ds_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_ds_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| dma/gdma_cycles_long_scx2_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_scx2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| dma/gdma_cycles_long_scx3_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_scx3_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| dma/gdma_cycles_long_scx5_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_scx5_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| dma/gdma_cycles_long_scx5_ds_1_cgb04c_out3 [cgb] | got 2, expected 3 |
+| dma/gdma_cycles_long_scx5_ds_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | dma/gdma_cycles_short_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | dma/gdma_cycles_short_scx3_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_short_scx5_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_cycles_short_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/gdma_weird_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/hdma_cycles_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/hdma_cycles_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | dma/hdma_cycles_scx2_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | dma/hdma_cycles_scx3_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/hdma_cycles_scx5_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| dma/hdma_cycles_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | dma/hdma_disable_display_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_ei_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_destl_1_cgb04c_out0 [cgb] | got 1, expected 0 |

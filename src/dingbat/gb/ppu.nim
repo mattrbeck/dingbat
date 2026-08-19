@@ -1783,6 +1783,15 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false): bool =
     mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
                  from_cpu = false)
     mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
+  # The bus acquire/release either side of the block, which is NOT part of the
+  # per-byte cost above. Charged after the copies so the hold deadline below is
+  # still measured from the last transferred byte. See HDMA_BLOCK_OVERHEAD_M in
+  # gb.nim for the two instruments that derive it.
+  when HDMA_BLOCK_OVERHEAD_M != 0:
+    mem_tick_bus(gb.memory, gb,
+                 HDMA_BLOCK_OVERHEAD_M shl int(gb.memory.current_speed),
+                 from_cpu = false)
+    mem_tick_ppu(gb.memory, gb, HDMA_BLOCK_OVERHEAD_M, ignore_speed = true)
   if hold:
     # Armed only now that the block's own dots have run, so the deadline is
     # measured from the LAST transferred byte and the ticks above cannot spend

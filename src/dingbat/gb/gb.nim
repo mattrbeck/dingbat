@@ -794,6 +794,40 @@ const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## CGB_HALT_PPU_LEAD wants exactly 4 T taken out of here, and it is worth
   ## having the row that refuses it on record. See docs/gb-failure-triage.md
   ## (2026-08-10).
+const HDMA_BLOCK_OVERHEAD_M* {.intdefine.} = 2
+  ## Extra M-cycles an HBlank DMA block costs BEYOND its sixteen byte copies.
+  ##
+  ## The copies themselves are two dots per byte at either speed — that part is
+  ## pinned by gambatte's `hdma_start_ds_*` and matches SameBoy's GB_hdma_run
+  ## (`double_speed ? 4 : 2` per byte), and it is NOT what this changes. This is
+  ## the bus acquire/release either side of the block, which dingbat charged as
+  ## zero, so a block stalled the machine for exactly its copies and nothing
+  ## else.
+  ##
+  ## Derived from mealybug `dma/hdma_timing-C`, which stores 48 results and only
+  ## renders a truncated view of them (base.asm wraps at 32 columns, the screen
+  ## shows 20). `tools/gbppu/hdmaresults.nim` reads the buffer out of WRAM
+  ## instead and scores all 48; the same buffer comes out of SameBoy through
+  ## `sameboy_runner`'s GBFUZZ_DUMP, so the oracle is readable per sub-test too:
+  ##
+  ##   HDMA_BLOCK_OVERHEAD_M    0      1     2 (ship)   4      SameBoy
+  ##   hdma_timing-C wrong    20/48  18/48   12/48    14/48     2/48
+  ##
+  ## and, on a completely separate instrument, gambatte's 229-row `dma` group
+  ## goes **121 -> 126** with nothing anywhere else moving (suite 4258 -> 4263,
+  ## every other group byte-identical). Two sub-groups of the mealybug ROM stop
+  ## being wrong at all rather than merely getting closer: the whole
+  ## double-speed DIV-duration group (4 wrong -> 0), and the fourth STAT read of
+  ## all four STAT groups, which is the mode-2 entry after the block.
+  ##
+  ## **Not the whole story, and the residual says where it goes next.** At 2 the
+  ## SINGLE-speed DIV-duration group is still 4 wrong while the double-speed one
+  ## is exact, so the overhead is not simply `2 shl speed` the way the copies
+  ## are; the HDMA5 readback is still a phase early; and in double speed mode 3
+  ## still ends early. SameBoy reaches 2/48 with no overhead term at all, which
+  ## means it spends these cycles somewhere dingbat does not, and finding that
+  ## is what would close the row. Shipped anyway because it is a strict
+  ## improvement on two independent instruments with zero measured losses.
 const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
   ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
   ##
