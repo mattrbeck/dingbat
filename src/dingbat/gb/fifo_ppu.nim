@@ -1433,6 +1433,12 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         (m, o)
       else:
         let m = if bg_tile_map(ppu) == 0: 0x1800 else: 0x1C00
+        # Latched UNCONDITIONALLY: one store, no branch. Guarding it on
+        # quirks.scy_fetch_latch so DMG and CGB-C skip the store was tried and
+        # is WORSE -- 6.2069 G -> 6.2415 G retired instructions on
+        # cgb-acid-hell, i.e. the branch costs more than the store it saves.
+        # Only the READ BACK is gated (see scy_fetch_latch).
+        ppu.fetch_scy = ppu.scy
         let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
                 (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
         (m, o)
@@ -1477,6 +1483,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
     var tile_row = if ppu.fetching_window:
                      ppu.current_window_line and 7
+                   elif gb.quirks.scy_fetch_latch:
+                     (int(ppu.ly) + int(ppu.fetch_scy)) and 7
                    else:
                      (int(ppu.ly) + int(ppu.scy)) and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row

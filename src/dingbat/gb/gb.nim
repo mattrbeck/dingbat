@@ -2498,6 +2498,18 @@ type
       ## NRx4 = $00 (CH3: $03), with bit 6 clear, and still expect the counter
       ## to move.
     mixer_write_immediate*: bool
+    scy_fetch_latch*: bool
+      ## CGB-D and later latch SCY ONCE per BG fetch, at the map read, and both
+      ## bitplane reads of that tile use the latched value. CGB-C and earlier
+      ## sample it live on each of the three read dots.
+      ##
+      ## Derived two-sided from mealybug `m3_scy_change`, whose two captures
+      ## invert exactly (docs/gb-mealybug-sources.md 3.4 -- each tile IS the
+      ## triple (SCY at B, SCY at 0, SCY at 1), because the map is
+      ## `65 + row + col`, BGP is identity and SCX is 0). Live-per-read is
+      ## pixel-exact on `_cgb_c` and 6217 px wrong on `_cgb_d`; the per-fetch
+      ## latch is pixel-exact on `_cgb_d` and the same 6217 px wrong on
+      ## `_cgb_c`. Two models, two captures, no overlap and no fitted constant.
       ## CGB D and later. The CGB takes a mid-mode-3 write to a PALETTE
       ## register one dot later than the DMG does -- that dot is
       ## `CGB_MIXER_LATENCY`, and this flag is the revision that stops taking
@@ -3254,6 +3266,8 @@ type
     tdsel_addr*:          int32
     tile_num*:            uint8
     tile_attrs*:          uint8
+    fetch_scy*:           uint8   ## SCY as of this fetch's map read; read
+                                  ## back only when quirks.scy_fetch_latch
     tile_data_low*:       uint8
     tile_data_high*:      uint8
     # The FIFO entries the mixer is still holding: the pairs popped on the last
@@ -4656,6 +4670,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
   GbQuirks(
     length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
     mixer_write_immediate: rev in {grCgbD, grCgbE},
+    scy_fetch_latch: rev in {grCgbD, grCgbE},
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:

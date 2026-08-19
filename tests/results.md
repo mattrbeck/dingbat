@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-18 17:33:10 · commit 94c4caa · game-boy-test-roms v7.0*
+*Generated: 2026-08-18 22:17:17 · commit 75923ba · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
 - **Total:** 1054
-- **Pass:** 893
-- **Fail:** 161
+- **Pass:** 894
+- **Fail:** 160
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -21,7 +21,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
-| Game Boy - Mealybug Tearoom | 55 | 61 |
+| Game Boy - Mealybug Tearoom | 56 | 61 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 14 | 37 |
 | Game Boy - Screenshot suites | 12 | 13 |
@@ -283,7 +283,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | magen/ppu_disabled_state | cart | 👌 |
 | magen/bg_oam_priority | cart | 👌 |
 
-## Game Boy - Mealybug Tearoom (55/61)
+## Game Boy - Mealybug Tearoom (56/61)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -332,7 +332,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_scx_low_3_bits | CGB | 👌 |
 | mealybug/m3_scy_change | DMG | 👌 |
 | mealybug-cgb/m3_scy_change | CGB | 👌 |
-| mealybug-cgbd/m3_scy_change | CGB cgbd | 👀 73.0% correct (16823/23040 pixels match) |
+| mealybug-cgbd/m3_scy_change | CGB cgbd | 👌 |
 | mealybug-cgb/m3_scy_change2 | CGB | 👌 |
 | mealybug/m3_window_timing | DMG | 👌 |
 | mealybug-cgb/m3_window_timing | CGB | 👌 |
