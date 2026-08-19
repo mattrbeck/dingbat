@@ -11,6 +11,53 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## Rows that pass on one revision and fail on another — swept 2026-08-19
+
+Every currently-failing self-checking row (mooneye, wilbertpol, AGE — 113 of
+them, all boolean via the Fibonacci protocol) re-run on all eleven revisions
+dingbat models: dmg0, dmgABC, mgb, sgb, sgb2, cgb0, cgbab, cgbc, cgbd, cgbe,
+agb. Script: `tools/gbppu/revsweep.py`.
+
+**Exactly six pass on at least one revision, and they are one family:**
+
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops
+    mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops
+
+All six are green on **every CGB revision AND on AGB**, and red on **every**
+DMG-family one (dmg0/dmgABC/mgb/sgb/sgb2). They are scored as DMG. So the
+behaviour is implemented and correct — it is the DMG side of it that is wrong,
+which is a far smaller problem than a row that is red everywhere.
+
+**The residue pattern names the mechanism.** Among the plain SCX variants on
+DMG, `scx1`, `scx2`, `scx3`, `scx5`, `scx6` and `scx7` all PASS; only **`scx4`
+and `scx8`** fail — and 8 mod 8 = 0. With sprites, every `_nops` variant fails
+(`scx1` fails on all eleven revisions, the rest recover on CGB). The plain
+non-`_nops` rows — `intr_2_mode0_timing` and `intr_2_mode0_timing_sprites`, in
+both forks — pass, so this is only visible at the ONE-NOP granularity the
+`_nops` builds measure.
+
+That is mode-3 LENGTH as a function of `SCX mod 8` and of object presence, on
+DMG, at single-nop resolution: the same grid-alignment quantity as
+`cgb-acid-hell`, the 31 halt-lead rows and probe (e)'s column table, seen from
+the DMG side for once. Two useful consequences:
+
+* it is a **DMG** instrument for a question that has otherwise only been
+  asked on CGB, and dingbat's DMG and CGB paths clearly disagree here;
+* it is **cheap to iterate** — six boolean rows, each a sub-second run, versus
+  probe (e)'s 136-cell fit.
+
+Worth trying before the structural work: whatever separates dingbat's DMG
+mode-3 length from its CGB one at `SCX mod 8 in {0, 4}` and under objects.
+
+**Everything else is red on all eleven revisions**, so there is no other
+cheap revision-gating win hiding in the self-checking suites. That is the
+useful negative: the remaining 107 failures are real behaviour gaps, not
+mis-assigned machines.
+
 ## RTC 2026-08-19: `rtc3test-1` and `-3` are a PACING gap, not an RTC defect
 
 Both rows fail, and neither fails on RTC behaviour. Measured rather than
