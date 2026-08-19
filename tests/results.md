@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-19 08:18:51 · commit c8e61a9 · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 08:29:34 · commit 81f03ae · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: AGE writes the devices it was verified on into the filename (`ei-halt-dmgC-cgbBCE`), and each of those now gets its own row on its own revision rather than one row on whichever machine happened to be the default.
 
 ## Summary
 
 - **Total:** 1106
-- **Pass:** 919
-- **Fail:** 187
+- **Pass:** 924
+- **Fail:** 182
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -21,7 +21,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
-| Game Boy - Mealybug Tearoom | 56 | 61 |
+| Game Boy - Mealybug Tearoom | 60 | 61 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 39 | 89 |
 | Game Boy - Screenshot suites | 12 | 13 |
@@ -29,7 +29,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 11 | 13 |
 | Game Boy - Mooneye (wilbertpol) | 85 | 117 |
-| Game Boy - gambatte | 9 | 48 |
+| Game Boy - gambatte | 10 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -283,7 +283,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | magen/ppu_disabled_state | cart | 👌 |
 | magen/bg_oam_priority | cart | 👌 |
 
-## Game Boy - Mealybug Tearoom (56/61)
+## Game Boy - Mealybug Tearoom (60/61)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -299,8 +299,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_bg_en_change | CGB | 👌 |
 | mealybug-cgb/m3_lcdc_bg_en_change2 | CGB | 👌 |
 | mealybug/m3_lcdc_bg_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_bg_map_change | CGB | 👀 98.3% correct (22656/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_bg_map_change2 | CGB | 👀 99.1% correct (22822/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_bg_map_change | CGB | 👌 |
+| mealybug-cgb/m3_lcdc_bg_map_change2 | CGB | 👌 |
 | mealybug/m3_lcdc_obj_en_change | DMG | 👌 |
 | mealybug-cgb/m3_lcdc_obj_en_change | CGB | 👌 |
 | mealybug/m3_lcdc_obj_en_change_variant | DMG | 👌 |
@@ -320,8 +320,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_win_en_change_multiple | CGB | 👌 |
 | mealybug/m3_lcdc_win_en_change_multiple_wx | DMG | 👌 |
 | mealybug/m3_lcdc_win_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_win_map_change | CGB | 👀 99.2% correct (22858/23040 pixels match) |
-| mealybug-cgb/m3_lcdc_win_map_change2 | CGB | 👀 99.4% correct (22900/23040 pixels match) |
+| mealybug-cgb/m3_lcdc_win_map_change | CGB | 👌 |
+| mealybug-cgb/m3_lcdc_win_map_change2 | CGB | 👌 |
 | mealybug/m3_obp0_change | DMG | 👌 |
 | mealybug-cgb/m3_obp0_change | CGB | 👌 |
 | mealybug-cgbd/m3_obp0_change | CGB cgbd | 👌 |
@@ -1176,13 +1176,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/misc/boot_regs-sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C | CGB | 👌 |
 
-## Game Boy - gambatte (9/48)
+## Game Boy - gambatte (10/48)
 
 | Test | Device | Result |
 |------|--------|--------|
 | gambatte/bgen | per-ROM | 👌 2/2 passed |
 | gambatte/bgtiledata | per-ROM | 👌 34/34 passed |
-| gambatte/bgtilemap | per-ROM | 👀 28/40 passed |
+| gambatte/bgtilemap | per-ROM | 👌 40/40 passed |
 | gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
 | gambatte/display_startstate | per-ROM | 👀 10/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |

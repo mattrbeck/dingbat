@@ -706,6 +706,65 @@ in `m3_lcdc_obj_size_change` that lands them on dots **101, 125, 137, 149** of
 this renderer's line, which is what `-d:gb_m3_trace` prints and what the
 derivation's table brackets each bitplane read against.
 
+### 3.12 The four CGB `*map_change*` rows — 384 / 218 / 182 / 140 → **0** (2026-08-19)
+
+These four were the last red rows in the suite on either device, and they were
+red only on the CGB side: `m3_lcdc_bg_map_change` and `m3_lcdc_win_map_change`
+are 23040/23040 against their `_dmg_blob` references and were 384 and 182
+pixels out against `_cgb_c`, at every revision (the suite ships `_cgb_c` and
+`_cgb_d` for both and they are byte-identical, so this was never a revision
+axis). Their `2`-suffixed CGB-only siblings were 218 and 140.
+
+**Both ROMs invert completely, and reading them that way is the whole
+derivation.** `m3_lcdc_bg_map_change` fills map `$9800` with tile 0 and map
+`$9C00` with tile 1, writes an all-`$00` tile at `$9000` and an all-`$FF` tile
+at `$9010`, sets `BGP = $E4` and leaves SCX at 0. So **every 8-pixel tile
+column of the frame is one bit — which map the fetcher's B-stage read used** —
+and the handler (`line_0_fix`, 9 `nop`s, `ld [hl],c`, `ld [hl],b`) raises
+LCDC.3 for exactly 8 dots. The eighteen objects at `Y = $10 + 8k, X = k` sweep
+that pulse across the fetch grid at one dot per band (§1.3), so one frame is
+eighteen readings of *which tile's map read fell inside the pulse*.
+`m3_lcdc_win_map_change` is the same cart for LCDC.6 with `WY = 0`, `WX = 7`.
+
+Reading the black column off both captures, per band (`X` = the band's OAM X):
+
+| | DMG blob | CGB C and D |
+|---|---|---|
+| `bg_map_change`, tile 1 black | X = 0, 1, 2 | X = 0 |
+| `bg_map_change`, tile 2 black | X = 3..7 | X = 1..7 |
+| `bg_map_change`, nothing black | X = 8, 9, 10 | X = 8 |
+| `bg_map_change`, tile 2 black | X = 11..15 | X = 9..15 |
+| `win_map_change`, tile 0 black | X = 0, 1, 2 | X = 0 |
+| `win_map_change`, tile 1 black | X = 1..7 | X = 0..7 |
+
+**Four independent edges, all four moved by the same two bands in the same
+direction, and a band is a dot.** So the pulse reaches the map read two dots
+later on a CGB than on a DMG. dingbat answered the DMG schedule on both
+consoles, which is exactly the four bands (1, 2, 9, 10 of `bg_map_change`) that
+were wrong. Two dots is also the magnitude the suite's own PPU notes give for
+the one CGB write latency they state outright (§2, SCY).
+
+Shipped as **`CGB_MAP_LATENCY = 2`** in `gb.nim`, applied at `fsGetTile` in
+`fifo_ppu.nim` — a per-READER delay on LCDC.3/LCDC.6 like `CGB_TDSEL_LATENCY`
+for LCDC.4 and `CGB_OBJ_SIZE_LATENCY` for LCDC.2, not the whole-register
+`CGB_LCDC_LATENCY`, which still ships at 0. `-d:CGB_MAP_LATENCY=0` is the
+control build.
+
+The confirmations, none of which were consulted while the value was derived:
+
+* the two `2`-suffixed siblings, whose picture is the alphabetical map and not
+  the black/white one, went to 0 with them;
+* **gambatte's `bgtilemap` family, 40 rows of the same write, went 28/40 →
+  40/40** — every gain a `[cgb]` row;
+* the bracket agrees on both instruments (`bgtilemap` 28 / 32 / **40** / 32 and
+  mealybug CGB 1863574 / 1865000 / **1866240** / 1864988 pixels at latency
+  0 / 1 / 2 / 3), a unique maximum with symmetric fall-off;
+* the four `bgtilemap_*_ds_*` rows fail if the latency is not scaled by the CPU
+  clock, which is what pins it as a CPU-clock delay rather than a dot count.
+
+**With this the whole mealybug PPU suite is pixel-exact on both devices**: 24/24
+DMG rows at 552960/552960 and 27/27 CGB rows at 1866240/1866240.
+
 ---
 
 ## 4. Sources with nothing useful in them

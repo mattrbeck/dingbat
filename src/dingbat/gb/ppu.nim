@@ -2145,6 +2145,17 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
         # CGB_TDSEL_LATENCY in gb.nim.
         gb.fifo_ppu.tdsel_dot = ppu.cycle_counter +
           int32(max(0, CGB_TDSEL_LATENCY - int(gb.memory.current_speed)))
+    when CGB_MAP_ANY:
+      # LCDC.3 and LCDC.6 at the fetcher's MAP ADDRESS read. Same shape as the
+      # tdsel block above and the latency is spent here for the same reason:
+      # it is a CPU-clock delay, so a double-speed M-cycle spends it inside
+      # itself. `map_old` is the pair as it stood BEFORE this write, which is
+      # what a read still inside the latency uses. See CGB_MAP_LATENCY in
+      # gb.nim for the four mealybug edges that derive the dots.
+      if (moved and 0x48'u8) != 0 and gb.fifo_ppu.cgb:
+        gb.fifo_ppu.map_old = (val xor moved) and 0x48'u8
+        gb.fifo_ppu.map_dot = ppu.cycle_counter +
+          int32(max(0, CGB_MAP_LATENCY - int(gb.memory.current_speed)))
     if flip2:
       ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
       ppu.lcdc2_flip[0] = ppu.cycle_counter

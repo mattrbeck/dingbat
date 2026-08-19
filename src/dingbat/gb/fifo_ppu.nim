@@ -117,6 +117,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
     tdsel_dot: NO_TDSEL_CHANGE,
     tdsel_addr: TDSEL_ADDR_OFF,
+    map_dot: NO_MAP_CHANGE,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -243,6 +244,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
   ppu.tdsel_dot = NO_TDSEL_CHANGE
   ppu.tdsel_addr = TDSEL_ADDR_OFF
+  ppu.map_dot = NO_MAP_CHANGE
   ppu.m3_delay = 0'u8
   ppu.tile_num = 0
   ppu.tile_attrs = 0
@@ -1154,6 +1156,10 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   # arming packed ABOVE the address does go with the dot: it is a dot on this
   # line's clock, and a stale one would compare live against the next line's.
   ppu.tdsel_dot = NO_TDSEL_CHANGE
+  # LCDC.3 / LCDC.6 at the map read, for the same reason: the dot is on this
+  # line's clock and no map read of this line can be answered by the line
+  # before it. See CGB_MAP_LATENCY in gb.nim.
+  when CGB_MAP_ANY: ppu.map_dot = NO_MAP_CHANGE
   when CGB_TDSEL_IDX_DOTS > 0:
     if ppu.tdsel_addr > 0:
       ppu.tdsel_addr = ppu.tdsel_addr and ((1'i32 shl TDSEL_IDX_SHIFT) - 1)
@@ -1421,18 +1427,28 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
           # the bit low, arm a hold nothing can serve). A genuine second start
           # needs a pixel the shifter has not reached.
           if ppu.win_lx == ppu.lx: ppu.win_lx = WIN_LX_OFF
+    # ---- LCDC.3 / LCDC.6, as the MAP ADDRESS sees them ----------------------
+    #
+    # The two map-select bits as they stood CGB_MAP_LATENCY dots ago on a CGB
+    # (see that constant in gb.nim: the DMG is pixel-exact on both
+    # `m3_lcdc_*_map_change` rows, so those dots are a CGB delta and nothing
+    # else). `map_dot` is already the dot the change goes live on, so this is
+    # one compare that never takes on a DMG or on any line without a write.
+    var map_bits = ppu.lcd_control and 0x48'u8
+    when CGB_MAP_ANY:
+      if unlikely(ppu.cycle_counter < ppu.map_dot): map_bits = ppu.map_old
     let (map, offset) =
       if ppu.fetching_window:
         # Wraps inside the 32x32 tile map exactly as the background fetch
         # below does. Without the mask a long enough line runs fetcher_x past
         # the end of the map and then off the end of VRAM itself — an
         # out-of-bounds read (The Fish Files crashed the emulator here).
-        let m = if window_tile_map(ppu) == 0: 0x1800 else: 0x1C00
+        let m = if (map_bits and 0x40'u8) == 0: 0x1800 else: 0x1C00
         let o = (ppu.fetcher_x and 0x1F) +
                 ((((ppu.current_window_line shr 3) * 32)) and 0x3FF)
         (m, o)
       else:
-        let m = if bg_tile_map(ppu) == 0: 0x1800 else: 0x1C00
+        let m = if (map_bits and 0x08'u8) == 0: 0x1800 else: 0x1C00
         # Latched UNCONDITIONALLY: one store, no branch. Guarding it on
         # quirks.scy_fetch_latch so DMG and CGB-C skip the store was tried and
         # is WORSE -- 6.2069 G -> 6.2415 G retired instructions on

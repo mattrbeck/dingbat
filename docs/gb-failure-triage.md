@@ -3400,6 +3400,15 @@ is identical here) is exact on `_cgb_d` for 17 of 20.
 * **Two fail identically at every revision**: `m3_lcdc_bg_map_change` (22656)
   and `m3_lcdc_win_map_change` (22858) are off on BOTH captures by the same
   count, so they are pre-existing and revision-independent. Not this axis.
+  **Closed 2026-08-19**, and the revision-independence is what said where to
+  look: it is a CGB/DMG delta and not a C/D/E one. Both ROMs invert into "which
+  map did each tile's B read use", both DMG captures are already exact, and all
+  four edges of the two frames put the CGB's LCDC.3/LCDC.6 arrival at the map
+  read exactly two dots behind the DMG's. Shipped as `CGB_MAP_LATENCY = 2`;
+  derivation at that constant in `gb.nim` and the band tables in
+  docs/gb-mealybug-sources.md §3.12. Both rows, both their `2`-suffixed
+  siblings and gambatte's whole `bgtilemap` family (28/40 → 40/40) are now
+  exact, at C, D and E and against both captures.
 * **One is the honest gap: `m3_scy_change`**, 23040 on `_cgb_c` at C and
   16823/23040 on `_cgb_d` at D. This is the OTHER documented CGB-D difference
   and dingbat does not model it. Pan Docs, `Scrolling.md`: *"All models before

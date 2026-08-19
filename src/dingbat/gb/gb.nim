@@ -1017,7 +1017,17 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #    +517 mealybug CGB pixels, DMG untouched as it must be). Three instruments,
 #    one value, and it is the documented one.
 #    Its _scx1 rows are still red on both devices; that residual is elsewhere.
-#  * LCDC. All the window rows it costs are late_disable / late_reenable rows.
+#  * LCDC. **Read this bullet as being about the WHOLE-REGISTER latency only.**
+#    Four of LCDC's bits now carry their own per-reader delay instead --
+#    CGB_OBJ_SIZE_LATENCY (bit 2, the object fetch), CGB_TDSEL_LATENCY (bit 4,
+#    the bitplane reads) and CGB_MAP_LATENCY (bits 3 and 6, the map address) --
+#    and each of those was derived on a family the whole-register form cannot
+#    separate. CGB_MAP_LATENCY in particular takes gambatte's `bgtilemap`
+#    28/40 -> 40/40, which is a family this table never moved at any setting of
+#    the constant below, so the two are measuring different things.
+#
+#    All the window rows the whole-register form costs are late_disable /
+#    late_reenable rows.
 #    Those are the family SameBoy gives a CGB-ONLY fetcher-abort path (a window
 #    disable part way through the fetch aborts it), which moves them the other
 #    way; the +2 dots is not separable from the abort here, and adding it alone
@@ -1092,6 +1102,118 @@ const CGB_OBJ_SCAN_LEAD*      {.intdefine.} = 2
   ##
   ## Its SIGN agrees with CGB_OBJ_SIZE_LATENCY: both say the bit reaches the
   ## object logic later on a CGB than on a DMG.
+const CGB_MAP_LATENCY*        {.intdefine.} = 2
+  ## Dots LCDC.3 / LCDC.6 -- the two TILE MAP select bits -- take to reach the
+  ## background fetcher's MAP ADDRESS read on a CGB over a DMG.
+  ##
+  ## The fourth member of the family above (CGB_OBJ_SIZE_LATENCY for LCDC.2 at
+  ## the object fetch, CGB_TDSEL_LATENCY for LCDC.4 at the bitplane reads,
+  ## CGB_LCDC_MIXER_LATENCY for the whole register at the mixer), and the same
+  ## shape: a per-READER delay, not the whole-register write latency
+  ## CGB_LCDC_LATENCY, which ships at 0 because every nonzero setting of it
+  ## costs gambatte `window/late_disable*` rows that are a missing mechanism
+  ## rather than a wrong dot.
+  ##
+  ## **Derived, not fitted, from the four mealybug `*map_change*` rows, and the
+  ## DMG side pins the phase so the whole delta is the console.**
+  ## `m3_lcdc_bg_map_change` and `m3_lcdc_win_map_change` are 23040/23040
+  ## against their `_dmg_blob` references and were 384 and 182 pixels out
+  ## against `_cgb_c`, at every revision C/D/E alike (the suite ships `_cgb_c`
+  ## and `_cgb_d` captures for both and they are byte-identical, so this is not
+  ## a revision axis).
+  ##
+  ## Both ROMs invert completely. Map `$9800` is filled with tile 0 and map
+  ## `$9C00` with tile 1; tile 0 is all-`$00` and tile 1 all-`$FF`; BGP is the
+  ## identity and SCX is 0. So **every 8-pixel tile column of the frame is one
+  ## bit: which map the fetcher's B-stage read used**, and the handler
+  ## (`line_0_fix`, 9 `nop`s, `ld [hl],c`, `ld [hl],b`) raises the bit for
+  ## exactly 8 dots. Eighteen objects at `Y = $10 + 8k, X = k` sweep that pulse
+  ## across the fetch grid one dot per 8-line band (see docs/gb-mealybug-
+  ## sources.md §1.3), so one frame is eighteen readings of "which tile's map
+  ## read fell inside the pulse". Reading the black column off both references
+  ## per band, `X` = the band's OAM X:
+  ##
+  ##   m3_lcdc_bg_map_change     DMG blob            CGB C and D
+  ##     tile 1 black            X = 0, 1, 2         X = 0
+  ##     tile 2 black            X = 3 .. 7          X = 1 .. 7
+  ##     nothing black           X = 8, 9, 10        X = 8
+  ##     tile 2 black            X = 11 .. 15        X = 9 .. 15
+  ##
+  ##   m3_lcdc_win_map_change    DMG blob            CGB C and D
+  ##     tile 0 black            X = 0, 1, 2         X = 0
+  ##     tile 1 black            X = 1 .. 7          X = 0 .. 7
+  ##
+  ## **Four independent edges and all four move by the same two bands in the
+  ## same direction.** A band is a dot, so the pulse arrives at the map read
+  ## two dots later on a CGB: at a given X the CGB catches a map read the DMG
+  ## needs two more bands of object penalty to reach. (The `win_map` tile-1
+  ## entry edge reads as one band only because X cannot go below 0 -- +2 puts
+  ## it at X = -1, off the instrument, and nothing there contradicts +2.)
+  ## dingbat before this constant answered the DMG schedule on both consoles,
+  ## which is exactly the four bands that were wrong.
+  ##
+  ## Two dots is also the magnitude mealybug's own PPU documentation gives for
+  ## the one CGB write latency it states outright -- *"writes will take effect
+  ## immediately on the DMG. On CGB and AGB devices, writes appear to take
+  ## effect 2 T-cycles later"* for SCY, which ships next door as
+  ## CGB_SCY_LATENCY = 2. Bracketed on the instrument rather than assumed:
+  ## 1 dot moves each edge one band and closes exactly half of each row
+  ## (`m3_lcdc_bg_map_change` 384 -> 192 wrong pixels), 3 dots overshoots every
+  ## edge by a band, and 2 is the only value that is pixel-exact on all four.
+  ##
+  ## **A second instrument, unconsulted while the value was derived, agrees on
+  ## the same dot.** gambatte's `bgtilemap` family is 40 rows of exactly this
+  ## write -- LCDC.3 moved inside mode 3 at SCX 8, 9 and $0A, four write dots
+  ## each -- scored against reference images, and it went **28/40 -> 40/40**.
+  ## Every one of the twelve it gained is a `[cgb]` row; the DMG half was
+  ## already green and does not move. The bracket on that instrument matches
+  ## mealybug's exactly:
+  ##
+  ##   CGB_MAP_LATENCY        0      1      2 (ship)    3
+  ##   gambatte bgtilemap    28/40  32/40   40/40     32/40
+  ##   mealybug CGB pixels  1863574 1865000 1866240  1864988  (of 1866240)
+  ##
+  ## Two instruments, one unique maximum, symmetric fall-off on both sides.
+  ## At 2 the whole 27-row mealybug CGB set and the whole 24-row DMG set are
+  ## pixel-exact, and every one of the four rows is exact at `--cgb-rev=` C, D
+  ## and E against BOTH the `_cgb_c` and the `_cgb_d` capture.
+  ##
+  ## The same bracket at the level of the WHOLE runner, re-measured
+  ## independently, which is the strongest form of it -- 3 is not merely worse
+  ## than 2, it is worse than turning the rule off entirely:
+  ##
+  ##   CGB_MAP_LATENCY        0      1      2 (ship)    3
+  ##   gambatte total        4246   4250    4258      4250   (of 5005)
+  ##   runner Pass            919    919     924       916   (of 1106)
+  ##
+  ## Re-measuring that is a trap worth naming: dingbat_test_runner SHELLS OUT
+  ## to ./dingbat_test, so `-d:CGB_MAP_LATENCY=N` has to go into THAT binary.
+  ## Rebuilding only the runner scores every arm identically -- including the
+  ## control -- and looks exactly like a knob that does nothing.
+  ##
+  ## **The latency is CPU-clock, and the double-speed rows prove it rather than
+  ## assume it.** It is spent at the write (in ppu_store_lcdc), where the CPU's
+  ## speed is known, as `max(0, CGB_MAP_LATENCY - current_speed)` -- so a
+  ## double-speed M-cycle spends the delay inside itself. Built without the
+  ## speed term, `bgtilemap` drops 40/40 -> 36/40 and all four losses are
+  ## `_ds_` rows (`spx08_ds_1`, `spx08_ds_4`, `spx09_ds_1`, `spx09_ds_4`, each
+  ## ~1000 pixels out). Same shape and same reason as CGB_TDSEL_LATENCY.
+  ##
+  ## Confined to the map-address read because that is the only reader the
+  ## instrument sees. LCDC.3 and LCDC.6 have no other consumer in the fetcher,
+  ## and gating them here rather than in the register keeps the whole-register
+  ## `late_disable` question (CGB_LCDC_LATENCY, above) untouched.
+  ##
+  ## **Cost, named: +0.20% of retired instructions**, and it is the one compare
+  ## in `fsGetTile`, not the fields. 23664502699 -> 23711427313 on dmg-acid2
+  ## and 23782526967 -> 23829504665 on cgb-acid2, 2400 frames each, `cycles=`
+  ## identical in both arms; the control arm is `-d:CGB_MAP_LATENCY=0`, which
+  ## still carries `map_dot` and `map_old` in the object, so none of it is
+  ## layout. A DMG pays it too -- the compare is gated at compile time, not at
+  ## run time, and a runtime `ppu.cgb` test is one more load off the same cache
+  ## line. That is the same bill CGB_TDSEL_LATENCY's rule pays for the same
+  ## kind of per-fetch sample, and it buys 4 mealybug rows and 12 gambatte
+  ## rows.
 const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ## Dots LCDC.4 takes to reach the BACKGROUND FETCHER on CGB over the DMG --
   ## the same shape as CGB_OBJ_SIZE_LATENCY above, for the one bit of LCDC a
@@ -1439,6 +1561,10 @@ const CGB_TDSEL_IDX_DOTS*     {.intdefine.} = 8
   ## all. The unpacked shape, with the same behaviour, was +0.30% / +0.21% /
   ## +0.22%; see TDSEL_IDX_SHIFT for where that went.
 const CGB_TDSEL_ANY* = CGB_TDSEL_LATENCY != 0 or CGB_TDSEL_GLITCH
+const CGB_MAP_ANY* = CGB_MAP_LATENCY != 0
+  ## Whether anything records the map-select bits' change dot. `-d:CGB_MAP_
+  ## LATENCY=0` is the control build and reproduces the pre-2026-08-19 numbers
+  ## exactly: the field is never written, the fetcher's compare never takes.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background
@@ -2076,6 +2202,12 @@ const NO_TDSEL_CHANGE*        = int32.low
   ## positive that is neither inside the latency nor on the glitch dot, and the
   ## empty case costs no branch of its own -- the same shape as NO_LCDC2_FLIP.
   ## It is also what a DMG carries all frame, since only a CGB records a change.
+const NO_MAP_CHANGE*          = int32.low
+  ## `GbFifoPpu.map_dot` meaning "neither tile-map select bit has changed on
+  ## this line". Same shape as NO_TDSEL_CHANGE above: a dot in the far past, so
+  ## the fetcher's single `cycle_counter < map_dot` never takes and the empty
+  ## case -- which is every line of every DMG frame -- costs no branch of its
+  ## own. See CGB_MAP_LATENCY.
 const TDSEL_ADDR_OFF*         = -1'i32
   ## `GbFifoPpu.tdsel_addr` meaning "nothing has driven an $8000-region
   ## tile-data address yet". A SET-glitched read falls back to its own read
@@ -3264,6 +3396,21 @@ type
     # captured in vblank.
     tdsel_dot*:           int32
     tdsel_addr*:          int32
+    # ---- LCDC.3 / LCDC.6 against the map address read (CGB only) ------------
+    #
+    # `map_dot` is the dot the last change to either TILE MAP select bit goes
+    # LIVE on at the fetcher -- the dot it was written on plus
+    # CGB_MAP_LATENCY -- and NO_MAP_CHANGE when neither has moved on this line.
+    # `map_old` is bits 3 and 6 as they stood before that write, which is what
+    # a map read before `map_dot` uses. One dot and one byte covers both bits
+    # because the writes that move them are the same store; when a later write
+    # lands inside an earlier one's latency the newest wins, which is the same
+    # corner (and the same resolution) `tdsel_dot` has.
+    #
+    # Per-line scratch cleared at the mode 2 -> 3 edge, and not serialized: a
+    # state is captured in vblank. Only a CGB ever records a change.
+    map_dot*:             int32
+    map_old*:             uint8
     tile_num*:            uint8
     tile_attrs*:          uint8
     fetch_scy*:           uint8   ## SCY as of this fetch's map read; read

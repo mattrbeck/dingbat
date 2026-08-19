@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-19 08:18:51*
+*Generated: 2026-08-19 08:29:34*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4246/5005 passed.**
+**4258/5005 passed.**
 
 ## bgen
 
@@ -17,24 +17,9 @@ All 2 tests passed.
 
 All 34 tests passed.
 
-## bgtilemap (28/40 passed)
+## bgtilemap
 
-28/40 tests passed, 12 failed:
-
-| Test | Result |
-|------|--------|
-| bgtilemap/bgtilemap_spx08_ds_1 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_ds_2 [cgb, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_ds_3 [cgb, png] | 120/23040 pixels differ |
-| bgtilemap/bgtilemap_spx08_ds_4 [cgb, png] | 8/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_1 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_2 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_3 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx09_4 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_1 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_2 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_3 [cgb, png] | 128/23040 pixels differ |
-| bgtilemap/bgtilemap_spx0A_4 [cgb, png] | 128/23040 pixels differ |
+All 40 tests passed.
 
 ## cgbpal_m3 (33/44 passed)
 

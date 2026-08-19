@@ -570,6 +570,13 @@ genuine model defects and not mis-scored silicon. Worth stating plainly rather
 than hoping: finding a systematic methodology error is not the same as finding
 rows it was hiding.
 
+*(2026-08-19: and that row of the table was the useful part of it. Being
+identical at C, D and E is what said the defect is a CGB/DMG delta rather than
+a revision one, which is where `CGB_MAP_LATENCY = 2` came from — the two dots
+LCDC.3/LCDC.6 take to reach the fetcher's map read on a CGB. All four rows are
+now exact at every revision against both captures, no hardware session needed.
+See docs/gb-mealybug-sources.md §3.12.)*
+
 Fixed while proving that: `ppmdiff.py` rejected 1-bit greyscale PNGs outright
 (`ctype=0 depth=1`), which is how several mealybug CGB references ship -- so
 those rows were unscorable by every tool here except the runner itself.
