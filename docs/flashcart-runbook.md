@@ -227,6 +227,43 @@ geometry. These photos hold the quantitative version of what acid-hell
 already answered qualitatively, so read them when the tool is finished —
 before the GBC session at the latest (same tool reads those photos).
 
+## 9. rtcrate + wramscan (folder 9 — no hardware session needed for the rest)
+
+Two ROMs, both validated against dingbat first, so only a DISAGREEMENT with the
+numbers below is information. Full instructions in the folder's README.md;
+sources are `tools/gbprobe/roms/{rtcrate,wramscan}.asm`. Build them with
+`tools/gbprobe/mkcart.sh`, **not** `mk.sh` — mk.sh fixes every header to
+ROM-only ($00), and rtcrate needs $10 (MBC3+TIMER+RAM+BATTERY) or it has no RTC
+to talk to and hangs on its first tick wait.
+
+**`rtcrate.gb`** — settles whether dingbat's RTC is slow. It walks rtc3test's
+battery ~25% slower than the shootout's reference emulator (rtc3test-1 needs 720
+frames against an allotted 570) while PASSING every sub-test and matching the
+reference frame pixel-for-pixel, so behaviour is right and only pacing is
+disputed — and both candidates are emulators. Four rows of frame counts;
+dingbat prints `01DE` (478 frames per eight RTC seconds — the exact rate),
+`003C` (60 frames: a SECONDS write resets the sub-second divider), `001E` and
+`001E` (30 frames: MINUTES writes and halt/resume keep the remainder). The row
+to watch is row 1: `001E` there would mean a seconds write does NOT reset the
+divider on silicon, which would be the whole 25% — and would contradict
+rtc3test's own tests.md, which is worth knowing either way.
+
+**`wramscan.gb`** — photographs power-up WRAM, which is the only thing standing
+between bully and a green row. **Cold boot, not reset**, or you photograph the
+last game instead of the power-up state. Line 0 is ZEROS/FFS/OTHER over all
+8192 bytes; lines 2-17 are a 16x16 map, one glyph per 32 bytes, `0` = all zero,
+`F` = all $FF, `A` = mixed. dingbat prints `2000 0000 0000` and a field of `0`
+by default, `0020 001C 1FC4` and a field of `A` under
+`-d:GB_POWERUP_WRAM_PATTERN=1`. **The MAP is the deliverable, not the counts**:
+uniform noise gives a featureless field of `A`, but real WRAM is usually banded,
+and that banding is what an emulator would have to reproduce for gambatte's
+`oamdma_srcFE00_*` rows to keep passing. Worth running twice with a full
+power-down between, to see whether the pattern is stable across boots.
+
+This ROM writes NOTHING to WRAM before measuring it — HRAM stack, HRAM
+counters, everything drawn straight to VRAM. Do not "tidy" a `ld [$C000], a`
+into it.
+
 ## Getting results back
 
 Photograph everything into one folder per console. For gbedge pages,

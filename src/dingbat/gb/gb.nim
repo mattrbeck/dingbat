@@ -858,13 +858,22 @@ const HDMA_BLOCK_OVERHEAD_DOTS* {.intdefine.} = 2
   ## block. The remaining 8 are two separable defects, in
   ## `tools/gbppu/hdmaresults.nim` terms:
   ##
-  ##   * **6 cells -- the HDMA5 "finished" flag flips too early.** Hardware
-  ##     still reads $00 (active, zero blocks left) for ONE nop at SCX=1 and
-  ##     TWO at SCX=2 before it reads $FF; dingbat reads $FF immediately. The
-  ##     SCX dependence is the ROM's own "HDMA is delayed due to longer mode 3"
-  ##     showing up in the readback, so this is a visibility latency on the
-  ##     completion bit and not another cycle cost -- adding more cycles moves
-  ##     the DIV groups back off.
+  ##   * **6 cells -- the block steals the bus too early.** Hardware reads
+  ##     HDMA5 as $00 for ONE nop at SCX=1 and TWO at SCX=2 before it reads
+  ##     $FF. $00 is "armed, zero blocks left, NOT YET TRANSFERRED" -- so those
+  ##     nops are the CPU still running while hardware's block has not started.
+  ##     dingbat takes the bus on the mode-0 edge itself (see the
+  ##     `mode == 0 and prev_mode != 0` line in this file) and so has already
+  ##     finished by the first read. NOT a completion-bit latency and NOT a
+  ##     cycle cost: charging the overhead BEFORE the copies instead of after
+  ##     scores identically (8/48 either way), because the CPU is stalled
+  ##     through it either way. The block has to start LATER in CPU-instruction
+  ##     terms, which is a scheduling change rather than a constant -- and the
+  ##     obvious form of it, a per-dot deadline, is exactly what
+  ##     ppu_land_hdma_if_due measured at **+1.36% of retired instructions** and
+  ##     declined. A cheaper shape would be to arm `hdma_block_due` on the edge
+  ##     and pay it at the next CPU M-cycle boundary, which is where the bus
+  ##     actually changes hands and costs nothing per tick.
   ##   * **2 cells -- double-speed mode 3 ends early.** The first STAT read of
   ##     both double-speed groups is $80 (mode 0) where hardware says $83
   ##     (mode 3). Unrelated to HDMA: it is the mode-3 length in double speed.
