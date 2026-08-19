@@ -11,6 +11,62 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## RTC 2026-08-19: `rtc3test-1` and `-3` are a PACING gap, not an RTC defect
+
+Both rows fail, and neither fails on RTC behaviour. Measured rather than
+inferred, with `tools/gbppu` style renders at the runner's exact sample frames
+and the runner's exact comparison (8-bit luma, tolerance 50):
+
+* **Every sub-test dingbat runs, it PASSES.** Rendered past the sample point,
+  `rtc3test-1` shows RTC on / Tick / RTC off / Register writes / Seconds
+  increment / Rollovers / Overflow / Overflow stickiness all green, and the
+  frame is a **100.0% match to the reference at frame 720** — zero differing
+  pixels, not merely within tolerance.
+* **The runner samples `-1` at frame 570 and `-3` at 1200**, from the
+  shootout's OWN `testroms/ax6.py` (`runtime=9.5 / 7.5 / 20.0`), so the budget
+  is gbdev's published criterion and lengthening it would be scoring these
+  images by a looser rule than they are published under. At 570 dingbat is
+  three text rows short; the 581 differing pixels the row reports are the
+  MISSING lines, not wrong ones.
+* **Frames dingbat needs vs frames allotted: 720 vs 570 (-1), >1500 vs 1200
+  (-3).** A consistent ~25-26% more, not a fixed offset.
+
+### What is NOT the cause (each checked)
+
+* **The tick rate is exact.** 570 frames x 70224 T = 40,027,680 T =
+  **9.54 RTC seconds** against the 9.5 s the shootout allots, and
+  `RTC_SECOND_CYCLES = 4194304` with `schedule_gb` scaling by `current_speed`.
+* **The sub-second reset semantics are right, and rtc3test documents them.**
+  Its `tests.md` lists **RTCS/500 and RTCS/900 both expecting 1000ms** (writing
+  the SECONDS register resets the sub-second counter to a full second) while
+  RTCM/50, RTCM/600, RTCH/200, RTCDL/800 and RTCDH/300 all expect their
+  remaining time preserved. dingbat calls `rtc_schedule_full` on the seconds
+  write and on nothing else (the only other caller is `post_init`).
+* **The green is a red herring.** dingbat renders PASS as rgb(0,206,0), the
+  reference as rgb(0,145,0) — a colour-correction curve difference — but that
+  is ~35 luma, inside the shootout's own tolerance of 50, and contributes zero
+  differing pixels. `rtc3test-2` has the identical green difference and passes.
+* **RTC behaviour is corroborated elsewhere and all of it is green:**
+  `mealybug/mbc/mbc3_rtc`, `mbc3-tester/mbc3-tester`, `cpp/latch-rtc-test`,
+  `cpp/rtc-invalid-banks-test`, `cpp/ramg-mbc3-test`.
+* **SameBoy is not usable as the oracle here without work:** it is FURTHER
+  behind than dingbat (90.6% at frame 570 vs dingbat's 97.5%), almost certainly
+  because `sameboy_runner` never initialises an RTC/battery for it.
+
+### Where it goes next
+
+The rate is right and the reset rule is right, so dingbat must be waiting on
+MORE ticks than the reference emulator: some sub-test spills into an extra
+second here that does not there. The next step is a tick trace — log every
+`rtc_tick` with the ROM's PC and diff the tick count per sub-test against the
+frame at which each result line appears. That names the sub-test in one run.
+
+**Harness trap that cost an hour, worth not repeating:** these carts are
+battery-backed with an RTC, so a bare `dingbat_test` run leaves a `.sav` and
+the NEXT run starts from the previous run's clock — the battery appears to
+finish sooner and sooner. The runner passes `no_save: true`; any manual repro
+must pass `--nosave` and delete stale `.sav` files first.
+
 ## CORRECTED 2026-08-19: the CGB halt lead is net +45 on gambatte, not -31
 
 Earlier notes in this tree describe `CGB_HALT_PPU_LEAD=1` as *costing* ~31
