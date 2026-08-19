@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-18 22:17:17*
+*Generated: 2026-08-19 08:18:51*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the

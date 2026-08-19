@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-18 22:17:17 · commit 75923ba · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 08:18:51 · commit c8e61a9 · game-boy-test-roms v7.0*
 
-Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
+Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: AGE writes the devices it was verified on into the filename (`ei-halt-dmgC-cgbBCE`), and each of those now gets its own row on its own revision rather than one row on whichever machine happened to be the default.
 
 ## Summary
 
-- **Total:** 1054
-- **Pass:** 894
-- **Fail:** 160
+- **Total:** 1106
+- **Pass:** 919
+- **Fail:** 187
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -23,7 +23,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 56 | 61 |
 | Game Boy - GBMicrotest | 430 | 482 |
-| Game Boy - AGE | 14 | 37 |
+| Game Boy - AGE | 39 | 89 |
 | Game Boy - Screenshot suites | 12 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
@@ -106,18 +106,18 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | mooneye/acceptance/bits/mem_oam | cart | 👌 |
 | mooneye/acceptance/bits/reg_f | cart | 👌 |
 | mooneye/acceptance/bits/unused_hwio-GS | cart | 👌 |
-| mooneye/acceptance/boot_div-S | cart sgb | 👌 |
-| mooneye/acceptance/boot_div-dmg0 | cart dmg0 | 👌 |
+| mooneye/acceptance/boot_div-S | SGB sgb | 👌 |
+| mooneye/acceptance/boot_div-dmg0 | DMG dmg0 | 👌 |
 | mooneye/acceptance/boot_div-dmgABCmgb | cart | 👌 |
-| mooneye/acceptance/boot_div2-S | cart sgb | 👌 |
-| mooneye/acceptance/boot_hwio-S | cart sgb | 👌 |
-| mooneye/acceptance/boot_hwio-dmg0 | cart dmg0 | 👌 |
+| mooneye/acceptance/boot_div2-S | SGB sgb | 👌 |
+| mooneye/acceptance/boot_hwio-S | SGB sgb | 👌 |
+| mooneye/acceptance/boot_hwio-dmg0 | DMG dmg0 | 👌 |
 | mooneye/acceptance/boot_hwio-dmgABCmgb | cart | 👌 |
-| mooneye/acceptance/boot_regs-dmg0 | cart dmg0 | 👌 |
+| mooneye/acceptance/boot_regs-dmg0 | DMG dmg0 | 👌 |
 | mooneye/acceptance/boot_regs-dmgABC | cart | 👌 |
-| mooneye/acceptance/boot_regs-mgb | cart mgb | 👌 |
-| mooneye/acceptance/boot_regs-sgb | cart sgb | 👌 |
-| mooneye/acceptance/boot_regs-sgb2 | cart sgb2 | 👌 |
+| mooneye/acceptance/boot_regs-mgb | DMG mgb | 👌 |
+| mooneye/acceptance/boot_regs-sgb | SGB sgb | 👌 |
+| mooneye/acceptance/boot_regs-sgb2 | SGB sgb2 | 👌 |
 | mooneye/acceptance/call_cc_timing | cart | 👌 |
 | mooneye/acceptance/call_cc_timing2 | cart | 👌 |
 | mooneye/acceptance/call_timing | cart | 👌 |
@@ -249,10 +249,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | jsmolka/flash64 | — | 👌 |
 | jsmolka/flash128 | — | 👌 |
 | jsmolka/unsafe | — | 👌 |
-| jsmolka/hello | DMG | 👌 |
-| jsmolka/shades | DMG | 👌 |
-| jsmolka/stripes | DMG | 👌 |
-| jsmolka/nes | DMG | 👌 |
+| jsmolka/hello | — | 👌 |
+| jsmolka/shades | — | 👌 |
+| jsmolka/stripes | — | 👌 |
+| jsmolka/nes | — | 👌 |
 
 ## GBA - FuzzARM (5/5)
 
@@ -836,47 +836,99 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win9_a | cart | 👌 |
 | gbmicrotest/win9_b | cart | 👌 |
 
-## Game Boy - AGE (14/37)
+## Game Boy - AGE (39/89)
 
 | Test | Device | Result |
 |------|--------|--------|
-| age/halt/ei-halt-dmgC-cgbBCE | cart | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
-| age/halt/halt-prefetch-dmgC-cgbBCE | cart | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
-| age/lcd-align-ly/lcd-align-ly-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
-| age/ly/ly-cgbE | CGB cgbE | 👌 |
-| age/ly/ly-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
+| age/halt/ei-halt-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
+| age/halt/ei-halt-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/halt/ei-halt-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/halt/ei-halt-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/halt/halt-m0-interrupt-dmgC-cgbBCE@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/halt/halt-prefetch-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
+| age/halt/halt-prefetch-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/halt/halt-prefetch-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/halt/halt-prefetch-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/lcd-align-ly/lcd-align-ly-cgbE | CGB cgbe | 👀 Mooneye: FAIL |
+| age/ly/ly-cgbE | CGB cgbe | 👌 |
+| age/ly/ly-dmgC-cgbBC@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/ly/ly-dmgC-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/ly/ly-dmgC-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | age/m3-bg-bgp/m3-bg-bgp-dmgC | DMG dmgC | 👀 100.0% correct (23038/23040 pixels match) |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE | CGB | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE | CGB | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbe | CGB cgbe | 👌 |
 | age/m3-bg-lcdc/m3-bg-lcdc-dmgC | DMG dmgC | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE | CGB | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE | CGB | 👌 |
+| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbe | CGB cgbe | 👌 |
 | age/m3-bg-scx/m3-bg-scx-dmgC | DMG dmgC | 👌 |
-| age/oam/oam-read-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
-| age/oam/oam-read-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
-| age/oam/oam-write-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/oam/oam-write-dmgC | cart dmgC | 👀 Mooneye: FAIL |
-| age/speed-switch/caution/spsw-interrupts-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
-| age/speed-switch/caution/spsw-interrupts-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/speed-switch/spsw-div-cgbBCE | CGB | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE | CGB | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE | CGB | 👌 |
-| age/speed-switch/spsw-tima-cgbBC | CGB cgbBC | 👀 Mooneye: FAIL |
-| age/speed-switch/spsw-tima-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE | cart | 👀 Mooneye: FAIL |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE | cart | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE | CGB | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/stat-mode-window/stat-mode-window-dmgC | cart dmgC | 👀 Mooneye: FAIL |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/stat-mode/stat-mode-cgbE | CGB cgbE | 👀 Mooneye: FAIL |
-| age/stat-mode/stat-mode-dmgC-cgbBC | cart | 👀 Mooneye: FAIL |
-| age/stat-mode/stat-mode-ds-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/vram/vram-read-cgbBCE | CGB | 👀 Mooneye: FAIL |
-| age/vram/vram-read-dmgC | cart dmgC | 👀 Mooneye: FAIL |
+| age/oam/oam-read-cgbE | CGB cgbe | 👀 Mooneye: FAIL |
+| age/oam/oam-read-dmgC-cgbBC@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/oam/oam-read-dmgC-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/oam/oam-read-dmgC-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/oam/oam-write-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/oam/oam-write-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/oam/oam-write-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/oam/oam-write-dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/speed-switch/caution/spsw-interrupts-cgbE | CGB cgbe | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-div-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/speed-switch/spsw-div-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/speed-switch/spsw-div-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/speed-switch/spsw-mode0-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/speed-switch/spsw-mode0-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/speed-switch/spsw-mode0-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/speed-switch/spsw-tima-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-tima-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/speed-switch/spsw-tima-cgbE | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
+| age/stat-mode-window/stat-mode-window-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-cgbE | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-dmgC-cgbBC@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-dmgC-cgbBC@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-dmgC-cgbBC@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-ds-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-ds-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/stat-mode/stat-mode-ds-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/vram/vram-read-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
+| age/vram/vram-read-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
+| age/vram/vram-read-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/vram/vram-read-dmgC | DMG dmgC | 👀 Mooneye: FAIL |
 
 ## Game Boy - Screenshot suites (12/13)
 
@@ -1116,12 +1168,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/manual-only/sprite_priority | DMG | 👌 |
 | mooneye-wilbertpol/misc/bits/unused_hwio-C | CGB | 👌 |
 | mooneye-wilbertpol/misc/boot_hwio-C | CGB | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/misc/boot_hwio-S | cart sgb | 👌 |
+| mooneye-wilbertpol/misc/boot_hwio-S | SGB sgb | 👌 |
 | mooneye-wilbertpol/misc/boot_regs-A | CGB agb | 👌 |
 | mooneye-wilbertpol/misc/boot_regs-cgb | CGB | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-mgb | cart mgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb | cart sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb2 | cart sgb2 | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-mgb | DMG mgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb | SGB sgb | 👌 |
+| mooneye-wilbertpol/misc/boot_regs-sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C | CGB | 👌 |
 
 ## Game Boy - gambatte (9/48)
@@ -1189,7 +1241,8 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **daid/rom_and_ram, acid/which** — ship no reference image; the shootout classes them INFO, not pass/fail. (build_shootout_tests)
 - **cpp/sgb-ext-test** — SGB packet-protocol test the shootout scores on an SGB; not covered by dingbat's SGB adapter model. (build_shootout_tests)
 - **magen/oam_internal_priority** — its only stated criterion is prose ("2 pairs of rectangles connected or touching"); nothing machine-checkable to score against. (build_magen_tests)
-- **mealybug `*_cgb_d` references (~20)** — a CGB-D-or-later machine; measured 17/20 pixel-exact under --cgb-rev=D and held out pending per-revision rows. (build_mealybug_tests)
+- **mealybug `*_cgb_d` references (13 of 20)** — pixel-identical to their `_cgb_c` twin, so a second row could only restate what the CGB-C row already says. The OTHER SEVEN — the ones whose captures actually differ — ARE scored, as `mealybug-cgbd/*` at --model=cgbd; wiring them found a real defect (m3_scy_change rendered the CGB-C picture at every revision). (build_mealybug_tests)
+- **mooneye/wilbertpol `-GS` rows, on three of their four machines (48 rows)** — `-GS` is Gekkio's FAMILY token (DMG/MGB/SGB/SGB2), not a revision, and the harness runs the default DMG-ABC, which is inside it. Measured 2026-08-19 rather than assumed: every one of the seven failing `-GS` rows returns the same verdict at dmgABC, mgb, sgb AND sgb2, so expanding all 48 into 192 rows would add wall clock and no information. Revisit if a GS row ever disagrees across the family. (build_mooneye_tests / build_wilbertpol_tests)
 - **age `ncm*` rows** — CGB running in non-CGB mode, a device this harness does not model. (build_age_tests)
 - **gambatte `_outaudio0/1` rows (220) + the AGB column** — audio-register sampling and the AGB device are not scored; see results_gambatte.md's source notes. (build_gambatte_rows)
 - **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)

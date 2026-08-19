@@ -1067,6 +1067,41 @@ proc age_model_for(device: string): string =
      "cgbd", "cgbcd", "cgb", "cgbe", "cgbde", "cgbcde", "cgbabcde": device
   else: ""
 
+proc age_models_for(device: string): seq[string] =
+  ## Every DISTINCT dingbat revision an AGE device token names.
+  ##
+  ## AGE writes the devices a test was verified on as a span — `cgbBCE` means
+  ## "B, C and E" — and `age_model_for` above can only answer with a single
+  ## `--model=` token, so a span got none and the row silently ran on the
+  ## default machine (CPU CGB C) while its name claimed three. That is a real
+  ## coverage hole: the revision the row is scored on is the one thing its name
+  ## is most explicit about.
+  ##
+  ## dingbat models five CGB revisions (`grCgb0, grCgbAB, grCgbC, grCgbD,
+  ## grCgbE`), so `cgbBCE` covers three of them and becomes three rows. The DMG
+  ## side needs no expansion: dingbat models `grDmg0` and `grDmgABC`, so a DMG
+  ## span already IS one machine.
+  ##
+  ## An unrecognised character falls back to the single-token behaviour rather
+  ## than guessing, because dingbat_test QUITS on a token it cannot parse.
+  let d = device.toLowerAscii()
+  if d.startsWith("ncm"): return @[]        # CGB in non-CGB mode: not modelled
+  if not d.startsWith("cgb") or d.len <= 3:
+    let one = age_model_for(device)
+    return if one.len > 0: @[one] else: @[]
+  for ch in d[3 .. ^1]:
+    let name = case ch
+               of '0': "cgb0"
+               of 'a', 'b': "cgbab"
+               of 'c': "cgbc"
+               of 'd': "cgbd"
+               of 'e': "cgbe"
+               else: ""
+    if name.len == 0:                        # not a revision span after all
+      let one = age_model_for(device)
+      return if one.len > 0: @[one] else: @[]
+    if name notin result: result.add(name)
+
 proc build_age_tests(age_dir: string): seq[TestDef] =
   ## c-sp's own AGE test roms. Two verdicts, both already implemented here:
   ## most ROMs end on LD B,B with the mooneye Fibonacci registers (tmMooneye),
@@ -1094,34 +1129,55 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
       for (device, png) in shots:
         if device.startsWith("ncm"): continue   # device not modeled
         let cgb = device.startsWith("cgb")
-        var t = shot("age/" & rel & "-" & device, rom, png,
-                     timeout = 120, color = cgb, cgb = cgb)
-        t.model = age_model_for(device)
-        tests.add(t)
+        let models = age_models_for(device)
+        # A span becomes one row per revision it names; the suffix is added
+        # only when there is more than one, so single-revision rows keep the
+        # name their baseline is recorded under.
+        for m in (if models.len == 0: @[""] else: models):
+          var t = shot("age/" & rel & "-" & device &
+                       (if models.len > 1: "@" & m else: ""),
+                       rom, png, timeout = 120, color = cgb, cgb = cgb)
+          t.model = m
+          tests.add(t)
       continue
     let devices = age_device_tokens(base)
     let dmg = devices.anyIt(it.startsWith("dmg"))
     let cgb = devices.anyIt(it.startsWith("cgb"))
     if not dmg and not cgb:
       continue   # ncm-only: CGB in non-CGB mode, which this harness cannot run
-    tests.add(TestDef(
-      name: "age/" & rel,
-      rom_path: rom,
-      mode: tmMooneye,
-      timeout: 1800,
-      cgb: not dmg,   # prefer DMG when the ROM is verified on both
-      # ...and then run the revision the name declares, when it names exactly
-      # one family. A multi-device name (`-dmgC-cgbBCE`) gets no token: the row
-      # already picked DMG above, and inventing a revision for the other half
-      # would be a claim the filename does not make.
-      model: (if devices.len == 1: age_model_for(devices[0]) else: ""),
-      # AGE signals failure with "any register values other than the Fibonacci
-      # ones", not with a dedicated failure signature, so LD B,B has to end the
-      # run unconditionally. Without this a failing ROM never stops and burns
-      # the whole 1800-frame timeout — which, with most of this suite red
-      # today, was the single biggest chunk of the runner's wall clock.
-      bb_breakpoint: true,
-    ))
+    # ONE ROW PER MACHINE THE NAME DECLARES. `ei-halt-dmgC-cgbBCE` is verified
+    # on four machines and now runs on four; before, it ran on ONE (DMG at the
+    # default revision) and the other three tokens were decoration. Both halves
+    # of that were wrong: the CGB arm was never run at all, and the CGB span
+    # got no `--model` because it names three revisions and `age_model_for`
+    # can only answer with one — so the row silently used CPU CGB C while its
+    # name claimed B, C and E.
+    #
+    # Failing AGE rows stop at LD B,B rather than burning the 1800-frame
+    # timeout (see bb_breakpoint below), so the extra arms cost little wall
+    # clock.
+    var arms: seq[(bool, string)]   # (run as CGB, --model token)
+    for d in devices:
+      if d.startsWith("ncm"): continue     # CGB in non-CGB mode: not modelled
+      let is_cgb = d.startsWith("cgb")
+      for m in age_models_for(d):
+        if (is_cgb, m) notin arms: arms.add((is_cgb, m))
+    if arms.len == 0: arms.add((not dmg, ""))
+    for (arm_cgb, m) in arms:
+      tests.add(TestDef(
+        name: "age/" & rel & (if arms.len > 1: "@" & m else: ""),
+        rom_path: rom,
+        mode: tmMooneye,
+        timeout: 1800,
+        cgb: arm_cgb,
+        model: m,
+        # AGE signals failure with "any register values other than the Fibonacci
+        # ones", not with a dedicated failure signature, so LD B,B has to end the
+        # run unconditionally. Without this a failing ROM never stops and burns
+        # the whole 1800-frame timeout — which, with most of this suite red
+        # today, was the single biggest chunk of the runner's wall clock.
+        bb_breakpoint: true,
+      ))
   tests
 
 proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
@@ -1583,7 +1639,10 @@ proc build_magen_tests(): seq[TestDef] =
     ))
   tests
 
-const NotScored: array[16, (string, string)] = [
+# Deliberately a seq, not a fixed-size array: it used to be `array[16, ...]`
+# and every entry added or removed here meant editing the bound too, which is
+# a compile error waiting to happen for no benefit.
+const NotScored: seq[(string, string)] = @[
   # The page's own record of every deliberate skip, so "why isn't X here?"
   # is answerable from the page itself instead of from runner comments.
   # Keep in sync with the skip sites (each entry names its builder).
@@ -1607,9 +1666,20 @@ const NotScored: array[16, (string, string)] = [
   ("magen/oam_internal_priority", "its only stated criterion is prose (\"2 " &
     "pairs of rectangles connected or touching\"); nothing machine-checkable " &
     "to score against. (build_magen_tests)"),
-  ("mealybug `*_cgb_d` references (~20)", "a CGB-D-or-later machine; " &
-    "measured 17/20 pixel-exact under --cgb-rev=D and held out pending " &
-    "per-revision rows. (build_mealybug_tests)"),
+  ("mealybug `*_cgb_d` references (13 of 20)", "pixel-identical to their " &
+    "`_cgb_c` twin, so a second row could only restate what the CGB-C row " &
+    "already says. The OTHER SEVEN — the ones whose captures actually differ " &
+    "— ARE scored, as `mealybug-cgbd/*` at --model=cgbd; wiring them found a " &
+    "real defect (m3_scy_change rendered the CGB-C picture at every " &
+    "revision). (build_mealybug_tests)"),
+  ("mooneye/wilbertpol `-GS` rows, on three of their four machines (48 rows)",
+    "`-GS` is Gekkio's FAMILY token (DMG/MGB/SGB/SGB2), not a revision, and " &
+    "the harness runs the default DMG-ABC, which is inside it. Measured " &
+    "2026-08-19 rather than assumed: every one of the seven failing `-GS` " &
+    "rows returns the same verdict at dmgABC, mgb, sgb AND sgb2, so " &
+    "expanding all 48 into 192 rows would add wall clock and no information. " &
+    "Revisit if a GS row ever disagrees across the family. " &
+    "(build_mooneye_tests / build_wilbertpol_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
   ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
@@ -1677,7 +1747,7 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     "cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a " &
     "CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific " &
     "boot table/revision (`--model`); `\xE2\x80\x94` = GBA, which has no " &
-    "device axis here.")
+    "device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: AGE writes the devices it was verified on into the filename (`ei-halt-dmgC-cgbBCE`), and each of those now gets its own row on its own revision rather than one row on whichever machine happened to be the default.")
   lines.add("")
 
   var total = 0
@@ -1800,6 +1870,13 @@ proc device_label(t: TestDef): string =
   ## boot table prints as "CGB sgb"). GBA rows have no device axis.
   if t.mode in {tmMgba, tmMgbaSuite, tmJsmolka, tmFuzzArm}:
     return ""
+  # ...and neither does a GBA ROM scored by SCREENSHOT. jsmolka's ppu/ and nes/
+  # ROMs are compared by frame hash rather than by its own pass protocol, so
+  # they arrive here as tmScreenshot and used to fall into the DMG fallback
+  # below — printing "DMG" against four .gba rows. The mode does not identify
+  # the machine; the ROM does.
+  if t.rom_path.endsWith(".gba"):
+    return ""
   result =
     if t.sgb: "SGB"
     elif t.dmg: "DMG"
@@ -1810,6 +1887,17 @@ proc device_label(t: TestDef): string =
     elif t.mode == tmScreenshot: "DMG"
     else: "cart"
   if t.model.len > 0:
+    # A `--model` token pins the machine even when no --dmg/--cgb flag was
+    # passed, so "cart" would understate it: the header is not deciding
+    # anything any more. Promote the base to the family the token names, which
+    # is what makes `age/.../-dmgC` print "DMG dmgC" rather than "cart dmgC".
+    if result == "cart":
+      let m = t.model.toLowerAscii()
+      result = if m.startsWith("dmg") or m == "mgb": "DMG"
+               elif m.startsWith("cgb"): "CGB"
+               elif m.startsWith("sgb"): "SGB"
+               elif m.startsWith("agb"): "AGB"
+               else: result
     result.add(" " & t.model)
 
 proc run_suite(name: string; tests: seq[TestDef]; harness: string;
