@@ -749,14 +749,21 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   ## any more: as of 2026-08-10 the default was moved to CGB C partly because
   ## these references are what the tree is scored against.
   ##
-  ## `_cgb_d.png` (CPU CGB D) is still not wired, but the reason has changed.
-  ## It used to be "dingbat models one CGB"; dingbat now models six, and
-  ## `--cgb-rev=D` reproduces 17 of the 20 `_cgb_d` captures pixel-exactly
-  ## (`TestDef.model` is already the passthrough — `model: "cgbd"` is all a row
-  ## would need). What holds them out is that they would add ~20 rows to
-  ## results.md, three of them failing, for an axis no shipping frontend can
-  ## reach; the measurement lives in docs/gb-failure-triage.md (2026-08-10)
-  ## instead. Wire them the day a revision becomes user-selectable.
+  ## `_cgb_d.png` (CPU CGB D) IS wired now, as of 2026-08-18 — but only for the
+  ## seven ROMs whose two captures differ in their decoded pixels. The other
+  ## thirteen `_cgb_d` files are pixel-identical to their `_cgb_c` twin and a
+  ## row for them could only restate what the `_cgb_c` row already says.
+  ##
+  ## The old reason for holding all twenty out — "~20 rows for an axis no
+  ## shipping frontend can reach" — was a bad trade and it cost something real.
+  ## With nothing scoring `_cgb_d`, and the shootout's own RevC/RevD mealybug
+  ## variants absent from its active list, the entire revision axis was
+  ## unobserved by every harness in play. `m3_scy_change` was sitting in that
+  ## gap: dingbat renders the CGB-C picture at C, D **and** E and misses
+  ## `_cgb_d` by 6217 pixels — a different palette attribute on 855 of them and
+  ## different tile rows on the rest, so a whole revision's worth of mid-line
+  ## SCY behaviour that is simply not modelled. Seven rows is a cheap price for
+  ## seeing that class of defect at all.
   var tests: seq[TestDef]
   let ppu_dir = mealybug_dir / "ppu"
   if not dirExists(ppu_dir):
@@ -783,6 +790,39 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
         expected_png: cgb_png,
         color: true,
         cgb: true,
+        no_save: true,
+      ))
+    # ...and the CGB-D capture, at CGB-D, but ONLY where the two references
+    # actually differ.
+    #
+    # Twenty ROMs ship a `_cgb_d.png` and thirteen of those are byte-identical
+    # to their `_cgb_c.png`: those carry no revision axis and a second row for
+    # them would be pure duplication. The other SEVEN are the whole per-revision
+    # story, and until 2026-08-18 NOTHING in this tree or the shootout scored a
+    # single one of them — the shootout defines RevC/RevD mealybug variants in
+    # its testroms/mealybug.py but they are not in its active list, so its
+    # recorded run contains zero. A revision defect was therefore invisible
+    # everywhere, and one was: `m3_scy_change` renders the CGB-C picture at C, D
+    # AND E, missing `_cgb_d` by all 6217 of its differing pixels.
+    #
+    # Gated on the references themselves rather than a hardcoded list, so the
+    # set tracks the bundle if upstream adds or equalises a capture — but on
+    # the DECODED PIXELS, not the file bytes. Eleven of the twenty pairs are
+    # byte-different and pixel-identical (different encoder settings upstream),
+    # and comparing files adds eleven duplicate rows that can only ever restate
+    # what the `_cgb_c` row already said.
+    let cgb_d_png = ppu_dir / test_name & "_cgb_d.png"
+    if fileExists(cgb_png) and fileExists(cgb_d_png) and
+       read_png(cgb_png).pixels != read_png(cgb_d_png).pixels:
+      tests.add(TestDef(
+        name: "mealybug-cgbd/" & test_name,
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 120,
+        expected_png: cgb_d_png,
+        color: true,
+        cgb: true,
+        model: "cgbd",
         no_save: true,
       ))
   # The bundle's other two mealybug directories, `dma/` and `mbc/`, ship no

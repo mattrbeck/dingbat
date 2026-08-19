@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-18 14:09:25 · commit bc9afb1 · game-boy-test-roms v7.0*
+*Generated: 2026-08-18 17:33:10 · commit 94c4caa · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here.
 
 ## Summary
 
-- **Total:** 1047
-- **Pass:** 887
-- **Fail:** 160
+- **Total:** 1054
+- **Pass:** 893
+- **Fail:** 161
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -21,7 +21,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
-| Game Boy - Mealybug Tearoom | 49 | 54 |
+| Game Boy - Mealybug Tearoom | 55 | 61 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 14 | 37 |
 | Game Boy - Screenshot suites | 12 | 13 |
@@ -283,7 +283,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | magen/ppu_disabled_state | cart | 👌 |
 | magen/bg_oam_priority | cart | 👌 |
 
-## Game Boy - Mealybug Tearoom (49/54)
+## Game Boy - Mealybug Tearoom (55/61)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -291,8 +291,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m2_win_en_toggle | CGB | 👌 |
 | mealybug/m3_bgp_change | DMG | 👌 |
 | mealybug-cgb/m3_bgp_change | CGB | 👌 |
+| mealybug-cgbd/m3_bgp_change | CGB cgbd | 👌 |
 | mealybug/m3_bgp_change_sprites | DMG | 👌 |
 | mealybug-cgb/m3_bgp_change_sprites | CGB | 👌 |
+| mealybug-cgbd/m3_bgp_change_sprites | CGB cgbd | 👌 |
 | mealybug/m3_lcdc_bg_en_change | DMG | 👌 |
 | mealybug-cgb/m3_lcdc_bg_en_change | CGB | 👌 |
 | mealybug-cgb/m3_lcdc_bg_en_change2 | CGB | 👌 |
@@ -303,6 +305,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_obj_en_change | CGB | 👌 |
 | mealybug/m3_lcdc_obj_en_change_variant | DMG | 👌 |
 | mealybug-cgb/m3_lcdc_obj_en_change_variant | CGB | 👌 |
+| mealybug-cgbd/m3_lcdc_obj_en_change_variant | CGB cgbd | 👌 |
 | mealybug/m3_lcdc_obj_size_change | DMG | 👌 |
 | mealybug-cgb/m3_lcdc_obj_size_change | CGB | 👌 |
 | mealybug/m3_lcdc_obj_size_change_scx | DMG | 👌 |
@@ -321,6 +324,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_lcdc_win_map_change2 | CGB | 👀 99.4% correct (22900/23040 pixels match) |
 | mealybug/m3_obp0_change | DMG | 👌 |
 | mealybug-cgb/m3_obp0_change | CGB | 👌 |
+| mealybug-cgbd/m3_obp0_change | CGB cgbd | 👌 |
 | mealybug/m3_scx_high_5_bits | DMG | 👌 |
 | mealybug-cgb/m3_scx_high_5_bits | CGB | 👌 |
 | mealybug-cgb/m3_scx_high_5_bits_change2 | CGB | 👌 |
@@ -328,11 +332,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug-cgb/m3_scx_low_3_bits | CGB | 👌 |
 | mealybug/m3_scy_change | DMG | 👌 |
 | mealybug-cgb/m3_scy_change | CGB | 👌 |
+| mealybug-cgbd/m3_scy_change | CGB cgbd | 👀 73.0% correct (16823/23040 pixels match) |
 | mealybug-cgb/m3_scy_change2 | CGB | 👌 |
 | mealybug/m3_window_timing | DMG | 👌 |
 | mealybug-cgb/m3_window_timing | CGB | 👌 |
+| mealybug-cgbd/m3_window_timing | CGB cgbd | 👌 |
 | mealybug/m3_window_timing_wx_0 | DMG | 👌 |
 | mealybug-cgb/m3_window_timing_wx_0 | CGB | 👌 |
+| mealybug-cgbd/m3_window_timing_wx_0 | CGB cgbd | 👌 |
 | mealybug/m3_wx_4_change | DMG | 👌 |
 | mealybug/m3_wx_4_change_sprites | DMG | 👌 |
 | mealybug-cgb/m3_wx_4_change_sprites | CGB | 👌 |
