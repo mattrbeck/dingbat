@@ -828,40 +828,46 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 0
   ## determinism: the byte-identical screenshot gates, save-state round-trips
   ## and the rollback netplay core all need two runs to start from the same
   ## bytes.
-const HDMA_BLOCK_OVERHEAD_M* {.intdefine.} = 2
-  ## Extra M-cycles an HBlank DMA block costs BEYOND its sixteen byte copies.
-  ##
-  ## The copies themselves are two dots per byte at either speed — that part is
-  ## pinned by gambatte's `hdma_start_ds_*` and matches SameBoy's GB_hdma_run
-  ## (`double_speed ? 4 : 2` per byte), and it is NOT what this changes. This is
+const HDMA_BLOCK_OVERHEAD_BUS* {.intdefine.} = 4
+  ## CPU-clock cycles an HBlank DMA block costs beyond its sixteen byte copies:
   ## the bus acquire/release either side of the block, which dingbat charged as
-  ## zero, so a block stalled the machine for exactly its copies and nothing
-  ## else.
+  ## zero. NOT the per-byte cost -- two dots per byte at either speed is pinned
+  ## by gambatte's `hdma_start_ds_*` and agrees with SameBoy's GB_hdma_run.
   ##
-  ## Derived from mealybug `dma/hdma_timing-C`, which stores 48 results and only
-  ## renders a truncated view of them (base.asm wraps at 32 columns, the screen
-  ## shows 20). `tools/gbppu/hdmaresults.nim` reads the buffer out of WRAM
-  ## instead and scores all 48; the same buffer comes out of SameBoy through
-  ## `sameboy_runner`'s GBFUZZ_DUMP, so the oracle is readable per sub-test too:
+  ## **Unscaled, and that is the measured part.** The copies are charged
+  ## `2 shl current_speed` because they are two PPU dots whatever the CPU is
+  ## doing; this is not, and the double-speed rows are what say so. Shipped
+  ## first as a single `2 shl speed` term, that made the DOUBLE-speed
+  ## DIV-duration group exact while leaving the SINGLE-speed one 4 wrong --
+  ## double speed was getting 4 cycles and single speed 2. Charging a flat 4 at
+  ## both speeds makes BOTH groups exact:
   ##
-  ##   HDMA_BLOCK_OVERHEAD_M    0      1     2 (ship)   4      SameBoy
-  ##   hdma_timing-C wrong    20/48  18/48   12/48    14/48     2/48
+  ##   unscaled bus cycles     2      4 (ship)    6      8
+  ##   hdma_timing-C wrong   16/48    8/48     12/48  16/48
   ##
-  ## and, on a completely separate instrument, gambatte's 229-row `dma` group
-  ## goes **121 -> 126** with nothing anywhere else moving (suite 4258 -> 4263,
-  ## every other group byte-identical). Two sub-groups of the mealybug ROM stop
-  ## being wrong at all rather than merely getting closer: the whole
-  ## double-speed DIV-duration group (4 wrong -> 0), and the fourth STAT read of
-  ## all four STAT groups, which is the mode-2 entry after the block.
+  ## (dots swept separately at bus=4: 0 -> 12, 2 -> 8, 4 -> 10. Charging it
+  ## BEFORE the copies instead of after scores identically at 8, so the
+  ## instrument does not distinguish acquire from release -- do not read the
+  ## placement here as evidence.)
+const HDMA_BLOCK_OVERHEAD_DOTS* {.intdefine.} = 2
+  ## PPU dots for the same overhead. Separate from the bus term because they
+  ## are separate clocks; see HDMA_BLOCK_OVERHEAD_BUS for the sweep.
   ##
-  ## **Not the whole story, and the residual says where it goes next.** At 2 the
-  ## SINGLE-speed DIV-duration group is still 4 wrong while the double-speed one
-  ## is exact, so the overhead is not simply `2 shl speed` the way the copies
-  ## are; the HDMA5 readback is still a phase early; and in double speed mode 3
-  ## still ends early. SameBoy reaches 2/48 with no overhead term at all, which
-  ## means it spends these cycles somewhere dingbat does not, and finding that
-  ## is what would close the row. Shipped anyway because it is a strict
-  ## improvement on two independent instruments with zero measured losses.
+  ## **Where hdma_timing-C stands: 20/48 wrong -> 12 -> 8. SameBoy gets 2/48.**
+  ## Both DIV-duration groups are now exact and so is the mode-2 entry after the
+  ## block. The remaining 8 are two separable defects, in
+  ## `tools/gbppu/hdmaresults.nim` terms:
+  ##
+  ##   * **6 cells -- the HDMA5 "finished" flag flips too early.** Hardware
+  ##     still reads $00 (active, zero blocks left) for ONE nop at SCX=1 and
+  ##     TWO at SCX=2 before it reads $FF; dingbat reads $FF immediately. The
+  ##     SCX dependence is the ROM's own "HDMA is delayed due to longer mode 3"
+  ##     showing up in the readback, so this is a visibility latency on the
+  ##     completion bit and not another cycle cost -- adding more cycles moves
+  ##     the DIV groups back off.
+  ##   * **2 cells -- double-speed mode 3 ends early.** The first STAT read of
+  ##     both double-speed groups is $80 (mode 0) where hardware says $83
+  ##     (mode 3). Unrelated to HDMA: it is the mode-3 length in double speed.
 const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
   ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
   ##
