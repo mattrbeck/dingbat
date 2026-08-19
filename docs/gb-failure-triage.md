@@ -11,6 +11,82 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## CORRECTED 2026-08-19: the CGB halt lead is net +45 on gambatte, not -31
+
+Earlier notes in this tree describe `CGB_HALT_PPU_LEAD=1` as *costing* ~31
+gambatte rows. **That was the breakage list, not the net, and it is no longer
+even that.** Measured by building the control into `dingbat_test` (which is what
+the runner shells out to -- rebuilding the runner changes nothing):
+
+    CGB_HALT_PPU_LEAD      0            1 (ship)
+    gambatte            4213/5005     4258/5005
+    runner Pass          1008          1012
+
+Per ROM the lead **breaks 31 and fixes 76**. It also closes `cgb-acid-hell`,
+the 261st shootout row. The balance moved because `HDMA_VISIBLE_DOTS` and
+`CGB_HALT_LEAD_SKIP_LYC0` were added after those notes were written. Turning
+the lead off to recover the 31 would surrender 45 others and the shootout row.
+Do not treat the 31 as a block to be "recovered" by reverting.
+
+### The 31 are structured, and the structure is SCX
+
+* **9 `halt/*_m0stat_*`**, every one `[cgb]`, every one at **SCX 2 or SCX 5**.
+  The rows the lead FIXES in the same family are SCX 3, SCX 4 and the
+  double-speed SCX 2/3 variants. So a uniform lead is being applied where the
+  correct amount depends on where mode 3 ends -- the same SCX grid-alignment
+  question `cgb-acid-hell` ran into, not an independent bug.
+* **10 `dma/hdma_*`**, seven of them `hdma_late_disable`.
+* **8 `lcd_offset/offset1|2_lyc9Xint_*`**, plus 4 `*lcdoffset1*` rows over in
+  `window` and `lycEnable`.
+
+### Refuted 2026-08-19: HDMA_VISIBLE_DOTS is not the lever
+
+`HDMA_VISIBLE_DOTS` is *defined* as `4 + 4 * CGB_HALT_PPU_LEAD`, so the obvious
+hypothesis was that the coupling constant is wrong and the seven
+`hdma_late_disable` rows would come back at some other value. Swept whole-suite:
+
+    HDMA_VISIBLE_DOTS     4      6      8 (ship)   10     12
+    gambatte dma        116    121      121      118    116
+    gambatte total     4253   4258     4258     4255   4253
+
+The shipping value is already at the maximum, **not one of the seven rows
+returns at any value**, and the runner total is 1012 in every arm. Incidentally
+6 ties 8 exactly, so the `4 *` term is over-specified -- `2 *` would score the
+same. Not worth changing, but do not read the 4 as measured.
+
+### Refuted 2026-08-19: STAT_M0_FIELD_TAIL_CGB is not the lever either
+
+The nine broken `halt` rows are all `[cgb]` and all `*_m0stat_*`, reading STAT
+and getting 2 where the ROM wants 0, so the named knob for how long CGB's
+mode-0 STAT field is visible was the obvious next lever. Swept whole-suite:
+
+    STAT_M0_FIELD_TAIL_CGB    0 (ship)    1       2       3
+    gambatte total             4258     4232    4213    4203
+    gambatte halt               136      136     136     136
+    gambatte dma                121      121     121     121
+    gambatte lcd_offset          35       35      35      35
+
+The three groups that hold all 31 rows are **byte-identical in every arm** --
+the knob does not reach them at all -- while the suite total falls
+monotonically, so the shipping 0 is already optimal and every nonzero value is
+pure damage elsewhere. Two named, plausible, directly-aimed constants now both
+answer "not here", which is the same verdict earlier rounds reached about
+`OBJ_WAIT_SUB` and `CGB_TDSEL_LATENCY`: **these rows do not have a knob.**
+
+### What the 31 rows actually need
+
+The SCX split is the whole tell: broken at SCX 2 and 5, fixed at SCX 3 and 4.
+A single scalar lead cannot be right at every SCX because the quantity it is
+standing in for depends on where mode 3 ends, which moves with `SCX & 7`. That
+is the same grid-alignment model gap `cgb-acid-hell` needed and that
+docs/probe-e-plan.md concluded "needs a structural path, not a knob" -- the
+fetcher's displacement and the mode-3 length are two quantities on silicon and
+one field here. Until that is separated, expect every scalar sweep aimed at
+these 31 to return what these two did.
+
+Do NOT spend another round on constants here. The next real move is the
+structural one, and it is the same one probe (e) is blocked on.
+
 ## NEW 2026-08-19: `mooneye/misc/boot_hwio-C` fails on AGB and passes on CGB
 
 The per-machine fan-out (`mooneye_machines_for`, added 2026-08-19) runs every
