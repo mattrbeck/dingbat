@@ -143,6 +143,35 @@ method reset_render_scratch*(ppu: GbPpu) {.base.} =
   discard
 
 method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
+  # ---- The WY latch the hand-off itself opened -------------------------------
+  # The HLE hand-off writes LCDC = $91 through write_byte (memory.nim's
+  # skip_boot), and it does that while `ppu.ly` is still 0 -- so the LCD-enable
+  # branch runs, line 0 starts, and `mode_flag=`'s "LY == WY at the top of a
+  # visible line" test fires against the post-boot WY of 0. That latches
+  # `window_trigger` for the frame. The seeds below then move the PPU to
+  # mid-VBlank (line 153 on DMG, 144+ on CGB), so the mode 1 entry that would
+  # have cleared the latch is already PAST: the flag survives all the way to
+  # LY 143 -> 144 of the FIRST DRAWN FRAME, and every line of that frame draws
+  # a window the cart never asked for.
+  #
+  # That frame is exactly where the gambatte `window/` families measure. They
+  # wait for LY = $97, arm an LYC = $99 STAT source, and read STAT back a fixed
+  # number of M-cycles into the next frame; the window's ~6 extra mode 3 dots
+  # are the whole signal. With the latch stuck the read returns mode 3 whatever
+  # WY says, which is the `got 3, expected 0` that 81 of the 102 failing rows
+  # print. SameBoy runs the real boot ROM, whose last wy_check is in VBlank
+  # with nothing matching, so it hands off with the flag clear.
+  #
+  # Cleared here rather than suppressed at the write for the same reason
+  # `first_line` is cleared here: the hand-off is a state SEED, and the seed's
+  # job is to leave behind what the boot ROM would have left behind. The boot
+  # ROM ends in VBlank, where the latch is definitionally clear.
+  ppu.window_trigger = false
+  ppu.window_trigger_en = false
+  ppu.current_window_line = -1
+  # No `fifo_arm_window` here: `fifo_reset_bg` re-arms the comparator at every
+  # mode 2 -> 3 edge, and the hand-off is in VBlank, so the next line start
+  # recomputes `win_lx` from the flags above before a pixel is drawn.
   # Reproduce the post-boot VRAM tiles: blank tile $00 (VRAM inits to zero), the
   # Nintendo logo $01-$18 decompressed from the cart's OWN header (so no Nintendo
   # logo data lives in our source), and the generic ® tile $19.
