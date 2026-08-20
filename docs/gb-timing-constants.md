@@ -1838,3 +1838,1290 @@ form is that `gambatte/scx_m3_extend` says hardware's mode 3 is longer
 after such a store, and its `_ds` member -- twelve stores on one line,
 which is what SCX "banging" means -- prices one store at 8 dots.
 
+
+## `fifo_obj_abort` (OBJ_ABORT, OBJ_ABORT_LEAD, OBJ_ABORT_FLAG_HOLD, CGB_OBJ_ABORT)
+
+LCDC.1 has just gone low while an object's stall is running: the fetch is
+abandoned, the object dropped, and the rest of the penalty comes back. Pan
+Docs' OBJ-penalty section names the case and stops there. Two dots come back
+to the SHIFTER and one of those never reaches the FETCHER -- OBJ_ABORT_LEAD
+and OBJ_ABORT_FLAG_HOLD, and the second section is why they differ.
+
+---- Which dot the line gets back --------------------------------------
+
+Four gambatte DMG families bracket it. Each is one ROM with ONE object at a
+known OAM X, one mid-mode-3 `ld [c],a` moved by an M-cycle per step, and a
+STAT read on a fixed dot -- so the step where the expected answer flips from
+mode 0 to mode 3 names the dot the penalty stopped costing, to one M-cycle.
+
+Traced with `-d:gb_m3_len -d:gb_m3_trace -d:gb_stat_read_trace`, LY 8 of each.
+`T` is the object's trigger dot, `W` the write's, `R` the STAT read's; the
+wait half runs T .. T+wait-1 and the object's own six dots T+wait .. T+wait+5.
+The transducer is calibrated on this same set: the read at R reports mode 0
+iff `len <= R - 85`.
+
+  row (sprites/)                 OAM X   T   wait   W    R   wants
+  late_disable_2                    8   94    5    97  257  charge >= 1
+  sprite_late_disable_spx18_2      24  110    5   113  257  charge >= 1
+  sprite_late_disable_spx19_2      25  111    4   113  257  charge >= 1
+  sprite_late_disable_spx1A_1      26  112    3   113  257  charge <= 0
+  sprite_late_disable_spx1A_2      26  112    3   117  257  charge >= 1
+  sprite_late_disable_spx1B_2      27  113    2   117  257  charge >= 1
+  sprite_late_late_disable_spx18_1 24  110    5   113  261  charge <= 4
+  sprite_late_late_disable_spx18_2 24  110    5   117  261  charge >= 5
+  sprite_late_late_disable_spx19_1 25  111    4   113  261  charge <= 4
+  sprite_late_late_disable_spx19_2 25  111    4   117  261  charge >= 5
+  sprite_late_late_disable_spx1A_1 26  112    3   117  261  charge <= 4
+  sprite_late_late_disable_spx1B_1 27  113    2   117  261  charge <= 4
+
+The FLAG's length is `charge = W - 1 - T`, the only offset the twelve accept,
+pinned from both sides by a different pair on each side: `W - T` fails
+spx1A_1 and late_late_spx1A_1 (one dot too much), `W - 2 - T` fails spx19_2
+and late_late_spx19_2 (one too little), and at `W - 1 - T` no other row of
+the 5,005 moves either way. The shipping pair (2, 1) reproduces the table
+exactly, because 2 - 1 is the same 1.
+
+spx1A_1 and the late_late `_1` rows are what say the WAIT half is abortable
+too, not just the object's own six dots: spx1A_1's write lands ONE dot after
+the trigger, three dots before that object's fetch would start, and the row
+still wants the whole 9-dot penalty gone.
+
+Both quantities are separate from the MIXER's copy of the same bit, which
+reads it one stage the OTHER way (MIXER_PRIORITY_BACK).
+
+---- Two instruments read different things -----------------------------
+
+mealybug m3_lcdc_obj_en_change_variant measures the same abort with no STAT
+read in the path: its handler pulses BGP black at a fixed dot near the end of
+every line, so the x the black run starts at IS the shifter's position. Bands
+8..15 calibrate the ruler exactly (run start = 161 - P for penalty P) and the
+last two bands are the aborted ones:
+
+  band  X   T    wait  W    run start   charge
+   16  16  102    5   109      156         5      = W - 2 - T
+   17  17  103    4   109      157         4      = W - 2 - T
+
+One dot MORE refund than the twelve gambatte rows allow. As a function of
+`W - T` alone, ten of the twelve accept either answer and the disagreement is
+exactly one gambatte ROM (`spx19`, read at two STAT dots) against those two
+bands, at configurations congruent to the dot:
+
+  instrument                  X    T   wait  W    W-T   says
+  gambatte late_late_spx19_2  25  111   4   117    6    charge >= 5
+  mealybug variant band 17    17  103   4   109    6    charge  = 4
+
+Same X mod 8, same wait, same offset into the object's fetch, opposite
+answers -- no single refund satisfies both. What separates them is the
+QUANTITY, not the number: gambatte reads the mode 3 -> 0 flag through STAT
+and mealybug reads the pixels. So the shifter and fetcher get different
+amounts, which is what `fetcher_retired` already says -- mode 3 ends when the
+FETCHER is done, not when the last pixel leaves.
+
+  * the SHIFTER gets both dots back (OBJ_ABORT_LEAD = 2). It needs only the
+    BG FIFO, which is full, and 2 is not a new constant -- it is
+    M3_PIPE_DELAY, the lead this file already charges the pipeline over the
+    CPU's register view for the whole of every line.
+  * the FETCHER gets one (OBJ_ABORT_FLAG_HOLD = 1). The VRAM cycle the object
+    had already issued still owns the bus for its last dot, so the fetcher
+    retires one dot behind the pixels and only the flag sees it. `m3_hold` is
+    the field that already means this (added for LY0_PIPE_MCYCLES).
+
+Each half is refused on its own, whole suites on this base:
+
+  lead  hold   gambatte   mealybug DMG   what fails
+     1     0     3818        552580      variant bands 16/17, 16 px
+     2     0     3816        552596      spx19_2 and late_late_spx19_2
+     2     1     3818        552596      nothing
+
+At (2, 1) the whole gambatte suite is identical row for row to (1, 0) -- the
+flag's length on an aborted line is `W - 1 - T` either way -- and the
+variant's DMG row goes to 0 wrong pixels. The mealybug CGB set does not move.
+
+Caveat: (2, 1) is two numbers against two instruments, and no third ROM
+separates it from "one of the two instruments is a dot out". What would
+settle it is a mealybug-style PIXEL ruler for the gambatte geometry -- the
+`_2` rows re-cut with a BGP pulse instead of a STAT read. Until then the pair
+is preferred because it is the only setting costing nothing on either side.
+
+---- The CGB does not do this ------------------------------------------
+
+Same cart, write and objects, different console: the variant's `_cgb_c`
+reference gives those two bands the FULL 11- and 10-dot penalty, so it is
+pixel-exact with the cancel compiled out and 288 px out with it in. Hence
+CGB_OBJ_ABORT = 0.
+
+That one row cannot separate "the CGB has no cancel" from "the CGB's LCDC.1
+reaches the object fetcher four or more dots later than the DMG's" -- at
+W = 109 those bands have three stall dots left, so any latency of 4+ hides
+the cancel just as completely. Every other CGB row that could tell them apart
+is double-speed, where this tree is already out for unrelated reasons.
+
+The object is dropped rather than re-armed because `lx` has not moved:
+leaving it in the list would re-trigger it the instant LCDC.1 came back, and
+gambatte's sprite_late_enable_spx18..1B set it back a few M-cycles later on
+exactly this line. One `delete` on a path at most one object per line reaches.
+
+## The mixer tail (MIXER_PRIORITY_BACK, MIXER_PALETTE_BACK, MIXER_TAIL_DOTS, MIXER_TAIL_HBLANK, MIXER_DOT_LAG)
+
+---- The mixer is a TAIL, and it runs behind the FIFO pop -------------------
+
+A register the FETCHER reads is sampled on the dot of the VRAM read that uses
+it. A register the MIXER reads is sampled one or two dots LATER than the dot
+the pixel it colours left the FIFO, depending on how far down the tail it is
+read. Two stages, and the rows separating them are 8 apart in the same suite:
+
+  +1  LCDC's priority bits -- OBJ enable, BG priority in CGB mode; the
+      BG-vs-OBJ decision (sprite_wins).
+  +2  BGP / OBP0 / OBP1 -- the shade lookup, one stage after the decision that
+      picks which of them to look in.
+
+m3_lcdc_obj_en_change gives the first stage exactly, and is the cleanest
+instrument in the suite: nineteen objects, one per 8-line band, each hanging
+off the left edge at OAM X = 1..18, and a single LCDC write clearing OBJ enable
+a few dots into mode 3. Each band asks "which is the last object pixel the
+write does NOT suppress". All 60 of the frame's wrong pixels were one answer:
+the object pixel emitted on the dot immediately before the write's own dot
+survived here and does not on hardware -- at both write dots and all nineteen
+bands. m3_obp0_change gives the second, the same objects against two OBP0
+writes: its write lands on dot 109 of every band, and with the priority stage's
+dot the pixel emitted on 108 comes right and the one on 107 does not. At two it
+is pixel-exact.
+
+Later at the mixer makes a write's effect appear EARLIER on screen, which reads
+backwards until the stages are drawn out: the pixel popped on dot D is coloured
+on D + n, so it sees every write live by D + n.
+
+None of that adds stages to the dot loop. Registers only change at an M-cycle
+boundary, so "the mixer is n dots late" differs from "the mixer is on the pop's
+dot" in one place: a write also reaches the n pixels emitted before it. Redoing
+those from the WRITE path costs the mode 3 loop one eight-byte store per pixel
+(the FIFO entries the mixer still holds, indexed by the pixel's parity so two
+stages cost what one does) and nothing else. Measured against
+`-d:MIXER_DOT_LAG=0`, min of four runs: +0.35% retired instructions on blargg
+cpu_instrs, +0.51% on cgb-acid-hell (LCDC every eight dots, the worst case).
+
+Not M3_PIPE_DELAY = 3, which reaches the first stage's dot but moves the
+FETCHER too, and the fetcher is already where hardware has it. Mealybug DMG,
+wrong pixels of 23040:
+
+  row                          before    PIPE_DELAY=3
+  m3_lcdc_obj_en_change          60         2     mixer-read rows, all better
+  m3_obp0_change                 74        42
+  m3_bgp_change                1508       798
+  m3_bgp_change_sprites        1044       344
+  m3_lcdc_obj_en_change_variant 380       212
+  m3_scx_high_5_bits              0        41     fetcher-read rows, all worse
+  m3_scx_low_3_bits               0       324
+  m3_scy_change                 417      2157
+  m3_lcdc_tile_sel_win_change   106      1028
+  m3_lcdc_bg_map_change         192       444
+
+The split IS the result: every mixer-read row wants the extra dot and every
+fetcher-read row refuses it, which says the two stages are a dot apart rather
+than the pipeline being a dot out.
+
+The two stages used to ship on structure alone, because the ~800 pixels
+m3_bgp_change and m3_bgp_change_sprites had left were a second mechanism and an
+unnamed residual is not a vote. Both names have since been found and both are
+nearby rather than in the stage count: MIXER_PALETTE_OR (the transition pixel)
+and MIXER_TAIL_HBLANK (the line end, below). With them those two rows prefer
+TWO by 806 and 624 and the palette vote is unanimous.
+
+---- The tail does not stop at the mode 3 -> 0 edge ------------------------
+
+The guard below used to be "mode 3, or nothing", one dot too strict, and
+m3_bgp_change's own handler says so. It writes BGP seven times per line and
+dingbat's trace puts the writes on dots 81, 97, 109, 169, 181, 241 and 253; the
+reference's run-lengths put the edge each write draws at exactly `dot - 96` for
+all six that land inside mode 3. Mode 3 ends on dot 252, so the seventh write is
+on the FIRST DOT OF MODE 0 -- and the reference draws its edge at x = 157 all
+the same, three-valued, with 158 and 159 taking the new value cleanly.
+
+So the rule the six measure -- a write on dot D reaches every pixel from
+`D - MIXER_PALETTE_BACK - 94` up -- does not stop at the mode flag, and cannot:
+the shifter emits one pixel per dot and the tail latches a shade two dots after
+it leaves the FIFO, so on dot 252 two pixels are still inside the tail and one
+(159) is not yet emitted. The mode flag is a statement about the FETCHER
+(fetcher_retired), and the fetcher being done is exactly why those last pixels
+are safe to keep clocking: no VRAM read decides them any more.
+
+What changes is OURS, not the model's. `lx` stands in for the dot through the
+whole of mode 3 -- one pixel per dot, stalls included -- but `fifo_burst_tail`
+emits the last `m3_lead` pixels ALL ON THE RETIRE DOT, the one dot of the line
+where it does not. Two accounting consequences:
+
+  * the position must keep counting after `lx` has stopped. `tail_dot0` is
+    latched at the burst as `cycle_counter - lx`, so the position on any later
+    dot reads back as `cycle_counter - tail_dot0`. No edge, lock or STAT
+    behaviour moves -- this is a subtraction on a register write, not a dot;
+  * the pixels the burst decided EARLY are in the write's future, so a write in
+    the tail must reach FORWARD too. On dot 253 the position is 159: 157 is the
+    far end of the tail (the `old or new` pixel), 158 is inside it, and 159 has
+    not been emitted at all -- on hardware it takes the new palette because it
+    is emitted after the write, and here because the recompose sweeps to the end
+    of the line. Hence a span, not a countdown.
+
+The ring of held pairs is MIX_HOLD deep for the same reason: the deepest stage
+plus the lead, exactly the four columns 156..159 a write on dot 252 or 253 can
+name.
+
+---- Clocked in dots, not pixels, and written where the shifter STOPS -------
+
+Counting the reach back from `lx` is right for as long as the shifter takes one
+pixel per dot, which is every dot except an object fetch and the tail burst.
+mealybug's two `_sprites` rows stop the shifter under a write and say DOTS: a
+write reaches a pixel iff that pixel left the FIFO within `back` DOTS, so an
+object fetch drains the tail rather than freezing it. Bands and arithmetic at
+MIXER_TAIL_DOTS in gb.nim.
+
+The obvious implementation -- note `cycle_counter - lx` on every emitted pixel
+-- costs +5.02% of retired instructions on Pokemon Crystal
+(tools/gbppu/counters.sh, min of four a side). The dot loop sits on clang's
+inline threshold (docs/gb_oam_dma_cost.md's cliff, the same one that makes ONE
+extra branch in tick_shifter +1.7%), so nothing new may go in it.
+
+Nothing has to. `cycle_counter - lx` cannot change while the shifter takes one
+pixel per dot, so it only needs writing where the shifter STOPS, and every such
+place is already a cold branch running once per stall: an object fetch
+(mixer_note_stop in tick_shifter), a BG FIFO reset -- the line's start and a
+mid-line window restart (fifo_reset_bg) -- and the tail burst at the retire dot.
+Each notes the dot base of the run it interrupts plus the `lx` the next run
+starts at, which answers both of the recompose's questions: while stopped the
+position is `cycle_counter - tail_dot0` and the tail drains under it, and while
+running it is `lx` with nothing older than `mix_run` reachable.
+
+The price is that mixer_tail_front must TEST for the stall instead of reading it
+off the arithmetic, and one of the three is not a flag -- see the guard there.
+
+## `obj_yields_to_window` (the window/object tie)
+
+Does the object the shifter has just found have to wait for the window's
+start, instead of the other way round?
+
+---- The two triggers are ordered by COORDINATE, not by the dot ----------
+
+The window starts at pixel `WX - 7` and an object's trigger pixel is `X - 8`.
+Every shifter event happens in coordinate order, so an object whose column is
+LEFT of the window's first column is fetched before the window starts and one
+to the right after. What is special here is that the object test above is a
+`>=`, not an equality: an object at OAM X 1..7 has a trigger pixel of -7..-1,
+which `lx` never takes, so it is noticed on the shifter's first dot -- the
+same dot a WX = 7 window is noticed on. That collision is an artifact of the
+clamp, and the object-first order decides the resulting tie the wrong way.
+
+`lag` (below) is that displacement: `lx + 8 - X` is 0 for an object whose
+column IS this pixel and 1..8 for one already past. So:
+
+  lag > 0   object's column is left of the window's  -> object first
+  lag == 0  same column                              -> window first
+
+Only the second line changes anything. Resolving the tie the other way for
+BOTH cases is refused by hardware -- m3_lcdc_win_map_change goes 34 wrong
+pixels to 318, because it moves the seven left-hanging objects too.
+
+---- What pins the `lag == 0` line ---------------------------------------
+
+mealybug m3_lcdc_win_map_change and m3_lcdc_tile_sel_win_change both run
+WY = 0 / WX = 7 with one object per 8-line band at OAM X = band, so band 8 is
+the one line group where an object's column is the window's column. Both
+toggle one LCDC bit for 8 dots at a fixed dot (105..112), so each band reads
+out which fetch phase the PPU was in across those dots. Band 8 says the window
+went first:
+
+  * win_map_change (read at the tile-map fetch): band 8's reference has NO
+    black tile on the line, as do bands 9..15 where the object is
+    unambiguously after the window, because the object fetch stalls the
+    fetcher across the whole write. Object-first put our first window map read
+    at dot 107, inside the write, painting x = 0..7 black over the object.
+  * tile_sel_win_change (read at the two bitplane fetches) is sharper because
+    it resolves the write to a single dot. Band 8's reference is a WHITE
+    window tile at x = 0..7 and colour 2 at x = 8..15 -- one tile whose low
+    bitplane came from $9000 and whose high came from $8000. Window-first puts
+    window tile 1's two bitplane reads on dots 104 and 106 with the write at
+    105, exactly that mix; object-first has no fetch there at all.
+
+Both rows go to 0 wrong pixels and no other mealybug row moves: `X == WX + 1`
+on the line the window starts is the whole of it.
+
+---- The two neighbouring spellings, both measured out --------------------
+
+The tile_sel row pins this to ONE dot and refuses both variants either side,
+which is what makes the deferral a real edge rather than a knob:
+
+  * "the object pays no wait, having been pending before the window
+    restarted" (pre-charge `obj_tile_fx` over the restart, 6 dots instead of
+    11). Mealybug does not move -- it does not measure the penalty here -- but
+    gambatte loses the three other window/object ties it fixes
+    (window/late_disable_spx10_wx0f_2 on both devices,
+    sprites/space/1pos8_8pos9_wx08_m3stat_ds_1,
+    10spritesPrLine_wx7_m3stat_ds_1). The object DOES re-pay the wait.
+  * "the object starts its stall on the tie dot, concurrently with the
+    window's restart". Refused by the pixels: win_map_change 34 -> 64 and
+    tile_sel_win_change 98 -> 64. The BG fetcher only runs for the WAIT dots
+    (tick_sprite_fetcher), so starting the stall on the tie dot freezes the
+    window's FIRST fetch half-done and pushes its second tile's map read into
+    the write window, painting x = 8..15. The window's first tile must be
+    pushed before the object's stall begins.
+
+The pipeline says the same thing: an object is merged onto the BG FIFO entry
+it will be drawn over, and a window start empties that FIFO and refetches it.
+At the same pixel the fetch is upstream of the merge, so the refetch has to
+happen before the object has anything to merge onto. A left-hanging object was
+merged a pixel or more earlier and survives, because a window start does not
+clear the OBJ FIFO -- which is why the glyph is still drawn over the window in
+bands 1..7 of both references.
+
+---- What it costs -------------------------------------------------------
+
+Mode 3 gets longer whenever the object would have been charged against the
+tile the window discards: it is now charged at column 0 of the window's first
+tile, Pan Docs' 11-dot case. On the mealybug lines that is a no-op and
+gambatte's three mid-line ties go green. At WX = 166 -- the window's first
+pixel is the line's LAST -- it is +10 dots, and that is where the rule is
+bought: eight gambatte rows red (m0enable 153 -> 147, and
+window/m2int_wxA6_spxA7_m0irq_2 on both devices) against five green, net
+3781 -> 3776.
+
+That corner is a device split this tree does not carry, not this rule
+misfiring: hardware wants 180 dots on DMG and 190 on CGB for the same frame,
+and 190 is what this produces. The split is already there WITHOUT an object --
+window/m2int_wxA6_m3stat and its `_scx2_`/`_scx5_` arms have DMG and CGB
+expectations one and two M-cycles apart and this tree gives the DMG number to
+both. Until the window-start cost at the last pixel is modelled per device,
+every wxA6 row is decided by which side that one number sits on, and no
+setting of THIS rule moves it.
+
+Restricted to the window's START: `win_lx` also carries the re-trigger point
+while the window is already the fetch source, and that branch can decline to
+fire (it is gated on the fetcher's phase); yielding to an edge that then does
+nothing would park the shifter on this pixel for the rest of the line.
+
+And restricted to a pixel that HAS a pixel after it. On x = 159 there is
+nothing for the object to queue behind -- the line's last fetch is the
+window's restart (CGB_WIN_TAIL_LAST) -- so an object deferred there is
+deferred past the end of the line. gambatte measures that corner directly
+(`window/m2int_wxA6_spxA7_*`, `m0enable/enable_wxA6_2x_spxA7_*`) and its four
+mode-0 interrupt rows want 180 dots on both devices: 174 for the window start
+plus the object's own six, charged where the object is. Deferring here charges
+it on the far side and gives 190, taking six of those rows red.
+
+## `M3_PIPE_MCYCLES` / `M3_PIPE_DELAY`
+
+How far the mode-3 pixel pipeline lags the CPU's view of the PPU registers, in
+CPU M-cycles. Injected as idle dots at the head of mode 3, moving the whole
+fetch/shift pipeline later against the CPU clock without moving a mode boundary
+(fetcher_retired keeps the flag where it was).
+
+M3_PIPE_MCYCLES ships at 0 and is now a diagnostic, not a fix. The M-cycle the
+measurement below found was real but was never the pipeline's to pay: it was the
+CPU write landing an M-cycle late. mem_write now commits a write's byte at the
+START of its M-cycle, where its own VRAM/OAM lock is already decided, and the
+residual this constant absorbed is gone -- turning it up double-counts. The
+derivation is kept because it is the instrument for re-deriving the fetch phase.
+
+---- Why an M-cycle and not a dot count -----------------------------------
+
+A CPU write reaches the bus once per M-cycle, and dingbat used to run the
+M-cycle's PPU dots BEFORE handing the byte to write_byte, so a write committed
+at the END of its M-cycle. The locks disagreed: a write was admitted on the
+LATCHED mode (the mode at the START of the M-cycle) where a read is admitted on
+the live one. Lock and data are one event on hardware, so the data commits at
+the start too, and the pipeline was one M-cycle behind purely because the write
+was.
+
+One M-cycle is 4 dots at normal speed and 2 in double (Pan Docs, "Dots"), which
+is why the lead is latched per line from `current_speed` rather than being a
+constant -- and that factor of two is what identified the quantity.
+
+gambatte/bgtiledata (34 rows) and bgtilemap (40 rows) are four ROMs per SCX
+whose only difference is a mid-line LCDC write moving one M-cycle, each with a
+reference PNG, so the boundary they draw IS the staircase
+`first affected tile = 8*ceil((write_dot - c)/8)`. Sweeping the lead in DOTS
+over 0..8, scoring rows 16..143 of every row in both families:
+
+  lead (dots)   0      1      2      3      4      5..8
+  single speed  61440  28672  28672  0      0      61440
+  double speed  11264  0      0      11264  11264  17408+
+
+Two disjoint windows -- {3,4} dots single, {1,2} double -- so no constant dot
+count passes both, which is the shape of a one-M-cycle quantity. Solving
+`{3,4} - k = {1,2} - k/2` gives k = 4 and only 4, the same answer the locks
+give. Both windows then become {-1, 0} and the residual dot term is 0.
+
+---- M3_PIPE_DELAY: the speed-independent remainder, and it is 2 ----------
+
+It used to ship at 0 on the reasoning that the M-cycle term was the whole
+offset. It was not: the other two dots were absorbed by the BG fetcher's step 4
+sitting at the head of its cycle instead of the tail (see the early push in
+tick_bg_fetcher), which put every VRAM read two dots late and hid a pipeline two
+dots early. Fix the fetcher and the two dots have nowhere to go.
+
+What pins it to 2 rather than to whatever scores best: it is exactly the two
+dots the fetcher's padding moved, and the row that reads it back has no objects
+at all -- mealybug m3_bgp_change is BGP written across mode 3 and applied at the
+SHIFTER, so it sees the pipeline's phase against the CPU and nothing else
+(87.3% -> 93.5% DMG, 90.6% -> 96.1% CGB, on the lead alone). m3_window_timing
+agrees (96.9% -> 98.7%). Swept 0..4 on the fixed fetcher:
+
+  lead     0      1      2      3      4
+  gambatte 3576   3591   3587   3560   3550
+  mb DMG   504845 512369 516637 517664 515428
+  mb CGB   1803036 1800695 1801757 1802795 1789657
+
+1 and 3 each buy something and neither is the derived number; 2 is, and it is
+what makes GBMicrotest's ppu_spritex_vs_scx table come out 153/153.
+
+Whole gambatte suite, one build per cell:
+
+  M3_PIPE_DELAY   2 (ship)   0
+  total             3618     3596
+  window             322      303
+  scy                  9        3
+  sprites            393      397
+  bgtilemap            2        4
+  bgtiledata           2        1
+  m0enable           153      151
+
++22 net: window +19, scy +6, bgtiledata +1, m0enable +2, against bgtilemap -2
+and sprites -4. (An earlier note claimed "scx_during_m3 34 -> 31" as well; that
+does NOT reproduce -- the family scores 31/141 at both settings.) What remains
+is the six bgtilemap/sprites rows whose mid-line write lands in the two pixels
+the tail burst decides early.
+
+---- What the lead machinery costs ----------------------------------------
+
+A nonzero lead compiles in a per-line head delay and turns fetcher_retired from
+one compare into five, on the mode 3 dot loop -- ~25,000 dots a frame, inside a
+proc mem_read and mem_write are inlined into. Done naively that measured +5.51%
+of retired instructions on Pokemon Crystal, most of it not the branches but 52
+generated opcode bodies crossing clang's inline threshold (the cliff in
+docs/gb_oam_dma_cost.md).
+
+It shipped at +0.83% / +0.72% (Link's Awakening DMG / Pokemon Crystal against
+`-d:M3_PIPE_DELAY=0`, which compiles the mechanism out). Four changes take it to
++0.22% / +0.12%, each marked at its site: fetcher_retired's early-out folds the
+lead to an immediate when the M-cycle term is off; the head delay is spent in
+ONE step above the dot loop rather than tested inside it; the tail burst is
+{.inline.} again now the mode 3 branch is settled (-0.11%); and `m3_delay` is a
+uint8 so its once-per-M-cycle test is `ldrb`+`cbz` (-0.08%).
+
+What is left is a floor, not slack: the +0.22% on DMG is ~0.19% of byte test
+(one `ldrb` and one `cbz` per mode 3 M-cycle, ~6,200 a frame) and essentially
+nothing else. An object-free line otherwise pays one compare per dot --
+fetcher_retired's early-out against an immediate, which clang folds into the dot
+loop's own `lx` test -- plus a two-dot burst per line; lines with objects pay
+nothing on top.
+
+Two measurement traps, each of which cost this change a wrong answer before it
+was understood (see docs/gb_oam_dma_cost.md):
+ * `ri_instructions` includes kernel work charged to the process, so a run on a
+   loaded machine reads HIGH -- 0.5% at load average 100, bigger than every
+   number here. Take the MINIMUM of four or more runs per arm and check the
+   minima agree to ~0.01%.
+ * Two builds of the SAME source in different directories differ by up to 0.25%
+   (the nimcache path reaches the generated C, and `_uNNNN` renumbering with
+   it). Both arms of an A/B must be built the same way.
+
+---- Why moving the PIPELINE was the wrong half --------------------------
+
+The lead is injected at the HEAD of mode 3 and paid back by retiring the fetcher
+`m3_lead` pixels early at the tail, so mode 3's length is unchanged. That is
+exact everywhere except the last `m3_lead` pixels of a line, where a sprite or
+window fetch can still stall the shifter: the flag then wants to go up mid-fetch
+and neither "retire before the fetch" nor "retire after it" is that dot.
+Measured at 1: gambatte 3253 -> 3256 and thirteen mealybug/age rows up, but
+m3_scx_low_3_bits 100% -> 98.6% and gambatte sprites -2, window -2,
+enable_display -3, m0enable -1 -- every one a WX=166 / OBJ X=166 /
+SCX-at-H-Blank row, i.e. the tail accounting.
+
+Moving the WRITE instead buys the same thirteen rows with none of that tail,
+because the pipeline never moves. Same tree, same day: gambatte 3253 -> 3311,
+sprites +3, window +4, m0enable +4, enable_display unmoved, and
+m3_scx_low_3_bits stays green (its latch moved to the fetcher; see
+fifo_sample_smooth_scroll's caller).
+const M3_PIPE_MCYCLES {.intdefine.} = 0
+const M3_PIPE_DELAY {.intdefine.} = 2
+
+## `tick_sprite_fetcher` / `OBJ_BG_RUN` (which dots the BG fetcher may run on)
+
+One dot of an object fetch. Returns true if this dot was the object's -- the
+shifter is stopped for the whole of it -- and false for the one tail dot the
+shifter has back but the BG fetcher does not (OBJ_BG_RUN = 4).
+
+A return value rather than a call to tick_shifter from here: tick_shifter is
+the mode 3 dot loop's body, and a SECOND call site stops clang inlining it
+into fifo_pipeline_dot, which measured +0.9% of retired instructions on
+Pokemon Blue for a dot that happens at most once per object.
+
+Only the number of dots it lasts varies -- see the trigger in tick_shifter.
+
+The BG fetcher runs for the WAIT and is stopped for the object's own fetch:
+the two halves of the penalty read literally. The wait exists because a BG
+fetch is in flight and must finish; the six dots after it are the object's own
+VRAM reads, which the BG fetcher cannot overlap because there is one address
+bus. Neither half reaches the BG FIFO -- the shifter is stopped, so the FIFO
+cannot empty and try_push_bg_pixels cannot fire -- which also keeps `fetcher_x`
+still. The fetcher parks on fsPushPixel and re-locks to the FIFO on the next
+tile boundary, so mode 3's length is exactly the penalty with nothing added.
+
+---- This line was accused of the object families' residual; it is clear ---
+
+Until 2026-08-03 a note here said these wait dots should not run at all:
+m3_scy_change's eighteen per-object bands were pixel-exact wherever the wait
+term was 0 and ~960/1280 wherever it was not, and the only thing that moves
+the fetcher during a penalty is this line. The reading was wrong, and how it
+was settled is worth keeping, because a whole-frame percentage cannot do it.
+
+GBMicrotest ppu_spritex_vs_scx.gb is the instrument: 153 cells of "how many
+dots does one object at OAM X cost at this SCX", asserted against hardware,
+read back as dots by `tools/gbppu/objtab.py` and differenced against the same
+build's no-object line so the mode 3 edge's constant offset cancels. 79 of the
+153 were wrong with the shape `+1 dot wherever (X + SCX) mod 8 >= 4`: a STALL.
+The fetcher came out of the penalty too late to have the next tile ready.
+
+That is the opposite sign to what the picture wanted -- the bands wanted the
+fetcher frozen harder, the dots wanted it frozen less -- because both were
+reading a third thing: the fetch cycle's own phase. A push taken at
+Get-Tile-Data-High used to fall through the Sleep/Push steps it had already
+served, putting the two idle dots at the HEAD of the next cycle where hardware
+has them at the tail, leaving every VRAM read two dots late and exactly
+cancelling a real two-dot lead of the pipeline over the CPU's register view.
+Fix the push (tick_bg_fetcher), charge the lead where it belongs
+(M3_PIPE_DELAY = 2), and the object families come right WITHOUT this line
+changing: objtab.py 79 -> 0 mismatched cells, m3_scy_change 92.6% -> 98.3% DMG
+and 81.4% -> 97.2% CGB, its four broken bands ~960 -> 1261-1279 of 1280.
+
+---- The four candidate rules, and why none of them is the answer ---------
+
+On the fixed phase all four give objtab.py 0/153 and are indistinguishable on
+the scored suites (gambatte / mealybug DMG px / mealybug CGB px):
+
+  run for the wait dots          3614  517987  1814452
+  run for the whole penalty      3614  518293  1815437
+  freeze completely              3615  517786  1813590
+  step 4 only                    3615  517541  1813120
+
+A quarter of a percent apart on 23,040-pixel frames, one row apart on 5,005.
+("Run for the whole penalty" stays out whatever it scores, because it puts the
+BG fetch and the object fetch on the address bus at once.)
+
+What the mealybug SOURCES say is sharper than any of the four
+(docs/gb-mealybug-sources.md): on hardware an object fetch NEVER lands between
+a background tile's two bitplane reads. m3_lcdc_tile_sel_change reads that out
+directly -- its LCDC pulse is 8 dots wide and its 18 bands each move the fetch
+phase, so every band reports the pair (TILE_SEL at plane 0, TILE_SEL at plane
+1) as a shade, and the reference never reports a pair more than 2 dots apart.
+Under rule 1 the two reads come out 8 dots apart on 13 of the 18 bands,
+because the wait dots let a NEW fetch start and then freeze it mid-tile. Rule
+3 ("finish the fetch in flight") does not fix it either, because on the failing
+bands the fetcher had just pushed and there is no fetch in flight.
+
+---- Rule 4 (shipping): the object fetch goes at a TILE boundary, and the
+---- object decides which one, not the fetcher's phase --------------------
+
+Same ROM, read as a shade per band. With the pulse as the dot window
+W = [105, 112] and the object-free schedule as tile n's B/0/1 reads on dots
+8n+88, 8n+90, 8n+92 (n >= 1; tile 0's are 90/92/94):
+
+  X = 0..7    the pulse falls on the fetch of the tile displayed at x=8..15
+  X = 8..15   ...on the fetch of the tile at x=16..23, undisturbed
+  X = 16, 17  ...on the fetch of the tile at x=16..23, undisturbed
+
+So the penalty is inserted after the fetch of tile `floor(X / 8)`, while The
+Pixel of an object at OAM X sits in tile `floor(X / 8) - 1`. The boundary the
+object takes is the one at the END of the fetch that was in flight while The
+Pixel's own tile was being displayed -- the fetcher runs a tile ahead, and Pan
+Docs' "waiting for the BG fetch to finish" is that fetch. A background tile's
+three reads are never split.
+
+Two objects can be in identical FETCHER states at the trigger and still take
+different boundaries, which is why no rule phrased on `fetch_counter` works:
+X = 0 and X = 8 both trigger on the dot the first push fills the FIFO, both
+cost 11 dots, and both leave the fetcher at counter 0 -- yet the reference
+gives band 0 shade 3 (both planes read inside W) and band 8 shade 0 (neither).
+The one thing that differs is the tile The Pixel is in, which is `idx` at the
+trigger:
+
+  idx >= 0  The Pixel is in the tile the FIFO is displaying, so the fetch of
+            the tile after it is in flight. It runs inside the penalty to
+            completion, then parks -- the shifter is stopped, the FIFO cannot
+            drain, so it cannot start another.
+  idx < 0   The Pixel is in the tile BEFORE it (an object hanging off the left
+            edge, OAM X < 8). The fetch the object waits for has just this dot
+            finished -- the trigger dot IS its plane-1 read, which filled the
+            FIFO and let the shifter ask. So the object takes the bus from the
+            NEXT dot for the whole penalty and the fetcher gets none of it,
+            including one dot past the end of the shifter's stall: the stall
+            runs t .. t+P-1 and the object's accesses t+1 .. t+P. That last dot
+            is the `obj_penalty <= 0` tail below, and it is not padding --
+            band 4 (OAM X = 4, P = 7) is shade 3 with it and shade 2 without,
+            and is the only band separating the two.
+
+Mode 3's length does not move either way, checked rather than hoped: neither
+arm can make the fetcher LATE for a push. In the hold arm the shifter resumes
+on t+P with a full FIFO and empties it on t+P+8, while the fetch resumes on
+t+P+1 with its plane-1 read on t+P+6, two dots clear; in the run arm the fetch
+finishes earlier than rule 1 left it, and an earlier fetch can only remove a
+stall. ppu_spritex_vs_scx stays 0/153, and 1660 ROM/device runs over gambatte
+sprites, oam_access, vram_m3, scx_during_m3, GBMicrotest and mealybug are
+line-for-line identical under -d:gb_m3_len.
+
+What it costs is the run arm's dots: the fetch happens inside the object's
+stall instead of after it, so tick_bg_fetcher is called on up to six dots per
+object that rule 1 skipped. Pokemon Blue +0.76% retired instructions, Shantae
++0.41%, Pokemon Crystal +0.01%. All of it is the rule and none the plumbing --
+this file's shape with rule 1 forced back on measures -0.06%.
+
+`idx < 0` needs no state of its own: `obj_tile_fx` is the tile the wait was
+charged against (`fetcher_x - 1` when idx is negative, `fetcher_x` when not),
+and neither can move for the duration of the stall, because fetcher_x only
+advances on a push and a push needs an empty FIFO. So the two fields the
+penalty algorithm already keeps ARE the question, at one compare on a path no
+object-free line visits.
+
+## `OBJ_PLANE_GAP` / `OBJ_PLANE1_LAG` / `OBJ_PLANE1_HEAD` / `CGB_OBJ_SIZE_LATENCY`
+
+---- LCDC.2 is read ONCE PER BITPLANE, and the fetch's place in the penalty
+---- decides which dots those two reads land on ---------------------------
+
+`sprite_fetch_merge` runs on ONE dot and used to take the object's height from
+LCDC.2 as it stood there, for both bitplanes at once. mealybug
+`m3_lcdc_obj_size_change` and `_scx` refuse that, and are direct instruments:
+BGP = $00 makes the background white, every object is tile $4C with OBP0 = $E4,
+and objects stack at Y = $10, $20 .. $90 so each 16-line band is one object read
+out as eight columns of raw bitplane. Both pulse LCDC.2 four times across mode 3
+(8x8, 8x16, 8x8, 8x16), the first at a fixed dot, with `_scx` also driving
+SCX = (LY >> 4) & 7 so each band meets the pulse at a different fetch phase.
+Tile $4C is even, so the two heights differ only in the `or 1` for the lower
+tile of an 8x16 object and the reference names the pair exactly. Against this
+tree's merge dot M:
+
+  ROM              band  object  M     reference  needs
+  _scx             0, 8  X = 32  135   (16, 8)    lo <= 136, hi >= 137
+  m3_..._change    0     X = 16  123   ( 8, 16)   lo in [101,125), hi >= 125
+  m3_..._change    1     X = 33  148   ( 8, 16)   lo in [137,149), hi >= 149
+  m3_..._change    1..3  X = 1..3 103/102/101  (16, 16)  BOTH reads < 101
+  m3_..._change    8     X = 8   104   ( 8,  8)   both in [101,125)
+
+With the reads OBJ_PLANE_GAP = 2 dots apart the first three rows have a UNIQUE
+solution -- low plane on M, high plane on M + 2 -- forced from both sides.
+
+The fourth row cannot be that and the fifth says why. X = 1..3 hang off the left
+edge and are the `idx < 0` arm (OBJ_BG_RUN above): the trigger dot is the BG
+fetch's own last read, so the object takes the bus from the next dot and its six
+dots are the FIRST six of the penalty, not the last. All three trigger on dot 94
+and want both reads before 101, which `t + OBJ_FETCH_DOTS` gives at any X --
+the wait is spent AFTER the fetch on that arm, so the penalty's length changes
+and the read dots do not. X = 8 is the same measurement from the other side and
+makes the boundary a measurement rather than a choice: it is the first object
+NOT hanging off the left edge and it wants the tail arm's dots (104 and 106,
+8x8) where the head arm's (100, 8x16) would draw the other tile. So the split is
+exactly `idx < 0` -- the split OBJ_BG_RUN = 4 derived from an unrelated ROM.
+
+The CGB reads the bit three dots later. The same two ROMs as DMG carts on CGB
+hardware are the suite's `_cgb_c` references and are the COMPLEMENT of the DMG
+ones here: `_scx` band 0 (merge 135) is mixed on DMG and pure 8x16 on CGB, and
+bands 4..7 (merge 138/139) are pure 8x8 on DMG and mixed on CGB. Solving those
+six bands gives one offset -- three dots, on every one, with write and merge
+dots identical between devices under `-d:gb_m3_trace`. That is
+CGB_OBJ_SIZE_LATENCY. The head arm is insensitive to it (both settings put the
+read before the ROM's first write), so it is applied to the dot, not the arm.
+
+What is left over, and what these ROMs cannot say:
+ * on the tail arm the six dots come out as M-3 .. M+2, one dot later than "the
+   wait, then the fetch" places them. That dot is the same pipeline-over-CPU
+   lead M3_PIPE_DELAY and OBJ_DMA_BUS_LEAD each carry a share of; it is measured
+   here, not derived, which is why OBJ_PLANE1_LAG is a swept constant rather
+   than an expression;
+ * nothing here separates "the tile index's low bit is masked at the OAM read"
+   from "at each bitplane read" -- every object in both ROMs is on the even tile
+   $4C, so `tile and $FE` is a no-op. The whole address is recomputed per plane
+   below, the simpler of the two and consistent with everything either ROM sees;
+ * a second object at the same X re-arms the stall for a bare OBJ_FETCH_DOTS
+   (the chain at the end of sprite_fetch_merge). Its six dots ARE its penalty,
+   so it takes the tail arm's offset whichever arm the first object took; no ROM
+   puts an LCDC.2 write inside a chained fetch.
+
+Sweeps, mealybug matching pixels, one build per cell. DMG is 552,188 of 552,960
+at the shipping settings and CGB 1,856,315 of 1,866,240; both columns move ONLY
+the two obj_size rows at every cell.
+
+  OBJ_PLANE1_LAG      0        1        2 (ship)   3        4
+  DMG            552068   552143   552188     552098   552068
+  CGB           1855880  1855955  1856315    1856285  1856110
+
+  OBJ_PLANE_GAP            1        2 (ship)   3
+  DMG                 552188   552188     552188
+  CGB                1856285  1856315    1856135
+
+  CGB_OBJ_SIZE_LATENCY     0        1        2        3 (ship)   4        5
+  CGB                1855975  1856110  1856285  1856315    1855955  1855880
+
+  OBJ_PLANE1_HEAD          4        5        6 (ship)   7        8
+  DMG                 552188   552188     552188     552110   552110
+
+The first three are strict optima pinned from both sides. The fourth is not:
+the head arm's read only has to be before dot 101 and 4, 5 and 6 all are, so the
+ROMs bound it from above at 6 and say nothing below. 6 is the structural value
+-- the six-dot fetch starting on the dot after the trigger.
+
+## `OBJ_FETCH_DOTS` / `OBJ_WAIT_SUB` (the OBJ penalty)
+
+---- The OBJ penalty ------------------------------------------------------
+
+Pan Docs, Rendering / "OBJ penalty algorithm", on the object about to be drawn
+("The Pixel" is its leftmost pixel, transparent or not):
+
+  1. Determine the tile (background or window) that The Pixel is within.
+  2. If that tile has NOT been considered by a previous OBJ yet: count how many
+     of that tile's pixels are strictly right of The Pixel, subtract 2, and
+     incur that many dots (or zero if negative) waiting for the BG fetch.
+  3. Incur a flat 6-dot penalty for fetching the OBJ's tile.
+
+Both halves fall out of this renderer's own state:
+
+  * the BG FIFO holds exactly the not-yet-emitted pixels of the tile being
+    displayed, so at the trigger dot it holds The Pixel plus everything right
+    of it. Step 2 is `fifo.size - 1 - 2` floored at 0, with no register decode
+    -- right through a mid-line SCX change and through the window, both of
+    which change which tile The Pixel is in without changing the FIFO;
+  * "not considered yet" is `fetcher_x` differing from the tile the last wait
+    was charged against. fetcher_x only advances on a push and a push cannot
+    happen while an object has the shifter stopped, so every object landing in
+    one displayed tile sees the same value.
+
+An object at OAM X 0..7 hangs off the left edge, so The Pixel is in the tile
+BEFORE the first on-screen one and the trigger dot is not its own; see the
+`lag` term at the trigger.
+
+Pan Docs' X = 0 exception ("always 11 dots regardless of SCX") IS a special
+case and is spelled out as one below. It was once claimed to fall out for free,
+which is true only at `SCX & 7 = 0`: The Pixel sits at index `SCX & 7` of the
+tile before the first on-screen one, so the derived wait is `5 - (SCX & 7)` and
+the derived penalty ramps 11, 10, 9, 8, 7, 6, 6, 6 over the residues. Hardware
+does not.
+
+Both terms swept independently against gambatte/sprites (476 rows), writing the
+penalty as `FETCH + max(0, fifo.size - SUB)`:
+
+  SUB        1     2     3     4     5
+  FETCH=4   306   256   254   256   254
+  FETCH=5   267   304   254   250   252
+  FETCH=6   263   269  [391]  266   262
+  FETCH=7   251   251   254   312   267
+  FETCH=8   250   251   251   254   286
+
+(6, 3) -- Pan Docs' flat 6 and its "minus 2" -- is the unique optimum and not
+close: the 9-diagonal (everything that gets X = 0 right and the rest wrong)
+tops out at 312. The pre-existing model was a flat 8 with no wait, the
+bottom-right corner.
+
+GBMicrotest `ppu_spritex_vs_scx.gb` is the hardware table: 306 assertions, one
+object at OAM X 0..16 crossed with SCX 0..8, two per cell bracketing the end of
+mode 3 to one M-cycle. It never writes $FF82 so the runner cannot score it, but
+`tools/gbppu/objtab.py` reads its expectations back out of this tree as dots by
+differencing against the same build's no-object line. Hardware:
+
+  X \ SCX&7   0   1   2   3   4   5   6   7
+     0       11  11  11  11  11  11  11  11
+     1       10   9   8   7   6   6   6  11
+     2        9   8   7   6   6   6  11  10
+     ...      (each row the one above rotated right)
+
+i.e. `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and a flat 11 for X = 0 --
+Pan Docs' algorithm plus its X = 0 exception and nothing else. All 153 cells
+match as of 2026-08-03 (79 did not before).
+
+Cancelling the object fetch mid-flight by clearing LCDC.1 is a separate rule
+and NOT in this table (ppu_spritex_vs_scx never writes LCDC inside mode 3);
+it is at fifo_obj_abort.
+
+## `fifo_head_window` (WIN_LINE_START_LATCH, WIN_HEAD_ABSORB)
+
+---- The head of a line that starts as a WINDOW line -----------------------
+
+WX below WIN_LINE_START_WX puts the window's first pixel left of the screen, where
+the shifter's equality can never reach it, so the whole line is fetched from the
+window map from its first tile. Two things about that start were wrong, and
+mealybug `m3_window_timing` measures both. It is a ruler, not a picture: WX = LY,
+WY = 0, SCX = 0, BGP driven black at a fixed dot of every line, so the x at which
+black begins IS the count of dots the head consumed before x = 0:
+
+  WX (= LY)     0   1   2   3   4   5   6 ..  10   11  12 .. 16  17+
+  reference     3   3   3   3   3   3   3 ..   3    4   5 ..   9    9
+  was           9   3   4   5   6   7   8 ..   3    4   5 ..   9    9
+
+The 17+ tail is the control: there the window starts right of everything the
+write can reach, so 9 is what a line with no window head at all reads.
+
+---- 1. WHERE WX is read (WIN_LINE_START_LATCH) ---------------------------
+
+This ROM writes WX inside mode 3 -- the trace puts the write on dot 85 of every
+line, and dot 81 of LY 0, whose handler is one M-cycle shorter (`line_0_fix`).
+Reading WX at the mode 2 -> 3 edge therefore reads the PREVIOUS line's value,
+which for LY 0 is the 144 left from the bottom of the frame: dingbat drew no
+window on LY 0 and read 9 where the reference reads 3. So the read is AFTER 85.
+
+The other side is `m3_wx_6_change`, which writes WX = 6 in mode 2 and WX = LY at
+dot 93 with WY = 4: its reference draws NO window on LY 4 or 5, so the value the
+decision sees there is still 6 and the read is BEFORE dot 93. The latch -- the
+last dot of the throw-away fetch at the head of mode 3, dot 86, or 82 on LY 0 --
+is the fetcher event inside that bracket, and the same event that already latches
+the fine scroll two dots later. Only the dot changes: the throw-away fetch that
+just ended read the BACKGROUND map, and every byte of it is overwritten by the
+fetch this restarts.
+
+---- 2. The window's OWN discard is absorbed (WIN_HEAD_ABSORB) -------------
+
+`fifo_sample_smooth_scroll` seeds `lx` at `-(7 - WX)` so the window's first tile
+lands on the right pixel, and this shifter charged a dot for every discarded
+pixel. Hardware does not: the reference is FLAT at 3 across WX = 0..6, and 3 is
+also what WX = 7..10 read -- lines whose window starts on screen and pays the
+ordinary six-dot startup fetch. So the head costs the same six dots either way,
+which is the ROM's own header sentence: it accounts for the entire WX-dependence
+with "the 6 T-cycle window startup fetch" moving against a fixed write, and names
+no other per-WX term. (The hardware photograph backs the reference: 86.2% of the
+disputed cells and 100% of the cells above 2 sigma -- tools/gbphoto.)
+
+It cannot be spelled as a smaller discard. Seeding `lx` at a flat -6 gets
+m3_window_timing to 0 the same way and COLLAPSES three rows that are pixel-exact
+today (`m3_wx_4_change` 23040 -> 12809, `m3_wx_5_change` -> 14731,
+`m3_window_timing_wx_0` -> 22914), because the discard is what ALIGNS the
+window's glyphs and carries the SCX term. So the discard stays and only the DOTS
+move: they come back as `6 - (7 - WX)` = `WX - 1` idle dots at the head of the
+window's own fetch -- FETCHER_ORDER's negative steps -- leaving mode 3 at 172 + 6
+for every WX in 0..6, exactly the length WX = 7 already had.
+
+WX = 0 needs no idle dot and gets none: its discard is already six (the `+= 1` in
+the sampler, from `m3_window_timing_wx_0`'s stair), and `max(0, WX - 1)` is that.
+The SCX term is deliberately NOT absorbed -- it is the throw-away fetch's own
+discard, not the window's, and `m3_window_timing_wx_0` is pixel-exact with it
+charged in full.
+
+---- Two suites that never see a pixel say the same thing ------------------
+
+The consequence is a MODE 3 LENGTH, so it is measurable with no reference frame,
+and both length instruments agree:
+
+  * GBMicrotest `win<WX>_a` reads STAT at cc = 257 wanting mode 3 and `win<WX>_b`
+    at cc = 261 wanting mode 0. Hardware samples the mode bits at `cc - 2`, so
+    mode 0 starts in [256, 259] and mode 3 is 176..179 dots -- for every WX in
+    0..15, the whole family answering one bracket. Charging the discard on top put
+    WX = 4 at 175 and WX = 5 at 174, outside it on the short side, with
+    `-d:gb_stat_read_trace` showing both `_a` rows passing on a mode flag that was
+    already 0 when the ROM read it. At 178 every WX is inside the bracket.
+  * gambatte's WX = 3 length brackets go green, six rows on both devices:
+    `window/m2int_wx03_m3stat_1`, `window/m2int_wx03_scx3_m3stat_1`,
+    `window/late_wx_wx03_2` and `sprites/space/10spritesPrLine_wx{3,4,5}_m3stat_ds_1`.
+    Nothing in that suite goes the other way.
+
+## A window-start line still pays SCX & 7 (WIN_WX0_PHASE)
+
+---- A line that STARTS as a window line still pays SCX & 7 ------------
+
+`lx` starting negative is this renderer's discard: those pixels are
+shifted out and not drawn, so each one is a dot. A line that starts as a
+window line (WX < WIN_LINE_START_WX) discards `7 - WX` for the window's
+own fine scroll -- and, until 2026-08-07, nothing at all for SCX, which
+made mode 3 independent of SCX & 7 on exactly those lines.
+
+mealybug m3_window_timing_wx_0 is the instrument, and it is a ruler: WX =
+0, `SCX = LY`, and BGP driven black at a fixed dot of every line, so the
+x at which black begins IS the count of dots consumed before x = 0, read
+off once per scanline for all eight residues. Reference against ours,
+SCX & 7 = 0..7:
+
+  SCX & 7      0   1   2   3   4   5   6   7
+  reference   11   9   8   7   6   5   4   3
+  was         11  11  11  11  11  11  11  11     (no SCX term at all)
+  is          11   9   8   7   6   5   4   3
+
+The photograph backs the reference here (tools/gbphoto: 94.2% of the 652
+disputed cells, one region, residual ratio 7.6x), and so does the ROM's
+own header: "The stair pattern is visible due to the delay from the
+lowest 3 bits of SCX, and due to window activating one T-cycle later when
+WX = 0 and SCX > 0." Both terms are in that sentence; the second one was
+already here with the WRONG SIGN (it read `+= 1`, i.e. one dot EARLIER),
+which is invisible without the first because nothing else in the tree
+moves SCX on a WX = 0 line.
+
+So the discard for a window line is `(7 - WX) + (SCX and 7)`, plus the
+documented extra T-cycle when WX = 0 and SCX & 7 > 0. The WX = 0 case
+discards SIX for its own fine scroll rather than seven -- Pan Docs calls
+WX = 0 unreliable and this renderer already carried both 6 and 7 for it;
+what the stair adds is which of them goes with SCX & 7 = 0.
+
+Cross-checks, all three of them independent of the row above:
+ * gambatte window/m2int_wx03_scx5_m3stat_1 goes green on BOTH devices --
+   a direct mode-3-length bracket at WX < 7 with SCX > 0, and the only
+   gambatte family that holds one.
+ * gambatte sprites/space/10spritesPrLine_wx0_m3stat_ds_2 goes green.
+ * GBMicrotest win0_scx3_a/_b bracket it. `_a` reads STAT at cc = 261 and
+   expects mode 3, `_b` at cc = 265 and expects mode 0, and hardware
+   samples the mode bits at cc - 2 (see STAT_READ_LAG), so mode 0 starts
+   in [260, 263] and mode 3 is 180..183 dots. This makes it 183 -- INSIDE
+   the bracket, where the old 178 was outside it on the short side.
+
+What it costs: win0_scx3_b itself goes red, at `0x83` against `0x80`.
+That is not this rule being wrong -- it is the readback lag catalogued as
+bucket 15 in docs/gb-failure-triage.md (we sample no earlier than cc - 5
+where hardware samples cc - 2) becoming visible on one more row, because
+the mode-3 end moved to where that defect shows. Same shape, same
+signature and the same twenty siblings as win6_b next door.
+
+---- The discard is `7 - WX` at EVERY WX, WX = 0 included (WIN_WX0_PHASE)
+
+This used to carry a `+= 1 / -= 1` pair around `ppu.wx == 0`, which made
+the WX = 0 discard six rather than seven when SCX & 7 was zero. That is
+the right number of DOTS and the wrong PHASE: it puts the window's first
+tile one pixel to the right of where hardware puts it, which is invisible
+in every ruler ROM (they measure a black-x, i.e. a dot) and visible in
+exactly one place -- a line whose window is turned OFF again partway
+across, where the background resumes on the window's own tile boundary.
+mealybug m3_lcdc_win_en_change_multiple_wx is that ROM (see
+WIN_WX0_PHASE in gb.nim for the reading). The dot the pair was paying for
+moves to the head, where the rest of the window's head budget already is.
+
+## `SCX_FINE_LATCH_WRAP` / `SCX_STORE_STALL_DOTS`
+
+---- SCX_FINE_LATCH_WRAP -------------------------------------------------
+
+The window above is not the whole comparator. `gambatte/scx_m3_extend` --
+the one bracket four rounds of the mode-3 campaign could not reach, and
+which the window explicitly did NOT touch -- says a mid-line store can
+make mode 3 LONGER, and this is the missing half.
+
+---- The shape ----------------------------------------------------------
+
+The discard is a three-bit SLOT COUNTER, not a countdown. It runs 0..7 from
+the latch dot, and on each dot it compares its slot against the LIVE
+`SCX and 7`. Equal -> the discard ends, which is the classic penalty and is
+what the window above already models. Slot 7 with no match -> it WRAPS and
+runs the eight slots again. So a store's effect depends on where it lands
+against BOTH the old value and the new one:
+
+  store's slot <= new F        the counter has not passed the new target,
+                               it matches it -- the window above
+  new F < slot <= old F        the counter has already walked past the new
+                               target and can no longer match the old one:
+                               it runs to 7, wraps, and matches on the
+                               SECOND pass. Eight dots, and this constant
+  slot > old F                 the match already happened; no effect
+
+"The later the store, the bigger the extension" -- round 2's phrasing of
+the bracket -- is the boundary between the first two regimes sweeping as
+the store moves later.
+
+---- What prices it, from our own rows ----------------------------------
+
+`tools/gbscx/edgemap.sh` on the family, and the `_ds` pair is the whole of
+it. Those two write SCX **twelve times on one line**, every six dots,
+cycling the low bits 4,2,0,6,4,2,0,6,4,2,0,6 against a latched 7. They
+bracket hardware's 3 -> 0 edge to (329, 331] where the shipping tree is at
+259 -- **71 or 72 dots** -- and with this rule at 8 dingbat lands on
+**330**, inside a two-dot window arrived at by twelve stores compounding.
+Nine of the twelve wrap and three do not, which is what the mask is:
+
+  * WITHOUT `and 7` every store after the first wrap measures against an
+    ever-growing count, all twelve wrap, and mode 3 runs to 355 and off
+    the end of the line. That is not a bug to hide -- it is exactly the
+    runaway SameBoy's changelog calls "SCX banging", and hardware stops
+    because a store that RAISES the target above the current slot can
+    still be matched on the pass it lands in.
+
+The single-store members then agree, and they are what brackets 8 rather
+than merely admitting it. Swept whole-suite, one build per value:
+6 -> 4049, 7 -> 4050, **8 -> 4051**, 9 -> 4050, 10 -> 4050. A strict local
+maximum, and 8 is one whole pass of an eight-slot window rather than a
+fitted number.
+
+---- The one row it does not reach --------------------------------------
+
+`scx_m3_extend_1 [dmg]`. Both CGB arms and the banging pair go green; the
+DMG arm wants its 3 -> 0 edge 3-6 dots further still, and no wrap can
+supply that (a second one is 8 and overshoots the bracket). It cannot be
+paid by `STAT_M0_FIELD_TAIL` either, and that is settled rather than
+assumed: `tools/gbscx/readidiom.py` says this ROM reads STAT with
+`LDH A,($41)`, IO on its third M-cycle, so round 4's `STAT_M0_TAIL_MAX_MC`
+rule excludes it by construction. The residual is therefore a DMG-only,
+single-row, sub-M-cycle question about where that device's SCX store lands
+against the latch -- which is a much smaller thing than the 11-14 dot
+whole-family bracket it replaces.
+
+## `SCX_FINE_BORROW` / `SCX_FINE_BORROW_DMG_LEAD` / `SCX_FINE_LATCH_LIVE`
+
+const SCX_FINE_BORROW* {.intdefine.} = 1
+Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
+`SCX and 7` below the fine scroll the line latched. 1 ships; 0 is the previous
+model and the control arm.
+
+---- The shape of the claim -----------------------------------------------
+
+The BG fetcher is NOT addressed as "a tile index plus a scroll". It is
+addressed by a SCREEN POSITION with the live SCX added, so SCX's low three
+bits take part in the carry into the tile-address bits:
+
+    column = ((SCX + 8*k - F) shr 3) and 31
+
+where `k` is the fetch index on this line and `F` is `SCX and 7` as it stood
+when the line latched its fine scroll (`scx_fine`, in
+fifo_sample_smooth_scroll). `8*k - F` is the screen x the fetch is for.
+Expanded, the two forms agree except in one case:
+
+    SCX and 7 >= F   ->   k + (SCX shr 3)        the old model
+    SCX and 7 <  F   ->   k + (SCX shr 3) - 1    the borrow
+
+so nothing moves unless a write LOWERS the low three bits mid-line, and then
+the column comes out one tile lower for the rest of the line. Spelled as the
+difference rather than the sum, because the sum would have to re-derive
+`8*k - F` from a counter this renderer keeps in tiles.
+
+---- What derives it ------------------------------------------------------
+
+gambatte's `scx_during_m3`, read as a displacement ruler rather than pass/fail
+(tools/gbscx). Each ROM writes SCX three times per line off a mode-2 STAT
+interrupt with the writes swept one M-cycle per step, and its background row
+is aperiodic enough that the frame reads back as `screen x -> background X`.
+The directory name is the three SCX values:
+
+  dir          SCX and 7 per write   late writes that LOWER it   rows
+  scx_0060c0        0, 0, 0                   none               all pass
+  scx_0063c0        0, 3, 0             the third, when the      2 of 14
+                                        second landed in the
+                                        discard and raised F
+  scx_0360c0        3, 0, 0                   the second         12 of 14
+  scx_0363c0        3, 3, 0                   the third          14 of 14
+  scx_0367c0        3, 7, 0                   the third          14 of 14
+  scx_0761c0        7, 1, 0                   the second         12 of 14
+
+The correlation is exact both ways: every failing row's disputed span follows
+a write that lowers `SCX and 7`, every row with no such write passes, and
+`scx_0060c0` -- the one directory that never changes the low bits -- is green
+end to end. The error is always ONE TILE whatever the size of the drop (`3->0`
+is minus three, `7->1` minus six, both exactly 8 pixels), which is what says
+this is a carry and not a count.
+
+The fine scroll itself does not move: after such a write hardware keeps
+emitting on the OLD residue, so the disputed span is displaced by exactly 8 and
+never by 1..7. That is the second half of the derivation -- `F` is a latch and
+the borrow is taken against it, rather than the shifter re-discarding.
+
+---- The device split, and the three rows that are all of it --------------
+
+Three ROMs change ONLY the low bits, so they see the borrow with nothing else
+moving, and they are the only rows in the tree that can separate the devices:
+
+  ROM                     drop   DMG reference        CGB reference
+  scx1_scx0_during_m3_1   1->0   no change at all     borrows at x = 63
+  scx2_scx1_during_m3_1   2->1   no change at all     borrows at x = 62
+  scx2_scx0_during_m3_1   2->0   borrows at x = 62    borrows at x = 62
+
+Same ROM, dot and drop of one, and the consoles disagree; a drop of TWO borrows
+on both. So the DMG's threshold is one pixel tighter and nothing else differs:
+DMG borrows on `(SCX and 7) + 1 < F`, CGB on `(SCX and 7) < F`. That is
+SCX_FINE_BORROW_DMG_LEAD, and as physics it says the DMG fetcher's screen
+position sits ONE PIXEL further along at the moment the sum is taken.
+Bracketed from both sides by this trio: at 0 the two `-1` rows go red on DMG,
+at 2 the `2->0` row does, and the CGB arm is unmoved either way.
+
+NOT `CGB_PIPE_MCYCLES` -- that is a whole M-cycle against MACHINE time; this is
+one pixel inside the fetcher's own sum and invisible to every other row.
+
+Two neighbouring shapes, each refused: "the discard re-arms and throws 8 more
+pixels away" is refused by the residue (a re-armed discard would leave the line
+emitting on the NEW `SCX and 7`, and every measured span keeps the old one);
+"an extra tile is fetched" is refused by sign (the spans sit one tile LOWER,
+i.e. the picture moves right, which is a borrow and not an insertion).
+
+The window's own fetch is addressed from `current_window_line` and `fetcher_x`
+with no SCX term, so it cannot borrow and is left alone. Written as an `ord`
+term rather than an `if` because this is the mode 3 dot loop.
+
+const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
+Pixels the DMG's fetcher position leads the CGB's by inside the borrow
+comparison above. Derived and bracketed there, off the three
+`scxN_scxM_during_m3_1` ROMs. Subtracted into `scx_fine` at the latch so the
+dot loop never sees it.
+
+---- SCX_FINE_LATCH_LIVE ------------------------------------------------
+
+Declared in gb.nim beside the type it grows a field on; this is its derivation.
+
+The fine scroll is not sampled on ONE dot. A store to SCX joins the discard for
+as long as the discard still has pixels to throw away, moving the line's fine
+scroll and its own length with it. `false` is the old model, where the sample
+and the discard shared a dot. Worth gambatte +6 / -1.
+
+gambatte `scx_during_m3` sweeps one store across the head of mode 3 an M-cycle
+at a time. Traced with `-d:gb_m3_trace`, dingbat latches at dot 88 on every line
+but line 0, and the interesting stores land at dots 89 and 93. Whether hardware
+lets them move the fine scroll depends on the fine scroll the line already had,
+which is what says the window is the DISCARD rather than a fixed number of dots:
+
+  family      F   store 89   store 93   hardware's residue after it
+  scx_0063c0  0     no          no      keeps 0 -- there is no discard
+  scx_0367c0  3     YES         no      takes 7, the whole of `$67`
+  scx_0360c0  3     YES         no      takes 0, the whole of `$60`
+  scx_0761c0  7     YES         YES     takes 1, the whole of `$61`
+
+Read down the `store 89` column and a fixed window is refused outright: same dot,
+same offset from the same latch, and `scx_0063c0` says no while the other three
+say yes. The only thing separating them is `F`, which is exactly how many dots of
+discard are left. Read across `scx_0761c0` and the window is at least 5 dots long
+at `F = 7`, which no capped spelling reaches without also opening it at `F = 0`.
+
+So there is no constant here: the condition is `lx < 0`, which is what a negative
+`lx` already means. Swept as a capped `min(N, F)` first, the score saturates at
+N = 3 while the residues keep falling to N = 7 (`scx_0761c0/scx_during_m3_4`,
+6292 wrong pixels at N = 3 against 2145 at N = 7, with the DMG/CGB asymmetry
+there vanishing) -- the data wanted the cap gone.
+
+The one row it costs is `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`, a
+mode-3 LENGTH row on line 0, where this tree already carries a one-M-cycle
+difference (LY0_PIPE_MCYCLES, and a latch at dot 84 rather than 88). Its siblings
+`_scx0_2` and `_scx0_3` stay green, so this is not the mechanism being wrong in
+general. The obvious repair was built rather than argued away and is REFUSED:
+widening the window by that M-cycle on line 0 alone -- the shape
+LY0_PIPE_MCYCLES predicts -- scores 3998/5005 against 4009, losing eleven
+`scx_during_m3` rows to buy the one back. So line 0's latch is early by something
+that is not this window's length, and the row is left red with its cause named.
+
+Price: the +0.446% this note was once parked on was an object-layout artefact of
+a neighbouring field. Re-benched in the tree that ships STAT_M0_FIELD_TAIL --
+whose `obj_dots_line` sits in the same object-scratch block -- the same flag on
+the same ROM reads +0.027% (blargg cpu_instrs, 2400 frames after 300 warmup,
+four interleaved runs, `cycles=` identical in all eight).
+
+## `OAM_SCAN_DMA_LOCK` / `OBJ_SCAN_DOT_ADJ` / `CGB_OBJ_SCAN_LEAD`
+
+const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
+An OAM DMA owns OAM for the whole of its transfer, and the mode-2 OAM scan
+gets nothing out of the entries it reaches while that lasts.
+
+Measured and derived 2026-08-13, ships OFF at 0 -- the previous model is the
+scan as one burst at dot 80 against whatever OAM holds by then, transfer
+ignored. Full derivation in docs/gb-failure-triage.md.
+
+---- The mechanism ---------------------------------------------------------
+
+Mode 2 is 80 dots and there are 40 OAM entries: the scan reads one entry every
+two dots. Which dot an entry is read on is normally unobservable -- the CPU is
+locked out of OAM for all of mode 2 -- so the burst is exact. An OAM DMA is
+the exception: it owns OAM from the CPU clock domain, one byte per CPU
+M-cycle, straight through mode 2. That clock crossing is why no constant
+offset could ever fix the `oamdma/late_sp*` families -- the transfer advances
+one entry per 16 dots at normal speed and one per 8 in double, against a scan
+that always does one per 2, so the entry the lock opens or closes on moves
+with the speed. (The triage doc had these 27 rows down as a wrong clock domain
+in `CGB_OAM_DMA_START_T`; falsified -- sweeping that latency from 4 T to 40 T
+moves the `late_sp*` set by zero rows while moving the rest of `oamdma` by
+hundreds.)
+
+---- What pins it ----------------------------------------------------------
+
+Eight families, sixteen one-M-cycle brackets, both devices. The `x` half steps
+the transfer's START across one named entry's dot and the `y` half steps its
+END across the same one, and both put the same entry at the same dot: `sp00`
+in [-3, 1), `sp01`/`sp02` in [1, 5), `sp39` in [77, 81) -- i.e. `2n`, to two
+dots. Same per-object dot the `sprites/late_sizechange*` ladder derives through
+LCDC.2 instead of through a transfer: two suites, two mechanisms, the same two
+surviving cells (see OBJ_SCAN_DOT_ADJ).
+
+Turned on: gambatte 4183 -> 4199, +16 / -0, all sixteen `late_sp*`; mooneye
+`oam_dma*` and all twelve `acceptance/ppu` rows byte-identical; dmg-acid2 and
+cgb-acid2 byte-identical.
+
+---- What refuses it, and it is one ROM ------------------------------------
+
+`strikethrough` -- the one screenshot ROM in the bundle running an OAM DMA
+mid-picture -- goes from pixel-exact to 23033/23040 on both devices. Its LY 68
+has a transfer covering the whole of that line's mode 2, and its reference
+still draws OAM entry 39 (screen x 71..78, exactly the 7 missing pixels). A
+lock lasting the whole transfer cannot leave that entry readable, so the
+DURATION is wrong even though both edges are pinned to the dot.
+
+Two narrower durations were built and are worse: blocking only the entry the
+write port is on scores 28/52 on the families (against 42 for this and 26 for
+the burst), and blocking only the two M-cycles the OAM bus changes hands on
+scores 38/52. Neither saves `strikethrough`, because the progressive read they
+both need displaces entry 39 out of the ten-object cap on its own.
+
+So the shape is right and the duration is not. Left at 0 until it is derived
+rather than fitted.
+
+---- 2026-08-20: the REDIRECT reading, tested and refused ------------------
+
+LIJI32 (mooneye-test-suite issue #1) describes this span as a REDIRECT rather
+than a lock: the PPU uses the DMA destination address, except for bit 0. That
+looked like it dissolved `strikethrough`'s objection, since a redirected read
+still yields an OBJECT where a blocked one yields nothing. Built both halves
+(this scan and `obj_oam_dma_read`'s fetch) and swept the destination offset,
+against a shipping baseline of Pass 1016 / gambatte 4269 / oamdma 771 / both
+strikethrough rows exact:
+
+  arm                              Pass  gambatte  oamdma  strike dmg / cgb
+  lock, both devices               1014    4285      782     23033 / 23033
+  + scan redirect                  1014    4281      778     23032 / 23033
+  + object-fetch redirect too      1014    4281      778     23031 / 23033
+  lock, DMG-family only            1015    4277      774     23033 / PASS
+  that + redirect, off -1 / 0 / +1 1015  4273-4277 770-774   23033 / PASS
+
+The redirect never helps: every redirect arm scores at or below its lock
+counterpart and never better on `strikethrough`. So the +16 the lock buys is
+not explained by "reads the wrong address".
+
+One real finding, worth keeping if this is ever enabled: the span should be
+DMG-FAMILY ONLY. Gating it off on CGB recovers `strikethrough-cgb` to a clean
+pass while still gaining +8 gambatte over shipping, halving the lock's cost to
+one runner row. That matches LIJI's split -- he has CGB-E and later reading
+unmodified values -- although he puts CGB-0..D in the blocking camp and
+dingbat scores this row at CPU CGB C, so either that reference was captured on
+a CGB-E or the block is narrower than mode 2.
+
+Nothing beats shipping at the runner level (1016). The blocker is unchanged
+and is now known not to be an addressing question: `strikethrough-DMG` refuses
+the lock's DURATION, and the redirect does not rescue it at any offset.
+
+---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
+
+The scan runs in one go on the dot mode 2 ends, which is fine for OAM itself
+(the CPU cannot reach OAM during mode 2) but NOT for LCDC.2: the height is a
+register the CPU can move under the scan, and hardware compares each object's Y
+against the height as it stands in THAT object's own two-dot slot. gambatte's
+`sprites/late_sizechange*` is thirty-eight ROMs of exactly that, and it names
+the object in the filename (`_sp00`, `_sp01`, `_sp02`, `_sp39`), which makes it
+a ruler rather than a single boundary.
+
+Each sets up an object on the line at 8x16 and off it at 8x8, moves LCDC.2 once
+at a chosen dot of line 8, and prints 3 if the object was scanned in. Under
+`-d:gb_lcdc2_trace` (4 dots per M-cycle, so each family brackets to one M-cycle):
+
+  family / object   write dots        DMG says            CGB says
+  _sp00   obj 0     453 of ly 7, 1    seen, NOT seen      same as DMG
+  _sp01   obj 1     453, 1, 5         seen, seen, not     seen, MIXED, not
+  _sp02   obj 2     1, 5              seen, not           same as DMG
+  (none)  obj 9     13, 17, 21        seen, seen, not     seen, MIXED, not
+  _sp39   obj 39    73, 77, 81        seen, seen, not     seen, MIXED, not
+
+So the DMG's sample dot for object N is bracketed into `(2N - 4, 2N]` by the
+`_sizechange` half and `[2N - 3, 2N + 2)` by `_sizechange2` -- intersection
+`{2N - 1, 2N}`, the object's own slot and nothing else. 2N is the structural one
+(the first dot of the slot, and the dot the scan's first OAM read is on) and
+OBJ_SCAN_DOT_ADJ expresses the other. The ladder collapses to a single dot per
+object because a write dot and a sample dot are compared directly -- no latency
+to fit. Device-independent, and 24 gambatte rows on its own.
+
+MIXED: the three CGB cells cannot be one sample dot at all. Object 1's write at
+dot 1 is `not seen` when it CLEARS the bit (late_sizechange_sp01_2, the object
+stays 8x16) and `seen` when it SETS it (late_sizechange2_sp01_1, the object
+becomes 8x16). Same object, same dot, opposite conclusions: what is constant is
+the ANSWER, 8x16. The same pair holds at object 9 (dot 17) and object 39 (dot
+77), and in each the dot is `2N - 1`, one M-cycle before the DMG's.
+
+So the CGB scans each object against BOTH the DMG's dot and the dot one M-cycle
+earlier, keeping the object if either says it is on the line -- and
+`sprite_on_line` is monotone in the height, so "either says on the line" is
+exactly "either sample says 8x16". As a latency that is the bit arriving at the
+scan LATER on CGB, the same direction as CGB_OBJ_SIZE_LATENCY at the object
+fetch; the "opposite sign" this family used to be filed under came from reading
+it as a fetch measurement. See CGB_OBJ_SCAN_LEAD in gb.nim.
