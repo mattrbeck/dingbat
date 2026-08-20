@@ -46,15 +46,101 @@ proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
   of INT_JOYPAD: irq.joypad_interrupt    = false
   else: discard
 
+proc irq_packed*(irq: GbInterrupts): uint8 {.inline.} =
+  0xE0'u8 or
+  (if irq.joypad_interrupt:   0x10'u8 else: 0'u8) or
+  (if irq.serial_interrupt:   0x08'u8 else: 0'u8) or
+  (if irq.timer_interrupt:    0x04'u8 else: 0'u8) or
+  (if irq.lcd_stat_interrupt: 0x02'u8 else: 0'u8) or
+  (if irq.vblank_interrupt:   0x01'u8 else: 0'u8)
+
+when IF_READ_SAMPLE_T < 4:
+  proc irq_latch_mcycle*(irq: GbInterrupts) {.inline.} =
+    ## Called IF_READ_SAMPLE_T dots into the M-cycle of a $FF0F read, and only
+    ## there (mem_tick_if_read in memory.nim). See irq_read.
+    irq.if_prev = irq_packed(irq)
+
+# ---- What a CPU read of $FF0F is allowed to see -----------------------------
+#
+# dingbat ticks a bus access's whole M-cycle and then serves the read, so a
+# read of $FF0F returns IF as it stands at the END of its own M-cycle -- every
+# source that rose anywhere inside it included. The dispatch is entitled to
+# that view (it decides at the M-cycle boundary, and IRQ_SAMPLE_T in cpu.nim is
+# where its own clear sits), but a READ is a bus transaction that latches its
+# data part way through the cycle, and the suites say so in one voice.
+#
+# The signature is a single extra IF bit, always in dingbat's favour, on rows
+# whose read lands in the same M-cycle as a line boundary. GBMicrotest states
+# it most plainly, because those rows print IF itself:
+#
+#   vblank_int_if_a     got $E2  want $E0     lyc1_int_if_edge_a   $E2 / $E0
+#   vblank2_int_if_a    got $E1  want $E0     oam_int_if_edge_a    $E2 / $E0
+#   hblank_int_if_a     got $E2  want $E0     lcdon_to_if_oam_a    $E2 / $E0
+#   line_144_oam_int_c  got $E3  want $E2     stat_write_glitch_l143_c  $E3 / $E2
+#
+# and gambatte says the same thing 100-odd times over in `got 2 expected 0`,
+# `got 3 expected 1` and `got E2 expected E0`.
+#
+# The bracket that separates this from "the source rises a cycle late" is
+# gambatte m1/lycint_vblankirq_{1,2}: STAT = $40 (LYC alone), LYC = 143, and the
+# handler counts 103 / 104 NOPs from the LY 143 STAT dispatch to an IF read.
+# Hardware -- and SameBoy -- read 0 then 1; dingbat reads 1 at both. If the
+# VBlank IF bit itself were early, GBMicrotest's int_vblank1_nops sled (which
+# times the DISPATCH, not a read) would be one M-cycle out too, and it is
+# exact. So it is the read that is entitled to less, not the source that is
+# early.
+#
+# It is NOT a whole M-cycle, and one family says so on its own. gambatte
+# ly0/lycint152_lyc0irq_{1,2} wants E0 then E2, and the source it is waiting for
+# is the LY 153 -> 0 snapback's LYC = 0 match, which lands at LYC_RELATCH_DOT --
+# dot 9 of line 153, the SECOND dot of its M-cycle, not the last. Hardware sees
+# it inside the reading M-cycle; a latch at the M-cycle's top does not. So the
+# sample point is part way through, which is why this is a T-count and why the
+# M-cycle's dots are run in two pieces around it (mem_tick_components) the way
+# CGB_*_LATENCY already splits mem_write's.
+#
+# Swept, whole runner of 1225 / gambatte of 5005 / GBMicrotest of 482, one build
+# per cell, against `main` at 6759d52 -- so the gambatte column is three rows
+# below today's, the serial shift-clock fix having landed between; every cell is
+# against the same tree. On the tree this ships in the shipping cell is
+# 1042 / 4322 / 438 against 1016 / 4272 / 430 with it off.
+#
+#   IF_READ_SAMPLE_T   runner   gambatte   micro
+#          0            1037      4322      433
+#          1            1039      4320      435
+#          2            1042      4319      438   <- ships
+#          3            1039      4307      435
+#          4 (off)      1016      4269      430
+#
+# Two-sided on GBMicrotest, which is the instrument that prints IF itself, and a
+# strict maximum on the runner. gambatte prefers 0 by three rows and that column
+# is not the bracket: every row between 0 and 2 there is a `_2`/`_1` step of a
+# family whose OTHER arm moves the opposite way, i.e. the OAM-source phase this
+# constant does not own (see STAT_M2_LEAD in ppu.nim). Mooneye-wilbertpol is
+# +15 at every cell, mooneye proper, mealybug, AGE and the shootout unmoved.
+#
+# The split has to be proven neutral before the column means anything, and it
+# is not neutral for free: `fifo_tick` re-snapshots `read_mode` on every entry,
+# so a naive split re-latches the STAT/VRAM/OAM read mode mid-M-cycle and moves
+# twelve gambatte rows that have nothing to do with IF. mem_tick_components
+# carries the fix; `-d:gb_if_split_control` keeps the split and returns the live
+# IF byte, and with the fix in place that build scores the baseline exactly
+# (1225/1016, gambatte 4269).
+#
+# What is left after it, and what it is NOT: GBMicrotest's `oam_int_if_edge_b`
+# and `_d` still disagree in OPPOSITE directions with `_a` and `_c` green, and
+# `lcdon_to_if_oam_b` with them. That is the OAM STAT source rising one M-cycle
+# before the line boundary -- STAT_M2_LEAD, bucket 14 -- read through a now-
+# sharp instrument, not a second read phase.
 proc irq_read*(irq: GbInterrupts; idx: int): uint8 =
   case idx
   of 0xFF0F:
-    0xE0'u8 or
-    (if irq.joypad_interrupt:   0x10'u8 else: 0'u8) or
-    (if irq.serial_interrupt:   0x08'u8 else: 0'u8) or
-    (if irq.timer_interrupt:    0x04'u8 else: 0'u8) or
-    (if irq.lcd_stat_interrupt: 0x02'u8 else: 0'u8) or
-    (if irq.vblank_interrupt:   0x01'u8 else: 0'u8)
+    # `gb_if_split_control` keeps the split tick and returns the live byte: the
+    # control that says the split itself moved nothing (see above).
+    when IF_READ_SAMPLE_T < 4 and not defined(gb_if_split_control):
+      irq.if_prev
+    else:
+      irq_packed(irq)
   of 0xFFFF:
     irq.top_3_ie_bits or
     (if irq.joypad_enabled:   0x10'u8 else: 0'u8) or

@@ -452,6 +452,65 @@ After that, the sweep ROM: vary `initial_data`'s two bytes and the DMA source
 byte across a grid so the OR-and-mask rule and the range gate are measured
 rather than taken from a comment.
 
+## SOLVED 2026-08-20: a `$FF0F` read samples 2 dots into its own M-cycle
+
+`IF_READ_SAMPLE_T` in `gb.nim`, mechanism written up above `irq_read` in
+`gb/interrupts.nim`. Whole runner **1016 -> 1042**, gambatte **4272 -> 4322**,
+GBMicrotest **430 -> 438**, mooneye-wilbertpol **121 -> 136**.
+
+dingbat ticks a bus access's whole M-cycle and then serves the read, so a read
+of `$FF0F` returned IF as it stood at the END of its own M-cycle -- every source
+that rose anywhere inside it included. The dispatch is entitled to that view; a
+bus read is not. The signature was a single extra IF bit, always in dingbat's
+favour, on every row whose read lands in the same M-cycle as a line boundary:
+GBMicrotest's `vblank_int_if_a` ($E2/$E0), `vblank2_int_if_a` ($E1/$E0),
+`lyc1_int_if_edge_a`, `hblank_int_if_a`, `line_144_oam_int_c`,
+`stat_write_glitch_l143_c`, and about 130 gambatte rows reading `got 2 expected
+0` / `got 3 expected 1` / `got E2 expected E0`.
+
+Two brackets decide it and they pull opposite ways, which is why it is a
+T-count and not a whole M-cycle:
+
+* `m1/lycint_vblankirq_{1,2}` (STAT = $40, LYC = 143, 103 / 104 NOPs from the
+  LY 143 dispatch to an IF read) wants `0` then `1`; dingbat read `1` at both.
+  SameBoy reads `0`,`1`. So the read has to lose the line-boundary dot.
+* `ly0/lycint152_lyc0irq_{1,2}` wants `E0` then `E2`, and the source is the LY
+  153 -> 0 snapback's LYC = 0 match at `LYC_RELATCH_DOT` -- dot 9, the SECOND
+  dot of its M-cycle. Hardware sees that one inside the reading M-cycle. So the
+  read must NOT lose the whole M-cycle.
+
+`IF_READ_SAMPLE_T = 2` is the only cell that satisfies both, and GBMicrotest --
+the instrument that prints IF itself -- brackets it two-sided (433 / 435 / **438**
+/ 435 at 0 / 1 / 2 / 3; the sweep's gambatte column was taken at 6759d52, three
+rows below today's).
+
+**It is not the source that is early.** GBMicrotest's `int_vblank1_nops` and
+`int_lyc_nops` sleds time the DISPATCH rather than a read and are exact; only
+the read moves.
+
+**Cost.** Splitting every M-cycle's dots around the latch costs **+19.5% of all
+retired instructions** on Pokemon Blue -- `fifo_tick`'s lazy idle span is
+written to swallow a whole M-cycle and two halves defeat it. Behind an address
+test in `mem_read` (`mem_tick_if_read`), the same model costs **+0.07%** on
+Pokemon Blue and **+0.29%** on Pokemon Crystal.
+
+**Trap for the next agent.** `fifo_tick` re-snapshots `read_mode` on every
+entry, so a naive split re-latches the STAT/VRAM/OAM read mode mid-M-cycle and
+moves twelve gambatte rows that have nothing to do with IF (`oam_access` /
+`vram_m3` `postread`, `cgbpal_m3`, `window/*busyread`). `-d:gb_if_split_control`
+keeps the split and returns the live byte; with the fix in place that build
+scores the baseline exactly, which is what makes the sweep column mean anything.
+
+### What is left after it
+
+The residual is one named quantity, not a bucket. `oam_int_if_edge_{a,c}` are
+green and `_b`/`_d` disagree in OPPOSITE directions, with `lcdon_to_if_oam_b`
+alongside them: that is the OAM (mode 2) STAT source rising one M-cycle before
+the line boundary -- `STAT_M2_LEAD`, bucket 14 -- read through a now-sharp
+instrument. `m2int_m0irq` is fully green on DMG after this change and uniformly
+one M-cycle out on CGB, which is a CGB-only mode-0 residual stated cleanly for
+the first time.
+
 ## RESOLVED 2026-08-19: `rtc3test-1` and `-3` were a HARNESS bug, not an RTC one
 
 Both rows now pass and the Shootout section is **13/13**. There was never

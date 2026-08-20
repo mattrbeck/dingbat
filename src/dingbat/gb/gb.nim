@@ -38,6 +38,15 @@ const LY_BLIND_SCOPE* {.intdefine.} = 1
 #
 # STAT_IRQ_LEAD still ships at the value that needs no field and no branch, so
 # the shipping build is exactly the tree without it.
+# Where inside its own M-cycle a CPU read of $FF0F latches the byte, counted in
+# T-cycles from the start of the M-cycle's PPU dots (so it is dots, and it
+# scales with double speed). 4 is the M-cycle's end -- what this tree did before
+# the constant existed -- and compiles the field, the store and the split tick
+# out entirely. The write-up and the ROMs that bracket it are above `irq_read`
+# in interrupts.nim; it is declared here only because the GbInterrupts field it
+# gates is in the type block below.
+const IF_READ_SAMPLE_T* {.intdefine.} = 2
+
 const STAT_IRQ_LEAD* {.intdefine.} = 0
 const STAT_LYC_LEAD* {.intdefine.} = 0
   ## The same lead as STAT_IRQ_LEAD, applied to the **LYC source alone** --
@@ -3104,6 +3113,10 @@ type
     serial_enabled*:     bool
     joypad_enabled*:     bool
     top_3_ie_bits*:      uint8
+    when IF_READ_SAMPLE_T < 4:
+      # $FF0F as it stood at this M-cycle's latch point. See IF_READ_SAMPLE_T
+      # above and the write-up at irq_read in interrupts.nim.
+      if_prev*:          uint8
 
   # ---- Serial ----
   GbSerialDriver* = ref object of RootObj
