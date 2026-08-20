@@ -562,6 +562,34 @@ edit:
   `nim c -d:test_harness -d:release --path:src -d:<CONST>=<n> -o:dingbat_test
   tests/dingbat_test.nim && ./dingbat_test_runner`.
 
+**A SameBoy oracle for this suite: `tools/gbfuzz/sameboy_gambatte`.** Scoring dingbat
+tells you a row is wrong; it does not tell you what a *correct* emulator does with a ROM
+you have just modified, which is the whole method for pinning one of these families to an
+M-cycle. That runner runs a gambatte ROM under SameBoy and prints the same decoded hex
+string `--mode=gambatte` reads off the screen:
+
+```
+tools/gbfuzz/sameboy_gambatte <bootdir> --rom <dmg|cgb> <rom.gb> [frames]
+tools/gbfuzz/sameboy_gambatte <bootdir> <list.tsv> [frames]   # dev in col 1, ROM last
+```
+
+The device comes from the list, never from the cart header — nearly every ROM here ships
+a CGB header even for its DMG half, so scoring by header answers the wrong machine's
+question on ~1,700 rows. `SAMEBOY_CGB_MODEL=0|A|B|C|D|E` picks the CGB revision, and
+**C is the default because that is what gambatte's `cgb04c` tag means**: measured
+2026-08-20 over all 4,674 hex rows, rev C scores 4,216 and rev E only 4,187.
+
+**Its one caveat, and it is load-bearing.** SameBoy has no skip-boot API, so this runner
+plays the real boot ROM and counts frames from its end, while gambatte and dingbat both
+skip boot. Measured on `oamdma/late_sp00x_{1,2}`, whose expected values are `0` then `3`
+(the siblings are one M-cycle of NOPs apart): SameBoy answers `0` for **both** and
+dingbat answers `3` for **both**. That is a one-M-cycle post-boot phase offset, opposite
+in sign on the two emulators — not a disagreement about the mechanism. So SameBoy
+*passing* a row is strong evidence; SameBoy *failing* one by exactly the sibling's
+expected value is the phase artefact and says nothing. The trustworthy use is
+**differential**: modify the ROM and ask whether SameBoy's answer moves the way the model
+predicts, because a constant offset cancels.
+
 **Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
 its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
 `--dump-tiles=N` prints the raw top-row tiles, and running it over a few

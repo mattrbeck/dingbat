@@ -1,5 +1,6 @@
 # Built runners — they link against out-of-tree SameBoy/mGBA/Nim builds.
 sameboy_runner
+sameboy_gambatte
 mgba_gb_runner
 dingbat_gb_nav
 sameboy_fps
