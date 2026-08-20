@@ -1925,8 +1925,19 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # still on the bus, so the block's BYTES are held back HDMA_VISIBLE_DOTS dots.
   # Everything else about the block, its 8 M-cycles included, happens here.
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
-    if gb.cpu.halted: ppu.hdma_block_due = true
-    else:             ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
+    if gb.cpu.halted:
+      ppu.hdma_block_due = true
+      ppu.hdma_due_delay = 0
+    else:
+      when HDMA_STEAL_DELAY_M != 0:
+        # Owed, but the CPU keeps the bus for HDMA_STEAL_DELAY_M more
+        # instruction boundaries; cpu.tick pays it. See that constant.
+        ppu.hdma_block_due = true
+        # 1 = run at the FIRST instruction boundary after the edge, so the
+        # counter is one less than the constant.
+        ppu.hdma_due_delay = int8(HDMA_STEAL_DELAY_M - 1)
+      else:
+        ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
 
 proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## A rendered line starting, with the comparator's blind window around it:

@@ -657,4 +657,24 @@ proc tick*(cpu: GbCpu; gb: GB) =
   let cycles_taken = UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
   mem_tick_extra(gb.memory, gb, cycles_taken)
+  when HDMA_STEAL_DELAY_M != 0:
+    # A block that came due on a mode-0 edge takes the bus at this instruction
+    # boundary, once the CPU has had HDMA_STEAL_DELAY_M of them. `in_cpu_cycle`
+    # stays true so the bytes are still held back HDMA_VISIBLE_DOTS dots, which
+    # is what the gambatte dma rows pinned; only WHEN the block runs moves.
+    #
+    # BEFORE handle_interrupts, not after, and that ordering is load-bearing:
+    # "the DMA takes the bus before the CPU's own next cycle, so it goes ahead
+    # of the dispatch" (the halt-exit path above says the same). Paying it at
+    # the TOP of the next instruction instead is the same instant but the wrong
+    # side of the dispatch, and costs the whole gambatte `irq_precedence`
+    # hdma_vs_m0 / late_hdma_vs_ei / late_hdma_vs_ie family.
+    if unlikely(gb.ppu.hdma_block_due):
+      if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        if gb.ppu.hdma_due_delay > 0'i8:
+          dec gb.ppu.hdma_due_delay
+        else:
+          ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = true)
+      else:
+        gb.ppu.hdma_block_due = false
   handle_interrupts(cpu, gb)

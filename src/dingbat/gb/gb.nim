@@ -844,6 +844,48 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 0
   ## determinism: the byte-identical screenshot gates, save-state round-trips
   ## and the rollback netplay core all need two runs to start from the same
   ## bytes.
+const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
+  ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
+  ## before it takes the bus. 0 = take it on the edge itself, which is what
+  ## dingbat has always done.
+  ##
+  ## mealybug `dma/hdma_timing-C` says the edge is too early. Its `sub_test`
+  ## macro arms a one-block transfer and then reads a register after a given
+  ## number of nops, one fresh run per nop count, so the four HDMA5 samples are
+  ## independent. At SCX=1 hardware answers `00 ff ff ff` for nops 46-49, and
+  ## `$00` is "armed, zero blocks left, NOT YET TRANSFERRED" -- so at nop 46 the
+  ## CPU is still running and hardware's block has not started. The STAT samples
+  ## in the same test put the mode-0 edge between nops 44 and 45. The block
+  ## therefore starts about TWO M-cycles after the edge, and the CPU is stalled
+  ## through it (which is why nops 47-49 all read `$FF`: they land after the
+  ## stall, not before it). At SCX=2 the longer mode 3 moves the edge one
+  ## M-cycle later and the answer becomes `00 00 ff ff`, one sample further
+  ## along -- the same story shifted, which is the ROM's own "HDMA is delayed
+  ## due to longer mode 3".
+  ##
+  ## Paid at INSTRUCTION boundaries, not on a dot counter. A per-dot deadline is
+  ## what ppu_land_hdma_if_due measured at +1.36% of retired instructions and
+  ## declined; this is one not-taken branch per instruction instead, and it
+  ## measures FREE -- 23712879357 -> 23704099110 retired instructions on
+  ## dmg-acid2, i.e. marginally faster, min of 3.
+  ##
+  ## **Paid BEFORE handle_interrupts, and that ordering is worth as much as the
+  ## delay.** "The DMA takes the bus before the CPU's own next cycle, so it goes
+  ## ahead of the dispatch" -- the halt-exit path in cpu.nim already said so.
+  ## Paying at the TOP of the next instruction instead is the same instant on
+  ## the wrong side of the dispatch, and costs the whole gambatte
+  ## `irq_precedence` hdma_vs_m0 / late_hdma_vs_ei / late_hdma_vs_ie family;
+  ## paying it before the dispatch GAINS three of those rows over the old
+  ## edge-triggered behaviour.
+  ##
+  ##   HDMA_STEAL_DELAY_M      0      1 (ship)   2      3      4
+  ##   hdma_timing-C wrong    8/48    2/48     4/48   8/48  10/48
+  ##
+  ## Whole suite: **gambatte 4263 -> 4274, dma 126 -> 134, irq_precedence
+  ## 44 -> 47, zero rows lost.** The `dma` gain is the entire
+  ## `hdma_late_disable` family, which is exactly the set HDMA_VISIBLE_DOTS was
+  ## swept over and could not recover at any value -- the strongest evidence
+  ## that the mechanism, not the constant, was what was missing.
 const HDMA_BLOCK_OVERHEAD_BUS* {.intdefine.} = 4
   ## CPU-clock cycles an HBlank DMA block costs beyond its sixteen byte copies:
   ## the bus acquire/release either side of the block, which dingbat charged as
@@ -874,25 +916,21 @@ const HDMA_BLOCK_OVERHEAD_DOTS* {.intdefine.} = 2
   ## block. The remaining 8 are two separable defects, in
   ## `tools/gbppu/hdmaresults.nim` terms:
   ##
-  ##   * **6 cells -- the block steals the bus too early.** Hardware reads
-  ##     HDMA5 as $00 for ONE nop at SCX=1 and TWO at SCX=2 before it reads
-  ##     $FF. $00 is "armed, zero blocks left, NOT YET TRANSFERRED" -- so those
-  ##     nops are the CPU still running while hardware's block has not started.
-  ##     dingbat takes the bus on the mode-0 edge itself (see the
-  ##     `mode == 0 and prev_mode != 0` line in this file) and so has already
-  ##     finished by the first read. NOT a completion-bit latency and NOT a
-  ##     cycle cost: charging the overhead BEFORE the copies instead of after
-  ##     scores identically (8/48 either way), because the CPU is stalled
-  ##     through it either way. The block has to start LATER in CPU-instruction
-  ##     terms, which is a scheduling change rather than a constant -- and the
-  ##     obvious form of it, a per-dot deadline, is exactly what
-  ##     ppu_land_hdma_if_due measured at **+1.36% of retired instructions** and
-  ##     declined. A cheaper shape would be to arm `hdma_block_due` on the edge
-  ##     and pay it at the next CPU M-cycle boundary, which is where the bus
-  ##     actually changes hands and costs nothing per tick.
-  ##   * **2 cells -- double-speed mode 3 ends early.** The first STAT read of
-  ##     both double-speed groups is $80 (mode 0) where hardware says $83
-  ##     (mode 3). Unrelated to HDMA: it is the mode-3 length in double speed.
+  ##   * **6 cells: FIXED 2026-08-19 by HDMA_STEAL_DELAY_M.** The block was
+  ##     taking the bus on the mode-0 edge itself; hardware lets the CPU finish
+  ##     its instruction first. See that constant.
+  ##   * **2 cells remain, and they point OPPOSITE WAYS**, which is why no
+  ##     scalar closes them: SCX=1 single speed wants the block ~1 M EARLIER
+  ##     (sample 47 reads $00 where hardware says $FF) and SCX=2 double speed
+  ##     wants it LATER (sample 47 reads $FF where hardware says $00). An
+  ##     instruction boundary is 4 dots at single speed and 2 at double, so a
+  ##     fixed DOT delay of 3 would satisfy both where a boundary count cannot.
+  ##     **SameBoy also scores 2/48 here** (its two are both late, in groups 0
+  ##     and 3), so this is the resolution limit of a boundary-granular model
+  ##     rather than a dingbat-specific gap. Closing it needs the block placed
+  ##     on a DOT, and the cheap way to do that is a scheduler event armed at
+  ##     the edge -- not the per-tick countdown ppu_land_hdma_if_due measured at
+  ##     +1.36% and declined.
 const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
   ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
   ##
@@ -3166,6 +3204,9 @@ type
     # of mode 0, so it is never set at a frame boundary — where every state,
     # rewind snapshot and rollback snapshot is captured — and is not serialized.
     hdma_block_due*: bool
+    # CPU instruction boundaries still owed before a due HBlank DMA block may
+    # take the bus. See HDMA_STEAL_DELAY_M.
+    hdma_due_delay*: int8
     # A copied block whose bytes have not reached VRAM yet: they land
     # HDMA_VISIBLE_DOTS dots after the block's last byte (see that constant).
     # The window is 4 dots inside an HBlank and the next PPU tick closes it, so
