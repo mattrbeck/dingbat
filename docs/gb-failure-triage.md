@@ -58,6 +58,39 @@ cheap revision-gating win hiding in the self-checking suites. That is the
 useful negative: the remaining 107 failures are real behaviour gaps, not
 mis-assigned machines.
 
+## The last mooneye row: `madness/mgb_oam_dma_halt_sprites` (2026-08-19)
+
+**Both forks fail at exactly 11517/23040 pixels**, byte-for-byte the same
+number, so this is ONE bug seen twice (the two bundles' ROMs differ in md5 but
+share an expected PNG). Closing it takes the Mooneye section to 152/152 and
+collapses it.
+
+The failure is not noise and not a near-miss. Both frames are a tile
+checkerboard drawn with SPRITES, and they are **phase-inverted from tile row 4
+downwards** — every odd column differs on every row from 4 to 17, which is
+exactly 50% of the screen. Rows 0-3 match. The reference also carries a small
+dark glyph around tile (10,5) that dingbat does not draw at all.
+
+So from row 4 down, dingbat is placing (or suppressing) every sprite one tile
+out of phase. That is a behavioural difference in **OAM DMA across a `halt`**,
+which is what the ROM is named for and what the `madness/` directory exists to
+test — not a timing nudge, and not something a constant will move.
+
+Two things make it a good target despite that:
+
+* it is **MGB-specific** (`model: "mgb"`, and the reference is an MGB capture),
+  and MGB is a machine almost nothing else in the tree exercises — so a defect
+  here is plausibly a real gap rather than a shared one;
+* the failure is **structural and total**, which usually means one wrong
+  decision rather than an accumulation. A 50%-exact checkerboard is what you get
+  when a per-sprite predicate is inverted or off by one, not when timing drifts.
+
+First thing to try: dump OAM at the frame the reference was captured on and
+compare it against what the sprite positions in the reference imply. The
+checkerboard makes that unusually easy to read — each sprite's Y/X is directly
+visible in the picture, so a single OAM dump says whether dingbat's DMA wrote
+the wrong bytes or wrote the right ones at the wrong time.
+
 ## RESOLVED 2026-08-19: `rtc3test-1` and `-3` were a HARNESS bug, not an RTC one
 
 Both rows now pass and the Shootout section is **13/13**. There was never
