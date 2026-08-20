@@ -126,6 +126,7 @@ proc new_ppu_base(cgb: bool): GbPpu =
   # transfer active"), and the address counters hold the $FF the four registers
   # would have been written with.
   result.hdma5    = 0xFF
+  result.hdma_kill_from = -1
   result.hdma_src = 0xFFF0'u16
   result.hdma_dst = 0xFFF0'u16
   result.ran_bios = cgb
@@ -1973,6 +1974,20 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # still on the bus, so the block's BYTES are held back HDMA_VISIBLE_DOTS dots.
   # Everything else about the block, its 8 M-cycles included, happens here.
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
+    when HDMA_SPEEDSWITCH_KILL_W != 0:
+      # A CGB speed switch that lands in the last few dots of mode 3 destroys
+      # the armed transfer outright rather than owing it this block. See
+      # HDMA_SPEEDSWITCH_KILL_W.
+      if ppu.hdma_kill_from >= 0:
+        let d = ppu.cycle_counter - ppu.hdma_kill_from
+        when defined(gb_dma_trace):
+          echo "KILLWIN ly=", ppu.ly, " dot=", ppu.cycle_counter,
+               " stopdot=", ppu.hdma_kill_from, " d=", d
+        ppu.hdma_kill_from = -1
+        if d >= 0 and d < HDMA_SPEEDSWITCH_KILL_W:
+          ppu.hdma_active    = false
+          ppu.hdma_block_due = false
+          return
     if gb.cpu.halted:
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
@@ -2042,6 +2057,9 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
          " mode=", (ppu.lcd_status and 3'u8),
          " active=", (if ppu.hdma_active: 1 else: 0), " hdma5=", toHex(ppu.hdma5, 2)
   ppu.hdma5 = val and 0x7F
+  when HDMA_SPEEDSWITCH_KILL_W != 0:
+    # A fresh transfer is never the one a pending speed switch is racing.
+    ppu.hdma_kill_from = -1
   if (val and 0x80) != 0:
     ppu.hdma_active = true
     # Arming an HBlank transfer while the PPU is *already* in HBlank starts it

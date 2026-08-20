@@ -1408,6 +1408,13 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
 
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
+    when HDMA_SPEEDSWITCH_KILL_W != 0:
+      # Armed only while a transfer exists to lose, so the marker cannot
+      # outlive the stall: the mode-0 edge that consumes it is at most one line
+      # away and the stall is eighteen, and the CPU that could disarm the
+      # transfer in between is the one that is stopped. See
+      # HDMA_SPEEDSWITCH_KILL_W.
+      if gb.ppu.hdma_active: gb.ppu.hdma_kill_from = gb.ppu.cycle_counter
     # Pan Docs' STOP chart: entering STOP resets DIV. Go through the FF04
     # write path rather than zeroing tdiv, so the divider's consumers see the
     # reset the way they see any other one — the APU frame sequencer steps

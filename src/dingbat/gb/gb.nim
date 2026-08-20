@@ -915,6 +915,47 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 1
   ## per-model bias to a single sample would be exactly the overfitting this
   ## constant's history is already a lesson about. The measurement is recorded
   ## in docs/flashcart-runbook.md if a test ever needs it.
+const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
+  ## Dots before the mode 3 -> 0 edge within which a CGB speed switch DESTROYS
+  ## an armed HBlank VRAM DMA outright. 0 disables the mechanism; **1 ships,
+  ## and 1 means the switch and the edge land on the SAME DOT.**
+  ##
+  ## A STOP that switches speed does not normally disturb a transfer -- a
+  ## halted CPU simply owes the block ("the transfer will also be halted and
+  ## will be resumed only when the CPU resumes execution", Pan Docs FF55), and
+  ## `hdma_m3halt_m1unhalt_hdma5` proves an ordinary HALT can miss a whole
+  ## frame of HBlanks and leave the transfer armed with its length untouched.
+  ## What this models is a RACE: the block becomes due on the very dot the
+  ## clock changes underneath it, and it is lost together with the arming.
+  ##
+  ## **The dot is measured, not fitted.** `-d:gb_dma_trace` prints the STOP's
+  ## dot beside the mode-0 edge's, and across the nine speed-switch ROMs that
+  ## disagreed the two quantities separate the outcomes exactly:
+  ##
+  ##   ROM                                     STOP  edge   d   FF55  killed?
+  ##   transition_speedchange_hdmalen00_scx1    253   253    0    80    yes
+  ##   transition_speedchange_hdmalen7f_scx1    253   253    0    FF    yes
+  ##   late_m3speedchange_hdma5_scx1_2          253   253    0    80    yes
+  ##   late_m3speedchange_hdma5_scx2_1          253   254    1    00    NO
+  ##   late_m3speedchange_hdma5_scx1_1          249   253    4    00    NO
+  ##   m3speedchange_late_m0wakeup_2            121   252  131    00    NO
+  ##   m0speedchange_late_m3wakeup_scx1_1       373   253 -120    FF    NO
+  ##
+  ## Every `d = 0` row wants the transfer gone and every other row wants it
+  ## kept, including `scx2_1` one single dot away -- which is why the window is
+  ## a strict `d < W` and why widening it costs rather than gains:
+  ##
+  ##   W (dots)      0     1 (ship)    2      3      5
+  ##   gambatte dma 150      159      158    158    157
+  ##
+  ## An unconditional abort at every speed switch was tried first and is
+  ## REFUSED: +10 / -7 for a net +3, and the seven it breaks
+  ## (`m3speedchange_late_m0wakeup_{1,2}`, `m0speedchange_late_m3wakeup_*`,
+  ## `late_m3speedchange_hdma5_*_1`) are exactly the rows whose switch is
+  ## nowhere near the edge. SameBoy models none of this -- it answers the same
+  ## values dingbat did before this landed on all five
+  ## `transition_speedchange_hdmalen*` rows -- so gambatte's hardware capture
+  ## is the only witness here and there is no oracle to cross-check against.
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
@@ -3350,6 +3391,12 @@ type
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
+    # A speed switch is in flight and the next mode-0 edge within
+    # HDMA_SPEEDSWITCH_KILL_W dots of it destroys the armed transfer instead of
+    # owing it a block. Live only across the STOP's own stall, so like
+    # hdma_block_due it can never be set at a frame boundary and is not
+    # serialized. -1 = no switch pending.
+    hdma_kill_from*: int32
     # A copied block whose bytes have not reached VRAM yet: they land
     # HDMA_VISIBLE_DOTS dots after the block's last byte (see that constant).
     # The window is 4 dots inside an HBlank and the next PPU tick closes it, so
