@@ -248,6 +248,22 @@ to watch is row 1: `001E` there would mean a seconds write does NOT reset the
 divider on silicon, which would be the whole 25% — and would contradict
 rtc3test's own tests.md, which is worth knowing either way.
 
+**rtcrate v3 (2026-08-19)** — a white screen was reported on Matt's cart. White
+is not a hang: the ROM clears the map and turns the LCD on before measuring. v3
+seeds every row with `EEEE` and paints it within ~half a second, then redraws
+each row as it completes, so "the cart runs this ROM" is visible immediately and
+a row still reading `EEEE` at the end is one that never completed (`FFFF` = ran
+and timed out). Per-tick cap dropped 180 -> 90 frames, so a full run is ~25 s.
+`rtcrate_mbc5.gb` is the control: identical code with header `$1B` instead of
+`$10`, no RTC by construction, prints `FFF8/FFFF/FFFF/FFFF` + `0000 0000` in
+dingbat. If the MBC5 build draws and the MBC3 one stays white, the cart is
+refusing the MBC3+TIMER **header**, not the ROM.
+
+**Bug worth not repeating:** the first progressive-draw version stored nothing
+at all, because `DrawResults` used `wRow` as its loop counter and `StoreResult`
+uses `wRow` to decide where to write — so drawing left it at ROWS and every
+later result landed past the end of the array. Draw loops get their own counter.
+
 **`wramscan.gb`** — photographs power-up WRAM, which is the only thing standing
 between bully and a green row. **Cold boot, not reset**, or you photograph the
 last game instead of the power-up state. Line 0 is ZEROS/FFS/OTHER over all
@@ -263,6 +279,22 @@ power-down between, to see whether the pattern is stable across boots.
 This ROM writes NOTHING to WRAM before measuring it — HRAM stack, HRAM
 counters, everything drawn straight to VRAM. Do not "tidy" a `ld [$C000], a`
 into it.
+
+**Results, GBA SP, 2026-08-19 — and they show the menu contamination directly.**
+
+    through the cart MENU   050D 00DF 1A14   zeros 1293, $FF 223, other 6676
+    DIRECT boot (SD out)    0171 00DD 1DB2   zeros  369, $FF 221, other 7602
+
+Booting straight to the ROM removed **924 zero bytes** and collapsed the big
+aligned zero band to one short run, while the $FF count barely moved (223 ->
+221). That is the signature of a loader clearing its work area: the zeros were
+the menu's, the $FF bytes are the console's. The direct-boot read is the one to
+model — **93% of WRAM is neither $00 nor $FF**, with ~369 zeros and ~221 $FF
+scattered, i.e. mostly noise but with far more $00/$FF than uniform random
+would give (~32 each), so there is real structure on top of the noise.
+
+A flashcart loader still runs ahead of the ROM even on a direct boot, so treat
+369 as an upper bound on the true zero count.
 
 ## Getting results back
 

@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-19 15:50:46 · commit 6a51ba5 · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 20:55:52 · commit 456167b · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1013
-- **Fail:** 212
+- **Pass:** 1015
+- **Fail:** 210
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -27,7 +27,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 12 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
-| Game Boy - Shootout ROMs | 11 | 13 |
+| Game Boy - Shootout ROMs | 13 | 13 |
 | Game Boy - Mooneye (wilbertpol) | 121 | 184 |
 | Game Boy - gambatte | 10 | 48 |
 
@@ -993,23 +993,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | same-suite/apu/div_write_trigger_volume | CGB | 👌 |
 | same-suite/apu/div_write_trigger_volume_10 | CGB | 👌 |
 
-## Game Boy - Shootout ROMs (11/13)
+## Game Boy - Shootout ROMs (13/13)
 
-| Test | Device | Result |
-|------|--------|--------|
-| rtc3test/rtc3test-1 | CGB | 👀 97.5% correct (22459/23040 pixels match) |
-| rtc3test/rtc3test-2 | CGB | 👌 |
-| rtc3test/rtc3test-3 | CGB | 👀 98.0% correct (22571/23040 pixels match) |
-| cpp/rtc-invalid-banks-test | DMG | 👌 |
-| cpp/latch-rtc-test | DMG | 👌 |
-| cpp/ramg-mbc3-test | DMG | 👌 |
-| daid/ppu_scanline_bgp-dmg | DMG | 👌 |
-| daid/ppu_scanline_bgp-gbc | CGB cgbe | 👌 |
-| daid/stop_instr-dmg | DMG | 👌 |
-| daid/stop_instr_gbc_mode3 | CGB | 👌 |
-| daid/speed_switch_timing_div | CGB | 👌 |
-| daid/speed_switch_timing_ly | CGB | 👌 |
-| daid/speed_switch_timing_stat | CGB | 👌 |
+**All 13 tests passed.**
 
 ## Game Boy - Mooneye (wilbertpol) (121/184)
 

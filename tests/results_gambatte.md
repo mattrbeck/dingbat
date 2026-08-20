@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-19 15:50:46*
+*Generated: 2026-08-19 20:55:52*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
@@ -126,7 +126,7 @@ All 8 tests passed.
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx1_ds_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx2_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
 | dma/hdma_late_m3speedchange_read_hdmadst00_scx2_ds_1_cgb04c_out00 [cgb] | got 9F, expected 00 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_1_cgb04c_outF3 [cgb] | got F5, expected F3 |
+| dma/hdma_late_m3speedchange_tima_scx1_ds_1_cgb04c_outF3 [cgb] | got F6, expected F3 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_2_cgb04c_outF4 [cgb] | got F6, expected F4 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_3_cgb04c_outF6 [cgb] | got F8, expected F6 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7 [cgb] | got F8, expected F7 |
@@ -151,7 +151,7 @@ All 8 tests passed.
 | dma/hdma_transition_halt_late_unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_oamdma_1_cgb04c_out509E529C [cgb] | got 50515253, expected 509E529C |
-| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got E7, expected 67 |
+| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got E8, expected 67 |
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80 [cgb] | got FF, expected 80 |
 | dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81 [cgb] | got FF, expected 81 |

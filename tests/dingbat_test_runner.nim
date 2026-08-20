@@ -1431,7 +1431,17 @@ proc build_shootout_tests(): seq[TestDef] =
       rom_path: ensure_shootout_file(&"ax6/rtc3test-{n}.gb"),
       mode: tmScreenshot,
       grey_tolerance: ShootoutTolerance,
-      timeout: int(secs * 60),
+      # The shootout's OWN budget, not `secs`. emulator.py polls until
+      # `test.runtime / speed + self.startup_time + 5.0` seconds have passed,
+      # and emulators/dingbat.py turns that into frames as
+      # `(runtime + startup_time + 5.0) * 59.7275` with startup_time = 1.0.
+      # Scoring these images by `runtime` alone is a TIGHTER rule than gbdev
+      # publishes them under — the same mistake the ShootoutTolerance comment
+      # warns about from the other direction — and it is why rtc3test-1 and -3
+      # were red here while the shootout itself scores dingbat 261/261
+      # including them. dingbat reaches rtc3test-1's reference at frame 720; the
+      # real budget is 925 and the one used here was 570.
+      timeout: int((secs + 6.0) * 59.7275),
       expected_png: ensure_shootout_file(&"ax6/rtc3test-{n}.png"),
       cgb: true,
       color: true,
