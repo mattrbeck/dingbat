@@ -5999,20 +5999,35 @@ separable and did not move: the recorded sweep wants 2 and still leaves the
 SCX-carrying `long_scx{2,3,5}_2` short, so that residual is genuinely
 SCX-dependent. `GDMA_SETUP_MCYCLES` was never a candidate for either.
 
-**9. `serial`'s `start_wait_*` cluster -- 12 rows, both obvious readings
-refused.** Twelve rows report one defect through three registers: `_read_sb`
-(`exp 7F,FF got FF,FF` -- SB seeds at $00 and shifts in ones, so this counts the
+**9. `serial`'s `start_wait_*` cluster -- 24 rows, and the blocker is now
+NAMED.** These rows report one defect through three registers: `_read_sb`
+(`exp 7F got FF` -- SB seeds at $00 and shifts in ones, so this counts the
 shifts directly), `_read_sc` (SC.7 still set) and `_read_if` all flip on the same
 M-cycle. So the eighth shift EDGE is early, not the interrupt's visibility.
-Refused from both sides: **not the tap** (these 12 do not move by a single
-verdict at any tap in [-8,+8], while `div_write_start_wait_read_if` next door
-flips cleanly at 0), and **not a whole missed period** (`SERIAL_START_ARM`, which
-spends the first falling edge on arming the shifter, lands step 1 right on all
-six families and takes step 2 out on all six -- the error changes sign; +24/-32).
-The quantity is strictly between 8 T and one bit period.
-*Blocking question:* the next instrument has to move the transfer's START against
-a stationary clock -- when SC.7's write commits relative to the divider -- which
-is a bus-side question, not a serial-side one.
+The shift clock itself was wrong and is fixed (it is a half-rate toggle the SC
+write reseeds, not a bare DIV tap -- serial.nim), which took `serial` 50 -> 53,
+but these 24 are not the clock.
+
+They start their measured transfer from inside the serial handler of a previous
+one, so the boot seed and the tap both cancel and the verdict is a function of
+`Delta` alone -- the T-cycles from transfer 1's eighth shift edge to transfer 2's
+SC write. The sibling ROMs bracket `Delta mod 256` to **[68,71]**; dingbat's is
+**74** and cannot leave [72,75] at any tap, because the dispatch is the first
+instruction boundary at or after the edge and the tap moves edge and boundary
+together. Leading the serial IF cancels itself out. The observable reduces to
+`4 - a_r - (tap mod 4)`, needed in (0,4], where `a_r` is where inside its own
+M-cycle a CPU READ samples the divider: dingbat charges the M-cycle to the bus
+first, so `a_r = 4` and no tap can satisfy it. `a_r = 0` satisfies it for every
+tap.
+*Blocking question:* `a_r = 0` is a `mem_read` re-ordering (the bus half of
+`mem_tick_components` after the read instead of before), and the same `a_r = 0`
+independently reconciles the five `div_write`/`late_div_write` rows with mooneye
+`boot_sclk_align`, which have disagreed by exactly one M-cycle about
+`SERIAL_TAP_DMG` since it was first swept. One change, three families -- with
+`tima`, `halt` and `irq_precedence` on the other side of it. Refuted alongside:
+the DMG boot seed cannot absorb the tap disagreement (0xABC8 -> 0xABCC lands
+boot_sclk_align at tap 2 and costs nine gbmicrotest `timer_tima_phase` rows, all
+of gambatte `div`, two `sound` and one `tima`).
 
 **10. Not landable, and worth saying so.** `halt`'s 31 rows: 11 are the refuted
 `CGB_HALT_PPU_LEAD` and 16 are **mixed-direction inside the same family on the
