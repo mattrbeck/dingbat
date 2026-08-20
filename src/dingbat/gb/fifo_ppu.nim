@@ -326,6 +326,47 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
   ## So the shape is right and the duration is not, and the ROM that says so is
   ## a pixel oracle the triage doc already uses to arbitrate three other knobs.
   ## Left at 0 until the duration is derived rather than fitted.
+  ##
+  ## ---- 2026-08-20: the REDIRECT reading, tested and refused ------------------
+  ##
+  ## LIJI32 (mooneye-test-suite issue #1) describes this span as a REDIRECT
+  ## rather than a lock: "when the PPU reads OAM in this case, it uses the DMA
+  ## destination address (except for bit 0)". That looked like it dissolved
+  ## `strikethrough`'s objection exactly, since a redirected read still yields
+  ## an OBJECT where a blocked one yields nothing, so entry 39 could survive.
+  ## Built both halves (the mode-2 scan here, and `obj_oam_dma_read`'s fetch)
+  ## and swept the destination offset. Whole suite, against a shipping baseline
+  ## of Pass 1016 / gambatte 4269 / oamdma 771 / both strikethrough rows exact:
+  ##
+  ##   arm                              Pass  gambatte  oamdma  strike dmg / cgb
+  ##   lock, both devices               1014    4285      782     23033 / 23033
+  ##   + scan redirect                  1014    4281      778     23032 / 23033
+  ##   + object-fetch redirect too      1014    4281      778     23031 / 23033
+  ##   lock, DMG-family only            1015    4277      774     23033 / PASS
+  ##   that + redirect, off -1 / 0 / +1 1015  4273-4277 770-774   23033 / PASS
+  ##
+  ## **The redirect never helps.** Every redirect arm scores at or below its
+  ## lock counterpart on gambatte and never better on `strikethrough`. So the
+  ## +16 the lock buys is not explained by "reads the wrong address"; whatever
+  ## the span does to `late_sp*`, modelling it as a redirect does not reproduce
+  ## it any better and costs rows elsewhere.
+  ##
+  ## The lock's own +16 reproduces exactly against that baseline (4269 -> 4285),
+  ## eleven of them in `oamdma`.
+  ##
+  ## **One real finding, worth keeping if this is ever enabled: the span should
+  ## be DMG-FAMILY ONLY.** Gating it off on CGB recovers `strikethrough-cgb` to
+  ## a clean pass while still gaining +8 gambatte over shipping, which halves
+  ## the lock's cost from two runner rows to one. That matches LIJI's split --
+  ## he has CGB-E and later reading unmodified values -- although he puts
+  ## CGB-0..D in the blocking camp and dingbat scores this row at the default
+  ## CPU CGB C, so either that reference was captured on a CGB-E or the block is
+  ## narrower than mode 2.
+  ##
+  ## **Still nothing beats shipping at the runner level (1016).** The remaining
+  ## blocker is unchanged and is now known not to be an addressing question:
+  ## `strikethrough-DMG` refuses the lock's DURATION, and the redirect does not
+  ## rescue it at any offset.
 
 # ---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
 #
