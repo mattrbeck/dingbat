@@ -245,6 +245,71 @@ knowing that the accepted rule upstream is phrased about the destination, and
 that dingbat's mode-2 OAM scan applies no DMA redirect at all. Any attempt on
 this row should start there rather than at the phantom sprite.
 
+### Attempted 2026-08-20 with LIJI's mechanism: two of three parts WORK, and the row still cannot close
+
+All three mechanisms were built behind defines and measured. Reverted, but what
+they established is worth keeping — `tools/gbppu/oamstate.nim` (committed) dumps
+OAM and the DMA unit's state after a run and is what made it legible.
+
+**1. dingbat's current answer IS the CGB answer, confirmed by dump not by
+inference.** After this ROM halts, shipping dingbat shows:
+
+    dma_position = 0xA1 (finished)   dma_busy = false
+    OAM[00..0F]  = FF FF 1A FF FF FF FF FF ...
+
+Every sprite has Y = $FF, every one off-screen — the checkerboard with no
+sprites the ROM's header attributes to a CGB.
+
+**2. The DMG-family freeze WORKS and leaves exactly the right OAM.** Returning
+early from `mem_dma_tick` while `cpu.halted` on a non-CGB gives:
+
+    dma_position = 0x01 (frozen)     dma_busy = true
+    OAM[00..0F]  = FF FF 30 40 9F A7 9F A7 00 00 ...
+
+i.e. the transfer stopped with the original bytes intact, one byte behind where
+LIJI puts hardware (he has the write to $FE02 in flight; dingbat's
+`dma_position` is "the byte the unit moves NEXT", so the offset is a constant
+away and was swept).
+
+**3. The destination-address redirect WORKS, in both readers.** Applied to the
+mode-2 scan (`oam_scan_advance`, which only exists under `OAM_SCAN_DMA_LOCK`)
+AND to the object fetch (`obj_oam_dma_read`), traced live:
+
+    REDIR ly=140 entry=0 dest=2 y=48 x=64
+    REDIR ly=141 entry=0 dest=2 y=48 x=64
+
+Y = OAM[$FE02] = $30 = 48 and X = OAM[$FE03] = $40 = 64 — exactly what LIJI's
+rule predicts, and it reproduces the ROM's own Y = C, X = F structure for free.
+The object fetch had to be redirected as well: with only the scan redirected the
+fetch still painted the object with the DMA's SOURCE byte ($FF), which is why
+the first attempt still rendered blank.
+
+**Why it still cannot close the row.** Hardware draws tile `$38` at (56, 90).
+The redirect gives tile `$30` at (48, 64). The difference is precisely the OAM
+CORRUPTION — `$38` and `$5A` are what the held write leaves in OAM, and LIJI
+says that pattern is UNIT SPECIFIC. So a correct redirect draws the WRONG
+sprite, and would score worse than the 18 pixels the row reports today with no
+sprite at all. **Closing this row requires modelling a unit-specific corruption
+pattern, which is a fit to one console rather than a behaviour.**
+
+(One loose end: with both readers redirected the sprite did not render at all,
+where the scan and fetch values above say it should have. Not chased — the
+paragraph above makes the outcome moot either way.)
+
+### The part worth pursuing is NOT this row
+
+`OAM_SCAN_DMA_LOCK`'s own comment records that a LOCK model gains +16 gambatte
+`late_sp*` rows and costs `strikethrough` 7 pixels, and is "left at 0 until the
+duration is derived rather than fitted". **LIJI's rule says the mechanism is not
+a lock at all — it is a redirect**, and that dissolves the objection: a
+redirected read still yields an object where a blocked one yields nothing, which
+is exactly what `strikethrough`'s entry 39 needs. During a live transfer the
+destination MOVES, so entries differ; only a frozen transfer stands still.
+
+That is a general correctness question worth testing on its own: it touches the
+40-row `oamdma` family, the sixteen `late_sp*` brackets and `strikethrough`,
+none of which need this madness ROM to arbitrate them. Start there.
+
 ### Why it is not implemented yet
 
 Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
