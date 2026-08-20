@@ -6,8 +6,9 @@ measured or why an approach was refused; they are dated, they are not maintained
 their conclusions describe the tree as it stood. Check an archive's claims against the
 code before acting on them.
 
-Derivations for individual constants live at the constants themselves, in
-`src/dingbat/gb/gb.nim` and `fifo_ppu.nim`, not here.
+Comments in the GB core say what a constant or rule *is*. Why its value is that
+value — the ROMs, the sweeps, the refused alternatives — is in
+[gb-timing-constants.md](gb-timing-constants.md), keyed by name.
 
 ## Using dingbat
 
@@ -25,6 +26,7 @@ Derivations for individual constants live at the constants themselves, in
 
 | doc | what it is |
 |---|---|
+| [gb-timing-constants.md](gb-timing-constants.md) | **the derivation for every accuracy knob in the GB core**, keyed by constant name — the ROMs that bracket it, the sweeps, and what was refused. The comment at the constant says what it is; this says why the number is that number |
 | [gb-failure-triage.md](gb-failure-triage.md) | **the canonical next-steps list**: every failing bucket, ranked, with what is known about each |
 | [gb-test-suite-sources.md](gb-test-suite-sources.md) | what each suite actually measures, and where dingbat disagrees |
 | [gb-mealybug-sources.md](gb-mealybug-sources.md) | the mealybug ROMs read from their own source — the band/ruler decoding the PPU work depends on |
