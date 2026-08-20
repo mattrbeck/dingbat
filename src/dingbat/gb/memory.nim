@@ -1093,6 +1093,14 @@ const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
   ## that runs during a halt runs during it. DIV is still reset at the switch
   ## itself, before the stall starts, which makes the tick count come out round.
   ##
+  ## ---- How the 65548 reading was derived ------------------------------------
+  ##
+  ## Everything below is about `SPEED_SWITCH_STALL_T`, the REAL-TIME reading of the
+  ## stall, which `SPEED_SWITCH_STALL_CPU` superseded and which is inert in the
+  ## shipping build (that constant is nonzero, so the `when` at the stall site never
+  ## takes this branch). It is kept because the derivation is the only account of
+  ## how the stall's length was pinned, and because the constant is still swept.
+  ##
   ## 65548 = 2^16 + 12. The nearby 65540 = 2^16 + 4 is a ripple-counter length, not
   ## a fitted number, and three independent sources land on it:
   ##

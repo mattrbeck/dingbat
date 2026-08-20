@@ -2437,7 +2437,6 @@ const M3_END_EARLY {.intdefine.} = 0
 # five families want 2 dots, not 4, so the quantity is a CPU M-cycle and not a
 # count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
 const LY0_PIPE_MCYCLES {.intdefine.} = 1
-
 # The same mechanism on EVERY line -- the second axis of bucket 14, and it only
 # means anything alongside `STAT_M2_LEAD` in ppu.nim.
 #
@@ -2445,38 +2444,28 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 # measures the dispatch against the pipeline and NOTHING else: `scy`,
 # `bgtiledata`, `bgtilemap`, `scx_during_m3`, `dmgpalette_during_m3`, and the
 # mealybug `m3_*` frames with them. So the OAM dispatch and the pipeline's phase
-# are one unknown to those 180-odd rows, and moving the dispatch four dots early
-# on its own costs every one of them -- `scy` 67/67 -> 0/67. One M-cycle here
-# gives all of them back exactly (`scy` and `bgtiledata` and `bgtilemap` and
-# `scx_during_m3` all return to their baseline row for row), which is the
-# cancellation docs/gb-failure-triage.md's bucket 14 predicted, resolved: with
-# `STAT_M2_LEAD = 1` this is 3963 gambatte against 3743 at 0 and 3716 at 2,
-# and with the LEAD at 0 it is 3671, so neither term scores without the other.
+# are one unknown to those 180-odd rows, and moving the dispatch four dots early on
+# its own costs every one of them (`scy` 67/67 -> 0/67). One M-cycle here gives them
+# all back exactly, which is the cancellation bucket 14 predicted: with
+# `STAT_M2_LEAD = 1` this is 3963 gambatte against 3743 at 0 and 3716 at 2, and with
+# the LEAD at 0 it is 3671 -- neither term scores without the other.
 #
-# It ships at 0 because the LEAD does; see the halt/sled paragraph at
-# STAT_M2_LEAD for what blocks the pair. Two notes for whoever lands them:
-#
-#  * `LY0_PIPE_MCYCLES` must go to 0 at the same time (3964 against 3819). Line
-#    0's four dots and this lead are the same four dots, seen from the two ends,
-#    and mealybug's `line_0_fix` reads either way round.
-#  * daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's
-#    phase against something OTHER than the mode 2 interrupt -- it syncs on the
-#    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM,
-#    so it moves with the halt bucket rather than with this. It goes 100% ->
-#    90.5% here, which is four dots, and it is expected back when the halt half
-#    lands.
+# It ships at 0 because the LEAD does; see the halt/sled paragraph at STAT_M2_LEAD
+# for what blocks the pair. `LY0_PIPE_MCYCLES` must go to 0 at the same time (3964
+# against 3819): line 0's four dots and this lead are the same four dots seen from
+# the two ends, and mealybug's `line_0_fix` reads either way round.
 const M3_PIPE_AHEAD {.intdefine.} = 0
   ## The device-INDEPENDENT advance. Still 0: nothing measured here asks the DMG
   ## pipeline to move, and daid's DMG arm refuses it outright (pixel-exact at 0,
-  ## 90.5% at 1). The CGB's M-cycle is `CGB_PIPE_MCYCLES`, at the head of this
-  ## file, and the two are added.
+  ## 90.5% at 1). The CGB's M-cycle is `CGB_PIPE_MCYCLES`, at the head of this file,
+  ## and the two are added.
   ##
-  ## The paragraph above -- "daid ... is a HALT ROM, so it moves with the halt
-  ## bucket rather than with this ... expected back when the halt half lands" --
-  ## is superseded as of 2026-08-10 and left standing because its measurements
-  ## are still good. daid did not need the halt half. It needed this file to
-  ## stop double-counting the phase into three other constants; see
-  ## `CGB_PIPE_MCYCLES`.
+  ## daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's phase
+  ## against something OTHER than the mode 2 interrupt -- it syncs on the LYC = 0
+  ## relatch of line 153 (`ly=0 cc=9 mode=1`). It goes 100% -> 90.5% here, which is
+  ## four dots. Those four dots are NOT the halt bucket's, which is what an earlier
+  ## reading of this had: daid needed this file to stop double-counting the phase
+  ## into three other constants. See `CGB_PIPE_MCYCLES`.
 const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
                      CGB_PIPE_MCYCLES != 0
 
