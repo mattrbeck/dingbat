@@ -200,6 +200,51 @@ implementing a phantom-sprite rule risks the 40-row `oamdma` family. The larger
 blocks — AGE at 39/89, GBMicrotest at 430/482, wilbertpol at 121/184 — are
 where the rows are.
 
+### SOLVED upstream: LIJI32's explanation (mooneye-test-suite issue #1)
+
+https://github.com/Gekkio/mooneye-test-suite/issues/1#issuecomment-1019395723 —
+SameBoy's author worked the mechanism out, and it confirms the derivation this
+file already reached from the macro expansion while adding the part we could
+not have guessed. Quoting the substance:
+
+* **The halt lands during the DMA write to `$FE02`, before the new value is
+  written.** (Independently derived here from `start_oam_dma` expanding to
+  `wait_vblank / ld a,addr / ldh (DMA),a` followed by `nop` + `halt`.)
+* **While a DMA is active the PPU reads OAM using the DMA DESTINATION address,
+  ignoring bit 0.** That is the "stuck address" this file hypothesised, stated
+  as the rule. It is why all forty sprites resolve to the same four bytes and
+  look like one sprite.
+* **CGB-E and later read the unmodified values**; CGB-0 to D appear to block the
+  PPU from OAM during mode 2 while a DMA is active.
+* **Pre-CGB additionally triggers OAM CORRUPTION.** PHI is stopped, so the WR
+  signal to OAM is HELD and the machine performs one continuous write to
+  `$FE02`, tripping the OAM corruption bug. That is why bytes `$FE04`-`$FE08`
+  matter — a detail the ROM's own comment records as unexplained.
+* **`$38` and `$5A` are literally what is in OAM at that moment**, produced by
+  the corruption. They are NOT the `(existing | incoming) & $FC` formula this
+  file previously inferred; that formula happens to describe the corruption's
+  output for these inputs.
+* **The pattern is unit specific**, though Gekkio's DMG, LIJI's DMG and Matt's
+  Game Boy Pocket all land on the same values.
+* **A non-visual test of the corruption is impossible**: by the time the DMA
+  ends it has overwritten every corrupted byte.
+
+**What this changes.** The row needs three mechanisms, not one: the DMG-family
+freeze, the destination-address read redirect, and OAM corruption driven by a
+held write. dingbat already owns the third's machinery — the blargg `oam_bug`
+suite is green — so the missing pieces are the freeze and the redirect.
+
+**And it raises a GENERAL question worth more than the row.** dingbat models
+the object fetch's OAM read during a DMA in `fifo_ppu.obj_oam_dma_read` as *the
+SOURCE byte the unit is driving*, offset by `OBJ_DMA_BUS_LEAD`. LIJI's rule is
+*the byte at the DMA's DESTINATION address*. Those coincide whenever the write
+has already landed and diverge when it has not — which is exactly the frozen
+case, and possibly others. The current model is two-sidedly pinned by
+`strikethrough` on both consoles, so it is not simply wrong; but it is worth
+knowing that the accepted rule upstream is phrased about the destination, and
+that dingbat's mode-2 OAM scan applies no DMA redirect at all. Any attempt on
+this row should start there rather than at the phantom sprite.
+
 ### Why it is not implemented yet
 
 Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
