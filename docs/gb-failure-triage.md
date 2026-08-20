@@ -11,6 +11,90 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## 2026-08-20: the speed-switch bucket, closed as far as one constant reaches
+
+`gambatte/speedchange` 182/208 -> **192/208** and `gambatte/dma` 134 -> 136 (whole
+suite 4272 -> 4284) on the single measurement that the switch leaf's **DIV reset
+lands one M-cycle after the STOP fetch**, not on it — `SPEED_SWITCH_DIV_RESET_T`
+in `src/dingbat/gb/timer.nim` carries the whole write-up and the sweep. Modelled
+as a divider *phase*, not machine time: spending it as time costs ~50 `ly44_m3*`
+rows, which is the PPU refusing to have its dot advance across the switch moved.
+
+### The oracle for this family is much worse than the tree assumed
+
+`sb_fails.txt`'s whole-suite SameBoy sweep reports **no** `speedchange` failures.
+Re-scored directly against `tools/gbfuzz/sameboy_gambatte` (rev C, the `cgb04c`
+device), SameBoy scores **188/208** and fails **20 rows, 14 of them the same
+`tima` rows dingbat failed with the same values**. Whatever indexed that sweep
+lost this subdirectory. Treat a "SameBoy passes it" claim about `speedchange` as
+unproven until re-run one ROM at a time.
+
+### What is left, and why it is not one more constant (16 rows)
+
+* **10 `tima` rows want a lead that differs per TAC setting.** The pinning family
+  is `speedchange[N]_tima0M_{1a,1b,2a,2b}`: `1`/`2` move the STOP one M-cycle and
+  move the read with it, holding the post-reset interval fixed, so the axis can
+  only touch the divider phase the reset is judged against.
+  `speedchange_tima00_1a` (TAC $04, tap bit 9) sits at 508 mod 1024 — four counts
+  below the tap's half period, exactly where `speedchange_tima02_2a` (TAC $06, tap
+  bit 5) sits at 28 mod 64 — and hardware clocks TIMA on the tap-5 one and not on
+  the tap-9 one. Same offset from the tap, opposite answers. The split repeats on
+  the second switch, where taps 3/5/7 want 8 T and tap 9 wants 4: **tap 9 is one
+  M-cycle behind the other three in both directions.** No single lead expresses
+  that, and neither does any uniform read-phase change (see below).
+* **6 `ch2_nr52` rows are a length-counter expiry that is one M-cycle early in
+  three of seven configurations — and dingbat and SameBoy agree cell for cell.**
+  Measured by manufacturing a read-time ladder for each group (shorten the ROM's
+  own `dec b` delay loop by one unit = 4 M-cycles, then add k NOPs before the
+  `LDH A,($FF26)`; `.tmp` tooling, method in the round notes):
+
+      group     ends in   switches   error
+      sc        double    1          -1 M
+      sc_ds     single    1           0
+      sc2       single    2           0
+      sc2_ds    double    2          -1 M
+      sc3       double    3           0     <-- refutes the obvious fix
+      sc4       single    4           0
+      sc5       double    5          -1 M
+
+  "Ends in double speed is one M early" would be a fixed ~2-dot delay on the
+  length clock, which is literally what AGE's `spsw-ch2-lc-delay` is named after —
+  **and `sc3` refutes it**, being three switches, ending double, and correct. It
+  is also not a per-switch accumulation: solving `sc`, `sc_ds`, `sc2` and `sc2_ds`
+  for a per-direction error gives a to-single term that `sc3` then contradicts.
+
+### Two questions this round answers for other pools
+
+* **The parked speed-switch PPU model is already live.** `SPEED_SWITCH_PPU_EXTRA_DOTS`
+  and `..._SINGLE` are defined as functions of `CGB_HALT_PPU_LEAD`, which merged at
+  1, so the (A, B) = (8, 3) pair the 2026-08-13 `ly44_m3` ladder solved for is
+  shipping — all 55 of those rows are green in the run above, and the 192/208 here
+  is measured on top of it. Nothing further is parked in this bucket.
+* **The `tima` family neither supports nor refutes `a_r = 0`** (the serial pool's
+  claim that a CPU read samples at the TOP of its own M-cycle). Both ends of every
+  bracket here are reads, so the post-reset interval is invariant under it; what
+  moves is the STOP fetch that anchors `SPEED_SWITCH_DIV_RESET_T`, so `a_r = 0`
+  would simply require that constant to become 8. It cannot explain the residual
+  either: what the residual disagrees about is one TAC setting against another, and
+  a read-phase change moves every TAC setting equally. The one row here that DOES
+  point at `a_r = 0` is `tima/tc00_late_tc01_5` — dingbat reads `FE` where hardware
+  reads `00`, and `TAC_SELECT_LEAD_T`'s note already diagnoses it as the read
+  landing exactly on the 4-T reload countdown's expiry. Sampling 4 T earlier is
+  `00`.
+
+### AGE's nine speed-switch arms are TIMEOUTS, not comparisons
+
+All nine failing `age/speed-switch` rows (`spsw-tima` x2 ROMs, `spsw-ch2-lc-delay`,
+`spsw-interrupts` x2, across cgbab/cgbc/cgbe) never execute `LD B,B` inside the
+harness timeout, so the runner scores them FAIL with no verdict from the ROM. They
+are not silent: run them under `--mode=screenshot --frames 600` and each draws
+**"TEST FAILED!" plus a 64-cell table with the mismatching cells inverted** — a far
+better instrument than the pass/fail row suggests. `spsw-ch2-lc-delay` reads out as
+eight scenarios of `(F2, F0)` pairs, of which dingbat gets three right and five
+wrong in the same direction (channel off too early), which is the same shape as the
+gambatte `ch2_nr52` rows above. `spsw-tima`'s table is unmoved by
+`SPEED_SWITCH_DIV_RESET_T` at any value, so it is a third mechanism again.
+
 ## Rows that pass on one revision and fail on another — swept 2026-08-19
 
 Every currently-failing self-checking row (mooneye, wilbertpol, AGE — 113 of
