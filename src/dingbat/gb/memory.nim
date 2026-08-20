@@ -1366,7 +1366,11 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # a TIMA edge is checked. Done BEFORE the speed change so those taps are
     # read at the speed the write happened at; `speed_mode=` below then
     # rescales the re-aimed frame-sequencer event along with everything else.
-    timer_write(gb.timer, gb, 0xFF04, 0)
+    #
+    # ...through timer.nim's own entry point rather than `timer_write` direct,
+    # because WHEN in the opcode this reset lands is a measured quantity of its
+    # own: see SPEED_SWITCH_DIV_RESET_T there.
+    timer_speed_switch_div_reset(gb.timer, gb)
     let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
     # The APU channels' next_step deadlines live outside the scheduler's event

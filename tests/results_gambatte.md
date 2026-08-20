@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-20 16:12:18*
+*Generated: 2026-08-20 16:29:53*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4272/5005 passed.**
+**4284/5005 passed.**
 
 ## bgen
 
@@ -54,9 +54,9 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (134/229 passed)
+## dma (136/229 passed)
 
-134/229 tests passed, 95 failed:
+136/229 tests passed, 93 failed:
 
 | Test | Result |
 |------|--------|
@@ -121,8 +121,6 @@ All 8 tests passed.
 | dma/hdma_late_m3speedchange_tima_scx1_ds_2_cgb04c_outF4 [cgb] | got F6, expected F4 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_3_cgb04c_outF6 [cgb] | got F4, expected F6 |
 | dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7 [cgb] | got F4, expected F7 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_5_cgb04c_outF8 [cgb] | got F7, expected F8 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_6_cgb04c_outF9 [cgb] | got F8, expected F9 |
 | dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_m0halt_late_m3unhalt_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
@@ -834,38 +832,28 @@ All 67 tests passed.
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## speedchange (182/208 passed)
+## speedchange (192/208 passed)
 
-182/208 tests passed, 26 failed:
+192/208 tests passed, 16 failed:
 
 | Test | Result |
 |------|--------|
-| speedchange/speedchange2_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange2_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange2_tima00_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
-| speedchange/speedchange2_tima00_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
+| speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange2_tima01_1_cgb04c_out09 [cgb] | got 08, expected 09 |
 | speedchange/speedchange2_tima01_2_cgb04c_out0A [cgb] | got 09, expected 0A |
-| speedchange/speedchange2_tima01_nop_1_cgb04c_out0A [cgb] | got 08, expected 0A |
-| speedchange/speedchange2_tima01_nop_2_cgb04c_out0B [cgb] | got 09, expected 0B |
+| speedchange/speedchange2_tima01_nop_1_cgb04c_out0A [cgb] | got 09, expected 0A |
+| speedchange/speedchange2_tima01_nop_2_cgb04c_out0B [cgb] | got 0A, expected 0B |
 | speedchange/speedchange2_tima02_2a_cgb04c_out03 [cgb] | got 02, expected 03 |
 | speedchange/speedchange2_tima02_2b_cgb04c_out04 [cgb] | got 03, expected 04 |
 | speedchange/speedchange2_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
 | speedchange/speedchange2_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
-| speedchange/speedchange3_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange4_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
 | speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange5_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
+| speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange_ch2_nr52_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange_ch2_nr52_ds_2b_cgb04c_outF0 [cgb] | got F2, expected F0 |
-| speedchange/speedchange_tima01_nop_1_cgb04c_out07 [cgb] | got 06, expected 07 |
-| speedchange/speedchange_tima01_nop_2_cgb04c_out08 [cgb] | got 07, expected 08 |
-| speedchange/speedchange_tima02_2a_cgb04c_out03 [cgb] | got 02, expected 03 |
-| speedchange/speedchange_tima02_2b_cgb04c_out04 [cgb] | got 03, expected 04 |
-| speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
-| speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
+| speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 81, expected 80 |
+| speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 82, expected 81 |
 
 ## sprites (461/476 passed)
 

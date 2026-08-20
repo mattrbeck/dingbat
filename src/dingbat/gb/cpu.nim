@@ -218,6 +218,11 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   if cpu.halt_bug:
     cpu.halt_bug = false
     cpu.pc = cpu.pc - 1
+  when defined(gb_ss_trace):
+    # Diagnostic (tools only). The divider value the dispatch begins on -- the
+    # other half of timer.nim's TIMAIRQ line, and what turns a `speedchange`
+    # ROM's NOP count into a divider phase. See SPEED_SWITCH_DIV_RESET_T.
+    echo "IRQDISP tdiv=", gb.timer.tdiv, " pc=", toHex(cpu.pc, 4)
   when defined(gb_irq_trace):
     # Diagnostic (tools only; compiled out of every shipping build). One line
     # per interrupt the CPU actually TAKES, with the PPU dot it was taken on --

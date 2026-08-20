@@ -82,6 +82,11 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 4
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   when defined(gb_phase_trace):
     echo "TIMIRQ t=", gb_phase, "/", gb_ticklen
+  when defined(gb_ss_trace):
+    # Diagnostic (tools only). The divider value the TIMA overflow's reload
+    # landed on: the anchor every gambatte `speedchange*_tima0N_*` ROM lays its
+    # timeline out from. See SPEED_SWITCH_DIV_RESET_T below.
+    echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
   gb.interrupts.timer_interrupt = true
   t.tima = t.tma
 
@@ -204,6 +209,71 @@ proc apu_div_phase*(t: GbTimer; gb: GB): int =
   let period = apu_div_period(gb)
   period - (int(t.tdiv) and (period - 1))
 
+const SPEED_SWITCH_DIV_RESET_T* {.intdefine.} = 4
+  ## **The switch leaf's DIV reset is one M-cycle after the STOP fetch, not on
+  ## it** — T-cycles the divider counts between the two.
+  ##
+  ## STOP is a TWO-byte opcode on this leaf (Pan Docs' chart: "2 bytes, HALT
+  ## mode, DIV reset, speed changes"), and the reset goes with the second byte,
+  ## not the first. dingbat charges the whole instruction as one fetch M-cycle
+  ## plus the stall, so its reset landed a whole M-cycle early. SameBoy makes
+  ## the same choice from the other side — `stop()` calls `enter_stop_mode`
+  ## (which is where its DIV reset lives) *before* `cycle_read(gb->pc++)` — and
+  ## misses the same rows.
+  ##
+  ## **A phase, not a charge.** Only the divider domain moves; no time is
+  ## spent, because the M-cycle is already inside the instruction's total (the
+  ## stall). Ticking the whole MACHINE here instead — either on top of the
+  ## stall or taken back out of it — is a straight refutation:
+  ## 208-row `speedchange` goes 182 -> **142** / **143**, because the ~50
+  ## `ly44_m3*` rows measure the PPU's dot advance across the switch to the dot
+  ## and this moves it by 2-4. The reset point is the only thing that may move.
+  ##
+  ## The family that pins it is `speedchange[2]_tima0N_{1a,1b,2a,2b}`: N
+  ## back-to-back `LDH ($4D),A ; STOP` pairs anchored on a timer IRQ, with `1`
+  ## and `2` one M-cycle apart in WHERE THE STOP IS and `a`/`b` one M-cycle
+  ## apart in where TIMA is read. The `1`/`2` axis holds the post-reset
+  ## interval fixed, so the only thing it can move is the divider's phase at
+  ## the reset — i.e. whether the reset's own falling edge on the TAC tap
+  ## clocks TIMA once more. Swept one build per T-cycle over all 208
+  ## `speedchange` rows:
+  ##
+  ##     T      0    1    2    3   *4    5    6    7*   8    9   10   11   12
+  ##     rows 182  182  182  182  192  192  192  192  186  186  186  186  182
+  ##
+  ## A strict two-sided maximum, and the plateau is exactly one M-cycle wide —
+  ## which is the ROMs saying the quantity is M-cycle quantised rather than the
+  ## sweep being flat. 4 is the round value in it. Worth +10 `speedchange` and
+  ## +2 `dma` (the two `hdma_late_m3speedchange_tima_scx1_ds` rows), nothing
+  ## else in the tree moving.
+  ##
+  ## **What it does NOT close, and the contradiction that stops it.** Six rows
+  ## resist, and they are not a matter of one more T-cycle: they need the reset
+  ## to be a *different* distance out per TAC setting.
+  ## `speedchange_tima00_1a` (TAC = $04, tap bit 9) has the divider at 508 mod
+  ## 1024 at dingbat's reset point — four counts below the tap's half-period,
+  ## exactly where `speedchange_tima02_2a` (TAC = $06, tap bit 5) sits at 28
+  ## mod 64 — and hardware clocks TIMA on the tap-5 one and NOT on the tap-9
+  ## one. Same offset from the tap, opposite answers, so no single lead
+  ## satisfies both: T = 4 buys tima01/02/03 and loses `tima00_1a`/`_1b`. The
+  ## same split appears again on the second switch (`speedchange2`), where the
+  ## other three taps want 8 and tap 9 wants 4 — tap 9 is consistently one
+  ## M-cycle behind the rest, in both directions. Whatever explains that is a
+  ## second mechanism, and SameBoy does not have it either: it fails 20 of
+  ## these 208 rows, including 14 of the 16 that are left here.
+  ##
+  ## **This value is relative to `mem_read`'s access phase, and the residual is
+  ## not.** dingbat charges an M-cycle's ticks BEFORE returning a read's byte,
+  ## so the STOP fetch that anchors this lead lands at the END of its M-cycle;
+  ## sampling reads at the TOP instead (the serial work's `a_r = 0`) moves the
+  ## anchor 4 T earlier and this constant would have to become 8 to keep the
+  ## same ten rows. The post-reset interval, and therefore the `a`/`b` bracket,
+  ## is unmoved by that — both ends are reads. So these rows neither support
+  ## nor refute `a_r = 0`; they only tie the two together. The six residual
+  ## rows DO refute it as their explanation, because what they disagree about
+  ## is one TAC setting against another and any read-phase change moves every
+  ## TAC setting by the same amount.
+
 proc timer_read*(t: GbTimer; idx: int): uint8 =
   case idx
   of 0xFF04: uint8(t.tdiv shr 8)
@@ -271,3 +341,26 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
     t.bit_for_tima = bit
     timer_check_edge(t, gb, on_write = true)
   else: discard
+
+
+proc timer_speed_switch_div_reset*(t: GbTimer; gb: GB) =
+  ## The DIV reset a KEY1 speed switch performs (memory.nim's stop_instr).
+  ##
+  ## Ordinary `timer_write($FF04, 0)`, one M-cycle of divider later than the
+  ## STOP fetch dingbat charges the opcode as -- see SPEED_SWITCH_DIV_RESET_T.
+  when SPEED_SWITCH_DIV_RESET_T != 0:
+    timer_tick(t, gb, SPEED_SWITCH_DIV_RESET_T)
+  when defined(gb_ss_trace):
+    # Diagnostic (tools only; compiled out of every shipping build). One line
+    # per speed switch, printed at the instant the reset happens, with the
+    # divider phase the reset is about to be judged against. That phase is the
+    # whole content of the `speedchange*_tima0N_*` family and nothing else
+    # reports it; pair it with the TIMAIRQ / IRQDISP lines the same define
+    # turns on above and in cpu.nim, which give the anchor those ROMs hang
+    # their timeline off.
+    echo "SSWITCH pc=", toHex(int(gb.cpu.pc), 4),
+         " tdiv=", t.tdiv, " (mod64=", int(t.tdiv) mod 64,
+         " mod256=", int(t.tdiv) mod 256, " mod1024=", int(t.tdiv) mod 1024,
+         ") tima=", toHex(int(t.tima), 2),
+         " tap=", t.bit_for_tima, " spd=", gb.memory.current_speed
+  timer_write(t, gb, 0xFF04, 0)
