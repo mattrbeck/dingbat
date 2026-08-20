@@ -836,11 +836,25 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 1
   ## **Fixed xorshift, never a seeded RNG.** Every determinism guarantee here —
   ## the byte-identical screenshot gates, save-state round-trips, the rollback
   ## netplay core — needs two runs of the same ROM to start from the same bytes.
-  ## The pattern is per-model only in the sense that it is not: deriving real
-  ## per-model shapes needs `wrambands.gb` run on hardware (flashcart-kit/9),
-  ## which measures set-bits per 256-byte block and would tell us whether the
-  ## console bands its bias. Until that comes back, one shape for all models is
-  ## the most this tree can honestly claim.
+  ##
+  ## **`wrambands.gb` has now been run on two machines (2026-08-20), and the
+  ## answer is: uniform is right for AGB, mildly wrong for MGB.** Set bits per
+  ## 256-byte block, out of 2048, excluding the flashcart loader's region:
+  ##
+  ##     AGB (GBA SP)     mean 1007.6 / 2048 = 49.2% of bits set
+  ##     MGB (GB Pocket)  mean 1089.2 / 2048 = 53.2% of bits set
+  ##
+  ## with byte counts of 369 `$00` / 221 `$FF` on the AGB against 834 / 333 on
+  ## the MGB. **There is NO 256-byte banding on either machine** — the even and
+  ## odd halves of every row track each other — so the alternating-band shapes
+  ## some emulators model are not what these consoles do at that period.
+  ##
+  ## The uniform fill here is therefore a good model of an AGB and slightly
+  ## under-biased for an MGB. Deliberately NOT chasing that 4%: no row in the
+  ## tree distinguishes them, one console is not a population, and fitting a
+  ## per-model bias to a single sample would be exactly the overfitting this
+  ## constant's history is already a lesson about. The measurement is recorded
+  ## in docs/flashcart-runbook.md if a test ever needs it.
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
