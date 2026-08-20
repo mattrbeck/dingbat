@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-20 16:50:00 · commit 8d34240 · game-boy-test-roms v7.0*
+*Generated: 2026-08-20 16:59:17 · commit e20837d · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1016
-- **Fail:** 209
+- **Pass:** 1043
+- **Fail:** 182
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,14 +22,14 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 73 | 74 |
-| Game Boy - GBMicrotest | 430 | 482 |
+| Game Boy - GBMicrotest | 438 | 482 |
 | Game Boy - AGE | 39 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
-| Game Boy - Mooneye (wilbertpol) | 121 | 184 |
-| Game Boy - gambatte | 10 | 48 |
+| Game Boy - Mooneye (wilbertpol) | 136 | 184 |
+| Game Boy - gambatte | 14 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -315,7 +315,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/dma/hdma_timing-C | CGB | 👀 Mooneye: FAIL |
 | mealybug/mbc/mbc3_rtc | cart | 👌 |
 
-## Game Boy - GBMicrotest (430/482)
+## Game Boy - GBMicrotest (438/482)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -332,14 +332,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/halt_op_dupe_delay | cart | 👀 actual=0x01 expected=0x55 verdict=0xFF |
 | gbmicrotest/hblank_int_di_timing_a | cart | 👌 |
 | gbmicrotest/hblank_int_di_timing_b | cart | 👌 |
-| gbmicrotest/hblank_int_if_a | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_if_a | cart | 👌 |
 | gbmicrotest/hblank_int_if_b | cart | 👌 |
 | gbmicrotest/hblank_int_l0 | cart | 👌 |
 | gbmicrotest/hblank_int_l1 | cart | 👌 |
 | gbmicrotest/hblank_int_l2 | cart | 👌 |
 | gbmicrotest/hblank_int_scx0 | cart | 👌 |
 | gbmicrotest/hblank_int_scx0_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx0_if_b | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx0_if_b | cart | 👌 |
 | gbmicrotest/hblank_int_scx0_if_c | cart | 👌 |
 | gbmicrotest/hblank_int_scx0_if_d | cart | 👌 |
 | gbmicrotest/hblank_int_scx1 | cart | 👀 actual=0x2E expected=0x2D verdict=0xFF |
@@ -358,14 +358,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/hblank_int_scx2_nops_b | cart | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx3 | cart | 👌 |
 | gbmicrotest/hblank_int_scx3_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_if_b | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx3_if_b | cart | 👌 |
 | gbmicrotest/hblank_int_scx3_if_c | cart | 👌 |
 | gbmicrotest/hblank_int_scx3_if_d | cart | 👌 |
 | gbmicrotest/hblank_int_scx3_nops_a | cart | 👌 |
 | gbmicrotest/hblank_int_scx3_nops_b | cart | 👌 |
 | gbmicrotest/hblank_int_scx4 | cart | 👌 |
 | gbmicrotest/hblank_int_scx4_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_if_b | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx4_if_b | cart | 👌 |
 | gbmicrotest/hblank_int_scx4_if_c | cart | 👌 |
 | gbmicrotest/hblank_int_scx4_if_d | cart | 👌 |
 | gbmicrotest/hblank_int_scx4_nops_a | cart | 👌 |
@@ -386,14 +386,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/hblank_int_scx6_nops_b | cart | 👀 actual=0x00 expected=0xFF verdict=0xFF |
 | gbmicrotest/hblank_int_scx7 | cart | 👌 |
 | gbmicrotest/hblank_int_scx7_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_if_b | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_int_scx7_if_b | cart | 👌 |
 | gbmicrotest/hblank_int_scx7_if_c | cart | 👌 |
 | gbmicrotest/hblank_int_scx7_if_d | cart | 👌 |
 | gbmicrotest/hblank_int_scx7_nops_a | cart | 👌 |
 | gbmicrotest/hblank_int_scx7_nops_b | cart | 👌 |
 | gbmicrotest/hblank_scx2_if_a | cart | 👌 |
 | gbmicrotest/hblank_scx3_if_a | cart | 👌 |
-| gbmicrotest/hblank_scx3_if_b | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/hblank_scx3_if_b | cart | 👌 |
 | gbmicrotest/hblank_scx3_if_c | cart | 👌 |
 | gbmicrotest/hblank_scx3_if_d | cart | 👌 |
 | gbmicrotest/hblank_scx3_int_a | cart | 👌 |
@@ -449,7 +449,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_nops_to_vblank_int_a | cart | 👌 |
 | gbmicrotest/lcdon_nops_to_vblank_int_b | cart | 👌 |
 | gbmicrotest/lcdon_to_if_oam_a | cart | 👌 |
-| gbmicrotest/lcdon_to_if_oam_b | cart | 👌 |
+| gbmicrotest/lcdon_to_if_oam_b | cart | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
 | gbmicrotest/lcdon_to_ly1_a | cart | 👌 |
 | gbmicrotest/lcdon_to_ly1_b | cart | 👌 |
 | gbmicrotest/lcdon_to_ly2_a | cart | 👌 |
@@ -485,7 +485,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_stat3_d | cart | 👌 |
 | gbmicrotest/line_144_oam_int_a | cart | 👌 |
 | gbmicrotest/line_144_oam_int_b | cart | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
-| gbmicrotest/line_144_oam_int_c | cart | 👀 actual=0xE3 expected=0xE2 verdict=0xFF |
+| gbmicrotest/line_144_oam_int_c | cart | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
 | gbmicrotest/line_144_oam_int_d | cart | 👀 actual=0xE3 expected=0x00 verdict=0xFF |
 | gbmicrotest/line_153_ly_a | cart | 👌 |
 | gbmicrotest/line_153_ly_b | cart | 👌 |
@@ -522,7 +522,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/line_65_ly | cart | 👌 |
 | gbmicrotest/lyc1_int_halt_a | cart | 👌 |
 | gbmicrotest/lyc1_int_halt_b | cart | 👌 |
-| gbmicrotest/lyc1_int_if_edge_a | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/lyc1_int_if_edge_a | cart | 👌 |
 | gbmicrotest/lyc1_int_if_edge_b | cart | 👌 |
 | gbmicrotest/lyc1_int_if_edge_c | cart | 👌 |
 | gbmicrotest/lyc1_int_if_edge_d | cart | 👌 |
@@ -541,7 +541,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/oam_int_halt_a | cart | 👌 |
 | gbmicrotest/oam_int_halt_b | cart | 👌 |
 | gbmicrotest/oam_int_if_edge_a | cart | 👌 |
-| gbmicrotest/oam_int_if_edge_b | cart | 👌 |
+| gbmicrotest/oam_int_if_edge_b | cart | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
 | gbmicrotest/oam_int_if_edge_c | cart | 👌 |
 | gbmicrotest/oam_int_if_edge_d | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
 | gbmicrotest/oam_int_if_level_c | cart | 👌 |
@@ -675,7 +675,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/stat_write_glitch_l0_c | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l143_a | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l143_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l143_c | cart | 👀 actual=0xE3 expected=0xE2 verdict=0xFF |
+| gbmicrotest/stat_write_glitch_l143_c | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l143_d | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l154_a | cart | 👌 |
 | gbmicrotest/stat_write_glitch_l154_b | cart | 👌 |
@@ -733,7 +733,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/timer_tma_write_b | cart | 👌 |
 | gbmicrotest/vblank2_int_halt_a | cart | 👌 |
 | gbmicrotest/vblank2_int_halt_b | cart | 👌 |
-| gbmicrotest/vblank2_int_if_a | cart | 👀 actual=0xE1 expected=0xE0 verdict=0xFF |
+| gbmicrotest/vblank2_int_if_a | cart | 👌 |
 | gbmicrotest/vblank2_int_if_b | cart | 👌 |
 | gbmicrotest/vblank2_int_if_c | cart | 👌 |
 | gbmicrotest/vblank2_int_if_d | cart | 👌 |
@@ -742,7 +742,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/vblank2_int_nops_b | cart | 👌 |
 | gbmicrotest/vblank_int_halt_a | cart | 👌 |
 | gbmicrotest/vblank_int_halt_b | cart | 👌 |
-| gbmicrotest/vblank_int_if_a | cart | 👀 actual=0xE2 expected=0xE0 verdict=0xFF |
+| gbmicrotest/vblank_int_if_a | cart | 👌 |
 | gbmicrotest/vblank_int_if_b | cart | 👌 |
 | gbmicrotest/vblank_int_if_c | cart | 👌 |
 | gbmicrotest/vblank_int_if_d | cart | 👌 |
@@ -983,7 +983,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## Game Boy - Mooneye (wilbertpol) (121/184)
+## Game Boy - Mooneye (wilbertpol) (136/184)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -1015,12 +1015,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops | cart | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops | cart | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/intr_0_timing | cart | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/intr_0_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb | SGB sgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_timing | cart | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/intr_1_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | cart | 👌 |
@@ -1060,10 +1060,10 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly143_144_mode3_0 | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@dmgABC | DMG dmgABC | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@mgb | DMG mgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb | SGB sgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@dmgABC | DMG dmgABC | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@mgb | DMG mgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb | SGB sgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@agb | CGB agb | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@dmgABC | DMG dmgABC | 👀 Mooneye: FAIL |
@@ -1078,16 +1078,16 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@dmgABC | DMG dmgABC | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@mgb | DMG mgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb | SGB sgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@dmgABC | DMG dmgABC | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@mgb | DMG mgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb | SGB sgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@dmgABC | DMG dmgABC | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@mgb | DMG mgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb | SGB sgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@dmgABC | DMG dmgABC | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@mgb | DMG mgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb | SGB sgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@dmgABC | DMG dmgABC | 👌 |
@@ -1113,7 +1113,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@mgb | DMG mgb | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb | SGB sgb | 👀 Mooneye: FAIL |
 | mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | cart | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@sgb | SGB sgb | 👌 |
@@ -1172,7 +1172,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@cgbc | CGB cgbc | 👌 |
 | mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@agb | CGB agb | 👌 |
 
-## Game Boy - gambatte (10/48)
+## Game Boy - gambatte (14/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -1184,30 +1184,30 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👀 136/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 7/17 passed |
-| gambatte/enable_display | per-ROM | 👀 135/184 passed |
+| gambatte/enable_display | per-ROM | 👀 151/184 passed |
 | gambatte/halt | per-ROM | 👀 136/158 passed |
 | gambatte/irq_precedence | per-ROM | 👀 47/64 passed |
-| gambatte/lcd_offset | per-ROM | 👀 35/62 passed |
-| gambatte/lcdirq_precedence | per-ROM | 👀 60/62 passed |
-| gambatte/ly0 | per-ROM | 👀 74/96 passed |
+| gambatte/lcd_offset | per-ROM | 👀 39/62 passed |
+| gambatte/lcdirq_precedence | per-ROM | 👌 62/62 passed |
+| gambatte/ly0 | per-ROM | 👀 82/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👀 3/6 passed |
-| gambatte/lyc153int_m2irq | per-ROM | 👀 12/16 passed |
+| gambatte/lyc153int_m2irq | per-ROM | 👀 14/16 passed |
 | gambatte/lycEnable | per-ROM | 👀 181/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
 | gambatte/lycint_lycflag | per-ROM | 👀 11/12 passed |
-| gambatte/lycint_lycirq | per-ROM | 👀 2/4 passed |
+| gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
-| gambatte/lycm2int | per-ROM | 👀 11/18 passed |
+| gambatte/lycm2int | per-ROM | 👀 16/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 152/167 passed |
-| gambatte/m0int_m0irq | per-ROM | 👀 2/4 passed |
+| gambatte/m0enable | per-ROM | 👀 151/167 passed |
+| gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
 | gambatte/m0int_m0stat | per-ROM | 👀 10/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
-| gambatte/m1 | per-ROM | 👀 124/170 passed |
+| gambatte/m1 | per-ROM | 👀 139/170 passed |
 | gambatte/m2enable | per-ROM | 👀 96/120 passed |
-| gambatte/m2int_m0irq | per-ROM | 👀 47/72 passed |
+| gambatte/m2int_m0irq | per-ROM | 👀 52/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👀 5/6 passed |
-| gambatte/m2int_m2irq | per-ROM | 👀 15/18 passed |
+| gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |
 | gambatte/m2int_m2stat | per-ROM | 👀 7/8 passed |
 | gambatte/m2int_m3stat | per-ROM | 👀 42/44 passed |
 | gambatte/miscmstatirq | per-ROM | 👀 268/279 passed |
@@ -1223,7 +1223,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 37/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 32/36 passed |
-| gambatte/window | per-ROM | 👀 386/476 passed |
+| gambatte/window | per-ROM | 👀 385/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 

@@ -659,26 +659,35 @@ when IF_READ_SAMPLE_T < 4:
     ## path where the extra body pushes it off clang's threshold. A ROM reads
     ## $FF0F a few hundred times a frame, so paying the split there and one
     ## compare everywhere else is the same model for none of the cost.
-    mem_tick_bus(mem, gb, 4)
-    let dots = 4 shr mem.current_speed
-    let head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
-    if head <= 0:
+    when IF_READ_SAMPLE_T < 0:
+      # `a_r = 0` in the serial write-up's algebra: the read samples in front of
+      # the WHOLE M-cycle, timer and serial shifter included. Kept reachable
+      # because three families ask for it (see IF_READ_SAMPLE_T in gb.nim); it
+      # is not what this tree ships, and the paragraph there says what it costs.
       irq_latch_mcycle(gb.interrupts)
-      mem_tick_ppu(mem, gb, dots, ignore_speed = true)
-      return
-    mem_tick_ppu(mem, gb, head, ignore_speed = true)
-    # fifo_tick re-snapshots `read_mode` on every entry, so the tail call would
-    # otherwise re-latch the STAT/VRAM/OAM read mode part way through the
-    # M-cycle. Keep the head's latch -- the one this M-cycle owns -- and let the
-    # tail contribute only its LY-advanced bit. Without this the split alone
-    # moves twelve gambatte rows (oam_access / vram_m3 `postread`, cgbpal_m3,
-    # window `*busyread`) that have nothing to do with IF; with it,
-    # `-d:gb_if_split_control` scores the baseline exactly.
-    let head_rm = gb.ppu.read_mode
-    irq_latch_mcycle(gb.interrupts)
-    if dots > head:
-      mem_tick_ppu(mem, gb, dots - head, ignore_speed = true)
-      gb.ppu.read_mode = head_rm or (gb.ppu.read_mode and LY_JUST_CHANGED)
+      mem_tick_components(mem, gb, 4)
+    else:
+      mem_tick_bus(mem, gb, 4)
+      let dots = 4 shr mem.current_speed
+      let head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
+      if head <= 0:
+        irq_latch_mcycle(gb.interrupts)
+        mem_tick_ppu(mem, gb, dots, ignore_speed = true)
+      else:
+        mem_tick_ppu(mem, gb, head, ignore_speed = true)
+        # fifo_tick re-snapshots `read_mode` on every entry, so the tail call
+        # would otherwise re-latch the STAT/VRAM/OAM read mode part way through
+        # the M-cycle. Keep the head's latch -- the one this M-cycle owns -- and
+        # let the tail contribute only its LY-advanced bit. Without this the
+        # split alone moves twelve gambatte rows (oam_access / vram_m3
+        # `postread`, cgbpal_m3, window `*busyread`) that have nothing to do
+        # with IF; with it, `-d:gb_if_split_control` scores the baseline
+        # exactly.
+        let head_rm = gb.ppu.read_mode
+        irq_latch_mcycle(gb.interrupts)
+        if dots > head:
+          mem_tick_ppu(mem, gb, dots - head, ignore_speed = true)
+          gb.ppu.read_mode = head_rm or (gb.ppu.read_mode and LY_JUST_CHANGED)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   when IF_READ_SAMPLE_T < 4:

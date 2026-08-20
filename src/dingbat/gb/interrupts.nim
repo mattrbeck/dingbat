@@ -106,6 +106,7 @@ when IF_READ_SAMPLE_T < 4:
 # 1042 / 4322 / 438 against 1016 / 4272 / 430 with it off.
 #
 #   IF_READ_SAMPLE_T   runner   gambatte   micro
+#         -1              --        --       --   see the a_r paragraph below
 #          0            1037      4322      433
 #          1            1039      4320      435
 #          2            1042      4319      438   <- ships
@@ -126,6 +127,34 @@ when IF_READ_SAMPLE_T < 4:
 # carries the fix; `-d:gb_if_split_control` keeps the split and returns the live
 # IF byte, and with the fix in place that build scores the baseline exactly
 # (1225/1016, gambatte 4269).
+#
+# ---- `a_r = 0`: measured, and refused by ONE family ------------------------
+#
+# The serial write-up above SERIAL_TAP_DMG argues from three families that a CPU
+# read samples at the TOP of its own M-cycle -- `a_r = 0` -- rather than after
+# it, and names `tima`, `halt` and `irq_precedence` as the families on the other
+# side. `IF_READ_SAMPLE_T = -1` is that cell for the $FF0F read: the latch goes
+# in front of the whole M-cycle, timer and serial shifter included. Measured on
+# the tree this ships in, against the shipping 2:
+#
+#   runner 1043 -> 1037, gambatte 4334 -> 4328
+#   serial          53 -> 57   (+4, the direction the serial algebra predicts)
+#   m2int_m0irq     52 -> 55   lcd_offset +4, window +2
+#   tima           224 -> 211  (-13)
+#   ly0             82 -> 79   enable_display -1, sprites -2
+#   halt           136 -> 136  (unmoved)
+#   irq_precedence  47 -> 47   (unmoved)
+#
+# So two of the three families named as blockers do not move at all, and the
+# whole cost is `tima`. What `tima` is objecting to is not the read's phase: it
+# is that this tree runs the timer's four T-cycles as ONE step at the head of
+# the M-cycle (mem_tick_bus), so a latch in front of that step hides a timer IRQ
+# that hardware's read does see. `a_r = 0` therefore needs the timer's overflow
+# edge moved later inside the M-cycle at the same time -- it cannot be scored
+# against `tima` until it is -- and it would want SPEED_SWITCH_DIV_RESET_T in
+# timer.nim to go from 4 to 8 with it. The shipping 2 is a latch AFTER the bus
+# half and part way through the PPU's dots, which is what leaves `tima` and
+# `halt` exactly where they were.
 #
 # What is left after it, and what it is NOT: GBMicrotest's `oam_int_if_edge_b`
 # and `_d` still disagree in OPPOSITE directions with `_a` and `_c` green, and
