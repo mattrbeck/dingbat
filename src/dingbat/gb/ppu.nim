@@ -540,6 +540,17 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
     return (ppu.lcd_status and 3'u8) != 3
   if (ppu.read_mode and 3'u8) == 3: return false
   if ppu.first_line: return true
+  # Both clauses are load-bearing, and the LIVE one is bracketed from the CGB
+  # side by two rows it costs. gambatte `dma/hdma_late_enable_1` and
+  # `_lcdoffset3_1` read $8000 exactly ONE DOT into mode 3 with the latched
+  # mode still 2, and hardware (and SameBoy) answer them with the byte while
+  # this refuses it -- so the CGB read lock closes a shade later than the live
+  # mode 3 edge. Dropping the clause is REFUSED: gambatte +5 but the local
+  # runner goes 1016 -> 1009, losing mooneye `lcdon_timing-GS` on all four DMG
+  # and SGB models and GBMicrotest `poweron_vram_{026,140}` and
+  # `vram_read_l1_b`. Every loser is DMG-side or a power-on line and every
+  # gainer is CGB, so what is missing is a device or line split, not this
+  # clause. Measured 2026-08-20; see the HDMA_BLOCK_OVERHEAD_BUS commit.
   (ppu.lcd_status and 3'u8) != 3
 
 const CRAM_LOCK_R {.intdefine.} = 3
@@ -1756,12 +1767,11 @@ proc ppu_land_hdma_if_due*(ppu: GbPpu; gb: GB) {.noinline.} =
 
 proc ppu_charge_hdma_overhead(ppu: GbPpu; gb: GB) {.inline.} =
   ## The bus acquire/release either side of a VRAM DMA. Charged once per
-  ## TRANSFER, not once per block -- see HDMA_BLOCK_OVERHEAD_BUS in gb.nim for
-  ## why, and for the `gdma_cycles_long` family that measures it.
+  ## TRANSFER, not once per block, and on the CPU's clock rather than the PPU's
+  ## -- `ignore_speed = false` is the measured part, not a default. See
+  ## HDMA_BLOCK_OVERHEAD_BUS in gb.nim for both derivations.
   when HDMA_BLOCK_OVERHEAD_BUS != 0:
-    mem_tick_bus(gb.memory, gb, HDMA_BLOCK_OVERHEAD_BUS, from_cpu = false)
-  when HDMA_BLOCK_OVERHEAD_DOTS != 0:
-    mem_tick_ppu(gb.memory, gb, HDMA_BLOCK_OVERHEAD_DOTS, ignore_speed = true)
+    mem_tick_components(gb.memory, gb, HDMA_BLOCK_OVERHEAD_BUS, from_cpu = false)
 
 proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
                           charge_overhead = true): bool =

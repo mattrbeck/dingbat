@@ -987,24 +987,50 @@ const HDMA_BLOCK_OVERHEAD_BUS* {.intdefine.} = 4
   ## a one-block transfer of either kind is timed identically either way, which
   ## is why the sweep below is unaffected.
   ##
-  ## **Unscaled, and that is the measured part.** The copies are charged
-  ## `2 shl current_speed` because they are two PPU dots whatever the CPU is
-  ## doing; this is not, and the double-speed rows are what say so. Shipped
-  ## first as a single `2 shl speed` term, that made the DOUBLE-speed
-  ## DIV-duration group exact while leaving the SINGLE-speed one 4 wrong --
-  ## double speed was getting 4 cycles and single speed 2. Charging a flat 4 at
-  ## both speeds makes BOTH groups exact:
+  ## **Four CPU-clock cycles: it is ONE M-CYCLE, and its dot cost therefore
+  ## halves in double speed.** This shipped first as a flat count of DOTS,
+  ## `ignore_speed = true`, on the argument that the copies scale because they
+  ## are two PPU dots whatever the CPU is doing. The copies do; this does not,
+  ## and the whole `*_cycles` family is a two-sided bracket that says so.
   ##
-  ##   unscaled bus cycles     2      4 (ship)    6      8
+  ## Those 40 rows are pairs one M-cycle apart whose expected values (3 then 0)
+  ## straddle the mode 3 -> 0 edge, so each pair is an interval on the dots this
+  ## term contributes. Swept a dot at a time, the flip points give:
+  ##
+  ##     ROM family                    dots that satisfy it
+  ##     hdma/gdma_cycles (scx 0)      [1, 5)
+  ##     ..._scx2                      [3, 7)
+  ##     ..._scx3                      [4, 8)
+  ##     ..._scx5                      [2, 6)
+  ##     ..._ds, _2xshort_ds           [2, 4)  /  [2, 3)
+  ##     ..._scx5_ds                   [1, 3)
+  ##
+  ## The four single-speed intervals intersect at **4** and the double-speed
+  ## ones at **2**, and no flat dot count is both -- which is exactly why every
+  ## setting of the old `..._DOTS` knob left some of the family red, and why
+  ## GDMA_SETUP_MCYCLES was written up as "no constant works". 4 dots at normal
+  ## speed and 2 at double IS one CPU M-cycle, so the term is charged with
+  ## `mem_tick_components(4, ignore_speed = false)` and the family goes
+  ## **34/40 -> 40/40 with no contradiction left in it.**
+  ##
+  ## (Charging it BEFORE the copies instead of after scores identically -- the
+  ## copies end at the same dot either way -- so the placement is not evidence
+  ## about acquire versus release.)
+  ##
+  ## **What it costs, and why that is kept.** Two rows go the other way:
+  ## `hdma_late_enable_1` and `_lcdoffset3_1`. Both arm an HBlank transfer on
+  ## the LAST dot of a line and then read $8000, and the two extra dots land
+  ## that read one dot INTO mode 3 with the latched mode still 2, where
+  ## `cpu_vram_open` refuses it and the ROM prints `$FF and $07` = 7. SameBoy
+  ## answers both with the byte, so the read lock and not the transfer cost is
+  ## what is wrong there; the note at `cpu_vram_open` has the bracket and the
+  ## seven rows that refuse the obvious fix. Net on the family: +6 / -2.
+  ##
+  ## Earlier sweep, kept because it is what fixed the DIV-duration groups and
+  ## it is still the bracket on the CPU-cycle count itself:
+  ##
+  ##   CPU-clock cycles        2      4 (ship)    6      8
   ##   hdma_timing-C wrong   16/48    8/48     12/48  16/48
-  ##
-  ## (dots swept separately at bus=4: 0 -> 12, 2 -> 8, 4 -> 10. Charging it
-  ## BEFORE the copies instead of after scores identically at 8, so the
-  ## instrument does not distinguish acquire from release -- do not read the
-  ## placement here as evidence.)
-const HDMA_BLOCK_OVERHEAD_DOTS* {.intdefine.} = 2
-  ## PPU dots for the same overhead. Separate from the bus term because they
-  ## are separate clocks; see HDMA_BLOCK_OVERHEAD_BUS for the sweep.
   ##
   ## **Where hdma_timing-C stands: 20/48 wrong -> 12 -> 8. SameBoy gets 2/48.**
   ## Both DIV-duration groups are now exact and so is the mode-2 entry after the
