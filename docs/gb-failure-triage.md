@@ -169,12 +169,36 @@ So this is a behaviour essentially no emulator reproduces, which is what
   answer whatever the inputs, so it cannot tell us which bytes drive the
   phantom sprite. Only silicon, or an emulator that already models it, can.
 
-**Beaten Dying Moon is the open question.** It is Matt Currie's emulator, it
-selects the SoC directly, and `tools/gbppu/bdm.py` drives it — but BDM Simple
-has no screenshot, no headless mode and no stdout beyond errors (all verified),
-so reading its window needs macOS Screen Recording permission that this session
-does not have. Whether BDM draws the sprite is one glance at its window, and it
-decides whether a perturbation campaign is possible off-hardware at all.
+**Beaten Dying Moon fails it too** (screenshotted by Matt, 2026-08-20,
+`bdms -dev mgb`): a plain checkerboard, no sprite. BDM is Matt Currie's
+emulator and selects the SoC directly, so it was the best remaining candidate
+for an off-hardware oracle. The tally is now:
+
+    hardware (the reference)   ONE sprite
+    dingbat  --model=mgb       no sprite
+    SameBoy  -dev mgb / dmg    no sprite
+    BDM      -dev mgb          no sprite
+
+**No emulator in reach models this**, which settles two things. dingbat is not
+behind the field on this row — it is level with both references, and closing it
+would put it ahead of them. And a perturbation campaign is impossible
+off-hardware: every candidate oracle returns the same answer whatever the input
+bytes, so none of them can say which bytes drive the phantom sprite.
+
+**Do NOT spend a hardware session on the baseline ROM.** Its reference PNG IS
+the hardware answer (Gekkio's own MGB capture), so running it again measures
+nothing. What would need silicon is a SWEEP — varying `initial_data`'s two
+bytes and the DMA source byte and reading the resulting sprite — and that ROM
+does not exist: mooneye builds with WLA-DX rather than RGBDS, so it would have
+to be reimplemented here first, and the two attempts at the far simpler
+`dmahalt` probe both failed to render. Build and validate the sweep ROM against
+this tree before booking any hardware time for it.
+
+**Honest priority note.** This is ONE row (two counting the wilbertpol twin),
+its behaviour is exotic enough that mooneye files it under `madness/`, and
+implementing a phantom-sprite rule risks the 40-row `oamdma` family. The larger
+blocks — AGE at 39/89, GBMicrotest at 430/482, wilbertpol at 121/184 — are
+where the rows are.
 
 ### Why it is not implemented yet
 
