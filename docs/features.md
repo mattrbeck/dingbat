@@ -118,7 +118,8 @@ or dev port: https is required off localhost, and Google rejects raw IP addresse
 - Two PPU implementations: a cycle-accurate FIFO renderer (the default) and a faster
   scanline renderer, selectable in settings. The FIFO renderer handles games like
   Prehistorik Man that depend on cycle-accurate PPU behavior.
-  See [fifo_ppu_changes.md](fifo_ppu_changes.md) and [fifo_ppu_edge_cases.md](fifo_ppu_edge_cases.md).
+  The renderer's rules and their derivations are documented at the constants in
+  `src/dingbat/gb/gb.nim` and `fifo_ppu.nim`.
 - Save files are compatible with other emulators like BGB
 - Cartridge mappers — every mapper the library uses:
   - MBC1, including MBC1M multicarts
