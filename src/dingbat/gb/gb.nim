@@ -794,56 +794,53 @@ const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## CGB_HALT_PPU_LEAD wants exactly 4 T taken out of here, and it is worth
   ## having the row that refuses it on record. See docs/gb-failure-triage.md
   ## (2026-08-10).
-const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 0
-  ## Fill WRAM with a fixed non-uniform pattern at power-up instead of zeroes.
-  ## Ships OFF, and the reason it exists at all is worth the paragraph.
+const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 1
+  ## Fill WRAM with a fixed pseudo-random pattern at power-up instead of zeroes.
   ##
-  ## **It is the whole of what `bully/bully` needs.** BullyGB's InitRAMTest
-  ## walks $C000-$DFFF and reports "Uninitialized RAM not randomized" when every
-  ## byte is $00, which is exactly dingbat's power-up state; it is the FIRST of
-  ## that ROM's nine tests and the ROM prints only the first failure, so the
-  ## other eight never ran. Built with `-d:GB_POWERUP_WRAM_PATTERN=1` the ROM
-  ## renders **"All tests OK!"** — every one of bootreg, divtest,
-  ## dmabusconflict, echoram, initram, initvram_dmg, undoc_regs and unused_io
-  ## passes, and the row is pixel-exact against its reference.
+  ## **Pan Docs is explicit** (Power_Up_Sequence): *"The console's WRAM and HRAM
+  ## are random on power-up"*, and it names filling with a constant as an
+  ## emulator shortcut rather than behaviour. An all-zero fill was therefore
+  ## wrong by this tree's own spec authority, and BullyGB's InitRAMTest exists
+  ## to catch exactly that shortcut — it walks $C000-$DFFF, reports
+  ## "Uninitialized RAM not randomized" when every byte is $00, and since it is
+  ## the FIRST of that ROM's nine tests, the other eight had never run here.
+  ## With this on, bully prints **"All tests OK!"** and the row is pixel-exact.
   ##
-  ## **What stops it shipping: gambatte `oamdma` 771 -> 766.** Nine
-  ## `oamdma_srcFE00_*` / `oamdma_srcFF00_*` rows stop producing a readable
-  ## verdict at all ("got ?"). Those sources are the ones that come back through
-  ## the echo region, so they read WRAM, and their expected values therefore
-  ## encode SOME power-up convention. Which one is not established here: real
-  ## WRAM is not zeroes, but it is not this xorshift either, and gambatte's
-  ## `dmg08`/`cgb04c` outputs were captured on hardware where a warm reset
-  ## leaves the previous contents behind. Trading 9 hardware-captured rows for 1
-  ## is the wrong way round on the evidence available.
+  ## **Measured on a GBA SP** (flashcart-kit/9, `wramscan.gb`, booted directly
+  ## to the ROM so the cart menu could not overwrite it): 369 bytes of $00, 221
+  ## of $FF, **7602 of neither**, out of 8192. Real WRAM is overwhelmingly
+  ## non-uniform values, so zeroes are not close and a fill is not merely
+  ## defensible but the better model. It is not uniform noise either — uniform
+  ## would give ~32 each of $00 and $FF, not 369 and 221 — which is why this is
+  ## an honest approximation and not a claim about the silicon.
   ##
-  ## **Measured on a GBA SP, 2026-08-19 (flashcart-kit/9, `wramscan.gb`):**
-  ## `ZEROS 1293, FFS 223, OTHER 6676` of 8192. Real WRAM is neither of the
-  ## fills anyone has tried — most of it is neither $00 nor $FF — and a real
-  ## cart never hands a ROM the all-zero state shipped here. **Caveat that
-  ## matters: that read came through the cart's MENU**, which resets into the
-  ## ROM, and its big aligned run of zeroes in the middle of bank 1 looks like a
-  ## loader clearing its work area; two runs were byte-identical, which decayed
-  ## DRAM would not be. Same contamination class as the gbedge P1 byte.
+  ## **The bill, and why it is paid.** gambatte `oamdma` goes 771 -> 766. All
+  ## five are `oamdma_srcFE00_*` / `srcFF00_*` and all five stop producing a
+  ## readable verdict at all ("got ?") rather than a wrong one. That is not
+  ## incidental: an OAM DMA source at or above $E000 fetches through the echo,
+  ## so $FE00 and $FF00 read **$DE00 and $DF00** (the mapping mooneye
+  ## `oam_dma/sources-GS` pins, and which passes). Proven rather than argued:
+  ## randomising all of WRAM EXCEPT $DE00-$DFFF restores gambatte to 4274 and
+  ## oamdma to 771 exactly, with bully still passing.
   ##
-  ## **The trade is far cheaper than the xorshift made it look.** Whole-suite:
+  ## So those five rows read UNINITIALISED WRAM, and their expected values
+  ## encode whatever the capture rig happened to leave at $DE00. Pan Docs says
+  ## not to rely on that; a spec-correct emulator cannot score them. Zeroing
+  ## just those two pages would buy all five back and is deliberately NOT done —
+  ## it fits gambatte's rig rather than hardware, and the AGS scan puts its zero
+  ## run near $D600, nowhere near $DE00.
   ##
-  ##   fill        bully   gambatte oamdma   gambatte total   runner Pass
-  ##   zeroes      FAIL       771/811            4263            1013
-  ##   all $FF     PASS       770/811            4262            1014
-  ##   xorshift    PASS       766/811            4258            1014
+  ## Net: runner Pass 1015 -> 1016 with **zero runner rows lost** (the oamdma
+  ## group was already failing), gambatte 4274 -> 4269.
   ##
-  ## So those rows ARE value-dependent, which is what the echo-region reading
-  ## predicted — but $FF costs ONE row, not five. Still not shipped: hardware
-  ## says neither pure fill is right, so picking $FF swaps one arbitrary
-  ## convention for another, and zeroes are the MORE common of the two on
-  ## silicon (1293 vs 223). Revisit with an uncontaminated read — the ROM has to
-  ## be the first code the console executes.
-  ##
-  ## Fixed xorshift, not a seeded RNG, so that turning it on costs no
-  ## determinism: the byte-identical screenshot gates, save-state round-trips
-  ## and the rollback netplay core all need two runs to start from the same
-  ## bytes.
+  ## **Fixed xorshift, never a seeded RNG.** Every determinism guarantee here —
+  ## the byte-identical screenshot gates, save-state round-trips, the rollback
+  ## netplay core — needs two runs of the same ROM to start from the same bytes.
+  ## The pattern is per-model only in the sense that it is not: deriving real
+  ## per-model shapes needs `wrambands.gb` run on hardware (flashcart-kit/9),
+  ## which measures set-bits per 256-byte block and would tell us whether the
+  ## console bands its bias. Until that comes back, one shape for all models is
+  ## the most this tree can honestly claim.
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what

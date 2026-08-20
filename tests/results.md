@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-19 21:53:23 · commit 809a872 · game-boy-test-roms v7.0*
+*Generated: 2026-08-19 21:59:25 · commit 497c96b · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1015
-- **Fail:** 210
+- **Pass:** 1016
+- **Fail:** 209
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -24,7 +24,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mealybug Tearoom | 73 | 74 |
 | Game Boy - GBMicrotest | 430 | 482 |
 | Game Boy - AGE | 39 | 89 |
-| Game Boy - Screenshot suites | 12 | 13 |
+| Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
@@ -896,23 +896,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/vram/vram-read-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
 | age/vram/vram-read-dmgC | DMG dmgC | 👀 Mooneye: FAIL |
 
-## Game Boy - Screenshot suites (12/13)
+## Game Boy - Screenshot suites (13/13)
 
-| Test | Device | Result |
-|------|--------|--------|
-| bully/bully | CGB | 👀 98.2% correct (22620/23040 pixels match) |
-| strikethrough/strikethrough-dmg | DMG | 👌 |
-| strikethrough/strikethrough-cgb | CGB | 👌 |
-| scribbltests/lycscx | DMG | 👌 |
-| scribbltests/lycscy | DMG | 👌 |
-| scribbltests/palettely | DMG | 👌 |
-| scribbltests/scxly | DMG | 👌 |
-| scribbltests/statcount-auto | DMG | 👌 |
-| turtle-tests/window_y_trigger | DMG | 👌 |
-| turtle-tests/window_y_trigger_wx_offscreen | DMG | 👌 |
-| cgb-acid-hell/cgb-acid-hell | CGB | 👌 |
-| little-things-gb/firstwhite | DMG | 👌 |
-| mbc3-tester/mbc3-tester | DMG | 👌 |
+**All 13 tests passed.**
 
 ## Game Boy - SameSuite (8/8)
 
@@ -1226,7 +1212,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m3stat | per-ROM | 👀 42/44 passed |
 | gambatte/miscmstatirq | per-ROM | 👀 268/279 passed |
 | gambatte/oam_access | per-ROM | 👀 53/69 passed |
-| gambatte/oamdma | per-ROM | 👀 771/811 passed |
+| gambatte/oamdma | per-ROM | 👀 766/811 passed |
 | gambatte/scx_during_m3 | per-ROM | 👀 121/141 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
 | gambatte/serial | per-ROM | 👀 50/82 passed |
