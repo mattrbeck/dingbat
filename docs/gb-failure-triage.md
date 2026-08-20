@@ -150,6 +150,32 @@ is Y=`$38` (56), X=`$5A` (90), tile `$38`, flags `$5A`: **the reference sprite,
 exactly.** The unexplained parts are the mask itself and the four-byte range
 gate, and upstream marks both as not understood either.
 
+### SameBoy does not model it either (2026-08-20)
+
+`tools/gbfuzz/sameboy_runner` gained `GBFUZZ_MODEL=mgb` so the oracle could be
+asked on the right machine. It answers the same as dingbat:
+
+    hardware (the reference)   11517 white + 11505 grey + 18 px dark  -> ONE sprite
+    SameBoy, -dev mgb          11520 white + 11520 grey               -> no sprite
+    SameBoy, -dev dmg          11520 white + 11520 grey               -> no sprite
+    dingbat, --model=mgb       11520 white + 11520 grey               -> no sprite
+
+So this is a behaviour essentially no emulator reproduces, which is what
+`madness/` means. Two consequences:
+
+* dingbat is not behind the field here — it is level with SameBoy, and closing
+  this row would put it ahead;
+* **SameBoy cannot be the oracle for perturbing this ROM.** It returns the same
+  answer whatever the inputs, so it cannot tell us which bytes drive the
+  phantom sprite. Only silicon, or an emulator that already models it, can.
+
+**Beaten Dying Moon is the open question.** It is Matt Currie's emulator, it
+selects the SoC directly, and `tools/gbppu/bdm.py` drives it — but BDM Simple
+has no screenshot, no headless mode and no stdout beyond errors (all verified),
+so reading its window needs macOS Screen Recording permission that this session
+does not have. Whether BDM draws the sprite is one glance at its window, and it
+decides whether a perturbation campaign is possible off-hardware at all.
+
 ### Why it is not implemented yet
 
 Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
