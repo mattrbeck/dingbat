@@ -178,8 +178,31 @@ the CPU is halted?** Probe design, which is worth building properly:
 
 A Game Boy Pocket is the ideal machine; running it on a CGB too is worth it,
 since the two should DISAGREE if the per-machine split the mooneye ROM records
-really is about this clock. A first cut of this probe was written on 2026-08-20
-and did not render — it is not in the tree; rebuild it rather than trusting it.
+really is about this clock.
+
+**Two attempts at this probe have failed to render, and the bisect is worth
+having before a third.** Every component works ALONE, verified separately:
+the draw path (182 px), the `fillSrc` loop (188 px), a timer waking a `halt`
+with IME=0 (172 px), a `halt` with an OAM DMA already in flight (80 px), and
+the entire halt-run path end to end including the capped poll (153 px). But:
+
+* adding a SECOND measurement to the same image blanks the screen;
+* and replacing the `halt` with a 40-iteration `nop` busy-wait — nothing else
+  changed — also blanks it.
+
+So the fault is structural in the ROM rather than in any measurement, and it is
+NOT the halt, the DMA, the poll or the drawing. Suspect the section layout or a
+label/register collision introduced when the pieces are combined; disassemble
+the linked image rather than re-reading the source, which is what two passes of
+source-reading failed to catch.
+
+**Also re-derive the interpretation before running it.** The working row-0-only
+build reads `00C0` (192 poll iterations) in dingbat, where dingbat completes the
+transfer during the halt and the model therefore predicts ~1. Either the poll is
+far slower per iteration than assumed (it is ~17 M, not ~6), or the timer wake
+is not the 160 M intended. Until that number is understood, a hardware reading
+cannot be interpreted — so the probe is not merely unfinished, its scale is
+unvalidated.
 
 After that, the sweep ROM: vary `initial_data`'s two bytes and the DMA source
 byte across a grid so the OR-and-mask rule and the range gate are measured
