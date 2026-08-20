@@ -269,74 +269,66 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
   ## An OAM DMA owns OAM for the whole of its transfer, and the mode-2 OAM scan
   ## gets nothing out of the entries it reaches while that lasts.
   ##
-  ## **MEASURED AND DERIVED 2026-08-13, and it ships OFF at 0** -- the previous
-  ## model, which is the scan as one burst at dot 80 against whatever OAM holds
-  ## by then, with the transfer ignored. What it is worth and what refuses it
-  ## are both below; the whole derivation is in docs/gb-failure-triage.md.
+  ## Measured and derived 2026-08-13, ships OFF at 0 -- the previous model is the
+  ## scan as one burst at dot 80 against whatever OAM holds by then, transfer
+  ## ignored. Full derivation in docs/gb-failure-triage.md.
   ##
   ## ---- The mechanism ---------------------------------------------------------
   ##
-  ## Mode 2 is 80 dots and there are 40 OAM entries: the scan reads one entry
-  ## every two dots. Which dot inside mode 2 an entry is read on is normally
-  ## unobservable -- the CPU is locked out of OAM for all of mode 2 and nothing
-  ## else writes it -- so the burst is exact. **An OAM DMA is the exception**: it
-  ## owns OAM from the CPU clock domain, one byte per CPU M-cycle, straight
-  ## through mode 2. That is a clock crossing, and it is why no constant offset
-  ## could ever have fixed the `oamdma/late_sp*` families: the transfer advances
-  ## one entry per 16 dots at normal speed and one per 8 in double, against a
-  ## scan that always does one per 2, so the entry the lock opens or closes on
-  ## moves with the speed. (The triage doc had these 27 rows down as a wrong
-  ## clock domain in `CGB_OAM_DMA_START_T`. That is falsified: sweeping the start
-  ## latency from 4 T to 40 T moves the whole `late_sp*` set by exactly zero
-  ## rows while moving the rest of `oamdma` by hundreds.)
+  ## Mode 2 is 80 dots and there are 40 OAM entries: the scan reads one entry every
+  ## two dots. Which dot an entry is read on is normally unobservable -- the CPU is
+  ## locked out of OAM for all of mode 2 -- so the burst is exact. An OAM DMA is
+  ## the exception: it owns OAM from the CPU clock domain, one byte per CPU
+  ## M-cycle, straight through mode 2. That clock crossing is why no constant
+  ## offset could ever fix the `oamdma/late_sp*` families -- the transfer advances
+  ## one entry per 16 dots at normal speed and one per 8 in double, against a scan
+  ## that always does one per 2, so the entry the lock opens or closes on moves
+  ## with the speed. (The triage doc had these 27 rows down as a wrong clock domain
+  ## in `CGB_OAM_DMA_START_T`; falsified -- sweeping that latency from 4 T to 40 T
+  ## moves the `late_sp*` set by zero rows while moving the rest of `oamdma` by
+  ## hundreds.)
   ##
   ## ---- What pins it ----------------------------------------------------------
   ##
-  ## Eight families, sixteen one-M-cycle brackets, both devices. The `x` half
-  ## steps the transfer's START across one named entry's dot and the `y` half
-  ## steps its END across the same one, and both halves put the same entry at
-  ## the same dot: `sp00` in [-3, 1), `sp01` and `sp02` in [1, 5), `sp39` in
-  ## [77, 81) -- which is `2n` for n = 0, 1, 2, 39, to two dots. See
-  ## OBJ_SCAN_DOT_ADJ, which is the SAME per-object dot the `sprites/
-  ## late_sizechange*` ladder derives through LCDC.2 instead of through a
-  ## transfer -- two suites, two mechanisms, and the same two surviving cells.
-  ## Turned on: gambatte 4183 -> **4199, +16 / -0**, all sixteen of them
-  ## `late_sp*` (4145 -> 4161 when it was derived, before the LCDC.2 scan and
-  ## the window carry landed -- composing with those changed the total and not
-  ## one of the sixteen); mooneye `oam_dma/*`, `oam_dma_{restart,start,timing}`
-  ## and all twelve `acceptance/ppu` rows byte-identical; dmg-acid2 and
+  ## Eight families, sixteen one-M-cycle brackets, both devices. The `x` half steps
+  ## the transfer's START across one named entry's dot and the `y` half steps its
+  ## END across the same one, and both put the same entry at the same dot: `sp00`
+  ## in [-3, 1), `sp01`/`sp02` in [1, 5), `sp39` in [77, 81) -- i.e. `2n`, to two
+  ## dots. Same per-object dot the `sprites/late_sizechange*` ladder derives through
+  ## LCDC.2 instead of through a transfer: two suites, two mechanisms, the same two
+  ## surviving cells (see OBJ_SCAN_DOT_ADJ).
+  ##
+  ## Turned on: gambatte 4183 -> 4199, +16 / -0, all sixteen `late_sp*`; mooneye
+  ## `oam_dma*` and all twelve `acceptance/ppu` rows byte-identical; dmg-acid2 and
   ## cgb-acid2 byte-identical.
   ##
   ## ---- What refuses it, and it is one ROM ------------------------------------
   ##
-  ## `strikethrough` -- the one screenshot ROM in the bundle that runs an OAM DMA
-  ## mid-picture -- goes from pixel-exact to **23033/23040 on both devices**. Its
-  ## LY 68 has a transfer covering the WHOLE of that line's mode 2, and its
-  ## reference still draws OAM entry 39 (Y = $54, X = $4F, so screen x 71..78 --
-  ## exactly the 7 pixels that go missing). A lock that lasts the whole transfer
-  ## cannot leave that entry readable, so the lock's DURATION is wrong even
-  ## though its two edges are pinned to the dot by the sixteen brackets above.
-  ## Two narrower durations were built and measured and both are worse: blocking
-  ## only the entry the transfer's write port is on scores 28/52 on the families
-  ## (against 42 for this one and 26 for the burst), and blocking only the two
-  ## M-cycles the OAM bus changes hands on scores 38/52 -- and NEITHER saves
-  ## `strikethrough`, because the progressive read they both need is what
-  ## displaces entry 39 out of the ten-object cap on its own.
+  ## `strikethrough` -- the one screenshot ROM in the bundle running an OAM DMA
+  ## mid-picture -- goes from pixel-exact to 23033/23040 on both devices. Its LY 68
+  ## has a transfer covering the whole of that line's mode 2, and its reference
+  ## still draws OAM entry 39 (screen x 71..78, exactly the 7 missing pixels). A
+  ## lock lasting the whole transfer cannot leave that entry readable, so the
+  ## DURATION is wrong even though both edges are pinned to the dot.
   ##
-  ## So the shape is right and the duration is not, and the ROM that says so is
-  ## a pixel oracle the triage doc already uses to arbitrate three other knobs.
-  ## Left at 0 until the duration is derived rather than fitted.
+  ## Two narrower durations were built and are worse: blocking only the entry the
+  ## write port is on scores 28/52 on the families (against 42 for this and 26 for
+  ## the burst), and blocking only the two M-cycles the OAM bus changes hands on
+  ## scores 38/52. Neither saves `strikethrough`, because the progressive read they
+  ## both need displaces entry 39 out of the ten-object cap on its own.
+  ##
+  ## So the shape is right and the duration is not. Left at 0 until it is derived
+  ## rather than fitted.
   ##
   ## ---- 2026-08-20: the REDIRECT reading, tested and refused ------------------
   ##
-  ## LIJI32 (mooneye-test-suite issue #1) describes this span as a REDIRECT
-  ## rather than a lock: "when the PPU reads OAM in this case, it uses the DMA
-  ## destination address (except for bit 0)". That looked like it dissolved
-  ## `strikethrough`'s objection exactly, since a redirected read still yields
-  ## an OBJECT where a blocked one yields nothing, so entry 39 could survive.
-  ## Built both halves (the mode-2 scan here, and `obj_oam_dma_read`'s fetch)
-  ## and swept the destination offset. Whole suite, against a shipping baseline
-  ## of Pass 1016 / gambatte 4269 / oamdma 771 / both strikethrough rows exact:
+  ## LIJI32 (mooneye-test-suite issue #1) describes this span as a REDIRECT rather
+  ## than a lock: the PPU uses the DMA destination address, except for bit 0. That
+  ## looked like it dissolved `strikethrough`'s objection, since a redirected read
+  ## still yields an OBJECT where a blocked one yields nothing. Built both halves
+  ## (this scan and `obj_oam_dma_read`'s fetch) and swept the destination offset,
+  ## against a shipping baseline of Pass 1016 / gambatte 4269 / oamdma 771 / both
+  ## strikethrough rows exact:
   ##
   ##   arm                              Pass  gambatte  oamdma  strike dmg / cgb
   ##   lock, both devices               1014    4285      782     23033 / 23033
@@ -345,45 +337,35 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
   ##   lock, DMG-family only            1015    4277      774     23033 / PASS
   ##   that + redirect, off -1 / 0 / +1 1015  4273-4277 770-774   23033 / PASS
   ##
-  ## **The redirect never helps.** Every redirect arm scores at or below its
-  ## lock counterpart on gambatte and never better on `strikethrough`. So the
-  ## +16 the lock buys is not explained by "reads the wrong address"; whatever
-  ## the span does to `late_sp*`, modelling it as a redirect does not reproduce
-  ## it any better and costs rows elsewhere.
+  ## The redirect never helps: every redirect arm scores at or below its lock
+  ## counterpart and never better on `strikethrough`. So the +16 the lock buys is
+  ## not explained by "reads the wrong address".
   ##
-  ## The lock's own +16 reproduces exactly against that baseline (4269 -> 4285),
-  ## eleven of them in `oamdma`.
+  ## One real finding, worth keeping if this is ever enabled: the span should be
+  ## DMG-FAMILY ONLY. Gating it off on CGB recovers `strikethrough-cgb` to a clean
+  ## pass while still gaining +8 gambatte over shipping, halving the lock's cost to
+  ## one runner row. That matches LIJI's split -- he has CGB-E and later reading
+  ## unmodified values -- although he puts CGB-0..D in the blocking camp and
+  ## dingbat scores this row at CPU CGB C, so either that reference was captured on
+  ## a CGB-E or the block is narrower than mode 2.
   ##
-  ## **One real finding, worth keeping if this is ever enabled: the span should
-  ## be DMG-FAMILY ONLY.** Gating it off on CGB recovers `strikethrough-cgb` to
-  ## a clean pass while still gaining +8 gambatte over shipping, which halves
-  ## the lock's cost from two runner rows to one. That matches LIJI's split --
-  ## he has CGB-E and later reading unmodified values -- although he puts
-  ## CGB-0..D in the blocking camp and dingbat scores this row at the default
-  ## CPU CGB C, so either that reference was captured on a CGB-E or the block is
-  ## narrower than mode 2.
-  ##
-  ## **Still nothing beats shipping at the runner level (1016).** The remaining
-  ## blocker is unchanged and is now known not to be an addressing question:
-  ## `strikethrough-DMG` refuses the lock's DURATION, and the redirect does not
-  ## rescue it at any offset.
+  ## Nothing beats shipping at the runner level (1016). The blocker is unchanged
+  ## and is now known not to be an addressing question: `strikethrough-DMG` refuses
+  ## the lock's DURATION, and the redirect does not rescue it at any offset.
 
 # ---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
 #
-# The scan is run in one go on the dot mode 2 ends, which is fine for OAM
-# itself (the CPU cannot reach OAM during mode 2) but is NOT fine for LCDC.2:
-# the height is not in OAM, it is a register the CPU can move under the scan,
-# and hardware compares each object's Y against the height as it stands in
-# THAT object's own two-dot slot. gambatte's `sprites/late_sizechange*` is
-# thirty-eight ROMs of exactly that measurement and it names the object in the
-# filename -- `_sp00`, `_sp01`, `_sp02`, `_sp39` -- which is what makes it a
-# ruler rather than a single boundary.
+# The scan runs in one go on the dot mode 2 ends, which is fine for OAM itself
+# (the CPU cannot reach OAM during mode 2) but NOT for LCDC.2: the height is a
+# register the CPU can move under the scan, and hardware compares each object's Y
+# against the height as it stands in THAT object's own two-dot slot. gambatte's
+# `sprites/late_sizechange*` is thirty-eight ROMs of exactly that, and it names
+# the object in the filename (`_sp00`, `_sp01`, `_sp02`, `_sp39`), which makes it
+# a ruler rather than a single boundary.
 #
-# Every one of them sets up an object that is on the line at 8x16 and off it at
-# 8x8, moves LCDC.2 once at a chosen dot of line 8, and prints 3 if the object
-# was scanned in and 0 if it was not. Under `-d:gb_lcdc2_trace` the write dots
-# come out as (the ROMs run at 4 dots per M-cycle, so each family brackets its
-# boundary to one M-cycle and no finer):
+# Each sets up an object on the line at 8x16 and off it at 8x8, moves LCDC.2 once
+# at a chosen dot of line 8, and prints 3 if the object was scanned in. Under
+# `-d:gb_lcdc2_trace` (4 dots per M-cycle, so each family brackets to one M-cycle):
 #
 #   family / object   write dots        DMG says            CGB says
 #   _sp00   obj 0     453 of ly 7, 1    seen, NOT seen      same as DMG
@@ -392,56 +374,42 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
 #   (none)  obj 9     13, 17, 21        seen, seen, not     seen, MIXED, not
 #   _sp39   obj 39    73, 77, 81        seen, seen, not     seen, MIXED, not
 #
-# so the DMG's sample dot for object N is bracketed into `(2N - 4, 2N]` by the
-# `_sizechange` half and into `[2N - 3, 2N + 2)` by the `_sizechange2` half --
-# an intersection of `{2N - 1, 2N}`, i.e. the object's own slot and nothing
-# else. 2N is the structural one (the first dot of the slot, and the dot the
-# scan's first OAM read is on) and OBJ_SCAN_DOT_ADJ expresses the other.
+# So the DMG's sample dot for object N is bracketed into `(2N - 4, 2N]` by the
+# `_sizechange` half and `[2N - 3, 2N + 2)` by `_sizechange2` -- intersection
+# `{2N - 1, 2N}`, the object's own slot and nothing else. 2N is the structural one
+# (the first dot of the slot, and the dot the scan's first OAM read is on) and
+# OBJ_SCAN_DOT_ADJ expresses the other. The ladder collapses to a single dot per
+# object because a write dot and a sample dot are compared directly -- no latency
+# to fit. Device-independent, and 24 gambatte rows on its own.
 #
-# The whole ladder collapses to a single dot per object because a write dot and
-# a sample dot are compared directly -- there is no latency here to fit. That is
-# the device-INDEPENDENT half, and it is 24 gambatte rows on its own.
+# MIXED: the three CGB cells cannot be one sample dot at all. Object 1's write at
+# dot 1 is `not seen` when it CLEARS the bit (late_sizechange_sp01_2, the object
+# stays 8x16) and `seen` when it SETS it (late_sizechange2_sp01_1, the object
+# becomes 8x16). Same object, same dot, opposite conclusions: what is constant is
+# the ANSWER, 8x16. The same pair holds at object 9 (dot 17) and object 39 (dot
+# 77), and in each the dot is `2N - 1`, one M-cycle before the DMG's.
 #
-# ---- MIXED, and why the CGB half is not a shifted sample dot ---------------
-#
-# The three CGB cells above cannot be one sample dot at all. Object 1's write
-# at dot 1 is `not seen` when it CLEARS the bit (late_sizechange_sp01_2,
-# cgb04c_out3 -- the object stays 8x16) and `seen` when it SETS it
-# (late_sizechange2_sp01_1, out3 -- the object becomes 8x16). Same object, same
-# dot, opposite conclusions: what is actually constant is the ANSWER, 8x16.
-# The same pair holds at object 9 (dot 17) and object 39 (dot 77), and in every
-# one of them the dot in question is `2N - 1`, one M-cycle before the DMG's.
-#
-# So the CGB scans each object against BOTH the dot the DMG uses and the dot one
-# M-cycle earlier, and keeps the object if either says it is on the line -- and
-# `sprite_on_line` is monotone in the height (8x16's window contains 8x8's), so
-# "either says on the line" is exactly "either sample says 8x16". Read as a
-# latency that is the bit arriving at the scan LATER on CGB, the SAME direction
-# as CGB_OBJ_SIZE_LATENCY at the object fetch; the "opposite sign" this family
-# used to be filed under came from reading it as a fetch measurement, which it
-# is not. See CGB_OBJ_SCAN_LEAD in gb.nim.
+# So the CGB scans each object against BOTH the DMG's dot and the dot one M-cycle
+# earlier, keeping the object if either says it is on the line -- and
+# `sprite_on_line` is monotone in the height, so "either says on the line" is
+# exactly "either sample says 8x16". As a latency that is the bit arriving at the
+# scan LATER on CGB, the same direction as CGB_OBJ_SIZE_LATENCY at the object
+# fetch; the "opposite sign" this family used to be filed under came from reading
+# it as a fetch measurement. See CGB_OBJ_SCAN_LEAD in gb.nim.
 const OAM_SCAN_DOTS = 80'i32
-  ## Dots of mode 2, which is also the discriminator below: `lcdc2_flip` is
-  ## cleared on the dot this scan runs on, so an entry still in it BELOW this
-  ## is one of this line's mode-2 writes and one at or above it belongs to the
-  ## previous line and is already folded into `lcd_control`.
+  ## Dots of mode 2, and also the discriminator below: `lcdc2_flip` is cleared on
+  ## the dot this scan runs on, so an entry still in it BELOW this is one of this
+  ## line's mode-2 writes and one at or above it belongs to the previous line and
+  ## is already folded into `lcd_control`.
 const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
   ## Dots to shift every object's scan sample by. 0 ships (object N samples on
   ## dot 2N); -1 is the other cell the ROMs above cannot separate from it.
   ##
-  ## **Derived a second time, independently, from a different suite, and it
-  ## lands on the same two cells** (2026-08-13). `oamdma/late_sp{00,01,02,39}
-  ## {x,y}` measures the same `2N` through an OAM DMA rather than through
-  ## LCDC.2: the `x` half of each family steps the transfer's START across one
-  ## named object's scan dot in one-M-cycle steps and the `y` half steps its END
-  ## across the same dot two lines later, so the two halves are independent
-  ## instruments on the same quantity. They put object 0's dot in `[-3, 1)`,
-  ## objects 1 and 2 in `[1, 5)` and object 39 in `[77, 81)` -- `2N + adj` for
-  ## `adj` in `{-1, 0}`, exactly the cell the `_sizechange` ladder above cannot
-  ## split either. Swept over those families with OAM_SCAN_DMA_LOCK on, `adj` of
-  ## -3 / -2 / **-1 / 0** / 1 / 2 / 3 scores 34 / 34 / **42 / 42** / 34 / 30 /
-  ## 26 of 52 -- a two-value plateau with both sides falling off it. Two suites,
-  ## two mechanisms, one answer; see docs/gb-failure-triage.md (2026-08-13).
+  ## The `oamdma/late_sp*` families derive the same `2N` independently, through an
+  ## OAM DMA rather than through LCDC.2 (see OAM_SCAN_DMA_LOCK). Swept over them
+  ## with the lock on, `adj` of -3 / -2 / -1 / 0 / 1 / 2 / 3 scores
+  ## 34 / 34 / 42 / 42 / 34 / 30 / 26 of 52 -- a two-value plateau falling off on
+  ## both sides. Two suites, two mechanisms, one answer.
 
 proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
   ## `sprite_height` as the OAM scan's comparator saw it on `dot`. The same walk
@@ -633,38 +601,37 @@ proc fifo_oam_lock_change*(ppu: GbFifoPpu; gb: GB; taking: bool) =
 
 const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
-  ## `SCX and 7` below the fine scroll the line latched. 1 ships; 0 is the
-  ## previous model and is the control arm.
+  ## `SCX and 7` below the fine scroll the line latched. 1 ships; 0 is the previous
+  ## model and the control arm.
   ##
   ## ---- The shape of the claim -----------------------------------------------
   ##
   ## The BG fetcher is NOT addressed as "a tile index plus a scroll". It is
-  ## addressed by a SCREEN POSITION with the live SCX added to it, so SCX's low
-  ## three bits take part in the carry into the tile-address bits:
+  ## addressed by a SCREEN POSITION with the live SCX added, so SCX's low three
+  ## bits take part in the carry into the tile-address bits:
   ##
   ##     column = ((SCX + 8*k - F) shr 3) and 31
   ##
-  ## where `k` is the fetch index on this line and `F` is `SCX and 7` as it
-  ## stood when the line latched its fine scroll (`scx_fine`, set in
-  ## fifo_sample_smooth_scroll). `8*k - F` is exactly the screen x the fetch is
-  ## for. Expand it and the two forms agree except in one case:
+  ## where `k` is the fetch index on this line and `F` is `SCX and 7` as it stood
+  ## when the line latched its fine scroll (`scx_fine`, in
+  ## fifo_sample_smooth_scroll). `8*k - F` is the screen x the fetch is for.
+  ## Expanded, the two forms agree except in one case:
   ##
   ##     SCX and 7 >= F   ->   k + (SCX shr 3)        the old model
   ##     SCX and 7 <  F   ->   k + (SCX shr 3) - 1    the borrow
   ##
-  ## so nothing moves unless a write LOWERS the low three bits mid-line, and
-  ## then the column comes out one tile lower for the rest of the line. The
-  ## spelling here is the difference rather than the sum, because the sum would
-  ## have to re-derive `8*k - F` from a counter this renderer keeps in tiles.
+  ## so nothing moves unless a write LOWERS the low three bits mid-line, and then
+  ## the column comes out one tile lower for the rest of the line. Spelled as the
+  ## difference rather than the sum, because the sum would have to re-derive
+  ## `8*k - F` from a counter this renderer keeps in tiles.
   ##
   ## ---- What derives it ------------------------------------------------------
   ##
-  ## gambatte's `scx_during_m3`, read as a displacement ruler rather than as
-  ## pass/fail (tools/gbscx). Each ROM writes SCX three times per line off a
-  ## mode-2 STAT interrupt with the writes swept one M-cycle per step, and its
-  ## background row is aperiodic enough that the emitted frame reads back as
-  ## `screen x -> background X`. Six directories, and the directory name is the
-  ## three SCX values:
+  ## gambatte's `scx_during_m3`, read as a displacement ruler rather than pass/fail
+  ## (tools/gbscx). Each ROM writes SCX three times per line off a mode-2 STAT
+  ## interrupt with the writes swept one M-cycle per step, and its background row
+  ## is aperiodic enough that the frame reads back as `screen x -> background X`.
+  ## The directory name is the three SCX values:
   ##
   ##   dir          SCX and 7 per write   late writes that LOWER it   rows
   ##   scx_0060c0        0, 0, 0                   none               all pass
@@ -676,99 +643,69 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ##   scx_0367c0        3, 7, 0                   the third          14 of 14
   ##   scx_0761c0        7, 1, 0                   the second         12 of 14
   ##
-  ## The correlation is exact in both directions: every failing row's disputed
-  ## span follows a write that lowers `SCX and 7`, every row with no such write
-  ## passes, and `scx_0060c0` -- the one directory that never changes the low
-  ## bits at all -- is green from end to end. The error is always the SAME
-  ## error, one tile, and it is one tile whatever the size of the drop (`3->0`
-  ## is minus three, `7->1` is minus six, and both cost exactly 8 pixels), which
-  ## is what says this is a carry and not a count.
+  ## The correlation is exact both ways: every failing row's disputed span follows
+  ## a write that lowers `SCX and 7`, every row with no such write passes, and
+  ## `scx_0060c0` -- the one directory that never changes the low bits -- is green
+  ## end to end. The error is always ONE TILE whatever the size of the drop (`3->0`
+  ## is minus three, `7->1` minus six, both exactly 8 pixels), which is what says
+  ## this is a carry and not a count.
   ##
   ## The fine scroll itself does not move: after such a write hardware keeps
-  ## emitting on the OLD residue, so the disputed span is displaced by exactly
-  ## 8 and never by 1..7. That is the second half of the derivation -- it says
-  ## `F` is a latch and the borrow is taken against it, rather than the shifter
-  ## re-discarding.
+  ## emitting on the OLD residue, so the disputed span is displaced by exactly 8 and
+  ## never by 1..7. That is the second half of the derivation -- `F` is a latch and
+  ## the borrow is taken against it, rather than the shifter re-discarding.
   ##
-  ## ---- The device split, and the three rows that are the whole of it --------
+  ## ---- The device split, and the three rows that are all of it --------------
   ##
-  ## Three ROMs in the family change ONLY the low bits, so they see the borrow
-  ## with nothing else moving, and they are the only rows in the tree that can
-  ## separate the two devices on it. Read straight off the references:
+  ## Three ROMs change ONLY the low bits, so they see the borrow with nothing else
+  ## moving, and they are the only rows in the tree that can separate the devices:
   ##
   ##   ROM                     drop   DMG reference        CGB reference
   ##   scx1_scx0_during_m3_1   1->0   no change at all     borrows at x = 63
   ##   scx2_scx1_during_m3_1   2->1   no change at all     borrows at x = 62
   ##   scx2_scx0_during_m3_1   2->0   borrows at x = 62    borrows at x = 62
   ##
-  ## Same ROM, same dot, same drop of one -- and the two consoles disagree. A
-  ## drop of TWO borrows on both. So the DMG's threshold is one pixel tighter
-  ## than the CGB's and nothing else differs: the DMG borrows on
-  ## `(SCX and 7) + 1 < F` where the CGB borrows on `(SCX and 7) < F`. That is
-  ## `SCX_FINE_BORROW_DMG_LEAD`, and read as physics it says the DMG fetcher's
-  ## screen position sits ONE PIXEL further along than the CGB's at the moment
-  ## the sum is taken. It is bracketed from both sides by this trio: at 0 the
-  ## two `-1` rows go red on DMG, at 2 the `2->0` row goes red on DMG, and the
-  ## CGB arm of all three is unmoved either way.
+  ## Same ROM, dot and drop of one, and the consoles disagree; a drop of TWO borrows
+  ## on both. So the DMG's threshold is one pixel tighter and nothing else differs:
+  ## DMG borrows on `(SCX and 7) + 1 < F`, CGB on `(SCX and 7) < F`. That is
+  ## SCX_FINE_BORROW_DMG_LEAD, and as physics it says the DMG fetcher's screen
+  ## position sits ONE PIXEL further along at the moment the sum is taken.
+  ## Bracketed from both sides by this trio: at 0 the two `-1` rows go red on DMG,
+  ## at 2 the `2->0` row does, and the CGB arm is unmoved either way.
   ##
-  ## It is NOT `CGB_PIPE_MCYCLES`. That term is a whole M-cycle, four dots, and
-  ## moves the pipeline against MACHINE time; this is one pixel inside the
-  ## fetcher's own sum and is invisible to every other row in the suite.
+  ## NOT `CGB_PIPE_MCYCLES` -- that is a whole M-cycle against MACHINE time; this is
+  ## one pixel inside the fetcher's own sum and invisible to every other row.
   ##
-  ## ---- Two neighbouring shapes, and what refuses each ------------------------
+  ## Two neighbouring shapes, each refused: "the discard re-arms and throws 8 more
+  ## pixels away" is refused by the residue (a re-armed discard would leave the line
+  ## emitting on the NEW `SCX and 7`, and every measured span keeps the old one);
+  ## "an extra tile is fetched" is refused by sign (the spans sit one tile LOWER,
+  ## i.e. the picture moves right, which is a borrow and not an insertion).
   ##
-  ##   * "the discard re-arms and throws 8 more pixels away". Refused by the
-  ##     residue: a re-armed discard would leave the line emitting on the NEW
-  ##     `SCX and 7`, and every measured span keeps the old one.
-  ##   * "an extra tile is fetched" (column PLUS one). Refused by sign -- the
-  ##     measured spans sit one tile LOWER than the old model, i.e. the picture
-  ##     moves right, which is a borrow and not an insertion.
-  ##
-  ## ---- Where it does not apply ----------------------------------------------
-  ##
-  ## The window's own fetch (above) is addressed from `current_window_line` and
-  ## `fetcher_x` with no SCX term at all, so it cannot borrow and is left alone.
-  ## Written as an `ord` term rather than an `if` for the reason line 370 gives:
-  ## this is the mode 3 dot loop and a branch here is measurable.
+  ## The window's own fetch is addressed from `current_window_line` and `fetcher_x`
+  ## with no SCX term, so it cannot borrow and is left alone. Written as an `ord`
+  ## term rather than an `if` because this is the mode 3 dot loop.
 
 const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
   ## Pixels the DMG's fetcher position leads the CGB's by inside the borrow
-  ## comparison above. Derived and bracketed in that constant's note, off the
-  ## three `scxN_scxM_during_m3_1` ROMs, which are the only rows in the tree
-  ## that move the low three bits of SCX and nothing else. Subtracted into
-  ## `scx_fine` at the latch so the dot loop never sees it.
+  ## comparison above. Derived and bracketed there, off the three
+  ## `scxN_scxM_during_m3_1` ROMs. Subtracted into `scx_fine` at the latch so the
+  ## dot loop never sees it.
 
 # ---- SCX_FINE_LATCH_LIVE ------------------------------------------------
 #
-# The switch itself is declared in gb.nim, beside the type it grows a field
-# on; this is its derivation.
+# Declared in gb.nim beside the type it grows a field on; this is its derivation.
 #
-# The fine scroll is not sampled on ONE dot. A store to SCX joins the
-# discard for as long as the discard still has pixels to throw away, moving
-# the line's fine scroll and its own length with it. `false` is the old
-# model, where the sample and the discard shared a dot.
+# The fine scroll is not sampled on ONE dot. A store to SCX joins the discard for
+# as long as the discard still has pixels to throw away, moving the line's fine
+# scroll and its own length with it. `false` is the old model, where the sample
+# and the discard shared a dot. Worth gambatte +6 / -1.
 #
-# **Derived, measured, and shipping OFF on price alone.** The rule below is
-# as well evidenced as anything in this file and it is worth
-# gambatte +6 / -1. What is not established is what it costs: on the only
-# whole-cartridge workload this worktree has (blargg cpu_instrs) the
-# mechanism reads +0.24% of retired instructions and the FIELD IT NEEDS
-# reads a further +0.21% with the mechanism compiled out -- which is the
-# object-layout cliff `win_lx` and `win_hold` both record, not a cost of the
-# rule. Shrinking `scx_fine` to `int32` to pay for the field does not move
-# it and `{.noinline.}` on `fifo_arm_scx` costs +0.44% on its own. Five net
-# rows do not buy half a percent of the dot loop, and this bench is not the
-# one docs/gb_oam_dma_cost.md quotes. Re-price it on Pokemon Crystal and
-# Link's Awakening before flipping it: it is one build.
-#
-# ---- What derives it, and what fixes its length --------------------------
-#
-# gambatte `scx_during_m3` sweeps one store across the head of mode 3 one
-# M-cycle at a time. Traced with `-d:gb_m3_trace`, dingbat latches at dot 88
-# on every line but line 0, and the interesting stores land at dot 89 and
-# dot 93. Whether hardware lets them move the fine scroll depends on the
-# fine scroll the line already had, which is what says the window is the
-# discard rather than a fixed number of dots:
+# gambatte `scx_during_m3` sweeps one store across the head of mode 3 an M-cycle
+# at a time. Traced with `-d:gb_m3_trace`, dingbat latches at dot 88 on every line
+# but line 0, and the interesting stores land at dots 89 and 93. Whether hardware
+# lets them move the fine scroll depends on the fine scroll the line already had,
+# which is what says the window is the DISCARD rather than a fixed number of dots:
 #
 #   family      F   store 89   store 93   hardware's residue after it
 #   scx_0063c0  0     no          no      keeps 0 -- there is no discard
@@ -776,44 +713,33 @@ const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
 #   scx_0360c0  3     YES         no      takes 0, the whole of `$60`
 #   scx_0761c0  7     YES         YES     takes 1, the whole of `$61`
 #
-# Read down the `store 89` column and a fixed window is refused outright:
-# the same dot, the same offset from the same latch, and `scx_0063c0` says
-# no while the other three say yes. The only thing that separates them is
-# `F`, and `F` is exactly how many dots of discard are left. Read across
-# `scx_0761c0` and the window is at least 5 dots long at `F = 7`, which no
-# capped spelling reaches without also opening it at `F = 0`.
+# Read down the `store 89` column and a fixed window is refused outright: same dot,
+# same offset from the same latch, and `scx_0063c0` says no while the other three
+# say yes. The only thing separating them is `F`, which is exactly how many dots of
+# discard are left. Read across `scx_0761c0` and the window is at least 5 dots long
+# at `F = 7`, which no capped spelling reaches without also opening it at `F = 0`.
 #
-# So there is no constant here at all: the condition is `lx < 0`, which is
-# what a negative `lx` already means in this renderer. Swept as a capped
-# `min(N, F)` first, the score saturates at N = 3 and the residues keep
-# falling to N = 7 (`scx_0761c0/scx_during_m3_4`, 6292 wrong pixels at
-# N = 3 against 2145 at N = 7, and the DMG/CGB asymmetry there vanishes) --
-# i.e. the data wanted the cap gone.
+# So there is no constant here: the condition is `lx < 0`, which is what a negative
+# `lx` already means. Swept as a capped `min(N, F)` first, the score saturates at
+# N = 3 while the residues keep falling to N = 7 (`scx_0761c0/scx_during_m3_4`,
+# 6292 wrong pixels at N = 3 against 2145 at N = 7, with the DMG/CGB asymmetry
+# there vanishing) -- the data wanted the cap gone.
 #
-# ---- The one row it costs --------------------------------------------
+# The one row it costs is `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`, a
+# mode-3 LENGTH row on line 0, where this tree already carries a one-M-cycle
+# difference (LY0_PIPE_MCYCLES, and a latch at dot 84 rather than 88). Its siblings
+# `_scx0_2` and `_scx0_3` stay green, so this is not the mechanism being wrong in
+# general. The obvious repair was built rather than argued away and is REFUSED:
+# widening the window by that M-cycle on line 0 alone -- the shape
+# LY0_PIPE_MCYCLES predicts -- scores 3998/5005 against 4009, losing eleven
+# `scx_during_m3` rows to buy the one back. So line 0's latch is early by something
+# that is not this window's length, and the row is left red with its cause named.
 #
-# `enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg]`. It is a mode-3 LENGTH
-# row on line 0, and line 0 is where this tree already carries a one
-# M-cycle difference (`LY0_PIPE_MCYCLES`, and the latch there is dot 84 and
-# not 88). Its siblings `_scx0_2` and `_scx0_3` stay green, so this is not
-# the mechanism being wrong in general.
-#
-# The obvious repair is REFUSED and was built rather than argued away:
-# widening the window by that M-cycle on line 0 alone -- which is the shape
-# `LY0_PIPE_MCYCLES` would predict -- scores 3998/5005 against 4009, losing
-# eleven `scx_during_m3` rows to buy the one back. So line 0's latch is
-# early by something that is not simply this window's length, and the row
-# is left red with its cause named rather than papered over.
-#
-# ---- The price, re-measured, and it is not the one above ----------------
-#
-# The +0.446% this note was parked on is STALE. Re-benched in the tree that
-# ships `STAT_M0_FIELD_TAIL` -- whose `obj_dots_line` sits in the same
-# object-scratch block and moved the layout the old figure was blaming --
-# the same flag on the same ROM reads **+0.027%**: blargg cpu_instrs, 2400
-# frames after 300 warmup, four interleaved runs, `cycles=` identical in all
-# eight. So the reason this is off no longer holds, and the +6 / -1 it buys
-# costs about a fortieth of what the note above says it does.
+# Price: the +0.446% this note was once parked on was an object-layout artefact of
+# a neighbouring field. Re-benched in the tree that ships STAT_M0_FIELD_TAIL --
+# whose `obj_dots_line` sits in the same object-scratch block -- the same flag on
+# the same ROM reads +0.027% (blargg cpu_instrs, 2400 frames after 300 warmup,
+# four interleaved runs, `cycles=` identical in all eight).
 
 # ---- SCX_FINE_LATCH_WRAP -------------------------------------------------
 #
@@ -1695,48 +1621,40 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 
 # ---- The OBJ penalty ------------------------------------------------------
 #
-# Pan Docs, Rendering / "OBJ penalty algorithm", on the object that is about to
-# be drawn ("The Pixel" is its leftmost pixel, transparent or not):
+# Pan Docs, Rendering / "OBJ penalty algorithm", on the object about to be drawn
+# ("The Pixel" is its leftmost pixel, transparent or not):
 #
 #   1. Determine the tile (background or window) that The Pixel is within.
-#   2. If that tile has NOT been considered by a previous OBJ yet:
-#      1. Count how many of that tile's pixels are strictly to the right of
-#         The Pixel.
-#      2. Subtract 2.
-#      3. Incur this many dots of penalty, or zero if negative (from waiting
-#         for the BG fetch to finish).
-#   3. Incur a flat, 6-dot penalty (from fetching the OBJ's tile).
+#   2. If that tile has NOT been considered by a previous OBJ yet: count how many
+#      of that tile's pixels are strictly right of The Pixel, subtract 2, and
+#      incur that many dots (or zero if negative) waiting for the BG fetch.
+#   3. Incur a flat 6-dot penalty for fetching the OBJ's tile.
 #
-# Both halves fall straight out of this renderer's own state:
+# Both halves fall out of this renderer's own state:
 #
-#   * The BG FIFO holds exactly the not-yet-emitted pixels of the tile being
-#     displayed, so at the trigger dot it holds The Pixel plus everything
-#     strictly to its right. Step 2 is therefore `fifo.size - 1 - 2`, floored
-#     at 0, with no register decode at all -- it is right through a mid-line
-#     SCX change and through the window, both of which change which tile The
-#     Pixel is in without changing what the FIFO holds.
-#   * "That tile has not been considered yet" is `fetcher_x` (the fetcher's
-#     tile counter) differing from the one the last wait was charged against.
-#     fetcher_x only advances on a push, and a push cannot happen while an
-#     object has the shifter stopped, so every object landing in one displayed
-#     tile sees the same value.
+#   * the BG FIFO holds exactly the not-yet-emitted pixels of the tile being
+#     displayed, so at the trigger dot it holds The Pixel plus everything right
+#     of it. Step 2 is `fifo.size - 1 - 2` floored at 0, with no register decode
+#     -- right through a mid-line SCX change and through the window, both of
+#     which change which tile The Pixel is in without changing the FIFO;
+#   * "not considered yet" is `fetcher_x` differing from the tile the last wait
+#     was charged against. fetcher_x only advances on a push and a push cannot
+#     happen while an object has the shifter stopped, so every object landing in
+#     one displayed tile sees the same value.
 #
 # An object at OAM X 0..7 hangs off the left edge, so The Pixel is in the tile
-# BEFORE the first on-screen one and the trigger dot is not its own dot; see the
-# `lag` term at the trigger for how that is recovered.
+# BEFORE the first on-screen one and the trigger dot is not its own; see the
+# `lag` term at the trigger.
 #
-# Pan Docs' X=0 exception -- "always incurs an 11-dot penalty, regardless of
-# SCX" -- IS a special case and is spelled out as one below. It used to be
-# claimed here that it fell out for free (an X=0 object triggers on the first
-# dot the BG FIFO is non-empty, where the FIFO is a full 8), and that is only
-# true at SCX & 7 = 0: the FIFO is full there, but The Pixel sits at index
-# SCX & 7 of the tile before the first on-screen one, so the derived wait is
-# 5 - (SCX & 7) and the derived penalty ramps 11, 10, 9, 8, 7, 6, 6, 6 over the
-# eight residues. Hardware does not: see the table at the trigger.
+# Pan Docs' X = 0 exception ("always 11 dots regardless of SCX") IS a special
+# case and is spelled out as one below. It was once claimed to fall out for free,
+# which is true only at `SCX & 7 = 0`: The Pixel sits at index `SCX & 7` of the
+# tile before the first on-screen one, so the derived wait is `5 - (SCX & 7)` and
+# the derived penalty ramps 11, 10, 9, 8, 7, 6, 6, 6 over the residues. Hardware
+# does not.
 #
-# ---- Why these two numbers and not others ---------------------------------
-# Both terms were swept independently against the whole of gambatte/sprites
-# (476 rows), writing the penalty as `FETCH + max(0, fifo.size - SUB)`:
+# Both terms swept independently against gambatte/sprites (476 rows), writing the
+# penalty as `FETCH + max(0, fifo.size - SUB)`:
 #
 #   SUB        1     2     3     4     5
 #   FETCH=4   306   256   254   256   254
@@ -1745,20 +1663,16 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 #   FETCH=7   251   251   254   312   267
 #   FETCH=8   250   251   251   254   286
 #
-# (6, 3) -- Pan Docs' flat 6 and its "minus 2" -- is the unique optimum and it
-# is not close: the 9-diagonal (FETCH + 8 - SUB = 11, i.e. everything that gets
-# the X=0 case right and the rest wrong) tops out at 312. The shipping value of
-# the pre-existing OBJ model was a flat 8 with no wait at all, which is that
-# table's bottom-right corner.
+# (6, 3) -- Pan Docs' flat 6 and its "minus 2" -- is the unique optimum and not
+# close: the 9-diagonal (everything that gets X = 0 right and the rest wrong)
+# tops out at 312. The pre-existing model was a flat 8 with no wait, the
+# bottom-right corner.
 #
-# ---- The whole table, from hardware ---------------------------------------
-# GBMicrotest's `ppu_spritex_vs_scx.gb` is 306 assertions -- one object at OAM
-# X 0..16 crossed with SCX 0..8, two per cell bracketing the end of mode 3 to
-# one M-cycle -- and it never writes $FF82, so the runner cannot score it. Its
-# expectations are the table, though, and `tools/gbppu/objtab.py` reads them
-# back out of this tree as dots by differencing against the same build's
-# no-object line, which cancels whatever constant offset the mode 3 edge
-# carries. Hardware, penalty in dots (X >= 1 is period 8 in X; X = 0 is not):
+# GBMicrotest `ppu_spritex_vs_scx.gb` is the hardware table: 306 assertions, one
+# object at OAM X 0..16 crossed with SCX 0..8, two per cell bracketing the end of
+# mode 3 to one M-cycle. It never writes $FF82 so the runner cannot score it, but
+# `tools/gbppu/objtab.py` reads its expectations back out of this tree as dots by
+# differencing against the same build's no-object line. Hardware:
 #
 #   X \ SCX&7   0   1   2   3   4   5   6   7
 #      0       11  11  11  11  11  11  11  11
@@ -1766,33 +1680,30 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 #      2        9   8   7   6   6   6  11  10
 #      ...      (each row the one above rotated right)
 #
-# i.e. `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and a flat 11 for X = 0,
-# which is Pan Docs' algorithm plus Pan Docs' X = 0 exception and nothing else.
-# All 153 cells match this file as of 2026-08-03 (79 of them did not before).
+# i.e. `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and a flat 11 for X = 0 --
+# Pan Docs' algorithm plus its X = 0 exception and nothing else. All 153 cells
+# match as of 2026-08-03 (79 did not before).
 #
-# The object fetch being CANCELLED mid-flight by clearing LCDC.1 is a separate
-# rule and NOT in this table -- ppu_spritex_vs_scx never writes LCDC inside
-# mode 3. It is at fifo_obj_abort, where gambatte's
-# sprites/sprite_late_{,late_}disable_* rows pin it.
+# Cancelling the object fetch mid-flight by clearing LCDC.1 is a separate rule
+# and NOT in this table (ppu_spritex_vs_scx never writes LCDC inside mode 3);
+# it is at fifo_obj_abort.
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
-# ---- LCDC.2 is read ONCE PER BITPLANE, and where the fetch sits in the
-# ---- penalty decides which dots those two reads land on --------------------
+# ---- LCDC.2 is read ONCE PER BITPLANE, and the fetch's place in the penalty
+# ---- decides which dots those two reads land on ---------------------------
 #
 # `sprite_fetch_merge` runs on ONE dot and used to take the object's height from
-# LCDC.2 as it stood on that dot, for both bitplanes at once. mealybug
-# `m3_lcdc_obj_size_change` and `m3_lcdc_obj_size_change_scx` refuse that, and
-# they are unusually direct instruments for it: BGP = $00 makes the whole
-# background white, every object is tile $4C with OBP0 = $E4, and the objects
-# are stacked at Y = $10, $20 .. $90 so each 16-line band is one object read out
-# as eight columns of raw bitplane. Both ROMs pulse LCDC.2 four times across
-# mode 3 (8x8, 8x16, 8x8, 8x16), the first at a fixed dot and `_scx` also
-# driving SCX = (LY >> 4) & 7 so each band meets the pulse at a different fetch
-# phase. Decoding the reference frames back into "which height did the low
-# plane use, and which did the high" (tile $4C is even, so the two heights
-# differ only in the `or 1` for the lower tile of an 8x16 object, and the
-# reference names the pair exactly) gives, against this tree's own merge dot M:
+# LCDC.2 as it stood there, for both bitplanes at once. mealybug
+# `m3_lcdc_obj_size_change` and `_scx` refuse that, and are direct instruments:
+# BGP = $00 makes the background white, every object is tile $4C with OBP0 = $E4,
+# and objects stack at Y = $10, $20 .. $90 so each 16-line band is one object read
+# out as eight columns of raw bitplane. Both pulse LCDC.2 four times across mode 3
+# (8x8, 8x16, 8x8, 8x16), the first at a fixed dot, with `_scx` also driving
+# SCX = (LY >> 4) & 7 so each band meets the pulse at a different fetch phase.
+# Tile $4C is even, so the two heights differ only in the `or 1` for the lower
+# tile of an 8x16 object and the reference names the pair exactly. Against this
+# tree's merge dot M:
 #
 #   ROM              band  object  M     reference  needs
 #   _scx             0, 8  X = 32  135   (16, 8)    lo <= 136, hi >= 137
@@ -1801,64 +1712,48 @@ const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 #   m3_..._change    1..3  X = 1..3 103/102/101  (16, 16)  BOTH reads < 101
 #   m3_..._change    8     X = 8   104   ( 8,  8)   both in [101,125)
 #
-# With the two reads OBJ_PLANE_GAP = 2 dots apart the first three rows have a
-# UNIQUE solution -- low plane on M, high plane on M + 2 -- and it is forced
-# from both sides: band 0 of `m3_lcdc_obj_size_change` needs the high read at
-# least 2 dots after M, band 1's X = 33 needs the low read no later than M.
+# With the reads OBJ_PLANE_GAP = 2 dots apart the first three rows have a UNIQUE
+# solution -- low plane on M, high plane on M + 2 -- forced from both sides.
 #
-# The fourth row cannot be that, and the fifth says why. X = 1..3 hang off the
-# left edge of the screen and are the `idx < 0` arm of the penalty (see
-# OBJ_BG_RUN above): the trigger dot is the BG fetch's own last read, so the
-# object takes the bus from the very next dot and its six dots are the FIRST six
-# of the penalty, not the last. All three of them trigger on dot 94 and all
-# three want both reads before dot 101, which `t + OBJ_FETCH_DOTS` gives exactly
-# -- at any X, because the wait is spent AFTER the fetch on that arm rather than
-# before it, so the penalty's length changes and the read dots do not.
+# The fourth row cannot be that and the fifth says why. X = 1..3 hang off the left
+# edge and are the `idx < 0` arm (OBJ_BG_RUN above): the trigger dot is the BG
+# fetch's own last read, so the object takes the bus from the next dot and its six
+# dots are the FIRST six of the penalty, not the last. All three trigger on dot 94
+# and want both reads before 101, which `t + OBJ_FETCH_DOTS` gives at any X --
+# the wait is spent AFTER the fetch on that arm, so the penalty's length changes
+# and the read dots do not. X = 8 is the same measurement from the other side and
+# makes the boundary a measurement rather than a choice: it is the first object
+# NOT hanging off the left edge and it wants the tail arm's dots (104 and 106,
+# 8x8) where the head arm's (100, 8x16) would draw the other tile. So the split is
+# exactly `idx < 0` -- the split OBJ_BG_RUN = 4 derived from an unrelated ROM.
 #
-# X = 8 is the same measurement from the other side and it is what makes the
-# boundary a measurement rather than a choice: it is the first object that does
-# NOT hang off the left edge, and it wants the tail arm's dots (reads at 104 and
-# 106, i.e. 8x8) where the head arm's (100, i.e. 8x16) would draw the other
-# tile. So the split is exactly `idx < 0`, which is the split OBJ_BG_RUN = 4
-# already derived from `m3_lcdc_tile_sel_change` -- two unrelated ROMs, the same
-# line.
+# The CGB reads the bit three dots later. The same two ROMs as DMG carts on CGB
+# hardware are the suite's `_cgb_c` references and are the COMPLEMENT of the DMG
+# ones here: `_scx` band 0 (merge 135) is mixed on DMG and pure 8x16 on CGB, and
+# bands 4..7 (merge 138/139) are pure 8x8 on DMG and mixed on CGB. Solving those
+# six bands gives one offset -- three dots, on every one, with write and merge
+# dots identical between devices under `-d:gb_m3_trace`. That is
+# CGB_OBJ_SIZE_LATENCY. The head arm is insensitive to it (both settings put the
+# read before the ROM's first write), so it is applied to the dot, not the arm.
 #
-# ---- The CGB reads the bit three dots later, and says so on six bands ------
+# What is left over, and what these ROMs cannot say:
+#  * on the tail arm the six dots come out as M-3 .. M+2, one dot later than "the
+#    wait, then the fetch" places them. That dot is the same pipeline-over-CPU
+#    lead M3_PIPE_DELAY and OBJ_DMA_BUS_LEAD each carry a share of; it is measured
+#    here, not derived, which is why OBJ_PLANE1_LAG is a swept constant rather
+#    than an expression;
+#  * nothing here separates "the tile index's low bit is masked at the OAM read"
+#    from "at each bitplane read" -- every object in both ROMs is on the even tile
+#    $4C, so `tile and $FE` is a no-op. The whole address is recomputed per plane
+#    below, the simpler of the two and consistent with everything either ROM sees;
+#  * a second object at the same X re-arms the stall for a bare OBJ_FETCH_DOTS
+#    (the chain at the end of sprite_fetch_merge). Its six dots ARE its penalty,
+#    so it takes the tail arm's offset whichever arm the first object took; no ROM
+#    puts an LCDC.2 write inside a chained fetch.
 #
-# The same two ROMs run as DMG carts on CGB hardware are the suite's own
-# `_cgb_c` references, and they are the COMPLEMENT of the DMG ones here: `_scx`
-# band 0 (merge 135) is mixed on DMG and pure 8x16 on CGB, and its bands 4..7
-# (merge 138/139) are pure 8x8 on DMG and MIXED on CGB. Solving those six bands
-# the same way gives one offset -- three dots earlier than the DMG's, on every
-# one of them, with the write dots and the merge dots identical between the two
-# devices under `-d:gb_m3_trace`. That is CGB_OBJ_SIZE_LATENCY, the same shape
-# as CGB_MIXER_LATENCY for the mixer's registers: the bit reaches this reader
-# later on CGB. The head arm is insensitive to it (both settings put the read
-# before the ROM's first write), so it is applied to the dot rather than to
-# either arm.
-#
-# ---- What is left over, and what these ROMs cannot say ---------------------
-#
-#  * On the tail arm the six dots come out as M-3 .. M+2, which is one dot later
-#    than "the wait, then the fetch" places them (M-4 .. M+1). That one dot is
-#    the same lead of the pipeline over the CPU's register view that
-#    M3_PIPE_DELAY and OBJ_DMA_BUS_LEAD each carry a share of elsewhere in this
-#    file; it is measured here and not derived, which is why OBJ_PLANE1_LAG is
-#    a constant with a sweep rather than an expression.
-#  * Nothing here separates "the tile index's low bit is masked at the OAM read"
-#    from "at each bitplane read": every object in both ROMs is on tile $4C,
-#    which is even, so `tile and $FE` is a no-op and only the `or 1` for the
-#    lower tile is visible. The whole address is recomputed per plane below,
-#    which is the simpler of the two and matches everything either ROM can see.
-#  * A second object at the same X re-arms the stall for a bare OBJ_FETCH_DOTS
-#    (see the chain at the end of sprite_fetch_merge). Its six dots ARE its
-#    penalty, so it takes the tail arm's offset whichever arm the first object
-#    took; no ROM in the tree puts an LCDC.2 write inside a chained fetch.
-#
-# ---- The sweeps, mealybug matching pixels, one build per cell --------------
-#
-# DMG is 552,188 of 552,960 at the shipping settings and CGB 1,856,315 of
-# 1,866,240; both columns move ONLY the two obj_size rows at every cell below.
+# Sweeps, mealybug matching pixels, one build per cell. DMG is 552,188 of 552,960
+# at the shipping settings and CGB 1,856,315 of 1,866,240; both columns move ONLY
+# the two obj_size rows at every cell.
 #
 #   OBJ_PLANE1_LAG      0        1        2 (ship)   3        4
 #   DMG            552068   552143   552188     552098   552068
@@ -1874,123 +1769,100 @@ const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 #   OBJ_PLANE1_HEAD          4        5        6 (ship)   7        8
 #   DMG                 552188   552188     552188     552110   552110
 #
-# Each of the first three is a strict optimum pinned from both sides. The fourth
-# is not: the head arm's read only has to be before dot 101 and 4, 5 and 6 all
-# are, so the ROMs bound it from above at 6 and say nothing below. 6 is the
-# structural value -- the six-dot fetch starting on the dot after the trigger --
-# and the two dots below it are the same fetch with the OAM read left out.
+# The first three are strict optima pinned from both sides. The fourth is not:
+# the head arm's read only has to be before dot 101 and 4, 5 and 6 all are, so the
+# ROMs bound it from above at 6 and say nothing below. 6 is the structural value
+# -- the six-dot fetch starting on the dot after the trigger.
 const OBJ_PLANE_GAP {.intdefine.} = 2'i32
-  ## Dots between an object fetch's two bitplane reads. Two dots per VRAM
-  ## access, which is the same spacing the six-dot fetch is built out of.
+  ## Dots between an object fetch's two bitplane reads: two dots per VRAM access,
+  ## the spacing the six-dot fetch is built out of.
 const OBJ_PLANE1_LAG {.intdefine.} = 2'i32
-  ## Dots after the merge dot at which the HIGH bitplane's read samples LCDC.2,
-  ## on the `idx >= 0` arm. The low plane's is OBJ_PLANE_GAP earlier, i.e. the
-  ## merge dot itself.
+  ## Dots after the merge dot at which the HIGH bitplane's read samples LCDC.2, on
+  ## the `idx >= 0` arm. The low plane's is OBJ_PLANE_GAP earlier, i.e. the merge
+  ## dot itself.
 const OBJ_PLANE1_HEAD {.intdefine.} = 6'i32
   ## The same read on the `idx < 0` arm, in dots after the object's TRIGGER: the
-  ## fetch sits at the head of the penalty there, so it does not move with the
-  ## wait.
-
+  ## fetch sits at the head of the penalty there, so it does not move with the wait.
 # ---- The object's OAM read, and the one thing that can see it -------------
 #
 # This renderer's mode-2 scan snapshots all four of an object's OAM bytes
-# (fifo_get_sprites) and mode 3 uses that snapshot. Hardware splits the two:
-# the scan latches Y and X -- they are all it decides with -- and the object's
-# TILE NUMBER and ATTRIBUTES are read out of OAM again during mode 3, at the
-# object's own fetch. With OAM quiet the two readings agree and the split is
-# invisible, which is why nothing in this tree had to model it.
+# (fifo_get_sprites) and mode 3 uses that snapshot. Hardware splits the two: the
+# scan latches Y and X -- all it decides with -- and the TILE NUMBER and
+# ATTRIBUTES are read out of OAM again during mode 3, at the object's own fetch.
+# With OAM quiet the two agree and the split is invisible.
 #
-# An OAM DMA is where it stops being invisible. While the unit owns OAM the
-# PPU's read does not reach the array; what it gets is the byte the unit has on
-# its bus, the same byte a colliding CPU read latches (mem_read_busy). So the
-# object renders with a tile number the DMA is only passing through, which need
-# not be anywhere near the object's own OAM slot. Pan Docs ("OAM DMA Transfer")
-# says only that the PPU cannot read OAM properly during the transfer; which
-# byte it does get is Hacktix's strikethrough.gb's own finding, and that ROM is
-# the whole of the evidence below.
+# An OAM DMA is where it stops being invisible. While the unit owns OAM the PPU's
+# read does not reach the array; it gets the byte the unit has on its bus, the
+# same byte a colliding CPU read latches (mem_read_busy). So the object renders
+# with a tile number the DMA is only passing through. Pan Docs says only that the
+# PPU cannot read OAM properly during the transfer; WHICH byte it gets is
+# Hacktix's strikethrough.gb's finding, and that ROM is the whole of the evidence.
 #
-# ---- What the ROM does ----------------------------------------------------
-# It fills OAM with forty objects at Y $54 (LY 68) and X $17, $1F, ... -- tile
-# 0, a solid bar -- eight pixels apart, so every object is one bar's width from
-# the next. On LY 67 a STAT LYC interrupt waits for mode 0, idles 28 NOPs and
-# starts an OAM DMA whose 160-byte source is $01 (a blank tile) everywhere
-# except ONE $00 at offset 46. The transfer then spans the whole of LY 68.
-# Hardware draws exactly ONE eight-pixel bar: one object's fetch lands on the
-# M-cycle carrying that $00 and every other object on the line reads a $01.
-# Off the mode-2 snapshot this renderer drew all ten.
+# The ROM fills OAM with forty objects at Y $54 (LY 68) and X $17, $1F, ... --
+# tile 0, a solid bar -- eight pixels apart. On LY 67 a STAT LYC interrupt waits
+# for mode 0, idles 28 NOPs and starts an OAM DMA whose 160-byte source is $01 (a
+# blank tile) everywhere except ONE $00 at offset 46; the transfer spans the whole
+# of LY 68. Hardware draws exactly ONE eight-pixel bar: one object's fetch lands
+# on the M-cycle carrying that $00. Off the mode-2 snapshot this renderer drew all
+# ten.
 #
-# ---- Which M-cycle, and how the ROM pins it -------------------------------
 # The transfer is one byte per M-cycle, so the ROM resolves the fetch's OAM read
-# to four dots and no finer -- but it does resolve it to four dots, because the
-# bar it draws names the object. On LY 68 the DMA has already overwritten
-# objects 0-5 by the time mode 2 ends, so the ten objects drawn are 6..15
-# (screen x 63..135) and the bar is object 7's, at screen x 71. This renderer's
-# six-dot fetch for that object is dots 171-176 of the line and it merges the
-# tile row on 176; the M-cycle carrying source byte 46 is dots 177-180. So the
-# read is one M-cycle AHEAD of the fetch's own dots -- OBJ_DMA_BUS_LEAD.
+# to four dots -- and it does resolve it, because the bar names the object. On
+# LY 68 the DMA has overwritten objects 0-5 by the time mode 2 ends, so the ten
+# drawn are 6..15 (screen x 63..135) and the bar is object 7's at x 71. This
+# renderer's six-dot fetch for that object is dots 171-176 and it merges the tile
+# row on 176; the M-cycle carrying source byte 46 is dots 177-180. So the read is
+# one M-cycle AHEAD of the fetch's own dots -- OBJ_DMA_BUS_LEAD.
 #
-# That is a phase between the pipeline and the bus half of an M-cycle, and it is
-# the same quantity M3_PIPE_MCYCLES names for the CPU: exactly one M-cycle,
-# measured. M3_PIPE_MCYCLES ships at 0 only because the CPU's half of it is paid
-# on the write side instead (mem_write commits a byte at the top of its
-# M-cycle); the OAM DMA unit writes through its own path and was never given
-# that compensation, so the term is still owed here and this is where it lands.
+# That is a phase between the pipeline and the bus half of an M-cycle, the same
+# quantity M3_PIPE_MCYCLES names for the CPU. M3_PIPE_MCYCLES ships at 0 only
+# because the CPU's half is paid on the write side instead (mem_write commits at
+# the top of its M-cycle); the OAM DMA unit writes through its own path and never
+# got that compensation, so the term is still owed and lands here.
 #
-# ---- Two readings that are NOT it -----------------------------------------
-#  * "The DMA starts earlier." Moving the unit's own start is the other way to
-#    put the $00 under object 7's fetch, and it is refuted outright: one M-cycle
-#    earlier (the `next_dma_counter == 8` threshold at 4) does take
-#    strikethrough to 0 wrong pixels, and it costs sixteen mooneye acceptance
-#    rows -- oam_dma_start, oam_dma_timing, oam_dma_restart and the whole
-#    call/ret/push/rst timing family -- and gambatte/oamdma 681 -> 350.
-#  * "The read is somewhere inside the fetch." Swept over all six dots of the
-#    fetch (and out to eleven, into the wait): every one of them reads a $01 and
-#    the ROM draws no bar at all. The window the ROM leaves is four dots wide
-#    and it does not overlap the fetch.
+# Two readings that are NOT it:
+#  * "the DMA starts earlier". Moving the unit's start is the other way to put
+#    the $00 under object 7's fetch, and it is refuted: one M-cycle earlier (the
+#    `next_dma_counter == 8` threshold at 4) does take strikethrough to 0 wrong
+#    pixels, and costs sixteen mooneye acceptance rows -- oam_dma_start,
+#    oam_dma_timing, oam_dma_restart and the call/ret/push/rst timing family --
+#    plus gambatte/oamdma 681 -> 350.
+#  * "the read is somewhere inside the fetch". Swept over all six dots of the
+#    fetch and out to eleven, into the wait: every one reads $01 and the ROM draws
+#    no bar. The window the ROM leaves is four dots wide and does not overlap the
+#    fetch.
 #
-# ---- Why scanline_ppu does not mirror this --------------------------------
-# It cannot. That renderer draws a whole line in one step at the mode 2 -> 3
-# boundary, so every object on the line would take the same DMA byte and the
-# picture would be ten bars or none -- the answer this change exists to avoid.
-# The distinction only exists for a renderer with a dot per object fetch. The
-# FIFO renderer is the shipping and scored one either way (config `gb_fifo`
-# defaults true; every harness in tests/ passes `fifo = true`).
+# scanline_ppu cannot mirror this: it draws a whole line in one step at the
+# mode 2 -> 3 boundary, so every object would take the same DMA byte and the
+# picture would be ten bars or none. The distinction only exists for a renderer
+# with a dot per object fetch, and the FIFO renderer is the shipping and scored
+# one either way.
 const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
-  ## M-cycles the object fetch leads the OAM DMA unit's bus by, **on a console
-  ## whose mode-3 pipeline is not advanced**. 0 is "the byte the unit is driving
-  ## on the fetch's own M-cycle" (mem.dma_latch).
+  ## M-cycles the object fetch leads the OAM DMA unit's bus by, on a console whose
+  ## mode-3 pipeline is not advanced. 0 is "the byte the unit is driving on the
+  ## fetch's own M-cycle" (mem.dma_latch).
   ##
-  ## ---- It is a phase, so it MOVES WITH THE PHASE ---------------------------
+  ## It is a phase, so it MOVES WITH THE PHASE. The DMA unit runs on machine time
+  ## and the fetch on the pipeline, so advancing the pipeline by an M-cycle moves
+  ## the fetch an M-cycle EARLIER against the unit's bus and the fetch must look
+  ## one M-cycle FURTHER AHEAD to land on the same source byte. The effective lead
+  ## is `OBJ_DMA_BUS_LEAD + CGB_PIPE_MCYCLES`: 2 on CGB, 1 on DMG.
   ##
-  ## The paragraphs above derive this as "a phase between the pipeline and the
-  ## bus half of an M-cycle... the OAM DMA unit writes through its own path and
-  ## was never given that compensation, so the term is still owed here". Read
-  ## that literally and the consequence is forced: the DMA unit runs on machine
-  ## time and the fetch runs on the pipeline, so advancing the pipeline by an
-  ## M-cycle moves the fetch an M-cycle EARLIER against the unit's bus, and the
-  ## fetch has to look one M-cycle FURTHER AHEAD to land on the same source
-  ## byte. The effective lead is `OBJ_DMA_BUS_LEAD + CGB_PIPE_MCYCLES`, and at
-  ## `CGB_PIPE_MCYCLES = 1` that is 2 on CGB and 1 on DMG.
+  ## This was the whole of `strikethrough`'s objection to a moved pipeline, and it
+  ## was never a witness of the phase -- it witnesses the SUM. The 2026-08-10
+  ## sweep that bracketed the phase two-sidedly held this constant fixed while
+  ## moving the phase, so it read the sum move and attributed it to the phase.
+  ## With the sum held, `strikethrough-cgb` is byte-identical to its pre-advance
+  ## frame, all 23040 pixels.
   ##
-  ## This was the whole of `strikethrough`'s objection to a moved pipeline, and
-  ## it was never a witness of the phase at all -- it is a witness of the SUM.
-  ## The 2026-08-10 sweep that bracketed the phase two-sidedly held this
-  ## constant fixed while moving the phase, so it was reading the sum move and
-  ## attributing it to the phase. With the sum held, `strikethrough-cgb` is
-  ## byte-identical to its pre-advance frame, all 23040 pixels.
+  ## Bracketed from both sides, with the DMG arm as one of them: the base is
+  ## device-independent and the ADDITION is CGB-only, because the DMG pipeline
+  ## does not move. Charge the DMG the extra M-cycle and `strikethrough-dmg`
+  ## breaks by the same 7 pixels the CGB arm was breaking by. One ROM, two
+  ## consoles, two values, no fit.
   ##
-  ## **Bracketed from both sides, and the DMG arm is one of the two sides.**
-  ## The lead is device-independent as a base and the ADDITION is CGB-only,
-  ## because the DMG pipeline does not move: charge the DMG the extra M-cycle
-  ## and `strikethrough-dmg` breaks by the same 7 pixels the CGB arm was
-  ## breaking by, measured. So 1 is pinned on DMG by that frame and 2 is pinned
-  ## on CGB by the same frame on the other console -- one ROM, two consoles,
-  ## two values, no fit.
-  ##
-  ## Nothing else in the tree reads it: `dma_openbus` and the `0xE000` echo fold
-  ## are untouched, and the sweep at the head of this block (every dot of the
-  ## fetch, out to eleven) still says the read is not inside the fetch.
-
+  ## Nothing else reads it: `dma_openbus` and the `0xE000` echo fold are
+  ## untouched, and the sweep above still says the read is not inside the fetch.
 proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## The object's mode-3 OAM read while an OAM DMA owns OAM. Cold: `dma_busy`
   ## is false for all but ~160 of the ~17,500 M-cycles of a frame, and only for
