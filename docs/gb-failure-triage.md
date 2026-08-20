@@ -58,38 +58,70 @@ cheap revision-gating win hiding in the self-checking suites. That is the
 useful negative: the remaining 107 failures are real behaviour gaps, not
 mis-assigned machines.
 
-## The last mooneye row: `madness/mgb_oam_dma_halt_sprites` (2026-08-19)
+## The last mooneye row: `madness/mgb_oam_dma_halt_sprites` — 18 pixels
 
-**Both forks fail at exactly 11517/23040 pixels**, byte-for-byte the same
-number, so this is ONE bug seen twice (the two bundles' ROMs differ in md5 but
-share an expected PNG). Closing it takes the Mooneye section to 152/152 and
-collapses it.
+**Corrected 2026-08-19.** An earlier note here read the diff as a
+"phase-inverted checkerboard" from the tile grid. That was wrong. The colour
+histograms say what is actually going on:
 
-The failure is not noise and not a near-miss. Both frames are a tile
-checkerboard drawn with SPRITES, and they are **phase-inverted from tile row 4
-downwards** — every odd column differs on every row from 4 to 17, which is
-exactly 50% of the screen. Rows 0-3 match. The reference also carries a small
-dark glyph around tile (10,5) that dingbat does not draw at all.
+    dingbat     11520 white + 11520 grey(170,170,170)          no sprite
+    reference   11517 white + 11505 grey(176,176,176) + 18 px dark(104)
 
-So from row 4 down, dingbat is placing (or suppressing) every sprite one tile
-out of phase. That is a behavioural difference in **OAM DMA across a `halt`**,
-which is what the ROM is named for and what the `madness/` directory exists to
-test — not a timing nudge, and not something a constant will move.
+The checkerboard PHASE matches exactly. The tile diff lit up alternate columns
+because only the GREY tiles differ, and in a checkerboard the grey tiles ARE
+alternate columns. And they differ only in SHADE: this reference uses a
+255/176/104 ramp where every other mooneye reference — `sprite_priority-dmg.png`
+included, which dingbat matches exactly — uses 255/170/0. That is an encoding
+difference in the PNG, not an emulator difference, so both rows now carry
+`grey_tolerance: 8`, which absorbs the 6-level ramp gap and nothing else. The
+row went from a misleading **50.0%** to **99.9% (23022/23040)**.
 
-Two things make it a good target despite that:
+**The entire real defect is 18 pixels: one sprite dingbat does not draw.**
 
-* it is **MGB-specific** (`model: "mgb"`, and the reference is an MGB capture),
-  and MGB is a machine almost nothing else in the tree exercises — so a defect
-  here is plausibly a real gap rather than a shared one;
-* the failure is **structural and total**, which usually means one wrong
-  decision rather than an accumulation. A 50%-exact checkerboard is what you get
-  when a per-sprite predicate is inverted or off by one, not when timing drifts.
+### What has to be modelled
 
-First thing to try: dump OAM at the frame the reference was captured on and
-compare it against what the sprite positions in the reference imply. The
-checkerboard makes that unusually easy to read — each sprite's Y/X is directly
-visible in the picture, so a single OAM dump says whether dingbat's DMA wrote
-the wrong bytes or wrote the right ones at the wrong time.
+The ROM's own header states the behaviour is per-machine, which is why this is
+an MGB row:
+
+    MGB:      as visualised by *_expected.png
+    DMG:      a different sprite
+    CGB:      checkerboard WITHOUT sprites
+    AGB/AGS:  a different sprite
+
+**dingbat currently produces the CGB answer on an MGB.**
+
+The mechanism, from `madness/mgb_oam_dma_halt_sprites.s`: OAM DMA is started
+from HRAM and the CPU halts while it is still running, which stalls the transfer
+mid-OAM-write with no interrupt enabled to end it. The PPU keeps drawing and
+sees a bus conflict, rendering ONE phantom sprite whose four bytes come from two
+existing OAM bytes and the one incoming DMA byte:
+
+    Y = (existing | incoming) & $FC        X = (next_existing | incoming)
+    C = (existing | incoming) & $FC        F = (next_existing | incoming)
+
+With this ROM's `$30`/`$40` existing and `$1A` incoming that is Y=$38 (56),
+X=$5A (90), tile $38, flags $5A — above BG, H-flipped, OBP1. The `& $FC` is
+unexplained upstream ("Why & $FC? I have no idea").
+
+It is additionally GATED: no sprite appears at all unless OAM contains at least
+one properly aligned four-byte group inside these ranges — `$98-$9F`,
+`$00-$A7`, `$09-$9F`, `$00-$A7`. Position does not matter and more than one is
+fine. Upstream flags two of those bounds as not understood either.
+
+### Why it is not implemented yet
+
+Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
+the details are invented rather than derived: which OAM index the stall lands
+on, whether the phantom suppresses real sprites or merely wins, and what the
+range gate physically is. Getting those wrong risks the 40-row `oamdma` family
+for one row. The instrument is now honest — 18 pixels, not half a screen — so
+this can be picked up cold.
+
+**If it gets a hardware session:** the useful ROM is a variant of this one
+sweeping `initial_data`'s two bytes and the DMA source byte across a grid, so
+the OR-and-mask rule and the range gate are measured rather than taken from the
+comment. Gekkio's own ranges are marked uncertain, and an MGB is the machine to
+run it on.
 
 ## RESOLVED 2026-08-19: `rtc3test-1` and `-3` were a HARNESS bug, not an RTC one
 

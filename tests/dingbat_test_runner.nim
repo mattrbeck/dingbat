@@ -776,6 +776,15 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         mode: tmScreenshot,
         timeout: 120,
         expected_png: rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png",
+        # Its reference PNG uses a DIFFERENT grey ramp from every other
+        # mooneye reference: 255/176/104 where `sprite_priority-dmg.png` (and
+        # dingbat, and the rest of the suite) use 255/170/0. Compared exactly,
+        # all 11520 checkerboard greys count as wrong and the row reports 50%,
+        # which is badly misleading triage -- the real disagreement is 18
+        # pixels. A tolerance of 8 absorbs the 6-level ramp difference and
+        # nothing else: the sprite this row is actually about is 66 levels away
+        # and still counts.
+        grey_tolerance: 8,
         model: "mgb",
       ))
       continue
@@ -1291,6 +1300,10 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
       continue
     if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
       var t = shot(name, rom, rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png", 120)
+      # See the Gekkio builder above: this reference's grey ramp is 255/176/104
+      # where the rest of the suite uses 255/170/0, so an exact compare scores
+      # the whole checkerboard wrong and hides an 18-pixel disagreement.
+      t.grey_tolerance = 8
       t.model = "mgb"
       tests.add(t)
       continue
