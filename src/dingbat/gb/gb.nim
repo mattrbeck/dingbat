@@ -1729,78 +1729,19 @@ type
     rom_path*:       string
     # The two model axes, and they are NOT the same question.
     #
-    # `cgb_enabled` is the CONSOLE: a CGB (or AGB) is in front of you. It decides
-    # timing and the SoC's quirks -- the DMG STAT-write glitch, the OAM bus release
-    # inside mode 2, the serial tap, the line-144 STAT lead. None care what
-    # cartridge is inserted.
+    # `cgb_enabled` is the CONSOLE -- it decides timing and the SoC's quirks, and
+    # none of those care what cartridge is inserted. `cgb_native` is the MODE: the
+    # CGB's own graphics and register set are in use. A DMG cart on CGB hardware
+    # runs in DMG-compatibility mode, which is CGB timing with a DMG picture, so
+    # collapsing either axis onto the other gets one half wrong.
     #
-    # `cgb_native` is the MODE: the CGB's own graphics and register set are in use.
-    # A DMG cart on CGB hardware runs in DMG-compatibility mode -- the boot ROM sets
-    # KEY0 at handoff -- where KEY1/HDMA/SVBK/VBK/BCPD/OCPD/PCM12/PCM34 read as
-    # unmapped (mooneye misc/bits/unused_hwio-C), BG map attributes and the OBJ
-    # attribute's palette/bank nibble are not decoded, LCDC.0 is DMG's "BG on/off"
-    # rather than the CGB's master priority, objects are ordered by X again, and
-    # every pixel goes through BGP/OBP before indexing palette 0. The boot ROM
-    # itself always runs native, which is how it writes the compatibility palettes
-    # it is about to hand over.
+    # `cgb_native` is a cached derivation of `cgb_enabled and (cgb_flag != cgbNone
+    # or the boot ROM is still mapped)` rather than a proc because it is read per
+    # pixel; keep it in step via `gb_sync_cgb_native` wherever those inputs move.
     #
-    # So a DMG-compatibility CGB is CGB timing with a DMG picture, and collapsing
-    # either axis onto the other gets one half wrong. `cgb_native` is a cached
-    # derivation of `cgb_enabled and (cgb_flag != cgbNone or the boot ROM is still
-    # mapped)` rather than a proc because it is read per pixel; keep it in step via
-    # `gb_sync_cgb_native` at every point those three inputs move.
-    #
-    # ---- Documented model splits this tree does NOT model -------------------
-    #
-    # Audited 2026-08-03 against Pan Docs, the mealybug PPU document and the
-    # per-model expectations in mooneye/AGE/gambatte filenames; re-checked
-    # 2026-08-20, when four entries were struck because they had since shipped
-    # (OBJ_ABORT / CGB_OBJ_ABORT, CGB_TDSEL_GLITCH, GbUnusableRegion's per-revision
-    # $FEA0-$FEFF, and the WX = 166 window family -- see CGB_WIN_TAIL_LAST and
-    # DMG_WIN_LAST_PX_CARRY). Re-verify against the constants above before trusting
-    # a line of it.
-    #
-    # Measurable today, unfixed:
-    #  * LCDC.5 clear resets the window's Y condition on CGB, so WY must be met
-    #    again in the same frame; on DMG the latch persists (Pan Docs, Window
-    #    rendering criteria). ppu_latch_wy has no such reset.
-    #  * OAM DMA source above $DFFF folds down into $C000-$DFFF on DMG and fills
-    #    OAM with $FF on CGB (mooneye acceptance/oam_dma/sources-GS). Only the DMG
-    #    fold is modelled.
-    #  * OPRI ($FF6C) is unimplemented -- it reads as unmapped rather than as
-    #    itself. It only matters for a cart writing it while the boot ROM is
-    #    mapped, which no test ROM here does.
-    #  * The APU has no model branch, and three are documented (Pan Docs, Audio
-    #    Registers): wave RAM is only accessible on the dot CH3 reads it on
-    #    monochrome consoles, retriggering CH3 corrupts wave RAM on monochrome
-    #    only, and NRx1 length timers stay writable with the APU off on monochrome
-    #    only.
-    #
-    # Not measurable by anything this tree runs:
-    #  * HALT entry/wake granularity (2 T on DMG, 4 on CGB, plus a CGB termination
-    #    M-cycle) -- mooneye halt_ime1_timing2-GS is "fail: CGB".
-    #  * DI's delay on CGB. mooneye acceptance/di_timing-GS asserts one; Pan Docs
-    #    describes DI as immediate with no model note. Left alone deliberately --
-    #    the sources disagree and nothing here can arbitrate.
-    #  * The joypad line-switch settling delay (DMG/MGB only) and contact bounce.
-    #  * The IR port ($FF56) -- CGB-only hardware, unimplemented.
-    #  * STOP outside a speed switch: a DMG keeps drawing a black line, a CGB
-    #    blanks unless it is in mode 3.
-    #
-    # Out of scope: everything splitting CGB REVISIONS rather than consoles (SCY
-    # bitplane caching from CGB-D, the LY=153 and OAM-read boundaries, half the
-    # APU). dingbat models one CGB and is scored against CPU CGB C references.
-    #
-    # SCY keeps being re-opened, so: reading SCY LIVE at each of a tile fetch's
-    # three VRAM reads -- map row, then again per bitplane -- is the specified
-    # behaviour of every device this tree models, not an omission. Pan Docs,
-    # "Mid-frame behavior": the scroll registers are re-read on each tile fetch,
-    # and all models before CGB-D read Y once per bitplane while CGB-D and later
-    # use one Y for both. Caching into a per-fetch latch would be CGB-D behaviour,
-    # wrong for CPU CGB C and for DMG. Confirmed, not just documented: decoded per
-    # tile, the mealybug m3_scy_change DMG reference has the map fetch and low
-    # bitplane on one write and the high bitplane on the next wherever a write
-    # lands between them, and fifo_ppu's live reads reproduce that band exactly.
+    # docs/gb-hardware-revisions.md lists the documented model splits this tree
+    # does not model, and what is out of scope (anything splitting CGB REVISIONS
+    # rather than consoles -- dingbat models one CGB, scored against CPU CGB C).
     cgb_enabled*:    bool
     cgb_native*:     bool
     # Frontend opt-in for Super Game Boy emulation. Default OFF, and off for

@@ -2468,61 +2468,37 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
   false
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
-  ## Has the BG fetcher run out of work for this line? That -- not the last
-  ## pixel leaving the shifter -- is what ends mode 3 and hands VRAM back to
-  ## the CPU. At a zero lead the two coincide and this is exactly the
-  ## `lx >= GB_WIDTH` test it replaces.
+  ## Has the BG fetcher run out of work for this line? That -- not the last pixel
+  ## leaving the shifter -- is what ends mode 3 and hands VRAM back to the CPU. At
+  ## a zero lead the two coincide and this is the `lx >= GB_WIDTH` test it replaces.
   ##
-  ## The object and window terms are what make this a fetcher question rather
-  ## than an lx one. Everything the fetcher still owes for the last `m3_lead`
-  ## pixels has to hold mode 3 open exactly as it would anywhere else on the
-  ## line, or the fetch silently disappears for the right-hand edge of the
-  ## screen alone:
+  ## The object and window terms are what make it a fetcher question rather than an
+  ## `lx` one: everything still owed for the last `m3_lead` pixels must hold mode 3
+  ## open exactly as it would anywhere else, or the fetch silently disappears for
+  ## the right-hand edge of the screen alone.
   ##
-  ##   * a pending object: X in 160..167 is partly on screen, so it is a real
-  ##     VRAM read (gambatte sprites/10spritesPrLine_10xposA6/A7_*). It is
-  ##     conditioned on LCDC.1 for the same reason the window term below is
-  ##     conditioned on LCDC.5: an object the mode-2 scan left in the list but
-  ##     that the shifter will never trigger (tick_shifter asks
-  ##     `sprite_enabled` before anything else) owes the fetcher nothing, so it
-  ##     must not hold mode 3 open. Without the gate, clearing LCDC.1 anywhere
-  ##     before an object's trigger still bought that line the whole pipeline
-  ##     lead -- `-d:gb_m3_len` reads 174 against 172 on every such line, and
-  ##     four gambatte DMG rows measure exactly that from the mode 3 -> 0 edge
-  ##     (sprites/late_disable_1 and sprite_late_disable_spx18/19/1B_1, whose
-  ##     write lands one dot BEFORE the object's trigger so no fetch happens at
-  ##     all);
-  ##   * a window that has not started yet: WX up to 166 still reaches lx 159,
-  ##     and starting it restarts the BG fetch (gambatte window/m2int_wxA6_*).
-  ##     There is deliberately no `ly >= wy` term next to `window_trigger`
-  ##     here or at the trigger itself: the latch IS the WY condition (Pan
-  ##     Docs' "at any point in the frame"), and re-testing the register
-  ##     against LY makes a WY moved out of range mid-frame retract a window
-  ##     hardware keeps drawing (gambatte window/arg/late_wy_1toFF_*).
+  ##   * a pending object (X 160..167 is partly on screen, so a real VRAM read),
+  ##     gated on LCDC.1 for the same reason the window term is gated on LCDC.5 --
+  ##     an object the shifter will never trigger owes the fetcher nothing;
+  ##   * a window that has not started yet: WX up to 166 still reaches lx 159, and
+  ##     starting it restarts the BG fetch. There is deliberately no `ly >= wy`
+  ##     term -- the latch IS the WY condition, and re-testing the register makes a
+  ##     WY moved out of range mid-frame retract a window hardware keeps drawing.
   ##
-  ## Both are tested as `x <= 167` / `wx <= 166` rather than "does it trigger on
-  ## THIS dot" because the shifter still has the rest of the lead to walk
-  ## through: the trigger is in the future, and it is the future work that keeps
-  ## the fetcher alive. Both are only asked once the shifter is inside the last
-  ## `m3_lead` pixels, so they cost nothing on the other 152+.
+  ## Both are `x <= 167` / `wx <= 166` rather than "does it trigger on THIS dot",
+  ## because the shifter still has the rest of the lead to walk through: it is the
+  ## FUTURE work that keeps the fetcher alive. Both are asked only inside the last
+  ## `m3_lead` pixels, so they cost nothing on the other 152.
   ##
-  ## What is deliberately NOT here is "the FIFO does not yet hold the rest of
-  ## the line". It is the tempting rule -- it is what would keep the fetcher
-  ## alive across the FIFO flush a window start does at lx 159 -- but the BG
-  ## fetcher pushes in whole 8-pixel tiles, so asking it inside the lead
-  ## re-times the END of mode 3 on ordinary lines too: measured, it takes
-  ## gambatte to 3263 and the rest of the suite from 615 to 594 passing
-  ## (vramw_m3end -4, and mooneye/GBMicrotest hblank rows with it). The
-  ## remaining WX=166 rows are worth less than that.
+  ## Deliberately NOT here: "the FIFO does not yet hold the rest of the line". It
+  ## is the tempting rule, but the BG fetcher pushes whole 8-pixel tiles, so asking
+  ## it inside the lead re-times the END of mode 3 on ordinary lines too -- worth
+  ## far less than it costs.
   ##
-  ## Splitting the four terms below into a `{.noinline.}` tail behind the first
-  ## compare -- the shape that would make this one instruction on the dot loop
-  ## -- was measured on 2026-08-03 and is NOT worth it. The whole conjunction
-  ## costs about +0.04% of retired instructions over the degenerate
-  ## `lx >= GB_WIDTH` form, and hoisting it out of line costs MORE than it
-  ## saves, because clang already folds the first compare into the dot loop's
-  ## own `lx` test (`cmp w8, #0x9d` / `b.gt`, one branch for both questions) and
-  ## the split takes that away. Leave it inline.
+  ## Leave the conjunction inline. Splitting the four terms into a `{.noinline.}`
+  ## tail costs more than it saves: clang already folds the first compare into the
+  ## dot loop's own `lx` test, one branch for both questions, and the split takes
+  ## that away.
   when not M3_PIPE_LEAD_ANY:
     # Nothing below can be reached with a zero lead, and this is the mode 3
     # loop's condition -- spell the degenerate case out rather than trust the
@@ -2779,59 +2755,27 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           continue
       elif not fetcher_retired(ppu):
         # Mode 3 is the one mode with genuine per-dot work, so it cannot be
-        # collapsed the way the skip above collapses the other three — but it
-        # does not need the mode re-decoded on every one of its ~26,000 dots a
-        # frame either. Nothing inside the pipeline changes the mode: only the
-        # `lx >= GB_WIDTH` test does, and that is the loop condition. Same
-        # actions on the same dots as the generic path below, which still
-        # handles the dot that ends mode 3.
+        # collapsed the way the skip above collapses the other three -- but it does
+        # not need the mode re-decoded on every one of its ~26,000 dots a frame
+        # either. Nothing inside the pipeline changes the mode: only the
+        # `lx >= GB_WIDTH` test does, and that is the loop condition.
         #
-        # The pipeline runs `m3_lead` dots behind the CPU's view of the PPU
-        # registers (M3_PIPE_MCYCLES, above: one CPU M-cycle, so 4 dots at
-        # normal speed and 2 in double speed). Two structural notes on how that
-        # is arranged so it moves pixels and nothing else:
+        # The pipeline runs `m3_lead` dots behind the CPU's view of the registers.
+        # Three structural notes on how that is arranged so it moves pixels and
+        # nothing else:
         #
-        #  * The flag and the pipeline are separate events. Mode 3 ends when
-        #    the FETCHER retires (fetcher_retired), which is `m3_lead` pixels
-        #    before the shifter finishes the line; those last pixels are emitted
-        #    in one burst on that same dot. Mode 3's length is arithmetically
-        #    unchanged -- the head delay and the early flag are the same n and
-        #    cancel -- which is why blargg, mooneye, mooneye-wilbertpol,
-        #    GBMicrotest, MagenTests and the mGBA suite are byte-for-byte
-        #    identical at every lead from 0 to 8, where the old coupled version
-        #    put ~40 rows red at any n > 0.
-        #  * The CPU VRAM/OAM locks keep reading the LIVE mode, so they open
-        #    with the flag, at the dot they always did. The fetcher never runs
-        #    after that point -- that is exactly what "the fetcher retired"
-        #    means. Letting it run on into H-Blank instead re-reads SCX and the
-        #    LCDC selects for a tile the CPU is now free to move, which mealybug
-        #    m3_scx_low_3_bits catches within one line.
-        #  * An object overlapping the last columns (X 160..167) is a real
-        #    fetch, so it holds mode 3 open exactly as an object anywhere else
-        #    does; the flag waits for it. Without that term the object penalty
-        #    would silently vanish for the right-hand edge of the screen.
-        #
-        # ---- Where the fetch phase now stands ----------------------------
-        # The two bullets that used to stand here have both been resolved, and
-        # in the same change (2026-08-03), because they were the same error:
-        #
-        #  * "The fetcher idles for the FIRST two of its eight steps where
-        #    hardware idles for the last two, but the two agree on every VRAM
-        #    read's dot so nothing on an object-free line can see it." The
-        #    second half was wrong. They do NOT agree: a push taken at
-        #    Get-Tile-Data-High used to fall through the two idle steps it had
-        #    already served, which put every later read on the line two dots
-        #    late. It now restarts the fetch on the push, as Pan Docs' step 4
-        #    -> step 1 does. See tick_bg_fetcher.
-        #  * "m3_bgp_change carries no objects at all and still wants its whole
-        #    frame ~3 pixels to the left, so that residual is the palette
-        #    write's own." It is not the palette write's: it is the pipeline's,
-        #    it is 2 dots, and the fetcher's misplaced idle was cancelling it.
-        #    M3_PIPE_DELAY carries it and the row goes 87.3% -> 93.5%.
-        #
-        # What is left of the object families is in the OBJ penalty block above:
-        # GBMicrotest's ppu_spritex_vs_scx table is 153/153 and the wait-dot rule
-        # is untouched.
+        #  * the flag and the pipeline are separate events. Mode 3 ends when the
+        #    FETCHER retires, `m3_lead` pixels before the shifter finishes; those
+        #    pixels are emitted in one burst on that dot. Mode 3's length is
+        #    arithmetically unchanged, which is why blargg, mooneye, GBMicrotest,
+        #    MagenTests and the mGBA suite are byte-identical at every lead 0..8;
+        #  * the CPU VRAM/OAM locks keep reading the LIVE mode, so they open at the
+        #    dot they always did. Letting the fetcher run on into H-Blank instead
+        #    re-reads SCX and the LCDC selects for a tile the CPU is now free to
+        #    move, which mealybug m3_scx_low_3_bits catches within one line;
+        #  * an object overlapping X 160..167 is a real fetch and holds mode 3 open
+        #    exactly as one anywhere else does. Without that term the object
+        #    penalty would silently vanish at the right-hand edge.
         when M3_PIPE_LEAD_ANY:
           # The pipeline's head delay, spent in one step rather than as a test
           # inside the loop below. Nothing else in the PPU happens on these
