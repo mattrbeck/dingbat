@@ -2,14 +2,25 @@
 #
 # SB (0xFF01) is the live shift register; SC (0xFF02) bit 7 = transfer
 # enable/in-progress, bit 0 = clock source (1 = internal), bit 1 = CGB fast
-# clock. An internally-clocked transfer shifts one bit on each falling edge
-# of the selected DIV counter bit (bit 8 -> 8192 Hz, CGB-fast bit 3 ->
-# 262144 Hz; both double in CGB double speed because DIV itself ticks at the
-# CPU clock). The serial clock is the free-running divider, not a dedicated
-# counter started by SC: starting mid-phase shortens the first bit period,
-# and DIV writes mid-transfer produce (or delay) shift edges exactly like
-# the TIMA quirk — the behaviors pinned by mooneye boot_sclk_align and the
-# gambatte serial tests.
+# clock.
+#
+# The shift clock is a HALF-rate toggle, not a direct tap. A falling edge of
+# DIV bit 7 (CGB-fast: bit 2) flips a master clock, and only the flip that
+# takes it LOW shifts a bit — so the bit period is two edges, 512 T (8192 Hz)
+# normal and 16 T (262144 Hz) CGB-fast, both doubling in CGB double speed
+# because DIV itself ticks at the CPU clock. The rate is what a single bit-8
+# tap would give; the PHASE is not, because the master clock is state and a
+# write to SC reseeds it low. That makes the first shift of a transfer the
+# SECOND edge after the write — 256..512 T, never less — where a single-tap
+# model would sometimes shift within a few cycles of the write. This is
+# SameBoy's model (GB_serial_master_edge in Core/timing.c) and it is what
+# the gambatte `serial` bucket measures; the reseed is also what
+# `start_wait_restart`/`_sc80`/`_stop` see when they rewrite SC mid-transfer.
+#
+# The clock is still the free-running divider, not a dedicated counter: DIV
+# writes mid-transfer produce (or delay) shift edges exactly like the TIMA
+# quirk — the behaviors pinned by mooneye boot_sclk_align and the gambatte
+# serial tests.
 #
 # ==================== GbSerialDriver interface ====================
 #
@@ -42,11 +53,14 @@ proc new_gb_serial*(): GbSerial =
   GbSerial(driver: GbSerialDriver())
 
 proc serial_clock_mask(serial: GbSerial; gb: GB): uint16 {.inline.} =
-  ## The DIV counter bit whose falling edge drives the shift clock. The CGB
-  ## fast clock (SC.1) only exists in native CGB mode; a DMG cart on CGB
-  ## hardware gets DMG serial behavior (mooneye misc/bits/unused_hwio-C).
-  if gb.cgb_native and (serial.sc and 0x02) != 0: 1'u16 shl 3
-  else: 1'u16 shl 8
+  ## The DIV counter bit whose falling edge TOGGLES the shift clock. It runs
+  ## at twice the bit rate: bit 7 falls every 256 T and a bit is shifted every
+  ## other fall, giving the 512 T (8192 Hz) bit period. The CGB fast clock
+  ## (SC.1) moves the tap to bit 2 -- 8 T per toggle, 16 T per bit -- and only
+  ## exists in native CGB mode; a DMG cart on CGB hardware gets DMG serial
+  ## behavior (mooneye misc/bits/unused_hwio-C).
+  if gb.cgb_native and (serial.sc and 0x02) != 0: 1'u16 shl 2
+  else: 1'u16 shl 7
 
 proc serial_update_shifting(serial: GbSerial) {.inline.} =
   # Cached "an internally-clocked transfer is shifting" flag: the one test
@@ -86,11 +100,11 @@ proc set_serial_driver*(gb: GB; drv: GbSerialDriver) =
 # shift phase relative to that seed).
 
 proc serial_tap(gb: GB): uint16 {.inline.} =
-  ## Both SoCs want the same M-cycle here: the DMG's old 4 was one M-cycle
-  ## high and cost three `serial` rows. Swept and bracketed on both sides at
-  ## SERIAL_TAP_DMG in gb.nim, where the plateau table lives; mooneye
-  ## boot_div-dmgABCmgb and boot_sclk_align-dmgABCmgb still pin the DMG seed
-  ## and shift phase jointly, and both stay green at 0.
+  ## Both SoCs want the same M-cycle here, and gambatte puts it at [0,3] while
+  ## mooneye boot_sclk_align-dmgABCmgb puts the DMG one at [4,7]. The plateau
+  ## table and the (measured) reason neither the boot seed nor anything on this
+  ## side settles it are at SERIAL_TAP_DMG in gb.nim; the DMG ships at 4, where
+  ## the hardware-verified mooneye row is green.
   if gb.cgb_enabled: uint16(SERIAL_TAP_CGB) else: uint16(SERIAL_TAP_DMG)
 
 proc serial_clock_level(serial: GbSerial; gb: GB): bool {.inline.} =
@@ -99,27 +113,35 @@ proc serial_clock_level(serial: GbSerial; gb: GB): bool {.inline.} =
 proc serial_prime_history*(serial: GbSerial; gb: GB) =
   serial.clock_history = if serial.serial_clock_level(gb): 1'u8 else: 0'u8
 
+proc serial_master_edge(serial: GbSerial; gb: GB) =
+  ## One falling edge of the divider tap. The tap does not shift a bit: it
+  ## flips the half-rate master clock, and only the flip that takes that clock
+  ## LOW shifts. Two consequences, and both are what the gambatte `serial`
+  ## family measures:
+  ##
+  ##  * The bit period is two tap edges (512 T normal, 16 T CGB-fast), so the
+  ##    rate is unchanged from a single bit-8 tap.
+  ##  * The phase is now a piece of STATE, and `serial_write` below reseeds it
+  ##    low. So the first shift of a transfer is the SECOND tap edge after the
+  ##    SC.7 write -- between 256 and 512 T later, not between 0 and 512. When
+  ##    the write lands in the tap bit's high half, hardware is a whole bit
+  ##    period behind a naive single-tap model.
+  serial.master_clock = not serial.master_clock
+  if serial.master_clock: return
+  if (serial.sc and 0x81) != 0x81 or serial.bits_remaining <= 0: return
+  serial.sb = (serial.sb shl 1) or 1'u8  # a lone/disconnected line reads 1
+  dec serial.bits_remaining
+  if serial.bits_remaining == 0:
+    serial.driver.serial_complete(gb)
+
 proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
   ## Per-cycle hook from the timer loop (after tdiv increments), gated on
   ## serial.shifting.
   let current = serial.serial_clock_level(gb)
   let previous = (serial.clock_history and 1) != 0
-  when SERIAL_START_ARM != 0:
-    serial.clock_history = (serial.clock_history and 2'u8) or
-                           (if current: 1'u8 else: 0'u8)
-  else:
-    serial.clock_history = if current: 1'u8 else: 0'u8
-  if previous and not current and serial.bits_remaining > 0:  # falling edge
-    when SERIAL_START_ARM != 0:
-      # Experiment: the first falling edge after SC.7 rises does not shift, it
-      # only arms the shifter (clock_history bit 1 is the arm flag).
-      if (serial.clock_history and 2) != 0:
-        serial.clock_history = serial.clock_history and not 2'u8
-        return
-    serial.sb = (serial.sb shl 1) or 1'u8  # a lone/disconnected line reads 1
-    dec serial.bits_remaining
-    if serial.bits_remaining == 0:
-      serial.driver.serial_complete(gb)
+  serial.clock_history = if current: 1'u8 else: 0'u8
+  if previous and not current:  # falling edge of the tap
+    serial.serial_master_edge(gb)
 
 # ==================== Register access ====================
 
@@ -140,21 +162,29 @@ proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       if gb.test_output != nil:
         gb.test_output.serial_buffer.add(char(val))
   of 0xFF02:
+    # Any write to SC restarts the bit counter and reseeds the half-rate
+    # master clock LOW. Reseeding is not a plain assignment: if the master
+    # clock was high the write drives it through a real edge, so a transfer
+    # that was already running under the OLD SC shifts one more bit right
+    # there, on the write's own cycle. The counter is reset FIRST, so that
+    # forced shift can never be the eighth -- it can't complete a transfer.
+    # (This is `start_wait_restart_read_if_*` and the `_sc80`/`_stop` arms.)
     let started = (serial.sc and 0x80) == 0 and (val and 0x80) != 0
+    let old_sc = serial.sc
+    serial.bits_remaining = 8
+    if serial.master_clock:
+      serial.master_clock = false
+      if (old_sc and 0x81) == 0x81:
+        serial.sb = (serial.sb shl 1) or 1'u8
+        dec serial.bits_remaining
     serial.sc = val and (if gb.cgb_native: 0x83'u8 else: 0x81'u8)
     if (val and 0x80) == 0:
       serial.bits_remaining = 0  # clearing the enable bit aborts a transfer
     elif started:
       serial.out_latch = serial.sb
-      serial.bits_remaining = 8
-      # Watch the free-running serial clock for its next falling edge
-      serial.serial_prime_history(gb)
-      when SERIAL_START_ARM != 0:
-        serial.clock_history = serial.clock_history or 2'u8
       serial.driver.serial_start(gb)
-    else:
-      # Rewrite while enabled (e.g. clock-select change mid-transfer):
-      # resample so the edge detector tracks the newly selected bit
-      serial.serial_prime_history(gb)
+    # Resample the tap: the clock-select bit may have moved it, and the
+    # edge detector must not see a phantom edge on the next cycle.
+    serial.serial_prime_history(gb)
     serial.serial_update_shifting()
   else: discard

@@ -103,7 +103,13 @@ proc save_serial_state(s: GbSerial; w: var Writer) =
   w.write_u8(s.sc)
   w.write_u8(s.out_latch)
   w.write_u8(uint8(s.bits_remaining))
-  w.write_u8(s.clock_history)
+  # Bit 0 is the tap level; bit 1 carries the half-rate master clock, which
+  # rides in this byte's spare bit rather than a field of its own so the
+  # section keeps its width and the payload revision does not move. Both bits
+  # are 0 in any state not taken mid-transfer, which is what an older state's
+  # single-bit value already decodes to.
+  w.write_u8((s.clock_history and 1'u8) or
+             (if s.master_clock: 2'u8 else: 0'u8))
   w.write_bool(s.shifting)
 
 proc load_serial_state(s: GbSerial; r: var Reader; rev: uint32) =
@@ -117,6 +123,7 @@ proc load_serial_state(s: GbSerial; r: var Reader; rev: uint32) =
     s.out_latch = 0
     s.bits_remaining = 0
     s.clock_history = 0
+    s.master_clock = false
     s.shifting = false
     return
   r.expect_tag(GB_SEC_SER)
@@ -128,7 +135,9 @@ proc load_serial_state(s: GbSerial; r: var Reader; rev: uint32) =
   # (0956322 -> f678d02) before it became the clock_history shift register.
   # Same width, and 0 — the value in any state not taken mid-transfer — means
   # "clock low" under both readings.
-  s.clock_history = r.read_u8()
+  let clk = r.read_u8()
+  s.clock_history = clk and 1'u8
+  s.master_clock = (clk and 2'u8) != 0
   s.shifting = r.read_bool()
 
 proc save_joypad_state(j: GbJoypad; w: var Writer) =

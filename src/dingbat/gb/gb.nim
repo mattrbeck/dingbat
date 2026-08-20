@@ -351,74 +351,112 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 
 # ---- The serial shift clock's tap offset, per device -------------------------
 #
-# The serial unit watches a bit of (divider + tap); its falling edge shifts one
-# bit. The tap exists because the serial unit's copy of the divider sits a few
-# T-cycles ahead of the value a DIV read returns, so it is a phase, in T-cycles,
-# on a free-running counter -- not a countdown started by SC.
+# The serial unit watches a bit of (divider + tap); its falling edge TOGGLES the
+# half-rate shift clock, and every second toggle shifts a bit (serial.nim). The
+# tap exists because the serial unit's copy of the divider sits a few T-cycles
+# ahead of the value a DIV read returns, so it is a phase, in T-cycles, on a
+# free-running counter -- not a countdown started by SC.
 #
 # Raising the tap makes every edge land EARLIER in real time (the sum reaches
 # the bit boundary sooner); lowering it makes them land later.
 # **A two-sided contradiction, quarantined at the DMG value gambatte refuses.**
 #
 # Swept against the 82-row gambatte `serial` bucket, whole suite rebuilt per
-# value, CGB held at 2:
+# value, BOTH taps moved together (the DMG-only column, CGB held at 2, is
+# 4 -> 53 and 2 -> 58, so each SoC contributes its own half of the step):
 #
-#   SERIAL_TAP_DMG   -8  -4  -2 | 0   1   2   3 | 4   5   6   8
-#   serial rows      50  50  50 | 53  53  53  53| 50  50  50  50
+#   SERIAL_TAP       -8  -4  -2 | 0   1   2   3 | 4   5   6 | 8   12
+#   serial rows      48  46  46 | 58  58  58  58| 46  46  46| 48  46
 #
-# so gambatte puts the DMG tap in [0,3]: a strict local maximum bracketed on
-# BOTH sides, worth +3 / -0 over the whole 5,005-row suite with no collateral
-# row in any of the other 46 buckets. The plateau is exactly 4 T wide, which is
-# what says the tap is a phase quantised to the M-cycle and not a duration. The
-# CGB column has the same shape and already sits inside it (-4/-2 -> 49,
-# {0,2} -> 53, 4/6 -> 49), so the two SoCs would want the SAME tap.
+# so gambatte puts both taps in [0,3]: a strict local maximum bracketed on BOTH
+# sides, with no collateral row in any of the other 46 buckets. The plateau is
+# exactly 4 T wide, which is what says the tap is a phase quantised to the
+# M-cycle and not a duration.
+#
+# Only FIVE of those rows are really the tap's: `div_write_start_wait_read_if_1`,
+# its `nopx1` arm and `start_late_div_write_wait_read_if_{1a,2a,3a}`, all DMG.
+# They reset DIV immediately before the transfer, so they are the only ones in
+# the bucket that see the tap without the boot seed. Everything else in the
+# step is CGB-side arithmetic on the same phase.
 #
 # **`mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb` refuses [0,3] and pins
 # 4.** It is hardware-verified on DMG/MGB, so it wins and the tap ships at 4 --
-# the three gambatte rows stay red deliberately.
+# those five gambatte rows stay red deliberately, and flipping the default is a
+# suite-wide call (the local runner is not a superset of the shootout).
 #
 # The two cannot be reconciled by re-partitioning the tap against the boot
-# divider seed, and that is worth stating because it is the obvious next idea:
-# `boot_div-dmgABCmgb` reads DIV, which is `tdiv shr 8`, so it cannot see a 4 T
-# change in the seed at all -- the seed's low bits are pinned ONLY through the
-# serial tap. But both suites' ROMs start from that same boot state and neither
-# writes DIV before the transfer, so each sees only the SUM (seed + tap); moving
-# 4 T from one into the other leaves both verdicts exactly where they were.
-# Confirmed rather than assumed. The disagreement is therefore in something both
-# ROMs traverse before the SC.7 write, not in this constant.
+# divider seed. `boot_div-dmgABCmgb` reads DIV, which is `tdiv shr 8`, so it
+# cannot see a 4 T change in the seed at all -- but the gbmicrotest
+# `timer_tima_phase_*` set, gambatte `div` and parts of `sound`/`tima` can, and
+# do: 0xABC8 -> 0xABCC lands boot_sclk_align at tap 2 and takes thirteen of
+# those rows down. Measured, not assumed.
+#
+# What DOES reconcile them is one M-cycle on the READ side of the bus, not
+# anything in this constant -- see the `start_wait_*` block below, which needs
+# the same change for its own 24 rows.
 const SERIAL_TAP_DMG* {.intdefine.} = 4
 const SERIAL_TAP_CGB* {.intdefine.} = 2
 
-# ---- The residual `start_wait_*` cluster, and what it is NOT -----------------
+# ---- The residual `start_wait_*` cluster, and what it actually needs ---------
 #
-# Twelve rows (`start_wait_read_if`, `_read_sb`, `_read_sc`,
-# `start_wait_clear_if_read_if` and their `_ds` arms) report the SAME defect
-# through three different registers: at family step 1 hardware has done seven
-# shifts and dingbat has done eight. `_read_sb` is the clearest -- SB seeds at
-# $00 and shifts in ones, so `exp=7F,FF got=FF,FF` counts the shifts directly --
-# and `_read_sc` (SC.7 still set) and `_read_if` (the serial IF) flip on the
-# same M-cycle. So it is the eighth shift EDGE that is early, not the interrupt
-# becoming visible: all three observables move together.
+# Twenty-four rows (`start_wait_read_if`, `_read_sb`, `_read_sc`,
+# `start_wait_clear_if_read_if`, `_restart`, `_sc80`, `_stop`, the `nopx*` arms
+# and their `_ds` siblings) report the SAME defect through three registers: at
+# family step 1 hardware has done seven shifts and dingbat has done eight.
+# `_read_sb` is the clearest -- SB seeds at $00 and shifts in ones, so
+# `exp=7F got=FF` counts the shifts directly -- and `_read_sc` (SC.7 still set)
+# and `_read_if` flip on the same M-cycle. All three observables move together,
+# so it is the eighth shift EDGE that is early, not the interrupt.
 #
-# Two candidates are measured and both are refused, from opposite sides:
+# **These rows cannot be moved by anything on the serial side, and the algebra
+# says so exactly.** Every one of them starts its measured transfer from inside
+# the serial handler of a PREVIOUS transfer, so the boot divider seed and the
+# tap both cancel: the whole verdict is a function of Delta, the T-cycles from
+# transfer 1's eighth shift edge to transfer 2's SC write. Writing `a_r` for
+# where inside its own M-cycle a CPU READ samples the divider (dingbat charges
+# the M-cycle first, so a_r = 4) and `m` for how far the dispatch boundary sits
+# past the shift edge, the observable comes out as
 #
-#  * **It is not the tap.** These twelve rows do not move by a single verdict at
-#    ANY tap in [-8, +8] (checked at -8, -4, -2, 0, 4), while
-#    `div_write_start_wait_read_if` next door flips cleanly at 0. So the cluster
-#    is more than 8 T early and the shift clock's phase does not reach it.
-#  * **It is not a whole missed period.** `SERIAL_START_ARM` below spends the
-#    first falling edge after SC.7 rises on arming the shifter rather than
-#    shifting, which is +512 T. That lands step 1 right on all six families
-#    (`7F`, `E0`, `FF`/`FD`) and takes step 2 out on all six -- the error changes
-#    sign. Whole suite +24 / -32.
+#     (transfer 2's completion) - (the IF/SB/SC read) = 4 - m - a_r
 #
-# The quantity is therefore strictly between 8 T and one bit period, and no
-# single edge-phase constant expresses that: a tap moves the start sample with
-# the edges, so the count of edges after the write is invariant under it. The
-# next instrument has to move the START against a stationary clock -- i.e. when
-# SC.7's write commits relative to the divider -- which is a bus-side question,
-# not a serial-side one. Ships off.
-const SERIAL_START_ARM* {.intdefine.} = 0
+# and the ROMs need that in (0, 4]. `m = (tap mod 4)` is in [0,3] because the
+# dispatch is the first instruction boundary at or after the edge, so **no tap
+# reaches these rows** -- confirmed by sweep, they do not move at any tap in
+# [-8, 8]. Nor does leading the serial IF: the same lead moves transfer 2's IF
+# observable by the same amount and cancels itself out (it would land `_read_sb`
+# and `_read_sc` while leaving `_read_if` exactly where it was, and the family
+# has all three). Nor does moving where SC.7's write reseeds the shift clock
+# inside its own M-cycle: that is a 256 T jump inside a 4 T window of divider
+# phase, and none of these ROMs sits in that window.
+#
+# What IS left is `a_r`, and it wants 0 -- a read sampling the divider at the
+# TOP of its M-cycle rather than after it. Two independent checks agree:
+#
+#  * `div_write_start_wait_*` and `start_late_div_write_*` reset DIV just
+#    before the transfer, so the seed cancels and they pin `tap + (a_r - a_w)`
+#    (a_w = the write's own offset, 4 here) to [0,3]. At a_r = 4 that is
+#    tap in [0,3]; at a_r = 0 it is tap in [4,7].
+#  * mooneye `boot_sclk_align-dmgABCmgb` never writes DIV, so it sees the boot
+#    seed and pins the tap alone -- to [4,7].
+#
+# So at a_r = 4 those two contradict each other by exactly one M-cycle (the
+# disagreement this file has carried since the tap was first swept, and why
+# SERIAL_TAP_DMG ships at 4 and five gambatte rows stay red), and at a_r = 0
+# they AGREE, at the tap that already ships. One change, three families: the
+# `start_wait` cluster, the `div_write` cluster and boot_sclk_align all land
+# together, and nothing else in the serial family is sensitive to it.
+#
+# It is not taken here because it is not a serial change: `mem_read` charges
+# the whole M-cycle to bus and PPU alike before returning a byte
+# (`mem_tick_components(mem, gb, 4)`), and moving the bus half after the read
+# re-times every IF, DIV, TIMA, LY and STAT read in the emulator. That is a
+# memory.nim question with the `tima`, `halt` and `irq_precedence` families on
+# the other side of it, and it wants its own round.
+#
+# Refuted alongside, so they are not re-run: the DMG boot seed cannot absorb
+# the tap disagreement either -- 0xABC8 -> 0xABCC does land boot_sclk_align at
+# tap 2, and costs nine gbmicrotest `timer_tima_phase` rows, all of gambatte
+# `div`, two `sound` and one `tima`.
 
 # ---- The M-cycle a CGB spends leaving HALT that a DMG does not ---------------
 #
@@ -3080,6 +3118,9 @@ type
     clock_history*:  uint8   # per-cycle samples of the DIV clock bit; bit 0
                              # = newest (see serial.nim: the shift clock is
                              # the divider tap delayed by 4 cycles)
+    master_clock*:   bool    # the half-rate shift clock: the divider tap runs
+                             # at 2x the bit rate and TOGGLES this; a bit is
+                             # shifted only on its high->low half (serial.nim)
     shifting*:       bool    # cached: internal-clock transfer in progress
     driver*:         GbSerialDriver
 
