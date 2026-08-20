@@ -108,6 +108,48 @@ one properly aligned four-byte group inside these ranges — `$98-$9F`,
 `$00-$A7`, `$09-$9F`, `$00-$A7`. Position does not matter and more than one is
 fine. Upstream flags two of those bounds as not understood either.
 
+### 2026-08-20: the ROM's own data says dingbat is running the DMA to COMPLETION
+
+Reading the source rather than the picture moves this a long way. Two facts pin
+the mechanism:
+
+**1. Where the transfer stops is not a guess.** `common/macros.s` expands
+`start_oam_dma` to `wait_vblank / ld a,addr / ldh (DMA),a`, and the ROM follows
+it with exactly `nop` then `halt`. So the CPU halts about two M-cycles into the
+transfer — and the ROM's own comment names the bytes involved as OAM[2] = `$30`
+(the byte "supposed to be replaced"), OAM[3] = `$40` (the next one), and `$1A`
+(the incoming byte, which is `$2000 + 2` in the source page). **The unit is
+frozen mid-write to OAM index 2**, which is exactly where two M-cycles of DMA
+would put it. Nothing here needs inventing.
+
+**2. The CGB row of the header explains dingbat's picture completely.** The
+source page is `$FF $FF $1A $FF` followed by 156 more `$FF`, so a transfer that
+RUNS TO COMPLETION leaves `Y = $FF` in all forty sprites, every one off-screen,
+giving a checkerboard with no sprites — the ROM's stated CGB answer. dingbat
+draws precisely that on an MGB. **So the primary defect is not a missing
+phantom-sprite rule: dingbat lets the OAM DMA finish during `halt`, where a
+DMG-family machine freezes it.** That is a claim about the DMA unit's clock —
+HALT gates the CPU clock on a DMG, and if the DMA unit rides that clock it
+stops with it, while the CGB's evidently does not.
+
+**Tested, and it does not change the picture — for a knowable reason.** Freezing
+the transfer while `cpu.halted` on DMG-family renders byte-identically. With the
+unit stopped at index 2, OAM still reads `FF FF 30 40 9F A7 9F A7` then zeroes,
+and the only on-screen sprite that leaves is entry 1 at Y=`$9F` (159), X=`$A7`
+(167) — using **tile `$9F`, which this ROM never draws into**. It is invisible.
+So the freeze is necessary but cannot be OBSERVED through this ROM, and the
+expected sprite can only come from the bus conflict on top of it.
+
+**And the conflict now has a shape that explains the exact expected sprite.**
+If, while frozen, the OAM address bus is stuck at the DMA's current index and
+the data bus carries `stored | driven`, then every PPU OAM read returns the same
+two bytes — `($30|$1A) = $3A` and `($40|$1A) = $5A` — so all forty sprites
+resolve to the same Y, X, tile and flags and draw on top of each other, which
+looks like ONE sprite. With the `& $FC` the ROM records on the Y/tile byte that
+is Y=`$38` (56), X=`$5A` (90), tile `$38`, flags `$5A`: **the reference sprite,
+exactly.** The unexplained parts are the mask itself and the four-byte range
+gate, and upstream marks both as not understood either.
+
 ### Why it is not implemented yet
 
 Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
@@ -117,11 +159,31 @@ range gate physically is. Getting those wrong risks the 40-row `oamdma` family
 for one row. The instrument is now honest — 18 pixels, not half a screen — so
 this can be picked up cold.
 
-**If it gets a hardware session:** the useful ROM is a variant of this one
-sweeping `initial_data`'s two bytes and the DMA source byte across a grid, so
-the OR-and-mask rule and the range gate are measured rather than taken from the
-comment. Gekkio's own ranges are marked uncertain, and an MGB is the machine to
-run it on.
+**If it gets a hardware session**, the first question is far simpler than the
+sprite and does not involve the PPU at all: **does OAM DMA keep running while
+the CPU is halted?** Probe design, which is worth building properly:
+
+* pre-fill OAM with `$11` and a DMA source page with `$22`, so "transferred" is
+  distinguishable from "not";
+* the LAST byte a transfer writes is OAM `$FE9F`, and a CPU read of OAM while
+  the DMA holds the bus answers `$FF` — so polling `$FE9F` until it turns `$22`
+  measures the part of the transfer still outstanding;
+* start the DMA, `halt` with a timer set to wake ~160 M-cycles later (one whole
+  transfer), and on waking count poll iterations. Run the same thing again with
+  a busy-wait of the same length as a control.
+* **DMA keeps running while halted** -> it has finished by the wake, so the two
+  counts MATCH. **DMA freezes** -> it resumes with ~158 bytes to go and the
+  halt count is far larger. The two answers are ~30 poll iterations apart, not
+  a couple.
+
+A Game Boy Pocket is the ideal machine; running it on a CGB too is worth it,
+since the two should DISAGREE if the per-machine split the mooneye ROM records
+really is about this clock. A first cut of this probe was written on 2026-08-20
+and did not render — it is not in the tree; rebuild it rather than trusting it.
+
+After that, the sweep ROM: vary `initial_data`'s two bytes and the DMA source
+byte across a grid so the OR-and-mask rule and the range gate are measured
+rather than taken from a comment.
 
 ## RESOLVED 2026-08-19: `rtc3test-1` and `-3` were a HARNESS bug, not an RTC one
 
