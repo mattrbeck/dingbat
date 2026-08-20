@@ -814,70 +814,17 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
 
 # ---- Where STAT's mode bits are sampled ------------------------------------
 #
-# `mem_read` ticks the M-cycle's dots and THEN reads, so at the read the PPU dot
-# counter is `cc` = the dot the read's M-cycle leaves it on, and the M-cycle
-# covered dots cc-4 .. cc-1 (cc-2 .. cc-1 in double speed, Pan Docs "Dots").
-# Write the mode-0 edge's dot as `m0`, the first dot the PPU is in mode 0 on.
-# Then the whole model is one threshold: the read returns mode 0 iff
+# `mem_read` ticks the M-cycle's dots and THEN reads, so the whole model is one
+# threshold on `cc` (the dot the read's M-cycle leaves the counter on) against the
+# mode-0 edge's dot `m0`: the read returns mode 0 iff `cc - m0 >= T`. Bracketed on
+# both sides at both speeds by ROMs that take no interrupt, so the read's dot is
+# not hostage to a dispatch dot.
 #
-#     cc - m0 >= T
-#
-# and T is what the ROMs measure. It is bracketed on BOTH sides at BOTH speeds,
-# and -- this is the point -- by ROMs that take no interrupt, so the read's dot
-# is not hostage to a dispatch dot the way every m2int_* row's is:
-#
-#   speed   ROM                                     cc - m0   wants   pins
-#   -----   --------------------------------------  -------   -----   --------
-#   1x      GBMicrotest ppu_sprite0_scx0_a                 1   mode 3  T >= 2
-#   1x      gambatte sprites/1spritesPrLine_m3stat_2       2   mode 0  T <= 2
-#   2x      gambatte sprites/1spritesPrLine_m3stat_ds_1    2   mode 3  T >= 3
-#   2x      gambatte sprites/10spritesPrLine_m3stat_ds_2   3   mode 0  T <= 3
-#
-# so T = 2 at normal speed and T = 3 in double speed, with no slack at either.
-# GBMicrotest's twenty-one 0x83-against-0x80 rows (sprite_{0,1}_b, win*_b,
-# ppu_sprite0_scx*_b) all sit at cc - m0 of 2..4 wanting mode 0, and the whole
-# NspritesPrLine family agrees from the other direction: the object count moves
-# m0 by 11 dots apiece (Pan Docs) across the CPU's 4-dot read grid, so the
-# fraction of object counts that agree with hardware is (4 - e)/4 for an error
-# of e dots. Exactly one N in four passed before this, which is e = 3 and
-# nothing else -- and 3 is what T going 5 -> 2 is.
-#
-# **T is a dot count, not an M-cycle count, and it does not scale with speed --
-# it goes UP by one dot in double speed.** No quantity measured in CPU T-cycles
-# can do that (a fixed number of T-cycles is FEWER dots in double speed, not
-# more), which is what says the extra dot is not in the readback at all: it is
-# the half-dot the CPU's M-cycle boundary sits at relative to the PPU's dot grid
-# once the CPU clock is doubled. An M-cycle is 4 CPU T-cycles either way, so in
-# double speed it is 2 dots and its boundaries may land on a half-dot; sampling
-# 2 dots back from a boundary half a dot early lands in the dot BEFORE the one a
-# whole-dot model picks. dingbat's `cycles shr current_speed` rounds that phase
-# to zero, so the half-dot can only be spent here.
-#
-# What that is NOT: the phase the speed switch leaves behind. Tested -- one dot
-# of SPEED_SWITCH_STALL_T, which moves the CPU and the PPU apart by exactly the
-# dot in question, takes the double-speed rows the OTHER way (sprites/space -40)
-# and costs 110 rows for 18. The half-dot is not reachable from an integer-dot
-# stall, which is the same statement.
-#
-# The sweep, one build per cell, `gambatte / GBMicrotest` of 5005 / 513, on this
-# tree. Both axes are two-sided, and the maximum is the bracket above:
-#
-#   T (1x)      1          2         3         4         5 (was)     6
-#   at ds=3   3747/400  3818/430  3835/427  3844/407  3856/404   3781/374
-#
-#   T (2x)      2          3         4         5
-#   at 1x=2   3727/430  3818/430  3769/430  3686/430
-#
-# (sweep them as `-d:STAT_READ_SAMPLE=<T 1x>` and
-# `-d:STAT_READ_SAMPLE_DS_ADD=<T 2x minus T 1x>`.)
-#
-# The gambatte column is lower at the answer than at the old T = 5 and that is
-# not a defect in T: 98 of the 102 rows it trades are m2int_*-anchored and are
-# arithmetically exactly one M-cycle of mode-2 dispatch away from correct (see
-# the STAT_IRQ_LEAD note at the top of this file, and bucket 14 of
-# docs/gb-failure-triage.md). The old T = 5 was three dots of readback error
-# cancelling four dots of dispatch error on those rows, which is why moving
-# either alone looks like a regression.
+# T is a DOT count that does not scale with speed -- it goes UP by one dot in
+# double speed, and no quantity measured in CPU T-cycles can do that. The extra
+# dot is not in the readback: it is the half-dot the CPU's M-cycle boundary sits
+# at against the PPU's dot grid once the CPU clock is doubled, which
+# `cycles shr current_speed` rounds to zero, so it can only be spent here.
 
 proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
   ## The 3 -> 0 field tail (`STAT_M0_FIELD_TAIL`), as this particular read sees
@@ -1036,119 +983,25 @@ const STAT_M2_PULSE* {.intdefine.} = 3
 # That asymmetry is the whole of bucket 14, and it is why the LYC half has no
 # M-cycle to give.
 const STAT_M2_LEAD* {.intdefine.} = 0
-  ## CPU M-cycles the OAM STAT source comes up before the line boundary.
-  ## 0 is the boundary itself and compiles the whole mechanism out.
+  ## CPU M-cycles the OAM STAT source comes up before the line boundary. 0 is the
+  ## boundary itself and compiles the whole mechanism out.
   ##
-  ## ---- M-cycles, not dots ---------------------------------------------------
+  ## M-cycles, not dots: a fixed PPU dot is refused outright by the `_ds` column,
+  ## since one M-cycle early at normal speed is TWO M-cycles early in double.
   ##
-  ## Spelled as a fixed PPU dot first, because a pulse the OAM scan generates ought
-  ## to be a dot count the CPU's clock cannot touch (Pan Docs, "Dots"). The `_ds`
-  ## column refuses that outright: a rise at a fixed dot 452 -- four dots early, one
-  ## M-cycle at normal speed -- is TWO M-cycles early in double speed, and the
-  ## difference between the fixed dot and this scaled lead is 75 gambatte rows
-  ## gained and 4 lost, every single one of them a `_ds_` row. Nothing at normal
-  ## speed moves between the two spellings. The families say it directly too:
-  ## `m2int_m0irq` is `exp=0,2 got=2,2` and its `_ds` twin `exp=1,3 got=3,3` -- one
-  ## family step, i.e. one M-cycle, either way.
+  ## Cannot be scored alone -- every gambatte family that writes a PPU register
+  ## out of the mode 2 handler measures the dispatch against the pixel pipeline,
+  ## so this and `M3_PIPE_AHEAD` are one unknown to those 180-odd rows and neither
+  ## scores without the other. GBMicrotest depends on the LEAD alone, which is
+  ## what pins it independently of the pipeline.
   ##
-  ## Fixed-dot sweep for the record (gambatte of 5005 / GBMicrotest of 513, with
-  ## `M3_PIPE_AHEAD` off, so only the GBMicrotest column means anything):
-  ##
-  ##   rise dot  449      450      451      452      453      454      455      456
-  ##            3696/433 3698/433 3702/433 3702/433 3833/428 3838/428 3841/428 3849/429
-  ##
-  ## 453..455 do not move the dispatch, and that is not a defect in them: this
-  ## tree's line boundary falls on the LAST dot of a CPU M-cycle, so a rise at
-  ## 453..455 is in the same M-cycle as the boundary and only 449..452 cross it.
-  ## Which is the shape of the whole bucket -- nothing observes a rise inside an
-  ## M-cycle, so a rising dot decides only WHICH M-cycle it lands in.
-  ##
-  ## ---- The two-axis sweep ---------------------------------------------------
-  ##
-  ## The lead cannot be scored alone: every gambatte family that writes a PPU
-  ## register out of the mode 2 handler measures the dispatch against the pixel
-  ## pipeline, so moving one demands moving the other (`M3_PIPE_AHEAD` in
-  ## fifo_ppu.nim). Both axes are two-sided and the maximum is a single cell.
-  ## gambatte of 5005 / GBMicrotest of 513, one build per cell:
-  ##
-  ##   STAT_M2_LEAD \ M3_PIPE_AHEAD    0           1           2
-  ##                              0   3849/429    3671/429       --
-  ##                              1   3743/433    3963/433    3716/433
-  ##                              2      --       3605/425    3754/425
-  ##
-  ## GBMicrotest depends on the LEAD alone -- 429 / 433 / 425 at 0 / 1 / 2, and not
-  ## one of its OAM rows writes a PPU register mid-mode-3 -- so the lead is pinned
-  ## two-sided by an instrument the pipeline cannot reach. `LY0_PIPE_MCYCLES` is
-  ## then pinned the other way: with the model below it must be 0 (3964, against
-  ## 3819 at 1 and 3826 at 2), because line 0's four dots ARE this lead on lines
-  ## 1..143 and that constant was counting them twice.
-  ##
-  ## Line 0 is not in it (`STAT_M2_EARLY_LY0`). Line 0's predecessor is line 153,
-  ## which is vblank and scans no OAM, and the suite says the pulse does not lead
-  ## there: including line 0 costs `mooneye acceptance/ppu/intr_1_2_timing-GS` and
-  ## wilbertpol's copy -- hardware-verified on DMG/MGB/SGB/SGB2 -- and is a gambatte
-  ## row worse besides. That is the same fact `LY0_PIPE_MCYCLES` was built on from
-  ## the other side (mealybug's `line_0_fix` burning 24 T-cycles on LY 0 against 28
-  ## elsewhere), and this reading needs no per-line pipeline: the handler reaches
-  ## its write four T-cycles further into line 0's drawn area because line 0's
-  ## interrupt is the one that does NOT come early.
-  ##
-  ## ---- Why it ships off: the halt/sled split --------------------------------
-  ##
-  ## Seventeen rows go red with it on, and the list is not miscellaneous:
-  ##
-  ##   mooneye + wilbertpol  intr_2_0_timing, intr_2_mode0_timing,
-  ##                         intr_2_mode0_timing_sprites, intr_2_mode3_timing,
-  ##                         intr_2_oam_ok_timing   (5 rows, twice over)
-  ##   GBMicrotest           int_oam_halt, oam_int_halt_b, lcdon_to_if_oam_a,
-  ##                         oam_int_if_edge_a
-  ##   pixel                 daid ppu_scanline_bgp-dmg, strikethrough dmg + cgb
-  ##
-  ## All five mooneye ROMs, both strikethroughs and daid wait for their interrupt
-  ## with `EI; HALT`; two of the four GBMicrotest rows are the halt half of a
-  ## halt/sled pair by name. Meanwhile wilbertpol's `intr_2_mode0_scx1..8_timing_nops`
-  ## and `intr_2_mode0_timing_sprites*_nops` -- the SAME measurements with the halt
-  ## replaced by a NOP sled -- are twelve of the rows that go GREEN. The suite sorts
-  ## by how the ROM waits and by nothing else.
-  ##
-  ## GBMicrotest states the mechanism outright, in four halt-versus-sled pairs:
-  ##
-  ##   source   nops   halt   where it rises
-  ##   ------   ----   ----   ----------------------------------------
-  ##   OAM      $93    $94    one M-cycle before a line boundary (this)
-  ##   hblank   $61    $62    at the mode 3 -> 0 edge, mid-M-cycle
-  ##   LYC      $99    $99    on a line boundary
-  ##   vblank   $42    $42    on a line boundary
-  ##
-  ## Hardware puts the halt one M-cycle AFTER the sled for exactly the two sources
-  ## that do NOT rise on a line boundary, and level with it for the two that do.
-  ## That is a sub-M-cycle difference between where a halted CPU samples IF and
-  ## where an executing one does, and this tree cannot represent it: it ticks the
-  ## PPU over a whole M-cycle and then asks for IF, so both paths see every rise at
-  ## the same instant. With the source on the boundary that lands the halt right and
-  ## the sled one M-cycle out; with the source where it belongs it lands the sled
-  ## right and the halt one M-cycle out. Both models are exactly one M-cycle wrong
-  ## and differ only in which instrument reads them wrong -- and the twelve `_nops`
-  ## rows are what says the sled is the half that measures the SOURCE.
-  ##
-  ## A uniform "halt exit costs one more M-cycle" is not the missing piece and is
-  ## refused before it is built: it takes `int_lyc_halt` $99 -> $9A,
-  ## `int_vblank1_halt` $42 -> $43, `int_vblank2_halt`, all three `int_timer_halt*`
-  ## and both `int_hblank_halt_bug_*` with it -- nine green rows for two, and the
-  ## timer has nothing to do with the PPU.
-  ##
-  ## That quantity is now measured: `HALT_IF_SAMPLE_T` in cpu.nim -- the halted CPU
-  ## latches the interrupt line at the MIDPOINT of its M-cycle where the running one
-  ## latches at the end, so a source rising in the second half wakes it one boundary
-  ## later. With it at 2, this at 1, `M3_PIPE_AHEAD` at 1 and `LY0_PIPE_MCYCLES` at
-  ## 0, the runner is 786 against main's 765 (gambatte 3972, GBMicrotest 439) and
-  ## fifteen of the seventeen rows above are green. What is left is
-  ## `lcdon_to_if_oam_a` and `oam_int_if_edge_a`, which are IF *reads* rather than
-  ## halts, and the three pixel rows, whose phase comes from an LYC halt -- a source
-  ## the midpoint leaves alone -- while `M3_PIPE_AHEAD` moves the pixels under it.
-  ##
-  ## The pair is still blocked, but on one named row rather than a whole
-  ## unexplained bucket: see the ship-off paragraph at HALT_IF_SAMPLE_T.
+  ## It ships OFF, and what blocks it is the halt/sled split: seventeen rows go
+  ## red with it on, and every one of them waits for its interrupt with `EI; HALT`
+  ## while the twelve `_nops` rows -- the SAME measurements with a NOP sled --
+  ## go green. That quantity is now measured (`HALT_IF_SAMPLE_T`, cpu.nim: the
+  ## halted CPU latches IF at the MIDPOINT of its M-cycle where the running one
+  ## latches at the end), and with the pair on, fifteen of the seventeen come
+  ## back. See the ship-off paragraph at HALT_IF_SAMPLE_T for the one row left.
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
   ## Does LINE 0's pulse lead too? It does not -- see above, and mooneye
   ## intr_1_2_timing-GS is what says so.
@@ -1299,101 +1152,22 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 
 # ---- The LY 153 -> 0 snapback, and the comparator's blind window -----------
 #
-# Both are dots into line 153.
+# Both are dots into line 153. LY153_SNAP_DOT is LY's own edge. LYC_SETTLE_DOTS is
+# the READ path's rule (LY_JUST_CHANGED) applied to the same edge: the M-cycle in
+# which LY advances reads back with the coincidence bit CLEAR whatever LYC holds,
+# and the comparison re-appears one M-cycle later. A suppression window, not a
+# stale copy. The snapback is an LY change like any other, so it opens the same
+# window, and the STAT source rises on the window's FAR side.
 #
-# LY153_SNAP_DOT is LY's own edge and is not new -- it is the `cycle_counter > 4`
-# both renderers already had. It stays: GBMicrotest's `line_153_ly_c` does want it
-# an M-cycle earlier, but moving it is a whole-suite loss (swept on its own before
-# this window existed: gambatte 3614 -> 3606) and it is not this dot's question.
+# A fixed dot count rather than `4 shr current_speed`: the comparator is on the
+# PPU's clock, which double speed does not touch, and gambatte's `_ds_` arms agree
+# with the single-speed ones.
 #
-# LYC_SETTLE_DOTS is new: the READ path's rule applied to the same edge. The
-# LY_JUST_CHANGED branch in ppu_read already says the comparator does not follow LY
-# instantaneously -- the M-cycle in which LY advances reads back with the
-# coincidence bit CLEAR whatever LYC holds, and the comparison re-appears one
-# M-cycle later. mooneye lcdon_timing-GS pins both halves at the line 0 -> 1
-# advance: at the advance M-cycle it wants bit 2 clear for LYC=1 (a match that has
-# just become true) AND for LYC=0 (one that has just become false). A suppression
-# window, not a stale copy.
-#
-# The snapback is an LY change like any other, so it opens the same window. Four
-# suites read it out:
-#
-#   * GBMicrotest `line_153_lyc153_stat_timing_*` (LYC=153) ships hardware's table
-#     in its own header (`101 - C5 / 102 - C1`): the match lasts ONE M-cycle, so
-#     the comparator sees the snap at once -- the near side of the window.
-#   * GBMicrotest `line_153_lyc0_stat_timing_*` (LYC=0) ships the complement
-#     (`107 - c1 / 108 - c5`). Its letters differ by one inserted NOP, so the pair
-#     brackets the LYC=0 match's arrival to one M-cycle -- the far side, one
-#     M-cycle behind the near side.
-#   * gambatte `ly0/lycint152_lyc0flag_1..4` and `lycint152_lyc0irq_1..2`
-#     reproduce exactly at 4 and are one step out at 0, on dmg, on cgb, and in
-#     double speed.
-#   * daid `ppu_scanline_bgp` is the most direct: its whole frame is a picture of
-#     where this interrupt's handler started. At 4 it is 23040/23040; at 0 the
-#     frame is four columns out and 2656 pixels wrong. It is also the only one of
-#     the four that does not sync off an LCD enable.
-#
-# A fixed dot count rather than `4 shr current_speed`, because the comparator is on
-# the PPU's own clock, which double speed does not touch -- gambatte's `_ds_` arms
-# in ly0 would say otherwise and they agree with the single-speed ones.
-#
-# Whole gambatte suite, one build per cell, snapback edge in place throughout, from
-# 776505c (main moved twice under this pass, so read the shape, not the totals):
-#
-#   LYC_SETTLE_DOTS   0     2     4     6     8
-#   gambatte          3850  3850  3846  3844  3839
-#   daid px wrong     2656  2656  0     0     2656
-#
-# The daid row tracks the RE-LATCH dot exactly -- every cell with
-# LY153_SNAP_DOT + LYC_SETTLE_DOTS = 9 is pixel-exact and every other is out by a
-# column -- which independently confirms that this window's FAR side is what the
-# STAT source rises on.
-#
-# The four gambatte rows 4 costs against 0 are not a contradiction, and
-# tools/gbppu/famflip.py says so: each has a SECOND mechanism in it, and every
-# clean member of the same families goes exact. `lycint152_lyc0irq_ifw_*` (the
-# handler writes IF) reads E2,E0 at 0 and E2,E2 at 4 -- exactly what its sibling
-# `_late_retrigger` reads at BOTH settings, i.e. the known STAT edge-detector
-# re-trigger gap (bucket 3, docs/gb-failure-triage.md), which at 0 was cancelling
-# this window. `lycEnable/lyc0_ff4{1,5}_disable_*` put a register write on the edge
-# itself and their flip point moves one step either way. Against that: six rows
-# that measure nothing but this dot become exact.
-#
-# One GBMicrotest row disagrees outright, `line_153_lyc0_int_inc_sled`, and looks
-# like a counter-example without being one. It arms LYC=0, EIs, and runs 1122
-# `INC A`, so it passes iff the interrupt arrives before its last one -- a boundary
-# between dots 5 and 9 of line 153 here. Its whole phase chain hangs off an LCD
-# enable 16,300 M-cycles earlier, and that phase is a known open +-2 dots
-# (LCD_ON_LINE0_TRIM in gb.nim). Built: at `-d:LCD_ON_LINE0_TRIM=2` the sled PASSES
-# and `line_153_ly_c` with it, while `line_153_lyc0_stat_timing_c` goes red -- the
-# three trade 1:1 on that constant and not on this one, and daid stays pixel-exact
-# throughout. They read the LCD-on phase, not the comparator.
-#
-# ---- It is NOT device-split, and daid's CGB arm is what asks ----------------
-#
-# daid `ppu_scanline_bgp` is exact at 4 on its DMG arm. Its CGB arm
-# (`--cgb-rev=D`) is 20736/23040 there and 23040/23040 at 8 -- one M-cycle later,
-# the same +4 the whole acid-hell/strikethrough axis has been chasing, and this
-# edge is the only one in the machine daid observes and no other witness does. So
-# "the snapback edge rises one M-cycle later on CGB" was the last shape that could
-# give daid-GBC its four dots while moving nothing else.
-#
-# Refused from both sides by CGB rows. This constant is device-independent, so a
-# sweep moves both devices and every `[cgb]` row that breaks pins the CGB edge.
-# Whole suite, one build per dot: at 5 `ly0/lycint152_lyc0{flag,irq}_1 [cgb]` and
-# their `_ds_` twins break, at 13 the `_2` members and their twins break, and at 9
-# -- here -- none does. Two-sided on CGB alone, re-confirmed in double speed.
-#
-# The filenames make that a positive statement rather than a gap: gambatte encodes
-# per-device expectations in the name, and these carry ONE value for both
-# (`lycint152_lyc0flag_2_dmg08_cgb04c_outC5`) while
-# `lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0`, same suite and same edge
-# family, splits. Hardware is being asked and is answering "the same".
-#
-# So daid-GBC's four dots are not here either. See docs/gb-failure-triage.md
-# (2026-08-10) for the three doors this closes and the one alternative left
-# standing: the OAM scan and pixel emission may not share a phase, which is a
-# renderer change and not a constant.
+# NOT device-split. daid's CGB arm wants one M-cycle more, which would be the same
+# +4 the acid-hell/strikethrough axis has been chasing, but CGB rows bracket this
+# edge from both sides and gambatte encodes ONE expected value for both devices in
+# these filenames while splitting them elsewhere in the same edge family. Hardware
+# is being asked and answers "the same".
 const LY153_SNAP_DOT_D {.intdefine: "LY153_SNAP_DOT".} = 5
 const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
@@ -1489,89 +1263,32 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
 # ---- An ordinary LY advance is an edge the STAT line has to see too ---------
 #
 # The line boundary moves two of the STAT line's inputs at once -- LY and the mode
-# -- and dingbat used to move both and then ask the edge detector once. A level-OR
-# asked once cannot see one source hand the line over to another, so every such
-# handover was silently swallowed. gambatte's lcdirq_precedence family is
-# thirty-one ROMs built to catch exactly that, and they only agree with each other
-# if the inputs move in a definite order:
+# -- and asking a level-OR once cannot see one source hand the line over to
+# another, so every such handover was silently swallowed.
 #
-#   * `lycirq_ly44_lcdstat48` -- LYC + mode 0, LYC = $44. Mode 0 holds the line
-#     high through line $43's HBlank and LYC = $44 comes true at the top of $44.
-#     Hardware wants an interrupt (out2), so the line DIPS: mode 0 lets go before
-#     the match arrives.
-#   * `lcdirqprecedence_lycirq_ly44_lcdstat68` -- the same plus mode 2. Hardware
-#     wants NO interrupt (out0), so mode 2 catches the line on the way down:
-#     mode 0 -> mode 2 really is one instant, and the dip above is the match
-#     arriving LATE rather than the mode leaving early.
-#   * `m1irq_lcdstat50_lyc8f` -- LYC + mode 1, LYC = $8F. The match holds the line
-#     high through line 143 and mode 1 takes over at 144. Hardware wants an
-#     interrupt (out3), so the line dips here too: the match lets go BEFORE the
-#     mode change.
-#   * `m1irq_lcdstat18` -- mode 1 + mode 0, no LYC, over the same two lines, and
-#     hardware wants no interrupt (out1). So it is not the mode 0 -> mode 1
-#     handover that dips; it is only ever the comparator.
-#   * `m2enable/enable_after_lycint_1` -- LYC + mode 2, LYC = 5, the match handing
-#     over to the next line's OAM pulse. Hardware wants NO interrupt (out1). So the
-#     OAM pulse is not after the comparator's drop the way mode 1 is; it is at
-#     least simultaneous with it.
+# One rule fits all thirty-one of gambatte's lcdirq_precedence ROMs: **the LY=LYC
+# comparator answers nothing while LY is changing**. It drops before LY moves and
+# comes back only after the mode has moved with it. Not a new mechanism -- it is
+# the one the READ path already has (LY_JUST_CHANGED in ppu_read); the interrupt
+# SOURCE simply never got it. The OAM source sits INSIDE that window rather than
+# after it, because a rendered line starting is the same instant the comparator
+# lets go on; entering vblank is not a line start, so mode 1 lands after the drop.
 #
-# One rule fits all of them: **the LY=LYC comparator answers nothing while LY is
-# changing** -- it drops before LY moves and comes back only after the mode has
-# moved with it. Not a new mechanism; it is the one the READ path already has
-# (LY_JUST_CHANGED in ppu_read, pinned by mooneye lcdon_timing-GS, and written up
-# at LYC_SETTLE_DOTS, which says the 153 -> 0 snapback is "an LY change like any
-# other"). The interrupt SOURCE simply never got it.
+# The whole window lives inside the boundary dot, so no CPU M-cycle can observe
+# the low and no interrupt's arrival moves. Masking a term out of an OR can only
+# lower the line, so this can only ADD an edge, never lose one.
 #
-# The OAM source sits INSIDE that window rather than after it, which is what this
-# file already argues on independent grounds -- see m2_source, "tied to a line
-# starting, not to a mode". A rendered line starting is the same instant the
-# comparator lets go on, so mode 2's arrival and mode 0's departure both happen
-# with the window open. Entering vblank is not a line start: nothing scans OAM, and
-# the mode 1 source and m2_line144's once-a-frame pulse are consequences of the
-# mode changing, landing after the comparator's drop. That asymmetry is the whole
-# difference between the last two ROMs above.
+# Exception: a CPU write to LYC/STAT/LCDC parked in the same M-cycle
+# (`stat_write_pending`) already has its own instant at the M-cycle boundary
+# (mem_flush_deferred), and running the glitch as well would count one change of
+# the comparator's inputs twice.
 #
-# Width: the entire window lives inside the boundary dot, so no CPU M-cycle can
-# observe the low and no interrupt's arrival time moves. A window one M-cycle wide,
-# like the snapback's, would push every LYC STAT interrupt a whole M-cycle later,
-# which gambatte lycEnable/lycm2int and mooneye intr_2_* refuse.
-#
-# Blast radius: every evaluation the boundary now runs is the old one with the
-# comparator masked off, and the LAST one is the old one exactly. Masking a term
-# out of an OR can only lower the line, so a rise the old single call reached is
-# still reached; this can only ADD an edge where the line dipped inside the dot,
-# never lose one.
-#
-# The one exception the callers carry is a CPU write to LYC/STAT/LCDC parked in the
-# same M-cycle (`stat_write_pending`). That write already has its own instant at
-# the M-cycle boundary (mem_flush_deferred), and running the comparator's glitch as
-# well would count one change of its inputs twice. gambatte's
-# `lycEnable/ff45_enable_weirdpoint` is named for it: four ROMs writing LYC = LY+1
-# one M-cycle apart across the LY advance, expecting an interrupt either side and
-# NONE at the step landing on the boundary itself (dmg 3,3,1,3; cgb 3,1,3,3).
-# Without the exception the window fills that notch in on both devices; with it, 3
-# of the 4 rows it would cost come back plus `lyc153_late_ff45_enable`, at a cost
-# of 5 of the 36 it gains.
-#
-# ---- Why this is spelled as the enable bit --------------------------------
-#
-# The window wants ONE term of the STAT line held low for two evaluations, and the
-# obvious spelling is a `ly_changing` flag ORed into `settling`. That flag was
-# built and costs +1.19% of ALL retired instructions on Pokemon Crystal, for work
-# that happens 154 times a frame. It is not the work -- the same tree with the flag
-# present and never set costs the same. It is the extra field read in `stat_flag`,
-# which reaches the mode-3 dot loop through `mode_flag=` and pushes it over clang's
-# inline threshold (docs/gb_oam_dma_cost.md, the same cliff `lyc_settling` and
-# `fifo_line153_edge` are `noinline` for).
-#
-# Taking the LYC source's ENABLE bit away instead costs nothing: the line already
-# loads `lcd_status` for that term, so the window adds no read to the hot
-# expression and no field to GbPpu. It is a means, not the model -- the ROM's bit
-# is put straight back -- and it is safe because nothing is ticked between the two
-# calls, so no CPU read and no capture can fall inside. The readable coincidence
-# bit deliberately does NOT dip with it: that half of the window is the read path's
-# (LY_JUST_CHANGED), it is a whole M-cycle wide there rather than one dot, and no
-# read can see this one anyway.
+# Spelled as taking the LYC source's ENABLE bit away rather than as a
+# `ly_changing` flag: the flag costs +1.19% of ALL retired instructions, not for
+# the work but for the extra field read in `stat_flag`, which reaches the mode-3
+# dot loop and pushes it over clang's inline threshold. The enable bit is already
+# loaded there. It is a means, not the model -- the ROM's bit is put straight back
+# -- and safe because nothing is ticked between the two calls.
 proc ly_advance_open*(ppu: GbPpu): uint8 {.inline.} =
   ## The comparator lets go, and returns what to put back. Zero if a CPU write
   ## to LYC/STAT/LCDC is parked for this M-cycle: that write has its own instant

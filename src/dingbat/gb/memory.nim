@@ -953,81 +953,16 @@ const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
 
 const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12 - 4 * CGB_HALT_PPU_LEAD
   ## Dots the PPU advances across the speed-switch stall beyond what the CPU clock
-  ## counts. Tied to `CGB_HALT_PPU_LEAD` (gb.nim) because the two are one
-  ## measurement split across two files: at the shipping lead of 1 this is 8, the
-  ## value the switch itself measures; with the lead off it is 12, which is 8 plus
-  ## the halt M-cycle the daid frames also carry.
+  ## counts. Tied to `CGB_HALT_PPU_LEAD` because the two are one measurement split
+  ## across two files: at the shipping lead of 1 this is 8, the value the switch
+  ## itself measures, and with the lead off it is 12 -- that 8 plus the halt
+  ## M-cycle daid's frames also carry.
   ##
-  ## daid's three speed-switch frames are what separate stall-time from PPU-dots,
-  ## because they contradict each other under any single "the stall is N cycles"
-  ## model:
-  ##
-  ##  * `speed_switch_timing_div` is pixel-exact only when the CPU-domain stall is a
-  ##    whole multiple of 256, because it reads DIV back and the residue sets the
-  ##    divider's phase for everything after. 131072 = 2^17 gives 0; 131096 leaves
-  ##    24 and costs 226 pixels.
-  ##  * `speed_switch_timing_ly` and `_stat` are pixel-exact only when the PPU
-  ##    advances 65548 dots across a switch INTO double speed. At 65536 they cost
-  ##    452 and 575 pixels.
-  ##
-  ## Both are native-CGB carts scored against captures, so neither is a tolerance
-  ## artefact, and no single value satisfies both: 131072 gives div 0 / ly 452 /
-  ## stat 575, and 131096 gives div 226 / ly 0 / stat 0. Two quantities, and this is
-  ## the difference -- the PPU keeps being clocked through a re-alignment the CPU
-  ## clock is not yet counting.
-  ##
-  ## Bracketed on both sides by those frames, one build per dot:
-  ##
-  ##   EXTRA_DOTS      11    *12*   13    14    15    16
-  ##   daid ly px     109     0      0     0     0    125
-  ##   daid stat px     0     0      0     0   233    233
-  ##
-  ## [12,14] is the legal window with 11 and 15 closing it. gambatte's four
-  ## subdirectories are flat across it as a TOTAL, which is why nobody had noticed
-  ## that the family which actually measures this quantity is not.
-  ##
-  ## ---- The direction splits (2026-08-13) -----------------------------------
-  ##
-  ## `speedchange{,2..5}[_nop]_ly44_m3[_nopxK]_m3stat[_scxS]_{1,2}` is a ladder in
-  ## SWITCH COUNT: N back-to-back `LDH ($4D),A ; STOP` pairs then one STAT read,
-  ## with `_1` and `_2` one M-cycle apart across the mode 3 -> 0 edge. A per-switch
-  ## error of d dots shows up as N*d, so the ladder divides the residual by N -- and
-  ## none of these ROMs halts, which makes them the only witness that sees the
-  ## switch on its own. Swept per dot over all 55 rows
-  ## (`tools/gbppu/sssweep.sh`; full table in docs/gb-failure-triage.md bucket 13):
-  ##
-  ##       N  ends in  1 M-cyc  green at    => total PPU lead over N switches
-  ##       1  double    2 dots  8, 9         8
-  ##       2  single    4 dots  5, 6        11
-  ##       3  double    2 dots  6           19
-  ##       4  single    4 dots  5 / 6       22
-  ##       5  double    2 dots  6           30
-  ##
-  ## The successive differences of that last column are +3, +8, +3, +8, alternating
-  ## exactly with the direction each switch ends in. One constant cannot produce
-  ## that (N=1 wants 8 per switch and N=5 wants 6, and every window above is
-  ## narrower than the 2 dots that would take); two constants produce it with
-  ## nothing left over. See `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`.
-  ##
-  ## The 8 is not a new quantity: it is the 12 minus the CGB halt-exit M-cycle
-  ## `CGB_HALT_PPU_LEAD` owns. daid's two ROMs each take one halt before their STOP
-  ## (`halt` at $019B in `speed_switch_timing_ly.gbc`, IME clear, waiting for the
-  ## first vblank after an LCD enable) and everything they sample hangs off that
-  ## wake, so they pin halt-lead + switch-extra where the `ly44_m3` ladder pins
-  ## switch-extra alone. 4 + 8 = 12, and the two instruments never disagree by a dot.
-  ##
-  ## The halt is the ONLY carrier those 4 dots can have, measured rather than
-  ## assumed: `LCD_ON_HEAD_START` = 1 and = 9 (the `1 mod 4` neighbours of the
-  ## shipping 5) move daid's `_ly` and `_stat` by zero pixels each, because a halt
-  ## re-anchors the CPU to a PPU event and a whole-M-cycle shift of the PPU before
-  ## it cancels out. Only something moving the PPU relative to the CPU ACROSS the
-  ## wake survives, which is what `CGB_HALT_PPU_LEAD` is.
-  ##
-  ## What the pair is worth, whole gambatte suite, baseline 4183/5005:
-  ##
-  ##   A=8 B=3 alone                   4228   daid ly/stat 109 px each -- refused
-  ##   A=8 B=3 + CGB_HALT_PPU_LEAD=1   4224   daid green; +75 / -34
-  ##   A=12 B=-1 (sum kept, split not) 4205   daid green; +33 / -11 -- a fit
+  ## Stall-time and PPU-dots are two quantities: daid's `_div` frame is exact only
+  ## when the CPU-domain stall is a whole multiple of 256, and its `_ly` / `_stat`
+  ## frames only when the PPU advances 65548 dots into double speed. No single
+  ## value satisfies both. The direction also splits -- see
+  ## `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`.
 
 const SS_EXTRA_SINGLE_SAME* = -9999
   ## Sentinel for `SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE`: a value well outside any
@@ -1082,94 +1017,22 @@ const SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE* {.intdefine.} =
   ## docs/gb-failure-triage.md) seen from inside the instrument.
 
 const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
-  ## Whether the timer/serial/OAM-DMA domain runs during the stall.
+  ## Whether the timer/serial/OAM-DMA domain runs during the stall. It does: the
+  ## speed-switch leaf is a HALT, not a STOP leaf, and in a halt the CPU clock
+  ## keeps running for everything except instruction fetch. DIV is still reset at
+  ## the switch itself, before the stall starts, which is what makes the tick
+  ## count come out round.
   ##
-  ## It does, and the TIMA rows above are the proof: they can only see +128 ticks
-  ## if the timer counted through the stall. Not a contradiction with Pan Docs'
-  ## "`DIV` does not tick" -- that is about the STOP leaves, where the whole
-  ## machine's clock stops. The speed-switch leaf is a HALT (Pan Docs' own chart
-  ## calls it that), and in a halt the CPU clock keeps running for everything
-  ## except instruction fetch. So: the stall is an ordinary halt, and everything
-  ## that runs during a halt runs during it. DIV is still reset at the switch
-  ## itself, before the stall starts, which makes the tick count come out round.
+  ## Note this constant's neighbours are two readings of the same stall:
+  ## `SPEED_SWITCH_STALL_CPU` (CPU cycles at the speed being switched TO) is
+  ## nonzero and wins, so the real-time `SPEED_SWITCH_STALL_T` is inert in the
+  ## shipping build and kept only so that reading stays swept.
   ##
-  ## ---- How the 65548 reading was derived ------------------------------------
-  ##
-  ## Everything below is about `SPEED_SWITCH_STALL_T`, the REAL-TIME reading of the
-  ## stall, which `SPEED_SWITCH_STALL_CPU` superseded and which is inert in the
-  ## shipping build (that constant is nonzero, so the `when` at the stall site never
-  ## takes this branch). It is kept because the derivation is the only account of
-  ## how the stall's length was pinned, and because the constant is still swept.
-  ##
-  ## 65548 = 2^16 + 12. The nearby 65540 = 2^16 + 4 is a ripple-counter length, not
-  ## a fitted number, and three independent sources land on it:
-  ##
-  ##   * SameBoy times the switch with `speed_switch_halt_countdown = 0x20008`
-  ##     (Core/sm83_cpu.c, `stop`). Its cycle unit is half a dot in both speed modes,
-  ##     so 0x20008 = 131080 units = 65540 dots.
-  ##   * gambatte's three LY rows across the switch (speedchange_ly44_m3_ly,
-  ##     speedchange_ly97_ly, dma/hdma_late_m3speedchange_ly) all want the PPU to
-  ##     advance exactly 143 scanlines from three different starting LYs.
-  ##     143 * 456 = 65208, and 65540 dots is 143.7 lines -- the same line, and the
-  ##     same answer from every starting line, which says this is a fixed stall and
-  ##     not a frame reset.
-  ##   * The eleven blargg cpu_instrs ROMs against SameBoy through the real CGB boot
-  ##     ROM, frame 1200. Blargg's console races the PPU after the switch (see
-  ##     tests/README.md), which makes the frame a high-resolution probe:
-  ##
-  ##         8200 -> 8/11    32768 -> 6/11   65208 -> 8/11   65536 -> 11/11
-  ##        65540 -> 11/11  65544 -> 11/11   65664 -> 8/11   66000 -> 11/11
-  ##       131072 -> 8/11
-  ##
-  ##     The 11/11 region sits around 2^16 and 65540 is inside it. Noisy by nature
-  ##     (65664 dips), so it confirms the SameBoy constant rather than sourcing it.
-  ##
-  ## Pan Docs' "FF4D — KEY1" says 2050 M-cycles (8200 T-cycles), which is what this
-  ## used to be. That is eight times short of all three sources and is the outlier;
-  ## it survived because sweeping against gambatte alone produced no clean optimum
-  ## (2682 at 8200, 2692 near 65664, jagged in between). Moving to 65548 was
-  ## gambatte 3248 -> 3253, and everything that moved is in the speed-switch family.
-  ##
-  ## The eight dots between 65540 and 65548 are SameBoy's switch countdown, and
-  ## daid's speed_switch_timing_ly.gbc / _stat.gbc measure them directly: both write
-  ## 128 (resp. 64) back-to-back `ld a,[rLY]` / `ld a,[rSTAT]` reads into WRAM
-  ## starting the instruction after the STOP, sampling the PPU every 8 dots. At
-  ## 65540 every transition in both buffers lands exactly one sample late, and the
-  ## window that puts all of them right is only two dots wide:
-  ##
-  ##       65540..65543  ly and stat both a sample early
-  ##       65544..65547  stat lands, ly still a sample early
-  ##       65548..65549  both correct  <-
-  ##       65550..65551  stat a sample late
-  ##       65552+        ly a sample late as well
-  ##
-  ## (The observable is really the total PPU advance across the STOP, 65550 dots:
-  ## the stall plus the opcode's own 4 CPU cycles, 2 dots at the post-switch double
-  ## speed. Splitting it differently between the two moves this constant by the same
-  ## amount the other way.)
-  ##
-  ## Worth 8 gambatte rows as well -- speedchange 106 -> 112 and oamdma 680 -> 681,
-  ## nothing else moving, no row lost -- which says this is the countdown and not a
-  ## fit to one ROM. `speed_switch_timing_div.gbc` passes at both values; DIV is
-  ## reset either way, so it cannot see this.
-  ##
-  ## ---- Its interaction with CGB_HALT_PPU_LEAD (re-checked 2026-08-20) --------
-  ##
-  ## Both daid ROMs take exactly ONE halt each (LY 144, vblank, IME clear, traced
-  ## with `-d:gb_halt_trace`) and everything they sample hangs off that wake, so
-  ## when the halt lead applies to that wake they pin halt-lead + stall rather than
-  ## the stall alone. That was measured on 2026-08-10: with the lead on and applied
-  ## to every wake, the two-dot window slid down one M-cycle to 65544..65545, and
-  ## this constant had to move with it or `speed_switch_timing_ly` went 125 px out.
-  ##
-  ## That pairing no longer holds, and the reason is `CGB_HALT_LEAD_SKIP_LYC0`
-  ## (gb.nim), which landed afterwards and exempts the wake these ROMs take. As the
-  ## tree ships today -- `CGB_HALT_PPU_LEAD = 1`, this constant at 65548 -- all
-  ## three daid speed-switch rows are 23040/23040. Do not re-derive the pairing
-  ## from the 2026-08-10 table without re-running the three rows first.
-  ##
-  ## (65545 was inside the old window and still not the value: an odd stall wrecks
-  ## the dot alignment everywhere else, costing 118 gambatte rows, 95 in `sprites`.)
+  ## Before re-deriving the stall against `CGB_HALT_PPU_LEAD`: daid's two ROMs
+  ## each take one halt before their STOP, so they can pin halt-lead + stall
+  ## rather than the stall alone. `CGB_HALT_LEAD_SKIP_LYC0` exempts the wake they
+  ## take, and as shipped all three daid speed-switch rows are 23040/23040 -- run
+  ## them before trusting any earlier pairing.
 
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   ## mem_tick_components for the speed-switch stall, where the CPU clock is

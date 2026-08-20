@@ -274,116 +274,17 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
 
 # ---- Where inside an M-cycle a HALTED CPU latches the interrupt line --------
 #
-# A running CPU asks `interrupt_ready` after the last M-cycle of an instruction has
-# been ticked -- at the M-cycle's END, all four T-cycles and all its PPU dots spent.
-# This tree gives the halted CPU the same point, and that is wrong: the two paths
-# differ by half an M-cycle, and GBMicrotest measures the difference directly.
+# A running CPU asks `interrupt_ready` at its last M-cycle's END. A halted one
+# latches at the MIDPOINT, so a source that rises in the M-cycle's second half
+# wakes it one boundary later. Each source is then classified by which half of ITS
+# M-cycle it rises in -- mode 0 varies with SCX, the OAM pulse is a tail, LYC,
+# vblank and the timer are heads -- and the halt/sled ROM pairs read exactly that
+# classification out.
 #
-# `int_hblank_nops_scx0..7` and `int_hblank_halt_scx0..7` are the bracket. Both wait
-# for the same mode-0 STAT interrupt; the only difference is a NOP sled against
-# `EI; HALT`. SCX moves the mode 3 -> 0 edge one dot at a time, so the eight pairs
-# walk that edge across two whole M-cycles:
-#
-#   scx                     0    1    2    3    4    5    6    7
-#   dot of the mode 0 edge  252  253  254  255  256  257  258  259
-#   T of the M-cycle        3    0    1    2    3    0    1    2
-#   sled (`_nops_`)         $61  $62  $62  $62  $62  $63  $63  $63
-#   halt (`_halt_`)         $62  $62  $62  $63  $63  $63  $63  $64
-#   halt - sled             +1   0    0    +1   +1   0    0    +1
-#
-# The sled row is exact here, so both grids are already right -- its two steps (scx
-# 0->1 and 4->5) are what put the M-cycle boundary between dots 252 and 253. Read
-# the last row against it: the halted CPU misses the interrupt for a whole M-cycle
-# exactly when the flag rises on T 2 or T 3 and catches it on T 0 or T 1. That is a
-# two-sided threshold -- the four level rows refuse any larger value, the four late
-# ones any smaller -- so the latch sits after T 1 and before T 2, the MIDPOINT of
-# the M-cycle, with four rows either side.
-#
-# Spent, not skipped: the M-cycle is still four T-cycles either way. Only WHERE the
-# question is asked moves, so nothing here can cost or save time, which is what the
-# `tima/*` rows demand of any halt change. That is also what separates this from
-# "halt exit costs one more M-cycle", which cannot produce the table at all: a
-# uniform charge moves all eight rows together, so it swaps which four are green and
-# stays at 4/8, and it takes `int_lyc_halt`, `int_vblank1/2_halt` and all three
-# `int_timer_halt*` with it -- and the timer has nothing to do with the PPU.
-#
-# With the latch pinned, every source is classified by which half of ITS M-cycle it
-# rises in, and the halt rows read that classification out:
-#
-#   source          rises          halt vs sled   ROMs
-#   -------------   ------------   ------------   ----------------------------
-#   mode 0 (STAT)   T 0..3, by scx  +1 on T 2,3   int_hblank_{nops,halt}_scx0-7
-#   OAM (mode 2)    tail            +1            int_oam_nops $93 / _halt $94
-#   LYC             head            level         int_lyc_{nops,halt} both $99
-#   vblank          head            level         int_vblank1_{nops,halt} $42
-#   timer           head            level         int_timer_halt{,_div_a,_div_b}
-#
-# The OAM row is only a tail one once `STAT_M2_LEAD` is on: at 0 that source rises
-# with the line boundary, which is a head, and the pair reads $94/$94. That is the
-# whole of bucket 14's blocker -- see the halt paragraph at STAT_M2_LEAD in ppu.nim.
-# Two of the head sources need saying in code rather than in a dot (both in
-# cpu_halt_tick below); neither is a free parameter, since the halt rows are
-# two-sided on the latch and each source's half is then read off, not fitted.
-#
-# ---- Measured, and it ships OFF --------------------------------------------
-#
-# Whole runner, one full pass per build, against 765/981 on main:
-#
-#   this alone (knobs off)                  766   gambatte 3851, GBMicrotest 433
-#   + STAT_M2_LEAD=1 M3_PIPE_AHEAD=1
-#     LY0_PIPE_MCYCLES=0                    786   gambatte 3972, GBMicrotest 439
-#
-# The second line is bucket 14 landing: +123 gambatte (`window` +80,
-# `m2int_m3stat` 22/44 -> 44/44, `m2int_m0irq` +4, `halt` +12, `sprites` +4,
-# `speedchange` +7 against `m2enable` -8, `irq_precedence` -4, `enable_display` -3),
-# +10 GBMicrotest, with all five mooneye `intr_2_*` and their wilbertpol copies
-# staying green and the twelve `*_timing_nops` rows joining them.
-#
-# It ships at 4 anyway, for a row this tree may not lose:
-# `mooneye acceptance/ppu/hblank_ly_scx_timing-GS` (and wilbertpol's copy) goes red
-# with the latch alone, before any knob. It is the same measurement as
-# `int_hblank_halt_scx0` at the same SCX on the same device, and the two disagree by
-# exactly this M-cycle -- GBMicrotest reads TIMA out of the handler, timing the
-# dispatch against the timer; mooneye reads LY out of the handler twice, one
-# M-cycle apart, timing it against the LY ADVANCE, and puts the halt-woken read on
-# the near side of a boundary that +1 crosses.
-#
-# Both endpoints of mooneye's span are separately pinned against TIMA and both are
-# green (`int_hblank_nops_scx0` for the mode-0 edge; `poweron_ly_*`, `lcdon_to_ly*`,
-# `line_153_ly_*` for LY), so the arithmetic says they should agree. That is a new
-# bucket and it is the one thing between this constant and bucket 14 -- and it is
-# already visible from the other side: the sled sibling
-# `hblank_ly_scx_timing_nops` is red on main at 4 and at 2 alike, so that family
-# carries an error of its own that the halt half was cancelling.
-#
-# A read-side lag was the obvious candidate and is FALSIFIED, not untried: giving
-# `$FF44` the sample point `STAT_READ_LAG` gives the mode bits does not fix the
-# mooneye row and takes seven GBMicrotest LY rows with it (`lcdon_to_ly{1,2,3}_b`,
-# `line_153_ly_{b,f}`, `poweron_ly_{120,234}`). LY reads back where it is.
-#
-# The rest of the residue at 2, against main with the three knobs on:
-#
-#   mooneye misc/ppu/vblank_stat_intr-C  x2   the CGB line-144 OAM pulse is a tail
-#                                             source here and its wake collides
-#                                             with vblank's; its half is unmeasured
-#   daid ppu_scanline_bgp-dmg                 100% -> 90.5%. Its phase is an LYC=0
-#                                             halt, a HEAD source, so the latch
-#                                             leaves its dispatch alone while
-#                                             M3_PIPE_AHEAD moves the pixels
-#   strikethrough dmg + cgb                   7 pixels each, same shape
-#   gbmicrotest lcdon_to_if_oam_a,            IF *reads*, not halts: they want the
-#     oam_int_if_edge_a                       OAM source's rise on the far side of
-#                                             a read -- the read-side quantity above
-#
-# Perf is a prerequisite for the flip, not an afterthought. At 4 it costs nothing:
-# the shipping build is within noise of the same tree without cpu_halt_tick at all
-# (Pokemon Blue 24.0705 vs 24.0723 G retired instructions, Link's Awakening 24.2334
-# both, min of three). At 2 it is expensive and has to come down first: the split
-# doubles the PPU tick calls of every halted M-cycle, which is Pokemon Blue's whole
-# main loop -- +4.79% there (24.076 -> 25.228 G) and +1.88% on Link's Awakening.
-# The obvious way down is that most halted M-cycles cannot raise anything: the PPU's
-# idle-skip already knows the next dot on which something can happen, so a halted
-# M-cycle ending before it needs no split. Untried.
+# Spent, not skipped: the M-cycle is still four T-cycles either way, only the
+# question's position moves. That is what separates this from "halt exit costs one
+# more M-cycle", which cannot produce the per-SCX table at all and takes the timer
+# rows with it.
 const HALT_IF_SAMPLE_T* {.intdefine.} = 4
   ## T-cycles into a halted M-cycle at which the interrupt line is latched.
   ## 4 is the M-cycle's end -- the running CPU's point, and what this tree
