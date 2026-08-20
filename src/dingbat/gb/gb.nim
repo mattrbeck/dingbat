@@ -958,10 +958,34 @@ const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## swept over and could not recover at any value -- the strongest evidence
   ## that the mechanism, not the constant, was what was missing.
 const HDMA_BLOCK_OVERHEAD_BUS* {.intdefine.} = 4
-  ## CPU-clock cycles an HBlank DMA block costs beyond its sixteen byte copies:
-  ## the bus acquire/release either side of the block, which dingbat charged as
-  ## zero. NOT the per-byte cost -- two dots per byte at either speed is pinned
-  ## by gambatte's `hdma_start_ds_*` and agrees with SameBoy's GB_hdma_run.
+  ## CPU-clock cycles a VRAM DMA costs beyond its sixteen-byte-per-block copies:
+  ## the bus acquire/release either side of the TRANSFER, which dingbat charged
+  ## as zero. NOT the per-byte cost -- two dots per byte at either speed is
+  ## pinned by gambatte's `hdma_start_ds_*` and agrees with SameBoy's
+  ## GB_hdma_run.
+  ##
+  ## **Per transfer, not per block, and `gdma_cycles_long` is what says so.**
+  ## Charged once per BLOCK it is right for every one-block transfer in the
+  ## suite and catastrophically wrong for the long ones. `gdma_cycles_long*`
+  ## writes `LD A,$7F` to FF55 -- 128 blocks in one general-purpose burst -- so
+  ## a per-block charge added 128 * 4 = 512 CPU cycles and 128 * 2 = 256 dots,
+  ## more than half a scanline, and pushed the family's STAT read clean past
+  ## mode 0 into the NEXT line's mode 2. Both members of every `long` pair
+  ## answered 2 where hardware answers 3 then 0. Making it per transfer:
+  ##
+  ##   gambatte dma   134 -> 144/229     (whole suite 4269 -> 4279, 0 lost)
+  ##
+  ## and the ten rows are exactly the `gdma_cycles_long` family bar its SCX 2
+  ## and SCX 3 members, which are the separate mode-3-length residual that also
+  ## holds `gdma_cycles_short_scx{2,3}_2` and `hdma_cycles_scx{2,3}_2` red at
+  ## every value of this constant.
+  ##
+  ## The mechanism is the reason, not the fit: a GDMA stops the CPU and holds
+  ## the bus for the whole burst, so there is nothing to re-acquire between its
+  ## blocks. An HBlank DMA hands the bus back after every block -- that is the
+  ## whole of what makes it an HBlank DMA -- so it pays this once per block, and
+  ## a one-block transfer of either kind is timed identically either way, which
+  ## is why the sweep below is unaffected.
   ##
   ## **Unscaled, and that is the measured part.** The copies are charged
   ## `2 shl current_speed` because they are two PPU dots whatever the CPU is

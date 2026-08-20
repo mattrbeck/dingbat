@@ -1754,7 +1754,17 @@ proc ppu_land_hdma_if_due*(ppu: GbPpu; gb: GB) {.noinline.} =
   if cc >= ppu.hdma_hold_until or cc < ppu.hdma_hold_from:
     ppu_flush_hdma_bytes(ppu, gb)
 
-proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false): bool =
+proc ppu_charge_hdma_overhead(ppu: GbPpu; gb: GB) {.inline.} =
+  ## The bus acquire/release either side of a VRAM DMA. Charged once per
+  ## TRANSFER, not once per block -- see HDMA_BLOCK_OVERHEAD_BUS in gb.nim for
+  ## why, and for the `gdma_cycles_long` family that measures it.
+  when HDMA_BLOCK_OVERHEAD_BUS != 0:
+    mem_tick_bus(gb.memory, gb, HDMA_BLOCK_OVERHEAD_BUS, from_cpu = false)
+  when HDMA_BLOCK_OVERHEAD_DOTS != 0:
+    mem_tick_ppu(gb.memory, gb, HDMA_BLOCK_OVERHEAD_DOTS, ignore_speed = true)
+
+proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
+                          charge_overhead = true): bool =
   ## One $10-byte block, from wherever the address counters currently stand.
   ## Returns false if the transfer cannot go on, i.e. the destination counter
   ## overflowed off the top of the address space.
@@ -1812,14 +1822,13 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false): bool =
     mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
                  from_cpu = false)
     mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
-  # The bus acquire/release either side of the block, which is NOT part of the
-  # per-byte cost above. Charged after the copies so the hold deadline below is
-  # still measured from the last transferred byte. See HDMA_BLOCK_OVERHEAD_M in
-  # gb.nim for the two instruments that derive it.
-  when HDMA_BLOCK_OVERHEAD_BUS != 0:
-    mem_tick_bus(gb.memory, gb, HDMA_BLOCK_OVERHEAD_BUS, from_cpu = false)
-  when HDMA_BLOCK_OVERHEAD_DOTS != 0:
-    mem_tick_ppu(gb.memory, gb, HDMA_BLOCK_OVERHEAD_DOTS, ignore_speed = true)
+  # The bus acquire/release either side of the TRANSFER, which is NOT part of
+  # the per-byte cost above. Charged after the copies so the hold deadline below
+  # is still measured from the last transferred byte. `charge_overhead` is false
+  # for every block of a GDMA burst but its last: the CPU never gets the bus
+  # back in between, so there is nothing to re-acquire. See
+  # HDMA_BLOCK_OVERHEAD_BUS in gb.nim.
+  if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
   if hold:
     # Armed only now that the block's own dots have run, so the deadline is
     # measured from the LAST transferred byte and the ticks above cannot spend
@@ -2035,8 +2044,12 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
       ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
+      # One acquire and one release for the WHOLE burst, not one per block: a
+      # GDMA never hands the bus back to the CPU in between. Charged after the
+      # last block so a one-block GDMA is timed exactly as it was.
       for _ in 0 .. int(ppu.hdma5):
-        if not ppu_copy_hdma_block(ppu, gb): break
+        if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
+      ppu_charge_hdma_overhead(ppu, gb)
       # GDMA is short of the hardware by some amount here, and SHIPS AT ZERO
       # because no constant is that amount. See GDMA_SETUP_MCYCLES in gb.nim
       # for the measurement that rejected every setting of it.
