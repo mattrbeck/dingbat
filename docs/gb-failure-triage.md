@@ -452,6 +452,33 @@ After that, the sweep ROM: vary `initial_data`'s two bytes and the DMA source
 byte across a grid so the OR-and-mask rule and the range gate are measured
 rather than taken from a comment.
 
+## SOLVED 2026-08-20: bucket 18 was the IF read, and `LY_BLIND_SCOPE = 2` ships
+
+The LY=LYC comparator's blind window now also opens at the mode 0 -> 1 entry
+into vblank on line 144. gambatte **4322 -> 4334**, runner **1042 -> 1043**,
+nothing outside `m1` and `lcdirq_precedence` moving either way.
+
+It was blocked on bucket 18 -- "whether the mode-1 STAT source asserts at all on
+entering vblank, and how it overlaps the vblank IF bit" -- because the twelve
+`m1` rows it costs read as placing that source and the vblank IF bit one M-cycle
+apart. Two things settle it:
+
+* **The overlap was `IF_READ_SAMPLE_T`, not the source.** `lycint143_m1irq`
+  wants 0 then 3 one M-cycle later, i.e. the mode-1 STAT edge and the vblank IF
+  bit ARE simultaneous; dingbat read 1 at both steps because its `$FF0F` read
+  could see the boundary dot. With that fixed the scope trade is unchanged at
+  +24 / -12 on both trees, so those twelve say nothing about the window.
+* **SameBoy fails ten of the twelve too, with dingbat's exact answers.**
+  `m1irq_m2enable_lyc_{1,2}`, `m1irq_m2disable_lycdisable_{2,3}`,
+  `m2m1irq_ifw_2` and their `_ds` arms all want `1`; both emulators say `3`.
+  Only `lycint143_m1irq_late_retrigger_2` (two device rows) is a row SameBoy
+  gets right and dingbat does not.
+
+So what is left of bucket 18 is ten rows that no emulator in reach models -- a
+mode-1/mode-2 handover at the top of line 144 where hardware refuses an edge
+that a level-OR gives -- and they are no longer worth 24 rows of the comparator
+handover to keep.
+
 ## SOLVED 2026-08-20: a `$FF0F` read samples 2 dots into its own M-cycle
 
 `IF_READ_SAMPLE_T` in `gb.nim`, mechanism written up above `irq_read` in

@@ -7,7 +7,7 @@ import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
 
-const LY_BLIND_SCOPE* {.intdefine.} = 1
+const LY_BLIND_SCOPE* {.intdefine.} = 2
   ## Which LY advances open the LY=LYC comparator's blind window (the write-up
   ## is above `ly_advance_close` in ppu.nim): -1 none, 0 rendered line
   ## boundaries only, 1 also vblank line to vblank line, 2 also the mode 0 -> 1
@@ -19,19 +19,32 @@ const LY_BLIND_SCOPE* {.intdefine.} = 1
   ##   scope   gambatte   vs main
   ##     -1      3871     +16 / -1
   ##      0      3885     +31 / -2
-  ##      1      3887     +33 / -2   <- ships
-  ##      2      3899     +57 / -14
+  ##      1      3887     +33 / -2   was shipping
+  ##      2      3899     +57 / -14  <- ships
   ##
-  ## **2 is not refused; it is unresolved, and it belongs to a different
-  ## quantity.** Every one of the twelve rows it costs is in `m1`, every one is
-  ## a handover between the mode 1 source and something else at the top of line
-  ## 144, and they place that source and the vblank IF bit one M-cycle apart
-  ## (`m2m1irq_ifw` wants 3,1,0 across three steps: the STAT edge before the
-  ## vblank flag, with dingbat putting both on the same dot). That is bucket 18
-  ## of docs/gb-failure-triage.md -- "whether the mode-1 STAT source asserts at
-  ## all on entering vblank, and how it overlaps the vblank IF bit" -- and the
-  ## window cannot be scored at line 144 until it is settled. It is worth +24
-  ## rows gross when it is.
+  ## ---- Why 2 ships now (2026-08-20) -----------------------------------------
+  ##
+  ## 2 used to be held back because the twelve rows it costs are all in `m1`,
+  ## all a handover between the mode 1 source and something else at the top of
+  ## line 144, and they read as placing that source and the vblank IF bit one
+  ## M-cycle apart -- bucket 18 of docs/gb-failure-triage.md. Two measurements
+  ## settle it in 2's favour:
+  ##
+  ##  * The overlap the twelve rows were read as reporting was NOT the mode-1
+  ##    source against the vblank flag. It was `IF_READ_SAMPLE_T` -- a $FF0F
+  ##    read seeing a bit that rose on its own M-cycle's last dot. With that
+  ##    fixed the trade is unchanged at +24 / -12 (measured on both trees), so
+  ##    the twelve are not evidence about the window at all.
+  ##  * **SameBoy fails ten of the twelve too**, with dingbat's exact answers:
+  ##    `m1irq_m2enable_lyc_{1,2}`, `m1irq_m2disable_lycdisable_{2,3}`,
+  ##    `m2m1irq_ifw_2` and their `_ds` arms all want 1 and both emulators say
+  ##    3. Only `lycint143_m1irq_late_retrigger_2` (two device rows) is a row
+  ##    SameBoy gets right and this does not. So the block was a bucket nobody
+  ##    in reach models, being paid for with 24 rows that are plainly the
+  ##    comparator handover this window is about.
+  ##
+  ## On the tree this ships in: runner 1042 -> 1043, gambatte 4322 -> 4334,
+  ## nothing outside `m1` and `lcdirq_precedence` moving in either direction.
 # The STAT model's knobs, declared here rather than next to their write-up in
 # gb/ppu.nim only because the GbPpu fields they gate are in the type block
 # below. See ppu.nim for what they mean and for the ROMs that bracket each.
