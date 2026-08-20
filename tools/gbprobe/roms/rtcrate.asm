@@ -41,7 +41,8 @@
 
 INCLUDE "hw.inc"
 
-DEF ROWS EQU 4
+DEF ROWS EQU 6
+DEF TICK_CAP EQU 180   ; frames a single tick wait may take before giving up
 
 SECTION "hram", HRAM
 hIsCgb: db
@@ -82,7 +83,14 @@ ReadSeconds:
     and $3F
     ret
 
-; Wait for SECONDS to change; BC = frames waited.
+; Wait for SECONDS to change; BC = frames waited, or $FFFF if the clock never
+; ticked within TICK_CAP frames.
+;
+; The cap is not defensive padding, it is the whole difference between a probe
+; and a brick: v1 of this ROM waited forever, so on a cart whose MBC3 has no RTC
+; it sat on a blank screen and reported nothing at all. A cart that cannot tick
+; is a RESULT -- it should print $FFFF and move on, and rows 4-5 below then say
+; whether the $A000 window responds at all.
 WaitTick:
     call ReadSeconds
     ld d, a
@@ -90,11 +98,20 @@ WaitTick:
 .loop
     call WaitFrame
     inc bc
+    ld a, b
+    or a
+    jr nz, .giveUp                 ; bc >= 256
+    ld a, c
+    cp TICK_CAP
+    jr nc, .giveUp
     push de
     call ReadSeconds
     pop de
     cp d
     jr z, .loop
+    ret
+.giveUp
+    ld bc, $FFFF
     ret
 
 ; Wait 30 frames (~half a second), so a "reset the divider" answer and a
@@ -203,6 +220,29 @@ Start:
     and %10111111
     ld [$A000], a
     call WaitTick
+    call StoreResult
+
+    ; --- row 4: raw DH ($0C) in the high half, raw SECONDS in the low ----
+    ld hl, $6000
+    ld [hl], 0
+    ld [hl], 1
+    ld a, $0C
+    ld [$4000], a
+    ld a, [$A000]
+    ld b, a
+    call ReadSeconds
+    ld c, a
+    call StoreResult
+
+    ; --- row 5: raw byte at $A000 with the bank set to 0 (plain cart RAM),
+    ; --- so "the window answers but the RTC does not" is distinguishable
+    ; --- from "the window is dead".
+    xor a
+    ld [$4000], a
+    ld a, [$A000]
+    ld b, a
+    ld a, [$A001]
+    ld c, a
     call StoreResult
 
     call DrawResults

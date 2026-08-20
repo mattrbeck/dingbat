@@ -817,12 +817,28 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 0
   ## leaves the previous contents behind. Trading 9 hardware-captured rows for 1
   ## is the wrong way round on the evidence available.
   ##
-  ## **What would settle it:** run gambatte's `oamdma_srcFE00_*` family against
-  ## SameBoy with ITS randomisation enabled (sameboy_runner disables it for
-  ## determinism — see GB_random_set_enabled there). If SameBoy passes both
-  ## those rows and bully, a correct pattern exists and both zeroes and this
-  ## xorshift are wrong. If it cannot pass both either, the two tests genuinely
-  ## disagree and bully is the one to leave red.
+  ## **Measured on a GBA SP, 2026-08-19 (flashcart-kit/9, `wramscan.gb`):**
+  ## `ZEROS 1293, FFS 223, OTHER 6676` of 8192. Real WRAM is neither of the
+  ## fills anyone has tried — most of it is neither $00 nor $FF — and a real
+  ## cart never hands a ROM the all-zero state shipped here. **Caveat that
+  ## matters: that read came through the cart's MENU**, which resets into the
+  ## ROM, and its big aligned run of zeroes in the middle of bank 1 looks like a
+  ## loader clearing its work area; two runs were byte-identical, which decayed
+  ## DRAM would not be. Same contamination class as the gbedge P1 byte.
+  ##
+  ## **The trade is far cheaper than the xorshift made it look.** Whole-suite:
+  ##
+  ##   fill        bully   gambatte oamdma   gambatte total   runner Pass
+  ##   zeroes      FAIL       771/811            4263            1013
+  ##   all $FF     PASS       770/811            4262            1014
+  ##   xorshift    PASS       766/811            4258            1014
+  ##
+  ## So those rows ARE value-dependent, which is what the echo-region reading
+  ## predicted — but $FF costs ONE row, not five. Still not shipped: hardware
+  ## says neither pure fill is right, so picking $FF swaps one arbitrary
+  ## convention for another, and zeroes are the MORE common of the two on
+  ## silicon (1293 vs 223). Revisit with an uncontaminated read — the ROM has to
+  ## be the first code the console executes.
   ##
   ## Fixed xorshift, not a seeded RNG, so that turning it on costs no
   ## determinism: the byte-identical screenshot gates, save-state round-trips
