@@ -933,15 +933,30 @@ const HDMA_BLOCK_OVERHEAD_DOTS* {.intdefine.} = 2
   ##   * **2 cells remain, and they point OPPOSITE WAYS**, which is why no
   ##     scalar closes them: SCX=1 single speed wants the block ~1 M EARLIER
   ##     (sample 47 reads $00 where hardware says $FF) and SCX=2 double speed
-  ##     wants it LATER (sample 47 reads $FF where hardware says $00). An
-  ##     instruction boundary is 4 dots at single speed and 2 at double, so a
-  ##     fixed DOT delay of 3 would satisfy both where a boundary count cannot.
+  ##     wants it LATER (sample 47 reads $FF where hardware says $00).
   ##     **SameBoy also scores 2/48 here** (its two are both late, in groups 0
-  ##     and 3), so this is the resolution limit of a boundary-granular model
-  ##     rather than a dingbat-specific gap. Closing it needs the block placed
-  ##     on a DOT, and the cheap way to do that is a scheduler event armed at
-  ##     the edge -- not the per-tick countdown ppu_land_hdma_if_due measured at
-  ##     +1.36% and declined.
+  ##     and 3).
+  ##
+  ##     **A dot-granular delay was tried on 2026-08-20 and does NOT help — do
+  ##     not re-derive it.** The reasoning was sound and the measurement refused
+  ##     it: an instruction boundary is 4 dots at single speed and only 2 at
+  ##     double, which is exactly the asymmetry above, so a FIXED dot delay
+  ##     between those two numbers should have satisfied both directions at
+  ##     once. Implemented as an `etHdmaSteal` scheduler event armed at the
+  ##     mode-0 edge with `schedule_gb` — constant in real time, hence constant
+  ##     in DOTS at either speed, at no per-tick cost — and swept whole:
+  ##
+  ##       dots      1   2   3   4   5   6   8  10  12  16  20  24  32
+  ##       wrong/48  6   6   6   6   2   2   2   4   6   8  10  10  10
+  ##
+  ##     It PLATEAUS at 2/48 across dots 5-8, exactly what the boundary path
+  ##     already achieves with no new machinery, and is worse everywhere else;
+  ##     the predicted 3 dots is 6/48. At 5 dots both survivors are `FF != 00`,
+  ##     i.e. both too EARLY and in the SAME direction, which looked like more
+  ##     delay would close them — and more delay makes it monotonically worse.
+  ##     So the residual is not a placement question at ANY granularity. The
+  ##     scheduler version was reverted rather than shipped: it ties the simpler
+  ##     code while adding an event type and a save-state surface.
 const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
   ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
   ##
