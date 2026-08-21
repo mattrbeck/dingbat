@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 08:41:39*
+*Generated: 2026-08-21 08:46:24*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4470/5005 passed.**
+**4470/4996 passed.**
 
 ## bgen
 
@@ -571,9 +571,9 @@ All 44 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (785/811 passed)
+## oamdma (785/802 passed)
 
-785/811 tests passed, 26 failed:
+785/802 tests passed, 17 failed:
 
 | Test | Result |
 |------|--------|
@@ -593,15 +593,6 @@ All 44 tests passed.
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oamdma/oamdma_srcFE00_busyread0000_dmg08_cgb04c_out0 [dmg] | got ?, expected 0 |
-| oamdma/oamdma_srcFE00_busyreadA000_dmg08_cgb04c_out0 [dmg] | got ?, expected 0 |
-| oamdma/oamdma_srcFE00_busyreadC000_dmg08_out0_cgb_xoutblank [dmg] | got ?, expected 0 |
-| oamdma/oamdma_srcFE00_readFE00_dmg08_cgb04c_out0 [dmg] | got ?, expected 0 |
-| oamdma/oamdma_srcFF00_busyread0000_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
-| oamdma/oamdma_srcFF00_busyreadA000_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
-| oamdma/oamdma_srcFF00_busyreadC000_dmg08_out1_cgb_xoutblank [dmg] | got ?, expected 1 |
-| oamdma/oamdma_srcFF00_readFE00_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
-| oamdma/oamdma_srcFF00_readFE45_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
 ## scx_during_m3 (131/141 passed)

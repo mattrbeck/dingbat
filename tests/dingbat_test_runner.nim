@@ -1815,6 +1815,14 @@ const NotScored: seq[(string, string)] = @[
     "Those separate ROMs ARE scored. (build_mooneye_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
+  ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
+    "is a byte of uninitialised WRAM. That source fetches through the echo, " &
+    "so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch " &
+    "rather than its own byte -- Pan Docs says WRAM is random on power-up and " &
+    "GB_POWERUP_WRAM_PATTERN honours that, so these encode gambatte's capture " &
+    "rig, not hardware. The non-colliding members of the same family " &
+    "(`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. " &
+    "(build_gambatte_rows / gambatte_row_reads_powerup_wram)"),
   ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
     "sampling and the AGB device are not scored; see results_gambatte.md's " &
     "source notes. (build_gambatte_rows)"),
@@ -2410,6 +2418,32 @@ proc gambatte_hex_prefix(tail: string): string =
     if c in {'0'..'9', 'a'..'f', 'A'..'F'}: result.add(c)
     else: break
 
+proc gambatte_row_reads_powerup_wram(stem: string): bool =
+  ## True for the gambatte `oamdma` rows whose DMG verdict is a byte of
+  ## UNINITIALISED WRAM, which nothing spec-correct can score.
+  ##
+  ## An OAM DMA source at or above $E000 fetches through the echo, so a $FE00
+  ## or $FF00 source reads $DE00 / $DF00 (the mapping mooneye
+  ## `oam_dma/sources-GS` pins, and which dingbat passes). A CPU read that
+  ## COLLIDES with that transfer's bus gets the DMA's latch instead of its own
+  ## byte -- so on DMG these rows print whatever the capture rig happened to
+  ## leave in high WRAM, and Pan Docs says outright not to rely on it
+  ## ("The console's WRAM and HRAM are random on power-up"). See
+  ## GB_POWERUP_WRAM_PATTERN in gb.nim: zeroing just those two pages buys all
+  ## of them back and is deliberately not done, because it fits gambatte's rig
+  ## rather than hardware.
+  ##
+  ## The collision is what decides it, not the source: the same family's
+  ## `busyread8000` (video bus) and `busyreadFF4B` (IO) rows do NOT collide,
+  ## are scoreable, and are scored. Nor does the CGB arm -- there a source at
+  ## or above $E000 is driven onto the external bus, where nothing answers, so
+  ## the byte is a defined $FF.
+  if not (stem.startsWith("oamdma_srcFE00_") or
+          stem.startsWith("oamdma_srcFF00_")): return false
+  for target in ["read0000", "readA000", "readC000", "readFE00", "readFE45"]:
+    if target in stem: return true
+  false
+
 proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
   var rows: seq[GambatteRow]
   var roms: seq[string]
@@ -2437,6 +2471,8 @@ proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
       let tail = fname[fname.find(marker) + marker.len .. ^1]
       if tail.startsWith("audio0") or tail.startsWith("audio1"):
         continue  # audio verdict is out of reach, see the header comment
+      if dev == "dmg" and gambatte_row_reads_powerup_wram(stem):
+        continue  # verdict is uninitialised WRAM; recorded in NotScored
       let expected = gambatte_hex_prefix(tail)
       if expected.len == 0: continue
       rows.add(GambatteRow(
