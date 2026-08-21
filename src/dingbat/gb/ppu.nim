@@ -2783,8 +2783,15 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         if hdma_seen_was == 0'u8: return
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
+      when HDMA_STEAL_LEAD_DOTS >= 0:
+        # A halted CPU is not on the bus, so there is no hand-over to time:
+        # the debt is paid at the WAKE (cpu.nim), not on a dot deadline. Park
+        # the deadline out of reach so mem_tick_bus cannot take this block
+        # early -- leaving the field stale is what broke the whole
+        # `hdma_*_m0unhalt` / `hdma_transition_*_late_unhalt` family.
+        ppu.hdma_due_deadline = high(int32)
     else:
-      when HDMA_STEAL_LEAD_DOTS != 0:
+      when HDMA_STEAL_LEAD_DOTS >= 0:
         # The request goes up HDMA_STEAL_LEAD_DOTS dots from here and the CPU
         # hands the bus over on its next M-cycle boundary; mem_tick_bus pays
         # it. The extra M-cycle is what makes the total 8 dots at normal speed

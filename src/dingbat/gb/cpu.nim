@@ -811,7 +811,7 @@ proc tick*(cpu: GbCpu; gb: GB) =
   let cycles_taken = UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
   mem_tick_extra(gb.memory, gb, cycles_taken)
-  when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS == 0:
+  when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0:
     # A block that came due on a mode-0 edge takes the bus at this instruction
     # boundary, once the CPU has had HDMA_STEAL_DELAY_M of them. `in_cpu_cycle`
     # stays true so the bytes are still held back HDMA_VISIBLE_DOTS dots, which

@@ -1478,111 +1478,237 @@ const HDMA_DISABLE_GRACE_DOTS* {.intdefine.} = 4
   ##
   ## One instruction boundary is still the unique optimum on BOTH groups, so
   ## those rows are not a steal-delay offset and want something else.
-const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = 0
+const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = -1
   ## Dots after the mode-0 edge at which an owed HBlank block raises its bus
   ## request; the CPU then hands the bus over at its next **M-cycle** boundary,
-  ## which may be INSIDE an instruction. One CPU M-cycle is added to whatever is
-  ## set here, so the total is `n + 4` dots at normal speed and `n + 2` in
-  ## double. **Ships at 0 = off, and the whole of mealybug `dma/hdma_timing-C`
-  ## is why it exists and why it does not ship.**
+  ## which may be INSIDE an instruction, and one CPU M-cycle is added to
+  ## whatever is set here. The landing is therefore
+  ## `ceil_M(edge + n + one M-cycle)`, so `n` is a lead in PPU dots while the
+  ## added M-cycle is 4 dots at normal speed and 2 in double.
   ##
-  ## ---- At 4 this row is 0/48, which is better than SameBoy -----------------
+  ## **`-1` = OFF and ships**, which leaves HDMA_STEAL_DELAY_M's
+  ## instruction-boundary payment in cpu.nim in charge. `0` is ON with no lead
+  ## and is a real setting, not a synonym for off -- the sentinel is -1 for
+  ## exactly that reason. Everything below is compiled out at the shipping
+  ## value and a default build is unchanged by all of it (verified: runner
+  ## 1102 / gambatte 4567 both before and after, on `3e4e984`).
   ##
-  ## `tools/gbppu/hdmaresults.nim` dumps the ROM's own 48-cell result buffer.
-  ## On `883a4a1` dingbat is 2/48 and SameBoy is 2/48 (different cells), and
-  ## `-d:HDMA_STEAL_LEAD_DOTS=4` takes dingbat to **0/48, verdict P**. The
-  ## constant is a UNIQUE two-sided optimum on the ROM's own 48 cells, swept a
-  ## dot at a time:
+  ## ---- What each suite actually pins, re-derived 2026-08-21 ---------------
   ##
-  ##   lead        1   2   3   4   5   6   8
-  ##   wrong/48    4   3   2   0   2   3   6
+  ## Both suites answer the SAME question, and neither of them is about byte
+  ## visibility: a CPU access whose M-cycle occupies `[X, X+4)` either runs to
+  ## completion (the DMA has not taken the bus yet) or is pushed past the whole
+  ## block. So a pair of ROMs whose access differs by one M-cycle brackets the
+  ## landing `L` from BOTH sides, and a family that also varies SCX moves the
+  ## edge one dot at a time while the CPU's M grid stays put.
   ##
-  ## The measurement is `-d:gb_dma_trace` on the ROM itself, which prints the
-  ## mode-0 edge dot and the dot each block takes the bus on, per sub-test.
-  ## `sub_test` is `LDH [$FF55],A ; nops N ; LDH A,[$FF55]`, one fresh run per
-  ## N, so the four HDMA5 cells of a group are four independent runs whose only
-  ## difference is where the CPU is in its instruction stream when the edge
-  ## arrives. Reading the block's landing dot straight out of hardware's own
-  ## four answers (a cell is `$00` if the read's M-cycle ran BEFORE the block
-  ## stalled the CPU and `$FF` if it ran after, so consecutive cells bracket the
-  ## landing to one M-cycle):
+  ## **gambatte `dma/hdma_start*` is a four-point measurement, not one point.**
+  ## The nop sleds are in the ROMs and are already the answer: SCX=0 uses
+  ## 45/46 while SCX=2, 3 and 5 all use 46/47 -- three different edges, two
+  ## landings. With the sled starting at dot 69 (`-d:gb_dma_trace` prints
+  ## `FF55 ... dot=61`, plus the `LD B,$07`), `LD A,[HL]`'s read M-cycle starts
+  ## at `69 + 4N + 4`:
   ##
-  ##   group             edge dot   landing hardware demands
-  ##   ---------------   --------   -----------------------
-  ##   SCX=1  1x         253        261   = edge + 8
-  ##   SCX=2  1x         254        265   = ceil_M(254) + 8
-  ##   SCX=1  2x         253        259   = edge + 6
-  ##   SCX=2  2x         254        261   = ceil_M(255) + 6
+  ##   ROM pair          edge   `_1` read M   `_2` read M   L is exactly
+  ##   ---------------   ----   -----------   -----------   ------------
+  ##   hdma_start        252     [253,257)     [257,261)      257
+  ##   hdma_start_scx2   254     [257,261)     [261,265)      261
+  ##   hdma_start_scx3   255     [257,261)     [261,265)      261
+  ##   hdma_start_scx5   257     [257,261)     [261,265)      261
   ##
-  ## 8 dots at normal speed and 6 in double is `4 + one CPU M-cycle`, and it is
-  ## unique: a landing at the first M boundary >= edge + d needs d = 8 for the
-  ## two normal-speed groups and d = 6 for the two double-speed ones, and no
-  ## flat dot count and no flat M-cycle count is both.
+  ## `L = ceil_M(edge) + one M-cycle` fits all four and is UNIQUE. Writing the
+  ## rule as `ceil_M(edge + n) + 1 M`, the four rows give `n <= 1`, `n >= 0`,
+  ## `n >= -1` and `n <= 0`, so **n = 0** -- this constant at 0.
   ##
-  ## **What it costs, and why 0 ships anyway.** Whole runner on `883a4a1`
-  ## (1093 / gambatte 4503), one build:
+  ## **mealybug `dma/hdma_timing-C` is a four-point measurement too**, and it
+  ## says `n = 4`. Its sled starts at dot 65 (1x) / 35 (2x) and
+  ## `LDH A,[rHDMA5]` reads on its THIRD M-cycle, so the read M-cycle starts at
+  ## `65 + 4N + 8`; a cell is `$00` if that M-cycle ran and `$FF` if the block
+  ## pushed it past itself:
   ##
-  ##   HDMA_STEAL_LEAD_DOTS   runner   gambatte   hdma_timing-C
-  ##   0 (ships)              1093       4503        2/48
-  ##   4                      1092       4482        0/48      +7 / -28
+  ##   group        edge   last 00 cell     first FF cell    L is exactly
+  ##   ----------   ----   --------------   --------------   ------------
+  ##   SCX=1 1x     253    nops 46 [257,)   nops 47 [261,)    261
+  ##   SCX=2 1x     254    nops 47 [261,)   nops 48 [265,)    265
+  ##   SCX=1 2x     253    nops109 [257,)   nops110 [259,)    259
+  ##   SCX=2 2x     254    nops110 [259,)  nops111 [261,)     261
   ##
-  ## The 28 are `dma` (the `hdma_*_ly_*` family, `hdma_start{,_ly0,_scx2,_scx3}_2`,
-  ## the `hdma_late_m0unhalt` / `hdma_late_m3halt_m2unhalt` / `hdma_transition_*`
-  ## pairs sliding by one member), five `irq_precedence/*hdma_vs_*` and one
-  ## `oamdma`. Adding `-d:HDMA_VISIBLE_DOTS=0` to compensate the byte-visibility
-  ## half recovers none of them (4481).
+  ## `ceil_M(edge + 4) + 1 M` fits all four at both speeds, and the sweep is
+  ## two-sided and unique on the ROM's own cells (wrong/48, HDMA_VISIBLE_DOTS
+  ## at 4, re-measured on `3e4e984`):
+  ##
+  ##   n           0   1   2   3   4   5   6   8
+  ##   wrong/48    5   4   3   2   0   2   3   6
   ##
   ## ---- The contradiction, stated exactly, because it is the deliverable ----
   ##
-  ## `-d:gb_dma_trace` on `gambatte/dma/hdma_start_2` prints
-  ## `MODE 3->0 ly=1 dot=252` / `HDMABLOCK ly=1 dot=253`, and that ROM's `_1`
-  ## sibling is the same ROM with the VRAM read one M-cycle earlier, so the pair
-  ## brackets the landing to a single M-cycle: **gambatte demands the FIRST
-  ## M-cycle boundary at or after the edge, with nothing added.** mealybug
-  ## demands that boundary plus TWO more M-cycles, at the same speed and with
-  ## the same one-block transfer. Both ROMs arm the transfer in mode 2 of line 1
-  ## and both are read on line 1's own mode 0; dingbat's edge is `252 + SCX` in
-  ## both, so the edge model is not the difference.
+  ## **gambatte pins n = 0, mealybug pins n = 4, and the gap is 4 PPU DOTS at
+  ## BOTH speeds** -- one M-cycle at normal speed and two in double. It is
+  ## therefore real time on the PPU's clock and not a count of CPU cycles,
+  ## which rules out every "the CPU is an M-cycle late here" story.
   ##
-  ## What IS different is the CPU's instruction stream at the edge. gambatte's
-  ## is a NOP sled; mealybug's two surviving cells are the two where the edge
-  ## lands inside a 3 M-cycle `LDH A,[n]`, and they are exactly the cells an
-  ## instruction-boundary model cannot express -- one needs the block to go
-  ## BEFORE that instruction's data read and the other AFTER it. So:
+  ## It cannot be closed by moving the edge, and that is provable rather than
+  ## swept. Any rule of the form `L = ceil_M(edge + a) + b M-cycles` is a step
+  ## function of the edge with period 4, so over three consecutive edge dots it
+  ## takes at most TWO distinct values. The 1x witnesses are
   ##
-  ##  * The residue is **the rule for whether a VRAM DMA may preempt the CPU
-  ##    part way through an instruction**, not a delay. No scalar delay
-  ##    reconciles the two suites, and neither does any of: min(instruction end,
-  ##    deadline), i.e. keeping BOTH payments -- **1/48**, the closest anything
-  ##    else gets, and the cell it still misses is the SCX=2 double-speed
-  ##    `nops 110` one, where hardware declines an instruction boundary that
-  ##    was available to it (edge 254, boundary 255, hardware lands at 261), so
-  ##    the landing is a pure deadline and not the earlier of the two; landing
-  ##    at
-  ##    the first INSTRUCTION boundary >= edge + d for d = 0, 1 or 2 -- each
-  ##    value fits three of the four groups and misses a different fourth;
-  ##    M-granular landing with no added M-cycle -- fails `nops 46`; and moving
-  ##    the LCD-enable phase, which is the obvious way to make one dot of edge
-  ##    move both suites at once. **`LCD_ON_LINE0_TRIM` is refuted at DOT
-  ##    resolution by this row's own cells**, the shipping 0 being a strict
-  ##    local minimum:
+  ##   edge 252 -> L 257   (gambatte SCX=0)
+  ##   edge 253 -> L 261   (mealybug SCX=1)
+  ##   edge 254 -> L 265   (mealybug SCX=2)  and  L 261  (gambatte SCX=2)
   ##
-  ##      trim       -4  -3  -2  -1   0   1   2   3   4
-  ##      wrong/48   14  10   7   4   2   5  11  12  12
-  ##  * The instrument it needs is one that reads the **CPU-versus-PPU phase of
-  ##    mealybug's own `lcd_on` entry** to a dot. Every cell here is dot-granular
-  ##    through the boundary rounding while the STAT cells in the same sub-tests
-  ##    are only M-granular, so the four STAT cells being green does NOT pin the
-  ##    phase to better than one M-cycle -- and one M-cycle of phase is exactly
-  ##    the size of the disagreement.
+  ## -- three landings 4 dots apart over three consecutive edges, plus a fourth
+  ## witness that disagrees with the third at the SAME edge dot and the same M
+  ## grid. A slope of 4 dots of landing per 1 dot of edge is not a rounding
+  ## function, so no re-basing of the mode-3 length reaches it.
+  ##
+  ## **The previous write-up's "instruction boundary versus M-cycle boundary"
+  ## framing was wrong, and the mid-instruction-preemption hypothesis it
+  ## proposed has now been BUILT and measured.** `hdma_start_1` does not need
+  ## the block held to an instruction boundary; it needs `L = 257`, which
+  ## M-granular preemption gives it. The M-granular model is strictly better on
+  ## the family it was accused of breaking: at `n = 0` with
+  ## `HDMA_VISIBLE_DOTS = 4` all fourteen `hdma_start*` rows are green,
+  ## including `hdma_start_ds_2`, `hdma_start_scx5_2` and
+  ## `hdma_start_scx5_ds_2`, which are RED in the shipping tree. Preemption is
+  ## not the axis. The 4 dots are.
+  ##
+  ## **`LCD_ON_LINE0_TRIM` is refused by this ROM at DOT resolution, and now
+  ## for a stated reason rather than a sweep.** mealybug re-enables the LCD in
+  ## every sub-test and then counts nops, so it is the one witness in the tree
+  ## whose CPU-versus-PPU phase is set by `lcd_on` -- a trim moves its CPU
+  ## against its PPU and nothing else's, because every gambatte `dma` ROM
+  ## re-syncs on a STAT interrupt, which absorbs any constant lcd_on offset.
+  ## That is the instrument the last round asked for. Sweeping the trim with
+  ## `n` moved to keep `edge + n` fixed:
+  ##
+  ##   trim / n        0/4    -1/3   -2/2   -3/1   -4/0
+  ##   HDMA5 cells      0       0      0      0      0     wrong
+  ##   STAT  cells      0       3      5      6      8     wrong
+  ##
+  ## The sixteen HDMA5 cells only ever see `edge + n`, so they are flat along
+  ## that line -- and the sixteen STAT cells, which see the edge alone, pick
+  ## `trim = 0` and pick it two-sidedly. **The ROM pins its own phase and then
+  ## demands n = 4 on top of it.** The phase hypothesis is dead: this is not a
+  ## resync error, it is the DMA reaching the bus 4 dots after the mode-0 edge
+  ## the CPU's own STAT read reports.
+  ##
+  ## Which leaves exactly one structural difference between the two witnesses,
+  ## and it is written down here for whoever picks this up: **every gambatte
+  ## `dma` ROM reaches its edge having just woken from HALT** -- they all HALT
+  ## on a LYC=1 STAT interrupt and run the handler at $1000 -- and mealybug's
+  ## never halts at all. `CGB_HALT_PPU_LEAD` is 4 dots of PPU advance charged
+  ## at exactly that wake: the same size, the same place, the right sign. It is
+  ## NOT simply mis-homed, though. `-d:CGB_HALT_PPU_LEAD=0` with this constant
+  ## at 4 scores gambatte **4459** (from 4567) and reddens all thirteen
+  ## `hdma_start*` rows, four of them with `got 7` -- a VRAM read answered $FF
+  ## because the read-mode latch is still in mode 3. The halt lead carries the
+  ## whole post-wake VRAM/STAT phase and cannot be moved on its own.
+  ##
+  ## ---- What it costs today, both ways -------------------------------------
+  ##
+  ## Whole runner on `3e4e984` (base 1102 / gambatte 4567 / hdma_timing-C
+  ## 2/48 F), with the two fixes below in place:
+  ##
+  ##   setting                              runner  gambatte  hdma_timing-C
+  ##   -1 (ships)                            1102     4567       2/48  F
+  ##   0, HDMA_VISIBLE_DOTS=4                1102     4559       5/48  F
+  ##   4, HDMA_VISIBLE_DOTS=4                1103     4550       0/48  P
+  ##
+  ## At 0 the four gains are `hdma_start_{ds,scx5,scx5_ds}_2` and
+  ## `hdma_late_if_and_ie_halt_2` -- which makes the whole fourteen-ROM
+  ## `hdma_start*` family green, three of them from red. The twelve losses,
+  ## each classified:
+  ##
+  ##   * `hdma_late_if_and_ie_halt_1` -- **a wash.** Its `_2` sibling is one of
+  ##     the gains: the pair brackets the halt-wake landing and n = 0 moves it
+  ##     one M-cycle, so the family slid rather than broke. It cannot say which
+  ##     side is right without a third member.
+  ##   * `hdma_late_disable_ds_2`, `hdma_late_disable_scx5_ds_2` -- **a second,
+  ##     separate bug, unmasked.** Both answer `got 7`, i.e. a VRAM read that
+  ##     came back $FF because the read-mode latch was still in mode 3. That is
+  ##     not a landing error at all; it is the same VRAM-lock-release lag that
+  ##     already costs `hdma_start_scx5_1` in the SHIPPING tree (edge 257, read
+  ##     at dot 261, `latch=3 live=0` in `-d:gb_dma_trace`). Both are double
+  ##     speed, where the lag is a whole two M-cycles.
+  ##   * `irq_precedence/late_hdma_vs_{ei,ie}_scx2_2` and
+  ##     `late_hdma_vs_tima_scx2_1`, plus three
+  ##     `hdma_late_m3speedchange_*_scx2*` and
+  ##     `oamdma/oamdmasrcC000_hdmasrc0000` -- **fitted to the old landing.**
+  ##     Every one of them is SCX=2 or double speed, which is exactly where one
+  ##     dot of edge crosses an M boundary; the `_scx1` members of the same
+  ##     families do not move. `hdma_late_m3speedchange` is already 10 rows red
+  ##     at base and `HDMA_SPEEDSWITCH_KILL_W` was measured against the
+  ##     instruction-boundary landing.
+  ##   * `hdma_ei_m3halt_m0unhalt_ly_2`, `hdma_late_length_1` -- one member
+  ##     each of a pair whose sibling still passes, and the only two of the
+  ##     twelve with no group story. `hdma_late_length_1`'s is the FF55 write
+  ##     inside the HDMA_WRITE_DEFER window (excluding FF55 from the window
+  ##     costs more than it recovers).
+  ##
+  ## At 4 the single gain is `hdma_late_if_and_ie_halt_2`, and the seventeen
+  ## losses are those twelve less the two `hdma_late_disable` and
+  ## `hdma_late_length_1`, plus the four `hdma_start_*_2` rows back again,
+  ## `hdma_late_{destl,wrambank}_2`, `irq_precedence/hdma_vs_m0_scx3` and two
+  ## `hdma_late_m3speedchange_tima_scx1_ds_*`.
+  ##
+  ## `HDMA_VISIBLE_DOTS` is two-sided at 4 for `n = 0` (0 -> 4556, 2 -> 4556,
+  ## 4 -> 4558, 6 -> 4551, 8 -> 4550) and NOT the `4 + 4 * CGB_HALT_PPU_LEAD`
+  ## it is elsewhere. The shipping 8 is fitted to the instruction-boundary
+  ## landing, where a preempted `LD A,[HL]` still owes TWO M-cycles after the
+  ## block; M-granular preemption leaves it owing one, so the hold halves.
+  ##
+  ## ---- Two fixes this measurement produced, both live only when n >= 0 -----
+  ##
+  ## 1. **The halted branch left `hdma_due_deadline` stale** (ppu.nim), so a
+  ##    block owed to a HALTED CPU was taken by `mem_tick_bus` on whatever the
+  ##    previous transfer's deadline happened to be instead of waiting for the
+  ##    wake. Parking it at `high(int32)` there is worth **13 gambatte rows**
+  ##    at n = 4: the whole `hdma_*_m0unhalt` / `hdma_late_m3halt_m2unhalt` /
+  ##    `hdma_transition_*_late_unhalt` family, which the previous write-up
+  ##    listed as part of the price of this constant. It was not the price; it
+  ##    was a bug. (Suppressing the deadline path outright while halted is
+  ##    REFUSED -- 4555 against 4558. A halted CPU really does hand the bus
+  ##    over on the dot rather than at its wake.)
+  ## 2. **A CPU write beats the block to the bus on the grant boundary; a read
+  ##    does not.** See HDMA_WRITE_DEFER_LO/HI just below.
   ##
   ## Also settled, so it is not re-asked: the row has no revision axis
   ## (`hdma_timing-C.asm`'s own header is "pass: CGB, AGB 0/A/B/BE"), it is a
   ## genuine `Failed` verdict and not a harness artefact (`hdmaresults` reads
   ## the buffer directly and prints `verdict=F`), and the two DIV-duration
-  ## groups and all sixteen STAT cells are exact at every setting of this
-  ## constant.
+  ## groups are exact at every setting of this constant.
 
+const HDMA_WRITE_DEFER_LO* {.intdefine.} = 0xFF00
+const HDMA_WRITE_DEFER_HI* {.intdefine.} = 0xFFFF
+  ## Address window in which a CPU WRITE beats an owed HBlank block to the bus
+  ## when the write's M-cycle begins on the grant boundary itself. Live only
+  ## when HDMA_STEAL_LEAD_DOTS >= 0, where the grant is M-granular and such a
+  ## collision is possible at all; the instruction-boundary payment cannot
+  ## produce one.
+  ##
+  ## dingbat commits a CPU write's byte at the TOP of its M-cycle and answers a
+  ## read at the BOTTOM of its own (see mem_write and mem_read_open), and
+  ## gambatte's `dma` suite says the DMA grant sits between those two points:
+  ##
+  ##   * `hdma_late_destl_{1,2}` and `hdma_late_wrambank_{1,2}` put an
+  ##     `LDH [$FF54],A` / `LDH [$FF70],A` write M-cycle either side of the
+  ##     grant. At `n = 0` the `_1` members' write starts exactly ON it, and
+  ##     hardware's answer is that the BLOCK SEES THE NEW VALUE -- the write
+  ##     went first.
+  ##   * `hdma_start_*_2` put a VRAM read M-cycle exactly ON it, and hardware's
+  ##     answer is that the read is pushed past the block -- the block went
+  ##     first.
+  ##
+  ## The window is over the ADDRESS because the two are only reconcilable if
+  ## the distinction is which bus the access needs: $FF00-$FFFF is IO and HRAM,
+  ## which are internal to the CPU/DMA controller and never reach the external
+  ## bus the VRAM DMA has just taken. Measured, at n = 0 with
+  ## HDMA_VISIBLE_DOTS = 4: no window at all 4557, whole address space 4558
+  ## ($FF54 and $FF70 come back but `irq_precedence/hdma_vs_m0_scx3` goes),
+  ## $FF51-$FF54 only 4558 (`hdma_late_wrambank_1` stays red instead),
+  ## $FF00-$FF54 4558 (loses the FF55 writers), **$FF00-$FFFF 4559**.
+  ## $FF00-$FF7F is the same 4559, so HRAM is not load-bearing either way and
+  ## the wider window is kept because it is the one the mechanism argues for.
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
@@ -4448,8 +4574,10 @@ type
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
     # HDMA_STEAL_LEAD_DOTS: the PPU dot at or after which the owed block may
-    # take the bus, on the M-cycle boundary the CPU next reaches. Scratch, like
-    # hdma_block_due, and live only alongside it.
+    # take the bus, on the M-cycle boundary the CPU next reaches. `high(int32)`
+    # when the CPU was HALTED at the edge -- there is no hand-over to time then
+    # and the debt is paid at the wake instead. Scratch, like hdma_block_due,
+    # and live only alongside it.
     hdma_due_deadline*: int32
     # The dot the owed block's mode-0 edge fell on. See
     # HDMA_DISABLE_GRACE_DOTS. Live only alongside hdma_block_due, so like it
@@ -6238,7 +6366,8 @@ when defined(clang):
 else:
   {.pragma: hot_bus_inline, inline.}
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
-proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.}
+proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
+                   defer_hdma = false) {.hot_bus_inline.}
 proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.}
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)

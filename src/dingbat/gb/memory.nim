@@ -223,7 +223,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
 # forward declarations of these procs: on the gcc side the pragma expands to
 # `inline`, which Nim requires on the forward declaration as well.
 
-when HDMA_STEAL_LEAD_DOTS != 0:
+when HDMA_STEAL_LEAD_DOTS >= 0:
   proc mem_land_hdma_due(mem: GbMemory; gb: GB) {.noinline.} =
     ## An owed HBlank block whose request went up HDMA_STEAL_LEAD_DOTS dots
     ## after the mode-0 edge, taking the bus on the M-cycle boundary the CPU
@@ -235,7 +235,8 @@ when HDMA_STEAL_LEAD_DOTS != 0:
     else:
       ppu.hdma_block_due = false
 
-proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.} =
+proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
+                   defer_hdma = false) {.hot_bus_inline.} =
   ## Everything an M-cycle advances EXCEPT the PPU: the scheduler, the timer
   ## (which also clocks the serial shifter) and the OAM DMA unit.
   ##
@@ -244,10 +245,19 @@ proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bu
   ## in this half rather than the PPU's because `dma_busy` decides which of the
   ## two write paths runs, so it has to be settled before the write.
   if from_cpu: mem.cycle_tick_count += cycles
-  when HDMA_STEAL_LEAD_DOTS != 0:
+  when HDMA_STEAL_LEAD_DOTS >= 0:
     # The CPU is at an M-cycle boundary here and about to spend the next
     # M-cycle on the bus; an owed block whose deadline has passed goes first.
-    if unlikely(gb.ppu.hdma_block_due) and from_cpu and
+    #
+    # `defer_hdma` is the one exception, and gambatte's `hdma_late_destl` and
+    # `hdma_late_wrambank` pairs are what put it here: a CPU WRITE commits
+    # its byte at the top of its M-cycle (see mem_write), so a write whose
+    # M-cycle begins on the grant boundary has already reached the register
+    # when the DMA takes the bus, and the block sees the NEW value. A READ
+    # samples at the bottom of its M-cycle and loses the same race, which is
+    # what `hdma_start_*_2` says. mem_write lands the block itself, after the
+    # byte.
+    if unlikely(gb.ppu.hdma_block_due) and from_cpu and not defer_hdma and
        gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
       mem_land_hdma_due(mem, gb)
   gb.scheduler.tick(cycles)
@@ -876,12 +886,23 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
   # The bus half runs first regardless, because the bus owner decides
   # everything: mem.dma_busy selects which of the two write paths runs, and
   # mem_write_busy reads the DMA position this M-cycle just filled.
-  mem_tick_bus(mem, gb, 4)
+  when HDMA_STEAL_LEAD_DOTS >= 0:
+    mem_tick_bus(mem, gb, 4, defer_hdma = HDMA_WRITE_DEFER_LO <= idx and
+                                          idx <= HDMA_WRITE_DEFER_HI)
+  else:
+    mem_tick_bus(mem, gb, 4)
   # Same ordering as mem_read: the bus owner decides first.
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
   else:
     mem_write_open(mem, gb, idx, val)
+  when HDMA_STEAL_LEAD_DOTS >= 0:
+    # ...and only now can an owed HBlank block take the bus: see the comment in
+    # mem_tick_bus for why the byte goes first on a write and not on a read.
+    if unlikely(gb.ppu.hdma_block_due) and
+       HDMA_WRITE_DEFER_LO <= idx and idx <= HDMA_WRITE_DEFER_HI and
+       gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
+      mem_land_hdma_due(mem, gb)
   # Whatever of this write does not land where the byte did -- a CGB pipeline
   # store a dot or two into these dots, an IF store or a STAT interrupt-line
   # edge on the boundary after them. One flag covers all of it, so the write
