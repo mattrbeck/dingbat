@@ -2860,6 +2860,19 @@ const SCX_FINE_LATCH_LIVE* {.booldefine.} = true
   ## The derivation, the two-sided evidence and the price are all at this
   ## constant's note in gb/fifo_ppu.nim.
 
+const SCX_LIVE_BORROW_LATCHED* {.booldefine.} = true
+  ## Whether `SCX_FINE_BORROW`'s carry is measured against the fine scroll the
+  ## LINE LATCHED even after `SCX_FINE_LATCH_LIVE` has moved the live discard
+  ## target. `true` ships since 2026-08-20; `false` is the behaviour before it,
+  ## where both mechanisms wrote and read one `scx_fine` and the carry could
+  ## never fire again after any store that joined the discard. Declared here
+  ## rather than in fifo_ppu.nim for the same reason its two neighbours are:
+  ## `GbFifoPpu` grows a field only when it is on.
+  ##
+  ## Worth gambatte +16 / -0 -- every `scx_during_m3` row of the `scx_0360c0`
+  ## and `scx_0761c0` directories, both devices and both speeds. The derivation
+  ## and the per-row pixel counts are at this constant's note in gb/fifo_ppu.nim.
+
 const SCX_FINE_LATCH_WRAP* {.intdefine.} = 8'i32
   ## Dots the fine-scroll discard costs when a mid-line SCX store lands AFTER
   ## the discard has already walked past the new `SCX and 7`. 0 is off; 8 is
@@ -3702,6 +3715,16 @@ type
     # which is the object-layout cliff `win_lx` and `win_hold` both record.
     when SCX_FINE_LATCH_LIVE:
       scx_latch_until*:   int32
+      # The discard target as the live window has MOVED it, which is not the
+      # same quantity as `scx_fine` above even though the two start the line
+      # equal: that one is the carry's reference and stands for the whole
+      # line. They shared one field until 2026-08-20 and the carry could not
+      # fire again after any store that joined the discard -- see
+      # SCX_LIVE_BORROW_LATCHED in fifo_ppu.nim. Sits here, inside the same
+      # `when` as the field it belongs to, so a build with the mechanism off
+      # is byte-identical to not having it.
+      when SCX_LIVE_BORROW_LATCHED:
+        scx_live_fine*:   int32
     # The LOW THREE BITS of the dot the line latched its fine scroll on. The
     # wrap needs how many of the window's eight slots the discard has already
     # walked, and that is a slot index, so three bits are the whole of it --

@@ -221,6 +221,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.scx_fine = 0
   when SCX_FINE_LATCH_LIVE:
     ppu.scx_latch_until = -1'i32
+    ppu.scx_live_fine = 0'i32
   when SCX_STORE_STALL_DOTS != 0:
     # Per-line, like the object penalty below: a stall armed near the end of
     # one line must not hold the next one's head.
@@ -731,6 +732,86 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Written as an `ord` term rather than an `if` for the reason line 370 gives:
   ## this is the mode 3 dot loop and a branch here is measurable.
 
+# ---- SCX_LIVE_BORROW_LATCHED ---------------------------------------------
+#
+# The switch is declared in gb.nim, beside the type it grows a field on (the
+# same reason SCX_FINE_LATCH_LIVE is); this is its derivation. It says the
+# borrow above is measured against the fine scroll the LINE LATCHED, even
+# after SCX_FINE_LATCH_LIVE has moved the live one. `true` ships; `false` is
+# the pre-2026-08-20 behaviour, where the two mechanisms shared `scx_fine`
+# and a store that joined the discard silently moved the borrow's reference
+# with it.
+#
+# ---- Why the two must not share the field --------------------------------
+#
+# `SCX_FINE_BORROW` above is a CARRY in `((SCX + 8k - F) shr 3)` and its `F`
+# is, in its own words, "`SCX and 7` as it stood when the line latched its
+# fine scroll". `SCX_FINE_LATCH_LIVE` is a different statement -- that a
+# store landing while the discard still has pixels to throw away moves the
+# DISCARD -- and it wrote its new target into the same `scx_fine` the carry
+# reads. From that store on, the carry was compared against the value the
+# store installed, so it could never fire again on that line: `$60` after a
+# latched `3` compares `0 < 0`.
+#
+# What it costs is exactly the two `scx_during_m3` directories whose SECOND
+# write lands inside the discard -- `scx_0360c0` (`3, 0, 0`) and
+# `scx_0761c0` (`7, 1, 0`) -- and it costs them TWICE over: once at the
+# store itself and once at the third store of the line, which is out of the
+# window and was still measuring against the moved reference. Both halves
+# displace the picture by exactly one tile, which is what says this is the
+# carry and not a count. Measured on the six failing rows of each directory,
+# wrong pixels out of 23040, one build per stage:
+#
+#   row                       shared field   carry vs prev   carry vs latch
+#   scx_0360c0/_2  [dmg,cgb]        160             8               0
+#   scx_0360c0/_3  [dmg,cgb]      22880          2288               0
+#   scx_0761c0/_2  [dmg,cgb]        160             9               0
+#   scx_0761c0/_3  [dmg,cgb]      23040          2448               0
+#   scx_0761c0/_4  [dmg,cgb]      22880          3575               0
+#
+# and the `_ds` members of both directories move with them. The middle
+# column is the same fix applied only to the store that joins the discard
+# (compare against the value it displaced): it collects the first half and
+# leaves the line's last two tiles wrong, which is the third store reading
+# the moved reference. Only the latched reference collects both, and it is
+# the spelling `SCX_FINE_BORROW`'s derivation already states.
+#
+# Nothing else in the tree moves: the field is read at two sites and the
+# other one, the `lx` bookkeeping inside the live window, keeps the running
+# value it needs (`scx_live_fine`), so a line with no in-window store is
+# byte-identical. Whole-suite: gambatte 4393 -> 4402, +16 / -0 gambatte rows
+# and the local runner unmoved at 1043.
+#
+# ---- What is left, and it is a DEVICE split, not this carry ---------------
+#
+# `scx_0761c0`'s CGB arm is still red -- `_{2,3,4}` and `_ds_{2,3,4,5}`, 7
+# rows -- and the residual is the LAST TWO TILES of the line, i.e. the third
+# store (`$C0`) only. It is not our device axis leaking: our DMG and CGB
+# frames for `_3` are pixel-for-pixel the same picture (`fx`/`lx`/`tn` agree
+# dot for dot in `-d:gb_m3_trace`), and the two REFERENCE images disagree --
+# read line 1 of `_3_dmg08.png` against `_3_cgb04c.png` in one shared palette
+# and the tail is `[white|6 grey|white][grey|6 white|grey]` on the DMG against
+# `[grey|6 white|grey][white|6 grey|white]` on the CGB. So hardware's CGB
+# column is one HIGHER there than its DMG column, on the same ROM and the same
+# store, and dingbat answers the (correct) DMG value on both.
+#
+# Solved against the two stores it has to satisfy at once, the CGB wants
+# `scx_tile` = 11 after `$61` and **24** after `$C0` -- i.e. borrow, then NO
+# borrow -- where the DMG wants 11 and 23. No single reference `F` produces
+# that pair (`floorDiv(97-F, 8) = 11` needs `F` in 2..9 and
+# `floorDiv(192-F, 8) = 24` needs `F <= 0`), so the CGB's reference MOVES
+# between the two stores and the DMG's does not. That is the shape of a
+# per-register CGB write latency (see CGB_SCX_LATENCY in gb.nim), not of this
+# carry, and it is left red with its bracket written down.
+#
+# Refuted on the way, so the next reader does not re-run it: **the wrap is not
+# the device term.** Our DMG wraps here and our CGB does not (the DMG's
+# one-pixel lead is subtracted into `want` and the CGB's is not, so at
+# `consumed = 1` the DMG compares `0 < 1` and the CGB `1 < 1`). Making the CGB
+# wrap too, by widening SCX_FINE_LATCH_WRAP's own predicate to `want <=
+# consumed`, leaves all 7 rows exactly where they were and costs
+# `scx_0363c0/scx_during_m3_{2,3} [cgb]` (whole-suite -2).
+
 const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
   ## Pixels the DMG's fetcher position leads the CGB's by inside the borrow
   ## comparison above. Derived and bracketed in that constant's note, off the
@@ -911,8 +992,14 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
         if int32(want) < consumed:
           extra = SCX_FINE_LATCH_WRAP
           ppu.scx_latch_until += SCX_FINE_LATCH_WRAP
-      ppu.lx -= int32(want - ppu.scx_fine) + extra
-      ppu.scx_fine = want
+      # The running discard target, NOT the borrow's reference: see
+      # SCX_LIVE_BORROW_LATCHED for why the two stopped sharing `scx_fine`.
+      when SCX_LIVE_BORROW_LATCHED:
+        ppu.lx -= int32(want - int(ppu.scx_live_fine)) + extra
+        ppu.scx_live_fine = int32(want)
+      else:
+        ppu.lx -= int32(want - ppu.scx_fine) + extra
+        ppu.scx_fine = want
   ppu.scx_tile = (int(ppu.scx) shr 3) -
                  SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
 
@@ -985,6 +1072,11 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   # shape it was. See SCX_FINE_BORROW above.
   ppu.scx_fine = int(ppu.scx and 7) -
                  (if ppu.cgb: 0 else: SCX_FINE_BORROW_DMG_LEAD)
+  when SCX_FINE_LATCH_LIVE and SCX_LIVE_BORROW_LATCHED:
+    # Same value, second copy: `scx_fine` is the CARRY's reference and stands
+    # for the whole line, while this one follows the discard the live window
+    # moves. See SCX_LIVE_BORROW_LATCHED.
+    ppu.scx_live_fine = int32(ppu.scx_fine)
   fifo_arm_scx(ppu)
   when SCX_FINE_LATCH_LIVE:
     # The window is the discard's own length. `SCX and 7` here is the RAW fine
