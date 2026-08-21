@@ -1678,6 +1678,77 @@ const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = -1
   ## the buffer directly and prints `verdict=F`), and the two DIV-duration
   ## groups are exact at every setting of this constant.
 
+const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = -1
+  ## Dots after the mode 3 -> 0 edge at which an owed HBlank block raises its
+  ## bus request, when the CPU hands the bus over at the END OF ITS NEXT OPCODE
+  ## FETCH. `-1` = OFF; `0` is a real setting.
+  ##
+  ## This is the third spelling of the hand-over and the only one that fits
+  ## every witness at once. The other two are HDMA_STEAL_DELAY_M (instruction
+  ## BOUNDARIES, which ships) and HDMA_STEAL_LEAD_DOTS (any M-cycle boundary).
+  ##
+  ## ---- The 4-dot "contradiction" was a parameterisation error --------------
+  ##
+  ## HDMA_STEAL_LEAD_DOTS' note records gambatte `hdma_start*` pinning `n = 0`
+  ## and mealybug `dma/hdma_timing-C` pinning `n = 4`, at both speeds, and calls
+  ## the 4 dots between them irreconcilable. They are not, and nothing about
+  ## HALT is involved. Both derivations parameterise the landing by the dot the
+  ## CPU's READ M-cycle starts on -- and the two suites read with different
+  ## INSTRUCTIONS:
+  ##
+  ##   gambatte  `LD A,[HL]`        2 M-cycles: fetch, read
+  ##   mealybug  `LDH A,[rHDMA5]`   3 M-cycles: fetch, operand, read
+  ##
+  ## If the hand-over is tested at the opcode FETCH, the read sits one M-cycle
+  ## further from it in mealybug than in gambatte -- and one M-cycle at normal
+  ## speed is exactly 4 dots. Re-derive both suites against the fetch instead of
+  ## against the read: a read is pushed past the block **iff its own
+  ## instruction's opcode fetch ENDS at or after the request dot `r`**, because
+  ## the fetch is the last hand-over point before it.
+  ##
+  ##   witness                 edge   fetch ends, not pushed / pushed   `r` in
+  ##   ---------------------   ----   -------------------------------   -------
+  ##   gambatte hdma_start      252    253 / 257                        (253,257]
+  ##   gambatte ..._scx2        254    257 / 261                        (257,261]
+  ##   gambatte ..._scx3        255    257 / 261                        (257,261]
+  ##   gambatte ..._scx5        257    257 / 261                        (257,261]
+  ##   mealybug SCX=1 1x        253    253 / 257                        (253,257]
+  ##   mealybug SCX=2 1x        254    257 / 261                        (257,261]
+  ##   mealybug SCX=1 2x        253    255 / 257                        (255,257]
+  ##   mealybug SCX=2 2x        254    257 / 259                        (257,259]
+  ##
+  ## `r = edge + 4` satisfies all eight and is the ONLY integer that does:
+  ## gambatte SCX=5 caps it at `edge + 4` from above and mealybug SCX=2 at 1x
+  ## floors it at `edge + 4` from below. **Four dots, flat, at both speeds** --
+  ## the same shape HDMA_DISABLE_GRACE_DOTS already measured for the moment the
+  ## block becomes uncancellable, and the same shape the VRAM read lock's open
+  ## edge has. It is real time on the PPU's clock, not a count of CPU cycles.
+  ##
+  ## The two rejected spellings, on the same eight rows:
+  ##
+  ##   * **Any M-cycle boundary** (HDMA_STEAL_LEAD_DOTS). mealybug's operand
+  ##     fetch is an M-cycle boundary the block must NOT be granted on, so this
+  ##     spelling has to buy back the M-cycle with a bigger `n` -- which is the
+  ##     recorded 0-versus-4 split. At `r = edge + 4` it grants mealybug SCX=1
+  ##     1x on the operand fetch at 257 and pushes the nops-46 read, which
+  ##     hardware says runs.
+  ##   * **The instruction BOUNDARY** (HDMA_STEAL_DELAY_M, shipping). The grant
+  ##     is then a fixed number of DOTS after the instruction's start, so it
+  ##     cannot separate the two speeds: at 1x it needs the boundary at or after
+  ##     `edge`, at 2x at or after `edge + 2`. The fetch is one M-CYCLE after
+  ##     the start, which is 4 dots at 1x and 2 in double, and that is exactly
+  ##     the difference the two speeds ask for.
+  ##
+  ## SameBoy spells it this way too, and independently: `GB_cpu_run`'s run-mode
+  ## arm is `opcode = cycle_read(gb, gb->pc++); if (gb->hdma_on) GB_hdma_run(gb)`
+  ## -- after the fetch, before the rest of the instruction -- with `hdma_on`
+  ## raised from the display state machine a fixed sleep after the mode-0 STAT
+  ## update, never at the update itself.
+const HDMA_GRANT_FETCH_HOLD* {.booldefine.} = false
+  ## Whether a block granted at the fetch still holds its bytes back
+  ## HDMA_VISIBLE_DOTS dots (`in_cpu_cycle`). It should not: the grant is
+  ## BETWEEN two CPU accesses, not inside one, so there is no half-sampled read
+  ## for the hold to protect. Swept anyway, see the note above.
 const HDMA_WRITE_DEFER_LO* {.intdefine.} = 0xFF00
 const HDMA_WRITE_DEFER_HI* {.intdefine.} = 0xFFFF
   ## Address window in which a CPU WRITE beats an owed HBlank block to the bus

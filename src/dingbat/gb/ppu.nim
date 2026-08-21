@@ -2825,6 +2825,12 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         if hdma_seen_was == 0'u8: return
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
+      when HDMA_GRANT_FETCH_DOTS >= 0:
+        # Same reasoning as the HDMA_STEAL_LEAD_DOTS arm below: a halted CPU
+        # fetches no opcode, so there is no hand-over point to time and the
+        # debt is paid at the wake (cpu.nim). Park the deadline out of reach so
+        # a stale one from the previous transfer cannot take this block early.
+        ppu.hdma_due_deadline = high(int32)
       when HDMA_STEAL_LEAD_DOTS >= 0:
         # A halted CPU is not on the bus, so there is no hand-over to time:
         # the debt is paid at the WAKE (cpu.nim), not on a dot deadline. Park
@@ -2833,7 +2839,23 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         # `hdma_*_m0unhalt` / `hdma_transition_*_late_unhalt` family.
         ppu.hdma_due_deadline = high(int32)
     else:
-      when HDMA_STEAL_LEAD_DOTS >= 0:
+      when HDMA_GRANT_FETCH_DOTS >= 0:
+        # The request goes up HDMA_GRANT_FETCH_DOTS dots from here and the CPU
+        # hands the bus over at the END OF ITS NEXT OPCODE FETCH; cpu.tick pays
+        # it. See HDMA_GRANT_FETCH_DOTS in gb.nim for the eight-witness
+        # derivation and for why the fetch, and not any M-cycle boundary or any
+        # instruction boundary, is the hand-over point.
+        ppu.hdma_block_due = true
+        ppu.hdma_due_delay = 0
+        var dl = ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS)
+        # A mode-0 edge this late in a line is not reachable (mode 3 tops out
+        # around dot 370 with a full object row), but the counter wraps at the
+        # line end and a deadline past it would never be met; the block is
+        # dropped on the way out of mode 0 instead of being taken.
+        let le = gb_line_end(ppu)
+        if dl >= le: dl = le - 1
+        ppu.hdma_due_deadline = dl
+      elif HDMA_STEAL_LEAD_DOTS >= 0:
         # The request goes up HDMA_STEAL_LEAD_DOTS dots from here and the CPU
         # hands the bus over on its next M-cycle boundary; mem_tick_bus pays
         # it. The extra M-cycle is what makes the total 8 dots at normal speed

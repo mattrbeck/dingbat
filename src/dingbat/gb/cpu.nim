@@ -803,6 +803,20 @@ proc tick*(cpu: GbCpu; gb: GB) =
     if gbfuzz_trace_hook != nil:
       gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
   let opcode = mem_read(gb.memory, gb, int(cpu.pc))
+  when HDMA_GRANT_FETCH_DOTS >= 0:
+    # The hand-over point. An HBlank block whose request went up
+    # HDMA_GRANT_FETCH_DOTS dots after the mode-0 edge takes the bus at the END
+    # of the opcode fetch that has just run -- so the rest of THIS instruction
+    # is pushed past the block, and the block is not granted on the operand or
+    # data M-cycles in between. That is the whole of what separates gambatte's
+    # two-M-cycle `LD A,[HL]` from mealybug's three-M-cycle `LDH A,[rHDMA5]`;
+    # see HDMA_GRANT_FETCH_DOTS in gb.nim.
+    if unlikely(gb.ppu.hdma_block_due):
+      if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        if gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
+          ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
+      else:
+        gb.ppu.hdma_block_due = false
   when STAT_M0_TAIL_MAX_MC != 0:
     # The instruction an IO read belongs to, so stat_read_mode can tell a read
     # on its instruction's second M-cycle from one on its third. Guarded, so a
@@ -811,7 +825,30 @@ proc tick*(cpu: GbCpu; gb: GB) =
   let cycles_taken = UNPREFIXED[opcode](cpu, gb)
   cpu.cached_hl = -1
   mem_tick_extra(gb.memory, gb, cycles_taken)
-  when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0:
+  when HDMA_GRANT_FETCH_DOTS >= 0:
+    # The instruction's own boundary is the OTHER hand-over point, and this one
+    # is where the shipping HDMA_STEAL_DELAY_M pays: BEFORE handle_interrupts,
+    # so a block whose request was already up when the instruction ended takes
+    # the bus ahead of an interrupt dispatch. gambatte's `irq_precedence`
+    # hdma_vs_m0 / late_hdma_vs_{ei,ie,tima} families measure that ordering
+    # directly (the DMA's source is the stack the dispatch is about to push
+    # onto), and SameBoy -- which has no grant point here at all -- answers the
+    # dispatch's PC on every one of them where hardware answers the DMA's.
+    #
+    # For a one-M-cycle instruction this dot and the next fetch's end are the
+    # same dot, so the two points only differ inside a multi-M-cycle
+    # instruction: the CPU hands the bus over at its fetch or at its end, and
+    # never on the operand or data M-cycles in between. That is exactly what
+    # separates mealybug's three-M-cycle `LDH A,[rHDMA5]` from gambatte's
+    # two-M-cycle `LD A,[HL]`; see HDMA_GRANT_FETCH_DOTS in gb.nim.
+    if unlikely(gb.ppu.hdma_block_due):
+      if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        if gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
+          ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
+      else:
+        gb.ppu.hdma_block_due = false
+  when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
+       HDMA_GRANT_FETCH_DOTS < 0:
     # A block that came due on a mode-0 edge takes the bus at this instruction
     # boundary, once the CPU has had HDMA_STEAL_DELAY_M of them. `in_cpu_cycle`
     # stays true so the bytes are still held back HDMA_VISIBLE_DOTS dots, which
