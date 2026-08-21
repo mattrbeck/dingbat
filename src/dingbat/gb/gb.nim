@@ -1744,6 +1744,10 @@ const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = -1
   ## -- after the fetch, before the rest of the instruction -- with `hdma_on`
   ## raised from the display state machine a fixed sleep after the mode-0 STAT
   ## update, never at the update itself.
+const HDMA_GRANT_BOUNDARY_DOTS* {.intdefine.} = HDMA_GRANT_FETCH_DOTS
+  ## The same request dot for the OTHER hand-over point, the instruction
+  ## boundary. Defaults to HDMA_GRANT_FETCH_DOTS; swept separately because the
+  ## eight witnesses above do not pin the two together.
 const HDMA_GRANT_FETCH_HOLD* {.booldefine.} = false
   ## Whether a block granted at the fetch still holds its bytes back
   ## HDMA_VISIBLE_DOTS dots (`in_cpu_cycle`). It should not: the grant is

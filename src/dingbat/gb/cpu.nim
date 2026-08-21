@@ -739,6 +739,22 @@ proc tick*(cpu: GbCpu; gb: GB) =
       if cpu.stopped: cpu_stop_tick(cpu, gb)
       else:           mem_tick_extra(gb.memory, gb, 4)
       return
+    when HDMA_GRANT_FETCH_DOTS >= 0:
+      # The third hand-over point, and the only one a HALTED CPU has: it is not
+      # on the bus, so an owed block whose request has come up takes it on the
+      # dot rather than waiting for an opcode fetch that is not coming.
+      #
+      # Only reachable when the CPU halted AFTER the mode-0 edge and before the
+      # grant -- a block owed to an already-halted CPU has its deadline parked
+      # at `high(int32)` by `mode_flag=` and is paid at the WAKE instead. That
+      # window is four dots wide and gambatte's `hdma_late_m3halt_m2unhalt_*`
+      # pair falls straight into it: the `_2` member halts between the boundary
+      # at 257 and the request at 258, and without this the block waits for a
+      # wake in mode 2 and is dropped a whole line later.
+      if unlikely(gb.ppu.hdma_block_due) and
+         gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline and
+         gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        ppu_step_hdma(gb.ppu, gb)
     # handle_interrupts, opened up. The halt ends on IF & IE whether or not IME
     # lets an interrupt be taken, and that is the exact M-cycle the question
     # below has to be asked on -- asking it on every halted M-cycle instead
@@ -843,7 +859,9 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # two-M-cycle `LD A,[HL]`; see HDMA_GRANT_FETCH_DOTS in gb.nim.
     if unlikely(gb.ppu.hdma_block_due):
       if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
-        if gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
+        if gb.ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS -
+                                        HDMA_GRANT_BOUNDARY_DOTS) >=
+           gb.ppu.hdma_due_deadline:
           ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
       else:
         gb.ppu.hdma_block_due = false
