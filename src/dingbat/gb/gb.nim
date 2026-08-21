@@ -1700,15 +1700,54 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #    the 14 -- it models no device difference at all -- which is the actual
 #    defect and is worth ~26 rows.
 #
-#    Note the SIGN before reaching for a latency: the CGB expectation flips one
-#    step EARLIER than the DMG one, so CGB samples WY sooner, not later. Every
-#    constant in this block is a positive delay, which moves CGB the wrong way --
-#    that, not the absence of an instrument, is why "WY / WY latch: nothing at
-#    all" appears against every setting in the sweep table above. A negative
-#    latency is not expressible here and the mechanism is probably not a write
-#    latency at all.
+#    **SETTLED 2026-08-21: it IS this constant, and the sign note that used to
+#    be here was wrong.** The note read "the CGB expectation flips one step
+#    EARLIER than the DMG one, so CGB samples WY sooner, not later... every
+#    constant in this block is a positive delay, which moves CGB the wrong
+#    way". The second sentence does not follow from the first: a write that
+#    ARRIVES later and a sample point that is EARLIER are the same statement
+#    about the deadline, and the deadline is all these ROMs can see. A positive
+#    delay is exactly right.
+#
+#    Why the 2026-08-03 sweep saw "nothing at all" at 1 and 2 is a separate
+#    thing, and it is not the sign: the boot hand-off used to leave the WY
+#    LATCH set for the whole first frame (fixed 4b816a5, "the boot hand-off
+#    leaves a WY latch set, and it costs a whole frame"), so on the frame these
+#    ROMs are scored on the window was already armed and no WY write could
+#    matter at any latency. With that gone the constant is an instrument again.
+#    Swept alone on the 440-row window list (gambatte `--mode=gambatte`, one
+#    build per cell, control 362):
+#
+#      CGB_WY_LATENCY   0    1    2    3    4    5    6
+#      window PASS     362  365  369  371  371  371  371
+#
+#    It saturates rather than peaking because `mem_tick_ppu_latched` clips every
+#    latency at `mdots - CGB_LATENCY_CAP` = 3 dots at normal speed and 1 at
+#    double, so 3 and above are the same build. 4 ships because a whole M-cycle
+#    is the structural value and the clip is what makes it 3; the ROMs
+#    themselves only bound it from below, at 3.
+#
+#    Whole runner at 4: gambatte 4447 -> **4456**, everything outside
+#    `gambatte/window` byte-identical, and 986 non-gambatte test ROMs x both
+#    devices identical framebuffer at frame 200. +10 rows / -1: the loss is
+#    `window/arg/late_scx_late_wy_FFto4_ly4_wx00_1 [cgb]`, and it is a second
+#    bug unmasked rather than this rule being wrong -- that family's DMG arm is
+#    ALREADY one step early (`_2 [dmg]` wants 3 and answers 0, red before and
+#    after), so its CGB arm was passing because two errors cancelled. It is the
+#    only `late_scx_late_wy` family in the set and the SCX half is what is
+#    unaccounted for.
+#
+#    What this does NOT close is the `late_disable*` CGB block, which is the
+#    other half of the window bucket and wants the CGB fetcher-abort named in
+#    the "What this is NOT" note in memory.nim -- opposite direction (the CGB
+#    tolerates a LATER LCDC.5 disable, which no positive latency can express).
 const CGB_WX_LATENCY*         {.intdefine.} = 0
-const CGB_WY_LATENCY*         {.intdefine.} = 0
+const CGB_WY_LATENCY*         {.intdefine.} = 4
+  ## Dots the CGB's WY write takes to reach the window's WY comparator, over the
+  ## DMG's. One M-cycle, clipped to 3 dots (1 at double speed) by
+  ## CGB_LATENCY_CAP in mem_tick_ppu_latched. Derivation and sweep directly
+  ## above; it is worth 9 net gambatte rows and it is the whole of the
+  ## `window/arg/late_wy_*` device split.
 const CGB_SCY_LATENCY*        {.intdefine.} = 2
 const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0

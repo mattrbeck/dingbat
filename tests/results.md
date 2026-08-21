@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 08:23:55 · commit 0dbbe26 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 08:25:08 · commit b07de2c · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
@@ -1223,7 +1223,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 40/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 32/36 passed |
-| gambatte/window | per-ROM | 👀 396/476 passed |
+| gambatte/window | per-ROM | 👀 405/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 
