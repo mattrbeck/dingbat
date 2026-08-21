@@ -31,6 +31,92 @@ const WIN_LX_OFF = -128'i32
 # fifo_recompose_last.
 const TAIL_DOT0_OFF = -(1'i32 shl 20)
 
+const M3_AHEAD_HOLD* {.booldefine.} = true
+  ## Whether the mode 3 -> 0 FLAG is held for the pipeline's advance, so that
+  ## it lands on the dot it would have landed on with no advance at all
+  ## (`true`, shipping). `false` lets the flag fire when the fetcher retires,
+  ## i.e. moves the mode 3 -> 0 edge early with the pixels and makes mode 3
+  ## that many dots shorter, with the mode 2 -> 3 edge left alone.
+  ##
+  ## `false` is REFUSED: on top of the five-constant DMG re-spelling (see
+  ## M3_GRID_EARLY below) it scores gambatte 3944 / runner 924 against
+  ## 4425 / 1050 with the hold in, and the losses are the same flag-edge
+  ## families -- `sprites` 461 -> 271, `window` 385 -> 291, `speedchange`
+  ## 192 -> 131. It is the tail-only half of that constant's refutation and it
+  ## fails the same way.
+
+const M3_GRID_EARLY* {.intdefine.} = 0
+  ## CPU M-cycles the whole mode 2 -> 3 -> 0 DOT GRID runs ahead of LY, on
+  ## every line and every device. Distinct from `M3_PIPE_AHEAD` below, which
+  ## moves only the PIXELS and holds both flags where they are: this one moves
+  ## the mode 2 -> 3 flag, the mode-3 STAT source, the OAM scan's completion,
+  ## the pipeline and (because the fetcher then retires that much sooner) the
+  ## mode 3 -> 0 flag together, leaving mode 3's LENGTH and LY untouched.
+  ##
+  ## It exists because the OAM STAT source is one M-cycle late on the DMG
+  ## (`tools/gbppu/ifedgesled.py`; see STAT_M2_LEAD in ppu.nim) and moving the
+  ## source alone costs every mode-3 pixel family, while moving the pixels
+  ## alone (M3_PIPE_AHEAD) leaves the mode 3 -> 0 edge four dots behind the
+  ## source that just moved. This is the third option: the grid moves and LY
+  ## does not, which is also what `int_oam_nops` (one M-cycle over) against
+  ## `int_lyc_nops` (exact) says -- a whole-PPU phase would move both.
+  ##
+  ## ---- Ships at 0, and it is REFUSED, not merely unmeasured ---------------
+  ##
+  ## Built and scored 2026-08-20 against the five-constant DMG re-spelling the
+  ## `oam_int_if_edge` sled asks for (`STAT_M2_LEAD=1 STAT_M2_LEAD_CGB=0
+  ## M3_PIPE_AHEAD=1 CGB_PIPE_MCYCLES=0 STAT_M0_FIELD_TAIL=0`), whose one
+  ## residual is that the mode 3 -> 0 edge is four dots late *relative to the
+  ## source that just moved*. Moving the grid is the obvious way to say that
+  ## and it collapses the suite:
+  ##
+  ##   arm                                          gambatte   runner
+  ##   shipping                                       4402      1043
+  ##   the five (+ the OAM DMA bus lead below)        4425      1050
+  ##   M3_GRID_EARLY = 1 alone                        3626       807
+  ##   M3_GRID_EARLY = 1 + the five, LY0_PIPE = 0     3899       906
+  ##
+  ## The losses are concentrated in exactly the families that BRACKET the two
+  ## flag edges -- `sprites` 461 -> 266, `window` 385 -> 295, `vram_m3` 41 -> 31
+  ## -- i.e. the mode 2 -> 3 and mode 3 -> 0 flag dots are pinned by hundreds of
+  ## rows and nothing may move them. `M3_AHEAD_HOLD = false` (the same statement
+  ## made only at the tail, mode 3 four dots SHORTER) is 3944 / 924 on top of
+  ## the five, and `M3_END_EARLY = 4` on top of the five is 4290 / 1023. All
+  ## three ways of moving that edge are refused, from both ends and the middle.
+  ##
+  ## ---- And the residual is not the flip's to fix ---------------------------
+  ##
+  ## Classifying the 38 `[dmg]` rows the five-constant arm turns red (against
+  ## the 59 it turns green):
+  ##
+  ##   22  the ROM declares ONE value for both devices, and the CGB arm is
+  ##       ALREADY red today with the byte-identical verdict -- the DMG merely
+  ##       joins it
+  ##    2  shared-expectation ROMs whose CGB arm is green (both `halt/`)
+  ##   11  the ROM declares a DIFFERENT value per device and the DMG now
+  ##       answers the CGB's
+  ##    3  DMG-only ROMs (`sprites/sprite_late_*_disable_spx1{A,B}_1`)
+  ##
+  ## Zero of the 22 have a green CGB sibling. So the four-dot mode 3 -> 0
+  ## residual is not created by the re-spelling: it is a **device-independent
+  ## defect the CGB already carries**, which the DMG's late dispatch was
+  ## cancelling. Fixing it is a mode 3 -> 0 question that has to be answered on
+  ## the CGB rows FIRST, where it is visible today and where no constant in
+  ## this file has to move for it to be studied.
+
+const M3_PIPE_AHEAD* {.intdefine.} = 0
+  ## CPU M-cycles the mode-3 pipeline runs AHEAD of machine time on EVERY
+  ## device -- the device-independent half of the advance whose CGB-only half is
+  ## `CGB_PIPE_MCYCLES` below; the two are added. Declared here rather than
+  ## beside the derivation (search `M3_PIPE_AHEAD`, in the M3_PIPE_MCYCLES
+  ## block) because `obj_oam_dma_read` sums it into the OAM DMA bus lead and a
+  ## const cannot be read before it is declared.
+  ##
+  ## Still 0: nothing measured here asks the DMG pipeline to move, and daid's
+  ## DMG arm refuses it outright (`ppu_scanline_bgp` pixel-exact at 0, 90.5% at
+  ## 1). See the derivation for what a nonzero value buys and what stands in
+  ## the way.
+
 const CGB_PIPE_MCYCLES* {.intdefine.} = 1
   ## CPU M-cycles the CGB's mode-3 pipeline runs AHEAD of machine time, over the
   ## DMG's. Declared here, at the top of the file, rather than beside
@@ -2110,7 +2196,16 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # with the sum held it is byte-identical across the advance. The term is
     # CGB-only because the DMG pipeline does not move -- charging the DMG the
     # extra M-cycle breaks `strikethrough-dmg` by the same 7 pixels, measured.
-    let lead = OBJ_DMA_BUS_LEAD +
+    # `M3_PIPE_AHEAD` is the DEVICE-INDEPENDENT half of the same advance and is
+    # summed here for the same reason as the CGB terms next to it: whatever
+    # moves the pipeline against machine time moves this fetch against the DMA
+    # unit's bus. It is a no-op at the shipping 0, and it is what keeps BOTH
+    # strikethrough frames byte-identical if the DMG/CGB re-spelling of that
+    # constant (see M3_PIPE_AHEAD) is ever taken -- without it, moving the
+    # advance out of `CGB_PIPE_MCYCLES` and into `M3_PIPE_AHEAD` costs
+    # `strikethrough-cgb` 7 pixels (the CGB term it just lost) and
+    # `strikethrough-dmg` 7 pixels (the DMG advance it never gained), measured.
+    let lead = OBJ_DMA_BUS_LEAD + M3_PIPE_AHEAD +
                (when CGB_PIPE_MCYCLES != 0 or CGB_HALT_PPU_LEAD != 0:
                   (if ppu.cgb: CGB_PIPE_MCYCLES + CGB_HALT_PPU_LEAD else: 0)
                 else: 0)
@@ -2768,18 +2863,10 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 #    so it moves with the halt bucket rather than with this. It goes 100% ->
 #    90.5% here, which is four dots, and it is expected back when the halt half
 #    lands.
-const M3_PIPE_AHEAD {.intdefine.} = 0
-  ## The device-INDEPENDENT advance. Still 0: nothing measured here asks the DMG
-  ## pipeline to move, and daid's DMG arm refuses it outright (pixel-exact at 0,
-  ## 90.5% at 1). The CGB's M-cycle is `CGB_PIPE_MCYCLES`, at the head of this
-  ## file, and the two are added.
-  ##
-  ## The paragraph above -- "daid ... is a HALT ROM, so it moves with the halt
-  ## bucket rather than with this ... expected back when the halt half lands" --
-  ## is superseded as of 2026-08-10 and left standing because its measurements
-  ## are still good. daid did not need the halt half. It needed this file to
-  ## stop double-counting the phase into three other constants; see
-  ## `CGB_PIPE_MCYCLES`.
+# `M3_PIPE_AHEAD` -- the device-INDEPENDENT advance -- is declared at the head
+# of this file for the same reason `CGB_PIPE_MCYCLES` is: `obj_oam_dma_read`
+# reads it, and a const cannot be read before it is declared. Its derivation is
+# the paragraphs above.
 const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
                      CGB_PIPE_MCYCLES != 0
 
@@ -4034,6 +4121,17 @@ proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   when OBJ_ABORT_FLAG_HOLD != 0:
     ppu.m3_hold = ppu.m3_hold + uint8(OBJ_ABORT_FLAG_HOLD)
 
+template m3_start_dot(gb: GB): int32 =
+  ## The dot the mode 2 -> 3 boundary lands on. 80 unless `M3_GRID_EARLY` moves
+  ## the whole grid, and it has to be the SAME expression the dot loop tests
+  ## against -- the idle-mode skip jumps straight to this dot, so a boundary the
+  ## skip does not know about is a boundary the loop never visits and mode 3
+  ## never starts.
+  when M3_GRID_EARLY != 0:
+    80'i32 - int32(M3_GRID_EARLY * (4 shr gb.memory.current_speed))
+  else:
+    80'i32
+
 template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## The next dot of this line an idle mode (0, 1 or 2) has something to do on.
   ##
@@ -4049,7 +4147,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## as a proc it measured +1.0% of retired instructions on both a DMG and a
   ## CGB title -- the whole cost of a call, for three compares.
   when not STAT_IRQ_SPLIT:
-    if m == 2: 80'i32
+    if m == 2: m3_start_dot(gb)
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
     elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
     else: gb_line_end(ppu)
@@ -4062,7 +4160,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
     # do. At normal speed the lead's dot and M2_144_EARLY_DOT coincide; in
     # double speed they do not, hence three candidates rather than two.
     block:
-      let boundary = if m == 2: 80'i32 else: gb_line_end(ppu)
+      let boundary = if m == 2: m3_start_dot(gb) else: gb_line_end(ppu)
       var tgt = boundary
       let irq_dot = boundary - stat_irq_lead(gb)
       if irq_dot >= ppu.cycle_counter: tgt = irq_dot
@@ -4309,11 +4407,14 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         gb_ticklen = int32(cycles)
       case m
       of 2:  # OAM search
+        # The whole mode 2 -> 3 boundary -- flag, STAT source, pipeline and
+        # OAM scan -- moves this many dots early. See M3_GRID_EARLY.
+        let m3_dot = m3_start_dot(gb)
         when STAT_IRQ_SPLIT:
           # Mode 2 ends for the interrupt line a lead before it ends for the
           # mode bits. Nothing else about the boundary moves.
-          if ppu.cycle_counter == 80 - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
-        if ppu.cycle_counter == 80:
+          if ppu.cycle_counter == m3_dot - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
+        if ppu.cycle_counter == m3_dot:
           ppu.`mode_flag=`(3'u8, gb)
           # WX below 7 puts the window's first pixel LEFT of the screen, where
           # the shifter's equality above can never reach it (lx starts at
@@ -4433,7 +4534,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               let adv = mc * (4 shr gb.memory.current_speed)
               let head = int(ppu.m3_delay)
               ppu.m3_delay = uint8(max(0, head - adv))
-              ppu.m3_hold  = uint8(adv)
+              ppu.m3_hold  = when M3_AHEAD_HOLD: uint8(adv) else: 0'u8
               for _ in 0 ..< adv - min(head, adv): fifo_pipeline_dot(ppu, gb)
           when defined(gb_m3_len):
             if gb_m3_len_lines > 0:
