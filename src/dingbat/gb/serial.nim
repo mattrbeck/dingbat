@@ -184,6 +184,49 @@ proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
   if previous and not current:  # falling edge of the tap
     serial.serial_master_edge(gb)
 
+const SERIAL_DIV_WRITE_LEAD_T* {.intdefine.} = 4
+  ## How many T-cycles BEFORE the end of its own M-cycle a `$FF04` store's
+  ## divider reset is compared against the serial tap.
+  ##
+  ## Same rule as SERIAL_CPU_SAMPLE_T, one register further out. `mem_write`
+  ## runs the whole bus half (`mem_tick_bus(4)`) at the TOP of the M-cycle and
+  ## only then commits the byte, so by the time `timer_write` zeroes `tdiv` the
+  ## divider has already been advanced through all four of this M-cycle's
+  ## T-cycles. The tap level the reset is then compared against is therefore
+  ## the one at the END of the M-cycle, and a tap bit that ROSE inside that
+  ## M-cycle is seen as high -- so the reset manufactures a falling edge one
+  ## M-cycle before hardware does. Subtracting the M-cycle back off puts the
+  ## comparison where the store is, without moving the reset itself.
+  ##
+  ## Measured two-sidedly against SameBoy on `serial/start_late_div_write_*`
+  ## by sliding BOTH islands of the ROM (the `ldh ($ff04),a` and the
+  ## `ldh a,($ff0f)`) through their NOP sleds -- 17 x 79 patched ROMs, DMG.
+  ## The number reported per DIV-write position is the first IF-read offset
+  ## that reads $E8, i.e. the M-cycle the transfer's 8th shift lands on:
+  ##
+  ##   div    -10  -9  -8  -7  -6  -5  -4  -3  -2  -1  +0  +1  +2  +3  +4
+  ##   SameBoy  -9  -8  -7  -6  -5  -4  -3  -2  -1   0  +1 -62 -61 -60 -59
+  ##   dingbat  -9  -8  -7  -6  -5  -4  -3  -2  -1   0 -63 -62 -61 -60 -59
+  ##
+  ## Both emulators ramp +1 per M-cycle of DIV-write delay (the reset restarts
+  ## the divider, so the next tap edge moves with it) and both take the same
+  ## 64-M-cycle step DOWN when the reset starts cancelling a tap period -- the
+  ## step is one master-clock toggle, 256 T. The ONLY disagreement in 1343
+  ## cells is WHERE that step falls: hardware at div+1, dingbat at div+0.
+  ## Exactly one M-cycle, exactly one lead of 4 T. The reset itself must NOT
+  ## move with it: every other row in the table is already exact, and shifting
+  ## the reset would carry all of them off by one.
+
+proc serial_div_write_edge*(serial: GbSerial; gb: GB; old_tdiv: uint16) {.inline.} =
+  ## The tap's view of a `$FF04` store: `tdiv` is already 0 here, so the
+  ## PRE-reset level has to be reconstructed from the value the divider held,
+  ## less this M-cycle's own four T-cycles. See SERIAL_DIV_WRITE_LEAD_T.
+  when SERIAL_DIV_WRITE_LEAD_T != 0:
+    let pre = ((old_tdiv - uint16(SERIAL_DIV_WRITE_LEAD_T) + serial_tap(gb)) and
+               serial.serial_clock_mask(gb)) != 0
+    serial.clock_history = if pre: 1'u8 else: 0'u8
+  serial_tick(serial, gb)
+
 # ==================== Register access ====================
 
 when SERIAL_CPU_SAMPLE_T < 4:

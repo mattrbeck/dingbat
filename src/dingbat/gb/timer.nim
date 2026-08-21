@@ -321,14 +321,19 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
     # equivalent — it can skip an edge falling before the stale target, and
     # measurably loses a SameSuite test.
     let apu_before = (t.tdiv shr apu_div_bit(gb)) and 1
+    let old_tdiv = t.tdiv
     t.tdiv = 0
     if apu_before == 1: tick_frame_sequencer(gb.apu, gb)
     gb.scheduler.clear(etAPUFrameSeq)
     gb.scheduler.schedule(apu_div_phase(t, gb), etAPUFrameSeq)
     timer_check_edge(t, gb, on_write = true)
     # The serial clock tap sees the reset too; a high->low transition of
-    # the tapped bit shifts (gambatte start_late_div_write serial tests)
-    if gb.serial.shifting: serial_tick(gb.serial, gb)
+    # the tapped bit shifts (gambatte start_late_div_write serial tests).
+    # `old_tdiv` rather than the (already zeroed) counter because the level the
+    # store is compared against is the one at the TOP of its M-cycle, not after
+    # mem_write's bus half has run the divider through it: SERIAL_DIV_WRITE_LEAD_T
+    # in serial.nim carries the two-sided measurement.
+    if gb.serial.shifting: serial_div_write_edge(gb.serial, gb, old_tdiv)
   of 0xFF05:
     if t.countdown != 0:
       t.tima     = val

@@ -136,10 +136,45 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
     # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
     # clocking rule, which drops the requirement that the write turn the
     # length counter ON; see GbQuirks in gb.nim.
+    #
+    # CGB A/B defer the SWITCH-OFF by one clock, and only on the wave channel.
+    # SameSuite ships `channel_3_extra_length_clocking` twice -- `-cgb0` and
+    # `-cgbB` -- and the two ROMs are byte-identical apart from their 32-byte
+    # expected tables, so the wave channel is the one place where CGB-0 and
+    # CGB-B disagree about this path (channel_1/2/4 ship a single `-cgb0B` ROM
+    # each, i.e. those three channels agree across the pair, and they still
+    # pass unchanged). The ROM is four groups of eight cells, each group a
+    # 1-M-cycle ladder over (initial length, number of NRx4 writes with bit 6
+    # clear); with `p` the ladder position at which the DIV-APU bit is already
+    # set (p = 2 here), the two tables read:
+    #
+    #   group   NR31   writes   CGB-0            CGB-B
+    #   A       $FF=1  1        F4 F4 F0*6       F4*8
+    #   B       $FF=1  2        F0*8             F4 F4 F0*6
+    #   C       $FE=2  2        F4 F4 F0*6       F4*8
+    #   D       $FE=2  3        F0*8             F4 F4 F0*6
+    #
+    # Every CGB-B cell is the CGB-0 answer for ONE FEWER write, on all 32 --
+    # i.e. the decrement still happens on the clock that reaches zero, but the
+    # channel keeps running until the NEXT such clock finds the counter already
+    # there. `enabled and length_counter == 0` is reachable by no other path
+    # (an NRx1 write cannot store 0, a trigger reloads 0 to $100, and the frame
+    # sequencer's length_step switches off at zero), so the pending switch-off
+    # needs no state of its own.
+    #
+    # This is NOT a port: SameBoy has no CGB-0 gate anywhere in Core/apu.c's
+    # length handling -- its `model <= GB_MODEL_CGB_B` NRx4 gate is the
+    # `length_clock_any_nrx4` rule dingbat already has -- so it answers one of
+    # this ROM pair wrong. Derived from the tables above instead.
+    let defer_off = gb.revision == grCgbAB
     if gb.apu.first_half_of_length_period and not ch.length_enable and
-       (len_enable or gb.quirks.length_clock_any_nrx4) and ch.length_counter > 0:
-      dec ch.length_counter
-      if ch.length_counter == 0: ch.enabled = false
+       (len_enable or gb.quirks.length_clock_any_nrx4) and
+       (ch.length_counter > 0 or (defer_off and ch.enabled)):
+      if ch.length_counter == 0:
+        ch.enabled = false            # the deferred switch-off, one clock late
+      else:
+        dec ch.length_counter
+        if ch.length_counter == 0 and not defer_off: ch.enabled = false
     ch.length_enable = len_enable
     if (val and 0x80) != 0:
       # Pan Docs, Wave RAM: "on monochrome consoles, if CH3 is restarted while
