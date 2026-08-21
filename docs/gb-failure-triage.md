@@ -91,9 +91,11 @@ and all three `ly-dmgC-cgbBC` arms fail on that single cell — **1 bad cell out
 32, three rows**. `lcd-align-ly` reads the same edge (its byte 5) and splits the
 same way: the BC file's row-0/row-8 cells fail and the E file's do not.
 
-**C2 — the standing "2 dots at the mode 3 -> 0 edge"** (`LCD_ON_LINE0_TRIM` in
-`gb.nim`). `halt-m0-interrupt` is a fourth family asking for exactly those 2
-dots and it is the sharpest statement of them yet — see below. Most of the
+**C2 — the standing "2 dots at the mode 3 -> 0 edge"** (the table at
+`LCD_ON_LINE0_TRIM` in `gb.nim`). AGE contributes **two** families asking for
+exactly those 2 dots, `halt-m0-interrupt` on line 10 and `stat-int` on line 3,
+both two-sided, both on both devices — and between them they take the quantity
+off line 0, which no previous witness did. Both sections below. Most of the
 `oam-read` / `oam-write` / `vram-read` / `stat-mode` residue is the same shape.
 
 **C3 — the DMG OAM STAT source one M-cycle late** (the five-constant re-spelling
@@ -167,10 +169,46 @@ dingbat, respelling + LCD_ON_LINE0_TRIM=2, CGB            2   exact, row PASSES
 
 Two things fall out. The re-spelling **unifies the devices** on this row, which
 is the third independent witness that the DMG/CGB split it removes is not real.
-And what is left is 2 dots, on both devices, in the same direction — the
-`LCD_ON_LINE0_TRIM` quantity. This ROM measures line 10 after an LCD enable, so
-it is a fourth entry for that constant's table, and unlike the other three it
-brackets from both sides.
+And what is left is 2 dots, on both devices, in the same direction.
+
+### `stat-int` is the SECOND witness for those 2 dots, and it moves them off line 0
+
+`stat-int-dmgC-cgbBCE` prints raw STAT bytes: for each SCX it takes the mode-0
+STAT interrupt on **line 3** and reads STAT back at two delays one M-cycle
+apart, chosen so hardware answers `$80` (mode 0) then `$82` (mode 2) — a bracket
+on the mode 0 -> 2 line boundary measured *from the interrupt*. Under the
+re-spelling the DMG and CGB tables become **identical** (5 bad cells, the same
+cells — the fourth device-unification witness), and the residue is:
+
+```
+SCX          0    1    2    3    4    5    6    7    8    9
+ROM's delay 34   34   34   33   33   33   33   32   34   34   (M-cycles)
+dingbat     ok  BAD  BAD   ok   ok  BAD  BAD   ok   ok  BAD
+```
+
+Solving that pattern against `456 - (252 + (SCX and 7))` — the ROM's delay steps
+down at SCX 3 and 7, so the read grid and the boundary are both pinned — gives
+one answer and only one: **dingbat's mode-0 STAT interrupt is 2 dots late
+relative to the line's own mode 0 -> 2 edge**, on every SCX, on both devices.
+
+That is the same 2 dots `halt-m0-interrupt` wants, and taken together the two
+ROMs **take the quantity off line 0 entirely**: `stat-int` measures line 3 and
+`halt-m0-interrupt` line 10, and neither depends on the LCD-on phase the way the
+three families in `LCD_ON_LINE0_TRIM`'s table do. What they say is that the
+mode 3 -> 0 edge itself — or the mode-0 STAT source hanging off it — is 2 dots
+late every line.
+
+**Why it was not fixed here.** The mode-0 STAT source is the
+`irq_mode_of == 0` term in `ppu_handle_stat_interrupt`, and it cannot be given
+the mode-2 source's treatment: `STAT_M2_LEAD` works because mode 2 starts on a
+dot the PPU knows in advance (dot 0 of the line), and mode 0's start dot depends
+on SCX and on the line's objects and is only known when it arrives. So a
+mode-0 twin of `STAT_M2_LEAD` is not expressible in `ppu.nim` — the 2 dots have
+to come from the edge itself, i.e. `M3_END_EARLY` in `fifo_ppu.nim`, which is
+where this hands over. Note that `M3_END_EARLY=2` does not currently build
+alongside `M3_PIPE_AHEAD=1`: the `MIX_HOLD` static assertion at `fifo_ppu.nim`
+rejects the combination, so measuring the two together needs `MIX_HOLD` raised
+first. `M3_END_EARLY=4` on top of the five is already refuted (runner 1023).
 
 ### REFUTED at cell resolution: `LCD_ON_LINE0_TRIM = 2`
 

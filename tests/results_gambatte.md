@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-20 18:40:59*
+*Generated: 2026-08-20 18:49:18*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4393/5005 passed.**
+**4420/5005 passed.**
 
 ## bgen
 
@@ -114,7 +114,7 @@ All 8 tests passed.
 | dma/hdma_transition_halt_late_unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_oamdma_1_cgb04c_out509E529C [cgb] | got 50515253, expected 509E529C |
-| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got E8, expected 67 |
+| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got 5E, expected 67 |
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
@@ -597,37 +597,23 @@ All 18 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (766/811 passed)
+## oamdma (784/811 passed)
 
-766/811 tests passed, 45 failed:
+784/811 tests passed, 27 failed:
 
 | Test | Result |
 |------|--------|
-| oamdma/late_sp00x_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp00x_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp00x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp00y_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp00y_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp00y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp01x_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp01x_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp01x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp01y_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp01y_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp01y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp02x_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp02x_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oamdma/late_sp02y_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp02y_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oamdma/late_sp39x_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp39x_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp39x_4_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/late_sp39x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp39y_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oamdma/late_sp39y_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/late_sp39y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
+| oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
@@ -642,35 +628,22 @@ All 18 tests passed.
 | oamdma/oamdma_srcFF00_busyreadC000_dmg08_out1_cgb_xoutblank [dmg] | got ?, expected 1 |
 | oamdma/oamdma_srcFF00_readFE00_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
 | oamdma/oamdma_srcFF00_readFE45_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
-| oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [dmg] | got A0, expected 81 |
-| oamdma/oamdmasrc80_halt_lycirq_read8000_dmg08_cgb04c_out81 [cgb] | got A0, expected 81 |
-| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [dmg] | got 2B, expected 81 |
-| oamdma/oamdmasrc80_halt_m2irq_read8000_dmg08_cgb04c_out81 [cgb] | got 2A, expected 81 |
 | oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
-## scx_during_m3 (121/141 passed)
+## scx_during_m3 (130/141 passed)
 
-121/141 tests passed, 20 failed:
+130/141 tests passed, 11 failed:
 
 | Test | Result |
 |------|--------|
-| scx_during_m3/scx_0360c0/scx_during_m3_2 [dmg, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_2 [cgb, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [dmg, png] | 22880/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_3 [cgb, png] | 22880/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_2 [cgb, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0360c0/scx_during_m3_ds_3 [cgb, png] | 22880/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_2 [dmg, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_2 [cgb, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_3 [dmg, png] | 23040/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_3 [cgb, png] | 23040/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_4 [dmg, png] | 22880/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_4 [cgb, png] | 22880/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 160/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 23040/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 23040/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 22880/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_2 [cgb, png] | 9/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_3 [cgb, png] | 2448/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_4 [cgb, png] | 3575/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 9/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 2440/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 2448/23040 pixels differ |
+| scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 2431/23040 pixels differ |
 | scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
