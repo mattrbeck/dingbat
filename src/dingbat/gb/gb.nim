@@ -1391,6 +1391,111 @@ const HDMA_DISABLE_GRACE_DOTS* {.intdefine.} = 4
   ##
   ## One instruction boundary is still the unique optimum on BOTH groups, so
   ## those rows are not a steal-delay offset and want something else.
+const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = 0
+  ## Dots after the mode-0 edge at which an owed HBlank block raises its bus
+  ## request; the CPU then hands the bus over at its next **M-cycle** boundary,
+  ## which may be INSIDE an instruction. One CPU M-cycle is added to whatever is
+  ## set here, so the total is `n + 4` dots at normal speed and `n + 2` in
+  ## double. **Ships at 0 = off, and the whole of mealybug `dma/hdma_timing-C`
+  ## is why it exists and why it does not ship.**
+  ##
+  ## ---- At 4 this row is 0/48, which is better than SameBoy -----------------
+  ##
+  ## `tools/gbppu/hdmaresults.nim` dumps the ROM's own 48-cell result buffer.
+  ## On `883a4a1` dingbat is 2/48 and SameBoy is 2/48 (different cells), and
+  ## `-d:HDMA_STEAL_LEAD_DOTS=4` takes dingbat to **0/48, verdict P**. The
+  ## constant is a UNIQUE two-sided optimum on the ROM's own 48 cells, swept a
+  ## dot at a time:
+  ##
+  ##   lead        1   2   3   4   5   6   8
+  ##   wrong/48    4   3   2   0   2   3   6
+  ##
+  ## The measurement is `-d:gb_dma_trace` on the ROM itself, which prints the
+  ## mode-0 edge dot and the dot each block takes the bus on, per sub-test.
+  ## `sub_test` is `LDH [$FF55],A ; nops N ; LDH A,[$FF55]`, one fresh run per
+  ## N, so the four HDMA5 cells of a group are four independent runs whose only
+  ## difference is where the CPU is in its instruction stream when the edge
+  ## arrives. Reading the block's landing dot straight out of hardware's own
+  ## four answers (a cell is `$00` if the read's M-cycle ran BEFORE the block
+  ## stalled the CPU and `$FF` if it ran after, so consecutive cells bracket the
+  ## landing to one M-cycle):
+  ##
+  ##   group             edge dot   landing hardware demands
+  ##   ---------------   --------   -----------------------
+  ##   SCX=1  1x         253        261   = edge + 8
+  ##   SCX=2  1x         254        265   = ceil_M(254) + 8
+  ##   SCX=1  2x         253        259   = edge + 6
+  ##   SCX=2  2x         254        261   = ceil_M(255) + 6
+  ##
+  ## 8 dots at normal speed and 6 in double is `4 + one CPU M-cycle`, and it is
+  ## unique: a landing at the first M boundary >= edge + d needs d = 8 for the
+  ## two normal-speed groups and d = 6 for the two double-speed ones, and no
+  ## flat dot count and no flat M-cycle count is both.
+  ##
+  ## **What it costs, and why 0 ships anyway.** Whole runner on `883a4a1`
+  ## (1093 / gambatte 4503), one build:
+  ##
+  ##   HDMA_STEAL_LEAD_DOTS   runner   gambatte   hdma_timing-C
+  ##   0 (ships)              1093       4503        2/48
+  ##   4                      1092       4482        0/48      +7 / -28
+  ##
+  ## The 28 are `dma` (the `hdma_*_ly_*` family, `hdma_start{,_ly0,_scx2,_scx3}_2`,
+  ## the `hdma_late_m0unhalt` / `hdma_late_m3halt_m2unhalt` / `hdma_transition_*`
+  ## pairs sliding by one member), five `irq_precedence/*hdma_vs_*` and one
+  ## `oamdma`. Adding `-d:HDMA_VISIBLE_DOTS=0` to compensate the byte-visibility
+  ## half recovers none of them (4481).
+  ##
+  ## ---- The contradiction, stated exactly, because it is the deliverable ----
+  ##
+  ## `-d:gb_dma_trace` on `gambatte/dma/hdma_start_2` prints
+  ## `MODE 3->0 ly=1 dot=252` / `HDMABLOCK ly=1 dot=253`, and that ROM's `_1`
+  ## sibling is the same ROM with the VRAM read one M-cycle earlier, so the pair
+  ## brackets the landing to a single M-cycle: **gambatte demands the FIRST
+  ## M-cycle boundary at or after the edge, with nothing added.** mealybug
+  ## demands that boundary plus TWO more M-cycles, at the same speed and with
+  ## the same one-block transfer. Both ROMs arm the transfer in mode 2 of line 1
+  ## and both are read on line 1's own mode 0; dingbat's edge is `252 + SCX` in
+  ## both, so the edge model is not the difference.
+  ##
+  ## What IS different is the CPU's instruction stream at the edge. gambatte's
+  ## is a NOP sled; mealybug's two surviving cells are the two where the edge
+  ## lands inside a 3 M-cycle `LDH A,[n]`, and they are exactly the cells an
+  ## instruction-boundary model cannot express -- one needs the block to go
+  ## BEFORE that instruction's data read and the other AFTER it. So:
+  ##
+  ##  * The residue is **the rule for whether a VRAM DMA may preempt the CPU
+  ##    part way through an instruction**, not a delay. No scalar delay
+  ##    reconciles the two suites, and neither does any of: min(instruction end,
+  ##    deadline), i.e. keeping BOTH payments -- **1/48**, the closest anything
+  ##    else gets, and the cell it still misses is the SCX=2 double-speed
+  ##    `nops 110` one, where hardware declines an instruction boundary that
+  ##    was available to it (edge 254, boundary 255, hardware lands at 261), so
+  ##    the landing is a pure deadline and not the earlier of the two; landing
+  ##    at
+  ##    the first INSTRUCTION boundary >= edge + d for d = 0, 1 or 2 -- each
+  ##    value fits three of the four groups and misses a different fourth;
+  ##    M-granular landing with no added M-cycle -- fails `nops 46`; and moving
+  ##    the LCD-enable phase, which is the obvious way to make one dot of edge
+  ##    move both suites at once. **`LCD_ON_LINE0_TRIM` is refuted at DOT
+  ##    resolution by this row's own cells**, the shipping 0 being a strict
+  ##    local minimum:
+  ##
+  ##      trim       -4  -3  -2  -1   0   1   2   3   4
+  ##      wrong/48   14  10   7   4   2   5  11  12  12
+  ##  * The instrument it needs is one that reads the **CPU-versus-PPU phase of
+  ##    mealybug's own `lcd_on` entry** to a dot. Every cell here is dot-granular
+  ##    through the boundary rounding while the STAT cells in the same sub-tests
+  ##    are only M-granular, so the four STAT cells being green does NOT pin the
+  ##    phase to better than one M-cycle -- and one M-cycle of phase is exactly
+  ##    the size of the disagreement.
+  ##
+  ## Also settled, so it is not re-asked: the row has no revision axis
+  ## (`hdma_timing-C.asm`'s own header is "pass: CGB, AGB 0/A/B/BE"), it is a
+  ## genuine `Failed` verdict and not a harness artefact (`hdmaresults` reads
+  ## the buffer directly and prints `verdict=F`), and the two DIV-duration
+  ## groups and all sixteen STAT cells are exact at every setting of this
+  ## constant.
+
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
@@ -4071,6 +4176,10 @@ type
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
+    # HDMA_STEAL_LEAD_DOTS: the PPU dot at or after which the owed block may
+    # take the bus, on the M-cycle boundary the CPU next reaches. Scratch, like
+    # hdma_block_due, and live only alongside it.
+    hdma_due_deadline*: int32
     # The dot the owed block's mode-0 edge fell on. See
     # HDMA_DISABLE_GRACE_DOTS. Live only alongside hdma_block_due, so like it
     # this is never set at a frame boundary and is not serialized.

@@ -2527,7 +2527,16 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
     else:
-      when HDMA_STEAL_DELAY_M != 0:
+      when HDMA_STEAL_LEAD_DOTS != 0:
+        # The request goes up HDMA_STEAL_LEAD_DOTS dots from here and the CPU
+        # hands the bus over on its next M-cycle boundary; mem_tick_bus pays
+        # it. The extra M-cycle is what makes the total 8 dots at normal speed
+        # and 6 in double -- see HDMA_STEAL_LEAD_DOTS in gb.nim.
+        ppu.hdma_block_due    = true
+        ppu.hdma_due_delay    = 0
+        ppu.hdma_due_deadline = ppu.cycle_counter +
+          int32(HDMA_STEAL_LEAD_DOTS) + int32(4 shr gb.memory.current_speed)
+      elif HDMA_STEAL_DELAY_M != 0:
         # Owed, but the CPU keeps the bus for HDMA_STEAL_DELAY_M more
         # instruction boundaries; cpu.tick pays it. See that constant.
         ppu.hdma_block_due = true

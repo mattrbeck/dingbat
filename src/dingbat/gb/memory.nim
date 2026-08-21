@@ -223,6 +223,18 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
 # forward declarations of these procs: on the gcc side the pragma expands to
 # `inline`, which Nim requires on the forward declaration as well.
 
+when HDMA_STEAL_LEAD_DOTS != 0:
+  proc mem_land_hdma_due(mem: GbMemory; gb: GB) {.noinline.} =
+    ## An owed HBlank block whose request went up HDMA_STEAL_LEAD_DOTS dots
+    ## after the mode-0 edge, taking the bus on the M-cycle boundary the CPU
+    ## has just reached. `noinline`, and behind a flag test that is false
+    ## almost always, so the bus path pays one not-taken branch for it.
+    let ppu = gb.ppu
+    if ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8:
+      ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
+    else:
+      ppu.hdma_block_due = false
+
 proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.} =
   ## Everything an M-cycle advances EXCEPT the PPU: the scheduler, the timer
   ## (which also clocks the serial shifter) and the OAM DMA unit.
@@ -232,6 +244,12 @@ proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bu
   ## in this half rather than the PPU's because `dma_busy` decides which of the
   ## two write paths runs, so it has to be settled before the write.
   if from_cpu: mem.cycle_tick_count += cycles
+  when HDMA_STEAL_LEAD_DOTS != 0:
+    # The CPU is at an M-cycle boundary here and about to spend the next
+    # M-cycle on the bus; an owed block whose deadline has passed goes first.
+    if unlikely(gb.ppu.hdma_block_due) and from_cpu and
+       gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
+      mem_land_hdma_due(mem, gb)
   gb.scheduler.tick(cycles)
   timer_tick(gb.timer, gb, cycles)
   # Hoisted out of mem_dma_tick so an idle OAM DMA costs a flag test rather
