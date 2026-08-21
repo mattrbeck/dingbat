@@ -352,14 +352,30 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.scan_next = 0
   ppu.scan_line = -1
 
-const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
+const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
+  ## The transfer's span is a BUS HOLD on the mode-2 comparator, not a lock
+  ## that drops the entry. 1 ships; 0 is the drop-the-entry arm and is the
+  ## control. Rides on OAM_SCAN_DMA_LOCK, which has to be on for either.
+  ##
+  ## **This is the DURATION the paragraph below asks for, and it is not a
+  ## duration at all -- it is what the scan does with the dots.** The two edges
+  ## were already pinned to the dot by sixteen one-M-cycle brackets; what
+  ## `strikethrough` refused was the claim that an entry read inside the span
+  ## yields NOTHING. It does not: the scan keeps stepping and keeps comparing,
+  ## it just gets no new Y/X off the OAM data bus, so every entry inside the
+  ## span is compared against **the last Y/X the bus latched**. See
+  ## OAM_SCAN_DMA_LOCK for the numbers.
+const OAM_SCAN_DMA_LOCK* {.intdefine.} = 1
   ## An OAM DMA owns OAM for the whole of its transfer, and the mode-2 OAM scan
   ## gets nothing out of the entries it reaches while that lasts.
   ##
-  ## **MEASURED AND DERIVED 2026-08-13, and it ships OFF at 0** -- the previous
-  ## model, which is the scan as one burst at dot 80 against whatever OAM holds
-  ## by then, with the transfer ignored. What it is worth and what refuses it
-  ## are both below; the whole derivation is in docs/gb-failure-triage.md.
+  ## **MEASURED AND DERIVED 2026-08-13; SHIPS ON at 1 since 2026-08-20**, when
+  ## the one ROM that refused it turned out to be refusing a different claim --
+  ## see OAM_SCAN_DMA_HOLD just above and the 2026-08-20 section at the end of
+  ## this block. The arm this replaces is the scan as one burst at dot 80
+  ## against whatever OAM holds by then, with the transfer ignored, and it is
+  ## still reachable at 0. The whole derivation is in
+  ## docs/gb-failure-triage.md.
   ##
   ## ---- The mechanism ---------------------------------------------------------
   ##
@@ -412,7 +428,8 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
   ##
   ## So the shape is right and the duration is not, and the ROM that says so is
   ## a pixel oracle the triage doc already uses to arbitrate three other knobs.
-  ## Left at 0 until the duration is derived rather than fitted.
+  ## **Answered 2026-08-20 -- see the section at the end of this block. The
+  ## duration was never wrong; "the entry yields nothing" was.**
   ##
   ## ---- 2026-08-20: the REDIRECT reading, tested and refused ------------------
   ##
@@ -450,10 +467,64 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 0
   ## CPU CGB C, so either that reference was captured on a CGB-E or the block is
   ## narrower than mode 2.
   ##
-  ## **Still nothing beats shipping at the runner level (1016).** The remaining
-  ## blocker is unchanged and is now known not to be an addressing question:
-  ## `strikethrough-DMG` refuses the lock's DURATION, and the redirect does not
-  ## rescue it at any offset.
+  ## **Superseded 2026-08-20 by the section below.** The redirect finding
+  ## stands -- it is not an addressing question -- but the conclusion drawn from
+  ## it, that the DURATION is wrong, does not.
+  ##
+  ## ---- 2026-08-20: it is a BUS HOLD, and that is the whole answer -----------
+  ##
+  ## The span's two edges were pinned to the dot by sixteen one-M-cycle
+  ## brackets and never moved. What `strikethrough` refused was the OTHER half
+  ## of the claim: that an entry the scan reaches inside the span contributes
+  ## NOTHING. It contributes plenty. The scan does not stall and it does not
+  ## re-address -- **it keeps stepping entry by entry and keeps comparing, it
+  ## just gets no new Y/X off the OAM data bus, so every entry inside the span
+  ## is compared against the last Y/X the bus latched.** OAM_SCAN_DMA_HOLD.
+  ##
+  ## The second half of the same mechanism is that the mode-3 object fetch
+  ## reads the object's TILE byte over that same bus, so a line that drew any
+  ## object leaves a tile number sitting in the comparator's Y latch for the
+  ## next line to hold (sprite_fetch_merge). Without that half the model is
+  ## +14 rather than +16 -- `late_sp39y_2`, both devices, is a line whose WHOLE
+  ## mode 2 is inside the span, and it comes out right only because what the
+  ## comparator holds there is the previous line's last tile and not the
+  ## previous line's last object.
+  ##
+  ## This is LIJI32's model in SameBoy (`add_object_from_index` in display.c
+  ## skips the two `oam_read`s outright while a transfer is active, keeps
+  ## `mode2_y_bus` / `mode2_x_bus`, and still runs the on-line test), and it is
+  ## why the REDIRECT arm above never helped: the redirect is what a *CPU* read
+  ## sees, and the mode-2 scan never issues a read at all.
+  ##
+  ## Whole suite, against the 689cf7e baseline of Pass 1043 / gambatte 4393 /
+  ## oamdma 766 / both `strikethrough` rows exact:
+  ##
+  ##   arm                                    Pass  gambatte  oamdma  strike
+  ##   shipping before (lock off)             1043    4393      766   exact
+  ##   lock only (drop the entry)             1041    4409      782   23033/23033
+  ##   lock + hold, no mode-3 clobber         1043    4407      780   exact
+  ##   **lock + hold + clobber (ships)**      1043  **4409**  **782**  exact
+  ##
+  ## +16 gambatte rows, **zero regressions anywhere in the tree** (per-row diff
+  ## of all three results files), and the two `strikethrough` rows stay
+  ## pixel-exact on both devices. All sixteen are `late_sp*`, and they are
+  ## exactly the sixteen `late_sp*` rows SameBoy also passes; the seven that
+  ## remain (`late_sp*_ds_*` and `late_sp39x_4`) are rows SameBoy misses too.
+  ##
+  ## **The +2.07% the burst was kept for is not paid.** The incremental body is
+  ## only entered on a line a transfer actually touched (`scan_line == ly` or
+  ## `dma_busy`); every other line still takes fifo_get_sprites. Measured with
+  ## DINGBAT_BENCH_COUNTERS, 2400 frames, min of three, `cycles=` equal on both
+  ## arms: Pokemon Blue 24.2778 G -> 24.2839 G (**+0.025%**), Pokemon Crystal
+  ## 24.5251 G -> 24.5335 G (**+0.034%**).
+  ##
+  ## **What is NOT explained.** The six `late_sp*_ds_*` rows are all
+  ## "got 0, expected 3" and no dot shift of the transfer's edges in double
+  ## speed fixes any of them (swept at -1; it moves nothing). Their bracket
+  ## reads as object N's scan dot being `2N + 2` in double speed against `2N`
+  ## in single, which `late_sp02x` refuses outright at single speed, so it is
+  ## not one sample dot with a speed term -- and SameBoy misses all six, so the
+  ## oracle cannot arbitrate it either.
 
 # ---- The OAM scan reads LCDC.2 FORTY TIMES, two dots apart -----------------
 #
@@ -671,10 +742,19 @@ proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = false) =
     # runs on, a Y of $FF puts the object at lines 239..246 and is not on it, so
     # the two are the same rule and this one does not have to claim a value it
     # cannot measure.
-    if blocked: continue
+    when OAM_SCAN_DMA_HOLD == 0:
+      if blocked: continue
+      ppu.scan_y_bus = ppu.sprite_table[sprite_addr]
+      ppu.scan_x_bus = ppu.sprite_table[sprite_addr + 1]
+    else:
+      # The bus HOLD, not a lock: the scan keeps stepping and keeps comparing,
+      # it just gets no new Y/X out of OAM while the transfer owns the bus.
+      if not blocked:
+        ppu.scan_y_bus = ppu.sprite_table[sprite_addr]
+        ppu.scan_x_bus = ppu.sprite_table[sprite_addr + 1]
     let s = GbSprite(
-      y:          ppu.sprite_table[sprite_addr],
-      x:          ppu.sprite_table[sprite_addr + 1],
+      y:          ppu.scan_y_bus,
+      x:          ppu.scan_x_bus,
       tile_num:   ppu.sprite_table[sprite_addr + 2],
       attributes: ppu.sprite_table[sprite_addr + 3],
       oam_idx:    uint8(sprite_addr),
@@ -2244,6 +2324,12 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   # takes here (the OBP registers, the tile row). One predictable not-taken
   # branch per object fetch when no transfer is running.
   if gb.memory.dma_busy: obj_oam_dma_read(ppu, gb)
+  when OAM_SCAN_DMA_HOLD != 0:
+    # The mode-3 object fetch reads the object's TILE byte over the same OAM
+    # data bus the mode-2 comparator latches from, so it leaves that byte
+    # behind: the next line's held Y is a tile number, not a Y. See
+    # OAM_SCAN_DMA_LOCK.
+    ppu.scan_y_bus = ppu.sprites[0].tile_num
   let s = ppu.sprites[0]
   ppu.sprites.delete(0)
   # LCDC.2 is read once per bitplane, on two dots that are not this one -- see
@@ -4471,8 +4557,23 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # transfer still in flight has held OAM off the scan since that edge,
           # so the tail of the line is blind.
           when OAM_SCAN_DMA_LOCK != 0:
-            oam_scan_advance(ppu, gb, OAM_SCAN_DOTS,
-                             blocked = gb.memory.dma_busy)
+            # The incremental body is only NEEDED on a line a transfer touched:
+            # `scan_line` says an edge has already walked this one, `dma_busy`
+            # says a transfer is holding the bus right now. Everywhere else the
+            # two are exactly equivalent (see fifo_get_sprites) and the burst is
+            # worth +2.07% of retired instructions on dmg-acid2, so the line
+            # that never sees a transfer keeps paying nothing for this model.
+            if unlikely(ppu.scan_line == int32(ppu.ly) or gb.memory.dma_busy):
+              oam_scan_advance(ppu, gb, OAM_SCAN_DOTS,
+                               blocked = gb.memory.dma_busy)
+            else:
+              ppu.sprites = fifo_get_sprites(ppu, gb)
+              when OAM_SCAN_DMA_HOLD != 0:
+                # The comparator's latches end an undisturbed line holding the
+                # LAST entry's Y/X: the scan reads all forty whatever the
+                # ten-object cap does to the list.
+                ppu.scan_y_bus = ppu.sprite_table[0x9C]
+                ppu.scan_x_bus = ppu.sprite_table[0x9D]
           else:
             ppu.sprites = fifo_get_sprites(ppu, gb)
           when LY0_PIPE_ANY:

@@ -3895,6 +3895,11 @@ type
     # the burst on the next mode 2 -> 3 transition.
     scan_next*:           int32
     scan_line*:           int32
+    # The mode-2 comparator's two input latches. An OAM DMA takes the OAM bus
+    # away from the scan, and the scan does not stop -- it keeps stepping and
+    # keeps comparing whatever these last held. See OAM_SCAN_DMA_LOCK.
+    scan_y_bus*:          uint8
+    scan_x_bus*:          uint8
 
   # ---- APU Channels (base types) ----
   GbSoundChannel* = ref object of RootObj
