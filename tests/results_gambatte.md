@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-20 17:10:38*
+*Generated: 2026-08-20 17:16:33*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4381/5005 passed.**
+**4387/5005 passed.**
 
 ## bgen
 
@@ -54,20 +54,14 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (159/229 passed)
+## dma (165/229 passed)
 
-159/229 tests passed, 70 failed:
+165/229 tests passed, 64 failed:
 
 | Test | Result |
 |------|--------|
 | dma/hdma_disable_display_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_ei_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
-| dma/hdma_late_disable_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_late_disable_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_late_disable_scx2_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_late_disable_scx3_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_late_disable_scx5_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_late_disable_scx5_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_6_cgb04c_out03 [cgb] | got 02, expected 03 |

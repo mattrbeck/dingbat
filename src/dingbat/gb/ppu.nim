@@ -1988,6 +1988,8 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
           ppu.hdma_active    = false
           ppu.hdma_block_due = false
           return
+    when HDMA_DISABLE_GRACE_DOTS != 0:
+      ppu.hdma_due_dot = ppu.cycle_counter
     if gb.cpu.halted:
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
@@ -2088,6 +2090,14 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
       # owed no longer. A block already COPIED is not undone by this -- its
       # bytes are on their way to VRAM (ppu_flush_hdma_bytes) and its length is
       # already spent.
+      #
+      # ...unless the write is too LATE to catch it: the block takes the bus a
+      # fixed moment after the mode-0 edge, and a disable that arrives after
+      # that moment finds it already gone. See HDMA_DISABLE_GRACE_DOTS.
+      when HDMA_DISABLE_GRACE_DOTS != 0:
+        if ppu.hdma_block_due and ppu.hdma_active and
+           ppu.cycle_counter - ppu.hdma_due_dot >= HDMA_DISABLE_GRACE_DOTS:
+          ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
       ppu.hdma_block_due = false
     ppu.hdma_active = false
 

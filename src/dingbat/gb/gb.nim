@@ -946,7 +946,10 @@ const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
   ## a strict `d < W` and why widening it costs rather than gains:
   ##
   ##   W (dots)      0     1 (ship)    2      3      5
-  ##   gambatte dma 150      159      158    158    157
+  ##   gambatte dma 156      165      164    164    163
+  ##
+  ## (re-swept at HEAD with HDMA_DISABLE_GRACE_DOTS shipping; it was
+  ## 150/159/158/158/157 before that constant existed, same shape.)
   ##
   ## An unconditional abort at every speed switch was tried first and is
   ## REFUSED: +10 / -7 for a net +3, and the seven it breaks
@@ -956,6 +959,56 @@ const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
   ## values dingbat did before this landed on all five
   ## `transition_speedchange_hdmalen*` rows -- so gambatte's hardware capture
   ## is the only witness here and there is no oracle to cross-check against.
+const HDMA_DISABLE_GRACE_DOTS* {.intdefine.} = 4
+  ## Dots after the mode 3 -> 0 edge at which an owed HBlank DMA block has
+  ## COMMITTED, i.e. after which an FF55 write with bit 7 clear is too late to
+  ## suppress it. 0 disables the rule (every disable suppresses, which is what
+  ## dingbat did).
+  ##
+  ## Distinct from HDMA_STEAL_DELAY_M, and both are needed. That constant says
+  ## WHEN the block runs -- at the CPU's next instruction boundary, because the
+  ## CPU finishes what it is doing before the DMA gets the bus. This one says
+  ## when the block became UNCANCELLABLE, which is earlier: the arbitration is
+  ## settled a fixed moment after the edge and the CPU can no longer take it
+  ## back, even though the transfer itself has not started.
+  ##
+  ## **gambatte `dma/hdma_late_disable_*` measures it directly, and dingbat had
+  ## it at zero.** Each ROM arms a one-block HBlank transfer, writes $00 to FF55
+  ## near the mode-0 edge to stop it, and reads the destination byte back; the
+  ## `_1` and `_2` members put that write one M-cycle either side of the answer.
+  ## `-d:gb_dma_trace` on the plain pair:
+  ##
+  ##   ROM                    m0 edge   FF55=$00 at   d   byte   dingbat was
+  ##   hdma_late_disable_1      252         253       1    00       00  ok
+  ##   hdma_late_disable_2      252         257       5    01       00  WRONG
+  ##
+  ## So the block is still cancellable one dot after the edge and gone five dots
+  ## after it, and the boundary is swept two-sided over the whole 229-ROM group:
+  ##
+  ##   dots          0     2     3    4 (ship)   5     6     8
+  ##   gambatte dma 159   161   163     165     163   161   159
+  ##
+  ## **Four dots flat, not one CPU M-cycle.** `hdma_late_disable_ds_2` and
+  ## `_scx5_ds_2` are double speed, where an M-cycle is two dots, and they go
+  ## green at the same 4 as the single-speed rows -- so this is real time on the
+  ## PPU's clock, the way the block's own copies are, and not a count of the
+  ## CPU's cycles the way HDMA_BLOCK_OVERHEAD_BUS is. The peak is +6 / -0 and
+  ## the six are exactly the `hdma_late_disable` `_2` members at every SCX and
+  ## both speeds; nothing else in the tree moves.
+  ##
+  ## **Separating the two did NOT free HDMA_STEAL_DELAY_M**, which was the
+  ## obvious follow-up and is worth recording as refused. The surviving
+  ## `irq_precedence/late_hdma_vs_{ei,ie,tima}` rows answer their own `_2`
+  ## sibling's value, which reads like the block taking the bus one M-cycle
+  ## early, and with the commit point now modelled separately the steal delay
+  ## was free to move. Re-swept with this constant at 4:
+  ##
+  ##   HDMA_STEAL_DELAY_M      0      1 (ship)    2      3
+  ##   gambatte dma           150       165      151    148
+  ##   gambatte irq_precedence 44        47       43     43
+  ##
+  ## One instruction boundary is still the unique optimum on BOTH groups, so
+  ## those rows are not a steal-delay offset and want something else.
 const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
@@ -3391,6 +3444,10 @@ type
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
+    # The dot the owed block's mode-0 edge fell on. See
+    # HDMA_DISABLE_GRACE_DOTS. Live only alongside hdma_block_due, so like it
+    # this is never set at a frame boundary and is not serialized.
+    hdma_due_dot*: int32
     # A speed switch is in flight and the next mode-0 edge within
     # HDMA_SPEEDSWITCH_KILL_W dots of it destroys the armed transfer instead of
     # owing it a block. Live only across the STOP's own stall, so like
