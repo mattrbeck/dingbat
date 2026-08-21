@@ -1784,6 +1784,60 @@ const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
 const LYC_SETTLE_DOTS* = int32(LYC_SETTLE_DOTS_D)
 const LYC_RELATCH_DOT* = LY153_SNAP_DOT + LYC_SETTLE_DOTS
+const LY153_SNAP_DOT_READ_D {.intdefine: "LY153_SNAP_DOT_READ".} = LY153_SNAP_DOT_D
+const LY153_SNAP_DOT_READ* = int32(LY153_SNAP_DOT_READ_D)
+  ## EXPERIMENT, shipped INERT (equal to `LY153_SNAP_DOT`, where the whole
+  ## branch in ppu_read compiles out). The dot the READABLE `$FF44` snaps to 0
+  ## on, when that is not the dot the comparator and the STAT source snap on.
+  ##
+  ## ## The measurement, which is not in doubt
+  ##
+  ## Read `$FF44` off a NOP sled through the line 152 -> 153 -> 0 turn, in
+  ## dingbat and in SameBoy (`tools/gbfuzz/sameboy_microtest` + `.work/mtsled.py`,
+  ## the probe patched into `line_153_ly_c`'s own body at $0167). Every sled
+  ## position agrees except one:
+  ##
+  ##     k          ...4      5        6      7...
+  ##     dingbat     98       99      99      00
+  ##     SameBoy     98       99    **00**    00
+  ##
+  ## The 152 -> 153 edge is byte-identical, so this is NOT the LCD-on phase
+  ## chain the `line_153_lyc0_int_inc_sled` note below blames for its own
+  ## residue -- a phase error would move both edges. dingbat's readable LY sits
+  ## at 153 for **five dots** (0..4) where hardware gives it four (0..3), which
+  ## is AGE's C1 cluster ("the LY=153 readback window is one M-cycle too wide")
+  ## measured a second way.
+  ##
+  ## ## Why it is not landed
+  ##
+  ## The dot the readable field snaps on and the dot the COMPARATOR snaps on
+  ## cannot both be 4: `LY153_SNAP_DOT = 4` with `LYC_SETTLE_DOTS = 5` (i.e. the
+  ## re-latch held at 9) is **shootout 260** -- `daid/ppu_scanline_bgp-dmg` at
+  ## 20848/23040 pixels -- plus `line_153_lyc153_stat_timing_b`,
+  ## `line_153_lyc_b` and six wilbertpol rows. Note what that corrects in the
+  ## write-up above: with `LYC_SETTLE_HALT_SKIP` on, daid's halted anchor is
+  ## `LY153_SNAP_DOT` itself, NOT the sum `LY153_SNAP_DOT + LYC_SETTLE_DOTS`.
+  ##
+  ## Splitting them here -- readable field at 4, comparator left at 5 -- is
+  ## **runner 1097 -> 1100, gambatte 4524 -> 4525**, and what it buys and costs
+  ## is a clean list: `+gbmicrotest/line_153_ly_c`,
+  ## `+mooneye-wilbertpol acceptance/gpu/ly_new_frame-GS` (4 arms),
+  ## `+age/ly/ly-dmgC-cgbBC@dmgC`, `+gambatte enable_display/frame1_ly_count_2`
+  ## and `+ly0/lycint152_ly153_3` (both devices), against
+  ## `-age/ly/ly-cgbE`, `-ly_new_frame-C@cgbc`, `-ly_new_frame-C@agb`,
+  ## `-enable_display/frame1_ly_count_ds_1 [cgb]` and
+  ## `-ly0/lycint152_ly153_ds_4 [cgb]`. Every loss is CGB, every gain but two is
+  ## DMG, so a device split is the obvious next move -- and a
+  ## `gb.cgb_enabled` gate on this constant does NOT behave: DMG-4/CGB-5 and
+  ## DMG-5/CGB-4 score the same 1100 and differ from each other on ONE row
+  ## (`lcd_offset/offset1_lyc98int_ly_count_ds_1 [cgb]`), which no reading of
+  ## the gate explains. Not landed until that is understood; the +3 is real but
+  ## unexplained, and a count is not a mechanism.
+  ##
+  ## At 1 instead of 4 it is firmly wrong and says why: LY = 153 becomes visible
+  ## for a single dot, so a `cp 153` polling loop cannot see it at all, and the
+  ## twelve `mooneye-wilbertpol acceptance/gpu/ly00_*` rows that sync that way
+  ## go red along with `line_153_ly_b` (the sibling that pins the window OPEN).
 
 proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
   ## Is the LY=LYC comparator inside the blind window the LY 153 -> 0 snapback
@@ -3019,7 +3073,13 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
       live
   of 0xFF42: ppu.scy
   of 0xFF43: ppu.scx
-  of 0xFF44: ppu.ly
+  of 0xFF44:
+    # Inert at the shipping value -- the branch is not compiled at all. See
+    # LY153_SNAP_DOT_READ.
+    when LY153_SNAP_DOT_READ != LY153_SNAP_DOT:
+      if ppu.ly == 153'u8 and ppu.cycle_counter >= LY153_SNAP_DOT_READ: 0'u8
+      else: ppu.ly
+    else: ppu.ly
   of 0xFF45: ppu.lyc
   of 0xFF46: 0xFF'u8  # DMA (write-only, return 0xFF)
   of 0xFF47: ppu_palette_from_array(ppu.bgp)
